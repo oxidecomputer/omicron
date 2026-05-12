@@ -18,6 +18,16 @@ pub struct DpdReconcilerStatus {
     pub todo_status: (),
 }
 
+impl slog::KV for DpdReconcilerStatus {
+    fn serialize(
+        &self,
+        _record: &slog::Record<'_>,
+        serializer: &mut dyn slog::Serializer,
+    ) -> slog::Result {
+        serializer.emit_str("dpd-reconciler".into(), "not yet implemented")
+    }
+}
+
 #[derive(Debug)]
 pub(crate) struct DpdReconciler {
     _client: Client,

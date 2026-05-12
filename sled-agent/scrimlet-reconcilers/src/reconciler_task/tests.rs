@@ -16,8 +16,21 @@ struct MockReconciler {
     do_reconciliation_results: mpsc::UnboundedReceiver<String>,
 }
 
+#[derive(Debug, Clone)]
+struct MockReconcilerStatus(String);
+
+impl slog::KV for MockReconcilerStatus {
+    fn serialize(
+        &self,
+        _record: &slog::Record<'_>,
+        serializer: &mut dyn slog::Serializer,
+    ) -> slog::Result {
+        serializer.emit_str("mock-reconciler".into(), &self.0)
+    }
+}
+
 impl Reconciler for MockReconciler {
-    type Status = String;
+    type Status = MockReconcilerStatus;
 
     const LOGGER_COMPONENT_NAME: &'static str = "MockReconciler";
     const RE_RECONCILE_INTERVAL: Duration = Duration::from_secs(30);
@@ -39,10 +52,12 @@ impl Reconciler for MockReconciler {
             .lock()
             .unwrap()
             .push(system_networking_config.clone());
-        self.do_reconciliation_results
-            .recv()
-            .await
-            .expect("test never closes sending side of channel")
+        MockReconcilerStatus(
+            self.do_reconciliation_results
+                .recv()
+                .await
+                .expect("test never closes sending side of channel"),
+        )
     }
 }
 
@@ -150,7 +165,7 @@ impl Harness {
         &self,
         description: &str,
         matches: F,
-    ) -> ReconcilerStatus<String>
+    ) -> ReconcilerStatus<MockReconcilerStatus>
     where
         F: Fn(&ReconcilerCurrentStatus) -> bool,
     {
@@ -170,7 +185,7 @@ impl Harness {
 
     async fn wait_for_task_status_no_longer_a_scrimlet(
         &self,
-    ) -> ReconcilerStatus<String> {
+    ) -> ReconcilerStatus<MockReconcilerStatus> {
         self.wait_for_task_status("Inert(NoLongerAScrimlet)", |status| {
             matches!(
                 status,
@@ -182,7 +197,9 @@ impl Harness {
         .await
     }
 
-    async fn wait_for_task_status_idle(&self) -> ReconcilerStatus<String> {
+    async fn wait_for_task_status_idle(
+        &self,
+    ) -> ReconcilerStatus<MockReconcilerStatus> {
         self.wait_for_task_status("Idle", |status| {
             matches!(status, ReconcilerCurrentStatus::Idle)
         })
@@ -233,7 +250,7 @@ async fn first_activation() {
     let completion =
         status.last_completion.expect("last_completion should be preserved");
     assert_eq!(completion.activation_count, 0);
-    assert_eq!(completion.status, "first");
+    assert_eq!(completion.status.0, "first");
     assert_matches!(
         completion.activation_reason,
         ReconcilerActivationReason::Startup
@@ -274,7 +291,7 @@ async fn scrimlet_becomes_not_scrimlet_during_select() {
     let completion =
         status.last_completion.expect("last_completion should be preserved");
     assert_eq!(completion.activation_count, 0);
-    assert_eq!(completion.status, "first");
+    assert_eq!(completion.status.0, "first");
 
     harness.shutdown_cleanly().await;
     logctx.cleanup_successful();
@@ -336,7 +353,7 @@ async fn system_networking_config_change_triggers_re_reconciliation() {
         ReconcilerActivationReason::SystemNetworkingConfigChanged
     );
     assert_eq!(completion.activation_count, 1);
-    assert_eq!(completion.status, "second");
+    assert_eq!(completion.status.0, "second");
 
     harness.shutdown_cleanly().await;
     logctx.cleanup_successful();
@@ -390,7 +407,7 @@ async fn periodic_timer_triggers_re_reconciliation() {
         ReconcilerActivationReason::PeriodicTimer
     );
     assert_eq!(completion.activation_count, 1);
-    assert_eq!(completion.status, "periodic");
+    assert_eq!(completion.status.0, "periodic");
 
     harness.shutdown_cleanly().await;
     logctx.cleanup_successful();
@@ -458,7 +475,7 @@ async fn config_change_during_inflight_reconciliation() {
         ReconcilerActivationReason::SystemNetworkingConfigChanged
     );
     assert_eq!(completion.activation_count, 1);
-    assert_eq!(completion.status, "second");
+    assert_eq!(completion.status.0, "second");
 
     harness.shutdown_cleanly().await;
     logctx.cleanup_successful();
@@ -519,7 +536,7 @@ async fn scrimlet_status_round_trip() {
         ReconcilerActivationReason::ScrimletStatusChanged
     );
     assert_eq!(completion.activation_count, 1);
-    assert_eq!(completion.status, "second");
+    assert_eq!(completion.status.0, "second");
 
     harness.shutdown_cleanly().await;
     logctx.cleanup_successful();

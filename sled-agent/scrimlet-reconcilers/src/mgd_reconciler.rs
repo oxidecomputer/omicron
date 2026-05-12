@@ -18,6 +18,16 @@ pub struct MgdReconcilerStatus {
     pub todo_status: (),
 }
 
+impl slog::KV for MgdReconcilerStatus {
+    fn serialize(
+        &self,
+        _record: &slog::Record<'_>,
+        serializer: &mut dyn slog::Serializer,
+    ) -> slog::Result {
+        serializer.emit_str("mgd-reconciler".into(), "not yet implemented")
+    }
+}
+
 #[derive(Debug)]
 pub(crate) struct MgdReconciler {
     _client: Client,

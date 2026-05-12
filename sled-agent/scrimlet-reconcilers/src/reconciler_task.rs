@@ -46,7 +46,7 @@ use tokio::task::JoinHandle;
 /// Trait that should be implemented by the service-specific reconciler tasks
 /// elsewhere in this crate.
 pub(crate) trait Reconciler: Send + 'static {
-    type Status: Clone + Send + Sync + 'static;
+    type Status: slog::KV + Clone + Send + Sync + 'static;
 
     const LOGGER_COMPONENT_NAME: &'static str;
     const RE_RECONCILE_INTERVAL: Duration;
@@ -224,6 +224,7 @@ impl<T: Reconciler> ReconcilerTask<T> {
                     /* use_z */ true,
                 ),
                 "elapsed" => ?start_instant.elapsed(),
+                &status_result,
             );
             self.status_tx.send_modify(|status| {
                 status.current_status = ReconcilerCurrentStatus::Idle;

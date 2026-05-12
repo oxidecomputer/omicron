@@ -19,6 +19,16 @@ pub struct UplinkdReconcilerStatus {
     pub todo_status: (),
 }
 
+impl slog::KV for UplinkdReconcilerStatus {
+    fn serialize(
+        &self,
+        _record: &slog::Record<'_>,
+        serializer: &mut dyn slog::Serializer,
+    ) -> slog::Result {
+        serializer.emit_str("uplinkd-reconciler".into(), "not yet implemented")
+    }
+}
+
 #[derive(Debug)]
 pub(crate) struct UplinkdReconciler {
     _switch_slot: ThisSledSwitchSlot,
