@@ -15,11 +15,12 @@ use internal_dns_types::config::DnsConfigBuilder;
 use internal_dns_types::names::ServiceName;
 use nexus_client::types::SledAgentInfo;
 use omicron_common::api::external::Error;
-use omicron_common::api::internal::nexus::SledVmmState;
 use omicron_uuid_kinds::{OmicronZoneUuid, PropolisUuid, SledUuid};
 use schemars::JsonSchema;
 use serde::Deserialize;
+use sled_agent_types_versions::v1::instance::SledVmmState;
 use sled_agent_types_versions::v1::instance::VmmPathParam;
+use transient_dns_server::TransientDnsServer;
 
 /// Implements a fake Nexus.
 ///
@@ -143,8 +144,8 @@ pub fn start_test_server(
 pub async fn start_dns_server(
     log: &slog::Logger,
     nexus: &dropshot::HttpServer<ServerContext>,
-) -> dns_server::TransientServer {
-    let dns = dns_server::TransientServer::new(log).await.unwrap();
+) -> TransientDnsServer {
+    let dns = TransientDnsServer::new(log).await.unwrap();
     let mut dns_config_builder = DnsConfigBuilder::new();
 
     let nexus_addr = match nexus.local_addr() {

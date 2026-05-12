@@ -10,6 +10,7 @@ use crate::SLED_AGENT2_UUID;
 use crate::TEST_SUITE_PASSWORD;
 use crate::TEST_SUITE_PASSWORD_HASH;
 use anyhow::Result;
+use bootstrap_agent_lockstep_types::RecoverySiloConfig;
 use camino::Utf8Path;
 use camino::Utf8PathBuf;
 use chrono::Utc;
@@ -73,10 +74,7 @@ use omicron_common::api::internal::nexus::Certificate;
 use omicron_common::api::internal::nexus::ProducerEndpoint;
 use omicron_common::api::internal::nexus::ProducerKind;
 use omicron_common::api::internal::shared::DatasetKind;
-use omicron_common::api::internal::shared::NetworkInterface;
-use omicron_common::api::internal::shared::NetworkInterfaceKind;
 use omicron_common::api::internal::shared::PrivateIpConfig;
-use omicron_common::api::internal::shared::SourceNatConfigGeneric;
 use omicron_common::disk::CompressionAlgorithm;
 use omicron_common::zpool_name::ZpoolName;
 use omicron_sled_agent::sim;
@@ -92,15 +90,17 @@ use omicron_uuid_kinds::ZpoolUuid;
 use oximeter_collector::Oximeter;
 use oximeter_producer::LogConfig;
 use oximeter_producer::Server as ProducerServer;
-use sled_agent_types::early_networking::EarlyNetworkConfigBody;
 use sled_agent_types::early_networking::RackNetworkConfig;
 use sled_agent_types::early_networking::SwitchSlot;
-use sled_agent_types::early_networking::WriteNetworkConfigRequest;
 use sled_agent_types::inventory::HostPhase2DesiredSlots;
+use sled_agent_types::inventory::NetworkInterface;
+use sled_agent_types::inventory::NetworkInterfaceKind;
 use sled_agent_types::inventory::OmicronSledConfig;
 use sled_agent_types::inventory::OmicronZoneDataset;
 use sled_agent_types::inventory::SledCpuFamily;
-use sled_agent_types::rack_init::RecoverySiloConfig;
+use sled_agent_types::inventory::SourceNatConfigGeneric;
+use sled_agent_types::system_networking::SystemNetworkingConfig;
+use sled_agent_types::system_networking::WriteNetworkConfigRequest;
 use slog::{Logger, debug, error, o};
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
@@ -110,6 +110,7 @@ use std::iter::{once, repeat, zip};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV6};
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
+use transient_dns_server::TransientDnsServer;
 use uuid::Uuid;
 
 /// Starts the control plane for tests and tools
@@ -152,8 +153,8 @@ pub struct ControlPlaneStarter<'a, N: NexusServer> {
     nexus_internal_addr: Option<SocketAddr>,
 
     pub external_dns_zone_name: Option<String>,
-    pub external_dns: Option<dns_server::TransientServer>,
-    pub internal_dns: Option<dns_server::TransientServer>,
+    pub external_dns: Option<TransientDnsServer>,
+    pub internal_dns: Option<TransientDnsServer>,
     dns_config: Option<DnsConfigParams>,
     initial_blueprint_id: Option<BlueprintUuid>,
 
@@ -772,6 +773,7 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
             external_dns_version: Generation::new(),
             target_release_minimum_generation: Generation::new(),
             nexus_generation: Generation::new(),
+            external_networking_generation: Generation::new(),
             cockroachdb_fingerprint: String::new(),
             cockroachdb_setting_preserve_downgrade:
                 CockroachDbPreserveDowngrade::DoNotModify,
@@ -911,7 +913,7 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
     /// write the early network config to all sleds.
     pub async fn configure_sled_agents(&mut self) {
         let early_network_config = WriteNetworkConfigRequest {
-            body: EarlyNetworkConfigBody {
+            body: SystemNetworkingConfig {
                 rack_network_config: RackNetworkConfig {
                     bfd: Vec::new(),
                     bgp: Vec::new(),
@@ -920,6 +922,8 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
                     ports: Vec::new(),
                     rack_subnet: "fd00:1122:3344:0100::/56".parse().unwrap(),
                 },
+                // TODO-correctness Can we fill this in for tests?
+                blueprint_external_networking_config: None,
             },
             generation: 1,
         };
@@ -1105,7 +1109,7 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
     pub async fn start_external_dns(&mut self) {
         let log = self.logctx.log.new(o!("component" => "external_dns_server"));
 
-        let dns = dns_server::TransientServer::new(&log).await.unwrap();
+        let dns = TransientDnsServer::new(&log).await.unwrap();
 
         let SocketAddr::V6(dns_address) = dns.dns_server.local_address() else {
             panic!("Unsupported IPv4 DNS address");
@@ -1187,7 +1191,7 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
     /// Set up an internal DNS server on the first sled agent
     pub async fn start_internal_dns(&mut self) {
         let log = self.logctx.log.new(o!("component" => "internal_dns_server"));
-        let dns = dns_server::TransientServer::new(&log).await.unwrap();
+        let dns = TransientDnsServer::new(&log).await.unwrap();
 
         let SocketAddr::V6(dns_address) = dns.dns_server.local_address() else {
             panic!("Unsupported IPv4 DNS address");

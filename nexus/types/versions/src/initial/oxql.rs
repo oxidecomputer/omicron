@@ -69,6 +69,8 @@ pub struct OxqlQuerySummary {
     pub elapsed_ms: usize,
     /// Summary of the data read and written.
     pub io_summary: oxql_types::IoSummary,
+    /// Aggregated ClickHouse profile events.
+    pub profile_summary: std::collections::BTreeMap<String, i64>,
 }
 
 impl From<oxql_types::QuerySummary> for OxqlQuerySummary {
@@ -78,6 +80,7 @@ impl From<oxql_types::QuerySummary> for OxqlQuerySummary {
             query: query_summary.query,
             elapsed_ms: query_summary.elapsed.as_millis() as usize,
             io_summary: query_summary.io_summary,
+            profile_summary: query_summary.profile_summary,
         }
     }
 }

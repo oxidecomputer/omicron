@@ -50,12 +50,3 @@ serde.workspace = true
 
 [features]
 seed-gen = ["dep:filetime"]
-
-[target.'cfg(target_os = "illumos")'.dependencies]
-libfalcon.workspace = true
-
-[[bin]]
-name = "falcon_runner"
-
-[[bin]]
-name = "falcon_runner_cli"

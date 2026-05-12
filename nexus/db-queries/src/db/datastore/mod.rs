@@ -129,7 +129,7 @@ mod silo;
 mod silo_auth_settings;
 mod silo_group;
 mod silo_user;
-mod sled;
+pub mod sled;
 mod sled_instance;
 mod snapshot;
 mod ssh_key;
@@ -192,7 +192,9 @@ pub use silo_user::SiloUserLookup;
 pub use silo_user::SiloUserScim;
 pub use sled::SledTransition;
 pub use sled::TransitionError;
+pub use support_bundle::SupportBundleCreateParams;
 pub use support_bundle::SupportBundleExpungementReport;
+pub use support_bundle::SupportBundleProvenance;
 pub use switch_port::SwitchPortSettingsCombinedResult;
 pub use user_data_export::*;
 pub use virtual_provisioning_collection::StorageType;
@@ -1011,7 +1013,7 @@ mod test {
         kind: PhysicalDiskKind,
         serial: String,
     ) -> PhysicalDiskUuid {
-        let physical_disk = PhysicalDisk::new(
+        let physical_disk = PhysicalDisk::from_parts(
             PhysicalDiskUuid::new_v4(),
             TEST_VENDOR.into(),
             serial,

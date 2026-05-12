@@ -189,10 +189,12 @@ impl Server {
         let opctx = apictx.context.nexus.opctx_for_service_balancer();
         apictx.context.nexus.await_rack_initialization(&opctx).await;
 
-        // While we've started our internal server, we need to wait until we've
-        // definitely implemented our source IP allowlist for making requests to
-        // the external server we're about to start.
-        apictx.context.nexus.await_ip_allowlist_plumbing().await;
+        // Make a best-effort attempt to push the IP allowlist as firewall rules
+        // to sled-agents before starting the external server. Because OPTE has
+        // a default-deny policy, Nexus will be unreachable until this succeeds;
+        // the background task that propagates service firewall rules will keep
+        // retrying if this attempt fails.
+        apictx.context.nexus.activate_service_firewall_propagation();
 
         // Wait until Nexus has determined if sagas are supposed to be quiesced.
         // This is not strictly necessary.  The goal here is to prevent 503
@@ -350,7 +352,7 @@ impl nexus_test_interface::NexusServer for Server {
         >,
         internal_dns_zone_config: nexus_types::internal_api::params::DnsConfigParams,
         external_dns_zone_name: &str,
-        recovery_silo: sled_agent_types::rack_init::RecoverySiloConfig,
+        recovery_silo: bootstrap_agent_lockstep_types::RecoverySiloConfig,
         certs: Vec<omicron_common::api::internal::nexus::Certificate>,
     ) -> Self {
         // Perform the "handoff from RSS".

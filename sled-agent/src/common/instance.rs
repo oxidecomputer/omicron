@@ -6,13 +6,13 @@
 
 use chrono::{DateTime, Utc};
 use omicron_common::api::external::Generation;
-use omicron_common::api::internal::nexus::{
-    MigrationRuntimeState, MigrationState, SledVmmState, VmmRuntimeState,
-    VmmState,
-};
 use propolis_client::types::{
     InstanceMigrationStatus, InstanceState as PropolisApiState,
     InstanceStateMonitorResponse, MigrationState as PropolisMigrationState,
+};
+use sled_agent_types::instance::{
+    MigrationRuntimeState, MigrationState, SledVmmState, VmmRuntimeState,
+    VmmState,
 };
 use uuid::Uuid;
 

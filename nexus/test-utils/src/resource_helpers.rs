@@ -42,6 +42,7 @@ use nexus_types::external_api::ip_pool::{
     IpPool, IpPoolRange, IpRange, IpVersion,
 };
 use nexus_types::external_api::multicast;
+use nexus_types::external_api::path_params;
 use nexus_types::external_api::policy;
 use nexus_types::external_api::project;
 use nexus_types::external_api::project::Project;
@@ -961,6 +962,31 @@ where
     object_create_error(client, &url, body, status).await
 }
 
+pub async fn attach_disk_to_instance(
+    client: &ClientTestContext,
+    project_name: &str,
+    instance_name: &str,
+    disk_name: &str,
+) {
+    let url = format!(
+        "/v1/instances/{instance_name}/disks/attach?project={project_name}",
+    );
+
+    let body = path_params::DiskPath {
+        disk: disk_name.to_string().try_into().unwrap(),
+    };
+
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &url)
+            .body(Some(&body))
+            .expect_status(Some(StatusCode::ACCEPTED)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
+}
+
 pub async fn create_affinity_group(
     client: &ClientTestContext,
     project_name: &str,
@@ -1353,6 +1379,28 @@ pub async fn assert_ip_pool_utilization(
     assert_eq!(
         capacity, utilization.capacity,
         "IP pool '{}': expected {} capacity, got {:?}",
+        pool_name, capacity, utilization.capacity,
+    );
+}
+
+pub async fn assert_subnet_pool_utilization(
+    client: &ClientTestContext,
+    pool_name: &str,
+    allocated: f64,
+    capacity: f64,
+) {
+    let url = format!("/v1/system/subnet-pools/{}/utilization", pool_name);
+    let utilization: subnet_pool::SubnetPoolUtilization =
+        object_get(client, &url).await;
+    let remaining = capacity - allocated;
+    assert_eq!(
+        remaining, utilization.remaining,
+        "Subnet pool '{}': expected {} remaining, got {}",
+        pool_name, remaining, utilization.remaining,
+    );
+    assert_eq!(
+        capacity, utilization.capacity,
+        "Subnet pool '{}': expected {} capacity, got {:?}",
         pool_name, capacity, utilization.capacity,
     );
 }

@@ -483,11 +483,11 @@ fn inventory_description(component: &Component) -> Text<'_> {
     let mut label = vec![Span::styled("Ignition: ", label_style)];
     if let Some(ignition) = sp.ignition() {
         match ignition {
-            SpIgnition::No => {
+            SpIgnition::Absent => {
                 label.push(Span::styled("Not present", warn_style));
                 spans.push(label.into());
             }
-            SpIgnition::Yes {
+            SpIgnition::Present {
                 ctrl_detect_0,
                 ctrl_detect_1,
                 flt_a2,

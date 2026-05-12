@@ -117,7 +117,7 @@ HOST_OS=$(uname -s)
 function install_packages {
   if [[ "${HOST_OS}" == "Linux" ]]; then
     # If Nix is in use, we don't need to install any packagess here,
-    # as they're provided by the Nix flake. 
+    # as they're provided by the Nix flake.
     if [[ "${OMICRON_USE_FLAKE-}" = 1 ]] && nix flake show &> /dev/null; then
       echo "OMICRON_USE_FLAKE=1 in environment and nix detected in PATH, skipping package installation"
       return
@@ -145,7 +145,7 @@ function install_packages {
     fi
   elif [[ "${HOST_OS}" == "SunOS" ]]; then
     CLANGVER=15
-    PGVER=13
+    PGVER=18
     packages=(
       "pkg:/package/pkg"
       "build-essential"
@@ -174,7 +174,8 @@ function install_packages {
     # Explicitly manage the return code using "rc" to observe the result of this
     # command without exiting the script entirely (due to bash's "errexit").
     rc=0
-    confirm "Install (or update) [${packages[*]}]?" && { pfexec pkg install -v "${packages[@]}" || rc=$?; }
+    confirm "Install (or update) [${packages[*]}]?" &&
+	{ pfexec pkg install -v "${packages[@]}" || rc=$?; }
     # Return codes:
     #  0: Normal Success
     #  4: Failure because we're already up-to-date. Also acceptable.
@@ -191,13 +192,19 @@ function install_packages {
     pkg publisher
     pkg list -afv "${packages[@]}"
   elif [[ "${HOST_OS}" == "Darwin" ]]; then
+    PGVER=18
     packages=(
-      'coreutils'
-      'postgresql@14'
-      'pkg-config'
-      'libxmlsec1'
+      "coreutils"
+      "postgresql@$PGVER"
+      "pkg-config"
+      "libxmlsec1"
     )
-    confirm "Install (or update) [${packages[*]}]?" && brew install "${packages[@]}"
+    confirm "Install (or update) [${packages[*]}]?" &&
+        brew install "${packages[@]}"
+    confirm "Set symlinks?" && {
+        brew unlink postgresql
+        brew link --force --overwrite postgresql@$PGVER
+    }
   else
     echo "Skipping builder prereqs for unsupported OS: ${HOST_OS}"
     exit 1
@@ -239,12 +246,12 @@ function show_hint
   case "$1" in
     "pg_config")
       if [[ "${HOST_OS}" == "SunOS" ]]; then
-        echo "On illumos, $1 is typically found in '/opt/ooce/bin'"
+        echo "On helios, $1 is typically found in '/opt/ooce/bin'"
       fi
       ;;
     "pkg-config")
       if [[ "${HOST_OS}" == "SunOS" ]]; then
-        echo "On illumos, $1 is typically found in '/usr/bin'"
+        echo "On helios, $1 is typically found in '/usr/bin'"
       fi
       ;;
     "cockroach")

@@ -27,11 +27,7 @@ use illumos_utils::opte::{
 use illumos_utils::running_zone::{RunningZone, ZoneBuilderFactory};
 use illumos_utils::zone::PROPOLIS_ZONE_PREFIX;
 use illumos_utils::zpool::ZpoolOrRamdisk;
-use omicron_common::api::internal::nexus::{SledVmmState, VmmRuntimeState};
-use omicron_common::api::internal::shared::{
-    DelegatedZvol, ExternalIpConfig, NetworkInterface, ResolvedVpcFirewallRule,
-    SledIdentifiers,
-};
+use omicron_common::api::internal::shared::{DelegatedZvol, SledIdentifiers};
 use omicron_common::backoff;
 use omicron_common::backoff::BackoffError;
 use omicron_common::zpool_name::ZpoolName;
@@ -48,6 +44,7 @@ use sled_agent_config_reconciler::AvailableDatasetsReceiver;
 use sled_agent_resolvable_files::ramdisk_file_source;
 use sled_agent_types::attached_subnet::{AttachedSubnet, AttachedSubnets};
 use sled_agent_types::instance::*;
+use sled_agent_types::inventory::NetworkInterface;
 use sled_agent_types::zone_bundle::ZoneBundleCause;
 use slog::Logger;
 use slog_error_chain::InlineErrorChain;
@@ -1926,11 +1923,7 @@ impl Instance {
             requested_nics: local_config.nics,
             external_ips: local_config.external_ips,
             multicast_groups: local_config.multicast_groups,
-            firewall_rules: local_config
-                .firewall_rules
-                .into_iter()
-                .map(Into::into)
-                .collect(),
+            firewall_rules: local_config.firewall_rules,
             dhcp_config,
             state: InstanceStates::new(vmm_runtime, migration_id),
             running_state: None,
@@ -2765,16 +2758,12 @@ mod tests {
     use crate::nexus::make_nexus_client_with_port;
     use crate::vmm_reservoir::VmmReservoirManagerHandle;
     use camino_tempfile::Utf8TempDir;
-    use dns_server::TransientServer;
     use dropshot::HttpServer;
     use internal_dns_resolver::Resolver;
     use omicron_common::FileKv;
     use omicron_common::api::external::{Generation, Hostname};
-    use omicron_common::api::internal::nexus::VmmState;
-    use omicron_common::api::internal::shared::{
-        DhcpConfig, ExternalIpv4Config, ExternalIpv6Config, SledIdentifiers,
-        SourceNatConfigV6,
-    };
+    use omicron_common::api::internal::shared::{DhcpConfig, SledIdentifiers};
+
     use omicron_common::disk::DiskIdentity;
     use omicron_uuid_kinds::InternalZpoolUuid;
     use propolis_client::ClientInfo;
@@ -2785,8 +2774,12 @@ mod tests {
         CurrentlyManagedZpoolsReceiver, InternalDiskDetails,
         InternalDisksReceiver,
     };
+    use sled_agent_types::instance::ExternalIpv4Config;
+    use sled_agent_types::instance::ExternalIpv6Config;
     use sled_agent_types::instance::InstanceEnsureBody;
+    use sled_agent_types::inventory::SourceNatConfigV6;
     use sled_agent_types::zone_bundle::CleanupContext;
+    use sled_agent_types_versions::v1;
     use sled_storage::config::MountConfig;
     use std::collections::BTreeSet;
     use std::net::SocketAddrV6;
@@ -2795,6 +2788,7 @@ mod tests {
     use std::time::Duration;
     use tokio::sync::watch::Receiver;
     use tokio::time::timeout;
+    use transient_dns_server::TransientDnsServer;
 
     const TIMEOUT_DURATION: tokio::time::Duration =
         tokio::time::Duration::from_secs(30);
@@ -2819,10 +2813,15 @@ mod tests {
         fn cpapi_instances_put(
             &self,
             _propolis_id: PropolisUuid,
-            new_runtime_state: SledVmmState,
+            new_runtime_state: v1::instance::SledVmmState,
         ) -> Result<(), omicron_common::api::external::Error> {
+            // useless `Into`/`From` conversion is allowed here because
+            // `v1::instance::SledVmmState` and `latest::instance::SledVmmState`
+            // are *currently* the same type, but may not be forever...
+            #[allow(clippy::useless_conversion)]
+            let state = SledVmmState::from(new_runtime_state);
             self.observed_runtime_state
-                .send(ReceivedInstanceState::InstancePut(new_runtime_state))
+                .send(ReceivedInstanceState::InstancePut(state))
                 .map_err(|_| {
                     omicron_common::api::external::Error::internal_error(
                         "couldn't send SledInstanceState to test driver",
@@ -2835,7 +2834,7 @@ mod tests {
         nexus_client: NexusClient,
         _nexus_server: HttpServer<ServerContext>,
         state_rx: Receiver<ReceivedInstanceState>,
-        _dns_server: TransientServer,
+        _dns_server: TransientDnsServer,
     }
 
     impl FakeNexusParts {
@@ -3226,66 +3225,92 @@ mod tests {
     }
 
     // tests around dropshot request timeouts during the blocking propolis setup
-    #[tokio::test]
-    async fn test_instance_create_timeout_while_starting_propolis() {
+    #[test]
+    fn test_instance_create_timeout_while_starting_propolis() {
         let logctx = omicron_test_utils::dev::test_setup_log(
             "test_instance_create_timeout_while_starting_propolis",
         );
         let log = logctx.log.new(o!(FileKv));
-
-        let FakeNexusParts {
-            nexus_client,
-            state_rx,
-            _dns_server,
-            _nexus_server,
-        } = FakeNexusParts::new(&log).await;
-
         let temp_guard = Utf8TempDir::new().unwrap();
 
-        let (inst, _) = timeout(
-            TIMEOUT_DURATION,
-            instance_struct(
-                &log,
-                // we want to test propolis not ever coming up
-                SocketAddr::V6(SocketAddrV6::new(Ipv6Addr::LOCALHOST, 1, 0, 0)),
+        // Use a manual runtime so that `temp_guard` outlives it.
+        //
+        // The runner task's `setup_propolis_zone` calls `tokio::fs::write`
+        // (which uses `spawn_blocking`) to write zone config files. This
+        // test times out before the runner finishes, so the blocking write
+        // may still be in-flight when the test drops its locals. If
+        // `temp_guard` drops while the blocking thread is writing,
+        // `remove_dir_all` can race and fail silently, leaking files.
+        //
+        // Dropping the runtime first drains the blocking thread pool,
+        // ensuring the write completes before `temp_guard` cleans up.
+        //
+        // See: https://github.com/oxidecomputer/omicron/issues/10063
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+
+        rt.block_on(async {
+            let FakeNexusParts {
                 nexus_client,
-                AvailableDatasetsReceiver::fake_in_tempdir_for_tests(
-                    ZpoolOrRamdisk::Ramdisk,
+                state_rx,
+                _dns_server,
+                _nexus_server,
+            } = FakeNexusParts::new(&log).await;
+
+            let (inst, _) = timeout(
+                TIMEOUT_DURATION,
+                instance_struct(
+                    &log,
+                    // we want to test propolis not ever coming up
+                    SocketAddr::V6(SocketAddrV6::new(
+                        Ipv6Addr::LOCALHOST,
+                        1,
+                        0,
+                        0,
+                    )),
+                    nexus_client,
+                    AvailableDatasetsReceiver::fake_in_tempdir_for_tests(
+                        ZpoolOrRamdisk::Ramdisk,
+                    ),
+                    temp_guard.path().as_str(),
                 ),
-                temp_guard.path().as_str(),
-            ),
-        )
-        .await
-        .expect("timed out creating Instance struct");
-
-        let (put_tx, put_rx) = oneshot::channel();
-
-        tokio::time::pause();
-
-        // pretending we're InstanceManager::ensure_state, try in vain to start
-        // our "instance", but no propolis server is running
-        inst.put_state(put_tx, VmmStateRequested::Running)
-            .expect("failed to send Instance::put_state");
-
-        let timeout_fut = timeout(TIMEOUT_DURATION, put_rx);
-
-        tokio::time::advance(TIMEOUT_DURATION).await;
-
-        tokio::time::resume();
-
-        timeout_fut
+            )
             .await
-            .expect_err("*should've* timed out waiting for Instance::put_state, but didn't?");
+            .expect("timed out creating Instance struct");
 
-        if let ReceivedInstanceState::InstancePut(SledVmmState {
-            vmm_state: VmmRuntimeState { state: VmmState::Running, .. },
-            ..
-        }) = state_rx.borrow().to_owned()
-        {
-            panic!(
-                "Nexus's InstanceState should never have reached running if zone creation timed out"
+            let (put_tx, put_rx) = oneshot::channel();
+
+            tokio::time::pause();
+
+            // pretending we're InstanceManager::ensure_state, try in vain
+            // to start our "instance", but no propolis server is running
+            inst.put_state(put_tx, VmmStateRequested::Running)
+                .expect("failed to send Instance::put_state");
+
+            let timeout_fut = timeout(TIMEOUT_DURATION, put_rx);
+
+            tokio::time::advance(TIMEOUT_DURATION).await;
+
+            tokio::time::resume();
+
+            timeout_fut.await.expect_err(
+                "*should've* timed out waiting for \
+                 Instance::put_state, but didn't?",
             );
-        }
+
+            if let ReceivedInstanceState::InstancePut(SledVmmState {
+                vmm_state: VmmRuntimeState { state: VmmState::Running, .. },
+                ..
+            }) = state_rx.borrow().to_owned()
+            {
+                panic!(
+                    "Nexus's InstanceState should never have reached \
+                     running if zone creation timed out"
+                );
+            }
+        });
 
         logctx.cleanup_successful();
     }
@@ -3606,11 +3631,7 @@ mod tests {
                 requested_nics: local_config.nics,
                 external_ips: local_config.external_ips,
                 multicast_groups: local_config.multicast_groups,
-                firewall_rules: local_config
-                    .firewall_rules
-                    .into_iter()
-                    .map(Into::into)
-                    .collect(),
+                firewall_rules: local_config.firewall_rules,
                 dhcp_config,
                 state: InstanceStates::new(vmm_runtime, migration_id),
                 running_state: None,
@@ -3639,7 +3660,7 @@ mod tests {
         // up communicating with, even though the tests may not interact with
         // them directly.
         _nexus_server: HttpServer<ServerContext>,
-        _dns_server: TransientServer,
+        _dns_server: TransientDnsServer,
     }
 
     impl TestInstanceRunner {

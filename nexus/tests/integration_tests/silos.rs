@@ -18,9 +18,10 @@ use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO;
 use nexus_db_queries::db::identity::Asset;
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
 use nexus_test_utils::resource_helpers::{
-    create_ip_pool, create_local_user, create_project, create_silo, grant_iam,
-    link_ip_pool, object_create, object_delete, objects_list_page_authz,
-    projects_list, test_params,
+    create_ip_pool, create_local_user, create_project, create_silo,
+    create_subnet_pool, grant_iam, link_ip_pool, link_subnet_pool,
+    object_create, object_delete, objects_list_page_authz, projects_list,
+    test_params,
 };
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::certificate;
@@ -28,6 +29,7 @@ use nexus_types::external_api::identity_provider;
 use nexus_types::external_api::ip_pool;
 use nexus_types::external_api::project;
 use nexus_types::external_api::silo;
+use nexus_types::external_api::subnet_pool;
 use nexus_types::external_api::user;
 use nexus_types::silo::DEFAULT_SILO_ID;
 use omicron_common::address::{IpRange, Ipv4Range};
@@ -2735,4 +2737,64 @@ async fn test_silo_delete_cleans_up_ip_pool_links(
 
     object_delete(client, "/v1/system/ip-pools/pool1").await;
     object_delete(client, "/v1/system/ip-pools/pool2").await;
+}
+
+#[nexus_test]
+async fn test_silo_delete_cleans_up_subnet_pool_links(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+
+    let silo1 =
+        create_silo(&client, "silo1", true, silo::SiloIdentityMode::SamlJit)
+            .await;
+    let silo2 =
+        create_silo(&client, "silo2", true, silo::SiloIdentityMode::SamlJit)
+            .await;
+
+    create_subnet_pool(client, "pool1", omicron_common::address::IpVersion::V6)
+        .await;
+    link_subnet_pool(client, "pool1", &silo1.identity.id, true).await;
+    link_subnet_pool(client, "pool1", &silo2.identity.id, true).await;
+
+    create_subnet_pool(client, "pool2", omicron_common::address::IpVersion::V4)
+        .await;
+    link_subnet_pool(client, "pool2", &silo1.identity.id, false).await;
+
+    let url = "/v1/system/subnet-pools/pool1/silos";
+    let links =
+        objects_list_page_authz::<subnet_pool::SubnetPoolSiloLink>(client, url)
+            .await;
+    assert_eq!(links.items.len(), 2);
+
+    let url = "/v1/system/subnet-pools/pool2/silos";
+    let links =
+        objects_list_page_authz::<subnet_pool::SubnetPoolSiloLink>(client, url)
+            .await;
+    assert_eq!(links.items.len(), 1);
+
+    let url = format!("/v1/system/silos/{}", silo1.identity.id);
+    object_delete(client, &url).await;
+
+    let url = "/v1/system/subnet-pools/pool1/silos";
+    let links =
+        objects_list_page_authz::<subnet_pool::SubnetPoolSiloLink>(client, url)
+            .await;
+    assert_eq!(links.items.len(), 1);
+
+    let url = "/v1/system/subnet-pools/pool2/silos";
+    let links =
+        objects_list_page_authz::<subnet_pool::SubnetPoolSiloLink>(client, url)
+            .await;
+    assert_eq!(links.items.len(), 0);
+
+    let url = "/v1/system/subnet-pools";
+    let pools =
+        objects_list_page_authz::<subnet_pool::SubnetPool>(client, url).await;
+    assert_eq!(pools.items.len(), 2);
+    assert_eq!(pools.items[0].identity.name, "pool1");
+    assert_eq!(pools.items[1].identity.name, "pool2");
+
+    object_delete(client, "/v1/system/subnet-pools/pool1").await;
+    object_delete(client, "/v1/system/subnet-pools/pool2").await;
 }

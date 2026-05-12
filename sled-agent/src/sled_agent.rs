@@ -5,8 +5,6 @@
 //! Sled agent implementation
 
 use crate::artifact_store::{ArtifactStore, SledAgentArtifactStoreWrapper};
-use crate::bootstrap::config::BOOTSTRAP_AGENT_RACK_INIT_PORT;
-use crate::bootstrap::early_networking::EarlyNetworkSetupError;
 use crate::config::Config;
 use crate::hardware_monitor::HardwareMonitorHandle;
 use crate::instance_manager::InstanceManager;
@@ -17,7 +15,7 @@ use crate::nexus::{
 };
 use crate::probe_manager::ProbeManager;
 use crate::rot::{RotAttestationHandle, RotAttestationTask};
-use crate::services::{self, ServiceManager, UnderlayInfo};
+use crate::services::{self, ServiceManager, SledAgentInfo};
 use crate::support_bundle::logs::SupportBundleLogs;
 use crate::support_bundle::storage::SupportBundleManager;
 use crate::vmm_reservoir::{ReservoirMode, VmmReservoirManager};
@@ -43,19 +41,16 @@ use illumos_utils::zfs::SizeDetails;
 use illumos_utils::zfs::Zfs;
 use illumos_utils::zpool::PathInPool;
 use illumos_utils::zpool::ZpoolOrRamdisk;
+use internal_dns_resolver::Resolver;
 use itertools::Itertools as _;
-use omicron_common::address::{
-    Ipv6Subnet, SLED_PREFIX, get_sled_address, get_switch_zone_address,
-};
+use omicron_common::address::BOOTSTRAP_AGENT_RACK_INIT_PORT;
+use omicron_common::address::{Ipv6Subnet, SLED_PREFIX, get_sled_address};
 use omicron_common::api::external::{ByteCount, ByteCountRangeError, Vni};
-use omicron_common::api::internal::nexus::{DiskRuntimeState, SledVmmState};
+use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::shared::DelegatedZvol;
 use omicron_common::api::internal::shared::{
-    ExternalIpGatewayMap, ResolvedVpcFirewallRule, ResolvedVpcRouteSet,
-    ResolvedVpcRouteState, SledIdentifiers, VirtualNetworkInterfaceHost,
-};
-use omicron_common::backoff::{
-    BackoffError, retry_notify, retry_policy_internal_service_aggressive,
+    ExternalIpGatewayMap, ResolvedVpcRouteSet, ResolvedVpcRouteState,
+    SledIdentifiers, VirtualNetworkInterfaceHost,
 };
 use omicron_common::zpool_name::ZpoolName;
 use omicron_ddm_admin_client::Client as DdmAdminClient;
@@ -71,16 +66,18 @@ use sled_agent_config_reconciler::{
 };
 use sled_agent_health_monitor::handle::HealthMonitorHandle;
 use sled_agent_measurements::MeasurementsHandle;
+use sled_agent_rack_setup::EarlyNetworkSetupError;
 use sled_agent_types::attached_subnet::AttachedSubnet;
 use sled_agent_types::attached_subnet::AttachedSubnets;
 use sled_agent_types::dataset::LocalStorageDatasetDeleteRequest;
 use sled_agent_types::dataset::LocalStorageDatasetEnsureRequest;
 use sled_agent_types::disk::DiskStateRequested;
 use sled_agent_types::early_networking::EarlyNetworkConfigEnvelope;
-use sled_agent_types::early_networking::RackNetworkConfig;
+use sled_agent_types::instance::ResolvedVpcFirewallRule;
 use sled_agent_types::instance::{
     InstanceEnsureBody, InstanceExternalIpBody, InstanceMulticastBody,
-    VmmPutStateResponse, VmmStateRequested, VmmUnregisterResponse,
+    SledVmmState, VmmPutStateResponse, VmmStateRequested,
+    VmmUnregisterResponse,
 };
 use sled_agent_types::inventory::{Inventory, OmicronSledConfig, SledRole};
 use sled_agent_types::probes::ProbeCreate;
@@ -88,7 +85,10 @@ use sled_agent_types::resolvable_files::{
     PreparedOmicronZone, RemoveMupdateOverrideResult, ResolverStatus,
 };
 use sled_agent_types::rot::Rot;
-use sled_agent_types::sled::StartSledAgentRequest;
+use sled_agent_types::sled::{
+    StartSledAgentRequest, ThisSledSwitchZoneUnderlayIpAddr,
+};
+use sled_agent_types::system_networking::SystemNetworkingConfig;
 use sled_agent_types::uplink::HostPortConfig;
 use sled_agent_types::zone_bundle::{
     BundleUtilization, CleanupContext, CleanupCount, CleanupPeriod,
@@ -104,8 +104,9 @@ use slog::Logger;
 use slog_error_chain::{InlineErrorChain, SlogInlineError};
 use sprockets_tls::keys::SprocketsConfig;
 use std::collections::BTreeMap;
-use std::net::{Ipv6Addr, SocketAddr, SocketAddrV6};
+use std::net::{SocketAddr, SocketAddrV6};
 use std::sync::Arc;
+use tokio::sync::watch;
 use uuid::Uuid;
 
 use illumos_utils::dladm::{Dladm, EtherstubVnic};
@@ -404,9 +405,6 @@ struct SledAgentInner {
     // A handle to the RoT for attestation requests.
     rot_attestor: RotAttestationHandle,
 
-    // The rack network config provided at RSS time.
-    rack_network_config: RackNetworkConfig,
-
     // Object managing zone bundles.
     zone_bundler: zone_bundle::ZoneBundler,
 
@@ -440,8 +438,10 @@ impl SledAgentInner {
         get_sled_address(self.subnet)
     }
 
-    fn switch_zone_ip(&self) -> Ipv6Addr {
-        get_switch_zone_address(self.subnet)
+    fn switch_zone_ip(&self) -> ThisSledSwitchZoneUnderlayIpAddr {
+        ThisSledSwitchZoneUnderlayIpAddr::from_sled_agent_request(
+            &self.start_request,
+        )
     }
 }
 
@@ -624,52 +624,69 @@ impl SledAgent {
         let svc_config =
             services::Config::new(identifiers, config.sidecar_revision.clone());
 
-        // Get our rack network config from the bootstore; we cannot proceed
-        // until we have this, as we need to know which switches have uplinks to
-        // correctly set up services.
-        let get_network_config = || async {
-            let serialized_config = long_running_task_handles
-                .bootstore
-                .get_network_config()
-                .await
-                .map_err(|err| {
-                    BackoffError::transient(
-                        InlineErrorChain::new(&err).to_string(),
-                    )
-                })?
-                .ok_or_else(|| {
-                    BackoffError::transient(
-                        "Missing early network config in bootstore".to_string(),
-                    )
-                })?;
+        // Get our system network config from the bootstore; we cannot proceed
+        // until we have this, as we need to set up uplinks inside the switch
+        // zone (if we're a scrimlet) and configure services that need NAT
+        // entries in dendrite (if we start any such services).
+        let mut bootstore_network_config_rx =
+            long_running_task_handles.bootstore.network_config_subscribe();
+        let network_config = loop {
+            let maybe_serialized_config =
+                bootstore_network_config_rx.borrow_and_update().clone();
 
-            let early_network_config =
-                EarlyNetworkConfigEnvelope::deserialize_from_bootstore(
-                    &serialized_config,
-                )
-                .and_then(|envelope| envelope.deserialize_body())
-                .map_err(|err| BackoffError::transient(err.to_string()))?;
+            // If we don't have a network config at all yet, wait until the
+            // watch channel changes then try again.
+            let Some(serialized_config) = maybe_serialized_config else {
+                warn!(log, "Waiting for network config from bootstore");
+                bootstore_network_config_rx
+                    .changed()
+                    .await
+                    .expect("bootstore task never exits");
+                continue;
+            };
 
-            Ok(early_network_config.rack_network_config)
-        };
-        let rack_network_config: RackNetworkConfig =
-            retry_notify::<_, String, _, _, _, _>(
-                retry_policy_internal_service_aggressive(),
-                get_network_config,
-                |error, delay| {
+            // We _should_ always be able to deserialize the raw config from the
+            // bootstore, but if we can't, log an error and wait for it to
+            // change; an operator may be able to fix it and push new contents.
+            match EarlyNetworkConfigEnvelope::deserialize_from_bootstore(
+                &serialized_config,
+            )
+            .and_then(|envelope| envelope.deserialize_body())
+            {
+                Ok(network_config) => {
+                    break network_config;
+                }
+                Err(err) => {
                     warn!(
                         log,
-                        "failed to get network config from bootstore";
-                        "error" => ?error,
-                        "retry_after" => ?delay,
+                        "failed to deserialize network config from bootstore; \
+                         will wait for new config then try again";
+                        InlineErrorChain::new(&err),
                     );
-                },
-            )
-            .await
-            .expect(
-                "Expected an infinite retry loop getting \
-                 network config from bootstore",
-            );
+                    bootstore_network_config_rx
+                        .changed()
+                        .await
+                        .expect("bootstore task never exits");
+                    continue;
+                }
+            };
+        };
+
+        // Spawn a task responsible for forwarding any changes to the rack
+        // network config from the bootstore back to us fully-deserialized.
+        //
+        // This is spiritually a "long-running task", but we can't spawn it with
+        // the other long-running tasks because it can't begin prior to this
+        // point: we must have already received and successfully deserialized a
+        // `SystemNetworkingConfig`.
+        let (network_config_tx, network_config_rx) =
+            watch::channel(network_config);
+        tokio::spawn(network_config_deserialization_task(
+            bootstore_network_config_rx,
+            network_config_tx,
+            parent_log
+                .new(o!("component" => "NetworkConfigDeserializationTask")),
+        ));
 
         // Start reconciling against our ledgered sled config.
         config_reconciler.spawn_reconciliation_task(
@@ -686,14 +703,22 @@ impl SledAgent {
         );
 
         services
-            .sled_agent_started(
-                svc_config,
-                port_manager.clone(),
-                *sled_address.ip(),
-                request.body.rack_id,
-                rack_network_config.clone(),
-                metrics_manager.request_queue(),
-            )
+            .sled_agent_started(SledAgentInfo {
+                config: svc_config,
+                port_manager: port_manager.clone(),
+                resolver: Resolver::new_from_ip(
+                    parent_log.new(o!("component" => "DnsResolver")),
+                    *sled_address.ip(),
+                )?,
+                underlay_address: *sled_address.ip(),
+                local_switch_zone_ip:
+                    ThisSledSwitchZoneUnderlayIpAddr::from_sled_agent_request(
+                        &request,
+                    ),
+                rack_id: request.body.rack_id,
+                network_config_rx,
+                metrics_queue: metrics_manager.request_queue(),
+            })
             .await?;
 
         let repo_depot = long_running_task_handles
@@ -746,7 +771,6 @@ impl SledAgent {
                 services,
                 nexus_notifier: nexus_notifier_handle,
                 rot_attestor: rot_attest_handle,
-                rack_network_config,
                 zone_bundler: long_running_task_handles.zone_bundler.clone(),
                 bootstore: long_running_task_handles.bootstore.clone(),
                 trust_quorum: long_running_task_handles.trust_quorum.clone(),
@@ -786,11 +810,10 @@ impl SledAgent {
         )
     }
 
-    pub(crate) fn switch_zone_underlay_info(&self) -> UnderlayInfo {
-        UnderlayInfo {
-            ip: self.inner.switch_zone_ip(),
-            rack_network_config: self.inner.rack_network_config.clone(),
-        }
+    pub(crate) fn local_switch_zone_ip(
+        &self,
+    ) -> ThisSledSwitchZoneUnderlayIpAddr {
+        self.inner.switch_zone_ip()
     }
 
     pub fn id(&self) -> SledUuid {
@@ -1422,13 +1445,9 @@ impl SledAgent {
             HttpError::for_internal_error(InlineErrorChain::new(&e).to_string())
         })?;
 
-        Zfs::ensure_dataset_volume(DatasetVolumeEnsureArgs {
+        Zfs::ensure_dataset_volume(DatasetVolumeEnsureArgs::Raw {
             name: &delegated_zvol.volume_name(),
             size: volume_size,
-            raw: true,
-            // Set the volblocksize (read: the allocation size for the zvol,
-            // _not_ the actual block size!) to 128k
-            volblocksize: Some(131072),
         })
         .await
         .map_err(|e| {
@@ -1701,6 +1720,77 @@ pub async fn sled_add(
 
     info!(log, "Peer agent initialized"; "peer_bootstrap_addr" => %bootstrap_addr, "peer_id" => %baseboard);
     Ok(())
+}
+
+// Long-running task that updates the contents of `network_config_tx` any
+// time the contents of `bootstore_network_config_rx` changes.
+//
+// Assumes the caller already deserialized the current bootstore network config
+// and used the result to initialize `network_config_tx`; this task starts
+// by waiting for any changes to `bootstore_network_config_rx`.
+async fn network_config_deserialization_task(
+    mut bootstore_network_config_rx: watch::Receiver<
+        Option<bootstore::NetworkConfig>,
+    >,
+    network_config_tx: watch::Sender<SystemNetworkingConfig>,
+    log: Logger,
+) {
+    loop {
+        // This should never happen - if it does, we're permanently dead.
+        if bootstore_network_config_rx.changed().await.is_err() {
+            error!(
+                log,
+                "bootstore task exited - \
+                 network_config_deserialization_task exiting"
+            );
+            return;
+        }
+
+        let maybe_bootstore_network_config =
+            bootstore_network_config_rx.borrow_and_update().clone();
+
+        // We were only spawned if we had a bootstore network config; we never
+        // expect to go back to `None`. If we do, there isn't much we can do -
+        // log an error.
+        let Some(bootstore_network_config) = maybe_bootstore_network_config
+        else {
+            error!(
+                log,
+                "bootstore network config was previously `Some(_)` but is \
+                 now `None` - this should never happen!",
+            );
+            continue;
+        };
+
+        // We _should_ always be able to deserialize the raw config from the
+        // bootstore, but if we can't, log an error and wait for it to
+        // change; an operator may be able to fix it and push new contents.
+        match EarlyNetworkConfigEnvelope::deserialize_from_bootstore(
+            &bootstore_network_config,
+        )
+        .and_then(|envelope| envelope.deserialize_body())
+        {
+            Ok(network_config) => {
+                info!(
+                    log,
+                    "received new network config from bootstore";
+                    "generation" => %bootstore_network_config.generation,
+                );
+                network_config_tx.send_modify(|c| {
+                    *c = network_config;
+                });
+            }
+            Err(err) => {
+                error!(
+                    log,
+                    "failed to deserialize network config from bootstore; \
+                     will wait for new config then try again - \
+                     this should never happen!";
+                    InlineErrorChain::new(&err),
+                );
+            }
+        }
+    }
 }
 
 struct ReconcilerFacilities {

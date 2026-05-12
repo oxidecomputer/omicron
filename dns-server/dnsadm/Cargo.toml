@@ -1,0 +1,34 @@
+[package]
+name = "dnsadm"
+version = "0.1.0"
+edition.workspace = true
+license = "MPL-2.0"
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "dnsadm"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+chrono.workspace = true
+clap.workspace = true
+dns-service-client.workspace = true
+internal-dns-types.workspace = true
+oxide-tokio-rt.workspace = true
+slog.workspace = true
+slog-async.workspace = true
+slog-envlogger.workspace = true
+slog-term.workspace = true
+omicron-workspace-hack.workspace = true
+
+[dev-dependencies]
+camino-tempfile.workspace = true
+dns-server.workspace = true
+dropshot.workspace = true
+expectorate.workspace = true
+omicron-test-utils.workspace = true
+subprocess.workspace = true
+tokio.workspace = true

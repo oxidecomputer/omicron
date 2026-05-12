@@ -38,6 +38,7 @@ use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
+use transient_dns_server::TransientDnsServer;
 
 pub struct ControlPlaneBuilder<'a> {
     // required
@@ -117,8 +118,8 @@ pub struct ControlPlaneTestContext<N> {
     pub stopped_dendrite_ports: RwLock<HashMap<SwitchSlot, u16>>,
     pub mgd: HashMap<SwitchSlot, dev::maghemite::MgdInstance>,
     pub external_dns_zone_name: String,
-    pub external_dns: dns_server::TransientServer,
-    pub internal_dns: dns_server::TransientServer,
+    pub external_dns: TransientDnsServer,
+    pub internal_dns: TransientDnsServer,
     pub initial_blueprint_id: BlueprintUuid,
     pub silo_name: Name,
     pub user_name: UserId,

@@ -733,6 +733,7 @@ fn test_config(
         default_request_body_max_bytes: 1024,
         default_handler_task_mode: HandlerTaskMode::Detached,
         log_headers: vec![],
+        compression: dropshot::CompressionConfig::None,
     };
 
     Ok((tmp_dir, config_storage, config_dropshot, logctx))

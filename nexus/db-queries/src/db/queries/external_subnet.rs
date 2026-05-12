@@ -840,9 +840,11 @@ fn push_cte_to_select_default_pool_by_version(
     builder
         .sql(
             "pool_id AS (\
-        SELECT subnet_pool_id AS id \
-        FROM subnet_pool_silo_link \
-        WHERE silo_id = ",
+        SELECT l.subnet_pool_id AS id \
+        FROM subnet_pool_silo_link AS l \
+        INNER JOIN subnet_pool AS sp \
+            ON sp.id = l.subnet_pool_id \
+        WHERE l.silo_id = ",
         )
         .param()
         .bind::<sql_types::Uuid, _>(*silo_id);
@@ -850,11 +852,11 @@ fn push_cte_to_select_default_pool_by_version(
     // Add the version filter if it's provided.
     if let Some(ip_version) = &maybe_ip_version {
         builder
-            .sql(" AND ip_version = ")
+            .sql(" AND l.ip_version = ")
             .param()
             .bind::<IpVersionEnum, _>(*ip_version);
     }
-    builder.sql(" AND is_default)");
+    builder.sql(" AND l.is_default AND sp.time_deleted IS NULL)");
 
     // Add a CTE to check the count of default pools.
     builder
