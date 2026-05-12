@@ -497,7 +497,7 @@ digest = "0.10.7"
 dns-server = { path = "dns-server" }
 dns-server-api = { path = "dns-server-api" }
 dns-service-client = { path = "clients/dns-service-client" }
-dpd-client = { git = "https://github.com/oxidecomputer/dendrite", rev = "edf0edb977b3d7c4f4b08985f8f900a61e88322c" }
+dpd-client = { git = "https://github.com/oxidecomputer/dendrite", rev = "23aa445fea291fab3589c8986b6bb7b4c6783438" }
 dropshot = { version = "0.17.0", features = [ "usdt-probes" ] }
 dropshot-api-manager = "0.7.1"
 dropshot-api-manager-types = "0.7.1"
@@ -845,7 +845,7 @@ tokio-tungstenite = "0.23.1"
 tokio-util = { version = "0.7.15", features = ["io", "io-util", "time"] }
 toml = "0.8.23"
 toml_edit = "0.22.27"
-tough = { version = "0.20.0", features = [ "http" ] }
+tough = { version = "0.22.0" }
 transceiver-controller = { git = "https://github.com/oxidecomputer/transceiver-control", features = [ "api-traits" ] }
 transient-dns-server = { path = "dns-server/transient" }
 trybuild = "1.0.106"

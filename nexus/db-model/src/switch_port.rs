@@ -30,8 +30,8 @@ use omicron_uuid_kinds::TypedUuid;
 use oxnet::IpNet;
 use serde::{Deserialize, Serialize};
 use sled_agent_types::early_networking::ImportExportPolicy;
-use sled_agent_types::early_networking::PortFec;
-use sled_agent_types::early_networking::PortSpeed;
+use sled_agent_types::early_networking::LinkFec;
+use sled_agent_types::early_networking::LinkSpeed;
 use sled_agent_types::early_networking::RouterLifetimeConfig;
 use sled_agent_types::early_networking::RouterLifetimeConfigError;
 use sled_agent_types::early_networking::RouterPeerIpAddr;
@@ -175,69 +175,27 @@ impl_enum_type!(
     Speed400G => b"400G"
 );
 
-impl From<SwitchLinkFec> for PortFec {
+impl From<SwitchLinkFec> for LinkFec {
     fn from(value: SwitchLinkFec) -> Self {
         match value {
-            SwitchLinkFec::Firecode => PortFec::Firecode,
-            SwitchLinkFec::None => PortFec::None,
-            SwitchLinkFec::Rs => PortFec::Rs,
+            SwitchLinkFec::Firecode => Self::Firecode,
+            SwitchLinkFec::None => Self::None,
+            SwitchLinkFec::Rs => Self::Rs,
         }
     }
 }
 
-impl From<networking_types::LinkFec> for SwitchLinkFec {
-    fn from(value: networking_types::LinkFec) -> Self {
+impl From<LinkFec> for SwitchLinkFec {
+    fn from(value: LinkFec) -> Self {
         match value {
-            networking_types::LinkFec::Firecode => SwitchLinkFec::Firecode,
-            networking_types::LinkFec::None => SwitchLinkFec::None,
-            networking_types::LinkFec::Rs => SwitchLinkFec::Rs,
+            LinkFec::Firecode => Self::Firecode,
+            LinkFec::None => Self::None,
+            LinkFec::Rs => Self::Rs,
         }
     }
 }
 
-impl From<SwitchLinkFec> for networking_types::LinkFec {
-    fn from(value: SwitchLinkFec) -> Self {
-        match value {
-            SwitchLinkFec::Firecode => networking_types::LinkFec::Firecode,
-            SwitchLinkFec::None => networking_types::LinkFec::None,
-            SwitchLinkFec::Rs => networking_types::LinkFec::Rs,
-        }
-    }
-}
-
-impl From<SwitchLinkSpeed> for PortSpeed {
-    fn from(value: SwitchLinkSpeed) -> Self {
-        match value {
-            SwitchLinkSpeed::Speed0G => PortSpeed::Speed0G,
-            SwitchLinkSpeed::Speed1G => PortSpeed::Speed1G,
-            SwitchLinkSpeed::Speed10G => PortSpeed::Speed10G,
-            SwitchLinkSpeed::Speed25G => PortSpeed::Speed25G,
-            SwitchLinkSpeed::Speed40G => PortSpeed::Speed40G,
-            SwitchLinkSpeed::Speed50G => PortSpeed::Speed50G,
-            SwitchLinkSpeed::Speed100G => PortSpeed::Speed100G,
-            SwitchLinkSpeed::Speed200G => PortSpeed::Speed200G,
-            SwitchLinkSpeed::Speed400G => PortSpeed::Speed400G,
-        }
-    }
-}
-
-impl From<networking_types::LinkSpeed> for SwitchLinkSpeed {
-    fn from(value: networking_types::LinkSpeed) -> Self {
-        match value {
-            networking_types::LinkSpeed::Speed0G => Self::Speed0G,
-            networking_types::LinkSpeed::Speed1G => Self::Speed1G,
-            networking_types::LinkSpeed::Speed10G => Self::Speed10G,
-            networking_types::LinkSpeed::Speed25G => Self::Speed25G,
-            networking_types::LinkSpeed::Speed40G => Self::Speed40G,
-            networking_types::LinkSpeed::Speed50G => Self::Speed50G,
-            networking_types::LinkSpeed::Speed100G => Self::Speed100G,
-            networking_types::LinkSpeed::Speed200G => Self::Speed200G,
-            networking_types::LinkSpeed::Speed400G => Self::Speed400G,
-        }
-    }
-}
-
-impl From<SwitchLinkSpeed> for networking_types::LinkSpeed {
+impl From<SwitchLinkSpeed> for LinkSpeed {
     fn from(value: SwitchLinkSpeed) -> Self {
         match value {
             SwitchLinkSpeed::Speed0G => Self::Speed0G,
@@ -249,6 +207,22 @@ impl From<SwitchLinkSpeed> for networking_types::LinkSpeed {
             SwitchLinkSpeed::Speed100G => Self::Speed100G,
             SwitchLinkSpeed::Speed200G => Self::Speed200G,
             SwitchLinkSpeed::Speed400G => Self::Speed400G,
+        }
+    }
+}
+
+impl From<LinkSpeed> for SwitchLinkSpeed {
+    fn from(value: LinkSpeed) -> Self {
+        match value {
+            LinkSpeed::Speed0G => Self::Speed0G,
+            LinkSpeed::Speed1G => Self::Speed1G,
+            LinkSpeed::Speed10G => Self::Speed10G,
+            LinkSpeed::Speed25G => Self::Speed25G,
+            LinkSpeed::Speed40G => Self::Speed40G,
+            LinkSpeed::Speed50G => Self::Speed50G,
+            LinkSpeed::Speed100G => Self::Speed100G,
+            LinkSpeed::Speed200G => Self::Speed200G,
+            LinkSpeed::Speed400G => Self::Speed400G,
         }
     }
 }
