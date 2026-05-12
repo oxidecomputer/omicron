@@ -30,6 +30,7 @@ use crate::status::ReconcilerStatus;
 use crate::status::ReconciliationCompletedStatus;
 use crate::status::ScrimletStatus;
 use crate::switch_zone_slot::ThisSledSwitchSlot;
+use chrono::SecondsFormat;
 use chrono::Utc;
 use sled_agent_types::system_networking::SystemNetworkingConfig;
 use slog::Logger;
@@ -37,6 +38,7 @@ use slog::error;
 use slog::info;
 use std::convert::Infallible;
 use std::time::Duration;
+use std::time::Instant;
 use tokio::sync::watch;
 use tokio::sync::watch::error::RecvError;
 use tokio::task::JoinHandle;
@@ -123,8 +125,8 @@ impl<T: Reconciler> ReconcilerTaskHandle<T> {
             last_completion: None,
         });
 
-        let log =
-            parent_log.new(slog::o!("component" => T::LOGGER_COMPONENT_NAME));
+        let log = parent_log
+            .new(slog::o!("scrimlet_reconciler" => T::LOGGER_COMPONENT_NAME));
 
         let mut inner_task = ReconcilerTask {
             scrimlet_status_rx,
@@ -185,6 +187,8 @@ impl<T: Reconciler> ReconcilerTask<T> {
             self.wait_if_this_sled_is_no_longer_a_scrimlet().await?;
 
             // We _are_ a scrimlet; perform reconciliation.
+            let start_instant = Instant::now();
+            let start_time = Utc::now();
             info!(
                 self.log, "starting reconciliation attempt";
                 "activation_reason" => ?activation_reason,
@@ -197,6 +201,8 @@ impl<T: Reconciler> ReconcilerTask<T> {
                 self.system_networking_config_rx.borrow_and_update().clone();
             let running_status =
                 ReconcilerRunningStatus::new(activation_reason);
+
+            // Update our status.
             self.status_tx.send_modify(|status| {
                 status.current_status =
                     ReconcilerCurrentStatus::Running(running_status);
@@ -213,6 +219,11 @@ impl<T: Reconciler> ReconcilerTask<T> {
                 self.log, "reconciliation attempt complete";
                 "activation_reason" => ?activation_reason,
                 "activation_count" => activation_count,
+                "started_at" => start_time.to_rfc3339_opts(
+                    SecondsFormat::Millis,
+                    /* use_z */ true,
+                ),
+                "elapsed" => ?start_instant.elapsed(),
             );
             self.status_tx.send_modify(|status| {
                 status.current_status = ReconcilerCurrentStatus::Idle;

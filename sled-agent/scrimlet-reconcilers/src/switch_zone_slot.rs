@@ -43,6 +43,16 @@ impl ThisSledSwitchSlot {
     #[cfg(test)]
     pub(crate) const TEST_FAKE: Self = Self(SwitchSlot::Switch0);
 
+    /// Attempt to determine this sled's switch slot via `client`, which _must_
+    /// be an MGS client pointed at the IP address of our switch zone. (We take
+    /// this as a `Client` instead of a more strict type to allow tests to call
+    /// this function with a `client` pointed at a non-switch-zone address; the
+    /// function is `pub(crate)` and we expect callers to respect this
+    /// requirement in non-test paths.)
+    ///
+    /// This function blocks until it either succeeds or the
+    /// `scrimlet_status_rx` channel is closed. It will retry indefinitely on
+    /// any failures to communicate via `client`.
     pub(crate) async fn determine_retrying_forever(
         determine_status_tx: watch::Sender<DetermineSwitchSlotStatus>,
         scrimlet_status_rx: &mut watch::Receiver<ScrimletStatus>,
@@ -113,7 +123,7 @@ impl ThisSledSwitchSlot {
                         );
                         format!(
                             "received invalid SP type/slot combo from MGS {}: \
-                         {sp_type:?}/{sp_slot}",
+                             {sp_type:?}/{sp_slot}",
                             client.baseurl()
                         )
                     }

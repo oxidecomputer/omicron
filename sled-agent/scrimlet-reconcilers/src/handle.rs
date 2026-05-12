@@ -68,7 +68,6 @@ impl ScrimletReconcilersMode {
                 // progenitor's normal defaults.
                 reqwest::ClientBuilder::new()
                     .connect_timeout(Duration::from_secs(15))
-                    .read_timeout(Duration::from_secs(15))
                     .pool_idle_timeout(Duration::from_secs(10))
                     .build()
                     .expect("reqwest parameters are valid")
