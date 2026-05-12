@@ -194,7 +194,7 @@ impl SledAgentInstanceError {
     /// returns the reason for the failure.
     pub fn vmm_failure_reason(&self) -> Option<db::model::VmmFailureReason> {
         if self.vmm_gone() {
-            Some(db::model::VmmFailureReason::NoSuchVmm)
+            Some(db::model::VmmFailureReason::NoSuchInstance)
         } else {
             None
         }
