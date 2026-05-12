@@ -8,7 +8,7 @@
 use crate::app::{
     background::{
         LoadedTargetBlueprint,
-        tasks::networking::{api_to_dpd_port_settings, build_mgd_clients},
+        tasks::networking::{api_to_dpd_port_settings, resolve_mgd_clients},
     },
     dpd_clients, switch_zone_address_mappings,
 };
@@ -364,7 +364,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                 let dpd_clients = match
                     dpd_clients(&self.resolver, &log).await
                 {
-                    Ok(mappings) => mappings,
+                    Ok(clients) => clients,
                     Err(e) => {
                         error!(
                             log,
@@ -376,7 +376,18 @@ impl BackgroundTask for SwitchPortSettingsManager {
 
                 // TODO https://github.com/oxidecomputer/omicron/issues/5201
                 // build mgd clients
-                let mgd_clients = build_mgd_clients(mappings, &log, &self.resolver).await;
+                let mgd_clients =
+                    match resolve_mgd_clients(&self.resolver, &log).await {
+                        Ok(clients) => clients,
+                        Err(e) => {
+                            error!(
+                                log,
+                                "failed to resolve addresses for MGD";
+                                InlineErrorChain::new(&e),
+                            );
+                            continue;
+                        },
+                    };
 
                 let port_list = match self.switch_ports(opctx, &log).await {
                     Ok(value) => value,
