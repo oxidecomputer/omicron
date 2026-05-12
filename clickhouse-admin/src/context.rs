@@ -723,7 +723,7 @@ async fn get_retention_policy(
 #[cfg(not(test))]
 const USAGE_UPDATE_INTERVAL: Duration = Duration::from_mins(2);
 #[cfg(test)]
-const USAGE_UPDATE_INTERVAL: Duration = Duration::from_secs(1);
+const USAGE_UPDATE_INTERVAL: Duration = Duration::from_millis(250);
 
 async fn long_running_usage_task(
     tx: watch::Sender<DatabaseUsageResult>,
@@ -976,7 +976,7 @@ mod tests {
                     None => Err(dev::poll::CondCheckError::<()>::NotYet),
                 }
             },
-            &std::time::Duration::from_millis(100),
+            &std::time::Duration::from_millis(50),
             &(2 * USAGE_UPDATE_INTERVAL),
         )
         .await
@@ -1018,7 +1018,7 @@ mod tests {
         };
         let is_network_err = |msg: &str| -> bool {
             msg.starts_with("Failed to check out")
-                || msg.contains("TCP connection to server")
+                || msg.starts_with("Native protocol error")
         };
         assert!(is_network_err(&err.error), "Expected a network error error");
 
