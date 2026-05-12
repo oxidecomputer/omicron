@@ -26,7 +26,7 @@ use illumos_utils::zone::Api as _;
 use illumos_utils::zone::DeleteAddressError;
 use illumos_utils::zone::OmicronZoneConfigExt;
 use illumos_utils::zone::Zones;
-use ntp_admin_client::v1::types::TimeSync;
+use ntp_admin_client_v1::types::TimeSync;
 use omicron_common::address::Ipv6Subnet;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use sled_agent_types::inventory::ConfigReconcilerInventoryResult;
@@ -78,7 +78,7 @@ pub enum TimeSyncError {
     MultipleRunningNtpZones,
     #[error("failed to communicate with NTP admin server")]
     NtpAdmin(
-        #[from] ntp_admin_client::v1::Error<ntp_admin_client::v1::types::Error>,
+        #[from] ntp_admin_client_v1::Error<ntp_admin_client_v1::types::Error>,
     ),
     #[error("failed to execute chronyc within NTP zone")]
     ExecuteChronyc(#[source] RunCommandError),
@@ -589,7 +589,7 @@ impl OmicronZones {
             return Err(TimeSyncError::MultipleRunningNtpZones);
         }
 
-        let client = ntp_admin_client::v1::Client::new(
+        let client = ntp_admin_client_v1::Client::new(
             &format!("http://{ntp_admin_address}"),
             log.clone(),
         );
