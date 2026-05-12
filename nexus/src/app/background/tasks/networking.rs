@@ -20,9 +20,10 @@ use std::collections::HashMap;
 ///
 /// Fails if we cannot resolve MGD in DNS.
 ///
-/// If we can resolve MGD in DNS but either or both MGD instance does not know
-/// its own switch slot, that switch slot will be omitted from the returned map.
-/// Callers must not assume an `Ok(_)` return value contains any client.
+/// For any MGD instance we resolve via DNS, if the MGD instance does not know
+/// its own switch slot, the switch slot -> client mapping for that instance
+/// will be omitted from the returned map. Callers must not assume an `Ok(_)`
+/// return value contains any client.
 pub(crate) async fn resolve_mgd_clients(
     resolver: &internal_dns_resolver::Resolver,
     log: &slog::Logger,
