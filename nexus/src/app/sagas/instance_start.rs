@@ -1155,7 +1155,6 @@ async fn sis_ensure_running(
 #[cfg(test)]
 mod test {
     use core::time::Duration;
-    use std::net::SocketAddrV6;
 
     use crate::app::sagas::disk_delete::test::ExpungeTestHarness;
     use crate::app::sagas::disk_delete::test::create_disk;

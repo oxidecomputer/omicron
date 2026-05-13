@@ -2777,13 +2777,13 @@ mod test {
         cptestctx: &ControlPlaneTestContext,
         switch0_port: u16,
     ) {
-        use std::net::Ipv6Addr;
-        use std::net::SocketAddrV6;
-
         let nexus_address = cptestctx.internal_client.bind_address;
-        let mgs = cptestctx.gateway.get(&SwitchSlot::Switch0).unwrap();
-        let mgs_address =
-            SocketAddrV6::new(Ipv6Addr::LOCALHOST, mgs.port, 0, 0).into();
+        let mgs_address = cptestctx
+            .gateway
+            .get(&SwitchSlot::Switch0)
+            .unwrap()
+            .address()
+            .into();
 
         let new_switch0 =
             omicron_test_utils::dev::dendrite::DendriteInstance::start(
