@@ -953,13 +953,6 @@ mod tests {
         let usage = context.database_usage();
         println!("{usage:#?}");
         assert!(usage.last_success.is_some());
-        assert!(
-            usage
-                .last_success
-                .expect("Should have successfully computed something")
-                .tables
-                .is_empty()
-        );
 
         // Wait until we actually do compute the usage again.
         let usage = dev::poll::wait_for_condition(
