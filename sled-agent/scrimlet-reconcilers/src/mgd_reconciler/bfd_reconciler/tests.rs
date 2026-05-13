@@ -2,8 +2,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use std::collections::BTreeMap;
-
 use super::*;
 use crate::switch_zone_slot::ThisSledSwitchSlot;
 use gateway_messages::SpPort;
@@ -14,6 +12,7 @@ use sled_agent_types::early_networking::BfdMode;
 use sled_agent_types::early_networking::BfdPeerConfig;
 use sled_agent_types::early_networking::RackNetworkConfig;
 use sled_agent_types::early_networking::SwitchSlot;
+use std::collections::BTreeMap;
 use tokio::task::block_in_place;
 
 fn desired_bfd_peer(

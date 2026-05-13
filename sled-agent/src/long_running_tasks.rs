@@ -34,6 +34,7 @@ use sled_agent_config_reconciler::{
 use sled_agent_health_monitor::HealthMonitorHandle;
 use sled_agent_measurements::MeasurementsHandle;
 use sled_agent_resolvable_files::ZoneImageSourceResolver;
+use sled_agent_scrimlet_reconcilers::ScrimletReconcilers;
 use sled_agent_types::zone_bundle::CleanupContext;
 use sled_hardware::{HardwareManager, SledMode, UnparsedDisk};
 use sled_storage::config::MountConfig;
@@ -52,6 +53,10 @@ pub struct LongRunningTaskHandles {
     /// A handle to the set of tasks managed by the sled-agent-config-reconciler
     /// system.
     pub config_reconciler: Arc<ConfigReconcilerHandle>,
+
+    /// A handle to the set of tasks managed by the
+    /// sled-agent-scrimlet-reconcilers system.
+    pub scrimlet_reconcilers: Arc<ScrimletReconcilers>,
 
     /// A mechanism for interacting with the hardware device tree
     pub hardware_manager: HardwareManager,
@@ -125,6 +130,8 @@ pub async fn spawn_all_longrunning_tasks(
             log,
         );
 
+    let scrimlet_reconcilers = Arc::new(ScrimletReconcilers::new(log));
+
     let nongimlet_observed_disks =
         config.nongimlet_observed_disks.clone().unwrap_or(vec![]);
 
@@ -136,7 +143,12 @@ pub async fn spawn_all_longrunning_tasks(
     let raw_disks_tx = config_reconciler.raw_disks_tx();
     upsert_synthetic_disks_if_needed(&log, &raw_disks_tx, &config).await;
     let (hardware_monitor, sled_agent_started_tx, service_manager_ready_tx) =
-        spawn_hardware_monitor(log, &hardware_manager, raw_disks_tx);
+        spawn_hardware_monitor(
+            log,
+            &hardware_manager,
+            raw_disks_tx,
+            Arc::clone(&scrimlet_reconcilers),
+        );
 
     // Wait for the boot disk so that we can work with any ledgers,
     // such as those needed by the bootstore and sled-agent
@@ -200,6 +212,7 @@ pub async fn spawn_all_longrunning_tasks(
     LongRunningTaskResult {
         long_running_task_handles: LongRunningTaskHandles {
             config_reconciler,
+            scrimlet_reconcilers,
             hardware_manager,
             hardware_monitor,
             bootstore,
@@ -254,6 +267,7 @@ fn spawn_hardware_monitor(
     log: &Logger,
     hardware_manager: &HardwareManager,
     raw_disks_tx: RawDisksSender,
+    scrimlet_reconcilers: Arc<ScrimletReconcilers>,
 ) -> (
     HardwareMonitorHandle,
     oneshot::Sender<SledAgent>,
@@ -261,7 +275,12 @@ fn spawn_hardware_monitor(
 ) {
     info!(log, "Starting HardwareMonitor");
     let (monitor, sled_agent_started_tx, service_manager_ready_tx) =
-        HardwareMonitor::spawn(log, hardware_manager, raw_disks_tx);
+        HardwareMonitor::spawn(
+            log,
+            hardware_manager,
+            raw_disks_tx,
+            scrimlet_reconcilers,
+        );
     (monitor, sled_agent_started_tx, service_manager_ready_tx)
 }
 

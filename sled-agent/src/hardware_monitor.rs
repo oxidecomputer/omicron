@@ -6,9 +6,13 @@
 //! [`sled_hardware::HardwareManager`] and dispatches them to other parts
 //! of the bootstrap agent and sled-agent code.
 
+use std::sync::Arc;
+
 use crate::services::ServiceManager;
 use crate::sled_agent::SledAgent;
 use sled_agent_config_reconciler::RawDisksSender;
+use sled_agent_scrimlet_reconcilers::ScrimletReconcilers;
+use sled_agent_scrimlet_reconcilers::ScrimletStatus;
 use sled_agent_types::debug::OperatorSwitchZonePolicy;
 use sled_hardware::{HardwareManager, HardwareView};
 use sled_hardware_types::Baseboard;
@@ -74,6 +78,10 @@ pub struct HardwareMonitor {
     /// or policy changes.
     service_manager: Option<ServiceManager>,
 
+    /// Handle to the scrimlet reconcilers, which we notify to activate or
+    /// deactivate based on whether we're a scrimlet.
+    scrimlet_reconcilers: Arc<ScrimletReconcilers>,
+
     /// Whether or not the tofino is available.  This implies that the ASIC is
     /// present, the driver has been loaded, and that we are able to use the
     /// driver to interact with the ASIC.
@@ -85,6 +93,7 @@ impl HardwareMonitor {
         log: &Logger,
         hardware_manager: &HardwareManager,
         raw_disks_tx: RawDisksSender,
+        scrimlet_reconcilers: Arc<ScrimletReconcilers>,
     ) -> (
         HardwareMonitorHandle,
         oneshot::Sender<SledAgent>,
@@ -108,6 +117,7 @@ impl HardwareMonitor {
             raw_disks_tx,
             sled_agent: None,
             service_manager: None,
+            scrimlet_reconcilers,
             is_tofino_available: false,
         };
         tokio::spawn(monitor.run());
@@ -225,6 +235,14 @@ impl HardwareMonitor {
             // policy.
             (false, _) => false,
         };
+
+        // Enable or disable the reconcilers that try to talk to services inside
+        // our switch zone.
+        self.scrimlet_reconcilers.set_scrimlet_status(if should_activate {
+            ScrimletStatus::Scrimlet
+        } else {
+            ScrimletStatus::NotScrimlet
+        });
 
         if should_activate {
             if let Err(e) =

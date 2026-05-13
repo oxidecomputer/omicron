@@ -18,6 +18,7 @@ gateway-client.workspace = true
 gateway-types.workspace = true
 http.workspace = true
 iddqd.workspace = true
+illumos-utils.workspace = true
 macaddr.workspace = true
 mg-admin-client.workspace = true
 mg-api-types.workspace = true
@@ -25,6 +26,7 @@ omicron-common.workspace = true
 omicron-uuid-kinds.workspace = true
 oxnet.workspace = true
 reqwest.workspace = true
+scuffle.workspace = true
 sled-agent-types.workspace = true
 slog.workspace = true
 slog-error-chain.workspace = true
@@ -42,6 +44,8 @@ gateway-test-utils.workspace = true
 httpmock.workspace = true
 omicron-test-utils.workspace = true
 proptest.workspace = true
+reqwest.workspace = true
+scuffle = { workspace = true, features = ["testing"] }
 serde_json.workspace = true
 sled-agent-types = { workspace = true, features = ["testing"] }
 test-strategy.workspace = true
