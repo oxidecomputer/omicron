@@ -61,7 +61,7 @@ nexus-config.workspace = true
 nexus-lockstep-client.workspace = true
 nexus-types.workspace = true
 nix = { workspace = true, features = ["signal"] }
-ntp-admin-client-v1.workspace = true
+ntp-admin-v1-client.workspace = true
 omicron-common.workspace = true
 omicron-ledger.workspace = true
 omicron-ddm-admin-client.workspace = true

@@ -7180,7 +7180,7 @@ dependencies = [
  "itertools 0.14.0",
  "nexus-client",
  "nexus-types",
- "ntp-admin-client-v1",
+ "ntp-admin-v1-client",
  "omicron-cockroach-metrics",
  "omicron-common",
  "omicron-sled-agent",
@@ -7947,20 +7947,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "ntp-admin-client-v1"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "git-stub-vcs",
- "omicron-workspace-hack",
- "progenitor 0.14.0",
- "reqwest 0.13.2",
- "schemars 0.8.22",
- "serde",
- "slog",
-]
-
-[[package]]
 name = "ntp-admin-types"
 version = "0.1.0"
 dependencies = [
@@ -7975,6 +7961,20 @@ dependencies = [
  "omicron-workspace-hack",
  "schemars 0.8.22",
  "serde",
+]
+
+[[package]]
+name = "ntp-admin-v1-client"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "git-stub-vcs",
+ "omicron-workspace-hack",
+ "progenitor 0.14.0",
+ "reqwest 0.13.2",
+ "schemars 0.8.22",
+ "serde",
+ "slog",
 ]
 
 [[package]]
@@ -9171,7 +9171,7 @@ dependencies = [
  "nexus-lockstep-client",
  "nexus-types",
  "nix 0.31.2",
- "ntp-admin-client-v1",
+ "ntp-admin-v1-client",
  "omicron-common",
  "omicron-ddm-admin-client",
  "omicron-ledger",
@@ -13538,7 +13538,7 @@ dependencies = [
  "installinator-common",
  "key-manager",
  "key-manager-types",
- "ntp-admin-client-v1",
+ "ntp-admin-v1-client",
  "omicron-common",
  "omicron-ledger",
  "omicron-test-utils",
@@ -13641,7 +13641,7 @@ dependencies = [
  "nexus-lockstep-client",
  "nexus-reconfigurator-blippy",
  "nexus-types",
- "ntp-admin-client-v1",
+ "ntp-admin-v1-client",
  "omicron-common",
  "omicron-ddm-admin-client",
  "omicron-ledger",

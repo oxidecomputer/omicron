@@ -241,7 +241,7 @@ configuration and monitoring that requires the `cockroach` CLI.
 """
 
 [[apis]]
-client_package_name = "ntp-admin-client-v1"
+client_package_name = "ntp-admin-v1-client"
 label = "NTP Admin version 1"
 server_package_name = "ntp-admin-api"
 versioned_how = "client"
