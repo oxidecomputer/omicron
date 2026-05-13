@@ -36,7 +36,6 @@ use semver::Version;
 use sled_agent_types::inventory::SvcsEnabledNotOnlineResult;
 use sled_hardware_types::BaseboardId;
 use slog::KV;
-use slog::OwnedKV;
 use slog::Record;
 use slog::Serializer;
 use slog::info;
@@ -548,10 +547,10 @@ impl super::Nexus {
         let contact_support = !problems.is_empty();
 
         if contact_support {
-            let log = opctx.log.new(OwnedKV(UpdateStatusProblemsKv(problems)));
             warn!(
-                log,
-                "found problems in the system before or after an update"
+                opctx.log,
+                "found problems in the system before or after an update";
+                UpdateStatusProblemsKv(problems)
             );
         }
 
