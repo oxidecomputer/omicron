@@ -299,7 +299,7 @@ enum OmdbCommands {
     Reconfigurator(reconfigurator::ReconfiguratorArgs),
     /// Debug a specific Sled
     SledAgent(sled_agent::SledAgentArgs),
-    /// Check time synchronization
+    /// Monitor time synchronization
     Timesync(timesync::TimesyncArgs),
 }
 
