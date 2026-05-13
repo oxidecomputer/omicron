@@ -28,6 +28,7 @@ use nexus_types_versions::v2026_01_01_00;
 use nexus_types_versions::v2026_01_03_00;
 use nexus_types_versions::v2026_01_05_00;
 use nexus_types_versions::v2026_01_08_00;
+use nexus_types_versions::v2026_01_15_00;
 use nexus_types_versions::v2026_01_16_00;
 use nexus_types_versions::v2026_01_16_01;
 use nexus_types_versions::v2026_01_22_00;
@@ -82,6 +83,7 @@ api_versions!([
     // |  date-based version should be at the top of the list.
     // v
     // (next_yyyy_mm_dd_nn, IDENT),
+    (2026_05_08_00, MANUAL_DISK_ADOPTION),
     (2026_05_07_00, REMOVE_DUPLICATED_NETWORKING_TYPES),
     (2026_04_30_00, PROBE_AND_SAML_DOCS),
     (2026_04_29_00, METRICS_ADD_JOULES),
@@ -6796,6 +6798,69 @@ pub trait NexusExternalApi {
         path_params: Path<latest::path_params::PhysicalDiskPath>,
     ) -> Result<HttpResponseOk<latest::physical_disk::PhysicalDisk>, HttpError>;
 
+    /// List physical disks that have not yet been adopted for use
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/hardware/disks-unadopted",
+        tags = ["system/hardware"],
+        versions = VERSION_MANUAL_DISK_ADOPTION..
+    }]
+    async fn physical_disk_list_unadopted(
+        rqctx: RequestContext<Self::Context>,
+        query: Query<PaginationParams<EmptyScanParams, String>>,
+    ) -> Result<
+        HttpResponseOk<
+            ResultsPage<latest::physical_disk::UnadoptedPhysicalDisk>,
+        >,
+        HttpError,
+    >;
+
+    /// List physical disk adoption requests
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/hardware/disk-adoption-requests",
+        tags = ["system/hardware"],
+        versions = VERSION_MANUAL_DISK_ADOPTION..
+    }]
+    async fn physical_disk_list_adoption_requests(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedById>,
+    ) -> Result<
+        HttpResponseOk<
+            ResultsPage<latest::physical_disk::PhysicalDiskAdoptionRequest>,
+        >,
+        HttpError,
+    >;
+
+    /// Enable adoption of a physical disk for general use
+    #[endpoint {
+        method = PUT,
+        path = "/v1/system/hardware/disk-adoption-request",
+        tags = ["system/hardware"],
+        versions = VERSION_MANUAL_DISK_ADOPTION..
+    }]
+    async fn physical_disk_enable_adoption(
+        rqctx: RequestContext<Self::Context>,
+        req: TypedBody<latest::physical_disk::PhysicalDiskManufacturerIdentity>,
+    ) -> Result<
+        HttpResponseCreated<latest::physical_disk::PhysicalDiskAdoptionRequest>,
+        HttpError,
+    >;
+
+    /// Disable adoption of a physical disk for general use
+    #[endpoint {
+        method = DELETE,
+        path = "/v1/system/hardware/disk-adoption-request/{physical_disk_adoption_req_id}",
+        tags = ["system/hardware"],
+        versions = VERSION_MANUAL_DISK_ADOPTION..
+    }]
+    async fn physical_disk_disable_adoption(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<
+            latest::physical_disk::PhysicalDiskAdoptionRequestPath,
+        >,
+    ) -> Result<HttpResponseDeleted, HttpError>;
+
     // Switches
 
     /// List switches
@@ -7774,6 +7839,7 @@ pub trait NexusExternalApi {
         method = GET,
         path = "/v1/system/audit-log",
         tags = ["system/audit-log"],
+        versions = VERSION_AUDIT_LOG_CREDENTIAL_ID..,
     }]
     async fn audit_log_list(
         rqctx: RequestContext<Self::Context>,
@@ -7784,6 +7850,58 @@ pub trait NexusExternalApi {
         HttpResponseOk<ResultsPage<latest::audit::AuditLogEntry>>,
         HttpError,
     >;
+
+    /// View audit log
+    #[endpoint {
+        operation_id = "audit_log_list",
+        method = GET,
+        path = "/v1/system/audit-log",
+        tags = ["system/audit-log"],
+        versions = VERSION_AUDIT_LOG_AUTH_METHOD_ENUM..VERSION_AUDIT_LOG_CREDENTIAL_ID,
+    }]
+    async fn audit_log_list_v2026_01_15_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<
+            PaginatedByTimeAndId<latest::audit::AuditLogParams>,
+        >,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<v2026_01_15_00::audit::AuditLogEntry>>,
+        HttpError,
+    > {
+        let page = Self::audit_log_list(rqctx, query_params).await?.0;
+        Ok(HttpResponseOk(ResultsPage {
+            items: page.items.into_iter().map(Into::into).collect(),
+            next_page: page.next_page,
+        }))
+    }
+
+    /// View audit log
+    #[endpoint {
+        operation_id = "audit_log_list",
+        method = GET,
+        path = "/v1/system/audit-log",
+        tags = ["system/audit-log"],
+        versions = ..VERSION_AUDIT_LOG_AUTH_METHOD_ENUM,
+    }]
+    async fn audit_log_list_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<
+            PaginatedByTimeAndId<latest::audit::AuditLogParams>,
+        >,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<v2025_11_20_00::audit::AuditLogEntry>>,
+        HttpError,
+    > {
+        let page = Self::audit_log_list(rqctx, query_params).await?.0;
+        Ok(HttpResponseOk(ResultsPage {
+            items: page
+                .items
+                .into_iter()
+                .map(|e| v2026_01_15_00::audit::AuditLogEntry::from(e).into())
+                .collect(),
+            next_page: page.next_page,
+        }))
+    }
 
     // Console API: logins
 

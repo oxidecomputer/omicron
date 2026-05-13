@@ -6,6 +6,7 @@
 
 use crate::blueprint_editor::DiskExpungeDetails;
 use crate::blueprint_editor::EditedSled;
+use crate::blueprint_editor::EnsureMupdateOverrideError;
 use crate::blueprint_editor::ExternalNetworkingChoice;
 use crate::blueprint_editor::ExternalNetworkingError;
 use crate::blueprint_editor::ExternalSnatNetworkingChoice;
@@ -1481,7 +1482,16 @@ impl<'a> BlueprintBuilder<'a> {
                 pending_mgs_update,
                 noop_sled_info,
             )
-            .map_err(|err| Error::SledEditError { sled_id, err })
+            .map_err(|err| match err {
+                EnsureMupdateOverrideError::SledEdit(err) => {
+                    Error::SledEditError { sled_id, err }
+                }
+                EnsureMupdateOverrideError::Planner(err) => {
+                    Error::Planner(err.context(format!(
+                        "for sled {sled_id}, programming error ensuring mupdate override"
+                    )))
+                }
+            })
     }
 
     fn next_internal_dns_gz_address_index(&self, sled_id: SledUuid) -> u32 {
@@ -2467,6 +2477,19 @@ pub(crate) enum EnsureMupdateOverrideAction {
         /// The reason the blueprint override was not cleared.
         reason: BpMupdateOverrideNotClearedReason,
     },
+    /// The inventory had an override, but the blueprint's
+    /// `remove_mupdate_override` field was not set to match it. This happens
+    /// when the sled's inventory is stale (older than the parent blueprint), so
+    /// acting on it would potentially overwrite a previously acknowledged
+    /// mupdate override.
+    BpOverrideNotSet {
+        /// The override observed in (stale) inventory.
+        inv_override: MupdateOverrideUuid,
+        /// The current blueprint override value, left unchanged.
+        bp_override: Option<MupdateOverrideUuid>,
+        /// The reason the blueprint override was not set.
+        reason: BpMupdateOverrideNotSetReason,
+    },
     /// Sled Agent encountered an error retrieving the mupdate override from the
     /// inventory.
     ///
@@ -2554,6 +2577,20 @@ impl EnsureMupdateOverrideAction {
                     "inventory override no longer exists, but blueprint \
                      override could not be cleared";
                     "bp_override" => %bp_override,
+                    "reason" => %reason,
+                );
+            }
+            EnsureMupdateOverrideAction::BpOverrideNotSet {
+                inv_override,
+                bp_override,
+                reason,
+            } => {
+                info!(
+                    log,
+                    "inventory override observed, but blueprint override \
+                     was not set to match it";
+                    "inv_override" => %inv_override,
+                    "bp_override" => ?bp_override,
                     "reason" => %reason,
                 );
             }
@@ -2717,6 +2754,38 @@ impl fmt::Display for BpMupdateOverrideNotClearedReason {
                     f,
                     "this sled cannot be noop-converted to Artifact: {reason}",
                 )
+            }
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) enum BpMupdateOverrideNotSetReason {
+    /// The sled's inventory is stale relative to the parent blueprint, so we
+    /// can't trust an override observed in inventory to reflect current
+    /// reality.
+    InventoryStale { parent_bp_gen: Generation, inventory_gen: Generation },
+    /// The sled has not yet successfully reconciled any config, so we have no
+    /// generation to compare against.
+    NoLastReconciliation,
+}
+
+impl fmt::Display for BpMupdateOverrideNotSetReason {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            BpMupdateOverrideNotSetReason::InventoryStale {
+                parent_bp_gen,
+                inventory_gen,
+            } => {
+                write!(
+                    f,
+                    "inventory stale: inventory reported generation \
+                     ({inventory_gen}) that is older than the generation in \
+                     the parent blueprint ({parent_bp_gen})",
+                )
+            }
+            BpMupdateOverrideNotSetReason::NoLastReconciliation => {
+                write!(f, "sled doesn't have a last reconciled config")
             }
         }
     }

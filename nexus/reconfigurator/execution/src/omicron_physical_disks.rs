@@ -112,7 +112,7 @@ mod test {
         sled_id: SledUuid,
     ) -> PhysicalDiskUuid {
         let id = PhysicalDiskUuid::new_v4();
-        let physical_disk = PhysicalDisk::new(
+        let physical_disk = PhysicalDisk::from_parts(
             id,
             "v".into(),
             format!("s-{i})"),
