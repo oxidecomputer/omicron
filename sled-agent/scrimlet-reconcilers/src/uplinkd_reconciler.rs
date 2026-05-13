@@ -30,9 +30,7 @@ impl slog::KV for UplinkdReconcilerStatus {
 }
 
 #[derive(Debug)]
-pub(crate) struct UplinkdReconciler {
-    _switch_slot: ThisSledSwitchSlot,
-}
+pub(crate) struct UplinkdReconciler {}
 
 impl Reconciler for UplinkdReconciler {
     type Status = UplinkdReconcilerStatus;
@@ -40,19 +38,16 @@ impl Reconciler for UplinkdReconciler {
     const LOGGER_COMPONENT_NAME: &'static str = "UplinkdReconciler";
     const RE_RECONCILE_INTERVAL: std::time::Duration = Duration::from_secs(30);
 
-    fn new(
-        _mode: ScrimletReconcilersMode,
-        switch_slot: ThisSledSwitchSlot,
-        _parent_log: &Logger,
-    ) -> Self {
+    fn new(_mode: ScrimletReconcilersMode, _parent_log: &Logger) -> Self {
         // TODO: Remain inert if `mode` is `ScrimletReconcilersMode::Test`,
         // since that indicates there's no real zone to connect to.
-        Self { _switch_slot: switch_slot }
+        Self {}
     }
 
     async fn do_reconciliation(
         &mut self,
         _system_networking_config: &SystemNetworkingConfig,
+        _switch_slot: ThisSledSwitchSlot,
         _log: &Logger,
     ) -> Self::Status {
         UplinkdReconcilerStatus { todo_status: () }

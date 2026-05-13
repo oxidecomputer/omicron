@@ -31,7 +31,6 @@ impl slog::KV for MgdReconcilerStatus {
 #[derive(Debug)]
 pub(crate) struct MgdReconciler {
     _client: Client,
-    _switch_slot: ThisSledSwitchSlot,
 }
 
 impl Reconciler for MgdReconciler {
@@ -40,17 +39,14 @@ impl Reconciler for MgdReconciler {
     const LOGGER_COMPONENT_NAME: &'static str = "MgdReconciler";
     const RE_RECONCILE_INTERVAL: Duration = Duration::from_secs(30);
 
-    fn new(
-        mode: ScrimletReconcilersMode,
-        switch_slot: ThisSledSwitchSlot,
-        parent_log: &Logger,
-    ) -> Self {
-        Self { _client: mode.mgd_client(parent_log), _switch_slot: switch_slot }
+    fn new(mode: ScrimletReconcilersMode, parent_log: &Logger) -> Self {
+        Self { _client: mode.mgd_client(parent_log) }
     }
 
     async fn do_reconciliation(
         &mut self,
         _system_networking_config: &SystemNetworkingConfig,
+        _switch_slot: ThisSledSwitchSlot,
         _log: &Logger,
     ) -> Self::Status {
         MgdReconcilerStatus { todo_status: () }

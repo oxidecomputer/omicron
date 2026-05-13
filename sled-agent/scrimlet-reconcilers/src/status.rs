@@ -19,32 +19,29 @@ pub enum ScrimletStatus {
     NotScrimlet,
 }
 
-/// Status of attempting to determine this sled's switch slot via MGS within
-/// this sled's switch zone.
+/// Why we have not yet discovered our switch slot.
 #[derive(Debug, Clone)]
-pub enum DetermineSwitchSlotStatus {
-    /// We're not attempting to contact MGS because we're not a scrimlet.
-    NotScrimlet,
-
+pub enum UndeterminedSwitchSlotReason {
     /// We're currently attempting to contact MGS.
     ///
     /// If this is not the first attempt, `prev_attempt_err` contains the error
-    /// we encountered the last time. (If the last time succeeded, we'd be
-    /// done!)
+    /// we encountered the last time.
     ContactingMgs { prev_attempt_err: Option<String> },
 
     /// We're currently idle waiting for a timeout to retry due to a previous
-    /// failure.
+    /// failure contacting MGS.
     WaitingToRetry { prev_attempt_err: String },
 }
 
 /// Why a reconciler task has gone inert.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub enum ReconcilerInertReason {
-    /// The reconciler task started when this sled was a scrimlet, but it has
-    /// since become "not a scrimlet" (e.g., because the attached switch has
-    /// gone away).
-    NoLongerAScrimlet,
+    /// This sled is not a scrimlet.
+    NotScrimlet,
+
+    /// This sled is a scrimlet, but we have not yet discovered our switch slot,
+    /// and are currently trying to contact MGS.
+    UndeterminedSwitchSlot { reason: UndeterminedSwitchSlotReason },
 
     /// The reconciler task exited. This is not expected except in tests; the
     /// task runs forever as long as sled-agent holds on to the channels used to
@@ -128,9 +125,6 @@ pub struct ReconcilerStatus<T> {
 pub enum ScrimletReconcilersStatus {
     /// `sled-agent` has not yet provided underlay networking information.
     WaitingForSledAgentNetworkingInfo,
-
-    /// We're attempting to determine our switch slot.
-    DeterminingSwitchSlot(DetermineSwitchSlotStatus),
 
     /// We are a scrimlet and the individual reconcilers are running.
     Running {

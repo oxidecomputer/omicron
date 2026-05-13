@@ -29,6 +29,8 @@ use crate::status::ReconcilerRunningStatus;
 use crate::status::ReconcilerStatus;
 use crate::status::ReconciliationCompletedStatus;
 use crate::status::ScrimletStatus;
+use crate::status::UndeterminedSwitchSlotReason;
+use crate::switch_zone_slot::DetermineSwitchSlotStatus;
 use crate::switch_zone_slot::ThisSledSwitchSlot;
 use chrono::SecondsFormat;
 use chrono::Utc;
@@ -53,14 +55,8 @@ pub(crate) trait Reconciler: Send + 'static {
 
     /// Construct a new instance of this `Reconciler`.
     ///
-    /// Typically builds a client for the relevant service based on `mode` and
-    /// record `switch_slot` for use inside future calls to
-    /// `do_reconciliation()`.
-    fn new(
-        mode: ScrimletReconcilersMode,
-        switch_slot: ThisSledSwitchSlot,
-        parent_log: &Logger,
-    ) -> Self;
+    /// Typically builds a client for the relevant service based on `mode`.
+    fn new(mode: ScrimletReconcilersMode, parent_log: &Logger) -> Self;
 
     /// Perform any required reconciliation based on the current contents of
     /// `system_networking_config`.
@@ -70,6 +66,7 @@ pub(crate) trait Reconciler: Send + 'static {
     fn do_reconciliation(
         &mut self,
         system_networking_config: &SystemNetworkingConfig,
+        switch_slot: ThisSledSwitchSlot,
         log: &Logger,
     ) -> impl Future<Output = Self::Status> + Send;
 }
@@ -88,16 +85,16 @@ pub(crate) struct ReconcilerTaskHandle<T: Reconciler> {
 impl<T: Reconciler> ReconcilerTaskHandle<T> {
     pub(crate) fn spawn(
         scrimlet_status_rx: watch::Receiver<ScrimletStatus>,
+        determine_switch_slot_rx: watch::Receiver<DetermineSwitchSlotStatus>,
         system_networking_config_rx: watch::Receiver<SystemNetworkingConfig>,
         mode: ScrimletReconcilersMode,
-        this_sled_switch_slot: ThisSledSwitchSlot,
         parent_log: &Logger,
     ) -> Self {
         Self::spawn_impl(
             scrimlet_status_rx,
+            determine_switch_slot_rx,
             system_networking_config_rx,
             mode,
-            this_sled_switch_slot,
             parent_log,
             T::new,
         )
@@ -108,14 +105,14 @@ impl<T: Reconciler> ReconcilerTaskHandle<T> {
     // just call the constructor we know exists from the `Reconciler` trait.
     fn spawn_impl<F>(
         scrimlet_status_rx: watch::Receiver<ScrimletStatus>,
+        determine_switch_slot_rx: watch::Receiver<DetermineSwitchSlotStatus>,
         system_networking_config_rx: watch::Receiver<SystemNetworkingConfig>,
         mode: ScrimletReconcilersMode,
-        this_sled_switch_slot: ThisSledSwitchSlot,
         parent_log: &Logger,
         inner_constructor: F,
     ) -> Self
     where
-        F: FnOnce(ScrimletReconcilersMode, ThisSledSwitchSlot, &Logger) -> T
+        F: FnOnce(ScrimletReconcilersMode, &Logger) -> T
             + Send
             + Sync
             + 'static,
@@ -130,9 +127,10 @@ impl<T: Reconciler> ReconcilerTaskHandle<T> {
 
         let mut inner_task = ReconcilerTask {
             scrimlet_status_rx,
+            determine_switch_slot_rx,
             system_networking_config_rx,
             status_tx,
-            inner: inner_constructor(mode, this_sled_switch_slot, parent_log),
+            inner: inner_constructor(mode, parent_log),
             log,
         };
 
@@ -167,6 +165,7 @@ impl<T: Reconciler> ReconcilerTaskHandle<T> {
 
 struct ReconcilerTask<T: Reconciler> {
     scrimlet_status_rx: watch::Receiver<ScrimletStatus>,
+    determine_switch_slot_rx: watch::Receiver<DetermineSwitchSlotStatus>,
     system_networking_config_rx: watch::Receiver<SystemNetworkingConfig>,
     status_tx: watch::Sender<ReconcilerStatus<T::Status>>,
     inner: T,
@@ -179,12 +178,14 @@ impl<T: Reconciler> ReconcilerTask<T> {
         let mut activation_count: u64 = 0;
 
         loop {
-            // We know we _were_ a scrimlet at some point, because we determined
-            // our switch slot by contacting MGS within our own switch zone. But
-            // it's possible we could become "not a scrimlet" in the future
-            // (e.g., if the switch disappears out from under us). In such a
-            // case, block until it comes back.
-            self.wait_if_this_sled_is_no_longer_a_scrimlet().await?;
+            // Wait until we're a scrimlet and know our switch slot.
+            //
+            // Non-scrimlet sleds will never move beyond this point. Scrimlets
+            // may block here if either (a) we've not yet successfully contacted
+            // MGS to determine our switch slot or (b) we're no longer a
+            // scrimlet (i.e., a previously-attached switch has gone away at
+            // runtime).
+            let switch_slot = self.wait_until_this_sled_is_a_scrimlet().await?;
 
             // We _are_ a scrimlet; perform reconciliation.
             let start_instant = Instant::now();
@@ -211,7 +212,11 @@ impl<T: Reconciler> ReconcilerTask<T> {
             // Actually perform reconciliation.
             let status_result = self
                 .inner
-                .do_reconciliation(&system_networking_config, &self.log)
+                .do_reconciliation(
+                    &system_networking_config,
+                    switch_slot,
+                    &self.log,
+                )
                 .await;
 
             // Update our output watch channel with the result.
@@ -263,16 +268,16 @@ impl<T: Reconciler> ReconcilerTask<T> {
         }
     }
 
-    async fn wait_if_this_sled_is_no_longer_a_scrimlet(
+    async fn wait_until_this_sled_is_a_scrimlet(
         &mut self,
-    ) -> Result<(), RecvError> {
+    ) -> Result<ThisSledSwitchSlot, RecvError> {
         let mut logged_not_scrimlet = false;
 
-        loop {
+        'check_status: loop {
             let status = *self.scrimlet_status_rx.borrow_and_update();
             match status {
                 ScrimletStatus::Scrimlet => {
-                    return Ok(());
+                    return self.wait_for_switch_slot().await;
                 }
                 ScrimletStatus::NotScrimlet => {
                     if !logged_not_scrimlet {
@@ -284,26 +289,99 @@ impl<T: Reconciler> ReconcilerTask<T> {
                     }
                     self.status_tx.send_modify(|status| {
                         status.current_status = ReconcilerCurrentStatus::Inert(
-                            ReconcilerInertReason::NoLongerAScrimlet,
+                            ReconcilerInertReason::NotScrimlet,
                         );
                     });
 
-                    // Select over both input channels so we can detect channel
-                    // closure and exit cleanly if either channel goes away. If
-                    // the rack network config changes here, we'll spuriously
-                    // loop around and reread the scrimlet status, but that's no
-                    // big deal.
+                    // Select over all input channels so we can detect channel
+                    // closure and exit cleanly if any channel goes away. We
+                    // only loop back to the top ('check_status) if the
+                    // `scrimlet_status_rx` channel changes; for other channel
+                    // changes, we stay here and keep waiting.
                     //
-                    // Both arms are cancel-safe and we do not `.await` within
+                    // All arms are cancel-safe and we do not `.await` within
                     // the body of any arm, avoiding any opportunity for
                     // futurelock.
-                    tokio::select! {
-                        result = self.scrimlet_status_rx.changed() => {
-                            () = result?;
+                    'wait_for_status_changed: loop {
+                        tokio::select! {
+                            res = self.scrimlet_status_rx.changed() => {
+                                () = res?;
+                                continue 'check_status;
+                            }
+                            res = self.system_networking_config_rx.changed() => {
+                                () = res?;
+                                continue 'wait_for_status_changed;
+                            }
+                            res = self.determine_switch_slot_rx.changed() => {
+                                () = res?;
+                                continue 'wait_for_status_changed;
+                            }
                         }
-                        result = self.system_networking_config_rx.changed() => {
-                            () = result?;
-                        }
+                    }
+                }
+            }
+        }
+    }
+
+    async fn wait_for_switch_slot(
+        &mut self,
+    ) -> Result<ThisSledSwitchSlot, RecvError> {
+        'check_status: loop {
+            let switch_slot_status =
+                self.determine_switch_slot_rx.borrow_and_update().clone();
+
+            // Either return if we're done, or get the reason we're not.
+            let inert_reason = match switch_slot_status {
+                DetermineSwitchSlotStatus::Done { switch_slot } => {
+                    return Ok(switch_slot);
+                }
+                DetermineSwitchSlotStatus::NotScrimlet => {
+                    ReconcilerInertReason::NotScrimlet
+                }
+                DetermineSwitchSlotStatus::ContactingMgs {
+                    prev_attempt_err,
+                } => ReconcilerInertReason::UndeterminedSwitchSlot {
+                    reason: UndeterminedSwitchSlotReason::ContactingMgs {
+                        prev_attempt_err,
+                    },
+                },
+                DetermineSwitchSlotStatus::WaitingToRetry {
+                    prev_attempt_err,
+                } => ReconcilerInertReason::UndeterminedSwitchSlot {
+                    reason: UndeterminedSwitchSlotReason::WaitingToRetry {
+                        prev_attempt_err,
+                    },
+                },
+            };
+
+            // Propogate why we're still inert.
+            self.status_tx.send_modify(|status| {
+                status.current_status =
+                    ReconcilerCurrentStatus::Inert(inert_reason);
+            });
+
+            // Select over all input channels so we can detect channel
+            // closure and exit cleanly if any channel goes away. We
+            // only loop back to the top ('check_status) if the
+            // `determine_switch_slot_rx` channel changes; for other channel
+            // changes, we stay here and keep waiting.
+            //
+            // All arms are cancel-safe and we do not `.await` within
+            // the body of any arm, avoiding any opportunity for
+            // futurelock.
+            'wait_for_status_changed: loop {
+                tokio::select! {
+                    res = self.determine_switch_slot_rx.changed() => {
+                        () = res?;
+                        continue 'check_status;
+                    }
+                    res = self.scrimlet_status_rx.changed() => {
+                        () = res?;
+                        continue 'wait_for_status_changed;
+                    }
+                    res = self.system_networking_config_rx.changed() => {
+                        () = res?;
+                        continue 'wait_for_status_changed;
                     }
                 }
             }

@@ -6,12 +6,12 @@
 //! it provides a suitable handle for `sled-agent`'s "long running tasks", and
 //! contains a handle to each of the inner service-specific reconcilers.
 
-use crate::DetermineSwitchSlotStatus;
 use crate::dpd_reconciler::DpdReconciler;
 use crate::mgd_reconciler::MgdReconciler;
 use crate::reconciler_task::ReconcilerTaskHandle;
 use crate::status::ScrimletReconcilersStatus;
 use crate::status::ScrimletStatus;
+use crate::switch_zone_slot::DetermineSwitchSlotStatus;
 use crate::switch_zone_slot::ThisSledSwitchSlot;
 use crate::uplinkd_reconciler::UplinkdReconciler;
 use omicron_common::address::DENDRITE_PORT;
@@ -20,7 +20,6 @@ use omicron_common::address::MGS_PORT;
 use sled_agent_types::sled::ThisSledSwitchZoneUnderlayIpAddr;
 use sled_agent_types::system_networking::SystemNetworkingConfig;
 use slog::Logger;
-use slog::info;
 use std::net::SocketAddr;
 use std::net::SocketAddrV6;
 use std::sync::Arc;
@@ -158,9 +157,9 @@ pub struct SledAgentNetworkingInfo {
 /// Handle to tasks that reconcile network configuration with services within a
 /// scrimlet's local switch zone.
 ///
-/// [`ScrimletReconcilers`] has a two- or three-phase initialization process
-/// (depending on whether the sled is a non-scrimlet or a scrimlet) to support
-/// being included in `sled-agent`'s set of "long running tasks".
+/// [`ScrimletReconcilers`] has a two-phase initialization process (depending on
+/// whether the sled is a non-scrimlet or a scrimlet) to support being included
+/// in `sled-agent`'s set of "long running tasks".
 /// [`ScrimletReconcilers::new()`] can be constructed at any time (in
 /// particular: very soon after `sled-agent` starts).
 ///
@@ -172,21 +171,19 @@ pub struct SledAgentNetworkingInfo {
 /// zone (should it have one).
 ///
 /// After `sled-agent` has provided those prerequisites, on all sleds,
-/// [`ScrimletReconcilers`] spawns a tokio task that waits until both of these
-/// have occurred:
+/// [`ScrimletReconcilers`] spawns a tokio task that will attempt to determine
+/// which switch slot we are, if we're a scrimlet, and spawns all the inner
+/// reconciler tasks. All of these tasks remain inert until
+/// [`ScrimletReconcilers::set_scrimlet_status()`] has been called with
+/// [`ScrimletStatus::Scrimlet`]. sled-agent will only make that call on
+/// scrimlets; all other sleds will remain in the "not a scrimlet" inert state
+/// indefinitely.
 ///
-/// 1. [`ScrimletReconcilers::set_scrimlet_status()`] is called with
-///    [`ScrimletStatus::Scrimlet`].
-/// 2. We successfully contact MGS within our switch zone to determine which
-///    switch slot we are.
-///
-/// On non-scrimlet sleds, step 1 never happens, so the reconciler tasks are
-/// never spawned.
-///
-/// Once both of these are satisfied on scrimlets, all reconciliation tasks are
-/// spawned and begin running. They will reactivate periodically and in response
-/// to any changes to the [`SystemNetworkingConfig`] from sled-agent, and will
-/// go inert if [`ScrimletReconcilers::set_scrimlet_status()`] is called with
+/// On scrimlets, the reconciler tasks will wait until the "which slot are we"
+/// task completes by successfully contacting MGS. Then they will reactivate
+/// periodically and in response to any changes to the
+/// [`SystemNetworkingConfig`] from sled-agent, and will go inert if
+/// [`ScrimletReconcilers::set_scrimlet_status()`] is called with
 /// [`ScrimletStatus::NotScrimlet`] (remaining inert until we are told we are a
 /// scrimlet again).
 pub struct ScrimletReconcilers {
@@ -194,10 +191,15 @@ pub struct ScrimletReconcilers {
     // whether we're still a scrimlet.
     scrimlet_status_tx: watch::Sender<ScrimletStatus>,
 
-    // These once locks hold the second and third phases of initialization
-    // described in the doc comment above.
-    determining_switch_slot:
-        OnceLock<watch::Receiver<DetermineSwitchSlotStatus>>,
+    // Sending half of the channel used to communicate to all the reconcilers
+    // which switch slot we are.
+    //
+    // This is determined by contacting MGS within our switch zone once we know
+    // we're a scrimlet and have a switch zone.
+    determine_switch_slot_tx: watch::Sender<DetermineSwitchSlotStatus>,
+
+    // This once lock holds the second phase of initialization described in the
+    // doc comment above.
     running_reconcilers: Arc<OnceLock<RunningReconcilers>>,
 
     parent_log: Logger,
@@ -205,14 +207,16 @@ pub struct ScrimletReconcilers {
 
 impl ScrimletReconcilers {
     pub fn new(parent_log: &Logger) -> Self {
-        // We discard the receiver here, and create new subscribers if and when
+        // We discard the receivers here, and create new subscribers if and when
         // we spawn tasks that need to consume it.
         let (scrimlet_status_tx, _scrimlet_status_rx) =
             watch::channel(ScrimletStatus::NotScrimlet);
+        let (determine_switch_slot_tx, _determine_switch_slot_rx) =
+            watch::channel(DetermineSwitchSlotStatus::NotScrimlet);
 
         Self {
             scrimlet_status_tx,
-            determining_switch_slot: OnceLock::new(),
+            determine_switch_slot_tx,
             running_reconcilers: Arc::new(OnceLock::new()),
             parent_log: parent_log.clone(),
         }
@@ -231,12 +235,6 @@ impl ScrimletReconcilers {
                 mgd_reconciler: mgd_reconciler.status(),
                 uplinkd_reconciler: uplinkd_reconciler.status(),
             }
-        }
-        // Otherwise, have we started determining our switch slot?
-        else if let Some(status_rx) = self.determining_switch_slot.get() {
-            ScrimletReconcilersStatus::DeterminingSwitchSlot(
-                status_rx.borrow().clone(),
-            )
         }
         // Otherwise, we're still waiting for the networking info.
         else {
@@ -276,11 +274,19 @@ impl ScrimletReconcilers {
         &self,
         info: SledAgentNetworkingInfo,
     ) {
-        let (determining_switch_slot_tx, determining_switch_slot_rx) =
-            watch::channel(DetermineSwitchSlotStatus::NotScrimlet);
+        let mgs_client = info.mode.mgs_client(&self.parent_log);
 
-        // Ensure we're only called once.
-        if self.determining_switch_slot.set(determining_switch_slot_rx).is_err()
+        // Ensure we're only called once. If we're called twice, this will
+        // (briefly) spawn a second set of reconcilers, then panic.
+        if self
+            .running_reconcilers
+            .set(RunningReconcilers::spawn_all(
+                self.scrimlet_status_tx.subscribe(),
+                self.determine_switch_slot_tx.subscribe(),
+                info,
+                &self.parent_log,
+            ))
+            .is_err()
         {
             panic!(
                 "set_sled_agent_networking_info_once() called more than \
@@ -289,71 +295,22 @@ impl ScrimletReconcilers {
             );
         }
 
-        // We now know this is the one and only time we've been called; spawn a
-        // task that waits until we're a scrimlet, then waits until we can
-        // determine our switch slot, then spawns all the running reconcilers
-        // (populating `self.running_reconcilers`).
+        // We now know this is the one and only time we've been called; spawn
+        // the task that contacts MGS to determine our switch slot.
         //
         // We don't hang on to the join handle from this task; it exits either
-        // when it populates `self.running_reconcilers`, or when we're dropped
-        // (because it will exit when `self.scrimlet_status_tx` is closed).
-        tokio::spawn(determine_switch_slot(
-            Arc::clone(&self.running_reconcilers),
-            determining_switch_slot_tx,
+        // when it sets the `determine_switch_slot_tx` channel to the `Done`
+        // state, or when we're dropped (because it will exit when
+        // `self.scrimlet_status_tx` is closed).
+        tokio::spawn(ThisSledSwitchSlot::determine_retrying_forever(
+            self.determine_switch_slot_tx.clone(),
             self.scrimlet_status_tx.subscribe(),
-            info.mode.mgs_client(&self.parent_log),
-            info,
-            self.parent_log.clone(),
+            mgs_client,
+            self.parent_log.new(
+                slog::o!("component" => "ThisSledSwitchSlotDetermination"),
+            ),
         ));
     }
-}
-
-async fn determine_switch_slot(
-    running_reconcilers: Arc<OnceLock<RunningReconcilers>>,
-    determining_switch_slot_tx: watch::Sender<DetermineSwitchSlotStatus>,
-    mut scrimlet_status_rx: watch::Receiver<ScrimletStatus>,
-    mgs_client: gateway_client::Client,
-    networking_info: SledAgentNetworkingInfo,
-    parent_log: Logger,
-) {
-    let log = parent_log
-        .new(slog::o!("component" => "ThisSledSwitchSlotDetermination"));
-
-    // Block until either we successfully contact MGS at our switch zone
-    // underlay IP or the sending half of `scrimlet_status_rx` is closed (which
-    // means our parent `ScrimletReconcilers` was dropped - this only happens in
-    // tests).
-    let this_sled_switch_slot =
-        match ThisSledSwitchSlot::determine_retrying_forever(
-            determining_switch_slot_tx,
-            &mut scrimlet_status_rx,
-            &mgs_client,
-            &log,
-        )
-        .await
-        {
-            Ok(slot) => slot,
-            Err(_recv_error) => {
-                return;
-            }
-        };
-    info!(
-        log, "determined this sled's switch slot";
-        "slot" => ?this_sled_switch_slot,
-    );
-
-    // We know `running_reconcilers` must be unset, because we're the only one
-    // that sets it, and we're only spawned from
-    // `set_sled_agent_networking_info_once()` (which itself guarantees it's
-    // only called once).
-    running_reconcilers
-        .set(RunningReconcilers::spawn_all(
-            scrimlet_status_rx,
-            networking_info,
-            this_sled_switch_slot,
-            &parent_log,
-        ))
-        .expect("running reconcilers is only set once");
 }
 
 #[derive(Debug)]
@@ -366,30 +323,30 @@ struct RunningReconcilers {
 impl RunningReconcilers {
     fn spawn_all(
         scrimlet_status_rx: watch::Receiver<ScrimletStatus>,
+        determine_switch_slot_rx: watch::Receiver<DetermineSwitchSlotStatus>,
         networking_info: SledAgentNetworkingInfo,
-        this_sled_switch_slot: ThisSledSwitchSlot,
         parent_log: &Logger,
     ) -> Self {
         let dpd_reconciler = ReconcilerTaskHandle::<DpdReconciler>::spawn(
             scrimlet_status_rx.clone(),
+            determine_switch_slot_rx.clone(),
             networking_info.system_networking_config_rx.clone(),
             networking_info.mode,
-            this_sled_switch_slot,
             parent_log,
         );
         let mgd_reconciler = ReconcilerTaskHandle::<MgdReconciler>::spawn(
             scrimlet_status_rx.clone(),
+            determine_switch_slot_rx.clone(),
             networking_info.system_networking_config_rx.clone(),
             networking_info.mode,
-            this_sled_switch_slot,
             parent_log,
         );
         let uplinkd_reconciler =
             ReconcilerTaskHandle::<UplinkdReconciler>::spawn(
                 scrimlet_status_rx,
+                determine_switch_slot_rx,
                 networking_info.system_networking_config_rx,
                 networking_info.mode,
-                this_sled_switch_slot,
                 parent_log,
             );
         Self { dpd_reconciler, mgd_reconciler, uplinkd_reconciler }
