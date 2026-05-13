@@ -1162,6 +1162,20 @@ pub struct SessionCleanupStatus {
     pub error: Option<String>,
 }
 
+/// The status of a `token_cleanup` background task activation.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub struct TokenCleanupStatus {
+    /// Number of tokens deleted in this activation.
+    pub deleted: usize,
+    /// The cutoff time used: tokens whose `time_expires` is non-NULL and older
+    /// than this were eligible.
+    pub cutoff: DateTime<Utc>,
+    /// The per-activation delete limit.
+    pub limit: u32,
+    /// Errors encountered during this activation.
+    pub error: Option<String>,
+}
+
 /// Status of the background task pushing service firewall rules.
 #[derive(Default, Deserialize, Serialize)]
 pub struct ServiceFirewallRuleStatus {

@@ -438,6 +438,8 @@ pub struct BackgroundTaskConfig {
     pub attached_subnet_manager: AttachedSubnetManagerConfig,
     /// configuration for console session cleanup task
     pub session_cleanup: SessionCleanupConfig,
+    /// configuration for device access token cleanup task
+    pub token_cleanup: TokenCleanupConfig,
     /// configuration for audit log incomplete timeout task
     pub audit_log_timeout_incomplete: AuditLogTimeoutIncompleteConfig,
     /// configuration for audit log cleanup (retention) task
@@ -448,6 +450,17 @@ pub struct BackgroundTaskConfig {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct SessionCleanupConfig {
     /// period (in seconds) for periodic activations of the session cleanup task
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub period_secs: Duration,
+
+    /// maximum rows hard-deleted per activation
+    pub max_delete_per_activation: u32,
+}
+
+#[serde_as]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct TokenCleanupConfig {
+    /// period (in seconds) for periodic activations of the token cleanup task
     #[serde_as(as = "DurationSeconds<u64>")]
     pub period_secs: Duration,
 
@@ -1333,6 +1346,8 @@ mod test {
             attached_subnet_manager.period_secs = 60
             session_cleanup.period_secs = 300
             session_cleanup.max_delete_per_activation = 10000
+            token_cleanup.period_secs = 300
+            token_cleanup.max_delete_per_activation = 10000
             audit_log_timeout_incomplete.period_secs = 600
             audit_log_timeout_incomplete.timeout_secs = 14400
             audit_log_timeout_incomplete.max_timed_out_per_activation = 1000
@@ -1609,6 +1624,10 @@ mod test {
                             period_secs: Duration::from_secs(300),
                             max_delete_per_activation: 10_000,
                         },
+                        token_cleanup: TokenCleanupConfig {
+                            period_secs: Duration::from_secs(300),
+                            max_delete_per_activation: 10_000,
+                        },
                         audit_log_timeout_incomplete:
                             AuditLogTimeoutIncompleteConfig {
                                 period_secs: Duration::from_secs(600),
@@ -1729,6 +1748,8 @@ mod test {
             attached_subnet_manager.period_secs = 60
             session_cleanup.period_secs = 300
             session_cleanup.max_delete_per_activation = 10000
+            token_cleanup.period_secs = 300
+            token_cleanup.max_delete_per_activation = 10000
             audit_log_timeout_incomplete.period_secs = 600
             audit_log_timeout_incomplete.timeout_secs = 14400
             audit_log_timeout_incomplete.max_timed_out_per_activation = 1000

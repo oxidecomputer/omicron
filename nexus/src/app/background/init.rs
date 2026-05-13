@@ -138,6 +138,7 @@ use super::tasks::session_cleanup;
 use super::tasks::support_bundle_collector;
 use super::tasks::sync_service_zone_nat::ServiceZoneNatTracker;
 use super::tasks::sync_switch_configuration::SwitchPortSettingsManager;
+use super::tasks::token_cleanup;
 use super::tasks::trust_quorum;
 use super::tasks::tuf_artifact_replication;
 use super::tasks::tuf_repo_pruner;
@@ -277,6 +278,7 @@ impl BackgroundTasksInitializer {
             task_trust_quorum_manager: Activator::new(),
             task_attached_subnet_manager: Activator::new(),
             task_session_cleanup: Activator::new(),
+            task_token_cleanup: Activator::new(),
 
             // Handles to activate background tasks that do not get used by Nexus
             // at-large.  These background tasks are implementation details as far as
@@ -370,6 +372,7 @@ impl BackgroundTasksInitializer {
             task_trust_quorum_manager,
             task_attached_subnet_manager,
             task_session_cleanup,
+            task_token_cleanup,
             task_audit_log_timeout_incomplete,
             task_audit_log_cleanup,
             // Add new background tasks here.  Be sure to use this binding in a
@@ -1245,6 +1248,19 @@ impl BackgroundTasksInitializer {
             opctx: opctx.child(BTreeMap::new()),
             watchers: vec![],
             activator: task_session_cleanup,
+        });
+
+        driver.register(TaskDefinition {
+            name: "token_cleanup",
+            description: "hard-deletes expired device access tokens",
+            period: config.token_cleanup.period_secs,
+            task_impl: Box::new(token_cleanup::TokenCleanup::new(
+                datastore.clone(),
+                config.token_cleanup.max_delete_per_activation,
+            )),
+            opctx: opctx.child(BTreeMap::new()),
+            watchers: vec![],
+            activator: task_token_cleanup,
         });
 
         driver.register(TaskDefinition {

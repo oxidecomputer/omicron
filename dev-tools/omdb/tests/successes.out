@@ -477,6 +477,10 @@ task: "switch_port_config_manager"
     manages switch port settings for rack switches
 
 
+task: "token_cleanup"
+    hard-deletes expired device access tokens
+
+
 task: "trust_quorum_manager"
     Drive trust quorum reconfigurations to completion
 
@@ -995,6 +999,14 @@ task: "switch_port_config_manager"
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
 warning: unknown background task: "switch_port_config_manager" (don't know how to interpret details: Object {})
+
+task: "token_cleanup"
+  configured period: every <REDACTED_DURATION>m
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    deleted: 0
+    cutoff:  <REDACTED_TIMESTAMP>
+    limit:   10000
 
 task: "trust_quorum_manager"
   configured period: every <REDACTED_DURATION>m
@@ -1678,6 +1690,14 @@ task: "switch_port_config_manager"
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
 warning: unknown background task: "switch_port_config_manager" (don't know how to interpret details: Object {})
+
+task: "token_cleanup"
+  configured period: every <REDACTED_DURATION>m
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    deleted: 0
+    cutoff:  <REDACTED_TIMESTAMP>
+    limit:   10000
 
 task: "trust_quorum_manager"
   configured period: every <REDACTED_DURATION>m

@@ -3429,6 +3429,11 @@ CREATE UNIQUE INDEX IF NOT EXISTS device_access_token_unique
 CREATE INDEX IF NOT EXISTS lookup_device_access_token_by_silo_user
     ON omicron.public.device_access_token (silo_user_id);
 
+-- Used by the token_cleanup background task to grab the next batch of expired
+-- tokens efficiently. Non-unique is fine: we just delete the next N, repeat.
+CREATE INDEX IF NOT EXISTS lookup_device_access_token_by_expiration
+    ON omicron.public.device_access_token (time_expires);
+
 
 /*
  * Assignments between users, roles, and resources
@@ -8576,7 +8581,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '257.0.0', NULL)
+    (TRUE, NOW(), NOW(), '258.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;
