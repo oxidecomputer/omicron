@@ -63,7 +63,7 @@ impl<T: MgsFlavor> Harness<T> {
                     bgp: Vec::new(),
                     bfd: Vec::new(),
                 },
-                service_zone_nat_entries: None,
+                blueprint_external_networking_config: None,
             });
 
         let handle = ScrimletReconcilers::new(&logctx.log);

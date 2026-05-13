@@ -71,7 +71,7 @@ fn test_system_networking_config_1() -> SystemNetworkingConfig {
             bgp: Vec::new(),
             bfd: Vec::new(),
         },
-        service_zone_nat_entries: None,
+        blueprint_external_networking_config: None,
     }
 }
 
@@ -85,7 +85,7 @@ fn test_system_networking_config_2() -> SystemNetworkingConfig {
             bgp: Vec::new(),
             bfd: Vec::new(),
         },
-        service_zone_nat_entries: None,
+        blueprint_external_networking_config: None,
     }
 }
 
