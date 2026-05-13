@@ -9659,6 +9659,7 @@ dependencies = [
  "sled-agent-measurements",
  "sled-agent-rack-setup",
  "sled-agent-resolvable-files",
+ "sled-agent-scrimlet-reconcilers",
  "sled-agent-types",
  "sled-agent-types-versions",
  "sled-diagnostics",

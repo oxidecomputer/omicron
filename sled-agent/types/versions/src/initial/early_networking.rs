@@ -246,7 +246,16 @@ pub struct LldpPortConfig {
 /// Per-port tx-eq overrides.  This can be used to fine-tune the transceiver
 /// equalization settings to improve signal integrity.
 #[derive(
-    Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq, Hash, JsonSchema,
+    Clone,
+    Copy,
+    Debug,
+    Deserialize,
+    Serialize,
+    PartialEq,
+    Eq,
+    Hash,
+    JsonSchema,
+    daft::Diffable,
 )]
 #[cfg_attr(any(test, feature = "testing"), derive(test_strategy::Arbitrary))]
 pub struct TxEqConfig {
@@ -357,7 +366,16 @@ pub enum LinkSpeed {
 
 /// The forward error correction mode of a link.
 #[derive(
-    Copy, Clone, Debug, Deserialize, Serialize, PartialEq, Eq, JsonSchema, Hash,
+    Copy,
+    Clone,
+    Debug,
+    Deserialize,
+    Serialize,
+    PartialEq,
+    Eq,
+    JsonSchema,
+    Hash,
+    daft::Diffable,
 )]
 #[serde(rename_all = "snake_case")]
 #[cfg_attr(any(test, feature = "testing"), derive(test_strategy::Arbitrary))]

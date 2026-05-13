@@ -43,7 +43,6 @@ use illumos_utils::zfs::SizeDetails;
 use illumos_utils::zfs::Zfs;
 use illumos_utils::zpool::PathInPool;
 use illumos_utils::zpool::ZpoolOrRamdisk;
-use internal_dns_resolver::Resolver;
 use itertools::Itertools as _;
 use omicron_common::address::BOOTSTRAP_AGENT_RACK_INIT_PORT;
 use omicron_common::address::{Ipv6Subnet, SLED_PREFIX, get_sled_address};
@@ -69,6 +68,8 @@ use sled_agent_config_reconciler::{
 use sled_agent_early_networking::EarlyNetworkSetupError;
 use sled_agent_health_monitor::handle::HealthMonitorHandle;
 use sled_agent_measurements::MeasurementsHandle;
+use sled_agent_scrimlet_reconcilers::ScrimletReconcilersMode;
+use sled_agent_scrimlet_reconcilers::SledAgentNetworkingInfo;
 use sled_agent_types::attached_subnet::AttachedSubnet;
 use sled_agent_types::attached_subnet::AttachedSubnets;
 use sled_agent_types::dataset::LocalStorageDatasetDeleteRequest;
@@ -690,6 +691,19 @@ impl SledAgent {
                 .new(o!("component" => "NetworkConfigDeserializationTask")),
         ));
 
+        // Hand our scrimlet reconcilers the information they need, now that we
+        // have it available.
+        let this_sled_switch_zone_ip =
+            ThisSledSwitchZoneUnderlayIpAddr::from_sled_agent_request(&request);
+        long_running_task_handles
+            .scrimlet_reconcilers
+            .set_sled_agent_networking_info_once(SledAgentNetworkingInfo {
+                system_networking_config_rx: network_config_rx.clone(),
+                mode: ScrimletReconcilersMode::SwitchZone(
+                    this_sled_switch_zone_ip,
+                ),
+            });
+
         // Start reconciling against our ledgered sled config.
         config_reconciler.spawn_reconciliation_task(
             ReconcilerFacilities {
@@ -708,15 +722,8 @@ impl SledAgent {
             .sled_agent_started(SledAgentInfo {
                 config: svc_config,
                 port_manager: port_manager.clone(),
-                resolver: Resolver::new_from_ip(
-                    parent_log.new(o!("component" => "DnsResolver")),
-                    *sled_address.ip(),
-                )?,
                 underlay_address: *sled_address.ip(),
-                local_switch_zone_ip:
-                    ThisSledSwitchZoneUnderlayIpAddr::from_sled_agent_request(
-                        &request,
-                    ),
+                local_switch_zone_ip: this_sled_switch_zone_ip,
                 rack_id: request.body.rack_id,
                 network_config_rx,
                 metrics_queue: metrics_manager.request_queue(),

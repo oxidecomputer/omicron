@@ -94,7 +94,6 @@ use super::tasks::alert_dispatcher::AlertDispatcher;
 use super::tasks::attached_subnets;
 use super::tasks::audit_log_cleanup;
 use super::tasks::audit_log_timeout_incomplete;
-use super::tasks::bfd;
 use super::tasks::blueprint_execution;
 use super::tasks::blueprint_load;
 use super::tasks::blueprint_load::LoadedTargetBlueprint;
@@ -136,7 +135,6 @@ use super::tasks::saga_recovery;
 use super::tasks::service_firewall_rules;
 use super::tasks::session_cleanup;
 use super::tasks::support_bundle_collector;
-use super::tasks::sync_service_zone_nat::ServiceZoneNatTracker;
 use super::tasks::sync_switch_configuration::SwitchPortSettingsManager;
 use super::tasks::trust_quorum;
 use super::tasks::tuf_artifact_replication;
@@ -230,7 +228,6 @@ impl BackgroundTasksInitializer {
             task_metrics_producer_gc: Activator::new(),
             task_external_endpoints: Activator::new(),
             task_nat_cleanup: Activator::new(),
-            task_bfd_manager: Activator::new(),
             task_inventory_collection: Activator::new(),
             task_inventory_loader: Activator::new(),
             task_support_bundle_collector: Activator::new(),
@@ -242,7 +239,6 @@ impl BackgroundTasksInitializer {
             task_blueprint_executor: Activator::new(),
             task_blueprint_rendezvous: Activator::new(),
             task_crdb_node_id_collector: Activator::new(),
-            task_service_zone_nat_tracker: Activator::new(),
             task_switch_port_settings_manager: Activator::new(),
             task_v2p_manager: Activator::new(),
             task_region_replacement: Activator::new(),
@@ -327,7 +323,6 @@ impl BackgroundTasksInitializer {
             task_metrics_producer_gc,
             task_external_endpoints,
             task_nat_cleanup,
-            task_bfd_manager,
             task_inventory_collection,
             task_inventory_loader,
             task_support_bundle_collector,
@@ -339,7 +334,6 @@ impl BackgroundTasksInitializer {
             task_blueprint_executor,
             task_blueprint_rendezvous,
             task_crdb_node_id_collector,
-            task_service_zone_nat_tracker,
             task_switch_port_settings_manager,
             task_v2p_manager,
             task_region_replacement,
@@ -457,20 +451,6 @@ impl BackgroundTasksInitializer {
             opctx: opctx.child(BTreeMap::new()),
             watchers: vec![],
             activator: task_nat_cleanup,
-        });
-
-        driver.register(TaskDefinition {
-            name: "bfd_manager",
-            description: "Manages bidirectional fowarding detection (BFD) \
-                 configuration on rack switches",
-            period: config.bfd_manager.period_secs,
-            task_impl: Box::new(bfd::BfdManager::new(
-                datastore.clone(),
-                resolver.clone(),
-            )),
-            opctx: opctx.child(BTreeMap::new()),
-            watchers: vec![],
-            activator: task_bfd_manager,
         });
 
         // Background task: phantom disk detection
@@ -707,22 +687,6 @@ impl BackgroundTasksInitializer {
             opctx: opctx.child(BTreeMap::new()),
             watchers: vec![],
             activator: task_decommissioned_disk_cleaner,
-        });
-
-        driver.register(TaskDefinition {
-            name: "service_zone_nat_tracker",
-            description:
-                "ensures service zone nat records are recorded in NAT RPW \
-                 table",
-            period: config.sync_service_zone_nat.period_secs,
-            task_impl: Box::new(ServiceZoneNatTracker::new(
-                datastore.clone(),
-                resolver.clone(),
-                inventory_load_watcher.clone(),
-            )),
-            opctx: opctx.child(BTreeMap::new()),
-            watchers: vec![],
-            activator: task_service_zone_nat_tracker,
         });
 
         driver.register(TaskDefinition {

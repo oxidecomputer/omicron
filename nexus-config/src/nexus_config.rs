@@ -377,10 +377,6 @@ pub struct BackgroundTaskConfig {
     pub phantom_disks: PhantomDiskConfig,
     /// configuration for blueprint related tasks
     pub blueprints: BlueprintTasksConfig,
-    /// configuration for service zone nat sync task
-    pub sync_service_zone_nat: SyncServiceZoneNatConfig,
-    /// configuration for the bfd manager task
-    pub bfd_manager: BfdManagerConfig,
     /// configuration for the switch port settings manager task
     pub switch_port_settings_manager: SwitchPortSettingsManagerConfig,
     /// configuration for region replacement starter task
@@ -585,14 +581,6 @@ pub struct DecommissionedDiskCleanerConfig {
 #[serde_as]
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct NatCleanupConfig {
-    /// period (in seconds) for periodic activations of this background task
-    #[serde_as(as = "DurationSeconds<u64>")]
-    pub period_secs: Duration,
-}
-
-#[serde_as]
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-pub struct BfdManagerConfig {
     /// period (in seconds) for periodic activations of this background task
     #[serde_as(as = "DurationSeconds<u64>")]
     pub period_secs: Duration,
@@ -1290,7 +1278,6 @@ mod test {
             metrics_producer_gc.period_secs = 60
             external_endpoints.period_secs = 9
             nat_cleanup.period_secs = 30
-            bfd_manager.period_secs = 30
             inventory.period_secs_load = 10
             inventory.period_secs_collect = 11
             inventory.nkeep = 12
@@ -1305,7 +1292,6 @@ mod test {
             blueprints.period_secs_rendezvous = 300
             blueprints.period_secs_collect_crdb_node_ids = 180
             blueprints.period_secs_load_reconfigurator_config = 5
-            sync_service_zone_nat.period_secs = 30
             switch_port_settings_manager.period_secs = 30
             region_replacement.period_secs = 30
             region_replacement_driver.period_secs = 30
@@ -1475,9 +1461,6 @@ mod test {
                         nat_cleanup: NatCleanupConfig {
                             period_secs: Duration::from_secs(30),
                         },
-                        bfd_manager: BfdManagerConfig {
-                            period_secs: Duration::from_secs(30),
-                        },
                         inventory: InventoryConfig {
                             period_secs_load: Duration::from_secs(10),
                             period_secs_collect: Duration::from_secs(11),
@@ -1510,9 +1493,6 @@ mod test {
                             period_secs_rendezvous: Duration::from_secs(300),
                             period_secs_load_reconfigurator_config:
                                 Duration::from_secs(5)
-                        },
-                        sync_service_zone_nat: SyncServiceZoneNatConfig {
-                            period_secs: Duration::from_secs(30)
                         },
                         switch_port_settings_manager:
                             SwitchPortSettingsManagerConfig {
@@ -1693,7 +1673,6 @@ mod test {
             metrics_producer_gc.period_secs = 60
             external_endpoints.period_secs = 9
             nat_cleanup.period_secs = 30
-            bfd_manager.period_secs = 30
             inventory.period_secs_load = 10
             inventory.period_secs_collect = 10
             inventory.nkeep = 3
@@ -1708,7 +1687,6 @@ mod test {
             blueprints.period_secs_rendezvous = 300
             blueprints.period_secs_collect_crdb_node_ids = 180
             blueprints.period_secs_load_reconfigurator_config = 5
-            sync_service_zone_nat.period_secs = 30
             switch_port_settings_manager.period_secs = 30
             region_replacement.period_secs = 30
             region_replacement_driver.period_secs = 30

@@ -10,7 +10,6 @@ use crate::DropshotServer;
 use crate::app::background::BackgroundTasksData;
 use crate::app::background::CurrentSitrep;
 use crate::app::background::SagaRecoveryHelpers;
-use crate::app::background::resolve_mgd_clients;
 use crate::app::update::UpdateStatusHandle;
 use crate::populate::PopulateArgs;
 use crate::populate::PopulateStatus;
@@ -1175,7 +1174,47 @@ impl Nexus {
         &self,
     ) -> Result<HashMap<SwitchSlot, mg_admin_client::Client>, ResolveError>
     {
-        resolve_mgd_clients(self.resolver(), &self.log).await
+        let mgd_addrs =
+            self.resolver().lookup_all_socket_v6(ServiceName::Mgd).await?;
+        let mut clients = HashMap::new();
+        for addr in mgd_addrs {
+            let client = mg_admin_client::Client::new(
+                &format!("http://{addr}"),
+                self.log.clone(),
+            );
+            let switch_slot = match client.switch_identifiers().await {
+                Ok(response) => match response.slot {
+                    Some(0) => SwitchSlot::Switch0,
+                    Some(1) => SwitchSlot::Switch1,
+                    Some(n) => {
+                        warn!(
+                            self.log, "failed to determine switch slot for mgd";
+                            "addr" => %addr,
+                            "error" => format!("mgd returned unknown slot {n}"),
+                        );
+                        continue;
+                    }
+                    None => {
+                        warn!(
+                            self.log, "failed to determine switch slot for mgd";
+                            "addr" => %addr,
+                            "error" => "mgd does not yet know its switch slot",
+                        );
+                        continue;
+                    }
+                },
+                Err(err) => {
+                    warn!(
+                        self.log, "failed to determine switch slot for mgd";
+                        "addr" => %addr,
+                        InlineErrorChain::new(&err),
+                    );
+                    continue;
+                }
+            };
+            clients.insert(switch_slot, client);
+        }
+        Ok(clients)
     }
 
     pub(crate) fn demo_sagas(
