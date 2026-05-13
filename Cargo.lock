@@ -8893,6 +8893,7 @@ dependencies = [
  "nexus-test-utils",
  "nexus-test-utils-macros",
  "nexus-types",
+ "ntp-admin-client",
  "omicron-common",
  "omicron-nexus",
  "omicron-rpaths",
