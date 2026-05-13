@@ -12,8 +12,11 @@ use crate::db::model::DeviceAuthRequest;
 use crate::db::model::to_db_typed_uuid;
 use crate::db::pagination::paginated;
 use async_bb8_diesel::AsyncRunQueryDsl;
+use chrono::DateTime;
 use chrono::Utc;
+use diesel::dsl::sql_query;
 use diesel::prelude::*;
+use diesel::sql_types;
 use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::public_error_from_diesel;
 use nexus_db_schema::schema::device_access_token;
@@ -285,6 +288,30 @@ impl DataStore {
         }
 
         Ok(())
+    }
+
+    /// Hard-delete up to `limit` device access tokens whose `time_expires` is
+    /// non-NULL and older than `cutoff`, returning the number deleted. Tokens
+    /// with NULL `time_expires` never expire and are not eligible.
+    pub async fn token_cleanup_batch(
+        &self,
+        opctx: &OpContext,
+        cutoff: DateTime<Utc>,
+        limit: u32,
+    ) -> Result<usize, Error> {
+        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
+
+        sql_query(
+            "DELETE FROM omicron.public.device_access_token \
+             WHERE time_expires IS NOT NULL AND time_expires < $1 \
+             ORDER BY time_expires \
+             LIMIT $2",
+        )
+        .bind::<sql_types::Timestamptz, _>(cutoff)
+        .bind::<sql_types::BigInt, _>(i64::from(limit))
+        .execute_async(&*self.pool_connection_authorized(opctx).await?)
+        .await
+        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
     /// Delete all tokens for the user
