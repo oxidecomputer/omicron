@@ -295,11 +295,7 @@ async fn apply_plan(
     }
 
     if remove_failures.is_empty() && create_failures.is_empty() {
-        DpdNatReconcilerStatus::Success {
-            unchanged,
-            removed,
-            created,
-        }
+        DpdNatReconcilerStatus::Success { unchanged, removed, created }
     } else {
         DpdNatReconcilerStatus::PartialSuccess {
             unchanged,
