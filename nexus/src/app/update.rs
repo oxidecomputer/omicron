@@ -53,10 +53,10 @@ use uuid::Uuid;
 
 /// Threshold at which we consider an active saga stuck.
 ///
-/// Sometimes sagas can sometimes spend time being unassigned or recovered
-/// across Nexus restarts. To calculate this threshold we took a sample of
-/// 10,000 sagas and the longest running saga took ~1h30m so we give ample time
-/// before we consider a saga stuck.
+/// Sagas can sometimes spend time being unassigned or recovered across Nexus
+/// restarts. To calculate this threshold we took a sample of 10,000 sagas and
+/// the longest running saga took ~1h30m so we give ample time before we
+/// consider a saga stuck.
 const STUCK_SAGA_THRESHOLD: TimeDelta = TimeDelta::minutes(120);
 
 /// Threshold at which we consider an inventory collection too old for the
@@ -73,7 +73,7 @@ const STALE_INVENTORY_THRESHOLD: TimeDelta = TimeDelta::minutes(20);
 /// sled reboot) under normal conditions. Host OS updates can take a very long
 /// time, usually around 10-13 minutes. We give ourselves a bit more time than
 /// that before considering an update stuck.
-const STUCK_UPDATE_THRESHOLD: TimeDelta = TimeDelta::minutes(30);
+const STUCK_UPDATE_THRESHOLD: TimeDelta = TimeDelta::minutes(20);
 
 /// Used to pull data out of the channels
 #[derive(Clone)]
@@ -92,129 +92,14 @@ impl UpdateStatusHandle {
 /// Inputs used to decide, based on health checks of a subset of system
 /// components, whether the user should contact support before or after an
 /// update.
-struct UpdateContactSupportChecks {
+struct UpdateContactSupportChecksInput {
     inventory: Arc<Collection>,
     stuck_sagas: Result<Vec<Saga>, Error>,
     components_by_release_version: BTreeMap<String, usize>,
     time_last_step_planned: DateTime<Utc>,
 }
 
-/// Identifies a saga that has been running or unwinding for too long.
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
-struct StuckSaga {
-    id: SagaId,
-    name: String,
-}
-
-/// A problem identified by an update health check.
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
-enum UpdateStatusProblem {
-    /// One or more sagas have been running or unwinding longer than
-    /// `STUCK_SAGA_THRESHOLD`.
-    StuckSagas { sagas: Vec<StuckSaga> },
-    /// The query for stuck sagas itself failed.
-    StuckSagasQueryFailed { error: String },
-    /// An update is in progress and the last step planned in the blueprint is
-    /// older than `STUCK_UPDATE_THRESHOLD`.
-    StuckUpdate { time_last_step_planned: DateTime<Utc> },
-    /// The latest inventory collection is older than
-    /// `STALE_INVENTORY_THRESHOLD`.
-    StaleInventory { collection_time_done: DateTime<Utc> },
-    /// One or more zpools are not in an `Online` state.
-    UnhealthyZpools { zpools_by_sled: BTreeMap<SledUuid, Vec<Zpool>> },
-    /// One or more enabled SMF services are not in an `online` state.
-    EnabledSmfServicesNotOnline {
-        svcs_by_sled: BTreeMap<SledUuid, SvcsEnabledNotOnlineResult>,
-    },
-}
-
-impl KV for UpdateStatusProblem {
-    fn serialize(
-        &self,
-        _record: &Record,
-        serializer: &mut dyn Serializer,
-    ) -> slog::Result {
-        match self {
-            Self::StuckSagas { sagas } => serializer.emit_arguments(
-                "stuck_sagas".into(),
-                &format_args!("{sagas:?}"),
-            ),
-            Self::StuckSagasQueryFailed { error } => serializer.emit_arguments(
-                "error_message".into(),
-                &format_args!("{error}"),
-            ),
-            Self::StuckUpdate { time_last_step_planned } => serializer
-                .emit_arguments(
-                    "stuck_update_last_step_planned_time".into(),
-                    &format_args!("{time_last_step_planned:?}"),
-                ),
-            Self::StaleInventory { collection_time_done } => serializer
-                .emit_arguments(
-                    "stale_inventory_last_collection_time_done".into(),
-                    &format_args!("{collection_time_done:?}"),
-                ),
-            Self::UnhealthyZpools { zpools_by_sled } => serializer
-                .emit_arguments(
-                    "unhealthy_zpools_by_sled".into(),
-                    &format_args!("{zpools_by_sled:?}"),
-                ),
-            Self::EnabledSmfServicesNotOnline { svcs_by_sled } => serializer
-                .emit_arguments(
-                    "enabled_not_online_svcs_by_sled".into(),
-                    &format_args!("{svcs_by_sled:?}"),
-                ),
-        }
-    }
-}
-
-/// Wrapper that lets a whole set of [`UpdateStatusProblem`]s contribute their
-/// kvs to a single log record.
-struct UpdateStatusProblemsKv(BTreeSet<UpdateStatusProblem>);
-
-impl KV for UpdateStatusProblemsKv {
-    fn serialize(
-        &self,
-        record: &Record,
-        serializer: &mut dyn Serializer,
-    ) -> slog::Result {
-        for problem in &self.0 {
-            problem.serialize(record, serializer)?;
-        }
-        Ok(())
-    }
-}
-
-/// Returns true if the system appears to be mid-update.
-///
-/// A system is considered mid-update when its components don't all report
-/// the same version. The one exception is the initial state of a system
-/// that has never been updated, which has exactly two versions present:
-/// "install dataset" and "unknown". This state is not treated as in progress.
-fn is_update_in_progress(
-    components_by_release_version: &BTreeMap<String, usize>,
-) -> bool {
-    let versions_at_initial_state = components_by_release_version.len() == 2
-        && components_by_release_version
-            .contains_key(&internal_views::TufRepoVersion::Unknown.to_string())
-        && components_by_release_version.contains_key(
-            &internal_views::TufRepoVersion::InstallDataset.to_string(),
-        );
-    components_by_release_version.len() != 1 && !versions_at_initial_state
-}
-
-/// Returns true if an update appears to be stuck.
-///
-/// An update is considered "stuck" if it is in progress but the last step
-/// planned in the blueprint is older than `STUCK_UPDATE_THRESHOLD`.
-fn is_update_stuck(
-    components_by_release_version: &BTreeMap<String, usize>,
-    time_last_step_planned: DateTime<Utc>,
-) -> bool {
-    is_update_in_progress(components_by_release_version)
-        && time_last_step_planned < Utc::now() - STUCK_UPDATE_THRESHOLD
-}
-
-impl UpdateContactSupportChecks {
+impl UpdateContactSupportChecksInput {
     /// Identify a set of problems present in the system based on a series of
     /// health checks.
     fn problems(&self) -> BTreeSet<UpdateStatusProblem> {
@@ -231,7 +116,7 @@ impl UpdateContactSupportChecks {
 
         match &self.stuck_sagas {
             Ok(sagas) => {
-                let sagas: Vec<_> = sagas
+                let sagas: BTreeSet<_> = sagas
                     .iter()
                     .map(|s| StuckSaga { id: s.id, name: s.name.clone() })
                     .collect();
@@ -278,6 +163,121 @@ impl UpdateContactSupportChecks {
 
         problems
     }
+}
+
+/// Identifies a saga that has been running or unwinding for too long.
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
+struct StuckSaga {
+    id: SagaId,
+    name: String,
+}
+
+/// A problem identified by an update health check.
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
+enum UpdateStatusProblem {
+    /// One or more sagas have been running or unwinding longer than
+    /// `STUCK_SAGA_THRESHOLD`.
+    StuckSagas { sagas: BTreeSet<StuckSaga> },
+    /// The query for stuck sagas itself failed.
+    StuckSagasQueryFailed { error: String },
+    /// An update is in progress and the last step planned in the blueprint is
+    /// older than `STUCK_UPDATE_THRESHOLD`.
+    StuckUpdate { time_last_step_planned: DateTime<Utc> },
+    /// The latest inventory collection is older than
+    /// `STALE_INVENTORY_THRESHOLD`.
+    StaleInventory { collection_time_done: DateTime<Utc> },
+    /// One or more zpools are not in an `Online` state.
+    UnhealthyZpools { zpools_by_sled: BTreeMap<SledUuid, Vec<Zpool>> },
+    /// One or more enabled SMF services are not in an `online` state.
+    EnabledSmfServicesNotOnline {
+        svcs_by_sled: BTreeMap<SledUuid, SvcsEnabledNotOnlineResult>,
+    },
+}
+
+impl KV for UpdateStatusProblem {
+    fn serialize(
+        &self,
+        _record: &Record,
+        serializer: &mut dyn Serializer,
+    ) -> slog::Result {
+        match self {
+            Self::StuckSagas { sagas } => serializer.emit_arguments(
+                "stuck_sagas".into(),
+                &format_args!("{sagas:?}"),
+            ),
+            Self::StuckSagasQueryFailed { error } => serializer.emit_arguments(
+                "error_message".into(),
+                &format_args!("{error}"),
+            ),
+            Self::StuckUpdate { time_last_step_planned } => serializer
+                .emit_arguments(
+                    "stuck_update_last_step_planned_time".into(),
+                    &format_args!("{time_last_step_planned}"),
+                ),
+            Self::StaleInventory { collection_time_done } => serializer
+                .emit_arguments(
+                    "stale_inventory_last_collection_time_done".into(),
+                    &format_args!("{collection_time_done}"),
+                ),
+            Self::UnhealthyZpools { zpools_by_sled } => serializer
+                .emit_arguments(
+                    "unhealthy_zpools_by_sled".into(),
+                    &format_args!("{zpools_by_sled:?}"),
+                ),
+            Self::EnabledSmfServicesNotOnline { svcs_by_sled } => serializer
+                .emit_arguments(
+                    "enabled_not_online_svcs_by_sled".into(),
+                    &format_args!("{svcs_by_sled:?}"),
+                ),
+        }
+    }
+}
+
+/// Wrapper that lets a whole set of [`UpdateStatusProblem`]s contribute their
+/// kvs to a single log record.
+struct UpdateStatusProblemsKv(BTreeSet<UpdateStatusProblem>);
+
+impl KV for UpdateStatusProblemsKv {
+    fn serialize(
+        &self,
+        record: &Record,
+        serializer: &mut dyn Serializer,
+    ) -> slog::Result {
+        for problem in &self.0 {
+            problem.serialize(record, serializer)?;
+        }
+        Ok(())
+    }
+}
+
+/// Returns true if the system appears to be mid-update.
+///
+/// A system is considered mid-update when its components don't all report
+/// the same version. The one exception is the initial state of a system
+/// that has never been updated, which has exactly two versions present:
+/// "install dataset" and "unknown". This state is not treated as in-progress.
+fn is_update_in_progress(
+    components_by_release_version: &BTreeMap<String, usize>,
+) -> bool {
+    let versions_at_initial_state = components_by_release_version.len() == 2
+        && components_by_release_version
+            .contains_key(&internal_views::TufRepoVersion::Unknown.to_string())
+        && components_by_release_version.contains_key(
+            &internal_views::TufRepoVersion::InstallDataset.to_string(),
+        );
+    components_by_release_version.len() != 1 && !versions_at_initial_state
+}
+
+/// Returns true if an update appears to be stuck.
+///
+/// An update is considered "stuck" if it is in progress but the last step
+/// planned in the blueprint is older than `STUCK_UPDATE_THRESHOLD`.
+fn is_update_stuck(
+    components_by_release_version: &BTreeMap<String, usize>,
+    time_last_step_planned: DateTime<Utc>,
+) -> bool {
+    is_update_in_progress(components_by_release_version)
+        && time_last_step_planned < Utc::now() - STUCK_UPDATE_THRESHOLD
 }
 
 impl super::Nexus {
@@ -537,7 +537,7 @@ impl super::Nexus {
             )
             .await;
 
-        let checks = UpdateContactSupportChecks {
+        let checks = UpdateContactSupportChecksInput {
             inventory,
             stuck_sagas,
             components_by_release_version,
@@ -1235,7 +1235,7 @@ mod test {
 
     #[test]
     fn test_problems_healthy_system() {
-        let checks = UpdateContactSupportChecks {
+        let checks = UpdateContactSupportChecksInput {
             inventory: Arc::new(fake_collection_with_ids(
                 sled_id(),
                 healthy_zpools(),
@@ -1254,7 +1254,7 @@ mod test {
         let expected_stuck_saga =
             StuckSaga { id: saga.id, name: saga.name.clone() };
 
-        let checks = UpdateContactSupportChecks {
+        let checks = UpdateContactSupportChecksInput {
             inventory: Arc::new(fake_collection_with_ids(
                 sled_id(),
                 healthy_zpools(),
@@ -1266,7 +1266,7 @@ mod test {
         };
 
         let expected = BTreeSet::from([UpdateStatusProblem::StuckSagas {
-            sagas: vec![expected_stuck_saga],
+            sagas: BTreeSet::from([expected_stuck_saga]),
         }]);
         assert_eq!(checks.problems(), expected);
     }
@@ -1276,7 +1276,7 @@ mod test {
         let err = Error::internal_error("db boom");
         let expected_error = err.to_string();
 
-        let checks = UpdateContactSupportChecks {
+        let checks = UpdateContactSupportChecksInput {
             inventory: Arc::new(fake_collection_with_ids(
                 sled_id(),
                 healthy_zpools(),
@@ -1299,7 +1299,7 @@ mod test {
         let time_last_step_planned =
             Utc::now() - STUCK_UPDATE_THRESHOLD - TimeDelta::seconds(10);
 
-        let checks = UpdateContactSupportChecks {
+        let checks = UpdateContactSupportChecksInput {
             inventory: Arc::new(fake_collection_with_ids(
                 sled_id(),
                 healthy_zpools(),
@@ -1319,7 +1319,7 @@ mod test {
     #[test]
     fn test_problems_update_in_progress_not_stuck_is_not_a_problem() {
         // Update in progress but the last step planned is recent — not stuck.
-        let checks = UpdateContactSupportChecks {
+        let checks = UpdateContactSupportChecksInput {
             inventory: Arc::new(fake_collection_with_ids(
                 sled_id(),
                 healthy_zpools(),
@@ -1343,7 +1343,7 @@ mod test {
             Utc::now() - STALE_INVENTORY_THRESHOLD - TimeDelta::seconds(10);
         collection.time_done = collection_time_done;
 
-        let checks = UpdateContactSupportChecks {
+        let checks = UpdateContactSupportChecksInput {
             inventory: Arc::new(collection),
             stuck_sagas: Ok(vec![]),
             components_by_release_version: system_version_update_finished(),
@@ -1359,7 +1359,7 @@ mod test {
     #[test]
     fn test_problems_unhealthy_zpools() {
         let sled_id = sled_id();
-        let checks = UpdateContactSupportChecks {
+        let checks = UpdateContactSupportChecksInput {
             inventory: Arc::new(fake_collection_with_ids(
                 sled_id,
                 vec![InventoryZpool {
@@ -1396,7 +1396,7 @@ mod test {
             services.clone(),
         );
 
-        let checks = UpdateContactSupportChecks {
+        let checks = UpdateContactSupportChecksInput {
             inventory: Arc::new(collection),
             stuck_sagas: Ok(vec![]),
             components_by_release_version: system_version_update_finished(),
@@ -1418,7 +1418,7 @@ mod test {
         let expected_stuck_saga =
             StuckSaga { id: saga.id, name: saga.name.clone() };
 
-        let checks = UpdateContactSupportChecks {
+        let checks = UpdateContactSupportChecksInput {
             inventory: Arc::new(fake_collection_with_ids(
                 sled_id,
                 vec![InventoryZpool {
@@ -1441,7 +1441,7 @@ mod test {
         };
         let expected = BTreeSet::from([
             UpdateStatusProblem::StuckSagas {
-                sagas: vec![expected_stuck_saga],
+                sagas: BTreeSet::from([expected_stuck_saga]),
             },
             UpdateStatusProblem::UnhealthyZpools {
                 zpools_by_sled: BTreeMap::from([(
@@ -1477,7 +1477,7 @@ mod test {
         let time_last_step_planned =
             Utc::now() - STUCK_UPDATE_THRESHOLD - TimeDelta::seconds(10);
 
-        let checks = UpdateContactSupportChecks {
+        let checks = UpdateContactSupportChecksInput {
             inventory: Arc::new(collection),
             stuck_sagas: Ok(vec![saga]),
             components_by_release_version: system_version_update_in_progress(),
@@ -1492,7 +1492,7 @@ mod test {
         };
         let expected = BTreeSet::from([
             UpdateStatusProblem::StuckSagas {
-                sagas: vec![expected_stuck_saga],
+                sagas: BTreeSet::from([expected_stuck_saga]),
             },
             UpdateStatusProblem::StuckUpdate { time_last_step_planned },
             UpdateStatusProblem::StaleInventory { collection_time_done },
