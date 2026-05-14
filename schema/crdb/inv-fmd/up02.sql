@@ -1,5 +1,7 @@
 CREATE TABLE IF NOT EXISTS omicron.public.inv_fmd_host_case (
+    -- (foreign key into `inv_collection` table)
     inv_collection_id UUID NOT NULL,
+    -- guaranteed to match a row in this collection's `inv_sled_agent`
     sled_id UUID NOT NULL,
     case_id UUID NOT NULL,
     code TEXT NOT NULL,
