@@ -56,9 +56,10 @@ use uuid::Uuid;
 ///
 /// Sagas can sometimes spend time being unassigned or recovered across Nexus
 /// restarts. To calculate this threshold we took a sample of 10,000 sagas and
-/// the longest running saga took ~1h30m so we give ample time before we
-/// consider a saga stuck.
-const STUCK_SAGA_THRESHOLD: TimeDelta = TimeDelta::minutes(120);
+/// only 3 took longer than 15 minutes from time_created to done (1h32m, 34m24s
+/// and 19m23s). We give set the threshold at 15 minutes to catch those rather
+/// than letting the Nexus handoff take an extraordinary amount of time.
+const STUCK_SAGA_THRESHOLD: TimeDelta = TimeDelta::minutes(15);
 
 /// Threshold at which we consider an inventory collection too old for the
 /// purpose of reporting system health via the update status endpoint
@@ -72,8 +73,10 @@ const STALE_INVENTORY_THRESHOLD: TimeDelta = TimeDelta::minutes(20);
 ///
 /// This is chosen to be large enough to cover any update-related step (e.g.,
 /// sled reboot) under normal conditions. Host OS updates can take a very long
-/// time, usually around 10-13 minutes. We give ourselves a bit more time than
-/// that before considering an update stuck.
+/// time, usually around 10 minutes. Using `omdb reconfigurator history` we
+/// took a sample of 1000 events and the longest interval between steps during
+/// an update was ~13 minutes between 2 sled host OS updates. We give ourselves
+/// a bit more time than that before considering an update stuck.
 const STUCK_UPDATE_THRESHOLD: TimeDelta = TimeDelta::minutes(20);
 
 /// Used to pull data out of the channels
