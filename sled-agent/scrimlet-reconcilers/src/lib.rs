@@ -50,6 +50,8 @@ mod status;
 mod switch_zone_slot;
 mod uplinkd_reconciler;
 
+pub use dpd_reconciler::DpdNatReconcilerStatusNatEntry;
+pub use dpd_reconciler::DpdNatReconcilerStatusNatEntryFailure;
 pub use dpd_reconciler::DpdReconcilerStatus;
 pub use handle::ScrimletReconcilers;
 pub use handle::ScrimletReconcilersMode;

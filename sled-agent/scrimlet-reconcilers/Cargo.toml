@@ -9,11 +9,15 @@ workspace = true
 
 [dependencies]
 chrono.workspace = true
+daft.workspace = true
 dpd-client.workspace = true
+futures.workspace = true
 gateway-client.workspace = true
 gateway-types.workspace = true
+macaddr.workspace = true
 mg-admin-client.workspace = true
 omicron-common.workspace = true
+omicron-uuid-kinds.workspace = true
 reqwest.workspace = true
 sled-agent-types.workspace = true
 slog.workspace = true
@@ -24,13 +28,17 @@ tokio.workspace = true
 omicron-workspace-hack.workspace = true
 
 [dev-dependencies]
+anyhow.workspace = true
 assert_matches.workspace = true
 dropshot.workspace = true
 gateway-messages.workspace = true
 gateway-test-utils.workspace = true
 httpmock.workspace = true
 omicron-test-utils.workspace = true
+proptest.workspace = true
 serde_json.workspace = true
+sled-agent-types = { workspace = true, features = ["testing"] }
+test-strategy.workspace = true
 
 [features]
 testing = []

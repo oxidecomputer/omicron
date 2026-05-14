@@ -422,8 +422,7 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
         let log = &self.logctx.log;
         debug!(log, "Starting Dendrite"; "switch_slot" => ?switch_slot);
         let mgs = self.gateway.get(&switch_slot).unwrap();
-        let mgs_addr =
-            SocketAddrV6::new(Ipv6Addr::LOCALHOST, mgs.port, 0, 0).into();
+        let mgs_addr = mgs.address().into();
 
         // Set up a stub instance of dendrite
         let dendrite = dev::dendrite::DendriteInstance::start(
@@ -448,9 +447,7 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
     pub async fn start_mgd(&mut self, switch_slot: SwitchSlot) {
         let log = &self.logctx.log;
         debug!(log, "Starting mgd"; "switch_slot" => ?switch_slot);
-        let mgs = self.gateway.get(&switch_slot).unwrap();
-        let mgs_addr =
-            SocketAddrV6::new(Ipv6Addr::LOCALHOST, mgs.port, 0, 0).into();
+        let mgs_addr = self.gateway.get(&switch_slot).unwrap().address().into();
 
         // Set up an instance of mgd
         let mgd =
@@ -484,7 +481,7 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
                 sled_id,
                 Ipv6Addr::LOCALHOST,
                 self.dendrite.read().unwrap().get(&switch_slot).unwrap().port,
-                self.gateway.get(&switch_slot).unwrap().port,
+                self.gateway.get(&switch_slot).unwrap().address().port(),
                 self.mgd.get(&switch_slot).unwrap().port,
             )
             .unwrap()
