@@ -94,7 +94,7 @@ impl super::Nexus {
             .physical_disks
             .into_iter()
             .map(|disk| {
-                db::model::PhysicalDisk::new(
+                db::model::PhysicalDisk::from_parts(
                     disk.id,
                     disk.vendor,
                     disk.serial,
@@ -573,8 +573,8 @@ impl super::Nexus {
                 link_name: link_name.clone(),
                 //TODO https://github.com/oxidecomputer/omicron/issues/2274
                 mtu: 1500,
-                fec: uplink_config.uplink_port_fec.map(|fec| fec.into()),
-                speed: uplink_config.uplink_port_speed.into(),
+                fec: uplink_config.uplink_port_fec,
+                speed: uplink_config.uplink_port_speed,
                 autoneg: uplink_config.autoneg,
                 lldp,
                 tx_eq: uplink_config.tx_eq,

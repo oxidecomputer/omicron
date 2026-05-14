@@ -852,6 +852,8 @@ pub struct SpEreportIngesterStatus {
     /// the config file.
     pub disabled: bool,
     pub sps: Vec<SpEreporterStatus>,
+    /// Total number of present SPs discovered via ignition.
+    pub sps_found: usize,
     pub sps_not_present: usize,
     pub errors: Vec<String>,
 }
@@ -1187,6 +1189,16 @@ pub struct ServiceFirewallRuleStatus {
     pub lookup_error: Option<String>,
     /// Errors encountered pushing the set of rules to each sled.
     pub sled_push_errors: Option<BTreeMap<SledUuid, String>>,
+}
+
+/// Status of the `PhysicalDiskAdoption` background task
+#[derive(Debug, Default, Deserialize, Serialize)]
+pub struct PhysicalDiskAdoptionStatus {
+    /// The number of physical disks added during this activation
+    pub disks_added: usize,
+
+    /// Errors encountered during this activation
+    pub errors: Vec<String>,
 }
 
 #[cfg(test)]
