@@ -11,6 +11,36 @@
 //!
 //! Within this module, types are referred to using `latest::` identifiers.
 
+macro_rules! path_param {
+    ($struct:ident, $param:ident, $name:tt) => {
+        #[derive(Serialize, Deserialize, JsonSchema)]
+        pub struct $struct {
+            #[doc = "Name or ID of the "]
+            #[doc = $name]
+            pub $param: NameOrId,
+        }
+    };
+}
+
+macro_rules! id_path_param {
+    ($struct:ident, $param:ident, $name:tt) => {
+        id_path_param!($struct, $param, $name, Uuid);
+    };
+
+    ($struct:ident, $param:ident, $name:tt, $uuid_type:ident) => {
+        #[derive(Serialize, Deserialize, JsonSchema)]
+        pub struct $struct {
+            #[doc = "ID of the "]
+            #[doc = $name]
+            #[schemars(with = "Uuid")]
+            pub $param: $uuid_type,
+        }
+    };
+}
+
+pub(crate) use id_path_param;
+pub(crate) use path_param;
+
 mod alert;
 mod disk;
 mod hardware;

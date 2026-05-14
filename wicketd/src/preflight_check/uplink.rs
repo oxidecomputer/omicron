@@ -25,8 +25,8 @@ use illumos_utils::zone::SVCCFG;
 use omicron_common::OMICRON_DPD_TAG;
 use omicron_common::address::DENDRITE_PORT;
 use oxnet::IpNet;
-use sled_agent_types::early_networking::PortFec as OmicronPortFec;
-use sled_agent_types::early_networking::PortSpeed as OmicronPortSpeed;
+use sled_agent_types::early_networking::LinkFec;
+use sled_agent_types::early_networking::LinkSpeed;
 use sled_agent_types::early_networking::SwitchSlot;
 use sled_agent_types::early_networking::UplinkAddress;
 use sled_agent_types::early_networking::UplinkAddressConfig;
@@ -824,20 +824,20 @@ fn build_port_settings(
 ) -> PortSettings {
     // Map from omicron_common types to dpd_client types
     let fec = uplink.uplink_port_fec.map(|fec| match fec {
-        OmicronPortFec::Firecode => DpdPortFec::Firecode,
-        OmicronPortFec::None => DpdPortFec::None,
-        OmicronPortFec::Rs => DpdPortFec::Rs,
+        LinkFec::Firecode => DpdPortFec::Firecode,
+        LinkFec::None => DpdPortFec::None,
+        LinkFec::Rs => DpdPortFec::Rs,
     });
     let speed = match uplink.uplink_port_speed {
-        OmicronPortSpeed::Speed0G => DpdPortSpeed::Speed0G,
-        OmicronPortSpeed::Speed1G => DpdPortSpeed::Speed1G,
-        OmicronPortSpeed::Speed10G => DpdPortSpeed::Speed10G,
-        OmicronPortSpeed::Speed25G => DpdPortSpeed::Speed25G,
-        OmicronPortSpeed::Speed40G => DpdPortSpeed::Speed40G,
-        OmicronPortSpeed::Speed50G => DpdPortSpeed::Speed50G,
-        OmicronPortSpeed::Speed100G => DpdPortSpeed::Speed100G,
-        OmicronPortSpeed::Speed200G => DpdPortSpeed::Speed200G,
-        OmicronPortSpeed::Speed400G => DpdPortSpeed::Speed400G,
+        LinkSpeed::Speed0G => DpdPortSpeed::Speed0G,
+        LinkSpeed::Speed1G => DpdPortSpeed::Speed1G,
+        LinkSpeed::Speed10G => DpdPortSpeed::Speed10G,
+        LinkSpeed::Speed25G => DpdPortSpeed::Speed25G,
+        LinkSpeed::Speed40G => DpdPortSpeed::Speed40G,
+        LinkSpeed::Speed50G => DpdPortSpeed::Speed50G,
+        LinkSpeed::Speed100G => DpdPortSpeed::Speed100G,
+        LinkSpeed::Speed200G => DpdPortSpeed::Speed200G,
+        LinkSpeed::Speed400G => DpdPortSpeed::Speed400G,
     };
 
     let mut port_settings = PortSettings { links: HashMap::new() };

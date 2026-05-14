@@ -52,7 +52,9 @@ pub mod config {
 
 pub mod retention {
     pub use crate::v2::retention::Days;
-    pub use crate::v2::retention::RetentionPolicy;
+    pub use crate::v3::retention::DatabaseRetentionPolicy;
+    pub use crate::v3::retention::RetentionPolicy;
+    pub use crate::v3::retention::RetentionPolicyRequest;
 }
 
 pub mod usage {

@@ -58,10 +58,10 @@ pub mod early_networking {
     pub use crate::v1::early_networking::BfdMode;
     pub use crate::v1::early_networking::BfdPeerConfig;
     pub use crate::v1::early_networking::ImportExportPolicy;
+    pub use crate::v1::early_networking::LinkFec;
+    pub use crate::v1::early_networking::LinkSpeed;
     pub use crate::v1::early_networking::LldpAdminStatus;
     pub use crate::v1::early_networking::LldpPortConfig;
-    pub use crate::v1::early_networking::PortFec;
-    pub use crate::v1::early_networking::PortSpeed;
     pub use crate::v1::early_networking::RouteConfig;
     pub use crate::v1::early_networking::SwitchSlot;
     pub use crate::v1::early_networking::TxEqConfig;
@@ -90,15 +90,15 @@ pub mod firewall_rules {
 }
 
 pub mod multicast {
-    pub use crate::v38::multicast::ClearMcast2Phys;
-    pub use crate::v38::multicast::ClearMcastForwarding;
-    pub use crate::v38::multicast::Mcast2PhysMapping;
-    pub use crate::v38::multicast::McastFilterMode;
-    pub use crate::v38::multicast::McastForwardingEntry;
-    pub use crate::v38::multicast::McastForwardingNextHop;
-    pub use crate::v38::multicast::McastReplication;
-    pub use crate::v38::multicast::McastSourceFilter;
-    pub use crate::v38::multicast::MulticastGroupCfg;
+    pub use crate::v39::multicast::ClearMcast2Phys;
+    pub use crate::v39::multicast::ClearMcastForwarding;
+    pub use crate::v39::multicast::Mcast2PhysMapping;
+    pub use crate::v39::multicast::McastFilterMode;
+    pub use crate::v39::multicast::McastForwardingEntry;
+    pub use crate::v39::multicast::McastForwardingNextHop;
+    pub use crate::v39::multicast::McastReplication;
+    pub use crate::v39::multicast::McastSourceFilter;
+    pub use crate::v39::multicast::MulticastGroupCfg;
 }
 
 pub mod instance {

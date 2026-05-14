@@ -10,7 +10,6 @@ use ipnetwork::IpNetwork;
 use nexus_db_schema::schema::{loopback_address, switch_vlan_interface_config};
 use nexus_types::external_api::networking as networking_types;
 use nexus_types::identity::Asset;
-use omicron_common::api::external;
 use omicron_uuid_kinds::LoopbackAddressKind;
 use omicron_uuid_kinds::TypedUuid;
 use serde::{Deserialize, Serialize};
@@ -53,20 +52,6 @@ impl From<networking_types::SwitchInterfaceKind> for DbSwitchInterfaceKind {
     }
 }
 
-impl Into<external::SwitchInterfaceKind> for DbSwitchInterfaceKind {
-    fn into(self) -> external::SwitchInterfaceKind {
-        match self {
-            DbSwitchInterfaceKind::Primary => {
-                external::SwitchInterfaceKind::Primary
-            }
-            DbSwitchInterfaceKind::Vlan => external::SwitchInterfaceKind::Vlan,
-            DbSwitchInterfaceKind::Loopback => {
-                external::SwitchInterfaceKind::Loopback
-            }
-        }
-    }
-}
-
 #[derive(
     Queryable,
     Insertable,
@@ -89,9 +74,11 @@ impl SwitchVlanInterfaceConfig {
     }
 }
 
-impl Into<external::SwitchVlanInterfaceConfig> for SwitchVlanInterfaceConfig {
-    fn into(self) -> external::SwitchVlanInterfaceConfig {
-        external::SwitchVlanInterfaceConfig {
+impl Into<networking_types::SwitchVlanInterfaceConfig>
+    for SwitchVlanInterfaceConfig
+{
+    fn into(self) -> networking_types::SwitchVlanInterfaceConfig {
+        networking_types::SwitchVlanInterfaceConfig {
             interface_config_id: self.interface_config_id,
             vlan_id: self.vid.into(),
         }

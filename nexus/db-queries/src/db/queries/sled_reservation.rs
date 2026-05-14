@@ -274,6 +274,35 @@ pub fn sled_find_targets_query(
     query.query()
 }
 
+pub const SLED_HAS_SPACE_SENTINEL: &'static str = "SLED_HAS_SPACE";
+pub const SLED_HAS_SPACE_SENTINEL_REASON: &'static str =
+    "sled target does not have the available hardware resources";
+
+pub const BANNED_SLEDS_SENTINEL: &'static str = "BANNED_SLEDS";
+pub const BANNED_SLEDS_SENTINEL_REASON: &'static str =
+    "sled target hosts another instance in anti-affinity group";
+
+pub const REQUIRED_SLEDS_SENTINEL: &'static str = "REQUIRED_SLEDS";
+pub const REQUIRED_SLEDS_SENTINEL_REASON: &'static str =
+    "sled target does not host another instance in affinity group";
+
+/// The sled insert query will return a sentinel (using the pattern of an
+/// erroneous cast of a string into a bool) if the insert is no longer valid due
+/// to three of the conditions related to a sled's available hardware resources,
+/// or affinity rules.
+pub const SLED_INSERT_QUERY_SENTINELS: [&'static str; 3] =
+    [SLED_HAS_SPACE_SENTINEL, BANNED_SLEDS_SENTINEL, REQUIRED_SLEDS_SENTINEL];
+
+/// Turn the returned sentinel into a human-readable error
+pub fn sentinel_to_reason(sentinel: &'static str) -> &'static str {
+    match sentinel {
+        SLED_HAS_SPACE_SENTINEL => SLED_HAS_SPACE_SENTINEL_REASON,
+        BANNED_SLEDS_SENTINEL => BANNED_SLEDS_SENTINEL_REASON,
+        REQUIRED_SLEDS_SENTINEL => REQUIRED_SLEDS_SENTINEL_REASON,
+        _ => sentinel,
+    }
+}
+
 /// Attempts to:
 ///
 /// 1. Insert a sled_resource_vmm record, if it is still a valid reservation
@@ -397,21 +426,51 @@ pub fn sled_insert_resource_query(
     //     allocation records with the existing ones and test each zpool.
     //   - the rendezvous local storage dataset is not tombstoned or marked
     //     no_provision
+    //
+    // In addition, use the "cast error string to bool" pattern to provide an
+    // error to the caller indicating what failed.
 
-    query
-        .sql(
-            "INSERT_VALID AS (
+    query.sql(
+        "INSERT_VALID AS (
               SELECT 1
               WHERE
-                  EXISTS(SELECT 1 FROM sled_has_space) AND
-                  NOT(EXISTS(SELECT 1 FROM banned_sleds WHERE sled_id = ",
-        )
-        .param()
-        .bind::<sql_types::Uuid, _>(resource.sled_id.into_untyped_uuid())
-        .sql(")) AND (EXISTS(SELECT 1 FROM required_sleds WHERE sled_id = ")
-        .param()
-        .bind::<sql_types::Uuid, _>(resource.sled_id.into_untyped_uuid())
-        .sql(") OR NOT EXISTS (SELECT 1 FROM required_sleds))");
+                  ",
+    );
+
+    query.true_or_cast_error(
+        |query| {
+            query.sql("EXISTS(SELECT 1 FROM sled_has_space)");
+        },
+        SLED_HAS_SPACE_SENTINEL,
+    );
+    query.sql(" AND ");
+
+    query.true_or_cast_error(
+        |query| {
+            query
+                .sql("NOT(EXISTS(SELECT 1 FROM banned_sleds WHERE sled_id = ")
+                .param()
+                .bind::<sql_types::Uuid, _>(
+                    resource.sled_id.into_untyped_uuid(),
+                )
+                .sql("))");
+        },
+        BANNED_SLEDS_SENTINEL,
+    );
+    query.sql(" AND ");
+
+    query.true_or_cast_error(
+        |query| {
+            query
+                .sql("(EXISTS(SELECT 1 FROM required_sleds WHERE sled_id = ")
+                .param()
+                .bind::<sql_types::Uuid, _>(
+                    resource.sled_id.into_untyped_uuid(),
+                )
+                .sql(") OR NOT EXISTS (SELECT 1 FROM required_sleds))");
+        },
+        REQUIRED_SLEDS_SENTINEL,
+    );
 
     match local_storage_allocation_required {
         LocalStorageAllocationRequired::No => {}

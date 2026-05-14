@@ -1,0 +1,66 @@
+# This test verifies that when resolving a MUPdate, the planner does not clear
+# the "will remove mupdate override" field from a sled's blueprint based on stale
+# inventory -- specifically, an inventory collection that occurred before
+# the sled was MUPdated, so the mupdate override UUID isn't visible in it.
+#
+# Acting on stale inventory in this way could cause the planner to acknowledge
+# a sled recovery that hasn't happened, breaking the edge-triggered
+# mupdate override semantics. The solution is to mark a sled as ineligible for
+# both noop conversion and will-remove-mupdate-override clearing whenever the
+# inventory's reported sled-agent generation is older than the generation in
+# the parent blueprint.
+#
+# The test simulates two plans against the same parent blueprint: one against
+# the latest (post-mupdate) inventory, and then one against a stale (pre-mupdate)
+# inventory. With the fix, planning against the stale inventory leaves
+# the "will remove mupdate override" field alone instead of clearing it.
+
+# Load a small example system. We only need one sled to demonstrate the bug.
+load-example --nsleds 1 --ndisks-per-sled 3
+sled-list
+
+# Create a TUF repository so noop image source conversions are possible.
+tuf-assemble ../../update-common/manifests/fake.toml
+set target-release repo-1.0.0.zip
+
+# Update the install dataset on serial0 to the target release.
+sled-update-install-dataset serial0 --to-target-release
+
+# Generate the first inventory collection. At this point the sled has no
+# mupdate override visible. We'll come back to this collection later to plan
+# against it as a "stale" inventory.
+inventory-generate
+inventory-list
+
+# Simulate a mupdate on serial0 by setting the mupdate override field. The
+# sled's reconciled config generation is unchanged -- the mupdate override is
+# tracked separately.
+sled-set serial0 mupdate-override 11111111-1111-1111-1111-111111111111
+
+# Generate a second inventory collection, post-MUPdate. This one has the
+# override visible.
+inventory-generate
+inventory-list
+
+# Plan against the latest (post-mupdate) inventory. This should set
+# `remove_mupdate_override` on serial0 in the new blueprint and bump its
+# sled-agent generation.
+blueprint-plan latest latest
+blueprint-diff latest
+
+# Now plan against the first (pre-mupdate) inventory collection. That
+# inventory shows no mupdate override on serial0, but only because the
+# inventory was captured before the mupdate ever happened. The parent
+# blueprint's sled-agent generation for serial0 is now ahead of what this
+# stale inventory reports.
+#
+# The collection ID below is the deterministic UUID for the first
+# `inventory-generate` above.
+#
+# Without the check for stale inventory, the planner would treat the absence of
+# the override in this stale inventory as evidence that the sled has recovered,
+# and clear the "will remove mupdate override" field from the blueprint. With
+# the check, the planner leaves the "will remove mupdate override" field alone,
+# logging "blueprint override could not be cleared, ... reason: inventory stale".
+blueprint-plan latest eb0796d5-ab8a-4f7b-a884-b4aeacb8ab51
+blueprint-diff latest

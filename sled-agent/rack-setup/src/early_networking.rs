@@ -39,8 +39,8 @@ use omicron_ddm_admin_client::DdmError;
 use oxnet::IpNet;
 use rdb_types::{Prefix, Prefix4, Prefix6};
 use sled_agent_types::early_networking::{
-    BfdMode, BgpConfig, BgpPeerConfig, ImportExportPolicy, PortConfig, PortFec,
-    PortSpeed, RouterPeerType, SwitchSlot, UplinkAddress,
+    BfdMode, BgpConfig, BgpPeerConfig, ImportExportPolicy, LinkFec, LinkSpeed,
+    PortConfig, RouterPeerType, SwitchSlot, UplinkAddress,
 };
 use sled_agent_types::sled::ThisSledSwitchZoneUnderlayIpAddr;
 use sled_agent_types::system_networking::SystemNetworkingConfig;
@@ -929,24 +929,24 @@ fn retry_policy_switch_mapping() -> ExponentialBackoff {
 // in the internal API to the types used in the dpd-client API.  The conversion
 // is done here, rather than with "impl From" at the definition, to avoid a
 // circular dependency between omicron-common and dpd.
-fn convert_speed(speed: &PortSpeed) -> dpd_client::types::PortSpeed {
+fn convert_speed(speed: &LinkSpeed) -> dpd_client::types::PortSpeed {
     match speed {
-        PortSpeed::Speed0G => dpd_client::types::PortSpeed::Speed0G,
-        PortSpeed::Speed1G => dpd_client::types::PortSpeed::Speed1G,
-        PortSpeed::Speed10G => dpd_client::types::PortSpeed::Speed10G,
-        PortSpeed::Speed25G => dpd_client::types::PortSpeed::Speed25G,
-        PortSpeed::Speed40G => dpd_client::types::PortSpeed::Speed40G,
-        PortSpeed::Speed50G => dpd_client::types::PortSpeed::Speed50G,
-        PortSpeed::Speed100G => dpd_client::types::PortSpeed::Speed100G,
-        PortSpeed::Speed200G => dpd_client::types::PortSpeed::Speed200G,
-        PortSpeed::Speed400G => dpd_client::types::PortSpeed::Speed400G,
+        LinkSpeed::Speed0G => dpd_client::types::PortSpeed::Speed0G,
+        LinkSpeed::Speed1G => dpd_client::types::PortSpeed::Speed1G,
+        LinkSpeed::Speed10G => dpd_client::types::PortSpeed::Speed10G,
+        LinkSpeed::Speed25G => dpd_client::types::PortSpeed::Speed25G,
+        LinkSpeed::Speed40G => dpd_client::types::PortSpeed::Speed40G,
+        LinkSpeed::Speed50G => dpd_client::types::PortSpeed::Speed50G,
+        LinkSpeed::Speed100G => dpd_client::types::PortSpeed::Speed100G,
+        LinkSpeed::Speed200G => dpd_client::types::PortSpeed::Speed200G,
+        LinkSpeed::Speed400G => dpd_client::types::PortSpeed::Speed400G,
     }
 }
 
-fn convert_fec(fec: PortFec) -> dpd_client::types::PortFec {
+fn convert_fec(fec: LinkFec) -> dpd_client::types::PortFec {
     match fec {
-        PortFec::Firecode => dpd_client::types::PortFec::Firecode,
-        PortFec::None => dpd_client::types::PortFec::None,
-        PortFec::Rs => dpd_client::types::PortFec::Rs,
+        LinkFec::Firecode => dpd_client::types::PortFec::Firecode,
+        LinkFec::None => dpd_client::types::PortFec::None,
+        LinkFec::Rs => dpd_client::types::PortFec::Rs,
     }
 }

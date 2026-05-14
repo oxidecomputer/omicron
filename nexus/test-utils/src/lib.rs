@@ -46,6 +46,8 @@ pub const PHYSICAL_DISK_UUID: &str = "fbf4e1f1-410e-4314-bff1-fec0504be07e";
 pub const OXIMETER_UUID: &str = "39e6175b-4df2-4730-b11d-cbc1e60a2e78";
 pub const PRODUCER_UUID: &str = "a6458b7d-87c3-4483-be96-854d814c20de";
 pub const RACK_SUBNET: &str = "fd00:1122:3344:0100::/56";
+pub const PHYSICAL_DISK_ADOPTION_REQ_UUID: &str =
+    "f6944257-9799-4e3e-89b1-c2297b67c16f";
 
 /// Password for the user created by the test suite
 ///

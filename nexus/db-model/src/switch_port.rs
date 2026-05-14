@@ -30,8 +30,8 @@ use omicron_uuid_kinds::TypedUuid;
 use oxnet::IpNet;
 use serde::{Deserialize, Serialize};
 use sled_agent_types::early_networking::ImportExportPolicy;
-use sled_agent_types::early_networking::PortFec;
-use sled_agent_types::early_networking::PortSpeed;
+use sled_agent_types::early_networking::LinkFec;
+use sled_agent_types::early_networking::LinkSpeed;
 use sled_agent_types::early_networking::RouterLifetimeConfig;
 use sled_agent_types::early_networking::RouterLifetimeConfigError;
 use sled_agent_types::early_networking::RouterPeerIpAddr;
@@ -175,80 +175,54 @@ impl_enum_type!(
     Speed400G => b"400G"
 );
 
-impl From<SwitchLinkFec> for PortFec {
+impl From<SwitchLinkFec> for LinkFec {
     fn from(value: SwitchLinkFec) -> Self {
         match value {
-            SwitchLinkFec::Firecode => PortFec::Firecode,
-            SwitchLinkFec::None => PortFec::None,
-            SwitchLinkFec::Rs => PortFec::Rs,
+            SwitchLinkFec::Firecode => Self::Firecode,
+            SwitchLinkFec::None => Self::None,
+            SwitchLinkFec::Rs => Self::Rs,
         }
     }
 }
 
-impl From<external::LinkFec> for SwitchLinkFec {
-    fn from(value: external::LinkFec) -> Self {
+impl From<LinkFec> for SwitchLinkFec {
+    fn from(value: LinkFec) -> Self {
         match value {
-            external::LinkFec::Firecode => SwitchLinkFec::Firecode,
-            external::LinkFec::None => SwitchLinkFec::None,
-            external::LinkFec::Rs => SwitchLinkFec::Rs,
+            LinkFec::Firecode => Self::Firecode,
+            LinkFec::None => Self::None,
+            LinkFec::Rs => Self::Rs,
         }
     }
 }
 
-impl From<SwitchLinkFec> for external::LinkFec {
-    fn from(value: SwitchLinkFec) -> Self {
-        match value {
-            SwitchLinkFec::Firecode => external::LinkFec::Firecode,
-            SwitchLinkFec::None => external::LinkFec::None,
-            SwitchLinkFec::Rs => external::LinkFec::Rs,
-        }
-    }
-}
-
-impl From<SwitchLinkSpeed> for PortSpeed {
+impl From<SwitchLinkSpeed> for LinkSpeed {
     fn from(value: SwitchLinkSpeed) -> Self {
         match value {
-            SwitchLinkSpeed::Speed0G => PortSpeed::Speed0G,
-            SwitchLinkSpeed::Speed1G => PortSpeed::Speed1G,
-            SwitchLinkSpeed::Speed10G => PortSpeed::Speed10G,
-            SwitchLinkSpeed::Speed25G => PortSpeed::Speed25G,
-            SwitchLinkSpeed::Speed40G => PortSpeed::Speed40G,
-            SwitchLinkSpeed::Speed50G => PortSpeed::Speed50G,
-            SwitchLinkSpeed::Speed100G => PortSpeed::Speed100G,
-            SwitchLinkSpeed::Speed200G => PortSpeed::Speed200G,
-            SwitchLinkSpeed::Speed400G => PortSpeed::Speed400G,
+            SwitchLinkSpeed::Speed0G => Self::Speed0G,
+            SwitchLinkSpeed::Speed1G => Self::Speed1G,
+            SwitchLinkSpeed::Speed10G => Self::Speed10G,
+            SwitchLinkSpeed::Speed25G => Self::Speed25G,
+            SwitchLinkSpeed::Speed40G => Self::Speed40G,
+            SwitchLinkSpeed::Speed50G => Self::Speed50G,
+            SwitchLinkSpeed::Speed100G => Self::Speed100G,
+            SwitchLinkSpeed::Speed200G => Self::Speed200G,
+            SwitchLinkSpeed::Speed400G => Self::Speed400G,
         }
     }
 }
 
-impl From<external::LinkSpeed> for SwitchLinkSpeed {
-    fn from(value: external::LinkSpeed) -> Self {
+impl From<LinkSpeed> for SwitchLinkSpeed {
+    fn from(value: LinkSpeed) -> Self {
         match value {
-            external::LinkSpeed::Speed0G => SwitchLinkSpeed::Speed0G,
-            external::LinkSpeed::Speed1G => SwitchLinkSpeed::Speed1G,
-            external::LinkSpeed::Speed10G => SwitchLinkSpeed::Speed10G,
-            external::LinkSpeed::Speed25G => SwitchLinkSpeed::Speed25G,
-            external::LinkSpeed::Speed40G => SwitchLinkSpeed::Speed40G,
-            external::LinkSpeed::Speed50G => SwitchLinkSpeed::Speed50G,
-            external::LinkSpeed::Speed100G => SwitchLinkSpeed::Speed100G,
-            external::LinkSpeed::Speed200G => SwitchLinkSpeed::Speed200G,
-            external::LinkSpeed::Speed400G => SwitchLinkSpeed::Speed400G,
-        }
-    }
-}
-
-impl From<SwitchLinkSpeed> for external::LinkSpeed {
-    fn from(value: SwitchLinkSpeed) -> Self {
-        match value {
-            SwitchLinkSpeed::Speed0G => external::LinkSpeed::Speed0G,
-            SwitchLinkSpeed::Speed1G => external::LinkSpeed::Speed1G,
-            SwitchLinkSpeed::Speed10G => external::LinkSpeed::Speed10G,
-            SwitchLinkSpeed::Speed25G => external::LinkSpeed::Speed25G,
-            SwitchLinkSpeed::Speed40G => external::LinkSpeed::Speed40G,
-            SwitchLinkSpeed::Speed50G => external::LinkSpeed::Speed50G,
-            SwitchLinkSpeed::Speed100G => external::LinkSpeed::Speed100G,
-            SwitchLinkSpeed::Speed200G => external::LinkSpeed::Speed200G,
-            SwitchLinkSpeed::Speed400G => external::LinkSpeed::Speed400G,
+            LinkSpeed::Speed0G => Self::Speed0G,
+            LinkSpeed::Speed1G => Self::Speed1G,
+            LinkSpeed::Speed10G => Self::Speed10G,
+            LinkSpeed::Speed25G => Self::Speed25G,
+            LinkSpeed::Speed40G => Self::Speed40G,
+            LinkSpeed::Speed50G => Self::Speed50G,
+            LinkSpeed::Speed100G => Self::Speed100G,
+            LinkSpeed::Speed200G => Self::Speed200G,
+            LinkSpeed::Speed400G => Self::Speed400G,
         }
     }
 }
@@ -269,17 +243,17 @@ impl From<networking_types::SwitchPortGeometry> for SwitchPortGeometry {
     }
 }
 
-impl Into<external::SwitchPortGeometry> for SwitchPortGeometry {
-    fn into(self) -> external::SwitchPortGeometry {
+impl Into<networking_types::SwitchPortGeometry> for SwitchPortGeometry {
+    fn into(self) -> networking_types::SwitchPortGeometry {
         match self {
             SwitchPortGeometry::Qsfp28x1 => {
-                external::SwitchPortGeometry::Qsfp28x1
+                networking_types::SwitchPortGeometry::Qsfp28x1
             }
             SwitchPortGeometry::Qsfp28x2 => {
-                external::SwitchPortGeometry::Qsfp28x2
+                networking_types::SwitchPortGeometry::Qsfp28x2
             }
             SwitchPortGeometry::Sfp28x4 => {
-                external::SwitchPortGeometry::Sfp28x4
+                networking_types::SwitchPortGeometry::Sfp28x4
             }
         }
     }
@@ -409,9 +383,11 @@ impl SwitchPortSettings {
     }
 }
 
-impl Into<external::SwitchPortSettingsIdentity> for SwitchPortSettings {
-    fn into(self) -> external::SwitchPortSettingsIdentity {
-        external::SwitchPortSettingsIdentity { identity: self.identity() }
+impl Into<networking_types::SwitchPortSettingsIdentity> for SwitchPortSettings {
+    fn into(self) -> networking_types::SwitchPortSettingsIdentity {
+        networking_types::SwitchPortSettingsIdentity {
+            identity: self.identity(),
+        }
     }
 }
 
@@ -424,9 +400,11 @@ pub struct SwitchPortSettingsGroups {
     pub port_settings_group_id: Uuid,
 }
 
-impl Into<external::SwitchPortSettingsGroups> for SwitchPortSettingsGroups {
-    fn into(self) -> external::SwitchPortSettingsGroups {
-        external::SwitchPortSettingsGroups {
+impl Into<networking_types::SwitchPortSettingsGroups>
+    for SwitchPortSettingsGroups
+{
+    fn into(self) -> networking_types::SwitchPortSettingsGroups {
+        networking_types::SwitchPortSettingsGroups {
             port_settings_id: self.port_settings_id,
             port_settings_group_id: self.port_settings_group_id,
         }
@@ -450,9 +428,11 @@ pub struct SwitchPortSettingsGroup {
     pub port_settings_id: Uuid,
 }
 
-impl Into<external::SwitchPortSettingsGroup> for SwitchPortSettingsGroup {
-    fn into(self) -> external::SwitchPortSettingsGroup {
-        external::SwitchPortSettingsGroup {
+impl Into<networking_types::SwitchPortSettingsGroup>
+    for SwitchPortSettingsGroup
+{
+    fn into(self) -> networking_types::SwitchPortSettingsGroup {
+        networking_types::SwitchPortSettingsGroup {
             identity: self.identity(),
             port_settings_id: self.port_settings_id,
         }
@@ -474,9 +454,9 @@ impl SwitchPortConfig {
     }
 }
 
-impl Into<external::SwitchPortConfig> for SwitchPortConfig {
-    fn into(self) -> external::SwitchPortConfig {
-        external::SwitchPortConfig {
+impl Into<networking_types::SwitchPortConfig> for SwitchPortConfig {
+    fn into(self) -> networking_types::SwitchPortConfig {
+        networking_types::SwitchPortConfig {
             port_settings_id: self.port_settings_id,
             geometry: self.geometry.into(),
         }
@@ -584,9 +564,9 @@ impl LldpLinkConfig {
 
 // This converts the internal database version of the config into the
 // user-facing version.
-impl Into<external::LldpLinkConfig> for LldpLinkConfig {
-    fn into(self) -> external::LldpLinkConfig {
-        external::LldpLinkConfig {
+impl Into<networking_types::LldpLinkConfig> for LldpLinkConfig {
+    fn into(self) -> networking_types::LldpLinkConfig {
+        networking_types::LldpLinkConfig {
             id: self.id,
             enabled: self.enabled,
             link_name: self.link_name.clone(),
@@ -633,9 +613,9 @@ impl TxEqConfig {
 
 // This converts the internal database version of the config into the
 // user-facing version.
-impl Into<external::TxEqConfig> for TxEqConfig {
-    fn into(self) -> external::TxEqConfig {
-        external::TxEqConfig {
+impl Into<sled_agent_types::early_networking::TxEqConfig> for TxEqConfig {
+    fn into(self) -> sled_agent_types::early_networking::TxEqConfig {
+        sled_agent_types::early_networking::TxEqConfig {
             pre1: self.pre1,
             pre2: self.pre2,
             main: self.main,
@@ -677,18 +657,6 @@ impl SwitchInterfaceConfig {
             interface_name,
             v6_enabled,
             kind,
-        }
-    }
-}
-
-impl Into<external::SwitchInterfaceConfig> for SwitchInterfaceConfig {
-    fn into(self) -> external::SwitchInterfaceConfig {
-        external::SwitchInterfaceConfig {
-            port_settings_id: self.port_settings_id,
-            id: self.id,
-            interface_name: self.interface_name.into(),
-            v6_enabled: self.v6_enabled,
-            kind: self.kind.into(),
         }
     }
 }

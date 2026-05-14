@@ -3,7 +3,13 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 //! HTTP entrypoint functions for simulating the crucible pantry API.
+//!
+//! `VolumeStatus` and its tree (`VolumeInfo`, `UpstairsInfoStatus`, etc.) are
+//! imported directly from `crucible_pantry_client::types` so the simulator's
+//! OpenAPI stays byte-identical to the real pantry's, since both are generated
+//! from the same upstream OpenAPI document.
 
+use crucible_pantry_client::types::VolumeStatus;
 use dropshot::{
     ApiDescription, ApiDescriptionRegisterError, HttpError,
     HttpResponseDeleted, HttpResponseOk, HttpResponseUpdatedNoContent,
@@ -45,10 +51,6 @@ pub fn api() -> CruciblePantryApiDescription {
     api
 }
 
-// TODO: We'd like to de-duplicate as much as possible with the real crucible
-// pantry here, to avoid skew. However, this was wholesale copied from the
-// crucible repo!
-
 #[derive(Serialize, JsonSchema)]
 pub struct PantryStatus {
     /// Which volumes does this Pantry know about? Note this may include volumes
@@ -77,18 +79,6 @@ async fn pantry_status(
 #[derive(Deserialize, JsonSchema)]
 struct VolumePath {
     pub id: String,
-}
-
-#[derive(Clone, Deserialize, Serialize, JsonSchema)]
-pub struct VolumeStatus {
-    /// Is the Volume currently active?
-    pub active: bool,
-
-    /// Has the Pantry ever seen this Volume active?
-    pub seen_active: bool,
-
-    /// How many job handles are there for this Volume?
-    pub num_job_handles: usize,
 }
 
 /// Get a current Volume's status
@@ -486,6 +476,14 @@ mod tests {
                     // since it's not possible to get this key-value combination
                     // in a real JSON schema.
                     if key == "description" && value.is_string() {
+                        continue;
+                    }
+                    // Also skip "format" string differences: progenitor's
+                    // round-trip (OpenAPI -> Rust type -> schemars) loses
+                    // integer-format precision (e.g. real's `usize` -> `uint`
+                    // becomes generated `u32` -> `uint32`). These hints don't
+                    // affect schema semantics.
+                    if key == "format" && value.is_string() {
                         continue;
                     }
                     let new_path = format!("{path}/{key}");
