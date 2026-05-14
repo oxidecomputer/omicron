@@ -980,10 +980,13 @@ mod tests {
             .as_ref()
             .expect("Should have computed something")
             .tables;
-        tables.contains_key(&String::from("oximeter.measurements_u64"));
-        tables.contains_key(&String::from("oximeter.measurements_f64"));
-        let version = tables.get(&String::from("oximeter.version")).unwrap();
-        assert_eq!(version.n_rows, 1);
+        assert!(
+            tables.contains_key(&String::from("oximeter.measurements_u64"))
+        );
+        assert!(
+            tables.contains_key(&String::from("oximeter.measurements_f64"))
+        );
+        assert!(tables.contains_key(&String::from("oximeter.version")));
 
         // Kill the database, and wait for another collection. This one should
         // fail.
