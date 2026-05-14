@@ -14,6 +14,7 @@ mod illumos {
     use sled_agent_types::inventory::{FmdHostCase, FmdInventory, FmdResource};
     use slog::Logger;
     use slog::warn;
+    use slog_error_chain::InlineErrorChain;
 
     pub(super) fn nvvalue_to_json(value: &NvValue) -> serde_json::Value {
         match value {
@@ -68,8 +69,9 @@ mod illumos {
         let adm = match FmdAdm::open() {
             Ok(adm) => adm,
             Err(e) => {
-                warn!(log, "failed to open fmd"; "error" => %e);
-                return Err(format!("failed to open fmd: {e}"));
+                let err = InlineErrorChain::new(&e);
+                warn!(log, "failed to open fmd"; &err);
+                return Err(format!("failed to open fmd: {err}"));
             }
         };
 
@@ -87,8 +89,9 @@ mod illumos {
                 })
                 .collect(),
             Err(e) => {
-                warn!(log, "failed to list fmd cases"; "error" => %e);
-                return Err(format!("failed to list fmd cases: {e}"));
+                let err = InlineErrorChain::new(&e);
+                warn!(log, "failed to list fmd cases"; &err);
+                return Err(format!("failed to list fmd cases: {err}"));
             }
         };
 
@@ -115,8 +118,9 @@ mod illumos {
                 })
                 .collect(),
             Err(e) => {
-                warn!(log, "failed to list fmd resources"; "error" => %e);
-                return Err(format!("failed to list fmd resources: {e}"));
+                let err = InlineErrorChain::new(&e);
+                warn!(log, "failed to list fmd resources"; &err);
+                return Err(format!("failed to list fmd resources: {err}"));
             }
         };
 
