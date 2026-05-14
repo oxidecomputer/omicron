@@ -11,17 +11,22 @@ use crate::switch_zone_slot::ThisSledSwitchSlot;
 use dpd_client::Client;
 use sled_agent_types::system_networking::SystemNetworkingConfig;
 use slog::Logger;
-use slog::info;
 use std::time::Duration;
 
 mod nat;
+mod port_reconciler;
 
 pub use nat::DpdNatReconcilerStatus;
 pub use nat::DpdNatReconcilerStatusNatEntry;
 pub use nat::DpdNatReconcilerStatusNatEntryFailure;
+pub use port_reconciler::DpdPortOperationFailure;
+pub use port_reconciler::DpdPortReconcilerStatus;
+use port_reconciler::PortReconciler;
 
 #[derive(Debug, Clone)]
 pub struct DpdReconcilerStatus {
+    /// Result of reconciling port settings
+    pub port_settings_status: DpdPortReconcilerStatus,
     /// Result of reconciling service zone NAT entries
     pub nat_status: DpdNatReconcilerStatus,
 }
@@ -32,15 +37,18 @@ impl slog::KV for DpdReconcilerStatus {
         record: &slog::Record<'_>,
         serializer: &mut dyn slog::Serializer,
     ) -> slog::Result {
-        let Self { nat_status } = self;
-        nat_status.serialize(record, serializer)
+        let Self { port_settings_status, nat_status } = self;
+        port_settings_status.serialize(record, serializer)?;
+        nat_status.serialize(record, serializer)?;
+        Ok(())
     }
 }
 
 #[derive(Debug)]
 pub(crate) struct DpdReconciler {
     client: Client,
-    _switch_slot: ThisSledSwitchSlot,
+    switch_slot: ThisSledSwitchSlot,
+    port_reconciler: PortReconciler,
 }
 
 impl Reconciler for DpdReconciler {
@@ -54,7 +62,11 @@ impl Reconciler for DpdReconciler {
         switch_slot: ThisSledSwitchSlot,
         parent_log: &Logger,
     ) -> Self {
-        Self { client: mode.dpd_client(parent_log), _switch_slot: switch_slot }
+        Self {
+            client: mode.dpd_client(parent_log),
+            switch_slot,
+            port_reconciler: PortReconciler::default(),
+        }
     }
 
     async fn do_reconciliation(
@@ -62,6 +74,16 @@ impl Reconciler for DpdReconciler {
         system_networking_config: &SystemNetworkingConfig,
         log: &Logger,
     ) -> Self::Status {
+        let port_settings_status = self
+            .port_reconciler
+            .reconcile(
+                &self.client,
+                &system_networking_config.rack_network_config,
+                self.switch_slot,
+                log,
+            )
+            .await;
+
         let nat_status = if let Some(nat_entries) = system_networking_config
             .blueprint_external_networking_config
             .as_ref()
@@ -72,11 +94,6 @@ impl Reconciler for DpdReconciler {
             DpdNatReconcilerStatus::NoNatEntriesConfig
         };
 
-        info!(
-            log, "dpd reconciliation completed";
-            &nat_status,
-        );
-
-        DpdReconcilerStatus { nat_status }
+        DpdReconcilerStatus { port_settings_status, nat_status }
     }
 }

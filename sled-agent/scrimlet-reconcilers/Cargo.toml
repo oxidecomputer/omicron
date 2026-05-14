@@ -14,6 +14,7 @@ dpd-client.workspace = true
 futures.workspace = true
 gateway-client.workspace = true
 gateway-types.workspace = true
+iddqd.workspace = true
 macaddr.workspace = true
 mg-admin-client.workspace = true
 omicron-common.workspace = true

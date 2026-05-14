@@ -245,6 +245,7 @@ pub struct LldpPortConfig {
 #[derive(
     Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq, Hash, JsonSchema,
 )]
+#[cfg_attr(any(test, feature = "testing"), derive(test_strategy::Arbitrary))]
 pub struct TxEqConfig {
     /// Pre-cursor tap1
     pub pre1: Option<i32>,
@@ -307,9 +308,19 @@ pub enum SwitchSlot {
 
 /// The speed of a link.
 #[derive(
-    Copy, Clone, Debug, Deserialize, Serialize, PartialEq, Eq, JsonSchema, Hash,
+    Copy,
+    Clone,
+    Debug,
+    Deserialize,
+    Serialize,
+    PartialEq,
+    Eq,
+    JsonSchema,
+    Hash,
+    daft::Diffable,
 )]
 #[serde(rename_all = "snake_case")]
+#[cfg_attr(any(test, feature = "testing"), derive(test_strategy::Arbitrary))]
 pub enum LinkSpeed {
     /// Zero gigabits per second.
     #[serde(alias = "0G")]
@@ -345,6 +356,7 @@ pub enum LinkSpeed {
     Copy, Clone, Debug, Deserialize, Serialize, PartialEq, Eq, JsonSchema, Hash,
 )]
 #[serde(rename_all = "snake_case")]
+#[cfg_attr(any(test, feature = "testing"), derive(test_strategy::Arbitrary))]
 pub enum LinkFec {
     /// Firecode forward error correction.
     Firecode,

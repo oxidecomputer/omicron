@@ -13707,6 +13707,7 @@ dependencies = [
  "gateway-test-utils",
  "gateway-types",
  "httpmock",
+ "iddqd",
  "macaddr",
  "mg-admin-client",
  "omicron-common",
