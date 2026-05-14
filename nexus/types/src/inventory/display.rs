@@ -917,7 +917,11 @@ fn display_sleds(
 
         writeln!(indented, "fmd:")?;
         let mut indent2 = IndentWriter::new("    ", &mut indented);
-        write!(indent2, "{}", fmd.display())?;
+        write!(
+            indent2,
+            "{}",
+            sled_agent_types_versions::latest::inventory::FmdInventoryResultDisplay::new(fmd),
+        )?;
 
         f = indented.into_inner();
         display_svcs_enabled_not_online(smf_services_enabled_not_online, f)?;

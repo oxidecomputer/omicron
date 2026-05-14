@@ -240,7 +240,6 @@ mod api_impl {
     use sled_agent_types::inventory::ConfigReconcilerInventory;
     use sled_agent_types::inventory::ConfigReconcilerInventoryStatus;
     use sled_agent_types::inventory::FmdInventory;
-    use sled_agent_types::inventory::FmdInventoryResult;
     use sled_agent_types::inventory::HostPhase2DesiredContents;
     use sled_agent_types::inventory::HostPhase2DesiredSlots;
     use sled_agent_types::inventory::Inventory;
@@ -275,6 +274,7 @@ mod api_impl {
     use sled_agent_types_versions::v26;
     use sled_agent_types_versions::v30;
     use sled_agent_types_versions::v33;
+    use sled_agent_types_versions::v39;
     use sled_diagnostics::SledDiagnosticsQueryOutput;
     use std::collections::BTreeMap;
     use std::collections::BTreeSet;
@@ -378,7 +378,7 @@ mod api_impl {
                     remove_mupdate_override: None,
                     boot_partitions,
                 }),
-                fmd: FmdInventoryResult::Available(FmdInventory::default()),
+                fmd: Ok(FmdInventory::default()),
                 file_source_resolver: OmicronFileSourceResolverInventory {
                     zone_manifest: ManifestInventory {
                         boot_disk_path: Utf8PathBuf::new(),
@@ -773,6 +773,13 @@ mod api_impl {
             HttpResponseOk<v20::early_networking::EarlyNetworkConfig>,
             HttpError,
         > {
+            unimplemented!()
+        }
+
+        async fn write_network_bootstore_config_v39(
+            _rqctx: RequestContext<Self::Context>,
+            _body: TypedBody<v39::system_networking::WriteNetworkConfigRequest>,
+        ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
             unimplemented!()
         }
 

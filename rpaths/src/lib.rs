@@ -143,6 +143,21 @@ mod internal {
             configure_rpaths_from_env_var(&mut rpaths, &env_var_name);
         }
 
+        // If none of the expected env vars were set, the caller opted into
+        // this plumbing but has no direct `*-sys` dep that would contribute.
+        // Only enforced on illumos: on Linux some `*-sys` deps (e.g.
+        // fmd-adm-sys) are target-gated to illumos, so a caller can
+        // legitimately contribute nothing on Linux.
+        #[cfg(target_os = "illumos")]
+        assert!(
+            !rpaths.is_empty(),
+            "omicron-rpaths: configure_default_omicron_rpaths() was called \
+             but none of {:?} were set. Add a direct dep on the \
+             corresponding *-sys crate(s) to your Cargo.toml, or remove \
+             the call from build.rs.",
+            RPATH_ENV_VARS,
+        );
+
         for r in rpaths {
             println!("{}", emit_rpath(&r));
         }

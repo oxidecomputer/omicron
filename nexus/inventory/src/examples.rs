@@ -52,7 +52,6 @@ use sled_agent_types::inventory::ConfigReconcilerInventory;
 use sled_agent_types::inventory::ConfigReconcilerInventoryResult;
 use sled_agent_types::inventory::ConfigReconcilerInventoryStatus;
 use sled_agent_types::inventory::FmdInventory;
-use sled_agent_types::inventory::FmdInventoryResult;
 use sled_agent_types::inventory::HostPhase2DesiredSlots;
 use sled_agent_types::inventory::Inventory;
 use sled_agent_types::inventory::InventoryDataset;
@@ -1120,10 +1119,7 @@ pub fn sled_agent(
         unusable: false,
         invisible: false,
     });
-    let fmd = FmdInventoryResult::Available(FmdInventory {
-        cases: fmd_cases,
-        resources: fmd_resources,
-    });
+    let fmd = Ok(FmdInventory { cases: fmd_cases, resources: fmd_resources });
 
     Inventory {
         baseboard,

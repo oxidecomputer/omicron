@@ -61,10 +61,10 @@ use sled_agent_types::instance::{
 };
 use sled_agent_types::inventory::{
     ConfigReconcilerInventory, ConfigReconcilerInventoryResult,
-    ConfigReconcilerInventoryStatus, FmdInventory, FmdInventoryResult,
-    HostPhase2DesiredSlots, Inventory, InventoryDataset, InventoryDisk,
-    InventoryZpool, OmicronFileSourceResolverInventory, OmicronSledConfig,
-    OmicronZonesConfig, SingleMeasurementInventory, SledRole, ZpoolHealth,
+    ConfigReconcilerInventoryStatus, FmdInventory, HostPhase2DesiredSlots,
+    Inventory, InventoryDataset, InventoryDisk, InventoryZpool,
+    OmicronFileSourceResolverInventory, OmicronSledConfig, OmicronZonesConfig,
+    SingleMeasurementInventory, SledRole, ZpoolHealth,
 };
 use sled_agent_types::support_bundle::SupportBundleMetadata;
 use sled_agent_types::system_networking::SystemNetworkingConfig;
@@ -154,7 +154,7 @@ impl SledAgent {
                 },
                 // TODO-correctness Can we fill this in for the simulated
                 // sled-agent?
-                service_zone_nat_entries: None,
+                blueprint_external_networking_config: None,
             })
             .serialize_to_bootstore_with_generation(0),
         );
@@ -994,7 +994,7 @@ impl SledAgent {
             ),
             smf_services_enabled_not_online,
             reference_measurements,
-            fmd: FmdInventoryResult::Available(FmdInventory::default()),
+            fmd: Ok(FmdInventory::default()),
         })
     }
 

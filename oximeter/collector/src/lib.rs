@@ -379,7 +379,7 @@ impl Oximeter {
         .version_policy(dropshot::VersionPolicy::Dynamic(Box::new(
             dropshot::ClientSpecifiesVersionInHeader::new(
                 omicron_common::api::VERSION_HEADER,
-                oximeter_api::VERSION_INITIAL,
+                oximeter_api::latest_version(),
             ),
         )))
         .start()
@@ -497,7 +497,7 @@ impl Oximeter {
         .version_policy(dropshot::VersionPolicy::Dynamic(Box::new(
             dropshot::ClientSpecifiesVersionInHeader::new(
                 omicron_common::api::VERSION_HEADER,
-                oximeter_api::VERSION_INITIAL,
+                oximeter_api::latest_version(),
             ),
         )))
         .start()

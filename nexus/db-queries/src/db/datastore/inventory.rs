@@ -477,14 +477,7 @@ impl DataStore {
             .sled_agents
             .iter()
             .flat_map(|sled_agent| {
-                let cases = match &sled_agent.fmd {
-                    sled_agent_types::inventory::FmdInventoryResult::Available(
-                        inv,
-                    ) => Some(&inv.cases),
-                    sled_agent_types::inventory::FmdInventoryResult::Error {
-                        ..
-                    } => None,
-                };
+                let cases = sled_agent.fmd.as_ref().ok().map(|inv| &inv.cases);
                 cases.into_iter().flatten().map(|case| {
                     InvFmdHostCase::new(collection_id, sled_agent.sled_id, case)
                 })
@@ -494,14 +487,8 @@ impl DataStore {
             .sled_agents
             .iter()
             .flat_map(|sled_agent| {
-                let resources = match &sled_agent.fmd {
-                    sled_agent_types::inventory::FmdInventoryResult::Available(
-                        inv,
-                    ) => Some(&inv.resources),
-                    sled_agent_types::inventory::FmdInventoryResult::Error {
-                        ..
-                    } => None,
-                };
+                let resources =
+                    sled_agent.fmd.as_ref().ok().map(|inv| &inv.resources);
                 resources.into_iter().flatten().map(|resource| {
                     InvFmdResource::new(
                         collection_id,
@@ -4869,28 +4856,20 @@ impl DataStore {
                     .remove(&sled_id)
                     .unwrap_or_default(),
                 fmd: {
-                    use sled_agent_types::inventory::{
-                        FmdInventory, FmdInventoryResult,
-                    };
+                    use sled_agent_types::inventory::FmdInventory;
                     let cases =
                         fmd_cases_by_sled.remove(&sled_id).unwrap_or_default();
                     let resources = fmd_resources_by_sled
                         .remove(&sled_id)
                         .unwrap_or_default();
-                    // The status row's error_message column distinguishes
-                    // Available (NULL) from Error (the message). If no row
-                    // exists at all (i.e. an older collection predates this
-                    // migration), fall back to Available with whatever
-                    // case/resource rows we found, which will normally be
-                    // empty.
+                    // The status row's error_message column distinguishes Ok
+                    // (NULL) from Err (the message). If no row exists at all
+                    // (i.e. an older collection predates this migration),
+                    // fall back to Ok with whatever case/resource rows we
+                    // found, which will normally be empty.
                     match fmd_status_by_sled.remove(&sled_id) {
-                        Some(Some(error)) => {
-                            FmdInventoryResult::Error { error }
-                        }
-                        _ => FmdInventoryResult::Available(FmdInventory {
-                            cases,
-                            resources,
-                        }),
+                        Some(Some(error)) => Err(error),
+                        _ => Ok(FmdInventory { cases, resources }),
                     }
                 },
             };

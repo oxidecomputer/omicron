@@ -89,7 +89,7 @@ use sled_agent_types::inventory::BootImageHeader;
 use sled_agent_types::inventory::BootPartitionDetails;
 use sled_agent_types::inventory::ConfigReconcilerInventoryStatus;
 use sled_agent_types::inventory::FmdHostCase;
-use sled_agent_types::inventory::FmdInventoryResult;
+use sled_agent_types::inventory::FmdInventory;
 use sled_agent_types::inventory::FmdResource;
 use sled_agent_types::inventory::HostPhase2DesiredContents;
 use sled_agent_types::inventory::HostPhase2DesiredSlots;
@@ -2150,11 +2150,11 @@ impl InvFmdStatus {
     pub fn new(
         inv_collection_id: CollectionUuid,
         sled_id: SledUuid,
-        result: &FmdInventoryResult,
+        result: &Result<FmdInventory, String>,
     ) -> Self {
         let error_message = match result {
-            FmdInventoryResult::Available(_) => None,
-            FmdInventoryResult::Error { error } => Some(error.clone()),
+            Ok(_) => None,
+            Err(error) => Some(error.clone()),
         };
         Self {
             inv_collection_id: inv_collection_id.into(),
@@ -2256,7 +2256,6 @@ impl_enum_type!(
     pub enum InvSvcEnabledNotOnlineState;
 
     // Enum values
-    Uninitialized => b"uninitialized"
     Offline => b"offline"
     Degraded => b"degraded"
     Maintenance => b"maintenance"
@@ -2267,9 +2266,6 @@ impl From<SvcEnabledNotOnlineState> for InvSvcEnabledNotOnlineState {
         match value {
             SvcEnabledNotOnlineState::Degraded => {
                 InvSvcEnabledNotOnlineState::Degraded
-            }
-            SvcEnabledNotOnlineState::Uninitialized => {
-                InvSvcEnabledNotOnlineState::Uninitialized
             }
             SvcEnabledNotOnlineState::Offline => {
                 InvSvcEnabledNotOnlineState::Offline
@@ -2286,9 +2282,6 @@ impl From<InvSvcEnabledNotOnlineState> for SvcEnabledNotOnlineState {
         match value {
             InvSvcEnabledNotOnlineState::Degraded => {
                 SvcEnabledNotOnlineState::Degraded
-            }
-            InvSvcEnabledNotOnlineState::Uninitialized => {
-                SvcEnabledNotOnlineState::Uninitialized
             }
             InvSvcEnabledNotOnlineState::Offline => {
                 SvcEnabledNotOnlineState::Offline

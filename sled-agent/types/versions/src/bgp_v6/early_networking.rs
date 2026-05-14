@@ -309,9 +309,9 @@ pub struct PortConfig {
     /// Nmae of the port this config applies to.
     pub port: String,
     /// Port speed.
-    pub uplink_port_speed: v1::PortSpeed,
+    pub uplink_port_speed: v1::LinkSpeed,
     /// Port forward error correction type.
-    pub uplink_port_fec: Option<v1::PortFec>,
+    pub uplink_port_fec: Option<v1::LinkFec>,
     /// BGP peers on this port
     pub bgp_peers: Vec<BgpPeerConfig>,
     /// Whether or not to set autonegotiation

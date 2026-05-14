@@ -4,6 +4,8 @@
 
 use iddqd::{IdOrdItem, IdOrdMap, id_upcast};
 use omicron_common::api::external::ByteCount;
+use omicron_common::snake_case_result;
+use omicron_common::snake_case_result::SnakeCaseResult;
 use omicron_uuid_kinds::{FmdHostCaseUuid, FmdResourceUuid, SledUuid};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -19,7 +21,7 @@ use crate::v14::inventory::OmicronSledConfig;
 use crate::v16::inventory::ConfigReconcilerInventory;
 use crate::v16::inventory::SingleMeasurementInventory;
 use crate::v24::inventory::InventoryZpool;
-use crate::v34;
+use crate::v37;
 
 /// A diagnosed fault case from the illumos Fault Management Daemon on a sled.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
@@ -75,16 +77,6 @@ impl IdOrdItem for FmdResource {
     id_upcast!();
 }
 
-/// Result of querying FMD for fault information.
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
-#[serde(tag = "type", content = "value", rename_all = "snake_case")]
-pub enum FmdInventoryResult {
-    /// FMD data was successfully collected.
-    Available(FmdInventory),
-    /// FMD data collection failed or is not available on this platform.
-    Error { error: String },
-}
-
 /// Successfully collected FMD fault data.
 #[derive(
     Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize, JsonSchema,
@@ -113,12 +105,16 @@ pub struct Inventory {
     pub last_reconciliation: Option<ConfigReconcilerInventory>,
     pub file_source_resolver: OmicronFileSourceResolverInventory,
     pub smf_services_enabled_not_online:
-        v34::inventory::SvcsEnabledNotOnlineResult,
+        v37::inventory::SvcsEnabledNotOnlineResult,
     pub reference_measurements: IdOrdMap<SingleMeasurementInventory>,
-    pub fmd: FmdInventoryResult,
+    #[serde(with = "snake_case_result")]
+    #[schemars(
+        schema_with = "SnakeCaseResult::<FmdInventory, String>::json_schema"
+    )]
+    pub fmd: Result<FmdInventory, String>,
 }
 
-impl From<Inventory> for v34::inventory::Inventory {
+impl From<Inventory> for v37::inventory::Inventory {
     fn from(value: Inventory) -> Self {
         let Inventory {
             sled_id,

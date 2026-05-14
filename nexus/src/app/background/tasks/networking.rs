@@ -6,47 +6,68 @@ use db::datastore::SwitchPortSettingsCombinedResult;
 use dpd_client::types::{
     LinkCreate, LinkId, LinkSettings, PortFec, PortSettings, PortSpeed, TxEq,
 };
+use internal_dns_resolver::ResolveError;
 use internal_dns_types::names::ServiceName;
 use nexus_db_model::{SwitchLinkFec, SwitchLinkSpeed};
 use nexus_db_queries::db;
-use omicron_common::address::MGD_PORT;
 use sled_agent_types::early_networking::SwitchSlot;
-use std::{
-    collections::HashMap,
-    net::{Ipv6Addr, SocketAddrV6},
-};
+use slog_error_chain::InlineErrorChain;
+use std::collections::HashMap;
 
-pub(crate) async fn build_mgd_clients(
-    mappings: HashMap<SwitchSlot, std::net::Ipv6Addr>,
-    log: &slog::Logger,
+/// Get all MGD known `SwitchSlot -> MGD client` pairs.
+///
+/// # Errors
+///
+/// Fails if we cannot resolve MGD in DNS.
+///
+/// For any MGD instance we resolve via DNS, if the MGD instance does not know
+/// its own switch slot, the switch slot -> client mapping for that instance
+/// will be omitted from the returned map. Callers must not assume an `Ok(_)`
+/// return value contains any client.
+pub(crate) async fn resolve_mgd_clients(
     resolver: &internal_dns_resolver::Resolver,
-) -> HashMap<SwitchSlot, mg_admin_client::Client> {
-    let mut clients: Vec<(SwitchSlot, mg_admin_client::Client)> = vec![];
-    for (switch_slot, addr) in &mappings {
-        let port = match resolver.lookup_all_socket_v6(ServiceName::Mgd).await {
-            Ok(addrs) => {
-                let port_map: HashMap<Ipv6Addr, u16> = addrs
-                    .into_iter()
-                    .map(|sockaddr| (*sockaddr.ip(), sockaddr.port()))
-                    .collect();
-
-                *port_map.get(&addr).unwrap_or(&MGD_PORT)
-            }
-            Err(e) => {
-                error!(log, "failed to  addresses"; "error" => %e);
-                MGD_PORT
-            }
-        };
-
-        let socketaddr =
-            std::net::SocketAddr::V6(SocketAddrV6::new(*addr, port, 0, 0));
+    log: &slog::Logger,
+) -> Result<HashMap<SwitchSlot, mg_admin_client::Client>, ResolveError> {
+    let mgd_addrs = resolver.lookup_all_socket_v6(ServiceName::Mgd).await?;
+    let mut clients = HashMap::new();
+    for addr in mgd_addrs {
         let client = mg_admin_client::Client::new(
-            format!("http://{}", socketaddr).as_str(),
+            &format!("http://{addr}"),
             log.clone(),
         );
-        clients.push((*switch_slot, client));
+        let switch_slot = match client.switch_identifiers().await {
+            Ok(response) => match response.slot {
+                Some(0) => SwitchSlot::Switch0,
+                Some(1) => SwitchSlot::Switch1,
+                Some(n) => {
+                    warn!(
+                        log, "failed to determine switch slot for mgd";
+                        "addr" => %addr,
+                        "error" => format!("mgd returned unknown slot {n}"),
+                    );
+                    continue;
+                }
+                None => {
+                    warn!(
+                        log, "failed to determine switch slot for mgd";
+                        "addr" => %addr,
+                        "error" => "mgd does not yet know its switch slot",
+                    );
+                    continue;
+                }
+            },
+            Err(err) => {
+                warn!(
+                    log, "failed to determine switch slot for mgd";
+                    "addr" => %addr,
+                    InlineErrorChain::new(&err),
+                );
+                continue;
+            }
+        };
+        clients.insert(switch_slot, client);
     }
-    clients.into_iter().collect::<HashMap<_, _>>()
+    Ok(clients)
 }
 
 pub(crate) fn api_to_dpd_port_settings(

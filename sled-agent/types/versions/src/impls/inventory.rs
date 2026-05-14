@@ -22,7 +22,7 @@ use tufaceous_artifact::{ArtifactHash, KnownArtifactKind};
 use crate::latest::inventory::{
     BootImageHeader, BootPartitionContents, BootPartitionDetails,
     ConfigReconcilerInventory, ConfigReconcilerInventoryResult, FmdHostCase,
-    FmdInventory, FmdInventoryResult, FmdResource, HostPhase2DesiredContents,
+    FmdInventory, FmdResource, HostPhase2DesiredContents,
     HostPhase2DesiredSlots, ManifestBootInventory, ManifestInventory,
     ManifestNonBootInventory, MupdateOverrideBootInventory,
     MupdateOverrideInventory, MupdateOverrideNonBootInventory,
@@ -911,26 +911,22 @@ impl fmt::Display for SingleMeasurementInventoryDisplay<'_> {
     }
 }
 
-impl FmdInventoryResult {
-    pub fn display(&self) -> FmdInventoryResultDisplay<'_> {
-        FmdInventoryResultDisplay { inner: self }
-    }
+/// a displayer for the FMD inventory result on a sled
+pub struct FmdInventoryResultDisplay<'a> {
+    inner: &'a Result<FmdInventory, String>,
 }
 
-/// a displayer for [`FmdInventoryResult`]
-pub struct FmdInventoryResultDisplay<'a> {
-    inner: &'a FmdInventoryResult,
+impl<'a> FmdInventoryResultDisplay<'a> {
+    pub fn new(result: &'a Result<FmdInventory, String>) -> Self {
+        Self { inner: result }
+    }
 }
 
 impl fmt::Display for FmdInventoryResultDisplay<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.inner {
-            FmdInventoryResult::Available(inv) => {
-                write!(f, "{}", inv.display())
-            }
-            FmdInventoryResult::Error { error } => {
-                writeln!(f, "FMD collection failed: {error}")
-            }
+            Ok(inv) => write!(f, "{}", inv.display()),
+            Err(error) => writeln!(f, "FMD collection failed: {error}"),
         }
     }
 }
@@ -1068,7 +1064,6 @@ impl From<SvcEnabledNotOnlineState> for SvcState {
             SvcEnabledNotOnlineState::Degraded => Self::Degraded,
             SvcEnabledNotOnlineState::Maintenance => Self::Maintenance,
             SvcEnabledNotOnlineState::Offline => Self::Offline,
-            SvcEnabledNotOnlineState::Uninitialized => Self::Uninitialized,
         }
     }
 }
@@ -1092,7 +1087,6 @@ impl fmt::Display for SvcState {
 impl fmt::Display for SvcEnabledNotOnlineState {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let state = match self {
-            SvcEnabledNotOnlineState::Uninitialized => "uninitialized",
             SvcEnabledNotOnlineState::Offline => "offline",
             SvcEnabledNotOnlineState::Degraded => "degraded",
             SvcEnabledNotOnlineState::Maintenance => "maintenance",
