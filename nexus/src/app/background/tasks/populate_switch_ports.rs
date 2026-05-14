@@ -257,7 +257,12 @@ impl SwitchPortPopulator {
             })
             .collect::<Vec<_>>();
 
-        let mut processed = 0;
+        // Try to insert all the ports, tracking how many insertions were
+        // successful, and keep only the last error (if any). If any insert
+        // fails, we'll return an error; otherwise, we return the total number
+        // of ports successfully inserted.
+        let mut num_inserted = 0;
+        let mut last_error = None;
         for port_name in qsfp_ports {
             match self
                 .datastore
@@ -270,17 +275,18 @@ impl SwitchPortPopulator {
                 .await
             {
                 Ok(_) | Err(external::Error::ObjectAlreadyExists { .. }) => {
-                    processed += 1;
+                    num_inserted += 1;
                 }
                 Err(err) => {
-                    return Err(anyhow!(err).context(format!(
-                        "failed to insert port {port_name}"
-                    )));
+                    last_error =
+                        Some(anyhow!(err).context(format!(
+                            "failed to insert port {port_name}"
+                        )));
                 }
             }
         }
 
-        Ok(processed)
+        if let Some(err) = last_error { Err(err) } else { Ok(num_inserted) }
     }
 }
 
