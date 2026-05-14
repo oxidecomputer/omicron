@@ -102,8 +102,7 @@ struct UpdateContactSupportChecksInput {
     components_by_release_version: BTreeMap<String, usize>,
     time_last_step_planned: DateTime<Utc>,
     blueprint: Arc<Blueprint>,
-    // None when no target release has ever been set on the system, in which
-    // case the blueprint check inside `is_update_in_progress` is skipped.
+    // None when no target release has ever been set on the system.
     current_target_version: Option<Version>,
 }
 
