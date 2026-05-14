@@ -140,8 +140,10 @@ use super::{
     ACTION_GENERATE_ID, ActionRegistry, NexusActionContext, NexusSaga,
     SagaInitError,
 };
+use crate::app::crucible::UpstairsDegradedReason;
 use crate::app::crucible::UpstairsHealth;
 use crate::app::crucible::UpstairsHealthDegradedDetails;
+use crate::app::crucible::crucible_pantry_client_upstairs_health;
 use crate::app::crucible::propolis_client_upstairs_health;
 use crate::app::db::datastore::CrucibleDisk;
 use crate::app::db::datastore::InstanceAndActiveVmm;
@@ -150,6 +152,7 @@ use crate::app::sagas::declare_saga_actions;
 use crate::app::{authn, authz, db};
 use chrono::DateTime;
 use chrono::Utc;
+use crucible_pantry_client::types::VolumeStatus;
 use nexus_db_lookup::LookupPath;
 use nexus_db_model::VmmState;
 use nexus_types::saga::saga_action_failed;
@@ -456,6 +459,20 @@ async fn srrd_drive_region_replacement_check(
 
             let volume_id = new_region.volume_id().to_string();
 
+            let Some(new_region_addr) = osagactx
+                .datastore()
+                .region_addr(new_region.id())
+                .await
+                .map_err(saga_action_failed)?
+            else {
+                return Err(saga_action_failed(Error::internal_error(
+                    &format!(
+                        "new region {} has a None region_addr result",
+                        new_region.id(),
+                    ),
+                )));
+            };
+
             check_from_previous_pantry_step(
                 log,
                 params.request.id,
@@ -463,6 +480,7 @@ async fn srrd_drive_region_replacement_check(
                 pantry_address,
                 job_id,
                 &volume_id.to_string(),
+                new_region_addr,
             )
             .await
         }
@@ -521,16 +539,6 @@ async fn check_from_previous_propolis_step(
     // request has!). It will probably cause live repair to start on the source,
     // which is alright because it can be cancelled at any time (and will be
     // when the destination propolis activates the Volume).
-    //
-    // Until crucible#871 is addressed, sending the replacement request to the
-    // destination propolis could cause a panic if activation hasn't occurred
-    // yet. Even if this saga does wait, this same potential exists because the
-    // migration is considered complete before propolis activates disk Volumes.
-    //
-    // If the destination propolis' Volume activated, the Upstairs will return a
-    // `ReplacementResult`: either `VcrMatches` (if the destination is using the
-    // updated VCR) or `Started` (if the destination is using the pre-update VCR
-    // and the replacement result triggers live repair).
     //
     // Also note: if the migration target was sent a Volume that refers to a
     // region that is no longer responding, it will hang trying to activate, but
@@ -640,6 +648,126 @@ async fn check_from_previous_propolis_step(
     }
 }
 
+fn drive_action_from_pantry_volume_status(
+    log: &Logger,
+    volume_id: &str,
+    new_region_addr: SocketAddrV6,
+    volume_status: VolumeStatus,
+) -> Result<DriveCheck, ActionError> {
+    info!(log, "pantry job finished, saw status {volume_status:?}");
+
+    if volume_status.seen_active {
+        // It may not be active now if a Propolis activated the volume, but if
+        // the Pantry's ever seen this Volume active before, we can check the
+        // health of the upstairs that targets the downstairs we replaced to
+        // determine what to do next.
+
+        let Some(upstairs_health) = crucible_pantry_client_upstairs_health(
+            log,
+            &volume_status.info,
+            new_region_addr,
+        ) else {
+            let s = format!(
+                "could not find {new_region_addr} in volume {volume_id}",
+            );
+
+            error!(log, "{s}");
+
+            return Err(saga_action_failed(Error::internal_error(&s)));
+        };
+
+        match upstairs_health {
+            // The Pantry activated this volume, and it's currently healthy: the
+            // replacement is done.
+            UpstairsHealth::Healthy { upstairs_id } => {
+                info!(
+                    log,
+                    "saw a healthy upstairs : no action required, replacement \
+                    done";
+                    "upstairs_id" => %upstairs_id,
+                );
+
+                Ok(DriveCheck::Done)
+            }
+
+            UpstairsHealth::Degraded(result) => {
+                let UpstairsHealthDegradedDetails { upstairs_id, reason } =
+                    result;
+
+                match reason {
+                    UpstairsDegradedReason::NotActive => {
+                        // The Pantry has seen this activate, and it's now not
+                        // active. Propolis probably activated and caused this
+                        // to deactivate: action is required to query there for
+                        // health instead.
+
+                        info!(
+                            log,
+                            "saw degraded reason: not active. action required";
+                            "upstairs_id" => %upstairs_id,
+                        );
+
+                        Ok(DriveCheck::ActionRequired)
+                    }
+
+                    UpstairsDegradedReason::ReducedRedundancy => {
+                        // Not all three downstairs are present. This is pretty
+                        // bad!
+
+                        error!(
+                            log,
+                            "saw degraded reason: reduced redundancy";
+                            "upstairs_id" => %upstairs_id,
+                        );
+
+                        Err(saga_action_failed(Error::internal_error(
+                            &format!(
+                                "upstairs {upstairs_id} has reduced redundancy",
+                            ),
+                        )))
+                    }
+
+                    UpstairsDegradedReason::DownstairsDegraded => {
+                        // A `DownstairsDegraded` reason is because a
+                        // reconciliation or repair is still ongoing. Wait for
+                        // that to complete.
+
+                        info!(
+                            log,
+                            "saw degraded reason: degraded. waiting for \
+                            repair or reconciliation";
+                            "upstairs_id" => %upstairs_id,
+                        );
+
+                        Ok(DriveCheck::Wait)
+                    }
+
+                    UpstairsDegradedReason::InvalidState { message } => {
+                        error!(
+                            log,
+                            "saw degraded reason: invalid state ({message})";
+                            "upstairs_id" => %upstairs_id,
+                        );
+
+                        Err(saga_action_failed(Error::internal_error(
+                            &format!(
+                                "upstairs {upstairs_id} has invalid state \
+                                {message}",
+                            ),
+                        )))
+                    }
+                }
+            }
+        }
+    } else {
+        // The Pantry has never seen this active before, and
+        // the job finished - some action is required, the
+        // job failed.
+
+        Ok(DriveCheck::ActionRequired)
+    }
+}
+
 /// Generate a DriveCheck if the previous step was a Pantry step
 async fn check_from_previous_pantry_step(
     log: &Logger,
@@ -648,7 +776,15 @@ async fn check_from_previous_pantry_step(
     pantry_address: SocketAddrV6,
     job_id: Uuid,
     volume_id: &str,
+    new_region_addr: SocketAddrV6,
 ) -> Result<DriveCheck, ActionError> {
+    let log = log.new(o!(
+        "region replacement id" => request_id.to_string(),
+        "last replacement drive time" => step_time.to_string(),
+        "last replacement drive step" => "pantry",
+        "pantry address" => pantry_address.to_string(),
+    ));
+
     // If there is a committed step, Nexus attached this Volume to a Pantry, and
     // requested activation in a background job. Is it finished?
 
@@ -663,29 +799,12 @@ async fn check_from_previous_pantry_step(
 
                 match client.volume_status(volume_id).await {
                     Ok(volume_status) => {
-                        info!(
-                            log,
-                            "pantry job finished, saw status {volume_status:?}";
-                            "region replacement id" => %request_id,
-                            "last replacement drive time" => ?step_time,
-                            "last replacement drive step" => "pantry",
-                            "pantry address" => ?pantry_address,
-                        );
-
-                        if volume_status.seen_active {
-                            // It may not be active now if a Propolis activated
-                            // the volume, but if the Pantry's ever seen this
-                            // Volume active before, then the reconciliation
-                            // completed ok.
-
-                            Ok(DriveCheck::Done)
-                        } else {
-                            // The Pantry has never seen this active before, and
-                            // the job finished - some action is required, the
-                            // job failed.
-
-                            Ok(DriveCheck::ActionRequired)
-                        }
+                        drive_action_from_pantry_volume_status(
+                            &log,
+                            volume_id,
+                            new_region_addr,
+                            volume_status.into_inner(),
+                        )
                     }
 
                     Err(e) => {
@@ -707,10 +826,6 @@ async fn check_from_previous_pantry_step(
                         error!(
                             log,
                             "pantry job finished, saw error {e}";
-                            "region replacement id" => %request_id,
-                            "last replacement drive time" => ?step_time,
-                            "last replacement drive step" => "pantry",
-                            "pantry address" => ?pantry_address,
                         );
 
                         Ok(DriveCheck::ActionRequired)
@@ -720,10 +835,6 @@ async fn check_from_previous_pantry_step(
                 info!(
                     log,
                     "pantry is still performing reconcilation";
-                    "region replacement id" => %request_id,
-                    "last replacement drive time" => ?step_time,
-                    "last replacement drive step" => "pantry",
-                    "pantry address" => ?pantry_address,
                 );
 
                 Ok(DriveCheck::LastStepStillRunning)
@@ -737,10 +848,6 @@ async fn check_from_previous_pantry_step(
             error!(
                 log,
                 "pantry returned an error checking job {job_id}: {e}";
-                "region replacement id" => %request_id,
-                "last replacement drive time" => ?step_time,
-                "last replacement drive step" => "pantry",
-                "pantry address" => ?pantry_address,
             );
 
             match client.pantry_status().await {
@@ -758,10 +865,6 @@ async fn check_from_previous_pantry_step(
                             info!(
                                 log,
                                 "pantry still has active volume";
-                                "region replacement id" => %request_id,
-                                "last replacement drive time" => ?step_time,
-                                "last replacement drive step" => "pantry",
-                                "pantry address" => ?pantry_address,
                                 "volume id" => volume_id,
                             );
 
@@ -779,10 +882,6 @@ async fn check_from_previous_pantry_step(
                                 log,
                                 "pantry returned an error checking on volume: \
                                 {e}";
-                                "region replacement id" => %request_id,
-                                "last replacement drive time" => ?step_time,
-                                "last replacement drive step" => "pantry",
-                                "pantry address" => ?pantry_address,
                                 "volume id" => volume_id,
                             );
 
@@ -799,10 +898,6 @@ async fn check_from_previous_pantry_step(
                     error!(
                         log,
                         "pantry returned an error checking on status: {e}";
-                        "region replacement id" => %request_id,
-                        "last replacement drive time" => ?step_time,
-                        "last replacement drive step" => "pantry",
-                        "pantry address" => ?pantry_address,
                     );
 
                     Ok(DriveCheck::ActionRequired)
@@ -1594,17 +1689,13 @@ async fn execute_propolis_drive_action(
             // record of a previous replace request (sent to a different
             // propolis!) starting a live repair.
             //
-            // If the Volume is active, that means reconcilation completed ok,
-            // and therefore Nexus can consider this repair complete. This is
-            // only true if one repair occurs at a time per volume (which is
-            // true due to the presence of volume_repair records), and if this
-            // saga locks the region replacement request record as part of it
-            // executing (which it does through the SET_SAGA_ID forward action).
-            // If either of those conditions are not held, then multiple
-            // replacement calls and activation checks can interleave and
-            // confuse this saga.
-            //
-            // Check if the Volume activated.
+            // If the Volume is not active, wait until it is. If the Volume is
+            // active, check if reconcilation completed ok, and if Nexus can
+            // consider this replacement complete. Check the health of the
+            // specific Upstairs for the replaced region only: we don't want to
+            // delay for the health of Upstairs unrelated to this region
+            // replacement as another replacements may be required to make those
+            // Upstairs healthy.
 
             let result = client
                 .disk_volume_status()
@@ -1617,8 +1708,7 @@ async fn execute_propolis_drive_action(
                     }
 
                     _ => saga_action_failed(Error::internal_error(&format!(
-                        "unexpected failure during \
-                                `disk_volume_status`: {e}",
+                        "unexpected failure during `disk_volume_status`: {e}",
                     ))),
                 })?;
 
@@ -1658,6 +1748,7 @@ async fn execute_propolis_drive_action(
                     // If "healthy" is seen after we have replaced a downstairs,
                     // then we're done waiting - the replacement is done
                     info!(log, "upstairs {upstairs_id} is healthy");
+
                     true
                 }
 
@@ -1762,7 +1853,8 @@ async fn srrd_drive_region_replacement_commit_undo(
     //   would have constructed the disk's volume with the replacement VCR, so
     //   the upstairs would respond with `ReplaceResult::VcrMatches`. The drive
     //   saga would then consider the replacement done only if propolis observed
-    //   that the volume activated ok.
+    //   that the volume activated ok and if the health info showed it as
+    //   active.
     //
     // # case 2 #
     //
@@ -1788,7 +1880,7 @@ async fn srrd_drive_region_replacement_commit_undo(
     // operations driven by any previous steps to complete, aka if Nexus
     // _always_ polled, instead of the behaviour it has now (wait or poll or
     // receive push notifications). Polling all the time would be functionally
-    // correct but unnecessary (and in the case of crucible#1277, a problem!).
+    // correct but unnecessary.
 
     Ok(())
 }
