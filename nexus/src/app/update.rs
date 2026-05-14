@@ -4,6 +4,7 @@
 
 //! Software Updates
 
+use super::deployment::BlueprintTargetReleaseStatus;
 use crate::app::background::LoadedTargetBlueprint;
 use bytes::Bytes;
 use chrono::DateTime;
@@ -20,6 +21,7 @@ use nexus_db_model::saga_types::Saga;
 use nexus_db_model::saga_types::SagaId;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::{datastore::SQL_BATCH_SIZE, pagination::Paginator};
+use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::SledFilter;
 use nexus_types::deployment::TargetReleaseDescription;
 use nexus_types::external_api::update;
@@ -96,6 +98,10 @@ struct UpdateContactSupportChecksInput {
     stuck_sagas: Result<Vec<Saga>, Error>,
     components_by_release_version: BTreeMap<String, usize>,
     time_last_step_planned: DateTime<Utc>,
+    blueprint: Arc<Blueprint>,
+    // None when no target release has ever been set on the system, in which
+    // case the blueprint check inside `is_update_in_progress` is skipped.
+    current_target_version: Option<Version>,
 }
 
 impl UpdateContactSupportChecksInput {
@@ -106,6 +112,8 @@ impl UpdateContactSupportChecksInput {
 
         if is_update_stuck(
             &self.components_by_release_version,
+            &self.blueprint,
+            self.current_target_version.as_ref(),
             self.time_last_step_planned,
         ) {
             problems.insert(UpdateStatusProblem::StuckUpdate {
@@ -205,7 +213,7 @@ impl KV for UpdateStatusProblem {
                 &format_args!("{sagas:?}"),
             ),
             Self::StuckSagasQueryFailed { error } => serializer.emit_arguments(
-                "error_message".into(),
+                "stuck_sagas_error_message".into(),
                 &format_args!("{error}"),
             ),
             Self::StuckUpdate { time_last_step_planned } => serializer
@@ -251,20 +259,48 @@ impl KV for UpdateStatusProblemsKv {
 
 /// Returns true if the system appears to be mid-update.
 ///
-/// A system is considered mid-update when its components don't all report
-/// the same version. The one exception is the initial state of a system
-/// that has never been updated, which has exactly two versions present:
-/// "install dataset" and "unknown". This state is not treated as in-progress.
+/// A system is considered mid-update when EITHER:
+///
+/// - Its components don't all report the same version. The one exception is
+///   the initial state of a system that has never been updated, which has
+///   exactly two versions present: "install dataset" and "unknown". This state
+///   is not treated as in-progress.
+/// - The current target blueprint shows a previous update is still in
+///   progress (relative to `current_target_version`). This catches the window
+///   between a new target release being set and any components actually moving
+///   to that version, where every component is still on the prior version.
 fn is_update_in_progress(
     components_by_release_version: &BTreeMap<String, usize>,
+    blueprint: &Blueprint,
+    current_target_version: Option<&Version>,
 ) -> bool {
+
     let versions_at_initial_state = components_by_release_version.len() == 2
         && components_by_release_version
             .contains_key(&internal_views::TufRepoVersion::Unknown.to_string())
         && components_by_release_version.contains_key(
             &internal_views::TufRepoVersion::InstallDataset.to_string(),
         );
-    components_by_release_version.len() != 1 && !versions_at_initial_state
+    let components_in_progress =
+        components_by_release_version.len() != 1 && !versions_at_initial_state;
+
+    let blueprint_in_progress = match current_target_version {
+        Some(v) => match super::deployment::target_release_change_status(
+            blueprint,
+            &v.to_string(),
+        ) {
+            BlueprintTargetReleaseStatus::PreviousUpdateInProgress(_) => true,
+            BlueprintTargetReleaseStatus::AllComponentsOnCurrentTargetRelease
+            // We don't consider a Mupdate as an "update in-progress" because
+            // recofigurator is not driving this update.
+            | BlueprintTargetReleaseStatus::WaitingForMupdateToBeCleared{ how: _, sled_id: _ } => false,
+        },
+        // When `current_target_version` is `None` no target release has ever
+        // been set. We can safely assume no update is in progress.
+        None => false,
+    };
+
+    components_in_progress || blueprint_in_progress
 }
 
 /// Returns true if an update appears to be stuck.
@@ -273,10 +309,15 @@ fn is_update_in_progress(
 /// planned in the blueprint is older than `STUCK_UPDATE_THRESHOLD`.
 fn is_update_stuck(
     components_by_release_version: &BTreeMap<String, usize>,
+    blueprint: &Blueprint,
+    current_target_version: Option<&Version>,
     time_last_step_planned: DateTime<Utc>,
 ) -> bool {
-    is_update_in_progress(components_by_release_version)
-        && time_last_step_planned < Utc::now() - STUCK_UPDATE_THRESHOLD
+    is_update_in_progress(
+        components_by_release_version,
+        blueprint,
+        current_target_version,
+    ) && time_last_step_planned < Utc::now() - STUCK_UPDATE_THRESHOLD
 }
 
 impl super::Nexus {
@@ -479,6 +520,8 @@ impl super::Nexus {
                 time_last_step_planned,
                 components_by_release_version.clone(),
                 inventory,
+                Arc::clone(&blueprint_target.blueprint),
+                target_release.as_ref().map(|t| &t.version),
             )
             .await?;
 
@@ -509,16 +552,22 @@ impl super::Nexus {
         time_last_step_planned: DateTime<Utc>,
         components_by_release_version: BTreeMap<String, usize>,
         inventory: Arc<Collection>,
+        blueprint: Arc<Blueprint>,
+        current_target_version: Option<&Version>,
     ) -> Result<bool, Error> {
         // If an update is in progress but not stuck, the remaining checks
         // could fail mid-update and shouldn't trigger a contact-support
         // signal.
-        if is_update_in_progress(&components_by_release_version)
-            && !is_update_stuck(
-                &components_by_release_version,
-                time_last_step_planned,
-            )
-        {
+        if is_update_in_progress(
+            &components_by_release_version,
+            &blueprint,
+            current_target_version,
+        ) && !is_update_stuck(
+            &components_by_release_version,
+            &blueprint,
+            current_target_version,
+            time_last_step_planned,
+        ) {
             info!(
                 opctx.log,
                 "skipping update health checks; update in progress with last \
@@ -541,6 +590,8 @@ impl super::Nexus {
             stuck_sagas,
             components_by_release_version,
             time_last_step_planned,
+            blueprint,
+            current_target_version: current_target_version.cloned(),
         };
 
         let problems = checks.problems();
@@ -704,8 +755,14 @@ mod test {
     use nexus_db_model::saga_types::Saga;
     use nexus_db_model::saga_types::SecId;
     use nexus_inventory::CollectionBuilder;
+    use nexus_reconfigurator_planning::example::example;
     use nexus_test_utils_macros::nexus_test;
+    use nexus_types::deployment::BlueprintArtifactVersion;
+    use nexus_types::deployment::BlueprintHostPhase2DesiredContents;
+    use nexus_types::deployment::BlueprintHostPhase2DesiredSlots;
+    use nexus_types::deployment::BlueprintZoneImageSource;
     use omicron_common::api::external::ByteCount;
+    use omicron_test_utils::dev::test_setup_log;
     use omicron_uuid_kinds::SledUuid;
     use omicron_uuid_kinds::ZpoolUuid;
     use sled_agent_types::inventory::Baseboard;
@@ -720,7 +777,10 @@ mod test {
     use sled_agent_types::inventory::SvcsEnabledNotOnline;
     use sled_agent_types::inventory::SvcsEnabledNotOnlineResult;
     use sled_agent_types::inventory::ZpoolHealth;
+    use slog::Logger;
     use slog::o;
+    use tufaceous_artifact::ArtifactHash;
+    use tufaceous_artifact::ArtifactVersion;
     use uuid::Uuid;
 
     type ControlPlaneTestContext =
@@ -812,6 +872,10 @@ mod test {
         )
     }
 
+    fn fake_target_version() -> Version {
+        "9.2.0-0.ci+gite4b75dde134".parse().expect("valid version")
+    }
+
     fn system_versions_initial_state() -> BTreeMap<String, usize> {
         BTreeMap::from([
             ("install dataset".to_string(), 13),
@@ -820,12 +884,12 @@ mod test {
     }
 
     fn system_version_update_finished() -> BTreeMap<String, usize> {
-        BTreeMap::from([("9.2.0-0.ci+gite4b75dde134".to_string(), 15)])
+        BTreeMap::from([(fake_target_version().to_string(), 15)])
     }
 
     fn system_version_update_in_progress() -> BTreeMap<String, usize> {
         BTreeMap::from([
-            ("9.2.0-0.ci+gite4b75dde134".to_string(), 12),
+            (fake_target_version().to_string(), 12),
             ("install dataset".to_string(), 3),
         ])
     }
@@ -888,6 +952,37 @@ mod test {
         builder.build()
     }
 
+    // Build a blueprint for tests in which every sled and zone is on the
+    // given target release version.
+    fn fake_blueprint(log: &Logger, version: &Version) -> Arc<Blueprint> {
+        let (_, _, mut bp) = example(log, "test");
+        let artifact_version =
+            ArtifactVersion::new(version.to_string()).unwrap();
+        let os_artifact = BlueprintHostPhase2DesiredContents::Artifact {
+            version: BlueprintArtifactVersion::Available {
+                version: artifact_version.clone(),
+            },
+            hash: ArtifactHash([0; 32]),
+        };
+        let zone_artifact = BlueprintZoneImageSource::Artifact {
+            version: BlueprintArtifactVersion::Available {
+                version: artifact_version,
+            },
+            hash: ArtifactHash([0; 32]),
+        };
+        for sled_config in bp.sleds.values_mut() {
+            sled_config.remove_mupdate_override = None;
+            sled_config.host_phase_2 = BlueprintHostPhase2DesiredSlots {
+                slot_a: os_artifact.clone(),
+                slot_b: os_artifact.clone(),
+            };
+            for mut zone_config in sled_config.zones.iter_mut() {
+                zone_config.image_source = zone_artifact.clone();
+            }
+        }
+        Arc::new(bp)
+    }
+
     fn sled_id() -> SledUuid {
         SledUuid::from_untyped_uuid(Uuid::from_u128(0xAAAA))
     }
@@ -947,6 +1042,8 @@ mod test {
                 .unwrap()
                 .unwrap(),
         );
+        let version = fake_target_version();
+        let blueprint = fake_blueprint(&cptestctx.logctx.log, &version);
         // No health checks failed and no update is running, contact support
         // should be false
         assert!(
@@ -956,6 +1053,8 @@ mod test {
                     Utc::now(),
                     system_version_update_finished(),
                     inventory,
+                    blueprint,
+                    Some(&version),
                 )
                 .await
                 .unwrap()
@@ -983,6 +1082,8 @@ mod test {
                 .unwrap()
                 .unwrap(),
         );
+        let version = fake_target_version();
+        let blueprint = fake_blueprint(&cptestctx.logctx.log, &version);
         // There are unhealthy zpools and no update is running, contact support
         // should be true
         assert!(
@@ -992,6 +1093,8 @@ mod test {
                     Utc::now(),
                     system_version_update_finished(),
                     inventory,
+                    blueprint,
+                    Some(&version),
                 )
                 .await
                 .unwrap()
@@ -1019,6 +1122,8 @@ mod test {
                 .unwrap()
                 .unwrap(),
         );
+        let version = fake_target_version();
+        let blueprint = fake_blueprint(&cptestctx.logctx.log, &version);
         // There are unhealthy SMF services and no update is running, contact
         // support should be true
         assert!(
@@ -1028,6 +1133,8 @@ mod test {
                     Utc::now(),
                     system_version_update_finished(),
                     inventory,
+                    blueprint,
+                    Some(&version),
                 )
                 .await
                 .unwrap()
@@ -1057,6 +1164,8 @@ mod test {
                 .unwrap()
                 .unwrap(),
         );
+        let version = fake_target_version();
+        let blueprint = fake_blueprint(&cptestctx.logctx.log, &version);
         assert!(
             nexus
                 .contact_support(
@@ -1064,6 +1173,8 @@ mod test {
                     Utc::now(),
                     system_versions_initial_state(),
                     inventory,
+                    blueprint,
+                    None,
                 )
                 .await
                 .unwrap()
@@ -1092,6 +1203,8 @@ mod test {
                 .unwrap()
                 .unwrap(),
         );
+        let version = fake_target_version();
+        let blueprint = fake_blueprint(&cptestctx.logctx.log, &version);
         // There is a stuck active saga no update has ever been run, contact
         // support should be true
         assert!(
@@ -1100,7 +1213,9 @@ mod test {
                     &opctx,
                     Utc::now(),
                     system_versions_initial_state(),
-                    inventory
+                    inventory,
+                    blueprint,
+                    None,
                 )
                 .await
                 .unwrap()
@@ -1128,6 +1243,8 @@ mod test {
                 .unwrap()
                 .unwrap(),
         );
+        let version = fake_target_version();
+        let blueprint = fake_blueprint(&cptestctx.logctx.log, &version);
         // Components are split across multiple non-initial versions and the
         // last step planned is older than `STUCK_UPDATE_THRESHOLD`, so the
         // update is considered stuck and contact support is true.
@@ -1140,6 +1257,8 @@ mod test {
                         - TimeDelta::seconds(10),
                     system_version_update_in_progress(),
                     inventory,
+                    blueprint,
+                    Some(&version),
                 )
                 .await
                 .unwrap()
@@ -1177,6 +1296,8 @@ mod test {
             Utc::now() - STALE_INVENTORY_THRESHOLD - TimeDelta::seconds(10);
 
         let inventory = Arc::new(collection);
+        let version = fake_target_version();
+        let blueprint = fake_blueprint(&cptestctx.logctx.log, &version);
         // Every health check is unhealthy: stuck saga, stuck update, stale
         // inventory, unhealthy zpools, and unhealthy SMF services. Contact
         // support should be true.
@@ -1189,6 +1310,8 @@ mod test {
                         - TimeDelta::seconds(10),
                     system_version_update_in_progress(),
                     inventory,
+                    blueprint,
+                    Some(&version),
                 )
                 .await
                 .unwrap()
@@ -1219,6 +1342,8 @@ mod test {
                 .unwrap()
                 .unwrap(),
         );
+        let version = fake_target_version();
+        let blueprint = fake_blueprint(&cptestctx.logctx.log, &version);
         assert!(
             !nexus
                 .contact_support(
@@ -1226,6 +1351,56 @@ mod test {
                     Utc::now(),
                     system_version_update_in_progress(),
                     inventory,
+                    blueprint,
+                    Some(&version),
+                )
+                .await
+                .unwrap()
+        );
+    }
+
+    // Tests the edge case where a new target release has been set, but no
+    // components report being at the target release yet. We consider this case
+    // as an update in-progress, so `contact_support()` should return `false`
+    // even though the system has unhealthy zpools and SMF services.
+    #[nexus_test(server = crate::Server)]
+    async fn test_contact_support_target_set_but_components_on_old_version(
+        cptestctx: &ControlPlaneTestContext,
+    ) {
+        let nexus = &cptestctx.server.server_context().nexus;
+        let opctx = fake_opctx(cptestctx);
+        insert_fake_collection(
+            cptestctx,
+            &opctx,
+            unhealthy_zpools(),
+            unhealthy_services(),
+        )
+        .await;
+        let inventory = Arc::new(
+            nexus
+                .datastore()
+                .inventory_get_latest_collection(&opctx)
+                .await
+                .unwrap()
+                .unwrap(),
+        );
+
+        let prev_version: Version =
+            "8.0.0-0.ci+gitprev0000000".parse().unwrap();
+        let target_release = fake_target_version();
+        let blueprint = fake_blueprint(&cptestctx.logctx.log, &prev_version);
+        let components_by_release_version =
+            BTreeMap::from([(prev_version.to_string(), 15)]);
+
+        assert!(
+            !nexus
+                .contact_support(
+                    &opctx,
+                    Utc::now(),
+                    components_by_release_version,
+                    inventory,
+                    blueprint,
+                    Some(&target_release),
                 )
                 .await
                 .unwrap()
@@ -1234,6 +1409,9 @@ mod test {
 
     #[test]
     fn test_problems_healthy_system() {
+        let logctx = test_setup_log("test_problems_healthy_system");
+        let blueprint = fake_blueprint(&logctx.log, &fake_target_version());
+
         let checks = UpdateContactSupportChecksInput {
             inventory: Arc::new(fake_collection_with_ids(
                 sled_id(),
@@ -1243,12 +1421,18 @@ mod test {
             stuck_sagas: Ok(vec![]),
             components_by_release_version: system_version_update_finished(),
             time_last_step_planned: Utc::now(),
+            blueprint,
+            current_target_version: Some(fake_target_version()),
         };
         assert_eq!(checks.problems(), BTreeSet::new());
+
+        logctx.cleanup_successful();
     }
 
     #[test]
     fn test_problems_stuck_sagas() {
+        let logctx = test_setup_log("test_problems_stuck_sagas");
+        let blueprint = fake_blueprint(&logctx.log, &fake_target_version());
         let saga = fake_saga();
         let expected_stuck_saga =
             StuckSaga { id: saga.id, name: saga.name.clone() };
@@ -1262,16 +1446,22 @@ mod test {
             stuck_sagas: Ok(vec![saga]),
             components_by_release_version: system_version_update_finished(),
             time_last_step_planned: Utc::now(),
+            blueprint,
+            current_target_version: Some(fake_target_version()),
         };
 
         let expected = BTreeSet::from([UpdateStatusProblem::StuckSagas {
             sagas: BTreeSet::from([expected_stuck_saga]),
         }]);
         assert_eq!(checks.problems(), expected);
+
+        logctx.cleanup_successful();
     }
 
     #[test]
     fn test_problems_stuck_sagas_query_failed() {
+        let logctx = test_setup_log("test_problems_stuck_sagas_query_failed");
+        let blueprint = fake_blueprint(&logctx.log, &fake_target_version());
         let err = Error::internal_error("db boom");
         let expected_error = err.to_string();
 
@@ -1284,6 +1474,8 @@ mod test {
             stuck_sagas: Err(err),
             components_by_release_version: system_version_update_finished(),
             time_last_step_planned: Utc::now(),
+            blueprint,
+            current_target_version: Some(fake_target_version()),
         };
 
         let expected =
@@ -1291,10 +1483,14 @@ mod test {
                 error: expected_error,
             }]);
         assert_eq!(checks.problems(), expected);
+
+        logctx.cleanup_successful();
     }
 
     #[test]
     fn test_problems_stuck_update() {
+        let logctx = test_setup_log("test_problems_stuck_update");
+        let blueprint = fake_blueprint(&logctx.log, &fake_target_version());
         let time_last_step_planned =
             Utc::now() - STUCK_UPDATE_THRESHOLD - TimeDelta::seconds(10);
 
@@ -1307,16 +1503,24 @@ mod test {
             stuck_sagas: Ok(vec![]),
             components_by_release_version: system_version_update_in_progress(),
             time_last_step_planned,
+            blueprint,
+            current_target_version: Some(fake_target_version()),
         };
 
         let expected = BTreeSet::from([UpdateStatusProblem::StuckUpdate {
             time_last_step_planned,
         }]);
         assert_eq!(checks.problems(), expected);
+
+        logctx.cleanup_successful();
     }
 
     #[test]
     fn test_problems_update_in_progress_not_stuck_is_not_a_problem() {
+        let logctx = test_setup_log(
+            "test_problems_update_in_progress_not_stuck_is_not_a_problem",
+        );
+        let blueprint = fake_blueprint(&logctx.log, &fake_target_version());
         // Update in progress but the last step planned is recent — not stuck.
         let checks = UpdateContactSupportChecksInput {
             inventory: Arc::new(fake_collection_with_ids(
@@ -1327,12 +1531,18 @@ mod test {
             stuck_sagas: Ok(vec![]),
             components_by_release_version: system_version_update_in_progress(),
             time_last_step_planned: Utc::now(),
+            blueprint,
+            current_target_version: Some(fake_target_version()),
         };
         assert_eq!(checks.problems(), BTreeSet::new());
+
+        logctx.cleanup_successful();
     }
 
     #[test]
     fn test_problems_stale_inventory() {
+        let logctx = test_setup_log("test_problems_stale_inventory");
+        let blueprint = fake_blueprint(&logctx.log, &fake_target_version());
         let mut collection = fake_collection_with_ids(
             sled_id(),
             healthy_zpools(),
@@ -1347,16 +1557,22 @@ mod test {
             stuck_sagas: Ok(vec![]),
             components_by_release_version: system_version_update_finished(),
             time_last_step_planned: Utc::now(),
+            blueprint,
+            current_target_version: Some(fake_target_version()),
         };
 
         let expected = BTreeSet::from([UpdateStatusProblem::StaleInventory {
             collection_time_done,
         }]);
         assert_eq!(checks.problems(), expected);
+
+        logctx.cleanup_successful();
     }
 
     #[test]
     fn test_problems_unhealthy_zpools() {
+        let logctx = test_setup_log("test_problems_unhealthy_zpools");
+        let blueprint = fake_blueprint(&logctx.log, &fake_target_version());
         let sled_id = sled_id();
         let checks = UpdateContactSupportChecksInput {
             inventory: Arc::new(fake_collection_with_ids(
@@ -1371,6 +1587,8 @@ mod test {
             stuck_sagas: Ok(vec![]),
             components_by_release_version: system_version_update_finished(),
             time_last_step_planned: Utc::now(),
+            blueprint,
+            current_target_version: Some(fake_target_version()),
         };
 
         let expected_zpool = Zpool {
@@ -1383,10 +1601,14 @@ mod test {
             zpools_by_sled: BTreeMap::from([(sled_id, vec![expected_zpool])]),
         }]);
         assert_eq!(normalise_zpool_times(checks.problems()), expected);
+
+        logctx.cleanup_successful();
     }
 
     #[test]
     fn test_problems_unhealthy_services() {
+        let logctx = test_setup_log("test_problems_unhealthy_services");
+        let blueprint = fake_blueprint(&logctx.log, &fake_target_version());
         let sled_id = sled_id();
         let services = unhealthy_services();
         let collection = fake_collection_with_ids(
@@ -1400,6 +1622,8 @@ mod test {
             stuck_sagas: Ok(vec![]),
             components_by_release_version: system_version_update_finished(),
             time_last_step_planned: Utc::now(),
+            blueprint,
+            current_target_version: Some(fake_target_version()),
         };
 
         let expected = BTreeSet::from([
@@ -1408,10 +1632,15 @@ mod test {
             },
         ]);
         assert_eq!(checks.problems(), expected);
+
+        logctx.cleanup_successful();
     }
 
     #[test]
     fn test_problems_stuck_sagas_and_unhealthy_zpools() {
+        let logctx =
+            test_setup_log("test_problems_stuck_sagas_and_unhealthy_zpools");
+        let blueprint = fake_blueprint(&logctx.log, &fake_target_version());
         let sled_id = sled_id();
         let saga = fake_saga();
         let expected_stuck_saga =
@@ -1430,6 +1659,8 @@ mod test {
             stuck_sagas: Ok(vec![saga]),
             components_by_release_version: system_version_update_finished(),
             time_last_step_planned: Utc::now(),
+            blueprint,
+            current_target_version: Some(fake_target_version()),
         };
 
         let expected_zpool = Zpool {
@@ -1450,10 +1681,14 @@ mod test {
             },
         ]);
         assert_eq!(normalise_zpool_times(checks.problems()), expected);
+
+        logctx.cleanup_successful();
     }
 
     #[test]
     fn test_problems_all_unhealthy() {
+        let logctx = test_setup_log("test_problems_all_unhealthy");
+        let blueprint = fake_blueprint(&logctx.log, &fake_target_version());
         let sled_id = sled_id();
         let saga = fake_saga();
         let expected_stuck_saga =
@@ -1481,6 +1716,8 @@ mod test {
             stuck_sagas: Ok(vec![saga]),
             components_by_release_version: system_version_update_in_progress(),
             time_last_step_planned,
+            blueprint,
+            current_target_version: Some(fake_target_version()),
         };
 
         let expected_zpool = Zpool {
@@ -1506,5 +1743,7 @@ mod test {
             },
         ]);
         assert_eq!(normalise_zpool_times(checks.problems()), expected);
+
+        logctx.cleanup_successful();
     }
 }
