@@ -62,7 +62,7 @@ impl TimesyncArgs {
         let boundaries = boundaries.into_iter().zip(std::iter::repeat(true));
         let internal = internal.into_iter().zip(std::iter::repeat(false));
         for (sock, is_boundary) in boundaries.chain(internal) {
-            let url = format!("http:://{sock}");
+            let url = format!("http://{sock}");
             let client = Client::new(&url, log.clone());
             let result = match client.timesync().await.map(|t| t.into_inner()) {
                 Ok(ts) => {
