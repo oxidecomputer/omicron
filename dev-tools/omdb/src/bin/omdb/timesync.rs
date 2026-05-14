@@ -4,9 +4,9 @@
 
 //! Check status of time-synchronization.
 
-use std::net::IpAddr;
-
 use crate::Omdb;
+use chrono::DateTime;
+use chrono::Utc;
 use clap::Args;
 use clap::Subcommand;
 use internal_dns_types::names::ServiceName;
@@ -16,6 +16,8 @@ use omicron_common::address::NTP_ADMIN_PORT;
 use slog::Logger;
 use slog::debug;
 use slog::error;
+use std::net::IpAddr;
+use std::time::Duration;
 use tabled::Table;
 use tabled::Tabled;
 
@@ -79,6 +81,7 @@ impl TimesyncArgs {
                         stratum,
                         sync,
                     } = ts;
+                    let ref_time_human = compute_human_ref_time(ref_time);
                     TimesyncStatus {
                         is_boundary,
                         is_synchronized: sync,
@@ -86,6 +89,7 @@ impl TimesyncArgs {
                         ref_id,
                         stratum,
                         ref_time,
+                        ref_time_human,
                         last_offset,
                         rms_offset,
                         correction,
@@ -114,6 +118,15 @@ impl TimesyncArgs {
         println!("{table}");
         Ok(())
     }
+}
+
+fn compute_human_ref_time(ref_time: f64) -> Option<DateTime<Utc>> {
+    if ref_time < 0.0 || ref_time > i64::MAX as f64 {
+        return None;
+    }
+    let secs = ref_time.floor() as i64;
+    // Ignore the subsecond part here, just for human-friendliness.
+    DateTime::from_timestamp(secs, 0)
 }
 
 async fn lookup_ntp_admin_servers(
@@ -170,6 +183,9 @@ struct TimesyncStatus {
     /// The "true" NTP reference time that the NTP server thinks it is.
     #[tabled(display_with = "display_secs_f64")]
     ref_time: f64,
+    /// The true NTP reference time, in human-friendly UTC format.
+    #[tabled(display_with = "display_optional_utc")]
+    ref_time_human: Option<DateTime<Utc>>,
     /// The offset between the local and upstream NTP clocks at the last
     /// measurement.
     #[tabled(display_with = "display_secs_f64")]
@@ -196,7 +212,15 @@ struct TimesyncStatus {
 }
 
 fn display_secs_f64(s: &f64) -> String {
-    format!("{:?}", Duration::from_secs_f64(s))
+    let sign = if *s >= 0.0 { "" } else { "-" };
+    format!("{}{:?}", sign, Duration::from_secs_f64(s.abs()))
+}
+
+fn display_optional_utc(dt: &Option<DateTime<Utc>>) -> String {
+    match dt {
+        Some(dt) => dt.to_string(),
+        None => String::from("None"),
+    }
 }
 
 fn display_ref_id(x: &u32) -> String {
