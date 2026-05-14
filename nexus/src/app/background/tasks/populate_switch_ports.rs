@@ -104,7 +104,7 @@ pub struct SwitchPortPopulator {
     rack_id: Uuid,
     datastore: Arc<DataStore>,
     resolver: Resolver,
-    did_populate_switches: BTreeSet<SwitchSlot>,
+    populated_switches: BTreeSet<SwitchSlot>,
 }
 
 impl SwitchPortPopulator {
@@ -117,7 +117,7 @@ impl SwitchPortPopulator {
             rack_id,
             datastore,
             resolver,
-            did_populate_switches: BTreeSet::new(),
+            populated_switches: BTreeSet::new(),
         }
     }
 
@@ -128,8 +128,8 @@ impl SwitchPortPopulator {
         // Short circuit - if we've already successfully contacted both switch
         // zones and populated the switch ports for them, we have nothing to do
         // ever again.
-        if self.did_populate_switches.contains(&SwitchSlot::Switch0)
-            && self.did_populate_switches.contains(&SwitchSlot::Switch1)
+        if self.populated_switches.contains(&SwitchSlot::Switch0)
+            && self.populated_switches.contains(&SwitchSlot::Switch1)
         {
             return SwitchPortPopulatorStatus {
                 switch0: Ok(SwitchPortPopulatorStatusKind::PreviouslyPopulated),
@@ -184,7 +184,7 @@ impl SwitchPortPopulator {
         clients_by_switch: &HashMap<SwitchSlot, DpdClient>,
         opctx: &OpContext,
     ) -> Result<SwitchPortPopulatorStatusKind, String> {
-        if self.did_populate_switches.contains(&which_switch) {
+        if self.populated_switches.contains(&which_switch) {
             return Ok(SwitchPortPopulatorStatusKind::PreviouslyPopulated);
         }
 
@@ -203,7 +203,7 @@ impl SwitchPortPopulator {
             .await
         {
             Ok(num_ports) => {
-                self.did_populate_switches.insert(which_switch);
+                self.populated_switches.insert(which_switch);
                 Ok(SwitchPortPopulatorStatusKind::Populated { num_ports })
             }
             Err(err) => {
