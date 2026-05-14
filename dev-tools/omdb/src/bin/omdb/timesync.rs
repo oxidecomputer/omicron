@@ -12,6 +12,7 @@ use clap::Subcommand;
 use internal_dns_types::names::ServiceName;
 use ntp_admin_client::Client;
 use ntp_admin_client::types::TimeSync;
+use omicron_common::address::NTP_ADMIN_PORT;
 use slog::Logger;
 use slog::debug;
 use slog::error;
@@ -51,51 +52,10 @@ impl TimesyncArgs {
         omdb: &Omdb,
         log: &Logger,
     ) -> anyhow::Result<()> {
-        // First boundary NTP
-        let boundaries = match omdb
-            .dns_lookup_all(log.clone(), ServiceName::BoundaryNtp)
-            .await
-        {
-            Ok(s) => {
-                debug!(
-                    log,
-                    "looked up boundary NTP services";
-                    "n_records" => s.len()
-                );
-                s
-            }
-            Err(e) => {
-                error!(
-                    log,
-                    "failed to look up boundary NTP SRV records";
-                    "error" => e.to_string(),
-                );
-                vec![]
-            }
-        };
-
-        // Then internal
-        let internal = match omdb
-            .dns_lookup_all(log.clone(), ServiceName::InternalNtp)
-            .await
-        {
-            Ok(s) => {
-                debug!(
-                    log,
-                    "looked up internal NTP services";
-                    "n_records" => s.len()
-                );
-                s
-            }
-            Err(e) => {
-                error!(
-                    log,
-                    "failed to look up internal NTP SRV records";
-                    "error" => e.to_string(),
-                );
-                vec![]
-            }
-        };
+        let boundaries =
+            lookup_ntp_admin_servers(omdb, log, ServiceName::BoundaryNtp).await;
+        let internal =
+            lookup_ntp_admin_servers(omdb, log, ServiceName::InternalNtp).await;
 
         // Fetch timesync from all of them.
         let mut rows = Vec::with_capacity(boundaries.len() + internal.len());
@@ -154,6 +114,43 @@ impl TimesyncArgs {
         println!("{table}");
         Ok(())
     }
+}
+
+async fn lookup_ntp_admin_servers(
+    omdb: &Omdb,
+    log: &Logger,
+    srv: ServiceName,
+) -> Vec<std::net::SocketAddrV6> {
+    let records = match omdb.dns_lookup_all(log.clone(), srv).await {
+        Ok(s) => {
+            debug!(
+                log,
+                "looked up NTP services";
+                "srv" => ?srv,
+                "n_records" => s.len()
+            );
+            s
+        }
+        Err(e) => {
+            error!(
+                log,
+                "failed to look up NTP SRV records";
+                "srv" => ?srv,
+                "error" => e.to_string(),
+            );
+            vec![]
+        }
+    };
+
+    // The DNS SRV records are for the actual NTP service. We need the NTP admin
+    // servers, which are on a different port at the same address.
+    records
+        .into_iter()
+        .map(|mut sock| {
+            sock.set_port(NTP_ADMIN_PORT);
+            sock
+        })
+        .collect()
 }
 
 #[derive(Debug, Tabled)]
