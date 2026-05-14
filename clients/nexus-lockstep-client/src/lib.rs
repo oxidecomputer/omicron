@@ -50,7 +50,6 @@ progenitor::generate_api!(
         DnsConfigParams = nexus_types::internal_api::params::DnsConfigParams,
         DnsConfigZone = nexus_types::internal_api::params::DnsConfigZone,
         DnsRecord = nexus_types::internal_api::params::DnsRecord,
-        ExternalPortDiscovery = nexus_types::internal_api::params::ExternalPortDiscovery,
         Generation = omicron_common::api::external::Generation,
         ImportExportPolicy = sled_agent_types::early_networking::ImportExportPolicy,
         LinkFec = sled_agent_types::early_networking::LinkFec,

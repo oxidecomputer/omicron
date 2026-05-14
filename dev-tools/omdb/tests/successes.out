@@ -411,6 +411,11 @@ task: "physical_disk_adoption"
     ensure new physical disks are automatically marked in-service
 
 
+task: "populate_switch_ports"
+    one-time population of the `switch_port` table containing all QSFP ports
+    managed by dendrite
+
+
 task: "probe_distributor"
     distributes networking probe zones to sleds
 
@@ -854,6 +859,13 @@ task: "physical_disk_adoption"
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
 physical disks added: 0
 /!\ task disabled
+
+task: "populate_switch_ports"
+  configured period: every <REDACTED_DURATION>s
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+switch0 failed: failed to look up dendrite clients: proto error: no records found for Query { name: Name("_dendrite._tcp.control-plane.oxide.internal."), query_type: SRV, query_class: IN }
+switch1 failed: failed to look up dendrite clients: proto error: no records found for Query { name: Name("_dendrite._tcp.control-plane.oxide.internal."), query_type: SRV, query_class: IN }
 
 task: "probe_distributor"
   configured period: every <REDACTED_DURATION>m
@@ -1537,6 +1549,13 @@ task: "physical_disk_adoption"
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
 physical disks added: 0
 /!\ task disabled
+
+task: "populate_switch_ports"
+  configured period: every <REDACTED_DURATION>s
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+switch0 failed: failed to look up dendrite clients: proto error: no records found for Query { name: Name("_dendrite._tcp.control-plane.oxide.internal."), query_type: SRV, query_class: IN }
+switch1 failed: failed to look up dendrite clients: proto error: no records found for Query { name: Name("_dendrite._tcp.control-plane.oxide.internal."), query_type: SRV, query_class: IN }
 
 task: "probe_distributor"
   configured period: every <REDACTED_DURATION>m
