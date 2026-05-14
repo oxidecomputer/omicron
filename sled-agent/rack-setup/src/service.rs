@@ -67,7 +67,6 @@
 //! after a clean slate upon failure.
 //! See <https://github.com/oxidecomputer/omicron/issues/7174> for details.
 
-use crate::early_networking::EarlyNetworkSetupError;
 use crate::plan::service::PlanError as ServicePlanError;
 use crate::plan::service::ServicePlan;
 use crate::plan::sled::SledPlan;
@@ -110,6 +109,7 @@ use sled_agent_client::{
     Client as SledAgentClient, Error as SledAgentError, types as SledAgentTypes,
 };
 use sled_agent_config_reconciler::InternalDisksReceiver;
+use sled_agent_early_networking::EarlyNetworkSetupError;
 use sled_agent_types::early_networking::{
     EarlyNetworkConfigEnvelope, LldpAdminStatus,
 };

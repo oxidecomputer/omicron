@@ -77,7 +77,7 @@ Nexus Internal Lockstep API (client: nexus-lockstep-client)
 
 NTP Admin (client: ntp-admin-client)
     consumed by: omicron-nexus (omicron/nexus) via 2 paths
-    consumed by: omicron-sled-agent (omicron/sled-agent) via 3 paths
+    consumed by: omicron-sled-agent (omicron/sled-agent) via 2 paths
 
 External API (client: oxide-client)
 
