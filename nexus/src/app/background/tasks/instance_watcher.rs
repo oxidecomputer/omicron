@@ -8,6 +8,7 @@ use crate::app::background::BackgroundTask;
 use crate::app::instance::SledAgentInstanceError;
 use crate::app::saga::StartSaga;
 use futures::{FutureExt, future::BoxFuture};
+use gateway_client::types::PowerState;
 use nexus_db_model::Instance;
 use nexus_db_model::Project;
 use nexus_db_model::Sled;
@@ -15,9 +16,11 @@ use nexus_db_model::Vmm;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::pagination::Paginator;
+use nexus_networking::GatewayClient;
 use nexus_types::external_api::sled::SledPolicy;
 use nexus_types::identity::Asset;
 use nexus_types::identity::Resource;
+use nexus_types::inventory;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::InstanceState;
 use omicron_uuid_kinds::GenericUuid;
@@ -29,6 +32,7 @@ use parallel_task_set::ParallelTaskSet;
 use sled_agent_client::Client as SledAgentClient;
 use sled_agent_types::instance;
 use sled_agent_types::instance::SledVmmState;
+use sled_hardware_types::BaseboardId;
 use slog_error_chain::InlineErrorChain;
 use std::borrow::Cow;
 use std::collections::BTreeMap;
@@ -36,6 +40,7 @@ use std::collections::VecDeque;
 use std::future::Future;
 use std::sync::Arc;
 use std::sync::Mutex;
+use tokio::sync::watch;
 use uuid::Uuid;
 
 oximeter::use_timeseries!("vm-health-check.toml");
@@ -45,7 +50,9 @@ use virtual_machine::VirtualMachine;
 pub(crate) struct InstanceWatcher {
     datastore: Arc<DataStore>,
     sagas: Arc<dyn StartSaga>,
+    resolver: internal_dns_resolver::Resolver,
     metrics: Arc<Mutex<metrics::Metrics>>,
+    inv_rx: watch::Receiver<Option<Arc<inventory::Collection>>>,
     id: WatcherIdentity,
 }
 
@@ -74,18 +81,21 @@ impl InstanceWatcher {
         datastore: Arc<DataStore>,
         sagas: Arc<dyn StartSaga>,
         producer_registry: &ProducerRegistry,
+        resolver: internal_dns_resolver::Resolver,
+        inv_rx: watch::Receiver<Option<Arc<inventory::Collection>>>,
         id: WatcherIdentity,
     ) -> Self {
         let metrics = Arc::new(Mutex::new(metrics::Metrics::default()));
         producer_registry
             .register_producer(metrics::Producer(metrics.clone()))
             .unwrap();
-        Self { datastore, sagas, metrics, id }
+        Self { datastore, sagas, metrics, id, resolver, inv_rx }
     }
 
     fn check_instance(
         &self,
         opctx: &OpContext,
+        gateways: &Arc<[GatewayClient]>,
         client: SledAgentClient,
         target: VirtualMachine,
         vmm: Vmm,
@@ -93,6 +103,8 @@ impl InstanceWatcher {
     ) -> impl Future<Output = Check> + Send + 'static + use<> {
         let datastore = self.datastore.clone();
         let sagas = self.sagas.clone();
+        let gateways = gateways.clone();
+        let inv_rx = self.inv_rx.clone();
 
         let vmm_id = PropolisUuid::from_untyped_uuid(target.vmm_id);
         let opctx = {
@@ -103,12 +115,16 @@ impl InstanceWatcher {
             );
             meta.insert("vmm_id".to_string(), vmm_id.to_string());
             meta.insert("sled_id".to_string(), sled.id().to_string());
+            meta.insert(
+                "sled_serial".to_string(),
+                sled.serial_number().to_string(),
+            );
             opctx.child(meta)
         };
 
         async move {
             slog::trace!(
-                opctx.log, "checking on VMM"; "propolis_id" => %vmm_id
+                opctx.log, "checking on VMM"; "propolis_id" => %vmm.id
             );
 
             let mut check = Check {
@@ -118,114 +134,13 @@ impl InstanceWatcher {
                 update_saga_queued: false,
             };
 
-            let state = if sled.policy() == SledPolicy::Expunged {
-                // If the sled has been expunged, any VMMs still on that sled
-                // should be marked as `Failed`.
-                slog::info!(
-                    opctx.log,
-                    "instance is assigned to a VMM on an Expunged sled; \
-                     marking it as Failed";
-                );
-                check.outcome = CheckOutcome::Failure(Failure::SledExpunged);
-                // TODO(eliza): it would be nicer if this used the same
-                // code path as `mark_instance_failed`...
-                SledVmmState {
-                    vmm_state: instance::VmmRuntimeState {
-                        generation: vmm.generation.0.next(),
-                        state: instance::VmmState::Failed,
-                        time_updated: chrono::Utc::now(),
-                    },
-                    // It's fine to synthesize `None`s here because a `None`
-                    // just means "don't update the migration state", not
-                    // "there is no migration".
-                    migration_in: None,
-                    migration_out: None,
-                }
-            } else {
-                // Otherwise, ask the sled-agent what it has to say for itself.
-                let rsp = client
-                    .vmm_get_state(&vmm_id)
-                    .await
-                    .map_err(SledAgentInstanceError);
-                match rsp {
-                    Ok(rsp) => {
-                        let state = rsp.into_inner();
-                        check.outcome =
-                            CheckOutcome::Success(state.vmm_state.state.into());
-                        state
-                    }
-                    // Oh, this error indicates that the VMM should transition to
-                    // `Failed`. Let's synthesize a `SledInstanceState` that does
-                    // that.
-                    Err(e) if e.vmm_gone() => {
-                        slog::info!(
-                            opctx.log,
-                            "sled-agent error indicates that this instance's \
-                             VMM has failed!";
-                            "error" => %e,
-                        );
-                        check.outcome =
-                            CheckOutcome::Failure(Failure::NoSuchInstance);
-                        // TODO(eliza): it would be nicer if this used the same
-                        // code path as `mark_instance_failed`...
-                        SledVmmState {
-                            vmm_state: instance::VmmRuntimeState {
-                                generation: vmm.generation.0.next(),
-                                state: instance::VmmState::Failed,
-                                time_updated: chrono::Utc::now(),
-                            },
-                            // It's fine to synthesize `None`s here because a `None`
-                            // just means "don't update the migration state", not
-                            // "there is no migration".
-                            migration_in: None,
-                            migration_out: None,
-                        }
-                    }
-                    Err(SledAgentInstanceError(
-                        ClientError::ErrorResponse(rsp),
-                    )) => {
-                        let status = rsp.status();
-                        if status.is_client_error() {
-                            slog::warn!(opctx.log, "check incomplete due to client error";
-                            "status" => ?status, "error" => ?rsp.into_inner());
-                        } else {
-                            slog::info!(opctx.log, "check incomplete due to server error";
-                        "status" => ?status, "error" => ?rsp.into_inner());
-                        }
-
-                        check.result = Err(Incomplete::SledAgentHttpError(
-                            status.as_u16(),
-                        ));
-                        return check;
-                    }
-                    Err(SledAgentInstanceError(
-                        ClientError::CommunicationError(e),
-                    )) => {
-                        // TODO(eliza): eventually, we may want to transition the
-                        // instance to the `Failed` state if the sled-agent has been
-                        // unreachable for a while. We may also want to take other
-                        // corrective actions or alert an operator in this case.
-                        //
-                        // TODO(eliza): because we have the purported IP address
-                        // of the instance's VMM from our database query, we could
-                        // also ask the VMM directly when the sled-agent is
-                        // unreachable. We should start doing that here at some
-                        // point.
-                        slog::info!(opctx.log, "sled agent is unreachable"; InlineErrorChain::new(&e));
-                        check.result = Err(Incomplete::SledAgentUnreachable);
-                        return check;
-                    }
-                    Err(SledAgentInstanceError(e)) => {
-                        slog::warn!(
-                            opctx.log,
-                            "error checking up on instance";
-                            "error" => ?e,
-                            "status" => ?e.status(),
-                        );
-                        check.result = Err(Incomplete::ClientError);
-                        return check;
-                    }
-                }
+            let Some(state) = check
+                .run(&opctx, inv_rx, &sled, &vmm, &gateways, &client)
+                .await
+            else {
+                // Check did not result in an updated state, nothing else to
+                // do for this one!
+                return check;
             };
 
             debug!(
@@ -234,10 +149,7 @@ impl InstanceWatcher {
                 "state" => ?state,
             );
             match crate::app::instance::process_vmm_update(
-                &datastore,
-                &opctx,
-                PropolisUuid::from_untyped_uuid(target.vmm_id),
-                &state,
+                &datastore, &opctx, vmm_id, &state,
             )
             .await
             {
@@ -278,6 +190,248 @@ impl InstanceWatcher {
             check
         }
     }
+}
+
+impl Check {
+    async fn run(
+        &mut self,
+        opctx: &OpContext,
+        inv_rx: watch::Receiver<Option<Arc<inventory::Collection>>>,
+        sled: &Sled,
+        vmm: &Vmm,
+        gateways: &[GatewayClient],
+        client: &SledAgentClient,
+    ) -> Option<SledVmmState> {
+        let mk_failed = || {
+            // TODO(eliza): it would be nicer if this used the same
+            // code path as `mark_instance_failed`...
+            Some(SledVmmState {
+                vmm_state: instance::VmmRuntimeState {
+                    generation: vmm.generation.0.next(),
+                    state: instance::VmmState::Failed,
+                    time_updated: chrono::Utc::now(),
+                },
+                // It's fine to synthesize `None`s here because a `None`
+                // just means "don't update the migration state", not
+                // "there is no migration".
+                migration_in: None,
+                migration_out: None,
+            })
+        };
+
+        if sled.policy() == SledPolicy::Expunged {
+            // If the sled has been expunged, any VMMs still on that sled
+            // should be marked as `Failed`.
+            slog::info!(
+                opctx.log,
+                "instance is assigned to a VMM on an Expunged sled; \
+                 marking it as Failed";
+            );
+            self.outcome = CheckOutcome::Failure(Failure::SledExpunged);
+            return mk_failed();
+        }
+
+        // Ask the sled-agent what it has to say for itself.
+        let rsp = client
+            .vmm_get_state(&PropolisUuid::from_untyped_uuid(vmm.id))
+            .await
+            .map_err(SledAgentInstanceError);
+        match rsp {
+            // We received a response from the sled-agent. We shall update the
+            // instance's state to match.
+            //
+            // Note that this does not always mean that the *VMM* is healthy,
+            // but only that we successfully got its state from the sled-agent.
+            Ok(rsp) => {
+                let state = rsp.into_inner();
+                self.outcome =
+                    CheckOutcome::Success(state.vmm_state.state.into());
+                Some(state)
+            }
+            // Oh, this error indicates that the VMM should transition to
+            // `Failed`. Let's synthesize a `SledInstanceState` that does
+            // that.
+            Err(e) if e.vmm_gone() => {
+                let error = InlineErrorChain::new(&e);
+                slog::info!(
+                    opctx.log,
+                    "sled-agent error indicates that this instance's \
+                     VMM has failed!";
+                    error,
+                );
+                self.outcome = CheckOutcome::Failure(Failure::NoSuchInstance);
+                mk_failed()
+            }
+            // We were able to contact the sled-agent, but it responded with an
+            // error which does *not* tell us that the VMM has failed. Either
+            // the sled-agent is unhealthy, or we sent an invalid request for
+            // some reason. In either case, the check is inconclusive and the
+            // instance's state will not change.
+            Err(SledAgentInstanceError(ClientError::ErrorResponse(rsp))) => {
+                // This is a bit goofy: we destructure the error because
+                // `ResponseValue` has a `status()` which is not optional (so we
+                // don't have to unwrap it), but then we re-construct the
+                // `progenitor_client::Error` because we would like to format it
+                // with `InlineErrorChain`. This looks silly but there's nothing
+                // actually *wrong* with it...
+                let status = rsp.status();
+                let error = ClientError::ErrorResponse(rsp);
+                let error = InlineErrorChain::new(&error);
+                if status.is_client_error() {
+                    slog::warn!(
+                        opctx.log,
+                        "check incomplete due to client error";
+                        "status" => ?status,
+                        "error" => error,
+                    );
+                } else {
+                    slog::info!(
+                        opctx.log,
+                        "check incomplete due to server error";
+                        "status" => ?status,
+                        "error" => error,
+                    );
+                }
+
+                self.result =
+                    Err(Incomplete::SledAgentHttpError(status.as_u16()));
+                None
+            }
+            // We were unable to communicate with the sled-agent. This could be
+            // due to a network partition between us and the sled-agent, or
+            // because the sled is powered off or not present. We will use the
+            // management network to check whether the sled is present and
+            // powered on. If we determine conclusively that it is not present
+            // and in A0, the instance is moved to `Failed`. Otherwise, the
+            // check is inconclusive and the instance's state will not change.
+            Err(SledAgentInstanceError(ClientError::CommunicationError(e))) => {
+                slog::info!(
+                    opctx.log,
+                    "sled-agent is unreachable";
+                    InlineErrorChain::new(&e),
+                );
+
+                // Is your computer running?
+                match is_computer_on(&opctx, &inv_rx, &gateways, &sled).await {
+                    // ...impossible to tell! Results are inconclusive.
+                    Err(error) => {
+                        let error = InlineErrorChain::new(&*error);
+                        warn!(
+                            opctx.log,
+                            "sled-agent is unreachable, but we cannot \
+                             determine if your computer is running";
+                            error
+                        );
+                    }
+
+                    // ...better go catch it!
+                    Ok(PowerState::A0) => {}
+
+                    // It is not running, the instance can't possibly be there.
+                    Ok(state) => {
+                        slog::info!(
+                            opctx.log,
+                            "instance is assigned to a VMM on a sled \
+                             that is not in A0, marking it as Failed";
+                            "sled_power_state" => ?state,
+                        );
+                        self.outcome = CheckOutcome::Failure(Failure::SledOff);
+                        return mk_failed();
+                    }
+                }
+
+                self.result = Err(Incomplete::SledAgentUnreachable);
+                None
+            }
+            // Any other errors mean that the check is inconclusive.
+            Err(SledAgentInstanceError(e)) => {
+                slog::warn!(
+                    opctx.log,
+                    "error checking up on instance";
+                    "error" => InlineErrorChain::new(&e),
+                    "status" => ?e.status(),
+                );
+                self.result = Err(Incomplete::ClientError);
+                None
+            }
+        }
+    }
+}
+
+/// An implementation of the `is_computer_on()` function originally defined
+/// in the BeOS C library][1].
+///
+/// [1]: https://web.archive.org/web/20260309055003/https://www.haiku-os.org/legacy-docs/bebook/TheKernelKit_SystemInfo.html
+async fn is_computer_on(
+    opctx: &OpContext,
+    inv_rx: &watch::Receiver<Option<Arc<inventory::Collection>>>,
+    gateways: &[GatewayClient],
+    sled: &Sled,
+) -> anyhow::Result<PowerState> {
+    let Some(inv) = inv_rx.borrow().clone() else {
+        anyhow::bail!(
+            "cannot find sled to ask if it's turned on, since there is no \
+             inventory collection yet"
+        );
+    };
+
+    let part_number = sled.part_number();
+    let rev = sled.revision();
+    let serial_number = sled.serial_number();
+
+    // TODO(eliza): this sucks, i would rather not have to memcpy the strings
+    // here...this would be nicer if we iterated over sled-agents from the
+    // inventory in the main loop. change that!
+    let bb = BaseboardId {
+        part_number: part_number.to_owned(),
+        serial_number: serial_number.to_owned(),
+    };
+    let Some(sp) = inv.sps.get(&bb) else {
+        anyhow::bail!(
+            "SP for sled {part_number}:{rev}:{serial_number} is not in the \
+             inventory"
+        );
+    };
+
+    // Ask MGS whether the computer is on. If trying to talk to one of the
+    // gateways fails for whatever reason, ask any others we were able to
+    // resolve as well.
+    for GatewayClient { client, addr } in gateways {
+        let state = match client.sp_get(&sp.sp_type, sp.sp_slot).await {
+            Ok(response) => response.into_inner(),
+            Err(error) => {
+                let error = InlineErrorChain::new(&error);
+                slog::warn!(
+                    &opctx.log,
+                    "requesting sled SP status from MGS failed";
+                    "gateway_addr" => %addr,
+                    "error" => &error,
+                );
+                continue;
+            }
+        };
+
+        if state.serial_number != sled.serial_number() {
+            // Well, this is surprising; is our inventory stale? In any case, if
+            // we can't find the actual location of the sled, we can't determine
+            // whether or not it's turned on...
+            anyhow::bail!(
+                "expected sled {part_number}:{rev}:{serial_number} to be in \
+                 slot {}, but found sled {}:{}:{} instead",
+                sp.sp_slot,
+                state.model,
+                state.revision,
+                state.serial_number,
+            );
+        }
+
+        return Ok(state.power_state);
+    }
+
+    Err(anyhow::anyhow!(
+        "no MGS could determine if the sled is on (asked {})",
+        gateways.len()
+    ))
 }
 
 /// The identity of the process performing the health check, for distinguishing
@@ -382,6 +536,10 @@ enum Failure {
     /// The instance was assigned to a sled that was expunged. Its VMM has been
     /// marked as `Failed`, since the sled is no longer present.
     SledExpunged,
+    /// The instance was assigned to a sled that is not currently in A0.
+    /// Its VMM has been marked as `Failed`, since the computer it's on is not,
+    /// you know...turned on.
+    SledOff,
 }
 
 impl Failure {
@@ -389,6 +547,7 @@ impl Failure {
         match self {
             Self::NoSuchInstance => "no_such_instance".into(),
             Self::SledExpunged => "sled_expunged".into(),
+            Self::SledOff => "sled_off".into(),
         }
     }
 }
@@ -402,8 +561,8 @@ enum Incomplete {
     /// The sled-agent for the sled on which the instance is running was
     /// unreachable.
     ///
-    /// This may indicate a network partition between us and that sled, that
-    /// the sled-agent process has crashed, or that the sled is down.
+    /// This may indicate a network partition between us and that sled, or that
+    /// the sled-agent process has crashed.
     SledAgentUnreachable,
     /// The sled-agent responded with an unexpected HTTP error.
     SledAgentHttpError(u16),
@@ -447,6 +606,26 @@ impl BackgroundTask for InstanceWatcher {
             let mut tasks = ParallelTaskSet::new_with_parallelism(
                 MAX_CONCURRENT_CHECKS,
             );
+
+            let gateways = match GatewayClient::resolve_all_gateways(&opctx.log, &self.resolver).await {
+                Ok(gateways) => gateways.collect::<Arc<[_]>>(),
+                Err(err) => {
+                    // This is a bit sad, but talking to MGS is only necessary
+                    // to check if a sled is powered on in the event that the
+                    // sled-agent is unreachable. If we don't see communication
+                    // errors talking to sled-agents, we can confirm that VMMs
+                    // are, or are not, healthy, even if we are unable to talk
+                    // to MGS.
+                    slog::warn!(
+                        opctx.log,
+                        "failed to resolve any management gateways; we will \
+                         not be checking if sleds are powered on, should \
+                         sled-agents be unreachable";
+                        "error" => InlineErrorChain::new(&*err),
+                    );
+                    Arc::new([])
+                },
+            };
 
             let mut update_sagas_queued: usize = 0;
             let mut instance_states: BTreeMap<String, usize> =
@@ -508,7 +687,7 @@ impl BackgroundTask for InstanceWatcher {
                     };
 
                     let target = VirtualMachine::new(self.id, &sled, &instance, &vmm, &project);
-                    tasks.spawn(self.check_instance(opctx, client, target ,vmm ,sled)).await
+                    tasks.spawn(self.check_instance(opctx, &gateways, client, target, vmm, sled)).await
                 } else {
                     // If there are no remaining instances to check, wait for
                     // all previously spawned check to complete.

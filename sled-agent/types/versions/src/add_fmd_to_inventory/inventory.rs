@@ -19,7 +19,7 @@ use crate::v14::inventory::OmicronSledConfig;
 use crate::v16::inventory::ConfigReconcilerInventory;
 use crate::v16::inventory::SingleMeasurementInventory;
 use crate::v24::inventory::InventoryZpool;
-use crate::v34;
+use crate::v37;
 
 /// A diagnosed fault case from the illumos Fault Management Daemon on a sled.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
@@ -113,12 +113,12 @@ pub struct Inventory {
     pub last_reconciliation: Option<ConfigReconcilerInventory>,
     pub file_source_resolver: OmicronFileSourceResolverInventory,
     pub smf_services_enabled_not_online:
-        v34::inventory::SvcsEnabledNotOnlineResult,
+        v37::inventory::SvcsEnabledNotOnlineResult,
     pub reference_measurements: IdOrdMap<SingleMeasurementInventory>,
     pub fmd: FmdInventoryResult,
 }
 
-impl From<Inventory> for v34::inventory::Inventory {
+impl From<Inventory> for v37::inventory::Inventory {
     fn from(value: Inventory) -> Self {
         let Inventory {
             sled_id,

@@ -11,31 +11,6 @@ use sled_agent_types::early_networking::BfdMode;
 use sled_agent_types::early_networking::SwitchSlot;
 
 impl super::Nexus {
-    async fn mg_client_for_switch_slot(
-        &self,
-        switch: SwitchSlot,
-    ) -> Result<mg_admin_client::Client, Error> {
-        let mg_client: mg_admin_client::Client = self
-            .mg_clients()
-            .await
-            .map_err(|e| {
-                Error::internal_error(&format!("failed to get mg clients: {e}"))
-            })?
-            .get(&switch)
-            .ok_or_else(|| {
-                // TODO-correctness Only having one switch shouldn't be an
-                // error; this will be fixed by
-                // <https://github.com/oxidecomputer/omicron/pull/9979> or
-                // <https://github.com/oxidecomputer/omicron/pull/9533>.
-                Error::internal_error(&format!(
-                    "failed to find switch {switch:?}"
-                ))
-            })?
-            .clone();
-
-        Ok(mg_client)
-    }
-
     pub async fn bfd_enable(
         &self,
         opctx: &OpContext,
@@ -72,9 +47,22 @@ impl super::Nexus {
     ) -> Result<Vec<bfd::BfdStatus>, Error> {
         // ask each rack switch about all its BFD sessions. This will need to
         // be updated for multirack.
+        let mg_clients = self.mg_clients().await.map_err(|err| {
+            Error::internal_error(&format!("failed to get mg clients: {err}"))
+        })?;
         let mut result = Vec::new();
         for switch_slot in [SwitchSlot::Switch0, SwitchSlot::Switch1] {
-            let mg_client = self.mg_client_for_switch_slot(switch_slot).await?;
+            // If we only have one scrimlet, we won't have an entry in
+            // `mg_clients` for one of the switch locations. Log that, but
+            // continue so we can still report status from whichever switch we
+            // do have.
+            let Some(mg_client) = mg_clients.get(&switch_slot) else {
+                warn!(
+                    self.log, "no mgd client found for switch slot";
+                    "switch-slot" => ?switch_slot,
+                );
+                continue;
+            };
             let status = mg_client
                 .get_bfd_peers()
                 .await

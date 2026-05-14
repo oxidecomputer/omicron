@@ -114,7 +114,8 @@ const BAD_SILO_LINK_ERROR: &str = "IP Pools cannot be both linked to external \
     Silos and reserved for internal Oxide usage.";
 
 // Error message emitted when a user attempts to unlink an IP Pool from a Silo
-// while the pool has external IP addresses allocated from it.
+// while the pool has external IP addresses or multicast groups allocated
+// from it.
 const POOL_HAS_IPS_ERROR: &str =
     "IP addresses from this pool are in use in the linked silo";
 
@@ -2202,14 +2203,18 @@ fn link_ip_pool_to_external_silo_query(
 
 // Query to conditionally unlink an IP Pool from an external / customer Silo.
 //
-// This deletes the link iff there are no outstanding instance external IPs or
-// floating IPs allocated out of the pool, to objects in the Silo.
+// This deletes the link iff there are no remaining instance external IPs or
+// floating IPs in the Silo. Multicast groups aren't silo-scoped at the row
+// level (they're explicitly cross-silo), so we additionally block unlinking
+// while any remain (groups in the deleting state still hold their pool IP),
+// mirroring `ip_pool_delete_range`. A group allocated from this pool by any
+// silo blocks unlinking from every silo linked to the pool.
 //
 // The full query is:
 //
 // ```
 // -- This CTE returns one row if there are any external IPs attached to
-// -- instances, in any projects in the Silo.
+// -- instances in any projects in the Silo.
 // WITH instance_ips AS (
 //   SELECT 1
 //   FROM external_ip
@@ -2240,20 +2245,33 @@ fn link_ip_pool_to_external_silo_query(
 //       project.silo_id = $4 AND
 //       project.time_deleted IS NULL
 //   LIMIT 1
+// ),
+// -- This CTE returns one row if any multicast groups are allocated out of
+// -- the pool. Groups are cross-silo by design, so the existence check is
+// -- not silo-scoped.
+// multicast_groups AS (
+//   SELECT 1
+//   FROM multicast_group
+//   WHERE
+//       multicast_group.time_deleted IS NULL AND
+//       multicast_group.ip_pool_id = $5
+//   LIMIT 1
 // )
 // -- Delete the requested link by primary key, but conditionally.
 // DELETE FROM ip_pool_resource
 // WHERE
-//   ip_pool_id = $7 AND
+//   ip_pool_id = $6 AND
 //   resource_type = 'silo' AND
-//   resource_id = $8 AND
-//   -- If there are any external IPs, this generates an error casting 'eips' to
-//   -- a boolean, which we detect and handle.
+//   resource_id = $7 AND
+//   -- If there are any allocations, this generates an error casting
+//   -- 'has-allocs' to a boolean, which we detect and handle.
 //   CAST(IF(EXISTS(
 //      SELECT 1 FROM instance_ips
 //      UNION ALL
 //      SELECT 1 FROM floating_ips
-//  ), 'eips', 'true') AS BOOL)
+//      UNION ALL
+//      SELECT 1 FROM multicast_groups
+//  ), 'has-allocs', 'true') AS BOOL)
 // ```
 fn unlink_ip_pool_from_external_silo_query(
     ip_pool_id: Uuid,
@@ -2301,7 +2319,18 @@ fn unlink_ip_pool_from_external_silo_query(
         .param()
         .bind::<sql_types::Uuid, _>(silo_id)
         .sql(
-            " AND project.time_deleted IS NULL LIMIT 1) \
+            " AND project.time_deleted IS NULL LIMIT 1), \
+            multicast_groups AS (\
+        SELECT 1 \
+        FROM multicast_group \
+        WHERE \
+            multicast_group.time_deleted IS NULL AND \
+            multicast_group.ip_pool_id = ",
+        )
+        .param()
+        .bind::<sql_types::Uuid, _>(ip_pool_id)
+        .sql(
+            " LIMIT 1) \
             DELETE FROM ip_pool_resource \
             WHERE ip_pool_id = ",
         )
@@ -2321,9 +2350,11 @@ fn unlink_ip_pool_from_external_silo_query(
                 EXISTS(\
                     SELECT 1 FROM instance_ips \
                     UNION ALL \
-                    SELECT 1 FROM floating_ips\
+                    SELECT 1 FROM floating_ips \
+                    UNION ALL \
+                    SELECT 1 FROM multicast_groups\
                 ), \
-                'has-eips', \
+                'has-allocs', \
                 'true'\
             ) AS BOOL)",
         );

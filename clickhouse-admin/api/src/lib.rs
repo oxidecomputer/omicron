@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use clickhouse_admin_types_versions::latest;
+use clickhouse_admin_types_versions::{latest, v2};
 use dropshot::{
     HttpError, HttpResponseCreated, HttpResponseOk,
     HttpResponseUpdatedNoContent, Path, Query, RequestContext, TypedBody,
@@ -27,6 +27,8 @@ api_versions!([
     // |  example for the next person.
     // v
     // (next_int, IDENT), // NOTE: read the note at the start of this macro!
+    (3, ADD_RETENTION_POLICY_FOR_ALL_TABLES),
+    (2, ADD_RETENTION_POLICY_AND_TABLE_USAGE),
     (1, INITIAL),
 ]);
 
@@ -200,6 +202,77 @@ pub trait ClickhouseAdminServerApi {
     async fn init_db(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    /// Set the retention policy for timeseries data.
+    #[endpoint {
+        method = PUT,
+        path = "/retention-policy",
+        versions = VERSION_ADD_RETENTION_POLICY_FOR_ALL_TABLES..,
+    }]
+    async fn set_retention_policy(
+        rqctx: RequestContext<Self::Context>,
+        policy: TypedBody<latest::retention::RetentionPolicyRequest>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    /// Set the retention policy for timeseries data.
+    #[endpoint {
+        method = PUT,
+        path = "/retention-policy",
+        versions =
+            VERSION_ADD_RETENTION_POLICY_AND_TABLE_USAGE..VERSION_ADD_RETENTION_POLICY_FOR_ALL_TABLES,
+    }]
+    async fn set_retention_policy_v2(
+        rqctx: RequestContext<Self::Context>,
+        policy: TypedBody<v2::retention::RetentionPolicy>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        Self::set_retention_policy(rqctx, policy.map(Into::into)).await
+    }
+
+    /// Get the retention policy for timeseries data from the database
+    #[endpoint {
+        method = GET,
+        path = "/retention-policy",
+        versions = VERSION_ADD_RETENTION_POLICY_FOR_ALL_TABLES..,
+    }]
+    async fn retention_policy(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<
+        HttpResponseOk<latest::retention::DatabaseRetentionPolicy>,
+        HttpError,
+    >;
+
+    /// Get the retention policy for timeseries data from the database
+    #[endpoint {
+        method = GET,
+        path = "/retention-policy",
+        versions =
+            VERSION_ADD_RETENTION_POLICY_AND_TABLE_USAGE..VERSION_ADD_RETENTION_POLICY_FOR_ALL_TABLES,
+    }]
+    async fn retention_policy_v2(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<v2::retention::RetentionPolicy>, HttpError> {
+        let HttpResponseOk(mut policy) = Self::retention_policy(rqctx).await?;
+        policy
+            .tables
+            .pop_first()
+            .ok_or_else(|| {
+                HttpError::for_unavail(
+                    None,
+                    "Database is not yet populated".to_string(),
+                )
+            })
+            .map(|pol| HttpResponseOk(pol.into()))
+    }
+
+    /// Return the resource usage of database tables.
+    #[endpoint {
+        method = GET,
+        path = "/usage/database",
+        versions = VERSION_ADD_RETENTION_POLICY_AND_TABLE_USAGE..,
+    }]
+    async fn database_usage(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<latest::usage::DatabaseUsageResult>, HttpError>;
 }
 
 /// API interface for our clickhouse-admin-single server
@@ -235,4 +308,75 @@ pub trait ClickhouseAdminSingleApi {
         path_params: Path<latest::server::MetricInfoPath>,
         query_params: Query<latest::server::TimeSeriesSettingsQuery>,
     ) -> Result<HttpResponseOk<Vec<latest::server::SystemTimeSeries>>, HttpError>;
+
+    /// Set the retention policy for timeseries data.
+    #[endpoint {
+        method = PUT,
+        path = "/retention-policy",
+        versions = VERSION_ADD_RETENTION_POLICY_FOR_ALL_TABLES..,
+    }]
+    async fn set_retention_policy(
+        rqctx: RequestContext<Self::Context>,
+        policy: TypedBody<latest::retention::RetentionPolicyRequest>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    /// Set the retention policy for timeseries data.
+    #[endpoint {
+        method = PUT,
+        path = "/retention-policy",
+        versions =
+            VERSION_ADD_RETENTION_POLICY_AND_TABLE_USAGE..VERSION_ADD_RETENTION_POLICY_FOR_ALL_TABLES,
+    }]
+    async fn set_retention_policy_v2(
+        rqctx: RequestContext<Self::Context>,
+        policy: TypedBody<v2::retention::RetentionPolicy>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        Self::set_retention_policy(rqctx, policy.map(Into::into)).await
+    }
+
+    /// Get the retention policy for timeseries data from the database
+    #[endpoint {
+        method = GET,
+        path = "/retention-policy",
+        versions = VERSION_ADD_RETENTION_POLICY_FOR_ALL_TABLES..,
+    }]
+    async fn retention_policy(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<
+        HttpResponseOk<latest::retention::DatabaseRetentionPolicy>,
+        HttpError,
+    >;
+
+    /// Get the retention policy for timeseries data from the database
+    #[endpoint {
+        method = GET,
+        path = "/retention-policy",
+        versions =
+            VERSION_ADD_RETENTION_POLICY_AND_TABLE_USAGE..VERSION_ADD_RETENTION_POLICY_FOR_ALL_TABLES,
+    }]
+    async fn retention_policy_v2(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<v2::retention::RetentionPolicy>, HttpError> {
+        let HttpResponseOk(mut policy) = Self::retention_policy(rqctx).await?;
+        policy
+            .tables
+            .pop_first()
+            .ok_or_else(|| {
+                HttpError::for_unavail(
+                    None,
+                    "Database is not yet populated".to_string(),
+                )
+            })
+            .map(|pol| HttpResponseOk(pol.into()))
+    }
+
+    /// Return the resource usage of database tables.
+    #[endpoint {
+        method = GET,
+        path = "/usage/database",
+        versions = VERSION_ADD_RETENTION_POLICY_AND_TABLE_USAGE..,
+    }]
+    async fn database_usage(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<latest::usage::DatabaseUsageResult>, HttpError>;
 }
