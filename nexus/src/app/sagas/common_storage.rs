@@ -17,8 +17,9 @@ use nexus_db_queries::db;
 use nexus_db_queries::db::datastore::CrucibleDisk;
 use nexus_types::saga::saga_action_failed;
 use omicron_common::api::external::Error;
-use omicron_common::progenitor_operation_retry::ProgenitorOperationRetry;
-use omicron_common::progenitor_operation_retry::ProgenitorOperationRetryError;
+use omicron_common::backoff::backon_retry_policy_internal_service;
+use progenitor_extras::retry::IndefiniteRetryOperationWhileError;
+use progenitor_extras::retry::retry_operation_while_indefinitely;
 use slog::Logger;
 use slog_error_chain::InlineErrorChain;
 use std::net::SocketAddrV6;
@@ -46,12 +47,12 @@ pub(crate) async fn get_pantry_address(
 // gone, and we detect "gone" by seeing whether the pantry address we've chosen
 // is still present when we resolve all the crucible pantry records in DNS.
 //
-// This function never returns an error because it's expected to be used with
-// `ProgenitorOperationRetry`, which treats an error in the "gone check" as a
-// fatal error. We don't want to amplify failures: if something is wrong with
-// DNS, we can't go back and choose another pantry anyway, so we'll just keep
-// retrying until DNS comes back. All that to say: a failure to resolve DNS is
-// treated as "the pantry is not gone".
+// This function never returns an error because it's expected to be used within
+// a `retry_operation_while_indefinitely` loop, which treats an error in the
+// "gone check" as a fatal error. We don't want to amplify failures: if
+// something is wrong with DNS, we can't go back and choose another pantry
+// anyway, so we'll just keep retrying until DNS comes back. All that to say: a
+// failure to resolve DNS is treated as "the pantry is not gone".
 pub(crate) async fn is_pantry_gone(
     nexus: &Nexus,
     pantry_address: SocketAddrV6,
@@ -136,20 +137,43 @@ pub(crate) async fn call_pantry_attach_for_volume(
     let attach_operation = || async {
         client.attach(&attach_id.to_string(), &attach_request).await
     };
-    let gone_check =
-        || async { Ok(is_pantry_gone(nexus, pantry_address, log).await) };
 
-    ProgenitorOperationRetry::new(attach_operation, gone_check)
-        .run(log)
-        .await
-        .map_err(|e| {
+    let gone_check = || async {
+        let result = match is_pantry_gone(nexus, pantry_address, log).await {
+            true => GoneCheckResult::Gone,
+            false => GoneCheckResult::StillAvailable,
+        };
+
+        Ok(result)
+    };
+
+    retry_operation_while_indefinitely(
+        backon_retry_policy_internal_service(),
+        attach_operation,
+        gone_check,
+        |notification| {
+            slog::warn!(
+                log,
+                "failed to attach {attach_id} to pantry {pantry_address}, \
+                retrying in {:?}",
+                notification.delay;
+                InlineErrorChain::new(&notification.error),
+            );
+        },
+    )
+    .await
+    .map(|_response| ())
+    .map_err(
+        |e: IndefiniteRetryOperationWhileError<
+            crucible_pantry_client::types::Error,
+            Error,
+        >| {
             saga_action_failed(Error::internal_error(&format!(
                 "pantry attach failed: {}",
                 InlineErrorChain::new(&e)
             )))
-        })?;
-
-    Ok(())
+        },
+    )
 }
 
 pub(crate) async fn call_pantry_detach(
@@ -157,7 +181,7 @@ pub(crate) async fn call_pantry_detach(
     log: &slog::Logger,
     attach_id: Uuid,
     pantry_address: SocketAddrV6,
-) -> Result<(), ProgenitorOperationRetryError<CruciblePantryClientError>> {
+) -> Result<(), IndefiniteRetryOperationWhileError<CruciblePantryClientError>> {
     let endpoint = format!("http://{}", pantry_address);
 
     info!(log, "sending detach for {attach_id} to endpoint {endpoint}");
@@ -166,13 +190,32 @@ pub(crate) async fn call_pantry_detach(
 
     let detach_operation =
         || async { client.detach(&attach_id.to_string()).await };
-    let gone_check =
-        || async { Ok(is_pantry_gone(nexus, pantry_address, log).await) };
 
-    ProgenitorOperationRetry::new(detach_operation, gone_check)
-        .run(log)
-        .await
-        .map(|_response| ())
+    let gone_check = || async {
+        let result = match is_pantry_gone(nexus, pantry_address, log).await {
+            true => GoneCheckResult::Gone,
+            false => GoneCheckResult::StillAvailable,
+        };
+
+        Ok(result)
+    };
+
+    retry_operation_while_indefinitely(
+        backon_retry_policy_internal_service(),
+        detach_operation,
+        gone_check,
+        |notification| {
+            slog::warn!(
+                log,
+                "failed to detach {attach_id} from pantry {pantry_address}, \
+                retrying in {:?}",
+                notification.delay;
+                InlineErrorChain::new(&notification.error),
+            );
+        },
+    )
+    .await
+    .map(|_response| ())
 }
 
 pub(crate) fn find_only_new_region(

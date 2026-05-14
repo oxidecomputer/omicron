@@ -3,6 +3,13 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 //! Functions common to interacting with Crucible agents
+//!
+//! A note: there are multiple places in this file that have two layers of
+//! retries. This is because the majority of the requests to the Crucible agent
+//! are requests for something to happen in the background, and it's the
+//! client's responsibility to poll for a state change. One example of this is
+//! for creating regions: the inner loop retries the POST until it succeeds, and
+//! the outer loop checks the state returned.
 
 use super::*;
 
@@ -19,11 +26,15 @@ use futures::StreamExt;
 use nexus_db_queries::db;
 use nexus_db_queries::db::identity::Asset;
 use omicron_common::api::external::Error;
+use omicron_common::backoff::backon_retry_policy_internal_service;
 use omicron_common::backoff::{self, BackoffError};
-use omicron_common::progenitor_operation_retry::ProgenitorOperationRetry;
-use omicron_common::progenitor_operation_retry::ProgenitorOperationRetryError;
 use omicron_uuid_kinds::DatasetUuid;
+use progenitor_extras::retry::GoneCheckResult;
+use progenitor_extras::retry::IndefiniteRetryOperationWhileError;
+use progenitor_extras::retry::IndefiniteRetryOperationWhileErrorKind;
+use progenitor_extras::retry::retry_operation_while_indefinitely;
 use slog::Logger;
+use std::collections::VecDeque;
 
 // Arbitrary limit on concurrency, for operations issued on multiple regions
 // within a disk at the same time.
@@ -41,21 +52,23 @@ enum WaitError {
     Permanent(#[from] Error),
 }
 
-/// Convert an error returned from the ProgenitorOperationRetry loops in this
-/// file into an external Error
+/// Convert an error returned from a retry loop into an external Error
 fn into_external_error(
-    e: ProgenitorOperationRetryError<crucible_agent_client::types::Error>,
+    e: IndefiniteRetryOperationWhileError<
+        crucible_agent_client::types::Error,
+        Error,
+    >,
 ) -> Error {
-    match e {
-        ProgenitorOperationRetryError::Gone => Error::Gone,
+    match e.kind {
+        IndefiniteRetryOperationWhileErrorKind::Gone => Error::Gone,
 
-        ProgenitorOperationRetryError::GoneCheckError(e) => {
+        IndefiniteRetryOperationWhileErrorKind::GoneCheckError(e) => {
             Error::internal_error(&format!(
                 "insufficient permission for crucible_agent_gone_check: {e}"
             ))
         }
 
-        ProgenitorOperationRetryError::ProgenitorError(e) => match e {
+        IndefiniteRetryOperationWhileErrorKind::OperationError(e) => match e {
             crucible_agent_client::Error::ErrorResponse(rv) => {
                 if rv.status().is_client_error() {
                     Error::invalid_request(&rv.message)
@@ -64,7 +77,7 @@ fn into_external_error(
                 }
             }
 
-            _ => Error::internal_error(&format!("unexpected failure: {e}",)),
+            _ => Error::internal_error(&format!("unexpected failure: {e}")),
         },
     }
 }
@@ -74,27 +87,27 @@ impl super::Nexus {
         &self,
         dataset: &db::model::CrucibleDataset,
     ) -> CrucibleAgentClient {
-        // Use reqwest012_client because the rev-pinned crucible-agent-client
-        // is still on reqwest 0.12.
         CrucibleAgentClient::new_with_client(
             &format!("http://{}", dataset.address()),
-            self.reqwest012_client.clone(),
+            self.reqwest_client.clone(),
         )
     }
 
     /// Return if the Crucible agent is expected to be there and answer Nexus:
-    /// true means it's gone, and the caller should bail out of the
-    /// ProgenitorOperationRetry loop.
+    /// if it's [`Gone`], the caller should bail out of the retry loop.
     async fn crucible_agent_gone_check(
         &self,
         dataset_id: DatasetUuid,
-    ) -> Result<bool, Error> {
+    ) -> Result<GoneCheckResult, Error> {
         let on_in_service_physical_disk = self
             .datastore()
             .crucible_dataset_physical_disk_in_service(dataset_id)
             .await?;
 
-        Ok(!on_in_service_physical_disk)
+        Ok(match on_in_service_physical_disk {
+            true => GoneCheckResult::StillAvailable,
+            false => GoneCheckResult::Gone,
+        })
     }
 
     /// Return a region's associated address
@@ -156,6 +169,7 @@ impl super::Nexus {
         source: Option<String>,
     ) -> Result<Region, Error> {
         let client = self.crucible_agent_client_for_dataset(dataset);
+        let region_id = region.id();
         let dataset_id = dataset.id();
 
         let Ok(extent_count) = u32::try_from(region.extent_count()) else {
@@ -179,21 +193,35 @@ impl super::Nexus {
         };
 
         let create_region = || async {
-            let region = match ProgenitorOperationRetry::new(
-                || async { client.region_create(&region_request).await },
-                || async { self.crucible_agent_gone_check(dataset_id).await },
+            let create_region_operation =
+                || async { client.region_create(&region_request).await };
+
+            let gone_check =
+                || async { self.crucible_agent_gone_check(dataset_id).await };
+
+            let region = match retry_operation_while_indefinitely(
+                backon_retry_policy_internal_service(),
+                create_region_operation,
+                gone_check,
+                |notification| {
+                    slog::warn!(
+                        log,
+                        "failed to create region {region_id}, retrying in {:?}",
+                        notification.delay;
+                        InlineErrorChain::new(&notification.error),
+                    );
+                },
             )
-            .run(log)
             .await
             {
-                Ok(v) => Ok(v),
+                Ok(v) => Ok(v.into_inner()),
 
                 Err(e) => {
                     error!(
                         log,
                         "region_create saw {:?}",
                         e;
-                        "region_id" => %region.id(),
+                        "region_id" => %region_id,
                         "dataset_id" => %dataset_id,
                     );
 
@@ -228,8 +256,8 @@ impl super::Nexus {
                 log,
                 "Region requested, not yet created. Retrying in {:?}",
                 delay;
-                "dataset" => %dataset.id(),
-                "region" => %region.id(),
+                "dataset" => %dataset_id,
+                "region" => %region_id,
             );
         };
 
@@ -250,8 +278,6 @@ impl super::Nexus {
 
             WaitError::Permanent(e) => e,
         })?;
-
-        let returned_region = returned_region.into_inner();
 
         // Record the returned port
         self.datastore()
@@ -361,21 +387,35 @@ impl super::Nexus {
         // transitions from Requested to Created
 
         let create_running_snapshot = || async {
-            let running_snapshot = match ProgenitorOperationRetry::new(
-                || async {
-                    client
-                        .region_run_snapshot(
-                            &RegionId(region_id.to_string()),
-                            &snapshot_id.to_string(),
-                        )
-                        .await
+            let run_snapshot_operation = || async {
+                client
+                    .region_run_snapshot(
+                        &RegionId(region_id.to_string()),
+                        &snapshot_id.to_string(),
+                    )
+                    .await
+            };
+
+            let gone_check =
+                || async { self.crucible_agent_gone_check(dataset_id).await };
+
+            let running_snapshot = match retry_operation_while_indefinitely(
+                backon_retry_policy_internal_service(),
+                run_snapshot_operation,
+                gone_check,
+                |notification| {
+                    slog::warn!(
+                        log,
+                        "failed to run region {region_id} snapshot \
+                        {snapshot_id}, retrying in {:?}",
+                        notification.delay;
+                        InlineErrorChain::new(&notification.error),
+                    );
                 },
-                || async { self.crucible_agent_gone_check(dataset_id).await },
             )
-            .run(log)
             .await
             {
-                Ok(v) => Ok(v),
+                Ok(v) => Ok(v.into_inner()),
 
                 Err(e) => {
                     error!(
@@ -443,8 +483,6 @@ impl super::Nexus {
             WaitError::Permanent(e) => e,
         })?;
 
-        let running_snapshot = running_snapshot.into_inner();
-
         Ok((region, snapshot, running_snapshot))
     }
 
@@ -459,13 +497,26 @@ impl super::Nexus {
         let client = self.crucible_agent_client_for_dataset(dataset);
         let dataset_id = dataset.id();
 
-        let result = ProgenitorOperationRetry::new(
-            || async {
-                client.region_get(&RegionId(region_id.to_string())).await
+        let region_get_operation = || async {
+            client.region_get(&RegionId(region_id.to_string())).await
+        };
+
+        let gone_check =
+            || async { self.crucible_agent_gone_check(dataset_id).await };
+
+        let result = retry_operation_while_indefinitely(
+            backon_retry_policy_internal_service(),
+            region_get_operation,
+            gone_check,
+            |notification| {
+                slog::warn!(
+                    log,
+                    "failed to get region {region_id}, retrying in {:?}",
+                    notification.delay;
+                    InlineErrorChain::new(&notification.error),
+                );
             },
-            || async { self.crucible_agent_gone_check(dataset_id).await },
         )
-        .run(log)
         .await;
 
         match result {
@@ -504,18 +555,32 @@ impl super::Nexus {
         let client = self.crucible_agent_client_for_dataset(dataset);
         let dataset_id = dataset.id();
 
-        let result = ProgenitorOperationRetry::new(
-            || async {
-                client
-                    .region_get_snapshot(
-                        &RegionId(region_id.to_string()),
-                        &snapshot_id.to_string(),
-                    )
-                    .await
+        let snapshot_get_operation = || async {
+            client
+                .region_get_snapshot(
+                    &RegionId(region_id.to_string()),
+                    &snapshot_id.to_string(),
+                )
+                .await
+        };
+
+        let gone_check =
+            || async { self.crucible_agent_gone_check(dataset_id).await };
+
+        let result = retry_operation_while_indefinitely(
+            backon_retry_policy_internal_service(),
+            snapshot_get_operation,
+            gone_check,
+            |notification| {
+                slog::warn!(
+                    log,
+                    "failed to get region {region_id} snapshot {snapshot_id}, \
+                    retrying in {:?}",
+                    notification.delay;
+                    InlineErrorChain::new(&notification.error),
+                );
             },
-            || async { self.crucible_agent_gone_check(dataset_id).await },
         )
-        .run(log)
         .await;
 
         match result {
@@ -552,15 +617,27 @@ impl super::Nexus {
         let client = self.crucible_agent_client_for_dataset(dataset);
         let dataset_id = dataset.id();
 
-        let result = ProgenitorOperationRetry::new(
-            || async {
-                client
-                    .region_get_snapshots(&RegionId(region_id.to_string()))
-                    .await
+        let region_get_snapshots_operation = || async {
+            client.region_get_snapshots(&RegionId(region_id.to_string())).await
+        };
+
+        let gone_check =
+            || async { self.crucible_agent_gone_check(dataset_id).await };
+
+        let result = retry_operation_while_indefinitely(
+            backon_retry_policy_internal_service(),
+            region_get_snapshots_operation,
+            gone_check,
+            |notification| {
+                slog::warn!(
+                    log,
+                    "failed to get snapshots for region {region_id}, \
+                    retrying in {:?}",
+                    notification.delay;
+                    InlineErrorChain::new(&notification.error),
+                );
             },
-            || async { self.crucible_agent_gone_check(dataset_id).await },
         )
-        .run(log)
         .await;
 
         match result {
@@ -592,13 +669,26 @@ impl super::Nexus {
         let client = self.crucible_agent_client_for_dataset(dataset);
         let dataset_id = dataset.id();
 
-        let result = ProgenitorOperationRetry::new(
-            || async {
-                client.region_delete(&RegionId(region_id.to_string())).await
+        let region_delete_operation = || async {
+            client.region_delete(&RegionId(region_id.to_string())).await
+        };
+
+        let gone_check =
+            || async { self.crucible_agent_gone_check(dataset_id).await };
+
+        let result = retry_operation_while_indefinitely(
+            backon_retry_policy_internal_service(),
+            region_delete_operation,
+            gone_check,
+            |notification| {
+                slog::warn!(
+                    log,
+                    "failed to delete region {region_id}, retrying in {:?}",
+                    notification.delay;
+                    InlineErrorChain::new(&notification.error),
+                );
             },
-            || async { self.crucible_agent_gone_check(dataset_id).await },
         )
-        .run(log)
         .await;
 
         match result {
@@ -635,18 +725,32 @@ impl super::Nexus {
         let client = self.crucible_agent_client_for_dataset(dataset);
         let dataset_id = dataset.id();
 
-        let result = ProgenitorOperationRetry::new(
-            || async {
-                client
-                    .region_delete_running_snapshot(
-                        &RegionId(region_id.to_string()),
-                        &snapshot_id.to_string(),
-                    )
-                    .await
+        let delete_running_snapshot_operation = || async {
+            client
+                .region_delete_running_snapshot(
+                    &RegionId(region_id.to_string()),
+                    &snapshot_id.to_string(),
+                )
+                .await
+        };
+
+        let gone_check =
+            || async { self.crucible_agent_gone_check(dataset_id).await };
+
+        let result = retry_operation_while_indefinitely(
+            backon_retry_policy_internal_service(),
+            delete_running_snapshot_operation,
+            gone_check,
+            |notification| {
+                slog::warn!(
+                    log,
+                    "failed to delete region {region_id} running snapshot \
+                    {snapshot_id}, retrying in {:?}",
+                    notification.delay;
+                    InlineErrorChain::new(&notification.error),
+                );
             },
-            || async { self.crucible_agent_gone_check(dataset_id).await },
         )
-        .run(log)
         .await;
 
         match result {
@@ -684,18 +788,32 @@ impl super::Nexus {
         let client = self.crucible_agent_client_for_dataset(dataset);
         let dataset_id = dataset.id();
 
-        let result = ProgenitorOperationRetry::new(
-            || async {
-                client
-                    .region_delete_snapshot(
-                        &RegionId(region_id.to_string()),
-                        &snapshot_id.to_string(),
-                    )
-                    .await
+        let delete_snapshot_operation = || async {
+            client
+                .region_delete_snapshot(
+                    &RegionId(region_id.to_string()),
+                    &snapshot_id.to_string(),
+                )
+                .await
+        };
+
+        let gone_check =
+            || async { self.crucible_agent_gone_check(dataset_id).await };
+
+        let result = retry_operation_while_indefinitely(
+            backon_retry_policy_internal_service(),
+            delete_snapshot_operation,
+            gone_check,
+            |notification| {
+                slog::warn!(
+                    log,
+                    "failed to delete region {region_id} snapshot \
+                    {snapshot_id}, retrying in {:?}",
+                    notification.delay;
+                    InlineErrorChain::new(&notification.error),
+                );
             },
-            || async { self.crucible_agent_gone_check(dataset_id).await },
         )
-        .run(log)
         .await;
 
         match result {
@@ -1361,4 +1479,235 @@ impl super::Nexus {
             .into_iter()
             .collect::<Result<Vec<_>, _>>()
     }
+}
+
+pub enum VolumeHealth {
+    Healthy,
+
+    Degraded { reason: VolumeDegradedReason },
+}
+
+pub enum VolumeDegradedReason {
+    /// The Volume is only partially active
+    UpstairsNotActive,
+
+    /// Not all three downstairs are present for one or more region sets.
+    ReducedRedundancy,
+
+    /// For one or more region sets, three downstairs are present but one or
+    /// more is degraded.
+    DownstairsDegraded,
+}
+
+impl std::fmt::Display for VolumeDegradedReason {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            VolumeDegradedReason::UpstairsNotActive => {
+                write!(f, "volume is only partially active")
+            }
+
+            VolumeDegradedReason::ReducedRedundancy => {
+                write!(
+                    f,
+                    "part of the volume is operating at reduced redundancy",
+                )
+            }
+
+            VolumeDegradedReason::DownstairsDegraded => {
+                write!(f, "one or more downstairs is degraded")
+            }
+        }
+    }
+}
+
+// Crucible can return a `VolumeInfo` that describes the state of the entire
+// Volume in a tree structure. Both Propolis (from `propolis_client::types`) and
+// the Crucible Pantry (from `crucible_pantry_client::types`) export this type
+// from their import of the `crucible-client-types` crate, meaning two versions
+// could exist that Nexus could read. Do the simplest thing: write two versions
+// of the function that reads each type returns a `VolumeHealth`. These
+// functions currently are the same, but in the future may temporarily look
+// different if Propolis and the Crucible Pantry import different
+// `crucible-client-types` versions. These types should eventually be derived
+// from the same `crucible-client-types` version though as that is equivalent to
+// both imports being up to date.
+
+/// Given a [`propolis_client::types::VolumeInfo`], return if the Volume should
+/// be considered healthy by Nexus.
+pub fn propolis_client_volume_health(
+    info: &propolis_client::types::VolumeInfo,
+) -> VolumeHealth {
+    use propolis_client::types::DownstairsInfoStatus;
+    use propolis_client::types::UpstairsInfoStatus;
+    use propolis_client::types::VolumeInfo;
+
+    let mut parts: VecDeque<&VolumeInfo> = VecDeque::new();
+    parts.push_back(info);
+
+    while let Some(part) = parts.pop_front() {
+        match part {
+            VolumeInfo::Volume { sub_volumes, read_only_parent } => {
+                for sub_volume in sub_volumes {
+                    parts.push_back(sub_volume);
+                }
+
+                if let Some(read_only_parent) = read_only_parent {
+                    parts.push_back(read_only_parent);
+                }
+            }
+
+            VolumeInfo::Upstairs {
+                state,
+                block_size: _,
+                upstairs_id: _,
+                session_id: _,
+                generation: _,
+                read_only: _,
+                encrypted: _,
+                reconcile_in_progress,
+                live_repair_in_progress,
+                targets,
+            } => {
+                if *reconcile_in_progress || *live_repair_in_progress {
+                    return VolumeHealth::Degraded {
+                        reason: VolumeDegradedReason::DownstairsDegraded,
+                    };
+                }
+
+                match state {
+                    UpstairsInfoStatus::Initializing
+                    | UpstairsInfoStatus::GoActive
+                    | UpstairsInfoStatus::Deactivating
+                    | UpstairsInfoStatus::Disabled => {
+                        return VolumeHealth::Degraded {
+                            reason: VolumeDegradedReason::UpstairsNotActive,
+                        };
+                    }
+
+                    UpstairsInfoStatus::Active => {
+                        // ok!
+                    }
+                }
+
+                for target in targets {
+                    match target.state {
+                        DownstairsInfoStatus::Connecting { .. } => {
+                            return VolumeHealth::Degraded {
+                                reason: VolumeDegradedReason::ReducedRedundancy,
+                            };
+                        }
+
+                        DownstairsInfoStatus::Active => {
+                            // ok!
+                        }
+
+                        DownstairsInfoStatus::LiveRepair => {
+                            return VolumeHealth::Degraded {
+                                reason:
+                                    VolumeDegradedReason::DownstairsDegraded,
+                            };
+                        }
+
+                        DownstairsInfoStatus::Stopping => {
+                            return VolumeHealth::Degraded {
+                                reason: VolumeDegradedReason::ReducedRedundancy,
+                            };
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    VolumeHealth::Healthy
+}
+
+/// Given a [`crucible_pantry_client::types::VolumeInfo`], return if the Volume
+/// should be considered healthy by Nexus.
+pub fn crucible_pantry_client_volume_health(
+    info: &crucible_pantry_client::types::VolumeInfo,
+) -> VolumeHealth {
+    use crucible_pantry_client::types::DownstairsInfoStatus;
+    use crucible_pantry_client::types::UpstairsInfoStatus;
+    use crucible_pantry_client::types::VolumeInfo;
+
+    let mut parts: VecDeque<&VolumeInfo> = VecDeque::new();
+    parts.push_back(info);
+
+    while let Some(part) = parts.pop_front() {
+        match part {
+            VolumeInfo::Volume { sub_volumes, read_only_parent } => {
+                for sub_volume in sub_volumes {
+                    parts.push_back(sub_volume);
+                }
+
+                if let Some(read_only_parent) = read_only_parent {
+                    parts.push_back(read_only_parent);
+                }
+            }
+
+            VolumeInfo::Upstairs {
+                state,
+                block_size: _,
+                upstairs_id: _,
+                session_id: _,
+                generation: _,
+                read_only: _,
+                encrypted: _,
+                reconcile_in_progress,
+                live_repair_in_progress,
+                targets,
+            } => {
+                if *reconcile_in_progress || *live_repair_in_progress {
+                    return VolumeHealth::Degraded {
+                        reason: VolumeDegradedReason::DownstairsDegraded,
+                    };
+                }
+
+                match state {
+                    UpstairsInfoStatus::Initializing
+                    | UpstairsInfoStatus::GoActive
+                    | UpstairsInfoStatus::Deactivating
+                    | UpstairsInfoStatus::Disabled => {
+                        return VolumeHealth::Degraded {
+                            reason: VolumeDegradedReason::UpstairsNotActive,
+                        };
+                    }
+
+                    UpstairsInfoStatus::Active => {
+                        // ok!
+                    }
+                }
+
+                for target in targets {
+                    match target.state {
+                        DownstairsInfoStatus::Connecting { .. } => {
+                            return VolumeHealth::Degraded {
+                                reason: VolumeDegradedReason::ReducedRedundancy,
+                            };
+                        }
+
+                        DownstairsInfoStatus::Active => {
+                            // ok!
+                        }
+
+                        DownstairsInfoStatus::LiveRepair => {
+                            return VolumeHealth::Degraded {
+                                reason:
+                                    VolumeDegradedReason::DownstairsDegraded,
+                            };
+                        }
+
+                        DownstairsInfoStatus::Stopping => {
+                            return VolumeHealth::Degraded {
+                                reason: VolumeDegradedReason::ReducedRedundancy,
+                            };
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    VolumeHealth::Healthy
 }

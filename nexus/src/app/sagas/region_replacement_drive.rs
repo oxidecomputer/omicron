@@ -140,6 +140,8 @@ use super::{
     ACTION_GENERATE_ID, ActionRegistry, NexusActionContext, NexusSaga,
     SagaInitError,
 };
+use crate::app::crucible::VolumeHealth;
+use crate::app::crucible::propolis_client_volume_health;
 use crate::app::db::datastore::CrucibleDisk;
 use crate::app::db::datastore::InstanceAndActiveVmm;
 use crate::app::sagas::common_storage::get_pantry_address;
@@ -774,7 +776,8 @@ async fn check_from_previous_pantry_step(
 
                             error!(
                                 log,
-                                "pantry returned an error checking on volume: {e}";
+                                "pantry returned an error checking on volume: \
+                                {e}";
                                 "region replacement id" => %request_id,
                                 "last replacement drive time" => ?step_time,
                                 "last replacement drive step" => "pantry",
@@ -1592,10 +1595,10 @@ async fn execute_propolis_drive_action(
                     ))),
                 })?;
 
-            // If the Volume is active, then reconciliation finished
+            // If the Volume is healthy, then reconciliation finished
             // successfully.
             //
-            // There's a few reasons it may not be active yet:
+            // There's a few reasons it may not be healthy yet:
             //
             // - Propolis could be shutting down, and tearing down the Upstairs
             //   in the process (which deactivates the Volume)
@@ -1604,10 +1607,25 @@ async fn execute_propolis_drive_action(
             //
             // - reconciliation could have failed
             //
-            // If it's not active, wait until the next invocation of this saga
+            // If it's not healthy, wait until the next invocation of this saga
             // to decide what to do next.
 
-            result.into_inner().active
+            let health =
+                propolis_client_volume_health(&result.into_inner().volume_info);
+
+            match health {
+                VolumeHealth::Healthy => {
+                    // If "healthy" is seen after we have replaced a downstairs,
+                    // then we're done waiting - the replacement is done
+                    true
+                }
+
+                VolumeHealth::Degraded { reason } => {
+                    info!(log, "volume is not healthy: {reason}");
+
+                    false
+                }
+            }
         }
 
         ReplaceResult::Missing => {

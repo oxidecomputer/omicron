@@ -26,8 +26,6 @@ cfg-if.workspace = true
 chrono.workspace = true
 clap.workspace = true
 clickhouse-admin-types.workspace = true
-# Only used by the simulated sled agent.
-crucible-agent-client.workspace = true
 derive_more.workspace = true
 dice-verifier = { workspace = true, features = ["ipcc", "mock"] }
 display-error-chain.workspace = true
@@ -80,7 +78,6 @@ range-requests.workspace = true
 repo-depot-api.workspace = true
 repo-depot-client.workspace = true
 reqwest = { workspace = true, features = ["rustls", "stream"] }
-reqwest012 = { workspace = true }
 schemars = { workspace = true, features = ["chrono", "uuid1"] }
 serde.workspace = true
 serde_json = { workspace = true, features = ["raw_value"] }
@@ -131,6 +128,10 @@ x509-cert.workspace = true
 zeroize.workspace = true
 zip.workspace = true
 zone.workspace = true
+
+# Only used by the simulated sled agent.
+crucible-agent-client.workspace = true
+crucible-client-types.workspace = true
 
 [target.'cfg(target_os = "illumos")'.dependencies]
 opte-ioctl.workspace = true

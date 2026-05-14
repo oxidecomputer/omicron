@@ -58,6 +58,7 @@ nexus-reconfigurator-preparation.workspace = true
 nexus-saga-recovery.workspace = true
 nexus-types.workspace = true
 omicron-common.workspace = true
+omicron-nexus.workspace = true
 omicron-uuid-kinds.workspace = true
 omicron-workspace-hack.workspace = true
 owo-colors.workspace = true
@@ -101,7 +102,6 @@ expectorate.workspace = true
 http.workspace = true
 nexus-test-utils.workspace = true
 nexus-test-utils-macros.workspace = true
-omicron-nexus.workspace = true
 omicron-test-utils.workspace = true
 subprocess.workspace = true
 
