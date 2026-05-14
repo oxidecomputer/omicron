@@ -274,7 +274,6 @@ fn is_update_in_progress(
     blueprint: &Blueprint,
     current_target_version: Option<&Version>,
 ) -> bool {
-
     let versions_at_initial_state = components_by_release_version.len() == 2
         && components_by_release_version
             .contains_key(&internal_views::TufRepoVersion::Unknown.to_string())
@@ -581,7 +580,7 @@ impl super::Nexus {
             .datastore()
             .saga_list_running_or_unwinding_older_than(
                 opctx,
-                STUCK_SAGA_THRESHOLD,
+                Utc::now() - STUCK_SAGA_THRESHOLD,
             )
             .await;
 

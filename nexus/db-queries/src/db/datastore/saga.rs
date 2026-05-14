@@ -13,7 +13,7 @@ use crate::db::pagination::paginated_multicolumn;
 use crate::db::update_and_check::UpdateAndCheck;
 use crate::db::update_and_check::UpdateStatus;
 use async_bb8_diesel::AsyncRunQueryDsl;
-use chrono::TimeDelta;
+use chrono::DateTime;
 use chrono::Utc;
 use diesel::prelude::*;
 use nexus_auth::authz;
@@ -168,16 +168,15 @@ impl DataStore {
         Ok(sagas)
     }
 
-    /// Returns a list of sagas that were created before the given time
-    /// threshold and are in a running or unwinding state (limit of 500).
+    /// Returns a list of sagas that were created before `time_limit` and are
+    /// in a running or unwinding state (limit of 500).
     pub async fn saga_list_running_or_unwinding_older_than(
         &self,
         opctx: &OpContext,
-        time_threshold: TimeDelta,
+        time_limit: DateTime<Utc>,
     ) -> Result<Vec<db::saga_types::Saga>, Error> {
         use nexus_db_schema::schema::saga::dsl;
         let conn = self.pool_connection_authorized(opctx).await?;
-        let time_limit = Utc::now() - time_threshold;
 
         dsl::saga
             .filter(
@@ -292,6 +291,7 @@ mod test {
     use crate::db::pub_test_utils::TestDatabase;
     use async_bb8_diesel::AsyncConnection;
     use async_bb8_diesel::AsyncSimpleConnection;
+    use chrono::TimeDelta;
     use db::queries::ALLOW_FULL_TABLE_SCAN_SQL;
     use nexus_db_model::SagaState;
     use nexus_db_model::{SagaNodeEvent, SecId};
@@ -820,12 +820,12 @@ mod test {
             .await
             .expect("Failed to insert test setup data");
 
-        // Querying with a large threshold should return no sagas, since all
-        // test sagas were just created and none are older than 10 hours.
+        // Querying with a time limit 10 hours in the past should return no
+        // sagas, since all test sagas were just created.
         let observed_sagas = datastore
             .saga_list_running_or_unwinding_older_than(
                 &opctx,
-                TimeDelta::hours(10),
+                Utc::now() - TimeDelta::hours(10),
             )
             .await
             .expect("Failed to list sagas by states");
@@ -835,13 +835,13 @@ mod test {
             observed_sagas,
         );
 
-        // Querying with a negative threshold pushes the time limit into the
-        // future to avoid flakyness. All sagas in the Running or Unwinding
-        // states should be returned.
+        // Pushing the time limit into the future (10 seconds from now) avoids
+        // flakiness. All sagas in the Running or Unwinding states should be
+        // returned.
         let observed_sagas = datastore
             .saga_list_running_or_unwinding_older_than(
                 &opctx,
-                TimeDelta::seconds(-10),
+                Utc::now() + TimeDelta::seconds(10),
             )
             .await
             .expect("Failed to list running/unwinding sagas");

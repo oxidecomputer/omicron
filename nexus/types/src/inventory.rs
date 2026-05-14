@@ -301,8 +301,11 @@ impl Collection {
                         | ZpoolHealth::Unavailable => true,
                     })
                     .collect();
-                (!unhealthy.is_empty())
-                    .then_some((sled_agent.sled_id, unhealthy))
+                if unhealthy.is_empty() {
+                    None
+                } else {
+                    Some((sled_agent.sled_id, unhealthy))
+                }
             })
             .collect()
     }
