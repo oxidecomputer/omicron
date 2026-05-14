@@ -82,7 +82,7 @@ pub mod v34;
 #[path = "modify_svc_enabled_not_online_state/mod.rs"]
 pub mod v37;
 #[path = "mcast_m2p_forwarding/mod.rs"]
-pub mod v38;
+pub mod v39;
 #[path = "add_nexus_lockstep_port_to_inventory/mod.rs"]
 pub mod v4;
 #[path = "add_probe_put_endpoint/mod.rs"]

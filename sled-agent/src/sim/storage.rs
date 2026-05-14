@@ -11,7 +11,6 @@
 use crate::sim::SimulatedUpstairs;
 use crate::sim::http_entrypoints_pantry::ExpectedDigest;
 use crate::sim::http_entrypoints_pantry::PantryStatus;
-use crate::sim::http_entrypoints_pantry::VolumeStatus;
 use crate::support_bundle::storage::SupportBundleManager;
 use anyhow::{self, Result, bail};
 use camino::Utf8Path;
@@ -20,6 +19,8 @@ use chrono::prelude::*;
 use crucible_agent_client::types::{
     CreateRegion, Region, RegionId, RunningSnapshot, Snapshot, State,
 };
+use crucible_pantry_client::types::VolumeInfo;
+use crucible_pantry_client::types::VolumeStatus;
 use dropshot::HandlerTaskMode;
 use dropshot::HttpError;
 use illumos_utils::zfs::DatasetProperties;
@@ -2067,6 +2068,10 @@ impl Pantry {
                     active: true,
                     seen_active: true,
                     num_job_handles: 0,
+                    info: VolumeInfo::Volume {
+                        read_only_parent: None,
+                        sub_volumes: vec![],
+                    },
                 },
                 activate_job: None,
             },
@@ -2097,6 +2102,10 @@ impl Pantry {
                     active: auto_activate_volumes,
                     seen_active: auto_activate_volumes,
                     num_job_handles: 1,
+                    info: VolumeInfo::Volume {
+                        read_only_parent: None,
+                        sub_volumes: vec![],
+                    },
                 },
                 activate_job: Some(activate_job_id.clone()),
             },

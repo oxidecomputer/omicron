@@ -238,6 +238,42 @@ impl NexusSaga for SagaRegionReplacementDrive {
 
 // region replacement drive saga: action implementations
 
+/// Walk a [`VolumeInfo`] tree to determine reconciliation status.
+///
+/// Replaces the previous `VolumeStatus.active` boolean. The shape change
+/// originated in crucible PR oxidecomputer/crucible#1928 and reached omicron
+/// via propolis PR oxidecomputer/propolis#1132.
+///
+/// # Returns
+///
+/// `true` when every [`Upstairs`] leaf reports [`Active`] state with no
+/// live-repair or reconcile in progress; `false` otherwise.
+///
+/// [`VolumeInfo`]: propolis_client::types::VolumeInfo
+/// [`Upstairs`]: propolis_client::types::VolumeInfo::Upstairs
+/// [`Active`]: propolis_client::types::UpstairsInfoStatus::Active
+fn volume_info_reconciled(info: &propolis_client::types::VolumeInfo) -> bool {
+    use propolis_client::types::{UpstairsInfoStatus, VolumeInfo};
+    match info {
+        VolumeInfo::Volume { sub_volumes, read_only_parent } => {
+            sub_volumes.iter().all(volume_info_reconciled)
+                && read_only_parent
+                    .as_deref()
+                    .map_or(true, volume_info_reconciled)
+        }
+        VolumeInfo::Upstairs {
+            state,
+            live_repair_in_progress,
+            reconcile_in_progress,
+            ..
+        } => {
+            matches!(state, UpstairsInfoStatus::Active)
+                && !live_repair_in_progress
+                && !reconcile_in_progress
+        }
+    }
+}
+
 async fn srrd_set_saga_id(
     sagactx: NexusActionContext,
 ) -> Result<(), ActionError> {
@@ -1576,7 +1612,7 @@ async fn execute_propolis_drive_action(
             //
             // Check if the Volume activated.
 
-            let result = client
+            let info = client
                 .disk_volume_status()
                 .id(disk.id())
                 .send()
@@ -1590,24 +1626,26 @@ async fn execute_propolis_drive_action(
                         "unexpected failure during \
                                 `disk_volume_status`: {e}",
                     ))),
-                })?;
+                })?
+                .into_inner()
+                .volume_info;
 
-            // If the Volume is active, then reconciliation finished
-            // successfully.
+            // Reconciliation finished iff every upstairs leaf reports Active
+            // with no live-repair or reconcile in progress.
             //
-            // There's a few reasons it may not be active yet:
+            // Reasons it may not be reconciled yet:
             //
-            // - Propolis could be shutting down, and tearing down the Upstairs
-            //   in the process (which deactivates the Volume)
+            // - Propolis could be shutting down, tearing down the Upstairs
+            //   (which deactivates the Volume)
             //
             // - reconciliation could still be going on
             //
             // - reconciliation could have failed
             //
-            // If it's not active, wait until the next invocation of this saga
-            // to decide what to do next.
+            // If not, wait until the next invocation of this saga to decide
+            // what to do next.
 
-            result.into_inner().active
+            volume_info_reconciled(&info)
         }
 
         ReplaceResult::Missing => {

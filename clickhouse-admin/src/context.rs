@@ -9,7 +9,9 @@ use camino::Utf8PathBuf;
 use chrono::Utc;
 use clickhouse_admin_types::config::GenerateConfigResult;
 use clickhouse_admin_types::keeper::KeeperConfigurableSettings;
-use clickhouse_admin_types::retention::RetentionPolicy;
+use clickhouse_admin_types::retention::{
+    DatabaseRetentionPolicy, RetentionPolicyRequest,
+};
 use clickhouse_admin_types::server::ServerConfigurableSettings;
 use clickhouse_admin_types::usage::{
     DatabaseUsage, DatabaseUsageError, DatabaseUsageResult,
@@ -273,7 +275,7 @@ impl ServerContext {
     /// Update the retention policy of the oximeter database tables.
     pub async fn set_retention_policy(
         &self,
-        policy: RetentionPolicy,
+        policy: RetentionPolicyRequest,
     ) -> Result<(), HttpError> {
         let (tx, rx) = oneshot::channel();
         self.retention_tx
@@ -294,7 +296,9 @@ impl ServerContext {
     }
 
     /// Request the retention policy from the database.
-    pub async fn retention_policy(&self) -> Result<RetentionPolicy, HttpError> {
+    pub async fn retention_policy(
+        &self,
+    ) -> Result<DatabaseRetentionPolicy, HttpError> {
         let (tx, rx) = oneshot::channel();
         self.retention_tx.try_send(RetentionRequest::Get { tx }).map_err(
             |_| {
@@ -594,8 +598,13 @@ fn read_generation_from_file(path: Utf8PathBuf) -> Result<Option<Generation>> {
 
 #[derive(Debug)]
 enum RetentionRequest {
-    Set { policy: RetentionPolicy, tx: oneshot::Sender<Result<(), HttpError>> },
-    Get { tx: oneshot::Sender<Result<RetentionPolicy, HttpError>> },
+    Set {
+        policy: RetentionPolicyRequest,
+        tx: oneshot::Sender<Result<(), HttpError>>,
+    },
+    Get {
+        tx: oneshot::Sender<Result<DatabaseRetentionPolicy, HttpError>>,
+    },
 }
 
 async fn long_running_retention_task(
@@ -629,7 +638,7 @@ async fn long_running_retention_task(
 async fn set_retention_policy(
     log: &Logger,
     client: &OximeterDbClient,
-    policy: RetentionPolicy,
+    policy: RetentionPolicyRequest,
     replicated: bool,
     tx: oneshot::Sender<Result<(), HttpError>>,
 ) {
@@ -667,7 +676,7 @@ async fn set_retention_policy(
 async fn get_retention_policy(
     log: &Logger,
     client: &OximeterDbClient,
-    tx: oneshot::Sender<Result<RetentionPolicy, HttpError>>,
+    tx: oneshot::Sender<Result<DatabaseRetentionPolicy, HttpError>>,
 ) {
     debug!(log, "fetching retention policy from database");
     let result = match client.retention_policy().await {
@@ -768,7 +777,7 @@ mod tests {
     use camino::Utf8PathBuf;
     use clickhouse_admin_types::CLICKHOUSE_SERVER_CONFIG_FILE;
     use clickhouse_admin_types::retention::Days;
-    use clickhouse_admin_types::retention::RetentionPolicy;
+    use clickhouse_admin_types::retention::RetentionPolicyRequest;
     use dropshot::ErrorStatusCode;
     use omicron_common::api::external::Generation;
     use omicron_test_utils::dev;
@@ -882,15 +891,41 @@ mod tests {
             ErrorStatusCode::SERVICE_UNAVAILABLE
         ));
 
+        // Initialize the database, then check the retention policy again.
+        //
+        // We need to wait for the `system.query_log` table to exist, which can
+        // take a while.
         context.init_db(false).await.expect("failed to initialize database");
-        let policy = context
-            .retention_policy()
-            .await
-            .expect("failed to get retention policy");
-        assert_eq!(policy.days, Days::new(30).unwrap());
 
+        let policy = dev::poll::wait_for_condition(
+            || async {
+                match context.retention_policy().await {
+                    Ok(pol) => {
+                        if pol.tables.contains_key("query_log") {
+                            Ok(pol)
+                        } else {
+                            Err(dev::poll::CondCheckError::<()>::NotYet)
+                        }
+                    }
+                    Err(_) => Err(dev::poll::CondCheckError::<()>::NotYet),
+                }
+            },
+            &std::time::Duration::from_millis(100),
+            &std::time::Duration::from_secs(30),
+        )
+        .await
+        .expect("failed to get retention policy");
+        assert!(!policy.tables.is_empty());
+
+        // The query log defaults to 7 days TTL, everything else is 30.
+        assert!(policy.tables.iter().all(|pol| {
+            let expected = if pol.table == "query_log" { 7 } else { 30 };
+            u8::from(pol.days) == expected
+        }));
+
+        // Set everything to 3, and ensure we can read it back.
         let days = Days::new(3).unwrap();
-        let new = RetentionPolicy { days };
+        let new = RetentionPolicyRequest { days };
         context
             .set_retention_policy(new)
             .await
@@ -899,7 +934,8 @@ mod tests {
             .retention_policy()
             .await
             .expect("failed to get retention policy");
-        assert_eq!(policy.days, days);
+        assert!(!policy.tables.is_empty());
+        assert!(policy.tables.iter().all(|pol| pol.days == days));
 
         clickhouse.cleanup().await.unwrap();
         logctx.cleanup_successful();

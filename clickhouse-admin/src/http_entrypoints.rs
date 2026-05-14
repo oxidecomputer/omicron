@@ -9,7 +9,9 @@ use clickhouse_admin_types::keeper::{
     ClickhouseKeeperClusterMembership, KeeperConf, KeeperConfigurableSettings,
     Lgif, RaftConfig,
 };
-use clickhouse_admin_types::retention::RetentionPolicy;
+use clickhouse_admin_types::retention::{
+    DatabaseRetentionPolicy, RetentionPolicyRequest,
+};
 use clickhouse_admin_types::server::{
     DistributedDdlQueue, MetricInfoPath, ServerConfigurableSettings,
     SystemTimeSeries, SystemTimeSeriesSettings, TimeSeriesSettingsQuery,
@@ -106,7 +108,7 @@ impl ClickhouseAdminServerApi for ClickhouseAdminServerImpl {
 
     async fn set_retention_policy(
         rqctx: RequestContext<Self::Context>,
-        policy: TypedBody<RetentionPolicy>,
+        policy: TypedBody<RetentionPolicyRequest>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         rqctx
             .context()
@@ -117,7 +119,7 @@ impl ClickhouseAdminServerApi for ClickhouseAdminServerImpl {
 
     async fn retention_policy(
         rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<RetentionPolicy>, HttpError> {
+    ) -> Result<HttpResponseOk<DatabaseRetentionPolicy>, HttpError> {
         rqctx.context().retention_policy().await.map(HttpResponseOk)
     }
 
@@ -226,7 +228,7 @@ impl ClickhouseAdminSingleApi for ClickhouseAdminSingleImpl {
 
     async fn set_retention_policy(
         rqctx: RequestContext<Self::Context>,
-        policy: TypedBody<RetentionPolicy>,
+        policy: TypedBody<RetentionPolicyRequest>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         rqctx
             .context()
@@ -237,7 +239,7 @@ impl ClickhouseAdminSingleApi for ClickhouseAdminSingleImpl {
 
     async fn retention_policy(
         rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<RetentionPolicy>, HttpError> {
+    ) -> Result<HttpResponseOk<DatabaseRetentionPolicy>, HttpError> {
         rqctx.context().retention_policy().await.map(HttpResponseOk)
     }
 
