@@ -4,16 +4,14 @@
 
 //! Collects fault information from the illumos Fault Management Daemon (FMD).
 
-use sled_agent_types::inventory::FmdInventoryResult;
+use sled_agent_types::inventory::FmdInventory;
 use slog::Logger;
 
 #[cfg(target_os = "illumos")]
 mod illumos {
     use fmd_adm::{FmdAdm, InvisibleResources, NvList, NvValue};
     use omicron_uuid_kinds::{FmdHostCaseUuid, FmdResourceUuid, GenericUuid};
-    use sled_agent_types::inventory::{
-        FmdHostCase, FmdInventory, FmdInventoryResult, FmdResource,
-    };
+    use sled_agent_types::inventory::{FmdHostCase, FmdInventory, FmdResource};
     use slog::Logger;
     use slog::warn;
 
@@ -66,14 +64,12 @@ mod illumos {
         serde_json::Value::Object(map)
     }
 
-    pub(super) fn collect(log: Logger) -> FmdInventoryResult {
+    pub(super) fn collect(log: Logger) -> Result<FmdInventory, String> {
         let adm = match FmdAdm::open() {
             Ok(adm) => adm,
             Err(e) => {
                 warn!(log, "failed to open fmd"; "error" => %e);
-                return FmdInventoryResult::Error {
-                    error: format!("failed to open fmd: {e}"),
-                };
+                return Err(format!("failed to open fmd: {e}"));
             }
         };
 
@@ -92,9 +88,7 @@ mod illumos {
                 .collect(),
             Err(e) => {
                 warn!(log, "failed to list fmd cases"; "error" => %e);
-                return FmdInventoryResult::Error {
-                    error: format!("failed to list fmd cases: {e}"),
-                };
+                return Err(format!("failed to list fmd cases: {e}"));
             }
         };
 
@@ -122,17 +116,17 @@ mod illumos {
                 .collect(),
             Err(e) => {
                 warn!(log, "failed to list fmd resources"; "error" => %e);
-                return FmdInventoryResult::Error {
-                    error: format!("failed to list fmd resources: {e}"),
-                };
+                return Err(format!("failed to list fmd resources: {e}"));
             }
         };
 
-        FmdInventoryResult::Available(FmdInventory { cases, resources })
+        Ok(FmdInventory { cases, resources })
     }
 }
 
-pub(crate) async fn collect_fmd_inventory(log: &Logger) -> FmdInventoryResult {
+pub(crate) async fn collect_fmd_inventory(
+    log: &Logger,
+) -> Result<FmdInventory, String> {
     #[cfg(target_os = "illumos")]
     {
         // FMD queries go through door calls to fmd(1M) and can block, so run
@@ -148,9 +142,7 @@ pub(crate) async fn collect_fmd_inventory(log: &Logger) -> FmdInventoryResult {
     #[cfg(not(target_os = "illumos"))]
     {
         let _ = log;
-        FmdInventoryResult::Error {
-            error: "fmd not supported on this platform".to_string(),
-        }
+        Err("fmd not supported on this platform".to_string())
     }
 }
 

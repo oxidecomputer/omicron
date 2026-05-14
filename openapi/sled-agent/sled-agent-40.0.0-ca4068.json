@@ -5478,57 +5478,6 @@
           "resources"
         ]
       },
-      "FmdInventoryResult": {
-        "description": "Result of querying FMD for fault information.",
-        "oneOf": [
-          {
-            "description": "FMD data was successfully collected.",
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "available"
-                ]
-              },
-              "value": {
-                "$ref": "#/components/schemas/FmdInventory"
-              }
-            },
-            "required": [
-              "type",
-              "value"
-            ]
-          },
-          {
-            "description": "FMD data collection failed or is not available on this platform.",
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "error"
-                ]
-              },
-              "value": {
-                "type": "object",
-                "properties": {
-                  "error": {
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "error"
-                ]
-              }
-            },
-            "required": [
-              "type",
-              "value"
-            ]
-          }
-        ]
-      },
       "FmdResource": {
         "description": "A resource affected by a diagnosed fault.",
         "type": "object",
@@ -6221,7 +6170,43 @@
             "$ref": "#/components/schemas/OmicronFileSourceResolverInventory"
           },
           "fmd": {
-            "$ref": "#/components/schemas/FmdInventoryResult"
+            "x-rust-type": {
+              "crate": "std",
+              "parameters": [
+                {
+                  "$ref": "#/components/schemas/FmdInventory"
+                },
+                {
+                  "type": "string"
+                }
+              ],
+              "path": "::std::result::Result",
+              "version": "*"
+            },
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "ok": {
+                    "$ref": "#/components/schemas/FmdInventory"
+                  }
+                },
+                "required": [
+                  "ok"
+                ]
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "err": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "err"
+                ]
+              }
+            ]
           },
           "last_reconciliation": {
             "nullable": true,

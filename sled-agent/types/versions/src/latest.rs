@@ -185,7 +185,6 @@ pub mod inventory {
 
     pub use crate::v40::inventory::FmdHostCase;
     pub use crate::v40::inventory::FmdInventory;
-    pub use crate::v40::inventory::FmdInventoryResult;
     pub use crate::v40::inventory::FmdResource;
     pub use crate::v40::inventory::Inventory;
 

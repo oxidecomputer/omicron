@@ -1897,9 +1897,9 @@ mod test {
         early_networking::RackNetworkConfig,
         inventory::{
             Baseboard, ConfigReconcilerInventoryStatus, FmdInventory,
-            FmdInventoryResult, Inventory, InventoryDisk,
-            OmicronFileSourceResolverInventory, OmicronZoneType, SledCpuFamily,
-            SledRole, SvcsEnabledNotOnlineResult,
+            Inventory, InventoryDisk, OmicronFileSourceResolverInventory,
+            OmicronZoneType, SledCpuFamily, SledRole,
+            SvcsEnabledNotOnlineResult,
         },
     };
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
@@ -1960,7 +1960,7 @@ mod test {
                 smf_services_enabled_not_online:
                     SvcsEnabledNotOnlineResult::DataUnavailable,
                 reference_measurements: IdOrdMap::new(),
-                fmd: FmdInventoryResult::Available(FmdInventory::default()),
+                fmd: Ok(FmdInventory::default()),
             },
             true,
         )
