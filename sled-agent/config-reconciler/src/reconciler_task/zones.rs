@@ -536,8 +536,8 @@ impl OmicronZones {
                 match self.timesync_status_from_ntp_zone(log).await {
                     Ok(timesync) => {
                         if !timesync.sync {
-                            // TODO-completeness: Include maximum error and
-                            // dispersion after we update to the new client.
+                            // TODO:
+                            // https://github.com/oxidecomputer/omicron/issues/10446.
                             warn!(
                                 log,
                                 "time is not yet synchronized";

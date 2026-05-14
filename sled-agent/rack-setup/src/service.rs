@@ -89,8 +89,8 @@ use nexus_types::deployment::{
     Blueprint, BlueprintZoneType, blueprint_zone_type,
 };
 use nexus_types::internal_api::params::ExternalPortDiscovery;
-use ntp_admin_v1_client::ClientInfo as _;
-use ntp_admin_v1_client::{
+use ntp_admin_client::ClientInfo as _;
+use ntp_admin_client::{
     Client as NtpAdminClient, Error as NtpAdminError, types::TimeSync,
 };
 use omicron_common::address::BOOTSTRAP_AGENT_HTTP_PORT;
@@ -237,7 +237,7 @@ pub enum SetupServiceError {
     NexusApi(#[from] NexusError<NexusTypes::Error>),
 
     #[error("Error making HTTP request to NTP Admin Server")]
-    NtpAdminApi(#[from] NtpAdminError<ntp_admin_v1_client::types::Error>),
+    NtpAdminApi(#[from] NtpAdminError<ntp_admin_client::types::Error>),
 
     #[error("Error contacting ddmd")]
     DdmError(#[from] DdmError),
