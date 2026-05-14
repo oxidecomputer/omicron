@@ -94,7 +94,8 @@ impl super::Nexus {
     }
 
     /// Return if the Crucible agent is expected to be there and answer Nexus:
-    /// if it's [`Gone`], the caller should bail out of the retry loop.
+    /// if it's [`GoneCheckResult::Gone`], the caller should bail out of the
+    /// retry loop.
     async fn crucible_agent_gone_check(
         &self,
         dataset_id: DatasetUuid,
