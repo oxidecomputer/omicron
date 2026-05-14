@@ -196,7 +196,7 @@ struct TimesyncStatus {
 }
 
 fn display_secs_f64(s: &f64) -> String {
-    format!("{s} s")
+    format!("{:?}", Duration::from_secs_f64(s))
 }
 
 fn display_ref_id(x: &u32) -> String {
