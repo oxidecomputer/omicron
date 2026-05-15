@@ -86,6 +86,57 @@ pub struct FmdInventory {
     pub resources: IdOrdMap<FmdResource>,
 }
 
+/// Maximum number of FMD cases sled-agent will report for a single sled.
+/// Exceeding this returns [`FmdInventoryErrorKind::TooManyCases`] rather than
+/// silently truncating: a count this high indicates a pathological state
+/// operators should investigate directly via `fmadm`.
+pub const FMD_MAX_CASES: u32 = 1000;
+
+/// Maximum number of FMD resources sled-agent will report for a single sled.
+/// See [`FMD_MAX_CASES`] for rationale.
+pub const FMD_MAX_RESOURCES: u32 = 1000;
+
+/// Classification of an [`FmdInventoryError`].
+///
+/// `FmdError` is a catch-all for any FMD-side failure: the daemon was
+/// unreachable, a case/resource listing failed, or the platform doesn't have
+/// FMD at all. The accompanying message disambiguates these cases.
+/// `TooManyCases` and `TooManyResources` are first-class because exceeding
+/// those bounds is operationally distinct from a transient FMD failure.
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum FmdInventoryErrorKind {
+    /// Catch-all for FMD-side failures.
+    FmdError,
+    /// Number of FMD cases exceeded [`FMD_MAX_CASES`].
+    TooManyCases,
+    /// Number of FMD resources exceeded [`FMD_MAX_RESOURCES`].
+    TooManyResources,
+}
+
+/// An error reported by sled-agent in place of an [`FmdInventory`].
+///
+/// `kind` is a typed discriminator suitable for filtering / monitoring.
+/// `message` is a human-readable description (built via `Display`); it is
+/// informational only and should not be parsed.
+#[derive(
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+    thiserror::Error,
+)]
+#[error("{message}")]
+pub struct FmdInventoryError {
+    pub kind: FmdInventoryErrorKind,
+    pub message: String,
+}
+
 /// Identity and basic status information about this sled agent
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
 pub struct Inventory {
@@ -109,9 +160,9 @@ pub struct Inventory {
     pub reference_measurements: IdOrdMap<SingleMeasurementInventory>,
     #[serde(with = "snake_case_result")]
     #[schemars(
-        schema_with = "SnakeCaseResult::<FmdInventory, String>::json_schema"
+        schema_with = "SnakeCaseResult::<FmdInventory, FmdInventoryError>::json_schema"
     )]
-    pub fmd: Result<FmdInventory, String>,
+    pub fmd: Result<FmdInventory, FmdInventoryError>,
 }
 
 impl From<Inventory> for v37::inventory::Inventory {

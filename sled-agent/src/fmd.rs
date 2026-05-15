@@ -4,14 +4,17 @@
 
 //! Collects fault information from the illumos Fault Management Daemon (FMD).
 
-use sled_agent_types::inventory::FmdInventory;
+use sled_agent_types::inventory::{FmdInventory, FmdInventoryError};
 use slog::Logger;
 
 #[cfg(target_os = "illumos")]
 mod illumos {
     use fmd_adm::{FmdAdm, InvisibleResources, NvList, NvValue};
     use omicron_uuid_kinds::{FmdHostCaseUuid, FmdResourceUuid, GenericUuid};
-    use sled_agent_types::inventory::{FmdHostCase, FmdInventory, FmdResource};
+    use sled_agent_types::inventory::{
+        FMD_MAX_CASES, FMD_MAX_RESOURCES, FmdHostCase, FmdInventory,
+        FmdInventoryError, FmdInventoryErrorKind, FmdResource,
+    };
     use slog::Logger;
     use slog::warn;
     use slog_error_chain::InlineErrorChain;
@@ -65,64 +68,105 @@ mod illumos {
         serde_json::Value::Object(map)
     }
 
-    pub(super) fn collect(log: Logger) -> Result<FmdInventory, String> {
+    pub(super) fn collect(
+        log: Logger,
+    ) -> Result<FmdInventory, FmdInventoryError> {
         let adm = match FmdAdm::open() {
             Ok(adm) => adm,
             Err(e) => {
                 let err = InlineErrorChain::new(&e);
                 warn!(log, "failed to open fmd"; &err);
-                return Err(format!("failed to open fmd: {err}"));
+                return Err(FmdInventoryError {
+                    kind: FmdInventoryErrorKind::FmdError,
+                    message: format!("failed to open fmd: {err}"),
+                });
             }
         };
 
-        let cases = match adm.cases(None) {
-            Ok(cases) => cases
-                .into_iter()
-                .map(|c| {
-                    let fmd_adm::CaseInfo { uuid, code, url, event } = c;
-                    FmdHostCase {
-                        uuid: FmdHostCaseUuid::from_untyped_uuid(uuid),
-                        code,
-                        url,
-                        event: event.as_ref().map(nvlist_to_json),
-                    }
-                })
-                .collect(),
+        let raw_cases = match adm.cases(None) {
+            Ok(cases) => cases,
             Err(e) => {
                 let err = InlineErrorChain::new(&e);
                 warn!(log, "failed to list fmd cases"; &err);
-                return Err(format!("failed to list fmd cases: {err}"));
+                return Err(FmdInventoryError {
+                    kind: FmdInventoryErrorKind::FmdError,
+                    message: format!("failed to list fmd cases: {err}"),
+                });
             }
         };
+        let case_count = raw_cases.len();
+        if case_count as u64 > u64::from(FMD_MAX_CASES) {
+            warn!(
+                log, "too many fmd cases reported, refusing partial inventory";
+                "count" => case_count, "limit" => FMD_MAX_CASES,
+            );
+            return Err(FmdInventoryError {
+                kind: FmdInventoryErrorKind::TooManyCases,
+                message: format!(
+                    "too many fmd cases ({case_count} > limit {FMD_MAX_CASES})"
+                ),
+            });
+        }
+        let cases: iddqd::IdOrdMap<_> = raw_cases
+            .into_iter()
+            .map(|c| {
+                let fmd_adm::CaseInfo { uuid, code, url, event } = c;
+                FmdHostCase {
+                    uuid: FmdHostCaseUuid::from_untyped_uuid(uuid),
+                    code,
+                    url,
+                    event: event.as_ref().map(nvlist_to_json),
+                }
+            })
+            .collect();
 
-        let resources = match adm.resources(InvisibleResources::Included) {
-            Ok(resources) => resources
-                .into_iter()
-                .map(|r| {
-                    let fmd_adm::ResourceInfo {
-                        fmri,
-                        uuid,
-                        case,
-                        faulty,
-                        unusable,
-                        invisible,
-                    } = r;
-                    FmdResource {
-                        fmri,
-                        uuid: FmdResourceUuid::from_untyped_uuid(uuid),
-                        case_id: FmdHostCaseUuid::from_untyped_uuid(case),
-                        faulty,
-                        unusable,
-                        invisible,
-                    }
-                })
-                .collect(),
+        let raw_resources = match adm.resources(InvisibleResources::Included) {
+            Ok(resources) => resources,
             Err(e) => {
                 let err = InlineErrorChain::new(&e);
                 warn!(log, "failed to list fmd resources"; &err);
-                return Err(format!("failed to list fmd resources: {err}"));
+                return Err(FmdInventoryError {
+                    kind: FmdInventoryErrorKind::FmdError,
+                    message: format!("failed to list fmd resources: {err}"),
+                });
             }
         };
+        let resource_count = raw_resources.len();
+        if resource_count as u64 > u64::from(FMD_MAX_RESOURCES) {
+            warn!(
+                log,
+                "too many fmd resources reported, refusing partial inventory";
+                "count" => resource_count, "limit" => FMD_MAX_RESOURCES,
+            );
+            return Err(FmdInventoryError {
+                kind: FmdInventoryErrorKind::TooManyResources,
+                message: format!(
+                    "too many fmd resources \
+                     ({resource_count} > limit {FMD_MAX_RESOURCES})"
+                ),
+            });
+        }
+        let resources: iddqd::IdOrdMap<_> = raw_resources
+            .into_iter()
+            .map(|r| {
+                let fmd_adm::ResourceInfo {
+                    fmri,
+                    uuid,
+                    case,
+                    faulty,
+                    unusable,
+                    invisible,
+                } = r;
+                FmdResource {
+                    fmri,
+                    uuid: FmdResourceUuid::from_untyped_uuid(uuid),
+                    case_id: FmdHostCaseUuid::from_untyped_uuid(case),
+                    faulty,
+                    unusable,
+                    invisible,
+                }
+            })
+            .collect();
 
         Ok(FmdInventory { cases, resources })
     }
@@ -130,7 +174,7 @@ mod illumos {
 
 pub(crate) async fn collect_fmd_inventory(
     log: &Logger,
-) -> Result<FmdInventory, String> {
+) -> Result<FmdInventory, FmdInventoryError> {
     #[cfg(target_os = "illumos")]
     {
         // FMD queries go through door calls to fmd(1M) and can block, so run
@@ -146,7 +190,10 @@ pub(crate) async fn collect_fmd_inventory(
     #[cfg(not(target_os = "illumos"))]
     {
         let _ = log;
-        Err("fmd not supported on this platform".to_string())
+        Err(FmdInventoryError {
+            kind: sled_agent_types::inventory::FmdInventoryErrorKind::FmdError,
+            message: "fmd not supported on this platform".to_string(),
+        })
     }
 }
 
