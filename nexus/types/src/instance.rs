@@ -266,7 +266,7 @@ pub enum VmmFailureReason {
 impl VmmFailureReason {
     pub fn description(&self) -> &'static str {
         match self {
-            Self::Prehistoric => "<VMM failed prior to recorded history>",
+            Self::Prehistoric => "VMM failed prior to recorded history",
             Self::FromSledAgent => "failed VMM state received from sled-agent",
             Self::NoSuchInstance => "VMM no longer present on sled",
             Self::SledExpunged => {
