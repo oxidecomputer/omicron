@@ -67,7 +67,6 @@
 //! after a clean slate upon failure.
 //! See <https://github.com/oxidecomputer/omicron/issues/7174> for details.
 
-use crate::early_networking::EarlyNetworkSetupError;
 use crate::plan::service::PlanError as ServicePlanError;
 use crate::plan::service::ServicePlan;
 use crate::plan::sled::SledPlan;
@@ -264,11 +263,6 @@ pub enum SetupServiceError {
 
     #[error("Failed to construct valid set of service zone NAT entries")]
     InvalidServiceZoneNatEntries(#[from] ServiceZoneNatEntriesError),
-
-    // We used transparent, because `EarlyNetworkSetupError` contains a subset
-    // of error variants already in this type
-    #[error(transparent)]
-    EarlyNetworkSetup(#[from] EarlyNetworkSetupError),
 
     #[error("Rack already initialized")]
     RackAlreadyInitialized,
