@@ -34,7 +34,6 @@ use nexus_db_queries::db;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::blueprint_zone_type;
-use nexus_types::internal_api::params::ExternalPortDiscovery;
 use nexus_types::internal_api::params::InitialTrustQuorumConfig;
 use nexus_types::internal_api::params::{
     PhysicalDiskPutRequest, ZpoolPutRequest,
@@ -56,9 +55,9 @@ use sled_hardware_types::BaseboardId;
 use slog::Logger;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeSet;
-use std::collections::HashMap;
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV6};
 use std::sync::Arc;
+use strum::IntoEnumIterator;
 use tokio::sync::watch;
 use uuid::Uuid;
 
@@ -396,6 +395,28 @@ impl nexus_test_interface::NexusServer for Server {
             .await
             .unwrap();
 
+        // In the real rack init handoff, the `rack_network_config` will contain
+        // at least one configured port, and handoff will only complete
+        // successfully if the `populate_switch_ports` background task has
+        // completed successfully to populate the corresponding qsfp* values in
+        // the `switch_port` table. We could block here until that task
+        // activates successfully, contacting whatever `dpd` instance has been
+        // stood up for this test, but in the interest of streamlining this
+        // handoff (which happens for _every_ Nexus test, including those
+        // completely uninterested in switch port interaction), we'll insert a
+        // single qsfp0 for each switch to the db directly.
+        for which_switch in SwitchSlot::iter() {
+            datastore
+                .switch_port_create(
+                    &opctx,
+                    config.deployment.rack_id,
+                    which_switch,
+                    nexus_db_model::Name("qsfp0".parse().unwrap()),
+                )
+                .await
+                .expect("inserted qsfp0");
+        }
+
         // Allocation of initial external IP addresses is a little funny.  In
         // a real system, it'd be allocated by RSS and provided with the rack
         // initialization request (which we're about to simulate).  RSS also
@@ -436,18 +457,6 @@ impl nexus_test_interface::NexusServer for Server {
                     internal_dns_zone_config,
                     external_dns_zone_name: external_dns_zone_name.to_owned(),
                     recovery_silo,
-                    external_port_count: ExternalPortDiscovery::Static(
-                        HashMap::from([
-                            (
-                                SwitchSlot::Switch0,
-                                vec!["qsfp0".parse().unwrap()],
-                            ),
-                            (
-                                SwitchSlot::Switch1,
-                                vec!["qsfp0".parse().unwrap()],
-                            ),
-                        ]),
-                    ),
                     rack_network_config: RackNetworkConfig {
                         rack_subnet: "fd00:1122:3344:0100::/56"
                             .parse()

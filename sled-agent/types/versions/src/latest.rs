@@ -177,11 +177,19 @@ pub mod inventory {
     pub use crate::v34::inventory::SvcState;
     pub use crate::v34::inventory::SvcsError;
 
-    pub use crate::v37::inventory::Inventory;
     pub use crate::v37::inventory::SvcEnabledNotOnline;
     pub use crate::v37::inventory::SvcEnabledNotOnlineState;
     pub use crate::v37::inventory::SvcsEnabledNotOnline;
     pub use crate::v37::inventory::SvcsEnabledNotOnlineResult;
+
+    pub use crate::v40::inventory::FMD_MAX_CASES;
+    pub use crate::v40::inventory::FMD_MAX_RESOURCES;
+    pub use crate::v40::inventory::FmdHostCase;
+    pub use crate::v40::inventory::FmdInventory;
+    pub use crate::v40::inventory::FmdInventoryError;
+    pub use crate::v40::inventory::FmdInventoryErrorKind;
+    pub use crate::v40::inventory::FmdResource;
+    pub use crate::v40::inventory::Inventory;
 
     pub use crate::impls::inventory::ManifestBootInventoryDisplay;
     pub use crate::impls::inventory::ManifestInventoryDisplay;
@@ -236,8 +244,10 @@ pub mod system_networking {
     pub use crate::v33::system_networking::ServiceZoneNatEntriesError;
     pub use crate::v33::system_networking::ServiceZoneNatEntry;
     pub use crate::v33::system_networking::ServiceZoneNatKind;
-    pub use crate::v33::system_networking::SystemNetworkingConfig;
-    pub use crate::v33::system_networking::WriteNetworkConfigRequest;
+
+    pub use crate::v39::system_networking::BlueprintExternalNetworkingConfig;
+    pub use crate::v39::system_networking::SystemNetworkingConfig;
+    pub use crate::v39::system_networking::WriteNetworkConfigRequest;
 }
 
 pub mod trust_quorum {

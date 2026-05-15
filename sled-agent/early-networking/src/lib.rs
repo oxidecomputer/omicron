@@ -45,6 +45,10 @@ use sled_agent_types::early_networking::{
 use sled_agent_types::sled::ThisSledSwitchZoneUnderlayIpAddr;
 use sled_agent_types::system_networking::SystemNetworkingConfig;
 use slog::Logger;
+use slog::error;
+use slog::info;
+use slog::o;
+use slog::warn;
 use slog_error_chain::InlineErrorChain;
 use std::collections::{HashMap, HashSet};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};

@@ -448,9 +448,13 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
     pub async fn start_mgd(&mut self, switch_slot: SwitchSlot) {
         let log = &self.logctx.log;
         debug!(log, "Starting mgd"; "switch_slot" => ?switch_slot);
+        let mgs = self.gateway.get(&switch_slot).unwrap();
+        let mgs_addr =
+            SocketAddrV6::new(Ipv6Addr::LOCALHOST, mgs.port, 0, 0).into();
 
         // Set up an instance of mgd
-        let mgd = dev::maghemite::MgdInstance::start(0).await.unwrap();
+        let mgd =
+            dev::maghemite::MgdInstance::start(0, mgs_addr).await.unwrap();
         let port = mgd.port;
         self.mgd.insert(switch_slot, mgd);
         let address = SocketAddrV6::new(Ipv6Addr::LOCALHOST, port, 0, 0);
@@ -923,7 +927,7 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
                     rack_subnet: "fd00:1122:3344:0100::/56".parse().unwrap(),
                 },
                 // TODO-correctness Can we fill this in for tests?
-                service_zone_nat_entries: None,
+                blueprint_external_networking_config: None,
             },
             generation: 1,
         };
