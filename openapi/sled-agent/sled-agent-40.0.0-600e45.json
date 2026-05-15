@@ -5478,6 +5478,48 @@
           "resources"
         ]
       },
+      "FmdInventoryError": {
+        "description": "An error reported by sled-agent in place of an [`FmdInventory`].\n\n`kind` is a typed discriminator suitable for filtering / monitoring. `message` is a human-readable description (built via `Display`); it is informational only and should not be parsed.",
+        "type": "object",
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/FmdInventoryErrorKind"
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "message"
+        ]
+      },
+      "FmdInventoryErrorKind": {
+        "description": "Classification of an [`FmdInventoryError`].\n\n`FmdError` is a catch-all for any FMD-side failure: the daemon was unreachable, a case/resource listing failed, or the platform doesn't have FMD at all. The accompanying message disambiguates these cases. `TooManyCases` and `TooManyResources` are first-class because exceeding those bounds is operationally distinct from a transient FMD failure.",
+        "oneOf": [
+          {
+            "description": "Catch-all for FMD-side failures.",
+            "type": "string",
+            "enum": [
+              "fmd_error"
+            ]
+          },
+          {
+            "description": "Number of FMD cases exceeded [`FMD_MAX_CASES`].",
+            "type": "string",
+            "enum": [
+              "too_many_cases"
+            ]
+          },
+          {
+            "description": "Number of FMD resources exceeded [`FMD_MAX_RESOURCES`].",
+            "type": "string",
+            "enum": [
+              "too_many_resources"
+            ]
+          }
+        ]
+      },
       "FmdResource": {
         "description": "A resource affected by a diagnosed fault.",
         "type": "object",
@@ -6177,7 +6219,7 @@
                   "$ref": "#/components/schemas/FmdInventory"
                 },
                 {
-                  "type": "string"
+                  "$ref": "#/components/schemas/FmdInventoryError"
                 }
               ],
               "path": "::std::result::Result",
@@ -6199,7 +6241,7 @@
                 "type": "object",
                 "properties": {
                   "err": {
-                    "type": "string"
+                    "$ref": "#/components/schemas/FmdInventoryError"
                   }
                 },
                 "required": [

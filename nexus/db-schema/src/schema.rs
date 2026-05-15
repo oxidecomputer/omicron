@@ -1809,6 +1809,7 @@ table! {
     inv_fmd_status (inv_collection_id, sled_id) {
         inv_collection_id -> Uuid,
         sled_id -> Uuid,
+        error_kind -> Nullable<crate::enums::FmdInventoryErrorKindEnum>,
         error_message -> Nullable<Text>,
     }
 }

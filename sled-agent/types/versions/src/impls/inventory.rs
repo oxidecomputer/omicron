@@ -22,7 +22,7 @@ use tufaceous_artifact::{ArtifactHash, KnownArtifactKind};
 use crate::latest::inventory::{
     BootImageHeader, BootPartitionContents, BootPartitionDetails,
     ConfigReconcilerInventory, ConfigReconcilerInventoryResult, FmdHostCase,
-    FmdInventory, FmdResource, HostPhase2DesiredContents,
+    FmdInventory, FmdInventoryError, FmdResource, HostPhase2DesiredContents,
     HostPhase2DesiredSlots, ManifestBootInventory, ManifestInventory,
     ManifestNonBootInventory, MupdateOverrideBootInventory,
     MupdateOverrideInventory, MupdateOverrideNonBootInventory,
@@ -913,11 +913,11 @@ impl fmt::Display for SingleMeasurementInventoryDisplay<'_> {
 
 /// a displayer for the FMD inventory result on a sled
 pub struct FmdInventoryResultDisplay<'a> {
-    inner: &'a Result<FmdInventory, String>,
+    inner: &'a Result<FmdInventory, FmdInventoryError>,
 }
 
 impl<'a> FmdInventoryResultDisplay<'a> {
-    pub fn new(result: &'a Result<FmdInventory, String>) -> Self {
+    pub fn new(result: &'a Result<FmdInventory, FmdInventoryError>) -> Self {
         Self { inner: result }
     }
 }
@@ -926,7 +926,7 @@ impl fmt::Display for FmdInventoryResultDisplay<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.inner {
             Ok(inv) => write!(f, "{}", inv.display()),
-            Err(error) => writeln!(f, "FMD collection failed: {error}"),
+            Err(err) => writeln!(f, "FMD collection failed: {err}"),
         }
     }
 }

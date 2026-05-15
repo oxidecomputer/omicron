@@ -4186,9 +4186,13 @@ impl DataStore {
             measurements
         };
 
-        // Load all FMD inventory rows. We expect at most ~tens of cases or
-        // resources per sled, so we don't bother paginating.
-        let mut fmd_status_by_sled: BTreeMap<SledUuid, Option<String>> = {
+        // Load all FMD inventory rows. The producer's per-sled bounds
+        // (`FMD_MAX_CASES` / `FMD_MAX_RESOURCES`) keep this size predictable,
+        // so we don't paginate.
+        let mut fmd_status_by_sled: BTreeMap<
+            SledUuid,
+            Option<(nexus_db_model::FmdInventoryErrorKind, String)>,
+        > = {
             use nexus_db_schema::schema::inv_fmd_status::dsl;
             let rows = dsl::inv_fmd_status
                 .filter(dsl::inv_collection_id.eq(db_id))
@@ -4199,7 +4203,17 @@ impl DataStore {
                     public_error_from_diesel(e, ErrorHandler::Server)
                 })?;
             rows.into_iter()
-                .map(|row| (row.sled_id.into(), row.error_message))
+                .map(|row| {
+                    let err = match (row.error_kind, row.error_message) {
+                        (Some(kind), Some(message)) => Some((kind, message)),
+                        (None, None) => None,
+                        _ => unreachable!(
+                            "inv_fmd_status CHECK constraint enforces \
+                             error_kind and error_message agree on NULL"
+                        ),
+                    };
+                    (row.sled_id.into(), err)
+                })
                 .collect()
         };
 
@@ -4856,19 +4870,24 @@ impl DataStore {
                     .remove(&sled_id)
                     .unwrap_or_default(),
                 fmd: {
-                    use sled_agent_types::inventory::FmdInventory;
+                    use sled_agent_types::inventory::{
+                        FmdInventory, FmdInventoryError,
+                    };
                     let cases =
                         fmd_cases_by_sled.remove(&sled_id).unwrap_or_default();
                     let resources = fmd_resources_by_sled
                         .remove(&sled_id)
                         .unwrap_or_default();
-                    // The status row's error_message column distinguishes Ok
-                    // (NULL) from Err (the message). If no row exists at all
-                    // (i.e. an older collection predates this migration),
-                    // fall back to Ok with whatever case/resource rows we
-                    // found, which will normally be empty.
+                    // The status row's (error_kind, error_message) columns
+                    // distinguish Ok (both NULL) from Err (both set). If no
+                    // row exists at all (older collection predating this
+                    // migration), fall back to Ok with whatever case/resource
+                    // rows we found, which will normally be empty.
                     match fmd_status_by_sled.remove(&sled_id) {
-                        Some(Some(error)) => Err(error),
+                        Some(Some((kind, message))) => Err(FmdInventoryError {
+                            kind: kind.into(),
+                            message,
+                        }),
                         _ => Ok(FmdInventory { cases, resources }),
                     }
                 },

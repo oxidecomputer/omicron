@@ -36,6 +36,7 @@ use sled_agent_types_versions::latest::inventory::ConfigReconcilerInventory;
 use sled_agent_types_versions::latest::inventory::ConfigReconcilerInventoryResult;
 use sled_agent_types_versions::latest::inventory::ConfigReconcilerInventoryStatus;
 use sled_agent_types_versions::latest::inventory::FmdInventory;
+use sled_agent_types_versions::latest::inventory::FmdInventoryError;
 use sled_agent_types_versions::latest::inventory::InventoryDataset;
 use sled_agent_types_versions::latest::inventory::InventoryDisk;
 use sled_agent_types_versions::latest::inventory::InventoryZpool;
@@ -650,7 +651,7 @@ pub struct SledAgent {
     pub file_source_resolver: OmicronFileSourceResolverInventory,
     pub smf_services_enabled_not_online: SvcsEnabledNotOnlineResult,
     pub reference_measurements: IdOrdMap<SingleMeasurementInventory>,
-    pub fmd: Result<FmdInventory, String>,
+    pub fmd: Result<FmdInventory, FmdInventoryError>,
 }
 
 impl IdOrdItem for SledAgent {

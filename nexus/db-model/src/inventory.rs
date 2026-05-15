@@ -90,6 +90,7 @@ use sled_agent_types::inventory::BootPartitionDetails;
 use sled_agent_types::inventory::ConfigReconcilerInventoryStatus;
 use sled_agent_types::inventory::FmdHostCase;
 use sled_agent_types::inventory::FmdInventory;
+use sled_agent_types::inventory::FmdInventoryError;
 use sled_agent_types::inventory::FmdResource;
 use sled_agent_types::inventory::HostPhase2DesiredContents;
 use sled_agent_types::inventory::HostPhase2DesiredSlots;
@@ -2134,15 +2135,57 @@ impl InvSvcEnabledNotOnlineParseError {
     }
 }
 
+impl_enum_type!(
+    FmdInventoryErrorKindEnum:
+
+    #[derive(Copy, Clone, Debug, AsExpression, FromSqlRow, PartialEq)]
+    pub enum FmdInventoryErrorKind;
+
+    // Enum values
+    FmdError => b"fmd_error"
+    TooManyCases => b"too_many_cases"
+    TooManyResources => b"too_many_resources"
+);
+
+impl From<sled_agent_types::inventory::FmdInventoryErrorKind>
+    for FmdInventoryErrorKind
+{
+    fn from(value: sled_agent_types::inventory::FmdInventoryErrorKind) -> Self {
+        use sled_agent_types::inventory::FmdInventoryErrorKind as ApiKind;
+        match value {
+            ApiKind::FmdError => FmdInventoryErrorKind::FmdError,
+            ApiKind::TooManyCases => FmdInventoryErrorKind::TooManyCases,
+            ApiKind::TooManyResources => {
+                FmdInventoryErrorKind::TooManyResources
+            }
+        }
+    }
+}
+
+impl From<FmdInventoryErrorKind>
+    for sled_agent_types::inventory::FmdInventoryErrorKind
+{
+    fn from(value: FmdInventoryErrorKind) -> Self {
+        use sled_agent_types::inventory::FmdInventoryErrorKind as ApiKind;
+        match value {
+            FmdInventoryErrorKind::FmdError => ApiKind::FmdError,
+            FmdInventoryErrorKind::TooManyCases => ApiKind::TooManyCases,
+            FmdInventoryErrorKind::TooManyResources => {
+                ApiKind::TooManyResources
+            }
+        }
+    }
+}
+
 /// One row per (collection, sled) recording the outcome of FMD inventory
-/// collection. `error_message` is `NULL` when the daemon was queried
-/// successfully (even if it reported zero faults); set when collection
-/// failed (e.g. on non-illumos sleds, or when the daemon was unreachable).
+/// collection. Both `error_kind` and `error_message` are `NULL` when the
+/// daemon was queried successfully; both are set when collection failed.
 #[derive(Queryable, Clone, Debug, Selectable, Insertable)]
 #[diesel(table_name = inv_fmd_status)]
 pub struct InvFmdStatus {
     pub inv_collection_id: DbTypedUuid<CollectionKind>,
     pub sled_id: DbTypedUuid<SledKind>,
+    pub error_kind: Option<FmdInventoryErrorKind>,
     pub error_message: Option<String>,
 }
 
@@ -2150,15 +2193,16 @@ impl InvFmdStatus {
     pub fn new(
         inv_collection_id: CollectionUuid,
         sled_id: SledUuid,
-        result: &Result<FmdInventory, String>,
+        result: &Result<FmdInventory, FmdInventoryError>,
     ) -> Self {
-        let error_message = match result {
-            Ok(_) => None,
-            Err(error) => Some(error.clone()),
+        let (error_kind, error_message) = match result {
+            Ok(_) => (None, None),
+            Err(err) => (Some(err.kind.into()), Some(err.message.clone())),
         };
         Self {
             inv_collection_id: inv_collection_id.into(),
             sled_id: sled_id.into(),
+            error_kind,
             error_message,
         }
     }
