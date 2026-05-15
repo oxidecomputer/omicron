@@ -8006,6 +8006,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "ntp-admin-v1-client"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "git-stub-vcs",
+ "omicron-workspace-hack",
+ "progenitor 0.14.0",
+ "reqwest 0.13.2",
+ "schemars 0.8.22",
+ "serde",
+ "slog",
+]
+
+[[package]]
 name = "nu-ansi-term"
 version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8926,6 +8940,7 @@ dependencies = [
  "nexus-test-utils",
  "nexus-test-utils-macros",
  "nexus-types",
+ "ntp-admin-client",
  "omicron-common",
  "omicron-nexus",
  "omicron-rpaths",
@@ -9205,7 +9220,6 @@ dependencies = [
  "nexus-lockstep-client",
  "nexus-types",
  "nix 0.31.2",
- "ntp-admin-client",
  "omicron-common",
  "omicron-ddm-admin-client",
  "omicron-ledger",
@@ -9241,6 +9255,7 @@ dependencies = [
  "sled-agent-api",
  "sled-agent-client",
  "sled-agent-config-reconciler",
+ "sled-agent-early-networking",
  "sled-agent-health-monitor",
  "sled-agent-measurements",
  "sled-agent-rack-setup",
@@ -9259,7 +9274,6 @@ dependencies = [
  "smf 0.2.3",
  "sp-sim",
  "sprockets-tls",
- "static_assertions",
  "strum 0.27.2",
  "subprocess",
  "tar",
@@ -13573,7 +13587,7 @@ dependencies = [
  "installinator-common",
  "key-manager",
  "key-manager-types",
- "ntp-admin-client",
+ "ntp-admin-v1-client",
  "omicron-common",
  "omicron-ledger",
  "omicron-test-utils",
@@ -13604,6 +13618,30 @@ dependencies = [
  "tufaceous-artifact",
  "xshell",
  "zone",
+]
+
+[[package]]
+name = "sled-agent-early-networking"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=cc8e02a0800034c431c8cf96b889ea638da3d194)",
+ "futures",
+ "gateway-client",
+ "http",
+ "internal-dns-resolver",
+ "internal-dns-types",
+ "mg-admin-client",
+ "omicron-common",
+ "omicron-ddm-admin-client",
+ "omicron-workspace-hack",
+ "oxnet",
+ "rdb-types",
+ "sled-agent-types",
+ "slog",
+ "slog-error-chain",
+ "thiserror 2.0.18",
+ "tokio",
 ]
 
 [[package]]
@@ -13663,16 +13701,13 @@ dependencies = [
  "chrono",
  "cockroach-admin-client",
  "dns-service-client",
- "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=cc8e02a0800034c431c8cf96b889ea638da3d194)",
  "futures",
- "gateway-client",
  "http",
  "iddqd",
  "illumos-utils",
  "internal-dns-resolver",
  "internal-dns-types",
  "itertools 0.14.0",
- "mg-admin-client",
  "nexus-lockstep-client",
  "nexus-reconfigurator-blippy",
  "nexus-types",
@@ -13686,7 +13721,6 @@ dependencies = [
  "oxnet",
  "rand 0.9.2",
  "rcgen",
- "rdb-types",
  "reqwest 0.13.2",
  "schemars 0.8.22",
  "serde",
