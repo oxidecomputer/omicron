@@ -548,6 +548,7 @@ mod tests {
             )
             .await
             .expect("VMM 2 should be inserted successfully!");
+        let mut vmm2_state = vmm2.runtime();
 
         let migration1 = datastore
             .migration_insert(
@@ -589,11 +590,12 @@ mod tests {
             generation: Generation::new().0.next(),
             time_updated: Utc::now(),
         };
+        vmm2_state = vmm2_state.transition(VmmState::Running);
         datastore
             .vmm_and_migration_update_runtime(
                 &opctx,
                 PropolisUuid::from_untyped_uuid(vmm2.id),
-                &vmm2.runtime().transition(VmmState::Running),
+                &vmm2_state,
                 Migrations {
                     migration_in: Some(&vmm2_migration_in),
                     migration_out: None,
@@ -672,15 +674,12 @@ mod tests {
             generation: Generation::new().0.next(),
             time_updated: Utc::now(),
         };
+        vmm2_state = vmm2_state.transition(VmmState::Destroyed);
         datastore
             .vmm_and_migration_update_runtime(
                 &opctx,
                 PropolisUuid::from_untyped_uuid(vmm2.id),
-                &nexus_types::instance::VmmRuntimeState {
-                    time_updated: Utc::now(),
-                    generation: vmm2.generation.0.next().next(),
-                    state: VmmState::Destroyed,
-                },
+                &vmm2_state,
                 Migrations {
                     migration_in: Some(&vmm2_migration_in),
                     migration_out: Some(&vmm2_migration_out),
