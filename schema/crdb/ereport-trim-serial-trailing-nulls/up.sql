@@ -8,5 +8,4 @@ SET LOCAL disallow_full_table_scans = off;
 
 UPDATE omicron.public.ereport
     SET serial_number = rtrim(serial_number, '\0')
-    WHERE serial_number IS NOT NULL
-      AND serial_number != rtrim(serial_number, '\0');
+    WHERE serial_number IS NOT NULL;
