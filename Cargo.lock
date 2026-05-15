@@ -9991,14 +9991,18 @@ dependencies = [
 name = "oximeter-instruments"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "cfg-if",
  "chrono",
  "dropshot 0.17.0",
  "futures",
  "http",
  "hyper",
+ "illumos-utils",
  "kstat-rs",
  "libc",
+ "omicron-common",
+ "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "oximeter 0.1.0",
  "rand 0.9.2",
