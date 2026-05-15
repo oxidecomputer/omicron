@@ -109,7 +109,6 @@ use sled_agent_client::{
     Client as SledAgentClient, Error as SledAgentError, types as SledAgentTypes,
 };
 use sled_agent_config_reconciler::InternalDisksReceiver;
-use sled_agent_early_networking::EarlyNetworkSetupError;
 use sled_agent_types::early_networking::{
     EarlyNetworkConfigEnvelope, LldpAdminStatus,
 };
@@ -264,11 +263,6 @@ pub enum SetupServiceError {
 
     #[error("Failed to construct valid set of service zone NAT entries")]
     InvalidServiceZoneNatEntries(#[from] ServiceZoneNatEntriesError),
-
-    // We used transparent, because `EarlyNetworkSetupError` contains a subset
-    // of error variants already in this type
-    #[error(transparent)]
-    EarlyNetworkSetup(#[from] EarlyNetworkSetupError),
 
     #[error("Rack already initialized")]
     RackAlreadyInitialized,

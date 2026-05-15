@@ -13661,7 +13661,6 @@ dependencies = [
  "serde",
  "sled-agent-client",
  "sled-agent-config-reconciler",
- "sled-agent-early-networking",
  "sled-agent-types",
  "sled-hardware-types",
  "sled-storage",

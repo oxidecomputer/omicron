@@ -38,7 +38,6 @@ schemars = { workspace = true, features = ["chrono", "uuid1"] }
 serde.workspace = true
 sled-agent-client.workspace = true
 sled-agent-config-reconciler.workspace = true
-sled-agent-early-networking.workspace = true
 sled-agent-types.workspace = true
 sled-hardware-types.workspace = true
 sled-storage.workspace = true
