@@ -56,9 +56,15 @@ impl BackgroundTask for FmAnalysis {
                     opctx.log,
                     "fault management analysis explicitly disabled by config",
                 );
+                let known_classes: Vec<String> =
+                    fm::diagnosis::known_ereport_classes()
+                        .iter()
+                        .map(|s| (*s).to_string())
+                        .collect();
                 FmAnalysisStatus {
                     parent_sitrep_id: None,
                     inv_collection_id: None,
+                    known_classes,
                     outcome: status::Outcome::Disabled,
                 }
             };
@@ -99,6 +105,14 @@ impl FmAnalysis {
         &mut self,
         opctx: &OpContext,
     ) -> FmAnalysisStatus {
+        // Snapshot the static known-classes set once, up front, so it's
+        // reported in the activation status regardless of which outcome
+        // variant fires.
+        let known_classes: Vec<String> = fm::diagnosis::known_ereport_classes()
+            .iter()
+            .map(|s| (*s).to_string())
+            .collect();
+
         let parent_sitrep = self.sitrep_rx.borrow_and_update().clone();
         let parent_sitrep_id = parent_sitrep.as_ref().map(|s| s.1.id());
         let Some(inv) = self.inv_rx.borrow_and_update().clone() else {
@@ -109,6 +123,7 @@ impl FmAnalysis {
             return FmAnalysisStatus {
                 parent_sitrep_id,
                 inv_collection_id: None,
+                known_classes,
                 outcome: status::Outcome::WaitingForInventory,
             };
         };
@@ -144,6 +159,7 @@ impl FmAnalysis {
                 return FmAnalysisStatus {
                     parent_sitrep_id,
                     inv_collection_id: Some(inv_collection_id),
+                    known_classes,
                     outcome: status::Outcome::PreparationError(
                         error.to_string(),
                     ),
@@ -168,6 +184,7 @@ impl FmAnalysis {
                 return FmAnalysisStatus {
                     parent_sitrep_id,
                     inv_collection_id: Some(inv_collection_id),
+                    known_classes,
                     outcome: status::Outcome::WaitingForNewerInventory {
                         parent_inv_id,
                         next_inv_min_time_started,
@@ -183,6 +200,7 @@ impl FmAnalysis {
         FmAnalysisStatus {
             parent_sitrep_id,
             inv_collection_id: Some(inv_collection_id),
+            known_classes,
             outcome: status::Outcome::RanAnalysis {
                 prep_status,
                 analysis_status: outcome,
@@ -216,6 +234,8 @@ impl FmAnalysis {
         builder: &mut fm::analysis_input::Builder,
         errors: &mut Vec<String>,
     ) -> anyhow::Result<()> {
+        // Only surface ereports a diagnosis engine will consume.
+        let classes = fm::diagnosis::known_ereport_classes();
         let mut paginator = Paginator::new(
             nexus_db_queries::db::datastore::SQL_BATCH_SIZE,
             dropshot::PaginationOrder::Ascending,
@@ -224,7 +244,7 @@ impl FmAnalysis {
             let prev_total = builder.num_ereports();
             let batch = self
                 .datastore
-                .ereports_list_unmarked(opctx, &p.current_pagparams())
+                .ereports_list_unmarked(opctx, classes, &p.current_pagparams())
                 .await?;
             paginator = p.found_batch(&batch, &|e| {
                 (e.restart_id.into_untyped_uuid(), e.ena)
