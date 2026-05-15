@@ -20,6 +20,7 @@ members = [
     "clients/nexus-client",
     "clients/nexus-lockstep-client",
     "clients/ntp-admin-client",
+    "clients/ntp-admin-v1-client",
     "clients/oxide-client",
     "clients/oximeter-client",
     "clients/repo-depot-client",
@@ -149,6 +150,7 @@ members = [
     "sled-agent/config-reconciler",
     "sled-agent/health-monitor",
     "sled-agent/measurements",
+    "sled-agent/rack-setup",
     "sled-agent/repo-depot-api",
     "sled-agent/types",
     "sled-agent/types/versions",
@@ -203,6 +205,7 @@ default-members = [
     "clients/nexus-client",
     "clients/nexus-lockstep-client",
     "clients/ntp-admin-client",
+    "clients/ntp-admin-v1-client",
     "clients/oxide-client",
     "clients/oximeter-client",
     "clients/repo-depot-client",
@@ -334,6 +337,7 @@ default-members = [
     "sled-agent/config-reconciler",
     "sled-agent/health-monitor",
     "sled-agent/measurements",
+    "sled-agent/rack-setup",
     "sled-agent/repo-depot-api",
     "sled-agent/types",
     "sled-agent/types/versions",
@@ -495,7 +499,7 @@ digest = "0.10.7"
 dns-server = { path = "dns-server" }
 dns-server-api = { path = "dns-server-api" }
 dns-service-client = { path = "clients/dns-service-client" }
-dpd-client = { git = "https://github.com/oxidecomputer/dendrite", rev = "44a949c9bedf4fcd4d280337fa1965b4293c88d1" }
+dpd-client = { git = "https://github.com/oxidecomputer/dendrite", rev = "187aee7de2e50f907099ea06c04aac96c3455665" }
 dropshot = { version = "0.17.0", features = [ "usdt-probes" ] }
 dropshot-api-manager = "0.7.1"
 dropshot-api-manager-types = "0.7.1"
@@ -600,6 +604,7 @@ maplit = "1.0.2"
 newtype_derive = "0.1.6"
 ntp-admin-api = { path = "ntp-admin/api" }
 ntp-admin-client = { path = "clients/ntp-admin-client" }
+ntp-admin-v1-client = { path = "clients/ntp-admin-v1-client" }
 ntp-admin-types = { path = "ntp-admin/types" }
 ntp-admin-types-versions = { path = "ntp-admin/types/versions" }
 mg-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "7696ee48d5ee29a917dea459e281fe2e8ff20513" }
@@ -665,7 +670,7 @@ omicron-workspace-hack = "0.1.0"
 omicron-zone-package = "0.12.2"
 oxide-client = { path = "clients/oxide-client" }
 oxide-tokio-rt = "0.1.4"
-oxide-vpc = { git = "https://github.com/oxidecomputer/opte", rev = "bae0440c199b3908c12903a9532854936353433b", features = [ "api", "std" ] }
+oxide-vpc = { git = "https://github.com/oxidecomputer/opte", rev = "2c6efefe14321dafe7e9e80129d38316adb2d238", features = [ "api", "std" ] }
 oxlog = { path = "dev-tools/oxlog" }
 oxnet = "0.1.4"
 once_cell = "1.21.3"
@@ -674,7 +679,7 @@ openapiv3 = "2.2.0"
 # must match samael's crate!
 openssl = "0.10"
 openssl-sys = "0.9"
-opte-ioctl = { git = "https://github.com/oxidecomputer/opte", rev = "bae0440c199b3908c12903a9532854936353433b" }
+opte-ioctl = { git = "https://github.com/oxidecomputer/opte", rev = "2c6efefe14321dafe7e9e80129d38316adb2d238" }
 oso = "0.27"
 owo-colors = "4.2.2"
 oximeter = { path = "oximeter/oximeter" }
@@ -729,7 +734,7 @@ proptest = "1.7.0"
 qorb = "0.4.1"
 quote = "1.0"
 # Some dependencies still require rand 0.8.x.
-rand08 = { package = "rand", version = "0.8.5" }
+rand08 = { package = "rand", version = "0.8.6" }
 rand = "0.9.2"
 rand_core = "0.9.3"
 rand_distr = "0.5.1"
@@ -789,6 +794,7 @@ sled-agent-client = { path = "clients/sled-agent-client" }
 sled-agent-config-reconciler = { path = "sled-agent/config-reconciler" }
 sled-agent-health-monitor = { path = "sled-agent/health-monitor" }
 sled-agent-measurements = { path = "sled-agent/measurements" }
+sled-agent-rack-setup = { path = "sled-agent/rack-setup" }
 sled-agent-types = { path = "sled-agent/types" }
 sled-agent-types-versions = { path = "sled-agent/types/versions" }
 sled-agent-resolvable-files = { path = "sled-agent/resolvable-files" }
@@ -843,7 +849,7 @@ tokio-tungstenite = "0.23.1"
 tokio-util = { version = "0.7.15", features = ["io", "io-util", "time"] }
 toml = "0.8.23"
 toml_edit = "0.22.27"
-tough = { version = "0.20.0", features = [ "http" ] }
+tough = { version = "0.22.0" }
 transceiver-controller = { git = "https://github.com/oxidecomputer/transceiver-control", features = [ "api-traits" ] }
 transient-dns-server = { path = "dns-server/transient" }
 trybuild = "1.0.106"

@@ -26,6 +26,14 @@ blueprint-plan latest latest
 # and the target release minimum generation being set.
 blueprint-diff latest
 
+# Apply the blueprint to serial0 so that inventory's reported sled-agent
+# generation matches the blueprint. (The mupdate override remains visible in
+# inventory because we don't call `sled-set ... mupdate-override unset`.) This
+# keeps the next plan's noop check from firing the inventory-stale path,
+# letting it exercise the mupdate-override-set-in-blueprint path instead.
+sled-set serial0 omicron-config latest
+inventory-generate
+
 # Set Nexus redundancy to 4.
 set num-nexus 4
 

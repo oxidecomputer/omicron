@@ -31,6 +31,7 @@ pub struct FmAnalysis {
     inv_rx: watch::Receiver<Option<Arc<inventory::Collection>>>,
     activators: Activators,
     nexus_id: OmicronZoneUuid,
+    analysis_enabled: bool,
 }
 
 /// This is just because I don't like it when a constructor takes multiple
@@ -48,7 +49,25 @@ impl BackgroundTask for FmAnalysis {
         opctx: &'a OpContext,
     ) -> BoxFuture<'a, serde_json::Value> {
         Box::pin(async {
-            let status = self.actually_activate(opctx).await;
+            let status = if self.analysis_enabled {
+                self.actually_activate(opctx).await
+            } else {
+                slog::info!(
+                    opctx.log,
+                    "fault management analysis explicitly disabled by config",
+                );
+                let known_classes: Vec<String> =
+                    fm::diagnosis::known_ereport_classes()
+                        .iter()
+                        .map(|s| (*s).to_string())
+                        .collect();
+                FmAnalysisStatus {
+                    parent_sitrep_id: None,
+                    inv_collection_id: None,
+                    known_classes,
+                    outcome: status::Outcome::Disabled,
+                }
+            };
             match serde_json::to_value(status) {
                 Ok(val) => val,
                 Err(err) => {
@@ -70,8 +89,16 @@ impl FmAnalysis {
         inv_rx: watch::Receiver<Option<Arc<inventory::Collection>>>,
         activators: Activators,
         nexus_id: OmicronZoneUuid,
+        analysis_enabled: bool,
     ) -> Self {
-        Self { datastore, sitrep_rx, inv_rx, activators, nexus_id }
+        Self {
+            datastore,
+            sitrep_rx,
+            inv_rx,
+            activators,
+            nexus_id,
+            analysis_enabled,
+        }
     }
 
     async fn actually_activate(
@@ -363,6 +390,8 @@ mod tests {
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::SitrepUuid;
 
+    const ANALYSIS_ENABLED: bool = true;
+
     fn activators() -> Activators {
         let a = Activators {
             inventory_loader: Activator::new(),
@@ -446,6 +475,7 @@ mod tests {
                 inv_rx,
                 activators(),
                 OmicronZoneUuid::new_v4(),
+                ANALYSIS_ENABLED,
             );
 
             let result = task.actually_activate(opctx).await;
@@ -478,6 +508,7 @@ mod tests {
                 inv_rx,
                 activators(),
                 OmicronZoneUuid::new_v4(),
+                ANALYSIS_ENABLED,
             );
 
             let result = task.actually_activate(opctx).await;
@@ -503,6 +534,7 @@ mod tests {
                 inv_rx,
                 activators(),
                 OmicronZoneUuid::new_v4(),
+                ANALYSIS_ENABLED,
             );
 
             let result = task.actually_activate(opctx).await;
@@ -532,6 +564,7 @@ mod tests {
                 inv_rx,
                 activators(),
                 OmicronZoneUuid::new_v4(),
+                ANALYSIS_ENABLED,
             );
 
             let result = task.actually_activate(opctx).await;
@@ -561,6 +594,7 @@ mod tests {
                 inv_rx,
                 activators(),
                 OmicronZoneUuid::new_v4(),
+                ANALYSIS_ENABLED,
             );
 
             let result = task.actually_activate(opctx).await;
