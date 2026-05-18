@@ -313,8 +313,9 @@ fn plan_mix() {
 
     // qsfp0: unchanged
     assert_eq!(plan.unchanged, BTreeSet::from([qsfp0]));
+    // qsfp1: speed changed, so we have to remove it before applying
     // qsfp2: in dpd but not desired
-    assert_eq!(plan.to_clear, BTreeSet::from([qsfp2]));
+    assert_eq!(plan.to_clear, BTreeSet::from([qsfp1.clone(), qsfp2]));
     // qsfp1: changed, qsfp3: new
     assert_eq!(
         plan.to_apply.keys().collect::<BTreeSet<_>>(),
