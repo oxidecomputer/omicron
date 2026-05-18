@@ -234,23 +234,16 @@ impl Workspace {
         Ok(path)
     }
 
-    /// Iterate over the required dependencies of package `root`, invoking
-    /// `func` for each one as:
+    /// Walks the required (normal and build) dependencies of package `root`.
     ///
-    /// ```ignore
-    /// func(package: &Package, dep_path: &DepPath)
-    /// ```
-    ///
-    /// where `package` is the package that is (directly or indirectly) a
-    /// dependency of `root` and `dep_path` describes the dependency path from
-    /// `root` to `package`.
-    pub fn walk_required_deps_recursively(
-        &self,
+    /// Returns a [`WalkOutcome`] describing every package reachable from
+    /// `root`, each paired with a dependency path to it.
+    pub fn walk_required_deps_recursively<'a>(
+        &'a self,
         root: &Package,
-        func: &mut dyn FnMut(&Package, &DepPath),
-    ) -> Result<()> {
-        struct Remaining<'a> {
-            node: &'a cargo_metadata::Node,
+    ) -> Result<WalkOutcome<'a>> {
+        struct Remaining<'n> {
+            node: &'n cargo_metadata::Node,
             path: DepPath,
         }
 
@@ -268,6 +261,7 @@ impl Workspace {
             path: DepPath::for_pkg(root.id.clone()),
         }];
         let mut seen: BTreeSet<PackageId> = BTreeSet::new();
+        let mut found: Vec<(&'a Package, DepPath)> = Vec::new();
 
         while let Some(Remaining { node: next, path }) = remaining.pop() {
             for d in &next.deps {
@@ -288,7 +282,7 @@ impl Workspace {
                 // package metadata.
                 let dep_pkg = self.packages_by_id.get(did).unwrap();
                 let dep_node = self.nodes_by_id.get(did).unwrap();
-                func(dep_pkg, &path);
+                found.push((dep_pkg, path.clone()));
                 if seen.contains(did) {
                     continue;
                 }
@@ -299,7 +293,7 @@ impl Workspace {
             }
         }
 
-        Ok(())
+        Ok(WalkOutcome { found })
     }
 
     /// Return all package ids for the given `pkgname`
@@ -341,6 +335,16 @@ fn cargo_toml_parent(
         .ok_or_else(|| anyhow!("unexpected manifest path: {:?}", label_path))?
         .to_owned();
     Ok(path)
+}
+
+/// The result of [`Workspace::walk_required_deps_recursively`].
+pub struct WalkOutcome<'a> {
+    /// Every package encountered as a required (normal or build) dependency of
+    /// the walk's `root`, each paired with a dependency path from `root` to
+    /// that package.
+    ///
+    /// A package reachable by more than one path appears once per path.
+    pub found: Vec<(&'a Package, DepPath)>,
 }
 
 /// Describes a "dependency path": a path through the Cargo dependency graph

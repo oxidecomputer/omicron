@@ -22,7 +22,6 @@ use crate::workspaces::Workspaces;
 use anyhow::Result;
 use anyhow::{Context, anyhow, bail};
 use camino::Utf8PathBuf;
-use cargo_metadata::Package;
 use iddqd::IdOrdItem;
 use iddqd::IdOrdMap;
 use iddqd::id_upcast;
@@ -175,12 +174,11 @@ impl SystemApis {
                 let dep_path = DepPath::for_pkg(server_pkg.id.clone());
                 tracker.found_package(dunit_pkg, dunit_pkg, &dep_path);
 
-                workspace.walk_required_deps_recursively(
-                    server_pkg,
-                    &mut |p: &Package, dep_path: &DepPath| {
-                        tracker.found_package(dunit_pkg, &p.name, dep_path);
-                    },
-                )?;
+                let outcome =
+                    workspace.walk_required_deps_recursively(server_pkg)?;
+                for (dep_pkg, dep_path) in &outcome.found {
+                    tracker.found_package(dunit_pkg, &dep_pkg.name, dep_path);
+                }
             }
         }
 
@@ -219,17 +217,8 @@ impl SystemApis {
         for server_pkgname in server_component_units.keys() {
             let (workspace, pkg) =
                 workspaces.find_package_workspace(server_pkgname)?;
-            workspace
-                .walk_required_deps_recursively(
-                    pkg,
-                    &mut |p: &Package, dep_path: &DepPath| {
-                        deps_tracker.found_dependency(
-                            server_pkgname,
-                            &p.name,
-                            dep_path,
-                        );
-                    },
-                )
+            let outcome = workspace
+                .walk_required_deps_recursively(pkg)
                 .with_context(|| {
                     format!(
                         "iterating dependencies of workspace {:?} package {:?}",
@@ -237,6 +226,13 @@ impl SystemApis {
                         server_pkgname
                     )
                 })?;
+            for (dep_pkg, dep_path) in &outcome.found {
+                deps_tracker.found_dependency(
+                    server_pkgname,
+                    &dep_pkg.name,
+                    dep_path,
+                );
+            }
         }
 
         let (apis_consumed, api_consumers) =
