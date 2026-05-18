@@ -59,6 +59,7 @@ pub use handle::ScrimletReconcilers;
 pub use handle::ScrimletReconcilersMode;
 pub use handle::SledAgentNetworkingInfo;
 pub use mgd_reconciler::MgdReconcilerStatus;
+pub use mgd_reconciler::MgdStaticRouteReconcilerStatus;
 pub use status::DetermineSwitchSlotStatus;
 pub use status::ReconcilerActivationReason;
 pub use status::ReconcilerCurrentStatus;
