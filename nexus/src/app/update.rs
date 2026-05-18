@@ -119,7 +119,7 @@ impl UpdateContactSupportChecksInput {
         ) {
             UpdateActivityState::Stuck => {
                 problems.insert(UpdateStatusProblem::StuckUpdate {
-                    time_last_step_planned: self.blueprint.time_created,
+                    time_last_blueprint_created: self.blueprint.time_created,
                 });
             }
             UpdateActivityState::Idle | UpdateActivityState::InProgress => {}
@@ -191,9 +191,9 @@ enum UpdateStatusProblem {
     StuckSagas { sagas: BTreeSet<StuckSaga> },
     /// The query for stuck sagas itself failed.
     StuckSagasQueryFailed { error: String },
-    /// An update is in progress and the last step planned in the blueprint is
-    /// older than `STUCK_UPDATE_THRESHOLD`.
-    StuckUpdate { time_last_step_planned: DateTime<Utc> },
+    /// An update is in progress and the last blueprint created is older than
+    /// `STUCK_UPDATE_THRESHOLD`.
+    StuckUpdate { time_last_blueprint_created: DateTime<Utc> },
     /// The latest inventory collection is older than
     /// `STALE_INVENTORY_THRESHOLD`.
     StaleInventory { collection_time_done: DateTime<Utc> },
@@ -220,10 +220,10 @@ impl KV for UpdateStatusProblem {
                 "stuck_sagas_error_message".into(),
                 &format_args!("{error}"),
             ),
-            Self::StuckUpdate { time_last_step_planned } => serializer
+            Self::StuckUpdate { time_last_blueprint_created } => serializer
                 .emit_arguments(
-                    "stuck_update_last_step_planned_time".into(),
-                    &format_args!("{time_last_step_planned}"),
+                    "stuck_update_last_blueprint_created_time".into(),
+                    &format_args!("{time_last_blueprint_created}"),
                 ),
             Self::StaleInventory { collection_time_done } => serializer
                 .emit_arguments(
@@ -1511,12 +1511,12 @@ mod test {
     #[test]
     fn test_problems_stuck_update() {
         let logctx = test_setup_log("test_problems_stuck_update");
-        let time_last_step_planned =
+        let time_last_blueprint_created =
             Utc::now() - STUCK_UPDATE_THRESHOLD - TimeDelta::seconds(10);
         let blueprint = fake_blueprint(
             &logctx.log,
             &fake_target_version(),
-            time_last_step_planned,
+            time_last_blueprint_created,
         );
 
         let checks = UpdateContactSupportChecksInput {
@@ -1532,7 +1532,7 @@ mod test {
         };
 
         let expected = BTreeSet::from([UpdateStatusProblem::StuckUpdate {
-            time_last_step_planned,
+            time_last_blueprint_created,
         }]);
         assert_eq!(checks.problems(), expected);
 
@@ -1712,12 +1712,12 @@ mod test {
     #[test]
     fn test_problems_all_unhealthy() {
         let logctx = test_setup_log("test_problems_all_unhealthy");
-        let time_last_step_planned =
+        let time_last_blueprint_created =
             Utc::now() - STUCK_UPDATE_THRESHOLD - TimeDelta::seconds(10);
         let blueprint = fake_blueprint(
             &logctx.log,
             &fake_target_version(),
-            time_last_step_planned,
+            time_last_blueprint_created,
         );
         let sled_id = sled_id();
         let saga = fake_saga();
@@ -1756,7 +1756,7 @@ mod test {
             UpdateStatusProblem::StuckSagas {
                 sagas: BTreeSet::from([expected_stuck_saga]),
             },
-            UpdateStatusProblem::StuckUpdate { time_last_step_planned },
+            UpdateStatusProblem::StuckUpdate { time_last_blueprint_created },
             UpdateStatusProblem::StaleInventory { collection_time_done },
             UpdateStatusProblem::UnhealthyZpools {
                 zpools_by_sled: BTreeMap::from([(
