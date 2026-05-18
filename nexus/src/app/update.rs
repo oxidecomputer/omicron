@@ -57,8 +57,9 @@ use uuid::Uuid;
 /// Sagas can sometimes spend time being unassigned or recovered across Nexus
 /// restarts. To calculate this threshold we took a sample of 10,000 sagas and
 /// only 3 took longer than 15 minutes from time_created to done (1h32m, 34m24s
-/// and 19m23s). We give set the threshold at 15 minutes to catch those rather
-/// than letting the Nexus handoff take an extraordinary amount of time.
+/// and 19m23s). Since sagas running longer than 15 minutes are so rare in
+/// practice, we use that as the threshold. Anything older is much more likely
+/// stuck than legitimately still in progress.
 const STUCK_SAGA_THRESHOLD: TimeDelta = TimeDelta::minutes(15);
 
 /// Threshold at which we consider an inventory collection too old for the
@@ -286,7 +287,7 @@ fn is_update_in_progress(
         components_by_release_version.len() != 1 && !versions_at_initial_state;
 
     let blueprint_in_progress = match current_target_version {
-        Some(v) => match super::deployment::target_release_change_status(
+        Some(v) => match BlueprintTargetReleaseStatus::new(
             blueprint,
             &v.to_string(),
         ) {

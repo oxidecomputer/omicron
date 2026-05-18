@@ -539,76 +539,78 @@ pub(super) enum BlueprintTargetReleaseStatus {
     PreviousUpdateInProgress(SledUuid),
 }
 
-// Check the blueprint against the current target release version, returning
-// the first mismatch found or `AllComponentsOnCurrentTargetRelease` if none.
-pub(super) fn target_release_change_status(
-    current_blueprint: &Blueprint,
-    current_target_version: &str,
-) -> BlueprintTargetReleaseStatus {
-    // Check sled configs first.
-    for (sled_id, sled_config) in current_blueprint.active_sled_configs() {
-        match SledUpdateStatus::new(sled_config, current_target_version) {
-            SledUpdateStatus::HasUnresolvedMupdate(how) => {
-                return BlueprintTargetReleaseStatus::WaitingForMupdateToBeCleared {
+impl BlueprintTargetReleaseStatus {
+    // Check the blueprint against the current target release version, returning
+    // the first mismatch found or `AllComponentsOnCurrentTargetRelease` if none.
+    pub(super) fn new(
+        current_blueprint: &Blueprint,
+        current_target_version: &str,
+    ) -> Self {
+        // Check sled configs first.
+        for (sled_id, sled_config) in current_blueprint.active_sled_configs() {
+            match SledUpdateStatus::new(sled_config, current_target_version) {
+                SledUpdateStatus::HasUnresolvedMupdate(how) => {
+                    return BlueprintTargetReleaseStatus::WaitingForMupdateToBeCleared {
                     how,
                     sled_id,
                 };
-            }
-            SledUpdateStatus::PreviousUpdatePending => {
-                return BlueprintTargetReleaseStatus::PreviousUpdateInProgress(
+                }
+                SledUpdateStatus::PreviousUpdatePending => {
+                    return BlueprintTargetReleaseStatus::PreviousUpdateInProgress(
                     sled_id,
                 );
-            }
-            SledUpdateStatus::RunningCurrentVersion => {
-                // This sled is okay; move on to the next.
+                }
+                SledUpdateStatus::RunningCurrentVersion => {
+                    // This sled is okay; move on to the next.
+                }
             }
         }
-    }
 
-    // Now check zone configs.
-    for (sled_id, zone_config) in current_blueprint.in_service_zones() {
-        match &zone_config.image_source {
-            // When a zone's image source is the install dataset, the sled has
-            // never been updated by reconfigurator and is still in the initial
-            // state left by the manufacturing mupdate.
-            BlueprintZoneImageSource::InstallDataset => {
-                return BlueprintTargetReleaseStatus::WaitingForMupdateToBeCleared {
-                    how: SledMupdateDetectedHow::VersionIsInstallDataset,
-                    sled_id,
-                };
-            }
-            BlueprintZoneImageSource::Artifact { version, .. } => {
-                match version {
-                    BlueprintArtifactVersion::Available { version } => {
-                        if version.as_str() != current_target_version {
-                            return BlueprintTargetReleaseStatus::PreviousUpdateInProgress(sled_id);
+        // Now check zone configs.
+        for (sled_id, zone_config) in current_blueprint.in_service_zones() {
+            match &zone_config.image_source {
+                // When a zone's image source is the install dataset, the sled has
+                // never been updated by reconfigurator and is still in the initial
+                // state left by the manufacturing mupdate.
+                BlueprintZoneImageSource::InstallDataset => {
+                    return BlueprintTargetReleaseStatus::WaitingForMupdateToBeCleared {
+                        how: SledMupdateDetectedHow::VersionIsInstallDataset,
+                        sled_id,
+                    };
+                }
+                BlueprintZoneImageSource::Artifact { version, .. } => {
+                    match version {
+                        BlueprintArtifactVersion::Available { version } => {
+                            if version.as_str() != current_target_version {
+                                return BlueprintTargetReleaseStatus::PreviousUpdateInProgress(sled_id);
+                            }
                         }
-                    }
-                    // This shouldn't happen; it means we have an artifact
-                    // source in the blueprint that doesn't match a known
-                    // artifact in the database. Should we instead load all
-                    // the artifacts in the current target release and check
-                    // hashes?
-                    //
-                    // For now, treat this as "not the current version".
-                    BlueprintArtifactVersion::Unknown => {
-                        return BlueprintTargetReleaseStatus::PreviousUpdateInProgress(
+                        // This shouldn't happen; it means we have an artifact
+                        // source in the blueprint that doesn't match a known
+                        // artifact in the database. Should we instead load all
+                        // the artifacts in the current target release and check
+                        // hashes?
+                        //
+                        // For now, treat this as "not the current version".
+                        BlueprintArtifactVersion::Unknown => {
+                            return BlueprintTargetReleaseStatus::PreviousUpdateInProgress(
                             sled_id,
                         );
+                        }
                     }
                 }
             }
         }
-    }
 
-    // All the sled and zone configs match the current target version; it's okay
-    // to proceed with an update. We don't attempt to check Hubris components:
-    //
-    // * They don't have the same API versioning restrictions that require
-    //   strict single-stepped upgrades.
-    // * We don't keep the desired state of all Hubris components in the
-    //   blueprint anyway.
-    BlueprintTargetReleaseStatus::AllComponentsOnCurrentTargetRelease
+        // All the sled and zone configs match the current target version; it's okay
+        // to proceed with an update. We don't attempt to check Hubris components:
+        //
+        // * They don't have the same API versioning restrictions that require
+        //   strict single-stepped upgrades.
+        // * We don't keep the desired state of all Hubris components in the
+        //   blueprint anyway.
+        BlueprintTargetReleaseStatus::AllComponentsOnCurrentTargetRelease
+    }
 }
 
 // Check whether we should allow an operator to change the current target
@@ -649,7 +651,7 @@ fn validate_can_set_target_release_for_update(
     // populates them as the system version that contained them.
     let current_target_version = current_target_version.to_string();
 
-    match target_release_change_status(
+    match BlueprintTargetReleaseStatus::new(
         current_blueprint,
         &current_target_version,
     ) {
