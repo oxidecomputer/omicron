@@ -112,15 +112,17 @@ impl UpdateContactSupportChecksInput {
     fn problems(&self) -> BTreeSet<UpdateStatusProblem> {
         let mut problems = BTreeSet::new();
 
-        if is_update_stuck(
+        match UpdateActivityState::new(
             &self.components_by_release_version,
             &self.blueprint,
             self.current_target_version.as_ref(),
-            self.blueprint.time_created,
         ) {
-            problems.insert(UpdateStatusProblem::StuckUpdate {
-                time_last_step_planned: self.blueprint.time_created,
-            });
+            UpdateActivityState::Stuck => {
+                problems.insert(UpdateStatusProblem::StuckUpdate {
+                    time_last_step_planned: self.blueprint.time_created,
+                });
+            }
+            UpdateActivityState::Idle | UpdateActivityState::InProgress => {}
         }
 
         match &self.stuck_sagas {
@@ -304,21 +306,36 @@ fn is_update_in_progress(
     components_in_progress || blueprint_in_progress
 }
 
-/// Returns true if an update appears to be stuck.
-///
-/// An update is considered "stuck" if it is in progress but the last step
-/// planned in the blueprint is older than `STUCK_UPDATE_THRESHOLD`.
-fn is_update_stuck(
-    components_by_release_version: &BTreeMap<String, usize>,
-    blueprint: &Blueprint,
-    current_target_version: Option<&Version>,
-    time_last_step_planned: DateTime<Utc>,
-) -> bool {
-    is_update_in_progress(
-        components_by_release_version,
-        blueprint,
-        current_target_version,
-    ) && time_last_step_planned < Utc::now() - STUCK_UPDATE_THRESHOLD
+#[derive(Clone, Debug)]
+enum UpdateActivityState {
+    Idle,
+    InProgress,
+    Stuck,
+}
+
+impl UpdateActivityState {
+    fn new(
+        components_by_release_version: &BTreeMap<String, usize>,
+        blueprint: &Blueprint,
+        current_target_version: Option<&Version>,
+    ) -> Self {
+        // First, we determine if an update is not in progress.
+        if !is_update_in_progress(
+            components_by_release_version,
+            blueprint,
+            current_target_version,
+        ) {
+            return UpdateActivityState::Idle;
+        }
+
+        // An update is considered "stuck" if it is in progress but the last step
+        // planned in the blueprint is older than `STUCK_UPDATE_THRESHOLD`.
+        if blueprint.time_created < Utc::now() - STUCK_UPDATE_THRESHOLD {
+            UpdateActivityState::Stuck
+        } else {
+            UpdateActivityState::InProgress
+        }
+    }
 }
 
 impl super::Nexus {
@@ -558,24 +575,22 @@ impl super::Nexus {
         // If an update is in progress but not stuck, the remaining checks
         // could fail mid-update and shouldn't trigger a contact-support
         // signal.
-        if is_update_in_progress(
+        match UpdateActivityState::new(
             &components_by_release_version,
             &blueprint,
             current_target_version,
-        ) && !is_update_stuck(
-            &components_by_release_version,
-            &blueprint,
-            current_target_version,
-            blueprint.time_created,
         ) {
-            info!(
-                opctx.log,
-                "skipping update health checks; update in progress with last \
-                step planned within the last {}",
-                omicron_common::format_time_delta(STUCK_UPDATE_THRESHOLD);
-            );
-            return Ok(false);
-        }
+            UpdateActivityState::InProgress => {
+                info!(
+                    opctx.log,
+                    "skipping update health checks; update in progress with last \
+                    blueprint created within the last {}",
+                    omicron_common::format_time_delta(STUCK_UPDATE_THRESHOLD);
+                );
+                return Ok(false);
+            }
+            UpdateActivityState::Idle | UpdateActivityState::Stuck => {}
+        };
 
         let stuck_sagas = self
             .datastore()
