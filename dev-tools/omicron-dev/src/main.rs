@@ -15,9 +15,12 @@ use nexus_test_utils::resource_helpers::DiskTest;
 use signal_hook_tokio::Signals;
 use slog::{Drain, o};
 use std::{
+    collections::BTreeMap,
     fs,
     net::{Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV6},
+    sync::{Arc, Mutex},
 };
+use sled_agent_types::early_networking::SwitchSlot;
 
 const DEFAULT_NEXUS_CONFIG: &str =
     concat!(env!("CARGO_MANIFEST_DIR"), "/../../nexus/examples/config.toml");
@@ -284,15 +287,26 @@ impl RunMultipleArgs {
         let mut contexts = vec![];
 
         let mut peer_routers = vec![];
+        let mut peer_router_loopback_allocations = vec![];
 
-        // let mut loopback_manager =
-        //     mg_test::LoopbackIpManager::new("lo0", log.clone());
+        let loopback_manager = Arc::new(Mutex::new(
+            loopback_ip_mgr::LoopbackIpManager::new("lo0", log.clone()),
+        ));
 
         for n in 0..self.peer_routers {
             let mgd_bgp_addr =
                 SocketAddr::new(Ipv4Addr::new(127, 0, n, 1).into(), 1049);
 
-            // loopback_manager.add(&[mgd_bgp_addr.ip()]);
+            // Allocate the loopback IP for this peer router's BGP listener.
+            // 127.0.0.1 (n == 0) is always present and treated as a no-op by
+            // the manager; addresses for n > 0 are added to the interface and
+            // removed when the allocation is dropped.
+            let alloc = loopback_ip_mgr::LoopbackIpManager::allocate(
+                loopback_manager.clone(),
+                &[mgd_bgp_addr.ip()],
+            )
+            .expect("allocate loopback IP for peer router BGP listener");
+            peer_router_loopback_allocations.push(alloc);
 
             let mgd = omicron_test_utils::dev::maghemite::MgdInstance::start(
                 0,
@@ -350,10 +364,6 @@ impl RunMultipleArgs {
             peer_routers.push(mgd);
         }
 
-        // TODO: bug causes loopbacks to hang around even after tearing down
-        // the topology
-        // loopback_manager.install()?;
-
         for n in 0..self.count {
             config
                 .deployment
@@ -372,11 +382,30 @@ impl RunMultipleArgs {
             config.deployment.dropshot_lockstep.bind_address.set_port(0);
             config.deployment.techport_external_server_port = 0;
 
+            // Assign unique loopback IPs to this rack's pair of mgd BGP
+            // dispatchers so they can coexist with other rack instances and
+            // with the peer routers above.
+            let mut mgd_bgp_addrs = BTreeMap::new();
+            mgd_bgp_addrs.insert(
+                SwitchSlot::Switch0,
+                Ipv4Addr::new(127, 2, n, 0),
+            );
+            mgd_bgp_addrs.insert(
+                SwitchSlot::Switch1,
+                Ipv4Addr::new(127, 2, n, 1),
+            );
+
             println!("\nomicron-dev: setting up all services for rack {n}... ");
             let cptestctx =
-                nexus_test_utils::omicron_dev_setup_with_config::<
+                nexus_test_utils::omicron_dev_setup_with_bgp_loopbacks::<
                     omicron_nexus::Server,
-                >(&mut config, 1, self.gateway_config.clone())
+                >(
+                    &mut config,
+                    1,
+                    self.gateway_config.clone(),
+                    loopback_manager.clone(),
+                    mgd_bgp_addrs,
+                )
                 .await
                 .context("error setting up services")?;
 
@@ -518,7 +547,11 @@ impl RunMultipleArgs {
             }
         }
 
-        // loopback_manager.uninstall();
+        // Loopback allocations for both peer routers and rack mgd instances
+        // are released here. The rack allocations were already released by the
+        // ControlPlaneTestContext teardown above (via MgdInstance drop), so
+        // this only actively removes the peer router addresses.
+        drop(peer_router_loopback_allocations);
 
         Ok(())
     }
