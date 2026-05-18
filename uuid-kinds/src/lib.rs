@@ -50,6 +50,7 @@ impl_typed_uuid_kinds! {
         BuiltInUser = {},
         Case = {},
         CaseEreport = {},
+        CaseFact = {},
         Collection = {},
         ConsoleSession = {},
         Dataset = {},

@@ -9,11 +9,15 @@ use anyhow::Context;
 use chrono::Utc;
 use fm::analysis_input::InvalidInputs;
 use futures::future::BoxFuture;
+use iddqd::IdOrdMap;
+use nexus_db_model::PhysicalDiskPolicy;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::datastore;
+use nexus_db_queries::db::identity::Asset;
 use nexus_db_queries::db::pagination::Paginator;
 use nexus_fm as fm;
+use nexus_types::in_service_disk::InServiceDisk;
 use nexus_types::internal_api::background::FmAnalysisStatus;
 use nexus_types::internal_api::background::fm_analysis as status;
 use nexus_types::inventory;
@@ -217,8 +221,48 @@ impl FmAnalysis {
         (fm::analysis_input::Input, status::PreparationStatus),
         PreparationError,
     > {
-        let mut builder =
-            fm::analysis_input::Input::builder(parent_sitrep, inv)?;
+        // Load all external (U.2) zpools and project them down to FM's
+        // `InServiceDisk` view, filtering on `disk_policy = in_service` and a
+        // live (non-soft-deleted) physical_disk row. M.2 disks are not
+        // represented as control plane disks today, so the U.2-only filter
+        // on the underlying query matches reality.
+        //
+        // This is the executed view from the DB — flipped only after sagas /
+        // cleaners have actually drained resources, not while a planner is
+        // merely proposing changes. A faulty disk a planner proposes to
+        // expunge is still the diagnoser's concern until the control plane
+        // has actually moved on.
+        let zpools_and_disks = self
+            .datastore
+            .zpool_list_all_external_batched(opctx)
+            .await
+            .context("failed to load in-service control plane disks")?;
+        let mut in_service_disks_map = IdOrdMap::new();
+        for (zpool, disk) in zpools_and_disks {
+            if disk.disk_policy != PhysicalDiskPolicy::InService {
+                continue;
+            }
+            in_service_disks_map
+                .insert_unique(InServiceDisk {
+                    physical_disk_id: disk.id(),
+                    zpool_id: zpool.id(),
+                    sled_id: disk.sled_id.into(),
+                    vendor: disk.vendor,
+                    serial: disk.serial,
+                    model: disk.model,
+                    variant: disk.variant.into(),
+                })
+                .expect(
+                    "physical_disk.id is a primary key, so duplicates are \
+                     impossible",
+                );
+        }
+        let in_service_disks = Arc::new(in_service_disks_map);
+        let mut builder = fm::analysis_input::Input::builder(
+            parent_sitrep,
+            inv,
+            in_service_disks,
+        )?;
         let mut errors = Vec::new();
         self.load_new_ereports(opctx, &mut builder, &mut errors)
             .await

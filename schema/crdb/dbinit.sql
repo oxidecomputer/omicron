@@ -7623,7 +7623,8 @@ ON omicron.public.fm_sitrep_history (sitrep_id);
 
 
 CREATE TYPE IF NOT EXISTS omicron.public.diagnosis_engine AS ENUM (
-    'power_shelf'
+    'power_shelf',
+    'disk'
 );
 
 CREATE TABLE IF NOT EXISTS omicron.public.fm_case (
@@ -7649,6 +7650,28 @@ CREATE TABLE IF NOT EXISTS omicron.public.fm_case (
 CREATE INDEX IF NOT EXISTS
     lookup_fm_cases_for_sitrep
 ON omicron.public.fm_case (sitrep_id);
+
+-- Per-engine "facts" attached to a case. A fact's payload is a JSONB blob
+-- owned by the case's diagnosis engine (see `fm_case.de`) and opaque to
+-- shared FM code.
+CREATE TABLE IF NOT EXISTS omicron.public.fm_case_fact (
+    -- Stable UUID for this fact across sitreps.
+    id UUID NOT NULL,
+    -- Sitrep this row belongs to.
+    sitrep_id UUID NOT NULL,
+    -- UUID of the case this fact attaches to.
+    case_id UUID NOT NULL,
+    -- Engine-defined JSONB payload. Opaque to shared FM code.
+    payload JSONB NOT NULL,
+    -- Free-form, debug-only comment.
+    comment TEXT NOT NULL,
+
+    PRIMARY KEY (sitrep_id, id)
+);
+
+CREATE INDEX IF NOT EXISTS
+    lookup_fm_case_facts_for_case
+ON omicron.public.fm_case_fact (sitrep_id, case_id);
 
 CREATE TABLE IF NOT EXISTS omicron.public.fm_ereport_in_case (
     -- ID of this association. When an ereport is assigned to a case, that
@@ -8626,7 +8649,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '259.0.0', NULL)
+    (TRUE, NOW(), NOW(), '260.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

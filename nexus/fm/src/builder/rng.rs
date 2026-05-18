@@ -12,6 +12,8 @@ use omicron_uuid_kinds::AlertKind;
 use omicron_uuid_kinds::AlertUuid;
 use omicron_uuid_kinds::CaseEreportKind;
 use omicron_uuid_kinds::CaseEreportUuid;
+use omicron_uuid_kinds::CaseFactKind;
+use omicron_uuid_kinds::CaseFactUuid;
 use omicron_uuid_kinds::CaseKind;
 use omicron_uuid_kinds::CaseUuid;
 use omicron_uuid_kinds::SitrepUuid;
@@ -59,11 +61,17 @@ impl SitrepBuilderRng {
     }
 }
 
+/// Per-case child RNGs. Each `next_*` returns the next deterministic UUID
+/// in its stream; collisions across calls are statistically impossible, but
+/// callers in `builder/case.rs` still guard inserts with a `contains_key`
+/// loop so that a future change here (e.g., reseeding mid-build) can't
+/// silently corrupt a case.
 #[derive(Clone, Debug)]
 pub(super) struct CaseBuilderRng {
     ereport_assignment_rng: TypedUuidRng<CaseEreportKind>,
     alert_rng: TypedUuidRng<AlertKind>,
     support_bundle_rng: TypedUuidRng<SupportBundleKind>,
+    fact_rng: TypedUuidRng<CaseFactKind>,
 }
 
 impl CaseBuilderRng {
@@ -85,7 +93,11 @@ impl CaseBuilderRng {
             &mut sitrep.parent,
             (case_id, "support-bundle"),
         );
-        Self { alert_rng, ereport_assignment_rng, support_bundle_rng }
+        let fact_rng = TypedUuidRng::from_parent_rng(
+            &mut sitrep.parent,
+            (case_id, "case-fact"),
+        );
+        Self { alert_rng, ereport_assignment_rng, support_bundle_rng, fact_rng }
     }
 
     pub(super) fn next_alert(&mut self) -> AlertUuid {
@@ -98,5 +110,9 @@ impl CaseBuilderRng {
 
     pub(super) fn next_support_bundle(&mut self) -> SupportBundleUuid {
         self.support_bundle_rng.next()
+    }
+
+    pub(super) fn next_fact(&mut self) -> CaseFactUuid {
+        self.fact_rng.next()
     }
 }

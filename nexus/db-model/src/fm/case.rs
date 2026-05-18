@@ -9,10 +9,10 @@ use super::DiagnosisEngine;
 use super::SupportBundleRequest;
 use crate::DbTypedUuid;
 use crate::ereport;
-use nexus_db_schema::schema::{fm_case, fm_ereport_in_case};
+use nexus_db_schema::schema::{fm_case, fm_case_fact, fm_ereport_in_case};
 use nexus_types::fm;
 use omicron_uuid_kinds::{
-    CaseEreportKind, CaseKind, EreporterRestartKind, SitrepKind,
+    CaseEreportKind, CaseFactKind, CaseKind, EreporterRestartKind, SitrepKind,
 };
 
 /// Metadata describing a fault management case.
@@ -64,6 +64,7 @@ impl CaseMetadata {
             alerts_requested: _,
             support_bundles_requested: _,
             ereports: _,
+            facts: _,
         } = case;
         Self {
             sitrep_id: sitrep_id.into(),
@@ -71,6 +72,35 @@ impl CaseMetadata {
             created_sitrep_id: (*created_sitrep_id).into(),
             closed_sitrep_id: closed_sitrep_id.map(Into::into),
             de: (*de).into(),
+            comment: comment.clone(),
+        }
+    }
+}
+
+/// Diesel row for the `fm_case_fact` table. See
+/// [`nexus_types::fm::case::CaseFact`] for semantics.
+#[derive(Queryable, Insertable, Clone, Debug, Selectable)]
+#[diesel(table_name = fm_case_fact)]
+pub struct CaseFact {
+    pub id: DbTypedUuid<CaseFactKind>,
+    pub sitrep_id: DbTypedUuid<SitrepKind>,
+    pub case_id: DbTypedUuid<CaseKind>,
+    pub payload: serde_json::Value,
+    pub comment: String,
+}
+
+impl CaseFact {
+    pub fn from_sitrep(
+        sitrep_id: impl Into<DbTypedUuid<SitrepKind>>,
+        case_id: impl Into<DbTypedUuid<CaseKind>>,
+        fact: &fm::case::CaseFact,
+    ) -> Self {
+        let fm::case::CaseFact { id, payload, comment } = fact;
+        Self {
+            id: (*id).into(),
+            sitrep_id: sitrep_id.into(),
+            case_id: case_id.into(),
+            payload: payload.clone(),
             comment: comment.clone(),
         }
     }

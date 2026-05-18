@@ -358,6 +358,15 @@ async fn test_omdb_success_cases() {
         .field("triggered by", r"[\w ]+")
         .section(&["task: \"tuf_artifact_replication\"", "request ringbuf:"]);
 
+    // The `fm_analysis` task's input report includes a line comparing the
+    // current inventory collection against the parent sitrep's collection,
+    // which can be either "same" or "different" depending on whether a new
+    // inventory was collected between sitreps. Collapse both forms.
+    redactor.variable_regex(
+        "fm_input_inv_comparison",
+        r" --> (same collection as parent sitrep|different from parent sitrep \(collection [-a-f0-9]+\))",
+    );
+
     // The `sp_ereport_ingester` task's output depends on how many simulated
     // sled agents ahppen to register with Nexus before its first execution.
     // These redactions work around the issue described in

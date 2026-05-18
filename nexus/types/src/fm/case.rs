@@ -7,9 +7,11 @@ use crate::fm::DiagnosisEngineKind;
 use crate::fm::Ereport;
 use crate::fm::EreportId;
 use crate::support_bundle::BundleDataSelection;
+use anyhow::Context;
 use iddqd::{IdOrdItem, IdOrdMap};
 use omicron_uuid_kinds::{
-    AlertUuid, CaseEreportUuid, CaseUuid, SitrepUuid, SupportBundleUuid,
+    AlertUuid, CaseEreportUuid, CaseFactUuid, CaseUuid, SitrepUuid,
+    SupportBundleUuid,
 };
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -24,6 +26,9 @@ pub struct Case {
     pub ereports: IdOrdMap<CaseEreport>,
     pub alerts_requested: IdOrdMap<AlertRequest>,
     pub support_bundles_requested: IdOrdMap<SupportBundleRequest>,
+    /// Diagnosis-engine-derived facts attached to this case. See
+    /// [`CaseFact`] for semantics.
+    pub facts: IdOrdMap<CaseFact>,
 }
 
 impl Case {
@@ -159,6 +164,48 @@ impl CaseEreport {
     }
 }
 
+/// A diagnosis-engine-derived fact attached to a [`Case`].
+///
+/// Facts are **immutable**: to "update" a fact, the diagnosis engine
+/// removes the old one and adds a fresh one. As long as a fact's content
+/// matches the engine's current view, the same fact is carried forward
+/// across sitreps unchanged.
+///
+/// The `payload` shape is owned and interpreted only by the case's
+/// diagnosis engine. Other engines and shared FM code must treat it as
+/// opaque bytes.
+///
+/// `Eq`/`PartialEq` compare the raw `serde_json::Value` payloads, so two
+/// facts are equal iff their payloads are JSON-value-equal (object key
+/// order does not matter; number representation does). This is the
+/// equality the DB round-trip needs. Engine-side comparison should go
+/// through [`CaseFact::payload_as`] and compare typed enum values — never
+/// the raw payload.
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
+pub struct CaseFact {
+    pub id: CaseFactUuid,
+    pub payload: serde_json::Value,
+    pub comment: String,
+}
+
+impl IdOrdItem for CaseFact {
+    type Key<'a> = &'a CaseFactUuid;
+    fn key(&self) -> Self::Key<'_> {
+        &self.id
+    }
+    iddqd::id_upcast!();
+}
+
+impl CaseFact {
+    /// Attempt to deserialize this fact's payload as `T`.
+    pub fn payload_as<T: serde::de::DeserializeOwned>(
+        &self,
+    ) -> anyhow::Result<T> {
+        serde_json::from_value(self.payload.clone())
+            .context("failed to deserialize case fact payload")
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct AlertRequest {
     pub id: AlertUuid,
@@ -217,6 +264,7 @@ impl fmt::Display for DisplayCase<'_> {
                     ereports,
                     alerts_requested,
                     support_bundles_requested,
+                    facts,
                 },
             indent,
             sitrep_id,
@@ -283,6 +331,22 @@ impl fmt::Display for DisplayCase<'_> {
                 )?;
                 writeln!(f, "{:>indent$}{ASSIGNMENT_ID:<WIDTH$} {id}", "")?;
                 writeln!(f, "{:>indent$}{COMMENT:<WIDTH$} {comment}\n", "",)?;
+            }
+        }
+
+        if !facts.is_empty() {
+            writeln!(f, "\n{:>indent$}facts:", "")?;
+            writeln!(f, "{:>indent$}------", "")?;
+
+            let indent = indent + 2;
+            for CaseFact { id, payload, comment } in facts.iter() {
+                const PAYLOAD: &str = "payload:";
+                const COMMENT: &str = "comment:";
+                const WIDTH: usize = const_max_len(&[PAYLOAD, COMMENT]);
+
+                writeln!(f, "{BULLET:>indent$}fact {id}")?;
+                writeln!(f, "{:>indent$}{PAYLOAD:<WIDTH$} {payload}", "")?;
+                writeln!(f, "{:>indent$}{COMMENT:<WIDTH$} {comment}\n", "")?;
             }
         }
 
@@ -527,6 +591,7 @@ mod tests {
             ereports,
             alerts_requested,
             support_bundles_requested,
+            facts: IdOrdMap::new(),
         };
 
         eprintln!("example case display:");

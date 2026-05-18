@@ -9,6 +9,7 @@ use iddqd::id_ord_map::{self, IdOrdMap};
 use nexus_types::alert::AlertClass;
 use nexus_types::fm;
 use nexus_types::support_bundle::BundleDataSelection;
+use omicron_uuid_kinds::CaseFactUuid;
 use omicron_uuid_kinds::CaseUuid;
 use omicron_uuid_kinds::SitrepUuid;
 use std::sync::Arc;
@@ -38,7 +39,7 @@ impl AllCases {
         mut rng: rng::SitrepBuilderRng,
     ) -> Self {
         let cases = inputs
-            .cases()
+            .open_cases()
             .iter()
             .map(|case| {
                 let rng = rng::CaseBuilderRng::new(case.id, &mut rng);
@@ -76,6 +77,7 @@ impl AllCases {
                     ereports: Default::default(),
                     alerts_requested: Default::default(),
                     support_bundles_requested: Default::default(),
+                    facts: Default::default(),
                 };
                 let mut builder =
                     CaseBuilder::new(&self.log, sitrep_id, case, case_rng);
@@ -213,6 +215,55 @@ impl CaseBuilder {
         let comment = comment.to_string();
         slog::info!(&self.log, "case closed"; "comment" => %comment);
         self.report_log.entry("case closed").comment(comment);
+    }
+
+    /// Replace this case's free-form comment string.
+    pub fn set_comment(&mut self, comment: impl ToString) {
+        self.case.metadata.comment = comment.to_string();
+    }
+
+    /// Emit a new fact under this case. The fact's UUID is freshly
+    /// allocated from the case's deterministic RNG.
+    pub fn add_fact<T: serde::Serialize>(
+        &mut self,
+        fact: &T,
+        comment: impl ToString,
+    ) -> anyhow::Result<CaseFactUuid> {
+        let id = loop {
+            let id = self.rng.next_fact();
+            if !self.case.facts.contains_key(&id) {
+                break id;
+            }
+        };
+        let payload = serde_json::to_value(fact)
+            .context("failed to serialize case fact payload")?;
+        let comment = comment.to_string();
+        let fact = fm::case::CaseFact { id, payload, comment: comment.clone() };
+        self.case.facts.insert_unique(fact).expect("UUID should be unused");
+
+        slog::info!(
+            &self.log,
+            "added a fact";
+            "fact_id" => %id,
+            "comment" => %comment,
+        );
+        self.report_log.entry("added fact").kv("fact_id", id).comment(comment);
+        Ok(id)
+    }
+
+    /// Remove a fact from this case. The fact will not be carried forward
+    /// into the next sitrep.
+    pub fn remove_fact(&mut self, id: CaseFactUuid) {
+        if self.case.facts.remove(&id).is_some() {
+            slog::info!(&self.log, "removed a fact"; "fact_id" => %id);
+            self.report_log.entry("removed fact").kv("fact_id", id);
+        }
+    }
+
+    /// Iterate the facts currently attached to this case (including any that
+    /// were carried forward from the parent sitrep).
+    pub fn facts(&self) -> impl Iterator<Item = &fm::case::CaseFact> {
+        self.case.facts.iter()
     }
 
     pub fn add_ereport(

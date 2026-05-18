@@ -552,6 +552,7 @@ mod tests {
             alerts_requested: iddqd::IdOrdMap::new(),
             ereports: iddqd::IdOrdMap::new(),
             support_bundles_requested: iddqd::IdOrdMap::new(),
+            facts: iddqd::IdOrdMap::new(),
         };
         case1
             .alerts_requested
@@ -631,6 +632,7 @@ mod tests {
             alerts_requested: iddqd::IdOrdMap::new(),
             ereports: iddqd::IdOrdMap::new(),
             support_bundles_requested: iddqd::IdOrdMap::new(),
+            facts: iddqd::IdOrdMap::new(),
         };
         case2
             .alerts_requested
@@ -933,6 +935,7 @@ mod tests {
                 ereports,
                 alerts_requested: iddqd::IdOrdMap::new(),
                 support_bundles_requested: iddqd::IdOrdMap::new(),
+                facts: iddqd::IdOrdMap::new(),
             }
         };
 
@@ -1145,6 +1148,7 @@ mod tests {
                 ereports,
                 alerts_requested: iddqd::IdOrdMap::new(),
                 support_bundles_requested: iddqd::IdOrdMap::new(),
+                facts: iddqd::IdOrdMap::new(),
             }
         };
 
@@ -1254,6 +1258,7 @@ mod tests {
                 ereports,
                 alerts_requested: iddqd::IdOrdMap::new(),
                 support_bundles_requested: iddqd::IdOrdMap::new(),
+                facts: iddqd::IdOrdMap::new(),
             }
         };
 
@@ -1449,6 +1454,7 @@ mod tests {
             alerts_requested: iddqd::IdOrdMap::new(),
             ereports: iddqd::IdOrdMap::new(),
             support_bundles_requested: iddqd::IdOrdMap::new(),
+            facts: iddqd::IdOrdMap::new(),
         };
         case1
             .support_bundles_requested
@@ -1625,6 +1631,7 @@ mod tests {
             alerts_requested: iddqd::IdOrdMap::new(),
             ereports: iddqd::IdOrdMap::new(),
             support_bundles_requested: iddqd::IdOrdMap::new(),
+            facts: iddqd::IdOrdMap::new(),
         };
         case.support_bundles_requested
             .insert_unique(fm::case::SupportBundleRequest {

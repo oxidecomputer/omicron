@@ -33,6 +33,7 @@ use nexus_db_lookup::DbConnection;
 use nexus_db_schema::schema::ereport::dsl as ereport_dsl;
 use nexus_db_schema::schema::fm_alert_request::dsl as alert_req_dsl;
 use nexus_db_schema::schema::fm_case::dsl as case_dsl;
+use nexus_db_schema::schema::fm_case_fact::dsl as case_fact_dsl;
 use nexus_db_schema::schema::fm_ereport_in_case::dsl as case_ereport_dsl;
 use nexus_db_schema::schema::fm_sitrep::dsl as sitrep_dsl;
 use nexus_db_schema::schema::fm_sitrep_history::dsl as history_dsl;
@@ -46,6 +47,8 @@ use omicron_common::api::external::ListResultVec;
 use omicron_uuid_kinds::AlertKind;
 use omicron_uuid_kinds::AlertUuid;
 use omicron_uuid_kinds::CaseEreportKind;
+use omicron_uuid_kinds::CaseFactKind;
+use omicron_uuid_kinds::CaseFactUuid;
 use omicron_uuid_kinds::CaseKind;
 use omicron_uuid_kinds::CaseUuid;
 use omicron_uuid_kinds::GenericUuid;
@@ -121,6 +124,7 @@ sitrep_child_tables! {
     SupportBundleRequestDataSelectionEreports => { table: "fm_support_bundle_request_data_selection_ereports" },
     SupportBundleRequest => { table: "fm_support_bundle_request" },
     Case => { table: "fm_case" },
+    CaseFact => { table: "fm_case_fact" },
 }
 
 /// Per-child-table statistics from a single GC pass.
@@ -366,6 +370,8 @@ impl DataStore {
         let mut support_bundle_requests =
             self.support_bundle_requests_read_on_conn(id, conn).await?;
 
+        let mut case_facts = self.fm_case_facts_read_on_conn(id, conn).await?;
+
         // Next, load the case metadata entries and marry them to the sets of
         // ereports, alert requests, and support bundle requests for those
         // cases that we loaded in the previous steps.
@@ -408,6 +414,7 @@ impl DataStore {
                         alert_requests.remove(&id).unwrap_or_default();
                     let support_bundles_requested =
                         support_bundle_requests.remove(&id).unwrap_or_default();
+                    let facts = case_facts.remove(&id).unwrap_or_default();
                     fm::Case {
                         id,
                         metadata: fm::case::Metadata {
@@ -419,6 +426,7 @@ impl DataStore {
                         alerts_requested,
                         ereports,
                         support_bundles_requested,
+                        facts,
                     }
                 }));
             }
@@ -488,6 +496,61 @@ impl DataStore {
                              {case_id} with the same alert UUID {id}. \
                              this should really not be possible, as the \
                              alert UUID is a primary key!",
+                        );
+                        Error::InternalError { internal_message }
+                    })?;
+            }
+        }
+
+        Ok(by_case)
+    }
+
+    /// Fetch all `fm_case_fact` rows belonging to cases in the given sitrep,
+    /// grouped by `case_id`.
+    async fn fm_case_facts_read_on_conn(
+        &self,
+        id: SitrepUuid,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+    ) -> Result<HashMap<CaseUuid, iddqd::IdOrdMap<fm::case::CaseFact>>, Error>
+    {
+        let mut by_case =
+            HashMap::<CaseUuid, iddqd::IdOrdMap<fm::case::CaseFact>>::new();
+
+        let mut paginator: Paginator<DbTypedUuid<CaseFactKind>> =
+            Paginator::new(SQL_BATCH_SIZE, PaginationOrder::Descending);
+        while let Some(p) = paginator.next() {
+            let batch = paginated(
+                case_fact_dsl::fm_case_fact,
+                case_fact_dsl::id,
+                &p.current_pagparams(),
+            )
+            .filter(case_fact_dsl::sitrep_id.eq(id.into_untyped_uuid()))
+            .select(model::fm::CaseFact::as_select())
+            .load_async(conn)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel(e, ErrorHandler::Server)
+                    .internal_context("failed to load case facts")
+            })?;
+
+            paginator = p.found_batch(&batch, &|f| f.id);
+            for fact in batch {
+                let case_id: CaseUuid = fact.case_id.into();
+                let id: CaseFactUuid = fact.id.into();
+                by_case
+                    .entry(case_id)
+                    .or_default()
+                    .insert_unique(fm::case::CaseFact {
+                        id,
+                        payload: fact.payload,
+                        comment: fact.comment,
+                    })
+                    .map_err(|_| {
+                        let internal_message = format!(
+                            "encountered multiple case facts for case \
+                             {case_id} with the same fact UUID {id}. this \
+                             should really not be possible, as the fact \
+                             UUID is a primary key!",
                         );
                         Error::InternalError { internal_message }
                     })?;
@@ -740,6 +803,7 @@ impl DataStore {
         let mut support_bundles_requested = Vec::new();
         let mut bundle_data_selections_requested = Vec::new();
         let mut case_ereports = Vec::new();
+        let mut case_facts = Vec::new();
         for case in sitrep.cases {
             let case_id = case.id;
             cases.push(model::fm::CaseMetadata::from_sitrep(sitrep_id, &case));
@@ -762,6 +826,11 @@ impl DataStore {
                     ),
                 );
                 bundle_data_selections_requested.push((req_id, data_selection));
+            }
+            for fact in case.facts.iter() {
+                case_facts.push(model::fm::CaseFact::from_sitrep(
+                    sitrep_id, case_id, fact,
+                ));
             }
         }
 
@@ -796,6 +865,17 @@ impl DataStore {
             bundle_data_selections_requested,
         )
         .await?;
+
+        if !case_facts.is_empty() {
+            diesel::insert_into(case_fact_dsl::fm_case_fact)
+                .values(case_facts)
+                .execute_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                        .internal_context("failed to insert case facts")
+                })?;
+        }
 
         if !cases.is_empty() {
             diesel::insert_into(case_dsl::fm_case)
@@ -1138,6 +1218,7 @@ impl DataStore {
             alert_requests_deleted: usize,
             support_bundle_requests_deleted: usize,
             cases_deleted: usize,
+            case_facts_deleted: usize,
         }
 
         let err = OptionalError::new();
@@ -1147,6 +1228,7 @@ impl DataStore {
             alert_requests_deleted,
             support_bundle_requests_deleted,
             cases_deleted,
+            case_facts_deleted,
         } = self
             // Sitrep deletion is transactional to prevent a sitrep from being
             // left in a partially-deleted state should the Nexus instance
@@ -1190,6 +1272,15 @@ impl DataStore {
                         Self::support_bundle_requests_delete_on_conn(&conn, ids.clone())
                             .await?;
 
+                    // Delete case facts.
+                    let case_facts_deleted = diesel::delete(
+                        case_fact_dsl::fm_case_fact.filter(
+                            case_fact_dsl::sitrep_id.eq_any(ids.clone()),
+                        ),
+                    )
+                    .execute_async(&conn)
+                    .await?;
+
                     // Delete case metadata records.
                     let cases_deleted = diesel::delete(
                         case_dsl::fm_case
@@ -1212,6 +1303,7 @@ impl DataStore {
                         alert_requests_deleted,
                         support_bundle_requests_deleted,
                         case_ereports_deleted,
+                        case_facts_deleted,
                     })
                 }
             })
@@ -1230,6 +1322,7 @@ impl DataStore {
             "case_ereports_deleted" => case_ereports_deleted,
             "alert_requests_deleted" => alert_requests_deleted,
             "support_bundle_requests_deleted" => support_bundle_requests_deleted,
+            "case_facts_deleted" => case_facts_deleted,
         );
 
         Ok(sitreps_deleted)
@@ -2037,6 +2130,7 @@ mod tests {
                 ereports,
                 alerts_requested,
                 support_bundles_requested,
+                facts,
             } = case;
             let case_id = id;
             let Some(expected) = this.cases.get(&case_id) else {
@@ -2068,6 +2162,7 @@ mod tests {
                 &expected.metadata.de, de,
                 "while checking case {case_id}"
             );
+            assert_eq!(&expected.facts, facts, "while checking case {case_id}");
 
             // Now, check that all the ereports are present in both cases.
             assert_eq!(ereports.len(), expected.ereports.len());
@@ -2241,6 +2336,18 @@ mod tests {
                     .unwrap();
             }
 
+            let mut facts = iddqd::IdOrdMap::new();
+            facts
+                .insert_unique(fm::case::CaseFact {
+                    id: CaseFactUuid::new_v4(),
+                    payload: serde_json::json!({
+                        "kind": "representative_fact",
+                        "note": "for round-trip testing",
+                    }),
+                    comment: "a representative fact for case 1".to_string(),
+                })
+                .unwrap();
+
             fm::Case {
                 id: omicron_uuid_kinds::CaseUuid::new_v4(),
                 metadata: fm::case::Metadata {
@@ -2252,6 +2359,7 @@ mod tests {
                 ereports,
                 alerts_requested,
                 support_bundles_requested,
+                facts,
             }
         };
 
@@ -2288,6 +2396,7 @@ mod tests {
                 ereports,
                 alerts_requested,
                 support_bundles_requested: iddqd::IdOrdMap::new(),
+                facts: iddqd::IdOrdMap::new(),
             }
         };
 
@@ -2406,6 +2515,7 @@ mod tests {
             ereports: iddqd::IdOrdMap::new(),
             alerts_requested: iddqd::IdOrdMap::new(),
             support_bundles_requested,
+            facts: iddqd::IdOrdMap::new(),
         };
 
         let mut cases = iddqd::IdOrdMap::new();
