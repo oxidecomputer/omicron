@@ -328,8 +328,8 @@ impl UpdateActivityState {
             return UpdateActivityState::Idle;
         }
 
-        // An update is considered "stuck" if it is in progress but the last step
-        // planned in the blueprint is older than `STUCK_UPDATE_THRESHOLD`.
+        // An update is considered "stuck" if it is in progress but the last
+        // created blueprint is older than `STUCK_UPDATE_THRESHOLD`.
         if blueprint.time_created < Utc::now() - STUCK_UPDATE_THRESHOLD {
             UpdateActivityState::Stuck
         } else {
