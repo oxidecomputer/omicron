@@ -1,0 +1,15 @@
+# Test for planning without any in-service sleds.
+
+load-example --seed test-basic --nsleds 1
+
+# Expunge the only sled. Now no sleds match SledFilter::InService.
+sled-set serial0 policy expunged
+
+# Generate a fresh inventory so the planner sees a state matching the
+# system description.
+inventory-generate
+
+# Plan a new blueprint. We expect this to say that zone adds and updates are
+# blocked, with the reason being that there are no in-service sleds to plan
+# against. We expect this not to produce a programming error.
+blueprint-plan latest latest

@@ -784,12 +784,23 @@ impl IdOrdItem for BlockedMgsUpdate {
 #[serde(rename_all = "snake_case", tag = "type")]
 #[cfg_attr(test, derive(test_strategy::Arbitrary))]
 pub enum PlanningMeasurementUpdatesStepReport {
-    Modified { count: usize },
+    Modified {
+        count: usize,
+    },
     BlockedAddUpdate,
     EmptyMeasurements,
-    NoSledAgentInInventory { sled_id: SledUuid },
-    NoSledConfig { sled_id: SledUuid },
-    StillInstallDataset { sled_id: SledUuid },
+    /// The system has no target release set, so there are no measurements to
+    /// plan against.
+    NoTargetRelease,
+    NoSledAgentInInventory {
+        sled_id: SledUuid,
+    },
+    NoSledConfig {
+        sled_id: SledUuid,
+    },
+    StillInstallDataset {
+        sled_id: SledUuid,
+    },
     WaitingOnInventory,
     MatchesInventory,
 }
@@ -825,6 +836,12 @@ impl fmt::Display for PlanningMeasurementUpdatesStepReport {
                     writeln!(
                         f,
                         "attempted to plan with a empty measurement set"
+                    )?;
+                }
+                PlanningMeasurementUpdatesStepReport::NoTargetRelease => {
+                    writeln!(
+                        f,
+                        "no target release set; nothing to plan"
                     )?;
                 }
                 PlanningMeasurementUpdatesStepReport::NoSledAgentInInventory { sled_id }=> {
