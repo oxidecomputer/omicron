@@ -10,7 +10,8 @@ use clap::Args;
 use clap::Subcommand;
 use crucible_pantry_client::Client;
 use crucible_pantry_client::types::VolumeStatus;
-use omicron_nexus::app::crucible::VolumeHealth;
+use omicron_nexus::app::crucible::UpstairsHealthDegradedDetails;
+use omicron_nexus::app::crucible::crucible_pantry_client_volume_health;
 use tabled::Tabled;
 use uuid::Uuid;
 
@@ -113,15 +114,17 @@ async fn cmd_volume_info(
     println!(" num_job_handles: {}", num_job_handles);
     println!("     seen_active: {}", seen_active);
 
-    use omicron_nexus::app::crucible::crucible_pantry_client_volume_health;
+    let volume_health = crucible_pantry_client_volume_health(&info);
 
-    match crucible_pantry_client_volume_health(&info) {
-        VolumeHealth::Healthy => {
-            println!("   volume health: healthy");
-        }
+    if volume_health.all_upstairs_healthy() {
+        println!("   volume health: healthy");
+    } else {
+        for details in volume_health.unhealthy_upstairs() {
+            let UpstairsHealthDegradedDetails { upstairs_id, reason } = details;
 
-        VolumeHealth::Degraded { reason } => {
-            println!("   volume health: degraded ({reason})");
+            println!(
+                "   volume health: upstairs {upstairs_id} degraded: {reason}"
+            );
         }
     }
 
