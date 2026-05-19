@@ -7,12 +7,9 @@
 #[macro_use]
 extern crate slog;
 
-mod early_networking;
 mod plan;
 mod service;
 
-pub use early_networking::EarlyNetworkSetup;
-pub use early_networking::EarlyNetworkSetupError;
 pub use plan::service::PlannedSledDescription;
 pub use plan::service::ServicePlan;
 pub use plan::service::SledConfig;

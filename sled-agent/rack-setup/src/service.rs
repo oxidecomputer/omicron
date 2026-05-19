@@ -67,7 +67,6 @@
 //! after a clean slate upon failure.
 //! See <https://github.com/oxidecomputer/omicron/issues/7174> for details.
 
-use crate::early_networking::EarlyNetworkSetupError;
 use crate::plan::service::PlanError as ServicePlanError;
 use crate::plan::service::ServicePlan;
 use crate::plan::sled::SledPlan;
@@ -264,11 +263,6 @@ pub enum SetupServiceError {
 
     #[error("Failed to construct valid set of service zone NAT entries")]
     InvalidServiceZoneNatEntries(#[from] ServiceZoneNatEntriesError),
-
-    // We used transparent, because `EarlyNetworkSetupError` contains a subset
-    // of error variants already in this type
-    #[error(transparent)]
-    EarlyNetworkSetup(#[from] EarlyNetworkSetupError),
 
     #[error("Rack already initialized")]
     RackAlreadyInitialized,
@@ -757,15 +751,7 @@ impl ServiceInner {
     ) -> Result<TimeSync, SetupServiceError> {
         info!(client.inner(), "Checking time synchronization");
 
-        let ts = client.timesync().await?.into_inner();
-        Ok(TimeSync {
-            sync: ts.sync,
-            ref_id: ts.ref_id,
-            ip_addr: ts.ip_addr,
-            stratum: ts.stratum,
-            ref_time: ts.ref_time,
-            correction: ts.correction,
-        })
+        Ok(client.timesync().await?.into_inner())
     }
 
     async fn wait_for_timesync(
@@ -1896,9 +1882,10 @@ mod test {
     use sled_agent_types::{
         early_networking::RackNetworkConfig,
         inventory::{
-            Baseboard, ConfigReconcilerInventoryStatus, Inventory,
-            InventoryDisk, OmicronFileSourceResolverInventory, OmicronZoneType,
-            SledCpuFamily, SledRole, SvcsEnabledNotOnlineResult,
+            Baseboard, ConfigReconcilerInventoryStatus, FmdInventory,
+            Inventory, InventoryDisk, OmicronFileSourceResolverInventory,
+            OmicronZoneType, SledCpuFamily, SledRole,
+            SvcsEnabledNotOnlineResult,
         },
     };
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
@@ -1959,6 +1946,7 @@ mod test {
                 smf_services_enabled_not_online:
                     SvcsEnabledNotOnlineResult::DataUnavailable,
                 reference_measurements: IdOrdMap::new(),
+                fmd: Ok(FmdInventory::default()),
             },
             true,
         )

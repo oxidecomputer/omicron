@@ -20,6 +20,7 @@ members = [
     "clients/nexus-client",
     "clients/nexus-lockstep-client",
     "clients/ntp-admin-client",
+    "clients/ntp-admin-v1-client",
     "clients/oxide-client",
     "clients/oximeter-client",
     "clients/repo-depot-client",
@@ -147,6 +148,7 @@ members = [
     "sled-agent/bootstrap-agent-lockstep-api",
     "sled-agent/bootstrap-agent-lockstep-types",
     "sled-agent/config-reconciler",
+    "sled-agent/early-networking",
     "sled-agent/health-monitor",
     "sled-agent/measurements",
     "sled-agent/rack-setup",
@@ -204,6 +206,7 @@ default-members = [
     "clients/nexus-client",
     "clients/nexus-lockstep-client",
     "clients/ntp-admin-client",
+    "clients/ntp-admin-v1-client",
     "clients/oxide-client",
     "clients/oximeter-client",
     "clients/repo-depot-client",
@@ -333,6 +336,7 @@ default-members = [
     "sled-agent/bootstrap-agent-lockstep-api",
     "sled-agent/bootstrap-agent-lockstep-types",
     "sled-agent/config-reconciler",
+    "sled-agent/early-networking",
     "sled-agent/health-monitor",
     "sled-agent/measurements",
     "sled-agent/rack-setup",
@@ -510,6 +514,8 @@ filetime = "0.2.26"
 flate2 = "1.1.2"
 float-ord = "0.3.2"
 flume = "0.11.1"
+fmd-adm = { git = "https://github.com/oxidecomputer/fmd-adm", rev = "846361bf0a698a8c7efefd97b2828b9aa74858c4" }
+fmd-adm-sys = { git = "https://github.com/oxidecomputer/fmd-adm", rev = "846361bf0a698a8c7efefd97b2828b9aa74858c4" }
 foreign-types = "0.3.2"
 fs-err = "3.1.1"
 futures = "0.3.31"
@@ -524,9 +530,9 @@ gateway-client = { path = "clients/gateway-client" }
 # compatibility, but will mean that faux-mgs might be missing new
 # functionality.)
 #
-gateway-ereport-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "0d7a8992f914ad6a5947409048779969bbe80e3d", default-features = false, features = ["debug-impls"] }
-gateway-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "0d7a8992f914ad6a5947409048779969bbe80e3d", default-features = false, features = ["std"] }
-gateway-sp-comms = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "0d7a8992f914ad6a5947409048779969bbe80e3d" }
+gateway-ereport-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "745a508cb97b7ca9b4c10ec9592c980eb769b10d", default-features = false, features = ["debug-impls"] }
+gateway-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "745a508cb97b7ca9b4c10ec9592c980eb769b10d", default-features = false, features = ["std"] }
+gateway-sp-comms = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "745a508cb97b7ca9b4c10ec9592c980eb769b10d" }
 gateway-test-utils = { path = "gateway-test-utils" }
 gateway-types = { path = "gateway-types" }
 gateway-types-versions = { path = "gateway-types/versions" }
@@ -602,6 +608,7 @@ maplit = "1.0.2"
 newtype_derive = "0.1.6"
 ntp-admin-api = { path = "ntp-admin/api" }
 ntp-admin-client = { path = "clients/ntp-admin-client" }
+ntp-admin-v1-client = { path = "clients/ntp-admin-v1-client" }
 ntp-admin-types = { path = "ntp-admin/types" }
 ntp-admin-types-versions = { path = "ntp-admin/types/versions" }
 mg-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "7696ee48d5ee29a917dea459e281fe2e8ff20513" }
@@ -789,6 +796,7 @@ sled = "=0.34.7"
 sled-agent-api = { path = "sled-agent/api" }
 sled-agent-client = { path = "clients/sled-agent-client" }
 sled-agent-config-reconciler = { path = "sled-agent/config-reconciler" }
+sled-agent-early-networking = { path = "sled-agent/early-networking" }
 sled-agent-health-monitor = { path = "sled-agent/health-monitor" }
 sled-agent-measurements = { path = "sled-agent/measurements" }
 sled-agent-rack-setup = { path = "sled-agent/rack-setup" }

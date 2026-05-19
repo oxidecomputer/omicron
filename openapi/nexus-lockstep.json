@@ -982,6 +982,34 @@
         }
       }
     },
+    "/fm/known-ereport-classes": {
+      "get": {
+        "summary": "List ereport classes that this Nexus's diagnosis engines consume.",
+        "operationId": "fm_known_ereport_classes_list",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Array_of_String",
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/instances/{instance_id}/migrate": {
       "post": {
         "operationId": "instance_migrate",
