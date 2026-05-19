@@ -178,20 +178,20 @@ struct StuckSaga {
 /// Problems identified by update health checks.
 #[derive(Debug, Default, PartialEq, Eq)]
 struct UpdateStatusProblems {
-    /// One or more sagas have been running or unwinding longer than
+    /// Sagas that have been running or unwinding longer than
     /// `STUCK_SAGA_THRESHOLD`.
     stuck_sagas: BTreeSet<StuckSaga>,
     /// Error message if the query for stuck sagas itself failed.
     stuck_sagas_error_message: Option<String>,
-    /// An update is in progress and the last blueprint created is older than
-    /// `STUCK_UPDATE_THRESHOLD`.
+    /// The time the last blueprint was created if an update is in progress, and
+    /// the last blueprint created is older than `STUCK_UPDATE_THRESHOLD`.
     stuck_update_last_blueprint_created_time: Option<DateTime<Utc>>,
-    /// The latest inventory collection is older than
-    /// `STALE_INVENTORY_THRESHOLD`.
+    /// The time the last collection was finished if the latest inventory
+    /// collection is older than `STALE_INVENTORY_THRESHOLD`.
     stale_inventory_last_collection_time_done: Option<DateTime<Utc>>,
-    /// One or more zpools are not in an `Online` state.
+    /// Zpools that are not in an `Online` state.
     unhealthy_zpools_by_sled: BTreeMap<SledUuid, Vec<Zpool>>,
-    /// One or more enabled SMF services are not in an `online` state.
+    /// Enabled SMF services that are not in an `online` state.
     enabled_smf_services_not_online_by_sled:
         BTreeMap<SledUuid, SvcsEnabledNotOnlineResult>,
 }
