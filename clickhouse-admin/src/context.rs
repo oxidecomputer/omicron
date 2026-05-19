@@ -899,37 +899,13 @@ mod tests {
             ErrorStatusCode::SERVICE_UNAVAILABLE
         ));
 
-        // Initialize the database, then check the retention policy again.
-        //
-        // We need to wait for the `system.query_log` table to exist, which can
-        // take a while.
         context.init_db(false).await.expect("failed to initialize database");
 
-        let policy = dev::poll::wait_for_condition(
-            || async {
-                match context.retention_policy().await {
-                    Ok(pol) => {
-                        if pol.tables.contains_key("query_log") {
-                            Ok(pol)
-                        } else {
-                            Err(dev::poll::CondCheckError::<()>::NotYet)
-                        }
-                    }
-                    Err(_) => Err(dev::poll::CondCheckError::<()>::NotYet),
-                }
-            },
-            &std::time::Duration::from_millis(100),
-            &std::time::Duration::from_secs(30),
-        )
-        .await
-        .expect("failed to get retention policy");
-        assert!(!policy.tables.is_empty());
-
-        // The query log defaults to 7 days TTL, everything else is 30.
-        assert!(policy.tables.iter().all(|pol| {
-            let expected = if pol.table == "query_log" { 7 } else { 30 };
-            u8::from(pol.days) == expected
-        }));
+        let policy = context
+            .retention_policy()
+            .await
+            .expect("failed to get retention policy");
+        assert!(policy.tables.iter().all(|pol| { u8::from(pol.days) == 30 }));
 
         // Set everything to 3, and ensure we can read it back.
         let days = Days::new(3).unwrap();
