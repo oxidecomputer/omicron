@@ -178,7 +178,7 @@ impl CaseEreport {
 /// `Eq`/`PartialEq` derive over all fields, including the raw
 /// `serde_json::Value` payload (object key order does not matter; number
 /// representation does). This is the equality the DB round-trip test
-/// needs. Engine-side comparison should go through [`Fact::payload_as`]
+/// needs. Engine-side comparison should go through [`Fact::payload_to`]
 /// and compare typed enum values — never the raw payload.
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
 pub struct Fact {
@@ -201,11 +201,15 @@ impl IdOrdItem for Fact {
 
 impl Fact {
     /// Attempt to deserialize this fact's payload as `T`.
-    pub fn payload_as<T: serde::de::DeserializeOwned>(
+    pub fn payload_to<T: serde::de::DeserializeOwned>(
         &self,
     ) -> anyhow::Result<T> {
-        serde_json::from_value(self.payload.clone())
-            .context("failed to deserialize case fact payload")
+        serde_json::from_value(self.payload.clone()).with_context(|| {
+            format!(
+                "failed to deserialize case fact payload: {:?}",
+                self.payload
+            )
+        })
     }
 }
 

@@ -78,7 +78,7 @@ pub(super) fn analyze(
             let mut summary =
                 ParentCaseSummary { zpool_unhealthy: BTreeMap::new() };
             for fact in c.facts.iter() {
-                match fact.payload_as::<DiskFact>() {
+                match fact.payload_to::<DiskFact>() {
                     Ok(DiskFact::ZpoolUnhealthy {
                         zpool_id,
                         last_seen_health,
@@ -378,7 +378,7 @@ mod tests {
             .filter(|c| !open_only || c.is_open())
             .flat_map(|c| {
                 c.facts.iter().filter_map(move |f| {
-                    f.payload_as::<DiskFact>().ok().map(|d| (c, f, d))
+                    f.payload_to::<DiskFact>().ok().map(|d| (c, f, d))
                 })
             })
             .collect()
