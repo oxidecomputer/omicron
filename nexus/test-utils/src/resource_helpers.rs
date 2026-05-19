@@ -1873,8 +1873,7 @@ impl<'a, N: NexusServer> DiskTest<'a, N> {
                 },
             ],
             gibibytes,
-            // TODO-K: revert
-            ZpoolHealth::Degraded,
+            ZpoolHealth::Online,
         )
         .await
     }
