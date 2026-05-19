@@ -691,13 +691,9 @@ async fn main() -> Result<()> {
         // and add it as a package source for the image build.
         if let Some(ov) = &opte_override {
             let p5p_path = tempdir.path().join(format!("opte-{target}.p5p"));
-            let commit = ov.commit.clone();
-            let dest = p5p_path.clone();
-            let cl = client.clone();
-            let log = logger.clone();
             jobs.push(
                 format!("{target}-opte-p5p"),
-                download_opte_p5p(log, cl, commit, dest),
+                download_opte_p5p(&logger, &client, &ov.commit, &p5p_path),
             );
 
             image_cmd = image_cmd
@@ -961,40 +957,50 @@ const OPTE_BUILDOMAT_BASE: &str =
     "https://buildomat.eng.oxide.computer/public/file/oxidecomputer/opte";
 
 /// Download the OPTE override p5p archive from buildomat.
-async fn download_opte_p5p(
-    logger: Logger,
-    client: reqwest::Client,
-    commit: String,
-    dest: Utf8PathBuf,
-) -> Result<()> {
-    let url = format!("{OPTE_BUILDOMAT_BASE}/repo/{commit}/opte.p5p");
-    info!(logger, "downloading OPTE override p5p from {url}");
-    for attempt in 1..=RETRY_ATTEMPTS {
-        let result = async {
-            let response = client.get(&url).send().await?.error_for_status()?;
-            let bytes = response.bytes().await?;
-            fs::write(&dest, &bytes).await?;
-            Ok::<_, anyhow::Error>(())
-        }
-        .await;
-
-        match result {
-            Ok(()) => {
-                info!(logger, "downloaded OPTE p5p to {dest}");
-                return Ok(());
+fn download_opte_p5p(
+    logger: &Logger,
+    client: &reqwest::Client,
+    commit: &str,
+    dest: &Utf8PathBuf,
+) -> impl Future<Output = Result<()>> + Send + 'static {
+    let logger = logger.clone();
+    let client = client.clone();
+    let commit = commit.to_string();
+    let dest = dest.clone();
+    async move {
+        let url = format!("{OPTE_BUILDOMAT_BASE}/repo/{commit}/opte.p5p");
+        info!(logger, "downloading OPTE override p5p from {url}");
+        for attempt in 1..=RETRY_ATTEMPTS {
+            let result = async {
+                let response =
+                    client.get(&url).send().await?.error_for_status()?;
+                let bytes = response.bytes().await?;
+                fs::write(&dest, &bytes).await?;
+                Ok::<_, anyhow::Error>(())
             }
-            Err(err) => {
-                if attempt == RETRY_ATTEMPTS {
-                    return Err(err).with_context(|| {
-                        format!("failed to download OPTE p5p from {url}")
-                    });
+            .await;
+
+            match result {
+                Ok(()) => {
+                    info!(logger, "downloaded OPTE p5p to {dest}");
+                    return Ok(());
                 }
-                info!(logger, "retrying OPTE p5p download (attempt {attempt})");
+                Err(err) => {
+                    if attempt == RETRY_ATTEMPTS {
+                        return Err(err).with_context(|| {
+                            format!("failed to download OPTE p5p from {url}")
+                        });
+                    }
+                    info!(
+                        logger,
+                        "retrying OPTE p5p download (attempt {attempt})"
+                    );
+                }
             }
         }
-    }
 
-    bail!("failed to download OPTE p5p after {RETRY_ATTEMPTS} attempts")
+        bail!("failed to download OPTE p5p after {RETRY_ATTEMPTS} attempts")
+    }
 }
 
 async fn host_add_root_profile(host_proto_root: Utf8PathBuf) -> Result<()> {
