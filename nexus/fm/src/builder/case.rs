@@ -12,6 +12,7 @@ use nexus_types::support_bundle::BundleDataSelection;
 use omicron_uuid_kinds::CaseFactUuid;
 use omicron_uuid_kinds::CaseUuid;
 use omicron_uuid_kinds::SitrepUuid;
+use std::fmt::Debug;
 use std::sync::Arc;
 
 #[derive(Debug)]
@@ -224,7 +225,7 @@ impl CaseBuilder {
 
     /// Emit a new fact under this case. The fact's UUID is freshly
     /// allocated from the case's deterministic RNG.
-    pub fn add_fact<T: serde::Serialize>(
+    pub fn add_fact<T: serde::Serialize + Debug>(
         &mut self,
         fact: &T,
         comment: impl ToString,
@@ -235,8 +236,9 @@ impl CaseBuilder {
                 break id;
             }
         };
-        let payload = serde_json::to_value(fact)
-            .context("failed to serialize case fact payload")?;
+        let payload = serde_json::to_value(fact).with_context(
+            || "failed to serialize case fact payload {fact:?}",
+        )?;
         let comment = comment.to_string();
         let fact = fm::case::CaseFact { id, payload, comment: comment.clone() };
         self.case.facts.insert_unique(fact).expect("UUID should be unused");
