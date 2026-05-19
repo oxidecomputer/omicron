@@ -109,70 +109,62 @@ struct UpdateContactSupportChecksInput {
 impl UpdateContactSupportChecksInput {
     /// Identify a set of problems present in the system based on a series of
     /// health checks.
-    fn problems(&self) -> BTreeSet<UpdateStatusProblem> {
-        let mut problems = BTreeSet::new();
+    fn problems(&self) -> UpdateStatusProblems {
+        let stuck_update_last_blueprint_created_time =
+            match UpdateActivityState::new(
+                &self.components_by_release_version,
+                &self.blueprint,
+                self.current_target_version.as_ref(),
+            ) {
+                UpdateActivityState::Stuck => Some(self.blueprint.time_created),
+                UpdateActivityState::Idle | UpdateActivityState::InProgress => {
+                    None
+                }
+            };
 
-        match UpdateActivityState::new(
-            &self.components_by_release_version,
-            &self.blueprint,
-            self.current_target_version.as_ref(),
-        ) {
-            UpdateActivityState::Stuck => {
-                problems.insert(UpdateStatusProblem::StuckUpdate {
-                    time_last_blueprint_created: self.blueprint.time_created,
-                });
-            }
-            UpdateActivityState::Idle | UpdateActivityState::InProgress => {}
-        }
-
-        match &self.stuck_sagas {
-            Ok(sagas) => {
-                let sagas: BTreeSet<_> = sagas
+        let (stuck_sagas, stuck_sagas_error_message) = match &self.stuck_sagas {
+            Ok(sagas) => (
+                sagas
                     .iter()
                     .map(|s| StuckSaga { id: s.id, name: s.name.clone() })
-                    .collect();
-                if !sagas.is_empty() {
-                    problems.insert(UpdateStatusProblem::StuckSagas { sagas });
-                }
-            }
-            Err(e) => {
-                problems.insert(UpdateStatusProblem::StuckSagasQueryFailed {
-                    error: e.to_string(),
-                });
-            }
-        }
+                    .collect(),
+                None,
+            ),
+            Err(e) => (BTreeSet::new(), Some(e.to_string())),
+        };
 
-        if self.inventory.time_done < Utc::now() - STALE_INVENTORY_THRESHOLD {
-            problems.insert(UpdateStatusProblem::StaleInventory {
-                collection_time_done: self.inventory.time_done,
-            });
-        }
+        let stale_inventory_last_collection_time_done = if self
+            .inventory
+            .time_done
+            < Utc::now() - STALE_INVENTORY_THRESHOLD
+        {
+            Some(self.inventory.time_done)
+        } else {
+            None
+        };
 
-        let zpools_by_sled: BTreeMap<_, Vec<Zpool>> = self
+        let unhealthy_zpools_by_sled = self
             .inventory
             .unhealthy_zpools()
             .into_iter()
             .map(|(sled, zpools)| (sled, zpools.into_iter().cloned().collect()))
             .collect();
-        if !zpools_by_sled.is_empty() {
-            problems.insert(UpdateStatusProblem::UnhealthyZpools {
-                zpools_by_sled,
-            });
-        }
 
-        let svcs_by_sled: BTreeMap<_, SvcsEnabledNotOnlineResult> = self
+        let enabled_smf_services_not_online_by_sled = self
             .inventory
             .enabled_smf_services_not_online()
             .into_iter()
             .map(|(sled, svcs)| (sled, svcs.clone()))
             .collect();
-        if !svcs_by_sled.is_empty() {
-            problems.insert(UpdateStatusProblem::EnabledSmfServicesNotOnline {
-                svcs_by_sled,
-            });
-        }
 
-        problems
+        UpdateStatusProblems {
+            stuck_sagas,
+            stuck_sagas_error_message,
+            stuck_update_last_blueprint_created_time,
+            stale_inventory_last_collection_time_done,
+            unhealthy_zpools_by_sled,
+            enabled_smf_services_not_online_by_sled,
+        }
     }
 }
 
@@ -183,79 +175,94 @@ struct StuckSaga {
     name: String,
 }
 
-/// A problem identified by an update health check.
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
-enum UpdateStatusProblem {
+/// Problems identified by update health checks.
+#[derive(Debug, Default, PartialEq, Eq)]
+struct UpdateStatusProblems {
     /// One or more sagas have been running or unwinding longer than
     /// `STUCK_SAGA_THRESHOLD`.
-    StuckSagas { sagas: BTreeSet<StuckSaga> },
-    /// The query for stuck sagas itself failed.
-    StuckSagasQueryFailed { error: String },
+    stuck_sagas: BTreeSet<StuckSaga>,
+    /// Error message if the query for stuck sagas itself failed.
+    stuck_sagas_error_message: Option<String>,
     /// An update is in progress and the last blueprint created is older than
     /// `STUCK_UPDATE_THRESHOLD`.
-    StuckUpdate { time_last_blueprint_created: DateTime<Utc> },
+    stuck_update_last_blueprint_created_time: Option<DateTime<Utc>>,
     /// The latest inventory collection is older than
     /// `STALE_INVENTORY_THRESHOLD`.
-    StaleInventory { collection_time_done: DateTime<Utc> },
+    stale_inventory_last_collection_time_done: Option<DateTime<Utc>>,
     /// One or more zpools are not in an `Online` state.
-    UnhealthyZpools { zpools_by_sled: BTreeMap<SledUuid, Vec<Zpool>> },
+    unhealthy_zpools_by_sled: BTreeMap<SledUuid, Vec<Zpool>>,
     /// One or more enabled SMF services are not in an `online` state.
-    EnabledSmfServicesNotOnline {
-        svcs_by_sled: BTreeMap<SledUuid, SvcsEnabledNotOnlineResult>,
-    },
+    enabled_smf_services_not_online_by_sled:
+        BTreeMap<SledUuid, SvcsEnabledNotOnlineResult>,
 }
 
-impl KV for UpdateStatusProblem {
+impl UpdateStatusProblems {
+    fn is_empty(&self) -> bool {
+        let Self {
+            stuck_sagas,
+            stuck_sagas_error_message,
+            stuck_update_last_blueprint_created_time,
+            stale_inventory_last_collection_time_done,
+            unhealthy_zpools_by_sled,
+            enabled_smf_services_not_online_by_sled,
+        } = self;
+        stuck_sagas.is_empty()
+            && stuck_sagas_error_message.is_none()
+            && stuck_update_last_blueprint_created_time.is_none()
+            && stale_inventory_last_collection_time_done.is_none()
+            && unhealthy_zpools_by_sled.is_empty()
+            && enabled_smf_services_not_online_by_sled.is_empty()
+    }
+}
+
+impl KV for UpdateStatusProblems {
     fn serialize(
         &self,
         _record: &Record,
         serializer: &mut dyn Serializer,
     ) -> slog::Result {
-        match self {
-            Self::StuckSagas { sagas } => serializer.emit_arguments(
+        if !self.stuck_sagas.is_empty() {
+            serializer.emit_arguments(
                 "stuck_sagas".into(),
-                &format_args!("{sagas:?}"),
-            ),
-            Self::StuckSagasQueryFailed { error } => serializer.emit_arguments(
+                &format_args!("{:?}", self.stuck_sagas),
+            )?;
+        }
+        if let Some(error) = &self.stuck_sagas_error_message {
+            serializer.emit_arguments(
                 "stuck_sagas_error_message".into(),
                 &format_args!("{error}"),
-            ),
-            Self::StuckUpdate { time_last_blueprint_created } => serializer
-                .emit_arguments(
-                    "stuck_update_last_blueprint_created_time".into(),
-                    &format_args!("{time_last_blueprint_created}"),
-                ),
-            Self::StaleInventory { collection_time_done } => serializer
-                .emit_arguments(
-                    "stale_inventory_last_collection_time_done".into(),
-                    &format_args!("{collection_time_done}"),
-                ),
-            Self::UnhealthyZpools { zpools_by_sled } => serializer
-                .emit_arguments(
-                    "unhealthy_zpools_by_sled".into(),
-                    &format_args!("{zpools_by_sled:?}"),
-                ),
-            Self::EnabledSmfServicesNotOnline { svcs_by_sled } => serializer
-                .emit_arguments(
-                    "enabled_not_online_svcs_by_sled".into(),
-                    &format_args!("{svcs_by_sled:?}"),
-                ),
+            )?;
         }
-    }
-}
-
-/// Wrapper that lets a whole set of [`UpdateStatusProblem`]s contribute their
-/// kvs to a single log record.
-struct UpdateStatusProblemsKv(BTreeSet<UpdateStatusProblem>);
-
-impl KV for UpdateStatusProblemsKv {
-    fn serialize(
-        &self,
-        record: &Record,
-        serializer: &mut dyn Serializer,
-    ) -> slog::Result {
-        for problem in &self.0 {
-            problem.serialize(record, serializer)?;
+        if let Some(time_last_blueprint_created) =
+            &self.stuck_update_last_blueprint_created_time
+        {
+            serializer.emit_arguments(
+                "stuck_update_last_blueprint_created_time".into(),
+                &format_args!("{time_last_blueprint_created}"),
+            )?;
+        }
+        if let Some(collection_time_done) =
+            &self.stale_inventory_last_collection_time_done
+        {
+            serializer.emit_arguments(
+                "stale_inventory_last_collection_time_done".into(),
+                &format_args!("{collection_time_done}"),
+            )?;
+        }
+        if !self.unhealthy_zpools_by_sled.is_empty() {
+            serializer.emit_arguments(
+                "unhealthy_zpools_by_sled".into(),
+                &format_args!("{:?}", self.unhealthy_zpools_by_sled),
+            )?;
+        }
+        if !self.enabled_smf_services_not_online_by_sled.is_empty() {
+            serializer.emit_arguments(
+                "enabled_not_online_svcs_by_sled".into(),
+                &format_args!(
+                    "{:?}",
+                    self.enabled_smf_services_not_online_by_sled
+                ),
+            )?;
         }
         Ok(())
     }
@@ -615,7 +622,7 @@ impl super::Nexus {
             warn!(
                 opctx.log,
                 "found problems in the system before or after an update";
-                UpdateStatusProblemsKv(problems)
+                problems
             );
         }
 
@@ -1018,23 +1025,14 @@ mod test {
     // current time and isn't predictable. Replace it with the epoch so we can
     // assert against the rest of the zpool fields exactly.
     fn normalise_zpool_times(
-        problems: BTreeSet<UpdateStatusProblem>,
-    ) -> BTreeSet<UpdateStatusProblem> {
+        mut problems: UpdateStatusProblems,
+    ) -> UpdateStatusProblems {
+        for zpools in problems.unhealthy_zpools_by_sled.values_mut() {
+            for z in zpools {
+                z.time_collected = DateTime::<Utc>::UNIX_EPOCH;
+            }
+        }
         problems
-            .into_iter()
-            .map(|mut p| {
-                if let UpdateStatusProblem::UnhealthyZpools { zpools_by_sled } =
-                    &mut p
-                {
-                    for zpools in zpools_by_sled.values_mut() {
-                        for z in zpools {
-                            z.time_collected = DateTime::<Utc>::UNIX_EPOCH;
-                        }
-                    }
-                }
-                p
-            })
-            .collect()
     }
 
     #[nexus_test(server = crate::Server)]
@@ -1445,7 +1443,7 @@ mod test {
             blueprint,
             current_target_version: Some(fake_target_version()),
         };
-        assert_eq!(checks.problems(), BTreeSet::new());
+        assert_eq!(checks.problems(), UpdateStatusProblems::default());
 
         logctx.cleanup_successful();
     }
@@ -1471,17 +1469,18 @@ mod test {
             current_target_version: Some(fake_target_version()),
         };
 
-        let expected = BTreeSet::from([UpdateStatusProblem::StuckSagas {
-            sagas: BTreeSet::from([expected_stuck_saga]),
-        }]);
+        let expected = UpdateStatusProblems {
+            stuck_sagas: BTreeSet::from([expected_stuck_saga]),
+            ..Default::default()
+        };
         assert_eq!(checks.problems(), expected);
 
         logctx.cleanup_successful();
     }
 
     #[test]
-    fn test_problems_stuck_sagas_query_failed() {
-        let logctx = test_setup_log("test_problems_stuck_sagas_query_failed");
+    fn test_problems_stuck_sagas_error_message() {
+        let logctx = test_setup_log("test_problems_stuck_sagas_error_message");
         let blueprint =
             fake_blueprint(&logctx.log, &fake_target_version(), Utc::now());
         let err = Error::internal_error("db boom");
@@ -1499,10 +1498,10 @@ mod test {
             current_target_version: Some(fake_target_version()),
         };
 
-        let expected =
-            BTreeSet::from([UpdateStatusProblem::StuckSagasQueryFailed {
-                error: expected_error,
-            }]);
+        let expected = UpdateStatusProblems {
+            stuck_sagas_error_message: Some(expected_error),
+            ..Default::default()
+        };
         assert_eq!(checks.problems(), expected);
 
         logctx.cleanup_successful();
@@ -1531,9 +1530,12 @@ mod test {
             current_target_version: Some(fake_target_version()),
         };
 
-        let expected = BTreeSet::from([UpdateStatusProblem::StuckUpdate {
-            time_last_blueprint_created,
-        }]);
+        let expected = UpdateStatusProblems {
+            stuck_update_last_blueprint_created_time: Some(
+                time_last_blueprint_created,
+            ),
+            ..Default::default()
+        };
         assert_eq!(checks.problems(), expected);
 
         logctx.cleanup_successful();
@@ -1558,7 +1560,7 @@ mod test {
             blueprint,
             current_target_version: Some(fake_target_version()),
         };
-        assert_eq!(checks.problems(), BTreeSet::new());
+        assert_eq!(checks.problems(), UpdateStatusProblems::default());
 
         logctx.cleanup_successful();
     }
@@ -1585,9 +1587,12 @@ mod test {
             current_target_version: Some(fake_target_version()),
         };
 
-        let expected = BTreeSet::from([UpdateStatusProblem::StaleInventory {
-            collection_time_done,
-        }]);
+        let expected = UpdateStatusProblems {
+            stale_inventory_last_collection_time_done: Some(
+                collection_time_done,
+            ),
+            ..Default::default()
+        };
         assert_eq!(checks.problems(), expected);
 
         logctx.cleanup_successful();
@@ -1621,9 +1626,13 @@ mod test {
             total_size: ByteCount::from(1024 * 1024),
             health: ZpoolHealth::Degraded,
         };
-        let expected = BTreeSet::from([UpdateStatusProblem::UnhealthyZpools {
-            zpools_by_sled: BTreeMap::from([(sled_id, vec![expected_zpool])]),
-        }]);
+        let expected = UpdateStatusProblems {
+            unhealthy_zpools_by_sled: BTreeMap::from([(
+                sled_id,
+                vec![expected_zpool],
+            )]),
+            ..Default::default()
+        };
         assert_eq!(normalise_zpool_times(checks.problems()), expected);
 
         logctx.cleanup_successful();
@@ -1650,11 +1659,12 @@ mod test {
             current_target_version: Some(fake_target_version()),
         };
 
-        let expected = BTreeSet::from([
-            UpdateStatusProblem::EnabledSmfServicesNotOnline {
-                svcs_by_sled: BTreeMap::from([(sled_id, services)]),
-            },
-        ]);
+        let expected = UpdateStatusProblems {
+            enabled_smf_services_not_online_by_sled: BTreeMap::from([(
+                sled_id, services,
+            )]),
+            ..Default::default()
+        };
         assert_eq!(checks.problems(), expected);
 
         logctx.cleanup_successful();
@@ -1693,17 +1703,14 @@ mod test {
             total_size: ByteCount::from(1024 * 1024),
             health: ZpoolHealth::Degraded,
         };
-        let expected = BTreeSet::from([
-            UpdateStatusProblem::StuckSagas {
-                sagas: BTreeSet::from([expected_stuck_saga]),
-            },
-            UpdateStatusProblem::UnhealthyZpools {
-                zpools_by_sled: BTreeMap::from([(
-                    sled_id,
-                    vec![expected_zpool],
-                )]),
-            },
-        ]);
+        let expected = UpdateStatusProblems {
+            stuck_sagas: BTreeSet::from([expected_stuck_saga]),
+            unhealthy_zpools_by_sled: BTreeMap::from([(
+                sled_id,
+                vec![expected_zpool],
+            )]),
+            ..Default::default()
+        };
         assert_eq!(normalise_zpool_times(checks.problems()), expected);
 
         logctx.cleanup_successful();
@@ -1752,22 +1759,23 @@ mod test {
             total_size: ByteCount::from(1024 * 1024),
             health: ZpoolHealth::Degraded,
         };
-        let expected = BTreeSet::from([
-            UpdateStatusProblem::StuckSagas {
-                sagas: BTreeSet::from([expected_stuck_saga]),
-            },
-            UpdateStatusProblem::StuckUpdate { time_last_blueprint_created },
-            UpdateStatusProblem::StaleInventory { collection_time_done },
-            UpdateStatusProblem::UnhealthyZpools {
-                zpools_by_sled: BTreeMap::from([(
-                    sled_id,
-                    vec![expected_zpool],
-                )]),
-            },
-            UpdateStatusProblem::EnabledSmfServicesNotOnline {
-                svcs_by_sled: BTreeMap::from([(sled_id, services)]),
-            },
-        ]);
+        let expected = UpdateStatusProblems {
+            stuck_sagas: BTreeSet::from([expected_stuck_saga]),
+            stuck_sagas_error_message: None,
+            stuck_update_last_blueprint_created_time: Some(
+                time_last_blueprint_created,
+            ),
+            stale_inventory_last_collection_time_done: Some(
+                collection_time_done,
+            ),
+            unhealthy_zpools_by_sled: BTreeMap::from([(
+                sled_id,
+                vec![expected_zpool],
+            )]),
+            enabled_smf_services_not_online_by_sled: BTreeMap::from([(
+                sled_id, services,
+            )]),
+        };
         assert_eq!(normalise_zpool_times(checks.problems()), expected);
 
         logctx.cleanup_successful();
