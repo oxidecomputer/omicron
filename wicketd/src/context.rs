@@ -5,7 +5,9 @@
 //! User provided dropshot server context
 
 use crate::MgsHandle;
+use crate::bgp_auth_keys::BgpAuthKeyError;
 use crate::bootstrap_addrs::BootstrapPeers;
+use crate::multirack_config::CurrentMultirackJoinConfig;
 use crate::preflight_check::PreflightCheckerHandler;
 use crate::rss_config::CurrentRssConfig;
 use crate::transceivers::Handle as TransceiverHandle;
@@ -16,12 +18,100 @@ use anyhow::bail;
 use internal_dns_resolver::Resolver;
 use sled_hardware_types::Baseboard;
 use slog::info;
+use std::collections::BTreeMap;
 use std::net::Ipv6Addr;
 use std::net::SocketAddrV6;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::OnceLock;
 use wicket_common::inventory::SpIdentifier;
+use wicket_common::rack_setup::BgpAuthKey;
+use wicket_common::rack_setup::BgpAuthKeyId;
+use wicket_common::rack_setup::BgpAuthKeyStatus;
+use wicketd_api::SetBgpAuthKeyStatus;
+
+#[allow(clippy::large_enum_variant)]
+pub(crate) enum RssOrMultirackJoinConfig {
+    Rss(CurrentRssConfig),
+    MultirackJoin(CurrentMultirackJoinConfig),
+}
+
+impl Default for RssOrMultirackJoinConfig {
+    fn default() -> Self {
+        // Backwards compatibility
+        Self::default_rss_config()
+    }
+}
+
+impl RssOrMultirackJoinConfig {
+    pub fn default_rss_config() -> RssOrMultirackJoinConfig {
+        Self::Rss(CurrentRssConfig::default())
+    }
+
+    /// Return the [`CurrentRssConfig`] from the `Rss` variant if set.
+    pub fn rss_config_mut(&mut self) -> Option<&mut CurrentRssConfig> {
+        match self {
+            Self::Rss(c) => Some(c),
+            _ => None,
+        }
+    }
+
+    /// Return the [`CurrentMultirackJoinConfig`] from the `MultirackJoin`
+    /// variant if set.
+    pub fn multirack_join_config_mut(
+        &mut self,
+    ) -> Option<&mut CurrentMultirackJoinConfig> {
+        match self {
+            Self::MultirackJoin(c) => Some(c),
+            _ => None,
+        }
+    }
+
+    /// Return the a mutable reference to the `Rss` variant if set or initialize
+    /// `self` with `CurrentRssConfig::default()` and return a mutable reference
+    /// to that.
+    ///
+    /// This is essentially an entry API that overwrites other variants as necessary.
+    pub fn rss_config_mut_or_default(&mut self) -> &mut CurrentRssConfig {
+        match self {
+            Self::Rss(c) => c,
+            _ => {
+                *self = Self::default_rss_config();
+                self.rss_config_mut().unwrap()
+            }
+        }
+    }
+
+    pub(crate) fn check_bgp_auth_keys_valid<'a>(
+        &self,
+        check_valid: impl IntoIterator<Item = &'a BgpAuthKeyId>,
+    ) -> Result<(), BgpAuthKeyError> {
+        match self {
+            Self::Rss(c) => c.check_bgp_auth_keys_valid(check_valid),
+            Self::MultirackJoin(c) => c.check_bgp_auth_keys_valid(check_valid),
+        }
+    }
+
+    pub(crate) fn get_bgp_auth_key_data(
+        &self,
+    ) -> BTreeMap<BgpAuthKeyId, BgpAuthKeyStatus> {
+        match self {
+            Self::Rss(c) => c.get_bgp_auth_key_data(),
+            Self::MultirackJoin(c) => c.get_bgp_auth_key_data(),
+        }
+    }
+
+    pub(crate) fn set_bgp_auth_key(
+        &mut self,
+        key_id: BgpAuthKeyId,
+        key: BgpAuthKey,
+    ) -> Result<SetBgpAuthKeyStatus, BgpAuthKeyError> {
+        match self {
+            Self::Rss(c) => c.set_bgp_auth_key(key_id, key),
+            Self::MultirackJoin(c) => c.set_bgp_auth_key(key_id, key),
+        }
+    }
+}
 
 /// Shared state used by API handlers
 pub struct ServerContext {
@@ -38,7 +128,7 @@ pub struct ServerContext {
     pub(crate) bootstrap_peers: BootstrapPeers,
     pub(crate) update_tracker: Arc<UpdateTracker>,
     pub(crate) baseboard: Option<Baseboard>,
-    pub(crate) rss_config: Mutex<CurrentRssConfig>,
+    pub(crate) rss_or_multirack_join_config: Mutex<RssOrMultirackJoinConfig>,
     pub(crate) preflight_checker: PreflightCheckerHandler,
     pub(crate) internal_dns_resolver: Arc<Mutex<Option<Resolver>>>,
 }

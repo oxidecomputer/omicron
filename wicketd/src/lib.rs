@@ -3,6 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 mod artifacts;
+mod bgp_auth_keys;
 mod bootstrap_addrs;
 mod config;
 mod context;
@@ -10,6 +11,7 @@ mod helpers;
 mod http_entrypoints;
 mod installinator_progress;
 pub mod mgs;
+mod multirack_config;
 mod nexus_proxy;
 mod preflight_check;
 mod rss_config;
@@ -203,7 +205,7 @@ impl Server {
                     bootstrap_peers,
                     update_tracker: update_tracker.clone(),
                     baseboard: args.baseboard,
-                    rss_config: Default::default(),
+                    rss_or_multirack_join_config: Default::default(),
                     preflight_checker: PreflightCheckerHandler::new(&log),
                     internal_dns_resolver,
                 },
