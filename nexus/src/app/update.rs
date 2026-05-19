@@ -216,6 +216,8 @@ impl UpdateStatusProblems {
 }
 
 impl KV for UpdateStatusProblems {
+    // We keep this custome serialisation as using slog-derive would print out
+    // every item always, we only want to log fields that contain problems.
     fn serialize(
         &self,
         _record: &Record,
@@ -257,7 +259,7 @@ impl KV for UpdateStatusProblems {
         }
         if !self.enabled_smf_services_not_online_by_sled.is_empty() {
             serializer.emit_arguments(
-                "enabled_not_online_svcs_by_sled".into(),
+                "enabled_smf_services_not_online_by_sled".into(),
                 &format_args!(
                     "{:?}",
                     self.enabled_smf_services_not_online_by_sled
