@@ -199,7 +199,6 @@ impl fmt::Display for ReconfiguratorConfigDiffDisplay<'_, '_> {
     Clone,
     Copy,
     Debug,
-    Default,
     Diffable,
     PartialEq,
     Eq,
@@ -213,6 +212,15 @@ pub struct PlannerConfig {}
 impl PlannerConfig {
     pub fn display(&self) -> PlannerConfigDisplay<'_> {
         PlannerConfigDisplay { config: self }
+    }
+}
+
+// Allow the clippy::derivable_impls lint: spell out the default values for
+// these config values for clarity.
+#[expect(clippy::derivable_impls)]
+impl Default for PlannerConfig {
+    fn default() -> Self {
+        Self {}
     }
 }
 
