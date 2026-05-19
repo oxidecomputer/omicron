@@ -15,6 +15,7 @@ use futures::Stream;
 use nexus_auth::authz;
 use nexus_db_lookup::LookupPath;
 use nexus_db_model::Generation;
+use nexus_db_model::TargetReleaseSource;
 use nexus_db_model::TufRepoUpload;
 use nexus_db_model::TufTrustRoot;
 use nexus_db_model::saga_types::Saga;
@@ -104,6 +105,7 @@ struct UpdateContactSupportChecksInput {
     blueprint: Arc<Blueprint>,
     // None when no target release has ever been set on the system.
     current_target_version: Option<Version>,
+    target_release_source: TargetReleaseSource,
 }
 
 impl UpdateContactSupportChecksInput {
@@ -115,6 +117,7 @@ impl UpdateContactSupportChecksInput {
                 &self.components_by_release_version,
                 &self.blueprint,
                 self.current_target_version.as_ref(),
+                self.target_release_source,
             ) {
                 UpdateActivityState::Stuck => Some(self.blueprint.time_created),
                 UpdateActivityState::Idle | UpdateActivityState::InProgress => {
@@ -272,12 +275,12 @@ impl KV for UpdateStatusProblems {
 
 /// Returns true if the system appears to be mid-update.
 ///
-/// A system is considered mid-update when EITHER:
+/// If no target release has ever been set, the system has only ever been
+/// mupdated and is not mid-update.
 ///
-/// - Its components don't all report the same version. The one exception is
-///   the initial state of a system that has never been updated, which has
-///   exactly two versions present: "install dataset" and "unknown". This state
-///   is not treated as in-progress.
+/// Otherwise, a system is considered mid-update when EITHER:
+///
+/// - Its components don't all report the same version.
 /// - The current target blueprint shows a previous update is still in
 ///   progress (relative to `current_target_version`). This catches the window
 ///   between a new target release being set and any components actually moving
@@ -286,15 +289,18 @@ fn is_update_in_progress(
     components_by_release_version: &BTreeMap<String, usize>,
     blueprint: &Blueprint,
     current_target_version: Option<&Version>,
+    target_release_source: TargetReleaseSource,
 ) -> bool {
-    let versions_at_initial_state = components_by_release_version.len() == 2
-        && components_by_release_version
-            .contains_key(&internal_views::TufRepoVersion::Unknown.to_string())
-        && components_by_release_version.contains_key(
-            &internal_views::TufRepoVersion::InstallDataset.to_string(),
-        );
-    let components_in_progress =
-        components_by_release_version.len() != 1 && !versions_at_initial_state;
+    // If no target release has ever been set, no update is in progress.
+    match target_release_source {
+        TargetReleaseSource::Unspecified => return false,
+        TargetReleaseSource::SystemVersion(_) => {}
+    }
+
+    // `BlueprintTargetReleaseStatus::new` does not account for Hubris
+    // components so we need this additional check to make sure all components
+    // are at the same version
+    let components_in_progress = components_by_release_version.len() != 1;
 
     let blueprint_in_progress = match current_target_version {
         Some(v) => match BlueprintTargetReleaseStatus::new(
@@ -327,12 +333,14 @@ impl UpdateActivityState {
         components_by_release_version: &BTreeMap<String, usize>,
         blueprint: &Blueprint,
         current_target_version: Option<&Version>,
+        target_release_source: TargetReleaseSource,
     ) -> Self {
         // First, we determine if an update is not in progress.
         if !is_update_in_progress(
             components_by_release_version,
             blueprint,
             current_target_version,
+            target_release_source,
         ) {
             return UpdateActivityState::Idle;
         }
@@ -489,6 +497,9 @@ impl super::Nexus {
     ) -> Result<update::UpdateStatus, Error> {
         let db_target_release =
             self.datastore().target_release_get_current(opctx).await?;
+        let target_release_source = db_target_release
+            .release_source()
+            .map_err(|err| Error::internal_error(&format!("{err:#}")))?;
 
         let current_tuf_repo = match db_target_release.tuf_repo_id {
             Some(tuf_repo_id) => Some(
@@ -548,6 +559,7 @@ impl super::Nexus {
                 inventory,
                 Arc::clone(&blueprint_target.blueprint),
                 target_release.as_ref().map(|t| &t.version),
+                target_release_source,
             )
             .await?;
 
@@ -580,6 +592,7 @@ impl super::Nexus {
         inventory: Arc<Collection>,
         blueprint: Arc<Blueprint>,
         current_target_version: Option<&Version>,
+        target_release_source: TargetReleaseSource,
     ) -> Result<bool, Error> {
         // If an update is in progress but not stuck, the remaining checks
         // could fail mid-update and shouldn't trigger a contact-support
@@ -588,6 +601,7 @@ impl super::Nexus {
             &components_by_release_version,
             &blueprint,
             current_target_version,
+            target_release_source,
         ) {
             UpdateActivityState::InProgress => {
                 info!(
@@ -615,6 +629,7 @@ impl super::Nexus {
             components_by_release_version,
             blueprint,
             current_target_version: current_target_version.cloned(),
+            target_release_source,
         };
 
         let problems = checks.problems();
@@ -899,6 +914,12 @@ mod test {
         "9.2.0-0.ci+gite4b75dde134".parse().expect("valid version")
     }
 
+    fn fake_active_target_release_source() -> TargetReleaseSource {
+        TargetReleaseSource::SystemVersion(
+            omicron_uuid_kinds::TufRepoUuid::new_v4(),
+        )
+    }
+
     fn system_versions_initial_state() -> BTreeMap<String, usize> {
         BTreeMap::from([
             ("install dataset".to_string(), 13),
@@ -1074,6 +1095,7 @@ mod test {
                     inventory,
                     blueprint,
                     Some(&version),
+                    fake_active_target_release_source(),
                 )
                 .await
                 .unwrap()
@@ -1114,6 +1136,7 @@ mod test {
                     inventory,
                     blueprint,
                     Some(&version),
+                    fake_active_target_release_source(),
                 )
                 .await
                 .unwrap()
@@ -1154,6 +1177,7 @@ mod test {
                     inventory,
                     blueprint,
                     Some(&version),
+                    fake_active_target_release_source(),
                 )
                 .await
                 .unwrap()
@@ -1194,6 +1218,7 @@ mod test {
                     inventory,
                     blueprint,
                     None,
+                    TargetReleaseSource::Unspecified,
                 )
                 .await
                 .unwrap()
@@ -1235,6 +1260,7 @@ mod test {
                     inventory,
                     blueprint,
                     None,
+                    TargetReleaseSource::Unspecified,
                 )
                 .await
                 .unwrap()
@@ -1279,6 +1305,7 @@ mod test {
                     inventory,
                     blueprint,
                     Some(&version),
+                    fake_active_target_release_source(),
                 )
                 .await
                 .unwrap()
@@ -1333,6 +1360,7 @@ mod test {
                     inventory,
                     blueprint,
                     Some(&version),
+                    fake_active_target_release_source(),
                 )
                 .await
                 .unwrap()
@@ -1374,6 +1402,7 @@ mod test {
                     inventory,
                     blueprint,
                     Some(&version),
+                    fake_active_target_release_source(),
                 )
                 .await
                 .unwrap()
@@ -1422,6 +1451,7 @@ mod test {
                     inventory,
                     blueprint,
                     Some(&target_release),
+                    fake_active_target_release_source(),
                 )
                 .await
                 .unwrap()
@@ -1444,6 +1474,7 @@ mod test {
             components_by_release_version: system_version_update_finished(),
             blueprint,
             current_target_version: Some(fake_target_version()),
+            target_release_source: fake_active_target_release_source(),
         };
         assert_eq!(checks.problems(), UpdateStatusProblems::default());
 
@@ -1469,6 +1500,7 @@ mod test {
             components_by_release_version: system_version_update_finished(),
             blueprint,
             current_target_version: Some(fake_target_version()),
+            target_release_source: fake_active_target_release_source(),
         };
 
         let expected = UpdateStatusProblems {
@@ -1498,6 +1530,7 @@ mod test {
             components_by_release_version: system_version_update_finished(),
             blueprint,
             current_target_version: Some(fake_target_version()),
+            target_release_source: fake_active_target_release_source(),
         };
 
         let expected = UpdateStatusProblems {
@@ -1530,6 +1563,7 @@ mod test {
             components_by_release_version: system_version_update_in_progress(),
             blueprint,
             current_target_version: Some(fake_target_version()),
+            target_release_source: fake_active_target_release_source(),
         };
 
         let expected = UpdateStatusProblems {
@@ -1561,6 +1595,7 @@ mod test {
             components_by_release_version: system_version_update_in_progress(),
             blueprint,
             current_target_version: Some(fake_target_version()),
+            target_release_source: fake_active_target_release_source(),
         };
         assert_eq!(checks.problems(), UpdateStatusProblems::default());
 
@@ -1587,6 +1622,7 @@ mod test {
             components_by_release_version: system_version_update_finished(),
             blueprint,
             current_target_version: Some(fake_target_version()),
+            target_release_source: fake_active_target_release_source(),
         };
 
         let expected = UpdateStatusProblems {
@@ -1620,6 +1656,7 @@ mod test {
             components_by_release_version: system_version_update_finished(),
             blueprint,
             current_target_version: Some(fake_target_version()),
+            target_release_source: fake_active_target_release_source(),
         };
 
         let expected_zpool = Zpool {
@@ -1659,6 +1696,7 @@ mod test {
             components_by_release_version: system_version_update_finished(),
             blueprint,
             current_target_version: Some(fake_target_version()),
+            target_release_source: fake_active_target_release_source(),
         };
 
         let expected = UpdateStatusProblems {
@@ -1697,6 +1735,7 @@ mod test {
             components_by_release_version: system_version_update_finished(),
             blueprint,
             current_target_version: Some(fake_target_version()),
+            target_release_source: fake_active_target_release_source(),
         };
 
         let expected_zpool = Zpool {
@@ -1753,6 +1792,7 @@ mod test {
             components_by_release_version: system_version_update_in_progress(),
             blueprint,
             current_target_version: Some(fake_target_version()),
+            target_release_source: fake_active_target_release_source(),
         };
 
         let expected_zpool = Zpool {
