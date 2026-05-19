@@ -29,6 +29,7 @@ internal-dns-resolver.workspace = true
 internal-dns-types.workspace = true
 itertools.workspace = true
 mg-admin-client.workspace = true
+mg-api-types.workspace = true
 nexus-lockstep-client.workspace = true
 nexus-types.workspace = true
 ntp-admin-client.workspace = true
@@ -39,7 +40,6 @@ omicron-uuid-kinds.workspace = true
 omicron-workspace-hack.workspace = true
 oxnet.workspace = true
 rand = { workspace = true, features = ["os_rng"] }
-rdb-types.workspace = true
 reqwest = { workspace = true, features = ["rustls", "stream"] }
 schemars = { workspace = true, features = ["chrono", "uuid1"] }
 serde.workspace = true

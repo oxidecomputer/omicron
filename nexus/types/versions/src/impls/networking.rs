@@ -23,11 +23,11 @@ impl From<IpNet> for latest::networking::AddressLotBlockCreate {
     }
 }
 
-impl From<mg_admin_client::types::FsmStateKind>
+impl From<mg_api_types::bgp::session::FsmStateKind>
     for latest::networking::BgpPeerState
 {
-    fn from(s: mg_admin_client::types::FsmStateKind) -> Self {
-        use mg_admin_client::types::FsmStateKind;
+    fn from(s: mg_api_types::bgp::session::FsmStateKind) -> Self {
+        use mg_api_types::bgp::session::FsmStateKind;
         match s {
             FsmStateKind::Idle => Self::Idle,
             FsmStateKind::Connect => Self::Connect,

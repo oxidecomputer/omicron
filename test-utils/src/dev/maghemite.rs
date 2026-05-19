@@ -170,9 +170,9 @@ async fn find_mgd_port_in_log(logfile: String) -> Result<u16, anyhow::Error> {
 /// on `cleanup`/`Drop`. Mirrors `MgdInstance`.
 ///
 /// `ddmd` runs in sled global zones and switch zones in production. Spawned
-/// here with `--no-state-machine`, which serves only the admin API and skips
-/// the discovery / exchange / routing daemons that need real network
-/// interfaces and illumos-only kernel facilities. Only switch-zone instances
+/// here with `--api-only`, which serves only the admin API and skips the
+/// discovery / exchange / routing daemons that need real network interfaces
+/// and illumos-only kernel facilities. Only switch-zone instances
 /// are registered in internal DNS as `ServiceName::Ddm`; sled-global-zone
 /// instances are accessed locally by their own host (RSS, sled-agent's
 /// prefix advertisement, etc.) and don't need DNS publication.
@@ -189,8 +189,8 @@ pub struct DdmInstance {
 }
 
 impl DdmInstance {
-    /// Start a `ddmd` instance with `--no-state-machine`, bound to an
-    /// auto-assigned admin port on localhost.
+    /// Start a `ddmd` instance with `--api-only`, bound to an auto-assigned
+    /// admin port on localhost.
     pub async fn start() -> Result<Self, anyhow::Error> {
         let temp_dir = TempDir::new()?;
 
@@ -199,7 +199,7 @@ impl DdmInstance {
             "::1".into(),
             "--admin-port".into(),
             "0".into(),
-            "--no-state-machine".into(),
+            "--api-only".into(),
             "--data-dir".into(),
             temp_dir.path().display().to_string(),
         ];
