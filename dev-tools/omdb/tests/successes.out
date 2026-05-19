@@ -411,6 +411,11 @@ task: "physical_disk_adoption"
     ensure new physical disks are automatically marked in-service
 
 
+task: "populate_switch_ports"
+    one-time population of the `switch_port` table containing all QSFP ports
+    managed by dendrite
+
+
 task: "probe_distributor"
     distributes networking probe zones to sleds
 
@@ -626,7 +631,7 @@ task: "bfd_manager"
   configured period: every <REDACTED_DURATION>s
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-    last completion reported error: failed to resolve addresses for Dendrite services: proto error: no records found for Query { name: Name("_dendrite._tcp.control-plane.oxide.internal."), query_type: SRV, query_class: IN }
+    last completion reported error: proto error: no records found for Query { name: Name("_mgd._tcp.control-plane.oxide.internal."), query_type: SRV, query_class: IN }
 
 task: "blueprint_planner"
   configured period: every <REDACTED_DURATION>m
@@ -697,6 +702,7 @@ task: "fm_analysis"
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     parent sitrep ID:                None
     current inventory collection ID: Some(..........<REDACTED_UUID>........... (collection))
+    ereport classes consumed:        (none)
     FAULT MANAGEMENT ANALYSIS SUMMARY
     =================================
 /!\ analysis failed: FM analysis is not yet implemented
@@ -852,7 +858,15 @@ task: "physical_disk_adoption"
   configured period: every <REDACTED_DURATION>s
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-    last completion reported error: task disabled
+physical disks added: 0
+/!\ task disabled
+
+task: "populate_switch_ports"
+  configured period: every <REDACTED_DURATION>s
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+switch0 failed: failed to look up dendrite clients: proto error: no records found for Query { name: Name("_dendrite._tcp.control-plane.oxide.internal."), query_type: SRV, query_class: IN }
+switch1 failed: failed to look up dendrite clients: proto error: no records found for Query { name: Name("_dendrite._tcp.control-plane.oxide.internal."), query_type: SRV, query_class: IN }
 
 task: "probe_distributor"
   configured period: every <REDACTED_DURATION>m
@@ -967,6 +981,7 @@ task: "sp_ereport_ingester"
   configured period: every <REDACTED_DURATION>s
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    SPs found via ignition:       0
     total ereports received:      <TOTAL_EREPORTS_RECEIVED_REDACTED>
       new ereports ingested:      <NEW_EREPORTS_INGESTED_REDACTED>
     total HTTP requests sent:     <TOTAL_HTTP_REQUESTS_SENT_REDACTED>
@@ -1307,7 +1322,7 @@ task: "bfd_manager"
   configured period: every <REDACTED_DURATION>s
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-    last completion reported error: failed to resolve addresses for Dendrite services: proto error: no records found for Query { name: Name("_dendrite._tcp.control-plane.oxide.internal."), query_type: SRV, query_class: IN }
+    last completion reported error: proto error: no records found for Query { name: Name("_mgd._tcp.control-plane.oxide.internal."), query_type: SRV, query_class: IN }
 
 task: "blueprint_planner"
   configured period: every <REDACTED_DURATION>m
@@ -1378,6 +1393,7 @@ task: "fm_analysis"
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     parent sitrep ID:                None
     current inventory collection ID: Some(..........<REDACTED_UUID>........... (collection))
+    ereport classes consumed:        (none)
     FAULT MANAGEMENT ANALYSIS SUMMARY
     =================================
 /!\ analysis failed: FM analysis is not yet implemented
@@ -1533,7 +1549,15 @@ task: "physical_disk_adoption"
   configured period: every <REDACTED_DURATION>s
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-    last completion reported error: task disabled
+physical disks added: 0
+/!\ task disabled
+
+task: "populate_switch_ports"
+  configured period: every <REDACTED_DURATION>s
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+switch0 failed: failed to look up dendrite clients: proto error: no records found for Query { name: Name("_dendrite._tcp.control-plane.oxide.internal."), query_type: SRV, query_class: IN }
+switch1 failed: failed to look up dendrite clients: proto error: no records found for Query { name: Name("_dendrite._tcp.control-plane.oxide.internal."), query_type: SRV, query_class: IN }
 
 task: "probe_distributor"
   configured period: every <REDACTED_DURATION>m
@@ -1648,6 +1672,7 @@ task: "sp_ereport_ingester"
   configured period: every <REDACTED_DURATION>s
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    SPs found via ignition:       0
     total ereports received:      <TOTAL_EREPORTS_RECEIVED_REDACTED>
       new ereports ingested:      <NEW_EREPORTS_INGESTED_REDACTED>
     total HTTP requests sent:     <TOTAL_HTTP_REQUESTS_SENT_REDACTED>
