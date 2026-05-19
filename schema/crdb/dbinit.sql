@@ -504,6 +504,25 @@ CREATE UNIQUE INDEX IF NOT EXISTS lookup_physical_disk_by_sled ON omicron.public
     id
 );
 
+-- Any disk present in this table with a NULL time_deleted column
+-- is eligible for adoption.
+CREATE TABLE IF NOT EXISTS omicron.public.physical_disk_adoption_request (
+    id UUID PRIMARY KEY,
+    vendor STRING(63) NOT NULL,
+    model STRING(63) NOT NULL,
+    serial STRING(63) NOT NULL,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_deleted TIMESTAMPTZ
+);
+
+-- Only one eligible disk with the same physical id may be present at a time
+CREATE UNIQUE INDEX IF NOT EXISTS physical_disk_adoption_request_by_physical_id
+ON omicron.public.physical_disk_adoption_request (
+    vendor,
+    model,
+    serial
+) WHERE time_deleted IS NULL;
+
 -- x509 certificates which may be used by services
 CREATE TABLE IF NOT EXISTS omicron.public.certificate (
     -- Identity metadata (resource)
@@ -6003,6 +6022,37 @@ CREATE TYPE IF NOT EXISTS omicron.public.vmm_cpu_platform AS ENUM (
   'amd_turin'
 );
 
+/* Describes why a VMM record is in the 'failed' `vmm_state`. */
+CREATE TYPE IF NOT EXISTS omicron.public.vmm_failure_reason AS ENUM (
+    /*
+     * The reason for this VMM's failure is unknown, because the VMM failed
+     * prior to the recording of failure reasons.
+     */
+    'prehistoric',
+    /*
+     * The sled-agent reported that this VMM failed.
+     *
+     * TODO(eliza): once omicron#10290 is resolved or client-side API
+     * versioning is implemented (RFD 567), it would be nice if the sled-agent
+     * could report more detailed failure reasons...
+     */
+    'from_sled_agent',
+    /*
+     * A request to the sled-agent received a response indicating that this
+     * VMM is no longer present on the sled.
+     */
+    'no_such_instance',
+    /*
+     * The sled on which this VMM was running has been expunged.
+     */
+    'sled_expunged',
+    /*
+     * The sled on which this VMM was running has powered off.
+     */
+    'sled_off'
+);
+
+
 -- Per-VMM state.
 CREATE TABLE IF NOT EXISTS omicron.public.vmm (
     id UUID PRIMARY KEY,
@@ -6015,7 +6065,15 @@ CREATE TABLE IF NOT EXISTS omicron.public.vmm (
     propolis_ip INET NOT NULL,
     propolis_port INT4 NOT NULL CHECK (propolis_port BETWEEN 0 AND 65535) DEFAULT 12400,
     state omicron.public.vmm_state NOT NULL,
-    cpu_platform omicron.public.vmm_cpu_platform NOT NULL
+    cpu_platform omicron.public.vmm_cpu_platform NOT NULL,
+    failure_reason omicron.public.vmm_failure_reason,
+
+    -- If a VMM is in the 'failed' state, it must have a failure reason; if it
+    -- is not in the failed state, it must not have a failure reason.
+    CONSTRAINT failure_reason_iff_failed CHECK (
+        (state = 'failed' AND failure_reason IS NOT NULL)
+            OR (state != 'failed' AND failure_reason IS NULL)
+    )
 );
 
 CREATE INDEX IF NOT EXISTS lookup_vmms_by_sled_id ON omicron.public.vmm (
@@ -7462,6 +7520,17 @@ ON omicron.public.ereport (
 WHERE
     time_deleted IS NULL;
 
+-- Targeted partial index supporting fm_analysis preparation: filter by class
+-- (FM analysis's `known_ereport_classes`) restricted to ereports that are
+-- still unprocessed, ordered by the (restart_id, ena) pagination key.
+CREATE INDEX IF NOT EXISTS lookup_unmarked_ereports_by_class
+ON omicron.public.ereport (
+    class, restart_id, ena
+)
+WHERE
+    marked_seen_in IS NULL
+    AND time_deleted IS NULL;
+
 CREATE INDEX IF NOT EXISTS lookup_unseen_ereports
 ON omicron.public.ereport (
     restart_id, ena
@@ -8557,7 +8626,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '256.0.0', NULL)
+    (TRUE, NOW(), NOW(), '259.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

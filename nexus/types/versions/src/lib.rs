@@ -83,3 +83,5 @@ pub mod v2026_03_25_00;
 pub mod v2026_04_16_00;
 #[path = "remove_duplicated_networking_types/mod.rs"]
 pub mod v2026_05_07_00;
+#[path = "manual_disk_adoption/mod.rs"]
+pub mod v2026_05_08_00;

@@ -1365,6 +1365,7 @@ mod tests {
     use oxnet::Ipv6Net;
     use sled_agent_types::early_networking::RackNetworkConfig;
     use sled_agent_types::inventory::ConfigReconcilerInventoryStatus;
+    use sled_agent_types::inventory::FmdInventory;
     use sled_agent_types::inventory::OmicronFileSourceResolverInventory;
     use sled_agent_types::inventory::SledCpuFamily;
     use sled_agent_types::inventory::SvcsEnabledNotOnlineResult;
@@ -1537,6 +1538,7 @@ mod tests {
                 smf_services_enabled_not_online:
                     SvcsEnabledNotOnlineResult::DataUnavailable,
                 reference_measurements: IdOrdMap::new(),
+                fmd: Ok(FmdInventory::default()),
             },
             is_scrimlet,
         )
