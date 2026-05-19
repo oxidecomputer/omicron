@@ -5235,9 +5235,9 @@ checksum = "3d3067d79b975e8844ca9eb072e16b31c3c1c36928edf9c6789548c524d0d954"
 
 [[package]]
 name = "iddqd"
-version = "0.3.18"
+version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "616230c7d641ef971a3a5bfcc654c6b7524ab9c9fb665693c6a397dba9a14aca"
+checksum = "b1fb967ac6b9edb2b5bd91496fc95fdf5eee0772aa31aca370766975f7e57962"
 dependencies = [
  "allocator-api2",
  "daft",
@@ -5246,7 +5246,6 @@ dependencies = [
  "hashbrown 0.16.1",
  "proptest",
  "ref-cast",
- "rustc-hash",
  "schemars 0.8.22",
  "serde_core",
  "serde_json",
@@ -9468,7 +9467,6 @@ dependencies = [
  "reqwest 0.12.28",
  "reqwest 0.13.2",
  "rsa",
- "rustc-hash",
  "rustix 0.38.44",
  "rustix 1.1.3",
  "rustls 0.23.37",
@@ -12919,7 +12917,7 @@ dependencies = [
 [[package]]
 name = "scim2-rs"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/scim2-rs?rev=018ae6f7bd752cd9b2124887e00c93c6b4244103#018ae6f7bd752cd9b2124887e00c93c6b4244103"
+source = "git+https://github.com/oxidecomputer/scim2-rs?rev=163606c052ee30b16dfab282fca721dd81e0868a#163606c052ee30b16dfab282fca721dd81e0868a"
 dependencies = [
  "anyhow",
  "chrono",
@@ -12938,7 +12936,7 @@ dependencies = [
 [[package]]
 name = "scim2-test-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/scim2-rs?rev=018ae6f7bd752cd9b2124887e00c93c6b4244103#018ae6f7bd752cd9b2124887e00c93c6b4244103"
+source = "git+https://github.com/oxidecomputer/scim2-rs?rev=163606c052ee30b16dfab282fca721dd81e0868a#163606c052ee30b16dfab282fca721dd81e0868a"
 dependencies = [
  "anyhow",
  "clap",
@@ -14190,7 +14188,7 @@ version = "0.8.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c1c97747dbf44bb1ca44a561ece23508e99cb592e862f22222dcf42f51d1e451"
 dependencies = [
- "heck 0.4.1",
+ "heck 0.5.0",
  "proc-macro2",
  "quote",
  "syn 2.0.117",
