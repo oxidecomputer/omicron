@@ -240,16 +240,20 @@ impl CaseBuilder {
             || "failed to serialize case fact payload {fact:?}",
         )?;
         let comment = comment.to_string();
-        let fact = fm::case::CaseFact { id, payload, comment: comment.clone() };
-        self.case.facts.insert_unique(fact).expect("UUID should be unused");
-
         slog::info!(
             &self.log,
             "added a fact";
             "fact_id" => %id,
+            "payload" => %payload,
             "comment" => %comment,
         );
-        self.report_log.entry("added fact").kv("fact_id", id).comment(comment);
+        self.report_log
+            .entry("added fact")
+            .kv("fact_id", id)
+            .kv("payload", &payload)
+            .comment(comment.clone());
+        let fact = fm::case::CaseFact { id, payload, comment };
+        self.case.facts.insert_unique(fact).expect("UUID should be unused");
         Ok(id)
     }
 
