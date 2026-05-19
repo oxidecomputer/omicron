@@ -870,7 +870,7 @@ async fn proptest_full_reconciliation() {
         for (port_id, settings) in input.initial_dpd_settings() {
             client
                 .port_settings_apply(
-                    &DpdPortId::Qsfp(dbg!(port_id)),
+                    &DpdPortId::Qsfp(port_id),
                     DPD_TAG,
                     &settings,
                 )
