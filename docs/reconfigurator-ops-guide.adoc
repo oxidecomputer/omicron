@@ -1180,8 +1180,6 @@ Reconfigurator config:
     version: 8
     modified time: 2025-10-23T05:58:27.392Z
     planner enabled: true
-    planner config:
-        add zones with mupdate override:   false
 ```
 
 This shows that the planner is enabled.
@@ -1209,8 +1207,6 @@ note: (if this is not right, use --dns-server to specify an alternate DNS server
 note: using Nexus URL http://[fd00:1122:3344:101::6]:12232
 reconfigurator config updated to version 1:
     planner enabled: false
-    planner config:
-        add zones with mupdate override:   false
 ```
 
 You can see the result with:
@@ -1225,8 +1221,6 @@ Reconfigurator config:
     version: 1
     modified time: 2025-11-05T23:49:01.597Z
     planner enabled: false
-    planner config:
-        add zones with mupdate override:   false
 ```
 
 Note that it takes a few seconds for all Nexus instances to pick up the new configuration.  You can check this by checking the status of the `reconfigurator_config_watcher` background task:
@@ -1277,8 +1271,6 @@ note: (if this is not right, use --dns-server to specify an alternate DNS server
 note: using Nexus URL http://[fd00:1122:3344:101::6]:12232
 reconfigurator config updated to version 2:
 *   planner enabled:   false -> true
-    planner config:
-        add zones with mupdate override:   false (unchanged)
 ```
 
 Verify it:
@@ -1293,8 +1285,6 @@ Reconfigurator config:
     version: 2
     modified time: 2025-11-05T23:51:26.402Z
     planner enabled: true
-    planner config:
-        add zones with mupdate override:   false
 ```
 
 As before, it will take a few seconds for this to propagate.  Then you'll see this in the planner background task output:
