@@ -362,6 +362,7 @@ use chrono::Utc;
 use nexus_db_lookup::LookupPath;
 use nexus_db_queries::{authn, authz};
 use nexus_types::identity::Resource;
+use nexus_types::instance::SledVmmState;
 use nexus_types::saga::saga_action_failed;
 use omicron_common::api::external::Error;
 use omicron_common::backoff;
@@ -370,7 +371,6 @@ use omicron_uuid_kinds::InstanceUuid;
 use omicron_uuid_kinds::PropolisUuid;
 use omicron_uuid_kinds::SledUuid;
 use serde::{Deserialize, Serialize};
-use sled_agent_types::instance::SledVmmState;
 use steno::{ActionError, DagBuilder, Node};
 use uuid::Uuid;
 
@@ -1548,7 +1548,6 @@ mod test {
     use crate::app::OpContext;
     use crate::app::db;
     use crate::app::db::model::Instance;
-    use crate::app::db::model::VmmRuntimeState;
     use crate::app::saga::create_saga_dag;
     use crate::app::sagas::test_helpers;
     use anyhow::Context;
@@ -1564,6 +1563,9 @@ mod test {
     use nexus_types::external_api::{
         instance as instance_types, networking as networking_types,
     };
+    use nexus_types::instance::Migrations;
+    use nexus_types::instance::VmmFailureReason;
+    use nexus_types::instance::VmmState as NexusVmmState;
     use nexus_types::internal_api::params::InstanceMigrateRequest;
     use omicron_common::api::external::{
         ByteCount, DataPageParams, IdentityMetadataCreateParams,
@@ -1573,9 +1575,7 @@ mod test {
     use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::PropolisUuid;
     use sled_agent_types::early_networking::SwitchSlot;
-    use sled_agent_types::instance::{
-        MigrationRuntimeState, MigrationState, Migrations,
-    };
+    use sled_agent_types::instance::{MigrationRuntimeState, MigrationState};
     use std::sync::Arc;
     use std::sync::Mutex;
     use std::time::Duration;
@@ -1978,11 +1978,8 @@ mod test {
         datastore
             .vmm_update_runtime(
                 &vmm_id,
-                &VmmRuntimeState {
-                    time_state_updated: Utc::now(),
-                    generation: Generation(vmm.generation.0.next()),
-                    state: VmmState::Destroyed,
-                },
+                &vmm.runtime()
+                    .transition(nexus_types::instance::VmmState::Destroyed),
             )
             .await
             .unwrap();
@@ -2038,7 +2035,7 @@ mod test {
     ) {
         let _project_id = setup_test_project(&cptestctx.external_client).await;
         MigrationOutcome::default()
-            .source(MigrationState::Completed, VmmState::Stopping)
+            .source(MigrationState::Completed, NexusVmmState::Stopping)
             .setup_test(cptestctx)
             .await
             .run_saga_basic_usage_succeeds_test(cptestctx)
@@ -2052,7 +2049,7 @@ mod test {
         let _project_id = setup_test_project(&cptestctx.external_client).await;
 
         MigrationOutcome::default()
-            .source(MigrationState::Completed, VmmState::Stopping)
+            .source(MigrationState::Completed, NexusVmmState::Stopping)
             .setup_test(cptestctx)
             .await
             .run_actions_succeed_idempotently_test(cptestctx)
@@ -2064,7 +2061,7 @@ mod test {
         cptestctx: &ControlPlaneTestContext,
     ) {
         MigrationOutcome::default()
-            .source(MigrationState::Completed, VmmState::Stopping)
+            .source(MigrationState::Completed, NexusVmmState::Stopping)
             .run_unwinding_test(cptestctx)
             .await;
     }
@@ -2078,7 +2075,7 @@ mod test {
         let _project_id = setup_test_project(&cptestctx.external_client).await;
 
         MigrationOutcome::default()
-            .target(MigrationState::Completed, VmmState::Running)
+            .target(MigrationState::Completed, NexusVmmState::Running)
             .setup_test(cptestctx)
             .await
             .run_saga_basic_usage_succeeds_test(cptestctx)
@@ -2092,7 +2089,7 @@ mod test {
         let _project_id = setup_test_project(&cptestctx.external_client).await;
 
         MigrationOutcome::default()
-            .target(MigrationState::Completed, VmmState::Running)
+            .target(MigrationState::Completed, NexusVmmState::Running)
             .setup_test(cptestctx)
             .await
             .run_actions_succeed_idempotently_test(cptestctx)
@@ -2104,7 +2101,7 @@ mod test {
         cptestctx: &ControlPlaneTestContext,
     ) {
         MigrationOutcome::default()
-            .target(MigrationState::Completed, VmmState::Running)
+            .target(MigrationState::Completed, NexusVmmState::Running)
             .run_unwinding_test(cptestctx)
             .await;
     }
@@ -2118,8 +2115,8 @@ mod test {
         let _project_id = setup_test_project(&cptestctx.external_client).await;
 
         MigrationOutcome::default()
-            .target(MigrationState::Completed, VmmState::Running)
-            .source(MigrationState::Completed, VmmState::Destroyed)
+            .target(MigrationState::Completed, NexusVmmState::Running)
+            .source(MigrationState::Completed, NexusVmmState::Destroyed)
             .setup_test(cptestctx)
             .await
             .run_saga_basic_usage_succeeds_test(cptestctx)
@@ -2133,8 +2130,8 @@ mod test {
         let _project_id = setup_test_project(&cptestctx.external_client).await;
 
         MigrationOutcome::default()
-            .target(MigrationState::Completed, VmmState::Running)
-            .source(MigrationState::Completed, VmmState::Destroyed)
+            .target(MigrationState::Completed, NexusVmmState::Running)
+            .source(MigrationState::Completed, NexusVmmState::Destroyed)
             .setup_test(cptestctx)
             .await
             .run_actions_succeed_idempotently_test(cptestctx)
@@ -2146,8 +2143,8 @@ mod test {
         cptestctx: &ControlPlaneTestContext,
     ) {
         MigrationOutcome::default()
-            .target(MigrationState::Completed, VmmState::Running)
-            .source(MigrationState::Completed, VmmState::Destroyed)
+            .target(MigrationState::Completed, NexusVmmState::Running)
+            .source(MigrationState::Completed, NexusVmmState::Destroyed)
             .run_unwinding_test(cptestctx)
             .await;
     }
@@ -2161,8 +2158,11 @@ mod test {
         let _project_id = setup_test_project(&cptestctx.external_client).await;
 
         MigrationOutcome::default()
-            .target(MigrationState::Failed, VmmState::Failed)
-            .source(MigrationState::Failed, VmmState::Running)
+            .target(
+                MigrationState::Failed,
+                NexusVmmState::Failed(VmmFailureReason::FromSledAgent),
+            )
+            .source(MigrationState::Failed, NexusVmmState::Running)
             .setup_test(cptestctx)
             .await
             .run_saga_basic_usage_succeeds_test(cptestctx)
@@ -2176,8 +2176,11 @@ mod test {
         let _project_id = setup_test_project(&cptestctx.external_client).await;
 
         MigrationOutcome::default()
-            .target(MigrationState::Failed, VmmState::Failed)
-            .source(MigrationState::Failed, VmmState::Running)
+            .target(
+                MigrationState::Failed,
+                NexusVmmState::Failed(VmmFailureReason::FromSledAgent),
+            )
+            .source(MigrationState::Failed, NexusVmmState::Running)
             .setup_test(cptestctx)
             .await
             .run_actions_succeed_idempotently_test(cptestctx)
@@ -2189,8 +2192,11 @@ mod test {
         cptestctx: &ControlPlaneTestContext,
     ) {
         MigrationOutcome::default()
-            .target(MigrationState::Failed, VmmState::Failed)
-            .source(MigrationState::Failed, VmmState::Running)
+            .target(
+                MigrationState::Failed,
+                NexusVmmState::Failed(VmmFailureReason::FromSledAgent),
+            )
+            .source(MigrationState::Failed, NexusVmmState::Running)
             .run_unwinding_test(cptestctx)
             .await;
     }
@@ -2204,8 +2210,8 @@ mod test {
         let _project_id = setup_test_project(&cptestctx.external_client).await;
 
         MigrationOutcome::default()
-            .target(MigrationState::Failed, VmmState::Destroyed)
-            .source(MigrationState::Failed, VmmState::Running)
+            .target(MigrationState::Failed, NexusVmmState::Destroyed)
+            .source(MigrationState::Failed, NexusVmmState::Running)
             .setup_test(cptestctx)
             .await
             .run_saga_basic_usage_succeeds_test(cptestctx)
@@ -2219,8 +2225,8 @@ mod test {
         let _project_id = setup_test_project(&cptestctx.external_client).await;
 
         MigrationOutcome::default()
-            .target(MigrationState::Failed, VmmState::Destroyed)
-            .source(MigrationState::Failed, VmmState::Running)
+            .target(MigrationState::Failed, NexusVmmState::Destroyed)
+            .source(MigrationState::Failed, NexusVmmState::Running)
             .setup_test(cptestctx)
             .await
             .run_actions_succeed_idempotently_test(cptestctx)
@@ -2232,8 +2238,8 @@ mod test {
         cptestctx: &ControlPlaneTestContext,
     ) {
         MigrationOutcome::default()
-            .target(MigrationState::Failed, VmmState::Destroyed)
-            .source(MigrationState::Failed, VmmState::Running)
+            .target(MigrationState::Failed, NexusVmmState::Destroyed)
+            .source(MigrationState::Failed, NexusVmmState::Running)
             .run_unwinding_test(cptestctx)
             .await;
     }
@@ -2247,8 +2253,8 @@ mod test {
         let _project_id = setup_test_project(&cptestctx.external_client).await;
 
         MigrationOutcome::default()
-            .target(MigrationState::InProgress, VmmState::Running)
-            .source(MigrationState::Failed, VmmState::Destroyed)
+            .target(MigrationState::InProgress, NexusVmmState::Running)
+            .source(MigrationState::Failed, NexusVmmState::Destroyed)
             .setup_test(cptestctx)
             .await
             .run_saga_basic_usage_succeeds_test(cptestctx)
@@ -2262,8 +2268,8 @@ mod test {
         let _project_id = setup_test_project(&cptestctx.external_client).await;
 
         MigrationOutcome::default()
-            .target(MigrationState::InProgress, VmmState::Running)
-            .source(MigrationState::Failed, VmmState::Destroyed)
+            .target(MigrationState::InProgress, NexusVmmState::Running)
+            .source(MigrationState::Failed, NexusVmmState::Destroyed)
             .setup_test(cptestctx)
             .await
             .run_actions_succeed_idempotently_test(cptestctx)
@@ -2275,8 +2281,8 @@ mod test {
         cptestctx: &ControlPlaneTestContext,
     ) {
         MigrationOutcome::default()
-            .target(MigrationState::InProgress, VmmState::Running)
-            .source(MigrationState::Failed, VmmState::Destroyed)
+            .target(MigrationState::InProgress, NexusVmmState::Running)
+            .source(MigrationState::Failed, NexusVmmState::Destroyed)
             .run_unwinding_test(cptestctx)
             .await;
     }
@@ -2290,8 +2296,8 @@ mod test {
         let _project_id = setup_test_project(&cptestctx.external_client).await;
 
         MigrationOutcome::default()
-            .target(MigrationState::Failed, VmmState::Destroyed)
-            .source(MigrationState::Failed, VmmState::Destroyed)
+            .target(MigrationState::Failed, NexusVmmState::Destroyed)
+            .source(MigrationState::Failed, NexusVmmState::Destroyed)
             .setup_test(cptestctx)
             .await
             .run_saga_basic_usage_succeeds_test(cptestctx)
@@ -2305,8 +2311,8 @@ mod test {
         let _project_id = setup_test_project(&cptestctx.external_client).await;
 
         MigrationOutcome::default()
-            .target(MigrationState::Failed, VmmState::Destroyed)
-            .source(MigrationState::Failed, VmmState::Destroyed)
+            .target(MigrationState::Failed, NexusVmmState::Destroyed)
+            .source(MigrationState::Failed, NexusVmmState::Destroyed)
             .setup_test(cptestctx)
             .await
             .run_actions_succeed_idempotently_test(cptestctx)
@@ -2318,8 +2324,8 @@ mod test {
         cptestctx: &ControlPlaneTestContext,
     ) {
         MigrationOutcome::default()
-            .target(MigrationState::Failed, VmmState::Destroyed)
-            .source(MigrationState::Failed, VmmState::Destroyed)
+            .target(MigrationState::Failed, NexusVmmState::Destroyed)
+            .source(MigrationState::Failed, NexusVmmState::Destroyed)
             .run_unwinding_test(cptestctx)
             .await;
     }
@@ -2333,8 +2339,8 @@ mod test {
         let _project_id = setup_test_project(&cptestctx.external_client).await;
 
         MigrationOutcome::default()
-            .target(MigrationState::Completed, VmmState::Destroyed)
-            .source(MigrationState::Completed, VmmState::Stopping)
+            .target(MigrationState::Completed, NexusVmmState::Destroyed)
+            .source(MigrationState::Completed, NexusVmmState::Stopping)
             .setup_test(cptestctx)
             .await
             .run_saga_basic_usage_succeeds_test(cptestctx)
@@ -2348,8 +2354,8 @@ mod test {
         let _project_id = setup_test_project(&cptestctx.external_client).await;
 
         MigrationOutcome::default()
-            .target(MigrationState::Completed, VmmState::Destroyed)
-            .source(MigrationState::Completed, VmmState::Stopping)
+            .target(MigrationState::Completed, NexusVmmState::Destroyed)
+            .source(MigrationState::Completed, NexusVmmState::Stopping)
             .setup_test(cptestctx)
             .await
             .run_actions_succeed_idempotently_test(cptestctx)
@@ -2361,8 +2367,8 @@ mod test {
         cptestctx: &ControlPlaneTestContext,
     ) {
         MigrationOutcome::default()
-            .target(MigrationState::Completed, VmmState::Destroyed)
-            .source(MigrationState::Completed, VmmState::Stopping)
+            .target(MigrationState::Completed, NexusVmmState::Destroyed)
+            .source(MigrationState::Completed, NexusVmmState::Stopping)
             .run_unwinding_test(cptestctx)
             .await;
     }
@@ -2504,14 +2510,14 @@ mod test {
         migration_test
             .update_src_state(
                 &cptestctx,
-                VmmState::Destroyed,
+                NexusVmmState::Destroyed,
                 MigrationState::Completed,
             )
             .await;
         migration_test
             .update_target_state(
                 &cptestctx,
-                VmmState::Running,
+                NexusVmmState::Running,
                 MigrationState::Completed,
             )
             .await;
@@ -2805,23 +2811,23 @@ mod test {
 
     #[derive(Clone, Copy, Default)]
     struct MigrationOutcome {
-        source: Option<(MigrationState, VmmState)>,
-        target: Option<(MigrationState, VmmState)>,
+        source: Option<(MigrationState, NexusVmmState)>,
+        target: Option<(MigrationState, NexusVmmState)>,
         failed: bool,
     }
 
     impl MigrationOutcome {
-        fn source(self, migration: MigrationState, vmm: VmmState) -> Self {
+        fn source(self, migration: MigrationState, vmm: NexusVmmState) -> Self {
             let failed = self.failed
                 || migration == MigrationState::Failed
-                || vmm == VmmState::Failed;
+                || vmm.is_failed();
             Self { source: Some((migration, vmm)), failed, ..self }
         }
 
-        fn target(self, migration: MigrationState, vmm: VmmState) -> Self {
+        fn target(self, migration: MigrationState, vmm: NexusVmmState) -> Self {
             let failed = self.failed
                 || migration == MigrationState::Failed
-                || vmm == VmmState::Failed;
+                || vmm.is_failed();
             Self { target: Some((migration, vmm)), failed, ..self }
         }
 
@@ -3065,7 +3071,7 @@ mod test {
         async fn update_src_state(
             &self,
             cptestctx: &ControlPlaneTestContext,
-            vmm_state: VmmState,
+            vmm_state: NexusVmmState,
             migration_state: MigrationState,
         ) {
             let src_vmm = self
@@ -3074,11 +3080,7 @@ mod test {
                 .as_ref()
                 .expect("must have an active VMM");
             let vmm_id = PropolisUuid::from_untyped_uuid(src_vmm.id);
-            let new_runtime = nexus_db_model::VmmRuntimeState {
-                time_state_updated: Utc::now(),
-                generation: Generation(src_vmm.generation.0.next()),
-                state: vmm_state,
-            };
+            let new_runtime = src_vmm.runtime().transition(vmm_state);
 
             let migration = self
                 .initial_state
@@ -3122,7 +3124,7 @@ mod test {
         async fn update_target_state(
             &self,
             cptestctx: &ControlPlaneTestContext,
-            vmm_state: VmmState,
+            vmm_state: NexusVmmState,
             migration_state: MigrationState,
         ) {
             let target_vmm = self
@@ -3131,11 +3133,7 @@ mod test {
                 .as_ref()
                 .expect("must have a target VMM");
             let vmm_id = PropolisUuid::from_untyped_uuid(target_vmm.id);
-            let new_runtime = nexus_db_model::VmmRuntimeState {
-                time_state_updated: Utc::now(),
-                generation: Generation(target_vmm.generation.0.next()),
-                state: vmm_state,
-            };
+            let new_runtime = target_vmm.runtime().transition(vmm_state);
 
             let migration = self
                 .initial_state
@@ -3210,7 +3208,7 @@ mod test {
                 .target
                 .as_ref()
                 .map(|&(_, state)| state)
-                .unwrap_or(VmmState::Migrating);
+                .unwrap_or(NexusVmmState::Migrating);
 
             if self.outcome.failed {
                 assert_eq!(
@@ -3279,7 +3277,8 @@ mod test {
                 .source
                 .as_ref()
                 .map(|&(_, state)| state)
-                .unwrap_or(VmmState::Migrating);
+                .unwrap_or(NexusVmmState::Migrating);
+
             assert_eq!(
                 self.src_resource_records_exist(cptestctx).await,
                 !dbg!(src_vmm_state).is_terminal(),
@@ -3294,11 +3293,13 @@ mod test {
                  source VMM is not in a terminal state (Destroyed/Failed)",
             );
 
-            fn expected_instance_state(vmm: VmmState) -> InstanceState {
-                match vmm {
-                    VmmState::Destroyed => InstanceState::NoVmm,
-                    VmmState::Failed => InstanceState::Failed,
-                    _ => InstanceState::Vmm,
+            fn expected_instance_state(vmm: NexusVmmState) -> InstanceState {
+                if vmm.is_failed() {
+                    InstanceState::Failed
+                } else if vmm.is_terminal() {
+                    InstanceState::NoVmm
+                } else {
+                    InstanceState::Vmm
                 }
             }
 

@@ -250,6 +250,7 @@ mod tests {
                         state: VmmState::Destroyed,
                         time_state_updated: Utc::now(),
                         generation: Generation::new(),
+                        failure_reason: None,
                     }),
                 )
                 .await

@@ -60,5 +60,7 @@ files=(
 	target/release/xtask
 	target/debug/bootstrap
 	tests/*
+	tools/opte_version
+	tools/opte_version_override
 )
 ptime -m tar cvzf $WORK/package.tar.gz "${files[@]}" "${packages[@]}"

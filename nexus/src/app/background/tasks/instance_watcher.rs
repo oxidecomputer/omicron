@@ -20,6 +20,9 @@ use nexus_networking::GatewayClient;
 use nexus_types::external_api::sled::SledPolicy;
 use nexus_types::identity::Asset;
 use nexus_types::identity::Resource;
+use nexus_types::instance::SledVmmState;
+use nexus_types::instance::VmmFailureReason;
+use nexus_types::instance::VmmState;
 use nexus_types::inventory;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::InstanceState;
@@ -30,8 +33,6 @@ use omicron_uuid_kinds::SledUuid;
 use oximeter::types::ProducerRegistry;
 use parallel_task_set::ParallelTaskSet;
 use sled_agent_client::Client as SledAgentClient;
-use sled_agent_types::instance;
-use sled_agent_types::instance::SledVmmState;
 use sled_hardware_types::BaseboardId;
 use slog_error_chain::InlineErrorChain;
 use std::borrow::Cow;
@@ -202,15 +203,11 @@ impl Check {
         gateways: &[GatewayClient],
         client: &SledAgentClient,
     ) -> Option<SledVmmState> {
-        let mk_failed = || {
+        let mk_failed = |reason: VmmFailureReason| {
             // TODO(eliza): it would be nicer if this used the same
             // code path as `mark_instance_failed`...
             Some(SledVmmState {
-                vmm_state: instance::VmmRuntimeState {
-                    generation: vmm.generation.0.next(),
-                    state: instance::VmmState::Failed,
-                    time_updated: chrono::Utc::now(),
-                },
+                vmm_state: vmm.runtime().transition(VmmState::Failed(reason)),
                 // It's fine to synthesize `None`s here because a `None`
                 // just means "don't update the migration state", not
                 // "there is no migration".
@@ -228,7 +225,7 @@ impl Check {
                  marking it as Failed";
             );
             self.outcome = CheckOutcome::Failure(Failure::SledExpunged);
-            return mk_failed();
+            return mk_failed(VmmFailureReason::SledExpunged);
         }
 
         // Ask the sled-agent what it has to say for itself.
@@ -243,7 +240,7 @@ impl Check {
             // Note that this does not always mean that the *VMM* is healthy,
             // but only that we successfully got its state from the sled-agent.
             Ok(rsp) => {
-                let state = rsp.into_inner();
+                let state = SledVmmState::from(rsp.into_inner());
                 self.outcome =
                     CheckOutcome::Success(state.vmm_state.state.into());
                 Some(state)
@@ -260,7 +257,7 @@ impl Check {
                     error,
                 );
                 self.outcome = CheckOutcome::Failure(Failure::NoSuchInstance);
-                mk_failed()
+                mk_failed(VmmFailureReason::NoSuchInstance)
             }
             // We were able to contact the sled-agent, but it responded with an
             // error which does *not* tell us that the VMM has failed. Either
@@ -336,7 +333,7 @@ impl Check {
                             "sled_power_state" => ?state,
                         );
                         self.outcome = CheckOutcome::Failure(Failure::SledOff);
-                        return mk_failed();
+                        return mk_failed(VmmFailureReason::SledOff);
                     }
                 }
 

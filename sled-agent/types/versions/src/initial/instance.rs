@@ -103,12 +103,6 @@ pub struct SledVmmState {
     pub migration_out: Option<MigrationRuntimeState>,
 }
 
-#[derive(Copy, Clone, Debug, Default)]
-pub struct Migrations<'state> {
-    pub migration_in: Option<&'state MigrationRuntimeState>,
-    pub migration_out: Option<&'state MigrationRuntimeState>,
-}
-
 /// An update from a sled regarding the state of a migration, indicating the
 /// role of the VMM whose migration state was updated.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, Eq, PartialEq)]

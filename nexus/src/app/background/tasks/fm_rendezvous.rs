@@ -472,7 +472,6 @@ mod tests {
     use nexus_types::fm::ereport::EreportData;
     use nexus_types::fm::ereport::Reporter;
     use nexus_types::support_bundle::BundleDataSelection;
-    use omicron_common::api::external::DataPageParams;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::AlertUuid;
     use omicron_uuid_kinds::CaseEreportUuid;
@@ -483,7 +482,6 @@ mod tests {
     use omicron_uuid_kinds::OmicronZoneUuid;
     use omicron_uuid_kinds::SitrepUuid;
     use omicron_uuid_kinds::SupportBundleUuid;
-    use std::num::NonZeroU32;
 
     /// Activators needed by `FmRendezvous`, pre-wired for testing.
     struct TestActivators {
@@ -732,33 +730,23 @@ mod tests {
     }
 
     /// Paginate through all unseen ereports, collecting every row.
+    ///
+    /// This bypasses the production `ereports_list_unmarked` (which filters
+    /// by `known_ereport_classes`) because the test wants to verify that
+    /// rendezvous marked *every* ereport in a sitrep, regardless of class.
     async fn list_all_unseen_ereports(
         datastore: &DataStore,
-        opctx: &OpContext,
     ) -> Vec<db::model::Ereport> {
-        let batch_size = NonZeroU32::new(100).unwrap();
-        let mut all = Vec::new();
-        let mut marker = None;
-        loop {
-            let page = datastore
-                .ereports_list_unmarked(
-                    opctx,
-                    &DataPageParams {
-                        marker: marker.as_ref(),
-                        direction: dropshot::PaginationOrder::Ascending,
-                        limit: batch_size,
-                    },
-                )
-                .await
-                .expect("failed to list unseen ereports");
-            if page.is_empty() {
-                break;
-            }
-            let last = page.last().unwrap();
-            marker = Some((last.restart_id.into_untyped_uuid(), last.ena));
-            all.extend(page);
-        }
-        all
+        use nexus_db_schema::schema::ereport::dsl;
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
+        dsl::ereport
+            .filter(dsl::marked_seen_in.is_null())
+            .filter(dsl::time_deleted.is_null())
+            .order_by((dsl::restart_id, dsl::ena))
+            .select(db::model::Ereport::as_select())
+            .load_async(&*conn)
+            .await
+            .expect("failed to list unseen ereports")
     }
 
     /// Asserts that each of the provided ereport IDs has been marked as
@@ -770,7 +758,7 @@ mod tests {
         ids: &[ereport_types::EreportId],
         sitrep_id: SitrepUuid,
     ) {
-        let unseen = list_all_unseen_ereports(datastore, opctx).await;
+        let unseen = list_all_unseen_ereports(datastore).await;
         for &id in ids {
             let ereport =
                 datastore.ereport_fetch(opctx, id).await.unwrap_or_else(|e| {
@@ -800,7 +788,7 @@ mod tests {
         opctx: &OpContext,
         ids: &[ereport_types::EreportId],
     ) {
-        let unseen = list_all_unseen_ereports(datastore, opctx).await;
+        let unseen = list_all_unseen_ereports(datastore).await;
         for &id in ids {
             let ereport =
                 datastore.ereport_fetch(opctx, id).await.unwrap_or_else(|e| {

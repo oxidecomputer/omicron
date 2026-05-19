@@ -458,6 +458,7 @@ mod test {
                     time_state_updated: Utc::now(),
                     generation: Generation::new(),
                     state: VmmState::SagaUnwound,
+                    failure_reason: None,
                 },
             )
             .await

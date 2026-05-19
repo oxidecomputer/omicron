@@ -3,9 +3,13 @@ name = "end-to-end-tests"
 version = "0.1.0"
 edition.workspace = true
 license = "MPL-2.0"
+build = "build.rs"
 
 [lints]
 workspace = true
+
+[build-dependencies]
+omicron-rpaths.workspace = true
 
 [dependencies]
 anstyle.workspace = true
@@ -50,3 +54,7 @@ thiserror.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 toml.workspace = true
 uuid.workspace = true
+
+[target.'cfg(target_os = "illumos")'.dependencies]
+# See omicron-rpaths for more about the "fmd-adm-sys" dependency.
+fmd-adm-sys.workspace = true

@@ -60,6 +60,8 @@ impl_typed_uuid_kinds! {
         ExternalIp = {},
         ExternalSubnet = {},
         ExternalZpool = {},
+        FmdHostCase = {},
+        FmdResource = {},
         Instance = {},
         InternalZpool = {},
         LoopbackAddress = {},

@@ -10,12 +10,14 @@ use crate::DropshotServer;
 use crate::app::background::BackgroundTasksData;
 use crate::app::background::CurrentSitrep;
 use crate::app::background::SagaRecoveryHelpers;
+use crate::app::background::resolve_mgd_clients;
 use crate::app::update::UpdateStatusHandle;
 use crate::populate::PopulateArgs;
 use crate::populate::PopulateStatus;
 use crate::populate::populate_start;
 use ::oximeter::types::ProducerRegistry;
 use anyhow::anyhow;
+use internal_dns_resolver::ResolveError;
 use internal_dns_types::names::ServiceName;
 use nexus_background_task_interface::BackgroundTasks;
 use nexus_config::NexusConfig;
@@ -32,7 +34,6 @@ use nexus_mgs_updates::MgsUpdateDriver;
 use nexus_types::deployment::PendingMgsUpdates;
 use nexus_types::deployment::ReconfiguratorConfigParam;
 
-use omicron_common::address::MGD_PORT;
 use omicron_common::address::MGS_PORT;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Error;
@@ -1158,24 +1159,21 @@ impl Nexus {
         lldpd_clients(resolver, rack_id, &self.log).await
     }
 
+    /// Get all MGD known `SwitchSlot -> MGD client` pairs.
+    ///
+    /// # Errors
+    ///
+    /// Fails if we cannot resolve MGD in DNS.
+    ///
+    /// For any MGD instance we resolve via DNS, if the MGD instance does not
+    /// know its own switch slot, the switch slot -> client mapping for that
+    /// instance will be omitted from the returned map. Callers must not
+    /// assume an `Ok(_)` return value contains any client.
     pub(crate) async fn mg_clients(
         &self,
-    ) -> Result<HashMap<SwitchSlot, mg_admin_client::Client>, String> {
-        let resolver = self.resolver();
-        let mappings =
-            switch_zone_address_mappings(resolver, &self.log).await?;
-        let mut clients: Vec<(SwitchSlot, mg_admin_client::Client)> = vec![];
-        for (switch_slot, addr) in &mappings {
-            let port = MGD_PORT;
-            let socketaddr =
-                std::net::SocketAddr::V6(SocketAddrV6::new(*addr, port, 0, 0));
-            let client = mg_admin_client::Client::new(
-                format!("http://{}", socketaddr).as_str(),
-                self.log.clone(),
-            );
-            clients.push((*switch_slot, client));
-        }
-        Ok(clients.into_iter().collect::<HashMap<_, _>>())
+    ) -> Result<HashMap<SwitchSlot, mg_admin_client::Client>, ResolveError>
+    {
+        resolve_mgd_clients(self.resolver(), &self.log).await
     }
 
     pub(crate) fn demo_sagas(

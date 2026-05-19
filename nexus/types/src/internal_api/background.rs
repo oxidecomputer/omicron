@@ -918,6 +918,13 @@ pub struct SitrepGcStatus {
 pub struct FmAnalysisStatus {
     pub parent_sitrep_id: Option<SitrepUuid>,
     pub inv_collection_id: Option<CollectionUuid>,
+    /// Ereport classes that *this* Nexus's diagnosis engine consumes
+    /// (per `nexus_fm::diagnosis::known_ereport_classes`). Recorded here so
+    /// an operator interpreting the activation outcome can see what the
+    /// loader was configured to surface — e.g. whether `RanAnalysis`
+    /// produced no new ereports because the set is empty vs. because
+    /// nothing matched.
+    pub known_classes: Vec<String>,
     pub outcome: fm_analysis::Outcome,
 }
 
@@ -1147,6 +1154,26 @@ pub struct AuditLogCleanupStatus {
     pub max_deleted_per_activation: u32,
     /// Error encountered during this activation, if any.
     pub error: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum SwitchPortPopulatorStatusKind {
+    /// A previous activation of this task had already populated the ports for
+    /// this switch.
+    PreviouslyPopulated,
+
+    /// We successfully populated the ports of this switch.
+    Populated { num_ports: usize },
+}
+
+/// The status of a `populate_switch_ports` background task activation.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub struct SwitchPortPopulatorStatus {
+    /// Result of populating switch 0's ports, if any.
+    pub switch0: Result<SwitchPortPopulatorStatusKind, String>,
+    /// Result of populating switch 1's ports, if any.
+    pub switch1: Result<SwitchPortPopulatorStatusKind, String>,
 }
 
 /// The status of a `session_cleanup` background task activation.

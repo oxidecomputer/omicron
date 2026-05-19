@@ -31,7 +31,6 @@ use nexus_types::deployment::{
 use nexus_types::deployment::{
     BlueprintZoneConfig, BlueprintZoneDisposition, BlueprintZoneType,
 };
-use nexus_types::internal_api::params::ExternalPortDiscovery;
 use omicron_common::FileKv;
 use omicron_common::address::NEXUS_OPTE_IPV4_SUBNET;
 use omicron_common::address::{DNS_OPTE_IPV4_SUBNET, Ipv6Subnet};
@@ -60,7 +59,6 @@ use sled_agent_types::inventory::NetworkInterface;
 use sled_agent_types::inventory::NetworkInterfaceKind;
 use sled_agent_types::inventory::OmicronZoneDataset;
 use slog::{Drain, Logger, info};
-use std::collections::HashMap;
 use std::net::IpAddr;
 use std::net::Ipv4Addr;
 use std::net::Ipv6Addr;
@@ -650,7 +648,6 @@ pub async fn run_standalone_server(
         internal_dns_zone_config: dns_config,
         external_dns_zone_name: DNS_ZONE_EXTERNAL_TESTING.to_owned(),
         recovery_silo,
-        external_port_count: ExternalPortDiscovery::Static(HashMap::new()),
         rack_network_config: RackNetworkConfig {
             rack_subnet: Ipv6Net::host_net(Ipv6Addr::LOCALHOST),
             infra_ip_first: IpAddr::V4(Ipv4Addr::LOCALHOST),

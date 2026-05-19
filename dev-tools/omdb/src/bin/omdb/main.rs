@@ -58,6 +58,7 @@ mod oxql;
 mod reconfigurator;
 mod sled_agent;
 mod support_bundle;
+mod timesync;
 
 fn main() -> Result<(), anyhow::Error> {
     sigpipe::reset();
@@ -86,6 +87,7 @@ async fn main_impl() -> Result<(), anyhow::Error> {
         OmdbCommands::CrucibleAgent(crucible) => crucible.run_cmd(&args).await,
         OmdbCommands::CruciblePantry(crucible) => crucible.run_cmd(&args).await,
         OmdbCommands::ClickhouseAdmin(ch) => ch.run_cmd(&args, &log).await,
+        OmdbCommands::Timesync(timesync) => timesync.run_cmd(&args, &log).await,
     }
 }
 
@@ -297,6 +299,8 @@ enum OmdbCommands {
     Reconfigurator(reconfigurator::ReconfiguratorArgs),
     /// Debug a specific Sled
     SledAgent(sled_agent::SledAgentArgs),
+    /// Monitor time synchronization
+    Timesync(timesync::TimesyncArgs),
 }
 
 fn parse_dropshot_log_level(

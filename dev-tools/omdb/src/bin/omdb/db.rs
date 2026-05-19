@@ -1652,7 +1652,7 @@ impl DbArgs {
                         ).await
                     },
                     DbCommands::Ereport(args) => {
-                        cmd_db_ereport(&datastore, &fetch_opts, &args).await
+                        cmd_db_ereport(omdb, log, &datastore, &fetch_opts, &args).await
                     }
                     DbCommands::UserDataExport(args) => {
                         args.exec(&omdb, &opctx, &datastore).await
@@ -5357,7 +5357,7 @@ async fn cmd_db_instance_info(
 
             let table = tabled::Table::new(vmms.iter().map(|vmm| {
                 let &Vmm {
-                    id,
+                    id: _,
                     sled_id,
                     propolis_ip: _,
                     propolis_port: _,
@@ -5366,15 +5366,12 @@ async fn cmd_db_instance_info(
                     time_created,
                     time_deleted,
                     time_state_updated: _,
-                    generation,
-                    state,
+                    generation: _,
+                    state: _,
+                    failure_reason: _,
                 } = vmm;
                 VmmRow {
-                    state: VmmStateRow {
-                        id,
-                        state,
-                        generation: generation.0.into(),
-                    },
+                    state: VmmStateRow::from(vmm),
                     sled_id: sled_id.into(),
                     time_created,
                     time_deleted,
@@ -5395,8 +5392,21 @@ async fn cmd_db_instance_info(
 struct VmmStateRow {
     id: Uuid,
     state: db::model::VmmState,
+    #[tabled(display_with = "display_option_blank")]
+    failure_reason: Option<db::model::VmmFailureReason>,
     #[tabled(rename = "GEN")]
     generation: u64,
+}
+
+impl From<&'_ db::model::Vmm> for VmmStateRow {
+    fn from(vmm: &db::model::Vmm) -> Self {
+        Self {
+            id: vmm.id,
+            state: vmm.state,
+            failure_reason: vmm.failure_reason,
+            generation: vmm.generation.0.into(),
+        }
+    }
 }
 
 /// Common fields extracted from an InstanceAndActiveVmm, shared by
@@ -7995,6 +8005,8 @@ fn prettyprint_vmm(
     const CPU_PLATFORM: &'static str = "CPU platform";
     const ADDRESS: &'static str = "propolis address";
     const STATE: &'static str = "state";
+    const FAILURE_REASON: &'static str = "  failure reason";
+    const FAILURE_NOTE: &'static str = "  note";
     const WIDTH: usize = const_max_len(&[
         ID,
         CREATED,
@@ -8006,6 +8018,8 @@ fn prettyprint_vmm(
         CPU_PLATFORM,
         STATE,
         ADDRESS,
+        FAILURE_REASON,
+        FAILURE_NOTE,
     ]);
 
     let width = std::cmp::max(width, Some(WIDTH)).unwrap_or(WIDTH);
@@ -8021,6 +8035,7 @@ fn prettyprint_vmm(
         state,
         generation,
         time_state_updated,
+        failure_reason,
     } = vmm;
 
     println!("{indent}{ID:>width$}: {id}");
@@ -8032,6 +8047,31 @@ fn prettyprint_vmm(
         println!("{indent}{DELETED:width$}: {deleted}");
     }
     println!("{indent}{STATE:>width$}: {state}");
+    if let Some(reason) = failure_reason {
+        println!("{indent}{FAILURE_REASON:>width$}: {reason}");
+
+        if state == &db::model::VmmState::Failed {
+            println!(
+                "{indent}{FAILURE_NOTE:>width$}: {}",
+                reason.description()
+            );
+        } else {
+            println!(
+                "{:<width$}weird: VMMs should only have non-NULL failure \
+                     reasons if they are in the failed state",
+                "/!\\",
+                width = indent.len(),
+            );
+        }
+    } else if state == &db::model::VmmState::Failed {
+        println!(
+            "{:<width$}weird: VMMs in the 'failed' state should have a \
+             non-NULL failure reason",
+            "/!\\",
+            width = indent.len(),
+        );
+    }
+
     let g = u64::from(generation.0);
     println!(
         "{indent}{UPDATED:>width$}: {time_state_updated:?} (generation {g})"
@@ -8115,7 +8155,7 @@ async fn cmd_db_vmm_list(
     impl<'a> From<&'a (Vmm, Option<Sled>)> for VmmRow<'a> {
         fn from((vmm, sled): &'a (Vmm, Option<Sled>)) -> Self {
             let &Vmm {
-                id,
+                id: _,
                 time_created: _,
                 time_deleted: _,
                 instance_id,
@@ -8124,8 +8164,9 @@ async fn cmd_db_vmm_list(
                 propolis_port: _,
                 cpu_platform: _,
                 time_state_updated: _,
-                generation,
-                state,
+                generation: _,
+                state: _,
+                failure_reason: _,
             } = vmm;
             let sled = match sled {
                 Some(sled) => sled.serial_number(),
@@ -8134,15 +8175,7 @@ async fn cmd_db_vmm_list(
                     "<unknown>"
                 }
             };
-            VmmRow {
-                instance_id,
-                state: VmmStateRow {
-                    id,
-                    state,
-                    generation: generation.0.into(),
-                },
-                sled,
-            }
+            VmmRow { instance_id, state: VmmStateRow::from(vmm), sled }
         }
     }
 

@@ -2307,7 +2307,6 @@ mod tests {
     use nexus_db_model::InstanceState;
     use nexus_db_model::Project;
     use nexus_db_model::VmmCpuPlatform;
-    use nexus_db_model::VmmRuntimeState;
     use nexus_db_model::VmmState;
     use nexus_types::external_api::instance as instance_types;
     use nexus_types::external_api::project;
@@ -2991,6 +2990,7 @@ mod tests {
                     time_state_updated: Utc::now(),
                     generation: Generation::new(),
                     state: VmmState::Running,
+                    failure_reason: None,
                 },
             )
             .await
@@ -3052,6 +3052,7 @@ mod tests {
                     time_state_updated: Utc::now(),
                     generation: Generation::new(),
                     state: VmmState::Running,
+                    failure_reason: None,
                 },
             )
             .await
@@ -3148,6 +3149,7 @@ mod tests {
                     time_state_updated: Utc::now(),
                     generation: Generation::new(),
                     state: VmmState::Stopped,
+                    failure_reason: None,
                 },
             )
             .await
@@ -3187,6 +3189,7 @@ mod tests {
                     time_state_updated: Utc::now(),
                     generation: Generation::new(),
                     state: VmmState::Running,
+                    failure_reason: None,
                 },
             )
             .await
@@ -3217,15 +3220,13 @@ mod tests {
         assert!(res.is_err());
 
         // Okay, now, advance the active VMM to Running, and try again.
+        let vmm1_state =
+            vmm1.runtime().transition(nexus_types::instance::VmmState::Running);
         let updated = dbg!(
             datastore
                 .vmm_update_runtime(
                     &PropolisUuid::from_untyped_uuid(vmm1.id),
-                    &VmmRuntimeState {
-                        time_state_updated: Utc::now(),
-                        generation: Generation(vmm2.generation.0.next()),
-                        state: VmmState::Running,
-                    },
+                    &vmm1_state,
                 )
                 .await
         )
@@ -3288,6 +3289,7 @@ mod tests {
                     time_state_updated: Utc::now(),
                     generation: Generation::new(),
                     state: VmmState::Running,
+                    failure_reason: None,
                 },
             )
             .await
@@ -3320,11 +3322,9 @@ mod tests {
             datastore
                 .vmm_update_runtime(
                     &PropolisUuid::from_untyped_uuid(vmm2.id),
-                    &VmmRuntimeState {
-                        time_state_updated: Utc::now(),
-                        generation: Generation(vmm2.generation.0.next().next()),
-                        state: VmmState::SagaUnwound,
-                    },
+                    &vmm2.runtime().transition(
+                        nexus_types::instance::VmmState::SagaUnwound
+                    )
                 )
                 .await
         )
@@ -3433,6 +3433,7 @@ mod tests {
                             time_state_updated: Utc::now(),
                             generation: Generation::new(),
                             state: VmmState::Running,
+                            failure_reason: None,
                         },
                     )
                     .await

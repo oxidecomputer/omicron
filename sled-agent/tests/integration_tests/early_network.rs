@@ -6,7 +6,7 @@
 
 use bootstore::schemes::v0 as bootstore;
 use iddqd::IdOrdMap;
-use omicron_common::api::external::Vni;
+use omicron_common::api::external::{Generation, Vni};
 use omicron_test_utils::dev::test_setup_log;
 use sled_agent_types::early_networking::{
     BgpConfig, BgpPeerConfig, EarlyNetworkConfigEnvelope, ImportExportPolicy,
@@ -16,8 +16,8 @@ use sled_agent_types::early_networking::{
 };
 use sled_agent_types::inventory::SourceNatConfigGeneric;
 use sled_agent_types::system_networking::{
-    ServiceZoneNatEntries, ServiceZoneNatEntry, ServiceZoneNatKind,
-    SystemNetworkingConfig,
+    BlueprintExternalNetworkingConfig, ServiceZoneNatEntries,
+    ServiceZoneNatEntry, ServiceZoneNatKind, SystemNetworkingConfig,
 };
 use slog_error_chain::InlineErrorChain;
 
@@ -133,7 +133,7 @@ fn early_network_blobs_deserialize() {
 /// future, older blobs can still be deserialized correctly.
 fn current_config_example() -> (&'static str, EarlyNetworkConfigEnvelope) {
     // NOTE: the description must not contain commas or newlines.
-    let description = "2026-04-01 pre-r19";
+    let description = "2026-04-28 pre-r20";
     let config = EarlyNetworkConfigEnvelope::from(&SystemNetworkingConfig {
         rack_network_config: RackNetworkConfig {
             rack_subnet: "fd00:1122:3344:100::/56".parse().unwrap(),
@@ -311,102 +311,105 @@ fn current_config_example() -> (&'static str, EarlyNetworkConfigEnvelope) {
             }],
             bfd: vec![],
         },
-        service_zone_nat_entries: Some(
-            ServiceZoneNatEntries::try_from(
-                [
-                    ServiceZoneNatEntry {
-                        zone_id: "b922e5ec-a05e-4d8a-8378-5277f19426bc"
-                            .parse()
-                            .unwrap(),
-                        sled_underlay_ip: "fd00:1122:3344:103::1"
-                            .parse()
-                            .unwrap(),
-                        nic_mac: "A8:40:25:FF:80:00".parse().unwrap(),
-                        vni: Vni::SERVICES_VNI,
-                        kind: ServiceZoneNatKind::BoundaryNtp {
-                            snat_cfg: SourceNatConfigGeneric::new(
-                                "172.20.26.7".parse().unwrap(),
-                                0,
-                                16383,
-                            )
-                            .expect("valid snat cfg"),
+        blueprint_external_networking_config: Some(
+            BlueprintExternalNetworkingConfig {
+                blueprint_external_networking_generation: Generation::new(),
+                service_zone_nat_entries: ServiceZoneNatEntries::try_from(
+                    [
+                        ServiceZoneNatEntry {
+                            zone_id: "b922e5ec-a05e-4d8a-8378-5277f19426bc"
+                                .parse()
+                                .unwrap(),
+                            sled_underlay_ip: "fd00:1122:3344:103::1"
+                                .parse()
+                                .unwrap(),
+                            nic_mac: "A8:40:25:FF:80:00".parse().unwrap(),
+                            vni: Vni::SERVICES_VNI,
+                            kind: ServiceZoneNatKind::BoundaryNtp {
+                                snat_cfg: SourceNatConfigGeneric::new(
+                                    "172.20.26.7".parse().unwrap(),
+                                    0,
+                                    16383,
+                                )
+                                .expect("valid snat cfg"),
+                            },
                         },
-                    },
-                    ServiceZoneNatEntry {
-                        zone_id: "1683d46d-69c4-4adb-a113-70eba32de76f"
-                            .parse()
-                            .unwrap(),
-                        sled_underlay_ip: "fd00:1122:3344:101::1"
-                            .parse()
-                            .unwrap(),
-                        nic_mac: "A8:40:25:FF:80:02".parse().unwrap(),
-                        vni: Vni::SERVICES_VNI,
-                        kind: ServiceZoneNatKind::BoundaryNtp {
-                            snat_cfg: SourceNatConfigGeneric::new(
-                                "172.20.26.7".parse().unwrap(),
-                                16384,
-                                32767,
-                            )
-                            .expect("valid snat cfg"),
+                        ServiceZoneNatEntry {
+                            zone_id: "1683d46d-69c4-4adb-a113-70eba32de76f"
+                                .parse()
+                                .unwrap(),
+                            sled_underlay_ip: "fd00:1122:3344:101::1"
+                                .parse()
+                                .unwrap(),
+                            nic_mac: "A8:40:25:FF:80:02".parse().unwrap(),
+                            vni: Vni::SERVICES_VNI,
+                            kind: ServiceZoneNatKind::BoundaryNtp {
+                                snat_cfg: SourceNatConfigGeneric::new(
+                                    "172.20.26.7".parse().unwrap(),
+                                    16384,
+                                    32767,
+                                )
+                                .expect("valid snat cfg"),
+                            },
                         },
-                    },
-                    ServiceZoneNatEntry {
-                        zone_id: "84be6867-c3b1-4f54-92c8-1ba3390a9ff7"
-                            .parse()
-                            .unwrap(),
-                        sled_underlay_ip: "fd00:1122:3344:108::1"
-                            .parse()
-                            .unwrap(),
-                        nic_mac: "A8:40:25:FF:80:05".parse().unwrap(),
-                        vni: Vni::SERVICES_VNI,
-                        kind: ServiceZoneNatKind::Nexus {
-                            external_ip: "172.20.26.8".parse().unwrap(),
+                        ServiceZoneNatEntry {
+                            zone_id: "84be6867-c3b1-4f54-92c8-1ba3390a9ff7"
+                                .parse()
+                                .unwrap(),
+                            sled_underlay_ip: "fd00:1122:3344:108::1"
+                                .parse()
+                                .unwrap(),
+                            nic_mac: "A8:40:25:FF:80:05".parse().unwrap(),
+                            vni: Vni::SERVICES_VNI,
+                            kind: ServiceZoneNatKind::Nexus {
+                                external_ip: "172.20.26.8".parse().unwrap(),
+                            },
                         },
-                    },
-                    ServiceZoneNatEntry {
-                        zone_id: "03ee5ea0-a003-4ff3-9125-bf54d41b1868"
-                            .parse()
-                            .unwrap(),
-                        sled_underlay_ip: "fd00:1122:3344:102::1"
-                            .parse()
-                            .unwrap(),
-                        nic_mac: "A8:40:25:FF:80:04".parse().unwrap(),
-                        vni: Vni::SERVICES_VNI,
-                        kind: ServiceZoneNatKind::Nexus {
-                            external_ip: "172.20.26.6".parse().unwrap(),
+                        ServiceZoneNatEntry {
+                            zone_id: "03ee5ea0-a003-4ff3-9125-bf54d41b1868"
+                                .parse()
+                                .unwrap(),
+                            sled_underlay_ip: "fd00:1122:3344:102::1"
+                                .parse()
+                                .unwrap(),
+                            nic_mac: "A8:40:25:FF:80:04".parse().unwrap(),
+                            vni: Vni::SERVICES_VNI,
+                            kind: ServiceZoneNatKind::Nexus {
+                                external_ip: "172.20.26.6".parse().unwrap(),
+                            },
                         },
-                    },
-                    ServiceZoneNatEntry {
-                        zone_id: "45aa654b-77b9-4f73-b0e0-fbf1be4bf30f"
-                            .parse()
-                            .unwrap(),
-                        sled_underlay_ip: "fd00:1122:3344:102::1"
-                            .parse()
-                            .unwrap(),
-                        nic_mac: "A8:40:25:FF:80:03".parse().unwrap(),
-                        vni: Vni::SERVICES_VNI,
-                        kind: ServiceZoneNatKind::ExternalDns {
-                            external_ip: "172.20.26.1".parse().unwrap(),
+                        ServiceZoneNatEntry {
+                            zone_id: "45aa654b-77b9-4f73-b0e0-fbf1be4bf30f"
+                                .parse()
+                                .unwrap(),
+                            sled_underlay_ip: "fd00:1122:3344:102::1"
+                                .parse()
+                                .unwrap(),
+                            nic_mac: "A8:40:25:FF:80:03".parse().unwrap(),
+                            vni: Vni::SERVICES_VNI,
+                            kind: ServiceZoneNatKind::ExternalDns {
+                                external_ip: "172.20.26.1".parse().unwrap(),
+                            },
                         },
-                    },
-                    ServiceZoneNatEntry {
-                        zone_id: "7d6c20e7-92ca-46b9-8ec2-9c003d05cc83"
-                            .parse()
-                            .unwrap(),
-                        sled_underlay_ip: "fd00:1122:3344:105::1"
-                            .parse()
-                            .unwrap(),
-                        nic_mac: "A8:40:25:FF:80:01".parse().unwrap(),
-                        vni: Vni::SERVICES_VNI,
-                        kind: ServiceZoneNatKind::ExternalDns {
-                            external_ip: "172.20.26.2".parse().unwrap(),
+                        ServiceZoneNatEntry {
+                            zone_id: "7d6c20e7-92ca-46b9-8ec2-9c003d05cc83"
+                                .parse()
+                                .unwrap(),
+                            sled_underlay_ip: "fd00:1122:3344:105::1"
+                                .parse()
+                                .unwrap(),
+                            nic_mac: "A8:40:25:FF:80:01".parse().unwrap(),
+                            vni: Vni::SERVICES_VNI,
+                            kind: ServiceZoneNatKind::ExternalDns {
+                                external_ip: "172.20.26.2".parse().unwrap(),
+                            },
                         },
-                    },
-                ]
-                .into_iter()
-                .collect::<IdOrdMap<_>>(),
-            )
-            .expect("valid service zone NAT entries"),
+                    ]
+                    .into_iter()
+                    .collect::<IdOrdMap<_>>(),
+                )
+                .expect("valid service zone NAT entries"),
+            },
         ),
     });
 
