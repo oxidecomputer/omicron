@@ -819,9 +819,10 @@ async fn test_update_status() -> Result<()> {
     assert_eq!(counts.get("install dataset").unwrap(), &7);
     assert_eq!(counts.get("unknown").unwrap(), &11);
 
-    // The task that checks for enabled not online SMF services isn't running on
-    // a simulated system; the contact_support field should be true
-    assert!(status.contact_support, "should need to contact support");
+    // A new target release has been set but the components still show up as
+    // being in the initial system state. This puts the update status as
+    // "in-progress"; the contact_support field should be false.
+    assert!(!status.contact_support, "should need to contact support");
 
     cptestctx.teardown().await;
     Ok(())
