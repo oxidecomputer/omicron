@@ -511,10 +511,9 @@ impl DataStore {
         &self,
         id: SitrepUuid,
         conn: &async_bb8_diesel::Connection<DbConnection>,
-    ) -> Result<HashMap<CaseUuid, iddqd::IdOrdMap<fm::case::CaseFact>>, Error>
-    {
+    ) -> Result<HashMap<CaseUuid, iddqd::IdOrdMap<fm::case::Fact>>, Error> {
         let mut by_case =
-            HashMap::<CaseUuid, iddqd::IdOrdMap<fm::case::CaseFact>>::new();
+            HashMap::<CaseUuid, iddqd::IdOrdMap<fm::case::Fact>>::new();
 
         let mut paginator: Paginator<DbTypedUuid<CaseFactKind>> =
             Paginator::new(SQL_BATCH_SIZE, PaginationOrder::Descending);
@@ -525,7 +524,7 @@ impl DataStore {
                 &p.current_pagparams(),
             )
             .filter(case_fact_dsl::sitrep_id.eq(id.into_untyped_uuid()))
-            .select(model::fm::CaseFact::as_select())
+            .select(model::fm::Fact::as_select())
             .load_async(conn)
             .await
             .map_err(|e| {
@@ -540,8 +539,9 @@ impl DataStore {
                 by_case
                     .entry(case_id)
                     .or_default()
-                    .insert_unique(fm::case::CaseFact {
+                    .insert_unique(fm::case::Fact {
                         id,
+                        created_sitrep_id: fact.created_sitrep_id.into(),
                         payload: fact.payload,
                         comment: fact.comment,
                     })
@@ -828,7 +828,7 @@ impl DataStore {
                 bundle_data_selections_requested.push((req_id, data_selection));
             }
             for fact in case.facts.iter() {
-                case_facts.push(model::fm::CaseFact::from_sitrep(
+                case_facts.push(model::fm::Fact::from_sitrep(
                     sitrep_id, case_id, fact,
                 ));
             }
@@ -2338,8 +2338,9 @@ mod tests {
 
             let mut facts = iddqd::IdOrdMap::new();
             facts
-                .insert_unique(fm::case::CaseFact {
+                .insert_unique(fm::case::Fact {
                     id: CaseFactUuid::new_v4(),
+                    created_sitrep_id: sitrep_id,
                     payload: serde_json::json!({
                         "kind": "representative_fact",
                         "note": "for round-trip testing",

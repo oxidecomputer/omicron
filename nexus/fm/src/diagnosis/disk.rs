@@ -324,8 +324,9 @@ mod tests {
         let case_id = omicron_uuid_kinds::CaseUuid::new_v4();
         let mut facts = iddqd::IdOrdMap::new();
         facts
-            .insert_unique(fm::case::CaseFact {
+            .insert_unique(fm::case::Fact {
                 id: omicron_uuid_kinds::CaseFactUuid::new_v4(),
+                created_sitrep_id: parent_sitrep_id,
                 payload: serde_json::to_value(&DiskFact::ZpoolUnhealthy {
                     zpool_id,
                     last_seen_health: ZpoolHealth::Degraded,
@@ -369,7 +370,7 @@ mod tests {
     fn disk_facts(
         sitrep: &Sitrep,
         open_only: bool,
-    ) -> Vec<(&fm::Case, &fm::case::CaseFact, DiskFact)> {
+    ) -> Vec<(&fm::Case, &fm::case::Fact, DiskFact)> {
         sitrep
             .cases
             .iter()
@@ -539,8 +540,9 @@ mod tests {
         });
         let mut parent_facts = iddqd::IdOrdMap::new();
         parent_facts
-            .insert_unique(fm::case::CaseFact {
+            .insert_unique(fm::case::Fact {
                 id: unreadable_fact_id,
+                created_sitrep_id: parent_sitrep_id,
                 payload: unreadable_payload.clone(),
                 comment: "fact with payload from the future".to_string(),
             })

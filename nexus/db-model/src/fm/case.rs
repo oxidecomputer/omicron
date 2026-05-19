@@ -78,28 +78,32 @@ impl CaseMetadata {
 }
 
 /// Diesel row for the `fm_case_fact` table. See
-/// [`nexus_types::fm::case::CaseFact`] for semantics.
+/// [`nexus_types::fm::case::Fact`] for semantics.
 #[derive(Queryable, Insertable, Clone, Debug, Selectable)]
 #[diesel(table_name = fm_case_fact)]
-pub struct CaseFact {
+pub struct Fact {
     pub id: DbTypedUuid<CaseFactKind>,
     pub sitrep_id: DbTypedUuid<SitrepKind>,
     pub case_id: DbTypedUuid<CaseKind>,
+    /// Sitrep in which this fact was first added. Preserved unchanged
+    /// when the fact is carried forward; debug-only.
+    pub created_sitrep_id: DbTypedUuid<SitrepKind>,
     pub payload: serde_json::Value,
     pub comment: String,
 }
 
-impl CaseFact {
+impl Fact {
     pub fn from_sitrep(
         sitrep_id: impl Into<DbTypedUuid<SitrepKind>>,
         case_id: impl Into<DbTypedUuid<CaseKind>>,
-        fact: &fm::case::CaseFact,
+        fact: &fm::case::Fact,
     ) -> Self {
-        let fm::case::CaseFact { id, payload, comment } = fact;
+        let fm::case::Fact { id, created_sitrep_id, payload, comment } = fact;
         Self {
             id: (*id).into(),
             sitrep_id: sitrep_id.into(),
             case_id: case_id.into(),
+            created_sitrep_id: (*created_sitrep_id).into(),
             payload: payload.clone(),
             comment: comment.clone(),
         }

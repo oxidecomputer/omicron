@@ -7661,6 +7661,11 @@ CREATE TABLE IF NOT EXISTS omicron.public.fm_case_fact (
     sitrep_id UUID NOT NULL,
     -- UUID of the case this fact attaches to.
     case_id UUID NOT NULL,
+    -- UUID of the sitrep in which this fact was first added. Preserved
+    -- unchanged when the fact is carried forward into a child sitrep, so
+    -- this can be used to tell at a glance how long a fact has been
+    -- attached to its case. Debug-only.
+    created_sitrep_id UUID NOT NULL,
     -- Engine-defined JSONB payload. Opaque to shared FM code.
     payload JSONB NOT NULL,
     -- Free-form, debug-only comment.

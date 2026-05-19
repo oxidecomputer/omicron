@@ -3249,6 +3249,7 @@ table! {
         id -> Uuid,
         sitrep_id -> Uuid,
         case_id -> Uuid,
+        created_sitrep_id -> Uuid,
         payload -> Jsonb,
         comment -> Text,
     }

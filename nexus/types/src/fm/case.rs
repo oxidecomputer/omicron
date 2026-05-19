@@ -27,8 +27,8 @@ pub struct Case {
     pub alerts_requested: IdOrdMap<AlertRequest>,
     pub support_bundles_requested: IdOrdMap<SupportBundleRequest>,
     /// Diagnosis-engine-derived facts attached to this case. See
-    /// [`CaseFact`] for semantics.
-    pub facts: IdOrdMap<CaseFact>,
+    /// [`Fact`] for semantics.
+    pub facts: IdOrdMap<Fact>,
 }
 
 impl Case {
@@ -175,20 +175,23 @@ impl CaseEreport {
 /// diagnosis engine. Other engines and shared FM code must treat it as
 /// opaque bytes.
 ///
-/// `Eq`/`PartialEq` compare the raw `serde_json::Value` payloads, so two
-/// facts are equal iff their payloads are JSON-value-equal (object key
-/// order does not matter; number representation does). This is the
-/// equality the DB round-trip needs. Engine-side comparison should go
-/// through [`CaseFact::payload_as`] and compare typed enum values — never
-/// the raw payload.
+/// `Eq`/`PartialEq` derive over all fields, including the raw
+/// `serde_json::Value` payload (object key order does not matter; number
+/// representation does). This is the equality the DB round-trip test
+/// needs. Engine-side comparison should go through [`Fact::payload_as`]
+/// and compare typed enum values — never the raw payload.
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
-pub struct CaseFact {
+pub struct Fact {
     pub id: CaseFactUuid,
+    /// The sitrep in which this fact was first added. Preserved
+    /// unchanged when the fact is carried forward into a child sitrep.
+    /// Debug-only.
+    pub created_sitrep_id: SitrepUuid,
     pub payload: serde_json::Value,
     pub comment: String,
 }
 
-impl IdOrdItem for CaseFact {
+impl IdOrdItem for Fact {
     type Key<'a> = &'a CaseFactUuid;
     fn key(&self) -> Self::Key<'_> {
         &self.id
@@ -196,7 +199,7 @@ impl IdOrdItem for CaseFact {
     iddqd::id_upcast!();
 }
 
-impl CaseFact {
+impl Fact {
     /// Attempt to deserialize this fact's payload as `T`.
     pub fn payload_as<T: serde::de::DeserializeOwned>(
         &self,
@@ -339,12 +342,21 @@ impl fmt::Display for DisplayCase<'_> {
             writeln!(f, "{:>indent$}------", "")?;
 
             let indent = indent + 2;
-            for CaseFact { id, payload, comment } in facts.iter() {
+            for Fact { id, created_sitrep_id, payload, comment } in facts.iter()
+            {
+                const ADDED_IN: &str = "added in:";
                 const PAYLOAD: &str = "payload:";
                 const COMMENT: &str = "comment:";
-                const WIDTH: usize = const_max_len(&[PAYLOAD, COMMENT]);
+                const WIDTH: usize =
+                    const_max_len(&[ADDED_IN, PAYLOAD, COMMENT]);
 
                 writeln!(f, "{BULLET:>indent$}fact {id}")?;
+                writeln!(
+                    f,
+                    "{:>indent$}{ADDED_IN:<WIDTH$} {created_sitrep_id}{}",
+                    "",
+                    this_sitrep(*created_sitrep_id)
+                )?;
                 writeln!(f, "{:>indent$}{PAYLOAD:<WIDTH$} {payload}", "")?;
                 writeln!(f, "{:>indent$}{COMMENT:<WIDTH$} {comment}\n", "")?;
             }

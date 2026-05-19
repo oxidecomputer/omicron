@@ -252,7 +252,12 @@ impl CaseBuilder {
             .kv("fact_id", id)
             .kv("payload", &payload)
             .comment(comment.clone());
-        let fact = fm::case::CaseFact { id, payload, comment };
+        let fact = fm::case::Fact {
+            id,
+            created_sitrep_id: self.sitrep_id,
+            payload,
+            comment,
+        };
         self.case.facts.insert_unique(fact).expect("UUID should be unused");
         Ok(id)
     }
@@ -268,7 +273,7 @@ impl CaseBuilder {
 
     /// Iterate the facts currently attached to this case (including any that
     /// were carried forward from the parent sitrep).
-    pub fn facts(&self) -> impl Iterator<Item = &fm::case::CaseFact> {
+    pub fn facts(&self) -> impl Iterator<Item = &fm::case::Fact> {
         self.case.facts.iter()
     }
 
