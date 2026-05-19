@@ -885,16 +885,6 @@ impl SystemDescription {
         self.planner_config
     }
 
-    /// Set the planner's configuration.
-    ///
-    /// Returns the previous value.
-    pub fn set_planner_config(
-        &mut self,
-        config: PlannerConfig,
-    ) -> PlannerConfig {
-        mem::replace(&mut self.planner_config, config)
-    }
-
     pub fn set_target_release(
         &mut self,
         description: TargetReleaseDescription,
