@@ -211,6 +211,57 @@ impl Fact {
             )
         })
     }
+
+    pub fn display_multiline(
+        &self,
+        indent: usize,
+        sitrep_id: Option<SitrepUuid>,
+    ) -> impl fmt::Display + '_ {
+        struct DisplayFact<'a> {
+            fact: &'a Fact,
+            indent: usize,
+            sitrep_id: Option<SitrepUuid>,
+        }
+
+        impl fmt::Display for DisplayFact<'_> {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                const BULLET: &str = "* ";
+                const ADDED_IN: &str = "added in:";
+                const COMMENT: &str = "comment:";
+                const PAYLOAD: &str = "payload:";
+                const WIDTH: usize =
+                    const_max_len(&[ADDED_IN, COMMENT, PAYLOAD]);
+
+                let &Self {
+                    fact: Fact { id, created_sitrep_id, payload, comment },
+                    indent,
+                    sitrep_id,
+                } = self;
+                let this_sitrep = |s| {
+                    if Some(s) == sitrep_id { " <-- this sitrep" } else { "" }
+                };
+
+                writeln!(f, "{BULLET:>indent$}fact {id}")?;
+                writeln!(
+                    f,
+                    "{:>indent$}{ADDED_IN:<WIDTH$} {created_sitrep_id}{}",
+                    "",
+                    this_sitrep(*created_sitrep_id),
+                )?;
+                writeln!(f, "{:>indent$}{COMMENT:<WIDTH$} {comment}", "")?;
+                writeln!(f, "{:>indent$}{PAYLOAD:<WIDTH$}", "")?;
+                let payload_indent = indent + 2;
+                let pretty = serde_json::to_string_pretty(payload)
+                    .unwrap_or_else(|_| payload.to_string());
+                for line in pretty.lines() {
+                    writeln!(f, "{:>payload_indent$}{line}", "")?;
+                }
+                writeln!(f)
+            }
+        }
+
+        DisplayFact { fact: self, indent, sitrep_id }
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -346,23 +397,8 @@ impl fmt::Display for DisplayCase<'_> {
             writeln!(f, "{:>indent$}------", "")?;
 
             let indent = indent + 2;
-            for Fact { id, created_sitrep_id, payload, comment } in facts.iter()
-            {
-                const ADDED_IN: &str = "added in:";
-                const PAYLOAD: &str = "payload:";
-                const COMMENT: &str = "comment:";
-                const WIDTH: usize =
-                    const_max_len(&[ADDED_IN, PAYLOAD, COMMENT]);
-
-                writeln!(f, "{BULLET:>indent$}fact {id}")?;
-                writeln!(
-                    f,
-                    "{:>indent$}{ADDED_IN:<WIDTH$} {created_sitrep_id}{}",
-                    "",
-                    this_sitrep(*created_sitrep_id)
-                )?;
-                writeln!(f, "{:>indent$}{PAYLOAD:<WIDTH$} {payload}", "")?;
-                writeln!(f, "{:>indent$}{COMMENT:<WIDTH$} {comment}\n", "")?;
+            for fact in facts.iter() {
+                fact.display_multiline(indent, sitrep_id).fmt(f)?;
             }
         }
 
@@ -457,8 +493,8 @@ mod tests {
     use crate::support_bundle::BundleDataSelection;
     use ereport_types::{Ena, EreportId};
     use omicron_uuid_kinds::{
-        AlertUuid, CaseUuid, EreporterRestartUuid, OmicronZoneUuid, SitrepUuid,
-        SupportBundleUuid,
+        AlertUuid, CaseFactUuid, CaseUuid, EreporterRestartUuid,
+        OmicronZoneUuid, SitrepUuid, SupportBundleUuid,
     };
     use std::str::FromStr;
     use std::sync::Arc;
@@ -594,6 +630,23 @@ mod tests {
             })
             .unwrap();
 
+        let mut facts = IdOrdMap::new();
+        facts
+            .insert_unique(Fact {
+                id: CaseFactUuid::from_str(
+                    "f00f00f0-0f00-4f00-8f00-f00f00f00f00",
+                )
+                .unwrap(),
+                created_sitrep_id,
+                payload: serde_json::json!({
+                    "kind": "FactFunLevel",
+                    "fun_level": 3,
+                    "wow": ["what", "a", "fun", "fact"],
+                }),
+                comment: "made-up fact for display test".to_string(),
+            })
+            .unwrap();
+
         // Create the case
         let case = Case {
             id: case_id,
@@ -607,7 +660,7 @@ mod tests {
             ereports,
             alerts_requested,
             support_bundles_requested,
-            facts: IdOrdMap::new(),
+            facts,
         };
 
         eprintln!("example case display:");
