@@ -17,7 +17,7 @@ use slog::{Drain, o};
 use std::{
     collections::BTreeMap,
     fs,
-    net::{Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV6},
+    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV6},
     sync::{Arc, Mutex},
 };
 use sled_agent_types::early_networking::SwitchSlot;
@@ -230,6 +230,164 @@ impl RunAllArgs {
     }
 }
 
+fn slot_index(slot: SwitchSlot) -> u32 {
+    match slot {
+        SwitchSlot::Switch0 => 0,
+        SwitchSlot::Switch1 => 1,
+    }
+}
+
+fn ipv4_as_u32(a: u8, b: u8, c: u8, d: u8) -> u32 {
+    ((a as u32) << 24) | ((b as u32) << 16) | ((c as u32) << 8) | (d as u32)
+}
+
+fn make_neighbor(
+    local_asn: u32,
+    name: String,
+    peer_addr: SocketAddr,
+    src_addr: Option<IpAddr>,
+) -> mg_admin_client::types::Neighbor {
+    mg_admin_client::types::Neighbor {
+        asn: local_asn,
+        name,
+        group: "omicron-dev".to_string(),
+        host: peer_addr.to_string(),
+        hold_time: 6000,
+        keepalive: 2000,
+        connect_retry: 3000,
+        idle_hold_time: 0,
+        delay_open: 0,
+        resolution: 100,
+        passive: false,
+        enforce_first_as: false,
+        deterministic_collision_resolution: true,
+        communities: vec![],
+        ipv4_unicast: Some(mg_admin_client::types::Ipv4UnicastConfig {
+            import_policy:
+                mg_admin_client::types::ImportExportPolicy4::NoFiltering,
+            export_policy:
+                mg_admin_client::types::ImportExportPolicy4::NoFiltering,
+            nexthop: None,
+        }),
+        ipv6_unicast: None,
+        md5_auth_key: None,
+        min_ttl: None,
+        remote_asn: None,
+        local_pref: None,
+        multi_exit_discriminator: None,
+        connect_retry_jitter: None,
+        idle_hold_jitter: None,
+        src_addr,
+        src_port: None,
+        vlan_id: None,
+    }
+}
+
+async fn setup_bgp_peering(
+    log: &slog::Logger,
+    peer_routers: &[omicron_test_utils::dev::maghemite::MgdInstance],
+    contexts: &[nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>],
+) -> Result<(), anyhow::Error> {
+    for (rack_n, ctx) in contexts.iter().enumerate() {
+        for (slot, rack_mgd) in &ctx.mgd {
+            let slot_idx = slot_index(*slot);
+            let rack_asn = 65200 + 2 * rack_n as u32 + slot_idx;
+            let rack_id =
+                ipv4_as_u32(127, 2, rack_n as u8, slot_idx as u8);
+
+            let rack_api_addr =
+                SocketAddrV6::new(Ipv6Addr::LOCALHOST, rack_mgd.port, 0, 0);
+            let rack_client = mg_admin_client::Client::new(
+                &format!("http://{rack_api_addr}"),
+                slog::Logger::new(
+                    log,
+                    slog::o!(
+                        "component" => "MgdClient",
+                        "rack" => rack_n,
+                        "slot" => format!("{:?}", slot),
+                    ),
+                ),
+            );
+
+            rack_client
+                .create_router(&mg_admin_client::types::Router {
+                    asn: rack_asn,
+                    id: rack_id,
+                    graceful_shutdown: false,
+                    listen: rack_mgd.bgp_dispatcher_addr.to_string(),
+                })
+                .await
+                .with_context(|| {
+                    format!(
+                        "create_router for rack {rack_n} {slot:?}"
+                    )
+                })?;
+
+            for (peer_n, peer_mgd) in peer_routers.iter().enumerate() {
+                let peer_asn = 65100 + peer_n as u32;
+
+                let peer_api_addr = SocketAddrV6::new(
+                    Ipv6Addr::LOCALHOST,
+                    peer_mgd.port,
+                    0,
+                    0,
+                );
+                let peer_client = mg_admin_client::Client::new(
+                    &format!("http://{peer_api_addr}"),
+                    slog::Logger::new(
+                        log,
+                        slog::o!(
+                            "component" => "MgdClient",
+                            "peer_router" => peer_n,
+                        ),
+                    ),
+                );
+
+                // rack mgd → peer router
+                // src_addr ensures the outgoing connection uses the rack
+                // mgd's own loopback IP as the source, so the peer router
+                // dispatcher can match the incoming connection to the right
+                // session (keyed by the rack mgd's IP).
+                rack_client
+                    .create_neighbor(&make_neighbor(
+                        rack_asn,
+                        format!("peer-router-{peer_n}"),
+                        peer_mgd.bgp_dispatcher_addr,
+                        Some(rack_mgd.bgp_dispatcher_addr.ip()),
+                    ))
+                    .await
+                    .with_context(|| {
+                        format!(
+                            "rack {rack_n} {slot:?} create_neighbor \
+                             peer-router-{peer_n}"
+                        )
+                    })?;
+
+                // peer router → rack mgd
+                // src_addr ensures the outgoing connection uses the peer
+                // router's own loopback IP as the source, so the rack mgd
+                // dispatcher can match the incoming connection to the right
+                // session (keyed by the peer router's IP).
+                peer_client
+                    .create_neighbor(&make_neighbor(
+                        peer_asn,
+                        format!("rack-{rack_n}-{slot:?}"),
+                        rack_mgd.bgp_dispatcher_addr,
+                        Some(peer_mgd.bgp_dispatcher_addr.ip()),
+                    ))
+                    .await
+                    .with_context(|| {
+                        format!(
+                            "peer-router-{peer_n} create_neighbor \
+                             rack-{rack_n}-{slot:?}"
+                        )
+                    })?;
+            }
+        }
+    }
+    Ok(())
+}
+
 fn start_stream() -> futures::stream::Fuse<signal_hook_tokio::SignalsInfo> {
     let signals = Signals::new(&[SIGINT]).expect("failed to wait for SIGINT");
     signals.fuse()
@@ -283,6 +441,12 @@ impl RunMultipleArgs {
 
         // Read configuration.
         let mut config = read_config(self)?;
+
+        // Disable physical disk adoption: DiskTest manages disks explicitly,
+        // and the adoption task (period = 30 s) races with DiskTest::new when
+        // setup takes ~30 s per rack. Unit tests disable this for the same
+        // reason via config.test.toml.
+        config.pkg.background_tasks.physical_disk_adoption.disable = true;
 
         let mut contexts = vec![];
 
@@ -527,6 +691,13 @@ impl RunMultipleArgs {
                 cptestctx.password
             );
             contexts.push(cptestctx);
+        }
+
+        if self.peer_routers > 0 {
+            setup_bgp_peering(&log, &peer_routers, &contexts)
+                .await
+                .context("setting up BGP peering")?;
+            println!("omicron-dev: BGP peering configured.");
         }
 
         // Wait for a signal.

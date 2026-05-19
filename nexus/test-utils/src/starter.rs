@@ -506,7 +506,7 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
                     &[IpAddr::V4(ip)],
                 )
                 .expect("allocate loopback IP for mgd BGP dispatcher");
-                (SocketAddr::new(IpAddr::V4(ip), 0), Some(alloc))
+                (SocketAddr::new(IpAddr::V4(ip), 1049), Some(alloc))
             }
             _ => (SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0).into(), None),
         };
