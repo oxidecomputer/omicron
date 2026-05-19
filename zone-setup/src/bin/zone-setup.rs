@@ -562,7 +562,8 @@ maxclockerror 60
     }
     writeln!(
         &mut new_config,
-        "pool {boundary_pool} iburst maxdelay 0.1 maxsources 16",
+        "pool {boundary_pool} minpoll 0 maxpoll 5 \
+        iburst maxdelay 0.1 maxsources 16",
     )
     .expect("write to String is infallible");
 

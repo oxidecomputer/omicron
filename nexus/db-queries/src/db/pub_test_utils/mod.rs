@@ -19,6 +19,7 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 pub mod crdb;
+pub mod explain;
 pub mod helpers;
 pub mod multicast;
 

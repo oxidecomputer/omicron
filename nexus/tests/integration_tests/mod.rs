@@ -14,6 +14,7 @@ mod audit_log;
 mod authn_http;
 mod authz;
 mod basic;
+mod bfd;
 mod certificates;
 mod cockroach;
 mod commands;

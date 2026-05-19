@@ -1145,4 +1145,21 @@ impl NexusLockstepApi for NexusLockstepApiImpl {
             .instrument_dropshot_handler(&rqctx, handler)
             .await
     }
+
+    async fn fm_known_ereport_classes_list(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<Vec<String>>, HttpError> {
+        let apictx = &rqctx.context().context;
+        let handler = async {
+            let classes = nexus_fm::diagnosis::known_ereport_classes()
+                .iter()
+                .map(|s| (*s).to_string())
+                .collect();
+            Ok(HttpResponseOk(classes))
+        };
+        apictx
+            .internal_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
 }
