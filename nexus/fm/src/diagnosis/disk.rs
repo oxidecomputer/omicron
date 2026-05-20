@@ -9,13 +9,13 @@ use crate::analysis_input::Input;
 use nexus_types::fm::DiagnosisEngineKind;
 use nexus_types::in_service_disk::InServiceDisk;
 use nexus_types::inventory::ZpoolHealth;
-use omicron_uuid_kinds::{CaseFactUuid, CaseUuid, ZpoolUuid};
+use omicron_uuid_kinds::{CaseUuid, FactUuid, ZpoolUuid};
 use serde::{Deserialize, Serialize};
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 
 /// Per-fact state for the disk diagnosis engine, serialized into the
-/// `fm_case_fact.payload` JSONB column. Other diagnosis engines must not
+/// `fm_fact.payload` JSONB column. Other diagnosis engines must not
 /// inspect or modify this; shared FM code treats it as opaque bytes.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -30,7 +30,7 @@ struct ParentCaseSummary {
     /// recorded zpool. There can be multiple facts in pathological cases
     /// (e.g., two zpool ids on the same case after a hand-edit); the
     /// diagnoser keeps all of them in its accounting.
-    zpool_unhealthy: BTreeMap<ZpoolUuid, Vec<(CaseFactUuid, ZpoolHealth)>>,
+    zpool_unhealthy: BTreeMap<ZpoolUuid, Vec<(FactUuid, ZpoolHealth)>>,
 }
 
 pub(super) fn analyze(
@@ -325,7 +325,7 @@ mod tests {
         let mut facts = iddqd::IdOrdMap::new();
         facts
             .insert_unique(fm::case::Fact {
-                id: omicron_uuid_kinds::CaseFactUuid::new_v4(),
+                id: omicron_uuid_kinds::FactUuid::new_v4(),
                 created_sitrep_id: parent_sitrep_id,
                 payload: serde_json::to_value(&DiskFact::ZpoolUnhealthy {
                     zpool_id,
@@ -533,7 +533,7 @@ mod tests {
         let parent_sitrep_id = SitrepUuid::new_v4();
         let unreadable_case_id = omicron_uuid_kinds::CaseUuid::new_v4();
         let mut parent_cases = iddqd::IdOrdMap::new();
-        let unreadable_fact_id = omicron_uuid_kinds::CaseFactUuid::new_v4();
+        let unreadable_fact_id = omicron_uuid_kinds::FactUuid::new_v4();
         let unreadable_payload = serde_json::json!({
             "kind": "this_variant_does_not_exist",
             "mystery": "data",

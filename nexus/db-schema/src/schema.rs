@@ -3244,7 +3244,7 @@ table! {
 }
 
 table! {
-    fm_case_fact (sitrep_id, id) {
+    fm_fact (sitrep_id, id) {
         id -> Uuid,
         sitrep_id -> Uuid,
         case_id -> Uuid,
@@ -3269,8 +3269,8 @@ table! {
 
 allow_tables_to_appear_in_same_query!(fm_ereport_in_case, ereport);
 allow_tables_to_appear_in_same_query!(fm_sitrep, fm_case);
-allow_tables_to_appear_in_same_query!(fm_sitrep, fm_case_fact);
-allow_tables_to_appear_in_same_query!(fm_case, fm_case_fact);
+allow_tables_to_appear_in_same_query!(fm_sitrep, fm_fact);
+allow_tables_to_appear_in_same_query!(fm_case, fm_fact);
 
 table! {
     fm_alert_request (sitrep_id, id) {

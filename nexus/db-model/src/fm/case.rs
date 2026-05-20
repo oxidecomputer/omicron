@@ -9,10 +9,10 @@ use super::DiagnosisEngine;
 use super::SupportBundleRequest;
 use crate::DbTypedUuid;
 use crate::ereport;
-use nexus_db_schema::schema::{fm_case, fm_case_fact, fm_ereport_in_case};
+use nexus_db_schema::schema::{fm_case, fm_ereport_in_case, fm_fact};
 use nexus_types::fm;
 use omicron_uuid_kinds::{
-    CaseEreportKind, CaseFactKind, CaseKind, EreporterRestartKind, SitrepKind,
+    CaseEreportKind, CaseKind, EreporterRestartKind, FactKind, SitrepKind,
 };
 
 /// Metadata describing a fault management case.
@@ -77,12 +77,12 @@ impl CaseMetadata {
     }
 }
 
-/// Diesel row for the `fm_case_fact` table. See
+/// Diesel row for the `fm_fact` table. See
 /// [`nexus_types::fm::case::Fact`] for semantics.
 #[derive(Queryable, Insertable, Clone, Debug, Selectable)]
-#[diesel(table_name = fm_case_fact)]
+#[diesel(table_name = fm_fact)]
 pub struct Fact {
-    pub id: DbTypedUuid<CaseFactKind>,
+    pub id: DbTypedUuid<FactKind>,
     pub sitrep_id: DbTypedUuid<SitrepKind>,
     pub case_id: DbTypedUuid<CaseKind>,
     /// Sitrep in which this fact was first added. Preserved unchanged

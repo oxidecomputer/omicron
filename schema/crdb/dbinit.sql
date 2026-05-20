@@ -7651,7 +7651,7 @@ ON omicron.public.fm_case (sitrep_id);
 -- Per-engine "facts" attached to a case. A fact's payload is a JSONB blob
 -- owned by the case's diagnosis engine (see `fm_case.de`) and opaque to
 -- shared FM code.
-CREATE TABLE IF NOT EXISTS omicron.public.fm_case_fact (
+CREATE TABLE IF NOT EXISTS omicron.public.fm_fact (
     -- Stable UUID for this fact across sitreps.
     id UUID NOT NULL,
     -- Sitrep this row belongs to.
@@ -7672,8 +7672,8 @@ CREATE TABLE IF NOT EXISTS omicron.public.fm_case_fact (
 );
 
 CREATE INDEX IF NOT EXISTS
-    lookup_fm_case_facts_for_case
-ON omicron.public.fm_case_fact (sitrep_id, case_id);
+    lookup_fm_facts_for_case
+ON omicron.public.fm_fact (sitrep_id, case_id);
 
 CREATE TABLE IF NOT EXISTS omicron.public.fm_ereport_in_case (
     -- ID of this association. When an ereport is assigned to a case, that

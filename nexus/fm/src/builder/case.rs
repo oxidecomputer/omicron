@@ -9,8 +9,8 @@ use iddqd::id_ord_map::{self, IdOrdMap};
 use nexus_types::alert::AlertClass;
 use nexus_types::fm;
 use nexus_types::support_bundle::BundleDataSelection;
-use omicron_uuid_kinds::CaseFactUuid;
 use omicron_uuid_kinds::CaseUuid;
+use omicron_uuid_kinds::FactUuid;
 use omicron_uuid_kinds::SitrepUuid;
 use std::fmt::Debug;
 use std::sync::Arc;
@@ -229,7 +229,7 @@ impl CaseBuilder {
         &mut self,
         fact: &T,
         comment: impl ToString,
-    ) -> anyhow::Result<CaseFactUuid> {
+    ) -> anyhow::Result<FactUuid> {
         let id = loop {
             let id = self.rng.next_fact();
             if !self.case.facts.contains_key(&id) {
@@ -264,7 +264,7 @@ impl CaseBuilder {
 
     /// Remove a fact from this case. The fact will not be carried forward
     /// into the next sitrep.
-    pub fn remove_fact(&mut self, id: CaseFactUuid) {
+    pub fn remove_fact(&mut self, id: FactUuid) {
         if self.case.facts.remove(&id).is_some() {
             slog::info!(&self.log, "removed a fact"; "fact_id" => %id);
             self.report_log.entry("removed fact").kv("fact_id", id);

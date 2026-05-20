@@ -33,8 +33,8 @@ use nexus_db_lookup::DbConnection;
 use nexus_db_schema::schema::ereport::dsl as ereport_dsl;
 use nexus_db_schema::schema::fm_alert_request::dsl as alert_req_dsl;
 use nexus_db_schema::schema::fm_case::dsl as case_dsl;
-use nexus_db_schema::schema::fm_case_fact::dsl as case_fact_dsl;
 use nexus_db_schema::schema::fm_ereport_in_case::dsl as case_ereport_dsl;
+use nexus_db_schema::schema::fm_fact::dsl as fact_dsl;
 use nexus_db_schema::schema::fm_sitrep::dsl as sitrep_dsl;
 use nexus_db_schema::schema::fm_sitrep_history::dsl as history_dsl;
 use nexus_db_schema::schema::fm_support_bundle_request::dsl as support_bundle_req_dsl;
@@ -47,10 +47,10 @@ use omicron_common::api::external::ListResultVec;
 use omicron_uuid_kinds::AlertKind;
 use omicron_uuid_kinds::AlertUuid;
 use omicron_uuid_kinds::CaseEreportKind;
-use omicron_uuid_kinds::CaseFactKind;
-use omicron_uuid_kinds::CaseFactUuid;
 use omicron_uuid_kinds::CaseKind;
 use omicron_uuid_kinds::CaseUuid;
+use omicron_uuid_kinds::FactKind;
+use omicron_uuid_kinds::FactUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SitrepUuid;
 use omicron_uuid_kinds::SupportBundleKind;
@@ -124,7 +124,7 @@ sitrep_child_tables! {
     SupportBundleRequestDataSelectionEreports => { table: "fm_support_bundle_request_data_selection_ereports" },
     SupportBundleRequest => { table: "fm_support_bundle_request" },
     Case => { table: "fm_case" },
-    CaseFact => { table: "fm_case_fact" },
+    Fact => { table: "fm_fact" },
 }
 
 /// Per-child-table statistics from a single GC pass.
@@ -370,7 +370,7 @@ impl DataStore {
         let mut support_bundle_requests =
             self.support_bundle_requests_read_on_conn(id, conn).await?;
 
-        let mut case_facts = self.fm_case_facts_read_on_conn(id, conn).await?;
+        let mut case_facts = self.fm_facts_read_on_conn(id, conn).await?;
 
         // Next, load the case metadata entries and marry them to the sets of
         // ereports, alert requests, and support bundle requests for those
@@ -505,9 +505,9 @@ impl DataStore {
         Ok(by_case)
     }
 
-    /// Fetch all `fm_case_fact` rows belonging to cases in the given sitrep,
+    /// Fetch all `fm_fact` rows belonging to cases in the given sitrep,
     /// grouped by `case_id`.
-    async fn fm_case_facts_read_on_conn(
+    async fn fm_facts_read_on_conn(
         &self,
         id: SitrepUuid,
         conn: &async_bb8_diesel::Connection<DbConnection>,
@@ -515,15 +515,15 @@ impl DataStore {
         let mut by_case =
             HashMap::<CaseUuid, iddqd::IdOrdMap<fm::case::Fact>>::new();
 
-        let mut paginator: Paginator<DbTypedUuid<CaseFactKind>> =
+        let mut paginator: Paginator<DbTypedUuid<FactKind>> =
             Paginator::new(SQL_BATCH_SIZE, PaginationOrder::Descending);
         while let Some(p) = paginator.next() {
             let batch = paginated(
-                case_fact_dsl::fm_case_fact,
-                case_fact_dsl::id,
+                fact_dsl::fm_fact,
+                fact_dsl::id,
                 &p.current_pagparams(),
             )
-            .filter(case_fact_dsl::sitrep_id.eq(id.into_untyped_uuid()))
+            .filter(fact_dsl::sitrep_id.eq(id.into_untyped_uuid()))
             .select(model::fm::Fact::as_select())
             .load_async(conn)
             .await
@@ -535,7 +535,7 @@ impl DataStore {
             paginator = p.found_batch(&batch, &|f| f.id);
             for fact in batch {
                 let case_id: CaseUuid = fact.case_id.into();
-                let id: CaseFactUuid = fact.id.into();
+                let id: FactUuid = fact.id.into();
                 by_case
                     .entry(case_id)
                     .or_default()
@@ -867,7 +867,7 @@ impl DataStore {
         .await?;
 
         if !case_facts.is_empty() {
-            diesel::insert_into(case_fact_dsl::fm_case_fact)
+            diesel::insert_into(fact_dsl::fm_fact)
                 .values(case_facts)
                 .execute_async(&*conn)
                 .await
@@ -1218,7 +1218,7 @@ impl DataStore {
             alert_requests_deleted: usize,
             support_bundle_requests_deleted: usize,
             cases_deleted: usize,
-            case_facts_deleted: usize,
+            facts_deleted: usize,
         }
 
         let err = OptionalError::new();
@@ -1228,7 +1228,7 @@ impl DataStore {
             alert_requests_deleted,
             support_bundle_requests_deleted,
             cases_deleted,
-            case_facts_deleted,
+            facts_deleted,
         } = self
             // Sitrep deletion is transactional to prevent a sitrep from being
             // left in a partially-deleted state should the Nexus instance
@@ -1273,9 +1273,9 @@ impl DataStore {
                             .await?;
 
                     // Delete case facts.
-                    let case_facts_deleted = diesel::delete(
-                        case_fact_dsl::fm_case_fact.filter(
-                            case_fact_dsl::sitrep_id.eq_any(ids.clone()),
+                    let facts_deleted = diesel::delete(
+                        fact_dsl::fm_fact.filter(
+                            fact_dsl::sitrep_id.eq_any(ids.clone()),
                         ),
                     )
                     .execute_async(&conn)
@@ -1303,7 +1303,7 @@ impl DataStore {
                         alert_requests_deleted,
                         support_bundle_requests_deleted,
                         case_ereports_deleted,
-                        case_facts_deleted,
+                        facts_deleted,
                     })
                 }
             })
@@ -1322,7 +1322,7 @@ impl DataStore {
             "case_ereports_deleted" => case_ereports_deleted,
             "alert_requests_deleted" => alert_requests_deleted,
             "support_bundle_requests_deleted" => support_bundle_requests_deleted,
-            "case_facts_deleted" => case_facts_deleted,
+            "facts_deleted" => facts_deleted,
         );
 
         Ok(sitreps_deleted)
@@ -2339,7 +2339,7 @@ mod tests {
             let mut facts = iddqd::IdOrdMap::new();
             facts
                 .insert_unique(fm::case::Fact {
-                    id: CaseFactUuid::new_v4(),
+                    id: FactUuid::new_v4(),
                     created_sitrep_id: sitrep_id,
                     payload: serde_json::json!({
                         "kind": "representative_fact",

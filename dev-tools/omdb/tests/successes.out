@@ -761,7 +761,7 @@ task: "fm_sitrep_gc"
       batches:                                                                   1
     orphaned fm_case rows deleted:                                               0
       batches:                                                                   1
-    orphaned fm_case_fact rows deleted:                                          0
+    orphaned fm_fact rows deleted:                                               0
       batches:                                                                   1
     orphaned fm_ereport_in_case rows deleted:                                    0
       batches:                                                                   1
@@ -1457,7 +1457,7 @@ task: "fm_sitrep_gc"
       batches:                                                                   1
     orphaned fm_case rows deleted:                                               0
       batches:                                                                   1
-    orphaned fm_case_fact rows deleted:                                          0
+    orphaned fm_fact rows deleted:                                               0
       batches:                                                                   1
     orphaned fm_ereport_in_case rows deleted:                                    0
       batches:                                                                   1

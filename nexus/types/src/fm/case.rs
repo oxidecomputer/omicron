@@ -11,7 +11,7 @@ use crate::support_bundle::BundleDataSelection;
 use anyhow::Context;
 use iddqd::{IdOrdItem, IdOrdMap};
 use omicron_uuid_kinds::{
-    AlertUuid, CaseEreportUuid, CaseFactUuid, CaseUuid, SitrepUuid,
+    AlertUuid, CaseEreportUuid, CaseUuid, FactUuid, SitrepUuid,
     SupportBundleUuid,
 };
 use serde::{Deserialize, Serialize};
@@ -183,7 +183,7 @@ impl CaseEreport {
 /// and compare typed enum values — never the raw payload.
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
 pub struct Fact {
-    pub id: CaseFactUuid,
+    pub id: FactUuid,
     /// The sitrep in which this fact was first added. Preserved
     /// unchanged when the fact is carried forward into a child sitrep.
     /// Debug-only.
@@ -193,7 +193,7 @@ pub struct Fact {
 }
 
 impl IdOrdItem for Fact {
-    type Key<'a> = &'a CaseFactUuid;
+    type Key<'a> = &'a FactUuid;
     fn key(&self) -> Self::Key<'_> {
         &self.id
     }
@@ -486,8 +486,8 @@ mod tests {
     use crate::support_bundle::BundleDataSelection;
     use ereport_types::{Ena, EreportId};
     use omicron_uuid_kinds::{
-        AlertUuid, CaseFactUuid, CaseUuid, EreporterRestartUuid,
-        OmicronZoneUuid, SitrepUuid, SupportBundleUuid,
+        AlertUuid, CaseUuid, EreporterRestartUuid, FactUuid, OmicronZoneUuid,
+        SitrepUuid, SupportBundleUuid,
     };
     use std::str::FromStr;
     use std::sync::Arc;
@@ -626,10 +626,8 @@ mod tests {
         let mut facts = IdOrdMap::new();
         facts
             .insert_unique(Fact {
-                id: CaseFactUuid::from_str(
-                    "f00f00f0-0f00-4f00-8f00-f00f00f00f00",
-                )
-                .unwrap(),
+                id: FactUuid::from_str("f00f00f0-0f00-4f00-8f00-f00f00f00f00")
+                    .unwrap(),
                 created_sitrep_id,
                 payload: serde_json::json!({
                     "kind": "FactFunLevel",
