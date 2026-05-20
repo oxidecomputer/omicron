@@ -267,10 +267,7 @@ impl KV for UpdateStatusProblems {
         if !enabled_smf_services_not_online_by_sled.is_empty() {
             serializer.emit_arguments(
                 "enabled_smf_services_not_online_by_sled".into(),
-                &format_args!(
-                    "{:?}",
-                    enabled_smf_services_not_online_by_sled
-                ),
+                &format_args!("{:?}", enabled_smf_services_not_online_by_sled),
             )?;
         }
         Ok(())
