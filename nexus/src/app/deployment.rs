@@ -541,7 +541,7 @@ pub(super) enum BlueprintTargetReleaseStatus {
 
 impl BlueprintTargetReleaseStatus {
     // Check the blueprint against the current target release version, returning
-    // the first mismatch found or `AllComponentsOnCurrentTargetRelease` if none.
+    // the first mismatch found or `AllComponentsOnCurrentTargetRelease` if none
     pub(super) fn new(
         current_blueprint: &Blueprint,
         current_target_version: &str,
@@ -550,15 +550,10 @@ impl BlueprintTargetReleaseStatus {
         for (sled_id, sled_config) in current_blueprint.active_sled_configs() {
             match SledUpdateStatus::new(sled_config, current_target_version) {
                 SledUpdateStatus::HasUnresolvedMupdate(how) => {
-                    return BlueprintTargetReleaseStatus::WaitingForMupdateToBeCleared {
-                    how,
-                    sled_id,
-                };
+                    return Self::WaitingForMupdateToBeCleared { how, sled_id };
                 }
                 SledUpdateStatus::PreviousUpdatePending => {
-                    return BlueprintTargetReleaseStatus::PreviousUpdateInProgress(
-                    sled_id,
-                );
+                    return Self::PreviousUpdateInProgress(sled_id);
                 }
                 SledUpdateStatus::RunningCurrentVersion => {
                     // This sled is okay; move on to the next.
@@ -569,11 +564,11 @@ impl BlueprintTargetReleaseStatus {
         // Now check zone configs.
         for (sled_id, zone_config) in current_blueprint.in_service_zones() {
             match &zone_config.image_source {
-                // When a zone's image source is the install dataset, the sled has
-                // never been updated by reconfigurator and is still in the initial
-                // state left by the manufacturing mupdate.
+                // When a zone's image source is the install dataset, the sled
+                // has never been updated by reconfigurator and is still in the
+                // initial state left by the manufacturing mupdate.
                 BlueprintZoneImageSource::InstallDataset => {
-                    return BlueprintTargetReleaseStatus::WaitingForMupdateToBeCleared {
+                    return Self::WaitingForMupdateToBeCleared {
                         how: SledMupdateDetectedHow::VersionIsInstallDataset,
                         sled_id,
                     };
@@ -582,7 +577,7 @@ impl BlueprintTargetReleaseStatus {
                     match version {
                         BlueprintArtifactVersion::Available { version } => {
                             if version.as_str() != current_target_version {
-                                return BlueprintTargetReleaseStatus::PreviousUpdateInProgress(sled_id);
+                                return Self::PreviousUpdateInProgress(sled_id);
                             }
                         }
                         // This shouldn't happen; it means we have an artifact
@@ -593,17 +588,16 @@ impl BlueprintTargetReleaseStatus {
                         //
                         // For now, treat this as "not the current version".
                         BlueprintArtifactVersion::Unknown => {
-                            return BlueprintTargetReleaseStatus::PreviousUpdateInProgress(
-                            sled_id,
-                        );
+                            return Self::PreviousUpdateInProgress(sled_id);
                         }
                     }
                 }
             }
         }
 
-        // All the sled and zone configs match the current target version; it's okay
-        // to proceed with an update. We don't attempt to check Hubris components:
+        // All the sled and zone configs match the current target version; it's
+        // okay to proceed with an update. We don't attempt to check Hubris
+        // components:
         //
         // * They don't have the same API versioning restrictions that require
         //   strict single-stepped upgrades.

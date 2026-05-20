@@ -221,20 +221,29 @@ impl KV for UpdateStatusProblems {
         _record: &Record,
         serializer: &mut dyn Serializer,
     ) -> slog::Result {
-        if !self.stuck_sagas.is_empty() {
+        let Self {
+            stuck_sagas,
+            stuck_sagas_error_message,
+            stuck_update_last_blueprint_created_time,
+            stale_inventory_last_collection_time_done,
+            unhealthy_zpools_by_sled,
+            enabled_smf_services_not_online_by_sled,
+        } = self;
+
+        if !stuck_sagas.is_empty() {
             serializer.emit_arguments(
                 "stuck_sagas".into(),
-                &format_args!("{:?}", self.stuck_sagas),
+                &format_args!("{:?}", stuck_sagas),
             )?;
         }
-        if let Some(error) = &self.stuck_sagas_error_message {
+        if let Some(error) = &stuck_sagas_error_message {
             serializer.emit_arguments(
                 "stuck_sagas_error_message".into(),
                 &format_args!("{error}"),
             )?;
         }
         if let Some(time_last_blueprint_created) =
-            &self.stuck_update_last_blueprint_created_time
+            &stuck_update_last_blueprint_created_time
         {
             serializer.emit_arguments(
                 "stuck_update_last_blueprint_created_time".into(),
@@ -242,25 +251,25 @@ impl KV for UpdateStatusProblems {
             )?;
         }
         if let Some(collection_time_done) =
-            &self.stale_inventory_last_collection_time_done
+            &stale_inventory_last_collection_time_done
         {
             serializer.emit_arguments(
                 "stale_inventory_last_collection_time_done".into(),
                 &format_args!("{collection_time_done}"),
             )?;
         }
-        if !self.unhealthy_zpools_by_sled.is_empty() {
+        if !unhealthy_zpools_by_sled.is_empty() {
             serializer.emit_arguments(
                 "unhealthy_zpools_by_sled".into(),
-                &format_args!("{:?}", self.unhealthy_zpools_by_sled),
+                &format_args!("{:?}", unhealthy_zpools_by_sled),
             )?;
         }
-        if !self.enabled_smf_services_not_online_by_sled.is_empty() {
+        if !enabled_smf_services_not_online_by_sled.is_empty() {
             serializer.emit_arguments(
                 "enabled_smf_services_not_online_by_sled".into(),
                 &format_args!(
                     "{:?}",
-                    self.enabled_smf_services_not_online_by_sled
+                    enabled_smf_services_not_online_by_sled
                 ),
             )?;
         }
@@ -296,10 +305,11 @@ fn is_update_in_progress(
             &v.to_string(),
         ) {
             BlueprintTargetReleaseStatus::PreviousUpdateInProgress(_) => true,
-            BlueprintTargetReleaseStatus::AllComponentsOnCurrentTargetRelease
             // We don't consider a Mupdate as an "update in-progress" because
             // recofigurator is not driving this update.
-            | BlueprintTargetReleaseStatus::WaitingForMupdateToBeCleared{ how: _, sled_id: _ } => false,
+            BlueprintTargetReleaseStatus::WaitingForMupdateToBeCleared { .. }
+            | BlueprintTargetReleaseStatus::AllComponentsOnCurrentTargetRelease
+                => false,
         },
         // When `current_target_version` is `None` no target release has ever
         // been set. We can safely assume no update is in progress.
