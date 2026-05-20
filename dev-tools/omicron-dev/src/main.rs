@@ -677,6 +677,13 @@ impl RunMultipleArgs {
                     "omicron-dev: mgd bgp-dispatcher:     tcp {} ({:?})",
                     mgd.bgp_dispatcher_addr, location,
                 );
+
+                if let Some(dir) = &mgd.data_dir {
+                    println!(
+                        "omicron-dev: mgd tmp dir:            {} ({:?})",
+                        dir.display(), location,
+                    );
+                }
             }
             println!(
                 "omicron-dev: silo name:              {}",
@@ -697,7 +704,7 @@ impl RunMultipleArgs {
             setup_bgp_peering(&log, &peer_routers, &contexts)
                 .await
                 .context("setting up BGP peering")?;
-            println!("omicron-dev: BGP peering configured.");
+            println!("\nomicron-dev: BGP peering configured.\n");
         }
 
         // Wait for a signal.
