@@ -30,13 +30,22 @@ use dpd_client::{Client as DpdClient, types as DpdTypes};
 use futures::FutureExt;
 use futures::future::BoxFuture;
 use mg_admin_client::types::{
-    AddStaticRoute4Request, AddStaticRoute6Request, ApplyRequest,
-    BestpathFanoutRequest, BgpPeerConfig, CheckerSource,
-    DeleteStaticRoute4Request, DeleteStaticRoute6Request,
+    ApplyRequest, BgpPeerConfig, UnnumberedBgpPeerConfig,
+};
+use mg_api_types::bgp::config::{
+    CheckerSource, Ipv4UnicastConfig, Ipv6UnicastConfig, JitterRange,
+    ShaperSource,
+};
+use mg_api_types::bgp::policy::{
     ImportExportPolicy4 as MgImportExportPolicy4,
-    ImportExportPolicy6 as MgImportExportPolicy6, Ipv4UnicastConfig,
-    Ipv6UnicastConfig, JitterRange, ShaperSource, StaticRoute4,
-    StaticRoute4List, StaticRoute6, StaticRoute6List, UnnumberedBgpPeerConfig,
+    ImportExportPolicy6 as MgImportExportPolicy6,
+};
+use mg_api_types::rdb::prefix::{Prefix, Prefix4, Prefix6};
+use mg_api_types::rib::BestpathFanoutRequest;
+use mg_api_types::static_routes::{
+    AddStaticRoute4Request, AddStaticRoute6Request, DeleteStaticRoute4Request,
+    DeleteStaticRoute6Request, StaticRoute4, StaticRoute4List, StaticRoute6,
+    StaticRoute6List,
 };
 use nexus_db_queries::{
     context::OpContext,
@@ -49,7 +58,6 @@ use omicron_common::{
     address::{Ipv6Subnet, get_sled_address},
     api::external::{DataPageParams, Name},
 };
-use rdb_types::{Prefix, Prefix4, Prefix6};
 use serde_json::json;
 use sled_agent_client::types::HostPortConfig;
 use sled_agent_types::early_networking::BgpConfig as SledBgpConfig;
@@ -998,7 +1006,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                         "switch_slot" => ?switch_slot,
                         "config" => ?config,
                     );
-                    if let Err(e) = client.bgp_apply_v2(config).await {
+                    if let Err(e) = client.bgp_apply(config).await {
                         error!(log, "error while applying bgp configuration"; "error" => ?e);
                     }
 

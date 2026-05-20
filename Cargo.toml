@@ -611,8 +611,8 @@ ntp-admin-client = { path = "clients/ntp-admin-client" }
 ntp-admin-v1-client = { path = "clients/ntp-admin-v1-client" }
 ntp-admin-types = { path = "ntp-admin/types" }
 ntp-admin-types-versions = { path = "ntp-admin/types/versions" }
-mg-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "7696ee48d5ee29a917dea459e281fe2e8ff20513" }
-ddm-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "7696ee48d5ee29a917dea459e281fe2e8ff20513" }
+mg-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "ad71a11cb1f29478f350da15977277c0aa3e7f84" }
+ddm-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "ad71a11cb1f29478f350da15977277c0aa3e7f84" }
 multimap = "0.10.1"
 nexus-auth = { path = "nexus/auth" }
 nexus-background-task-interface = { path = "nexus/background-task-interface" }
@@ -749,7 +749,7 @@ rats-corim = { git = "https://github.com/oxidecomputer/rats-corim.git", rev = "f
 raw-cpuid = { git = "https://github.com/oxidecomputer/rust-cpuid.git", rev = "a4cf01df76f35430ff5d39dc2fe470bcb953503b" }
 rayon = "1.10"
 rcgen = "0.12.1"
-rdb-types = { git = "https://github.com/oxidecomputer/maghemite", rev = "7696ee48d5ee29a917dea459e281fe2e8ff20513" }
+mg-api-types = { git = "https://github.com/oxidecomputer/maghemite", rev = "ad71a11cb1f29478f350da15977277c0aa3e7f84" }
 reconfigurator-cli = { path = "dev-tools/reconfigurator-cli" }
 reedline = "0.40.0"
 ref-cast = "1.0"
@@ -1129,3 +1129,10 @@ path = "workspace-hack"
 [patch."https://github.com/oxidecomputer/omicron"]
 omicron-uuid-kinds = { path = "uuid-kinds" }
 omicron-common = { path = "common" }
+oxlog = { path = "dev-tools/oxlog" }
+# Collapse the git copy of workspace-hack into the path copy. Without this,
+# maghemite (which pulls omicron at branch=main for oximeter / oximeter-producer
+# / gateway-client) gets its own feature-thin workspace-hack, and the git copies
+# of omicron crates it transitively compiles (e.g. oximeter-types-versions) fail
+# to link num / float-ord / regex / thiserror features that the path build has.
+omicron-workspace-hack = { path = "workspace-hack" }
