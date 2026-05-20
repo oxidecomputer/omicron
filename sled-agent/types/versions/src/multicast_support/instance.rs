@@ -5,7 +5,6 @@
 use std::net::{IpAddr, SocketAddr};
 
 use omicron_common::api::external::Hostname;
-use omicron_common::api::internal::nexus::VmmRuntimeState;
 use omicron_common::api::internal::shared::DhcpConfig;
 use omicron_uuid_kinds::InstanceUuid;
 use schemars::JsonSchema;
@@ -15,6 +14,7 @@ use uuid::Uuid;
 use crate::v1;
 use crate::v1::instance::InstanceMetadata;
 use crate::v1::instance::ResolvedVpcFirewallRule;
+use crate::v1::instance::VmmRuntimeState;
 use crate::v1::instance::VmmSpec;
 use crate::v1::inventory::NetworkInterface;
 use crate::v1::inventory::SourceNatConfig;

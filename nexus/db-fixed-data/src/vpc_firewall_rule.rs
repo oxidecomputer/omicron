@@ -35,43 +35,6 @@ pub static DNS_VPC_FW_RULE: LazyLock<VpcFirewallRuleUpdate> =
     });
 
 /// The name for the built-in VPC firewall rule for Nexus.
-pub const NEXUS_VPC_FW_RULE_NAME: &str = "nexus-inbound";
-
-/// Built-in VPC firewall rule for Nexus.
-///
-/// Note that we currently rely on this being exactly one rule to implement the
-/// Nexus allowlist. See `nexus/networking/src/firewall_rules.rs` for more
-/// details.
-pub static NEXUS_VPC_FW_RULE: LazyLock<VpcFirewallRuleUpdate> =
-    LazyLock::new(|| VpcFirewallRuleUpdate {
-        name: NEXUS_VPC_FW_RULE_NAME.parse().unwrap(),
-        description:
-            "allow inbound connections for console & api from anywhere"
-                .to_string(),
-        status: VpcFirewallRuleStatus::Enabled,
-        direction: VpcFirewallRuleDirection::Inbound,
-        targets: vec![VpcFirewallRuleTarget::Subnet(
-            super::vpc_subnet::NEXUS_VPC_SUBNET.name().clone(),
-        )],
-        filters: VpcFirewallRuleFilter {
-            hosts: None,
-            protocols: Some(vec![VpcFirewallRuleProtocol::Tcp]),
-            ports: Some(vec![
-                L4PortRange {
-                    first: 80.try_into().unwrap(),
-                    last: 80.try_into().unwrap(),
-                },
-                L4PortRange {
-                    first: 443.try_into().unwrap(),
-                    last: 443.try_into().unwrap(),
-                },
-            ]),
-        },
-        action: VpcFirewallRuleAction::Allow,
-        priority: VpcFirewallRulePriority(65534),
-    });
-
-/// The name for the built-in VPC firewall rule for Nexus.
 pub const NEXUS_ICMP_FW_RULE_NAME: &str = "nexus-icmp";
 
 /// Built-in VPC firewall rule for Nexus.

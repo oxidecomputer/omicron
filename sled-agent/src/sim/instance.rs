@@ -14,7 +14,6 @@ use nexus_client;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::Generation;
 use omicron_common::api::external::ResourceType;
-use omicron_common::api::internal::nexus::{SledVmmState, VmmState};
 use omicron_uuid_kinds::{GenericUuid, PropolisUuid};
 use propolis_client::types::{
     InstanceMigrateStatusResponse as PropolisMigrateResponse,
@@ -22,6 +21,7 @@ use propolis_client::types::{
     InstanceState as PropolisInstanceState, InstanceStateMonitorResponse,
 };
 use sled_agent_types::instance::VmmStateRequested;
+use sled_agent_types::instance::{SledVmmState, VmmState};
 use std::collections::VecDeque;
 use std::sync::Arc;
 use std::sync::Mutex;

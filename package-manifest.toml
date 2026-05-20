@@ -605,8 +605,8 @@ source.type = "prebuilt"
 source.repo = "management-gateway-service"
 # In general, this commit should match the pinned revision of `gateway-sp-comms`
 # in `Cargo.toml`.
-source.commit = "ea2f39ccdea124b5affcad0ca17bc5dacf65823a"
-source.sha256 = "922a5eb2d800e7248f8a8f2a34ce855451e46877022e0305dac2f5f956456573"
+source.commit = "745a508cb97b7ca9b4c10ec9592c980eb769b10d"
+source.sha256 = "24368fb049c3bcdda56c5e4b1f18e2371aa5699ac73f161e12d1ebd842293b71"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -765,8 +765,8 @@ only_for_targets.image = "standard"
 # the other `source.*` keys.
 source.type = "prebuilt"
 source.repo = "dendrite"
-source.commit = "44a949c9bedf4fcd4d280337fa1965b4293c88d1"
-source.sha256 = "79898e25a079b8a977e3bf8dbd84b0621376afdc2731dd7d0fcd450f8b022c72"
+source.commit = "187aee7de2e50f907099ea06c04aac96c3455665"
+source.sha256 = "2a72f23b76c7e89c9e26b5e9cc646a85120b75972c5dc9058bc6377f834d5d34"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -792,8 +792,8 @@ only_for_targets.image = "standard"
 # the other `source.*` keys.
 source.type = "prebuilt"
 source.repo = "dendrite"
-source.commit = "44a949c9bedf4fcd4d280337fa1965b4293c88d1"
-source.sha256 = "31c7d9ce4fef2ec8f920cf38f70cce4504946551a6374534c9d19dddc5f3cc7a"
+source.commit = "187aee7de2e50f907099ea06c04aac96c3455665"
+source.sha256 = "b8e7e20f1aefc7e2447b89525d6177452c72bbce99d21319cade5a2c12e7a038"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -812,8 +812,8 @@ only_for_targets.image = "standard"
 # the other `source.*` keys.
 source.type = "prebuilt"
 source.repo = "dendrite"
-source.commit = "44a949c9bedf4fcd4d280337fa1965b4293c88d1"
-source.sha256 = "33d9099837fa4f3647f62de8ee9bfbb2ab365a9f1681700ad3438dd4ce50bf03"
+source.commit = "187aee7de2e50f907099ea06c04aac96c3455665"
+source.sha256 = "657e4f9f6bda938f5f12685076066554089ee4774c92b510f888099966c32a8e"
 output.type = "zone"
 output.intermediate_only = true
 

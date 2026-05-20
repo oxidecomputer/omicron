@@ -6,6 +6,8 @@
 
 use super::DbFetchOptions;
 use super::check_limit;
+use crate::Omdb;
+use crate::helpers::CONNECTION_OPTIONS_HEADING;
 use crate::helpers::const_max_len;
 use crate::helpers::datetime_opt_rfc3339_concise;
 use crate::helpers::datetime_rfc3339_concise;
@@ -23,6 +25,7 @@ use clap::Subcommand;
 use diesel::AggregateExpressionMethods;
 use diesel::dsl::{count, min};
 use diesel::prelude::*;
+use internal_dns_types::names::ServiceName;
 use nexus_db_lookup::DbConnection;
 use nexus_db_model::ereport as model;
 use nexus_db_model::ereport::DbEna;
@@ -55,6 +58,23 @@ enum Commands {
 
     /// List ereport reporters
     Reporters(ReportersArgs),
+
+    /// Summarize ereports by class, marking which classes a diagnosis engine
+    /// in Nexus consumes (fetched from Nexus's lockstep API; falls back to
+    /// `?` if Nexus is unreachable).
+    Classes(ClassesArgs),
+}
+
+#[derive(Debug, Args, Clone)]
+struct ClassesArgs {
+    /// URL of the Nexus lockstep API. If not provided, looks up an instance
+    /// in internal DNS.
+    #[clap(
+        long,
+        env = "OMDB_NEXUS_URL",
+        help_heading = CONNECTION_OPTIONS_HEADING,
+    )]
+    nexus_internal_url: Option<String>,
 }
 
 #[derive(Debug, Args, Clone)]
@@ -86,6 +106,19 @@ struct ListArgs {
     /// Include only ereports collected after this timestamp
     #[clap(long, short)]
     after: Option<DateTime<Utc>>,
+
+    /// Filter ereports based on whether or not their database records have
+    /// been marked as "seen" (included in a committed sitrep).
+    ///
+    /// Note that ereports which have not been marked in the database *may*
+    /// still have been included in a sitrep. Marking of ereport database
+    /// records occurs in the background, and may not be up to date with the
+    /// latest sitrep. If an ereport has been marked as seen, it has
+    /// *definitely* been included in a committed sitrep, but if an ereport
+    /// has not been marked, it *may or may not* have been included in a
+    /// committed sitrep.
+    #[clap(long = "seen", short = 'm', value_enum, default_value_t)]
+    seen: Seen,
 }
 
 #[derive(Debug, Args, Clone)]
@@ -99,7 +132,24 @@ struct ReportersArgs {
     serial: Option<String>,
 }
 
+#[derive(
+    Copy, Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord, clap::ValueEnum,
+)]
+enum Seen {
+    /// Include all ereports, regardless of whether or not they have been
+    /// marked.
+    #[default]
+    All,
+    /// Include only ereports whose database records have been marked as seen.
+    Marked,
+    /// Include only ereports whose database records have NOT been marked as
+    /// seen.
+    Unmarked,
+}
+
 pub(super) async fn cmd_db_ereport(
+    omdb: &Omdb,
+    log: &slog::Logger,
     datastore: &DataStore,
     fetch_opts: &DbFetchOptions,
     args: &EreportArgs,
@@ -114,6 +164,10 @@ pub(super) async fn cmd_db_ereport(
 
         Commands::Reporters(ref args) => {
             cmd_db_ereporters(datastore, args).await
+        }
+
+        Commands::Classes(ref args) => {
+            cmd_db_ereport_classes(omdb, log, datastore, args).await
         }
     }
 }
@@ -138,6 +192,22 @@ async fn cmd_db_ereport_list(
         serial: Option<&'report str>,
         #[tabled(display_with = "display_option_blank", rename = "P/N")]
         part_number: Option<&'report str>,
+
+        /// The underlying ereport record. This is not displayed when
+        /// formatting, but is retained so that the `EreportRow` can be
+        /// converted into an `EreportRowWithMark` if the markedness is needed.
+        #[tabled(skip)]
+        ereport: &'report db::model::Ereport,
+    }
+
+    /// Adds a `MARK` column to `EreportRow` to indicate whether or not the
+    /// ereport has been marked as seen in the database.
+    #[derive(Tabled)]
+    #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+    struct EreportRowWithMark<'report> {
+        mark: &'static str,
+        #[tabled(inline)]
+        ereport: EreportRow<'report>,
     }
 
     impl<'report> From<&'report db::model::Ereport> for EreportRow<'report> {
@@ -169,7 +239,24 @@ async fn cmd_db_ereport_list(
                 source,
                 serial: serial_number.as_deref(),
                 part_number: part_number.as_deref(),
+                ereport,
             }
+        }
+    }
+
+    impl<'report> From<EreportRow<'report>> for EreportRowWithMark<'report> {
+        fn from(row: EreportRow<'report>) -> Self {
+            // The column is named "MARK" and its values are either "seen" or
+            // "", because I wanted to make it as obvious as possible that an
+            // unmarked ereport may still have been seen in a sitrep. The more
+            // obvious option of a "SEEN" column with values "yes" and "no" is
+            // potentially misleading, as "no" would suggest the ereport has not
+            // been seen, when actually it has not been *marked*. So, the column
+            // is named "MARK". But, I wanted to include the word "seen", so
+            // marked-as-seen ereports have the value "seen".
+            let mark =
+                if row.ereport.marked_seen_in.is_some() { "seen" } else { "" };
+            Self { mark, ereport: row }
         }
     }
 
@@ -213,6 +300,12 @@ async fn cmd_db_ereport_list(
         query = query.filter(dsl::time_deleted.is_null());
     }
 
+    match args.seen {
+        Seen::Marked => query = query.filter(dsl::marked_seen_in.is_not_null()),
+        Seen::Unmarked => query = query.filter(dsl::marked_seen_in.is_null()),
+        Seen::All => {}
+    }
+
     let ereports = query.load_async(&*conn).await.with_context(ctx)?;
     check_limit(&ereports, fetch_opts.fetch_limit, ctx);
 
@@ -229,7 +322,13 @@ async fn cmd_db_ereport_list(
         )
     });
 
-    let mut table = tabled::Table::new(rows);
+    let mut table = if args.seen == Seen::All {
+        // If both marked and unmarked ereports were included, add the "mark"
+        // column.
+        tabled::Table::new(rows.into_iter().map(EreportRowWithMark::from))
+    } else {
+        tabled::Table::new(rows)
+    };
     table
         .with(tabled::settings::Style::empty())
         .with(tabled::settings::Padding::new(0, 1, 0, 0));
@@ -465,4 +564,198 @@ async fn cmd_db_ereporters(
     println!("{table}");
 
     Ok(())
+}
+
+async fn cmd_db_ereport_classes(
+    omdb: &Omdb,
+    log: &slog::Logger,
+    datastore: &DataStore,
+    args: &ClassesArgs,
+) -> anyhow::Result<()> {
+    use std::collections::BTreeMap;
+    use std::collections::BTreeSet;
+
+    // Try to fetch the known list from Nexus. If anything fails, fall back
+    // to "?" for every row — DB totals are still useful even without Nexus.
+    let known_from_nexus =
+        fetch_known_classes_from_nexus(omdb, log, args).await;
+    let known: BTreeSet<String> = match &known_from_nexus {
+        Ok(list) => list.iter().cloned().collect(),
+        Err(err) => {
+            eprintln!(
+                "warning: could not fetch known ereport classes from Nexus: \
+                 {err:#}"
+            );
+            BTreeSet::new()
+        }
+    };
+    let nexus_reachable = known_from_nexus.is_ok();
+
+    let conn = datastore.pool_connection_for_tests().await?;
+
+    // Both queries are backed by partial indexes (`lookup_ereports_by_class`
+    // and `lookup_unmarked_ereports_by_class`) and do not full-table-scan;
+    // see explain tests in nexus-db-queries.
+    let totals: Vec<(Option<String>, i64)> =
+        DataStore::ereport_class_totals_query()
+            .load_async(&*conn)
+            .await
+            .context("loading per-class totals")?;
+    let unmarkeds: Vec<(Option<String>, i64)> =
+        DataStore::ereport_unmarked_class_totals_query()
+            .load_async(&*conn)
+            .await
+            .context("loading per-class unmarked counts")?;
+
+    // Merge by class. Key: Option<String> so NULL gets its own bucket.
+    #[derive(Default)]
+    struct ClassCounts {
+        total: i64,
+        unmarked: i64,
+    }
+    let mut by_class: BTreeMap<Option<String>, ClassCounts> = BTreeMap::new();
+    for (class, total) in totals {
+        by_class.entry(class).or_default().total = total;
+    }
+    for (class, unmarked) in unmarkeds {
+        by_class.entry(class).or_default().unmarked = unmarked;
+    }
+
+    // Whether the deployed Nexus has a diagnosis engine that consumes a
+    // given ereport class.
+    #[derive(PartialEq, Eq)]
+    enum KnownToNexus {
+        /// Class has rows in the DB AND is in the list returned by Nexus.
+        Yes,
+        /// Class has rows in the DB but is NOT in the list returned by Nexus.
+        No,
+        /// Class is NULL — strict-match policy means the loader never
+        /// surfaces these to FM analysis.
+        NullClass,
+        /// Could not reach Nexus — known/unknown is undetermined.
+        Unknown,
+    }
+    impl std::fmt::Display for KnownToNexus {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.write_str(match self {
+                Self::Yes => "yes",
+                Self::No => "no",
+                Self::NullClass => "-",
+                Self::Unknown => "?",
+            })
+        }
+    }
+
+    #[derive(Tabled)]
+    #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+    struct ClassRow<'a> {
+        known: KnownToNexus,
+        total: i64,
+        unmarked: i64,
+        /// Variable-length, so it goes last: wrapping on a narrow terminal
+        /// won't disrupt the fixed-width numeric columns.
+        class: &'a str,
+    }
+
+    let mut rows: Vec<ClassRow<'_>> = by_class
+        .iter()
+        .map(|(class, ClassCounts { total, unmarked })| {
+            let (known_marker, class_str): (KnownToNexus, &str) = match class {
+                None => (KnownToNexus::NullClass, "(NULL)"),
+                Some(c) if !nexus_reachable => {
+                    (KnownToNexus::Unknown, c.as_str())
+                }
+                Some(c) => {
+                    let k = if known.contains(c.as_str()) {
+                        KnownToNexus::Yes
+                    } else {
+                        KnownToNexus::No
+                    };
+                    (k, c.as_str())
+                }
+            };
+            ClassRow {
+                known: known_marker,
+                total: *total,
+                unmarked: *unmarked,
+                class: class_str,
+            }
+        })
+        .collect();
+
+    // Sort: unknown-but-present first (highest unmarked), then known, then
+    // undetermined, then NULL.
+    rows.sort_by(|a, b| {
+        let priority = |row: &ClassRow<'_>| match row.known {
+            KnownToNexus::No => 0,
+            KnownToNexus::Yes => 1,
+            KnownToNexus::Unknown => 2,
+            KnownToNexus::NullClass => 3,
+        };
+        priority(a)
+            .cmp(&priority(b))
+            .then_with(|| b.unmarked.cmp(&a.unmarked))
+            .then_with(|| a.class.cmp(b.class))
+    });
+
+    if nexus_reachable {
+        println!(
+            "note: KNOWN reflects which classes the currently-deployed Nexus \
+             knows how\nto consume.\n"
+        );
+    } else {
+        println!(
+            "note: could not reach Nexus to determine known ereport classes.\n"
+        );
+    }
+
+    let mut table = tabled::Table::new(&rows);
+    table
+        .with(tabled::settings::Style::empty())
+        .with(tabled::settings::Padding::new(0, 1, 0, 0));
+    println!("{table}");
+
+    // Footer: classes Nexus knows about but with no rows in the database.
+    if nexus_reachable {
+        let seen_known: BTreeSet<&str> = rows
+            .iter()
+            .filter(|r| r.known == KnownToNexus::Yes)
+            .map(|r| r.class)
+            .collect();
+        let absent: Vec<&String> =
+            known.iter().filter(|c| !seen_known.contains(c.as_str())).collect();
+        if !absent.is_empty() {
+            println!(
+                "\nClasses Nexus knows about but with no rows in the database:"
+            );
+            for c in absent {
+                println!("  {c}");
+            }
+        }
+    }
+
+    Ok(())
+}
+
+async fn fetch_known_classes_from_nexus(
+    omdb: &Omdb,
+    log: &slog::Logger,
+    args: &ClassesArgs,
+) -> anyhow::Result<Vec<String>> {
+    let nexus_url = match &args.nexus_internal_url {
+        Some(url) => url.clone(),
+        None => {
+            let addr = omdb
+                .dns_lookup_one(log.clone(), ServiceName::NexusLockstep)
+                .await
+                .context("resolving Nexus lockstep service via internal DNS")?;
+            format!("http://{addr}")
+        }
+    };
+    let client = nexus_lockstep_client::Client::new(&nexus_url, log.clone());
+    let resp = client
+        .fm_known_ereport_classes_list()
+        .await
+        .context("calling Nexus fm_known_ereport_classes_list")?;
+    Ok(resp.into_inner())
 }
