@@ -1483,7 +1483,7 @@ impl super::Nexus {
     }
 }
 
-/// From a [`VolumeInfo`], collect all the Upstairs' health for Nexus to get a
+/// From a VolumeInfo, collect all the Upstairs' health for Nexus to get a
 /// picture of the health of the whole Volume.
 #[derive(Clone, Debug)]
 pub struct VolumeHealth {
@@ -1564,8 +1564,8 @@ impl std::fmt::Display for UpstairsDegradedReason {
 // from the same `crucible-client-types` version though as that is equivalent to
 // both imports being up to date.
 
-/// Return whether Nexus should consider a [`VolumeInfo::Upstairs`] healthy,
-/// using fields from that object.
+/// Return whether Nexus should consider a VolumeInfo::Upstairs healthy, using
+/// fields from that object.
 fn propolis_client_single_upstairs_health(
     state: &propolis_client::types::UpstairsInfoStatus,
     upstairs_id: Uuid,
@@ -1671,8 +1671,8 @@ fn propolis_client_single_upstairs_health(
 }
 
 /// Given a [`propolis_client::types::VolumeInfo`], return if the Upstairs for a
-/// particular Downstairs should be considered healthy by Nexus. Returns None
-/// if no Upstairs targets the [`downstairs_addr`] argument.
+/// particular Downstairs should be considered healthy by Nexus. Returns None if
+/// no Upstairs targets the downstairs_addr argument.
 pub fn propolis_client_upstairs_health(
     log: &Logger,
     info: &propolis_client::types::VolumeInfo,
@@ -1805,8 +1805,8 @@ pub fn propolis_client_volume_health(
     volume_health
 }
 
-/// Return whether Nexus should consider a [`VolumeInfo::Upstairs`] healthy,
-/// using fields from that object.
+/// Return whether Nexus should consider a VolumeInfo::Upstairs healthy, using
+/// fields from that object.
 fn crucible_pantry_client_single_upstairs_health(
     state: &crucible_pantry_client::types::UpstairsInfoStatus,
     upstairs_id: Uuid,
@@ -1913,7 +1913,7 @@ fn crucible_pantry_client_single_upstairs_health(
 
 /// Given a [`crucible_pantry_client::types::VolumeInfo`], return if the
 /// Upstairs for a particular Downstairs should be considered healthy by Nexus.
-/// Returns None if no Upstairs targets the [`downstairs_addr`] argument.
+/// Returns None if no Upstairs targets the downstairs_addr argument.
 pub fn crucible_pantry_client_upstairs_health(
     log: &Logger,
     info: &crucible_pantry_client::types::VolumeInfo,
