@@ -6,13 +6,14 @@
 
 use crate::SitrepBuilder;
 use crate::analysis_input::Input;
+use chrono::{DateTime, Utc};
+use iddqd::{IdOrdItem, IdOrdMap, id_upcast};
 use nexus_types::fm::DiagnosisEngineKind;
-use nexus_types::in_service_disk::InServiceDisk;
 use nexus_types::inventory::ZpoolHealth;
-use omicron_uuid_kinds::{CaseUuid, FactUuid, ZpoolUuid};
+use omicron_uuid_kinds::{CaseUuid, CollectionUuid, FactUuid, ZpoolUuid};
 use serde::{Deserialize, Serialize};
 use slog_error_chain::InlineErrorChain;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 /// Per-fact state for the disk diagnosis engine, serialized into the
 /// `fm_fact.payload` JSONB column. Other diagnosis engines must not
@@ -21,54 +22,116 @@ use std::collections::BTreeMap;
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum DiskFact {
     /// The zpool's most recently observed health is non-`Online`.
-    ZpoolUnhealthy { zpool_id: ZpoolUuid, last_seen_health: ZpoolHealth },
+    ZpoolUnhealthy(ZpoolUnhealthyFact),
+}
+
+/// Payload of a [`DiskFact::ZpoolUnhealthy`] fact.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct ZpoolUnhealthyFact {
+    pub zpool_id: ZpoolUuid,
+    pub last_seen_health: ZpoolHealth,
+    /// Inventory collection that produced this observation. Recorded for
+    /// provenance: if multiple `ZpoolUnhealthy` facts ever end up on the
+    /// same case, this lets a human reader see which inventory each came
+    /// from.
+    pub observed_in_inv: CollectionUuid,
+    /// `time_done` of `observed_in_inv`.
+    pub time_observed: DateTime<Utc>,
+}
+
+/// A parent-forwarded [`DiskFact::ZpoolUnhealthy`] fact paired with the
+/// `FactUuid` it lives under. Used to index parent-case facts during
+/// analysis; not serialized.
+#[derive(Clone, Copy, Debug)]
+struct UnhealthyZpoolFact {
+    fact_id: FactUuid,
+    fact: ZpoolUnhealthyFact,
+}
+
+impl IdOrdItem for UnhealthyZpoolFact {
+    type Key<'a> = FactUuid;
+    fn key(&self) -> Self::Key<'_> {
+        self.fact_id
+    }
+    id_upcast!();
+}
+
+/// One observed zpool's health, keyed by `zpool_id`. Used for both the
+/// inventory snapshot and the filtered "currently faulty" subset.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct ObservedZpool {
+    zpool_id: ZpoolUuid,
+    health: ZpoolHealth,
+}
+
+impl IdOrdItem for ObservedZpool {
+    type Key<'a> = ZpoolUuid;
+    fn key(&self) -> Self::Key<'_> {
+        self.zpool_id
+    }
+    id_upcast!();
 }
 
 /// Per-case summary built from a case's parent-forwarded facts.
 struct ParentCaseSummary {
-    /// IDs of `ZpoolUnhealthy` facts on this case, grouped by their
-    /// recorded zpool. There can be multiple facts in pathological cases
-    /// (e.g., two zpool ids on the same case after a hand-edit); the
-    /// diagnoser keeps all of them in its accounting.
-    zpool_unhealthy: BTreeMap<ZpoolUuid, Vec<(FactUuid, ZpoolHealth)>>,
+    /// All `ZpoolUnhealthy` facts on this case. In typical operation there
+    /// is at most one fact per zpool; pathological cases (e.g., hand-edited
+    /// DB) can have multiple — the diagnosis engine keeps all of them.
+    unhealthy_zpools: IdOrdMap<UnhealthyZpoolFact>,
+}
+
+impl ParentCaseSummary {
+    fn zpool_ids(&self) -> BTreeSet<ZpoolUuid> {
+        self.unhealthy_zpools.iter().map(|f| f.fact.zpool_id).collect()
+    }
+
+    fn facts_for_zpool(
+        &self,
+        zpool_id: ZpoolUuid,
+    ) -> impl Iterator<Item = &UnhealthyZpoolFact> {
+        self.unhealthy_zpools
+            .iter()
+            .filter(move |f| f.fact.zpool_id == zpool_id)
+    }
 }
 
 pub(super) fn analyze(
     input: &Input,
     builder: &mut SitrepBuilder<'_>,
 ) -> anyhow::Result<()> {
-    // The disk DE's primary key today is `zpool_id`, so we build a local
-    // index keyed by zpool. Future variants of `DiskFact` are welcome to
-    // derive their own secondary indices (e.g., by `sled_id` for FMD).
-    let in_service_by_zpool: BTreeMap<ZpoolUuid, &InServiceDisk> =
-        input.in_service_disks().iter().map(|d| (d.zpool_id, d)).collect();
+    let inv_collection_id = input.inventory().id;
+    let inv_time_done = input.inventory().time_done;
+
+    // The disk DE's lookups today are by `zpool_id`, so we build a local
+    // set of in-service zpools. Future variants of `DiskFact` are welcome
+    // to derive their own indices (e.g., by `sled_id` for FMD).
+    let in_service_zpools: BTreeSet<ZpoolUuid> =
+        input.in_service_disks().iter().map(|d| d.zpool_id).collect();
 
     // Index every zpool we observed in this inventory by ID, so we can
     // distinguish "saw it, it's Online" from "didn't see it at all" below.
-    let observed: BTreeMap<ZpoolUuid, ZpoolHealth> = input
+    let observed: IdOrdMap<ObservedZpool> = input
         .inventory()
         .sled_agents
         .iter()
         .flat_map(|sa| sa.zpools.iter())
-        .map(|z| (z.id, z.health))
+        .map(|z| ObservedZpool { zpool_id: z.id, health: z.health })
         .collect();
 
     // Currently-faulty, control-plane-managed zpools.
     //
     // Out-of-service zpools are intentionally ignored: a non-`Online` zpool
     // whose disk has been expunged is no longer the control plane's concern.
-    let faulty: BTreeMap<ZpoolUuid, ZpoolHealth> = observed
+    let faulty: IdOrdMap<ObservedZpool> = observed
         .iter()
-        .filter(|(id, _)| in_service_by_zpool.contains_key(*id))
-        .filter(|(_, h)| **h != ZpoolHealth::Online)
-        .map(|(id, h)| (*id, *h))
+        .filter(|z| in_service_zpools.contains(&z.zpool_id))
+        .filter(|z| z.health != ZpoolHealth::Online)
+        .copied()
         .collect();
 
-    // Inspect parent-forwarded Disk cases from the input (i.e., the state
-    // copied from the parent sitrep — *not* the in-progress builder, which
-    // we will mutate below). Each case's facts are JSON blobs owned by this
-    // engine; deserialize each one as DiskFact. Skip (with a warning) any
-    // fact we can't read.
+    // Index parent-forwarded Disk cases from the input — the state copied
+    // from the parent sitrep, *not* the in-progress builder we mutate
+    // below. Skip (with a warning) any fact we can't deserialize.
     let parent_summaries: BTreeMap<CaseUuid, ParentCaseSummary> = input
         .open_cases()
         .iter()
@@ -76,24 +139,24 @@ pub(super) fn analyze(
         .map(|c| {
             let case_id = c.id;
             let mut summary =
-                ParentCaseSummary { zpool_unhealthy: BTreeMap::new() };
+                ParentCaseSummary { unhealthy_zpools: IdOrdMap::new() };
             for fact in c.facts.iter() {
                 match fact.payload_to::<DiskFact>() {
-                    Ok(DiskFact::ZpoolUnhealthy {
-                        zpool_id,
-                        last_seen_health,
-                    }) => {
+                    Ok(DiskFact::ZpoolUnhealthy(inner)) => {
                         summary
-                            .zpool_unhealthy
-                            .entry(zpool_id)
-                            .or_default()
-                            .push((fact.id, last_seen_health));
+                            .unhealthy_zpools
+                            .insert_unique(UnhealthyZpoolFact {
+                                fact_id: fact.id,
+                                fact: inner,
+                            })
+                            .expect("fact ids are unique within a case");
                     }
                     Err(e) => {
                         slog::warn!(
                             &builder.log,
-                            "skipping Disk case fact with unreadable \
-                             payload; this run will not modify it";
+                            "skipping Disk case fact whose payload did not \
+                             deserialize as DiskFact; this run will not \
+                             modify it";
                             "case_id" => %case_id,
                             "fact_id" => %fact.id,
                             "error" => InlineErrorChain::new(&*e).to_string(),
@@ -106,29 +169,37 @@ pub(super) fn analyze(
         .collect();
 
     // Close any open Disk case whose entire set of (interpretable) facts
-    // points at zpools that are now Online or expunged. Closed cases are not
-    // copied forward, so their facts naturally drop with them.
+    // points at zpools that are now Online or expunged.
     //
     // Absence from inventory is NOT a recovery signal: a sled could be
     // powered off, or inventory could be lossy.
     for (case_id, summary) in &parent_summaries {
-        if summary.zpool_unhealthy.is_empty() {
+        if summary.unhealthy_zpools.is_empty() {
             continue;
         }
-        let any_still_unhealthy =
-            summary.zpool_unhealthy.keys().any(|zpool_id| {
-                in_service_by_zpool.contains_key(zpool_id)
-                    && observed.get(zpool_id) != Some(&ZpoolHealth::Online)
-            });
+        let mut reasons: Vec<String> = Vec::new();
+        let mut any_still_unhealthy = false;
+        for zpool_id in summary.zpool_ids() {
+            if !in_service_zpools.contains(&zpool_id) {
+                reasons.push(format!("zpool {zpool_id} no longer in service"));
+            } else if observed.get(&zpool_id).map(|z| z.health)
+                == Some(ZpoolHealth::Online)
+            {
+                reasons.push(format!("zpool {zpool_id} back to Online"));
+            } else {
+                any_still_unhealthy = true;
+                break;
+            }
+        }
         if !any_still_unhealthy {
             builder
                 .cases
                 .case_mut(case_id)
                 .expect("case_id came from iterating builder.cases")
-                .close(
-                    "all ZpoolUnhealthy facts have resolved (zpool back to \
-                     Online, or disk no longer in service)",
-                );
+                .close(format!(
+                    "all ZpoolUnhealthy facts resolved: {}",
+                    reasons.join("; "),
+                ));
         }
     }
 
@@ -143,14 +214,12 @@ pub(super) fn analyze(
         if !case_mut.is_open() {
             continue;
         }
-        for (zpool_id, facts) in &summary.zpool_unhealthy {
-            let Some(current_health) = faulty.get(zpool_id) else {
+        for fact_ref in summary.unhealthy_zpools.iter() {
+            let Some(current) = faulty.get(&fact_ref.fact.zpool_id) else {
                 continue;
             };
-            for (fact_id, last_seen_health) in facts {
-                if *current_health != *last_seen_health {
-                    case_mut.remove_fact(*fact_id);
-                }
+            if current.health != fact_ref.fact.last_seen_health {
+                case_mut.remove_fact(fact_ref.fact_id);
             }
         }
     }
@@ -158,19 +227,25 @@ pub(super) fn analyze(
     // For each currently-faulty in-service zpool: if there's no open case +
     // accurate fact already covering it, ensure a case exists (reuse the
     // parent-forwarded one for this zpool if any) and add a fresh fact.
-    for (zpool_id, current_health) in faulty {
+    for current in faulty.iter() {
+        let zpool_id = current.zpool_id;
+        let current_health = current.health;
         let parent_for_zpool =
             parent_summaries.iter().find_map(|(case_id, summary)| {
-                summary
-                    .zpool_unhealthy
-                    .get(&zpool_id)
-                    .map(|facts| (*case_id, facts))
+                let mut facts = summary.facts_for_zpool(zpool_id).peekable();
+                if facts.peek().is_some() {
+                    Some((*case_id, summary))
+                } else {
+                    None
+                }
             });
 
         let case_id_for_fact = match parent_for_zpool {
             // Parent case already has an accurate fact — fully covered.
-            Some((_, facts))
-                if facts.iter().any(|(_, h)| *h == current_health) =>
+            Some((_, summary))
+                if summary.facts_for_zpool(zpool_id).any(|f| {
+                    f.fact.last_seen_health == current_health
+                }) =>
             {
                 continue;
             }
@@ -191,10 +266,12 @@ pub(super) fn analyze(
             .case_mut(&case_id_for_fact)
             .expect("case_id came from this fn")
             .add_fact(
-                &DiskFact::ZpoolUnhealthy {
+                &DiskFact::ZpoolUnhealthy(ZpoolUnhealthyFact {
                     zpool_id,
                     last_seen_health: current_health,
-                },
+                    observed_in_inv: inv_collection_id,
+                    time_observed: inv_time_done,
+                }),
                 format!("zpool {zpool_id} health={current_health}"),
             )?;
     }
@@ -212,6 +289,7 @@ mod tests {
     use iddqd::IdOrdMap;
     use nexus_types::external_api::physical_disk::PhysicalDiskKind;
     use nexus_types::fm::{self, Sitrep, SitrepVersion};
+    use nexus_types::in_service_disk::InServiceDisk;
     use nexus_types::inventory;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::{
@@ -327,10 +405,14 @@ mod tests {
             .insert_unique(fm::case::Fact {
                 id: omicron_uuid_kinds::FactUuid::new_v4(),
                 created_sitrep_id: parent_sitrep_id,
-                payload: serde_json::to_value(&DiskFact::ZpoolUnhealthy {
-                    zpool_id,
-                    last_seen_health: ZpoolHealth::Degraded,
-                })
+                payload: serde_json::to_value(&DiskFact::ZpoolUnhealthy(
+                    ZpoolUnhealthyFact {
+                        zpool_id,
+                        last_seen_health: ZpoolHealth::Degraded,
+                        observed_in_inv: inv_collection_id,
+                        time_observed: Utc::now(),
+                    },
+                ))
                 .unwrap(),
                 comment: format!("zpool {zpool_id} degraded"),
             })
@@ -397,7 +479,11 @@ mod tests {
         let facts = disk_facts(&sitrep, true);
         assert_eq!(facts.len(), 1);
         match &facts[0].2 {
-            DiskFact::ZpoolUnhealthy { zpool_id, last_seen_health } => {
+            DiskFact::ZpoolUnhealthy(ZpoolUnhealthyFact {
+                zpool_id,
+                last_seen_health,
+                ..
+            }) => {
                 assert_eq!(*zpool_id, target);
                 assert_eq!(*last_seen_health, ZpoolHealth::Degraded);
             }
@@ -439,7 +525,9 @@ mod tests {
         let open_cases = disk_facts(&sitrep, true);
         assert_eq!(open_cases.len(), 1);
         match &open_cases[0].2 {
-            DiskFact::ZpoolUnhealthy { zpool_id, .. } => {
+            DiskFact::ZpoolUnhealthy(ZpoolUnhealthyFact {
+                zpool_id, ..
+            }) => {
                 assert_eq!(*zpool_id, target);
             }
         }
@@ -517,7 +605,7 @@ mod tests {
     }
 
     /// A parent Disk case carries a fact whose JSON `kind` doesn't match any
-    /// variant we know. The diagnoser should leave that case alone (not
+    /// variant we know. The diagnosis engine should leave that case alone (not
     /// touch its open/closed state, not mutate the fact, not count it
     /// toward dedup) and freely open a new case for a separate live signal.
     #[test]
@@ -588,7 +676,7 @@ mod tests {
             .expect("unreadable case should be copied forward");
         assert!(
             unreadable.is_open(),
-            "unreadable case must not be closed by the diagnoser",
+            "unreadable case must not be closed by the diagnosis engine",
         );
         let kept_fact = unreadable
             .facts
@@ -607,14 +695,16 @@ mod tests {
              signal",
         );
         match &readable[0].2 {
-            DiskFact::ZpoolUnhealthy { zpool_id, .. } => {
+            DiskFact::ZpoolUnhealthy(ZpoolUnhealthyFact {
+                zpool_id, ..
+            }) => {
                 assert_eq!(*zpool_id, live_target);
             }
         }
         logctx.cleanup_successful();
     }
 
-    /// When the parent sitrep's fact content matches the diagnoser's current
+    /// When the parent sitrep's fact content matches the diagnosis engine's current
     /// observation, the fact carries forward with the same UUID — no
     /// remove-and-readd churn.
     #[test]
@@ -648,7 +738,11 @@ mod tests {
              observation hasn't changed",
         );
         match &open[0].2 {
-            DiskFact::ZpoolUnhealthy { zpool_id, last_seen_health } => {
+            DiskFact::ZpoolUnhealthy(ZpoolUnhealthyFact {
+                zpool_id,
+                last_seen_health,
+                ..
+            }) => {
                 assert_eq!(*zpool_id, target);
                 assert_eq!(*last_seen_health, ZpoolHealth::Degraded);
             }
@@ -657,7 +751,7 @@ mod tests {
     }
 
     /// When the parent's fact recorded a different `last_seen_health` than
-    /// what we observe now, the diagnoser removes the stale fact and emits
+    /// what we observe now, the diagnosis engine removes the stale fact and emits
     /// a fresh one (new UUID). The case stays open because the zpool is
     /// still unhealthy — just with a different value.
     #[test]
@@ -694,7 +788,11 @@ mod tests {
             "fact UUID should rotate because last_seen_health changed",
         );
         match &open[0].2 {
-            DiskFact::ZpoolUnhealthy { zpool_id, last_seen_health } => {
+            DiskFact::ZpoolUnhealthy(ZpoolUnhealthyFact {
+                zpool_id,
+                last_seen_health,
+                ..
+            }) => {
                 assert_eq!(*zpool_id, target);
                 assert_eq!(*last_seen_health, ZpoolHealth::Faulted);
             }

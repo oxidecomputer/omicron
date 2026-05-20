@@ -9,7 +9,9 @@ use super::case;
 use super::ereport::EreportId;
 use super::json_display::fmt_json_value;
 use iddqd::IdOrdMap;
-use omicron_uuid_kinds::{CaseUuid, CollectionUuid, SitrepUuid};
+use omicron_uuid_kinds::{
+    CaseUuid, CollectionUuid, PhysicalDiskUuid, SitrepUuid,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
@@ -227,6 +229,9 @@ pub struct InputReport {
     /// Cases which have closed, but which have been copied forwards as they
     /// contain ereports which have not yet been marked seen.
     pub closed_cases_copied_forward: BTreeMap<CaseUuid, ClosedCaseReport>,
+    /// All control-plane-managed physical disks visible to the diagnosis
+    /// engines for this analysis pass.
+    pub in_service_disks: BTreeSet<PhysicalDiskUuid>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -257,6 +262,7 @@ impl fmt::Display for InputReportMultilineDisplay<'_> {
                     new_ereport_ids,
                     open_cases,
                     closed_cases_copied_forward,
+                    in_service_disks,
                 },
             indent,
         } = self;
@@ -357,6 +363,21 @@ impl fmt::Display for InputReportMultilineDisplay<'_> {
             writeln!(f, "{:indent$}no cases copied forward", "")?;
         }
 
+        if in_service_disks.is_empty() {
+            writeln!(f, "\n{:indent$}no in-service control plane disks", "")?;
+        } else {
+            writeln!(
+                f,
+                "\n{:indent$}in-service control plane disks ({} total):",
+                "",
+                in_service_disks.len()
+            )?;
+            let indent = indent + 2;
+            for disk_id in in_service_disks {
+                writeln!(f, "{:indent$}* disk {disk_id}", "")?;
+            }
+        }
+
         Ok(())
     }
 }
@@ -441,6 +462,7 @@ mod tests {
             new_ereport_ids,
             open_cases,
             closed_cases_copied_forward,
+            in_service_disks: BTreeSet::new(),
         }
     }
 
@@ -456,6 +478,7 @@ mod tests {
             new_ereport_ids: BTreeSet::new(),
             open_cases: BTreeMap::new(),
             closed_cases_copied_forward: BTreeMap::new(),
+            in_service_disks: BTreeSet::new(),
         }
     }
 
@@ -474,6 +497,7 @@ mod tests {
             new_ereport_ids: BTreeSet::new(),
             open_cases: BTreeMap::new(),
             closed_cases_copied_forward: BTreeMap::new(),
+            in_service_disks: BTreeSet::new(),
         }
     }
 

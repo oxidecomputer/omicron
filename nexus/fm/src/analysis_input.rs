@@ -197,6 +197,11 @@ impl Builder {
                 .collect(),
             open_cases: BTreeMap::new(),
             closed_cases_copied_forward: BTreeMap::new(),
+            in_service_disks: self
+                .in_service_disks
+                .iter()
+                .map(|d| d.physical_disk_id)
+                .collect(),
         };
 
         // Determine which cases must be copied forwards into the next sitrep.

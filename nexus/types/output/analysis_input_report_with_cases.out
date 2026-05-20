@@ -22,3 +22,5 @@ cases (2 total):
       closed in sitrep: 55555555-5555-5555-5555-555555555555
       copied forwards because these ereports haven't been marked seen yet:
       * ereport dddddddd-dddd-dddd-dddd-dddddddddddd:2
+
+no in-service control plane disks
