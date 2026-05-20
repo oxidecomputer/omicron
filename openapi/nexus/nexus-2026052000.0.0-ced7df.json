@@ -7,11 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-<<<<<<<< HEAD:openapi/nexus/nexus-2026042200.0.0-d75be3.json
-    "version": "2026042200.0.0"
-========
-    "version": "2026050800.0.0"
->>>>>>>> main:openapi/nexus/nexus-2026050800.0.0-d2276f.json
+    "version": "2026052000.0.0"
   },
   "paths": {
     "/device/auth": {

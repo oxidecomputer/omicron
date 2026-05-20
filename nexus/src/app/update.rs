@@ -779,6 +779,7 @@ mod test {
     use omicron_uuid_kinds::ZpoolUuid;
     use sled_agent_types::inventory::Baseboard;
     use sled_agent_types::inventory::ConfigReconcilerInventoryStatus;
+    use sled_agent_types::inventory::FmdInventory;
     use sled_agent_types::inventory::Inventory;
     use sled_agent_types::inventory::InventoryZpool;
     use sled_agent_types::inventory::OmicronFileSourceResolverInventory;
@@ -824,6 +825,7 @@ mod test {
             ),
             smf_services_enabled_not_online: smf_services,
             reference_measurements: iddqd::IdOrdMap::new(),
+            fmd: Ok(FmdInventory::default()),
         }
     }
 
