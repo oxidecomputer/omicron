@@ -7624,7 +7624,7 @@ ON omicron.public.fm_sitrep_history (sitrep_id);
 
 CREATE TYPE IF NOT EXISTS omicron.public.diagnosis_engine AS ENUM (
     'power_shelf',
-    'disk'
+    'physical_disk'
 );
 
 CREATE TABLE IF NOT EXISTS omicron.public.fm_case (

@@ -72,7 +72,7 @@ pub(super) fn analyze(
     let parent_summaries: BTreeMap<CaseUuid, ParentCaseSummary> = input
         .open_cases()
         .iter()
-        .filter(|c| c.metadata.de == DiagnosisEngineKind::Disk)
+        .filter(|c| c.metadata.de == DiagnosisEngineKind::PhysicalDisk)
         .map(|c| {
             let case_id = c.id;
             let mut summary =
@@ -180,7 +180,7 @@ pub(super) fn analyze(
             // No parent case for this zpool — open one.
             None => {
                 let mut new_case =
-                    builder.cases.open_case(DiagnosisEngineKind::Disk);
+                    builder.cases.open_case(DiagnosisEngineKind::PhysicalDisk);
                 new_case.set_comment(format!("zpool {zpool_id} unhealthy"));
                 new_case.id
             }
@@ -341,7 +341,7 @@ mod tests {
                 metadata: fm::case::Metadata {
                     created_sitrep_id: parent_sitrep_id,
                     closed_sitrep_id: None,
-                    de: DiagnosisEngineKind::Disk,
+                    de: DiagnosisEngineKind::PhysicalDisk,
                     comment: format!("zpool {zpool_id} degraded"),
                 },
                 ereports: Default::default(),
@@ -374,7 +374,7 @@ mod tests {
         sitrep
             .cases
             .iter()
-            .filter(|c| c.metadata.de == DiagnosisEngineKind::Disk)
+            .filter(|c| c.metadata.de == DiagnosisEngineKind::PhysicalDisk)
             .filter(|c| !open_only || c.is_open())
             .flat_map(|c| {
                 c.facts.iter().filter_map(move |f| {
@@ -553,7 +553,7 @@ mod tests {
                 metadata: fm::case::Metadata {
                     created_sitrep_id: parent_sitrep_id,
                     closed_sitrep_id: None,
-                    de: DiagnosisEngineKind::Disk,
+                    de: DiagnosisEngineKind::PhysicalDisk,
                     comment: "case with fact from the future".to_string(),
                 },
                 ereports: Default::default(),
@@ -630,7 +630,7 @@ mod tests {
         let parent_fact_id = parent
             .cases
             .iter()
-            .find(|c| c.metadata.de == DiagnosisEngineKind::Disk)
+            .find(|c| c.metadata.de == DiagnosisEngineKind::PhysicalDisk)
             .expect("parent should have one Disk case")
             .facts
             .iter()
@@ -673,7 +673,7 @@ mod tests {
         let parent_fact_id = parent
             .cases
             .iter()
-            .find(|c| c.metadata.de == DiagnosisEngineKind::Disk)
+            .find(|c| c.metadata.de == DiagnosisEngineKind::PhysicalDisk)
             .expect("parent should have one Disk case")
             .facts
             .iter()

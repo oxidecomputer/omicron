@@ -216,5 +216,5 @@ pub struct SitrepVersion {
 #[strum(serialize_all = "snake_case")]
 pub enum DiagnosisEngineKind {
     PowerShelf,
-    Disk,
+    PhysicalDisk,
 }
