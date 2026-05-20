@@ -163,6 +163,7 @@ members = [
     "sled-storage",
     "sled-storage/zfs-test-harness",
     "sp-sim",
+    "support-bundle-collection",
     "test-utils",
     "trust-quorum",
     "trust-quorum/gfss",
@@ -351,6 +352,7 @@ default-members = [
     "sled-storage",
     "sled-storage/zfs-test-harness",
     "sp-sim",
+    "support-bundle-collection",
     "trust-quorum",
     "trust-quorum/gfss",
     "trust-quorum/protocol",
@@ -831,6 +833,7 @@ strum = { version = "0.27.2", features = [ "derive" ] }
 subprocess = "0.2.9"
 subtle = "2.6.1"
 supports-color = "3.0.2"
+support-bundle-collection = { path = "support-bundle-collection" }
 support-bundle-viewer = "0.1.2"
 swrite = "0.1.0"
 sync-ptr = "0.1.4"

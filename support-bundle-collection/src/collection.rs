@@ -13,10 +13,10 @@
 //! data to a sled-agent's bundle storage endpoints, and never polls
 //! bundle state. Those responsibilities belong to the caller.
 
-use crate::app::background::tasks::support_bundle::cache::Cache;
-use crate::app::background::tasks::support_bundle::perfetto;
-use crate::app::background::tasks::support_bundle::step::CollectionStep;
-use crate::app::background::tasks::support_bundle::steps;
+use crate::cache::Cache;
+use crate::perfetto;
+use crate::step::CollectionStep;
+use crate::steps;
 use nexus_types::support_bundle::BundleDataSelection;
 
 use anyhow::Context;
@@ -28,6 +28,9 @@ use nexus_types::internal_api::background::SupportBundleCollectionReport;
 use omicron_uuid_kinds::SupportBundleUuid;
 use parallel_task_set::ParallelTaskSet;
 use serde_json::json;
+use slog::debug;
+use slog::info;
+use slog::warn;
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 
