@@ -2,7 +2,7 @@
 #:
 #: name = "helios / build TUF repo"
 #: variety = "basic"
-#: target = "helios-2.0-16c128gb"
+#: target = "helios-3.0-16c128gb"
 #: rust_toolchain = true
 #: output_rules = [
 #:	"=/work/manifest.toml",

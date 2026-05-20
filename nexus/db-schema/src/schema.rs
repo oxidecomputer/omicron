@@ -485,6 +485,7 @@ table! {
         propolis_port -> Int4,
         state -> crate::enums::VmmStateEnum,
         cpu_platform -> crate::enums::VmmCpuPlatformEnum,
+        failure_reason -> Nullable<crate::enums::VmmFailureReasonEnum>,
     }
 }
 joinable!(vmm -> sled (sled_id));
@@ -1146,6 +1147,17 @@ table! {
         sled_id -> Uuid,
         disk_policy -> crate::enums::PhysicalDiskPolicyEnum,
         disk_state -> crate::enums::PhysicalDiskStateEnum,
+    }
+}
+
+table! {
+    physical_disk_adoption_request (id) {
+        id -> Uuid,
+        vendor -> Text,
+        model -> Text,
+        serial -> Text,
+        time_created -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
     }
 }
 
@@ -2151,7 +2163,6 @@ table! {
         version -> Int8,
         planner_enabled -> Bool,
         time_modified -> Timestamptz,
-        add_zones_with_mupdate_override -> Bool,
         tuf_repo_pruner_enabled -> Bool,
     }
 }
@@ -2697,6 +2708,7 @@ allow_tables_to_appear_in_same_query!(
     instance_network_interface,
     inv_physical_disk,
     inv_nvme_disk_firmware,
+    physical_disk_adoption_request,
     service_network_interface,
     oximeter,
     physical_disk,

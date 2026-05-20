@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "2.0.0"
+    "version": "3.0.0"
   },
   "paths": {
     "/init": {
@@ -37,7 +37,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RetentionPolicy"
+                  "$ref": "#/components/schemas/DatabaseRetentionPolicy"
                 }
               }
             }
@@ -57,7 +57,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/RetentionPolicy"
+                "$ref": "#/components/schemas/RetentionPolicyRequest"
               }
             }
           },
@@ -180,6 +180,33 @@
   },
   "components": {
     "schemas": {
+      "DatabaseRetentionPolicy": {
+        "description": "Policy for retaining telemetry data for all tables.",
+        "type": "object",
+        "properties": {
+          "tables": {
+            "title": "IdOrdMap",
+            "x-rust-type": {
+              "crate": "iddqd",
+              "parameters": [
+                {
+                  "$ref": "#/components/schemas/RetentionPolicy"
+                }
+              ],
+              "path": "iddqd::IdOrdMap",
+              "version": "*"
+            },
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RetentionPolicy"
+            },
+            "uniqueItems": true
+          }
+        },
+        "required": [
+          "tables"
+        ]
+      },
       "DatabaseUsage": {
         "description": "The resource usage of all database tables.",
         "type": "object",
@@ -287,11 +314,33 @@
         ]
       },
       "RetentionPolicy": {
-        "description": "Policy for retaining telemetry data.",
+        "description": "Policy for retaining telemetry data for a database table.",
         "type": "object",
         "properties": {
           "days": {
             "description": "The retention period, in days.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Days"
+              }
+            ]
+          },
+          "table": {
+            "description": "The table the policy applies to.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "days",
+          "table"
+        ]
+      },
+      "RetentionPolicyRequest": {
+        "description": "A request for setting a retention policy.",
+        "type": "object",
+        "properties": {
+          "days": {
+            "description": "The requested retention period, in days.",
             "allOf": [
               {
                 "$ref": "#/components/schemas/Days"

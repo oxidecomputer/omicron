@@ -20,6 +20,7 @@ members = [
     "clients/nexus-client",
     "clients/nexus-lockstep-client",
     "clients/ntp-admin-client",
+    "clients/ntp-admin-v1-client",
     "clients/oxide-client",
     "clients/oximeter-client",
     "clients/repo-depot-client",
@@ -147,6 +148,7 @@ members = [
     "sled-agent/bootstrap-agent-lockstep-api",
     "sled-agent/bootstrap-agent-lockstep-types",
     "sled-agent/config-reconciler",
+    "sled-agent/early-networking",
     "sled-agent/health-monitor",
     "sled-agent/measurements",
     "sled-agent/rack-setup",
@@ -205,6 +207,7 @@ default-members = [
     "clients/nexus-client",
     "clients/nexus-lockstep-client",
     "clients/ntp-admin-client",
+    "clients/ntp-admin-v1-client",
     "clients/oxide-client",
     "clients/oximeter-client",
     "clients/repo-depot-client",
@@ -334,6 +337,7 @@ default-members = [
     "sled-agent/bootstrap-agent-lockstep-api",
     "sled-agent/bootstrap-agent-lockstep-types",
     "sled-agent/config-reconciler",
+    "sled-agent/early-networking",
     "sled-agent/health-monitor",
     "sled-agent/measurements",
     "sled-agent/rack-setup",
@@ -482,7 +486,7 @@ crucible-common = { git = "https://github.com/oxidecomputer/crucible", rev = "71
 # NOTE: See above!
 csv = "1.3.1"
 curve25519-dalek = "4"
-daft = { version = "0.1.4", features = ["derive", "newtype-uuid1", "oxnet01", "uuid1"] }
+daft = { version = "0.1.7", features = ["derive", "newtype-uuid1", "oxnet01", "uuid1"] }
 display-error-chain = "0.2.2"
 omicron-ddm-admin-client = { path = "clients/ddm-admin-client" }
 datatest-stable = "0.3.2"
@@ -499,7 +503,7 @@ digest = "0.10.7"
 dns-server = { path = "dns-server" }
 dns-server-api = { path = "dns-server-api" }
 dns-service-client = { path = "clients/dns-service-client" }
-dpd-client = { git = "https://github.com/oxidecomputer/dendrite", rev = "d147f0925d14ed6f00eb37cb81f3a1bcbcb3c7f3" }
+dpd-client = { git = "https://github.com/oxidecomputer/dendrite", rev = "187aee7de2e50f907099ea06c04aac96c3455665" }
 dropshot = { version = "0.17.0", features = [ "usdt-probes" ] }
 dropshot-api-manager = "0.7.1"
 dropshot-api-manager-types = "0.7.1"
@@ -512,6 +516,8 @@ filetime = "0.2.26"
 flate2 = "1.1.2"
 float-ord = "0.3.2"
 flume = "0.11.1"
+fmd-adm = { git = "https://github.com/oxidecomputer/fmd-adm", rev = "846361bf0a698a8c7efefd97b2828b9aa74858c4" }
+fmd-adm-sys = { git = "https://github.com/oxidecomputer/fmd-adm", rev = "846361bf0a698a8c7efefd97b2828b9aa74858c4" }
 foreign-types = "0.3.2"
 fs-err = "3.1.1"
 futures = "0.3.31"
@@ -526,9 +532,9 @@ gateway-client = { path = "clients/gateway-client" }
 # compatibility, but will mean that faux-mgs might be missing new
 # functionality.)
 #
-gateway-ereport-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "0d7a8992f914ad6a5947409048779969bbe80e3d", default-features = false, features = ["debug-impls"] }
-gateway-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "0d7a8992f914ad6a5947409048779969bbe80e3d", default-features = false, features = ["std"] }
-gateway-sp-comms = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "0d7a8992f914ad6a5947409048779969bbe80e3d" }
+gateway-ereport-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "745a508cb97b7ca9b4c10ec9592c980eb769b10d", default-features = false, features = ["debug-impls"] }
+gateway-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "745a508cb97b7ca9b4c10ec9592c980eb769b10d", default-features = false, features = ["std"] }
+gateway-sp-comms = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "745a508cb97b7ca9b4c10ec9592c980eb769b10d" }
 gateway-test-utils = { path = "gateway-test-utils" }
 gateway-types = { path = "gateway-types" }
 gateway-types-versions = { path = "gateway-types/versions" }
@@ -565,7 +571,7 @@ hyper = "1.6.0"
 hyper-util = "0.1.16"
 hyper-rustls = "0.27.7"
 hyper-staticfile = "0.10.1"
-iddqd = { version = "0.3.18", features = ["daft", "serde", "schemars08"] }
+iddqd = { version = "0.4.1", features = ["daft", "serde", "schemars08"] }
 illumos-utils = { path = "illumos-utils" }
 iana-time-zone = "0.1.63"
 indent_write = "2.2.0"
@@ -604,6 +610,7 @@ maplit = "1.0.2"
 newtype_derive = "0.1.6"
 ntp-admin-api = { path = "ntp-admin/api" }
 ntp-admin-client = { path = "clients/ntp-admin-client" }
+ntp-admin-v1-client = { path = "clients/ntp-admin-v1-client" }
 ntp-admin-types = { path = "ntp-admin/types" }
 ntp-admin-types-versions = { path = "ntp-admin/types/versions" }
 mg-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "7696ee48d5ee29a917dea459e281fe2e8ff20513" }
@@ -669,7 +676,7 @@ omicron-workspace-hack = "0.1.0"
 omicron-zone-package = "0.12.2"
 oxide-client = { path = "clients/oxide-client" }
 oxide-tokio-rt = "0.1.4"
-oxide-vpc = { git = "https://github.com/oxidecomputer/opte", rev = "bae0440c199b3908c12903a9532854936353433b", features = [ "api", "std" ] }
+oxide-vpc = { git = "https://github.com/oxidecomputer/opte", rev = "2c6efefe14321dafe7e9e80129d38316adb2d238", features = [ "api", "std" ] }
 oxlog = { path = "dev-tools/oxlog" }
 oxnet = "0.1.4"
 once_cell = "1.21.3"
@@ -678,7 +685,7 @@ openapiv3 = "2.2.0"
 # must match samael's crate!
 openssl = "0.10"
 openssl-sys = "0.9"
-opte-ioctl = { git = "https://github.com/oxidecomputer/opte", rev = "bae0440c199b3908c12903a9532854936353433b" }
+opte-ioctl = { git = "https://github.com/oxidecomputer/opte", rev = "2c6efefe14321dafe7e9e80129d38316adb2d238" }
 oso = "0.27"
 owo-colors = "4.2.2"
 oximeter = { path = "oximeter/oximeter" }
@@ -733,7 +740,7 @@ proptest = "1.7.0"
 qorb = "0.4.1"
 quote = "1.0"
 # Some dependencies still require rand 0.8.x.
-rand08 = { package = "rand", version = "0.8.5" }
+rand08 = { package = "rand", version = "0.8.6" }
 rand = "0.9.2"
 rand_core = "0.9.3"
 rand_distr = "0.5.1"
@@ -791,6 +798,7 @@ sled = "=0.34.7"
 sled-agent-api = { path = "sled-agent/api" }
 sled-agent-client = { path = "clients/sled-agent-client" }
 sled-agent-config-reconciler = { path = "sled-agent/config-reconciler" }
+sled-agent-early-networking = { path = "sled-agent/early-networking" }
 sled-agent-health-monitor = { path = "sled-agent/health-monitor" }
 sled-agent-measurements = { path = "sled-agent/measurements" }
 sled-agent-rack-setup = { path = "sled-agent/rack-setup" }
@@ -849,7 +857,7 @@ tokio-tungstenite = "0.23.1"
 tokio-util = { version = "0.7.15", features = ["io", "io-util", "time"] }
 toml = "0.8.23"
 toml_edit = "0.22.27"
-tough = { version = "0.20.0", features = [ "http" ] }
+tough = { version = "0.22.0" }
 transceiver-controller = { git = "https://github.com/oxidecomputer/transceiver-control", features = [ "api-traits" ] }
 transient-dns-server = { path = "dns-server/transient" }
 trybuild = "1.0.106"
@@ -891,8 +899,8 @@ newtype-uuid = { version = "1.3.2", default-features = false }
 newtype-uuid-macros = "0.1.0"
 omicron-uuid-kinds = { path = "uuid-kinds", features = ["serde", "schemars08", "uuid-v4"] }
 
-scim2-rs = { git = "https://github.com/oxidecomputer/scim2-rs", rev = "018ae6f7bd752cd9b2124887e00c93c6b4244103" }
-scim2-test-client = { git = "https://github.com/oxidecomputer/scim2-rs", rev = "018ae6f7bd752cd9b2124887e00c93c6b4244103" }
+scim2-rs = { git = "https://github.com/oxidecomputer/scim2-rs", rev = "163606c052ee30b16dfab282fca721dd81e0868a" }
+scim2-test-client = { git = "https://github.com/oxidecomputer/scim2-rs", rev = "163606c052ee30b16dfab282fca721dd81e0868a" }
 
 # NOTE: The test profile inherits from the dev profile, so settings under
 # profile.dev get inherited. AVOID setting anything under profile.test: that

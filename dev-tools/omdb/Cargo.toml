@@ -57,6 +57,7 @@ nexus-lockstep-client.workspace = true
 nexus-reconfigurator-preparation.workspace = true
 nexus-saga-recovery.workspace = true
 nexus-types.workspace = true
+ntp-admin-client.workspace = true
 omicron-common.workspace = true
 omicron-uuid-kinds.workspace = true
 omicron-workspace-hack.workspace = true
@@ -94,6 +95,10 @@ unicode-width.workspace = true
 update-engine.workspace = true
 url.workspace = true
 uuid.workspace = true
+
+[target.'cfg(target_os = "illumos")'.dependencies]
+# See omicron-rpaths for more about the "fmd-adm-sys" dependency.
+fmd-adm-sys.workspace = true
 
 [dev-dependencies]
 camino-tempfile.workspace = true
