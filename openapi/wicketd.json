@@ -608,6 +608,56 @@
         }
       }
     },
+    "/rack-setup/config/multirack": {
+      "get": {
+        "summary": "Get the current status of the multirack join configuration.",
+        "operationId": "get_multirack_join_config",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CurrentMultirackJoinUserConfig"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "put": {
+        "summary": "Upload a configuration for joining this rack into an existing regional",
+        "description": "cluster.\n\nA multirack join configuration is mutually exclusive with an RSS config.",
+        "operationId": "put_multirack_join_config",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MultirackJoinConfigBaseUserInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/rack-setup/config/recovery-user-password-hash": {
       "put": {
         "summary": "Update the RSS config recovery silo user password hash.",
@@ -1585,6 +1635,34 @@
           "tx_output_status"
         ]
       },
+      "CurrentMultirackJoinUserConfig": {
+        "description": "A version of the multirack join configuration which contains learned bootstrap sleds and a redacted form of BGP auth keys if they exist.\n\nThis is returned to the user via wicketd and displayed in wicket.\n\nNote that there are no optional fields here unlike in `CurrentRssUserConfigInsensitive`. This is because wicketd defaults to filling in an empty RSS config for backwards compatibility and allows uploading BGP auth keys before actually uploading the RSS config. However, since we never default to an empty version of the `CurrentMultirackJoinConfig`, we can only fill in the BGP auth keys for this structure after the `MultirackJoinConfigBaseUserInput` is uploaded from a user.",
+        "type": "object",
+        "properties": {
+          "allowed_source_ips": {
+            "$ref": "#/components/schemas/AllowedSourceIps"
+          },
+          "bgp_auth_keys": {
+            "$ref": "#/components/schemas/GetBgpAuthKeyInfoResponse"
+          },
+          "bootstrap_sleds": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BootstrapSledDescription"
+            },
+            "uniqueItems": true
+          },
+          "rack_network_config": {
+            "$ref": "#/components/schemas/UserSpecifiedRackNetworkConfig"
+          }
+        },
+        "required": [
+          "allowed_source_ips",
+          "bgp_auth_keys",
+          "bootstrap_sleds",
+          "rack_network_config"
+        ]
+      },
       "CurrentRssUserConfig": {
         "type": "object",
         "properties": {
@@ -2542,6 +2620,33 @@
             }
           }
         }
+      },
+      "MultirackJoinConfigBaseUserInput": {
+        "description": "Input from a user for adopting an uninitialized rack into an existing regional cluster.\n\nThis type is provided in the form of a TOML file uploaded via the wicket CLI. It does not contain sensitive user input such as BGP keys. Those are input separately.",
+        "type": "object",
+        "properties": {
+          "allowed_source_ips": {
+            "$ref": "#/components/schemas/AllowedSourceIps"
+          },
+          "bootstrap_slots": {
+            "description": "List of slot numbers only.",
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "uint16",
+              "minimum": 0
+            },
+            "uniqueItems": true
+          },
+          "rack_network_config": {
+            "$ref": "#/components/schemas/UserSpecifiedRackNetworkConfig"
+          }
+        },
+        "required": [
+          "allowed_source_ips",
+          "bootstrap_slots",
+          "rack_network_config"
+        ]
       },
       "Name": {
         "title": "A name unique within the parent collection",
