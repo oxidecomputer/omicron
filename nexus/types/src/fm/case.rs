@@ -2,6 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use super::json_display::fmt_json_value;
 use crate::alert::AlertClass;
 use crate::fm::DiagnosisEngineKind;
 use crate::fm::Ereport;
@@ -228,9 +229,7 @@ impl Fact {
                 const BULLET: &str = "* ";
                 const ADDED_IN: &str = "added in:";
                 const COMMENT: &str = "comment:";
-                const PAYLOAD: &str = "payload:";
-                const WIDTH: usize =
-                    const_max_len(&[ADDED_IN, COMMENT, PAYLOAD]);
+                const WIDTH: usize = const_max_len(&[ADDED_IN, COMMENT]);
 
                 let &Self {
                     fact: Fact { id, created_sitrep_id, payload, comment },
@@ -249,13 +248,7 @@ impl Fact {
                     this_sitrep(*created_sitrep_id),
                 )?;
                 writeln!(f, "{:>indent$}{COMMENT:<WIDTH$} {comment}", "")?;
-                writeln!(f, "{:>indent$}{PAYLOAD:<WIDTH$}", "")?;
-                let payload_indent = indent + 2;
-                let pretty = serde_json::to_string_pretty(payload)
-                    .unwrap_or_else(|_| payload.to_string());
-                for line in pretty.lines() {
-                    writeln!(f, "{:>payload_indent$}{line}", "")?;
-                }
+                fmt_json_value(f, "payload", payload, indent)?;
                 writeln!(f)
             }
         }
