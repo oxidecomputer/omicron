@@ -220,14 +220,13 @@ inventory-generate
 blueprint-plan latest latest
 blueprint-diff latest
 
-# Test that the add-zones-with-mupdate-override planner config works as
-# expected. We do this by:
+# Test that adding a new sled while a mupdate override is active does not
+# cause the planner to add new zones to it. We do this by:
 # * setting the mupdate override on a sled
 # * adding a new sled
 #
-# With the option disabled (the current state), the planner will
-# not proceed with adding new zones. But with the option enabled,
-# new zones will be added.
+# The planner will not proceed with adding new zones while any sled has an
+# active mupdate override.
 
 # Apply the blueprint edits to sled 0. This also lets the planner see
 # that the internal_dns zone is expunged, setting up a replacement
@@ -238,18 +237,8 @@ sled-add c3bc4c6d-fdde-4fc4-8493-89d2a1e5ee6b
 inventory-generate
 
 # This will *not* generate the datasets and internal NTP zone on the new
-# sled.
+# sled, because zone adds are blocked while a mupdate override is present.
 blueprint-plan latest latest
-blueprint-diff latest
-
-# This *will* generate the datasets and internal NTP zone on the new sled.
-set planner-config --add-zones-with-mupdate-override true
-blueprint-plan latest latest
-# TODO: This blippy run produces two FATAL notes, due to, respectively:
-#
-# * https://github.com/oxidecomputer/omicron/issues/10420
-# * https://github.com/oxidecomputer/omicron/pull/10363
-blueprint-blippy latest
 blueprint-diff latest
 
 # Set the target release minimum generation to a large value -- we're going to

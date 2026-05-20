@@ -2163,7 +2163,6 @@ table! {
         version -> Int8,
         planner_enabled -> Bool,
         time_modified -> Timestamptz,
-        add_zones_with_mupdate_override -> Bool,
         tuf_repo_pruner_enabled -> Bool,
     }
 }

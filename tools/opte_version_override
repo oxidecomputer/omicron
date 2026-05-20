@@ -1,5 +1,24 @@
 #!/usr/bin/env bash
 
-# only set this if you want to override the version of opte/xde installed by the
-# install_opte.sh script
+# Override for using an unpublished OPTE version. When OPTE_COMMIT is set,
+# the override p5p package is downloaded from buildomat and used instead of
+# the version published in the helios pkg repo. The p5p is built by the
+# opte-p5p buildomat job and published at:
+#   https://buildomat.eng.oxide.computer/public/file/oxidecomputer/opte/repo/{commit}/opte.p5p
+#
+# Consumers:
+#   - install_opte.sh installs directly from the override p5p
+#   - releng image builds use extra_packages with the p5p as a pkg source
+#   - deploy.sh installs from the override p5p on the running system
+#   - ci_check_opte_ver.sh enforces OPTE_COMMIT == Cargo dep rev
+#
+# To activate: set OPTE_COMMIT to the git commit hash of the OPTE build.
+# OPTE_COMMIT must equal the `rev` pinned for `oxide-vpc` / `opte-ioctl` in
+# Cargo.toml. The kernel module is built from OPTE_COMMIT and the userland
+# (opte-ioctl, oxide-vpc) is built from the Cargo dep rev. If these hashes
+# diverge, kernel/userland ABI drift surfaces as opaque ioctl failures at
+# runtime. Even kernel-only fixes (logging, perf, internal refactors) must come
+# with a matching Cargo bump.
+#
+# To deactivate (once the new version is published): set OPTE_COMMIT to "".
 OPTE_COMMIT=""
