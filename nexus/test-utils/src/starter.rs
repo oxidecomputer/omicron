@@ -175,7 +175,8 @@ pub struct ControlPlaneStarter<'a, N: NexusServer> {
     /// When set, `start_mgd` allocates a unique loopback IP for each switch
     /// slot's mgd BGP dispatcher from `mgd_bgp_addrs` instead of using
     /// 127.0.0.1. Normal integration tests leave this `None`.
-    pub mgd_bgp_loopback: Option<Arc<Mutex<loopback_ip_mgr::LoopbackIpManager>>>,
+    pub mgd_bgp_loopback:
+        Option<Arc<Mutex<loopback_ip_mgr::LoopbackIpManager>>>,
     pub mgd_bgp_addrs: BTreeMap<SwitchSlot, Ipv4Addr>,
 }
 

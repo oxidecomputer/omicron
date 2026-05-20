@@ -15,10 +15,6 @@ use anyhow::Result;
 use camino::Utf8Path;
 #[cfg(feature = "omicron-dev")]
 use camino::Utf8PathBuf;
-#[cfg(feature = "omicron-dev")]
-use std::net::Ipv4Addr;
-#[cfg(feature = "omicron-dev")]
-use std::sync::Mutex;
 use dropshot::test_util::ClientTestContext;
 use dropshot::test_util::LogContext;
 use gateway_test_utils::setup::DEFAULT_SP_SIM_CONFIG;
@@ -40,6 +36,10 @@ use oximeter_producer::Server as ProducerServer;
 use sled_agent_types::early_networking::SwitchSlot;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
+#[cfg(feature = "omicron-dev")]
+use std::net::Ipv4Addr;
+#[cfg(feature = "omicron-dev")]
+use std::sync::Mutex;
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
 use transient_dns_server::TransientDnsServer;
@@ -364,7 +364,8 @@ pub async fn omicron_dev_setup_with_config<N: NexusServer>(
     gateway_config_file: Utf8PathBuf,
 ) -> Result<ControlPlaneTestContext<N>> {
     let starter = ControlPlaneStarter::<N>::new("omicron-dev", config);
-    omicron_dev_setup_impl(starter, extra_sled_agents, gateway_config_file).await
+    omicron_dev_setup_impl(starter, extra_sled_agents, gateway_config_file)
+        .await
 }
 
 /// Like [`omicron_dev_setup_with_config`], but assigns unique loopback IPs to
@@ -387,7 +388,8 @@ pub async fn omicron_dev_setup_with_bgp_loopbacks<N: NexusServer>(
     let mut starter = ControlPlaneStarter::<N>::new("omicron-dev", config);
     starter.mgd_bgp_loopback = Some(mgd_bgp_loopback);
     starter.mgd_bgp_addrs = mgd_bgp_addrs;
-    omicron_dev_setup_impl(starter, extra_sled_agents, gateway_config_file).await
+    omicron_dev_setup_impl(starter, extra_sled_agents, gateway_config_file)
+        .await
 }
 
 #[cfg(feature = "omicron-dev")]

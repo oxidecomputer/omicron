@@ -13,6 +13,7 @@ use nexus_config::NexusConfig;
 use nexus_test_interface::NexusServer;
 use nexus_test_utils::resource_helpers::DiskTest;
 use signal_hook_tokio::Signals;
+use sled_agent_types::early_networking::SwitchSlot;
 use slog::{Drain, o};
 use std::{
     collections::BTreeMap,
@@ -20,7 +21,6 @@ use std::{
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV6},
     sync::{Arc, Mutex},
 };
-use sled_agent_types::early_networking::SwitchSlot;
 
 const DEFAULT_NEXUS_CONFIG: &str =
     concat!(env!("CARGO_MANIFEST_DIR"), "/../../nexus/examples/config.toml");
@@ -238,7 +238,10 @@ fn slot_index(slot: SwitchSlot) -> u32 {
 }
 
 fn ipv4_as_u32(a: u8, b: u8, c: u8, d: u8) -> u32 {
-    ((a as u32) << 24) | ((b as u32) << 16) | ((c as u32) << 8) | (d as u32)
+    (u32::from(a) << 24)
+        | (u32::from(b) << 16)
+        | (u32::from(c) << 8)
+        | u32::from(d)
 }
 
 fn make_neighbor(
@@ -286,14 +289,15 @@ fn make_neighbor(
 async fn setup_bgp_peering(
     log: &slog::Logger,
     peer_routers: &[omicron_test_utils::dev::maghemite::MgdInstance],
-    contexts: &[nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>],
+    contexts: &[nexus_test_utils::ControlPlaneTestContext<
+        omicron_nexus::Server,
+    >],
 ) -> Result<(), anyhow::Error> {
     for (rack_n, ctx) in contexts.iter().enumerate() {
         for (slot, rack_mgd) in &ctx.mgd {
             let slot_idx = slot_index(*slot);
             let rack_asn = 65200 + 2 * rack_n as u32 + slot_idx;
-            let rack_id =
-                ipv4_as_u32(127, 2, rack_n as u8, slot_idx as u8);
+            let rack_id = ipv4_as_u32(127, 2, rack_n as u8, slot_idx as u8);
 
             let rack_api_addr =
                 SocketAddrV6::new(Ipv6Addr::LOCALHOST, rack_mgd.port, 0, 0);
@@ -318,20 +322,14 @@ async fn setup_bgp_peering(
                 })
                 .await
                 .with_context(|| {
-                    format!(
-                        "create_router for rack {rack_n} {slot:?}"
-                    )
+                    format!("create_router for rack {rack_n} {slot:?}")
                 })?;
 
             for (peer_n, peer_mgd) in peer_routers.iter().enumerate() {
                 let peer_asn = 65100 + peer_n as u32;
 
-                let peer_api_addr = SocketAddrV6::new(
-                    Ipv6Addr::LOCALHOST,
-                    peer_mgd.port,
-                    0,
-                    0,
-                );
+                let peer_api_addr =
+                    SocketAddrV6::new(Ipv6Addr::LOCALHOST, peer_mgd.port, 0, 0);
                 let peer_client = mg_admin_client::Client::new(
                     &format!("http://{peer_api_addr}"),
                     slog::Logger::new(
@@ -550,14 +548,10 @@ impl RunMultipleArgs {
             // dispatchers so they can coexist with other rack instances and
             // with the peer routers above.
             let mut mgd_bgp_addrs = BTreeMap::new();
-            mgd_bgp_addrs.insert(
-                SwitchSlot::Switch0,
-                Ipv4Addr::new(127, 2, n, 0),
-            );
-            mgd_bgp_addrs.insert(
-                SwitchSlot::Switch1,
-                Ipv4Addr::new(127, 2, n, 1),
-            );
+            mgd_bgp_addrs
+                .insert(SwitchSlot::Switch0, Ipv4Addr::new(127, 2, n, 0));
+            mgd_bgp_addrs
+                .insert(SwitchSlot::Switch1, Ipv4Addr::new(127, 2, n, 1));
 
             println!("\nomicron-dev: setting up all services for rack {n}... ");
             let cptestctx =
@@ -681,7 +675,8 @@ impl RunMultipleArgs {
                 if let Some(dir) = &mgd.data_dir {
                     println!(
                         "omicron-dev: mgd tmp dir:            {} ({:?})",
-                        dir.display(), location,
+                        dir.display(),
+                        location,
                     );
                 }
             }
