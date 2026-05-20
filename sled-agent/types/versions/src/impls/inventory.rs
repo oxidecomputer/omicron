@@ -1176,3 +1176,71 @@ pub enum SourceNatConfigError {
     )]
     UnalignedPortPair { first_port: u16, last_port: u16 },
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::latest::inventory::{FmdInventoryError, FmdInventoryErrorKind};
+    use iddqd::IdOrdMap;
+    use omicron_uuid_kinds::{FmdHostCaseUuid, FmdResourceUuid, GenericUuid};
+    use uuid::Uuid;
+
+    #[test]
+    fn fmd_inventory_result_display_snapshot() {
+        let case_uuid = FmdHostCaseUuid::from_untyped_uuid(Uuid::from_u128(
+            0xfeed_face_dead_beef_dead_beef_dead_beef,
+        ));
+        let resource_uuid = FmdResourceUuid::from_untyped_uuid(
+            Uuid::from_u128(0xbada_55ca_fe00_0000_0000_0000_0000_0001),
+        );
+
+        let mut cases = IdOrdMap::new();
+        cases
+            .insert_unique(FmdHostCase {
+                uuid: case_uuid,
+                code: "JOKE-9001-FAKE".to_string(),
+                url: "http://example.invalid/msg/JOKE-9001-FAKE".to_string(),
+                event: Some(serde_json::json!({
+                    "class": "fault.vibes.off",
+                    "spookiness": 9001,
+                    "suspects": ["casper", "slimer"],
+                })),
+            })
+            .expect("case uuid is unique");
+
+        let mut resources = IdOrdMap::new();
+        resources
+            .insert_unique(FmdResource {
+                uuid: resource_uuid,
+                fmri: "ghost:///not/a/real/fmri".to_string(),
+                case_id: case_uuid,
+                faulty: true,
+                unusable: false,
+                invisible: false,
+            })
+            .expect("resource uuid is unique");
+
+        let ok: Result<FmdInventory, FmdInventoryError> =
+            Ok(FmdInventory { cases, resources });
+        let err: Result<FmdInventory, FmdInventoryError> =
+            Err(FmdInventoryError {
+                kind: FmdInventoryErrorKind::FmdError,
+                message: "haunted by an absent fmd daemon".to_string(),
+            });
+
+        let mut out = String::new();
+        out.push_str("--- ok variant ---\n");
+        out.push_str(
+            &FmdInventoryResultDisplay::new(&ok).to_string(),
+        );
+        out.push_str("--- err variant ---\n");
+        out.push_str(
+            &FmdInventoryResultDisplay::new(&err).to_string(),
+        );
+
+        expectorate::assert_contents(
+            "tests/output/fmd_inventory_display.txt",
+            &out,
+        );
+    }
+}

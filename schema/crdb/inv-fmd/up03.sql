@@ -8,7 +8,9 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_fmd_host_case (
     url TEXT NOT NULL,
     -- The full FMD fault event payload as JSON, if present. Stored as
     -- JSONB without parsing — Nexus does not interpret the FMD event
-    -- schema; it round-trips verbatim for downstream tooling (e.g. omdb).
+    -- schema. JSONB normalizes whitespace and key order, so the value is
+    -- preserved structurally (not byte-for-byte) for downstream tooling
+    -- (e.g. omdb).
     event JSONB,
 
     PRIMARY KEY (inv_collection_id, sled_id, case_id)

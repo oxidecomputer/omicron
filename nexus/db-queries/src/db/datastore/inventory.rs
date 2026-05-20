@@ -4207,14 +4207,18 @@ impl DataStore {
                     let err = match (row.error_kind, row.error_message) {
                         (Some(kind), Some(message)) => Some((kind, message)),
                         (None, None) => None,
-                        _ => unreachable!(
-                            "inv_fmd_status CHECK constraint enforces \
-                             error_kind and error_message agree on NULL"
-                        ),
+                        _ => {
+                            return Err(Error::internal_error(
+                                "inv_fmd_status row violates \
+                                 error_kind_and_message_together CHECK \
+                                 constraint: exactly one of (error_kind, \
+                                 error_message) is NULL",
+                            ));
+                        }
                     };
-                    (row.sled_id.into(), err)
+                    Ok((row.sled_id.into(), err))
                 })
-                .collect()
+                .collect::<Result<BTreeMap<_, _>, _>>()?
         };
 
         let mut fmd_cases_by_sled: BTreeMap<
@@ -4240,12 +4244,12 @@ impl DataStore {
                     .entry(sled_id)
                     .or_default()
                     .insert_unique(row.into())
-                    .map_err(|err| {
-                    Error::internal_error(&format!(
-                        "unexpected duplicate FMD case: {}",
-                        InlineErrorChain::new(&err)
-                    ))
-                })?;
+                    .map_err(|err| Error::InternalError {
+                        internal_message: format!(
+                            "unexpected duplicate FMD case: {}",
+                            InlineErrorChain::new(&err)
+                        ),
+                    })?;
             }
             by_sled
         };
@@ -4273,12 +4277,12 @@ impl DataStore {
                     .entry(sled_id)
                     .or_default()
                     .insert_unique(row.into())
-                    .map_err(|err| {
-                    Error::internal_error(&format!(
-                        "unexpected duplicate FMD resource: {}",
-                        InlineErrorChain::new(&err)
-                    ))
-                })?;
+                    .map_err(|err| Error::InternalError {
+                        internal_message: format!(
+                            "unexpected duplicate FMD resource: {}",
+                            InlineErrorChain::new(&err)
+                        ),
+                    })?;
             }
             by_sled
         };
