@@ -200,6 +200,38 @@ impl<N: NexusServer> ControlPlaneTestContext<N> {
         }
     }
 
+    /// Wait until at least one fault management sitrep has been committed and
+    /// loaded.
+    ///
+    /// # Panics
+    ///
+    /// Panics if no sitrep is loaded within `timeout`.
+    pub async fn wait_for_at_least_one_sitrep(&self, timeout: Duration) {
+        let mut sitrep_rx = self.server.sitrep_load_rx();
+
+        match wait_for_watch_channel_condition(
+            &mut sitrep_rx,
+            async |sitrep| {
+                if sitrep.is_some() {
+                    Ok(())
+                } else {
+                    Err(CondCheckError::<()>::NotYet)
+                }
+            },
+            timeout,
+        )
+        .await
+        {
+            Ok(()) => (),
+            Err(poll::Error::TimedOut(elapsed)) => {
+                panic!("no sitrep found within {elapsed:?}");
+            }
+            Err(poll::Error::PermanentError(())) => {
+                unreachable!("check can only fail via timeout")
+            }
+        }
+    }
+
     pub fn internal_client(&self) -> nexus_client::Client {
         nexus_client::Client::new(
             &format!("http://{}", self.internal_client.bind_address),

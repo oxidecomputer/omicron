@@ -187,6 +187,12 @@ async fn test_omdb_success_cases() {
         .wait_for_at_least_one_inventory_collection(Duration::from_secs(60))
         .await;
 
+    // Wait until `fm_analysis` has committed at least one sitrep, so that the
+    // omdb snapshot for FM tasks is stable. (Otherwise sitrep IDs render as
+    // `None` or `Some(...)` depending on whether the task's natural cadence
+    // had landed by the time we sample it.)
+    cptestctx.wait_for_at_least_one_sitrep(Duration::from_secs(60)).await;
+
     let mut output = String::new();
 
     let invocations: &[&[&str]] = &[

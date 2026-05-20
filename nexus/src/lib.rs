@@ -524,6 +524,19 @@ impl nexus_test_interface::NexusServer for Server {
         self.apictx.context.nexus.inventory_load_rx()
     }
 
+    fn sitrep_load_rx(
+        &self,
+    ) -> watch::Receiver<
+        Option<
+            Arc<(
+                nexus_types::fm::SitrepVersion,
+                nexus_types::fm::Sitrep,
+            )>,
+        >,
+    > {
+        self.apictx.context.nexus.sitrep_load_rx()
+    }
+
     fn get_http_server_external_address(&self) -> SocketAddr {
         self.apictx.context.nexus.get_external_server_address().unwrap()
     }

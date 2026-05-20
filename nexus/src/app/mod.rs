@@ -316,7 +316,6 @@ pub struct Nexus {
     repo_depot_resolver: Box<dyn qorb::resolver::Resolver>,
 
     /// Watch channel containing the currently-loaded fault management sitrep.
-    #[allow(dead_code)]
     sitrep_load_rx: watch::Receiver<Option<CurrentSitrep>>,
 
     /// handle to pull update status data
@@ -1146,6 +1145,14 @@ impl Nexus {
 
     pub fn datastore(&self) -> &Arc<db::DataStore> {
         &self.db_datastore
+    }
+
+    pub(crate) fn sitrep_load_rx(
+        &self,
+    ) -> watch::Receiver<Option<CurrentSitrep>> {
+        let mut rx = self.sitrep_load_rx.clone();
+        rx.mark_unchanged();
+        rx
     }
 
     pub(crate) fn samael_max_issue_delay(&self) -> Option<chrono::Duration> {
