@@ -18,6 +18,7 @@ use nexus_db_model::Sled;
 use omicron_uuid_kinds::GenericUuid;
 use serde::Serialize;
 use slog::Logger;
+use slog::error;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use uuid::Uuid;
