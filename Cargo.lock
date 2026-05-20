@@ -8271,6 +8271,7 @@ dependencies = [
  "anyhow",
  "camino",
  "chrono",
+ "chrono-tz",
  "clap",
  "clickhouse-admin-api",
  "clickhouse-admin-test-utils",
@@ -8305,6 +8306,7 @@ dependencies = [
  "tokio-postgres",
  "toml 0.8.23",
  "url",
+ "uuid",
 ]
 
 [[package]]
