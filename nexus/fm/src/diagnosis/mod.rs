@@ -11,13 +11,13 @@
 use crate::SitrepBuilder;
 use crate::analysis_input::Input;
 
-mod disk;
+mod physical_disk;
 
 pub fn analyze(
     input: &Input,
     builder: &mut SitrepBuilder<'_>,
 ) -> anyhow::Result<()> {
-    disk::analyze(input, builder)?;
+    physical_disk::analyze(input, builder)?;
     Ok(())
 }
 
@@ -25,9 +25,9 @@ pub fn analyze(
 /// how to consume. The background task uses this to filter loaded ereports
 /// — there is no value in loading ereports FM analysis cannot consume.
 ///
-/// Empty today: the only enabled DE is the disk DE, which is polling-based
-/// and consumes no ereports. Grow this list alongside FM analysis as new
-/// classes gain ereport support.
+/// Empty today: the only enabled DE is the physical disk DE, which is
+/// polling-based and consumes no ereports. Grow this list alongside FM
+/// analysis as new classes gain ereport support.
 ///
 /// **NULL-class ereports are intentionally excluded by the loader's SQL
 /// filter** (`class = ANY(...)` never matches NULL). If FM analysis ever
