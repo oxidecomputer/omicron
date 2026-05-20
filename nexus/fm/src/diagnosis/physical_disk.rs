@@ -22,12 +22,12 @@ use std::collections::{BTreeMap, BTreeSet};
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum DiskFact {
     /// The zpool's most recently observed health is non-`Online`.
-    ZpoolUnhealthy(ZpoolUnhealthyFact),
+    ZpoolUnhealthy(ZpoolUnhealthyFactPayload),
 }
 
 /// Payload of a [`DiskFact::ZpoolUnhealthy`] fact.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub struct ZpoolUnhealthyFact {
+pub struct ZpoolUnhealthyFactPayload {
     pub zpool_id: ZpoolUuid,
     pub last_seen_health: ZpoolHealth,
     /// Inventory collection that produced this observation. Recorded for
@@ -39,16 +39,16 @@ pub struct ZpoolUnhealthyFact {
     pub time_observed: DateTime<Utc>,
 }
 
-/// A parent-forwarded [`DiskFact::ZpoolUnhealthy`] fact paired with the
-/// `FactUuid` it lives under. Used to index parent-case facts during
+/// A [`DiskFact::ZpoolUnhealthy`] payload paired with the `FactUuid` it
+/// lives under. Used to build in-memory indices over facts during
 /// analysis; not serialized.
 #[derive(Clone, Copy, Debug)]
-struct UnhealthyZpoolFact {
+struct ZpoolUnhealthyFact {
     fact_id: FactUuid,
-    fact: ZpoolUnhealthyFact,
+    payload: ZpoolUnhealthyFactPayload,
 }
 
-impl IdOrdItem for UnhealthyZpoolFact {
+impl IdOrdItem for ZpoolUnhealthyFact {
     type Key<'a> = FactUuid;
     fn key(&self) -> Self::Key<'_> {
         self.fact_id
@@ -77,21 +77,21 @@ struct ParentCaseSummary {
     /// All `ZpoolUnhealthy` facts on this case. In typical operation there
     /// is at most one fact per zpool; pathological cases (e.g., hand-edited
     /// DB) can have multiple — the diagnosis engine keeps all of them.
-    unhealthy_zpools: IdOrdMap<UnhealthyZpoolFact>,
+    unhealthy_zpools: IdOrdMap<ZpoolUnhealthyFact>,
 }
 
 impl ParentCaseSummary {
     fn zpool_ids(&self) -> BTreeSet<ZpoolUuid> {
-        self.unhealthy_zpools.iter().map(|f| f.fact.zpool_id).collect()
+        self.unhealthy_zpools.iter().map(|f| f.payload.zpool_id).collect()
     }
 
     fn facts_for_zpool(
         &self,
         zpool_id: ZpoolUuid,
-    ) -> impl Iterator<Item = &UnhealthyZpoolFact> {
+    ) -> impl Iterator<Item = &ZpoolUnhealthyFact> {
         self.unhealthy_zpools
             .iter()
-            .filter(move |f| f.fact.zpool_id == zpool_id)
+            .filter(move |f| f.payload.zpool_id == zpool_id)
     }
 }
 
@@ -142,12 +142,12 @@ pub(super) fn analyze(
                 ParentCaseSummary { unhealthy_zpools: IdOrdMap::new() };
             for fact in c.facts.iter() {
                 match fact.payload_to::<DiskFact>() {
-                    Ok(DiskFact::ZpoolUnhealthy(inner)) => {
+                    Ok(DiskFact::ZpoolUnhealthy(payload)) => {
                         summary
                             .unhealthy_zpools
-                            .insert_unique(UnhealthyZpoolFact {
+                            .insert_unique(ZpoolUnhealthyFact {
                                 fact_id: fact.id,
-                                fact: inner,
+                                payload,
                             })
                             .expect("fact ids are unique within a case");
                     }
@@ -215,10 +215,10 @@ pub(super) fn analyze(
             continue;
         }
         for fact_ref in summary.unhealthy_zpools.iter() {
-            let Some(current) = faulty.get(&fact_ref.fact.zpool_id) else {
+            let Some(current) = faulty.get(&fact_ref.payload.zpool_id) else {
                 continue;
             };
-            if current.health != fact_ref.fact.last_seen_health {
+            if current.health != fact_ref.payload.last_seen_health {
                 case_mut.remove_fact(fact_ref.fact_id);
             }
         }
@@ -243,9 +243,9 @@ pub(super) fn analyze(
         let case_id_for_fact = match parent_for_zpool {
             // Parent case already has an accurate fact — fully covered.
             Some((_, summary))
-                if summary.facts_for_zpool(zpool_id).any(|f| {
-                    f.fact.last_seen_health == current_health
-                }) =>
+                if summary
+                    .facts_for_zpool(zpool_id)
+                    .any(|f| f.payload.last_seen_health == current_health) =>
             {
                 continue;
             }
@@ -266,7 +266,7 @@ pub(super) fn analyze(
             .case_mut(&case_id_for_fact)
             .expect("case_id came from this fn")
             .add_fact(
-                &DiskFact::ZpoolUnhealthy(ZpoolUnhealthyFact {
+                &DiskFact::ZpoolUnhealthy(ZpoolUnhealthyFactPayload {
                     zpool_id,
                     last_seen_health: current_health,
                     observed_in_inv: inv_collection_id,
@@ -406,7 +406,7 @@ mod tests {
                 id: omicron_uuid_kinds::FactUuid::new_v4(),
                 created_sitrep_id: parent_sitrep_id,
                 payload: serde_json::to_value(&DiskFact::ZpoolUnhealthy(
-                    ZpoolUnhealthyFact {
+                    ZpoolUnhealthyFactPayload {
                         zpool_id,
                         last_seen_health: ZpoolHealth::Degraded,
                         observed_in_inv: inv_collection_id,
@@ -479,7 +479,7 @@ mod tests {
         let facts = disk_facts(&sitrep, true);
         assert_eq!(facts.len(), 1);
         match &facts[0].2 {
-            DiskFact::ZpoolUnhealthy(ZpoolUnhealthyFact {
+            DiskFact::ZpoolUnhealthy(ZpoolUnhealthyFactPayload {
                 zpool_id,
                 last_seen_health,
                 ..
@@ -525,8 +525,9 @@ mod tests {
         let open_cases = disk_facts(&sitrep, true);
         assert_eq!(open_cases.len(), 1);
         match &open_cases[0].2 {
-            DiskFact::ZpoolUnhealthy(ZpoolUnhealthyFact {
-                zpool_id, ..
+            DiskFact::ZpoolUnhealthy(ZpoolUnhealthyFactPayload {
+                zpool_id,
+                ..
             }) => {
                 assert_eq!(*zpool_id, target);
             }
@@ -695,8 +696,9 @@ mod tests {
              signal",
         );
         match &readable[0].2 {
-            DiskFact::ZpoolUnhealthy(ZpoolUnhealthyFact {
-                zpool_id, ..
+            DiskFact::ZpoolUnhealthy(ZpoolUnhealthyFactPayload {
+                zpool_id,
+                ..
             }) => {
                 assert_eq!(*zpool_id, live_target);
             }
@@ -738,7 +740,7 @@ mod tests {
              observation hasn't changed",
         );
         match &open[0].2 {
-            DiskFact::ZpoolUnhealthy(ZpoolUnhealthyFact {
+            DiskFact::ZpoolUnhealthy(ZpoolUnhealthyFactPayload {
                 zpool_id,
                 last_seen_health,
                 ..
@@ -788,7 +790,7 @@ mod tests {
             "fact UUID should rotate because last_seen_health changed",
         );
         match &open[0].2 {
-            DiskFact::ZpoolUnhealthy(ZpoolUnhealthyFact {
+            DiskFact::ZpoolUnhealthy(ZpoolUnhealthyFactPayload {
                 zpool_id,
                 last_seen_health,
                 ..

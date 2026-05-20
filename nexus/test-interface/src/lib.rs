@@ -91,12 +91,7 @@ pub trait NexusServer: Send + Sync + 'static {
     fn sitrep_load_rx(
         &self,
     ) -> watch::Receiver<
-        Option<
-            Arc<(
-                nexus_types::fm::SitrepVersion,
-                nexus_types::fm::Sitrep,
-            )>,
-        >,
+        Option<Arc<(nexus_types::fm::SitrepVersion, nexus_types::fm::Sitrep)>>,
     >;
 
     fn get_http_server_external_address(&self) -> SocketAddr;
