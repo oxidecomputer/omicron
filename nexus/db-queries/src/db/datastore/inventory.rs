@@ -4245,11 +4245,11 @@ impl DataStore {
                     .or_default()
                     .insert_unique(row.into())
                     .map_err(|err| Error::InternalError {
-                        internal_message: format!(
-                            "unexpected duplicate FMD case: {}",
-                            InlineErrorChain::new(&err)
-                        ),
-                    })?;
+                    internal_message: format!(
+                        "unexpected duplicate FMD case: {}",
+                        InlineErrorChain::new(&err)
+                    ),
+                })?;
             }
             by_sled
         };
@@ -4278,11 +4278,11 @@ impl DataStore {
                     .or_default()
                     .insert_unique(row.into())
                     .map_err(|err| Error::InternalError {
-                        internal_message: format!(
-                            "unexpected duplicate FMD resource: {}",
-                            InlineErrorChain::new(&err)
-                        ),
-                    })?;
+                    internal_message: format!(
+                        "unexpected duplicate FMD resource: {}",
+                        InlineErrorChain::new(&err)
+                    ),
+                })?;
             }
             by_sled
         };

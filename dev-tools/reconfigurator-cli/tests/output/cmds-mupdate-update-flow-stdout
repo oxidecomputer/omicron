@@ -3259,14 +3259,13 @@ external DNS:
 
 
 
-> # Test that the add-zones-with-mupdate-override planner config works as
-> # expected. We do this by:
+> # Test that adding a new sled while a mupdate override is active does not
+> # cause the planner to add new zones to it. We do this by:
 > # * setting the mupdate override on a sled
 > # * adding a new sled
 > #
-> # With the option disabled (the current state), the planner will
-> # not proceed with adding new zones. But with the option enabled,
-> # new zones will be added.
+> # The planner will not proceed with adding new zones while any sled has an
+> # active mupdate override.
 
 > # Apply the blueprint edits to sled 0. This also lets the planner see
 > # that the internal_dns zone is expunged, setting up a replacement
@@ -3285,7 +3284,7 @@ generated inventory collection 005f6a30-7f65-4593-9f78-ee68f766f42b from configu
 
 
 > # This will *not* generate the datasets and internal NTP zone on the new
-> # sled.
+> # sled, because zone adds are blocked while a mupdate override is present.
 > blueprint-plan latest latest
 INFO blueprint mupdate override updated to match inventory, phase: do_plan_mupdate_override, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, new_bp_override: c8fba912-63ae-473a-9115-0495d10fb3bc, prev_bp_override: None, zones: 
   - zone 0c71b3b2-6ceb-4e8f-b020-b08675e83038 (Nexus) updated from artifact: version 1.0.0 to install dataset
@@ -3445,276 +3444,16 @@ external DNS:
 
 
 
-> # This *will* generate the datasets and internal NTP zone on the new sled.
-> set planner-config --add-zones-with-mupdate-override true
-planner config updated:
-*   add zones with mupdate override:   false -> true
-
-
-> blueprint-plan latest latest
-INFO skipped noop image source check on sled, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, reason: inventory stale: inventory reported generation (6) that is older than the generation in the parent blueprint (7)
-INFO skipped noop image source check on sled, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, reason: inventory stale: inventory reported generation (9) that is older than the generation in the parent blueprint (10)
-INFO performed noop zone image source checks on sled, sled_id: c3bc4c6d-fdde-4fc4-8493-89d2a1e5ee6b, num_total: 0, num_already_artifact: 0, num_eligible: 0, num_ineligible: 0
-INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: c3bc4c6d-fdde-4fc4-8493-89d2a1e5ee6b, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
-INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: c3bc4c6d-fdde-4fc4-8493-89d2a1e5ee6b, slot: b, expected_hash: 0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b
-INFO current sled measurements are in an unknown state, sled_id: c3bc4c6d-fdde-4fc4-8493-89d2a1e5ee6b
-INFO skipped noop image source check on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, reason: inventory stale: inventory reported generation (7) that is older than the generation in the parent blueprint (8)
-INFO altered physical disks, sled_id: c3bc4c6d-fdde-4fc4-8493-89d2a1e5ee6b, sled_edits: SledEditCounts { disks: EditCounts { added: 10, updated: 0, expunged: 0, removed: 0 }, datasets: EditCounts { added: 40, updated: 0, expunged: 0, removed: 0 }, zones: EditCounts { added: 0, updated: 0, expunged: 0, removed: 0 }, measurements: EditCounts { added: 0, updated: 0, expunged: 0, removed: 0 } }
-generated blueprint 9a9e6c32-5a84-4020-a159-33dceff18d35 based on parent blueprint 9f89efdf-a23e-4137-b7cc-79f4a91cbe1f
-blueprint source: planner with report:
-planning report:
-planner config:
-    add zones with mupdate override:   true
-
-* zone adds and updates are blocked:
-  - current target release generation (4) is lower than minimum required by blueprint (5)
-  - sleds have remove mupdate override set in blueprint: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6
-  - sleds have deployment units with image sources not set to Artifact:
-    - sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: 5 zones
-
-  - sleds have measurements with image sources not set to Artifact:
-    - sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 set to install dataset
-
-* adding zones despite being blocked, because: planner config `add_zones_with_mupdate_override` is true
-* discretionary zone placement waiting for NTP zones on sleds: c3bc4c6d-fdde-4fc4-8493-89d2a1e5ee6b
-* missing NTP zone on sled c3bc4c6d-fdde-4fc4-8493-89d2a1e5ee6b
-* only placed 0/1 desired nexus zones
-* discretionary zones placed:
-  * internal_dns zone on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 from source artifact: version 2.0.0
-* zone updates waiting on discretionary zones
-* waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
-Measurement updates:
-Waiting on zone add/update blockers
-
-
-
-> # TODO: This blippy run produces two FATAL notes, due to, respectively:
-> #
-> # * https://github.com/oxidecomputer/omicron/issues/10420
-> # * https://github.com/oxidecomputer/omicron/pull/10363
-> blueprint-blippy latest
-blippy report for blueprint 9a9e6c32-5a84-4020-a159-33dceff18d35: 2 notes
-  FATAL note: sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c: Nexus zones 466a9f29-62bf-4e63-924a-b9efdb86afec and 0c71b3b2-6ceb-4e8f-b020-b08675e83038 both have generation 1 but different image sources (Artifact { version: Available { version: ArtifactVersion("2.0.0") }, hash: ArtifactHash("e9b7035f41848a987a798c15ac424cc91dd662b1af0920d58d8aa1ebad7467b6") } vs InstallDataset)
-  FATAL note: sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: sled has remove_mupdate_override set (c8fba912-63ae-473a-9115-0495d10fb3bc), but zone cfc72ddd-fd83-4396-b1ad-d53f69182a09 image source is set to Artifact (version version 2.0.0, hash de30657a72b066b8ef1f56351a0a5d4d7000da0a62c4be9b2e949a107ca8a389)
-
-
-> blueprint-diff latest
-from: blueprint 9f89efdf-a23e-4137-b7cc-79f4a91cbe1f
-to:   blueprint 9a9e6c32-5a84-4020-a159-33dceff18d35
-
- MODIFIED SLEDS:
-
-  sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 (active, config generation 10 -> 11):
-    will remove mupdate override:   c8fba912-63ae-473a-9115-0495d10fb3bc (unchanged)
-
-    measurements:
-    ------------------------------
-    hash              version     
-    ------------------------------
-    install dataset   (no version)
-
-
-    host phase 2 contents:
-    ------------------------
-    slot   boot image source
-    ------------------------
-    A      current contents 
-    B      current contents 
-
-
-    physical disks:
-    ------------------------------------------------------------------------------------
-    vendor        model        serial                                        disposition
-    ------------------------------------------------------------------------------------
-    fake-vendor   fake-model   serial-c6d33b64-fb96-4129-bab1-7878a06a5f9b   in service 
-
-
-    datasets:
-    -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-    dataset name                                                                                                   dataset id                             disposition   quota     reservation   compression
-    -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-    oxp_c6d33b64-fb96-4129-bab1-7878a06a5f9b/crucible                                                              42430c80-7836-4191-a4f6-bcee749010fe   in service    none      none          off        
-    oxp_c6d33b64-fb96-4129-bab1-7878a06a5f9b/crypt/external_dns                                                    ad41be71-6c15-4428-b510-20ceacde4fa6   in service    none      none          off        
-    oxp_c6d33b64-fb96-4129-bab1-7878a06a5f9b/crypt/internal_dns                                                    a4c3032e-21fa-4d4a-b040-a7e3c572cf3c   expunged      none      none          off        
-    oxp_c6d33b64-fb96-4129-bab1-7878a06a5f9b/crypt/zone                                                            4617d206-4330-4dfa-b9f3-f63a3db834f9   in service    none      none          off        
-    oxp_c6d33b64-fb96-4129-bab1-7878a06a5f9b/crypt/zone/oxz_crucible_5199c033-4cf9-4ab6-8ae7-566bd7606363          4847a96e-a267-4ae7-aa3d-805c1e77f81e   in service    none      none          off        
-    oxp_c6d33b64-fb96-4129-bab1-7878a06a5f9b/crypt/zone/oxz_crucible_pantry_ba4994a8-23f9-4b1a-a84f-a08d74591389   43931274-7fe8-4077-825d-dff2bc8efa58   in service    none      none          off        
-    oxp_c6d33b64-fb96-4129-bab1-7878a06a5f9b/crypt/zone/oxz_external_dns_803bfb63-c246-41db-b0da-d3b87ddfc63d      1bca7f71-5e42-4749-91ec-fa40793a3a9a   in service    none      none          off        
-    oxp_c6d33b64-fb96-4129-bab1-7878a06a5f9b/crypt/zone/oxz_internal_dns_427ec88f-f467-42fa-9bbb-66a91a36103c      3ac089c9-9dec-465b-863a-188e80d71fb4   expunged      none      none          off        
-    oxp_c6d33b64-fb96-4129-bab1-7878a06a5f9b/crypt/zone/oxz_nexus_0c71b3b2-6ceb-4e8f-b020-b08675e83038             4f60b534-eaa3-40a1-b60f-bfdf147af478   in service    none      none          off        
-    oxp_c6d33b64-fb96-4129-bab1-7878a06a5f9b/crypt/zone/oxz_ntp_6444f8a5-6465-4f0b-a549-1993c113569c               686c19cf-a0d7-45f6-866f-c564612b2664   in service    none      none          off        
-    oxp_c6d33b64-fb96-4129-bab1-7878a06a5f9b/crypt/debug                                                           248c6c10-1ac6-45de-bb55-ede36ca56bbd   in service    100 GiB   none          gzip-9     
-    oxp_c6d33b64-fb96-4129-bab1-7878a06a5f9b/crypt/local_storage                                                   cdf3684f-a6cf-4449-b9ec-e696b2c663e2   in service    none      none          off        
-    oxp_c6d33b64-fb96-4129-bab1-7878a06a5f9b/local_storage_unencrypted                                             793ac181-1b01-403c-850d-7f5c54bda6c9   in service    none      none          off        
-+   oxp_c6d33b64-fb96-4129-bab1-7878a06a5f9b/crypt/internal_dns                                                    b8ba4bea-893b-42e9-a034-c7283d15c2b7   in service    none      none          off        
-+   oxp_c6d33b64-fb96-4129-bab1-7878a06a5f9b/crypt/zone/oxz_internal_dns_cfc72ddd-fd83-4396-b1ad-d53f69182a09      64c1c086-6866-4a94-b9bf-1d022312d587   in service    none      none          off        
-
-
-    omicron zones:
-    -----------------------------------------------------------------------------------------------------------------------
-    zone type         zone id                                image source              disposition    underlay IP          
-    -----------------------------------------------------------------------------------------------------------------------
-    crucible          5199c033-4cf9-4ab6-8ae7-566bd7606363   install dataset           in service     fd00:1122:3344:101::7
-    crucible_pantry   ba4994a8-23f9-4b1a-a84f-a08d74591389   install dataset           in service     fd00:1122:3344:101::6
-    external_dns      803bfb63-c246-41db-b0da-d3b87ddfc63d   install dataset           in service     fd00:1122:3344:101::5
-    internal_dns      427ec88f-f467-42fa-9bbb-66a91a36103c   artifact: version 1.0.0   expunged ✓     fd00:1122:3344:2::1  
-    internal_ntp      6444f8a5-6465-4f0b-a549-1993c113569c   install dataset           in service     fd00:1122:3344:101::3
-    nexus             0c71b3b2-6ceb-4e8f-b020-b08675e83038   install dataset           in service     fd00:1122:3344:101::4
-+   internal_dns      cfc72ddd-fd83-4396-b1ad-d53f69182a09   artifact: version 2.0.0   in service     fd00:1122:3344:2::1  
-
-
-  sled c3bc4c6d-fdde-4fc4-8493-89d2a1e5ee6b (active, config generation 1 -> 2):
-
-    measurements:
-    ---------------------------
-    hash      version          
-    ---------------------------
-    unknown   (unknown version)
-
-
-    host phase 2 contents:
-    ------------------------
-    slot   boot image source
-    ------------------------
-    A      current contents 
-    B      current contents 
-
-
-    physical disks:
-    ------------------------------------------------------------------------------------
-    vendor        model        serial                                        disposition
-    ------------------------------------------------------------------------------------
-+   fake-vendor   fake-model   serial-1a2d5932-ca5b-44b8-a0a4-31215d934293   in service 
-+   fake-vendor   fake-model   serial-2454c824-3b2b-4350-a5c7-ce9b1ff5a903   in service 
-+   fake-vendor   fake-model   serial-5369d002-dd19-48f2-8c08-ba063cb1e010   in service 
-+   fake-vendor   fake-model   serial-5e25e3a5-d115-4df0-a54b-81f29fbb9d61   in service 
-+   fake-vendor   fake-model   serial-6082ad32-e210-4786-9656-4b6bfcec5d05   in service 
-+   fake-vendor   fake-model   serial-88659529-1c87-4107-8227-c9276a330bf5   in service 
-+   fake-vendor   fake-model   serial-9cde7847-ff58-41af-95bf-aecebc3f1344   in service 
-+   fake-vendor   fake-model   serial-9e9ca75a-6a79-4706-bcce-35714d79913c   in service 
-+   fake-vendor   fake-model   serial-d8c90412-fbdb-480d-8a07-c3de73b441bc   in service 
-+   fake-vendor   fake-model   serial-f3052185-bebb-4e75-842b-d8125b70bb8a   in service 
-
-
-    datasets:
-    -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-    dataset name                                                                                       dataset id                             disposition   quota     reservation   compression
-    -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-+   oxp_1a2d5932-ca5b-44b8-a0a4-31215d934293/crypt/zone                                                5b45f9cf-cfb5-4ab5-a1c5-c32409b9055c   in service    none      none          off        
-+   oxp_2454c824-3b2b-4350-a5c7-ce9b1ff5a903/crypt/zone                                                5521d6e5-f3d6-4743-9b86-acd9febe0b47   in service    none      none          off        
-+   oxp_5369d002-dd19-48f2-8c08-ba063cb1e010/crypt/zone                                                41bae319-97f7-458e-8b7d-94bbeb457279   in service    none      none          off        
-+   oxp_5e25e3a5-d115-4df0-a54b-81f29fbb9d61/crypt/zone                                                a50abc4d-ae17-4076-a35a-e3481fff8319   in service    none      none          off        
-+   oxp_6082ad32-e210-4786-9656-4b6bfcec5d05/crypt/zone                                                4753a210-ce06-41ae-97a7-5690ed7e41b4   in service    none      none          off        
-+   oxp_88659529-1c87-4107-8227-c9276a330bf5/crypt/zone                                                7bd6dfc3-8be9-4673-8db5-52b7f4945aa9   in service    none      none          off        
-+   oxp_9cde7847-ff58-41af-95bf-aecebc3f1344/crypt/zone                                                fbb5214b-39eb-4de4-9974-c5300c9fb47c   in service    none      none          off        
-+   oxp_9e9ca75a-6a79-4706-bcce-35714d79913c/crypt/zone                                                230cb67d-f35b-4b5d-8bd7-f75236f13cfc   in service    none      none          off        
-+   oxp_d8c90412-fbdb-480d-8a07-c3de73b441bc/crypt/zone                                                65b911da-ee99-4127-989c-dfc3ab80e154   in service    none      none          off        
-+   oxp_f3052185-bebb-4e75-842b-d8125b70bb8a/crypt/zone                                                c0d09d31-413c-4cc5-ab37-60c14de6cb6e   in service    none      none          off        
-+   oxp_1a2d5932-ca5b-44b8-a0a4-31215d934293/crypt/zone/oxz_ntp_cee5d0c6-412c-49e9-a9a8-dab9addaa182   0b31c2d5-a0d1-4726-be23-ddc116a67d4f   in service    none      none          off        
-+   oxp_1a2d5932-ca5b-44b8-a0a4-31215d934293/crypt/debug                                               a775b06e-d41a-4999-921d-92382de5b104   in service    100 GiB   none          gzip-9     
-+   oxp_2454c824-3b2b-4350-a5c7-ce9b1ff5a903/crypt/debug                                               361810ea-a221-4889-afff-c3c39800148e   in service    100 GiB   none          gzip-9     
-+   oxp_5369d002-dd19-48f2-8c08-ba063cb1e010/crypt/debug                                               1c2df152-b15a-4581-b577-59c1191bffcd   in service    100 GiB   none          gzip-9     
-+   oxp_5e25e3a5-d115-4df0-a54b-81f29fbb9d61/crypt/debug                                               127a5d0a-e1f2-45be-9e02-d237943bd572   in service    100 GiB   none          gzip-9     
-+   oxp_6082ad32-e210-4786-9656-4b6bfcec5d05/crypt/debug                                               b0c66ed8-0814-4fdf-bf98-3134e6b4f835   in service    100 GiB   none          gzip-9     
-+   oxp_88659529-1c87-4107-8227-c9276a330bf5/crypt/debug                                               6e688437-1dd2-4fa6-8ae5-27d03b9facc7   in service    100 GiB   none          gzip-9     
-+   oxp_9cde7847-ff58-41af-95bf-aecebc3f1344/crypt/debug                                               9c8fc544-ecd4-4665-ba59-e725dd6f8c3e   in service    100 GiB   none          gzip-9     
-+   oxp_9e9ca75a-6a79-4706-bcce-35714d79913c/crypt/debug                                               6706d44a-ee83-47e2-8170-6f074d8e8db1   in service    100 GiB   none          gzip-9     
-+   oxp_d8c90412-fbdb-480d-8a07-c3de73b441bc/crypt/debug                                               43d2e2ce-cd50-426e-a775-a2dd70266686   in service    100 GiB   none          gzip-9     
-+   oxp_f3052185-bebb-4e75-842b-d8125b70bb8a/crypt/debug                                               092f2d0d-a3ba-4dcb-8ddb-f03245d6f6fb   in service    100 GiB   none          gzip-9     
-+   oxp_1a2d5932-ca5b-44b8-a0a4-31215d934293/crypt/local_storage                                       a5761160-87b2-4f6e-8f9b-534bbb6e5b90   in service    none      none          off        
-+   oxp_2454c824-3b2b-4350-a5c7-ce9b1ff5a903/crypt/local_storage                                       b95b9b99-4499-4bd8-9d63-689c4f3e5643   in service    none      none          off        
-+   oxp_5369d002-dd19-48f2-8c08-ba063cb1e010/crypt/local_storage                                       23815e89-3785-4e91-8211-0047004d0d73   in service    none      none          off        
-+   oxp_5e25e3a5-d115-4df0-a54b-81f29fbb9d61/crypt/local_storage                                       92a3c4c9-a8f1-46c2-97d0-3ee013ce8e63   in service    none      none          off        
-+   oxp_6082ad32-e210-4786-9656-4b6bfcec5d05/crypt/local_storage                                       ede50fed-90a2-40c3-a2b3-368c5a94a868   in service    none      none          off        
-+   oxp_88659529-1c87-4107-8227-c9276a330bf5/crypt/local_storage                                       bba3293c-ac9c-4274-9964-714bb54500be   in service    none      none          off        
-+   oxp_9cde7847-ff58-41af-95bf-aecebc3f1344/crypt/local_storage                                       92385d71-5fd5-451c-a875-94d97f4c0480   in service    none      none          off        
-+   oxp_9e9ca75a-6a79-4706-bcce-35714d79913c/crypt/local_storage                                       d62c8cfb-65c3-4a02-8b8d-fc57ca4b3be9   in service    none      none          off        
-+   oxp_d8c90412-fbdb-480d-8a07-c3de73b441bc/crypt/local_storage                                       c8073218-d25b-423c-a654-0698f9d9d250   in service    none      none          off        
-+   oxp_f3052185-bebb-4e75-842b-d8125b70bb8a/crypt/local_storage                                       42e4993f-3d92-44c5-a219-3f9d88ad5d46   in service    none      none          off        
-+   oxp_1a2d5932-ca5b-44b8-a0a4-31215d934293/local_storage_unencrypted                                 45b0ac9f-5e52-4da4-9521-4bab8c42c748   in service    none      none          off        
-+   oxp_2454c824-3b2b-4350-a5c7-ce9b1ff5a903/local_storage_unencrypted                                 98acd8fb-856c-4a22-b359-1acefb507d67   in service    none      none          off        
-+   oxp_5369d002-dd19-48f2-8c08-ba063cb1e010/local_storage_unencrypted                                 dbe8d2c2-5618-4234-ad17-d749808e2881   in service    none      none          off        
-+   oxp_5e25e3a5-d115-4df0-a54b-81f29fbb9d61/local_storage_unencrypted                                 b1fc1b85-a6b8-407c-afdd-7d2f16349241   in service    none      none          off        
-+   oxp_6082ad32-e210-4786-9656-4b6bfcec5d05/local_storage_unencrypted                                 bc4a82c1-b64e-484d-be6a-e62a61f8c575   in service    none      none          off        
-+   oxp_88659529-1c87-4107-8227-c9276a330bf5/local_storage_unencrypted                                 1f7dfe5c-5043-4659-bb90-d026db043584   in service    none      none          off        
-+   oxp_9cde7847-ff58-41af-95bf-aecebc3f1344/local_storage_unencrypted                                 0eaab3fb-e88f-4c3f-9dc0-57193e309336   in service    none      none          off        
-+   oxp_9e9ca75a-6a79-4706-bcce-35714d79913c/local_storage_unencrypted                                 12a05e0d-0d26-484d-a16a-518ef1efb48d   in service    none      none          off        
-+   oxp_d8c90412-fbdb-480d-8a07-c3de73b441bc/local_storage_unencrypted                                 009e3f26-b45c-4a98-b772-46f2150e047d   in service    none      none          off        
-+   oxp_f3052185-bebb-4e75-842b-d8125b70bb8a/local_storage_unencrypted                                 ff1a3e79-11ce-4c22-bbc6-ab62776727d0   in service    none      none          off        
-
-
-    omicron zones:
-    -------------------------------------------------------------------------------------------------------------------
-    zone type      zone id                                image source              disposition   underlay IP          
-    -------------------------------------------------------------------------------------------------------------------
-+   internal_ntp   cee5d0c6-412c-49e9-a9a8-dab9addaa182   artifact: version 2.0.0   in service    fd00:1122:3344:104::3
-
-
- COCKROACHDB SETTINGS:
-    state fingerprint:::::::::::::::::   (none) (unchanged)
-    cluster.preserve_downgrade_option:   (do not modify) (unchanged)
-
- METADATA:
-    internal DNS version:::   1 (unchanged)
-    external DNS version:::   1 (unchanged)
-    target release min gen:   5 (unchanged)
-    nexus gen::::::::::::::   1 (unchanged)
-
- OXIMETER SETTINGS:
-    generation:   1 (unchanged)
-    read from::   SingleNode (unchanged)
-
-
-internal DNS:
-* DNS zone: "control-plane.oxide.internal": 
-*   name: @                                                  (records: 2 -> 3)
--       NS   ns1.control-plane.oxide.internal
--       NS   ns2.control-plane.oxide.internal
-+       NS   ns1.control-plane.oxide.internal
-+       NS   ns2.control-plane.oxide.internal
-+       NS   ns3.control-plane.oxide.internal
-*   name: _internal-ntp._tcp                                 (records: 3 -> 4)
--       SRV  port   123 62620961-fc4a-481e-968b-f5acbac0dc63.host.control-plane.oxide.internal
--       SRV  port   123 6444f8a5-6465-4f0b-a549-1993c113569c.host.control-plane.oxide.internal
--       SRV  port   123 f10a4fb9-759f-4a65-b25e-5794ad2d07d8.host.control-plane.oxide.internal
-+       SRV  port   123 62620961-fc4a-481e-968b-f5acbac0dc63.host.control-plane.oxide.internal
-+       SRV  port   123 6444f8a5-6465-4f0b-a549-1993c113569c.host.control-plane.oxide.internal
-+       SRV  port   123 cee5d0c6-412c-49e9-a9a8-dab9addaa182.host.control-plane.oxide.internal
-+       SRV  port   123 f10a4fb9-759f-4a65-b25e-5794ad2d07d8.host.control-plane.oxide.internal
-*   name: _nameservice._tcp                                  (records: 2 -> 3)
--       SRV  port  5353 99e2f30b-3174-40bf-a78a-90da8abba8ca.host.control-plane.oxide.internal
--       SRV  port  5353 ea5b4030-b52f-44b2-8d70-45f15f987d01.host.control-plane.oxide.internal
-+       SRV  port  5353 99e2f30b-3174-40bf-a78a-90da8abba8ca.host.control-plane.oxide.internal
-+       SRV  port  5353 cfc72ddd-fd83-4396-b1ad-d53f69182a09.host.control-plane.oxide.internal
-+       SRV  port  5353 ea5b4030-b52f-44b2-8d70-45f15f987d01.host.control-plane.oxide.internal
-+   name: cee5d0c6-412c-49e9-a9a8-dab9addaa182.host          (records: 1)
-+       AAAA fd00:1122:3344:104::3
-+   name: cfc72ddd-fd83-4396-b1ad-d53f69182a09.host          (records: 1)
-+       AAAA fd00:1122:3344:2::1
-*   name: ns2                                                (records: 1 -> 1)
--       AAAA fd00:1122:3344:3::1
-+       AAAA fd00:1122:3344:2::1
-+   name: ns3                                                (records: 1)
-+       AAAA fd00:1122:3344:3::1
-    unchanged names: 35 (records: 46)
-
-external DNS:
-  DNS zone: "oxide.example" (unchanged)
-    unchanged names: 5 (records: 9)
-
-
-
-
 > # Set the target release minimum generation to a large value -- we're going to
 > # test that the planner bails if it attempts a rollback of the target release
 > # minimum generation.
 > blueprint-edit latest set-target-release-min-gen 1000
-blueprint 13cfdd24-52ba-4e94-8c83-02e3a48fc746 created from latest blueprint (9a9e6c32-5a84-4020-a159-33dceff18d35): set target release minimum generation to 1000
+blueprint 9a9e6c32-5a84-4020-a159-33dceff18d35 created from latest blueprint (9f89efdf-a23e-4137-b7cc-79f4a91cbe1f): set target release minimum generation to 1000
 
 
 > # Apply this config to sled 1 before the new MUPdate below.
 > sled-set serial1 omicron-config latest
-set sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c omicron config from latest blueprint (13cfdd24-52ba-4e94-8c83-02e3a48fc746)
+set sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c omicron config from latest blueprint (9a9e6c32-5a84-4020-a159-33dceff18d35)
 
 > sled-set serial1 mupdate-override cc724abe-80c1-47e6-9771-19e6540531a9
 set sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c mupdate override: unset -> cc724abe-80c1-47e6-9771-19e6540531a9

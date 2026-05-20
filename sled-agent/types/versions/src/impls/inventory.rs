@@ -1230,13 +1230,9 @@ mod tests {
 
         let mut out = String::new();
         out.push_str("--- ok variant ---\n");
-        out.push_str(
-            &FmdInventoryResultDisplay::new(&ok).to_string(),
-        );
+        out.push_str(&FmdInventoryResultDisplay::new(&ok).to_string());
         out.push_str("--- err variant ---\n");
-        out.push_str(
-            &FmdInventoryResultDisplay::new(&err).to_string(),
-        );
+        out.push_str(&FmdInventoryResultDisplay::new(&err).to_string());
 
         expectorate::assert_contents(
             "tests/output/fmd_inventory_display.txt",
