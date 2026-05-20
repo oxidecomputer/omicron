@@ -85,3 +85,5 @@ pub mod v2026_04_16_00;
 pub mod v2026_05_07_00;
 #[path = "manual_disk_adoption/mod.rs"]
 pub mod v2026_05_08_00;
+#[path = "external_jumbo_frames/mod.rs"]
+pub mod v2026_05_20_00;

@@ -143,6 +143,7 @@ async fn test_snapshot_basic(cptestctx: &ControlPlaneTestContext) {
             auto_restart_policy: Default::default(),
             anti_affinity_groups: Vec::new(),
             multicast_groups: Vec::new(),
+            enable_jumbo_frames: false,
         },
     )
     .await;
@@ -325,6 +326,7 @@ async fn test_snapshot_stopped_instance(cptestctx: &ControlPlaneTestContext) {
             auto_restart_policy: Default::default(),
             anti_affinity_groups: Vec::new(),
             multicast_groups: Vec::new(),
+            enable_jumbo_frames: false,
         },
     )
     .await;

@@ -1203,6 +1203,26 @@ impl DataStore {
         Ok(instance_and_vmm)
     }
 
+    /// Update the per-instance jumbo-frames opt-in (RFD 689). Changes take
+    /// effect on the next instance restart.
+    pub async fn instance_set_enable_jumbo_frames(
+        &self,
+        opctx: &OpContext,
+        authz_instance: &authz::Instance,
+        enable_jumbo_frames: bool,
+    ) -> Result<(), Error> {
+        opctx.authorize(authz::Action::Modify, authz_instance).await?;
+        use nexus_db_schema::schema::instance::dsl as instance_dsl;
+        diesel::update(instance_dsl::instance)
+            .filter(instance_dsl::id.eq(authz_instance.id()))
+            .filter(instance_dsl::time_deleted.is_null())
+            .set(instance_dsl::enable_jumbo_frames.eq(enable_jumbo_frames))
+            .execute_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+        Ok(())
+    }
+
     /// Set the boot disk on an instance, bypassing the rest of an instance
     /// update. You probably don't need this; it's only used at the end of
     /// instance creation, since the boot disk can't be set until the new
@@ -2376,6 +2396,7 @@ mod tests {
                         auto_restart_policy: Default::default(),
                         anti_affinity_groups: Vec::new(),
                         multicast_groups: Vec::new(),
+                        enable_jumbo_frames: false,
                     },
                 ),
             )

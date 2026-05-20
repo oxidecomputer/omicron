@@ -33,6 +33,7 @@ use nexus_types_versions::v2026_01_16_00;
 use nexus_types_versions::v2026_01_16_01;
 use nexus_types_versions::v2026_01_22_00;
 use nexus_types_versions::v2026_01_30_01;
+use nexus_types_versions::v2026_01_31_00;
 use nexus_types_versions::v2026_02_13_01;
 use nexus_types_versions::v2026_04_16_00;
 use omicron_common::address::IpRange;
@@ -83,6 +84,7 @@ api_versions!([
     // |  date-based version should be at the top of the list.
     // v
     // (next_yyyy_mm_dd_nn, IDENT),
+    (2026_05_20_00, EXTERNAL_JUMBO_FRAMES),
     (2026_05_08_00, MANUAL_DISK_ADOPTION),
     (2026_05_07_00, REMOVE_DUPLICATED_NETWORKING_TYPES),
     (2026_04_30_00, PROBE_AND_SAML_DOCS),
@@ -434,6 +436,37 @@ pub trait NexusExternalApi {
         >,
     ) -> Result<
         HttpResponseOk<latest::policy::Policy<latest::policy::FleetRole>>,
+        HttpError,
+    >;
+
+    /// Fetch fleet-wide networking settings (RFD 689)
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/networking/settings",
+        tags = ["system/networking"],
+        versions = VERSION_EXTERNAL_JUMBO_FRAMES..,
+    }]
+    async fn system_networking_settings_view(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<
+        HttpResponseOk<latest::system_networking::SystemNetworkingSettings>,
+        HttpError,
+    >;
+
+    /// Update fleet-wide networking settings (RFD 689)
+    #[endpoint {
+        method = PUT,
+        path = "/v1/system/networking/settings",
+        tags = ["system/networking"],
+        versions = VERSION_EXTERNAL_JUMBO_FRAMES..,
+    }]
+    async fn system_networking_settings_update(
+        rqctx: RequestContext<Self::Context>,
+        new_settings: TypedBody<
+            latest::system_networking::SystemNetworkingSettingsUpdate,
+        >,
+    ) -> Result<
+        HttpResponseOk<latest::system_networking::SystemNetworkingSettings>,
         HttpError,
     >;
 
@@ -3581,13 +3614,29 @@ pub trait NexusExternalApi {
         method = POST,
         path = "/v1/instances",
         tags = ["instances"],
-        versions = VERSION_READ_ONLY_DISKS_NULLABLE..,
+        versions = VERSION_EXTERNAL_JUMBO_FRAMES..,
     }]
     async fn instance_create(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<latest::project::ProjectSelector>,
         new_instance: TypedBody<latest::instance::InstanceCreate>,
     ) -> Result<HttpResponseCreated<Instance>, HttpError>;
+
+    #[endpoint {
+        operation_id = "instance_create",
+        method = POST,
+        path = "/v1/instances",
+        tags = ["instances"],
+        versions = VERSION_READ_ONLY_DISKS_NULLABLE..VERSION_EXTERNAL_JUMBO_FRAMES,
+    }]
+    async fn instance_create_v2026_01_31_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<v2025_11_20_00::project::ProjectSelector>,
+        new_instance: TypedBody<v2026_01_31_00::instance::InstanceCreate>,
+    ) -> Result<HttpResponseCreated<Instance>, HttpError> {
+        Self::instance_create(rqctx, query_params, new_instance.map(Into::into))
+            .await
+    }
 
     #[endpoint {
         operation_id = "instance_create",
@@ -3601,8 +3650,12 @@ pub trait NexusExternalApi {
         query_params: Query<v2025_11_20_00::project::ProjectSelector>,
         new_instance: TypedBody<v2026_01_30_01::instance::InstanceCreate>,
     ) -> Result<HttpResponseCreated<Instance>, HttpError> {
-        Self::instance_create(rqctx, query_params, new_instance.map(Into::into))
-            .await
+        Self::instance_create_v2026_01_31_00(
+            rqctx,
+            query_params,
+            new_instance.map(Into::into),
+        )
+        .await
     }
 
     /// Create instance
@@ -3755,7 +3808,7 @@ pub trait NexusExternalApi {
         method = PUT,
         path = "/v1/instances/{instance}",
         tags = ["instances"],
-        versions = VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES..,
+        versions = VERSION_EXTERNAL_JUMBO_FRAMES..,
     }]
     async fn instance_update(
         rqctx: RequestContext<Self::Context>,
@@ -3763,6 +3816,29 @@ pub trait NexusExternalApi {
         path_params: Path<latest::path_params::InstancePath>,
         instance_config: TypedBody<latest::instance::InstanceUpdate>,
     ) -> Result<HttpResponseOk<Instance>, HttpError>;
+
+    /// Update instance
+    #[endpoint {
+        operation_id = "instance_update",
+        method = PUT,
+        path = "/v1/instances/{instance}",
+        tags = ["instances"],
+        versions = VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES..VERSION_EXTERNAL_JUMBO_FRAMES,
+    }]
+    async fn instance_update_v2026_01_08_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<v2025_11_20_00::project::OptionalProjectSelector>,
+        path_params: Path<v2025_11_20_00::path_params::InstancePath>,
+        instance_config: TypedBody<v2026_01_08_00::instance::InstanceUpdate>,
+    ) -> Result<HttpResponseOk<Instance>, HttpError> {
+        Self::instance_update(
+            rqctx,
+            query_params,
+            path_params,
+            instance_config.map(Into::into),
+        )
+        .await
+    }
 
     /// Update instance
     #[endpoint {
@@ -3778,7 +3854,7 @@ pub trait NexusExternalApi {
         path_params: Path<v2025_11_20_00::path_params::InstancePath>,
         instance_config: TypedBody<v2025_11_20_00::instance::InstanceUpdate>,
     ) -> Result<HttpResponseOk<Instance>, HttpError> {
-        Self::instance_update(
+        Self::instance_update_v2026_01_08_00(
             rqctx,
             query_params,
             path_params,

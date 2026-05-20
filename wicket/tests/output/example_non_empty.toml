@@ -50,6 +50,13 @@ bootstrap_sleds = [
     5, # serial 4 5 6 (model model2 revision 5, ::1)
 ]
 
+# Per RFD 689: when true, end users may opt in to jumbo frames (8500 byte
+# MTU) on the primary interface of an instance, and control plane services
+# with external-facing OPTE NICs are brought up with an 8500 byte MTU.
+# Operators can also toggle this at runtime via the Nexus
+# `/v1/system/networking/settings` endpoint after rack initialization.
+external_jumbo_frames_opt_in_enabled = false
+
 # Allowlist of source IPs that can make requests to user-facing services.
 #
 # Use the key:

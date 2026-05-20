@@ -481,6 +481,7 @@ async fn test_limited_collaborator_can_create_instance(
             start: true,
             auto_restart_policy: None,
             anti_affinity_groups: vec![],
+            enable_jumbo_frames: false,
         },
     )
     .authn_as(AuthnMode::SiloUser(limited_user.id))

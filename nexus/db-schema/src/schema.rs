@@ -467,6 +467,7 @@ table! {
         boot_disk_id -> Nullable<Uuid>,
         intended_state -> crate::enums::InstanceIntendedStateEnum,
         cpu_platform -> Nullable<crate::enums::InstanceCpuPlatformEnum>,
+        enable_jumbo_frames -> Bool,
     }
 }
 
@@ -592,6 +593,15 @@ table! {
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
         device_token_max_ttl_seconds -> Nullable<Int8>,
+    }
+}
+
+table! {
+    system_networking_settings(singleton) {
+        singleton -> Bool,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        external_jumbo_frames_opt_in_enabled -> Bool,
     }
 }
 

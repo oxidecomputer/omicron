@@ -651,6 +651,15 @@ impl super::Nexus {
             )
             .await?;
 
+        // Persist the fleet-wide jumbo-frames opt-in (RFD 689). The
+        // singleton row was seeded by the schema migration; we update it
+        // here in case RSS shipped a non-default value.
+        if request.external_jumbo_frames_opt_in_enabled {
+            self.db_datastore
+                .system_networking_settings_update(opctx, Some(true))
+                .await?;
+        }
+
         // Note: Service firewall rules are propagated on a best-effort basis
         // in Server::start() via attempt_ip_allowlist_plumbing(). OPTE's
         // default-deny policy ensures Nexus remains unreachable until the

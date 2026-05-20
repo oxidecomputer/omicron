@@ -658,6 +658,7 @@ pub async fn run_standalone_server(
         },
         allowed_source_ips: AllowedSourceIps::Any,
         initial_trust_quorum_configuration: None,
+        external_jumbo_frames_opt_in_enabled: false,
     };
 
     let mut nexus_lockstep_address = config.nexus_address;

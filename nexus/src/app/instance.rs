@@ -569,9 +569,26 @@ impl super::Nexus {
             boot_disk,
             cpu_platform,
             multicast_groups,
+            enable_jumbo_frames,
         } = params;
 
         check_instance_cpu_memory_sizes(*ncpus, *memory)?;
+
+        // RFD 689: opting in to jumbo frames requires the fleet-wide opt-in.
+        // Opting out (`Some(false)`) is always allowed.
+        if matches!(enable_jumbo_frames, Some(true)) {
+            let settings = self
+                .db_datastore
+                .system_networking_settings_view(opctx)
+                .await?;
+            if !settings.external_jumbo_frames_opt_in_enabled {
+                return Err(Error::invalid_request(
+                    "enable_jumbo_frames may only be set to true when the \
+                     fleet-wide jumbo-frames opt-in is enabled by a fleet \
+                     administrator",
+                ));
+            }
+        }
 
         let boot_disk_id = match boot_disk.as_ref() {
             Some(disk) => {
@@ -610,6 +627,18 @@ impl super::Nexus {
             .datastore()
             .instance_reconfigure(opctx, &authz_instance, update)
             .await;
+
+        // RFD 689: persist the new jumbo-frames bit if it was supplied.
+        // Effective MTU is recomputed on the next instance start.
+        if let Some(enable) = enable_jumbo_frames {
+            self.datastore()
+                .instance_set_enable_jumbo_frames(
+                    opctx,
+                    &authz_instance,
+                    *enable,
+                )
+                .await?;
+        }
 
         // Handle multicast group updates if specified
         if let Some(multicast_groups) = multicast_groups {
@@ -673,6 +702,22 @@ impl super::Nexus {
                 "An instance may not join more than {} multicast groups",
                 MAX_MULTICAST_GROUPS_PER_INSTANCE,
             )));
+        }
+
+        // RFD 689: requiring jumbo frames on a new instance requires the
+        // fleet-wide opt-in.
+        if params.enable_jumbo_frames {
+            let settings = self
+                .db_datastore
+                .system_networking_settings_view(opctx)
+                .await?;
+            if !settings.external_jumbo_frames_opt_in_enabled {
+                return Err(Error::invalid_request(
+                    "enable_jumbo_frames may only be set on an instance when \
+                     the fleet-wide jumbo-frames opt-in is enabled by a \
+                     fleet administrator",
+                ));
+            }
         }
 
         // Collect ephemeral IP selectors for validation
@@ -1649,6 +1694,24 @@ impl super::Nexus {
             })
             .collect();
 
+        // Compute the effective MTU for the instance's primary OPTE port,
+        // per RFD 689. Jumbo frames are only applied when both the fleet-wide
+        // opt-in is enabled and the per-instance bit is set; otherwise we
+        // leave `primary_nic_mtu` unset and OPTE applies the default MTU.
+        let primary_nic_mtu = if db_instance.enable_jumbo_frames {
+            let settings = self
+                .db_datastore
+                .system_networking_settings_view(opctx)
+                .await?;
+            if settings.external_jumbo_frames_opt_in_enabled {
+                Some(omicron_common::address::EXTERNAL_JUMBO_FRAMES_MTU)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
         let local_config = sled_agent_client::types::InstanceSledLocalConfig {
             hostname,
             nics,
@@ -1663,6 +1726,7 @@ impl super::Nexus {
             },
             delegated_zvols,
             attached_subnets,
+            primary_nic_mtu,
         };
 
         let instance_id = InstanceUuid::from_untyped_uuid(db_instance.id());
@@ -3103,6 +3167,7 @@ mod tests {
             auto_restart_policy: Default::default(),
             anti_affinity_groups: Vec::new(),
             multicast_groups: Vec::new(),
+            enable_jumbo_frames: false,
         };
 
         let instance_id = InstanceUuid::from_untyped_uuid(Uuid::new_v4());

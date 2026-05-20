@@ -8284,6 +8284,11 @@
             "description": "delegated DNS name for external DNS",
             "type": "string"
           },
+          "external_jumbo_frames_opt_in_enabled": {
+            "description": "Per RFD 689: fleet-wide jumbo-frames opt-in (defaults to false). Operators can change this post-init via the Nexus API.",
+            "default": false,
+            "type": "boolean"
+          },
           "initial_trust_quorum_configuration": {
             "nullable": true,
             "description": "Data used to write the initial trust quorum configuration to CRDB\n\nThis is optional for two reasons: * For clusters fewer than 3 nodes, we don't support trust quorum. * Trust quorum is not fully complete yet, and we only want this to be used in production once it is complete.",

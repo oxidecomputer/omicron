@@ -410,6 +410,7 @@ mod test {
                     auto_restart_policy,
                     anti_affinity_groups: Vec::new(),
                     multicast_groups: Vec::new(),
+                    enable_jumbo_frames: false,
                 },
             )
             .await;

@@ -45,8 +45,8 @@ use nexus_types::external_api::{
     external_subnet, floating_ip, hardware, identity_provider, image, instance,
     internet_gateway, ip_pool, metrics, multicast, networking, oxql,
     path_params, policy, probe, project, rack, scim, silo, sled, snapshot,
-    ssh_key, subnet_pool, support_bundle, switch, system, timeseries, update,
-    user, vpc,
+    ssh_key, subnet_pool, support_bundle, switch, system, system_networking,
+    timeseries, update, user, vpc,
 };
 // Type imports for API implementations (per RFD 619)
 use nexus_types::external_api::bfd::BfdStatus;
@@ -166,6 +166,47 @@ impl NexusExternalApi for NexusExternalApiImpl {
             bail_unless!(nasgns <= policy::MAX_ROLE_ASSIGNMENTS_PER_RESOURCE);
             let policy = nexus.fleet_update_policy(&opctx, &new_policy).await?;
             Ok(HttpResponseOk(policy))
+        })
+        .await
+    }
+
+    async fn system_networking_settings_view(
+        rqctx: RequestContext<ApiContext>,
+    ) -> Result<
+        HttpResponseOk<system_networking::SystemNetworkingSettings>,
+        HttpError,
+    > {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let settings =
+                nexus.system_networking_settings_view(&opctx).await?;
+            Ok(HttpResponseOk(settings))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn system_networking_settings_update(
+        rqctx: RequestContext<ApiContext>,
+        new_settings: TypedBody<
+            system_networking::SystemNetworkingSettingsUpdate,
+        >,
+    ) -> Result<
+        HttpResponseOk<system_networking::SystemNetworkingSettings>,
+        HttpError,
+    > {
+        audit_and_time(&rqctx, |opctx, nexus| async move {
+            let new_settings = new_settings.into_inner();
+            let settings = nexus
+                .system_networking_settings_update(&opctx, &new_settings)
+                .await?;
+            Ok(HttpResponseOk(settings))
         })
         .await
     }

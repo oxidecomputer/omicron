@@ -940,6 +940,7 @@ pub async fn create_instance_with(
             auto_restart_policy,
             anti_affinity_groups: Vec::new(),
             multicast_groups,
+            enable_jumbo_frames: false,
         },
     )
     .await

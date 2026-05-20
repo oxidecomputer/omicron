@@ -1173,6 +1173,7 @@ async fn test_floating_ip_attach_fail_between_projects(
             auto_restart_policy: Default::default(),
             anti_affinity_groups: Vec::new(),
             multicast_groups: Vec::new(),
+            enable_jumbo_frames: false,
         },
         StatusCode::BAD_REQUEST,
     )
