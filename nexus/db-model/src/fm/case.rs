@@ -83,10 +83,15 @@ impl CaseMetadata {
 #[diesel(table_name = fm_fact)]
 pub struct Fact {
     pub id: DbTypedUuid<FactKind>,
+    /// The sitrep to which this fact belongs.
+    ///
+    /// This will change as the fact is carried forward from
+    /// one sitrep to the next.
     pub sitrep_id: DbTypedUuid<SitrepKind>,
     pub case_id: DbTypedUuid<CaseKind>,
-    /// Sitrep in which this fact was first added. Preserved unchanged
-    /// when the fact is carried forward; debug-only.
+    /// Sitrep in which this fact was first added.
+    ///
+    /// Preserved unchanged when the fact is carried forward; debug-only.
     pub created_sitrep_id: DbTypedUuid<SitrepKind>,
     pub payload: serde_json::Value,
     pub comment: String,
