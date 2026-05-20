@@ -135,6 +135,118 @@ fn redirect_file(
         .with_context(|| format!("open \"{}\"", out_path.display()))
 }
 
+/// Per-OS configuration for asking the kernel which TCP port a pid is
+/// listening on.
+struct PortProbe {
+    /// Command to invoke (`pfiles` on illumos, `ss` on Linux).
+    command: &'static str,
+    /// Arguments to pass to `command`.
+    args: Vec<String>,
+    /// Substring that must appear on a line for it to belong to the target
+    /// pid. `None` when the command is already pid-scoped (e.g. `pfiles
+    /// <pid>`).
+    pid_marker: Option<String>,
+    /// Pattern that extracts the listening port into capture group 1.
+    port_re: regex::Regex,
+}
+
+impl PortProbe {
+    #[cfg(target_os = "illumos")]
+    fn for_pid(pid: u32) -> Self {
+        // `pfiles <pid>` lines look like:
+        //   sockname: AF_INET6 ::1  port: 41065
+        Self {
+            command: "pfiles",
+            args: vec![pid.to_string()],
+            pid_marker: None,
+            port_re: regex::Regex::new(
+                r"sockname:\s+AF_INET6\s+::1?\s+port:\s+(\d+)",
+            )
+            .unwrap(),
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    fn for_pid(pid: u32) -> Self {
+        // `ss -tlnpH` lines look like:
+        //   LISTEN 0 128 [::1]:41065 [::]:* users:(("ddmd",pid=12345,fd=8))
+        Self {
+            command: "ss",
+            args: vec!["-tlnpH".to_string()],
+            pid_marker: Some(format!("pid={pid}")),
+            port_re: regex::Regex::new(r"\[::1?\]:(\d+)").unwrap(),
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    fn for_pid(pid: u32) -> Self {
+        // `lsof` is part of base macOS, so this compiles and runs without
+        // any extra install. `lsof -nP -p <pid> -iTCP -sTCP:LISTEN` lines
+        // look like:
+        //   ddmd 12345 user 10u IPv6 0x... 0t0 TCP [::1]:41065 (LISTEN)
+        Self {
+            command: "lsof",
+            args: vec![
+                "-nP".to_string(),
+                "-p".to_string(),
+                pid.to_string(),
+                "-iTCP".to_string(),
+                "-sTCP:LISTEN".to_string(),
+            ],
+            pid_marker: None,
+            port_re: regex::Regex::new(r"\[::1?\]:(\d+)").unwrap(),
+        }
+    }
+
+    async fn probe(&self) -> Result<Option<u16>, anyhow::Error> {
+        let output = tokio::process::Command::new(self.command)
+            .args(&self.args)
+            .output()
+            .await
+            .with_context(|| format!("running {}", self.command))?;
+        if !output.status.success() {
+            // The probe command can transiently fail (process exiting,
+            // permissions, etc.); leave it to the caller to retry.
+            return Ok(None);
+        }
+        let text = std::str::from_utf8(&output.stdout)
+            .with_context(|| format!("{} output not utf8", self.command))?;
+        Ok(text
+            .lines()
+            .filter(|line| {
+                self.pid_marker.as_deref().is_none_or(|m| line.contains(m))
+            })
+            .find_map(|line| {
+                self.port_re
+                    .captures(line)?
+                    .get(1)?
+                    .as_str()
+                    .parse::<u16>()
+                    .ok()
+            }))
+    }
+}
+
+/// Ask the kernel which TCP port `pid` is listening on. Retries until either
+/// the port is found or [`DDMD_TIMEOUT`] elapses, since `ddmd` may not have
+/// finished binding when we first probe.
+async fn find_listening_port(pid: u32) -> Result<u16, anyhow::Error> {
+    let probe = PortProbe::for_pid(pid);
+    let deadline = Instant::now() + DDMD_TIMEOUT;
+    loop {
+        if let Some(port) = probe.probe().await? {
+            return Ok(port);
+        }
+        if Instant::now() >= deadline {
+            anyhow::bail!(
+                "kernel reports no listening TCP port for pid {pid} after \
+                 {DDMD_TIMEOUT:?}"
+            );
+        }
+        sleep(Duration::from_millis(100)).await;
+    }
+}
+
 async fn discover_port(logfile: String) -> Result<u16, anyhow::Error> {
     let timeout = Instant::now() + MGD_TIMEOUT;
     tokio::time::timeout_at(timeout, find_mgd_port_in_log(logfile))
@@ -169,6 +281,11 @@ async fn find_mgd_port_in_log(logfile: String) -> Result<u16, anyhow::Error> {
     }
 }
 
+/// Specifies the amount of time we will wait for `ddmd` to bind its admin
+/// port, confirmed by asking the kernel which TCP port `ddmd`'s pid is
+/// listening on.
+pub const DDMD_TIMEOUT: Duration = Duration::new(5, 0);
+
 /// Test fixture that spawns and supervises a legit `ddmd` subprocess.
 ///
 /// Owns a `tokio::process::Child` and a tempdir; discovers the bound admin
@@ -197,6 +314,20 @@ pub struct DdmInstance {
 impl DdmInstance {
     /// Start a `ddmd` instance with `--api-only`, bound to an auto-assigned
     /// admin port on localhost.
+    ///
+    /// `MgdInstance` discovers its admin port by scraping `local_addr` from
+    /// `mgd`'s startup logs. That approach does not work for `ddmd`: the
+    /// dropshot endpoint-registration records that carry `local_addr` are
+    /// emitted at debug level, and `ddmd`'s slog drain is currently focused
+    /// on errors, so those lines never reach stdout.
+    ///
+    /// Instead, this fixture asks the kernel directly via `pfiles` (illumos),
+    /// `ss` (Linux), or `lsof` (macOS), which reports the listening TCP port
+    /// for `ddmd`'s pid regardless of what `ddmd` chose to log.
+    ///
+    /// Tracked upstream as oxidecomputer/maghemite#740. Once unified logging
+    /// levels land, this fixture can revert to the simpler log-scrape pattern
+    /// that `MgdInstance` uses.
     pub async fn start() -> Result<Self, anyhow::Error> {
         let temp_dir = TempDir::new()?;
 
@@ -220,20 +351,19 @@ impl DdmInstance {
                 format!("failed to spawn `ddmd` (with args: {:?})", &args)
             })?;
 
-        let child = Some(child);
-
+        let pid =
+            child.id().context("ddmd child has no pid (already exited?)")?;
         let temp_dir = temp_dir.keep();
-        let port =
-            discover_port(temp_dir.join("ddmd_stdout").display().to_string())
-                .await
-                .with_context(|| {
-                    format!(
-                        "failed to discover ddmd port from files in {}",
-                        temp_dir.display()
-                    )
-                })?;
 
-        Ok(Self { port, args, child, data_dir: Some(temp_dir) })
+        let port = find_listening_port(pid).await.with_context(|| {
+            format!(
+                "failed to discover ddmd listening port for pid {pid} \
+                 (see {}/ddmd_stdout, ddmd_stderr)",
+                temp_dir.display()
+            )
+        })?;
+
+        Ok(Self { port, args, child: Some(child), data_dir: Some(temp_dir) })
     }
 
     pub async fn cleanup(&mut self) -> Result<(), anyhow::Error> {
