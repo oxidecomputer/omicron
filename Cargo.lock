@@ -3423,6 +3423,7 @@ dependencies = [
  "clap",
  "colored 2.2.0",
  "dhcproto",
+ "fmd-adm-sys",
  "futures",
  "hickory-resolver 0.25.2",
  "http",
@@ -3433,6 +3434,7 @@ dependencies = [
  "ispf",
  "macaddr",
  "nexus-lockstep-client",
+ "omicron-rpaths",
  "omicron-sled-agent",
  "omicron-test-utils",
  "omicron-uuid-kinds",
@@ -3724,6 +3726,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "fmd-adm"
+version = "0.3.0"
+source = "git+https://github.com/oxidecomputer/fmd-adm?rev=846361bf0a698a8c7efefd97b2828b9aa74858c4#846361bf0a698a8c7efefd97b2828b9aa74858c4"
+dependencies = [
+ "fmd-adm-sys",
+ "illumos-nvpair",
+ "libc",
+ "thiserror 2.0.18",
+ "uuid",
+]
+
+[[package]]
+name = "fmd-adm-sys"
+version = "0.4.1"
+source = "git+https://github.com/oxidecomputer/fmd-adm?rev=846361bf0a698a8c7efefd97b2828b9aa74858c4#846361bf0a698a8c7efefd97b2828b9aa74858c4"
+
+[[package]]
 name = "fnv"
 version = "1.0.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4007,7 +4026,7 @@ dependencies = [
 [[package]]
 name = "gateway-ereport-messages"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/management-gateway-service?rev=0d7a8992f914ad6a5947409048779969bbe80e3d#0d7a8992f914ad6a5947409048779969bbe80e3d"
+source = "git+https://github.com/oxidecomputer/management-gateway-service?rev=745a508cb97b7ca9b4c10ec9592c980eb769b10d#745a508cb97b7ca9b4c10ec9592c980eb769b10d"
 dependencies = [
  "serde",
  "zerocopy 0.8.40",
@@ -4016,7 +4035,7 @@ dependencies = [
 [[package]]
 name = "gateway-messages"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/management-gateway-service?rev=0d7a8992f914ad6a5947409048779969bbe80e3d#0d7a8992f914ad6a5947409048779969bbe80e3d"
+source = "git+https://github.com/oxidecomputer/management-gateway-service?rev=745a508cb97b7ca9b4c10ec9592c980eb769b10d#745a508cb97b7ca9b4c10ec9592c980eb769b10d"
 dependencies = [
  "bitflags 2.11.0",
  "hubpack",
@@ -4034,7 +4053,7 @@ dependencies = [
 [[package]]
 name = "gateway-sp-comms"
 version = "0.1.2"
-source = "git+https://github.com/oxidecomputer/management-gateway-service?rev=0d7a8992f914ad6a5947409048779969bbe80e3d#0d7a8992f914ad6a5947409048779969bbe80e3d"
+source = "git+https://github.com/oxidecomputer/management-gateway-service?rev=745a508cb97b7ca9b4c10ec9592c980eb769b10d#745a508cb97b7ca9b4c10ec9592c980eb769b10d"
 dependencies = [
  "async-trait",
  "backoff",
@@ -5127,9 +5146,9 @@ checksum = "3d3067d79b975e8844ca9eb072e16b31c3c1c36928edf9c6789548c524d0d954"
 
 [[package]]
 name = "iddqd"
-version = "0.3.18"
+version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "616230c7d641ef971a3a5bfcc654c6b7524ab9c9fb665693c6a397dba9a14aca"
+checksum = "b1fb967ac6b9edb2b5bd91496fc95fdf5eee0772aa31aca370766975f7e57962"
 dependencies = [
  "allocator-api2",
  "daft",
@@ -5138,7 +5157,6 @@ dependencies = [
  "hashbrown 0.16.1",
  "proptest",
  "ref-cast",
- "rustc-hash",
  "schemars 0.8.22",
  "serde_core",
  "serde_json",
@@ -5196,6 +5214,21 @@ dependencies = [
  "libc",
  "num_enum 0.5.11",
 ]
+
+[[package]]
+name = "illumos-nvpair"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "66fe4718e52c3654c4e6c6501ce8387d334acd0910b7b7bb3a554aad0262d09f"
+dependencies = [
+ "illumos-nvpair-sys",
+]
+
+[[package]]
+name = "illumos-nvpair-sys"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a4b8219c9c8c2c844dfd5772ec0bda5cd2a81d78c4579aba97f699721d46ab24"
 
 [[package]]
 name = "illumos-sys-hdrs"
@@ -6888,6 +6921,7 @@ dependencies = [
  "dropshot",
  "ereport-types",
  "expectorate",
+ "fmd-adm-sys",
  "futures",
  "gateway-client",
  "gateway-types",
@@ -7080,6 +7114,7 @@ dependencies = [
  "cockroach-admin-types",
  "dns-service-client",
  "expectorate",
+ "fmd-adm-sys",
  "futures",
  "gateway-client",
  "gateway-messages",
@@ -7094,6 +7129,7 @@ dependencies = [
  "ntp-admin-client",
  "omicron-cockroach-metrics",
  "omicron-common",
+ "omicron-rpaths",
  "omicron-sled-agent",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
@@ -7178,6 +7214,7 @@ dependencies = [
  "async-bb8-diesel",
  "chrono",
  "diesel",
+ "fmd-adm-sys",
  "futures",
  "httptest",
  "ipnetwork",
@@ -7299,6 +7336,7 @@ dependencies = [
  "camino",
  "camino-tempfile",
  "clap",
+ "fmd-adm-sys",
  "nexus-db-queries",
  "nexus-lockstep-client",
  "nexus-reconfigurator-preparation",
@@ -7335,6 +7373,7 @@ dependencies = [
  "clickhouse-admin-types",
  "cockroach-admin-client",
  "diesel",
+ "fmd-adm-sys",
  "futures",
  "httptest",
  "iddqd",
@@ -7519,6 +7558,7 @@ name = "nexus-saga-recovery"
 version = "0.1.0"
 dependencies = [
  "chrono",
+ "fmd-adm-sys",
  "futures",
  "nexus-auth",
  "nexus-db-model",
@@ -7575,6 +7615,7 @@ dependencies = [
  "dns-service-client",
  "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=187aee7de2e50f907099ea06c04aac96c3455665)",
  "dropshot",
+ "fmd-adm-sys",
  "futures",
  "gateway-messages",
  "gateway-test-utils",
@@ -7860,6 +7901,20 @@ dependencies = [
  "omicron-workspace-hack",
  "schemars 0.8.22",
  "serde",
+]
+
+[[package]]
+name = "ntp-admin-v1-client"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "git-stub-vcs",
+ "omicron-workspace-hack",
+ "progenitor 0.14.0",
+ "reqwest 0.13.2",
+ "schemars 0.8.22",
+ "serde",
+ "slog",
 ]
 
 [[package]]
@@ -8166,6 +8221,7 @@ dependencies = [
  "csv",
  "dropshot",
  "expectorate",
+ "fmd-adm-sys",
  "http",
  "illumos-utils",
  "nexus-test-utils",
@@ -8307,6 +8363,7 @@ dependencies = [
  "clap",
  "dropshot",
  "expectorate",
+ "fmd-adm-sys",
  "futures",
  "gateway-client",
  "gateway-test-utils",
@@ -8535,6 +8592,7 @@ dependencies = [
  "ereport-types",
  "expectorate",
  "fatfs",
+ "fmd-adm-sys",
  "futures",
  "gateway-client",
  "gateway-messages",
@@ -8693,6 +8751,7 @@ dependencies = [
  "clap",
  "dropshot",
  "expectorate",
+ "fmd-adm-sys",
  "http",
  "nexus-test-utils",
  "ntp-admin-api",
@@ -8749,6 +8808,7 @@ dependencies = [
  "dyn-clone",
  "ereport-types",
  "expectorate",
+ "fmd-adm-sys",
  "futures",
  "gateway-client",
  "gateway-messages",
@@ -8777,6 +8837,7 @@ dependencies = [
  "nexus-test-utils",
  "nexus-test-utils-macros",
  "nexus-types",
+ "ntp-admin-client",
  "omicron-common",
  "omicron-nexus",
  "omicron-rpaths",
@@ -9030,6 +9091,8 @@ dependencies = [
  "expectorate",
  "flate2",
  "flume",
+ "fmd-adm",
+ "fmd-adm-sys",
  "futures",
  "glob",
  "guppy",
@@ -9055,10 +9118,10 @@ dependencies = [
  "nexus-lockstep-client",
  "nexus-types",
  "nix 0.31.2",
- "ntp-admin-client",
  "omicron-common",
  "omicron-ddm-admin-client",
  "omicron-ledger",
+ "omicron-rpaths",
  "omicron-test-utils",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
@@ -9089,6 +9152,7 @@ dependencies = [
  "sled-agent-api",
  "sled-agent-client",
  "sled-agent-config-reconciler",
+ "sled-agent-early-networking",
  "sled-agent-health-monitor",
  "sled-agent-measurements",
  "sled-agent-rack-setup",
@@ -9107,7 +9171,6 @@ dependencies = [
  "smf 0.2.3",
  "sp-sim",
  "sprockets-tls",
- "static_assertions",
  "strum 0.27.2",
  "subprocess",
  "tar",
@@ -9302,7 +9365,6 @@ dependencies = [
  "reqwest 0.12.28",
  "reqwest 0.13.2",
  "rsa",
- "rustc-hash",
  "rustix 0.38.44",
  "rustix 1.1.3",
  "rustls 0.23.37",
@@ -12703,7 +12765,7 @@ dependencies = [
 [[package]]
 name = "scim2-rs"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/scim2-rs?rev=018ae6f7bd752cd9b2124887e00c93c6b4244103#018ae6f7bd752cd9b2124887e00c93c6b4244103"
+source = "git+https://github.com/oxidecomputer/scim2-rs?rev=163606c052ee30b16dfab282fca721dd81e0868a#163606c052ee30b16dfab282fca721dd81e0868a"
 dependencies = [
  "anyhow",
  "chrono",
@@ -12722,7 +12784,7 @@ dependencies = [
 [[package]]
 name = "scim2-test-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/scim2-rs?rev=018ae6f7bd752cd9b2124887e00c93c6b4244103#018ae6f7bd752cd9b2124887e00c93c6b4244103"
+source = "git+https://github.com/oxidecomputer/scim2-rs?rev=163606c052ee30b16dfab282fca721dd81e0868a#163606c052ee30b16dfab282fca721dd81e0868a"
 dependencies = [
  "anyhow",
  "clap",
@@ -13371,7 +13433,7 @@ dependencies = [
  "installinator-common",
  "key-manager",
  "key-manager-types",
- "ntp-admin-client",
+ "ntp-admin-v1-client",
  "omicron-common",
  "omicron-ledger",
  "omicron-test-utils",
@@ -13402,6 +13464,30 @@ dependencies = [
  "tufaceous-artifact",
  "xshell",
  "zone",
+]
+
+[[package]]
+name = "sled-agent-early-networking"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=cc8e02a0800034c431c8cf96b889ea638da3d194)",
+ "futures",
+ "gateway-client",
+ "http",
+ "internal-dns-resolver",
+ "internal-dns-types",
+ "mg-admin-client",
+ "omicron-common",
+ "omicron-ddm-admin-client",
+ "omicron-workspace-hack",
+ "oxnet",
+ "rdb-types",
+ "sled-agent-types",
+ "slog",
+ "slog-error-chain",
+ "thiserror 2.0.18",
+ "tokio",
 ]
 
 [[package]]
@@ -13461,16 +13547,13 @@ dependencies = [
  "chrono",
  "cockroach-admin-client",
  "dns-service-client",
- "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=cc8e02a0800034c431c8cf96b889ea638da3d194)",
  "futures",
- "gateway-client",
  "http",
  "iddqd",
  "illumos-utils",
  "internal-dns-resolver",
  "internal-dns-types",
  "itertools 0.14.0",
- "mg-admin-client",
  "nexus-lockstep-client",
  "nexus-reconfigurator-blippy",
  "nexus-types",
@@ -13484,7 +13567,6 @@ dependencies = [
  "oxnet",
  "rand 0.9.2",
  "rcgen",
- "rdb-types",
  "reqwest 0.13.2",
  "schemars 0.8.22",
  "serde",
@@ -13954,7 +14036,7 @@ version = "0.8.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c1c97747dbf44bb1ca44a561ece23508e99cb592e862f22222dcf42f51d1e451"
 dependencies = [
- "heck 0.4.1",
+ "heck 0.5.0",
  "proc-macro2",
  "quote",
  "syn 2.0.117",

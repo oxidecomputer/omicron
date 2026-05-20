@@ -6,8 +6,6 @@ use crate::latest::instance::ExternalIpConfig;
 use crate::latest::instance::ExternalIpv4Config;
 use crate::latest::instance::ExternalIpv6Config;
 use crate::latest::instance::MigrationState;
-use crate::latest::instance::Migrations;
-use crate::latest::instance::SledVmmState;
 use crate::latest::instance::VmmSpec;
 use crate::latest::instance::VmmState;
 use crate::latest::instance::VmmStateRequested;
@@ -108,21 +106,6 @@ impl VmmStateRequested {
             VmmStateRequested::Running => false,
             VmmStateRequested::Stopped => true,
             VmmStateRequested::Reboot => false,
-        }
-    }
-}
-
-impl Migrations<'_> {
-    pub fn empty() -> Self {
-        Self { migration_in: None, migration_out: None }
-    }
-}
-
-impl SledVmmState {
-    pub fn migrations(&self) -> Migrations<'_> {
-        Migrations {
-            migration_in: self.migration_in.as_ref(),
-            migration_out: self.migration_out.as_ref(),
         }
     }
 }

@@ -1069,8 +1069,6 @@ impl Client {
             Some("toDateTime(timestamp)")
         } else if table.contains("fields") {
             Some("last_updated_at")
-        } else if table.contains("query_log") {
-            Some("event_date")
         } else {
             None
         }
@@ -1098,30 +1096,7 @@ impl Client {
             tables.push(format!("{}.{}", crate::DATABASE_NAME, table));
         }
 
-        // TTL applies to the query log table too, if it exists.
-        if self.database_has_query_log_table(handle).await? {
-            tables.push(String::from("system.query_log"));
-        }
         Ok(tables)
-    }
-
-    /// Return true if the database has the `system.query_log` table.
-    async fn database_has_query_log_table(
-        &self,
-        handle: &mut Handle,
-    ) -> Result<bool, Error> {
-        const SQL: &str = "\
-            SELECT 1 \
-            FROM system.tables \
-            WHERE name = 'query_log' \
-            LIMIT 1";
-        let n_rows = self
-            .execute_with_block(handle, SQL)
-            .await?
-            .data
-            .ok_or_else(|| Error::QueryMissingData { query: SQL.to_string() })?
-            .n_rows();
-        Ok(n_rows > 0)
     }
 
     /// Return the retention policy for the oximeter database tables.
@@ -1152,7 +1127,7 @@ impl Client {
                     startsWith(name, 'fields') \
                 ) \
                 AND position(engine, 'MergeTree') != 0\
-            ) OR (database = 'system' AND name = 'query_log');";
+            );";
         let result = self
             .execute_with_block(&mut self.claim_connection().await?, SQL)
             .await?;
@@ -1213,10 +1188,9 @@ impl Client {
                 ifNull(total_bytes, 0) AS total_bytes, \
                 ifNull(total_rows, 0) AS total_rows \
             FROM system.tables \
-            WHERE (\
-                database = '{}' OR \
-                (database = 'system' AND name = 'query_log')\
-            ) AND has_own_data",
+            WHERE \
+                database = '{}'\
+                AND has_own_data",
             crate::DATABASE_NAME,
         );
         let columns = self
@@ -1705,26 +1679,15 @@ impl Client {
 //
 // for the field tables.
 //
-// Lastly, the TTL line could look like this
-//
-// ```
-// TTL event_date + toIntervalDay(<N>)
-// ```
-//
-// for the system.query_log table.
-//
-//
 // We're picking out the number of days from the function argument as a string.
 fn extract_ttl_in_days_from_create_table_query(
     row: &str,
 ) -> Result<Days, Error> {
-    const NEEDLES: [&str; 3] = [
+    const NEEDLES: [&str; 2] = [
         // For measurement tables
         "TTL toDateTime(timestamp) + toIntervalDay(",
         // For field tables
         "TTL last_updated_at + toIntervalDay(",
-        // For system.query_log
-        "TTL event_date + toIntervalDay(",
     ];
 
     // Find the first needle that matches, and error if none do.
@@ -5369,15 +5332,6 @@ mod tests {
             u8::from(extract_ttl_in_days_from_create_table_query(
                 "some junk TTL last_updated_at + toIntervalDay(7) other stuff"
             ).unwrap()),
-        );
-        assert_eq!(
-            7u8,
-            u8::from(
-                extract_ttl_in_days_from_create_table_query(
-                    "some junk TTL event_date + toIntervalDay(7) other stuff"
-                )
-                .unwrap()
-            ),
         );
 
         for invalid in [

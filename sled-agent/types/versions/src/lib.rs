@@ -85,6 +85,8 @@ pub mod v37;
 pub mod v39;
 #[path = "add_nexus_lockstep_port_to_inventory/mod.rs"]
 pub mod v4;
+#[path = "add_fmd_to_inventory/mod.rs"]
+pub mod v40;
 #[path = "add_probe_put_endpoint/mod.rs"]
 pub mod v6;
 #[path = "multicast_support/mod.rs"]

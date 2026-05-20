@@ -82,6 +82,8 @@ use nexus_types::internal_api::background::SupportBundleCleanupReport;
 use nexus_types::internal_api::background::SupportBundleCollectionReport;
 use nexus_types::internal_api::background::SupportBundleCollectionStepStatus;
 use nexus_types::internal_api::background::SupportBundleEreportStatus;
+use nexus_types::internal_api::background::SwitchPortPopulatorStatus;
+use nexus_types::internal_api::background::SwitchPortPopulatorStatusKind;
 use nexus_types::internal_api::background::TrustQuorumManagerStatus;
 use nexus_types::internal_api::background::TufArtifactReplicationCounters;
 use nexus_types::internal_api::background::TufArtifactReplicationRequest;
@@ -1372,6 +1374,9 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
         }
         "trust_quorum_manager" => {
             print_task_trust_quorum_manager(details);
+        }
+        "populate_switch_ports" => {
+            print_task_populate_switch_ports(details);
         }
         _ => {
             println!(
@@ -3508,22 +3513,36 @@ fn print_task_fm_analysis(details: &serde_json::Value) {
         AnalysisOutcome, AnalysisStatus, Outcome, PreparationStatus,
     };
 
-    let FmAnalysisStatus { parent_sitrep_id, inv_collection_id, outcome } =
-        match serde_json::from_value::<FmAnalysisStatus>(details.clone()) {
-            Err(error) => {
-                eprintln!(
-                    "warning: failed to interpret task details: {:?}: {:?}",
-                    error, details
-                );
-                return;
-            }
-            Ok(status) => status,
-        };
+    let FmAnalysisStatus {
+        parent_sitrep_id,
+        inv_collection_id,
+        known_classes,
+        outcome,
+    } = match serde_json::from_value::<FmAnalysisStatus>(details.clone()) {
+        Err(error) => {
+            eprintln!(
+                "warning: failed to interpret task details: {:?}: {:?}",
+                error, details
+            );
+            return;
+        }
+        Ok(status) => status,
+    };
     pub const PARENT_SITREP_ID: &str = "parent sitrep ID:";
     pub const INV_ID: &str = "current inventory collection ID:";
-    pub const WIDTH: usize = const_max_len(&[PARENT_SITREP_ID, INV_ID]) + 1;
+    pub const KNOWN_CLASSES: &str = "ereport classes consumed:";
+    pub const WIDTH: usize =
+        const_max_len(&[PARENT_SITREP_ID, INV_ID, KNOWN_CLASSES]) + 1;
     println!("    {PARENT_SITREP_ID:<WIDTH$}{parent_sitrep_id:?}");
     println!("    {INV_ID:<WIDTH$}{inv_collection_id:?}");
+    if known_classes.is_empty() {
+        println!("    {KNOWN_CLASSES:<WIDTH$}(none)");
+    } else {
+        println!("    {KNOWN_CLASSES:<WIDTH$}({} total)", known_classes.len());
+        for class in &known_classes {
+            println!("      - {class}");
+        }
+    }
     println!("    FAULT MANAGEMENT ANALYSIS SUMMARY");
     println!("    =================================");
     let (prep_status, analysis_status) = match outcome {
@@ -3951,6 +3970,40 @@ fn print_task_trust_quorum_manager(details: &serde_json::Value) {
             println!("    task did not complete successfully: {error}");
         }
     }
+}
+
+fn print_task_populate_switch_ports(details: &serde_json::Value) {
+    fn print_one(
+        name: &str,
+        result: Result<SwitchPortPopulatorStatusKind, String>,
+    ) {
+        match result {
+            Ok(SwitchPortPopulatorStatusKind::Populated { num_ports }) => {
+                println!("{name}: populated {num_ports} ports");
+            }
+            Ok(SwitchPortPopulatorStatusKind::PreviouslyPopulated) => {
+                println!("{name} skipped: previously populated ports");
+            }
+            Err(err) => println!("{name} failed: {err}"),
+        }
+    }
+
+    let status = match serde_json::from_value::<SwitchPortPopulatorStatus>(
+        details.clone(),
+    ) {
+        Ok(status) => status,
+        Err(error) => {
+            eprintln!(
+                "warning: failed to interpret task details: {:?}: {:#?}",
+                error, details
+            );
+            return;
+        }
+    };
+
+    let SwitchPortPopulatorStatus { switch0, switch1 } = status;
+    print_one("switch0", switch0);
+    print_one("switch1", switch1);
 }
 
 fn print_task_physical_disk_adoption(details: &serde_json::Value) {
