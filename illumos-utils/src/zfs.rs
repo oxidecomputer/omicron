@@ -141,6 +141,9 @@ enum MountpointError {
 
 #[derive(thiserror::Error, Debug)]
 enum EnsureDatasetErrorRaw {
+    #[error("Dataset not found")]
+    DatasetNotFound,
+
     #[error("ZFS execution error")]
     Execution(#[from] crate::ExecutionError),
 
@@ -164,6 +167,20 @@ enum EnsureDatasetErrorRaw {
     },
 }
 
+impl From<SetValueErrorRaw> for EnsureDatasetErrorRaw {
+    fn from(e: SetValueErrorRaw) -> EnsureDatasetErrorRaw {
+        match e {
+            SetValueErrorRaw::DatasetNotFound => {
+                EnsureDatasetErrorRaw::DatasetNotFound
+            }
+
+            SetValueErrorRaw::Execution(err) => {
+                EnsureDatasetErrorRaw::Execution(err)
+            }
+        }
+    }
+}
+
 /// Error returned by [`Zfs::ensure_dataset`].
 #[derive(thiserror::Error, Debug)]
 #[error("Failed to ensure filesystem '{name}'")]
@@ -173,18 +190,30 @@ pub struct EnsureDatasetError {
     err: EnsureDatasetErrorRaw,
 }
 
-/// Error returned by [`Zfs::set_oxide_value`]
+#[derive(thiserror::Error, Debug)]
+enum SetValueErrorRaw {
+    #[error("Dataset not found")]
+    DatasetNotFound,
+
+    #[error(transparent)]
+    Execution(#[from] crate::ExecutionError),
+}
+
+/// Error returned by [`Zfs::set_oxide_value`] or [`Zfs::set_value`]
 #[derive(thiserror::Error, Debug, SlogInlineError)]
 #[error("Failed to set values '{values}' on filesystem {filesystem}")]
 pub struct SetValueError {
     filesystem: String,
     values: String,
     #[source]
-    err: crate::ExecutionError,
+    err: SetValueErrorRaw,
 }
 
 #[derive(thiserror::Error, Debug)]
 enum GetValueErrorRaw {
+    #[error("Dataset not found")]
+    DatasetNotFound,
+
     #[error(transparent)]
     Execution(#[from] crate::ExecutionError),
 
@@ -1172,9 +1201,9 @@ pub struct DatasetVolumeDeleteArgs<'a> {
 #[derive(thiserror::Error, Debug)]
 #[error("Failed to remove reservation from '{name}': {err}")]
 pub struct RemoveReservationError {
-    name: String,
+    pub name: String,
     #[source]
-    err: RemoveReservationErrorInner,
+    pub err: RemoveReservationErrorInner,
 }
 
 impl RemoveReservationError {
@@ -1191,10 +1220,20 @@ impl RemoveReservationError {
             err: RemoveReservationErrorInner::SetValue(err),
         }
     }
+
+    pub fn dataset_not_found(name: String) -> Self {
+        RemoveReservationError {
+            name,
+            err: RemoveReservationErrorInner::DatasetNotFound,
+        }
+    }
 }
 
 #[derive(thiserror::Error, Debug)]
 pub enum RemoveReservationErrorInner {
+    #[error("Dataset not found")]
+    DatasetNotFound,
+
     #[error(transparent)]
     GetValue(#[from] GetValueError),
 
@@ -1575,14 +1614,33 @@ impl Zfs {
             cmd.arg(format!("{name}={value}"));
         }
         cmd.arg(filesystem_name);
-        execute_async(cmd).await.map_err(|err| SetValueError {
-            filesystem: filesystem_name.to_string(),
-            values: name_values
-                .iter()
-                .map(|(k, v)| format!("{k}={v}"))
-                .join(","),
-            err,
+
+        execute_async(cmd).await.map_err(|err| {
+            let values =
+                name_values.iter().map(|(k, v)| format!("{k}={v}")).join(",");
+
+            match err {
+                crate::ExecutionError::CommandFailure(info)
+                    if info.stderr.contains("does not exist") =>
+                {
+                    SetValueError {
+                        filesystem: filesystem_name.to_string(),
+                        values,
+                        err: SetValueErrorRaw::DatasetNotFound,
+                    }
+                }
+
+                _ => SetValueError {
+                    filesystem: filesystem_name.to_string(),
+                    values: name_values
+                        .iter()
+                        .map(|(k, v)| format!("{k}={v}"))
+                        .join(","),
+                    err: SetValueErrorRaw::Execution(err),
+                },
+            }
         })?;
+
         Ok(())
     }
 
@@ -1752,10 +1810,22 @@ impl Zfs {
         cmd.arg(&all_names);
         cmd.arg(filesystem_name);
         let output =
-            execute_async(&mut cmd).await.map_err(|err| GetValueError {
-                filesystem: filesystem_name.to_string(),
-                name: format!("{:?}", names),
-                err: err.into(),
+            execute_async(&mut cmd).await.map_err(|err| match err {
+                crate::ExecutionError::CommandFailure(info)
+                    if info.stderr.contains("does not exist") =>
+                {
+                    GetValueError {
+                        filesystem: filesystem_name.to_string(),
+                        name: format!("{:?}", names),
+                        err: GetValueErrorRaw::DatasetNotFound,
+                    }
+                }
+
+                _ => GetValueError {
+                    filesystem: filesystem_name.to_string(),
+                    name: format!("{:?}", names),
+                    err: err.into(),
+                },
             })?;
         let stdout = String::from_utf8_lossy(&output.stdout);
         let values = stdout.trim();
@@ -2243,12 +2313,29 @@ impl Zfs {
         name: &str,
     ) -> Result<(), RemoveReservationError> {
         let value = Zfs::get_value(name, "reservation").await.map_err(|e| {
-            RemoveReservationError::get_value(name.to_string(), e)
+            let GetValueError { filesystem: _, name: _, err } = &e;
+
+            match err {
+                GetValueErrorRaw::DatasetNotFound => {
+                    RemoveReservationError::dataset_not_found(name.to_string())
+                }
+
+                _ => RemoveReservationError::get_value(name.to_string(), e),
+            }
         })?;
 
         if value != "none" {
             Zfs::set_value(name, "reservation", "none").await.map_err(|e| {
-                RemoveReservationError::set_value(name.to_string(), e)
+                let SetValueError { filesystem: _, values: _, err } = &e;
+                match err {
+                    SetValueErrorRaw::DatasetNotFound => {
+                        RemoveReservationError::dataset_not_found(
+                            name.to_string(),
+                        )
+                    }
+
+                    _ => RemoveReservationError::set_value(name.to_string(), e),
+                }
             })?;
         }
 
