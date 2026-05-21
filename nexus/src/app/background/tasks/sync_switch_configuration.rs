@@ -38,6 +38,7 @@ use mg_admin_client::types::{
     Ipv6UnicastConfig, JitterRange, ShaperSource, StaticRoute4,
     StaticRoute4List, StaticRoute6, StaticRoute6List, UnnumberedBgpPeerConfig,
 };
+use mg_api_types::{Prefix, Prefix4, Prefix6};
 use nexus_db_queries::{
     context::OpContext,
     db::{DataStore, datastore::SwitchPortSettingsCombinedResult},
@@ -49,7 +50,6 @@ use omicron_common::{
     address::{Ipv6Subnet, get_sled_address},
     api::external::{DataPageParams, Name},
 };
-use rdb_types::{Prefix, Prefix4, Prefix6};
 use serde_json::json;
 use sled_agent_client::types::HostPortConfig;
 use sled_agent_types::early_networking::BgpConfig as SledBgpConfig;

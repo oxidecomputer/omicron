@@ -199,12 +199,12 @@ impl super::Nexus {
                 for (peer_id, exports) in exported {
                     for ex in exports.iter() {
                         let prefix = match ex {
-                            rdb_types::Prefix::V4(v4) => {
+                            mg_api_types::Prefix::V4(v4) => {
                                 oxnet::IpNet::V4(oxnet::Ipv4Net::new_unchecked(
                                     v4.value, v4.length,
                                 ))
                             }
-                            rdb_types::Prefix::V6(v6) => {
+                            mg_api_types::Prefix::V6(v6) => {
                                 oxnet::IpNet::V6(oxnet::Ipv6Net::new_unchecked(
                                     v6.value, v6.length,
                                 ))

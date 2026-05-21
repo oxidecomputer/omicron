@@ -29,6 +29,7 @@ use mg_admin_client::types::{
     BgpPeerConfig as MgBgpPeerConfig, Ipv6UnicastConfig,
     UnnumberedBgpPeerConfig as MgUnnumberedBgpPeerConfig,
 };
+use mg_api_types::{Prefix, Prefix4, Prefix6};
 use omicron_common::OMICRON_DPD_TAG;
 use omicron_common::address::DENDRITE_PORT;
 use omicron_common::address::{MGD_PORT, MGS_PORT};
@@ -37,7 +38,6 @@ use omicron_common::backoff::{
 };
 use omicron_ddm_admin_client::DdmError;
 use oxnet::IpNet;
-use rdb_types::{Prefix, Prefix4, Prefix6};
 use sled_agent_types::early_networking::{
     BfdMode, BgpConfig, BgpPeerConfig, ImportExportPolicy, LinkFec, LinkSpeed,
     PortConfig, RouterPeerType, SwitchSlot, UplinkAddress,
