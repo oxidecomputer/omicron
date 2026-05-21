@@ -200,7 +200,8 @@ pub struct ManualPortConfig {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
-#[serde(tag = "type", rename_all = "snake_case")]
+#[serde(rename_all = "snake_case", tag = "type")]
+#[allow(clippy::large_enum_variant)]
 pub enum UserSpecifiedPortConfig {
     Manual(ManualPortConfig),
     DdmAutoPortConfig,
@@ -208,6 +209,13 @@ pub enum UserSpecifiedPortConfig {
 
 impl UserSpecifiedPortConfig {
     pub fn manual(&self) -> Option<&ManualPortConfig> {
+        match self {
+            Self::Manual(cfg) => Some(cfg),
+            Self::DdmAutoPortConfig => None,
+        }
+    }
+
+    pub fn manual_mut(&mut self) -> Option<&mut ManualPortConfig> {
         match self {
             Self::Manual(cfg) => Some(cfg),
             Self::DdmAutoPortConfig => None,

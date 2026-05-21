@@ -778,17 +778,16 @@ mod tests {
         // Combine unnumbered with a non-default router_lifetime - fine.
         let mut valid_router_lifetime = rack_network_config.clone();
         {
-            let mut peer = valid_router_lifetime
+            let peer = valid_router_lifetime
                 .switch0
                 .first_entry()
                 .unwrap()
                 .into_mut()
-                .manual()
+                .manual_mut()
                 .unwrap()
                 .bgp_peers
-                .get(0)
-                .unwrap()
-                .clone();
+                .get_mut(0)
+                .unwrap();
             peer.addr = UserSpecifiedRouterPeerAddr::Unnumbered;
             peer.router_lifetime = RouterLifetimeConfig::new(1234).unwrap();
         }
@@ -799,17 +798,16 @@ mod tests {
         // should fail with a reasonable error.
         let mut invalid_router_lifetime = valid_router_lifetime.clone();
         {
-            let mut peer = invalid_router_lifetime
+            let peer = invalid_router_lifetime
                 .switch0
                 .first_entry()
                 .unwrap()
                 .into_mut()
-                .manual()
+                .manual_mut()
                 .unwrap()
                 .bgp_peers
-                .get(0)
-                .unwrap()
-                .clone();
+                .get_mut(0)
+                .unwrap();
             peer.addr = UserSpecifiedRouterPeerAddr::Numbered(
                 "1.2.3.4".parse().unwrap(),
             );
@@ -828,17 +826,16 @@ mod tests {
         // Keep numbered peer but switch router_lifetime back to default - fine.
         let mut valid_router_lifetime = invalid_router_lifetime.clone();
         {
-            let mut peer = valid_router_lifetime
+            let peer = valid_router_lifetime
                 .switch0
                 .first_entry()
                 .unwrap()
                 .into_mut()
-                .manual()
+                .manual_mut()
                 .unwrap()
                 .bgp_peers
-                .get(0)
-                .unwrap()
-                .clone();
+                .get_mut(0)
+                .unwrap();
             peer.router_lifetime = RouterLifetimeConfig::default()
         }
         validate_rack_network_config(&valid_router_lifetime, &bgp_auth_keys)
