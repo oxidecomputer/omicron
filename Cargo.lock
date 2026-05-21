@@ -186,17 +186,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "api_identity"
-version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/omicron?branch=main#dbaeb64ed174748570548023bb4b119d939105b0"
-dependencies = [
- "omicron-workspace-hack",
- "proc-macro2",
- "quote",
- "syn 2.0.117",
-]
-
-[[package]]
 name = "approx"
 version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -859,7 +848,7 @@ dependencies = [
  "derive_more 0.99.20",
  "hex",
  "hkdf",
- "omicron-ledger 0.1.0",
+ "omicron-ledger",
  "omicron-workspace-hack",
  "proptest",
  "rand 0.8.6",
@@ -867,40 +856,11 @@ dependencies = [
  "serde",
  "serde_with",
  "sha3",
- "sled-hardware-types 0.1.0",
+ "sled-hardware-types",
  "slog",
  "slog-async",
  "slog-error-chain",
  "slog-term",
- "thiserror 2.0.18",
- "tokio",
- "uuid",
- "vsss-rs",
- "zeroize",
-]
-
-[[package]]
-name = "bootstore"
-version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/omicron?branch=main#dbaeb64ed174748570548023bb4b119d939105b0"
-dependencies = [
- "bytes",
- "camino",
- "chacha20poly1305",
- "ciborium",
- "derive_more 0.99.20",
- "hex",
- "hkdf",
- "omicron-ledger 0.1.0 (git+https://github.com/oxidecomputer/omicron?branch=main)",
- "omicron-workspace-hack",
- "rand 0.8.6",
- "secrecy 0.10.3",
- "serde",
- "serde_with",
- "sha3",
- "sled-hardware-types 0.1.0 (git+https://github.com/oxidecomputer/omicron?branch=main)",
- "slog",
- "slog-error-chain",
  "thiserror 2.0.18",
  "tokio",
  "uuid",
@@ -919,9 +879,9 @@ dependencies = [
  "omicron-workspace-hack",
  "schemars 0.8.22",
  "serde",
- "sled-agent-types 0.1.0",
- "sled-agent-types-versions 0.1.0",
- "sled-hardware-types 0.1.0",
+ "sled-agent-types",
+ "sled-agent-types-versions",
+ "sled-hardware-types",
  "tufaceous-artifact",
 ]
 
@@ -939,8 +899,8 @@ dependencies = [
  "schemars 0.8.22",
  "serde",
  "serde_json",
- "sled-agent-types 0.1.0",
- "sled-hardware-types 0.1.0",
+ "sled-agent-types",
+ "sled-hardware-types",
  "slog",
  "uuid",
 ]
@@ -949,7 +909,7 @@ dependencies = [
 name = "bootstrap-agent-lockstep-api"
 version = "0.1.0"
 dependencies = [
- "bootstrap-agent-lockstep-types 0.1.0",
+ "bootstrap-agent-lockstep-types",
  "dropshot 0.17.0",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
@@ -969,8 +929,8 @@ dependencies = [
  "schemars 0.8.22",
  "serde",
  "serde_json",
- "sled-agent-types 0.1.0",
- "sled-hardware-types 0.1.0",
+ "sled-agent-types",
+ "sled-hardware-types",
  "slog",
 ]
 
@@ -980,30 +940,13 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "omicron-common",
- "omicron-passwords 0.1.0",
+ "omicron-passwords",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "schemars 0.8.22",
  "serde",
- "sled-agent-types 0.1.0",
- "sled-hardware-types 0.1.0",
- "strum 0.27.2",
-]
-
-[[package]]
-name = "bootstrap-agent-lockstep-types"
-version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/omicron?branch=main#dbaeb64ed174748570548023bb4b119d939105b0"
-dependencies = [
- "anyhow",
- "omicron-common",
- "omicron-passwords 0.1.0 (git+https://github.com/oxidecomputer/omicron?branch=main)",
- "omicron-uuid-kinds",
- "omicron-workspace-hack",
- "schemars 0.8.22",
- "serde",
- "sled-agent-types 0.1.0 (git+https://github.com/oxidecomputer/omicron?branch=main)",
- "sled-hardware-types 0.1.0 (git+https://github.com/oxidecomputer/omicron?branch=main)",
+ "sled-agent-types",
+ "sled-hardware-types",
  "strum 0.27.2",
 ]
 
@@ -1531,7 +1474,7 @@ dependencies = [
  "chrono",
  "clap",
  "clickhouse-admin-server-client",
- "clickhouse-admin-types 0.1.0",
+ "clickhouse-admin-types",
  "dropshot 0.17.0",
  "futures",
  "omicron-common",
@@ -1553,7 +1496,7 @@ dependencies = [
 name = "clickhouse-admin-api"
 version = "0.1.0"
 dependencies = [
- "clickhouse-admin-types-versions 0.1.0",
+ "clickhouse-admin-types-versions",
  "dropshot 0.17.0",
  "dropshot-api-manager-types",
  "omicron-common",
@@ -1569,7 +1512,7 @@ name = "clickhouse-admin-keeper-client"
 version = "0.1.0"
 dependencies = [
  "chrono",
- "clickhouse-admin-types 0.1.0",
+ "clickhouse-admin-types",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "progenitor 0.14.0",
@@ -1584,7 +1527,7 @@ name = "clickhouse-admin-server-client"
 version = "0.1.0"
 dependencies = [
  "chrono",
- "clickhouse-admin-types 0.1.0",
+ "clickhouse-admin-types",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "progenitor 0.14.0",
@@ -1599,7 +1542,7 @@ name = "clickhouse-admin-single-client"
 version = "0.1.0"
 dependencies = [
  "chrono",
- "clickhouse-admin-types 0.1.0",
+ "clickhouse-admin-types",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "progenitor 0.14.0",
@@ -1614,7 +1557,7 @@ name = "clickhouse-admin-test-utils"
 version = "0.1.0"
 dependencies = [
  "camino",
- "clickhouse-admin-types 0.1.0",
+ "clickhouse-admin-types",
  "clickward",
  "dropshot 0.17.0",
  "omicron-workspace-hack",
@@ -1624,16 +1567,7 @@ dependencies = [
 name = "clickhouse-admin-types"
 version = "0.1.0"
 dependencies = [
- "clickhouse-admin-types-versions 0.1.0",
- "omicron-workspace-hack",
-]
-
-[[package]]
-name = "clickhouse-admin-types"
-version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/omicron?branch=main#dbaeb64ed174748570548023bb4b119d939105b0"
-dependencies = [
- "clickhouse-admin-types-versions 0.1.0 (git+https://github.com/oxidecomputer/omicron?branch=main)",
+ "clickhouse-admin-types-versions",
  "omicron-workspace-hack",
 ]
 
@@ -1662,29 +1596,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "clickhouse-admin-types-versions"
-version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/omicron?branch=main#dbaeb64ed174748570548023bb4b119d939105b0"
-dependencies = [
- "anyhow",
- "atomicwrites",
- "camino",
- "camino-tempfile",
- "chrono",
- "daft",
- "derive_more 0.99.20",
- "expectorate",
- "iddqd",
- "itertools 0.14.0",
- "omicron-common",
- "omicron-workspace-hack",
- "schemars 0.8.22",
- "serde",
- "serde_json",
- "slog",
-]
-
-[[package]]
 name = "clickhouse-cluster-dev"
 version = "0.1.0"
 dependencies = [
@@ -1693,7 +1604,7 @@ dependencies = [
  "clickward",
  "omicron-workspace-hack",
  "oxide-tokio-rt",
- "oximeter-db 0.1.0",
+ "oximeter-db",
  "oximeter-test-utils",
  "scopeguard",
  "slog",
@@ -1715,6 +1626,11 @@ dependencies = [
  "thiserror 1.0.69",
  "tokio",
 ]
+
+[[package]]
+name = "client-common"
+version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=005bffd649e4ef7f59c90c463343b98bb2364e51#005bffd649e4ef7f59c90c463343b98bb2364e51"
 
 [[package]]
 name = "clipboard-win"
@@ -1747,7 +1663,7 @@ dependencies = [
 name = "cockroach-admin-api"
 version = "0.1.0"
 dependencies = [
- "cockroach-admin-types-versions 0.1.0",
+ "cockroach-admin-types-versions",
  "dropshot 0.17.0",
  "dropshot-api-manager-types",
  "http",
@@ -1774,17 +1690,7 @@ dependencies = [
 name = "cockroach-admin-types"
 version = "0.1.0"
 dependencies = [
- "cockroach-admin-types-versions 0.1.0",
- "omicron-workspace-hack",
- "serde",
-]
-
-[[package]]
-name = "cockroach-admin-types"
-version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/omicron?branch=main#dbaeb64ed174748570548023bb4b119d939105b0"
-dependencies = [
- "cockroach-admin-types-versions 0.1.0 (git+https://github.com/oxidecomputer/omicron?branch=main)",
+ "cockroach-admin-types-versions",
  "omicron-workspace-hack",
  "serde",
 ]
@@ -1802,20 +1708,6 @@ dependencies = [
  "serde",
  "slog-error-chain",
  "test-strategy",
- "thiserror 2.0.18",
-]
-
-[[package]]
-name = "cockroach-admin-types-versions"
-version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/omicron?branch=main#dbaeb64ed174748570548023bb4b119d939105b0"
-dependencies = [
- "chrono",
- "csv",
- "omicron-uuid-kinds",
- "omicron-workspace-hack",
- "schemars 0.8.22",
- "serde",
  "thiserror 2.0.18",
 ]
 
@@ -1870,7 +1762,7 @@ dependencies = [
  "slog-async",
  "slog-bunyan",
  "slog-term",
- "smf 0.10.0 (git+https://github.com/illumos/smf-rs)",
+ "smf 0.10.0",
  "thiserror 1.0.69",
  "tokio",
 ]
@@ -1891,7 +1783,7 @@ dependencies = [
  "slog-async",
  "slog-bunyan",
  "slog-term",
- "smf 0.10.0 (git+https://github.com/illumos/smf-rs)",
+ "smf 0.10.0",
  "thiserror 1.0.69",
  "tokio",
 ]
@@ -1913,7 +1805,7 @@ dependencies = [
  "slog-async",
  "slog-bunyan",
  "slog-term",
- "smf 0.10.0 (git+https://github.com/illumos/smf-rs)",
+ "smf 0.10.0",
  "thiserror 1.0.69",
  "tokio",
 ]
@@ -2662,7 +2554,7 @@ dependencies = [
 [[package]]
 name = "ddm-admin-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=288b8b9a4cae259e628e6d9637f7807684bc5b4d#288b8b9a4cae259e628e6d9637f7807684bc5b4d"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=005bffd649e4ef7f59c90c463343b98bb2364e51#005bffd649e4ef7f59c90c463343b98bb2364e51"
 dependencies = [
  "ddm-api-types-versions",
  "oxnet",
@@ -2674,17 +2566,9 @@ dependencies = [
 ]
 
 [[package]]
-name = "ddm-api-types"
-version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=288b8b9a4cae259e628e6d9637f7807684bc5b4d#288b8b9a4cae259e628e6d9637f7807684bc5b4d"
-dependencies = [
- "ddm-api-types-versions",
-]
-
-[[package]]
 name = "ddm-api-types-versions"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=288b8b9a4cae259e628e6d9637f7807684bc5b4d#288b8b9a4cae259e628e6d9637f7807684bc5b4d"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=005bffd649e4ef7f59c90c463343b98bb2364e51#005bffd649e4ef7f59c90c463343b98bb2364e51"
 dependencies = [
  "oxnet",
  "schemars 0.8.22",
@@ -3121,8 +3005,8 @@ dependencies = [
  "hickory-proto 0.25.2",
  "hickory-resolver 0.25.2",
  "hickory-server",
- "internal-dns-types 0.1.0",
- "internal-dns-types-versions 0.1.0",
+ "internal-dns-types",
+ "internal-dns-types-versions",
  "omicron-common",
  "omicron-test-utils",
  "omicron-workspace-hack",
@@ -3149,7 +3033,7 @@ dependencies = [
  "chrono",
  "dropshot 0.17.0",
  "dropshot-api-manager-types",
- "internal-dns-types-versions 0.1.0",
+ "internal-dns-types-versions",
  "omicron-workspace-hack",
  "schemars 0.8.22",
  "semver 1.0.28",
@@ -3163,7 +3047,7 @@ dependencies = [
  "chrono",
  "expectorate",
  "http",
- "internal-dns-types-versions 0.1.0",
+ "internal-dns-types-versions",
  "omicron-workspace-hack",
  "progenitor 0.14.0",
  "reqwest 0.13.2",
@@ -3184,7 +3068,7 @@ dependencies = [
  "dns-service-client",
  "dropshot 0.17.0",
  "expectorate",
- "internal-dns-types 0.1.0",
+ "internal-dns-types",
  "omicron-test-utils",
  "omicron-workspace-hack",
  "oxide-tokio-rt",
@@ -3664,7 +3548,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "base64 0.22.1",
- "bootstrap-agent-lockstep-types 0.1.0",
+ "bootstrap-agent-lockstep-types",
  "bytes",
  "chrono",
  "clap",
@@ -3675,8 +3559,8 @@ dependencies = [
  "hickory-resolver 0.25.2",
  "http",
  "humantime",
- "internal-dns-resolver 0.1.0",
- "internal-dns-types 0.1.0",
+ "internal-dns-resolver",
+ "internal-dns-types",
  "internet-checksum",
  "ispf",
  "macaddr",
@@ -3694,7 +3578,7 @@ dependencies = [
  "russh-keys",
  "serde",
  "serde_json",
- "sled-agent-types 0.1.0",
+ "sled-agent-types",
  "slog",
  "slog-error-chain",
  "socket2 0.5.10",
@@ -3772,20 +3656,6 @@ dependencies = [
 [[package]]
 name = "ereport-types"
 version = "0.1.0"
-dependencies = [
- "dropshot 0.17.0",
- "omicron-uuid-kinds",
- "omicron-workspace-hack",
- "schemars 0.8.22",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
-]
-
-[[package]]
-name = "ereport-types"
-version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/omicron?branch=main#dbaeb64ed174748570548023bb4b119d939105b0"
 dependencies = [
  "dropshot 0.17.0",
  "omicron-uuid-kinds",
@@ -4222,8 +4092,8 @@ version = "0.1.0"
 dependencies = [
  "dropshot 0.17.0",
  "dropshot-api-manager-types",
- "ereport-types 0.1.0",
- "gateway-types-versions 0.1.0",
+ "ereport-types",
+ "gateway-types-versions",
  "omicron-common",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
@@ -4240,7 +4110,7 @@ dependencies = [
  "anyhow",
  "clap",
  "futures",
- "gateway-client 0.1.0",
+ "gateway-client",
  "gateway-messages",
  "omicron-common",
  "omicron-uuid-kinds",
@@ -4267,34 +4137,9 @@ dependencies = [
  "base64 0.22.1",
  "chrono",
  "daft",
- "ereport-types 0.1.0",
+ "ereport-types",
  "gateway-messages",
- "gateway-types 0.1.0",
- "omicron-uuid-kinds",
- "omicron-workspace-hack",
- "progenitor 0.14.0",
- "rand 0.9.2",
- "reqwest 0.13.2",
- "schemars 0.8.22",
- "serde",
- "serde_json",
- "slog",
- "thiserror 2.0.18",
- "tokio",
- "uuid",
-]
-
-[[package]]
-name = "gateway-client"
-version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/omicron?branch=main#dbaeb64ed174748570548023bb4b119d939105b0"
-dependencies = [
- "base64 0.22.1",
- "chrono",
- "daft",
- "ereport-types 0.1.0 (git+https://github.com/oxidecomputer/omicron?branch=main)",
- "gateway-messages",
- "gateway-types 0.1.0 (git+https://github.com/oxidecomputer/omicron?branch=main)",
+ "gateway-types",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "progenitor 0.14.0",
@@ -4381,9 +4226,9 @@ version = "0.1.0"
 dependencies = [
  "camino",
  "dropshot 0.17.0",
- "gateway-client 0.1.0",
+ "gateway-client",
  "gateway-messages",
- "gateway-types 0.1.0",
+ "gateway-types",
  "omicron-gateway",
  "omicron-test-utils",
  "omicron-workspace-hack",
@@ -4399,16 +4244,7 @@ dependencies = [
 name = "gateway-types"
 version = "0.1.0"
 dependencies = [
- "gateway-types-versions 0.1.0",
- "omicron-workspace-hack",
-]
-
-[[package]]
-name = "gateway-types"
-version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/omicron?branch=main#dbaeb64ed174748570548023bb4b119d939105b0"
-dependencies = [
- "gateway-types-versions 0.1.0 (git+https://github.com/oxidecomputer/omicron?branch=main)",
+ "gateway-types-versions",
  "omicron-workspace-hack",
 ]
 
@@ -4426,24 +4262,6 @@ dependencies = [
  "schemars 0.8.22",
  "serde",
  "test-strategy",
- "thiserror 2.0.18",
- "tufaceous-artifact",
- "uuid",
-]
-
-[[package]]
-name = "gateway-types-versions"
-version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/omicron?branch=main#dbaeb64ed174748570548023bb4b119d939105b0"
-dependencies = [
- "daft",
- "dropshot 0.17.0",
- "gateway-messages",
- "hex",
- "omicron-uuid-kinds",
- "omicron-workspace-hack",
- "schemars 0.8.22",
- "serde",
  "thiserror 2.0.18",
  "tufaceous-artifact",
  "uuid",
@@ -4524,22 +4342,6 @@ dependencies = [
  "serde",
  "subtle",
  "test-strategy",
- "thiserror 2.0.18",
- "zeroize",
-]
-
-[[package]]
-name = "gfss"
-version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/omicron?branch=main#dbaeb64ed174748570548023bb4b119d939105b0"
-dependencies = [
- "digest",
- "omicron-workspace-hack",
- "rand 0.9.2",
- "schemars 0.8.22",
- "secrecy 0.10.3",
- "serde",
- "subtle",
  "thiserror 2.0.18",
  "zeroize",
 ]
@@ -5562,14 +5364,6 @@ checksum = "a4b8219c9c8c2c844dfd5772ec0bda5cd2a81d78c4579aba97f699721d46ab24"
 [[package]]
 name = "illumos-sys-hdrs"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=2c6efefe14321dafe7e9e80129d38316adb2d238#2c6efefe14321dafe7e9e80129d38316adb2d238"
-dependencies = [
- "bitflags 2.11.0",
-]
-
-[[package]]
-name = "illumos-sys-hdrs"
-version = "0.1.0"
 source = "git+https://github.com/oxidecomputer/opte?rev=84e91b62621406f38e4d0870a92bafacad96536e#84e91b62621406f38e4d0870a92bafacad96536e"
 dependencies = [
  "bitflags 2.11.0",
@@ -5595,7 +5389,7 @@ dependencies = [
  "iddqd",
  "ipnetwork",
  "itertools 0.14.0",
- "key-manager-types 0.1.0",
+ "key-manager-types",
  "libc",
  "macaddr",
  "nix 0.31.2",
@@ -5603,16 +5397,16 @@ dependencies = [
  "omicron-test-utils",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
- "opte-ioctl 0.1.0 (git+https://github.com/oxidecomputer/opte?rev=84e91b62621406f38e4d0870a92bafacad96536e)",
- "oxide-vpc 0.1.0 (git+https://github.com/oxidecomputer/opte?rev=84e91b62621406f38e4d0870a92bafacad96536e)",
- "oxlog 0.1.0",
+ "opte-ioctl",
+ "oxide-vpc",
+ "oxlog",
  "oxnet",
  "regress 0.10.5",
  "rustix 1.1.3",
  "schemars 0.8.22",
  "serde",
  "serde_json",
- "sled-agent-types 0.1.0",
+ "sled-agent-types",
  "slog",
  "slog-async",
  "slog-error-chain",
@@ -5623,55 +5417,6 @@ dependencies = [
  "tofino",
  "tokio",
  "toml 0.8.23",
- "uuid",
- "whoami 1.6.1",
- "zone",
-]
-
-[[package]]
-name = "illumos-utils"
-version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/omicron?branch=main#dbaeb64ed174748570548023bb4b119d939105b0"
-dependencies = [
- "anyhow",
- "async-trait",
- "bhyve_api",
- "byteorder",
- "camino",
- "camino-tempfile",
- "cfg-if",
- "chrono",
- "crucible-smf",
- "debug-ignore",
- "dropshot 0.17.0",
- "futures",
- "http",
- "iddqd",
- "ipnetwork",
- "itertools 0.14.0",
- "key-manager-types 0.1.0 (git+https://github.com/oxidecomputer/omicron?branch=main)",
- "libc",
- "macaddr",
- "nix 0.31.2",
- "omicron-common",
- "omicron-uuid-kinds",
- "omicron-workspace-hack",
- "opte-ioctl 0.1.0 (git+https://github.com/oxidecomputer/opte?rev=2c6efefe14321dafe7e9e80129d38316adb2d238)",
- "oxide-vpc 0.1.0 (git+https://github.com/oxidecomputer/opte?rev=2c6efefe14321dafe7e9e80129d38316adb2d238)",
- "oxlog 0.1.0 (git+https://github.com/oxidecomputer/omicron?branch=main)",
- "oxnet",
- "rustix 1.1.3",
- "schemars 0.8.22",
- "serde",
- "sled-agent-types 0.1.0 (git+https://github.com/oxidecomputer/omicron?branch=main)",
- "slog",
- "slog-async",
- "slog-error-chain",
- "slog-term",
- "smf 0.2.3",
- "thiserror 2.0.18",
- "tofino",
- "tokio",
  "uuid",
  "whoami 1.6.1",
  "zone",
@@ -5827,7 +5572,7 @@ dependencies = [
  "hex-literal",
  "http",
  "iddqd",
- "illumos-utils 0.1.0",
+ "illumos-utils",
  "installinator-client",
  "installinator-common",
  "ipcc",
@@ -5845,7 +5590,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "sled-hardware",
- "sled-hardware-types 0.1.0",
+ "sled-hardware-types",
  "sled-storage",
  "slog",
  "slog-async",
@@ -5859,7 +5604,7 @@ dependencies = [
  "tokio-stream",
  "tufaceous-artifact",
  "tufaceous-lib",
- "update-engine 0.1.0",
+ "update-engine",
 ]
 
 [[package]]
@@ -5878,7 +5623,7 @@ dependencies = [
  "serde",
  "slog",
  "tufaceous-artifact",
- "update-engine 0.1.0",
+ "update-engine",
  "uuid",
 ]
 
@@ -5896,7 +5641,7 @@ dependencies = [
  "serde",
  "serde_json",
  "slog",
- "update-engine 0.1.0",
+ "update-engine",
 ]
 
 [[package]]
@@ -5905,7 +5650,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "camino",
- "illumos-utils 0.1.0",
+ "illumos-utils",
  "installinator-common-versions",
  "libc",
  "omicron-common",
@@ -5918,7 +5663,7 @@ dependencies = [
  "test-strategy",
  "thiserror 2.0.18",
  "tokio",
- "update-engine 0.1.0",
+ "update-engine",
 ]
 
 [[package]]
@@ -5948,8 +5693,8 @@ dependencies = [
  "clap",
  "dropshot 0.17.0",
  "hickory-resolver 0.25.2",
- "internal-dns-resolver 0.1.0",
- "internal-dns-types 0.1.0",
+ "internal-dns-resolver",
+ "internal-dns-types",
  "omicron-common",
  "omicron-workspace-hack",
  "oxide-tokio-rt",
@@ -5971,7 +5716,7 @@ dependencies = [
  "futures",
  "hickory-proto 0.25.2",
  "hickory-resolver 0.25.2",
- "internal-dns-types 0.1.0",
+ "internal-dns-types",
  "omicron-common",
  "omicron-test-utils",
  "omicron-uuid-kinds",
@@ -5990,31 +5735,13 @@ dependencies = [
 ]
 
 [[package]]
-name = "internal-dns-resolver"
-version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/omicron?branch=main#dbaeb64ed174748570548023bb4b119d939105b0"
-dependencies = [
- "futures",
- "hickory-proto 0.25.2",
- "hickory-resolver 0.25.2",
- "internal-dns-types 0.1.0 (git+https://github.com/oxidecomputer/omicron?branch=main)",
- "omicron-common",
- "omicron-uuid-kinds",
- "omicron-workspace-hack",
- "qorb",
- "reqwest 0.13.2",
- "slog",
- "thiserror 2.0.18",
-]
-
-[[package]]
 name = "internal-dns-types"
 version = "0.1.0"
 dependencies = [
  "anyhow",
  "chrono",
  "expectorate",
- "internal-dns-types-versions 0.1.0",
+ "internal-dns-types-versions",
  "omicron-common",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
@@ -6025,37 +5752,8 @@ dependencies = [
 ]
 
 [[package]]
-name = "internal-dns-types"
-version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/omicron?branch=main#dbaeb64ed174748570548023bb4b119d939105b0"
-dependencies = [
- "anyhow",
- "chrono",
- "internal-dns-types-versions 0.1.0 (git+https://github.com/oxidecomputer/omicron?branch=main)",
- "omicron-common",
- "omicron-uuid-kinds",
- "omicron-workspace-hack",
- "schemars 0.8.22",
- "serde",
- "strum 0.27.2",
-]
-
-[[package]]
 name = "internal-dns-types-versions"
 version = "0.1.0"
-dependencies = [
- "anyhow",
- "chrono",
- "omicron-common",
- "omicron-workspace-hack",
- "schemars 0.8.22",
- "serde",
-]
-
-[[package]]
-name = "internal-dns-types-versions"
-version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/omicron?branch=main#dbaeb64ed174748570548023bb4b119d939105b0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -6300,7 +5998,7 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "hkdf",
- "key-manager-types 0.1.0",
+ "key-manager-types",
  "omicron-common",
  "omicron-workspace-hack",
  "secrecy 0.10.3",
@@ -6314,15 +6012,6 @@ dependencies = [
 [[package]]
 name = "key-manager-types"
 version = "0.1.0"
-dependencies = [
- "omicron-workspace-hack",
- "secrecy 0.10.3",
-]
-
-[[package]]
-name = "key-manager-types"
-version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/omicron?branch=main#dbaeb64ed174748570548023bb4b119d939105b0"
 dependencies = [
  "omicron-workspace-hack",
  "secrecy 0.10.3",
@@ -6353,15 +6042,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 1.0.109",
-]
-
-[[package]]
-name = "kstat-macro"
-version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=2c6efefe14321dafe7e9e80129d38316adb2d238#2c6efefe14321dafe7e9e80129d38316adb2d238"
-dependencies = [
- "quote",
- "syn 2.0.117",
 ]
 
 [[package]]
@@ -6904,31 +6584,13 @@ dependencies = [
 [[package]]
 name = "mg-admin-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=288b8b9a4cae259e628e6d9637f7807684bc5b4d#288b8b9a4cae259e628e6d9637f7807684bc5b4d"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=005bffd649e4ef7f59c90c463343b98bb2364e51#005bffd649e4ef7f59c90c463343b98bb2364e51"
 dependencies = [
  "chrono",
+ "client-common",
  "colored 3.1.1",
  "mg-api-types-versions",
- "mg-common",
  "progenitor 0.14.0",
- "reqwest 0.13.2",
- "schemars 0.8.22",
- "serde",
- "serde_json",
- "slog",
- "tabwriter",
- "uuid",
-]
-
-[[package]]
-name = "mg-admin-client"
-version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=7696ee48d5ee29a917dea459e281fe2e8ff20513#7696ee48d5ee29a917dea459e281fe2e8ff20513"
-dependencies = [
- "chrono",
- "colored 3.1.1",
- "progenitor 0.13.0",
- "rdb-types",
  "reqwest 0.13.2",
  "schemars 0.8.22",
  "serde",
@@ -6941,7 +6603,7 @@ dependencies = [
 [[package]]
 name = "mg-api-types"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=288b8b9a4cae259e628e6d9637f7807684bc5b4d#288b8b9a4cae259e628e6d9637f7807684bc5b4d"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=005bffd649e4ef7f59c90c463343b98bb2364e51#005bffd649e4ef7f59c90c463343b98bb2364e51"
 dependencies = [
  "mg-api-types-versions",
 ]
@@ -6949,7 +6611,7 @@ dependencies = [
 [[package]]
 name = "mg-api-types-versions"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=288b8b9a4cae259e628e6d9637f7807684bc5b4d#288b8b9a4cae259e628e6d9637f7807684bc5b4d"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=005bffd649e4ef7f59c90c463343b98bb2364e51#005bffd649e4ef7f59c90c463343b98bb2364e51"
 dependencies = [
  "chrono",
  "nom 8.0.0",
@@ -6963,30 +6625,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "mg-common"
-version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=288b8b9a4cae259e628e6d9637f7807684bc5b4d#288b8b9a4cae259e628e6d9637f7807684bc5b4d"
-dependencies = [
- "anstyle",
- "anyhow",
- "backoff",
- "clap",
- "ddm-api-types",
- "libc",
- "libnet",
- "oximeter 0.1.0 (git+https://github.com/oxidecomputer/omicron?branch=main)",
- "oximeter-producer 0.1.0 (git+https://github.com/oxidecomputer/omicron?branch=main)",
- "oxnet",
- "schemars 0.8.22",
- "serde",
- "slog",
- "slog-async",
- "slog-bunyan",
- "smf 0.10.0 (git+https://github.com/illumos/smf-rs?branch=main)",
- "uuid",
-]
-
-[[package]]
 name = "mgs-dev"
 version = "0.1.0"
 dependencies = [
@@ -6994,7 +6632,7 @@ dependencies = [
  "camino",
  "clap",
  "futures",
- "gateway-client 0.1.0",
+ "gateway-client",
  "gateway-messages",
  "gateway-test-utils",
  "libc",
@@ -7225,7 +6863,7 @@ dependencies = [
  "newtype_derive",
  "nexus-db-fixed-data",
  "nexus-db-model",
- "nexus-types 0.1.0",
+ "nexus-types",
  "omicron-common",
  "omicron-rpaths",
  "omicron-test-utils",
@@ -7261,7 +6899,7 @@ dependencies = [
  "chrono",
  "futures",
  "iddqd",
- "nexus-types 0.1.0",
+ "nexus-types",
  "omicron-common",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
@@ -7272,33 +6910,8 @@ dependencies = [
  "schemars 0.8.22",
  "serde",
  "serde_json",
- "sled-agent-types 0.1.0",
- "sled-agent-types-versions 0.1.0",
- "slog",
- "uuid",
-]
-
-[[package]]
-name = "nexus-client"
-version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/omicron?branch=main#dbaeb64ed174748570548023bb4b119d939105b0"
-dependencies = [
- "chrono",
- "futures",
- "iddqd",
- "nexus-types 0.1.0 (git+https://github.com/oxidecomputer/omicron?branch=main)",
- "omicron-common",
- "omicron-uuid-kinds",
- "omicron-workspace-hack",
- "oxnet",
- "progenitor 0.14.0",
- "regress 0.10.5",
- "reqwest 0.13.2",
- "schemars 0.8.22",
- "serde",
- "serde_json",
- "sled-agent-types 0.1.0 (git+https://github.com/oxidecomputer/omicron?branch=main)",
- "sled-agent-types-versions 0.1.0 (git+https://github.com/oxidecomputer/omicron?branch=main)",
+ "sled-agent-types",
+ "sled-agent-types-versions",
  "slog",
  "uuid",
 ]
@@ -7313,7 +6926,7 @@ dependencies = [
  "expectorate",
  "ipnet",
  "libc",
- "nexus-types 0.1.0",
+ "nexus-types",
  "omicron-common",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
@@ -7322,7 +6935,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_with",
- "sled-agent-types 0.1.0",
+ "sled-agent-types",
  "tokio-postgres",
  "toml 0.8.23",
  "uuid",
@@ -7344,7 +6957,7 @@ name = "nexus-db-fixed-data"
 version = "0.1.0"
 dependencies = [
  "nexus-db-model",
- "nexus-types 0.1.0",
+ "nexus-types",
  "omicron-common",
  "omicron-rpaths",
  "omicron-uuid-kinds",
@@ -7369,7 +6982,7 @@ dependencies = [
  "nexus-db-model",
  "nexus-db-queries",
  "nexus-db-schema",
- "nexus-types 0.1.0",
+ "nexus-types",
  "omicron-common",
  "omicron-rpaths",
  "omicron-test-utils",
@@ -7390,16 +7003,16 @@ dependencies = [
  "camino",
  "camino-tempfile",
  "chrono",
- "clickhouse-admin-types 0.1.0",
- "cockroach-admin-types 0.1.0",
+ "clickhouse-admin-types",
+ "cockroach-admin-types",
  "db-macros",
  "derive-where",
  "diesel",
- "ereport-types 0.1.0",
+ "ereport-types",
  "expectorate",
  "hex",
  "iddqd",
- "illumos-utils 0.1.0",
+ "illumos-utils",
  "ipnetwork",
  "itertools 0.14.0",
  "macaddr",
@@ -7407,11 +7020,11 @@ dependencies = [
  "nexus-config",
  "nexus-db-schema",
  "nexus-defaults",
- "nexus-types 0.1.0",
+ "nexus-types",
  "omicron-certificates",
  "omicron-cockroach-metrics",
  "omicron-common",
- "omicron-passwords 0.1.0",
+ "omicron-passwords",
  "omicron-rpaths",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
@@ -7427,8 +7040,8 @@ dependencies = [
  "serde",
  "serde_json",
  "sled-agent-client",
- "sled-agent-types 0.1.0",
- "sled-hardware-types 0.1.0",
+ "sled-agent-types",
+ "sled-hardware-types",
  "slog",
  "slog-error-chain",
  "sqlparser",
@@ -7437,7 +7050,7 @@ dependencies = [
  "test-strategy",
  "thiserror 2.0.18",
  "tokio",
- "trust-quorum-protocol 0.1.0",
+ "trust-quorum-protocol",
  "tufaceous-artifact",
  "uuid",
  "vergen-gitcl",
@@ -7454,26 +7067,26 @@ dependencies = [
  "camino",
  "camino-tempfile",
  "chrono",
- "clickhouse-admin-types 0.1.0",
- "cockroach-admin-types 0.1.0",
+ "clickhouse-admin-types",
+ "cockroach-admin-types",
  "const_format",
  "criterion",
  "db-macros",
  "diesel",
  "diesel-dtrace",
  "dropshot 0.17.0",
- "ereport-types 0.1.0",
+ "ereport-types",
  "expectorate",
  "fmd-adm-sys",
  "futures",
- "gateway-client 0.1.0",
- "gateway-types 0.1.0",
+ "gateway-client",
+ "gateway-types",
  "hex",
  "hyper-rustls",
  "iddqd",
- "illumos-utils 0.1.0",
- "internal-dns-resolver 0.1.0",
- "internal-dns-types 0.1.0",
+ "illumos-utils",
+ "internal-dns-resolver",
+ "internal-dns-types",
  "ipnetwork",
  "itertools 0.14.0",
  "macaddr",
@@ -7487,11 +7100,11 @@ dependencies = [
  "nexus-inventory",
  "nexus-reconfigurator-planning",
  "nexus-test-utils",
- "nexus-types 0.1.0",
+ "nexus-types",
  "nonempty",
  "omicron-cockroach-metrics",
  "omicron-common",
- "omicron-passwords 0.1.0",
+ "omicron-passwords",
  "omicron-rpaths",
  "omicron-sled-agent",
  "omicron-test-utils",
@@ -7522,8 +7135,8 @@ dependencies = [
  "serde_with",
  "sha2",
  "sled-agent-client",
- "sled-agent-types 0.1.0",
- "sled-hardware-types 0.1.0",
+ "sled-agent-types",
+ "sled-hardware-types",
  "slog",
  "slog-error-chain",
  "static_assertions",
@@ -7534,8 +7147,8 @@ dependencies = [
  "term 0.7.0",
  "thiserror 2.0.18",
  "tokio",
- "trust-quorum-protocol 0.1.0",
- "trust-quorum-types 0.1.0",
+ "trust-quorum-protocol",
+ "trust-quorum-types",
  "tufaceous-artifact",
  "url",
  "usdt 0.5.0",
@@ -7576,7 +7189,7 @@ name = "nexus-external-api"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "api_identity 0.1.0",
+ "api_identity",
  "base64 0.22.1",
  "chrono",
  "dropshot 0.17.0",
@@ -7585,21 +7198,21 @@ dependencies = [
  "hyper",
  "ipnetwork",
  "itertools 0.14.0",
- "nexus-types 0.1.0",
- "nexus-types-versions 0.1.0",
+ "nexus-types",
+ "nexus-types-versions",
  "omicron-common",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "openapiv3",
  "oximeter-types-versions 0.1.0",
  "oxnet",
- "oxql-types 0.1.0",
+ "oxql-types",
  "schemars 0.8.22",
  "scim2-rs",
  "serde",
  "serde_json",
  "slog-error-chain",
- "trust-quorum-types 0.1.0",
+ "trust-quorum-types",
  "tufaceous-artifact",
  "uuid",
 ]
@@ -7610,10 +7223,10 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "chrono",
- "ereport-types 0.1.0",
+ "ereport-types",
  "iddqd",
  "nexus-reconfigurator-planning",
- "nexus-types 0.1.0",
+ "nexus-types",
  "omicron-test-utils",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
@@ -7633,13 +7246,13 @@ dependencies = [
  "dropshot 0.17.0",
  "dropshot-api-manager-types",
  "http",
- "nexus-types 0.1.0",
+ "nexus-types",
  "omicron-common",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "schemars 0.8.22",
  "serde",
- "sled-agent-types-versions 0.1.0",
+ "sled-agent-types-versions",
  "uuid",
 ]
 
@@ -7653,22 +7266,22 @@ dependencies = [
  "chrono",
  "clickhouse-admin-keeper-client",
  "clickhouse-admin-server-client",
- "clickhouse-admin-types 0.1.0",
- "cockroach-admin-types 0.1.0",
+ "clickhouse-admin-types",
+ "cockroach-admin-types",
  "dns-service-client",
  "expectorate",
  "fmd-adm-sys",
  "futures",
- "gateway-client 0.1.0",
+ "gateway-client",
  "gateway-messages",
  "gateway-test-utils",
- "gateway-types 0.1.0",
+ "gateway-types",
  "httpmock",
  "iddqd",
- "illumos-utils 0.1.0",
+ "illumos-utils",
  "itertools 0.14.0",
- "nexus-client 0.1.0",
- "nexus-types 0.1.0",
+ "nexus-client",
+ "nexus-types",
  "ntp-admin-client",
  "omicron-cockroach-metrics",
  "omicron-common",
@@ -7681,9 +7294,9 @@ dependencies = [
  "serde_json",
  "sled-agent-client",
  "sled-agent-resolvable-files-examples",
- "sled-agent-types 0.1.0",
- "sled-agent-types-versions 0.1.0",
- "sled-hardware-types 0.1.0",
+ "sled-agent-types",
+ "sled-agent-types-versions",
+ "sled-hardware-types",
  "slog",
  "slog-error-chain",
  "strum 0.27.2",
@@ -7701,15 +7314,15 @@ version = "0.1.0"
 dependencies = [
  "dropshot 0.17.0",
  "http",
- "nexus-types 0.1.0",
- "nexus-types-versions 0.1.0",
+ "nexus-types",
+ "nexus-types-versions",
  "omicron-common",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "schemars 0.8.22",
  "serde",
- "sled-hardware-types 0.1.0",
- "trust-quorum-types 0.1.0",
+ "sled-hardware-types",
+ "trust-quorum-types",
  "uuid",
 ]
 
@@ -7717,13 +7330,13 @@ dependencies = [
 name = "nexus-lockstep-client"
 version = "0.1.0"
 dependencies = [
- "bootstrap-agent-lockstep-types 0.1.0",
+ "bootstrap-agent-lockstep-types",
  "chrono",
  "futures",
  "iddqd",
- "nexus-types 0.1.0",
+ "nexus-types",
  "omicron-common",
- "omicron-passwords 0.1.0",
+ "omicron-passwords",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "oxnet",
@@ -7733,9 +7346,9 @@ dependencies = [
  "schemars 0.8.22",
  "serde",
  "serde_json",
- "sled-agent-types 0.1.0",
- "sled-agent-types-versions 0.1.0",
- "sled-hardware-types 0.1.0",
+ "sled-agent-types",
+ "sled-agent-types-versions",
+ "sled-hardware-types",
  "slog",
  "uuid",
 ]
@@ -7765,7 +7378,7 @@ dependencies = [
  "nexus-db-queries",
  "nexus-db-schema",
  "nexus-test-utils",
- "nexus-types 0.1.0",
+ "nexus-types",
  "omicron-common",
  "omicron-rpaths",
  "omicron-test-utils",
@@ -7789,17 +7402,17 @@ dependencies = [
  "chrono",
  "dropshot 0.17.0",
  "futures",
- "gateway-client 0.1.0",
+ "gateway-client",
  "gateway-messages",
  "gateway-test-utils",
- "gateway-types 0.1.0",
+ "gateway-types",
  "http",
  "hubtools 0.4.7 (git+https://github.com/oxidecomputer/hubtools.git?rev=2b1ef9b38d75563ea800baa3b17327eec17b1b7a)",
  "iddqd",
- "illumos-utils 0.1.0",
- "internal-dns-resolver 0.1.0",
- "internal-dns-types 0.1.0",
- "nexus-types 0.1.0",
+ "illumos-utils",
+ "internal-dns-resolver",
+ "internal-dns-types",
+ "nexus-types",
  "omicron-common",
  "omicron-test-utils",
  "omicron-uuid-kinds",
@@ -7812,10 +7425,10 @@ dependencies = [
  "sha2",
  "sled-agent-api",
  "sled-agent-client",
- "sled-agent-types 0.1.0",
- "sled-agent-types-versions 0.1.0",
+ "sled-agent-types",
+ "sled-agent-types-versions",
  "sled-diagnostics",
- "sled-hardware-types 0.1.0",
+ "sled-hardware-types",
  "slog",
  "slog-error-chain",
  "sp-sim",
@@ -7823,7 +7436,7 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "tokio-util",
- "trust-quorum-types 0.1.0",
+ "trust-quorum-types",
  "tufaceous-artifact",
  "uuid",
 ]
@@ -7834,9 +7447,9 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "futures",
- "gateway-client 0.1.0",
- "internal-dns-resolver 0.1.0",
- "internal-dns-types 0.1.0",
+ "gateway-client",
+ "internal-dns-resolver",
+ "internal-dns-types",
  "ipnetwork",
  "nexus-db-lookup",
  "nexus-db-queries",
@@ -7848,8 +7461,8 @@ dependencies = [
  "pq-sys",
  "reqwest 0.13.2",
  "sled-agent-client",
- "sled-agent-types 0.1.0",
- "sled-hardware-types 0.1.0",
+ "sled-agent-types",
+ "sled-hardware-types",
  "slog",
  "static_assertions",
  "thiserror 2.0.18",
@@ -7862,12 +7475,12 @@ version = "0.1.0"
 dependencies = [
  "ipnet",
  "nexus-reconfigurator-planning",
- "nexus-types 0.1.0",
+ "nexus-types",
  "omicron-common",
  "omicron-test-utils",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
- "sled-agent-types 0.1.0",
+ "sled-agent-types",
  "tufaceous-artifact",
 ]
 
@@ -7885,7 +7498,7 @@ dependencies = [
  "nexus-reconfigurator-preparation",
  "nexus-test-utils",
  "nexus-test-utils-macros",
- "nexus-types 0.1.0",
+ "nexus-types",
  "omicron-common",
  "omicron-nexus",
  "omicron-rpaths",
@@ -7913,15 +7526,15 @@ dependencies = [
  "clickhouse-admin-keeper-client",
  "clickhouse-admin-server-client",
  "clickhouse-admin-single-client",
- "clickhouse-admin-types 0.1.0",
+ "clickhouse-admin-types",
  "cockroach-admin-client",
  "diesel",
  "fmd-adm-sys",
  "futures",
  "httptest",
  "iddqd",
- "internal-dns-resolver 0.1.0",
- "internal-dns-types 0.1.0",
+ "internal-dns-resolver",
+ "internal-dns-types",
  "ipnet",
  "ipnetwork",
  "newtype-uuid",
@@ -7937,7 +7550,7 @@ dependencies = [
  "nexus-reconfigurator-preparation",
  "nexus-test-utils",
  "nexus-test-utils-macros",
- "nexus-types 0.1.0",
+ "nexus-types",
  "omicron-common",
  "omicron-nexus",
  "omicron-rpaths",
@@ -7948,11 +7561,11 @@ dependencies = [
  "pq-sys",
  "reqwest 0.13.2",
  "sled-agent-client",
- "sled-agent-types 0.1.0",
+ "sled-agent-types",
  "slog",
  "slog-error-chain",
  "tokio",
- "update-engine 0.1.0",
+ "update-engine",
  "uuid",
 ]
 
@@ -7966,21 +7579,21 @@ dependencies = [
  "camino-tempfile",
  "chrono",
  "clap",
- "clickhouse-admin-types 0.1.0",
- "cockroach-admin-types 0.1.0",
+ "clickhouse-admin-types",
+ "cockroach-admin-types",
  "daft",
  "debug-ignore",
  "dropshot 0.17.0",
  "expectorate",
- "gateway-client 0.1.0",
- "gateway-types 0.1.0",
+ "gateway-client",
+ "gateway-types",
  "hex-literal",
  "hickory-resolver 0.25.2",
  "iddqd",
- "illumos-utils 0.1.0",
+ "illumos-utils",
  "indexmap 2.14.0",
- "internal-dns-resolver 0.1.0",
- "internal-dns-types 0.1.0",
+ "internal-dns-resolver",
+ "internal-dns-types",
  "ipnet",
  "itertools 0.14.0",
  "maplit",
@@ -7988,7 +7601,7 @@ dependencies = [
  "nexus-inventory",
  "nexus-reconfigurator-blippy",
  "nexus-reconfigurator-simulation",
- "nexus-types 0.1.0",
+ "nexus-types",
  "omicron-common",
  "omicron-deployment-graph",
  "omicron-test-utils",
@@ -8001,8 +7614,8 @@ dependencies = [
  "reconfigurator-cli",
  "semver 1.0.28",
  "sled-agent-client",
- "sled-agent-types 0.1.0",
- "sled-hardware-types 0.1.0",
+ "sled-agent-types",
+ "sled-hardware-types",
  "slog",
  "slog-error-chain",
  "sp-sim",
@@ -8030,14 +7643,14 @@ dependencies = [
  "futures",
  "nexus-db-model",
  "nexus-db-queries",
- "nexus-types 0.1.0",
+ "nexus-types",
  "omicron-common",
  "omicron-rpaths",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "pq-sys",
- "sled-agent-types 0.1.0",
- "sled-hardware-types 0.1.0",
+ "sled-agent-types",
+ "sled-hardware-types",
  "slog",
  "slog-error-chain",
 ]
@@ -8052,7 +7665,7 @@ dependencies = [
  "nexus-db-model",
  "nexus-db-queries",
  "nexus-db-schema",
- "nexus-types 0.1.0",
+ "nexus-types",
  "omicron-common",
  "omicron-rpaths",
  "omicron-test-utils",
@@ -8079,13 +7692,13 @@ dependencies = [
  "itertools 0.14.0",
  "nexus-inventory",
  "nexus-reconfigurator-planning",
- "nexus-types 0.1.0",
+ "nexus-types",
  "omicron-common",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "petname",
  "sapling-renderdag",
- "sled-agent-types 0.1.0",
+ "sled-agent-types",
  "slog",
  "strum 0.27.2",
  "swrite",
@@ -8108,7 +7721,7 @@ dependencies = [
  "nexus-db-queries",
  "nexus-test-utils",
  "nexus-test-utils-macros",
- "nexus-types 0.1.0",
+ "nexus-types",
  "omicron-common",
  "omicron-rpaths",
  "omicron-test-utils",
@@ -8129,16 +7742,16 @@ name = "nexus-test-interface"
 version = "0.1.0"
 dependencies = [
  "async-trait",
- "bootstrap-agent-lockstep-types 0.1.0",
+ "bootstrap-agent-lockstep-types",
  "nexus-config",
  "nexus-db-queries",
- "nexus-types 0.1.0",
+ "nexus-types",
  "omicron-common",
  "omicron-rpaths",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "pq-sys",
- "sled-agent-types 0.1.0",
+ "sled-agent-types",
  "slog",
  "tokio",
  "uuid",
@@ -8149,7 +7762,7 @@ name = "nexus-test-utils"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "bootstrap-agent-lockstep-types 0.1.0",
+ "bootstrap-agent-lockstep-types",
  "bytes",
  "camino",
  "camino-tempfile",
@@ -8168,18 +7781,18 @@ dependencies = [
  "http-body-util",
  "hyper",
  "iddqd",
- "illumos-utils 0.1.0",
- "internal-dns-resolver 0.1.0",
- "internal-dns-types 0.1.0",
- "nexus-client 0.1.0",
+ "illumos-utils",
+ "internal-dns-resolver",
+ "internal-dns-types",
+ "nexus-client",
  "nexus-config",
  "nexus-db-queries",
  "nexus-lockstep-client",
  "nexus-test-interface",
- "nexus-types 0.1.0",
+ "nexus-types",
  "omicron-cockroach-admin",
  "omicron-common",
- "omicron-passwords 0.1.0",
+ "omicron-passwords",
  "omicron-rpaths",
  "omicron-sled-agent",
  "omicron-test-utils",
@@ -8187,7 +7800,7 @@ dependencies = [
  "omicron-workspace-hack",
  "oximeter 0.1.0",
  "oximeter-collector",
- "oximeter-producer 0.1.0",
+ "oximeter-producer",
  "oxnet",
  "pq-sys",
  "pretty_assertions",
@@ -8195,7 +7808,7 @@ dependencies = [
  "serde_json",
  "serde_urlencoded",
  "sled-agent-client",
- "sled-agent-types 0.1.0",
+ "sled-agent-types",
  "slog",
  "slog-error-chain",
  "tokio",
@@ -8219,46 +7832,46 @@ name = "nexus-types"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "api_identity 0.1.0",
+ "api_identity",
  "async-trait",
  "base64 0.22.1",
- "bootstrap-agent-lockstep-types 0.1.0",
+ "bootstrap-agent-lockstep-types",
  "chrono",
  "clap",
- "clickhouse-admin-types 0.1.0",
- "cockroach-admin-types 0.1.0",
+ "clickhouse-admin-types",
+ "cockroach-admin-types",
  "cookie",
  "daft",
  "derive-where",
  "derive_more 0.99.20",
  "dropshot 0.17.0",
  "either",
- "ereport-types 0.1.0",
+ "ereport-types",
  "expectorate",
  "futures",
- "gateway-client 0.1.0",
- "gateway-types 0.1.0",
+ "gateway-client",
+ "gateway-types",
  "http",
  "humantime",
  "iddqd",
- "illumos-utils 0.1.0",
+ "illumos-utils",
  "indent_write",
- "internal-dns-types 0.1.0",
+ "internal-dns-types",
  "ipnet",
  "ipnetwork",
  "itertools 0.14.0",
  "newtype-uuid",
  "newtype_derive",
- "nexus-types-versions 0.1.0",
+ "nexus-types-versions",
  "omicron-common",
- "omicron-passwords 0.1.0",
+ "omicron-passwords",
  "omicron-test-utils",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "openssl",
- "oximeter-db 0.1.0",
+ "oximeter-db",
  "oxnet",
- "oxql-types 0.1.0",
+ "oxql-types",
  "parse-display",
  "proptest",
  "regex",
@@ -8267,9 +7880,9 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_with",
- "sled-agent-types 0.1.0",
- "sled-agent-types-versions 0.1.0",
- "sled-hardware-types 0.1.0",
+ "sled-agent-types",
+ "sled-agent-types-versions",
+ "sled-hardware-types",
  "slog",
  "slog-error-chain",
  "steno",
@@ -8281,85 +7894,11 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tough",
- "trust-quorum-protocol 0.1.0",
- "trust-quorum-types 0.1.0",
+ "trust-quorum-protocol",
+ "trust-quorum-types",
  "tufaceous-artifact",
  "unicode-width 0.1.14",
- "update-engine 0.1.0",
- "url",
- "uuid",
-]
-
-[[package]]
-name = "nexus-types"
-version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/omicron?branch=main#dbaeb64ed174748570548023bb4b119d939105b0"
-dependencies = [
- "anyhow",
- "api_identity 0.1.0 (git+https://github.com/oxidecomputer/omicron?branch=main)",
- "async-trait",
- "base64 0.22.1",
- "bootstrap-agent-lockstep-types 0.1.0 (git+https://github.com/oxidecomputer/omicron?branch=main)",
- "chrono",
- "clap",
- "clickhouse-admin-types 0.1.0 (git+https://github.com/oxidecomputer/omicron?branch=main)",
- "cockroach-admin-types 0.1.0 (git+https://github.com/oxidecomputer/omicron?branch=main)",
- "cookie",
- "daft",
- "derive-where",
- "derive_more 0.99.20",
- "dropshot 0.17.0",
- "either",
- "ereport-types 0.1.0 (git+https://github.com/oxidecomputer/omicron?branch=main)",
- "futures",
- "gateway-client 0.1.0 (git+https://github.com/oxidecomputer/omicron?branch=main)",
- "gateway-types 0.1.0 (git+https://github.com/oxidecomputer/omicron?branch=main)",
- "http",
- "humantime",
- "iddqd",
- "illumos-utils 0.1.0 (git+https://github.com/oxidecomputer/omicron?branch=main)",
- "indent_write",
- "internal-dns-types 0.1.0 (git+https://github.com/oxidecomputer/omicron?branch=main)",
- "ipnet",
- "ipnetwork",
- "itertools 0.14.0",
- "newtype-uuid",
- "newtype_derive",
- "nexus-types-versions 0.1.0 (git+https://github.com/oxidecomputer/omicron?branch=main)",
- "omicron-common",
- "omicron-passwords 0.1.0 (git+https://github.com/oxidecomputer/omicron?branch=main)",
- "omicron-uuid-kinds",
- "omicron-workspace-hack",
- "openssl",
- "oximeter-db 0.1.0 (git+https://github.com/oxidecomputer/omicron?branch=main)",
- "oxnet",
- "oxql-types 0.1.0 (git+https://github.com/oxidecomputer/omicron?branch=main)",
- "parse-display",
- "regex",
- "schemars 0.8.22",
- "semver 1.0.28",
- "serde",
- "serde_json",
- "serde_with",
- "sled-agent-types 0.1.0 (git+https://github.com/oxidecomputer/omicron?branch=main)",
- "sled-agent-types-versions 0.1.0 (git+https://github.com/oxidecomputer/omicron?branch=main)",
- "sled-hardware-types 0.1.0 (git+https://github.com/oxidecomputer/omicron?branch=main)",
- "slog",
- "slog-error-chain",
- "steno",
- "strum 0.27.2",
- "swrite",
- "tabled 0.15.0",
- "test-strategy",
- "textwrap 0.16.2",
- "thiserror 2.0.18",
- "tokio",
- "tough",
- "trust-quorum-protocol 0.1.0 (git+https://github.com/oxidecomputer/omicron?branch=main)",
- "trust-quorum-types 0.1.0 (git+https://github.com/oxidecomputer/omicron?branch=main)",
- "tufaceous-artifact",
- "unicode-width 0.1.14",
- "update-engine 0.1.0 (git+https://github.com/oxidecomputer/omicron?branch=main)",
+ "update-engine",
  "url",
  "uuid",
 ]
@@ -8369,65 +7908,29 @@ name = "nexus-types-versions"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "api_identity 0.1.0",
+ "api_identity",
  "base64 0.22.1",
  "chrono",
  "daft",
  "dropshot 0.17.0",
  "http",
- "mg-admin-client 0.1.0 (git+https://github.com/oxidecomputer/maghemite?rev=288b8b9a4cae259e628e6d9637f7807684bc5b4d)",
+ "mg-admin-client",
+ "mg-api-types",
  "omicron-common",
- "omicron-passwords 0.1.0",
+ "omicron-passwords",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "openssl",
  "oxnet",
- "oxql-types 0.1.0",
+ "oxql-types",
  "parse-display",
  "regex",
  "schemars 0.8.22",
  "semver 1.0.28",
  "serde",
  "serde_json",
- "sled-agent-types-versions 0.1.0",
- "sled-hardware-types 0.1.0",
- "slog-error-chain",
- "strum 0.27.2",
- "thiserror 2.0.18",
- "tough",
- "tufaceous-artifact",
- "url",
- "uuid",
-]
-
-[[package]]
-name = "nexus-types-versions"
-version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/omicron?branch=main#dbaeb64ed174748570548023bb4b119d939105b0"
-dependencies = [
- "anyhow",
- "api_identity 0.1.0 (git+https://github.com/oxidecomputer/omicron?branch=main)",
- "base64 0.22.1",
- "chrono",
- "daft",
- "dropshot 0.17.0",
- "http",
- "mg-admin-client 0.1.0 (git+https://github.com/oxidecomputer/maghemite?rev=7696ee48d5ee29a917dea459e281fe2e8ff20513)",
- "omicron-common",
- "omicron-passwords 0.1.0 (git+https://github.com/oxidecomputer/omicron?branch=main)",
- "omicron-uuid-kinds",
- "omicron-workspace-hack",
- "openssl",
- "oxnet",
- "oxql-types 0.1.0 (git+https://github.com/oxidecomputer/omicron?branch=main)",
- "parse-display",
- "regex",
- "schemars 0.8.22",
- "semver 1.0.28",
- "serde",
- "serde_json",
- "sled-agent-types-versions 0.1.0 (git+https://github.com/oxidecomputer/omicron?branch=main)",
- "sled-hardware-types 0.1.0 (git+https://github.com/oxidecomputer/omicron?branch=main)",
+ "sled-agent-types-versions",
+ "sled-hardware-types",
  "slog-error-chain",
  "strum 0.27.2",
  "thiserror 2.0.18",
@@ -8848,13 +8351,13 @@ dependencies = [
  "clap",
  "clickhouse-admin-api",
  "clickhouse-admin-test-utils",
- "clickhouse-admin-types 0.1.0",
+ "clickhouse-admin-types",
  "clickward",
  "dropshot 0.17.0",
  "expectorate",
  "flume",
  "http",
- "illumos-utils 0.1.0",
+ "illumos-utils",
  "omicron-common",
  "omicron-test-utils",
  "omicron-uuid-kinds",
@@ -8863,7 +8366,7 @@ dependencies = [
  "openapiv3",
  "oxide-tokio-rt",
  "oximeter 0.1.0",
- "oximeter-db 0.1.0",
+ "oximeter-db",
  "oximeter-test-utils",
  "schemars 0.8.22",
  "serde",
@@ -8891,14 +8394,14 @@ dependencies = [
  "chrono",
  "clap",
  "cockroach-admin-api",
- "cockroach-admin-types 0.1.0",
- "cockroach-admin-types-versions 0.1.0",
+ "cockroach-admin-types",
+ "cockroach-admin-types-versions",
  "csv",
  "dropshot 0.17.0",
  "expectorate",
  "fmd-adm-sys",
  "http",
- "illumos-utils 0.1.0",
+ "illumos-utils",
  "nexus-test-utils",
  "omicron-common",
  "omicron-rpaths",
@@ -8934,7 +8437,7 @@ dependencies = [
  "anyhow",
  "chrono",
  "cockroach-admin-client",
- "cockroach-admin-types 0.1.0",
+ "cockroach-admin-types",
  "futures",
  "omicron-workspace-hack",
  "parallel-task-set",
@@ -8952,7 +8455,7 @@ name = "omicron-common"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "api_identity 0.1.0",
+ "api_identity",
  "async-trait",
  "backoff",
  "backon",
@@ -8970,7 +8473,7 @@ dependencies = [
  "itertools 0.14.0",
  "libc",
  "macaddr",
- "omicron-ledger 0.1.0",
+ "omicron-ledger",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "oxnet",
@@ -9012,7 +8515,7 @@ dependencies = [
  "progenitor-client 0.14.0",
  "reqwest 0.13.2",
  "serde",
- "sled-hardware-types 0.1.0",
+ "sled-hardware-types",
  "slog",
  "slog-error-chain",
  "thiserror 2.0.18",
@@ -9040,7 +8543,7 @@ dependencies = [
  "expectorate",
  "fmd-adm-sys",
  "futures",
- "gateway-client 0.1.0",
+ "gateway-client",
  "gateway-test-utils",
  "libc",
  "nexus-config",
@@ -9113,21 +8616,21 @@ dependencies = [
  "chrono",
  "clap",
  "dropshot 0.17.0",
- "ereport-types 0.1.0",
+ "ereport-types",
  "expectorate",
  "futures",
  "gateway-api",
- "gateway-client 0.1.0",
+ "gateway-client",
  "gateway-messages",
  "gateway-sp-comms",
  "gateway-test-utils",
- "gateway-types 0.1.0",
- "gateway-types-versions 0.1.0",
+ "gateway-types",
+ "gateway-types-versions",
  "hex",
  "http",
  "hyper",
  "iddqd",
- "illumos-utils 0.1.0",
+ "illumos-utils",
  "ipcc",
  "omicron-common",
  "omicron-test-utils",
@@ -9136,7 +8639,7 @@ dependencies = [
  "oxide-tokio-rt",
  "oximeter 0.1.0",
  "oximeter-instruments",
- "oximeter-producer 0.1.0",
+ "oximeter-producer",
  "schemars 0.8.22",
  "serde",
  "serde_json",
@@ -9175,22 +8678,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "omicron-ledger"
-version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/omicron?branch=main#dbaeb64ed174748570548023bb4b119d939105b0"
-dependencies = [
- "async-trait",
- "camino",
- "omicron-workspace-hack",
- "serde",
- "serde_json",
- "slog",
- "slog-error-chain",
- "thiserror 2.0.18",
- "tokio",
-]
-
-[[package]]
 name = "omicron-live-tests"
 version = "0.1.0"
 dependencies = [
@@ -9199,8 +8686,8 @@ dependencies = [
  "dns-service-client",
  "dropshot 0.17.0",
  "futures",
- "internal-dns-resolver 0.1.0",
- "internal-dns-types 0.1.0",
+ "internal-dns-resolver",
+ "internal-dns-types",
  "live-tests-macros",
  "nexus-config",
  "nexus-db-model",
@@ -9209,7 +8696,7 @@ dependencies = [
  "nexus-lockstep-client",
  "nexus-reconfigurator-planning",
  "nexus-reconfigurator-preparation",
- "nexus-types 0.1.0",
+ "nexus-types",
  "omicron-common",
  "omicron-rpaths",
  "omicron-test-utils",
@@ -9218,7 +8705,7 @@ dependencies = [
  "pq-sys",
  "reqwest 0.13.2",
  "serde",
- "sled-agent-types 0.1.0",
+ "sled-agent-types",
  "slog",
  "slog-error-chain",
  "textwrap 0.16.2",
@@ -9258,7 +8745,7 @@ dependencies = [
  "async-bb8-diesel",
  "async-trait",
  "base64 0.22.1",
- "bootstrap-agent-lockstep-types 0.1.0",
+ "bootstrap-agent-lockstep-types",
  "buf-list",
  "bytes",
  "camino",
@@ -9280,15 +8767,15 @@ dependencies = [
  "dns-service-client",
  "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=187aee7de2e50f907099ea06c04aac96c3455665)",
  "dropshot 0.17.0",
- "ereport-types 0.1.0",
+ "ereport-types",
  "expectorate",
  "fatfs",
  "fmd-adm-sys",
  "futures",
- "gateway-client 0.1.0",
+ "gateway-client",
  "gateway-messages",
  "gateway-test-utils",
- "gateway-types 0.1.0",
+ "gateway-types",
  "headers",
  "hex",
  "hickory-resolver 0.25.2",
@@ -9302,9 +8789,9 @@ dependencies = [
  "hyper-rustls",
  "hyper-staticfile",
  "iddqd",
- "illumos-utils 0.1.0",
- "internal-dns-resolver 0.1.0",
- "internal-dns-types 0.1.0",
+ "illumos-utils",
+ "internal-dns-resolver",
+ "internal-dns-types",
  "ipnet",
  "ipnetwork",
  "itertools 0.14.0",
@@ -9312,11 +8799,11 @@ dependencies = [
  "lldpd-client",
  "macaddr",
  "maplit",
- "mg-admin-client 0.1.0 (git+https://github.com/oxidecomputer/maghemite?rev=288b8b9a4cae259e628e6d9637f7807684bc5b4d)",
+ "mg-admin-client",
  "mg-api-types",
  "nexus-auth",
  "nexus-background-task-interface",
- "nexus-client 0.1.0",
+ "nexus-client",
  "nexus-config",
  "nexus-db-lookup",
  "nexus-db-model",
@@ -9340,13 +8827,13 @@ dependencies = [
  "nexus-test-interface",
  "nexus-test-utils",
  "nexus-test-utils-macros",
- "nexus-types 0.1.0",
- "nexus-types-versions 0.1.0",
+ "nexus-types",
+ "nexus-types-versions",
  "ntp-admin-client",
  "num-integer",
  "omicron-cockroach-metrics",
  "omicron-common",
- "omicron-passwords 0.1.0",
+ "omicron-passwords",
  "omicron-rpaths",
  "omicron-sled-agent",
  "omicron-test-utils",
@@ -9360,11 +8847,11 @@ dependencies = [
  "oximeter 0.1.0",
  "oximeter-client",
  "oximeter-collector",
- "oximeter-db 0.1.0",
+ "oximeter-db",
  "oximeter-instruments",
- "oximeter-producer 0.1.0",
+ "oximeter-producer",
  "oxnet",
- "oxql-types 0.1.0",
+ "oxql-types",
  "parallel-task-set",
  "parse-display",
  "paste",
@@ -9400,9 +8887,9 @@ dependencies = [
  "sha2",
  "similar-asserts",
  "sled-agent-client",
- "sled-agent-types 0.1.0",
- "sled-agent-types-versions 0.1.0",
- "sled-hardware-types 0.1.0",
+ "sled-agent-types",
+ "sled-agent-types-versions",
+ "sled-hardware-types",
  "slog",
  "slog-async",
  "slog-dtrace",
@@ -9422,12 +8909,12 @@ dependencies = [
  "tokio-test",
  "tokio-util",
  "tough",
- "trust-quorum-types 0.1.0",
+ "trust-quorum-types",
  "tufaceous",
  "tufaceous-artifact",
  "tufaceous-lib",
  "update-common",
- "update-engine 0.1.0",
+ "update-engine",
  "usdt 0.5.0",
  "uuid",
  "zip 4.6.1",
@@ -9498,21 +8985,21 @@ dependencies = [
  "diesel",
  "dropshot 0.17.0",
  "dyn-clone",
- "ereport-types 0.1.0",
+ "ereport-types",
  "expectorate",
  "fmd-adm-sys",
  "futures",
- "gateway-client 0.1.0",
+ "gateway-client",
  "gateway-messages",
  "gateway-test-utils",
- "gateway-types 0.1.0",
+ "gateway-types",
  "http",
  "humantime",
  "iddqd",
  "indent_write",
  "indicatif",
- "internal-dns-resolver 0.1.0",
- "internal-dns-types 0.1.0",
+ "internal-dns-resolver",
+ "internal-dns-types",
  "ipnetwork",
  "itertools 0.14.0",
  "multimap",
@@ -9528,7 +9015,7 @@ dependencies = [
  "nexus-saga-recovery",
  "nexus-test-utils",
  "nexus-test-utils-macros",
- "nexus-types 0.1.0",
+ "nexus-types",
  "ntp-admin-client",
  "omicron-common",
  "omicron-nexus",
@@ -9539,7 +9026,7 @@ dependencies = [
  "owo-colors 4.3.0",
  "oxide-tokio-rt",
  "oximeter-client",
- "oximeter-db 0.1.0",
+ "oximeter-db",
  "oxnet",
  "petgraph 0.8.3",
  "pq-sys",
@@ -9550,8 +9037,8 @@ dependencies = [
  "serde_json",
  "sigpipe",
  "sled-agent-client",
- "sled-agent-types 0.1.0",
- "sled-hardware-types 0.1.0",
+ "sled-agent-types",
+ "sled-hardware-types",
  "slog",
  "slog-error-chain",
  "steno",
@@ -9562,10 +9049,10 @@ dependencies = [
  "tabled 0.15.0",
  "textwrap 0.16.2",
  "tokio",
- "trust-quorum-types 0.1.0",
+ "trust-quorum-types",
  "tufaceous-artifact",
  "unicode-width 0.1.14",
- "update-engine 0.1.0",
+ "update-engine",
  "url",
  "uuid",
  "vergen-gitcl",
@@ -9583,7 +9070,7 @@ dependencies = [
  "expectorate",
  "futures",
  "hex",
- "illumos-utils 0.1.0",
+ "illumos-utils",
  "indent_write",
  "indicatif",
  "omicron-workspace-hack",
@@ -9629,21 +9116,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "omicron-passwords"
-version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/omicron?branch=main#dbaeb64ed174748570548023bb4b119d939105b0"
-dependencies = [
- "argon2",
- "omicron-workspace-hack",
- "rand 0.9.2",
- "schemars 0.8.22",
- "secrecy 0.10.3",
- "serde",
- "serde_with",
- "thiserror 2.0.18",
-]
-
-[[package]]
 name = "omicron-pins"
 version = "0.1.0"
 dependencies = [
@@ -9664,13 +9136,13 @@ dependencies = [
  "camino",
  "clap",
  "dropshot 0.17.0",
- "internal-dns-resolver 0.1.0",
- "internal-dns-types 0.1.0",
+ "internal-dns-resolver",
+ "internal-dns-types",
  "nexus-db-model",
  "nexus-db-queries",
  "nexus-mgs-updates",
  "nexus-reconfigurator-execution",
- "nexus-types 0.1.0",
+ "nexus-types",
  "omicron-common",
  "omicron-rpaths",
  "omicron-uuid-kinds",
@@ -9683,7 +9155,7 @@ dependencies = [
  "slog",
  "supports-color 3.0.2",
  "tokio",
- "update-engine 0.1.0",
+ "update-engine",
  "uuid",
 ]
 
@@ -9775,11 +9247,11 @@ dependencies = [
  "async-trait",
  "atomicwrites",
  "base64 0.22.1",
- "bootstore 0.1.0",
+ "bootstore",
  "bootstrap-agent-api",
  "bootstrap-agent-client",
  "bootstrap-agent-lockstep-api",
- "bootstrap-agent-lockstep-types 0.1.0",
+ "bootstrap-agent-lockstep-types",
  "bytes",
  "camino",
  "camino-tempfile",
@@ -9787,7 +9259,7 @@ dependencies = [
  "cfg-if",
  "chrono",
  "clap",
- "clickhouse-admin-types 0.1.0",
+ "clickhouse-admin-types",
  "crucible-agent-client",
  "derive_more 0.99.20",
  "dice-verifier 0.3.0-pre0 (git+https://github.com/oxidecomputer/dice-util?branch=main)",
@@ -9810,32 +9282,32 @@ dependencies = [
  "hyper",
  "hyper-staticfile",
  "iddqd",
- "illumos-utils 0.1.0",
+ "illumos-utils",
  "installinator-common",
- "internal-dns-resolver 0.1.0",
- "internal-dns-types 0.1.0",
+ "internal-dns-resolver",
+ "internal-dns-types",
  "ipnetwork",
  "itertools 0.14.0",
  "key-manager",
  "libc",
  "macaddr",
- "nexus-client 0.1.0",
+ "nexus-client",
  "nexus-config",
  "nexus-lockstep-client",
- "nexus-types 0.1.0",
+ "nexus-types",
  "nix 0.31.2",
  "omicron-common",
  "omicron-ddm-admin-client",
- "omicron-ledger 0.1.0",
+ "omicron-ledger",
  "omicron-rpaths",
  "omicron-test-utils",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
- "opte-ioctl 0.1.0 (git+https://github.com/oxidecomputer/opte?rev=84e91b62621406f38e4d0870a92bafacad96536e)",
+ "opte-ioctl",
  "oxide-tokio-rt",
  "oximeter 0.1.0",
  "oximeter-instruments",
- "oximeter-producer 0.1.0",
+ "oximeter-producer",
  "oxnet",
  "pretty_assertions",
  "progenitor 0.14.0",
@@ -9864,11 +9336,11 @@ dependencies = [
  "sled-agent-measurements",
  "sled-agent-rack-setup",
  "sled-agent-resolvable-files",
- "sled-agent-types 0.1.0",
- "sled-agent-types-versions 0.1.0",
+ "sled-agent-types",
+ "sled-agent-types-versions",
  "sled-diagnostics",
  "sled-hardware",
- "sled-hardware-types 0.1.0",
+ "sled-hardware-types",
  "sled-storage",
  "slog",
  "slog-async",
@@ -9890,8 +9362,8 @@ dependencies = [
  "toml 0.8.23",
  "transient-dns-server",
  "trust-quorum",
- "trust-quorum-protocol 0.1.0",
- "trust-quorum-types 0.1.0",
+ "trust-quorum-protocol",
+ "trust-quorum-types",
  "tufaceous-artifact",
  "tufaceous-brand-metadata",
  "usdt 0.5.0",
@@ -9965,6 +9437,7 @@ version = "0.1.0"
 dependencies = [
  "ahash",
  "aho-corasick",
+ "anstream 0.6.21",
  "anyhow",
  "aws-lc-rs",
  "base16ct",
@@ -10265,33 +9738,14 @@ dependencies = [
 [[package]]
 name = "opte"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=2c6efefe14321dafe7e9e80129d38316adb2d238#2c6efefe14321dafe7e9e80129d38316adb2d238"
-dependencies = [
- "bitflags 2.11.0",
- "dyn-clone",
- "illumos-sys-hdrs 0.1.0 (git+https://github.com/oxidecomputer/opte?rev=2c6efefe14321dafe7e9e80129d38316adb2d238)",
- "ingot",
- "kstat-macro 0.1.0 (git+https://github.com/oxidecomputer/opte?rev=2c6efefe14321dafe7e9e80129d38316adb2d238)",
- "opte-api 0.1.0 (git+https://github.com/oxidecomputer/opte?rev=2c6efefe14321dafe7e9e80129d38316adb2d238)",
- "postcard",
- "ref-cast",
- "serde",
- "tabwriter",
- "version_check",
- "zerocopy 0.8.40",
-]
-
-[[package]]
-name = "opte"
-version = "0.1.0"
 source = "git+https://github.com/oxidecomputer/opte?rev=84e91b62621406f38e4d0870a92bafacad96536e#84e91b62621406f38e4d0870a92bafacad96536e"
 dependencies = [
  "bitflags 2.11.0",
  "dyn-clone",
- "illumos-sys-hdrs 0.1.0 (git+https://github.com/oxidecomputer/opte?rev=84e91b62621406f38e4d0870a92bafacad96536e)",
+ "illumos-sys-hdrs",
  "ingot",
- "kstat-macro 0.1.0 (git+https://github.com/oxidecomputer/opte?rev=84e91b62621406f38e4d0870a92bafacad96536e)",
- "opte-api 0.1.0 (git+https://github.com/oxidecomputer/opte?rev=84e91b62621406f38e4d0870a92bafacad96536e)",
+ "kstat-macro",
+ "opte-api",
  "postcard",
  "ref-cast",
  "serde",
@@ -10303,22 +9757,9 @@ dependencies = [
 [[package]]
 name = "opte-api"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=2c6efefe14321dafe7e9e80129d38316adb2d238#2c6efefe14321dafe7e9e80129d38316adb2d238"
-dependencies = [
- "illumos-sys-hdrs 0.1.0 (git+https://github.com/oxidecomputer/opte?rev=2c6efefe14321dafe7e9e80129d38316adb2d238)",
- "ingot",
- "ipnetwork",
- "postcard",
- "serde",
- "smoltcp 0.11.0",
-]
-
-[[package]]
-name = "opte-api"
-version = "0.1.0"
 source = "git+https://github.com/oxidecomputer/opte?rev=84e91b62621406f38e4d0870a92bafacad96536e#84e91b62621406f38e4d0870a92bafacad96536e"
 dependencies = [
- "illumos-sys-hdrs 0.1.0 (git+https://github.com/oxidecomputer/opte?rev=84e91b62621406f38e4d0870a92bafacad96536e)",
+ "illumos-sys-hdrs",
  "ingot",
  "ipnetwork",
  "postcard",
@@ -10329,26 +9770,12 @@ dependencies = [
 [[package]]
 name = "opte-ioctl"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=2c6efefe14321dafe7e9e80129d38316adb2d238#2c6efefe14321dafe7e9e80129d38316adb2d238"
-dependencies = [
- "libc",
- "libnet",
- "opte 0.1.0 (git+https://github.com/oxidecomputer/opte?rev=2c6efefe14321dafe7e9e80129d38316adb2d238)",
- "oxide-vpc 0.1.0 (git+https://github.com/oxidecomputer/opte?rev=2c6efefe14321dafe7e9e80129d38316adb2d238)",
- "postcard",
- "serde",
- "thiserror 2.0.18",
-]
-
-[[package]]
-name = "opte-ioctl"
-version = "0.1.0"
 source = "git+https://github.com/oxidecomputer/opte?rev=84e91b62621406f38e4d0870a92bafacad96536e#84e91b62621406f38e4d0870a92bafacad96536e"
 dependencies = [
  "libc",
  "libnet",
- "opte 0.1.0 (git+https://github.com/oxidecomputer/opte?rev=84e91b62621406f38e4d0870a92bafacad96536e)",
- "oxide-vpc 0.1.0 (git+https://github.com/oxidecomputer/opte?rev=84e91b62621406f38e4d0870a92bafacad96536e)",
+ "opte",
+ "oxide-vpc",
  "postcard",
  "serde",
  "thiserror 2.0.18",
@@ -10440,25 +9867,11 @@ dependencies = [
 [[package]]
 name = "oxide-vpc"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=2c6efefe14321dafe7e9e80129d38316adb2d238#2c6efefe14321dafe7e9e80129d38316adb2d238"
-dependencies = [
- "cfg-if",
- "illumos-sys-hdrs 0.1.0 (git+https://github.com/oxidecomputer/opte?rev=2c6efefe14321dafe7e9e80129d38316adb2d238)",
- "opte 0.1.0 (git+https://github.com/oxidecomputer/opte?rev=2c6efefe14321dafe7e9e80129d38316adb2d238)",
- "serde",
- "tabwriter",
- "uuid",
- "zerocopy 0.8.40",
-]
-
-[[package]]
-name = "oxide-vpc"
-version = "0.1.0"
 source = "git+https://github.com/oxidecomputer/opte?rev=84e91b62621406f38e4d0870a92bafacad96536e#84e91b62621406f38e4d0870a92bafacad96536e"
 dependencies = [
  "cfg-if",
- "illumos-sys-hdrs 0.1.0 (git+https://github.com/oxidecomputer/opte?rev=84e91b62621406f38e4d0870a92bafacad96536e)",
- "opte 0.1.0 (git+https://github.com/oxidecomputer/opte?rev=84e91b62621406f38e4d0870a92bafacad96536e)",
+ "illumos-sys-hdrs",
+ "opte",
  "serde",
  "tabwriter",
  "uuid",
@@ -10542,10 +9955,10 @@ dependencies = [
  "expectorate",
  "futures",
  "httpmock",
- "internal-dns-resolver 0.1.0",
- "internal-dns-types 0.1.0",
- "nexus-client 0.1.0",
- "nexus-types 0.1.0",
+ "internal-dns-resolver",
+ "internal-dns-types",
+ "nexus-client",
+ "nexus-types",
  "omicron-common",
  "omicron-test-utils",
  "omicron-workspace-hack",
@@ -10555,7 +9968,7 @@ dependencies = [
  "oximeter 0.1.0",
  "oximeter-api",
  "oximeter-client",
- "oximeter-db 0.1.0",
+ "oximeter-db",
  "oximeter-types 0.1.0",
  "proptest",
  "qorb",
@@ -10594,7 +10007,7 @@ dependencies = [
  "chrono",
  "chrono-tz",
  "clap",
- "clickhouse-admin-types 0.1.0",
+ "clickhouse-admin-types",
  "clickward",
  "const_format",
  "criterion",
@@ -10619,7 +10032,7 @@ dependencies = [
  "oxide-tokio-rt",
  "oximeter 0.1.0",
  "oximeter-test-utils",
- "oxql-types 0.1.0",
+ "oxql-types",
  "parse-display",
  "peg",
  "qorb",
@@ -10642,61 +10055,6 @@ dependencies = [
  "strum 0.27.2",
  "tabled 0.15.0",
  "tempfile",
- "termtree",
- "thiserror 2.0.18",
- "tokio",
- "tokio-util",
- "usdt 0.5.0",
- "uuid",
-]
-
-[[package]]
-name = "oximeter-db"
-version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/omicron?branch=main#dbaeb64ed174748570548023bb4b119d939105b0"
-dependencies = [
- "anyhow",
- "async-recursion",
- "async-trait",
- "bcs",
- "bytes",
- "camino",
- "chrono",
- "chrono-tz",
- "clap",
- "clickhouse-admin-types 0.1.0 (git+https://github.com/oxidecomputer/omicron?branch=main)",
- "clickward",
- "const_format",
- "debug-ignore",
- "dropshot 0.17.0",
- "futures",
- "gethostname",
- "highway",
- "iana-time-zone",
- "iddqd",
- "indexmap 2.14.0",
- "libc",
- "nom 7.1.3",
- "num",
- "omicron-common",
- "omicron-workspace-hack",
- "oxide-tokio-rt",
- "oximeter 0.1.0 (git+https://github.com/oxidecomputer/omicron?branch=main)",
- "oxql-types 0.1.0 (git+https://github.com/oxidecomputer/omicron?branch=main)",
- "parse-display",
- "qorb",
- "quote",
- "regex",
- "reqwest 0.13.2",
- "schemars 0.8.22",
- "serde",
- "serde_json",
- "slog",
- "slog-async",
- "slog-dtrace",
- "slog-error-chain",
- "slog-term",
- "strum 0.27.2",
  "termtree",
  "thiserror 2.0.18",
  "tokio",
@@ -10761,14 +10119,14 @@ dependencies = [
  "clap",
  "dropshot 0.17.0",
  "either",
- "internal-dns-resolver 0.1.0",
- "internal-dns-types 0.1.0",
- "nexus-client 0.1.0",
+ "internal-dns-resolver",
+ "internal-dns-types",
+ "nexus-client",
  "omicron-common",
  "omicron-test-utils",
  "omicron-workspace-hack",
  "oximeter 0.1.0",
- "oximeter-producer-api 0.1.0",
+ "oximeter-producer-api",
  "schemars 0.8.22",
  "serde",
  "serde_json",
@@ -10782,47 +10140,12 @@ dependencies = [
 ]
 
 [[package]]
-name = "oximeter-producer"
-version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/omicron?branch=main#dbaeb64ed174748570548023bb4b119d939105b0"
-dependencies = [
- "chrono",
- "dropshot 0.17.0",
- "either",
- "internal-dns-resolver 0.1.0 (git+https://github.com/oxidecomputer/omicron?branch=main)",
- "internal-dns-types 0.1.0 (git+https://github.com/oxidecomputer/omicron?branch=main)",
- "nexus-client 0.1.0 (git+https://github.com/oxidecomputer/omicron?branch=main)",
- "omicron-common",
- "omicron-workspace-hack",
- "oximeter 0.1.0 (git+https://github.com/oxidecomputer/omicron?branch=main)",
- "oximeter-producer-api 0.1.0 (git+https://github.com/oxidecomputer/omicron?branch=main)",
- "schemars 0.8.22",
- "serde",
- "slog",
- "slog-dtrace",
- "slog-error-chain",
- "thiserror 2.0.18",
- "tokio",
- "uuid",
-]
-
-[[package]]
 name = "oximeter-producer-api"
 version = "0.1.0"
 dependencies = [
  "dropshot 0.17.0",
  "omicron-workspace-hack",
  "oximeter-types-versions 0.1.0",
-]
-
-[[package]]
-name = "oximeter-producer-api"
-version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/omicron?branch=main#dbaeb64ed174748570548023bb4b119d939105b0"
-dependencies = [
- "dropshot 0.17.0",
- "omicron-workspace-hack",
- "oximeter-types-versions 0.1.0 (git+https://github.com/oxidecomputer/omicron?branch=main)",
 ]
 
 [[package]]
@@ -10875,7 +10198,7 @@ dependencies = [
  "clickward",
  "omicron-test-utils",
  "omicron-workspace-hack",
- "oximeter-db 0.1.0",
+ "oximeter-db",
  "oximeter-macro-impl 0.1.0",
  "oximeter-types 0.1.0",
  "slog",
@@ -10996,23 +10319,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "oxlog"
-version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/omicron?branch=main#dbaeb64ed174748570548023bb4b119d939105b0"
-dependencies = [
- "anyhow",
- "camino",
- "chrono",
- "clap",
- "glob",
- "jiff",
- "omicron-workspace-hack",
- "rayon",
- "sigpipe",
- "uuid",
-]
-
-[[package]]
 name = "oxnet"
 version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -11034,23 +10340,6 @@ dependencies = [
  "num",
  "omicron-workspace-hack",
  "oximeter-types 0.1.0",
- "schemars 0.8.22",
- "serde",
- "serde_json",
- "uuid",
-]
-
-[[package]]
-name = "oxql-types"
-version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/omicron?branch=main#dbaeb64ed174748570548023bb4b119d939105b0"
-dependencies = [
- "anyhow",
- "chrono",
- "highway",
- "num",
- "omicron-workspace-hack",
- "oximeter-types 0.1.0 (git+https://github.com/oxidecomputer/omicron?branch=main)",
  "schemars 0.8.22",
  "serde",
  "serde_json",
@@ -12694,16 +11983,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "rdb-types"
-version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=7696ee48d5ee29a917dea459e281fe2e8ff20513#7696ee48d5ee29a917dea459e281fe2e8ff20513"
-dependencies = [
- "oxnet",
- "schemars 0.8.22",
- "serde",
-]
-
-[[package]]
 name = "reconfigurator-cli"
 version = "0.1.0"
 dependencies = [
@@ -12718,18 +11997,18 @@ dependencies = [
  "datatest-stable",
  "dropshot 0.17.0",
  "expectorate",
- "gateway-types 0.1.0",
+ "gateway-types",
  "humantime",
  "iddqd",
  "indent_write",
- "internal-dns-types 0.1.0",
+ "internal-dns-types",
  "itertools 0.14.0",
  "newtype-uuid",
  "nexus-inventory",
  "nexus-reconfigurator-blippy",
  "nexus-reconfigurator-planning",
  "nexus-reconfigurator-simulation",
- "nexus-types 0.1.0",
+ "nexus-types",
  "omicron-common",
  "omicron-repl-utils",
  "omicron-rpaths",
@@ -12740,7 +12019,7 @@ dependencies = [
  "semver 1.0.28",
  "serde",
  "serde_json",
- "sled-agent-types 0.1.0",
+ "sled-agent-types",
  "slog",
  "slog-error-chain",
  "slog-term",
@@ -12765,21 +12044,21 @@ dependencies = [
  "clap",
  "dropshot 0.17.0",
  "futures",
- "gateway-client 0.1.0",
- "gateway-types 0.1.0",
+ "gateway-client",
+ "gateway-types",
  "humantime",
- "internal-dns-resolver 0.1.0",
- "internal-dns-types 0.1.0",
+ "internal-dns-resolver",
+ "internal-dns-types",
  "nexus-mgs-updates",
- "nexus-types 0.1.0",
+ "nexus-types",
  "omicron-common",
  "omicron-repl-utils",
  "omicron-workspace-hack",
  "oxide-tokio-rt",
  "qorb",
  "serde_json",
- "sled-agent-types 0.1.0",
- "sled-hardware-types 0.1.0",
+ "sled-agent-types",
+ "sled-hardware-types",
  "slog",
  "swrite",
  "tokio",
@@ -14312,12 +13591,12 @@ dependencies = [
  "schemars 0.8.22",
  "semver 1.0.28",
  "serde",
- "sled-agent-types 0.1.0",
- "sled-agent-types-versions 0.1.0",
+ "sled-agent-types",
+ "sled-agent-types-versions",
  "sled-diagnostics",
- "sled-hardware-types 0.1.0",
+ "sled-hardware-types",
  "slog-error-chain",
- "trust-quorum-types 0.1.0",
+ "trust-quorum-types",
  "tufaceous-artifact",
  "uuid",
  "x509-cert",
@@ -14341,11 +13620,11 @@ dependencies = [
  "schemars 0.8.22",
  "serde",
  "serde_json",
- "sled-agent-types 0.1.0",
- "sled-agent-types-versions 0.1.0",
- "sled-hardware-types 0.1.0",
+ "sled-agent-types",
+ "sled-agent-types-versions",
+ "sled-hardware-types",
  "slog",
- "trust-quorum-types 0.1.0",
+ "trust-quorum-types",
  "uuid",
 ]
 
@@ -14370,13 +13649,13 @@ dependencies = [
  "futures",
  "glob",
  "iddqd",
- "illumos-utils 0.1.0",
+ "illumos-utils",
  "installinator-common",
  "key-manager",
- "key-manager-types 0.1.0",
+ "key-manager-types",
  "ntp-admin-v1-client",
  "omicron-common",
- "omicron-ledger 0.1.0",
+ "omicron-ledger",
  "omicron-test-utils",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
@@ -14391,8 +13670,8 @@ dependencies = [
  "sha2",
  "sled-agent-api",
  "sled-agent-resolvable-files-examples",
- "sled-agent-types 0.1.0",
- "sled-agent-types-versions 0.1.0",
+ "sled-agent-types",
+ "sled-agent-types-versions",
  "sled-hardware",
  "sled-storage",
  "slog",
@@ -14401,7 +13680,7 @@ dependencies = [
  "test-strategy",
  "thiserror 2.0.18",
  "tokio",
- "trust-quorum-types 0.1.0",
+ "trust-quorum-types",
  "tufaceous-artifact",
  "xshell",
  "zone",
@@ -14414,17 +13693,17 @@ dependencies = [
  "anyhow",
  "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=cc8e02a0800034c431c8cf96b889ea638da3d194)",
  "futures",
- "gateway-client 0.1.0",
+ "gateway-client",
  "http",
- "internal-dns-resolver 0.1.0",
- "internal-dns-types 0.1.0",
- "mg-admin-client 0.1.0 (git+https://github.com/oxidecomputer/maghemite?rev=288b8b9a4cae259e628e6d9637f7807684bc5b4d)",
+ "internal-dns-resolver",
+ "internal-dns-types",
+ "mg-admin-client",
  "mg-api-types",
  "omicron-common",
  "omicron-ddm-admin-client",
  "omicron-workspace-hack",
  "oxnet",
- "sled-agent-types 0.1.0",
+ "sled-agent-types",
  "slog",
  "slog-error-chain",
  "thiserror 2.0.18",
@@ -14441,13 +13720,13 @@ dependencies = [
  "derive_more 0.99.20",
  "dropshot 0.17.0",
  "futures",
- "illumos-utils 0.1.0",
+ "illumos-utils",
  "omicron-common",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "serde",
  "sled-agent-api",
- "sled-agent-types 0.1.0",
+ "sled-agent-types",
  "slog",
  "slog-error-chain",
  "thiserror 2.0.18",
@@ -14467,8 +13746,8 @@ dependencies = [
  "serde",
  "sled-agent-config-reconciler",
  "sled-agent-resolvable-files",
- "sled-agent-types 0.1.0",
- "sled-agent-types-versions 0.1.0",
+ "sled-agent-types",
+ "sled-agent-types-versions",
  "slog",
  "slog-error-chain",
  "thiserror 2.0.18",
@@ -14480,8 +13759,8 @@ name = "sled-agent-rack-setup"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "bootstore 0.1.0",
- "bootstrap-agent-lockstep-types 0.1.0",
+ "bootstore",
+ "bootstrap-agent-lockstep-types",
  "camino",
  "camino-tempfile",
  "cancel-safe-futures",
@@ -14491,17 +13770,17 @@ dependencies = [
  "futures",
  "http",
  "iddqd",
- "illumos-utils 0.1.0",
- "internal-dns-resolver 0.1.0",
- "internal-dns-types 0.1.0",
+ "illumos-utils",
+ "internal-dns-resolver",
+ "internal-dns-types",
  "itertools 0.14.0",
  "nexus-lockstep-client",
  "nexus-reconfigurator-blippy",
- "nexus-types 0.1.0",
+ "nexus-types",
  "ntp-admin-client",
  "omicron-common",
  "omicron-ddm-admin-client",
- "omicron-ledger 0.1.0",
+ "omicron-ledger",
  "omicron-test-utils",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
@@ -14513,8 +13792,8 @@ dependencies = [
  "serde",
  "sled-agent-client",
  "sled-agent-config-reconciler",
- "sled-agent-types 0.1.0",
- "sled-hardware-types 0.1.0",
+ "sled-agent-types",
+ "sled-hardware-types",
  "sled-storage",
  "slog",
  "slog-error-chain",
@@ -14523,8 +13802,8 @@ dependencies = [
  "tokio",
  "toml 0.8.23",
  "trust-quorum",
- "trust-quorum-protocol 0.1.0",
- "trust-quorum-types 0.1.0",
+ "trust-quorum-protocol",
+ "trust-quorum-types",
  "uuid",
 ]
 
@@ -14537,7 +13816,7 @@ dependencies = [
  "dropshot 0.17.0",
  "expectorate",
  "iddqd",
- "illumos-utils 0.1.0",
+ "illumos-utils",
  "omicron-common",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
@@ -14548,7 +13827,7 @@ dependencies = [
  "sha2",
  "sled-agent-config-reconciler",
  "sled-agent-resolvable-files-examples",
- "sled-agent-types 0.1.0",
+ "sled-agent-types",
  "sled-storage",
  "slog",
  "slog-error-chain",
@@ -14568,7 +13847,7 @@ dependencies = [
  "omicron-workspace-hack",
  "serde_json",
  "sha2",
- "sled-agent-types 0.1.0",
+ "sled-agent-types",
  "sled-storage",
  "tufaceous-artifact",
 ]
@@ -14579,7 +13858,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
- "bootstore 0.1.0",
+ "bootstore",
  "byte-wrapper",
  "camino",
  "chrono",
@@ -14593,42 +13872,12 @@ dependencies = [
  "schemars 0.8.22",
  "serde",
  "serde_json",
- "sled-agent-types-versions 0.1.0",
- "sled-hardware-types 0.1.0",
+ "sled-agent-types-versions",
+ "sled-hardware-types",
  "slog",
  "slog-error-chain",
  "swrite",
  "test-strategy",
- "thiserror 2.0.18",
- "tufaceous-artifact",
- "uuid",
-]
-
-[[package]]
-name = "sled-agent-types"
-version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/omicron?branch=main#dbaeb64ed174748570548023bb4b119d939105b0"
-dependencies = [
- "anyhow",
- "async-trait",
- "bootstore 0.1.0 (git+https://github.com/oxidecomputer/omicron?branch=main)",
- "byte-wrapper",
- "camino",
- "chrono",
- "daft",
- "iddqd",
- "omicron-common",
- "omicron-uuid-kinds",
- "omicron-workspace-hack",
- "oxnet",
- "schemars 0.8.22",
- "serde",
- "serde_json",
- "sled-agent-types-versions 0.1.0 (git+https://github.com/oxidecomputer/omicron?branch=main)",
- "sled-hardware-types 0.1.0 (git+https://github.com/oxidecomputer/omicron?branch=main)",
- "slog",
- "slog-error-chain",
- "swrite",
  "thiserror 2.0.18",
  "tufaceous-artifact",
  "uuid",
@@ -14641,7 +13890,7 @@ dependencies = [
  "anyhow",
  "assert_matches",
  "async-trait",
- "bootstore 0.1.0",
+ "bootstore",
  "byte-wrapper",
  "camino",
  "chrono",
@@ -14651,8 +13900,8 @@ dependencies = [
  "ipnetwork",
  "itertools 0.14.0",
  "omicron-common",
- "omicron-ledger 0.1.0",
- "omicron-passwords 0.1.0",
+ "omicron-ledger",
+ "omicron-passwords",
  "omicron-test-utils",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
@@ -14665,53 +13914,14 @@ dependencies = [
  "serde_json",
  "serde_with",
  "sha3",
- "sled-hardware-types 0.1.0",
+ "sled-hardware-types",
  "slog",
  "slog-error-chain",
  "strum 0.27.2",
  "test-strategy",
  "thiserror 2.0.18",
  "toml 0.8.23",
- "trust-quorum-types-versions 0.1.0",
- "tufaceous-artifact",
- "uuid",
-]
-
-[[package]]
-name = "sled-agent-types-versions"
-version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/omicron?branch=main#dbaeb64ed174748570548023bb4b119d939105b0"
-dependencies = [
- "anyhow",
- "async-trait",
- "bootstore 0.1.0 (git+https://github.com/oxidecomputer/omicron?branch=main)",
- "byte-wrapper",
- "camino",
- "chrono",
- "daft",
- "iddqd",
- "indent_write",
- "ipnetwork",
- "itertools 0.14.0",
- "omicron-common",
- "omicron-ledger 0.1.0 (git+https://github.com/oxidecomputer/omicron?branch=main)",
- "omicron-passwords 0.1.0 (git+https://github.com/oxidecomputer/omicron?branch=main)",
- "omicron-uuid-kinds",
- "omicron-workspace-hack",
- "oxnet",
- "propolis-api-types-versions",
- "propolis_api_types",
- "schemars 0.8.22",
- "serde",
- "serde_json",
- "serde_with",
- "sha3",
- "sled-hardware-types 0.1.0 (git+https://github.com/oxidecomputer/omicron?branch=main)",
- "slog",
- "slog-error-chain",
- "strum 0.27.2",
- "thiserror 2.0.18",
- "trust-quorum-types-versions 0.1.0 (git+https://github.com/oxidecomputer/omicron?branch=main)",
+ "trust-quorum-types-versions",
  "tufaceous-artifact",
  "uuid",
 ]
@@ -14726,7 +13936,7 @@ dependencies = [
  "chrono",
  "fs-err 3.3.0",
  "futures",
- "illumos-utils 0.1.0",
+ "illumos-utils",
  "jiff",
  "libc",
  "omicron-common",
@@ -14734,7 +13944,7 @@ dependencies = [
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "once_cell",
- "oxlog 0.1.0",
+ "oxlog",
  "parallel-task-set",
  "rand 0.9.2",
  "regex",
@@ -14759,7 +13969,7 @@ dependencies = [
  "futures",
  "gethostname",
  "illumos-devinfo",
- "illumos-utils 0.1.0",
+ "illumos-utils",
  "libc",
  "libefi-illumos",
  "libnvme",
@@ -14771,7 +13981,7 @@ dependencies = [
  "rand 0.9.2",
  "schemars 0.8.22",
  "serde",
- "sled-hardware-types 0.1.0",
+ "sled-hardware-types",
  "slog",
  "slog-error-chain",
  "thiserror 2.0.18",
@@ -14796,19 +14006,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "sled-hardware-types"
-version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/omicron?branch=main#dbaeb64ed174748570548023bb4b119d939105b0"
-dependencies = [
- "daft",
- "omicron-workspace-hack",
- "schemars 0.8.22",
- "serde",
- "slog",
- "thiserror 2.0.18",
-]
-
-[[package]]
 name = "sled-storage"
 version = "0.1.0"
 dependencies = [
@@ -14823,7 +14020,7 @@ dependencies = [
  "futures",
  "glob",
  "iddqd",
- "illumos-utils 0.1.0",
+ "illumos-utils",
  "key-manager",
  "omicron-common",
  "omicron-test-utils",
@@ -15007,17 +14204,6 @@ dependencies = [
 [[package]]
 name = "smf"
 version = "0.10.0"
-source = "git+https://github.com/illumos/smf-rs?branch=main#72389b5161d2cca1f0e239b337af68bf31f191f4"
-dependencies = [
- "libc",
- "libscf-sys",
- "num-traits",
- "thiserror 1.0.69",
-]
-
-[[package]]
-name = "smf"
-version = "0.10.0"
 source = "git+https://github.com/illumos/smf-rs#72389b5161d2cca1f0e239b337af68bf31f191f4"
 dependencies = [
  "libc",
@@ -15107,10 +14293,10 @@ dependencies = [
  "futures",
  "gateway-ereport-messages",
  "gateway-messages",
- "gateway-types 0.1.0",
+ "gateway-types",
  "hex",
  "hubtools 0.4.7 (git+https://github.com/oxidecomputer/hubtools.git?rev=2b1ef9b38d75563ea800baa3b17327eec17b1b7a)",
- "nexus-types 0.1.0",
+ "nexus-types",
  "nix 0.31.2",
  "omicron-common",
  "omicron-workspace-hack",
@@ -16457,10 +15643,10 @@ dependencies = [
  "reconfigurator-cli",
  "reedline",
  "serde_json",
- "sled-hardware-types 0.1.0",
+ "sled-hardware-types",
  "slog",
  "tabled 0.15.0",
- "trust-quorum-protocol 0.1.0",
+ "trust-quorum-protocol",
  "trust-quorum-test-utils",
 ]
 
@@ -16615,7 +15801,7 @@ dependencies = [
  "dropshot 0.17.0",
  "hickory-proto 0.25.2",
  "hickory-resolver 0.25.2",
- "internal-dns-types 0.1.0",
+ "internal-dns-types",
  "omicron-workspace-hack",
  "slog",
  "tempfile",
@@ -16628,7 +15814,7 @@ dependencies = [
  "anyhow",
  "assert_matches",
  "attest-mock",
- "bootstore 0.1.0",
+ "bootstore",
  "bytes",
  "camino",
  "chacha20poly1305",
@@ -16638,11 +15824,11 @@ dependencies = [
  "derive_more 0.99.20",
  "dropshot 0.17.0",
  "futures",
- "gfss 0.1.0",
+ "gfss",
  "hex",
  "hkdf",
  "iddqd",
- "omicron-ledger 0.1.0",
+ "omicron-ledger",
  "omicron-test-utils",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
@@ -16654,8 +15840,8 @@ dependencies = [
  "serde_with",
  "sha3",
  "sled-agent-measurements",
- "sled-agent-types 0.1.0",
- "sled-hardware-types 0.1.0",
+ "sled-agent-types",
+ "sled-hardware-types",
  "slog",
  "slog-error-chain",
  "sprockets-tls",
@@ -16665,9 +15851,9 @@ dependencies = [
  "test-strategy",
  "thiserror 2.0.18",
  "tokio",
- "trust-quorum-protocol 0.1.0",
+ "trust-quorum-protocol",
  "trust-quorum-test-utils",
- "trust-quorum-types 0.1.0",
+ "trust-quorum-types",
  "uuid",
  "zeroize",
 ]
@@ -16678,7 +15864,7 @@ version = "0.1.0"
 dependencies = [
  "assert_matches",
  "attest-mock",
- "bootstore 0.1.0",
+ "bootstore",
  "bytes",
  "camino",
  "chacha20poly1305",
@@ -16686,7 +15872,7 @@ dependencies = [
  "daft",
  "derive_more 0.99.20",
  "dropshot 0.17.0",
- "gfss 0.1.0",
+ "gfss",
  "hex",
  "hkdf",
  "iddqd",
@@ -16700,8 +15886,8 @@ dependencies = [
  "serde_json",
  "serde_with",
  "sha3",
- "sled-agent-types 0.1.0",
- "sled-hardware-types 0.1.0",
+ "sled-agent-types",
+ "sled-hardware-types",
  "slog",
  "slog-error-chain",
  "static_assertions",
@@ -16709,42 +15895,7 @@ dependencies = [
  "test-strategy",
  "thiserror 2.0.18",
  "trust-quorum-test-utils",
- "trust-quorum-types 0.1.0",
- "uuid",
- "zeroize",
-]
-
-[[package]]
-name = "trust-quorum-protocol"
-version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/omicron?branch=main#dbaeb64ed174748570548023bb4b119d939105b0"
-dependencies = [
- "bootstore 0.1.0 (git+https://github.com/oxidecomputer/omicron?branch=main)",
- "bytes",
- "camino",
- "chacha20poly1305",
- "ciborium",
- "daft",
- "derive_more 0.99.20",
- "gfss 0.1.0 (git+https://github.com/oxidecomputer/omicron?branch=main)",
- "hex",
- "hkdf",
- "iddqd",
- "omicron-uuid-kinds",
- "omicron-workspace-hack",
- "rand 0.9.2",
- "secrecy 0.10.3",
- "serde",
- "serde_with",
- "sha3",
- "sled-agent-types 0.1.0 (git+https://github.com/oxidecomputer/omicron?branch=main)",
- "sled-hardware-types 0.1.0 (git+https://github.com/oxidecomputer/omicron?branch=main)",
- "slog",
- "slog-error-chain",
- "static_assertions",
- "subtle",
- "thiserror 2.0.18",
- "trust-quorum-types 0.1.0 (git+https://github.com/oxidecomputer/omicron?branch=main)",
+ "trust-quorum-types",
  "uuid",
  "zeroize",
 ]
@@ -16753,22 +15904,22 @@ dependencies = [
 name = "trust-quorum-test-utils"
 version = "0.1.0"
 dependencies = [
- "bootstore 0.1.0",
+ "bootstore",
  "camino",
  "daft",
  "dropshot 0.17.0",
- "gfss 0.1.0",
+ "gfss",
  "iddqd",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "secrecy 0.10.3",
  "serde",
  "serde_json",
- "sled-agent-types 0.1.0",
- "sled-hardware-types 0.1.0",
+ "sled-agent-types",
+ "sled-hardware-types",
  "slog",
- "trust-quorum-protocol 0.1.0",
- "trust-quorum-types 0.1.0",
+ "trust-quorum-protocol",
+ "trust-quorum-types",
 ]
 
 [[package]]
@@ -16776,16 +15927,7 @@ name = "trust-quorum-types"
 version = "0.1.0"
 dependencies = [
  "omicron-workspace-hack",
- "trust-quorum-types-versions 0.1.0",
-]
-
-[[package]]
-name = "trust-quorum-types"
-version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/omicron?branch=main#dbaeb64ed174748570548023bb4b119d939105b0"
-dependencies = [
- "omicron-workspace-hack",
- "trust-quorum-types-versions 0.1.0 (git+https://github.com/oxidecomputer/omicron?branch=main)",
+ "trust-quorum-types-versions",
 ]
 
 [[package]]
@@ -16795,7 +15937,7 @@ dependencies = [
  "byte-wrapper",
  "daft",
  "derive_more 0.99.20",
- "gfss 0.1.0",
+ "gfss",
  "iddqd",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
@@ -16803,29 +15945,7 @@ dependencies = [
  "schemars 0.8.22",
  "serde",
  "serde_with",
- "sled-hardware-types 0.1.0",
- "slog",
- "slog-error-chain",
- "thiserror 2.0.18",
-]
-
-[[package]]
-name = "trust-quorum-types-versions"
-version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/omicron?branch=main#dbaeb64ed174748570548023bb4b119d939105b0"
-dependencies = [
- "byte-wrapper",
- "daft",
- "derive_more 0.99.20",
- "gfss 0.1.0 (git+https://github.com/oxidecomputer/omicron?branch=main)",
- "iddqd",
- "omicron-uuid-kinds",
- "omicron-workspace-hack",
- "rand 0.9.2",
- "schemars 0.8.22",
- "serde",
- "serde_with",
- "sled-hardware-types 0.1.0 (git+https://github.com/oxidecomputer/omicron?branch=main)",
+ "sled-hardware-types",
  "slog",
  "slog-error-chain",
  "thiserror 2.0.18",
@@ -17321,36 +16441,6 @@ dependencies = [
  "swrite",
  "tokio",
  "tokio-stream",
- "unicode-width 0.1.14",
- "uuid",
-]
-
-[[package]]
-name = "update-engine"
-version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/omicron?branch=main#dbaeb64ed174748570548023bb4b119d939105b0"
-dependencies = [
- "anyhow",
- "cancel-safe-futures",
- "chrono",
- "debug-ignore",
- "derive-where",
- "either",
- "futures",
- "indent_write",
- "indexmap 2.14.0",
- "libsw",
- "linear-map",
- "omicron-workspace-hack",
- "owo-colors 4.3.0",
- "petgraph 0.8.3",
- "schemars 0.8.22",
- "serde",
- "serde_json",
- "serde_with",
- "slog",
- "swrite",
- "tokio",
  "unicode-width 0.1.14",
  "uuid",
 ]
@@ -17918,7 +17008,7 @@ dependencies = [
  "itertools 0.14.0",
  "maplit",
  "omicron-common",
- "omicron-passwords 0.1.0",
+ "omicron-passwords",
  "omicron-workspace-hack",
  "owo-colors 4.3.0",
  "proptest",
@@ -17929,8 +17019,8 @@ dependencies = [
  "serde",
  "serde_json",
  "shell-words",
- "sled-agent-types 0.1.0",
- "sled-hardware-types 0.1.0",
+ "sled-agent-types",
+ "sled-hardware-types",
  "slog",
  "slog-async",
  "slog-envlogger",
@@ -17948,7 +17038,7 @@ dependencies = [
  "tufaceous-artifact",
  "tui-tree-widget",
  "unicode-width 0.1.14",
- "update-engine 0.1.0",
+ "update-engine",
  "wicket-common",
  "wicketd-client",
  "zeroize",
@@ -17961,8 +17051,8 @@ dependencies = [
  "anyhow",
  "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=187aee7de2e50f907099ea06c04aac96c3455665)",
  "dropshot 0.17.0",
- "gateway-client 0.1.0",
- "gateway-types 0.1.0",
+ "gateway-client",
+ "gateway-types",
  "maplit",
  "omicron-common",
  "omicron-workspace-hack",
@@ -17973,8 +17063,8 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
- "sled-agent-types 0.1.0",
- "sled-hardware-types 0.1.0",
+ "sled-agent-types",
+ "sled-hardware-types",
  "slog",
  "slog-error-chain",
  "thiserror 2.0.18",
@@ -17982,7 +17072,7 @@ dependencies = [
  "toml 0.8.23",
  "transceiver-controller 0.1.1 (git+https://github.com/oxidecomputer/transceiver-control)",
  "tufaceous-artifact",
- "update-engine 0.1.0",
+ "update-engine",
 ]
 
 [[package]]
@@ -18032,29 +17122,29 @@ dependencies = [
  "flume",
  "fs-err 3.3.0",
  "futures",
- "gateway-client 0.1.0",
+ "gateway-client",
  "gateway-messages",
  "gateway-test-utils",
- "gateway-types 0.1.0",
+ "gateway-types",
  "hex",
  "hickory-resolver 0.25.2",
  "http",
  "http-body-util",
  "hubtools 0.4.7 (git+https://github.com/oxidecomputer/hubtools.git?rev=2b1ef9b38d75563ea800baa3b17327eec17b1b7a)",
  "hyper",
- "illumos-utils 0.1.0",
+ "illumos-utils",
  "installinator",
  "installinator-api",
  "installinator-client",
  "installinator-common",
- "internal-dns-resolver 0.1.0",
- "internal-dns-types 0.1.0",
+ "internal-dns-resolver",
+ "internal-dns-types",
  "itertools 0.14.0",
  "maplit",
  "omicron-certificates",
  "omicron-common",
  "omicron-ddm-admin-client",
- "omicron-passwords 0.1.0",
+ "omicron-passwords",
  "omicron-test-utils",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
@@ -18072,8 +17162,8 @@ dependencies = [
  "sled-agent-config-reconciler",
  "sled-agent-resolvable-files",
  "sled-agent-resolvable-files-examples",
- "sled-agent-types 0.1.0",
- "sled-hardware-types 0.1.0",
+ "sled-agent-types",
+ "sled-hardware-types",
  "sled-storage",
  "slog",
  "slog-dtrace",
@@ -18091,7 +17181,7 @@ dependencies = [
  "tufaceous-artifact",
  "tufaceous-lib",
  "update-common",
- "update-engine 0.1.0",
+ "update-engine",
  "uuid",
  "wicket",
  "wicket-common",
@@ -18105,15 +17195,15 @@ version = "0.1.0"
 dependencies = [
  "bootstrap-agent-lockstep-client",
  "dropshot 0.17.0",
- "gateway-client 0.1.0",
+ "gateway-client",
  "omicron-common",
- "omicron-passwords 0.1.0",
+ "omicron-passwords",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "schemars 0.8.22",
  "semver 1.0.28",
  "serde",
- "sled-hardware-types 0.1.0",
+ "sled-hardware-types",
  "slog",
  "tufaceous-artifact",
  "wicket-common",
@@ -18123,7 +17213,7 @@ dependencies = [
 name = "wicketd-client"
 version = "0.1.0"
 dependencies = [
- "bootstrap-agent-lockstep-types 0.1.0",
+ "bootstrap-agent-lockstep-types",
  "chrono",
  "installinator-common",
  "omicron-common",
@@ -18136,10 +17226,10 @@ dependencies = [
  "semver 1.0.28",
  "serde",
  "serde_json",
- "sled-agent-types 0.1.0",
- "sled-hardware-types 0.1.0",
+ "sled-agent-types",
+ "sled-hardware-types",
  "slog",
- "update-engine 0.1.0",
+ "update-engine",
  "uuid",
  "wicket-common",
 ]
@@ -18949,7 +18039,7 @@ dependencies = [
  "async-trait",
  "camino",
  "camino-tempfile",
- "illumos-utils 0.1.0",
+ "illumos-utils",
  "key-manager",
  "omicron-common",
  "omicron-uuid-kinds",
@@ -19022,14 +18112,14 @@ dependencies = [
  "camino",
  "clap",
  "dropshot 0.17.0",
- "illumos-utils 0.1.0",
+ "illumos-utils",
  "omicron-common",
  "omicron-workspace-hack",
  "oxide-tokio-rt",
  "oxnet",
  "serde_json",
- "sled-agent-types 0.1.0",
- "sled-hardware-types 0.1.0",
+ "sled-agent-types",
+ "sled-hardware-types",
  "slog",
  "tokio",
  "uzers",
