@@ -617,7 +617,7 @@ pub fn validate_rack_subnet(
     Ipv6Net::new(rack_subnet_address, 56).map_err(|e| e.to_string())
 }
 
-/// Builds a [`PortConfig`] from a [`UserSpecifiedPortConfig`].
+/// Builds a [`PortConfig`] from a [`wicket_common::rack_setup::UserSpecifiedPortConfig`].
 ///
 /// Assumes that all auth keys are present in `bgp_auth_keys`.
 fn build_port_config(
