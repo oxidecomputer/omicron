@@ -200,6 +200,7 @@ pub struct ManualPortConfig {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(tag = "type", rename_all = "snake_case")]
 pub enum UserSpecifiedPortConfig {
     Manual(ManualPortConfig),
     DdmAutoPortConfig,

@@ -7906,68 +7906,92 @@
         }
       },
       "UserSpecifiedPortConfig": {
-        "description": "User-specified version of `PortConfig`.\n\nAll of `PortConfig` is user-specified. But we expect the port name to be a key, rather than a field as in `PortConfig`. So this has all of the fields other than the port name.",
-        "type": "object",
-        "properties": {
-          "addresses": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/UserSpecifiedUplinkAddressConfig"
-            }
-          },
-          "autoneg": {
-            "type": "boolean"
-          },
-          "bgp_peers": {
-            "default": [],
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/UserSpecifiedBgpPeerConfig"
-            }
-          },
-          "lldp": {
-            "nullable": true,
-            "default": null,
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/LldpPortConfig"
+        "oneOf": [
+          {
+            "description": "User-specified version of `PortConfig`.\n\nAll of `PortConfig` is user-specified. But we expect the port name to be a key, rather than a field as in `PortConfig`. So this has all of the fields other than the port name.",
+            "type": "object",
+            "properties": {
+              "addresses": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/UserSpecifiedUplinkAddressConfig"
+                }
+              },
+              "autoneg": {
+                "type": "boolean"
+              },
+              "bgp_peers": {
+                "default": [],
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/UserSpecifiedBgpPeerConfig"
+                }
+              },
+              "lldp": {
+                "nullable": true,
+                "default": null,
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/LldpPortConfig"
+                  }
+                ]
+              },
+              "routes": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/RouteConfig"
+                }
+              },
+              "tx_eq": {
+                "nullable": true,
+                "default": null,
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/TxEqConfig"
+                  }
+                ]
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "manual"
+                ]
+              },
+              "uplink_port_fec": {
+                "nullable": true,
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/LinkFec"
+                  }
+                ]
+              },
+              "uplink_port_speed": {
+                "$ref": "#/components/schemas/LinkSpeed"
               }
+            },
+            "required": [
+              "addresses",
+              "autoneg",
+              "routes",
+              "type",
+              "uplink_port_speed"
             ]
           },
-          "routes": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/RouteConfig"
-            }
-          },
-          "tx_eq": {
-            "nullable": true,
-            "default": null,
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/TxEqConfig"
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "ddm_auto_port_config"
+                ]
               }
+            },
+            "required": [
+              "type"
             ]
-          },
-          "uplink_port_fec": {
-            "nullable": true,
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/LinkFec"
-              }
-            ]
-          },
-          "uplink_port_speed": {
-            "$ref": "#/components/schemas/LinkSpeed"
           }
-        },
-        "required": [
-          "addresses",
-          "autoneg",
-          "routes",
-          "uplink_port_speed"
-        ],
-        "additionalProperties": false
+        ]
       },
       "UserSpecifiedRackNetworkConfig": {
         "description": "User-specified parts of `RackNetworkConfig`.",
