@@ -202,8 +202,12 @@ impl RunAllArgs {
         }
         for (location, mgd) in &cptestctx.mgd {
             println!(
-                "omicron-dev: maghemite:              http://[::1]:{} ({:?})",
+                "omicron-dev: mgd api:                http://[::1]:{} ({:?})",
                 mgd.port, location,
+            );
+            println!(
+                "omicron-dev: mgd bgp-dispatcher:     tcp {} ({:?})",
+                mgd.bgp_dispatcher_addr, location,
             );
         }
         println!(
@@ -296,7 +300,7 @@ async fn setup_bgp_peering(
     for (rack_n, ctx) in contexts.iter().enumerate() {
         for (slot, rack_mgd) in &ctx.mgd {
             let slot_idx = slot_index(*slot);
-            let rack_asn = 65200 + 2 * rack_n as u32 + slot_idx;
+            let rack_asn = 65000 + rack_n as u32;
             let rack_id = ipv4_as_u32(127, 2, rack_n as u8, slot_idx as u8);
 
             let rack_api_addr =
@@ -404,6 +408,56 @@ fn read_config(args: &dyn Configurable) -> Result<NexusConfig, anyhow::Error> {
     Ok(config)
 }
 
+/// Number of simulated racks (1–100).
+///
+/// Racks are assigned BGP ASNs from the range 65000–65099 (one per rack).
+/// Limiting to 100 keeps rack ASNs entirely below the peer-router range.
+#[derive(Clone, Copy, Debug)]
+struct RackCount(u8);
+
+impl std::str::FromStr for RackCount {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let n: u8 = s.parse().map_err(|e| format!("invalid rack count: {e}"))?;
+        if n < 1 || n > 100 {
+            return Err(format!("rack count must be between 1 and 100, got {n}"));
+        }
+        Ok(RackCount(n))
+    }
+}
+
+impl std::fmt::Display for RackCount {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+/// Number of simulated peer routers (0–100).
+///
+/// Peer routers are assigned BGP ASNs from the range 65100–65199 (one per
+/// peer). Limiting to 100 prevents us from running out of ASNs.
+#[derive(Clone, Copy, Debug)]
+struct PeerRouterCount(u8);
+
+impl std::str::FromStr for PeerRouterCount {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let n: u8 = s.parse().map_err(|e| format!("invalid peer router count: {e}"))?;
+        if n > 100 {
+            return Err(format!(
+                "peer router count must be between 0 and 100, got {n}"
+            ));
+        }
+        Ok(PeerRouterCount(n))
+    }
+}
+
+impl std::fmt::Display for PeerRouterCount {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
 #[derive(Clone, Debug, Args)]
 struct RunMultipleArgs {
     /// Override the gateway server configuration file.
@@ -412,12 +466,12 @@ struct RunMultipleArgs {
     /// Override the nexus configuration file.
     #[clap(long, default_value = DEFAULT_NEXUS_CONFIG)]
     nexus_config: Utf8PathBuf,
-    /// Number of "racks" to launch
-    #[clap(long, default_value_t = 1)]
-    count: u8,
-    /// Launch peer router mgd instances
-    #[clap(long, default_value_t = 0)]
-    peer_routers: u8,
+    /// Number of "racks" to launch (1–100)
+    #[clap(long, default_value_t = RackCount(1))]
+    count: RackCount,
+    /// Launch peer router mgd instances (0–100)
+    #[clap(long, default_value_t = PeerRouterCount(0))]
+    peer_routers: PeerRouterCount,
 }
 
 impl Configurable for RunMultipleArgs {
@@ -455,7 +509,7 @@ impl RunMultipleArgs {
             loopback_ip_mgr::LoopbackIpManager::new("lo0", log.clone()),
         ));
 
-        for n in 0..self.peer_routers {
+        for n in 0..self.peer_routers.0 {
             let mgd_bgp_addr =
                 SocketAddr::new(Ipv4Addr::new(127, 0, n, 1).into(), 1049);
 
@@ -476,7 +530,7 @@ impl RunMultipleArgs {
                 None,
             )
             .await
-            .unwrap();
+            .context("failed to start peer router mgd")?;
 
             println!(
                 "peer router {n}: mgd api:                http://[::1]:{}",
@@ -526,7 +580,7 @@ impl RunMultipleArgs {
             peer_routers.push(mgd);
         }
 
-        for n in 0..self.count {
+        for n in 0..self.count.0 {
             config
                 .deployment
                 .dropshot_external
@@ -695,7 +749,7 @@ impl RunMultipleArgs {
             contexts.push(cptestctx);
         }
 
-        if self.peer_routers > 0 {
+        if self.peer_routers.0 > 0 {
             setup_bgp_peering(&log, &peer_routers, &contexts)
                 .await
                 .context("setting up BGP peering")?;
