@@ -23,10 +23,11 @@ use crate::{
     inventory::SpIdentifier,
     rack_setup::{
         BgpAuthKeyId, BootstrapSledDescription,
-        CurrentRssUserConfigInsensitive, PutRssUserConfigInsensitive,
-        UserSpecifiedBgpPeerConfig, UserSpecifiedImportExportPolicy,
-        UserSpecifiedPortConfig, UserSpecifiedRackNetworkConfig,
-        UserSpecifiedRouterPeerAddr, UserSpecifiedUplinkAddressConfig,
+        CurrentRssUserConfigInsensitive, ManualPortConfig,
+        PutRssUserConfigInsensitive, UserSpecifiedBgpPeerConfig,
+        UserSpecifiedImportExportPolicy, UserSpecifiedPortConfig,
+        UserSpecifiedRackNetworkConfig, UserSpecifiedRouterPeerAddr,
+        UserSpecifiedUplinkAddressConfig,
     },
 };
 
@@ -212,7 +213,7 @@ impl ExampleRackSetupData {
             infra_ip_last: "172.30.0.10".parse().unwrap(),
             #[rustfmt::skip]
             switch0: btreemap! {
-                "port0".to_owned() => UserSpecifiedPortConfig {
+                "port0".to_owned() => UserSpecifiedPortConfig::Manual(ManualPortConfig {
                     addresses: vec![UserSpecifiedUplinkAddressConfig {
                         address: UplinkAddress::AddrConf,
                         vlan_id: Some(1),
@@ -229,13 +230,13 @@ impl ExampleRackSetupData {
                     lldp: switch0_port0_lldp,
                     tx_eq,
                     autoneg: true,
-                },
+                }),
             },
             #[rustfmt::skip]
             switch1: btreemap! {
                 // Use the same port name as in switch0 to test that it doesn't
                 // collide.
-                "port0".to_owned() => UserSpecifiedPortConfig {
+                "port0".to_owned() => UserSpecifiedPortConfig::Manual(ManualPortConfig {
                     addresses: vec![UserSpecifiedUplinkAddressConfig::without_vlan(
                         "172.30.0.1/24".parse().unwrap(),
                     )],
@@ -251,7 +252,7 @@ impl ExampleRackSetupData {
                     lldp: switch1_port0_lldp,
                     tx_eq,
                     autoneg: true,
-                },
+                }),
             },
             bgp: vec![BgpConfig {
                 asn: 47,
@@ -333,6 +334,9 @@ fn apply_tweak(
             let rnc = current_insensitive.rack_network_config.as_mut().unwrap();
             for (_, _, port) in rnc.iter_uplinks_mut() {
                 // Remove all but the first BGP peer.
+                let UserSpecifiedPortConfig::Manual(port) = port else {
+                    unimplemented!("DdmAutoPortConfig currently unsupported")
+                };
                 port.bgp_peers.drain(1..);
             }
         }

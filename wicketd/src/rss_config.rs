@@ -45,8 +45,8 @@ use wicket_common::rack_setup::BgpAuthKeyStatus;
 use wicket_common::rack_setup::BootstrapSledDescription;
 use wicket_common::rack_setup::CurrentRssUserConfigInsensitive;
 use wicket_common::rack_setup::GetBgpAuthKeyInfoResponse;
+use wicket_common::rack_setup::ManualPortConfig;
 use wicket_common::rack_setup::PutRssUserConfigInsensitive;
-use wicket_common::rack_setup::UserSpecifiedPortConfig;
 use wicket_common::rack_setup::UserSpecifiedRackNetworkConfig;
 use wicket_common::rack_setup::UserSpecifiedRouterPeerAddr;
 use wicketd_api::CertificateUploadResponse;
@@ -623,7 +623,7 @@ pub fn validate_rack_subnet(
 fn build_port_config(
     switch: SwitchSlot,
     port: &str,
-    config: &UserSpecifiedPortConfig,
+    config: &ManualPortConfig,
     bgp_auth_keys: &BgpAuthKeys,
 ) -> PortConfig {
     use sled_agent_types::early_networking::BgpPeerConfig;
@@ -769,6 +769,8 @@ mod tests {
                 .first_key_value()
                 .expect("at least one switch0 port")
                 .1
+                .manual()
+                .unwrap()
                 .bgp_peers
                 .is_empty()
         );
@@ -776,14 +778,17 @@ mod tests {
         // Combine unnumbered with a non-default router_lifetime - fine.
         let mut valid_router_lifetime = rack_network_config.clone();
         {
-            let peer = valid_router_lifetime
+            let mut peer = valid_router_lifetime
                 .switch0
                 .first_entry()
                 .unwrap()
                 .into_mut()
+                .manual()
+                .unwrap()
                 .bgp_peers
-                .get_mut(0)
-                .unwrap();
+                .get(0)
+                .unwrap()
+                .clone();
             peer.addr = UserSpecifiedRouterPeerAddr::Unnumbered;
             peer.router_lifetime = RouterLifetimeConfig::new(1234).unwrap();
         }
@@ -794,14 +799,17 @@ mod tests {
         // should fail with a reasonable error.
         let mut invalid_router_lifetime = valid_router_lifetime.clone();
         {
-            let peer = invalid_router_lifetime
+            let mut peer = invalid_router_lifetime
                 .switch0
                 .first_entry()
                 .unwrap()
                 .into_mut()
+                .manual()
+                .unwrap()
                 .bgp_peers
-                .get_mut(0)
-                .unwrap();
+                .get(0)
+                .unwrap()
+                .clone();
             peer.addr = UserSpecifiedRouterPeerAddr::Numbered(
                 "1.2.3.4".parse().unwrap(),
             );
@@ -820,14 +828,17 @@ mod tests {
         // Keep numbered peer but switch router_lifetime back to default - fine.
         let mut valid_router_lifetime = invalid_router_lifetime.clone();
         {
-            let peer = valid_router_lifetime
+            let mut peer = valid_router_lifetime
                 .switch0
                 .first_entry()
                 .unwrap()
                 .into_mut()
+                .manual()
+                .unwrap()
                 .bgp_peers
-                .get_mut(0)
-                .unwrap();
+                .get(0)
+                .unwrap()
+                .clone();
             peer.router_lifetime = RouterLifetimeConfig::default()
         }
         validate_rack_network_config(&valid_router_lifetime, &bgp_auth_keys)

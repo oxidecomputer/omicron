@@ -27,6 +27,7 @@ use toml_edit::Value;
 use wicket_common::inventory::SpType;
 use wicket_common::rack_setup::BootstrapSledDescription;
 use wicket_common::rack_setup::CurrentRssUserConfigInsensitive;
+use wicket_common::rack_setup::ManualPortConfig;
 use wicket_common::rack_setup::UserSpecifiedBgpPeerConfig;
 use wicket_common::rack_setup::UserSpecifiedImportExportPolicy;
 use wicket_common::rack_setup::UserSpecifiedPortConfig;
@@ -339,7 +340,7 @@ fn populate_network_table(
 #[must_use]
 fn populate_uplink_table(cfg: &UserSpecifiedPortConfig) -> Table {
     // This style ensures that if a new field is added, this fails loudly.
-    let UserSpecifiedPortConfig {
+    let UserSpecifiedPortConfig::Manual(ManualPortConfig {
         routes,
         addresses,
         uplink_port_speed,
@@ -348,7 +349,10 @@ fn populate_uplink_table(cfg: &UserSpecifiedPortConfig) -> Table {
         bgp_peers,
         lldp,
         tx_eq,
-    } = cfg;
+    }) = cfg
+    else {
+        unimplemented!("DdmAutoPortConfig currently unsupported")
+    };
 
     let mut uplink = Table::new();
 

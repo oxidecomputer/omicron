@@ -141,17 +141,20 @@ impl UserSpecifiedRackNetworkConfig {
     /// Returns an iterator over all uplinks -- (switch, port, config) triples.
     pub fn iter_uplinks(
         &self,
-    ) -> impl Iterator<Item = (SwitchSlot, &str, &UserSpecifiedPortConfig)>
-    {
-        let iter0 = self
-            .switch0
-            .iter()
-            .map(|(port, cfg)| (SwitchSlot::Switch0, port.as_str(), cfg));
+    ) -> impl Iterator<Item = (SwitchSlot, &str, &ManualPortConfig)> {
+        let iter0 = self.switch0.iter().filter_map(|(port, cfg)| match cfg {
+            UserSpecifiedPortConfig::Manual(cfg) => {
+                Some((SwitchSlot::Switch0, port.as_str(), cfg))
+            }
+            UserSpecifiedPortConfig::DdmAutoPortConfig => None,
+        });
 
-        let iter1 = self
-            .switch1
-            .iter()
-            .map(|(port, cfg)| (SwitchSlot::Switch1, port.as_str(), cfg));
+        let iter1 = self.switch1.iter().filter_map(|(port, cfg)| match cfg {
+            UserSpecifiedPortConfig::Manual(cfg) => {
+                Some((SwitchSlot::Switch1, port.as_str(), cfg))
+            }
+            UserSpecifiedPortConfig::DdmAutoPortConfig => None,
+        });
 
         iter0.chain(iter1)
     }
@@ -182,7 +185,7 @@ impl UserSpecifiedRackNetworkConfig {
 /// the fields other than the port name.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct UserSpecifiedPortConfig {
+pub struct ManualPortConfig {
     pub routes: Vec<RouteConfig>,
     pub addresses: Vec<UserSpecifiedUplinkAddressConfig>,
     pub uplink_port_speed: LinkSpeed,
@@ -194,6 +197,21 @@ pub struct UserSpecifiedPortConfig {
     pub lldp: Option<LldpPortConfig>,
     #[serde(default)]
     pub tx_eq: Option<TxEqConfig>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+pub enum UserSpecifiedPortConfig {
+    Manual(ManualPortConfig),
+    DdmAutoPortConfig,
+}
+
+impl UserSpecifiedPortConfig {
+    pub fn manual(&self) -> Option<&ManualPortConfig> {
+        match self {
+            Self::Manual(cfg) => Some(cfg),
+            Self::DdmAutoPortConfig => None,
+        }
+    }
 }
 
 /// User-specified version of
