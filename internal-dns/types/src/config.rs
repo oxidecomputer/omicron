@@ -163,6 +163,20 @@ pub struct DnsConfigBuilder {
     service_instances_sleds: BTreeMap<ServiceName, BTreeMap<Sled, u16>>,
 }
 
+/// Ports for the per-switch services published in internal DNS by
+/// [`DnsConfigBuilder::host_zone_switch`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct HostSwitchZonePorts {
+    /// Dendrite (`dpd`) admin API port.
+    pub dendrite: u16,
+    /// Management Gateway Service (`mgs`) port.
+    pub mgs: u16,
+    /// Maghemite `mgd` admin API port.
+    pub mgd: u16,
+    /// Maghemite `ddmd` admin API port.
+    pub ddm: u16,
+}
+
 /// Describes a host of type "sled" in the control plane DNS zone
 #[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Sled(SledUuid);
@@ -396,10 +410,14 @@ impl DnsConfigBuilder {
         &mut self,
         sled_id: SledUuid,
         switch_zone_ip: Ipv6Addr,
-        dendrite_port: u16,
-        mgs_port: u16,
-        mgd_port: u16,
+        ports: HostSwitchZonePorts,
     ) -> anyhow::Result<()> {
+        let HostSwitchZonePorts {
+            dendrite: dendrite_port,
+            mgs: mgs_port,
+            mgd: mgd_port,
+            ddm: ddm_port,
+        } = ports;
         let zone = self.host_dendrite(sled_id, switch_zone_ip)?;
         self.service_backend_zone(ServiceName::Dendrite, &zone, dendrite_port)?;
         self.service_backend_zone(
@@ -407,7 +425,8 @@ impl DnsConfigBuilder {
             &zone,
             mgs_port,
         )?;
-        self.service_backend_zone(ServiceName::Mgd, &zone, mgd_port)
+        self.service_backend_zone(ServiceName::Mgd, &zone, mgd_port)?;
+        self.service_backend_zone(ServiceName::Ddm, &zone, ddm_port)
     }
 
     /// Higher-level shorthand for adding a Nexus zone with both its internal
@@ -731,7 +750,9 @@ impl DnsConfigBuilder {
 
 #[cfg(test)]
 mod test {
-    use super::{DnsConfigBuilder, Host, ServiceName};
+    use super::{
+        DnsConfigBuilder, DnsRecord, Host, HostSwitchZonePorts, ServiceName,
+    };
     use crate::{config::Zone, names::DNS_ZONE};
     use omicron_common::api::external::Generation;
     use omicron_uuid_kinds::{OmicronZoneUuid, SledUuid};
@@ -779,6 +800,8 @@ mod test {
             "_oximeter-reader._tcp",
         );
         assert_eq!(ServiceName::Dendrite.dns_name(), "_dendrite._tcp",);
+        assert_eq!(ServiceName::Mgd.dns_name(), "_mgd._tcp",);
+        assert_eq!(ServiceName::Ddm.dns_name(), "_ddm._tcp",);
         assert_eq!(
             ServiceName::CruciblePantry.dns_name(),
             "_crucible-pantry._tcp",
@@ -794,6 +817,71 @@ mod test {
             ServiceName::Crucible(zone_uuid).dns_name(),
             "_crucible._tcp.00000000-0000-0000-0000-000000000000",
         );
+    }
+
+    #[test]
+    fn host_zone_switch_publishes_all_services() {
+        let sled_uuid: SledUuid =
+            "001de000-51ed-4000-8000-000000000001".parse().unwrap();
+        let switch_zone_ip = Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 1);
+
+        // Use distinct port numbers so an arg-order swap in `host_zone_switch`
+        // surfaces as a port mismatch on the affected service.
+        let dendrite_port = 11;
+        let mgs_port = 13;
+        let mgd_port = 17;
+        let ddm_port = 19;
+
+        let mut builder = DnsConfigBuilder::new();
+        builder
+            .host_zone_switch(
+                sled_uuid,
+                switch_zone_ip,
+                HostSwitchZonePorts {
+                    dendrite: dendrite_port,
+                    mgs: mgs_port,
+                    mgd: mgd_port,
+                    ddm: ddm_port,
+                },
+            )
+            .unwrap();
+
+        let config = builder.build_full_config_for_initial_generation();
+
+        let mut by_name: BTreeMap<&str, &[DnsRecord]> = BTreeMap::new();
+        for zone in &config.zones {
+            for (name, records) in &zone.records {
+                by_name.insert(name.as_str(), records.as_slice());
+            }
+        }
+
+        for (expected_name, expected_port) in [
+            ("_dendrite._tcp", dendrite_port),
+            ("_mgs._tcp", mgs_port),
+            ("_mgd._tcp", mgd_port),
+            ("_ddm._tcp", ddm_port),
+        ] {
+            let records = by_name.get(expected_name).unwrap_or_else(|| {
+                panic!(
+                    "expected {expected_name} in published switch-zone \
+                     services; got {by_name:?}"
+                )
+            });
+            let srv_port = records
+                .iter()
+                .find_map(|r| match r {
+                    DnsRecord::Srv(s) => Some(s.port),
+                    _ => None,
+                })
+                .unwrap_or_else(|| {
+                    panic!("no SRV record for {expected_name}: {records:?}")
+                });
+
+            assert_eq!(
+                srv_port, expected_port,
+                "wrong SRV port for {expected_name}"
+            );
+        }
     }
 
     #[test]
