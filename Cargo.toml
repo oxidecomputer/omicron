@@ -611,9 +611,9 @@ ntp-admin-client = { path = "clients/ntp-admin-client" }
 ntp-admin-v1-client = { path = "clients/ntp-admin-v1-client" }
 ntp-admin-types = { path = "ntp-admin/types" }
 ntp-admin-types-versions = { path = "ntp-admin/types/versions" }
-mg-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "9bb5037167c1ff0d812299f668841c9b7bda4480" }
-mg-api-types = { git = "https://github.com/oxidecomputer/maghemite", rev = "9bb5037167c1ff0d812299f668841c9b7bda4480" }
-ddm-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "9bb5037167c1ff0d812299f668841c9b7bda4480" }
+mg-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "2220683020225d822150ded8d87c87d3bcddfded" }
+mg-api-types = { git = "https://github.com/oxidecomputer/maghemite", rev = "2220683020225d822150ded8d87c87d3bcddfded" }
+ddm-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "2220683020225d822150ded8d87c87d3bcddfded" }
 multimap = "0.10.1"
 nexus-auth = { path = "nexus/auth" }
 nexus-background-task-interface = { path = "nexus/background-task-interface" }
@@ -1133,4 +1133,12 @@ omicron-common = { path = "common" }
 # transitive git-pulls of oxlog (illumos-utils -> oxlog, via maghemite's
 # branch=main omicron deps) leave both local and git copies in the dep graph,
 # and cargo's `--package oxlog` fails as ambiguous.
+#
+# TODO: This patch is a symptom of the broader maghemite -> omicron
+# self-reference loop (maghemite depends on oximeter-producer, which pulls
+# nexus-client -> nexus-types from omicron@main and not a rev). @jgallagher
+# flagged this in review; @bnaecker suggested extracting oximeter-producer
+# out of omicron to break it. When that lands, this patch (and any
+# duplicated path+git entries for illumos-utils, nexus-types, etc.) can be
+# removed.
 oxlog = { path = "dev-tools/oxlog" }

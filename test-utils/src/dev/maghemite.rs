@@ -284,7 +284,7 @@ async fn find_mgd_port_in_log(logfile: String) -> Result<u16, anyhow::Error> {
 /// Specifies the amount of time we will wait for `ddmd` to bind its admin
 /// port, confirmed by asking the kernel which TCP port `ddmd`'s pid is
 /// listening on.
-pub const DDMD_TIMEOUT: Duration = Duration::new(5, 0);
+const DDMD_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Test fixture that spawns and supervises a legit `ddmd` subprocess.
 ///
