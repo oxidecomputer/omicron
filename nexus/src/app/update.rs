@@ -126,6 +126,8 @@ impl UpdateContactSupportChecksInput {
             .sleds
             .iter()
             .filter(|sled| {
+                // `unknown()` returns the represenation of the update status
+                // for a given sled ID that isn't present in inventory.
                 **sled
                     == internal_views::SledAgentUpdateStatus::unknown(
                         sled.sled_id,
