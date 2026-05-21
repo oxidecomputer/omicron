@@ -5236,7 +5236,8 @@ CREATE TYPE IF NOT EXISTS omicron.public.fmd_inventory_error_kind AS ENUM (
     -- Number of FMD cases reported by the sled exceeded the producer's
     -- limit; no partial data is recorded.
     'too_many_cases',
-    -- Number of FMD resources reported by the sled exceeded the limit.
+    -- Number of FMD resources reported by the sled exceeded the limit;
+    -- no partial data is recorded.
     'too_many_resources'
 );
 

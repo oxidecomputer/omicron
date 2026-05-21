@@ -1015,7 +1015,7 @@ impl fmt::Display for FmdResourceDisplay<'_> {
         writeln!(f, "  fmri: {fmri}")?;
         writeln!(
             f,
-            "  faulty: {faulty}, unusable: {unusable}, invisible: {invisible}"
+            "  faulty: {faulty:<5}  unusable: {unusable:<5}  invisible: {invisible:<5}"
         )?;
         Ok(())
     }
@@ -1190,8 +1190,14 @@ mod tests {
         let case_uuid = FmdHostCaseUuid::from_untyped_uuid(Uuid::from_u128(
             0xfeed_face_dead_beef_dead_beef_dead_beef,
         ));
+        let case_uuid_2 = FmdHostCaseUuid::from_untyped_uuid(Uuid::from_u128(
+            0xfeed_face_dead_beef_dead_beef_dead_b00f,
+        ));
         let resource_uuid = FmdResourceUuid::from_untyped_uuid(
             Uuid::from_u128(0xbada_55ca_fe00_0000_0000_0000_0000_0001),
+        );
+        let resource_uuid_2 = FmdResourceUuid::from_untyped_uuid(
+            Uuid::from_u128(0xbada_55ca_fe00_0000_0000_0000_0000_0002),
         );
 
         let mut cases = IdOrdMap::new();
@@ -1207,6 +1213,14 @@ mod tests {
                 })),
             })
             .expect("case uuid is unique");
+        cases
+            .insert_unique(FmdHostCase {
+                uuid: case_uuid_2,
+                code: "BOO-0000-FAKE".to_string(),
+                url: "http://example.invalid/msg/BOO-0000-FAKE".to_string(),
+                event: None,
+            })
+            .expect("case uuid is unique");
 
         let mut resources = IdOrdMap::new();
         resources
@@ -1217,6 +1231,16 @@ mod tests {
                 faulty: true,
                 unusable: false,
                 invisible: false,
+            })
+            .expect("resource uuid is unique");
+        resources
+            .insert_unique(FmdResource {
+                uuid: resource_uuid_2,
+                fmri: "ghost:///also/not/a/real/fmri".to_string(),
+                case_id: case_uuid_2,
+                faulty: false,
+                unusable: true,
+                invisible: true,
             })
             .expect("resource uuid is unique");
 
