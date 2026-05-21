@@ -112,11 +112,13 @@ serde_with.workspace = true
 sha2.workspace = true
 sled-agent-client.workspace = true
 sled-agent-types.workspace = true
+sled-agent-types-versions.workspace = true
 sled-hardware-types.workspace = true
 slog.workspace = true
 slog-async.workspace = true
 slog-dtrace.workspace = true
 slog-error-chain.workspace = true
+strum.workspace = true
 swrite.workspace = true
 display-error-chain.workspace = true
 slog-term.workspace = true
@@ -163,6 +165,10 @@ update-engine.workspace = true
 omicron-workspace-hack.workspace = true
 omicron-uuid-kinds.workspace = true
 zip = { workspace = true, features = ["jiff-02"] }
+
+[target.'cfg(target_os = "illumos")'.dependencies]
+# See omicron-rpaths for more about the "fmd-adm-sys" dependency.
+fmd-adm-sys.workspace = true
 
 [dev-dependencies]
 async-bb8-diesel.workspace = true

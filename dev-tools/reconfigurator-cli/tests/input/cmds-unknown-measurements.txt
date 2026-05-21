@@ -31,7 +31,11 @@ blueprint-plan latest latest
 # update from R18 -> R19
 blueprint-diff latest
 
-# Next plan should show waiting on inventory to have the measurements
+# The previous plan bumped each sled's sled-agent generation, but inventory
+# hasn't been advanced via `sled-set ... omicron-config latest` yet. The next
+# plan should therefore mark each sled's noop check as ineligible due to
+# stale inventory, and the planning report should still show that we're
+# waiting on measurements to converge.
 inventory-generate
 blueprint-plan latest latest
 blueprint-diff latest

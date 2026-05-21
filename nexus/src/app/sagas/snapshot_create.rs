@@ -97,6 +97,7 @@ use super::{
     },
 };
 use crate::app::sagas::declare_saga_actions;
+use crate::app::sagas::sled_out_of_service_gone_check;
 use crate::app::{authn, authz, db};
 use anyhow::anyhow;
 use nexus_db_lookup::LookupPath;
@@ -111,9 +112,7 @@ use omicron_common::{
     api::external, backoff::backon_retry_policy_internal_service,
 };
 use omicron_uuid_kinds::{GenericUuid, PropolisUuid, VolumeUuid};
-use progenitor_extras::retry::{
-    GoneCheckResult, retry_operation_while_indefinitely,
-};
+use progenitor_extras::retry::retry_operation_while_indefinitely;
 use rand::{RngCore, SeedableRng, rngs::StdRng};
 use serde::Deserialize;
 use serde::Serialize;
@@ -863,14 +862,11 @@ async fn ssc_send_snapshot_request_to_sled_agent(
             )
             .await
     };
-    // `check_sled_in_service` returns an error if the sled is no longer in
-    // service; if it succeeds, the sled is not gone.
+
+    // Bail out of the retry loop if the sled is gone.
     let gone_check = || async {
-        osagactx
-            .datastore()
-            .check_sled_in_service(&opctx, sled_id)
+        sled_out_of_service_gone_check(osagactx.datastore(), &opctx, sled_id)
             .await
-            .map(|()| GoneCheckResult::StillAvailable)
     };
 
     let notify_log = log.clone();

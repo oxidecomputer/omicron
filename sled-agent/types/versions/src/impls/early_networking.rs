@@ -6,11 +6,11 @@
 
 use crate::latest::early_networking::BgpPeerConfig;
 use crate::latest::early_networking::InvalidIpAddrError;
+use crate::latest::early_networking::LinkFec;
+use crate::latest::early_networking::LinkSpeed;
 use crate::latest::early_networking::LldpAdminStatus;
 use crate::latest::early_networking::MaxPathConfig;
 use crate::latest::early_networking::MaxPathConfigError;
-use crate::latest::early_networking::PortFec;
-use crate::latest::early_networking::PortSpeed;
 use crate::latest::early_networking::RouterLifetimeConfig;
 use crate::latest::early_networking::RouterLifetimeConfigError;
 use crate::latest::early_networking::RouterPeerIpAddr;
@@ -21,14 +21,13 @@ use crate::latest::early_networking::UplinkAddress;
 use crate::latest::early_networking::UplinkAddressConfig;
 use crate::latest::early_networking::UplinkIpNet;
 use crate::latest::early_networking::UplinkIpNetError;
-use omicron_common::api::external;
+use ipnetwork::IpNetwork;
 use oxnet::IpNet;
 use oxnet::IpNetParseError;
 use oxnet::Ipv6Net;
 use std::fmt;
 use std::net::AddrParseError;
 use std::net::IpAddr;
-use std::net::Ipv4Addr;
 use std::net::Ipv6Addr;
 use std::str::FromStr;
 
@@ -66,32 +65,6 @@ impl BgpPeerConfig {
 
     pub fn keepalive(&self) -> u64 {
         self.keepalive.unwrap_or(Self::DEFAULT_KEEPALIVE)
-    }
-}
-
-impl From<PortFec> for external::LinkFec {
-    fn from(x: PortFec) -> Self {
-        match x {
-            PortFec::Firecode => Self::Firecode,
-            PortFec::None => Self::None,
-            PortFec::Rs => Self::Rs,
-        }
-    }
-}
-
-impl From<PortSpeed> for external::LinkSpeed {
-    fn from(x: PortSpeed) -> Self {
-        match x {
-            PortSpeed::Speed0G => Self::Speed0G,
-            PortSpeed::Speed1G => Self::Speed1G,
-            PortSpeed::Speed10G => Self::Speed10G,
-            PortSpeed::Speed25G => Self::Speed25G,
-            PortSpeed::Speed40G => Self::Speed40G,
-            PortSpeed::Speed50G => Self::Speed50G,
-            PortSpeed::Speed100G => Self::Speed100G,
-            PortSpeed::Speed200G => Self::Speed200G,
-            PortSpeed::Speed400G => Self::Speed400G,
-        }
     }
 }
 
@@ -134,6 +107,12 @@ impl std::fmt::Display for UplinkIpNet {
 impl std::fmt::Display for RouterPeerIpAddr {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.0.fmt(f)
+    }
+}
+
+impl From<RouterPeerIpAddr> for IpNetwork {
+    fn from(value: RouterPeerIpAddr) -> Self {
+        Self::from(IpAddr::from(value))
     }
 }
 
@@ -180,29 +159,17 @@ impl FromStr for RouterPeerIpAddr {
 }
 
 impl RouterPeerType {
-    /// In contexts where we cannot use this strong type to describe
-    /// "unnumbered" addresses, we have two or three possible representations:
-    ///
-    /// * In a context where we need a non-optional `IpAddr`, we could use
-    ///   `Ipv4Addr::UNSPECIFIED` or `Ipv6Addr::UNSPECIFIED`.
-    /// * In a context where we need `Option<IpAddr>`, we could use `None`,
-    ///   Some(`Ipv4Addr::UNSPECIFIED`), or Some(`Ipv6Addr::UNSPECIFIED`).
-    ///
-    /// In the optional case, we always prefer `None`. In the non-optional case,
-    /// we choose this sentinel value.
-    pub const UNNUMBERED_SENTINEL: IpAddr = IpAddr::V4(Ipv4Addr::UNSPECIFIED);
-
-    /// Squash this address down to an [`IpAddr`] by converting
-    /// [`RouterPeerType::Unnumbered`] to
-    /// [`RouterPeerType::UNNUMBERED_SENTINEL`].
-    ///
-    /// Uses of this function probably indicate places where we could consider
-    /// using stronger types.
-    pub fn ip_squashing_unnumbered_to_sentinel(&self) -> IpAddr {
-        match *self {
-            Self::Unnumbered { .. } => Self::UNNUMBERED_SENTINEL,
-            Self::Numbered { ip } => ip.into(),
+    /// Returns true if `Self` describes a numbered peer; false otherwise.
+    pub fn is_numbered(&self) -> bool {
+        match self {
+            Self::Unnumbered { .. } => false,
+            Self::Numbered { .. } => true,
         }
+    }
+
+    /// Returns true if `Self` describes an unnumbered peer; false otherwise.
+    pub fn is_unnumbered(&self) -> bool {
+        !self.is_numbered()
     }
 }
 
@@ -311,28 +278,28 @@ impl fmt::Debug for SwitchSlot {
     }
 }
 
-impl fmt::Display for PortSpeed {
+impl fmt::Display for LinkSpeed {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            PortSpeed::Speed0G => write!(f, "0G"),
-            PortSpeed::Speed1G => write!(f, "1G"),
-            PortSpeed::Speed10G => write!(f, "10G"),
-            PortSpeed::Speed25G => write!(f, "25G"),
-            PortSpeed::Speed40G => write!(f, "40G"),
-            PortSpeed::Speed50G => write!(f, "50G"),
-            PortSpeed::Speed100G => write!(f, "100G"),
-            PortSpeed::Speed200G => write!(f, "200G"),
-            PortSpeed::Speed400G => write!(f, "400G"),
+            LinkSpeed::Speed0G => write!(f, "0G"),
+            LinkSpeed::Speed1G => write!(f, "1G"),
+            LinkSpeed::Speed10G => write!(f, "10G"),
+            LinkSpeed::Speed25G => write!(f, "25G"),
+            LinkSpeed::Speed40G => write!(f, "40G"),
+            LinkSpeed::Speed50G => write!(f, "50G"),
+            LinkSpeed::Speed100G => write!(f, "100G"),
+            LinkSpeed::Speed200G => write!(f, "200G"),
+            LinkSpeed::Speed400G => write!(f, "400G"),
         }
     }
 }
 
-impl fmt::Display for PortFec {
+impl fmt::Display for LinkFec {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            PortFec::Firecode => write!(f, "Firecode R-FEC"),
-            PortFec::None => write!(f, "None"),
-            PortFec::Rs => write!(f, "RS-FEC"),
+            LinkFec::Firecode => write!(f, "Firecode R-FEC"),
+            LinkFec::None => write!(f, "None"),
+            LinkFec::Rs => write!(f, "RS-FEC"),
         }
     }
 }
@@ -344,6 +311,7 @@ mod tests {
     use oxnet::Ipv4Net;
     use proptest::prelude::*;
     use serde::{Deserialize, Serialize};
+    use std::net::Ipv4Addr;
     use test_strategy::proptest;
 
     #[test]

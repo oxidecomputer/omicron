@@ -102,7 +102,7 @@ impl super::Nexus {
     ) -> ListResultVec<networking::BgpPeerStatus> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
         let mut result = Vec::new();
-        for (switch_slot, client) in self.mgd_clients().await.map_err(|e| {
+        for (switch_slot, client) in self.mg_clients().await.map_err(|e| {
             external::Error::internal_error(&format!(
                 "failed to get mgd clients: {e}"
             ))
@@ -158,7 +158,7 @@ impl super::Nexus {
     ) -> LookupResult<Vec<networking::BgpExported>> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
         let mut result = vec![];
-        for (switch_slot, client) in self.mgd_clients().await.map_err(|e| {
+        for (switch_slot, client) in self.mg_clients().await.map_err(|e| {
             external::Error::internal_error(&format!(
                 "failed to get mgd clients: {e}"
             ))
@@ -231,7 +231,7 @@ impl super::Nexus {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
 
         let mut result = Vec::new();
-        for (switch_slot, client) in self.mgd_clients().await.map_err(|e| {
+        for (switch_slot, client) in self.mg_clients().await.map_err(|e| {
             external::Error::internal_error(&format!(
                 "failed to get mgd clients: {e}"
             ))
@@ -274,7 +274,7 @@ impl super::Nexus {
     ) -> ListResultVec<networking::BgpImported> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
         let mut result = Vec::new();
-        for (switch_slot, client) in self.mgd_clients().await.map_err(|e| {
+        for (switch_slot, client) in self.mg_clients().await.map_err(|e| {
             external::Error::internal_error(&format!(
                 "failed to get mgd clients: {e}"
             ))

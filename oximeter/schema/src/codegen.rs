@@ -517,6 +517,7 @@ fn quote_units(units: Units) -> TokenStream {
             quote! { ::oximeter::schema::Units::DegreesCelsius }
         }
         Units::Rpm => quote! { ::oximeter::schema::Units::Rpm },
+        Units::Joules => quote! { ::oximeter::schema::Units::Joules },
     }
 }
 

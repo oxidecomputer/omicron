@@ -15,10 +15,13 @@ vergen-gitcl.workspace = true
 anyhow.workspace = true
 async-bb8-diesel.workspace = true
 async-trait.workspace = true
+base64.workspace = true
+bootstrap-agent-lockstep-client.workspace = true
 bytes.workspace = true
 camino.workspace = true
 chrono.workspace = true
 clap.workspace = true
+clickhouse-admin-single-client.workspace = true
 crossterm.workspace = true
 crucible-agent-client.workspace = true
 crucible-pantry-client.workspace = true
@@ -54,6 +57,7 @@ nexus-lockstep-client.workspace = true
 nexus-reconfigurator-preparation.workspace = true
 nexus-saga-recovery.workspace = true
 nexus-types.workspace = true
+ntp-admin-client.workspace = true
 omicron-common.workspace = true
 omicron-uuid-kinds.workspace = true
 omicron-workspace-hack.workspace = true
@@ -91,6 +95,10 @@ unicode-width.workspace = true
 update-engine.workspace = true
 url.workspace = true
 uuid.workspace = true
+
+[target.'cfg(target_os = "illumos")'.dependencies]
+# See omicron-rpaths for more about the "fmd-adm-sys" dependency.
+fmd-adm-sys.workspace = true
 
 [dev-dependencies]
 camino-tempfile.workspace = true

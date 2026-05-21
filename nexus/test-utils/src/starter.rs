@@ -75,10 +75,7 @@ use omicron_common::api::internal::nexus::Certificate;
 use omicron_common::api::internal::nexus::ProducerEndpoint;
 use omicron_common::api::internal::nexus::ProducerKind;
 use omicron_common::api::internal::shared::DatasetKind;
-use omicron_common::api::internal::shared::NetworkInterface;
-use omicron_common::api::internal::shared::NetworkInterfaceKind;
 use omicron_common::api::internal::shared::PrivateIpConfig;
-use omicron_common::api::internal::shared::SourceNatConfigGeneric;
 use omicron_common::disk::CompressionAlgorithm;
 use omicron_common::zpool_name::ZpoolName;
 use omicron_sled_agent::sim;
@@ -97,9 +94,12 @@ use oximeter_producer::Server as ProducerServer;
 use sled_agent_types::early_networking::RackNetworkConfig;
 use sled_agent_types::early_networking::SwitchSlot;
 use sled_agent_types::inventory::HostPhase2DesiredSlots;
+use sled_agent_types::inventory::NetworkInterface;
+use sled_agent_types::inventory::NetworkInterfaceKind;
 use sled_agent_types::inventory::OmicronSledConfig;
 use sled_agent_types::inventory::OmicronZoneDataset;
 use sled_agent_types::inventory::SledCpuFamily;
+use sled_agent_types::inventory::SourceNatConfigGeneric;
 use sled_agent_types::system_networking::SystemNetworkingConfig;
 use sled_agent_types::system_networking::WriteNetworkConfigRequest;
 use slog::{Logger, debug, error, o};
@@ -487,16 +487,15 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
     pub async fn start_mgd(&mut self, switch_slot: SwitchSlot) {
         let log = &self.logctx.log;
         debug!(log, "Starting mgd"; "switch_slot" => ?switch_slot);
-
         let mgs = self.gateway.get(&switch_slot).unwrap();
-        let mgs_addr =
+        let mgs_addr: std::net::SocketAddr =
             SocketAddrV6::new(Ipv6Addr::LOCALHOST, mgs.port, 0, 0).into();
 
         // If a loopback manager and per-slot address were provided, allocate a
         // unique loopback IP for this instance's BGP dispatcher so that
         // multiple control plane instances can coexist on the same host.
         // Otherwise, fall back to 127.0.0.1, which is always present and
-        // sufficient for single-rack development and normal integration tests.
+        // sufficient for single-mgd development and normal integration tests.
         let (bgp_addr, bgp_loopback_allocation) = match (
             &self.mgd_bgp_loopback,
             self.mgd_bgp_addrs.get(&switch_slot),
@@ -841,6 +840,7 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
             external_dns_version: Generation::new(),
             target_release_minimum_generation: Generation::new(),
             nexus_generation: Generation::new(),
+            external_networking_generation: Generation::new(),
             cockroachdb_fingerprint: String::new(),
             cockroachdb_setting_preserve_downgrade:
                 CockroachDbPreserveDowngrade::DoNotModify,
@@ -990,7 +990,7 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
                     rack_subnet: "fd00:1122:3344:0100::/56".parse().unwrap(),
                 },
                 // TODO-correctness Can we fill this in for tests?
-                service_zone_nat_entries: None,
+                blueprint_external_networking_config: None,
             },
             generation: 1,
         };

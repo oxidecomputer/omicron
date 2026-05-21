@@ -126,5 +126,6 @@ pub fn default_config(bind_address: std::net::SocketAddr) -> ConfigDropshot {
         default_request_body_max_bytes: 1024,
         default_handler_task_mode: HandlerTaskMode::Detached,
         log_headers: vec![],
+        compression: dropshot::CompressionConfig::None,
     }
 }

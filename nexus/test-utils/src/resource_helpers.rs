@@ -42,6 +42,7 @@ use nexus_types::external_api::ip_pool::{
     IpPool, IpPoolRange, IpRange, IpVersion,
 };
 use nexus_types::external_api::multicast;
+use nexus_types::external_api::path_params;
 use nexus_types::external_api::policy;
 use nexus_types::external_api::project;
 use nexus_types::external_api::project::Project;
@@ -959,6 +960,31 @@ where
 {
     let url = format!("/v1/instances?project={project_name}");
     object_create_error(client, &url, body, status).await
+}
+
+pub async fn attach_disk_to_instance(
+    client: &ClientTestContext,
+    project_name: &str,
+    instance_name: &str,
+    disk_name: &str,
+) {
+    let url = format!(
+        "/v1/instances/{instance_name}/disks/attach?project={project_name}",
+    );
+
+    let body = path_params::DiskPath {
+        disk: disk_name.to_string().try_into().unwrap(),
+    };
+
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &url)
+            .body(Some(&body))
+            .expect_status(Some(StatusCode::ACCEPTED)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
 }
 
 pub async fn create_affinity_group(

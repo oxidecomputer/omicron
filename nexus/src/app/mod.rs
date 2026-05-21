@@ -10,12 +10,14 @@ use crate::DropshotServer;
 use crate::app::background::BackgroundTasksData;
 use crate::app::background::CurrentSitrep;
 use crate::app::background::SagaRecoveryHelpers;
+use crate::app::background::resolve_mgd_clients;
 use crate::app::update::UpdateStatusHandle;
 use crate::populate::PopulateArgs;
 use crate::populate::PopulateStatus;
 use crate::populate::populate_start;
 use ::oximeter::types::ProducerRegistry;
 use anyhow::anyhow;
+use internal_dns_resolver::ResolveError;
 use internal_dns_types::names::ServiceName;
 use nexus_background_task_interface::BackgroundTasks;
 use nexus_config::NexusConfig;
@@ -31,6 +33,7 @@ use nexus_mgs_updates::ArtifactCache;
 use nexus_mgs_updates::MgsUpdateDriver;
 use nexus_types::deployment::PendingMgsUpdates;
 use nexus_types::deployment::ReconfiguratorConfigParam;
+
 use omicron_common::address::MGS_PORT;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Error;
@@ -447,7 +450,11 @@ impl Nexus {
             None => {
                 let native_resolver =
                     qorb_resolver.for_service(ServiceName::OximeterReader);
-                oximeter_db::Client::new_with_resolver(native_resolver, &log)
+                oximeter_db::Client::new_with_resolver(
+                    native_resolver,
+                    "nexus-oximeter-reader",
+                    &log,
+                )
             }
             Some(address) => oximeter_db::Client::new(*address, &log),
         };
@@ -775,6 +782,12 @@ impl Nexus {
     pub(crate) fn activate_inventory_collection(&self) {
         self.background_tasks
             .activate(&self.background_tasks.task_inventory_collection);
+    }
+
+    // Called to trigger propagation of service firewall rules.
+    pub(crate) fn activate_service_firewall_propagation(&self) {
+        self.background_tasks
+            .activate(&self.background_tasks.task_service_firewall_propagation);
     }
 
     // Called to hand off management of external servers to Nexus.
@@ -1165,11 +1178,21 @@ impl Nexus {
         lldpd_clients(resolver, rack_id, &self.log).await
     }
 
-    pub(crate) async fn mgd_clients(
+    /// Get all MGD known `SwitchSlot -> MGD client` pairs.
+    ///
+    /// # Errors
+    ///
+    /// Fails if we cannot resolve MGD in DNS.
+    ///
+    /// For any MGD instance we resolve via DNS, if the MGD instance does not
+    /// know its own switch slot, the switch slot -> client mapping for that
+    /// instance will be omitted from the returned map. Callers must not
+    /// assume an `Ok(_)` return value contains any client.
+    pub(crate) async fn mg_clients(
         &self,
-    ) -> Result<HashMap<SwitchSlot, mg_admin_client::Client>, String> {
-        let resolver = self.resolver();
-        mgd_clients(resolver, &self.log).await
+    ) -> Result<HashMap<SwitchSlot, mg_admin_client::Client>, ResolveError>
+    {
+        resolve_mgd_clients(self.resolver(), &self.log).await
     }
 
     pub(crate) fn demo_sagas(
@@ -1286,74 +1309,6 @@ pub(crate) async fn dpd_clients(
             1 => SwitchSlot::Switch1,
             _ => {
                 warn!(log, "unexpected value for switch slot: {switch_slot}");
-                continue;
-            }
-        };
-
-        mappings.insert(location, client);
-    }
-
-    Ok(mappings)
-}
-
-/// Returns a mapping of clients for the Maghemite daemons of reachable switch zones.
-/// If we are unable to communicate with the switch zone and determine the mapping
-/// of SwitchSlot -> Zone Underlay Address, we omit an entry for that client.
-pub(crate) async fn mgd_clients(
-    resolver: &internal_dns_resolver::Resolver,
-    log: &slog::Logger,
-) -> Result<HashMap<SwitchSlot, mg_admin_client::Client>, String> {
-    let mgd_socketaddrs = match resolver
-        .lookup_all_socket_v6(ServiceName::Mgd)
-        .await
-    {
-        Ok(addrs) => addrs,
-        Err(e) => {
-            error!(log, "failed to resolve addresses for Maghemite services"; "error" => %e);
-            return Err(e.to_string());
-        }
-    };
-
-    let clients: Vec<(SocketAddrV6, mg_admin_client::Client)> = mgd_socketaddrs
-        .iter()
-        .map(|socket_addr| {
-            let client = mg_admin_client::Client::new(
-                &format!("http://{socket_addr}"),
-                log.new(o!(
-                    "component" => "MgdClient"
-                )),
-            );
-
-            (*socket_addr, client)
-        })
-        .collect();
-
-    let mut mappings: HashMap<SwitchSlot, mg_admin_client::Client> =
-        HashMap::new();
-
-    for (addr, client) in clients {
-        let switch_slot = match client.switch_identifiers().await {
-            Ok(response) => response.slot,
-            Err(e) => {
-                error!(
-                    log,
-                    "failed to determine switch slot for maghemite";
-                    "error" => %e,
-                    "addr" => %addr,
-                );
-                continue;
-            }
-        };
-
-        let location = match switch_slot {
-            Some(0) => SwitchSlot::Switch0,
-            Some(1) => SwitchSlot::Switch1,
-            Some(v) => {
-                warn!(log, "unexpected value for switch slot: {v}");
-                continue;
-            }
-            None => {
-                warn!(log, "maghemite has not learned switch slot from MGS");
                 continue;
             }
         };

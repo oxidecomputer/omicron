@@ -65,6 +65,7 @@ use nexus_types::internal_api::background::InstanceReincarnationStatus;
 use nexus_types::internal_api::background::InstanceUpdaterStatus;
 use nexus_types::internal_api::background::InventoryLoadStatus;
 use nexus_types::internal_api::background::LookupRegionPortStatus;
+use nexus_types::internal_api::background::PhysicalDiskAdoptionStatus;
 use nexus_types::internal_api::background::ProbeDistributorStatus;
 use nexus_types::internal_api::background::ReadOnlyRegionReplacementStartStatus;
 use nexus_types::internal_api::background::RegionReplacementDriverStatus;
@@ -73,6 +74,7 @@ use nexus_types::internal_api::background::RegionSnapshotReplacementFinishStatus
 use nexus_types::internal_api::background::RegionSnapshotReplacementGarbageCollectStatus;
 use nexus_types::internal_api::background::RegionSnapshotReplacementStartStatus;
 use nexus_types::internal_api::background::RegionSnapshotReplacementStepStatus;
+use nexus_types::internal_api::background::ServiceFirewallRuleStatus;
 use nexus_types::internal_api::background::SessionCleanupStatus;
 use nexus_types::internal_api::background::SitrepGcStatus;
 use nexus_types::internal_api::background::SitrepLoadStatus;
@@ -80,6 +82,8 @@ use nexus_types::internal_api::background::SupportBundleCleanupReport;
 use nexus_types::internal_api::background::SupportBundleCollectionReport;
 use nexus_types::internal_api::background::SupportBundleCollectionStepStatus;
 use nexus_types::internal_api::background::SupportBundleEreportStatus;
+use nexus_types::internal_api::background::SwitchPortPopulatorStatus;
+use nexus_types::internal_api::background::SwitchPortPopulatorStatusKind;
 use nexus_types::internal_api::background::TrustQuorumManagerStatus;
 use nexus_types::internal_api::background::TufArtifactReplicationCounters;
 use nexus_types::internal_api::background::TufArtifactReplicationRequest;
@@ -1194,6 +1198,24 @@ fn print_run_time(start_time: DateTime<Utc>, elapsed: Duration, indent: usize) {
     );
 }
 
+fn print_start_end_time(
+    start: DateTime<Utc>,
+    end: DateTime<Utc>,
+    indent: usize,
+) {
+    if let Ok(elapsed) = end.signed_duration_since(start).to_std() {
+        print_run_time(start, elapsed, indent);
+    } else {
+        println!(
+            "{:indent$}started at: {} (end time {} less than start time, \
+            which seems weird?)",
+            "",
+            humantime::format_rfc3339_millis(start.into()),
+            humantime::format_rfc3339_millis(end.into()),
+        );
+    }
+}
+
 /// Interprets the unstable, schemaless output from each particular background
 /// task and print a human-readable summary
 ///
@@ -1281,6 +1303,9 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
         "phantom_disks" => {
             print_task_phantom_disks(details);
         }
+        "physical_disk_adoption" => {
+            print_task_physical_disk_adoption(details);
+        }
         "probe_distributor" => {
             print_task_probe_distributor(details);
         }
@@ -1349,6 +1374,9 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
         }
         "trust_quorum_manager" => {
             print_task_trust_quorum_manager(details);
+        }
+        "populate_switch_ports" => {
+            print_task_populate_switch_ports(details);
         }
         _ => {
             println!(
@@ -2791,18 +2819,26 @@ fn print_task_session_cleanup(details: &serde_json::Value) {
 }
 
 fn print_task_service_firewall_rule_propagation(details: &serde_json::Value) {
-    match serde_json::from_value::<serde_json::Value>(details.clone()) {
+    match serde_json::from_value::<ServiceFirewallRuleStatus>(details.clone()) {
         Err(error) => eprintln!(
             "warning: failed to interpret task details: {:?}: {:?}",
             error, details
         ),
-        Ok(serde_json::Value::Object(map)) => {
-            if !map.is_empty() {
-                eprintln!("    unexpected return value from task: {:?}", map)
+        Ok(status) => {
+            if let Some(e) = status.lookup_error {
+                eprintln!("    error looking up or resolving rules: {}", e);
             }
-        }
-        Ok(val) => {
-            eprintln!("    unexpected return value from task: {:?}", val)
+            if let Some(failures) = status.sled_push_errors {
+                let maybe_s = if failures.len() == 1 { "" } else { "s" };
+                eprintln!(
+                    "    failed to push rules to {} sled{}:",
+                    failures.len(),
+                    maybe_s,
+                );
+                for (sled_id, error) in failures {
+                    eprintln!("        sled {}: {}", sled_id, error);
+                }
+            }
         }
     };
 }
@@ -3306,17 +3342,22 @@ fn print_task_sp_ereport_ingester(details: &serde_json::Value) {
     use nexus_types::internal_api::background::SpEreportIngesterStatus;
     use nexus_types::internal_api::background::SpEreporterStatus;
 
-    let SpEreportIngesterStatus { sps, errors, disabled, sps_not_present } =
-        match serde_json::from_value(details.clone()) {
-            Err(error) => {
-                eprintln!(
-                    "warning: failed to interpret task details: {:?}: {:?}",
-                    error, details
-                );
-                return;
-            }
-            Ok(status) => status,
-        };
+    let SpEreportIngesterStatus {
+        sps,
+        errors,
+        disabled,
+        sps_found,
+        sps_not_present,
+    } = match serde_json::from_value(details.clone()) {
+        Err(error) => {
+            eprintln!(
+                "warning: failed to interpret task details: {:?}: {:?}",
+                error, details
+            );
+            return;
+        }
+        Ok(status) => status,
+    };
 
     if !errors.is_empty() {
         println!("    errors listing reporters:");
@@ -3328,11 +3369,13 @@ fn print_task_sp_ereport_ingester(details: &serde_json::Value) {
     if disabled {
         println!("    SP ereport ingestion explicitly disabled by config!");
     } else {
+        println!("    {SPS_FOUND:<WIDTH$}{sps_found:>NUM_WIDTH$}");
+        if sps_not_present > 0 {
+            println!(
+                "(i) {SPS_NOT_PRESENT:<WIDTH$}{sps_not_present:>NUM_WIDTH$}"
+            );
+        }
         print_ereporter_status_totals(sps.iter().map(|sp| &sp.status));
-    }
-
-    if sps_not_present > 0 {
-        println!("(i) {SPS_NOT_PRESENT:<WIDTH$}{sps_not_present:>NUM_WIDTH$}");
     }
 
     if !sps.is_empty() {
@@ -3395,12 +3438,12 @@ fn print_ereporter_status_totals<'status>(
         total_new += new_ereports;
         total_reqs += requests;
         total_errors += errors.len();
-        if total_received > 0 {
+        if ereports_received > 0 {
             reporters_with_ereports += 1;
         } else {
             reporters_without_ereports += 1;
         }
-        if total_errors > 0 {
+        if !errors.is_empty() {
             reporters_with_errors += 1;
         } else {
             reporters_without_errors += 1;
@@ -3412,7 +3455,7 @@ fn print_ereporter_status_totals<'status>(
     println!("    {EREPORTS_RECEIVED:<WIDTH$}{total_received:>NUM_WIDTH$}");
     println!("    {NEW_EREPORTS:<WIDTH$}{total_new:>NUM_WIDTH$}");
     println!("    {HTTP_REQUESTS:<WIDTH$}{total_reqs:>NUM_WIDTH$}");
-    println!("    {ERRORS:<WIDTH$}{total_reqs:>NUM_WIDTH$}");
+    println!("    {ERRORS:<WIDTH$}{total_errors:>NUM_WIDTH$}");
     println!("    {TOTAL_REPORTERS:<WIDTH$}{total_reporters:>NUM_WIDTH$}",);
     println!(
         "    {REPORTERS_CONTACTED_SUCCESSFULLY:<WIDTH$}\
@@ -3446,6 +3489,7 @@ mod ereporter_status_fields {
     pub const REPORTERS_WITH_EREPORTS: &str = "    with ereports:";
     pub const REPORTERS_WITHOUT_EREPORTS: &str = "    without ereports:";
     pub const REPORTERS_WITH_ERRORS: &str = "  with collection errors:";
+    pub const SPS_FOUND: &str = "SPs found via ignition:";
     pub const SPS_NOT_PRESENT: &str = "SPs not present:";
     pub const WIDTH: usize = super::const_max_len(&[
         TOTAL_NEW_EREPORTS,
@@ -3458,6 +3502,7 @@ mod ereporter_status_fields {
         REPORTERS_WITH_EREPORTS,
         REPORTERS_WITHOUT_EREPORTS,
         REPORTERS_WITH_ERRORS,
+        SPS_FOUND,
         SPS_NOT_PRESENT,
     ]) + 1;
     pub const NUM_WIDTH: usize = 4;
@@ -3465,27 +3510,49 @@ mod ereporter_status_fields {
 
 fn print_task_fm_analysis(details: &serde_json::Value) {
     use nexus_types::internal_api::background::fm_analysis::{
-        AnalysisOutcome, Outcome, PreparationStatus,
+        AnalysisOutcome, AnalysisStatus, Outcome, PreparationStatus,
     };
-    let FmAnalysisStatus { parent_sitrep_id, inv_collection_id, outcome } =
-        match serde_json::from_value::<FmAnalysisStatus>(details.clone()) {
-            Err(error) => {
-                eprintln!(
-                    "warning: failed to interpret task details: {:?}: {:?}",
-                    error, details
-                );
-                return;
-            }
-            Ok(status) => status,
-        };
+
+    let FmAnalysisStatus {
+        parent_sitrep_id,
+        inv_collection_id,
+        known_classes,
+        outcome,
+    } = match serde_json::from_value::<FmAnalysisStatus>(details.clone()) {
+        Err(error) => {
+            eprintln!(
+                "warning: failed to interpret task details: {:?}: {:?}",
+                error, details
+            );
+            return;
+        }
+        Ok(status) => status,
+    };
     pub const PARENT_SITREP_ID: &str = "parent sitrep ID:";
     pub const INV_ID: &str = "current inventory collection ID:";
-    pub const WIDTH: usize = const_max_len(&[PARENT_SITREP_ID, INV_ID]) + 1;
+    pub const KNOWN_CLASSES: &str = "ereport classes consumed:";
+    pub const WIDTH: usize =
+        const_max_len(&[PARENT_SITREP_ID, INV_ID, KNOWN_CLASSES]) + 1;
     println!("    {PARENT_SITREP_ID:<WIDTH$}{parent_sitrep_id:?}");
     println!("    {INV_ID:<WIDTH$}{inv_collection_id:?}");
+    if known_classes.is_empty() {
+        println!("    {KNOWN_CLASSES:<WIDTH$}(none)");
+    } else {
+        println!("    {KNOWN_CLASSES:<WIDTH$}({} total)", known_classes.len());
+        for class in &known_classes {
+            println!("      - {class}");
+        }
+    }
     println!("    FAULT MANAGEMENT ANALYSIS SUMMARY");
-    println!("    ===== ========== ======== =======");
-    let (prep_status, analysis_outcome) = match outcome {
+    println!("    =================================");
+    let (prep_status, analysis_status) = match outcome {
+        Outcome::Disabled => {
+            println!(
+                "    fault management analysis explicitly disabled \
+                 by config!"
+            );
+            return;
+        }
         Outcome::WaitingForInventory => {
             println!(
                 "    analysis was not performed, as the inventory has\n    \
@@ -3494,15 +3561,48 @@ fn print_task_fm_analysis(details: &serde_json::Value) {
             );
             return;
         }
+        Outcome::WaitingForNewerInventory {
+            parent_inv_id,
+            next_inv_min_time_started,
+            input_inv_time_started,
+        } => {
+            const PARENT_INV: &str = "parent sitrep's inventory ID:";
+            const MIN_STARTED: &str = "earliest start time for next inventory:";
+            const LOADED_STARTED: &str = "loaded inventory started at:";
+            const WIDTH: usize =
+                const_max_len(&[PARENT_INV, MIN_STARTED, LOADED_STARTED]) + 1;
+            println!(
+                "    waiting for a newer inventory collection than the one \
+                 in the parent sitrep"
+            );
+            let min_started = humantime::format_rfc3339_millis(
+                next_inv_min_time_started.into(),
+            );
+            let loaded_started =
+                humantime::format_rfc3339_millis(input_inv_time_started.into());
+            println!("      {PARENT_INV:<WIDTH$}{parent_inv_id}");
+            println!("      {MIN_STARTED:<WIDTH$}{min_started}");
+            println!("      {LOADED_STARTED:<WIDTH$}{loaded_started}");
+            return;
+        }
         Outcome::PreparationError(error) => {
             println!(
                 "{ERRICON} failed to prepare analysis inputs:\n    {error}"
             );
             return;
         }
-        Outcome::RanAnalysis { prep_status, outcome } => (prep_status, outcome),
+        Outcome::RanAnalysis { prep_status, analysis_status } => {
+            (prep_status, analysis_status)
+        }
     };
-    match analysis_outcome {
+
+    let AnalysisStatus {
+        start_time,
+        end_time,
+        report: analysis_report,
+        outcome,
+    } = analysis_status;
+    match outcome {
         AnalysisOutcome::Error(error) => {
             println!("{ERRICON} analysis failed: {error}");
         }
@@ -3512,9 +3612,20 @@ fn print_task_fm_analysis(details: &serde_json::Value) {
                 parent_sitrep_id
             );
         }
-        AnalysisOutcome::NotCommitted { sitrep_id, error } => {
+        AnalysisOutcome::NotCommitted { sitrep_id } => {
             println!(
-                "    analysis succeeded, but the sitrep was not committed!"
+                "    analysis succeeded, but the sitrep was not committed"
+            );
+            println!(
+                "    since the parent sitrep ({parent_sitrep_id:?}) was out \
+                of date"
+            );
+            println!("    sitrep ID: {sitrep_id:?}");
+        }
+        AnalysisOutcome::CommitFailed { sitrep_id, error } => {
+            println!(
+                "{ERRICON} analysis succeeded, but committing the new sitrep \
+                 failed!"
             );
             println!("    sitrep ID: {sitrep_id:?}");
             println!("    error:     {error}");
@@ -3526,17 +3637,17 @@ fn print_task_fm_analysis(details: &serde_json::Value) {
     }
     println!();
 
-    let PreparationStatus { errors, report } = prep_status;
-    println!("{}", report.display_multiline(4));
+    let PreparationStatus { errors, report: prep_report } = prep_status;
+    print!("{}", prep_report.display_multiline(4));
     if !errors.is_empty() {
         println!("{ERRICON}   errors preparing analysis inputs:");
         for error in errors {
             println!("      > {error}")
         }
     }
-
-    // TODO(eliza): eventually there will also be a detailed analysis report,
-    // print that here as well...
+    println!();
+    print!("{}", analysis_report.display_multiline(4));
+    print_start_end_time(start_time, end_time, 4);
 }
 
 fn print_task_fm_sitrep_loader(details: &serde_json::Value) {
@@ -3643,16 +3754,7 @@ fn print_task_fm_rendezvous(details: &serde_json::Value) {
                 println!("(i)   note: this operation was not executed")
             }
             fm_rendezvous::OpResult::Executed { start, end } => {
-                if let Ok(elapsed) = start.signed_duration_since(end).to_std() {
-                    print_run_time(start, elapsed, 6);
-                } else {
-                    println!(
-                        "      started at: {} (end time {} less than start time, \
-                        which seems weird?)",
-                        humantime::format_rfc3339_millis(start.into()),
-                        humantime::format_rfc3339_millis(end.into()),
-                    );
-                }
+                print_start_end_time(start, end, 6);
             }
         }
 
@@ -3867,6 +3969,59 @@ fn print_task_trust_quorum_manager(details: &serde_json::Value) {
         TrustQuorumManagerStatus::Error(error) => {
             println!("    task did not complete successfully: {error}");
         }
+    }
+}
+
+fn print_task_populate_switch_ports(details: &serde_json::Value) {
+    fn print_one(
+        name: &str,
+        result: Result<SwitchPortPopulatorStatusKind, String>,
+    ) {
+        match result {
+            Ok(SwitchPortPopulatorStatusKind::Populated { num_ports }) => {
+                println!("{name}: populated {num_ports} ports");
+            }
+            Ok(SwitchPortPopulatorStatusKind::PreviouslyPopulated) => {
+                println!("{name} skipped: previously populated ports");
+            }
+            Err(err) => println!("{name} failed: {err}"),
+        }
+    }
+
+    let status = match serde_json::from_value::<SwitchPortPopulatorStatus>(
+        details.clone(),
+    ) {
+        Ok(status) => status,
+        Err(error) => {
+            eprintln!(
+                "warning: failed to interpret task details: {:?}: {:#?}",
+                error, details
+            );
+            return;
+        }
+    };
+
+    let SwitchPortPopulatorStatus { switch0, switch1 } = status;
+    print_one("switch0", switch0);
+    print_one("switch1", switch1);
+}
+
+fn print_task_physical_disk_adoption(details: &serde_json::Value) {
+    let status = match serde_json::from_value::<PhysicalDiskAdoptionStatus>(
+        details.clone(),
+    ) {
+        Ok(status) => status,
+        Err(error) => {
+            eprintln!(
+                "warning: failed to interpret task details: {:?}: {:#?}",
+                error, details
+            );
+            return;
+        }
+    };
+    println!("physical disks added: {}", status.disks_added);
+    for error in status.errors {
+        println!("{ERRICON} {error}");
     }
 }
 
@@ -5006,19 +5161,24 @@ async fn cmd_nexus_support_bundles_list(
     struct SupportBundleInfo {
         id: Uuid,
         time_created: DateTime<Utc>,
+        state: String,
+        fm_case_id: String,
         reason_for_creation: String,
         reason_for_failure: String,
-        state: String,
         user_comment: String,
     }
     let rows = support_bundles.into_iter().map(|sb| SupportBundleInfo {
         id: sb.id,
         time_created: sb.time_created,
+        state: format!("{:?}", sb.state),
+        fm_case_id: sb
+            .fm_case_id
+            .map(|id| id.to_string())
+            .unwrap_or_else(|| "-".to_string()),
         reason_for_creation: sb.reason_for_creation,
         reason_for_failure: sb
             .reason_for_failure
             .unwrap_or_else(|| "-".to_string()),
-        state: format!("{:?}", sb.state),
         user_comment: sb.user_comment.unwrap_or_else(|| "-".to_string()),
     });
     let table = tabled::Table::new(rows)

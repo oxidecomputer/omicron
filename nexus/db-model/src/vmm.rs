@@ -14,7 +14,7 @@
 
 use super::{Generation, VmmState};
 use crate::typed_uuid::DbTypedUuid;
-use crate::{SqlU16, VmmCpuPlatform};
+use crate::{SqlU16, VmmCpuPlatform, VmmFailureReason};
 use chrono::{DateTime, Utc};
 use nexus_db_schema::schema::vmm;
 use omicron_uuid_kinds::*;
@@ -72,6 +72,10 @@ pub struct Vmm {
     /// control plane if this VMM's instance didn't specify a required platform
     /// when it was started.
     pub cpu_platform: VmmCpuPlatform,
+
+    /// If this VMM is in the `Failed` state, this field describes why it
+    /// failed. This is `None` for VMMs that are not in the `Failed` state.
+    pub failure_reason: Option<VmmFailureReason>,
 }
 
 impl Vmm {
@@ -101,70 +105,38 @@ impl Vmm {
             propolis_port: SqlU16(propolis_port),
             state: VmmState::Creating,
             cpu_platform,
+            failure_reason: None,
         }
     }
 
-    /// Returns the runtime state of this VMM.
-    pub fn runtime(&self) -> VmmRuntimeState {
-        VmmRuntimeState {
-            time_state_updated: self.time_state_updated,
-            generation: self.generation,
-            state: self.state,
+    pub fn runtime(&self) -> nexus_types::instance::VmmRuntimeState {
+        use nexus_types::instance as types;
+        let state = match (self.state, self.failure_reason) {
+            (VmmState::Failed, None) => {
+                // Weird and bad!
+                types::VmmState::Failed(types::VmmFailureReason::Prehistoric)
+            }
+            (VmmState::Failed, Some(reason)) => {
+                types::VmmState::Failed(reason.into())
+            }
+            (VmmState::Creating, _) => types::VmmState::Creating,
+            (VmmState::Starting, _) => types::VmmState::Starting,
+            (VmmState::Running, _) => types::VmmState::Running,
+            (VmmState::Stopping, _) => types::VmmState::Stopping,
+            (VmmState::Stopped, _) => types::VmmState::Stopped,
+            (VmmState::Rebooting, _) => types::VmmState::Rebooting,
+            (VmmState::Migrating, _) => types::VmmState::Migrating,
+            (VmmState::Destroyed, _) => types::VmmState::Destroyed,
+            (VmmState::SagaUnwound, _) => types::VmmState::SagaUnwound,
+        };
+        types::VmmRuntimeState {
+            state,
+            generation: self.generation.into(),
+            time_updated: self.time_state_updated,
         }
     }
 
     pub fn sled_id(&self) -> SledUuid {
         self.sled_id.into()
-    }
-}
-
-/// Runtime state for a VMM, owned by the sled where that VMM is running.
-#[derive(
-    Clone,
-    Debug,
-    AsChangeset,
-    Selectable,
-    Insertable,
-    Queryable,
-    Serialize,
-    Deserialize,
-    PartialEq,
-)]
-#[diesel(table_name = vmm)]
-pub struct VmmRuntimeState {
-    /// The time at which this state was most recently updated.
-    pub time_state_updated: DateTime<Utc>,
-
-    /// The generation number protecting this VMM's state and update time.
-    #[diesel(column_name = state_generation)]
-    #[serde(rename = "gen")]
-    pub generation: Generation,
-
-    /// The state of this VMM. If this VMM is the active VMM for a given
-    /// instance, this state is the instance's logical state.
-    pub state: VmmState,
-}
-
-impl From<omicron_common::api::internal::nexus::VmmRuntimeState>
-    for VmmRuntimeState
-{
-    fn from(
-        value: omicron_common::api::internal::nexus::VmmRuntimeState,
-    ) -> Self {
-        Self {
-            state: value.state.into(),
-            time_state_updated: value.time_updated,
-            generation: value.generation.into(),
-        }
-    }
-}
-
-impl From<Vmm> for sled_agent_client::types::VmmRuntimeState {
-    fn from(s: Vmm) -> Self {
-        Self {
-            gen_: s.generation.into(),
-            state: s.state.into(),
-            time_updated: s.time_state_updated,
-        }
     }
 }

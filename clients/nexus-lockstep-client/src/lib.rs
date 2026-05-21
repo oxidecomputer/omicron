@@ -50,21 +50,20 @@ progenitor::generate_api!(
         DnsConfigParams = nexus_types::internal_api::params::DnsConfigParams,
         DnsConfigZone = nexus_types::internal_api::params::DnsConfigZone,
         DnsRecord = nexus_types::internal_api::params::DnsRecord,
-        ExternalPortDiscovery = nexus_types::internal_api::params::ExternalPortDiscovery,
         Generation = omicron_common::api::external::Generation,
         ImportExportPolicy = sled_agent_types::early_networking::ImportExportPolicy,
+        LinkFec = sled_agent_types::early_networking::LinkFec,
+        LinkSpeed = sled_agent_types::early_networking::LinkSpeed,
         MacAddr = omicron_common::api::external::MacAddr,
         MgsUpdateDriverStatus = nexus_types::internal_api::views::MgsUpdateDriverStatus,
         Name = omicron_common::api::external::Name,
-        NetworkInterface = omicron_common::api::internal::shared::NetworkInterface,
-        NetworkInterfaceKind = omicron_common::api::internal::shared::NetworkInterfaceKind,
+        NetworkInterface = sled_agent_types::inventory::NetworkInterface,
+        NetworkInterfaceKind = sled_agent_types::inventory::NetworkInterfaceKind,
         NewPasswordHash = omicron_passwords::NewPasswordHash,
         OximeterReadMode = nexus_types::deployment::OximeterReadMode,
         OximeterReadPolicy = nexus_types::deployment::OximeterReadPolicy,
         PendingMgsUpdate = nexus_types::deployment::PendingMgsUpdate,
         PlannerConfig = nexus_types::deployment::PlannerConfig,
-        PortFec = sled_agent_types::early_networking::PortFec,
-        PortSpeed = sled_agent_types::early_networking::PortSpeed,
         ReconfiguratorConfig = nexus_types::deployment::ReconfiguratorConfig,
         ReconfiguratorConfigParam = nexus_types::deployment::ReconfiguratorConfigParam,
         ReconfiguratorConfigView = nexus_types::deployment::ReconfiguratorConfigView,
@@ -140,12 +139,10 @@ impl From<omicron_common::address::Ipv6Range> for types::Ipv6Range {
     }
 }
 
-impl From<&omicron_common::api::internal::shared::SourceNatConfigGeneric>
+impl From<&sled_agent_types::inventory::SourceNatConfigGeneric>
     for types::SourceNatConfigGeneric
 {
-    fn from(
-        r: &omicron_common::api::internal::shared::SourceNatConfigGeneric,
-    ) -> Self {
+    fn from(r: &sled_agent_types::inventory::SourceNatConfigGeneric) -> Self {
         let (first_port, last_port) = r.port_range_raw();
         Self { ip: r.ip, first_port, last_port }
     }

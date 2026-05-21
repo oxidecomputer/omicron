@@ -23,13 +23,13 @@
 //!   * [`WriteNetworkConfigRequest::body`] is now a [`SystemNetworkingConfig`]
 
 use crate::v1::inventory::ZoneKind;
+use crate::v11::inventory::SourceNatConfigGeneric;
 use crate::v30;
 use crate::v30::early_networking::RackNetworkConfig;
 use iddqd::IdOrdItem;
 use iddqd::IdOrdMap;
 use omicron_common::api::external::MacAddr;
 use omicron_common::api::external::Vni;
-use omicron_common::api::internal::shared::SourceNatConfigGeneric;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};

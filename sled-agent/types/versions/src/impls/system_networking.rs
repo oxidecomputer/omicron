@@ -57,7 +57,7 @@ impl proptest::arbitrary::Arbitrary for ServiceZoneNatEntries {
     type Strategy = proptest::prelude::BoxedStrategy<Self>;
 
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-        use omicron_common::api::internal::shared::SourceNatConfigGeneric;
+        use crate::latest::inventory::SourceNatConfigGeneric;
         use proptest::prelude::*;
 
         // We know `try_from` will fail if we don't have at least one boundary

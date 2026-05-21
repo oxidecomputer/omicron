@@ -10,26 +10,8 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     io::{BufReader, Write},
     net::SocketAddrV6,
+    process::ExitCode,
     time::Duration,
-};
-
-use anyhow::{Context, Result, anyhow, bail};
-use camino::Utf8PathBuf;
-use clap::{Args, Subcommand, ValueEnum};
-use slog::Logger;
-use tokio::{sync::watch, task::JoinHandle};
-use update_engine::{
-    EventBuffer, NestedError,
-    display::{GroupDisplay, LineDisplayStyles},
-};
-use wicket_common::{
-    WICKETD_TIMEOUT,
-    rack_update::ClearUpdateStateResponse,
-    update_events::{EventReport, WicketdEngineSpec},
-};
-use wicketd_client::types::{
-    ClearUpdateStateParams, GetArtifactsAndEventReportsResponse,
-    StartUpdateParams,
 };
 
 use crate::{
@@ -39,6 +21,29 @@ use crate::{
         parse_event_report_map,
     },
     wicketd::create_wicketd_client,
+};
+use anyhow::{Context, Result, anyhow, bail};
+use camino::Utf8PathBuf;
+use clap::{Args, Subcommand, ValueEnum};
+use omicron_common::update::ArtifactId;
+use slog::Logger;
+use tokio::{sync::watch, task::JoinHandle};
+use update_engine::{
+    AbortReason, EventBuffer, ExecutionStatus, FailureReason, NestedError,
+    StepKey, StepSpec, TerminalKind,
+    display::{GroupDisplay, LineDisplayStyles},
+};
+use wicket_common::{
+    WICKETD_TIMEOUT,
+    rack_update::{
+        ClearUpdateStateResponse, ComponentUpdateStatus, ExitMessage,
+        RackUpdateStatus, UpdateState, UpdateStateCounts, rollup_update_state,
+    },
+    update_events::{EventReport, WicketdEngineSpec},
+};
+use wicketd_client::types::{
+    ClearUpdateStateParams, GetArtifactsAndEventReportsResponse,
+    StartUpdateParams,
 };
 
 use super::command::CommandOutput;
@@ -50,6 +55,9 @@ pub(crate) enum RackUpdateArgs {
 
     /// Attach to one or more running updates.
     Attach(AttachArgs),
+
+    /// Get the status of the updates.
+    Status(StatusArgs),
 
     /// Clear updates.
     Clear(ClearArgs),
@@ -72,22 +80,30 @@ impl RackUpdateArgs {
         wicketd_addr: SocketAddrV6,
         global_opts: GlobalOpts,
         output: CommandOutput<'_>,
-    ) -> Result<()> {
+    ) -> Result<ExitCode> {
         match self {
             RackUpdateArgs::Start(args) => {
-                args.exec(log, wicketd_addr, global_opts, output).await
+                args.exec(log, wicketd_addr, global_opts, output).await?;
+                Ok(ExitCode::SUCCESS)
             }
             RackUpdateArgs::Attach(args) => {
-                args.exec(log, wicketd_addr, global_opts, output).await
+                args.exec(log, wicketd_addr, global_opts, output).await?;
+                Ok(ExitCode::SUCCESS)
+            }
+            RackUpdateArgs::Status(args) => {
+                args.exec(log, wicketd_addr, output).await
             }
             RackUpdateArgs::Clear(args) => {
-                args.exec(log, wicketd_addr, global_opts, output).await
+                args.exec(log, wicketd_addr, global_opts, output).await?;
+                Ok(ExitCode::SUCCESS)
             }
             RackUpdateArgs::DebugDump(args) => {
-                args.exec(log, wicketd_addr).await
+                args.exec(log, wicketd_addr).await?;
+                Ok(ExitCode::SUCCESS)
             }
             RackUpdateArgs::DebugReplay(args) => {
-                args.exec(log, global_opts, output)
+                args.exec(log, global_opts, output)?;
+                Ok(ExitCode::SUCCESS)
             }
         }
     }
@@ -310,6 +326,318 @@ async fn start_fetch_reports_task(
         Ok(())
     });
     (rx, handle)
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct StatusArgs {
+    #[clap(flatten)]
+    component_ids: ComponentIdSelector,
+
+    /// Return the data as JSON for programmatic use.
+    #[clap(long)]
+    json: bool,
+
+    /// Read debug-dump output from a file, or - for stdin.
+    /// If omitted, fetch data from wicketd.
+    #[clap(long, value_name = "FILE")]
+    file: Option<Utf8PathBuf>,
+}
+
+impl StatusArgs {
+    async fn exec(
+        self,
+        log: Logger,
+        wicketd_addr: SocketAddrV6,
+        output: CommandOutput<'_>,
+    ) -> Result<ExitCode> {
+        // Read the artifact & event reports from wicketd, a file, or stdin.
+        let response = if let Some(path) = self.file {
+            if path == "-" {
+                serde_json::from_reader(BufReader::new(std::io::stdin()))
+                    .context("error parsing stdin")?
+            } else {
+                let file = BufReader::new(
+                    std::fs::File::open(&path)
+                        .with_context(|| format!("error opening {path}"))?,
+                );
+                serde_json::from_reader(file)
+                    .with_context(|| format!("error parsing {path}"))?
+            }
+        } else {
+            let client =
+                create_wicketd_client(&log, wicketd_addr, WICKETD_TIMEOUT);
+            client
+                .get_artifacts_and_event_reports()
+                .await
+                .context("error fetching artifacts and event reports")?
+                .into_inner()
+        };
+
+        // Derive the status from events, artifacts, and component selector.
+        let status =
+            build_rack_update_status(&log, response, &self.component_ids)?;
+
+        // Write either JSON or a human-readable table to stdout.
+        if self.json {
+            serde_json::to_writer_pretty(&mut *output.stdout, &status)
+                .context("error writing JSON to output")?;
+            writeln!(output.stdout).context("error writing to output")?;
+        } else {
+            write_status_table(output.stdout, &status)?;
+        }
+
+        Ok(ExitCode::from(status.state.exit_code()))
+    }
+}
+
+fn get_exit_message<S: StepSpec>(
+    buffer: &EventBuffer<S>,
+    key: &StepKey,
+) -> Option<ExitMessage> {
+    let step = buffer.get(key)?;
+    if let Some(FailureReason::StepFailed(fi)) =
+        step.step_status().failure_reason()
+    {
+        return Some(ExitMessage {
+            message: fi.message.clone(),
+            causes: fi.causes.clone(),
+        });
+    }
+    if let Some(AbortReason::StepAborted(ai)) =
+        step.step_status().abort_reason()
+    {
+        return Some(ExitMessage {
+            message: ai.message.clone(),
+            causes: vec![],
+        });
+    }
+    None
+}
+
+fn build_rack_update_status(
+    log: &Logger,
+    response: GetArtifactsAndEventReportsResponse,
+    selector: &ComponentIdSelector,
+) -> Result<RackUpdateStatus> {
+    let artifacts: Vec<ArtifactId> = response
+        .artifacts
+        .into_iter()
+        .map(|a| a.artifact_id)
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect();
+
+    let event_reports = parse_event_report_map(log, response.event_reports);
+
+    // Filter to the selected components if any are specified.
+    let event_reports = if selector.is_empty() {
+        // Default to all components if no selectors specified.
+        event_reports
+    } else {
+        let ids = selector.to_component_ids()?;
+        event_reports.into_iter().filter(|(id, _)| ids.contains(id)).collect()
+    };
+
+    let components: Vec<ComponentUpdateStatus> =
+        event_reports
+            .iter()
+            .map(|(&id, report)| {
+                let mut buffer = EventBuffer::default();
+                buffer.add_event_report(report.clone());
+
+                // Derive the ComponentUpdateStatus status from the output of
+                // update-engine's ExecutionSummary, a rollup of all events.
+                match buffer.root_execution_summary() {
+                    None => ComponentUpdateStatus {
+                        id: id.into(),
+                        state: UpdateState::NotStarted,
+                        step_index: None,
+                        total_steps: None,
+                        elapsed_secs: None,
+                        exit_message: None,
+                    },
+                    Some(summary) => {
+                        let (
+                            state,
+                            current_step_index,
+                            elapsed_secs,
+                            exit_message,
+                        ) = match &summary.execution_status {
+                            ExecutionStatus::NotStarted => {
+                                (UpdateState::NotStarted, None, None, None)
+                            }
+                            ExecutionStatus::Running {
+                                step_key,
+                                root_total_elapsed,
+                            } => (
+                                UpdateState::InProgress,
+                                Some(step_key.index),
+                                Some(root_total_elapsed.as_secs_f64()),
+                                None,
+                            ),
+                            ExecutionStatus::Terminal(info) => {
+                                let state = match info.kind {
+                                    TerminalKind::Completed => {
+                                        UpdateState::Completed
+                                    }
+                                    TerminalKind::Failed => UpdateState::Failed,
+                                    TerminalKind::Aborted => {
+                                        UpdateState::Aborted
+                                    }
+                                };
+                                let exit_message =
+                                    get_exit_message(&buffer, &info.step_key);
+                                (
+                                    state,
+                                    Some(info.step_key.index),
+                                    info.root_total_elapsed
+                                        .map(|d| d.as_secs_f64()),
+                                    exit_message,
+                                )
+                            }
+                        };
+                        ComponentUpdateStatus {
+                            id: id.into(),
+                            state,
+                            step_index: current_step_index,
+                            total_steps: Some(summary.total_steps),
+                            elapsed_secs,
+                            exit_message,
+                        }
+                    }
+                }
+            })
+            .collect();
+
+    let component_states: Vec<UpdateState> =
+        components.iter().map(|c| c.state).collect();
+    let state = rollup_update_state(&component_states);
+    let counts = UpdateStateCounts::from_components(&components);
+
+    Ok(RackUpdateStatus {
+        state,
+        system_version: response.system_version,
+        artifacts,
+        components,
+        state_counts: counts,
+    })
+}
+
+/// Write a human-readable status table to `out`.
+fn write_status_table(
+    out: &mut dyn Write,
+    status: &RackUpdateStatus,
+) -> Result<()> {
+    #[derive(tabled::Tabled)]
+    #[tabled(rename_all = "UPPERCASE")]
+    struct ArtifactRow {
+        name: String,
+        kind: String,
+        version: String,
+    }
+
+    #[derive(tabled::Tabled)]
+    #[tabled(rename_all = "UPPERCASE")]
+    struct ComponentRow {
+        #[tabled(rename = "TYPE")]
+        type_: String,
+        slot: u16,
+        state: String,
+        progress: String,
+        elapsed: String,
+    }
+
+    // System version and artifacts.
+    writeln!(out, "State: {}\n", status.state)?;
+    writeln!(
+        out,
+        "System version: {}",
+        status
+            .system_version
+            .as_ref()
+            .map(|v| v.to_string())
+            .as_deref()
+            .unwrap_or("(none)")
+    )?;
+
+    let artifact_rows: Vec<ArtifactRow> = status
+        .artifacts
+        .iter()
+        .map(|a| ArtifactRow {
+            name: a.name.clone(),
+            kind: a.kind.to_string(),
+            version: a.version.to_string(),
+        })
+        .collect();
+    let artifact_table = tabled::Table::new(artifact_rows)
+        .with(tabled::settings::Style::empty())
+        .with(tabled::settings::Padding::new(0, 2, 0, 0))
+        .to_string();
+    writeln!(out, "{artifact_table}\n")?;
+
+    // Component table.
+    let component_rows: Vec<ComponentRow> = status
+        .components
+        .iter()
+        .map(|c| {
+            let progress = match (c.step_index, c.total_steps) {
+                (Some(i), Some(t)) => format!("{}/{}", i + 1, t),
+                (None, Some(t)) => format!("-/{t}"),
+                _ => "-".to_string(),
+            };
+            let elapsed = match c.elapsed_secs {
+                Some(secs) => {
+                    let total = secs as u64;
+                    format!(
+                        "{:02}:{:02}:{:02}",
+                        total / 3600,
+                        (total % 3600) / 60,
+                        total % 60
+                    )
+                }
+                None => "-".to_string(),
+            };
+
+            ComponentRow {
+                type_: c.id.type_.to_string(),
+                slot: c.id.slot,
+                state: c.state.to_string(),
+                progress,
+                elapsed,
+            }
+        })
+        .collect();
+
+    let component_table = tabled::Table::new(component_rows)
+        .with(tabled::settings::Style::empty())
+        .with(tabled::settings::Padding::new(0, 2, 0, 0))
+        .to_string();
+    writeln!(out, "{component_table}")?;
+
+    let c = &status.state_counts;
+    writeln!(
+        out,
+        "\n{} completed, {} failed, {} aborted, {} in progress, {} not started",
+        c.completed, c.failed, c.aborted, c.in_progress, c.not_started,
+    )?;
+
+    for component in &status.components {
+        if let Some(exit_message) = &component.exit_message {
+            writeln!(
+                out,
+                "\n{} {} ({}): {}",
+                component.id.type_,
+                component.id.slot,
+                component.state,
+                exit_message.message,
+            )?;
+            for cause in &exit_message.causes {
+                writeln!(out, "  caused by: {cause}")?;
+            }
+        }
+    }
+
+    Ok(())
 }
 
 #[derive(Debug, Args)]
@@ -603,5 +931,9 @@ impl ComponentIdSelector {
         }
 
         Ok(component_ids)
+    }
+
+    fn is_empty(&self) -> bool {
+        self.sled.is_empty() && self.switch.is_empty() && self.psc.is_empty()
     }
 }

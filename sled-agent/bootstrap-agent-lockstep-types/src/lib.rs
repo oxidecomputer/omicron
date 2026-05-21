@@ -322,3 +322,24 @@ impl RssStep {
         return 0;
     }
 }
+
+/// Wrapper for optional contents of the replicated network config.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct ReplicatedNetworkConfig {
+    pub contents: Option<ReplicatedNetworkConfigContents>,
+}
+
+/// Contents of the replicated network config.
+///
+/// Analogous to the bootstore `NetworkConfig` type.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct ReplicatedNetworkConfigContents {
+    pub generation: u64,
+    /// The `NetworkConfig` arbitrary blob, encoded using the standard base64
+    /// alphabet.
+    ///
+    /// Currently, the contents are expected to be JSON, but
+    /// serialization/deserialization of the contents is performed outside the
+    /// replication engine, which just deals with a binary blob.
+    pub base64_blob: String,
+}

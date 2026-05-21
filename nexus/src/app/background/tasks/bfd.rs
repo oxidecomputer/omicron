@@ -6,7 +6,7 @@
 //! (BFD) sessions.
 
 use crate::app::background::BackgroundTask;
-use crate::app::mgd_clients;
+use crate::app::background::tasks::networking::resolve_mgd_clients;
 use futures::FutureExt;
 use futures::future::BoxFuture;
 use internal_dns_resolver::Resolver;
@@ -116,22 +116,18 @@ impl BackgroundTask for BfdManager {
 
             let mut current: HashSet<BfdSessionKey> = HashSet::new();
 
-            let mgd_clients = match mgd_clients(&self.resolver, log).await
-                {
-                    Ok(mappings) => mappings,
+            let mgd_clients =
+                match resolve_mgd_clients(&self.resolver, log).await {
+                    Ok(clients) => clients,
                     Err(e) => {
+                        let e = InlineErrorChain::new(&e);
                         error!(
                             log,
-                            "failed to resolve addresses for Maghemite";
-                            "error" => %e);
-                        return json!({
-                            "error":
-                                format!(
-                                    "failed to resolve addresses for Maghemite: {:#}",
-                                    e
-                                )
-                        });
-                    },
+                            "failed to resolve addresses for MGD services";
+                            &e,
+                        );
+                        return json!({ "error": e.to_string() });
+                    }
                 };
 
             for (location, c) in &mgd_clients {
@@ -140,7 +136,7 @@ impl BackgroundTask for BfdManager {
                     Err(e) => {
                         error!(&log, "failed to get bfd sessions from mgd: {}",
                             c.baseurl();
-                            "error" => e.to_string()
+                            InlineErrorChain::new(&e),
                         );
                         continue;
                     }

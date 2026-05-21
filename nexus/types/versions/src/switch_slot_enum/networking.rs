@@ -10,8 +10,8 @@ use omicron_common::api::external::Name;
 use omicron_common::api::external::NameOrId;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use sled_agent_types::early_networking::BfdMode;
-use sled_agent_types::early_networking::SwitchSlot;
+use sled_agent_types_versions::v1::early_networking::BfdMode;
+use sled_agent_types_versions::v1::early_networking::SwitchSlot;
 use std::net::IpAddr;
 use uuid::Uuid;
 
