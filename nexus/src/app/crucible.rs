@@ -2621,6 +2621,9 @@ mod test {
         assert_eq!(upstairs_health, UpstairsHealth::Healthy { upstairs_id });
     }
 
+    /// Ensure that `propolis_client_upstairs_health` can find the requested
+    /// Upstairs for a paricular Downstairs when in various spots of the
+    /// VolumeInfo tree.
     #[test]
     fn upstairs_health_search() {
         let log = slog::Logger::root(slog::Discard, slog::o!());
