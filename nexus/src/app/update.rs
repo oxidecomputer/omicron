@@ -541,16 +541,8 @@ impl super::Nexus {
             )
             .await?;
 
-        let components_by_release_version = self
-            .component_version_counts(
-                //                opctx,
-                //                &db_target_release,
-                //                current_tuf_repo,
-                //                &inventory,
-                // TODO-K: Is this clone fine? Should I just use a reference?
-                internal_status.clone(),
-            )
-            .await?;
+        let components_by_release_version =
+            self.component_version_counts(internal_status.clone()).await?;
 
         let blueprint_target = self
             .update_status
@@ -628,8 +620,6 @@ impl super::Nexus {
             }
             UpdateActivityState::Idle | UpdateActivityState::Stuck => {}
         };
-
-        // TODO-K: Add missing sleds here
 
         let stuck_sagas = self
             .datastore()
@@ -755,92 +745,8 @@ impl super::Nexus {
     /// version
     async fn component_version_counts(
         &self,
-        //        opctx: &OpContext,
-        //        target_release: &nexus_db_model::TargetRelease,
-        //        current_tuf_repo: Option<nexus_db_model::TufRepoDescription>,
-        //        inventory: &Arc<Collection>,
         status: internal_views::UpdateStatus,
     ) -> Result<BTreeMap<String, usize>, Error> {
-        //        // Build current TargetReleaseDescription, defaulting to Initial if
-        //        // there is no tuf repo ID which, based on DB constraints, happens if
-        //        // and only if target_release_source is 'unspecified', which should only
-        //        // happen in the initial state before any target release has been set
-        //        let curr_target_desc = match current_tuf_repo {
-        //            Some(repo) => {
-        //                TargetReleaseDescription::TufRepo(repo.into_external())
-        //            }
-        //            None => TargetReleaseDescription::Initial,
-        //        };
-        //
-        //        // Get previous target release (if it exists). Build the "prev"
-        //        // TargetReleaseDescription from the previous generation if available,
-        //        // otherwise fall back to Initial.
-        //        let prev_repo_id =
-        //            if let Some(prev_gen) = target_release.generation.prev() {
-        //                self.datastore()
-        //                    .target_release_get_generation(opctx, Generation(prev_gen))
-        //                    .await
-        //                    .internal_context("fetching previous target release")?
-        //                    .and_then(|r| r.tuf_repo_id)
-        //            } else {
-        //                None
-        //            };
-        //
-        //        // It should never happen that a target release other than the initial
-        //        // one with target_release_source unspecified should be missing a
-        //        // tuf_repo_id. So if we have a tuf_repo_id for the previous target
-        //        // release, we should always have one for the current target.
-        //        if prev_repo_id.is_some() && target_release.tuf_repo_id.is_none() {
-        //            return Err(Error::internal_error(
-        //                "Target release has no tuf repo but previous release has one",
-        //            ));
-        //        }
-        //
-        //        let prev_target_desc = match prev_repo_id {
-        //            Some(id) => TargetReleaseDescription::TufRepo(
-        //                self.datastore()
-        //                    .tuf_repo_get_by_id(opctx, id.into())
-        //                    .await?
-        //                    .into_external(),
-        //            ),
-        //            None => TargetReleaseDescription::Initial,
-        //        };
-        //
-        //        // Get the list of sleds that should be reported as a part of the update
-        //        // status. (In particular, this allows us to filter out sleds that are
-        //        // physically present but not part of the cluster, as well as add
-        //        // "unknown" counts for sleds that ought to be present but aren't.)
-        //        let expected_sleds = self
-        //            .datastore()
-        //            .sled_list_all_batched(
-        //                opctx,
-        //                SledFilter::SpsUpdatedByReconfigurator,
-        //            )
-        //            .await?
-        //            .iter()
-        //            .map(|sled| {
-        //                (
-        //                    BaseboardId {
-        //                        part_number: sled.part_number().to_string(),
-        //                        serial_number: sled.serial_number().to_string(),
-        //                    },
-        //                    sled.id(),
-        //                )
-        //            })
-        //            .collect();
-        //
-        //        // It's weird to use the internal view this way. It would feel more
-        //        // correct to extract shared logic and call it in both places. On the
-        //        // other hand, that sharing would be boilerplatey and not add much yet.
-        //        // So for now, use the internal view, but plan to extract shared logic
-        //        // or do our own thing here once things settle.
-        //        let status = internal_views::UpdateStatus::new(
-        //            &prev_target_desc,
-        //            &curr_target_desc,
-        //            &expected_sleds,
-        //            &inventory,
-        //        );
-
         let sled_versions = status.sleds.into_iter().flat_map(|sled| {
             let zone_versions = sled.zones.into_iter().map(|zone| zone.version);
 
