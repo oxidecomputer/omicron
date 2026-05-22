@@ -473,6 +473,51 @@ async fn test_omdb_success_cases() {
         );
     }
 
+    // Now exercise the stdout-streaming path: omit `--output` and
+    // capture stdout as bytes. Verifies the data-descriptor zip variant
+    // produced by `bundle_to_stream` is well-formed and contains the
+    // expected metadata.
+    let stdout_path = tmpdir.path().join("bundle-stdout.zip");
+    let stdout_file =
+        std::fs::File::create(&stdout_path).expect("create stdout capture");
+    let cmd_path_owned = cmd_path.to_path_buf();
+    let p = postgres_url.clone();
+    let dns = cptestctx.internal_dns.dns_server.local_address().to_string();
+    let stream_tempdir = tmpdir.path().to_owned();
+    let exit_status = tokio::task::spawn_blocking(move || {
+        Exec::cmd(&cmd_path_owned)
+            .env("OMDB_DB_URL", &p)
+            .env("OMDB_DNS_SERVER", &dns)
+            .env("RUST_BACKTRACE", "1")
+            .env("RUST_LIB_BACKTRACE", "0")
+            .args(&[
+                "support-bundle",
+                "collect",
+                "--tempdir",
+                stream_tempdir.as_str(),
+                "--reason",
+                "integration test (stdout)",
+            ])
+            .stdout(subprocess::Redirection::File(stdout_file))
+            .join()
+            .expect("running omdb to stream a bundle")
+    })
+    .await
+    .expect("spawn_blocking");
+    assert!(exit_status.success(), "stdout streaming failed: {exit_status:?}");
+    let zip_file = std::fs::File::open(&stdout_path)
+        .expect("captured stdout file should exist");
+    let mut archive = zip::ZipArchive::new(zip_file)
+        .expect("streamed bundle is a valid zip archive");
+    for required in
+        ["bundle_id.txt", "meta/reason_for_creation.txt", "meta/trace.json"]
+    {
+        assert!(
+            archive.by_name(required).is_ok(),
+            "streamed bundle zip is missing expected entry {required}",
+        );
+    }
+
     let ox_invocation = &["oximeter", "list-producers"];
     let mut ox_output = String::new();
     let ox = ox_url.clone();

@@ -30,12 +30,12 @@ use nexus_types::fm::ereport::EreportFilters;
 use nexus_types::support_bundle::BundleDataCategory;
 use nexus_types::support_bundle::BundleDataSelection;
 use omicron_uuid_kinds::SupportBundleUuid;
-use std::io::Seek;
-use std::io::SeekFrom;
+use std::io::Write;
 use std::sync::Arc;
 use support_bundle_collection::BundleCollection;
 use support_bundle_collection::BundleInfo;
-use support_bundle_collection::zip::bundle_to_zipfile;
+use support_bundle_collection::zip::bundle_to_stream;
+use support_bundle_collection::zip::bundle_to_writer;
 
 /// Arguments to the "omdb support-bundle" subcommand
 #[derive(Debug, Args)]
@@ -60,9 +60,10 @@ struct CollectArgs {
     #[command(flatten)]
     db_url_opts: DbUrlOptions,
 
-    /// Path where the resulting bundle zip will be written.
+    /// Optional path where the bundle zip will be written. If omitted,
+    /// the zip is streamed to stdout (suitable for piping over ssh).
     #[clap(long, short = 'o')]
-    output: Utf8PathBuf,
+    output: Option<Utf8PathBuf>,
 
     /// Reason recorded inside the bundle's metadata.
     #[clap(long, default_value = "collected via omdb")]
@@ -171,20 +172,30 @@ impl CollectArgs {
         let _ = cancel_handle.await;
         let report = collect_result?;
 
-        let zip_tempdir = self.tempdir.clone();
         let output = self.output.clone();
         tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
-            let mut tempfile = bundle_to_zipfile(&dir, &zip_tempdir)?;
-            tempfile.seek(SeekFrom::Start(0))?;
-            let mut out = std::fs::File::create(&output)
-                .with_context(|| format!("creating {output}"))?;
-            std::io::copy(&mut tempfile, &mut out)?;
+            match output {
+                Some(path) => {
+                    let file = std::fs::File::create(&path)
+                        .with_context(|| format!("creating {path}"))?;
+                    bundle_to_writer(&dir, &file)?;
+                }
+                None => {
+                    let mut stdout = std::io::stdout().lock();
+                    bundle_to_stream(&dir, &mut stdout)?;
+                    stdout.flush()?;
+                }
+            }
             Ok(())
         })
         .await
         .context("zip task panicked")??;
 
-        eprintln!("Wrote bundle to {}", self.output);
+        if let Some(path) = &self.output {
+            eprintln!("Wrote bundle to {path}");
+        } else {
+            eprintln!("Bundle streamed to stdout");
+        }
         eprintln!("{} steps executed:", report.steps.len());
         for step in &report.steps {
             let dur = step.end - step.start;
