@@ -90,7 +90,7 @@ pub enum Error {
     AttachedSubnetUpdateMissingPort(uuid::Uuid, NetworkInterfaceKind),
 
     #[error(
-        "address {0} is not within the underlay multicast subnet (ff04::/64)"
+        "address {0} is not within the underlay multicast subnet (ff04::/16)"
     )]
     InvalidMcastUnderlay(std::net::Ipv6Addr),
 }
