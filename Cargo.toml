@@ -507,7 +507,7 @@ dropshot-api-manager = "0.7.1"
 dropshot-api-manager-types = "0.7.1"
 dyn-clone = "1.0.20"
 either = "1.15.0"
-erebor = { git = "https://github.com/oxidecomputer/erebor", rev = "eff27fb3a652e993a62c8babe327108538fcde53" }
+erebor = { git = "https://github.com/oxidecomputer/erebor", rev = "d41644dc6ec8396415712a2863edbee73d6e7ab9" }
 ereport-types = { path = "ereport/types" }
 expectorate = "1.2.0"
 fatfs = "0.3.6"
