@@ -28,6 +28,9 @@ use nexus_types::internal_api::background::SupportBundleCollectionReport;
 use omicron_uuid_kinds::SupportBundleUuid;
 use parallel_task_set::ParallelTaskSet;
 use serde_json::json;
+use slog::debug;
+use slog::info;
+use slog::warn;
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 

@@ -834,7 +834,7 @@ mod test {
         sled_id: SledUuid,
     ) -> PhysicalDiskUuid {
         let id = PhysicalDiskUuid::new_v4();
-        let physical_disk = PhysicalDisk::new(
+        let physical_disk = PhysicalDisk::from_parts(
             id,
             "v".into(),
             format!("s-{i})"),
@@ -2084,5 +2084,30 @@ mod test {
             sled_step.status,
             SupportBundleCollectionStepStatus::Skipped
         );
+    }
+
+    // Ensure that we can convert a temporary directory into a zipfile
+    #[test]
+    fn test_zipfile_creation() {
+        let dir = camino_tempfile::tempdir().unwrap();
+        let tempdir_for_zip = camino_tempfile::tempdir().unwrap();
+
+        std::fs::create_dir_all(dir.path().join("dir-a")).unwrap();
+        std::fs::create_dir_all(dir.path().join("dir-b")).unwrap();
+        std::fs::write(dir.path().join("dir-a").join("file-a"), "some data")
+            .unwrap();
+        std::fs::write(dir.path().join("file-b"), "more data").unwrap();
+
+        let zipfile = bundle_to_zipfile(&dir, tempdir_for_zip.path())
+            .expect("Should have been able to bundle zipfile");
+        let archive = zip::read::ZipArchive::new(zipfile).unwrap();
+
+        // We expect the order to be deterministically alphabetical
+        let mut names = archive.file_names();
+        assert_eq!(names.next(), Some("dir-a/"));
+        assert_eq!(names.next(), Some("dir-a/file-a"));
+        assert_eq!(names.next(), Some("dir-b/"));
+        assert_eq!(names.next(), Some("file-b"));
+        assert_eq!(names.next(), None);
     }
 }

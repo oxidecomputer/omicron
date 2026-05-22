@@ -13,9 +13,9 @@ use omicron_common::{
     api::external::AllowedSourceIps,
 };
 use sled_agent_types::early_networking::{
-    BgpConfig, BgpPeerConfig, LldpAdminStatus, LldpPortConfig, MaxPathConfig,
-    PortFec, PortSpeed, RouteConfig, RouterLifetimeConfig, TxEqConfig,
-    UplinkAddress,
+    BgpConfig, BgpPeerConfig, LinkFec, LinkSpeed, LldpAdminStatus,
+    LldpPortConfig, MaxPathConfig, RouteConfig, RouterLifetimeConfig,
+    TxEqConfig, UplinkAddress,
 };
 use sled_hardware_types::Baseboard;
 
@@ -224,8 +224,8 @@ impl ExampleRackSetupData {
                         rib_priority: None,
                     }],
                     bgp_peers: switch0_port0_bgp_peers,
-                    uplink_port_speed: PortSpeed::Speed400G,
-                    uplink_port_fec: Some(PortFec::Firecode),
+                    uplink_port_speed: LinkSpeed::Speed400G,
+                    uplink_port_fec: Some(LinkFec::Firecode),
                     lldp: switch0_port0_lldp,
                     tx_eq,
                     autoneg: true,
@@ -246,7 +246,7 @@ impl ExampleRackSetupData {
                         rib_priority: None,
                     }],
                     bgp_peers: switch1_port0_bgp_peers,
-                    uplink_port_speed: PortSpeed::Speed400G,
+                    uplink_port_speed: LinkSpeed::Speed400G,
                     uplink_port_fec: None,
                     lldp: switch1_port0_lldp,
                     tx_eq,

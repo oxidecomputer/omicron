@@ -64,9 +64,9 @@ use sled_agent_config_reconciler::{
     InternalDisksReceiver, LedgerNewConfigError, LedgerTaskError,
     ReconcilerInventory, SledAgentFacilities,
 };
+use sled_agent_early_networking::EarlyNetworkSetupError;
 use sled_agent_health_monitor::handle::HealthMonitorHandle;
 use sled_agent_measurements::MeasurementsHandle;
-use sled_agent_rack_setup::EarlyNetworkSetupError;
 use sled_agent_types::attached_subnet::AttachedSubnet;
 use sled_agent_types::attached_subnet::AttachedSubnets;
 use sled_agent_types::dataset::LocalStorageDatasetDeleteRequest;
@@ -1277,6 +1277,8 @@ impl SledAgent {
         let smf_services_enabled_not_online =
             self.inner.health_monitor.to_inventory();
 
+        let fmd = crate::fmd::collect_fmd_inventory(&self.log).await;
+
         let ReconcilerInventory {
             disks,
             zpools,
@@ -1304,6 +1306,7 @@ impl SledAgent {
             file_source_resolver,
             smf_services_enabled_not_online,
             reference_measurements: self.inner.measurements.to_inventory(),
+            fmd,
         })
     }
 

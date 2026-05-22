@@ -28,7 +28,7 @@ fi
 PUBLISHERS=("on-nightly" "helios-netdev")
 
 # The stock Helios publisher and incorporation base information to revert to
-HELIOS_PUBLISHER="helios-dev"
+HELIOS_PUBLISHER="helios"
 STOCK_CONSOLIDATION="pkg://$HELIOS_PUBLISHER/consolidation/osnet/osnet-incorporation"
 
 # Saved list of publisher origins we've removed if we need to restore them
@@ -71,7 +71,7 @@ function restore_removed_publishers {
     done
 }
 
-# Install stock incorporation from helios-dev, pushing the publisher to the top
+# Install stock incorporation from helios, pushing the publisher to the top
 function to_stock_helios {
     local CONSOLIDATION="$1"
     echo "Installing stock Helios kernel and networking bits"
@@ -125,7 +125,7 @@ function to_stock_helios {
     pkg install --no-refresh -v "${REJECT_ARGS[@]}" "$CONSOLIDATION"
 }
 
-# If helios-dev exists, echo the full osnet-incorporation package we'll be
+# If helios exists, echo the full osnet-incorporation package we'll be
 # installing to. If it does _not_ exist, fail.
 function ensure_helios_publisher_exists {
     pkg publisher "$HELIOS_PUBLISHER" > /dev/null || \
@@ -135,8 +135,8 @@ function ensure_helios_publisher_exists {
         echo "No osnet-incorporation package exists on this system,"
         echo "so we cannot determine the exact package to install"
         echo "to revert to stock Helios. You may need to update your"
-        echo "helios-dev publisher to refresh that publishers list of"
-        echo "available packages, with \"pkg refresh helios-dev\""
+        echo "helios publisher to refresh that publishers list of"
+        echo "available packages, with \"pkg refresh helios\""
         exit 1
     fi
     echo "$CONSOLIDATION" | tr -s ' ' | awk '{ print $1 "@" $(NF-1); }'

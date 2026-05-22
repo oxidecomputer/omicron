@@ -13,6 +13,7 @@ use gateway_client::Client as MgsClient;
 use internal_dns_types::names::ServiceName;
 use nexus_db_model::Sled;
 use nexus_types::deployment::SledFilter;
+use slog::error;
 use slog_error_chain::InlineErrorChain;
 use std::sync::Arc;
 use tokio::sync::OnceCell;
