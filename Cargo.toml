@@ -163,6 +163,7 @@ members = [
     "sled-storage",
     "sled-storage/zfs-test-harness",
     "sp-sim",
+    "support-bundle-collection",
     "test-utils",
     "trust-quorum",
     "trust-quorum/gfss",
@@ -351,6 +352,7 @@ default-members = [
     "sled-storage",
     "sled-storage/zfs-test-harness",
     "sp-sim",
+    "support-bundle-collection",
     "trust-quorum",
     "trust-quorum/gfss",
     "trust-quorum/protocol",
@@ -484,7 +486,7 @@ crucible-common = { git = "https://github.com/oxidecomputer/crucible", rev = "3c
 # NOTE: See above!
 csv = "1.3.1"
 curve25519-dalek = "4"
-daft = { version = "0.1.4", features = ["derive", "newtype-uuid1", "oxnet01", "uuid1"] }
+daft = { version = "0.1.7", features = ["derive", "newtype-uuid1", "oxnet01", "uuid1"] }
 display-error-chain = "0.2.2"
 omicron-ddm-admin-client = { path = "clients/ddm-admin-client" }
 datatest-stable = "0.3.2"
@@ -501,10 +503,10 @@ digest = "0.10.7"
 dns-server = { path = "dns-server" }
 dns-server-api = { path = "dns-server-api" }
 dns-service-client = { path = "clients/dns-service-client" }
-dpd-client = { git = "https://github.com/oxidecomputer/dendrite", rev = "b6d8ba7957c8ed1e6b29fa4b2d85ad2c2248565e" }
+dpd-client = { git = "https://github.com/oxidecomputer/dendrite", rev = "90efdc6cf618523320bc403f1b9484dbd7f762be" }
 dropshot = { version = "0.17.0", features = [ "usdt-probes" ] }
-dropshot-api-manager = "0.7.1"
-dropshot-api-manager-types = "0.7.1"
+dropshot-api-manager = "0.7.2"
+dropshot-api-manager-types = "0.7.2"
 dyn-clone = "1.0.20"
 either = "1.15.0"
 ereport-types = { path = "ereport/types" }
@@ -611,9 +613,9 @@ ntp-admin-client = { path = "clients/ntp-admin-client" }
 ntp-admin-v1-client = { path = "clients/ntp-admin-v1-client" }
 ntp-admin-types = { path = "ntp-admin/types" }
 ntp-admin-types-versions = { path = "ntp-admin/types/versions" }
-mg-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "864e0e150a90fd838199ceb38c2ad8a2be92a270" }
-mg-api-types = { git = "https://github.com/oxidecomputer/maghemite", rev = "864e0e150a90fd838199ceb38c2ad8a2be92a270" }
-ddm-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "864e0e150a90fd838199ceb38c2ad8a2be92a270" }
+mg-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "5060d5864df864741dac8a0a4078fa4ecc3c73c8" }
+mg-api-types = { git = "https://github.com/oxidecomputer/maghemite", rev = "5060d5864df864741dac8a0a4078fa4ecc3c73c8" }
+ddm-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "5060d5864df864741dac8a0a4078fa4ecc3c73c8" }
 multimap = "0.10.1"
 nexus-auth = { path = "nexus/auth" }
 nexus-background-task-interface = { path = "nexus/background-task-interface" }
@@ -830,6 +832,7 @@ strum = { version = "0.27.2", features = [ "derive" ] }
 subprocess = "0.2.9"
 subtle = "2.6.1"
 supports-color = "3.0.2"
+support-bundle-collection = { path = "support-bundle-collection" }
 support-bundle-viewer = "0.1.2"
 swrite = "0.1.0"
 sync-ptr = "0.1.4"
