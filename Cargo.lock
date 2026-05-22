@@ -3649,7 +3649,7 @@ dependencies = [
 [[package]]
 name = "erebor"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/erebor?rev=d41644dc6ec8396415712a2863edbee73d6e7ab9#d41644dc6ec8396415712a2863edbee73d6e7ab9"
+source = "git+https://github.com/oxidecomputer/erebor?rev=48512bf970474ff0fd0868c833fd504c8d169064#48512bf970474ff0fd0868c833fd504c8d169064"
 dependencies = [
  "pmbus",
  "serde_json",
