@@ -27,6 +27,7 @@ use clap::ValueEnum;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_types::fm::ereport::EreportFilters;
+use nexus_types::support_bundle::BundleDataCategory;
 use nexus_types::support_bundle::BundleDataSelection;
 use omicron_uuid_kinds::SupportBundleUuid;
 use std::io::Seek;
@@ -35,20 +36,6 @@ use std::sync::Arc;
 use support_bundle_collection::BundleCollection;
 use support_bundle_collection::BundleInfo;
 use support_bundle_collection::zip::bundle_to_zipfile;
-
-/// Categories of data the bundle collector knows how to gather.
-///
-/// Mirrors `nexus_types::support_bundle::BundleDataCategory`, but is
-/// declared here so it can derive `clap::ValueEnum` without making
-/// `nexus-types` depend on clap.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, ValueEnum)]
-enum BundleCategory {
-    Reconfigurator,
-    HostInfo,
-    SledCubbyInfo,
-    SpDumps,
-    Ereports,
-}
 
 /// Arguments to the "omdb support-bundle" subcommand
 #[derive(Debug, Args)]
@@ -88,13 +75,13 @@ struct CollectArgs {
     /// Categories of data to collect. May be supplied multiple times.
     /// Defaults to all categories.
     #[clap(long, value_enum)]
-    include: Vec<BundleCategory>,
+    include: Vec<BundleDataCategory>,
 }
 
 impl CollectArgs {
     fn data_selection(&self) -> BundleDataSelection {
-        let categories: &[BundleCategory] = if self.include.is_empty() {
-            BundleCategory::value_variants()
+        let categories: &[BundleDataCategory] = if self.include.is_empty() {
+            BundleDataCategory::value_variants()
         } else {
             self.include.as_slice()
         };
@@ -102,11 +89,11 @@ impl CollectArgs {
         let mut sel = BundleDataSelection::new();
         for category in categories {
             sel = match category {
-                BundleCategory::Reconfigurator => sel.with_reconfigurator(),
-                BundleCategory::HostInfo => sel.with_all_sleds(),
-                BundleCategory::SledCubbyInfo => sel.with_sled_cubby_info(),
-                BundleCategory::SpDumps => sel.with_sp_dumps(),
-                BundleCategory::Ereports => sel.with_ereports(
+                BundleDataCategory::Reconfigurator => sel.with_reconfigurator(),
+                BundleDataCategory::HostInfo => sel.with_all_sleds(),
+                BundleDataCategory::SledCubbyInfo => sel.with_sled_cubby_info(),
+                BundleDataCategory::SpDumps => sel.with_sp_dumps(),
+                BundleDataCategory::Ereports => sel.with_ereports(
                     EreportFilters::new()
                         .with_start_time(
                             omicron_common::now_db_precision()
