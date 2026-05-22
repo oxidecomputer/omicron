@@ -11,3 +11,6 @@ pub mod http;
 
 #[cfg(feature = "kstat")]
 pub mod kstat;
+
+#[cfg(feature = "zfs")]
+pub mod zfs;

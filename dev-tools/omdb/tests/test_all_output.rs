@@ -294,14 +294,6 @@ async fn test_omdb_success_cases() {
             "--planner-enabled",
             "true",
         ],
-        &[
-            "-w",
-            "nexus",
-            "reconfigurator-config",
-            "set",
-            "--add-zones-with-mupdate-override",
-            "true",
-        ],
         &["nexus", "reconfigurator-config", "show", "current"],
         &["reconfigurator", "export", tmppath.as_str()],
         // We can't easily test the sled agent output because that's only

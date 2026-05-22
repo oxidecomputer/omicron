@@ -4,8 +4,8 @@
 
 //! Collects metadata about the bundle itself
 
-use crate::app::background::tasks::support_bundle::collection::BundleCollection;
-use crate::app::background::tasks::support_bundle::step::CollectionStepOutput;
+use crate::collection::BundleCollection;
+use crate::step::CollectionStepOutput;
 use camino::Utf8Path;
 
 /// Writes the bundle ID to a file
