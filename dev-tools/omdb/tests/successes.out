@@ -2204,8 +2204,6 @@ Reconfigurator config:
     modified time: <REDACTED_TIMESTAMP>
     tuf repo pruner enabled: true
     planner enabled: false
-    planner config:
-        add zones with mupdate override:   false
 ---------------------------------------------
 stderr:
 note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
@@ -2285,21 +2283,6 @@ stdout:
 reconfigurator config updated to version 2:
     tuf repo pruner enabled:   true (unchanged)
 *   planner enabled:::::::::   false -> true
-    planner config:
-        add zones with mupdate override:   false (unchanged)
----------------------------------------------
-stderr:
-note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
-=============================================
-EXECUTING COMMAND: omdb ["-w", "nexus", "reconfigurator-config", "set", "--add-zones-with-mupdate-override", "true"]
-termination: Exited(0)
----------------------------------------------
-stdout:
-reconfigurator config updated to version 3:
-    tuf repo pruner enabled:   true (unchanged)
-    planner enabled:::::::::   true (unchanged)
-    planner config:
-    *   add zones with mupdate override:   false -> true
 ---------------------------------------------
 stderr:
 note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
@@ -2309,12 +2292,10 @@ termination: Exited(0)
 ---------------------------------------------
 stdout:
 Reconfigurator config:
-    version: 3
+    version: 2
     modified time: <REDACTED_TIMESTAMP>
     tuf repo pruner enabled: true
     planner enabled: true
-    planner config:
-        add zones with mupdate override:   true
 ---------------------------------------------
 stderr:
 note: using Nexus URL http://127.0.0.1:REDACTED_PORT/

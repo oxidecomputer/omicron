@@ -284,6 +284,7 @@ mod test {
     use omicron_common::api::external::{
         TufArtifactMeta, TufRepoDescription, TufRepoMeta,
     };
+    use omicron_common::now_db_precision;
     use omicron_common::update::ArtifactId;
     use omicron_test_utils::dev;
     use semver::Version;
@@ -352,18 +353,19 @@ mod test {
 
         // We should be able to set a new generation just like the first.
         // We allow some slack in the timestamp comparison because the
-        // database only stores timestamps with μsec precision.
+        // database only stores timestamps with μsec precision, so the
+        // `time_requested` we read back is truncated from what we wrote.
         let target_release =
             TargetRelease::new_unspecified(&initial_target_release);
+        let time_requested = target_release.time_requested;
         let target_release = datastore
             .target_release_insert(opctx, target_release)
             .await
             .unwrap();
         assert_eq!(target_release.generation, Generation(2.into()));
         assert!(
-            (target_release.time_requested - target_release.time_requested)
-                .abs()
-                < TimeDelta::new(0, 1_000).expect("1 μsec")
+            (target_release.time_requested - time_requested).abs()
+                < TimeDelta::microseconds(1)
         );
         assert_eq!(
             target_release.release_source().unwrap(),
@@ -397,7 +399,13 @@ mod test {
         assert_eq!(repo.system_version, version.into());
         let tuf_repo_id = repo.id;
 
-        let before = Utc::now();
+        // `time_requested` is read back from the database, which stores
+        // timestamps at μsec precision, rounding down toward zero. Use
+        // `now_db_precision()` for `before` to avoid comparison issues.
+        //
+        // `after` doesn't strictly need it, but using `now_db_precision()`
+        // for it is more straightforward.
+        let before = now_db_precision();
         let target_release = datastore
             .target_release_insert(
                 opctx,
@@ -405,7 +413,7 @@ mod test {
             )
             .await
             .unwrap();
-        let after = Utc::now();
+        let after = now_db_precision();
         assert_eq!(target_release.generation, Generation(4.into()));
         assert!(target_release.time_requested >= before);
         assert!(target_release.time_requested <= after);
