@@ -53,7 +53,9 @@ pub(super) async fn cmd_db_system_version(
             .load_async(&*conn)
             .await
             .context("listing target releases")?;
-        check_limit(&releases, limit, || String::from("listing target releases"));
+        check_limit(&releases, limit, || {
+            String::from("listing target releases")
+        });
         releases
     } else {
         vec![
