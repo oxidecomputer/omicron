@@ -7,25 +7,25 @@
 //! Shows the current target release and date when update was requested.
 //! When `--all` option is used, lists all target release records.
 
-use crate::db::DbFetchOptions;
-use crate::db::check_limit;
 use crate::helpers::datetime_rfc3339_concise;
 use anyhow::Context;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use clap::Args;
-use diesel::ExpressionMethods;
 use diesel::QueryDsl;
 use diesel::SelectableHelper;
 use nexus_db_model::TargetRelease;
 use nexus_db_model::TargetReleaseSource;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
+use nexus_db_queries::db::datastore::SQL_BATCH_SIZE;
+use nexus_db_queries::db::pagination::Paginator;
+use nexus_db_queries::db::pagination::paginated;
 use nexus_db_schema::schema::target_release::dsl;
 use tabled::Tabled;
 
 #[derive(Debug, Args, Clone)]
 pub(super) struct TargetReleaseArgs {
-    /// List of target releases sorted from newest to oldest
+    /// List of target releases sorted from oldest to newest
     #[clap(long)]
     all: bool,
 }
@@ -40,22 +40,29 @@ struct TargetReleaseRow {
 pub(super) async fn cmd_db_target_release(
     opctx: &OpContext,
     datastore: &DataStore,
-    fetch_opts: &DbFetchOptions,
     args: &TargetReleaseArgs,
 ) -> Result<(), anyhow::Error> {
     let releases = if args.all {
-        let limit = fetch_opts.fetch_limit;
         let conn = datastore.pool_connection_for_tests().await?;
-        let releases: Vec<TargetRelease> = dsl::target_release
+        let mut releases: Vec<TargetRelease> = Vec::new();
+        let mut paginator = Paginator::new(
+            SQL_BATCH_SIZE,
+            dropshot::PaginationOrder::Ascending,
+        );
+        while let Some(p) = paginator.next() {
+            let batch = paginated(
+                dsl::target_release,
+                dsl::generation,
+                &p.current_pagparams(),
+            )
             .select(TargetRelease::as_select())
-            .order_by(dsl::generation.desc())
-            .limit(i64::from(u32::from(limit)))
             .load_async(&*conn)
             .await
             .context("listing target releases")?;
-        check_limit(&releases, limit, || {
-            String::from("listing target releases")
-        });
+            paginator =
+                p.found_batch(&batch, &|r: &TargetRelease| r.generation);
+            releases.extend(batch);
+        }
         releases
     } else {
         vec![

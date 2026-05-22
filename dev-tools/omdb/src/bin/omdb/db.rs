@@ -1457,7 +1457,7 @@ impl DbArgs {
                         .await
                     }
                     DbCommands::TargetRelease(args) => {
-                        target_release::cmd_db_target_release(&opctx, &datastore, &fetch_opts, args).await
+                        target_release::cmd_db_target_release(&opctx, &datastore, args).await
                     }
                     DbCommands::Instance(InstanceArgs {
                         command: InstanceCommands::List(args),
