@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! `omdb db system-version` subcommand
+//! `omdb db target-release` subcommand
 //!
 //! Shows the current target release and date when update was requested.
 //! When `--all` option is used, lists all target release records.
@@ -24,7 +24,7 @@ use nexus_db_schema::schema::target_release::dsl;
 use tabled::Tabled;
 
 #[derive(Debug, Args, Clone)]
-pub(super) struct SystemVersionArgs {
+pub(super) struct TargetReleaseArgs {
     /// List of target releases sorted from newest to oldest
     #[clap(long)]
     all: bool,
@@ -32,16 +32,16 @@ pub(super) struct SystemVersionArgs {
 
 #[derive(Tabled)]
 #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
-struct SystemVersionRow {
+struct TargetReleaseRow {
     system_version: String,
     time_requested: String,
 }
 
-pub(super) async fn cmd_db_system_version(
+pub(super) async fn cmd_db_target_release(
     opctx: &OpContext,
     datastore: &DataStore,
     fetch_opts: &DbFetchOptions,
-    args: &SystemVersionArgs,
+    args: &TargetReleaseArgs,
 ) -> Result<(), anyhow::Error> {
     let releases = if args.all {
         let limit = fetch_opts.fetch_limit;
@@ -79,7 +79,7 @@ pub(super) async fn cmd_db_system_version(
                 .with_context(|| format!("fetching TUF repo {tuf_repo_id}"))?
                 .to_string(),
         };
-        rows.push(SystemVersionRow {
+        rows.push(TargetReleaseRow {
             system_version,
             time_requested: datetime_rfc3339_concise(&release.time_requested),
         });
