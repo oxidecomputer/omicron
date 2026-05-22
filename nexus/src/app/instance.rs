@@ -1133,17 +1133,11 @@ impl super::Nexus {
             return Err(e);
         }
 
-        // Detach multicast members (state -> "Left", clear `sled_id`) only
-        // after sled-agent has acknowledged the Stop request. Doing it
-        // before the request would tear down M2P/forwarding for a guest
-        // that is still running if the request fails.
-        if self.multicast_enabled() {
-            self.db_datastore
-                .multicast_group_members_detach_by_instance(
-                    opctx,
-                    InstanceUuid::from_untyped_uuid(authz_instance.id()),
-                )
-                .await?;
+        // Idempotent stop: with no active VMM, the instance-update saga will
+        // not fire (no terminal transition to drive it), so nudge the
+        // reconciler to converge any stale "Joined" rows now rather than wait
+        // a full reconciler tick.
+        if state.vmm().is_none() && self.multicast_enabled() {
             self.background_tasks.task_multicast_reconciler.activate();
         }
 
