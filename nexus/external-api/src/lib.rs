@@ -53,6 +53,7 @@ mod v2025_11_20_00_local;
 mod v2026_01_01_00_local;
 mod v2026_01_30_00_local;
 mod v2026_03_24_00_local;
+mod v2026_05_20_00_local;
 
 api_versions!([
     // API versions are in the format YYYY_MM_DD_NN.0.0, defined below as
@@ -83,6 +84,7 @@ api_versions!([
     // |  date-based version should be at the top of the list.
     // v
     // (next_yyyy_mm_dd_nn, IDENT),
+    (2026_06_03_00, DISK_BLOCK_SIZE_TYPE),
     (2026_05_20_00, ADD_CONTACT_SUPPORT_TO_UPDATE_STATUS),
     (2026_05_08_00, MANUAL_DISK_ADOPTION),
     (2026_05_07_00, REMOVE_DUPLICATED_NETWORKING_TYPES),
@@ -3304,7 +3306,7 @@ pub trait NexusExternalApi {
         method = GET,
         path = "/v1/disks",
         tags = ["disks"],
-        versions = VERSION_READ_ONLY_DISKS..,
+        versions = VERSION_DISK_BLOCK_SIZE_TYPE..,
     }]
     async fn disk_list(
         rqctx: RequestContext<Self::Context>,
@@ -3312,6 +3314,32 @@ pub trait NexusExternalApi {
             PaginatedByNameOrId<latest::project::ProjectSelector>,
         >,
     ) -> Result<HttpResponseOk<ResultsPage<Disk>>, HttpError>;
+
+    /// List disks
+    #[endpoint {
+        operation_id = "disk_list",
+        method = GET,
+        path = "/v1/disks",
+        tags = ["disks"],
+        versions = VERSION_READ_ONLY_DISKS..VERSION_DISK_BLOCK_SIZE_TYPE,
+    }]
+    async fn disk_list_v2026_01_30_01(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<
+            PaginatedByNameOrId<latest::project::ProjectSelector>,
+        >,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<v2026_05_20_00_local::Disk>>,
+        HttpError,
+    > {
+        Self::disk_list(rqctx, query_params).await.map(
+            |HttpResponseOk(page)| {
+                let items: Vec<_> =
+                    page.items.into_iter().map(Into::into).collect();
+                HttpResponseOk(ResultsPage { next_page: page.next_page, items })
+            },
+        )
+    }
 
     /// List disks
     #[endpoint {
@@ -3376,7 +3404,7 @@ pub trait NexusExternalApi {
         method = POST,
         path = "/v1/disks",
         tags = ["disks"],
-        versions = VERSION_READ_ONLY_DISKS_NULLABLE..,
+        versions = VERSION_DISK_BLOCK_SIZE_TYPE..,
     }]
     async fn disk_create(
         rqctx: RequestContext<Self::Context>,
@@ -3391,14 +3419,40 @@ pub trait NexusExternalApi {
         method = POST,
         path = "/v1/disks",
         tags = ["disks"],
+        versions = VERSION_READ_ONLY_DISKS_NULLABLE..VERSION_DISK_BLOCK_SIZE_TYPE,
+    }]
+    async fn disk_create_v2026_01_31_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<latest::project::ProjectSelector>,
+        new_disk: TypedBody<latest::disk::DiskCreate>,
+    ) -> Result<HttpResponseCreated<v2026_05_20_00_local::Disk>, HttpError>
+    {
+        Self::disk_create(rqctx, query_params, new_disk)
+            .await
+            .map(|resp| resp.map(Into::into))
+    }
+
+    // TODO-correctness See note about instance create.  This should be async.
+    /// Create disk
+    #[endpoint {
+        operation_id = "disk_create",
+        method = POST,
+        path = "/v1/disks",
+        tags = ["disks"],
         versions = VERSION_READ_ONLY_DISKS..VERSION_READ_ONLY_DISKS_NULLABLE,
     }]
     async fn disk_create_v2026_01_30_01(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<v2025_11_20_00::project::ProjectSelector>,
         new_disk: TypedBody<v2026_01_30_01::disk::DiskCreate>,
-    ) -> Result<HttpResponseCreated<Disk>, HttpError> {
-        Self::disk_create(rqctx, query_params, new_disk.map(Into::into)).await
+    ) -> Result<HttpResponseCreated<v2026_05_20_00_local::Disk>, HttpError>
+    {
+        Self::disk_create_v2026_01_31_00(
+            rqctx,
+            query_params,
+            new_disk.map(Into::into),
+        )
+        .await
     }
 
     // TODO-correctness See note about instance create.  This should be async.
@@ -3451,13 +3505,31 @@ pub trait NexusExternalApi {
         method = GET,
         path = "/v1/disks/{disk}",
         tags = ["disks"],
-        versions = VERSION_READ_ONLY_DISKS..,
+        versions = VERSION_DISK_BLOCK_SIZE_TYPE..,
     }]
     async fn disk_view(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<latest::path_params::DiskPath>,
         query_params: Query<latest::project::OptionalProjectSelector>,
     ) -> Result<HttpResponseOk<Disk>, HttpError>;
+
+    /// Fetch disk
+    #[endpoint {
+        operation_id = "disk_view",
+        method = GET,
+        path = "/v1/disks/{disk}",
+        tags = ["disks"],
+        versions = VERSION_READ_ONLY_DISKS..VERSION_DISK_BLOCK_SIZE_TYPE,
+    }]
+    async fn disk_view_v2026_01_30_01(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::DiskPath>,
+        query_params: Query<latest::project::OptionalProjectSelector>,
+    ) -> Result<HttpResponseOk<v2026_05_20_00_local::Disk>, HttpError> {
+        Self::disk_view(rqctx, path_params, query_params)
+            .await
+            .map(|resp| resp.map(Into::into))
+    }
 
     /// Fetch disk
     #[endpoint {
@@ -3877,7 +3949,7 @@ pub trait NexusExternalApi {
         method = GET,
         path = "/v1/instances/{instance}/disks",
         tags = ["instances"],
-        versions = VERSION_READ_ONLY_DISKS..,
+        versions = VERSION_DISK_BLOCK_SIZE_TYPE..,
     }]
     async fn instance_disk_list(
         rqctx: RequestContext<Self::Context>,
@@ -3886,6 +3958,33 @@ pub trait NexusExternalApi {
         >,
         path_params: Path<latest::path_params::InstancePath>,
     ) -> Result<HttpResponseOk<ResultsPage<Disk>>, HttpError>;
+
+    /// List disks for instance
+    #[endpoint {
+        operation_id = "instance_disk_list",
+        method = GET,
+        path = "/v1/instances/{instance}/disks",
+        tags = ["instances"],
+        versions = VERSION_READ_ONLY_DISKS..VERSION_DISK_BLOCK_SIZE_TYPE,
+    }]
+    async fn instance_disk_list_v2026_01_30_01(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<
+            PaginatedByNameOrId<latest::project::OptionalProjectSelector>,
+        >,
+        path_params: Path<latest::path_params::InstancePath>,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<v2026_05_20_00_local::Disk>>,
+        HttpError,
+    > {
+        Self::instance_disk_list(rqctx, query_params, path_params).await.map(
+            |HttpResponseOk(page)| {
+                let items: Vec<_> =
+                    page.items.into_iter().map(Into::into).collect();
+                HttpResponseOk(ResultsPage { next_page: page.next_page, items })
+            },
+        )
+    }
 
     /// List disks for instance
     #[endpoint {
@@ -3955,7 +4054,7 @@ pub trait NexusExternalApi {
         method = POST,
         path = "/v1/instances/{instance}/disks/attach",
         tags = ["instances"],
-        versions = VERSION_READ_ONLY_DISKS..,
+        versions = VERSION_DISK_BLOCK_SIZE_TYPE..,
     }]
     async fn instance_disk_attach(
         rqctx: RequestContext<Self::Context>,
@@ -3963,6 +4062,31 @@ pub trait NexusExternalApi {
         query_params: Query<latest::project::OptionalProjectSelector>,
         disk_to_attach: TypedBody<latest::path_params::DiskPath>,
     ) -> Result<HttpResponseAccepted<Disk>, HttpError>;
+
+    /// Attach disk to instance
+    #[endpoint {
+        operation_id = "instance_disk_attach",
+        method = POST,
+        path = "/v1/instances/{instance}/disks/attach",
+        tags = ["instances"],
+        versions = VERSION_READ_ONLY_DISKS..VERSION_DISK_BLOCK_SIZE_TYPE,
+    }]
+    async fn instance_disk_attach_v2026_01_30_01(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::InstancePath>,
+        query_params: Query<latest::project::OptionalProjectSelector>,
+        disk_to_attach: TypedBody<latest::path_params::DiskPath>,
+    ) -> Result<HttpResponseAccepted<v2026_05_20_00_local::Disk>, HttpError>
+    {
+        Self::instance_disk_attach(
+            rqctx,
+            path_params,
+            query_params,
+            disk_to_attach,
+        )
+        .await
+        .map(|resp| resp.map(Into::into))
+    }
 
     /// Attach disk to instance
     #[endpoint {
@@ -4019,7 +4143,7 @@ pub trait NexusExternalApi {
         method = POST,
         path = "/v1/instances/{instance}/disks/detach",
         tags = ["instances"],
-        versions = VERSION_READ_ONLY_DISKS..,
+        versions = VERSION_DISK_BLOCK_SIZE_TYPE..,
     }]
     async fn instance_disk_detach(
         rqctx: RequestContext<Self::Context>,
@@ -4027,6 +4151,31 @@ pub trait NexusExternalApi {
         query_params: Query<latest::project::OptionalProjectSelector>,
         disk_to_detach: TypedBody<latest::path_params::DiskPath>,
     ) -> Result<HttpResponseAccepted<Disk>, HttpError>;
+
+    /// Detach disk from instance
+    #[endpoint {
+        operation_id = "instance_disk_detach",
+        method = POST,
+        path = "/v1/instances/{instance}/disks/detach",
+        tags = ["instances"],
+        versions = VERSION_READ_ONLY_DISKS..VERSION_DISK_BLOCK_SIZE_TYPE,
+    }]
+    async fn instance_disk_detach_v2026_01_30_01(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::InstancePath>,
+        query_params: Query<latest::project::OptionalProjectSelector>,
+        disk_to_detach: TypedBody<latest::path_params::DiskPath>,
+    ) -> Result<HttpResponseAccepted<v2026_05_20_00_local::Disk>, HttpError>
+    {
+        Self::instance_disk_detach(
+            rqctx,
+            path_params,
+            query_params,
+            disk_to_detach,
+        )
+        .await
+        .map(|resp| resp.map(Into::into))
+    }
 
     /// Detach disk from instance
     #[endpoint {
