@@ -24,7 +24,17 @@ use crate::v16::inventory::SingleMeasurementInventory;
 use crate::v24::inventory::InventoryZpool;
 use crate::v28;
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub struct SvcsError {
     pub error: String,
@@ -55,6 +65,8 @@ impl From<SvcsError> for v28::inventory::SvcsError {
     Debug,
     PartialEq,
     Eq,
+    PartialOrd,
+    Ord,
     Deserialize,
     Serialize,
     JsonSchema,
@@ -140,7 +152,17 @@ impl From<Svc> for v28::inventory::Svc {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 /// Information about an SMF service that is enabled but not running
 pub struct SvcEnabledNotOnline {
@@ -159,7 +181,17 @@ impl From<SvcEnabledNotOnline> for v28::inventory::Svc {
 /// Lists services that are enabled but not in an online state if any, the time
 /// the sample was collected, and any errors that may have ocurred during the
 /// collection
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub struct SvcsEnabledNotOnline {
     pub services: Vec<SvcEnabledNotOnline>,
@@ -178,7 +210,17 @@ impl From<SvcsEnabledNotOnline> for v28::inventory::SvcsEnabledNotOnline {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+)]
 #[serde(tag = "type", content = "value", rename_all = "snake_case")]
 pub enum SvcsEnabledNotOnlineResult {
     SvcsEnabledNotOnline(SvcsEnabledNotOnline),

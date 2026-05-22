@@ -20,6 +20,7 @@ use kstat_rs::Kstat;
 use oximeter::Metric;
 use oximeter::MetricsError;
 use oximeter::Sample;
+use oximeter::queue::BoundedQueue;
 use oximeter::types::Cumulative;
 use slog::Logger;
 use slog::debug;
@@ -342,7 +343,7 @@ struct KstatSamplerWorker {
 
     /// The per-target queue of samples, pulled by the main `KstatSampler` type
     /// when producing metrics.
-    samples: Arc<Mutex<BTreeMap<TargetId, Vec<Sample>>>>,
+    samples: Arc<Mutex<BTreeMap<TargetId, BoundedQueue<Sample>>>>,
 
     /// Inbox channel on which the `KstatSampler` sends messages.
     inbox: mpsc::Receiver<Request>,
@@ -397,7 +398,7 @@ impl KstatSamplerWorker {
         log: Logger,
         inbox: mpsc::Receiver<Request>,
         self_stat_queue: broadcast::Sender<Sample>,
-        samples: Arc<Mutex<BTreeMap<TargetId, Vec<Sample>>>>,
+        samples: Arc<Mutex<BTreeMap<TargetId, BoundedQueue<Sample>>>>,
         sample_limit: usize,
     ) -> Result<Self, Error> {
         let ctl = Some(Ctl::new().map_err(Error::Kstat)?);
@@ -590,7 +591,7 @@ impl KstatSamplerWorker {
                 if let Some(remaining_samples) =
                     self.samples.lock().unwrap().remove(&id)
                 {
-                    if !remaining_samples.is_empty() {
+                    if remaining_samples.len() > 0 {
                         warn!(
                             self.log,
                             "target removed with queued samples";
@@ -766,7 +767,7 @@ impl KstatSamplerWorker {
     fn append_per_target_samples(
         &self,
         id: TargetId,
-        mut samples: Vec<Sample>,
+        samples: Vec<Sample>,
     ) -> Option<usize> {
         // Limit the number of samples we actually contain
         // in the sample queue. This is to avoid huge
@@ -785,36 +786,17 @@ impl KstatSamplerWorker {
         };
         let n_new_samples = samples.len();
         let n_current_samples = current_samples.len();
-        let n_total_samples = n_new_samples + n_current_samples;
-        let n_overflow_samples =
-            n_total_samples.saturating_sub(self.sample_limit);
-        if n_overflow_samples > 0 {
+        let n_dropped_samples = current_samples.extend(samples);
+        if n_dropped_samples > 0 {
             warn!(
                 self.log,
                 "sample queue is too full, dropping oldest samples";
                 "n_new_samples" => n_new_samples,
                 "n_current_samples" => n_current_samples,
-                "n_overflow_samples" => n_overflow_samples,
+                "n_dropped_samples" => n_dropped_samples,
             );
-            // It's possible that the number of new samples
-            // is big enough to overflow the current
-            // capacity, and also require removing new
-            // samples.
-            if n_overflow_samples < n_current_samples {
-                let _ = current_samples.drain(..n_overflow_samples);
-            } else {
-                // Clear all the current samples, and some
-                // of the new ones. The subtraction below
-                // cannot panic, because
-                // `n_overflow_samples` is computed above by
-                // adding `n_current_samples`.
-                current_samples.clear();
-                let _ =
-                    samples.drain(..(n_overflow_samples - n_current_samples));
-            }
         }
-        current_samples.extend(samples);
-        Some(n_overflow_samples)
+        Some(n_dropped_samples)
     }
 
     /// Add samples for one target to the internal queue.
@@ -1174,8 +1156,13 @@ impl KstatSamplerWorker {
         // were already there previously. This would be a bit odd, since it
         // means that the target expired, but we hadn't been polled by oximeter.
         // Nonetheless keep these samples anyway.
-        let n_samples =
-            self.samples.lock().unwrap().entry(id).or_default().len();
+        let n_samples = self
+            .samples
+            .lock()
+            .unwrap()
+            .entry(id)
+            .or_insert_with(|| BoundedQueue::new(self.sample_limit))
+            .len();
         match n_samples {
             0 => debug!(
                 self.log,
@@ -1198,7 +1185,7 @@ impl KstatSamplerWorker {
 #[derive(Clone, Debug)]
 pub struct KstatSampler {
     log: Logger,
-    samples: Arc<Mutex<BTreeMap<TargetId, Vec<Sample>>>>,
+    samples: Arc<Mutex<BTreeMap<TargetId, BoundedQueue<Sample>>>>,
     outbox: mpsc::Sender<Request>,
     // NOTE: We're using a broadcast MPMC channel here intentionally, even
     // though there is only one receiver. That's to make use of its ring-buffer
@@ -1378,7 +1365,7 @@ impl oximeter::Producer for KstatSampler {
         // keys.
         let mut samples = Vec::new();
         for (_id, queue) in self.samples.lock().unwrap().iter_mut() {
-            samples.append(queue);
+            samples.extend(queue.drain());
         }
 
         // Append any self-stat samples as well.

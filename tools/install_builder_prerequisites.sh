@@ -230,6 +230,7 @@ retry xtask download \
     console \
     dendrite-stub \
     maghemite-mgd \
+    maghemite-ddmd \
     transceiver-control
 
 # Validate the PATH:

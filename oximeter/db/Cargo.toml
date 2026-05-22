@@ -155,5 +155,9 @@ name = "protocol"
 harness = false
 
 [[bench]]
-name = "oxql"
+name = "oxql_field"
+harness = false
+
+[[bench]]
+name = "oxql_measurement"
 harness = false

@@ -406,7 +406,7 @@ impl nexus_test_interface::NexusServer for Server {
         // completely uninterested in switch port interaction), we'll insert a
         // single qsfp0 for each switch to the db directly.
         for which_switch in SwitchSlot::iter() {
-            datastore
+            match datastore
                 .switch_port_create(
                     &opctx,
                     config.deployment.rack_id,
@@ -414,7 +414,15 @@ impl nexus_test_interface::NexusServer for Server {
                     nexus_db_model::Name("qsfp0".parse().unwrap()),
                 )
                 .await
-                .expect("inserted qsfp0");
+            {
+                // We're racing with the background task - it may have already
+                // contacted dpd and inserted qsfp0. That's fine.
+                Ok(_) | Err(Error::ObjectAlreadyExists { .. }) => (),
+                Err(err) => panic!(
+                    "failed to insert qsfp0 for {which_switch:?}: {}",
+                    InlineErrorChain::new(&err)
+                ),
+            }
         }
 
         // Allocation of initial external IP addresses is a little funny.  In

@@ -4,11 +4,10 @@
 
 //! Runtime configuration for reconfigurator
 
-use std::fmt::{self, Write};
+use std::fmt;
 
 use chrono::{DateTime, TimeZone, Utc};
 use daft::Diffable;
-use indent_write::fmt::IndentWriter;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -116,6 +115,7 @@ impl fmt::Display for ReconfiguratorConfigViewDisplay<'_> {
 )]
 pub struct ReconfiguratorConfig {
     pub planner_enabled: bool,
+    #[serde(default)]
     pub planner_config: PlannerConfig,
     pub tuf_repo_pruner_enabled: bool,
 }
@@ -147,17 +147,12 @@ impl fmt::Display for ReconfiguratorConfigDisplay<'_> {
             config:
                 ReconfiguratorConfig {
                     planner_enabled,
-                    planner_config,
+                    planner_config: _,
                     tuf_repo_pruner_enabled,
                 },
         } = self;
         writeln!(f, "tuf repo pruner enabled: {}", tuf_repo_pruner_enabled)?;
         writeln!(f, "planner enabled: {}", planner_enabled)?;
-        writeln!(f, "planner config:")?;
-        // planner_config does its own indentation, so it's not necessary to
-        // use IndentWriter here -- and it adds its own newlines so we don't
-        // need to add any more.
-        write!(f, "{}", planner_config.display())?;
 
         Ok(())
     }
@@ -177,7 +172,7 @@ impl fmt::Display for ReconfiguratorConfigDiffDisplay<'_, '_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let ReconfiguratorConfigDiff {
             planner_enabled,
-            planner_config,
+            planner_config: _,
             tuf_repo_pruner_enabled,
         } = self.diff;
 
@@ -191,14 +186,15 @@ impl fmt::Display for ReconfiguratorConfigDiffDisplay<'_, '_> {
         // No need for writeln! here because KvList adds its own newlines.
         write!(f, "{list}")?;
 
-        let mut indented = IndentWriter::new("    ", f);
-        writeln!(indented, "planner config:")?;
-        write!(indented, "{}", planner_config.display())?;
+        // When there are fields in `PlannerConfigDiff`, this is where their
+        // display would go.
 
         Ok(())
     }
 }
 
+// `PlannerConfig` is currently empty. Future planner-wide feature flags will be
+// defined here.
 #[derive(
     Clone,
     Copy,
@@ -211,16 +207,7 @@ impl fmt::Display for ReconfiguratorConfigDiffDisplay<'_, '_> {
     JsonSchema,
 )]
 #[cfg_attr(test, derive(test_strategy::Arbitrary))]
-pub struct PlannerConfig {
-    /// Whether to add zones even if a mupdate override is present.
-    ///
-    /// Once Nexus-driven update is active on a customer system, we must not add
-    /// new zones while the system is recovering from a MUPdate.
-    ///
-    /// This setting, which is off by default, allows us to add zones
-    /// even if we've detected a recent MUPdate on the system.
-    pub add_zones_with_mupdate_override: bool,
-}
+pub struct PlannerConfig {}
 
 impl PlannerConfig {
     pub fn display(&self) -> PlannerConfigDisplay<'_> {
@@ -233,23 +220,7 @@ impl PlannerConfig {
 #[expect(clippy::derivable_impls)]
 impl Default for PlannerConfig {
     fn default() -> Self {
-        // By default, we block zone additions on mupdate overrides being
-        // present (see the docs on `add_zones_with_mupdate_override` above).
-        Self { add_zones_with_mupdate_override: false }
-    }
-}
-
-impl slog::KV for PlannerConfig {
-    fn serialize(
-        &self,
-        _record: &slog::Record,
-        serializer: &mut dyn slog::Serializer,
-    ) -> slog::Result {
-        let Self { add_zones_with_mupdate_override } = self;
-        serializer.emit_bool(
-            slog::Key::from("add_zones_with_mupdate_override"),
-            *add_zones_with_mupdate_override,
-        )
+        Self {}
     }
 }
 
@@ -259,44 +230,10 @@ pub struct PlannerConfigDisplay<'a> {
 
 impl<'a> fmt::Display for PlannerConfigDisplay<'a> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let Self { config: PlannerConfig { add_zones_with_mupdate_override } } =
-            self;
-        let list = KvList::new(
-            None,
-            vec![KvPair::new_unchanged(
-                "add zones with mupdate override",
-                add_zones_with_mupdate_override.to_string(),
-            )],
-        );
-        // No need for writeln! here because KvList adds its own newlines.
-        write!(f, "{list}")
-    }
-}
-
-impl<'a> PlannerConfigDiff<'a> {
-    pub fn display<'b>(&'b self) -> PlannerConfigDiffDisplay<'a, 'b> {
-        PlannerConfigDiffDisplay { diff: self }
-    }
-}
-
-#[derive(Clone, Debug)]
-pub struct PlannerConfigDiffDisplay<'a, 'b> {
-    diff: &'b PlannerConfigDiff<'a>,
-}
-
-impl fmt::Display for PlannerConfigDiffDisplay<'_, '_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let PlannerConfigDiff { add_zones_with_mupdate_override } = self.diff;
-
-        let list = KvList::new(
-            None,
-            vec![diff_row!(
-                add_zones_with_mupdate_override,
-                "add zones with mupdate override"
-            )],
-        );
-
-        // No need for writeln! here because KvList adds its own newlines.
-        write!(f, "{list}")
+        let Self { config: PlannerConfig {} } = self;
+        // `PlannerConfig` currently has no fields; once it gains some, we'll
+        // render them here as a `KvList`. The 4-space indent matches where
+        // those rows would appear.
+        writeln!(f, "    (no current planner configs)")
     }
 }

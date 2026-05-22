@@ -26,7 +26,16 @@ use crate::v16::inventory::SingleMeasurementInventory;
 use crate::v22;
 
 #[derive(
-    Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema,
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Deserialize,
+    Serialize,
+    JsonSchema,
 )]
 #[serde(rename_all = "snake_case")]
 pub enum ZpoolHealth {

@@ -22,6 +22,7 @@ use diesel::sql_types;
 use nexus_db_schema::schema::{saga, saga_node_event};
 use omicron_common::api::external::Error;
 use omicron_common::api::external::Generation;
+use omicron_common::now_db_precision;
 use omicron_uuid_kinds::{GenericUuid, OmicronZoneUuid};
 use serde::{Deserialize, Serialize};
 use std::convert::TryFrom;
@@ -91,6 +92,7 @@ impl From<&SecId> for Uuid {
 pub struct SagaId(pub steno::SagaId);
 
 NewtypeFrom! { () pub struct SagaId(steno::SagaId); }
+NewtypeDisplay! { () pub struct SagaId(steno::SagaId); }
 
 impl ToSql<sql_types::Uuid, Pg> for SagaId {
     fn to_sql<'a>(
@@ -206,7 +208,7 @@ pub struct Saga {
 
 impl Saga {
     pub fn new(creator: SecId, params: steno::SagaCreateParams) -> Self {
-        let now = chrono::Utc::now();
+        let now = now_db_precision();
 
         // This match will help us identify a case where Steno adds a new field
         // to `SagaCreateParams` that we aren't persisting in the database.  (If

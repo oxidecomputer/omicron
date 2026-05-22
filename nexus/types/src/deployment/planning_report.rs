@@ -977,11 +977,6 @@ pub struct PlanningAddStepReport {
     #[cfg_attr(test, any(((0, 16).into(), Default::default())))]
     pub add_update_blocked_reasons: Vec<String>,
 
-    /// The value of the homonymous planner config. (What this really means is
-    /// that zone adds happen despite being blocked by one or more
-    /// MUPdate-related reasons.)
-    pub add_zones_with_mupdate_override: bool,
-
     /// Set to true if the target release generation is 1, which would allow
     /// zones to be added.
     pub target_release_generation_is_one: bool,
@@ -1037,7 +1032,6 @@ impl PlanningAddStepReport {
         Self {
             waiting_on: None,
             add_update_blocked_reasons: Vec::new(),
-            add_zones_with_mupdate_override: false,
             target_release_generation_is_one: false,
             sleds_without_ntp_zones_in_inventory: BTreeSet::new(),
             sleds_without_zpools_for_ntp_zones: BTreeSet::new(),
@@ -1137,7 +1131,6 @@ impl fmt::Display for PlanningAddStepReport {
         let Self {
             waiting_on,
             add_update_blocked_reasons,
-            add_zones_with_mupdate_override,
             target_release_generation_is_one,
             sleds_without_ntp_zones_in_inventory,
             sleds_without_zpools_for_ntp_zones,
@@ -1168,21 +1161,11 @@ impl fmt::Display for PlanningAddStepReport {
             }
         }
 
-        let mut add_zones_despite_being_blocked_reasons = Vec::new();
-        if *add_zones_with_mupdate_override {
-            add_zones_despite_being_blocked_reasons.push(
-                "planner config `add_zones_with_mupdate_override` is true",
-            );
-        }
         if *target_release_generation_is_one {
-            add_zones_despite_being_blocked_reasons
-                .push("target release generation is 1");
-        }
-        if !add_zones_despite_being_blocked_reasons.is_empty() {
             writeln!(
                 f,
-                "* adding zones despite being blocked, because: {}",
-                add_zones_despite_being_blocked_reasons.join(", "),
+                "* adding zones despite being blocked, because: \
+                 target release generation is 1",
             )?;
         }
 

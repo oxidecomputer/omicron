@@ -16,6 +16,7 @@ pub mod collector;
 pub mod histogram;
 pub mod producer;
 pub mod quantile;
+pub mod queue;
 pub mod schema;
 pub mod traits;
 pub mod types;

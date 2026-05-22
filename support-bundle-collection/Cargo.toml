@@ -1,0 +1,47 @@
+[package]
+name = "support-bundle-collection"
+version = "0.1.0"
+edition.workspace = true
+
+[lints]
+workspace = true
+
+[build-dependencies]
+omicron-rpaths.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+base64.workspace = true
+camino.workspace = true
+camino-tempfile.workspace = true
+chrono.workspace = true
+dropshot.workspace = true
+futures.workspace = true
+gateway-client.workspace = true
+gateway-types.workspace = true
+internal-dns-resolver.workspace = true
+internal-dns-types.workspace = true
+jiff.workspace = true
+nexus-db-model.workspace = true
+nexus-db-queries.workspace = true
+nexus-networking.workspace = true
+nexus-reconfigurator-preparation.workspace = true
+nexus-types.workspace = true
+omicron-common.workspace = true
+omicron-uuid-kinds.workspace = true
+parallel-task-set.workspace = true
+# See omicron-rpaths for more about the "pq-sys" dependency.
+pq-sys = "*"
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+sled-agent-client.workspace = true
+slog.workspace = true
+slog-error-chain.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+tufaceous-artifact.workspace = true
+uuid.workspace = true
+zip.workspace = true
+
+omicron-workspace-hack.workspace = true

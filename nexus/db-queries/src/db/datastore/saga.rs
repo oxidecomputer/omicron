@@ -13,6 +13,8 @@ use crate::db::pagination::paginated_multicolumn;
 use crate::db::update_and_check::UpdateAndCheck;
 use crate::db::update_and_check::UpdateStatus;
 use async_bb8_diesel::AsyncRunQueryDsl;
+use chrono::DateTime;
+use chrono::Utc;
 use diesel::prelude::*;
 use nexus_auth::authz;
 use nexus_auth::context::OpContext;
@@ -166,6 +168,29 @@ impl DataStore {
         Ok(sagas)
     }
 
+    /// Returns a list of sagas that were created before `time_limit` and are
+    /// in a running or unwinding state (limit of 500).
+    pub async fn saga_list_running_or_unwinding_older_than(
+        &self,
+        opctx: &OpContext,
+        time_limit: DateTime<Utc>,
+    ) -> Result<Vec<db::saga_types::Saga>, Error> {
+        use nexus_db_schema::schema::saga::dsl;
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        dsl::saga
+            .filter(
+                dsl::saga_state
+                    .eq_any(vec![SagaState::Running, SagaState::Unwinding]),
+            )
+            .filter(dsl::time_created.lt(time_limit))
+            .limit(500)
+            .select(db::saga_types::Saga::as_select())
+            .load_async(&*conn)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
     /// Returns a list of all saga log entries for the given saga, making as
     /// many queries as needed (in batches) to get them all
     pub async fn saga_fetch_log_batched(
@@ -266,6 +291,7 @@ mod test {
     use crate::db::pub_test_utils::TestDatabase;
     use async_bb8_diesel::AsyncConnection;
     use async_bb8_diesel::AsyncSimpleConnection;
+    use chrono::TimeDelta;
     use db::queries::ALLOW_FULL_TABLE_SCAN_SQL;
     use nexus_db_model::SagaState;
     use nexus_db_model::{SagaNodeEvent, SecId};
@@ -577,6 +603,28 @@ mod test {
             saga
         }
 
+        fn new_unwinding_db_saga(&self) -> db::model::saga_types::Saga {
+            let params = steno::SagaCreateParams {
+                id: self.saga_id,
+                name: steno::SagaName::new("test saga"),
+                dag: serde_json::value::Value::Null,
+                state: steno::SagaCachedState::Unwinding,
+            };
+
+            db::model::saga_types::Saga::new(self.sec_id, params)
+        }
+
+        fn new_done_db_saga(&self) -> db::model::saga_types::Saga {
+            let params = steno::SagaCreateParams {
+                id: self.saga_id,
+                name: steno::SagaName::new("test saga"),
+                dag: serde_json::value::Value::Null,
+                state: steno::SagaCachedState::Done,
+            };
+
+            db::model::saga_types::Saga::new(self.sec_id, params)
+        }
+
         fn new_db_event(
             &self,
             node_id: u32,
@@ -736,6 +784,76 @@ mod test {
             .await
             .expect("failed to re-assign sagas");
         assert_eq!(nreassigned, 0);
+
+        // Test cleanup
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_list_long_running_or_unwinding_sagas() {
+        // Test setup
+        let logctx =
+            dev::test_setup_log("test_list_long_running_or_unwinding_sagas");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+        let sec_id = db::SecId(uuid::Uuid::new_v4());
+        let sec_id2 = db::SecId(uuid::Uuid::new_v4());
+
+        // Insert one saga in each state, plus an additional running saga.
+        let running = SagaTestContext::new(sec_id).new_running_db_saga();
+        let running2 = SagaTestContext::new(sec_id2).new_running_db_saga();
+        let unwinding = SagaTestContext::new(sec_id).new_unwinding_db_saga();
+        let done = SagaTestContext::new(sec_id).new_done_db_saga();
+        let abandoned = SagaTestContext::new(sec_id).new_abandoned_db_saga();
+
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
+        diesel::insert_into(nexus_db_schema::schema::saga::dsl::saga)
+            .values(vec![
+                running.clone(),
+                running2.clone(),
+                unwinding.clone(),
+                done.clone(),
+                abandoned.clone(),
+            ])
+            .execute_async(&*conn)
+            .await
+            .expect("Failed to insert test setup data");
+
+        // Querying with a time limit 10 hours in the past should return no
+        // sagas, since all test sagas were just created.
+        let observed_sagas = datastore
+            .saga_list_running_or_unwinding_older_than(
+                &opctx,
+                Utc::now() - TimeDelta::hours(10),
+            )
+            .await
+            .expect("Failed to list sagas by states");
+        assert!(
+            observed_sagas.is_empty(),
+            "Should return no sagas with a large threshold, got: {:?}",
+            observed_sagas,
+        );
+
+        // Pushing the time limit into the future (10 seconds from now) avoids
+        // flakiness. All sagas in the Running or Unwinding states should be
+        // returned.
+        let observed_sagas = datastore
+            .saga_list_running_or_unwinding_older_than(
+                &opctx,
+                Utc::now() + TimeDelta::seconds(10),
+            )
+            .await
+            .expect("Failed to list running/unwinding sagas");
+
+        let mut expected_sagas =
+            vec![running.clone(), running2.clone(), unwinding.clone()];
+        expected_sagas.sort_by_key(|s| s.id);
+
+        assert_eq!(
+            observed_sagas, expected_sagas,
+            "Should return the Running and Unwinding sagas"
+        );
 
         // Test cleanup
         db.terminate().await;

@@ -12,6 +12,7 @@
 use crate::collection_task::CollectionTaskOutput;
 use crate::probes;
 use oximeter::Sample;
+use oximeter::queue::BoundedQueue;
 use oximeter::types::ProducerResultsItem;
 use oximeter_db::Client;
 use oximeter_db::DbWrite as _;
@@ -151,14 +152,16 @@ const MAX_BUFFER_SIZE_MULTIPLIER: usize = 100;
 #[derive(Clone)]
 struct BatchHandoff<T> {
     notify: Arc<Notify>,
-    batch: Arc<Mutex<VecDeque<T>>>,
+    batch: Arc<Mutex<BoundedQueue<T>>>,
 }
 
 impl<T> BatchHandoff<T> {
     fn new(batch_size: usize) -> Self {
         Self {
             notify: Arc::new(Notify::new()),
-            batch: Arc::new(Mutex::new(VecDeque::with_capacity(batch_size))),
+            batch: Arc::new(Mutex::new(BoundedQueue::new(
+                batch_size * MAX_BUFFER_SIZE_MULTIPLIER,
+            ))),
         }
     }
 }
@@ -168,19 +171,11 @@ struct BatchSender<T> {
     handoff: BatchHandoff<T>,
     // Minimum size of the buffer before inserting into the database.
     batch_size: usize,
-    // Maximum size we let the ring buffer grow before starting to drop older
-    // samples. This is a relief value, in the case where the database is
-    // completely partitioned or insertions have slowed dramatically.
-    max_buffer_size: usize,
 }
 
 impl<T> BatchSender<T> {
     fn new(handoff: BatchHandoff<T>, batch_size: usize) -> Self {
-        Self {
-            handoff,
-            batch_size,
-            max_buffer_size: batch_size * MAX_BUFFER_SIZE_MULTIPLIER,
-        }
+        Self { handoff, batch_size }
     }
 
     // Notify the insertion task that it should insert the batch of results.
@@ -205,44 +200,7 @@ impl<T> BatchSender<T> {
     ) -> usize {
         let mut batch = self.handoff.batch.lock().unwrap();
 
-        // Append the new samples, ensuring we never exceed the maximum buffer
-        // size.
-        let n_current_samples = batch.len();
-        let n_new_samples = samples.len();
-        let n_total_samples = n_current_samples + n_new_samples;
-
-        // The easy case is when all the samples fit. Just append them and
-        // return 0, since we've not dropped anything.
-        let n_dropped = if n_total_samples <= self.max_buffer_size {
-            batch.extend(samples);
-            0
-        } else {
-            // Now, drop samples first from the existing batch, then the new set of
-            // samples, until we're under our limit. Start by computing the total
-            // number to be dropped.
-            //
-            // NOTE: This can't underflow, we're in the branch where
-            // `n_total_samples > self.max_buffer size`.
-            let n_dropped = n_total_samples - self.max_buffer_size;
-
-            // We want to drop from the existing batch first. We can drop the
-            // minimum of the number to be dropped and the batch length. If
-            // we're only dropping part of the batch, we'll take `n_dropped` off
-            // the front. If we need to drop the whole batch and then some,
-            // we'll take the batch length and drop the whole thing.
-            let n_to_drop_from_batch = n_dropped.min(batch.len());
-            drop(batch.drain(..n_to_drop_from_batch));
-
-            // At this point, we've dropped something (potentially everything)
-            // from the existing batch. We need to figure out how many, if any,
-            // to drop from the _incoming_ set of samples. Subtract whatever we
-            // dropped immediately above to compute the number left to drop.
-            let n_left_to_drop = n_dropped - n_to_drop_from_batch;
-
-            // Append whatever we don't want to drop.
-            batch.extend(samples.into_iter().skip(n_left_to_drop));
-            n_dropped
-        };
+        let n_dropped = batch.extend(samples);
 
         // Notify the insertion task if needed.
         if was_forced_collection || batch.len() >= self.batch_size {
@@ -254,7 +212,6 @@ impl<T> BatchSender<T> {
 
 struct BatchReceiver<T> {
     handoff: BatchHandoff<T>,
-    batch_size: usize,
 }
 
 impl<T> BatchReceiver<T> {
@@ -264,10 +221,7 @@ impl<T> BatchReceiver<T> {
     // a contiguous `&[Sample]` without an additional heap allocation.
     async fn wait_for_batch(&self) -> VecDeque<T> {
         self.handoff.notify.notified().await;
-        let mut stolen = VecDeque::with_capacity(self.batch_size);
-        let mut batch = self.handoff.batch.lock().unwrap();
-        std::mem::swap(&mut stolen, &mut *batch);
-        stolen
+        self.handoff.batch.lock().unwrap().drain()
     }
 }
 
@@ -276,7 +230,7 @@ fn batch_handoff<T: Clone>(
 ) -> (BatchSender<T>, BatchReceiver<T>) {
     let handoff = BatchHandoff::new(batch_size);
     let sender = BatchSender::new(handoff.clone(), batch_size);
-    let receiver = BatchReceiver { handoff, batch_size };
+    let receiver = BatchReceiver { handoff };
     (sender, receiver)
 }
 
@@ -379,7 +333,7 @@ mod tests {
                 .await
                 .expect("Should be notified with force collection");
         assert_eq!(batch.len(), n_samples);
-        assert!(batch_tx.handoff.batch.lock().unwrap().is_empty());
+        assert_eq!(batch_tx.handoff.batch.lock().unwrap().len(), 0);
     }
 
     proptest! {
@@ -407,7 +361,7 @@ mod tests {
             {
                 let buf = batch_tx.handoff.batch.lock().unwrap();
                 assert_eq!(buf.len(), expected_n_samples);
-                assert_eq!(*buf, tail);
+                assert!(buf.iter().eq(tail.iter()));
             }
 
             // Check that we're either notified, or not, if the current batch is
@@ -422,7 +376,7 @@ mod tests {
                 rt.block_on(async {
                     timeout(TIMEOUT, fut).await
                 }).expect("Should be notified");
-                assert_eq!(*batch_rx.handoff.batch.lock().unwrap(), tail);
+                assert!(batch_rx.handoff.batch.lock().unwrap().iter().eq(tail.iter()));
             } else {
                 rt.block_on(async {
                     timeout(TIMEOUT, fut).await
@@ -453,7 +407,7 @@ mod tests {
             {
                 let buf = batch_tx.handoff.batch.lock().unwrap();
                 assert_eq!(buf.len(), expected_n_samples);
-                assert_eq!(*buf, tail);
+                assert!(buf.iter().eq(tail.iter()));
             }
 
             // And check we've notified the receiver again.

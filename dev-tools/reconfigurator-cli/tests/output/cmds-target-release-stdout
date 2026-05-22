@@ -22,7 +22,7 @@ cockroachdb settings:
     version::::::::::::   (none)
     preserve downgrade:   (not set)
 planner config:
-    add zones with mupdate override:   false
+    (no current planner configs)
 
 
 
@@ -122,7 +122,7 @@ cockroachdb settings:
     version::::::::::::   (none)
     preserve downgrade:   (not set)
 planner config:
-    add zones with mupdate override:   false
+    (no current planner configs)
 
 
 
@@ -1249,7 +1249,7 @@ cockroachdb settings:
     version::::::::::::   (none)
     preserve downgrade:   (not set)
 planner config:
-    add zones with mupdate override:   false
+    (no current planner configs)
 
 
 
@@ -1276,7 +1276,7 @@ cockroachdb settings:
     version::::::::::::   (none)
     preserve downgrade:   (not set)
 planner config:
-    add zones with mupdate override:   false
+    (no current planner configs)
 
 
 > load saved.out 61f451b3-2121-4ed6-91c7-a550054f6c21
@@ -1344,7 +1344,7 @@ cockroachdb settings:
     version::::::::::::   (none)
     preserve downgrade:   (not set)
 planner config:
-    add zones with mupdate override:   false
+    (no current planner configs)
 
 
 

@@ -4,9 +4,9 @@
 
 //! Collect sled cubby information for support bundles
 
-use crate::app::background::tasks::support_bundle::cache::Cache;
-use crate::app::background::tasks::support_bundle::collection::BundleCollection;
-use crate::app::background::tasks::support_bundle::step::CollectionStepOutput;
+use crate::cache::Cache;
+use crate::collection::BundleCollection;
+use crate::step::CollectionStepOutput;
 
 use anyhow::Context;
 use anyhow::bail;
@@ -18,6 +18,7 @@ use nexus_db_model::Sled;
 use omicron_uuid_kinds::GenericUuid;
 use serde::Serialize;
 use slog::Logger;
+use slog::error;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use uuid::Uuid;

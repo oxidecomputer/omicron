@@ -64,7 +64,6 @@ jiff.workspace = true
 lldpd_client.workspace = true
 macaddr.workspace = true
 maplit.workspace = true
-mg-api-types.workspace = true
 nexus-background-task-interface.workspace = true
 # Not under "dev-dependencies"; these also need to be implemented for
 # integration tests.
@@ -98,6 +97,7 @@ qorb.workspace = true
 rand.workspace = true
 range-requests.workspace = true
 ref-cast.workspace = true
+mg-api-types.workspace = true
 regex.workspace = true
 reqwest = { workspace = true, features = ["http2", "json"] }
 ring.workspace = true
@@ -160,6 +160,7 @@ raw-cpuid = { workspace = true, features = ["std"] }
 rustls = { workspace = true }
 rustls-pemfile = { workspace = true }
 scim2-rs.workspace = true
+support-bundle-collection.workspace = true
 update-common.workspace = true
 update-engine.workspace = true
 omicron-workspace-hack.workspace = true

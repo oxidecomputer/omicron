@@ -1275,7 +1275,6 @@ mod test {
             address = "[::1]:4676"
             [initial_reconfigurator_config]
             planner_enabled = true
-            planner_config.add_zones_with_mupdate_override = true
             tuf_repo_pruner_enabled = false
             [background_tasks]
             dns_internal.period_secs_config = 1
@@ -1448,9 +1447,7 @@ mod test {
                     )]),
                     initial_reconfigurator_config: Some(ReconfiguratorConfig {
                         planner_enabled: true,
-                        planner_config: PlannerConfig {
-                            add_zones_with_mupdate_override: true,
-                        },
+                        planner_config: PlannerConfig::default(),
                         tuf_repo_pruner_enabled: false,
                     }),
                     background_tasks: BackgroundTaskConfig {

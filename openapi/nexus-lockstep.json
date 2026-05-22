@@ -7014,16 +7014,7 @@
         ]
       },
       "PlannerConfig": {
-        "type": "object",
-        "properties": {
-          "add_zones_with_mupdate_override": {
-            "description": "Whether to add zones even if a mupdate override is present.\n\nOnce Nexus-driven update is active on a customer system, we must not add new zones while the system is recovering from a MUPdate.\n\nThis setting, which is off by default, allows us to add zones even if we've detected a recent MUPdate on the system.",
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "add_zones_with_mupdate_override"
-        ]
+        "type": "object"
       },
       "PlanningAddOutOfEligibleSleds": {
         "description": "How many discretionary zones we actually placed out of how many we wanted to place.",
@@ -7054,10 +7045,6 @@
             "items": {
               "type": "string"
             }
-          },
-          "add_zones_with_mupdate_override": {
-            "description": "The value of the homonymous planner config. (What this really means is that zone adds happen despite being blocked by one or more MUPdate-related reasons.)",
-            "type": "boolean"
           },
           "discretionary_zones_placed": {
             "description": "Sled ID → kinds of discretionary zones placed there",
@@ -7143,7 +7130,6 @@
         },
         "required": [
           "add_update_blocked_reasons",
-          "add_zones_with_mupdate_override",
           "discretionary_zones_placed",
           "out_of_eligible_sleds",
           "sleds_getting_ntp_and_discretionary_zones",
@@ -8428,7 +8414,12 @@
         "type": "object",
         "properties": {
           "planner_config": {
-            "$ref": "#/components/schemas/PlannerConfig"
+            "default": {},
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PlannerConfig"
+              }
+            ]
           },
           "planner_enabled": {
             "type": "boolean"
@@ -8438,7 +8429,6 @@
           }
         },
         "required": [
-          "planner_config",
           "planner_enabled",
           "tuf_repo_pruner_enabled"
         ]

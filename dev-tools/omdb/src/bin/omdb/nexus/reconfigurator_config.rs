@@ -51,9 +51,6 @@ pub struct ReconfiguratorConfigOpts {
     planner_enabled: Option<bool>,
 
     #[clap(long, action = ArgAction::Set)]
-    add_zones_with_mupdate_override: Option<bool>,
-
-    #[clap(long, action = ArgAction::Set)]
     tuf_repo_pruner_enabled: Option<bool>,
 }
 
@@ -65,13 +62,7 @@ impl ReconfiguratorConfigOpts {
             planner_enabled: self
                 .planner_enabled
                 .unwrap_or(current.planner_enabled),
-            planner_config: PlannerConfig {
-                add_zones_with_mupdate_override: self
-                    .add_zones_with_mupdate_override
-                    .unwrap_or(
-                        current.planner_config.add_zones_with_mupdate_override,
-                    ),
-            },
+            planner_config: PlannerConfig::default(),
             tuf_repo_pruner_enabled: self
                 .tuf_repo_pruner_enabled
                 .unwrap_or(current.tuf_repo_pruner_enabled),

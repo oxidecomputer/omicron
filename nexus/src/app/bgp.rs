@@ -177,7 +177,7 @@ impl super::Nexus {
 
             for r in &router_info {
                 let asn = r.asn;
-                let selector = mg_admin_client::types::ExportedSelector {
+                let selector = mg_api_types::bgp::session::ExportedSelector {
                     afi: None,
                     asn,
                     peer: None,

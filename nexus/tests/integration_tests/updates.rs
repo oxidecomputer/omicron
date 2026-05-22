@@ -819,6 +819,16 @@ async fn test_update_status() -> Result<()> {
     assert_eq!(counts.get("install dataset").unwrap(), &7);
     assert_eq!(counts.get("unknown").unwrap(), &11);
 
+    // `set_target_release_for_mupdate_recovery` only updates the target_release
+    // row, but the blueprint stays in its initial
+    // `WaitingForMupdateToBeCleared` state. This state is not treated as an
+    // update in progress, so `contact_support()` runs the full health checks
+    // instead of skipping them due to an "update in-progress".
+    //
+    // The task that checks for enabled not online SMF services isn't running on
+    // a simulated system; the contact_support field should be true
+    assert!(status.contact_support, "should need to contact support");
+
     cptestctx.teardown().await;
     Ok(())
 }
