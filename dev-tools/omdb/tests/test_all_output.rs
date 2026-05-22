@@ -436,6 +436,7 @@ async fn test_omdb_success_cases() {
     // contains the expected metadata files.
     let bundle_path = tmpdir.path().join("bundle.zip");
     let bundle_args: &[&str] = &[
+        "-w",
         "support-bundle",
         "collect",
         "--output",
@@ -491,6 +492,7 @@ async fn test_omdb_success_cases() {
             .env("RUST_BACKTRACE", "1")
             .env("RUST_LIB_BACKTRACE", "0")
             .args(&[
+                "-w",
                 "support-bundle",
                 "collect",
                 "--tempdir",

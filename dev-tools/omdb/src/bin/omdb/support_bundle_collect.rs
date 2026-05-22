@@ -122,6 +122,12 @@ impl SupportBundleArgs {
 
 impl CollectArgs {
     async fn run(&self, omdb: &Omdb, log: &slog::Logger) -> anyhow::Result<()> {
+        // Collecting a full bundle stages every file in --tempdir before
+        // (or while) writing the zip. On the switch zone, where this
+        // command typically runs during incident response, disk space is
+        // limited and a large bundle can fill it. Gate the command behind
+        // -w/--destructive so an operator opts in knowingly.
+        let _token = omdb.check_allow_destructive()?;
         self.db_url_opts
             .with_datastore(omdb, log, async |opctx, datastore| {
                 self.collect(omdb, log, opctx, datastore).await
