@@ -190,6 +190,7 @@ mod db_metadata;
 mod ereport;
 mod saga;
 mod sitrep;
+mod system_version;
 mod user_data_export;
 mod whatis;
 
@@ -405,6 +406,8 @@ enum DbCommands {
     Sleds(SledsArgs),
     /// Show instances grouped by the sled they are running on
     SledInstances(SledInstancesArgs),
+    /// Print the current target system release and the update date (print all of the releases when `--all` is present)
+    SystemVersion(system_version::SystemVersionArgs),
     /// Print information about customer instances.
     Instance(InstanceArgs),
     /// Alias to `omdb instance list`.
@@ -1452,6 +1455,9 @@ impl DbArgs {
                             args,
                         )
                         .await
+                    }
+                    DbCommands::SystemVersion(args) => {
+                        system_version::cmd_db_system_version(&opctx, &datastore, &fetch_opts, args).await
                     }
                     DbCommands::Instance(InstanceArgs {
                         command: InstanceCommands::List(args),
