@@ -480,8 +480,8 @@ async fn cmd_db_ereport_info(
 
         println!("\n{:=<80}", "== EREPORT ");
         println!("{}", erebor::Displayer::new(&report));
-        println!()
     }
+    println!();
 
     Ok(())
 }
