@@ -1816,7 +1816,7 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
                     ),
                 ],
             },
-            // Fleet-wide networking settings (RFD 689)
+            // Fleet-wide networking settings
             VerifyEndpoint {
                 url: &SYSTEM_NETWORKING_SETTINGS_URL,
                 visibility: Visibility::Public,

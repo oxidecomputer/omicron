@@ -1210,8 +1210,8 @@ CREATE TABLE IF NOT EXISTS omicron.public.silo_auth_settings (
 );
 
 /*
- * Fleet-wide networking settings (RFD 689). Singleton row; see `db_metadata`
- * for an explanation of the singleton pattern.
+ * Fleet-wide networking settings. Singleton row; see `db_metadata` for an
+ * explanation of the singleton pattern.
  */
 CREATE TABLE IF NOT EXISTS omicron.public.system_networking_settings (
     singleton BOOL NOT NULL PRIMARY KEY,
@@ -1451,12 +1451,11 @@ CREATE TABLE IF NOT EXISTS omicron.public.instance (
     cpu_platform omicron.public.instance_cpu_platform,
 
     /*
-     * Per RFD 689, when set this instance has opted in to jumbo frames (8500
-     * byte MTU) on its primary OPTE interface. The effective MTU also depends
-     * on the fleet-wide setting in `system_networking_settings`; if that flag
-     * is off, the OPTE port is created with the default MTU regardless of
-     * this column. Changes to this column only take effect on the next
-     * instance restart.
+     * When set this instance has opted in to jumbo frames (8500 byte MTU)
+     * on its primary OPTE interface. The effective MTU also depends on the
+     * fleet-wide setting in `system_networking_settings`; if that flag is off,
+     * the OPTE port is created with the default MTU regardless of this column.
+     * Changes to this column only take effect on the next instance restart.
      */
     enable_jumbo_frames BOOL NOT NULL,
 

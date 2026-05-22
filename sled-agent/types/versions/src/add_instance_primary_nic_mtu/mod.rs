@@ -4,8 +4,7 @@
 
 //! Version `ADD_INSTANCE_PRIMARY_NIC_MTU` of the Sled Agent API.
 //!
-//! Per RFD 689 (External Jumbo Frames), this version adds an MTU field for
-//! the instance's primary OPTE NIC so Nexus can request an 8500 byte MTU when
-//! jumbo frames are enabled.
+//! This version adds an MTU field for the instance's primary OPTE NIC so
+//! Nexus can request an 8500 byte MTU when jumbo frames are enabled.
 
 pub mod instance;

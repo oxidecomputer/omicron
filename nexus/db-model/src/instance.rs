@@ -137,12 +137,11 @@ pub struct Instance {
     /// most general CPU platform supported by the selected sled.
     pub cpu_platform: Option<InstanceCpuPlatform>,
 
-    /// Per RFD 689: when true, the instance has opted in to jumbo frames
-    /// (8500 byte MTU) on its primary OPTE interface. The effective MTU
-    /// also depends on the fleet-wide setting in
-    /// `system_networking_settings`; if that flag is off the OPTE port is
-    /// created with the default MTU regardless of this column. Changes to
-    /// this column only take effect on the next instance restart.
+    /// When true, the instance has opted in to jumbo frames (8500 byte MTU)
+    /// on its primary OPTE interface. The effective MTU also depends on the
+    /// fleet-wide setting in `system_networking_settings`; if that flag is off
+    /// the OPTE port is created with the default MTU regardless of this field.
+    /// Changes to this field only take effect on the next instance restart.
     pub enable_jumbo_frames: bool,
 }
 

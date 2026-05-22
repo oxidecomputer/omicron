@@ -1637,7 +1637,7 @@
             "type": "string"
           },
           "external_jumbo_frames_opt_in_enabled": {
-            "description": "Per RFD 689: enable the fleet-wide jumbo-frames opt-in. Operators can also toggle this at runtime via the Nexus API after handoff.",
+            "description": "Enable the fleet-wide jumbo-frames opt-in. Operators can also toggle this at runtime via the Nexus API after handoff.",
             "default": false,
             "type": "boolean"
           },
@@ -3409,7 +3409,7 @@
             "type": "string"
           },
           "external_jumbo_frames_opt_in_enabled": {
-            "description": "Per RFD 689: enable the fleet-wide jumbo-frames opt-in.",
+            "description": "Enable the fleet-wide jumbo-frames opt-in.",
             "default": false,
             "type": "boolean"
           },

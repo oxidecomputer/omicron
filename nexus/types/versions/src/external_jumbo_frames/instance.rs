@@ -4,8 +4,8 @@
 
 //! Instance types for version EXTERNAL_JUMBO_FRAMES.
 //!
-//! Adds `enable_jumbo_frames` to both `InstanceCreate` and `InstanceUpdate`
-//! per RFD 689. The field is `bool` for create (defaults to `false`) and
+//! Adds `enable_jumbo_frames` to both `InstanceCreate` and `InstanceUpdate`.
+//! The field is `bool` for create (defaults to `false`) and
 //! `Option<bool>` for update (omit to leave the value unchanged).
 
 use omicron_common::api::external::{
@@ -147,10 +147,10 @@ pub struct InstanceCreate {
     /// it is initially placed on.
     #[serde(default)]
     pub cpu_platform: Option<InstanceCpuPlatform>,
-    /// Per RFD 689, enable jumbo frames (8500 byte MTU) on the instance's
-    /// primary OPTE interface. Requires the fleet-wide jumbo-frames opt-in
-    /// to be enabled by an operator; otherwise this field must be `false`.
-    /// Changes only take effect on the next instance restart.
+    /// Enable jumbo frames (8500 byte MTU) on the instance's primary OPTE
+    /// interface. Requires the fleet-wide jumbo-frames opt-in to be enabled
+    /// by an operator; otherwise this field must be `false`. Changes only take
+    /// effect on the next instance restart.
     #[serde(default)]
     pub enable_jumbo_frames: bool,
 }
@@ -200,9 +200,9 @@ pub struct InstanceUpdate {
     #[serde(default)]
     pub multicast_groups: Option<Vec<MulticastGroupJoinSpec>>,
 
-    /// Per RFD 689, update the per-instance jumbo-frames opt-in. Setting
-    /// this to `true` requires the fleet-wide jumbo-frames opt-in to be
-    /// enabled. Changes only take effect on the next instance restart.
+    /// Update the per-instance jumbo-frames opt-in. Setting this to `true`
+    /// requires the fleet-wide jumbo-frames opt-in to be enabled. Changes only
+    /// take effect on the next instance restart.
     #[serde(default)]
     pub enable_jumbo_frames: Option<bool>,
 }

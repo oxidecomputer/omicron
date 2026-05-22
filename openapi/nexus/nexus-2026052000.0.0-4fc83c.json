@@ -11274,7 +11274,7 @@
         "tags": [
           "system/networking"
         ],
-        "summary": "Fetch fleet-wide networking settings (RFD 689)",
+        "summary": "Fetch fleet-wide networking settings",
         "operationId": "system_networking_settings_view",
         "responses": {
           "200": {
@@ -11299,7 +11299,7 @@
         "tags": [
           "system/networking"
         ],
-        "summary": "Update fleet-wide networking settings (RFD 689)",
+        "summary": "Update fleet-wide networking settings",
         "operationId": "system_networking_settings_update",
         "requestBody": {
           "content": {
@@ -22890,7 +22890,7 @@
             }
           },
           "enable_jumbo_frames": {
-            "description": "Per RFD 689, enable jumbo frames (8500 byte MTU) on the instance's primary OPTE interface. Requires the fleet-wide jumbo-frames opt-in to be enabled by an operator; otherwise this field must be `false`. Changes only take effect on the next instance restart.",
+            "description": "Enable jumbo frames (8500 byte MTU) on the instance's primary OPTE interface. Requires the fleet-wide jumbo-frames opt-in to be enabled by an operator; otherwise this field must be `false`. Changes only take effect on the next instance restart.",
             "default": false,
             "type": "boolean"
           },
@@ -23505,7 +23505,7 @@
           },
           "enable_jumbo_frames": {
             "nullable": true,
-            "description": "Per RFD 689, update the per-instance jumbo-frames opt-in. Setting this to `true` requires the fleet-wide jumbo-frames opt-in to be enabled. Changes only take effect on the next instance restart.",
+            "description": "Update the per-instance jumbo-frames opt-in. Setting this to `true` requires the fleet-wide jumbo-frames opt-in to be enabled. Changes only take effect on the next instance restart.",
             "default": null,
             "type": "boolean"
           },
@@ -29656,7 +29656,7 @@
         ]
       },
       "SystemNetworkingSettings": {
-        "description": "Fleet-wide networking settings (RFD 689). Only fleet admins may view or modify these settings.",
+        "description": "Fleet-wide networking settings. Only fleet admins may view or modify these settings.",
         "type": "object",
         "properties": {
           "external_jumbo_frames_opt_in_enabled": {
@@ -29669,7 +29669,7 @@
         ]
       },
       "SystemNetworkingSettingsUpdate": {
-        "description": "Parameters for updating the fleet-wide networking settings (RFD 689).",
+        "description": "Parameters for updating the fleet-wide networking settings.",
         "type": "object",
         "properties": {
           "external_jumbo_frames_opt_in_enabled": {

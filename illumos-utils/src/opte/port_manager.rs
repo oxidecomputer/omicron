@@ -148,7 +148,7 @@ pub struct PortCreateParams<'a> {
     pub dhcp_config: DhcpCfg,
     pub attached_subnets: Vec<AttachedSubnet>,
     /// MTU to set on the xde device, in bytes. If `None`, OPTE applies its
-    /// default (1500). Used by RFD 689 jumbo-frame opt-in.
+    /// default (1500). Used by jumbo-frame opt-in.
     pub mtu: Option<u32>,
 }
 

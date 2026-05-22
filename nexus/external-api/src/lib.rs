@@ -439,7 +439,7 @@ pub trait NexusExternalApi {
         HttpError,
     >;
 
-    /// Fetch fleet-wide networking settings (RFD 689)
+    /// Fetch fleet-wide networking settings
     #[endpoint {
         method = GET,
         path = "/v1/system/networking/settings",
@@ -453,7 +453,7 @@ pub trait NexusExternalApi {
         HttpError,
     >;
 
-    /// Update fleet-wide networking settings (RFD 689)
+    /// Update fleet-wide networking settings
     #[endpoint {
         method = PUT,
         path = "/v1/system/networking/settings",

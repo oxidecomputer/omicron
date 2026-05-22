@@ -4,7 +4,7 @@
 
 //! Version `EXTERNAL_JUMBO_FRAMES` of the external Nexus API.
 //!
-//! Per RFD 689 (External Jumbo Frames), this version adds:
+//! This version adds:
 //!
 //! - `InstanceCreate.enable_jumbo_frames` — per-instance opt-in for jumbo
 //!   frames (8500 byte MTU) on the primary OPTE interface.

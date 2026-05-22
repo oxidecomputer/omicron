@@ -6,7 +6,7 @@ use chrono::{DateTime, Utc};
 use nexus_db_schema::schema::system_networking_settings;
 use serde::{Deserialize, Serialize};
 
-/// Singleton row holding fleet-wide networking settings (RFD 689).
+/// Singleton row holding fleet-wide networking settings.
 #[derive(
     Queryable,
     Insertable,

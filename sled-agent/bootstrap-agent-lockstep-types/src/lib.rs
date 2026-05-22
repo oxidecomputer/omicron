@@ -79,11 +79,10 @@ pub struct RackInitializeRequest {
     /// IPs or subnets allowed to make requests to user-facing services
     pub allowed_source_ips: AllowedSourceIps,
 
-    /// Per RFD 689: when true, end users may opt in to jumbo frames on the
-    /// primary interface of an instance, and control plane services with
-    /// external-facing OPTE NICs are brought up with an 8500 byte MTU.
-    /// Operators can toggle this at runtime via the fleet networking
-    /// settings API.
+    /// When true, end users may opt in to jumbo frames on the primary interface
+    /// of an instance, and control plane services with external-facing OPTE
+    /// NICs are brought up with an 8500 byte MTU. Operators can toggle this at
+    /// runtime via the fleet networking settings API.
     #[serde(default)]
     pub external_jumbo_frames_opt_in_enabled: bool,
 }

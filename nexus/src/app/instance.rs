@@ -574,8 +574,8 @@ impl super::Nexus {
 
         check_instance_cpu_memory_sizes(*ncpus, *memory)?;
 
-        // RFD 689: opting in to jumbo frames requires the fleet-wide opt-in.
-        // Opting out (`Some(false)`) is always allowed.
+        // Opting in to jumbo frames requires the fleet-wide opt-in. Opting out
+        // (`Some(false)`) is always allowed.
         if matches!(enable_jumbo_frames, Some(true)) {
             let settings = self
                 .db_datastore
@@ -628,8 +628,8 @@ impl super::Nexus {
             .instance_reconfigure(opctx, &authz_instance, update)
             .await;
 
-        // RFD 689: persist the new jumbo-frames bit if it was supplied.
-        // Effective MTU is recomputed on the next instance start.
+        // Persist the new jumbo-frames bit if it was supplied. Effective MTU is
+        // recomputed on the next instance start.
         if let Some(enable) = enable_jumbo_frames {
             self.datastore()
                 .instance_set_enable_jumbo_frames(
@@ -704,8 +704,8 @@ impl super::Nexus {
             )));
         }
 
-        // RFD 689: requiring jumbo frames on a new instance requires the
-        // fleet-wide opt-in.
+        // Requiring jumbo frames on a new instance requires the fleet-wide
+        // opt-in.
         if params.enable_jumbo_frames {
             let settings = self
                 .db_datastore
@@ -1694,10 +1694,10 @@ impl super::Nexus {
             })
             .collect();
 
-        // Compute the effective MTU for the instance's primary OPTE port,
-        // per RFD 689. Jumbo frames are only applied when both the fleet-wide
-        // opt-in is enabled and the per-instance bit is set; otherwise we
-        // leave `primary_nic_mtu` unset and OPTE applies the default MTU.
+        // Compute the effective MTU for the instance's primary OPTE port. Jumbo
+        // frames are only applied when both the fleet-wide opt-in is enabled
+        // and the per-instance bit is set; otherwise we leave `primary_nic_mtu`
+        // unset and OPTE applies the default MTU.
         let primary_nic_mtu = if db_instance.enable_jumbo_frames {
             let settings = self
                 .db_datastore

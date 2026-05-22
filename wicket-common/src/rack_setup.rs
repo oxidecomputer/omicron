@@ -54,8 +54,8 @@ pub struct CurrentRssUserConfigInsensitive {
     pub external_dns_zone_name: String,
     pub rack_network_config: Option<UserSpecifiedRackNetworkConfig>,
     pub allowed_source_ips: Option<AllowedSourceIps>,
-    /// Per RFD 689: enable the fleet-wide jumbo-frames opt-in. Operators can
-    /// also toggle this at runtime via the Nexus API after handoff.
+    /// Enable the fleet-wide jumbo-frames opt-in. Operators can also toggle
+    /// this at runtime via the Nexus API after handoff.
     #[serde(default)]
     pub external_jumbo_frames_opt_in_enabled: bool,
 }
@@ -81,7 +81,7 @@ pub struct PutRssUserConfigInsensitive {
     pub external_dns_zone_name: String,
     pub rack_network_config: UserSpecifiedRackNetworkConfig,
     pub allowed_source_ips: AllowedSourceIps,
-    /// Per RFD 689: enable the fleet-wide jumbo-frames opt-in.
+    /// Enable the fleet-wide jumbo-frames opt-in.
     #[serde(default)]
     pub external_jumbo_frames_opt_in_enabled: bool,
 }

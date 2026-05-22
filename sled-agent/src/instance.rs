@@ -568,9 +568,9 @@ struct InstanceRunner {
     firewall_rules: Vec<ResolvedVpcFirewallRule>,
     dhcp_config: DhcpCfg,
 
-    // Effective MTU for the primary NIC's OPTE port. `None` means use the
-    // OPTE default (1500). Populated by Nexus based on RFD 689 jumbo-frame
-    // opt-in (fleet flag AND instance bit).
+    // Effective MTU for the primary NIC's OPTE port. `None` means use the OPTE
+    // default (1500). Populated by Nexus based on jumbo-frame opt-in (fleet
+    // flag AND instance bit).
     primary_nic_mtu: Option<u32>,
 
     // Internal State management

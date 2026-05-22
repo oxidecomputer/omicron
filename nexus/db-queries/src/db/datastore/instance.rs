@@ -1203,8 +1203,8 @@ impl DataStore {
         Ok(instance_and_vmm)
     }
 
-    /// Update the per-instance jumbo-frames opt-in (RFD 689). Changes take
-    /// effect on the next instance restart.
+    /// Update the per-instance jumbo-frames opt-in. Changes take effect on the
+    /// next instance restart.
     pub async fn instance_set_enable_jumbo_frames(
         &self,
         opctx: &OpContext,

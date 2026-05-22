@@ -1001,7 +1001,7 @@
             "type": "string"
           },
           "external_jumbo_frames_opt_in_enabled": {
-            "description": "Per RFD 689: when true, end users may opt in to jumbo frames on the primary interface of an instance, and control plane services with external-facing OPTE NICs are brought up with an 8500 byte MTU. Operators can toggle this at runtime via the fleet networking settings API.",
+            "description": "When true, end users may opt in to jumbo frames on the primary interface of an instance, and control plane services with external-facing OPTE NICs are brought up with an 8500 byte MTU. Operators can toggle this at runtime via the fleet networking settings API.",
             "default": false,
             "type": "boolean"
           },
