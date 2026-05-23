@@ -89,7 +89,7 @@ use slog_error_chain::InlineErrorChain;
 use std::{
     collections::{HashMap, HashSet, hash_map::Entry},
     hash::Hash,
-    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
+    net::{IpAddr, Ipv6Addr, SocketAddr},
     str::FromStr,
     sync::{Arc, LazyLock},
 };
@@ -1859,7 +1859,7 @@ fn build_sled_agent_clients(
 
 #[derive(PartialEq, Eq, Hash, Debug)]
 struct SwitchStaticRouteV4 {
-    nexthop: Ipv4Addr,
+    nexthop: IpAddr,
     prefix: Prefix4,
     vlan: Option<u16>,
     priority: u8,
@@ -2042,7 +2042,7 @@ fn static_routes_in_db(
                         None => DEFAULT_RIB_PRIORITY_STATIC,
                     };
                     routes.insert(SwitchStaticRoute::V4(SwitchStaticRouteV4 {
-                        nexthop,
+                        nexthop: IpAddr::V4(nexthop),
                         prefix: Prefix4 {
                             value: dst,
                             length: route.dst.prefix(),
@@ -2064,6 +2064,21 @@ fn static_routes_in_db(
                     routes.insert(SwitchStaticRoute::V6(SwitchStaticRouteV6 {
                         nexthop,
                         prefix: Prefix6 {
+                            value: dst,
+                            length: route.dst.prefix(),
+                        },
+                        vlan: route.vid.map(|x| x.0),
+                        priority,
+                    }));
+                }
+                (IpAddr::V6(nexthop), IpAddr::V4(dst)) => {
+                    let priority = match route.rib_priority {
+                        Some(v) => v.0,
+                        None => DEFAULT_RIB_PRIORITY_STATIC,
+                    };
+                    routes.insert(SwitchStaticRoute::V4(SwitchStaticRouteV4 {
+                        nexthop: IpAddr::V6(nexthop),
+                        prefix: Prefix4 {
                             value: dst,
                             length: route.dst.prefix(),
                         },
@@ -2302,7 +2317,7 @@ async fn static_routes_on_switch(
                         };
                         flattened.insert(SwitchStaticRoute::V4(
                             SwitchStaticRouteV4 {
-                                nexthop: addr,
+                                nexthop: IpAddr::V4(addr),
                                 prefix: dst,
                                 vlan: p.vlan_id,
                                 priority: p.rib_priority,
@@ -2310,22 +2325,33 @@ async fn static_routes_on_switch(
                         ));
                     }
                     IpAddr::V6(addr) => {
-                        let Ok(dst) = destination.parse() else {
-                            error!(
-                                log,
-                                "failed to parse static route destination: \
-                                 {destination}"
-                            );
+                        if let Ok(dst) = destination.parse::<Prefix6>() {
+                            flattened.insert(SwitchStaticRoute::V6(
+                                SwitchStaticRouteV6 {
+                                    nexthop: addr,
+                                    prefix: dst,
+                                    vlan: p.vlan_id,
+                                    priority: p.rib_priority,
+                                },
+                            ));
                             continue;
                         };
-                        flattened.insert(SwitchStaticRoute::V6(
-                            SwitchStaticRouteV6 {
-                                nexthop: addr,
-                                prefix: dst,
-                                vlan: p.vlan_id,
-                                priority: p.rib_priority,
-                            },
-                        ));
+                        if let Ok(dst) = destination.parse::<Prefix4>() {
+                            flattened.insert(SwitchStaticRoute::V4(
+                                SwitchStaticRouteV4 {
+                                    nexthop: IpAddr::V6(addr),
+                                    prefix: dst,
+                                    vlan: p.vlan_id,
+                                    priority: p.rib_priority,
+                                },
+                            ));
+                            continue;
+                        };
+                        error!(
+                            log,
+                            "failed to parse static route destination: \
+                                 {destination}"
+                        );
                     }
                 };
             }
