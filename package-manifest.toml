@@ -833,8 +833,8 @@ setup_hint = "Run `cargo xtask download transceiver-control` to download the nec
 service_name = "thundermuffin"
 source.type = "prebuilt"
 source.repo = "thundermuffin"
-source.commit = "e7ce5975d53f91dbd5696afa959698d8924766ba"
-source.sha256 = "7ac866e0495c05410800272483f80ac7231ea6b533906d535b70024e86d0156b"
+source.commit = "473a90f8081e99f1b77f2625d97ab1f7817b3468"
+source.sha256 = "757600f364dcffa2ffccf6a95918b99b4dbd71c8ec60746a776143f3e086b519"
 output.type = "zone"
 output.intermediate_only = true
 
