@@ -1205,13 +1205,6 @@ pub struct Instance {
     /// The CPU platform for this instance. If this is `null`, the instance
     /// requires no particular CPU platform.
     pub cpu_platform: Option<InstanceCpuPlatform>,
-
-    /// When true, this instance has opted in to jumbo frames (8500 byte
-    /// MTU) on its primary network interface. The effective MTU also
-    /// depends on the fleet-wide jumbo-frames opt-in; if that is disabled,
-    /// the primary interface uses the default MTU regardless of this
-    /// value. Changes only take effect on the next instance restart.
-    pub enable_jumbo_frames: bool,
 }
 
 /// Status of control-plane driven automatic failure recovery for this instance.

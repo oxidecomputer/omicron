@@ -4,12 +4,13 @@
 
 //! Instance types for version EXTERNAL_JUMBO_FRAMES.
 //!
-//! Adds `enable_jumbo_frames` to both `InstanceCreate` and `InstanceUpdate`.
-//! The field is `bool` for create (defaults to `false`) and
-//! `Option<bool>` for update (omit to leave the value unchanged).
+//! Adds `enable_jumbo_frames` to `InstanceCreate`, `InstanceUpdate`, and the
+//! `Instance` view. For create the field is `bool` (defaults to `false`); for
+//! update it's `Option<bool>` (omit to leave the value unchanged); for the
+//! view it's `bool` reflecting the current configured value.
 
 use omicron_common::api::external::{
-    ByteCount, Hostname, IdentityMetadataCreateParams,
+    self, ByteCount, Hostname, IdentityMetadataCreateParams,
     InstanceAutoRestartPolicy, InstanceCpuCount, InstanceCpuPlatform, NameOrId,
     Nullable,
 };
@@ -218,5 +219,33 @@ impl From<v2026_01_08_00::instance::InstanceUpdate> for InstanceUpdate {
             multicast_groups: old.multicast_groups,
             enable_jumbo_frames: None,
         }
+    }
+}
+
+/// View of an Instance, including the per-instance jumbo-frames opt-in.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct Instance {
+    /// All fields of the prior `Instance` view, unchanged.
+    #[serde(flatten)]
+    pub inner: external::Instance,
+
+    /// When true, this instance has opted in to jumbo frames (8500 byte MTU)
+    /// on its primary network interface. The effective MTU also depends on
+    /// the fleet-wide jumbo-frames opt-in; if that is disabled, the primary
+    /// interface uses the default MTU regardless of this value. Changes only
+    /// take effect on the next instance restart.
+    pub enable_jumbo_frames: bool,
+}
+
+impl From<Instance> for external::Instance {
+    fn from(v: Instance) -> Self {
+        v.inner
+    }
+}
+
+// Delegated so paginated listings can derive a marker from the inner identity.
+impl external::ObjectIdentity for Instance {
+    fn identity(&self) -> &external::IdentityMetadata {
+        self.inner.identity()
     }
 }

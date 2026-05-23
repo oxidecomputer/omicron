@@ -83,7 +83,6 @@ use omicron_common::api::external::AntiAffinityGroupMember;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Disk;
 use omicron_common::api::external::Error;
-use omicron_common::api::external::Instance;
 use omicron_common::api::external::InstanceNetworkInterface;
 use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::LldpNeighbor;
@@ -2719,7 +2718,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
     async fn instance_list(
         rqctx: RequestContext<ApiContext>,
         query_params: Query<PaginatedByNameOrId<project::ProjectSelector>>,
-    ) -> Result<HttpResponseOk<ResultsPage<Instance>>, HttpError> {
+    ) -> Result<HttpResponseOk<ResultsPage<instance::Instance>>, HttpError>
+    {
         let apictx = rqctx.context();
         let handler = async {
             let nexus = &apictx.context.nexus;
@@ -2754,7 +2754,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
         rqctx: RequestContext<ApiContext>,
         query_params: Query<project::ProjectSelector>,
         new_instance: TypedBody<instance::InstanceCreate>,
-    ) -> Result<HttpResponseCreated<Instance>, HttpError> {
+    ) -> Result<HttpResponseCreated<instance::Instance>, HttpError> {
         audit_and_time(&rqctx, |opctx, nexus| async move {
             let project_selector = query_params.into_inner();
             let new_instance_params = new_instance.into_inner();
@@ -2776,7 +2776,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
         rqctx: RequestContext<ApiContext>,
         query_params: Query<project::OptionalProjectSelector>,
         path_params: Path<path_params::InstancePath>,
-    ) -> Result<HttpResponseOk<Instance>, HttpError> {
+    ) -> Result<HttpResponseOk<instance::Instance>, HttpError> {
         let apictx = rqctx.context();
         let nexus = &apictx.context.nexus;
         let path = path_params.into_inner();
@@ -2830,7 +2830,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
         query_params: Query<project::OptionalProjectSelector>,
         path_params: Path<path_params::InstancePath>,
         instance_config: TypedBody<instance::InstanceUpdate>,
-    ) -> Result<HttpResponseOk<Instance>, HttpError> {
+    ) -> Result<HttpResponseOk<instance::Instance>, HttpError> {
         let query = query_params.into_inner();
         let path = path_params.into_inner();
         let instance_config = instance_config.into_inner();
@@ -2857,7 +2857,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
         rqctx: RequestContext<ApiContext>,
         query_params: Query<project::OptionalProjectSelector>,
         path_params: Path<path_params::InstancePath>,
-    ) -> Result<HttpResponseAccepted<Instance>, HttpError> {
+    ) -> Result<HttpResponseAccepted<instance::Instance>, HttpError> {
         let path = path_params.into_inner();
         let query = query_params.into_inner();
         let instance_selector = instance::InstanceSelector {
@@ -2878,7 +2878,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
         rqctx: RequestContext<ApiContext>,
         query_params: Query<project::OptionalProjectSelector>,
         path_params: Path<path_params::InstancePath>,
-    ) -> Result<HttpResponseAccepted<Instance>, HttpError> {
+    ) -> Result<HttpResponseAccepted<instance::Instance>, HttpError> {
         let path = path_params.into_inner();
         let query = query_params.into_inner();
         let instance_selector = instance::InstanceSelector {
@@ -2904,7 +2904,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
         rqctx: RequestContext<ApiContext>,
         query_params: Query<project::OptionalProjectSelector>,
         path_params: Path<path_params::InstancePath>,
-    ) -> Result<HttpResponseAccepted<Instance>, HttpError> {
+    ) -> Result<HttpResponseAccepted<instance::Instance>, HttpError> {
         let path = path_params.into_inner();
         let query = query_params.into_inner();
         let instance_selector = instance::InstanceSelector {

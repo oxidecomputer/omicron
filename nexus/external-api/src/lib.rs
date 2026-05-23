@@ -3601,13 +3601,38 @@ pub trait NexusExternalApi {
         method = GET,
         path = "/v1/instances",
         tags = ["instances"],
+        versions = VERSION_EXTERNAL_JUMBO_FRAMES..,
     }]
     async fn instance_list(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<
             PaginatedByNameOrId<latest::project::ProjectSelector>,
         >,
-    ) -> Result<HttpResponseOk<ResultsPage<Instance>>, HttpError>;
+    ) -> Result<
+        HttpResponseOk<ResultsPage<latest::instance::Instance>>,
+        HttpError,
+    >;
+
+    #[endpoint {
+        operation_id = "instance_list",
+        method = GET,
+        path = "/v1/instances",
+        tags = ["instances"],
+        versions = ..VERSION_EXTERNAL_JUMBO_FRAMES,
+    }]
+    async fn instance_list_pre_jumbo(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<
+            PaginatedByNameOrId<latest::project::ProjectSelector>,
+        >,
+    ) -> Result<HttpResponseOk<ResultsPage<Instance>>, HttpError> {
+        let resp = Self::instance_list(rqctx, query_params).await?;
+        let inner = resp.0;
+        Ok(HttpResponseOk(ResultsPage {
+            items: inner.items.into_iter().map(Into::into).collect(),
+            next_page: inner.next_page,
+        }))
+    }
 
     /// Create instance
     #[endpoint {
@@ -3620,7 +3645,7 @@ pub trait NexusExternalApi {
         rqctx: RequestContext<Self::Context>,
         query_params: Query<latest::project::ProjectSelector>,
         new_instance: TypedBody<latest::instance::InstanceCreate>,
-    ) -> Result<HttpResponseCreated<Instance>, HttpError>;
+    ) -> Result<HttpResponseCreated<latest::instance::Instance>, HttpError>;
 
     #[endpoint {
         operation_id = "instance_create",
@@ -3634,8 +3659,13 @@ pub trait NexusExternalApi {
         query_params: Query<v2025_11_20_00::project::ProjectSelector>,
         new_instance: TypedBody<v2026_01_31_00::instance::InstanceCreate>,
     ) -> Result<HttpResponseCreated<Instance>, HttpError> {
-        Self::instance_create(rqctx, query_params, new_instance.map(Into::into))
-            .await
+        let resp = Self::instance_create(
+            rqctx,
+            query_params,
+            new_instance.map(Into::into),
+        )
+        .await?;
+        Ok(HttpResponseCreated(resp.0.into()))
     }
 
     #[endpoint {
@@ -3784,12 +3814,30 @@ pub trait NexusExternalApi {
         method = GET,
         path = "/v1/instances/{instance}",
         tags = ["instances"],
+        versions = VERSION_EXTERNAL_JUMBO_FRAMES..,
     }]
     async fn instance_view(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<latest::project::OptionalProjectSelector>,
         path_params: Path<latest::path_params::InstancePath>,
-    ) -> Result<HttpResponseOk<Instance>, HttpError>;
+    ) -> Result<HttpResponseOk<latest::instance::Instance>, HttpError>;
+
+    #[endpoint {
+        operation_id = "instance_view",
+        method = GET,
+        path = "/v1/instances/{instance}",
+        tags = ["instances"],
+        versions = ..VERSION_EXTERNAL_JUMBO_FRAMES,
+    }]
+    async fn instance_view_pre_jumbo(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<latest::project::OptionalProjectSelector>,
+        path_params: Path<latest::path_params::InstancePath>,
+    ) -> Result<HttpResponseOk<Instance>, HttpError> {
+        let resp =
+            Self::instance_view(rqctx, query_params, path_params).await?;
+        Ok(HttpResponseOk(resp.0.into()))
+    }
 
     /// Delete instance
     #[endpoint {
@@ -3815,7 +3863,7 @@ pub trait NexusExternalApi {
         query_params: Query<latest::project::OptionalProjectSelector>,
         path_params: Path<latest::path_params::InstancePath>,
         instance_config: TypedBody<latest::instance::InstanceUpdate>,
-    ) -> Result<HttpResponseOk<Instance>, HttpError>;
+    ) -> Result<HttpResponseOk<latest::instance::Instance>, HttpError>;
 
     /// Update instance
     #[endpoint {
@@ -3831,13 +3879,14 @@ pub trait NexusExternalApi {
         path_params: Path<v2025_11_20_00::path_params::InstancePath>,
         instance_config: TypedBody<v2026_01_08_00::instance::InstanceUpdate>,
     ) -> Result<HttpResponseOk<Instance>, HttpError> {
-        Self::instance_update(
+        let resp = Self::instance_update(
             rqctx,
             query_params,
             path_params,
             instance_config.map(Into::into),
         )
-        .await
+        .await?;
+        Ok(HttpResponseOk(resp.0.into()))
     }
 
     /// Update instance
@@ -3868,36 +3917,90 @@ pub trait NexusExternalApi {
         method = POST,
         path = "/v1/instances/{instance}/reboot",
         tags = ["instances"],
+        versions = VERSION_EXTERNAL_JUMBO_FRAMES..,
     }]
     async fn instance_reboot(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<latest::project::OptionalProjectSelector>,
         path_params: Path<latest::path_params::InstancePath>,
-    ) -> Result<HttpResponseAccepted<Instance>, HttpError>;
+    ) -> Result<HttpResponseAccepted<latest::instance::Instance>, HttpError>;
+
+    #[endpoint {
+        operation_id = "instance_reboot",
+        method = POST,
+        path = "/v1/instances/{instance}/reboot",
+        tags = ["instances"],
+        versions = ..VERSION_EXTERNAL_JUMBO_FRAMES,
+    }]
+    async fn instance_reboot_pre_jumbo(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<latest::project::OptionalProjectSelector>,
+        path_params: Path<latest::path_params::InstancePath>,
+    ) -> Result<HttpResponseAccepted<Instance>, HttpError> {
+        let resp =
+            Self::instance_reboot(rqctx, query_params, path_params).await?;
+        Ok(HttpResponseAccepted(resp.0.into()))
+    }
 
     /// Boot instance
     #[endpoint {
         method = POST,
         path = "/v1/instances/{instance}/start",
         tags = ["instances"],
+        versions = VERSION_EXTERNAL_JUMBO_FRAMES..,
     }]
     async fn instance_start(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<latest::project::OptionalProjectSelector>,
         path_params: Path<latest::path_params::InstancePath>,
-    ) -> Result<HttpResponseAccepted<Instance>, HttpError>;
+    ) -> Result<HttpResponseAccepted<latest::instance::Instance>, HttpError>;
+
+    #[endpoint {
+        operation_id = "instance_start",
+        method = POST,
+        path = "/v1/instances/{instance}/start",
+        tags = ["instances"],
+        versions = ..VERSION_EXTERNAL_JUMBO_FRAMES,
+    }]
+    async fn instance_start_pre_jumbo(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<latest::project::OptionalProjectSelector>,
+        path_params: Path<latest::path_params::InstancePath>,
+    ) -> Result<HttpResponseAccepted<Instance>, HttpError> {
+        let resp =
+            Self::instance_start(rqctx, query_params, path_params).await?;
+        Ok(HttpResponseAccepted(resp.0.into()))
+    }
 
     /// Stop instance
     #[endpoint {
         method = POST,
         path = "/v1/instances/{instance}/stop",
         tags = ["instances"],
+        versions = VERSION_EXTERNAL_JUMBO_FRAMES..,
     }]
     async fn instance_stop(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<latest::project::OptionalProjectSelector>,
         path_params: Path<latest::path_params::InstancePath>,
-    ) -> Result<HttpResponseAccepted<Instance>, HttpError>;
+    ) -> Result<HttpResponseAccepted<latest::instance::Instance>, HttpError>;
+
+    #[endpoint {
+        operation_id = "instance_stop",
+        method = POST,
+        path = "/v1/instances/{instance}/stop",
+        tags = ["instances"],
+        versions = ..VERSION_EXTERNAL_JUMBO_FRAMES,
+    }]
+    async fn instance_stop_pre_jumbo(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<latest::project::OptionalProjectSelector>,
+        path_params: Path<latest::path_params::InstancePath>,
+    ) -> Result<HttpResponseAccepted<Instance>, HttpError> {
+        let resp =
+            Self::instance_stop(rqctx, query_params, path_params).await?;
+        Ok(HttpResponseAccepted(resp.0.into()))
+    }
 
     /// Fetch instance serial console
     #[endpoint {

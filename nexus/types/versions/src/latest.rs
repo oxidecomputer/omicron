@@ -176,6 +176,7 @@ pub mod instance {
     pub use crate::v2026_01_23_00::instance::EphemeralIpDetachSelector;
     pub use crate::v2026_01_23_00::instance::ExternalIpDetach;
 
+    pub use crate::v2026_05_20_00::instance::Instance;
     pub use crate::v2026_05_20_00::instance::InstanceCreate;
     pub use crate::v2026_05_20_00::instance::InstanceDiskAttachment;
     pub use crate::v2026_05_20_00::instance::InstanceUpdate;
