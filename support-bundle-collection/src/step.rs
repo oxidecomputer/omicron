@@ -4,7 +4,7 @@
 
 //! Support bundle collection step execution framework
 
-use crate::app::background::tasks::support_bundle::collection::BundleCollection;
+use crate::collection::BundleCollection;
 
 use camino::Utf8Path;
 use chrono::DateTime;
@@ -14,6 +14,7 @@ use nexus_types::internal_api::background::SupportBundleCollectionReport;
 use nexus_types::internal_api::background::SupportBundleCollectionStep;
 use nexus_types::internal_api::background::SupportBundleCollectionStepStatus;
 use nexus_types::internal_api::background::SupportBundleEreportStatus;
+use slog::warn;
 use slog_error_chain::InlineErrorChain;
 use std::sync::Arc;
 
