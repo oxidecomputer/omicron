@@ -79,7 +79,7 @@ impl AttachMemberError {
     /// This catches the sentinel errors that indicate validation failures
     /// (group not found, instance not found, source union cap) as well as
     /// constraint violations.
-    fn from_diesel(err: DieselError, max_union_size: usize) -> Self {
+    fn from_diesel(err: DieselError) -> Self {
         // Check for sentinel errors first
         let sentinels = [
             GROUP_NOT_FOUND_SENTINEL,
@@ -94,7 +94,7 @@ impl AttachMemberError {
                 }
                 UNION_EXCEEDED_SENTINEL => {
                     AttachMemberError::SourceUnionExceeded {
-                        cap: max_union_size,
+                        cap: MAX_SOURCE_IPS_PER_GROUP,
                     }
                 }
                 _ => unreachable!("Unknown sentinel: {sentinel}"),
@@ -224,9 +224,7 @@ impl AttachMemberToGroupStatement {
     ) -> Result<AttachMemberResult, AttachMemberError> {
         self.get_result_async::<MulticastGroupMember>(conn)
             .await
-            .map_err(|e| {
-                AttachMemberError::from_diesel(e, MAX_SOURCE_IPS_PER_GROUP)
-            })
+            .map_err(AttachMemberError::from_diesel)
             .map(|member| AttachMemberResult { member })
     }
 }
