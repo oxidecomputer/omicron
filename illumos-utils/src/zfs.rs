@@ -199,7 +199,7 @@ enum SetValueErrorRaw {
     Execution(#[from] crate::ExecutionError),
 }
 
-/// Error returned by [`Zfs::set_oxide_value`] or [`Zfs::set_value`]
+/// Error returned by [`Zfs::set_oxide_value`] or Zfs::set_value
 #[derive(thiserror::Error, Debug, SlogInlineError)]
 #[error("Failed to set values '{values}' on filesystem {filesystem}")]
 pub struct SetValueError {
