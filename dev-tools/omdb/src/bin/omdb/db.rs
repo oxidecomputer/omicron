@@ -195,6 +195,7 @@ mod alert;
 mod blueprints;
 mod db_metadata;
 mod ereport;
+mod repair;
 mod saga;
 mod sitrep;
 mod target_release;
@@ -454,6 +455,8 @@ enum DbCommands {
     Whatis(whatis::WhatisArgs),
     /// Print information about trust quorum configurations
     TrustQuorum(TrustQuorumArgs),
+    /// Repair bad database state caused by bugs
+    Repair(repair::RepairDbArgs),
 }
 
 #[derive(Debug, Args, Clone)]
@@ -1661,6 +1664,8 @@ impl DbArgs {
                     }) => {
                         cmd_db_trust_quorum_list_configs(&opctx, &datastore, &fetch_opts, &args).await
                     }
+                    DbCommands::Repair(repair_db) =>
+                        repair_db.run_cmd(&omdb, &datastore, &log).await,
                 }
             }
         }).await

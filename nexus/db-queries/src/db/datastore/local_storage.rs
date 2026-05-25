@@ -220,7 +220,7 @@ impl DataStore {
         Ok(())
     }
 
-    pub(super) async fn delete_local_storage_unencrypted_dataset_allocation_in_txn(
+    pub async fn delete_local_storage_unencrypted_dataset_allocation_in_txn(
         conn: &async_bb8_diesel::Connection<DbConnection>,
         local_storage_unencrypted_dataset_allocation_id: DatasetUuid,
     ) -> Result<(), diesel::result::Error> {

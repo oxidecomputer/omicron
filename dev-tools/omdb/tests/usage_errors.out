@@ -161,6 +161,7 @@ Commands:
   user-data-export             Commands for querying and interacting with user data export objects
   whatis                       Given a UUID, try to figure out what type of object it refers to
   trust-quorum                 Print information about trust quorum configurations
+  repair                       Repair bad database state caused by bugs
   help                         Print this message or the help of the given subcommand(s)
 
 Options:
@@ -230,6 +231,7 @@ Commands:
   user-data-export             Commands for querying and interacting with user data export objects
   whatis                       Given a UUID, try to figure out what type of object it refers to
   trust-quorum                 Print information about trust quorum configurations
+  repair                       Repair bad database state caused by bugs
   help                         Print this message or the help of the given subcommand(s)
 
 Options:

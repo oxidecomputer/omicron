@@ -80,6 +80,7 @@ oximeter-db = { workspace = true, default-features = false, features = [
 oxnet.workspace = true
 parallel-task-set.workspace = true
 petgraph = { workspace = true, features = ["serde-1"] }
+propolis-client.workspace = true
 # See omicron-rpaths for more about the "pq-sys" dependency.
 pq-sys = "*"
 ratatui.workspace = true
