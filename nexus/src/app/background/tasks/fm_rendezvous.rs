@@ -18,9 +18,11 @@ use nexus_types::fm;
 use nexus_types::fm::case::AlertRequest;
 use nexus_types::internal_api::background::FmRendezvousStatus as Status;
 use nexus_types::internal_api::background::fm_rendezvous::*;
+use omicron_common::api::external::Error;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use serde_json::json;
 use slog_error_chain::InlineErrorChain;
+use std::future::Future;
 use std::sync::Arc;
 use tokio::sync::watch;
 
@@ -98,6 +100,22 @@ impl FmRendezvous {
             "marking ereports as seen",
             Self::mark_ereports_seen,
         );
+        // GC of `rendezvous_*_created` marker rows runs as peer ops, not as
+        // a tail of creation. The GC predicate's safety rests on the strict
+        // generation bound (delete only markers stamped strictly below the
+        // current per-resource generation), which holds regardless of whether
+        // any creation loop ran to completion -- so GC need not wait on
+        // creation. See the `fm_rendezvous_gc` module docs for the full
+        // argument. Splitting GC off lets the operator see GC timing and
+        // outcomes separately from creation.
+        let alert_marker_gc =
+            self.spawn_op(&sitrep, opctx, "alert GC", Self::gc_alert_markers);
+        let support_bundle_marker_gc = self.spawn_op(
+            &sitrep,
+            opctx,
+            "bundle GC",
+            Self::gc_support_bundle_markers,
+        );
 
         const TASKS_SHOULDNT_FAIL: &str = "\
             rendezvous op tasks should never return a `JoinError`. Nexus is \
@@ -112,6 +130,10 @@ impl FmRendezvous {
             alerts: alerts.await.expect(TASKS_SHOULDNT_FAIL),
             support_bundles: support_bundles.await.expect(TASKS_SHOULDNT_FAIL),
             ereport_marking: marking.await.expect(TASKS_SHOULDNT_FAIL),
+            alert_marker_gc: alert_marker_gc.await.expect(TASKS_SHOULDNT_FAIL),
+            support_bundle_marker_gc: support_bundle_marker_gc
+                .await
+                .expect(TASKS_SHOULDNT_FAIL),
         };
 
         // If a guarded-create op observed that our sitrep is stale, the db
@@ -534,6 +556,93 @@ impl FmRendezvous {
 
         status
     }
+
+    /// Garbage-collect this activation's `rendezvous_alert_created` marker
+    /// rows. Spawned as a peer op of `create_requested_alerts`.
+    async fn gc_alert_markers(
+        self,
+        sitrep: CurrentSitrep,
+        opctx: OpContext,
+    ) -> MarkerGcStatus {
+        let (_, ref sitrep) = *sitrep;
+        let result = self
+            .datastore
+            .rendezvous_alert_created_gc(
+                &opctx,
+                sitrep.id(),
+                sitrep.metadata.alert_generation,
+            )
+            .await;
+        Self::marker_gc_status(&opctx, "rendezvous_alert_created", result)
+    }
+
+    /// Garbage-collect this activation's `rendezvous_support_bundle_created`
+    /// marker rows. Parallel to [`Self::gc_alert_markers`].
+    async fn gc_support_bundle_markers(
+        self,
+        sitrep: CurrentSitrep,
+        opctx: OpContext,
+    ) -> MarkerGcStatus {
+        let (_, ref sitrep) = *sitrep;
+        let result = self
+            .datastore
+            .rendezvous_support_bundle_created_gc(
+                &opctx,
+                sitrep.id(),
+                sitrep.metadata.support_bundle_generation,
+            )
+            .await;
+        Self::marker_gc_status(
+            &opctx,
+            "rendezvous_support_bundle_created",
+            result,
+        )
+    }
+
+    /// Map the outcome of a `rendezvous_*_created` GC sweep into a
+    /// [`MarkerGcStatus`].
+    ///
+    /// The datastore sweep deletes only markers stamped strictly below the
+    /// current per-resource generation; that strict generation bound is what
+    /// makes a deletion safe, regardless of whether any creation loop ran to
+    /// completion or aborted on `StaleSitrep`. GC is therefore safe to run
+    /// independently of creation in the same activation. See the
+    /// `fm_rendezvous_gc` module docs for the full argument.
+    ///
+    /// An error is recorded in `status.errors`; the sweep for the current
+    /// activation is abandoned and a subsequent activation retries. It does
+    /// not cause the rendezvous to fail or block any downstream tracker
+    /// advance -- a marker table with stale rows is a cleanup-debt issue, not
+    /// a correctness issue.
+    fn marker_gc_status(
+        opctx: &OpContext,
+        label: &'static str,
+        result: Result<usize, Error>,
+    ) -> MarkerGcStatus {
+        let mut status = MarkerGcStatus::default();
+        match result {
+            Ok(rows_deleted) => {
+                status.rows_deleted = rows_deleted;
+                if rows_deleted > 0 {
+                    slog::debug!(
+                        opctx.log,
+                        "{} GC swept {} marker row(s)",
+                        label,
+                        rows_deleted;
+                    );
+                }
+            }
+            Err(e) => {
+                slog::warn!(
+                    opctx.log,
+                    "{} GC failed", label;
+                    "error" => InlineErrorChain::new(&e),
+                );
+                status.errors.push(InlineErrorChain::new(&e).to_string());
+            }
+        }
+        status
+    }
 }
 
 #[cfg(test)]
@@ -594,6 +703,22 @@ mod tests {
             .first_async(&*conn)
             .await;
         dbg!(result)
+    }
+
+    /// Is there a `rendezvous_alert_created` marker row for this alert?
+    async fn alert_marker_exists(
+        datastore: &DataStore,
+        alert_id: AlertUuid,
+    ) -> bool {
+        use nexus_db_schema::schema::rendezvous_alert_created::dsl;
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
+        let count: i64 = dsl::rendezvous_alert_created
+            .filter(dsl::alert_id.eq(alert_id.into_untyped_uuid()))
+            .count()
+            .get_result_async(&*conn)
+            .await
+            .unwrap();
+        count > 0
     }
 
     #[tokio::test]
@@ -691,7 +816,7 @@ mod tests {
             ))))
             .unwrap();
 
-        let Status { sitrep_id, alerts, .. } =
+        let Status { sitrep_id, alerts, alert_marker_gc, .. } =
             dbg!(task.actually_activate(opctx).await);
         assert_eq!(sitrep_id, Some(sitrep1_id));
         assert_eq!(
@@ -704,6 +829,15 @@ mod tests {
                 stale_sitrep: false,
                 errors: Vec::new(),
             }
+        );
+        // The single `rendezvous_alert_created` marker row we just
+        // inserted for `alert1` was stamped with the current sitrep's
+        // `alert_generation`, so its `created_at_generation` *equals* the
+        // current sitrep's `alert_generation`. The strict-inequality predicate
+        // (`created_at_generation < sitrep_alert_generation`) excludes it.
+        assert_eq!(
+            alert_marker_gc.details,
+            MarkerGcStatus { rows_deleted: 0, errors: Vec::new() }
         );
         let db_alert1 = fetch_alert(&datastore, alert1_id)
             .await
@@ -795,7 +929,7 @@ mod tests {
             .unwrap();
 
         let status = dbg!(task.actually_activate(opctx).await);
-        let Status { sitrep_id, alerts, .. } = status;
+        let Status { sitrep_id, alerts, alert_marker_gc, .. } = status;
         assert_eq!(sitrep_id, Some(sitrep2_id));
         assert_eq!(
             alerts.details,
@@ -807,6 +941,15 @@ mod tests {
                 stale_sitrep: false,
                 errors: Vec::new(),
             }
+        );
+        // Sitrep1 and sitrep2 carry the same alert_generation (both built
+        // with `Generation::new()`), so every marker row's
+        // `created_at_generation` equals the current sitrep's
+        // `alert_generation`, and the strict-inequality predicate excludes
+        // them all.
+        assert_eq!(
+            alert_marker_gc.details,
+            MarkerGcStatus { rows_deleted: 0, errors: Vec::new() }
         );
 
         let db_alert1 = fetch_alert(&datastore, alert1_id)
@@ -844,6 +987,158 @@ mod tests {
         );
 
         // Cleanup
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    /// End-to-end coverage of the alert marker GC sweep through a real
+    /// activation: creation and GC must agree on the generation stamp.
+    ///
+    /// The datastore unit tests in `fm_rendezvous_gc` exercise the GC
+    /// predicate against hand-inserted marker rows, but they choose the
+    /// marker's `created_at_generation` themselves. This test instead lets
+    /// real creation (`fm_rendezvous_alert_create` via `SitrepGuardedInsert`)
+    /// stamp the marker, then drives a later activation whose sitrep has
+    /// advanced past that generation and no longer requests the alert -- and
+    /// asserts the sweep deletes the marker. That proves creation and GC use a
+    /// consistent generation value, which neither layer's unit tests can catch
+    /// in isolation.
+    #[tokio::test]
+    async fn test_alert_marker_gc_deletes_dropped_request() {
+        let logctx =
+            dev::test_setup_log("test_alert_marker_gc_deletes_dropped_request");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let (sitrep_tx, sitrep_rx) = watch::channel(None);
+        let TestActivators {
+            alert_dispatcher_activator,
+            support_bundle_collector_activator,
+            sitrep_loader_activator,
+        } = make_activators();
+        let mut task = FmRendezvous::new(
+            datastore.clone(),
+            sitrep_rx,
+            alert_dispatcher_activator,
+            support_bundle_collector_activator,
+            sitrep_loader_activator,
+            OmicronZoneUuid::new_v4(),
+        );
+
+        // V1 (alert_generation = 1) requests alert A. Activating creates A and
+        // writes its `rendezvous_alert_created` marker, stamped with V1's
+        // alert_generation.
+        let sitrep1_id = SitrepUuid::new_v4();
+        let alert_id = AlertUuid::new_v4();
+        let mut case = fm::Case {
+            id: CaseUuid::new_v4(),
+            metadata: fm::case::Metadata {
+                created_sitrep_id: sitrep1_id,
+                closed_sitrep_id: None,
+                de: fm::DiagnosisEngineKind::PowerShelf,
+                comment: "case requesting alert A".to_string(),
+            },
+            alerts_requested: iddqd::IdOrdMap::new(),
+            ereports: iddqd::IdOrdMap::new(),
+            support_bundles_requested: iddqd::IdOrdMap::new(),
+            facts: iddqd::IdOrdMap::new(),
+        };
+        case.alerts_requested
+            .insert_unique(fm::case::AlertRequest {
+                id: alert_id,
+                class: AlertClass::TestFoo,
+                version: 0,
+                requested_sitrep_id: sitrep1_id,
+                payload: serde_json::json!({}),
+                comment: String::new(),
+            })
+            .unwrap();
+        let sitrep1 = fm::Sitrep {
+            metadata: fm::SitrepMetadata {
+                id: sitrep1_id,
+                inv_collection_id: CollectionUuid::new_v4(),
+                parent_sitrep_id: None,
+                creator_id: OmicronZoneUuid::new_v4(),
+                comment: "v1".to_string(),
+                time_created: Utc::now(),
+                next_inv_min_time_started: Utc::now(),
+                alert_generation: Generation::new(),
+                support_bundle_generation: Generation::new(),
+            },
+            cases: [case].into_iter().collect(),
+            ereports_by_id: Default::default(),
+        };
+        datastore
+            .fm_sitrep_insert(opctx, sitrep1.clone(), None)
+            .await
+            .expect("inserted v1");
+        sitrep_tx
+            .send(Some(Arc::new((
+                fm::SitrepVersion {
+                    id: sitrep1_id,
+                    version: 1,
+                    time_made_current: Utc::now(),
+                },
+                sitrep1,
+            ))))
+            .unwrap();
+
+        let status = dbg!(task.actually_activate(opctx).await);
+        assert_eq!(status.alerts.details.alerts_created, 1);
+        // Marker created at the current generation -- not yet GC-eligible.
+        assert_eq!(status.alert_marker_gc.details.rows_deleted, 0);
+        assert!(
+            alert_marker_exists(&datastore, alert_id).await,
+            "marker for A must exist after creation",
+        );
+
+        // V2 (alert_generation = 2) drops alert A entirely (no cases).
+        // Activating runs the GC sweep: A's marker has
+        // created_at_generation = 1 < 2 and A is not in V2's request set, so
+        // the marker is deleted.
+        let sitrep2_id = SitrepUuid::new_v4();
+        let sitrep2 = fm::Sitrep {
+            metadata: fm::SitrepMetadata {
+                id: sitrep2_id,
+                inv_collection_id: CollectionUuid::new_v4(),
+                parent_sitrep_id: Some(sitrep1_id),
+                creator_id: OmicronZoneUuid::new_v4(),
+                comment: "v2".to_string(),
+                time_created: Utc::now(),
+                next_inv_min_time_started: Utc::now(),
+                alert_generation: Generation::new().next(),
+                support_bundle_generation: Generation::new(),
+            },
+            cases: iddqd::IdOrdMap::new(),
+            ereports_by_id: Default::default(),
+        };
+        datastore
+            .fm_sitrep_insert(opctx, sitrep2.clone(), None)
+            .await
+            .expect("inserted v2");
+        sitrep_tx
+            .send(Some(Arc::new((
+                fm::SitrepVersion {
+                    id: sitrep2_id,
+                    version: 2,
+                    time_made_current: Utc::now(),
+                },
+                sitrep2,
+            ))))
+            .unwrap();
+
+        let status = dbg!(task.actually_activate(opctx).await);
+        assert_eq!(
+            status.alert_marker_gc.details,
+            MarkerGcStatus { rows_deleted: 1, errors: Vec::new() },
+        );
+        assert!(
+            !alert_marker_exists(&datastore, alert_id).await,
+            "marker for A must be swept once the current sitrep drops it at a \
+             newer \
+             generation",
+        );
+
         db.terminate().await;
         logctx.cleanup_successful();
     }
@@ -1874,6 +2169,23 @@ mod tests {
             .await
     }
 
+    /// Is there a `rendezvous_support_bundle_created` marker row for this
+    /// bundle?
+    async fn support_bundle_marker_exists(
+        datastore: &DataStore,
+        bundle_id: SupportBundleUuid,
+    ) -> bool {
+        use nexus_db_schema::schema::rendezvous_support_bundle_created::dsl;
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
+        let count: i64 = dsl::rendezvous_support_bundle_created
+            .filter(dsl::support_bundle_id.eq(bundle_id.into_untyped_uuid()))
+            .count()
+            .get_result_async(&*conn)
+            .await
+            .unwrap();
+        count > 0
+    }
+
     #[tokio::test]
     async fn test_support_bundle_requests() {
         let logctx = dev::test_setup_log("test_support_bundle_requests");
@@ -2075,6 +2387,154 @@ mod tests {
         assert_eq!(db_bundle2.state, db::model::SupportBundleState::Collecting,);
 
         // Cleanup
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    /// End-to-end coverage of the support-bundle marker GC sweep through a
+    /// real activation. Parallel to
+    /// [`test_alert_marker_gc_deletes_dropped_request`], but for the
+    /// support-bundle side, whose creation (`fm_rendezvous_support_bundle_create`)
+    /// and GC use a *separate* generation field (`support_bundle_generation`)
+    /// and separate tables -- so the seam is worth proving independently.
+    #[tokio::test]
+    async fn test_support_bundle_marker_gc_deletes_dropped_request() {
+        let logctx = dev::test_setup_log(
+            "test_support_bundle_marker_gc_deletes_dropped_request",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let (sitrep_tx, sitrep_rx) = watch::channel(None);
+        let TestActivators {
+            alert_dispatcher_activator,
+            support_bundle_collector_activator,
+            sitrep_loader_activator,
+        } = make_activators();
+        let mut task = FmRendezvous::new(
+            datastore.clone(),
+            sitrep_rx,
+            alert_dispatcher_activator,
+            support_bundle_collector_activator,
+            sitrep_loader_activator,
+            OmicronZoneUuid::new_v4(),
+        );
+
+        // Provision zpools/datasets so support bundle allocation can succeed.
+        create_sled_with_zpools(&datastore, &opctx, 3).await;
+
+        // V1 (support_bundle_generation = 1) requests bundle B. Activating
+        // creates B and writes its `rendezvous_support_bundle_created` marker,
+        // stamped with V1's support_bundle_generation.
+        let sitrep1_id = SitrepUuid::new_v4();
+        let bundle_id = SupportBundleUuid::new_v4();
+        let mut case = fm::Case {
+            id: CaseUuid::new_v4(),
+            metadata: fm::case::Metadata {
+                created_sitrep_id: sitrep1_id,
+                closed_sitrep_id: None,
+                de: fm::DiagnosisEngineKind::PowerShelf,
+                comment: "case requesting bundle B".to_string(),
+            },
+            alerts_requested: iddqd::IdOrdMap::new(),
+            ereports: iddqd::IdOrdMap::new(),
+            support_bundles_requested: iddqd::IdOrdMap::new(),
+            facts: iddqd::IdOrdMap::new(),
+        };
+        case.support_bundles_requested
+            .insert_unique(fm::case::SupportBundleRequest {
+                id: bundle_id,
+                requested_sitrep_id: sitrep1_id,
+                data_selection: BundleDataSelection::all(),
+                comment: String::new(),
+            })
+            .unwrap();
+        let sitrep1 = fm::Sitrep {
+            metadata: fm::SitrepMetadata {
+                id: sitrep1_id,
+                inv_collection_id: CollectionUuid::new_v4(),
+                parent_sitrep_id: None,
+                creator_id: OmicronZoneUuid::new_v4(),
+                comment: "v1".to_string(),
+                time_created: Utc::now(),
+                next_inv_min_time_started: Utc::now(),
+                alert_generation: Generation::new(),
+                support_bundle_generation: Generation::new(),
+            },
+            cases: [case].into_iter().collect(),
+            ereports_by_id: Default::default(),
+        };
+        datastore
+            .fm_sitrep_insert(opctx, sitrep1.clone(), None)
+            .await
+            .expect("inserted v1");
+        sitrep_tx
+            .send(Some(Arc::new((
+                fm::SitrepVersion {
+                    id: sitrep1_id,
+                    version: 1,
+                    time_made_current: Utc::now(),
+                },
+                sitrep1,
+            ))))
+            .unwrap();
+
+        let status = dbg!(task.actually_activate(opctx).await);
+        assert_eq!(status.support_bundles.details.bundles_created, 1);
+        // Marker created at the current generation -- not yet GC-eligible.
+        assert_eq!(status.support_bundle_marker_gc.details.rows_deleted, 0);
+        assert!(
+            support_bundle_marker_exists(&datastore, bundle_id).await,
+            "marker for B must exist after creation",
+        );
+
+        // V2 (support_bundle_generation = 2) drops bundle B entirely (no
+        // cases). Activating runs the GC sweep: B's marker has
+        // created_at_generation = 1 < 2 and B is not in V2's request set, so
+        // the marker is deleted.
+        let sitrep2_id = SitrepUuid::new_v4();
+        let sitrep2 = fm::Sitrep {
+            metadata: fm::SitrepMetadata {
+                id: sitrep2_id,
+                inv_collection_id: CollectionUuid::new_v4(),
+                parent_sitrep_id: Some(sitrep1_id),
+                creator_id: OmicronZoneUuid::new_v4(),
+                comment: "v2".to_string(),
+                time_created: Utc::now(),
+                next_inv_min_time_started: Utc::now(),
+                alert_generation: Generation::new(),
+                support_bundle_generation: Generation::new().next(),
+            },
+            cases: iddqd::IdOrdMap::new(),
+            ereports_by_id: Default::default(),
+        };
+        datastore
+            .fm_sitrep_insert(opctx, sitrep2.clone(), None)
+            .await
+            .expect("inserted v2");
+        sitrep_tx
+            .send(Some(Arc::new((
+                fm::SitrepVersion {
+                    id: sitrep2_id,
+                    version: 2,
+                    time_made_current: Utc::now(),
+                },
+                sitrep2,
+            ))))
+            .unwrap();
+
+        let status = dbg!(task.actually_activate(opctx).await);
+        assert_eq!(
+            status.support_bundle_marker_gc.details,
+            MarkerGcStatus { rows_deleted: 1, errors: Vec::new() },
+        );
+        assert!(
+            !support_bundle_marker_exists(&datastore, bundle_id).await,
+            "marker for B must be swept once the current sitrep drops it at a \
+             newer \
+             generation",
+        );
+
         db.terminate().await;
         logctx.cleanup_successful();
     }

@@ -3759,6 +3759,8 @@ fn print_task_fm_rendezvous(details: &serde_json::Value) {
         alerts,
         support_bundles,
         ereport_marking: marking,
+        alert_marker_gc,
+        support_bundle_marker_gc,
     } = match serde_json::from_value::<FmRendezvousStatus>(details.clone()) {
         Err(error) => {
             eprintln!(
@@ -3936,6 +3938,25 @@ fn print_task_fm_rendezvous(details: &serde_json::Value) {
             }
         },
     );
+    print_op("alert GC", &alert_marker_gc, print_marker_gc_details);
+    print_op("bundle GC", &support_bundle_marker_gc, print_marker_gc_details);
+}
+
+fn print_marker_gc_details(status: &fm_rendezvous::MarkerGcStatus) {
+    let fm_rendezvous::MarkerGcStatus { rows_deleted, errors } = status;
+    const ROWS_DELETED: &str = "rows deleted:";
+    const ERRORS: &str = "errors:";
+    const WIDTH: usize = const_max_len(&[ROWS_DELETED, ERRORS]) + 1;
+    const NUM_WIDTH: usize = 4;
+    println!("      {ROWS_DELETED:<WIDTH$}{rows_deleted:>NUM_WIDTH$}");
+    println!(
+        "{}   {ERRORS:<WIDTH$}{:>NUM_WIDTH$}",
+        warn_if_nonzero(errors.len()),
+        errors.len()
+    );
+    for error in errors {
+        println!("        > {error}");
+    }
 }
 
 fn print_task_trust_quorum_manager(details: &serde_json::Value) {

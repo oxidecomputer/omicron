@@ -750,6 +750,14 @@ task: "fm_rendezvous"
       batch size:                            1000
       batches:                                  0
       errors:                                   0
+    alert GC:
+(i)   note: this operation was not executed
+      rows deleted:    0
+      errors:          0
+    bundle GC:
+(i)   note: this operation was not executed
+      rows deleted:    0
+      errors:          0
 
 task: "fm_sitrep_gc"
   configured period: every <REDACTED_DURATION>s
@@ -1450,6 +1458,14 @@ task: "fm_rendezvous"
       batch size:                            1000
       batches:                                  0
       errors:                                   0
+    alert GC:
+(i)   note: this operation was not executed
+      rows deleted:    0
+      errors:          0
+    bundle GC:
+(i)   note: this operation was not executed
+      rows deleted:    0
+      errors:          0
 
 task: "fm_sitrep_gc"
   configured period: every <REDACTED_DURATION>s
