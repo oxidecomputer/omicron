@@ -38,7 +38,7 @@ impl AllCases {
         mut rng: rng::SitrepBuilderRng,
     ) -> Self {
         let cases = inputs
-            .cases()
+            .open_cases()
             .iter()
             .map(|case| {
                 let rng = rng::CaseBuilderRng::new(case.id, &mut rng);
