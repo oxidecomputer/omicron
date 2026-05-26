@@ -1532,6 +1532,9 @@ pub enum UpstairsDegradedReason {
 
     /// Three downstairs are present but one or more is degraded.
     DownstairsDegraded,
+
+    /// The Upstairs is in an unexpected or impossible state
+    InvalidState { message: String },
 }
 
 impl std::fmt::Display for UpstairsDegradedReason {
@@ -1547,6 +1550,10 @@ impl std::fmt::Display for UpstairsDegradedReason {
 
             UpstairsDegradedReason::DownstairsDegraded => {
                 write!(f, "one or more downstairs is degraded")
+            }
+
+            UpstairsDegradedReason::InvalidState { message } => {
+                write!(f, "invalid state: {message}")
             }
         }
     }
@@ -1604,6 +1611,18 @@ fn propolis_client_single_upstairs_health(
 
     let mut num_downstairs_active = 0;
 
+    if targets.len() != 3 {
+        return UpstairsHealth::Degraded(UpstairsHealthDegradedDetails {
+            upstairs_id,
+            reason: UpstairsDegradedReason::InvalidState {
+                message: format!(
+                    "number of targets is {} instead of 3",
+                    targets.len(),
+                ),
+            },
+        });
+    }
+
     for target in targets {
         match target.state {
             DownstairsInfoStatus::Connecting { .. } => {
@@ -1660,7 +1679,6 @@ fn propolis_client_single_upstairs_health(
     }
 
     if !read_only && num_downstairs_active != 3 {
-        // Technically this is an invalid configuration!
         return UpstairsHealth::Degraded(UpstairsHealthDegradedDetails {
             upstairs_id,
             reason: UpstairsDegradedReason::ReducedRedundancy,
@@ -1845,6 +1863,18 @@ fn crucible_pantry_client_single_upstairs_health(
 
     let mut num_downstairs_active = 0;
 
+    if targets.len() != 3 {
+        return UpstairsHealth::Degraded(UpstairsHealthDegradedDetails {
+            upstairs_id,
+            reason: UpstairsDegradedReason::InvalidState {
+                message: format!(
+                    "number of targets is {} instead of 3",
+                    targets.len(),
+                ),
+            },
+        });
+    }
+
     for target in targets {
         match target.state {
             DownstairsInfoStatus::Connecting { .. } => {
@@ -1901,7 +1931,6 @@ fn crucible_pantry_client_single_upstairs_health(
     }
 
     if !read_only && num_downstairs_active != 3 {
-        // Technically this is an invalid configuration!
         return UpstairsHealth::Degraded(UpstairsHealthDegradedDetails {
             upstairs_id,
             reason: UpstairsDegradedReason::ReducedRedundancy,
@@ -2146,7 +2175,11 @@ mod test {
             upstairs_health,
             UpstairsHealth::Degraded(UpstairsHealthDegradedDetails {
                 upstairs_id,
-                reason: UpstairsDegradedReason::ReducedRedundancy,
+                reason: UpstairsDegradedReason::InvalidState {
+                    message: String::from(
+                        "number of targets is 2 instead of 3"
+                    ),
+                },
             }),
         );
     }
@@ -2588,34 +2621,6 @@ mod test {
                     state: DownstairsInfoStatus::Active,
                 },
             ],
-        );
-
-        assert_eq!(upstairs_health, UpstairsHealth::Healthy { upstairs_id });
-    }
-
-    /// For a read-only Upstairs, if all downstairs are active but less than
-    /// three are present, then the Upstairs could technically still be
-    /// considered healthy
-    #[test]
-    fn single_upstairs_health_ro_only_one_present_and_active() {
-        let upstairs_id = Uuid::new_v4();
-
-        let upstairs_health = propolis_client_single_upstairs_health(
-            &UpstairsInfoStatus::Active,
-            upstairs_id,
-            true,  // read_only
-            false, // reconcile_in_progress
-            false, // live_repair_in_progress
-            &[DownstairsInfo {
-                region_id: Some(Uuid::new_v4()),
-                target_addr: Some(
-                    "[fd00:1122:3344::301]:17000".parse().unwrap(),
-                ),
-                repair_addr: Some(
-                    "[fd00:1122:3344::301]:21000".parse().unwrap(),
-                ),
-                state: DownstairsInfoStatus::Active,
-            }],
         );
 
         assert_eq!(upstairs_health, UpstairsHealth::Healthy { upstairs_id });
