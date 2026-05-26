@@ -21,6 +21,7 @@ use oximeter_instruments::kstat::link::SledDataLink;
 use oximeter_instruments::kstat::link::SledDataLinkTarget;
 use oximeter_instruments::kstat::zone::Zone;
 use oximeter_instruments::kstat::zone::ZoneTarget;
+use oximeter_instruments::zfs::usage::ZfsUsageProducer;
 use oximeter_producer::LogConfig;
 use oximeter_producer::Server as ProducerServer;
 use slog::Logger;
@@ -144,7 +145,7 @@ fn get_collection_details(kind: &str) -> CollectionDetails {
 async fn metrics_task(
     sled_identifiers: SledIdentifiers,
     kstat_sampler: KstatSampler,
-    _server: ProducerServer,
+    server: ProducerServer,
     log: Logger,
     mut rx: mpsc::Receiver<Message>,
 ) {
@@ -250,6 +251,13 @@ async fn metrics_task(
                     sync_zone(&log, &mut tracked_zone, &kstat_sampler).await;
                     sync_sled_cpu(&log, &mut tracked_sled_cpu, &kstat_sampler)
                         .await;
+
+                    let zfs_producer =
+                        ZfsUsageProducer::new(log.clone(), &sled_identifiers);
+                    server
+                        .registry()
+                        .register_producer(zfs_producer.clone())
+                        .expect("actually infallible");
                 }
             }
         }

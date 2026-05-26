@@ -4,8 +4,8 @@
 
 //! Individual support bundle collection steps
 
-use crate::app::background::tasks::support_bundle::cache::Cache;
-use crate::app::background::tasks::support_bundle::step::CollectionStep;
+use crate::cache::Cache;
+use crate::step::CollectionStep;
 use futures::FutureExt;
 use nexus_types::internal_api::background::SupportBundleCollectionStep;
 

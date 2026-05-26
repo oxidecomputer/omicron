@@ -163,6 +163,7 @@ members = [
     "sled-storage",
     "sled-storage/zfs-test-harness",
     "sp-sim",
+    "support-bundle-collection",
     "test-utils",
     "trust-quorum",
     "trust-quorum/gfss",
@@ -351,6 +352,7 @@ default-members = [
     "sled-storage",
     "sled-storage/zfs-test-harness",
     "sp-sim",
+    "support-bundle-collection",
     "trust-quorum",
     "trust-quorum/gfss",
     "trust-quorum/protocol",
@@ -485,7 +487,7 @@ crucible-client-types = { git = "https://github.com/oxidecomputer/crucible", rev
 # NOTE: See above!
 csv = "1.3.1"
 curve25519-dalek = "4"
-daft = { version = "0.1.4", features = ["derive", "newtype-uuid1", "oxnet01", "uuid1"] }
+daft = { version = "0.1.7", features = ["derive", "newtype-uuid1", "oxnet01", "uuid1"] }
 display-error-chain = "0.2.2"
 omicron-ddm-admin-client = { path = "clients/ddm-admin-client" }
 datatest-stable = "0.3.2"
@@ -502,12 +504,13 @@ digest = "0.10.7"
 dns-server = { path = "dns-server" }
 dns-server-api = { path = "dns-server-api" }
 dns-service-client = { path = "clients/dns-service-client" }
-dpd-client = { git = "https://github.com/oxidecomputer/dendrite", rev = "187aee7de2e50f907099ea06c04aac96c3455665" }
+dpd-client = { git = "https://github.com/oxidecomputer/dendrite", rev = "50ed531201ea5f85115141a2203d551fbbdaa3da" }
 dropshot = { version = "0.17.0", features = [ "usdt-probes" ] }
-dropshot-api-manager = "0.7.1"
-dropshot-api-manager-types = "0.7.1"
+dropshot-api-manager = "0.7.2"
+dropshot-api-manager-types = "0.7.2"
 dyn-clone = "1.0.20"
 either = "1.15.0"
+erebor = { git = "https://github.com/oxidecomputer/erebor", rev = "48512bf970474ff0fd0868c833fd504c8d169064" }
 ereport-types = { path = "ereport/types" }
 expectorate = "1.2.0"
 fatfs = "0.3.6"
@@ -831,6 +834,7 @@ strum = { version = "0.27.2", features = [ "derive" ] }
 subprocess = "0.2.9"
 subtle = "2.6.1"
 supports-color = "3.0.2"
+support-bundle-collection = { path = "support-bundle-collection" }
 support-bundle-viewer = "0.1.2"
 swrite = "0.1.0"
 sync-ptr = "0.1.4"

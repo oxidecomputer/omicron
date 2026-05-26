@@ -30,6 +30,7 @@ daft.workspace = true
 diesel.workspace = true
 dropshot.workspace = true
 dyn-clone.workspace = true
+erebor = { workspace = true, features = ["pmbus"] }
 ereport-types.workspace = true
 futures.workspace = true
 gateway-client.workspace = true
