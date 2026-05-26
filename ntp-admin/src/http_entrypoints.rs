@@ -195,10 +195,10 @@ impl NtpAdminImpl {
         let log = ctx.log();
         info!(log, "collecting NTP zone debug info");
 
-        // TODO: run the read-only diagnostic commands here and populate
-        // `commands`. Candidates from the buildomat deploy.sh script:
+        // TODO-K: run the read-only diagnostic commands from the buildomat
+        // deploy.sh script:
 
-        //   chronyc -n sources
+        //  chronyc -n sources
         //
         // TODO-K: this is too much?
         //   cat /etc/inet/chrony.conf
@@ -207,8 +207,8 @@ impl NtpAdminImpl {
         // connectivity.
         // We proabably want to log whether it is a boundary zone or not
 
-        // Check con connect to ntp servers -> they are set as a property value on the chrony setup
-        // service
+        // Check can connect to ntp servers -> they are set as a property value
+        // on the chrony setup service
         //
         // For the dig command use the value of:
         // svcprop -p config/server svc:/oxide/chrony-setup:default
