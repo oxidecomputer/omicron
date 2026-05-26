@@ -1629,10 +1629,7 @@ impl Zfs {
 
                 _ => SetValueError {
                     filesystem: filesystem_name.to_string(),
-                    values: name_values
-                        .iter()
-                        .map(|(k, v)| format!("{k}={v}"))
-                        .join(","),
+                    values,
                     err: SetValueErrorRaw::Execution(err),
                 },
             }
