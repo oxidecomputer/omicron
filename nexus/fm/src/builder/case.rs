@@ -24,6 +24,10 @@ pub struct CaseBuilder {
     /// this through [`AllCases::alert_set_changed`] to decide whether to bump
     /// its [`fm::SitrepMetadata::alert_generation`].
     pub(super) alerts_changed: bool,
+    /// Set by [`Self::request_support_bundle`]. [`super::SitrepBuilder::build`]
+    /// reads this through [`AllCases::support_bundle_set_changed`] to decide
+    /// whether to bump its [`fm::SitrepMetadata::support_bundle_generation`].
+    pub(super) support_bundles_changed: bool,
 }
 
 #[derive(Debug)]
@@ -120,6 +124,10 @@ impl AllCases {
     pub(super) fn alert_set_changed(&self) -> bool {
         self.cases.iter().any(|c| c.alerts_changed)
     }
+
+    pub(super) fn support_bundle_set_changed(&self) -> bool {
+        self.cases.iter().any(|c| c.support_bundles_changed)
+    }
 }
 
 impl CaseBuilder {
@@ -141,6 +149,7 @@ impl CaseBuilder {
             rng,
             report_log: Default::default(),
             alerts_changed: false,
+            support_bundles_changed: false,
         }
     }
 
@@ -220,6 +229,7 @@ impl CaseBuilder {
             .entry("requested support bundle")
             .kv("support_bundle_id", id)
             .comment(comment);
+        self.support_bundles_changed = true;
     }
 
     pub fn close(&mut self, comment: impl ToString) {
@@ -324,6 +334,7 @@ impl iddqd::IdOrdItem for CaseBuilder {
 mod tests {
     use super::*;
     use nexus_types::alert::AlertClass;
+    use nexus_types::support_bundle::BundleDataSelection;
 
     fn make_all_cases() -> AllCases {
         AllCases {
@@ -335,10 +346,11 @@ mod tests {
     }
 
     #[test]
-    fn dirty_bit_default_false() {
+    fn dirty_bits_default_false() {
         let mut all_cases = make_all_cases();
         let case = all_cases.open_case(fm::DiagnosisEngineKind::PowerShelf);
         assert!(!case.alerts_changed);
+        assert!(!case.support_bundles_changed);
     }
 
     #[test]
@@ -352,8 +364,27 @@ mod tests {
             case.request_alert(AlertClass::TestFoo, &serde_json::json!({}), "")
                 .unwrap();
             assert!(case.alerts_changed);
+            assert!(!case.support_bundles_changed);
         }
 
         assert!(all_cases.alert_set_changed());
+        assert!(!all_cases.support_bundle_set_changed());
+    }
+
+    #[test]
+    fn request_support_bundle_flips_bundle_state() {
+        let mut all_cases = make_all_cases();
+        assert!(!all_cases.support_bundle_set_changed());
+
+        {
+            let mut case =
+                all_cases.open_case(fm::DiagnosisEngineKind::PowerShelf);
+            case.request_support_bundle(BundleDataSelection::default(), "");
+            assert!(case.support_bundles_changed);
+            assert!(!case.alerts_changed);
+        }
+
+        assert!(all_cases.support_bundle_set_changed());
+        assert!(!all_cases.alert_set_changed());
     }
 }

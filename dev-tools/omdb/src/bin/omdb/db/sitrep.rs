@@ -248,6 +248,7 @@ async fn cmd_db_sitrep_show(
         comment,
         next_inv_min_time_started,
         alert_generation,
+        support_bundle_generation,
     } = metadata;
 
     const ID: &'static str = "ID";
@@ -264,6 +265,7 @@ async fn cmd_db_sitrep_show(
     const NEXT_INV_MIN_START: &'static str =
         "  next inventory minimum start time";
     const ALERT_GEN: &'static str = "alert generation";
+    const SUPPORT_BUNDLE_GEN: &'static str = "support bundle generation";
     const TOTAL_EREPORTS: &'static str = "ereports in this sitrep";
 
     const WIDTH: usize = const_max_len(&[
@@ -280,6 +282,7 @@ async fn cmd_db_sitrep_show(
         INV_FINISHED_AT,
         NEXT_INV_MIN_START,
         ALERT_GEN,
+        SUPPORT_BUNDLE_GEN,
         TOTAL_EREPORTS,
     ]);
 
@@ -355,6 +358,7 @@ async fn cmd_db_sitrep_show(
     }
     println!("    {NEXT_INV_MIN_START:>WIDTH$}: {next_inv_min_time_started}");
     println!("    {ALERT_GEN:>WIDTH$}: {alert_generation}");
+    println!("    {SUPPORT_BUNDLE_GEN:>WIDTH$}: {support_bundle_generation}");
     println!("    ");
     println!("    {TOTAL_EREPORTS}: {}", ereports_by_id.len());
     // TODO(eliza): perhaps display a table summarizing those ereports? possibly

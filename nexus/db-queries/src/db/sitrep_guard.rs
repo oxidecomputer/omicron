@@ -498,6 +498,8 @@ mod tests {
                 time_created: Utc::now(),
                 alert_generation:
                     omicron_common::api::external::Generation::new(),
+                support_bundle_generation:
+                    omicron_common::api::external::Generation::new(),
             },
             cases: IdOrdMap::new(),
             ereports_by_id: IdOrdMap::new(),
@@ -698,4 +700,10 @@ mod tests {
 impl SitrepGuardedResource for nexus_db_model::Alert {
     type GenerationColumn = schema::fm_sitrep::dsl::alert_generation;
     type MarkerIdColumn = schema::rendezvous_alert_created::dsl::alert_id;
+}
+
+impl SitrepGuardedResource for nexus_db_model::SupportBundle {
+    type GenerationColumn = schema::fm_sitrep::dsl::support_bundle_generation;
+    type MarkerIdColumn =
+        schema::rendezvous_support_bundle_created::dsl::support_bundle_id;
 }

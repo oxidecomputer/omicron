@@ -24,3 +24,5 @@ cases (2 total):
       * ereport dddddddd-dddd-dddd-dddd-dddddddddddd:2
       alert requests not yet satisfied:
       * alert 66666666-6666-6666-6666-666666666666
+      support bundle requests not yet satisfied:
+      * support bundle 77777777-7777-7777-7777-777777777777

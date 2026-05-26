@@ -235,6 +235,7 @@ mod tests {
                 parent_sitrep_id: None,
                 next_inv_min_time_started: Utc::now(),
                 alert_generation,
+                support_bundle_generation: Generation::new(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),

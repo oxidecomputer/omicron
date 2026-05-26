@@ -7628,7 +7628,13 @@ CREATE TABLE IF NOT EXISTS omicron.public.fm_sitrep (
     -- it builds a sitrep whose alert request set differs from its parent's.
     -- `SitrepGuardedInsert` compares it against the latest sitrep, preventing
     -- stale executors from resurrecting deleted alerts.
-    alert_generation INT8 NOT NULL
+    alert_generation INT8 NOT NULL,
+
+    -- Generation counter for support bundles: `SitrepBuilder` increments this
+    -- each time it builds a sitrep whose support bundle request set differs
+    -- from its parent's. `SitrepGuardedInsert` compares it against the latest
+    -- sitrep, preventing stale executors from resurrecting deleted bundles.
+    support_bundle_generation INT8 NOT NULL
 );
 
 -- Index for looking up all potential children of a given parent sitrep.
@@ -7847,6 +7853,25 @@ CREATE TABLE IF NOT EXISTS omicron.public.fm_support_bundle_request_data_selecti
 -- to resurrect a deleted alert, meaning the marker is no longer needed.
 CREATE TABLE IF NOT EXISTS omicron.public.rendezvous_alert_created (
     alert_id UUID PRIMARY KEY,
+    created_at_generation INT8 NOT NULL
+);
+
+-- Marker written by `SitrepGuardedInsert` atomically with a corresponding
+-- support_bundle row when FM rendezvous successfully creates a bundle. This
+-- serves as a guard against resurrection: if the bundle is deleted after its
+-- initial creation, but an executing sitrep still contains an
+-- fm_support_bundle_request for the same bundle, this marker prevents
+-- `SitrepGuardedInsert` from re-creating the bundle.
+--
+-- A marker can be GC'ed in FM rendezvous when:
+--   * its support_bundle_id is not present in any fm_support_bundle_request in
+--     the executing sitrep,
+--   * its created_at_generation is less than that of the
+--     support_bundle_generation on the sitrep being executed.
+-- Taken together, these two conditions ensure that no sitrep will ever attempt
+-- to resurrect a deleted bundle, meaning the marker is no longer needed.
+CREATE TABLE IF NOT EXISTS omicron.public.rendezvous_support_bundle_created (
+    support_bundle_id UUID PRIMARY KEY,
     created_at_generation INT8 NOT NULL
 );
 
@@ -8680,7 +8705,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '264.0.0', NULL)
+    (TRUE, NOW(), NOW(), '265.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

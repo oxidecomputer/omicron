@@ -3162,6 +3162,7 @@ table! {
         comment -> Text,
         next_inv_min_time_started -> Timestamptz,
         alert_generation -> Int8,
+        support_bundle_generation -> Int8,
     }
 }
 
@@ -3334,6 +3335,13 @@ allow_tables_to_appear_in_same_query!(
 table! {
     rendezvous_alert_created (alert_id) {
         alert_id -> Uuid,
+        created_at_generation -> Int8,
+    }
+}
+
+table! {
+    rendezvous_support_bundle_created (support_bundle_id) {
+        support_bundle_id -> Uuid,
         created_at_generation -> Int8,
     }
 }

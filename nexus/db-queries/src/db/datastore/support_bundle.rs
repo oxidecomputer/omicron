@@ -12,6 +12,8 @@ use crate::db::model::SupportBundle;
 use crate::db::model::SupportBundleState;
 use crate::db::pagination::paginated;
 use crate::db::pagination::paginated_multicolumn;
+use crate::db::sitrep_guard::SitrepGuardedInsert;
+use crate::db::sitrep_guard::SitrepGuardedInsertOutcome;
 use crate::db::update_and_check::{UpdateAndCheck, UpdateStatus};
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::prelude::*;
@@ -29,11 +31,14 @@ use omicron_common::api::external;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
+use omicron_common::api::external::Generation;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
+use omicron_uuid_kinds::CaseUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::SupportBundleUuid;
+use std::collections::HashSet;
 use uuid::Uuid;
 
 const CANNOT_ALLOCATE_ERR_MSG: &'static str = "Current policy limits support bundle creation to 'one per external disk', and \
@@ -71,8 +76,19 @@ pub enum SupportBundleProvenance {
     /// automatically when the bundle is created.
     User,
     /// Requested by the fault management subsystem. Uses a specific bundle ID
-    /// for idempotent creation, and records the FM case association.
-    Fm { id: SupportBundleUuid, case_id: omicron_uuid_kinds::CaseUuid },
+    /// for idempotent creation, records the FM case association, and inserts
+    /// a "created" marker to avoid FM rendezvous resurrecting deleted bundles.
+    Fm {
+        /// Bundle id requested by the sitrep. The FM path is idempotent on
+        /// this id: repeated activations for the same sitrep will do nothing.
+        id: SupportBundleUuid,
+        /// FM case that requested this bundle.
+        case_id: CaseUuid,
+        /// Generation counter the FM rendezvous executor expects to see in
+        /// the latest sitrep's `support_bundle_generation` column. Used by
+        /// the [`SitrepGuardedInsert::<SupportBundle>`] generation guard.
+        expected_support_bundle_generation: Generation,
+    },
 }
 
 /// Parameters for creating a support bundle.
@@ -103,9 +119,16 @@ impl DataStore {
     /// state, and inserts it. If no free dataset is available, returns
     /// [`Error::insufficient_capacity`].
     ///
-    /// If the provenance is [`SupportBundleProvenance::Fm`] and a bundle
-    /// with the given ID already exists, returns
-    /// [`Error::ObjectAlreadyExists`].
+    /// For [`SupportBundleProvenance::Fm`] the bundle INSERT is gated by
+    /// [`SitrepGuardedInsert`], which also writes the
+    /// `rendezvous_support_bundle_created` marker atomically. The
+    /// transaction encloses the guarded insert and the data-selection
+    /// inserts, so a marker is never durable without its data-selection
+    /// rows. If a bundle with the given id already exists, returns
+    /// [`Error::ObjectAlreadyExists`]. If the latest sitrep's
+    /// `support_bundle_generation` has advanced past
+    /// `expected_support_bundle_generation`, returns [`Error::Conflict`]; the
+    /// caller should skip the request rather than retrying.
     pub async fn support_bundle_create(
         &self,
         opctx: &OpContext,
@@ -118,6 +141,7 @@ impl DataStore {
         enum SupportBundleError {
             TooManyBundles,
             AlreadyExists,
+            StaleSitrep,
         }
 
         let SupportBundleCreateParams {
@@ -128,13 +152,15 @@ impl DataStore {
             data_selection,
         } = params;
 
-        let (bundle_id, fm_case_id, idempotent) = match provenance {
+        let (bundle_id, fm_case_id, fm_expected_generation) = match provenance {
             SupportBundleProvenance::User => {
-                (SupportBundleUuid::new_v4(), None, false)
+                (SupportBundleUuid::new_v4(), None, None)
             }
-            SupportBundleProvenance::Fm { id, case_id } => {
-                (id, Some(case_id), true)
-            }
+            SupportBundleProvenance::Fm {
+                id,
+                case_id,
+                expected_support_bundle_generation,
+            } => (id, Some(case_id), Some(expected_support_bundle_generation)),
         };
 
         let err = OptionalError::new();
@@ -189,38 +215,62 @@ impl DataStore {
                         fm_case_id,
                     );
 
-                    // For idempotent creation (FM provenance), check if the
-                    // bundle already exists before inserting.
-                    if idempotent
-                        && diesel::select(diesel::dsl::exists(
-                            support_bundle_dsl::support_bundle.filter(
-                                support_bundle_dsl::id
-                                    .eq(bundle_id.into_untyped_uuid()),
-                            ),
-                        ))
-                        .get_result_async::<bool>(&conn)
-                        .await?
-                    {
-                        return Err(
-                            err.bail(SupportBundleError::AlreadyExists),
-                        );
-                    }
+                    let inserted: Option<SupportBundle> =
+                        match fm_expected_generation {
+                            None => {
+                                diesel::insert_into(
+                                    support_bundle_dsl::support_bundle,
+                                )
+                                .values(bundle.clone())
+                                .execute_async(&conn)
+                                .await?;
+                                Some(bundle)
+                            }
+                            Some(expected_generation) => {
+                                let insert = diesel::insert_into(
+                                    support_bundle_dsl::support_bundle,
+                                )
+                                .values(bundle)
+                                .on_conflict_do_nothing()
+                                .returning(SupportBundle::as_returning());
+                                let guarded = SitrepGuardedInsert::<
+                                    SupportBundle,
+                                    _,
+                                >::new(
+                                    bundle_id.into_untyped_uuid(),
+                                    expected_generation.into(),
+                                    insert,
+                                );
+                                match guarded.execute_async(&conn).await? {
+                                    SitrepGuardedInsertOutcome::Created(row) => {
+                                        Some(row)
+                                    }
+                                    SitrepGuardedInsertOutcome::AlreadyExists => {
+                                        None
+                                    }
+                                    SitrepGuardedInsertOutcome::StaleSitrep => {
+                                        return Err(err.bail(
+                                            SupportBundleError::StaleSitrep,
+                                        ));
+                                    }
+                                }
+                            }
+                        };
 
-                    diesel::insert_into(
-                        support_bundle_dsl::support_bundle,
-                    )
-                    .values(bundle.clone())
-                    .execute_async(&conn)
-                    .await?;
+                    let Some(inserted) = inserted else {
+                        return Err(
+                            err.bail(SupportBundleError::AlreadyExists)
+                        );
+                    };
 
                     Self::support_bundle_data_selection_insert_on_conn(
                         &conn,
-                        bundle.id.into(),
+                        inserted.id.into(),
                         data_selection,
                     )
                     .await?;
 
-                    Ok(bundle)
+                    Ok(inserted)
                 }
             })
             .await
@@ -239,6 +289,12 @@ impl DataStore {
                                     external::ResourceType::SupportBundle,
                                 object_name: bundle_id.to_string(),
                             };
+                        }
+                        SupportBundleError::StaleSitrep => {
+                            return external::Error::conflict(
+                                "cannot create FM-originated support \
+                                 bundle for stale sitrep",
+                            );
                         }
                     }
                 }
@@ -793,6 +849,37 @@ impl DataStore {
 
         Ok(())
     }
+
+    /// Returns the subset of `candidates` for which a marker row exists in
+    /// `rendezvous_support_bundle_created`. Used by FM analysis to see which
+    /// support bundle requests on closed cases have been satisfied, to
+    /// determine whether any cases can be dropped (see
+    /// `nexus_fm::analysis_input::Builder::build`).
+    pub async fn support_bundle_markers_existing_in(
+        &self,
+        opctx: &OpContext,
+        candidates: &[SupportBundleUuid],
+    ) -> Result<HashSet<SupportBundleUuid>, Error> {
+        if candidates.is_empty() {
+            return Ok(HashSet::new());
+        }
+        opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        use nexus_db_schema::schema::rendezvous_support_bundle_created::dsl as marker_dsl;
+
+        let candidate_uuids: Vec<Uuid> =
+            candidates.iter().map(|id| id.into_untyped_uuid()).collect();
+
+        let rows: Vec<Uuid> = marker_dsl::rendezvous_support_bundle_created
+            .filter(marker_dsl::support_bundle_id.eq_any(candidate_uuids))
+            .select(marker_dsl::support_bundle_id)
+            .load_async(&*conn)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        Ok(rows.into_iter().map(SupportBundleUuid::from_untyped_uuid).collect())
+    }
 }
 
 #[cfg(test)]
@@ -800,7 +887,6 @@ mod test {
     use super::*;
     use crate::db::datastore::test::bp_insert_and_make_target;
     use crate::db::pub_test_utils::TestDatabase;
-    use assert_matches::assert_matches;
     use nexus_db_model::Generation;
     use nexus_db_model::SledBaseboard;
     use nexus_db_model::SledCpuFamily;
@@ -2006,24 +2092,59 @@ mod test {
         logctx.cleanup_successful();
     }
 
-    #[tokio::test]
-    async fn test_support_bundle_fm_idempotent_create() {
-        use omicron_uuid_kinds::CaseUuid;
+    fn make_fm_sitrep(
+        support_bundle_generation: external::Generation,
+    ) -> nexus_types::fm::Sitrep {
+        use nexus_types::fm::Sitrep;
+        use nexus_types::fm::SitrepMetadata;
+        use omicron_uuid_kinds::CollectionUuid;
+        use omicron_uuid_kinds::SitrepUuid;
+        Sitrep {
+            metadata: SitrepMetadata {
+                id: SitrepUuid::new_v4(),
+                inv_collection_id: CollectionUuid::new_v4(),
+                creator_id: OmicronZoneUuid::new_v4(),
+                comment: String::new(),
+                time_created: chrono::Utc::now(),
+                parent_sitrep_id: None,
+                next_inv_min_time_started: chrono::Utc::now(),
+                alert_generation: external::Generation::new(),
+                support_bundle_generation,
+            },
+            cases: Default::default(),
+            ereports_by_id: Default::default(),
+        }
+    }
 
-        let logctx =
-            dev::test_setup_log("test_support_bundle_fm_idempotent_create");
+    /// FM happy path: a fresh sitrep-generation-guarded insert writes both
+    /// the bundle row and its `rendezvous_support_bundle_created` marker.
+    #[tokio::test]
+    async fn support_bundle_create_fm_created_writes_marker() {
+        use diesel::ExpressionMethods;
+        use diesel::QueryDsl;
+        use diesel::SelectableHelper;
+        use nexus_db_model::fm::RendezvousSupportBundleCreated;
+        use nexus_db_schema::schema::rendezvous_support_bundle_created::dsl as marker_dsl;
+
+        let logctx = dev::test_setup_log(
+            "support_bundle_create_fm_created_writes_marker",
+        );
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
-        let this_nexus_id = OmicronZoneUuid::new_v4();
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
 
-        // Create a sled with zpools so we have debug datasets.
-        let _test_sled = create_sled_and_zpools(&datastore, &opctx, 2).await;
+        let _test_sled = create_sled_and_zpools(&datastore, &opctx, 1).await;
+        datastore
+            .fm_sitrep_insert(
+                opctx,
+                make_fm_sitrep(external::Generation::from_u32(3)),
+            )
+            .await
+            .unwrap();
 
         let bundle_id = SupportBundleUuid::new_v4();
         let case_id = CaseUuid::new_v4();
-        let reason = "sled is misbehaving";
-
-        // Create the bundle.
+        let nexus_id = OmicronZoneUuid::new_v4();
         let bundle = datastore
             .support_bundle_create(
                 &opctx,
@@ -2031,42 +2152,373 @@ mod test {
                     provenance: SupportBundleProvenance::Fm {
                         id: bundle_id,
                         case_id,
+                        expected_support_bundle_generation:
+                            external::Generation::from_u32(3),
                     },
-                    reason,
-                    nexus_id: this_nexus_id,
+                    reason: "fm happy path",
+                    nexus_id,
                     user_comment: None,
                     data_selection: BundleDataSelection::all(),
                 },
             )
             .await
-            .expect("Should be able to create a support bundle with a specified bundle ID and FM case ID");
-
+            .expect("support_bundle_create FM happy path should succeed");
         assert_eq!(SupportBundleUuid::from(bundle.id), bundle_id);
-        assert_eq!(bundle.reason_for_creation, reason);
         assert_eq!(bundle.fm_case_id, Some(case_id.into()));
         assert_eq!(bundle.state, SupportBundleState::Collecting);
-        assert_eq!(bundle.assigned_nexus, Some(this_nexus_id.into()));
+        assert_eq!(bundle.assigned_nexus, Some(nexus_id.into()));
 
-        // Creating the same bundle again should return ObjectAlreadyExists.
+        let marker = marker_dsl::rendezvous_support_bundle_created
+            .filter(
+                marker_dsl::support_bundle_id.eq(bundle_id.into_untyped_uuid()),
+            )
+            .select(RendezvousSupportBundleCreated::as_select())
+            .first_async::<RendezvousSupportBundleCreated>(&*conn)
+            .await
+            .unwrap();
+        assert_eq!(
+            marker.created_at_generation,
+            Generation::from(external::Generation::from_u32(3))
+        );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    /// Pre-seeded marker -> `ObjectAlreadyExists`. The combinator
+    /// short-circuits via `prior_marker_guard` and the bundle row is never
+    /// written.
+    #[tokio::test]
+    async fn support_bundle_create_fm_already_exists_via_marker() {
+        use diesel::ExpressionMethods;
+        use diesel::QueryDsl;
+        use nexus_db_model::fm::RendezvousSupportBundleCreated;
+        use nexus_db_schema::schema::rendezvous_support_bundle_created::dsl as marker_dsl;
+        use nexus_db_schema::schema::support_bundle::dsl as bundle_dsl;
+
+        let logctx = dev::test_setup_log(
+            "support_bundle_create_fm_already_exists_via_marker",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
+
+        let _test_sled = create_sled_and_zpools(&datastore, &opctx, 1).await;
+        datastore
+            .fm_sitrep_insert(
+                opctx,
+                make_fm_sitrep(external::Generation::from_u32(2)),
+            )
+            .await
+            .unwrap();
+
+        let bundle_id = SupportBundleUuid::new_v4();
+
+        // Pre-write the marker at an earlier generation. The combinator
+        // should short-circuit via `prior_marker_guard` and surface
+        // ObjectAlreadyExists without inserting the bundle row.
+        diesel::insert_into(marker_dsl::rendezvous_support_bundle_created)
+            .values(RendezvousSupportBundleCreated::new(
+                bundle_id,
+                Generation::new(),
+            ))
+            .execute_async(&*conn)
+            .await
+            .unwrap();
+
         let err = datastore
             .support_bundle_create(
                 &opctx,
                 SupportBundleCreateParams {
                     provenance: SupportBundleProvenance::Fm {
                         id: bundle_id,
-                        case_id,
+                        case_id: CaseUuid::new_v4(),
+                        expected_support_bundle_generation:
+                            external::Generation::from_u32(2),
                     },
-                    reason,
-                    nexus_id: this_nexus_id,
+                    reason: "should not get written",
+                    nexus_id: OmicronZoneUuid::new_v4(),
                     user_comment: None,
                     data_selection: BundleDataSelection::all(),
                 },
             )
             .await
-            .expect_err(
-                "Creating an existing FM bundle should return an error",
-            );
-        assert_matches!(err, Error::ObjectAlreadyExists { .. });
+            .expect_err("pre-seeded marker should surface ObjectAlreadyExists");
+        assert!(
+            matches!(err, Error::ObjectAlreadyExists { .. }),
+            "expected ObjectAlreadyExists, got {err:?}"
+        );
+
+        // No support_bundle row should have been written.
+        let count: i64 = bundle_dsl::support_bundle
+            .filter(bundle_dsl::id.eq(bundle_id.into_untyped_uuid()))
+            .count()
+            .get_result_async(&*conn)
+            .await
+            .unwrap();
+        assert_eq!(count, 0);
+
+        // The pre-existing marker must not have been overwritten with the
+        // current `expected_support_bundle_generation`. The combinator's
+        // marker INSERT uses `ON CONFLICT DO NOTHING`; if a future change
+        // flipped it to UPSERT (or dropped the conflict clause), the marker's
+        // `created_at_generation` would silently advance from 1 to 2,
+        // breaking the GC invariant that markers record the generation at
+        // which the support bundle was originally created.
+        let marker = marker_dsl::rendezvous_support_bundle_created
+            .filter(
+                marker_dsl::support_bundle_id.eq(bundle_id.into_untyped_uuid()),
+            )
+            .select(RendezvousSupportBundleCreated::as_select())
+            .first_async::<RendezvousSupportBundleCreated>(&*conn)
+            .await
+            .unwrap();
+        assert_eq!(marker.created_at_generation, Generation::new());
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    /// Regression test: a bundle row exists without a corresponding marker
+    /// (pre-migration data, or marker GC outrunning bundle deletion). The
+    /// guarded insert must surface `ObjectAlreadyExists` rather than letting a
+    /// bare `DieselError::NotFound` bubble out as HTTP 500, AND must NOT
+    /// fabricate a marker row for a bundle this executor did not produce.
+    #[tokio::test]
+    async fn support_bundle_create_fm_already_exists_without_marker() {
+        use diesel::ExpressionMethods;
+        use diesel::QueryDsl;
+        use nexus_db_schema::schema::rendezvous_support_bundle_created::dsl as marker_dsl;
+
+        let logctx = dev::test_setup_log(
+            "support_bundle_create_fm_already_exists_without_marker",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
+
+        // Two free datasets: the first backs the marker-free bundle row we
+        // plant below; the second lets the FM create reach the sitrep-guard
+        // (the free-dataset lookup precedes the guarded insert).
+        let _test_sled = create_sled_and_zpools(&datastore, &opctx, 2).await;
+        datastore
+            .fm_sitrep_insert(
+                opctx,
+                make_fm_sitrep(external::Generation::new()),
+            )
+            .await
+            .unwrap();
+
+        // Plant a bundle row with no marker by creating it through the
+        // non-FM (`User`) path, which never writes a
+        // `rendezvous_support_bundle_created` row. Reuse its id for the FM
+        // request so the inner INSERT conflicts on the primary key.
+        let planted = datastore
+            .support_bundle_create(
+                &opctx,
+                SupportBundleCreateParams {
+                    provenance: SupportBundleProvenance::User,
+                    reason: "marker-free row",
+                    nexus_id: OmicronZoneUuid::new_v4(),
+                    user_comment: None,
+                    data_selection: BundleDataSelection::all(),
+                },
+            )
+            .await
+            .expect("user-provenance create should succeed");
+        let bundle_id = SupportBundleUuid::from(planted.id);
+
+        let err = datastore
+            .support_bundle_create(
+                &opctx,
+                SupportBundleCreateParams {
+                    provenance: SupportBundleProvenance::Fm {
+                        id: bundle_id,
+                        case_id: CaseUuid::new_v4(),
+                        expected_support_bundle_generation:
+                            external::Generation::new(),
+                    },
+                    reason: "should hit existing row",
+                    nexus_id: OmicronZoneUuid::new_v4(),
+                    user_comment: None,
+                    data_selection: BundleDataSelection::all(),
+                },
+            )
+            .await
+            .expect_err("pre-existing row should surface ObjectAlreadyExists");
+        assert!(
+            matches!(err, Error::ObjectAlreadyExists { .. }),
+            "expected ObjectAlreadyExists, got {err:?}"
+        );
+
+        // No marker may have been written: the `new_marker` CTE is gated by
+        // `WHERE EXISTS (SELECT 1 FROM new_resource)`.
+        let marker_count: i64 = marker_dsl::rendezvous_support_bundle_created
+            .filter(
+                marker_dsl::support_bundle_id.eq(bundle_id.into_untyped_uuid()),
+            )
+            .count()
+            .get_result_async(&*conn)
+            .await
+            .unwrap();
+        assert_eq!(marker_count, 0);
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    /// Stale executor: latest sitrep advanced past
+    /// `expected_support_bundle_generation`. The guard surfaces
+    /// `Error::Conflict("stale sitrep")` and neither the bundle row nor the
+    /// marker is written.
+    #[tokio::test]
+    async fn support_bundle_create_fm_stale_sitrep() {
+        let logctx =
+            dev::test_setup_log("support_bundle_create_fm_stale_sitrep");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let _test_sled = create_sled_and_zpools(&datastore, &opctx, 1).await;
+        // Latest sitrep at generation 5; executor expects the initial
+        // generation, which is stale.
+        datastore
+            .fm_sitrep_insert(
+                opctx,
+                make_fm_sitrep(external::Generation::from_u32(5)),
+            )
+            .await
+            .unwrap();
+
+        let err = datastore
+            .support_bundle_create(
+                &opctx,
+                SupportBundleCreateParams {
+                    provenance: SupportBundleProvenance::Fm {
+                        id: SupportBundleUuid::new_v4(),
+                        case_id: CaseUuid::new_v4(),
+                        expected_support_bundle_generation:
+                            external::Generation::new(),
+                    },
+                    reason: "stale executor",
+                    nexus_id: OmicronZoneUuid::new_v4(),
+                    user_comment: None,
+                    data_selection: BundleDataSelection::all(),
+                },
+            )
+            .await
+            .expect_err("stale executor should surface Conflict");
+        assert!(
+            matches!(
+                err,
+                Error::Conflict { ref message }
+                    if message.external_message().contains("stale sitrep")
+            ),
+            "expected Conflict containing 'stale sitrep', got {err:?}"
+        );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn support_bundle_markers_existing_in_returns_only_present_ids() {
+        use nexus_db_model::fm::RendezvousSupportBundleCreated;
+        use nexus_db_schema::schema::rendezvous_support_bundle_created::dsl as bundle_marker_dsl;
+
+        let logctx = dev::test_setup_log(
+            "support_bundle_markers_existing_in_returns_only_present_ids",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let present_a = SupportBundleUuid::new_v4();
+        let present_b = SupportBundleUuid::new_v4();
+        let absent = SupportBundleUuid::new_v4();
+
+        // Insert markers for present_a and present_b only.
+        {
+            let conn = datastore.pool_connection_for_tests().await.unwrap();
+            diesel::insert_into(
+                bundle_marker_dsl::rendezvous_support_bundle_created,
+            )
+            .values(vec![
+                RendezvousSupportBundleCreated::new(
+                    present_a,
+                    Generation::new(),
+                ),
+                RendezvousSupportBundleCreated::new(
+                    present_b,
+                    Generation::new(),
+                ),
+            ])
+            .execute_async(&*conn)
+            .await
+            .unwrap();
+        }
+
+        let candidates = vec![present_a, absent, present_b];
+        let existing = datastore
+            .support_bundle_markers_existing_in(opctx, &candidates)
+            .await
+            .expect("query should succeed");
+
+        assert_eq!(existing.len(), 2);
+        assert!(existing.contains(&present_a));
+        assert!(existing.contains(&present_b));
+        assert!(!existing.contains(&absent));
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn support_bundle_markers_existing_in_empty_input_returns_empty() {
+        let logctx = dev::test_setup_log(
+            "support_bundle_markers_existing_in_empty_input_returns_empty",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let existing = datastore
+            .support_bundle_markers_existing_in(opctx, &[])
+            .await
+            .expect("empty input must return Ok");
+
+        assert!(existing.is_empty(), "empty input returns empty result");
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn support_bundle_markers_existing_in_explain_no_full_scan() {
+        use crate::db::explain::ExplainableAsync;
+        use nexus_db_schema::schema::rendezvous_support_bundle_created::dsl as bundle_marker_dsl;
+
+        let logctx = dev::test_setup_log(
+            "support_bundle_markers_existing_in_explain_no_full_scan",
+        );
+        let db = TestDatabase::new_with_pool(&logctx.log).await;
+        let pool = db.pool();
+        let conn = pool.claim().await.unwrap();
+
+        let candidates: Vec<Uuid> = (0..3)
+            .map(|_| SupportBundleUuid::new_v4().into_untyped_uuid())
+            .collect();
+        let query = bundle_marker_dsl::rendezvous_support_bundle_created
+            .filter(bundle_marker_dsl::support_bundle_id.eq_any(candidates))
+            .select(bundle_marker_dsl::support_bundle_id);
+
+        let explanation = query
+            .explain_async(&conn)
+            .await
+            .expect("query should be valid SQL");
+        eprintln!("{explanation}");
+        assert!(
+            !explanation.contains("FULL SCAN"),
+            "Found an unexpected FULL SCAN: {}",
+            explanation
+        );
 
         db.terminate().await;
         logctx.cleanup_successful();
