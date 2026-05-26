@@ -447,6 +447,7 @@ impl DataStore {
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::db::datastore::AlertProvenance;
     use crate::db::explain::ExplainableAsync;
     use crate::db::model;
     use crate::db::pagination::Paginator;
@@ -494,7 +495,7 @@ mod test {
             }),
         );
         datastore
-            .alert_create(&opctx, alert)
+            .alert_create(&opctx, alert, AlertProvenance::Unspecified)
             .await
             .expect("can't create ye alert");
 

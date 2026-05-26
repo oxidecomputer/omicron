@@ -3161,6 +3161,7 @@ table! {
         creator_id -> Uuid,
         comment -> Text,
         next_inv_min_time_started -> Timestamptz,
+        alert_generation -> Int8,
     }
 }
 
@@ -3329,6 +3330,13 @@ allow_tables_to_appear_in_same_query!(
     fm_support_bundle_request_data_selection_host_info,
     fm_support_bundle_request_data_selection_ereports,
 );
+
+table! {
+    rendezvous_alert_created (alert_id) {
+        alert_id -> Uuid,
+        created_at_generation -> Int8,
+    }
+}
 
 table! {
     trust_quorum_configuration (rack_id, epoch) {

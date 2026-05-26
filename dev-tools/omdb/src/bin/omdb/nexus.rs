@@ -3790,23 +3790,26 @@ fn print_task_fm_rendezvous(details: &serde_json::Value) {
              total_alerts_requested,
              current_sitrep_alerts_requested,
              alerts_created,
+             alerts_already_existed,
+             stale_sitrep,
              errors,
          }| {
-            let already_created =
-                total_alerts_requested - alerts_created - errors.len();
             const REQUESTED: &str = "alerts requested:";
             const REQUESTED_THIS_SITREP: &str = "  requested in this sitrep:";
             const CREATED: &str = "  created in this activation:";
-            const ALREADY_CREATED: &str = "  already created:";
+            const ALREADY_EXISTED: &str = "  already existed:";
             const ERRORS: &str = "  errors:";
             const WIDTH: usize = const_max_len(&[
                 REQUESTED,
                 REQUESTED_THIS_SITREP,
                 CREATED,
-                ALREADY_CREATED,
+                ALREADY_EXISTED,
                 ERRORS,
             ]) + 1;
             pub const NUM_WIDTH: usize = 4;
+            if *stale_sitrep {
+                println!("{ERRICON}   sitrep was stale");
+            }
             println!(
                 "      {REQUESTED:<WIDTH$}{total_alerts_requested:>NUM_WIDTH$}"
             );
@@ -3816,7 +3819,7 @@ fn print_task_fm_rendezvous(details: &serde_json::Value) {
             );
             println!("      {CREATED:<WIDTH$}{alerts_created:>NUM_WIDTH$}");
             println!(
-                "      {ALREADY_CREATED:<WIDTH$}{already_created:>NUM_WIDTH$}"
+                "      {ALREADY_EXISTED:<WIDTH$}{alerts_already_existed:>NUM_WIDTH$}"
             );
             println!(
                 "{}   {ERRORS:<WIDTH$}{:>NUM_WIDTH$}",

@@ -20,6 +20,10 @@ pub struct CaseBuilder {
     sitrep_id: SitrepUuid,
     rng: rng::CaseBuilderRng,
     report_log: analysis_reports::DebugLog,
+    /// Set by [`Self::request_alert`]. [`super::SitrepBuilder::build`] reads
+    /// this through [`AllCases::alert_set_changed`] to decide whether to bump
+    /// its [`fm::SitrepMetadata::alert_generation`].
+    pub(super) alerts_changed: bool,
 }
 
 #[derive(Debug)]
@@ -112,6 +116,10 @@ impl AllCases {
     pub fn is_empty(&self) -> bool {
         self.cases.is_empty()
     }
+
+    pub(super) fn alert_set_changed(&self) -> bool {
+        self.cases.iter().any(|c| c.alerts_changed)
+    }
 }
 
 impl CaseBuilder {
@@ -126,7 +134,14 @@ impl CaseBuilder {
             "de" => case.metadata.de.to_string(),
             "created_sitrep_id" => case.metadata.created_sitrep_id.to_string(),
         ));
-        Self { log, case, sitrep_id, rng, report_log: Default::default() }
+        Self {
+            log,
+            case,
+            sitrep_id,
+            rng,
+            report_log: Default::default(),
+            alerts_changed: false,
+        }
     }
 
     pub fn request_alert(
@@ -168,7 +183,7 @@ impl CaseBuilder {
             .kv("alert_id", id)
             .kv("alert_class", &class)
             .comment(comment);
-
+        self.alerts_changed = true;
         Ok(())
     }
 
@@ -303,4 +318,42 @@ impl iddqd::IdOrdItem for CaseBuilder {
     }
 
     iddqd::id_upcast!();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use nexus_types::alert::AlertClass;
+
+    fn make_all_cases() -> AllCases {
+        AllCases {
+            log: slog::Logger::root(slog::Discard, slog::o!()),
+            sitrep_id: SitrepUuid::new_v4(),
+            cases: IdOrdMap::new(),
+            rng: rng::SitrepBuilderRng::from_seed("make_all_cases"),
+        }
+    }
+
+    #[test]
+    fn dirty_bit_default_false() {
+        let mut all_cases = make_all_cases();
+        let case = all_cases.open_case(fm::DiagnosisEngineKind::PowerShelf);
+        assert!(!case.alerts_changed);
+    }
+
+    #[test]
+    fn request_alert_flips_alert_state() {
+        let mut all_cases = make_all_cases();
+        assert!(!all_cases.alert_set_changed());
+
+        {
+            let mut case =
+                all_cases.open_case(fm::DiagnosisEngineKind::PowerShelf);
+            case.request_alert(AlertClass::TestFoo, &serde_json::json!({}), "")
+                .unwrap();
+            assert!(case.alerts_changed);
+        }
+
+        assert!(all_cases.alert_set_changed());
+    }
 }

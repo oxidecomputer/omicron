@@ -150,6 +150,7 @@ use nexus_db_lookup::LookupPath;
 use nexus_db_lookup::lookup;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db::datastore::AlertProvenance;
 use nexus_db_queries::db::model::Alert;
 use nexus_db_queries::db::model::AlertClass;
 use nexus_db_queries::db::model::AlertDeliveryState;
@@ -182,6 +183,12 @@ impl Nexus {
     /// event to receivers.  However, if (for whatever reason) this Nexus fails
     /// to do that, the event remains durably in the database to be dispatched
     /// and delivered by someone else.
+    ///
+    /// Note: as of this writing, this method has no production callers; it
+    /// is exercised only by integration tests under
+    /// `tests/integration_tests/webhooks.rs`. It is preserved as the
+    /// framework entry point for recording control-plane events per the
+    /// module-level docs and RFD 538.
     pub async fn alert_publish(
         &self,
         opctx: &OpContext,
@@ -191,7 +198,11 @@ impl Nexus {
     ) -> Result<Alert, Error> {
         let alert = self
             .datastore()
-            .alert_create(opctx, Alert::new(id, class, event))
+            .alert_create(
+                opctx,
+                Alert::new(id, class, event),
+                AlertProvenance::Unspecified,
+            )
             .await?;
 
         // Once the alert has been inserted, activate the dispatcher task to

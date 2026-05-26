@@ -1166,6 +1166,7 @@ fn async_insert_error_to_txn(
 mod test {
     use super::*;
     use crate::authz;
+    use crate::db::datastore::AlertProvenance;
     use crate::db::explain::ExplainableAsync;
     use crate::db::model::Alert;
     use crate::db::pub_test_utils::TestDatabase;
@@ -1211,6 +1212,7 @@ mod test {
             .alert_create(
                 opctx,
                 Alert::new(id, alert_class, serde_json::json!({})),
+                AlertProvenance::Unspecified,
             )
             .await
             .expect("cant create ye event");

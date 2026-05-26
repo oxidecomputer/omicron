@@ -41,6 +41,7 @@ use diesel::result::Error as DieselError;
 use diesel::sql_types;
 use nexus_db_lookup::DbConnection;
 use nexus_db_model::Generation;
+use nexus_db_schema::schema;
 use uuid::Uuid;
 
 /// Trait supplying the types injected into [`SitrepGuardedInsert`]'s emitted
@@ -495,6 +496,8 @@ mod tests {
                 creator_id: OmicronZoneUuid::new_v4(),
                 comment: "sitrep_guard test sitrep".to_string(),
                 time_created: Utc::now(),
+                alert_generation:
+                    omicron_common::api::external::Generation::new(),
             },
             cases: IdOrdMap::new(),
             ereports_by_id: IdOrdMap::new(),
@@ -686,4 +689,13 @@ mod tests {
         db.terminate().await;
         logctx.cleanup_successful();
     }
+}
+
+// --------------------------------------------------------------------
+// Per-resource impls
+// --------------------------------------------------------------------
+
+impl SitrepGuardedResource for nexus_db_model::Alert {
+    type GenerationColumn = schema::fm_sitrep::dsl::alert_generation;
+    type MarkerIdColumn = schema::rendezvous_alert_created::dsl::alert_id;
 }

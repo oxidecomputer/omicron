@@ -9,7 +9,7 @@ use super::case;
 use super::ereport::EreportId;
 use super::json_display::fmt_json_value;
 use iddqd::IdOrdMap;
-use omicron_uuid_kinds::{CaseUuid, CollectionUuid, SitrepUuid};
+use omicron_uuid_kinds::{AlertUuid, CaseUuid, CollectionUuid, SitrepUuid};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
@@ -233,6 +233,7 @@ pub struct InputReport {
 pub struct ClosedCaseReport {
     pub metadata: case::Metadata,
     pub unmarked_ereports: BTreeSet<EreportId>,
+    pub unmarked_alert_requests: BTreeSet<AlertUuid>,
 }
 
 impl InputReport {
@@ -336,20 +337,39 @@ impl fmt::Display for InputReportMultilineDisplay<'_> {
                 let indent = indent + 2;
                 for (
                     case_id,
-                    ClosedCaseReport { metadata, unmarked_ereports },
+                    ClosedCaseReport {
+                        metadata,
+                        unmarked_ereports,
+                        unmarked_alert_requests,
+                    },
                 ) in closed_cases_copied_forward
                 {
                     writeln!(f, "{:indent$}* case {case_id}", "")?;
                     let indent = indent + 2;
                     metadata.display_multiline(indent, None).fmt(f)?;
-                    writeln!(
-                        f,
-                        "{:indent$}copied forwards because these ereports \
-                         haven't been marked seen yet:",
-                        ""
-                    )?;
-                    for ereport_id in unmarked_ereports {
-                        writeln!(f, "{:indent$}* ereport {ereport_id}", "")?;
+                    if !unmarked_ereports.is_empty() {
+                        writeln!(
+                            f,
+                            "{:indent$}ereports not yet marked seen:",
+                            ""
+                        )?;
+                        for ereport_id in unmarked_ereports {
+                            writeln!(
+                                f,
+                                "{:indent$}* ereport {ereport_id}",
+                                ""
+                            )?;
+                        }
+                    }
+                    if !unmarked_alert_requests.is_empty() {
+                        writeln!(
+                            f,
+                            "{:indent$}alert requests not yet satisfied:",
+                            ""
+                        )?;
+                        for alert_id in unmarked_alert_requests {
+                            writeln!(f, "{:indent$}* alert {alert_id}", "")?;
+                        }
                     }
                 }
             }
@@ -421,6 +441,11 @@ mod tests {
         let mut unmarked_ereports = BTreeSet::new();
         unmarked_ereports
             .insert(EreportId { restart_id, ena: Ena::from(2u64) });
+        let mut unmarked_alert_requests = BTreeSet::new();
+        unmarked_alert_requests.insert(
+            AlertUuid::from_str("66666666-6666-6666-6666-666666666666")
+                .unwrap(),
+        );
         closed_cases_copied_forward.insert(
             case2_id,
             ClosedCaseReport {
@@ -431,6 +456,7 @@ mod tests {
                     comment: "PSU 1 replaced".to_string(),
                 },
                 unmarked_ereports,
+                unmarked_alert_requests,
             },
         );
 

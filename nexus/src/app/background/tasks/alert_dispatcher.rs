@@ -355,6 +355,7 @@ mod test {
     use async_bb8_diesel::AsyncRunQueryDsl;
     use diesel::prelude::*;
     use nexus_db_queries::db;
+    use nexus_db_queries::db::datastore::AlertProvenance;
     use nexus_test_utils_macros::nexus_test;
     use omicron_common::api::external::IdentityMetadataCreateParams;
     use omicron_uuid_kinds::AlertReceiverUuid;
@@ -458,7 +459,7 @@ mod test {
             serde_json::json!({"msg": "help im trapped in a webhook event factory"}),
         );
         datastore
-            .alert_create(&opctx, alert)
+            .alert_create(&opctx, alert, AlertProvenance::Unspecified)
             .await
             .expect("creating the event should work");
 
