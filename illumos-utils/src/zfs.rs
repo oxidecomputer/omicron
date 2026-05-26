@@ -141,9 +141,6 @@ enum MountpointError {
 
 #[derive(thiserror::Error, Debug)]
 enum EnsureDatasetErrorRaw {
-    #[error("Dataset not found")]
-    DatasetNotFound,
-
     #[error("ZFS execution error")]
     Execution(#[from] crate::ExecutionError),
 
@@ -171,7 +168,7 @@ impl From<SetValueErrorRaw> for EnsureDatasetErrorRaw {
     fn from(e: SetValueErrorRaw) -> EnsureDatasetErrorRaw {
         match e {
             SetValueErrorRaw::DatasetNotFound => {
-                EnsureDatasetErrorRaw::DatasetNotFound
+                EnsureDatasetErrorRaw::DoesNotExist
             }
 
             SetValueErrorRaw::Execution(err) => {
