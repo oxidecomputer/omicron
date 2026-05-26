@@ -99,7 +99,6 @@ range-requests.workspace = true
 ref-cast.workspace = true
 regex.workspace = true
 reqwest = { workspace = true, features = ["http2", "json"] }
-reqwest012 = { workspace = true }
 ring.workspace = true
 samael.workspace = true
 schemars = { workspace = true, features = ["chrono", "uuid1"] }
@@ -160,6 +159,7 @@ raw-cpuid = { workspace = true, features = ["std"] }
 rustls = { workspace = true }
 rustls-pemfile = { workspace = true }
 scim2-rs.workspace = true
+support-bundle-collection.workspace = true
 update-common.workspace = true
 update-engine.workspace = true
 omicron-workspace-hack.workspace = true
