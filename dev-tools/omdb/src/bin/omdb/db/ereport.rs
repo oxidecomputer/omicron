@@ -56,11 +56,6 @@ enum Commands {
     #[clap(alias = "show")]
     Info(InfoArgs),
 
-    /// Dump an ereport as JSON.
-    ///
-    /// This is an alias for `omdb db ereport info --json --raw`.
-    Dump(EreportIdArgs),
-
     /// List ereport reporters
     Reporters(ReportersArgs),
 
@@ -84,8 +79,10 @@ struct ClassesArgs {
 
 #[derive(Debug, Args, Clone)]
 struct InfoArgs {
-    #[clap(flatten)]
-    ereport: EreportIdArgs,
+    /// The reporter restart UUID of the ereport to show
+    restart_id: EreporterRestartUuid,
+    /// The ENA of the ereport within the reporter restart
+    ena: Ena,
 
     /// If set, output the ereport as JSON, rather than using the default
     /// human-readable format.
@@ -102,14 +99,6 @@ struct InfoArgs {
     /// from the database.
     #[clap(long, short, requires("json"))]
     raw: bool,
-}
-
-#[derive(Debug, Args, Clone, Copy)]
-struct EreportIdArgs {
-    /// The reporter restart UUID of the ereport to show
-    restart_id: EreporterRestartUuid,
-    /// The ENA of the ereport within the reporter restart
-    ena: Ena,
 }
 
 #[derive(Debug, Args, Clone)]
@@ -188,11 +177,6 @@ pub(super) async fn cmd_db_ereport(
 
         Commands::Info(ref args) => {
             cmd_db_ereport_info(datastore, fetch_opts, args).await
-        }
-
-        Commands::Dump(ereport) => {
-            let args = InfoArgs { ereport, raw: true, json: true };
-            cmd_db_ereport_info(datastore, fetch_opts, &args).await
         }
 
         Commands::Reporters(ref args) => {
@@ -376,8 +360,7 @@ async fn cmd_db_ereport_info(
     fetch_opts: &DbFetchOptions,
     args: &InfoArgs,
 ) -> anyhow::Result<()> {
-    let &InfoArgs { ereport: EreportIdArgs { restart_id, ena }, json, raw } =
-        args;
+    let &InfoArgs { restart_id, ena, json, raw } = args;
     let ereport_id = ereport_types::EreportId { restart_id, ena };
     let conn = datastore.pool_connection_for_tests().await?;
     let ereport = ereport_fetch(&conn, fetch_opts, ereport_id).await?;
@@ -412,17 +395,29 @@ async fn cmd_db_ereport_info(
                 format!("failed to serialize raw ereport: {ereport:?}")
             })?;
     } else if json {
-        let ereport = nexus_types::fm::Ereport::try_from(ereport).context(
-            "failed to interpret ereport database row as domain type\n\
-             note: use `omdb db ereport info --raw` to display the raw \
-             JSON for this ereport",
-        )?;
-        serde_json::to_writer_pretty(std::io::stdout(), &ereport)
-            .with_context(|| {
-                format!(
-                    "failed to serialize ereport with metadata: {ereport:?}"
-                )
-            })?;
+        let raw_report = ereport.report.clone();
+        match nexus_types::fm::Ereport::try_from(ereport) {
+            Ok(ereport) => {
+                serde_json::to_writer_pretty(std::io::stdout(), &ereport)
+                    .with_context(|| {
+                        format!(
+                            "failed to serialize ereport with metadata: {ereport:?}"
+                        )
+                    })?;
+            }
+            Err(e) => {
+                eprintln!(
+                    "WARNING: failed to interpret ereport metadata, falling \
+                     back to raw JSON: {e}"
+                );
+                serde_json::to_writer_pretty(std::io::stdout(), &raw_report)
+                    .with_context(|| {
+                        format!(
+                            "failed to serialize raw ereport: {raw_report:?}"
+                        )
+                    })?;
+            }
+        }
     } else {
         let db::model::Ereport {
             ena: DbEna(ena),

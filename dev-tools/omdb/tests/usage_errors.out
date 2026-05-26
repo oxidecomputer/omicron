@@ -536,7 +536,6 @@ Usage: omdb db ereport [OPTIONS] <COMMAND>
 Commands:
   list       List ereports
   info       Show an ereport
-  dump       Dump an ereport as JSON
   reporters  List ereport reporters
   classes    Summarize ereports by class, marking which classes a diagnosis engine in Nexus consumes
              (fetched from Nexus's lockstep API; falls back to `?` if Nexus is unreachable)
