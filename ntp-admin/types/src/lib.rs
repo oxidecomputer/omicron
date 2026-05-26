@@ -11,4 +11,5 @@
 //! The API crate (`ntp-admin-api`) uses fixed identifiers from the versions
 //! crate directly.
 
+pub mod debug;
 pub mod timesync;

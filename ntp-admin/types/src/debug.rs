@@ -2,12 +2,4 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Re-exports of the latest versions of all published types.
-
-pub mod timesync {
-    pub use crate::v2::timesync::TimeSync;
-}
-
-pub mod debug {
-    pub use crate::v3::debug::DebugInfo;
-}
+pub use ntp_admin_types_versions::latest::debug::*;

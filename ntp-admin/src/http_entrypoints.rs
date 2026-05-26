@@ -7,6 +7,7 @@ use dropshot::HttpError;
 use dropshot::HttpResponseOk;
 use dropshot::RequestContext;
 use ntp_admin_api::*;
+use ntp_admin_types::debug::DebugInfo;
 use ntp_admin_types::timesync::TimeSync;
 use slog::info;
 use slog_error_chain::InlineErrorChain;
@@ -189,6 +190,45 @@ impl NtpAdminImpl {
         info!(log, "parse_timesync_result"; "result" => ?result);
         result
     }
+
+    async fn debug_get(ctx: &ServerContext) -> Result<DebugInfo, HttpError> {
+        let log = ctx.log();
+        info!(log, "collecting NTP zone debug info");
+
+        // TODO: run the read-only diagnostic commands here and populate
+        // `commands`. Candidates from the buildomat deploy.sh script:
+
+        //   chronyc -n sources
+        //
+        // TODO-K: this is too much?
+        //   cat /etc/inet/chrony.conf
+
+        // TODO-K: Check if zone is a boundary NTP zone and if it is then check
+        // connectivity.
+        // We proabably want to log whether it is a boundary zone or not
+
+        // Check con connect to ntp servers -> they are set as a property value on the chrony setup
+        // service
+        //
+        // For the dig command use the value of:
+        // svcprop -p config/server svc:/oxide/chrony-setup:default
+        // or retrieve it from the chrony config? In this case let's assume the
+        // external NTP server is ntp.eng.oxide.computer
+        //
+        //   /usr/sbin/dig ntp.eng.oxide.computer @1.1.1.1 (maybe 9.9.9.9 as well?)
+        //   getent hosts ntp.eng.oxide.computer
+        //
+        // For the internal NTP zone we may want to use the value of
+        // svcprop -p config/boundary_pool svc:/oxide/chrony-setup:default
+        // Let's say it's boundary_ntp.<some-uuid>.oxide.internal
+        // so we can do:
+        // `getent hosts boundary_ntp.<some-uuid>.oxide.internal`
+        //
+        // The deploy.sh job has some destructive commands (svcadm disable,
+        // chronyd -dd*). Let's not add those
+        //
+        Ok(DebugInfo { data: "DEBUG INFO HERE".to_string() })
+    }
 }
 
 impl NtpAdminApi for NtpAdminImpl {
@@ -199,6 +239,14 @@ impl NtpAdminApi for NtpAdminImpl {
     ) -> Result<HttpResponseOk<TimeSync>, HttpError> {
         let ctx = rqctx.context();
         let response = Self::timesync_get(ctx).await?;
+        Ok(HttpResponseOk(response))
+    }
+
+    async fn debug(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<DebugInfo>, HttpError> {
+        let ctx = rqctx.context();
+        let response = Self::debug_get(ctx).await?;
         Ok(HttpResponseOk(response))
     }
 }

@@ -21,6 +21,8 @@
   <service_fmri value='svc:/oxide/ntp:default' />
   </dependency>
 
+  <!-- TODO-K: This service should depend on the chrony-setup service -->
+
   <exec_method type='method' name='start'
     exec='/opt/oxide/lib/svc/manifest/ntp-admin.sh'
     timeout_seconds='0' />
