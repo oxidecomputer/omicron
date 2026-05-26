@@ -5,5 +5,5 @@
 //! Re-exports of the latest versions of all published types.
 
 pub mod timesync {
-    pub use crate::v1::timesync::TimeSync;
+    pub use crate::v2::timesync::TimeSync;
 }

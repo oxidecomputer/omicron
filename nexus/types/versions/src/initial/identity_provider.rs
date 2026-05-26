@@ -30,6 +30,7 @@ pub struct IdentityProvider {
     pub provider_type: IdentityProviderType,
 }
 
+/// A SAML identity provider
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct SamlIdentityProvider {
     #[serde(flatten)]

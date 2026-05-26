@@ -9,12 +9,6 @@ use super::http_entrypoints::api as http_api;
 use super::sled_agent::SledAgent;
 use super::storage::PantryServer;
 use crate::nexus::{ConvertInto, NexusClient};
-use crate::rack_setup::SledConfig;
-use crate::rack_setup::service::{PlannedSledDescription, ServicePlan};
-use crate::rack_setup::{
-    from_ipaddr_to_external_floating_ip,
-    from_sockaddr_to_external_floating_addr,
-};
 use crate::sim::SimulatedUpstairs;
 use anyhow::{Context, anyhow, bail};
 use bootstrap_agent_lockstep_types::RecoverySiloConfig;
@@ -37,7 +31,6 @@ use nexus_types::deployment::{
 use nexus_types::deployment::{
     BlueprintZoneConfig, BlueprintZoneDisposition, BlueprintZoneType,
 };
-use nexus_types::internal_api::params::ExternalPortDiscovery;
 use omicron_common::FileKv;
 use omicron_common::address::NEXUS_OPTE_IPV4_SUBNET;
 use omicron_common::address::{DNS_OPTE_IPV4_SUBNET, Ipv6Subnet};
@@ -57,11 +50,15 @@ use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use oxnet::Ipv6Net;
 use rand::seq::IndexedRandom;
+use sled_agent_rack_setup::{
+    PlannedSledDescription, ServicePlan, SledConfig,
+    from_ipaddr_to_external_floating_ip,
+    from_sockaddr_to_external_floating_addr,
+};
 use sled_agent_types::inventory::NetworkInterface;
 use sled_agent_types::inventory::NetworkInterfaceKind;
 use sled_agent_types::inventory::OmicronZoneDataset;
 use slog::{Drain, Logger, info};
-use std::collections::HashMap;
 use std::net::IpAddr;
 use std::net::Ipv4Addr;
 use std::net::Ipv6Addr;
@@ -651,7 +648,6 @@ pub async fn run_standalone_server(
         internal_dns_zone_config: dns_config,
         external_dns_zone_name: DNS_ZONE_EXTERNAL_TESTING.to_owned(),
         recovery_silo,
-        external_port_count: ExternalPortDiscovery::Static(HashMap::new()),
         rack_network_config: RackNetworkConfig {
             rack_subnet: Ipv6Net::host_net(Ipv6Addr::LOCALHOST),
             infra_ip_first: IpAddr::V4(Ipv4Addr::LOCALHOST),

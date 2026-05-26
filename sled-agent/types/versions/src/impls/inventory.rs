@@ -953,7 +953,6 @@ impl From<SvcEnabledNotOnlineState> for SvcState {
             SvcEnabledNotOnlineState::Degraded => Self::Degraded,
             SvcEnabledNotOnlineState::Maintenance => Self::Maintenance,
             SvcEnabledNotOnlineState::Offline => Self::Offline,
-            SvcEnabledNotOnlineState::Uninitialized => Self::Uninitialized,
         }
     }
 }
@@ -977,7 +976,6 @@ impl fmt::Display for SvcState {
 impl fmt::Display for SvcEnabledNotOnlineState {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let state = match self {
-            SvcEnabledNotOnlineState::Uninitialized => "uninitialized",
             SvcEnabledNotOnlineState::Offline => "offline",
             SvcEnabledNotOnlineState::Degraded => "degraded",
             SvcEnabledNotOnlineState::Maintenance => "maintenance",

@@ -533,6 +533,18 @@ pub enum PlanningInputKind {
     NicMacNotInBluperint(OmicronZoneNicEntry),
     NicIpNotInBlueprint(OmicronZoneNicEntry),
     NicWithUnknownOpteSubnet(OmicronZoneNicEntry),
+
+    /// The blueprint's `external_networking_generation` is not the expected
+    /// value.
+    ///
+    /// We expect the generation number to be equal to the parent blueprint if
+    /// no external networking configuration changed, or equal to its parent
+    /// blueprint generation plus one if it has.
+    WrongExternalNetworkingGeneration {
+        parent_generation: Generation,
+        expected_child_generation: Generation,
+        actual_child_generation: Generation,
+    },
 }
 
 impl fmt::Display for PlanningInputKind {
@@ -569,6 +581,19 @@ impl fmt::Display for PlanningInputKind {
                     "planning input contains a NIC with an IP not in a known
                      OPTE subnet: {} (NIC {} in zone {})",
                     nic.nic.ip, nic.nic.id, nic.zone_id,
+                )
+            }
+            PlanningInputKind::WrongExternalNetworkingGeneration {
+                parent_generation,
+                expected_child_generation,
+                actual_child_generation,
+            } => {
+                write!(
+                    f,
+                    "expected blueprint external networking generation to be \
+                     {expected_child_generation} (from parent's generation \
+                     {parent_generation}), but the blueprint's actual \
+                     generation is {actual_child_generation}",
                 )
             }
         }

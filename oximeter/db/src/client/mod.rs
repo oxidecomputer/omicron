@@ -30,11 +30,19 @@ use crate::native::QueryResult;
 use crate::native::block::Block;
 use crate::native::block::ValueArray;
 use crate::query;
+use chrono::Utc;
+use clickhouse_admin_types::retention::DatabaseRetentionPolicy;
+use clickhouse_admin_types::retention::Days;
+use clickhouse_admin_types::retention::RetentionPolicy;
+use clickhouse_admin_types::retention::RetentionPolicyRequest;
+use clickhouse_admin_types::usage::DatabaseUsage;
+use clickhouse_admin_types::usage::TableUsage;
 use debug_ignore::DebugIgnore;
 use dropshot::EmptyScanParams;
 use dropshot::PaginationOrder;
 use dropshot::ResultsPage;
 use dropshot::WhichPage;
+use iddqd::IdOrdMap;
 use omicron_common::backoff;
 use omicron_common::backoff::Backoff as _;
 use oximeter::Measurement;
@@ -937,21 +945,313 @@ impl Client {
 
     /// Verifies if instance is part of oximeter_cluster
     pub async fn is_oximeter_cluster(&self) -> Result<bool, Error> {
+        let mut handle = self.claim_connection().await?;
+        self.is_oximeter_cluster_on_connection(&mut handle).await
+    }
+
+    async fn is_oximeter_cluster_on_connection(
+        &self,
+        handle: &mut Handle,
+    ) -> Result<bool, Error> {
         const QUERY: &str =
             const_format::formatcp!("SHOW CLUSTER {}", crate::CLUSTER_NAME);
-        self.execute_with_block(&mut self.claim_connection().await?, QUERY)
-            .await
-            .and_then(|result| {
-                result
-                    .data
-                    .ok_or_else(|| {
-                        Error::Database(String::from(
-                            "Query for `oximeter` cluster unexpectedly \
-                    returned an empty data block",
-                        ))
-                    })
-                    .map(|block| block.n_rows() > 0)
+        self.execute_with_block(handle, QUERY).await.and_then(|result| {
+            result
+                .data
+                .ok_or_else(|| Error::QueryMissingData {
+                    query: QUERY.to_string(),
+                })
+                .map(|block| block.n_rows() > 0)
+        })
+    }
+
+    /// Set the retention policy for the oximeter database tables.
+    ///
+    /// This attempts to set the policy to the same value on every relevant
+    /// table. But because we set each table in a separate query, those
+    /// individual queries can fail, leaving each table with different retention
+    /// policies.
+    ///
+    /// The return value of `retention_policy()` includes the value for every
+    /// table. That should be checked to ensure the policy was correctly set on
+    /// every table.
+    ///
+    /// Also note that this sets the TTLs asynchronously. Fetching the TTL
+    /// itself immediately after should show the correct value (assuming it
+    /// succceeded), but dropping any data beyond the new TTL happens
+    /// asynchronously. Use the method `database_table_usage()` to monitor the
+    /// behavior.
+    pub async fn set_retention_policy(
+        &self,
+        policy: RetentionPolicyRequest,
+        replicated: bool,
+    ) -> Result<(), Error> {
+        let mut handle = self.claim_connection().await?;
+        let tables =
+            self.list_retention_policy_tables(&mut handle, replicated).await?;
+        let mut res = Ok(());
+        for table in tables.iter() {
+            if let Err(e) = self
+                .set_one_table_retention_policy(
+                    &mut handle,
+                    &policy,
+                    table,
+                    replicated,
+                )
+                .await
+            {
+                error!(
+                    self.log,
+                    "failed to set retention policy on table";
+                    "table_name" => table,
+                    "error" => InlineErrorChain::new(&e),
+                );
+                res = Err(e);
+
+                // Be cautious and claim a new connection if this attempt fails.
+                // We're not really sure what state the connection is in, so
+                // recycle it to the pool to be reset and claim a new one.
+                handle = self.claim_connection().await?;
+            }
+        }
+        res
+    }
+
+    /// Set the retention policy on one table.
+    ///
+    /// NOTE: The table name must be fully-qualified with the database, e.g.,
+    /// `oximeter.measurements_u64`.
+    async fn set_one_table_retention_policy(
+        &self,
+        handle: &mut Handle,
+        policy: &RetentionPolicyRequest,
+        table: &str,
+        replicated: bool,
+    ) -> Result<(), Error> {
+        let maybe_on_cluster = if replicated {
+            format!("ON CLUSTER {} ", crate::CLUSTER_NAME)
+        } else {
+            String::new()
+        };
+        let start_time = Self::ttl_start_time_expr_for_table(table)
+            .ok_or_else(|| {
+                Error::Database(format!(
+                    "table '{table}' does not have a known \
+                    retention policy start expression"
+                ))
+            })?;
+        let days = u8::from(policy.days);
+
+        // We want to explicitly queue the changes to the TTL, rather than wait
+        // for the full modification. This is a bit complicated in our version
+        // of ClickHouse. We need to:
+        //
+        // - set the TTL, but ensure the DB does not "materialize" that TTL
+        //   right away (the `materialize_ttl_after_modify` setting).
+        // - start materializing the TTL, but don't wait for it to finish (the
+        //   `mutations_sync` setting).
+        let alter_ttl_sql = format!(
+            "ALTER TABLE {table} {maybe_on_cluster}\
+            MODIFY TTL {start_time} + toIntervalDay({days}) \
+            SETTINGS materialize_ttl_after_modify=0;"
+        );
+        self.execute_native(handle, &alter_ttl_sql).await?;
+        let materialize_ttl_sql = format!(
+            "ALTER TABLE {table} {maybe_on_cluster} \
+            MATERIALIZE TTL \
+            SETTINGS mutations_sync=0;"
+        );
+        self.execute_native(handle, &materialize_ttl_sql).await
+    }
+
+    fn ttl_start_time_expr_for_table(table: &str) -> Option<&'static str> {
+        if table.contains("measurements") {
+            Some("toDateTime(timestamp)")
+        } else if table.contains("fields") {
+            Some("last_updated_at")
+        } else {
+            None
+        }
+    }
+
+    /// List tables that our retention policy applies to.
+    async fn list_retention_policy_tables(
+        &self,
+        handle: &mut Handle,
+        replicated: bool,
+    ) -> Result<Vec<String>, Error> {
+        let oximeter_tables = self
+            .list_oximeter_database_tables(
+                handle,
+                ListDetails { include_version: false, replicated },
+            )
+            .await?;
+
+        // Skip the timeseries schema table, which doesn't have a TTL, and
+        // prepend the database name.
+        let mut tables = Vec::with_capacity(oximeter_tables.len() - 1);
+        for table in
+            oximeter_tables.into_iter().filter(|n| n != "timeseries_schema")
+        {
+            tables.push(format!("{}.{}", crate::DATABASE_NAME, table));
+        }
+
+        Ok(tables)
+    }
+
+    /// Return the retention policy for the oximeter database tables.
+    ///
+    /// An error is returned if the database cannot be reached or the policy
+    /// could not be extracted. `None` is returned if there is no retention
+    /// policy set yet, which can happen if the database hasn't been initialized
+    /// yet.
+    ///
+    /// This returns the retention policy for every relevant table in the
+    /// database. Because we set the policy individually on each of them, they
+    /// can differ, if that set request fails in the middle. That also implies
+    /// the returned values may be different for different tables.
+    pub async fn retention_policy(
+        &self,
+    ) -> Result<Option<DatabaseRetentionPolicy>, Error> {
+        // It's possible today that different tables actually have different
+        // TTLs, because we individual queries may fail.
+        //
+        // Let's fetch all of them.
+        const SQL: &str = "\
+            SELECT name, create_table_query \
+            FROM system.tables \
+            WHERE (\
+                database = 'oximeter' \
+                AND (\
+                    startsWith(name, 'measurements') OR \
+                    startsWith(name, 'fields') \
+                ) \
+                AND position(engine, 'MergeTree') != 0\
+            );";
+        let result = self
+            .execute_with_block(&mut self.claim_connection().await?, SQL)
+            .await?;
+        let block = result.data.ok_or_else(|| Error::QueryMissingData {
+            query: SQL.to_string(),
+        })?;
+        let names = block
+            .columns
+            .get("name")
+            .ok_or_else(|| {
+                Error::Database("Expected a column named `name`".to_string())
+            })?
+            .values
+            .as_string()
+            .map_err(|dt| {
+                Error::Database(format!(
+                    "Expected string datatype found '{dt}'"
+                ))
+            })?;
+        let queries = block
+            .columns
+            .get("create_table_query")
+            .ok_or_else(|| {
+                Error::Database(
+                    "Expected a column named `create_table_query`".to_string(),
+                )
+            })?
+            .values
+            .as_string()
+            .map_err(|dt| {
+                Error::Database(format!(
+                    "Expected string datatype found '{dt}'"
+                ))
+            })?;
+        if queries.is_empty() {
+            return Ok(None);
+        }
+        names
+            .iter()
+            .cloned()
+            .zip(
+                queries
+                    .iter()
+                    .map(|q| extract_ttl_in_days_from_create_table_query(q)),
+            )
+            .map(|(table, ttl)| ttl.map(|days| RetentionPolicy { table, days }))
+            .collect::<Result<IdOrdMap<_>, _>>()
+            .map(|tables| Some(DatabaseRetentionPolicy { tables }))
+    }
+
+    /// Return the resource usage of tables in the database.
+    pub async fn database_table_usage(&self) -> Result<DatabaseUsage, Error> {
+        let started_at = Utc::now();
+        const SQL: &str = const_format::formatcp!(
+            "\
+            SELECT \
+                concat(database, '.', name) AS table_name, \
+                ifNull(total_bytes, 0) AS total_bytes, \
+                ifNull(total_rows, 0) AS total_rows \
+            FROM system.tables \
+            WHERE \
+                database = '{}'\
+                AND has_own_data",
+            crate::DATABASE_NAME,
+        );
+        let columns = self
+            .execute_with_block(&mut self.claim_connection().await?, SQL)
+            .await?
+            .data
+            .ok_or_else(|| Error::QueryMissingData { query: SQL.to_string() })?
+            .columns;
+        let ValueArray::String(table_names) = &columns
+            .get("table_name")
+            .ok_or_else(|| {
+                Error::Database(
+                    "Expected a column named 'table_name'".to_string(),
+                )
+            })?
+            .values
+        else {
+            return Err(Error::Database(
+                "Expected `table_name` column to be of type string".to_string(),
+            ));
+        };
+        let ValueArray::UInt64(total_bytes) = &columns
+            .get("total_bytes")
+            .ok_or_else(|| {
+                Error::Database(
+                    "Expected a column named 'total_bytes'".to_string(),
+                )
+            })?
+            .values
+        else {
+            return Err(Error::Database(
+                "Expected `total_bytes` column to be of type UInt64"
+                    .to_string(),
+            ));
+        };
+        let ValueArray::UInt64(total_rows) = &columns
+            .get("total_rows")
+            .ok_or_else(|| {
+                Error::Database(
+                    "Expected a column named 'total_rows'".to_string(),
+                )
+            })?
+            .values
+        else {
+            return Err(Error::Database(
+                "Expected `total_rows` column to be of type UInt64".to_string(),
+            ));
+        };
+        let tables = table_names
+            .iter()
+            .cloned()
+            .zip(total_bytes.iter().copied())
+            .zip(total_rows.iter().copied())
+            .map(|((name, n_bytes), n_rows)| TableUsage {
+                name,
+                n_bytes,
+                n_rows,
             })
+            .collect();
+        let completed_at = Utc::now();
+        Ok(DatabaseUsage { tables, started_at, completed_at })
     }
 
     // Select the timeseries, including keys and field values, that match the given field-selection
@@ -1358,6 +1658,66 @@ impl Client {
     async fn claim_connection(&self) -> Result<Handle, Error> {
         self.pool.claim().await.map_err(Error::from)
     }
+}
+
+// Helper function to extract the TTL in days from a create-table query.
+//
+// The create-table query is structured like this:
+//
+// ```
+// CREATE TABLE ...
+// ENGINE = ...
+// TTL toDate(timestamp) + toIntervalDay(<N>)
+// SETTINGS ...
+// ```
+//
+// The TTL line could also look like:
+//
+// ```
+// TTL last_updated_at + toIntervalDay(<N>)
+// ```
+//
+// for the field tables.
+//
+// We're picking out the number of days from the function argument as a string.
+fn extract_ttl_in_days_from_create_table_query(
+    row: &str,
+) -> Result<Days, Error> {
+    const NEEDLES: [&str; 2] = [
+        // For measurement tables
+        "TTL toDateTime(timestamp) + toIntervalDay(",
+        // For field tables
+        "TTL last_updated_at + toIntervalDay(",
+    ];
+
+    // Find the first needle that matches, and error if none do.
+    let (needle_start, needle) = NEEDLES
+        .iter()
+        .find_map(|needle| row.find(needle).map(|ix| (ix, needle)))
+        .ok_or_else(|| {
+            Error::Database(format!(
+                "could not find TTL expression in query: '{row}'"
+            ))
+        })?;
+
+    // Now the closing parentheses.
+    let n_days_start = needle_start + needle.len();
+    let close_paren_start = row[n_days_start..].find(")").ok_or_else(|| {
+        Error::Database(format!(
+            "could not find closing paren in TTL expression: '{row}'"
+        ))
+    })?;
+    let val = u8::from_str_radix(&row[n_days_start..][..close_paren_start], 10)
+        .map_err(|e| {
+            Error::Database(format!(
+                "failed to parse days from TTL: '{row}', error: '{e}'"
+            ))
+        })?;
+    Days::new(val).ok_or_else(|| {
+        Error::Database(format!(
+            "expected nonzero number of days for a TTL: {val}"
+        ))
+    })
 }
 
 /// Helper argument to `Client::list_oximeter_database_tables`.
@@ -4951,5 +5311,78 @@ mod tests {
 
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn test_extract_ttl_in_days_from_create_table_query() {
+        assert_eq!(
+            30u8,
+            u8::from(extract_ttl_in_days_from_create_table_query(
+                "some junk TTL toDateTime(timestamp) + toIntervalDay(30) other stuff"
+            ).unwrap()),
+        );
+        assert_eq!(
+            7u8,
+            u8::from(extract_ttl_in_days_from_create_table_query(
+                "some junk TTL toDateTime(timestamp) + toIntervalDay(7) other stuff"
+            ).unwrap()),
+        );
+        assert_eq!(
+            7u8,
+            u8::from(extract_ttl_in_days_from_create_table_query(
+                "some junk TTL last_updated_at + toIntervalDay(7) other stuff"
+            ).unwrap()),
+        );
+
+        for invalid in [
+            "some junk TTL toDateTime(timestamp) + toIntervalDay(-1) other stuf",
+            "some junk TTL toDateTime(timestamp) + toIntervalDay('foo') other stuf",
+            "some junk TTL toDateTime(timestamp) + other stuff toIntervalDay(1)",
+            "some junk TTL toDateTime(timestamp) + toIntervalDay(100)",
+            "some junk TTL toDateTime(timestamp) + toIntervalDay(3000)",
+            "some junk TTL toDateTime(timestamp) + toIntervalDay(3.0)",
+            "some junk TTL last_updated_at + toIntervalDay(3.0)",
+        ] {
+            assert!(
+                extract_ttl_in_days_from_create_table_query(invalid).is_err()
+            )
+        }
+    }
+
+    #[test]
+    fn can_extract_ttl_from_all_oximeter_tables() {
+        let dbinit = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("schema")
+            .join("single-node")
+            .join("db-init.sql");
+        let sql = std::fs::read_to_string(&dbinit).unwrap_or_else(|_| {
+            panic!("failed to read SQL from {}", dbinit.display())
+        });
+        let actual = sql
+            .lines()
+            .filter_map(|line| {
+                if !line.starts_with("CREATE TABLE") {
+                    return None;
+                }
+                let (_before, table) =
+                    line.rsplit_once(' ').unwrap_or_else(|| {
+                        panic!(
+                            "should have lines like \
+                        'CREATE TABLE IF NOT EXISTS <table_name>', \
+                        found '{}'",
+                            line,
+                        )
+                    });
+                let ttl_expr = Client::ttl_start_time_expr_for_table(table)
+                    .unwrap_or_else(|| "none");
+                Some(format!("{table} -> {ttl_expr}"))
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        let checked_in_file = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("test-output")
+            .join("ttl-expr-for-tables.txt");
+        expectorate::assert_contents(checked_in_file, &actual);
     }
 }

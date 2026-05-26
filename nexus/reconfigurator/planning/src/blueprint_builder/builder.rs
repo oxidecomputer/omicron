@@ -6,6 +6,7 @@
 
 use crate::blueprint_editor::DiskExpungeDetails;
 use crate::blueprint_editor::EditedSled;
+use crate::blueprint_editor::EnsureMupdateOverrideError;
 use crate::blueprint_editor::ExternalNetworkingChoice;
 use crate::blueprint_editor::ExternalNetworkingError;
 use crate::blueprint_editor::ExternalSnatNetworkingChoice;
@@ -42,6 +43,7 @@ use nexus_types::deployment::CockroachDbPreserveDowngrade;
 use nexus_types::deployment::DiskFilter;
 use nexus_types::deployment::OmicronZoneExternalFloatingAddr;
 use nexus_types::deployment::OmicronZoneExternalFloatingIp;
+use nexus_types::deployment::OmicronZoneExternalIp;
 use nexus_types::deployment::OmicronZoneExternalSnatIp;
 use nexus_types::deployment::OperatorNexusConfig;
 use nexus_types::deployment::OximeterReadMode;
@@ -575,6 +577,7 @@ impl<'a> BlueprintBuilder<'a> {
             external_dns_version: Generation::new(),
             target_release_minimum_generation: Generation::new(),
             nexus_generation: Generation::new(),
+            external_networking_generation: Generation::new(),
             cockroachdb_fingerprint: String::new(),
             cockroachdb_setting_preserve_downgrade:
                 CockroachDbPreserveDowngrade::DoNotModify,
@@ -882,6 +885,20 @@ impl<'a> BlueprintBuilder<'a> {
         Either::Right(editor.all_in_service_and_expunged_zones(reason))
     }
 
+    /// For a sled, return the sled agent generation recorded in the parent
+    /// blueprint, or generation 1 if the sled is newly added.
+    pub fn current_sled_incoming_sled_agent_generation(
+        &self,
+        sled_id: SledUuid,
+    ) -> Result<Generation, Error> {
+        let editor = self.sled_editors.get(&sled_id).ok_or_else(|| {
+            Error::Planner(anyhow!(
+                "tried to get incoming generation for unknown sled {sled_id}"
+            ))
+        })?;
+        Ok(editor.incoming_sled_agent_generation())
+    }
+
     pub fn current_sled_disks<F>(
         &self,
         sled_id: SledUuid,
@@ -969,7 +986,7 @@ impl<'a> BlueprintBuilder<'a> {
             }
         }
 
-        Blueprint {
+        let mut blueprint = Blueprint {
             id: blueprint_id,
             sleds,
             pending_mgs_updates: self.pending_mgs_updates,
@@ -979,6 +996,9 @@ impl<'a> BlueprintBuilder<'a> {
             target_release_minimum_generation: self
                 .target_release_minimum_generation,
             nexus_generation: self.nexus_generation,
+            external_networking_generation: self
+                .parent_blueprint
+                .external_networking_generation,
             cockroachdb_fingerprint: self.cockroachdb_fingerprint,
             cockroachdb_setting_preserve_downgrade: self
                 .cockroachdb_setting_preserve_downgrade,
@@ -994,7 +1014,31 @@ impl<'a> BlueprintBuilder<'a> {
                 .collect::<Vec<String>>()
                 .join(", "),
             source,
+        };
+
+        // Do we need to bump `external_networking_generation`? We need to
+        // compare the current external networking config against our parent
+        // blueprint.
+        //
+        // It's a little awkward to mutate a fully-created `Blueprint`,
+        // particularly since we think of them as immutable. But:
+        //
+        // (a) We're still inside `build()` - the blueprint is still
+        //     conceptually immutable to the rest of the system
+        // (b) Performing this check on the fully-realized child blueprint
+        //     makes it easy to ensure we're checking _exactly_ the same thing:
+        //     `is_external_networking_config_different()` can call the same
+        //     `Blueprint::*` helper methods to determine whether there were
+        //     changes.
+        if is_external_networking_config_different(
+            self.parent_blueprint,
+            &blueprint,
+        ) {
+            blueprint.external_networking_generation =
+                blueprint.external_networking_generation.next();
         }
+
+        blueprint
     }
 
     pub fn current_sled_state(
@@ -1438,7 +1482,16 @@ impl<'a> BlueprintBuilder<'a> {
                 pending_mgs_update,
                 noop_sled_info,
             )
-            .map_err(|err| Error::SledEditError { sled_id, err })
+            .map_err(|err| match err {
+                EnsureMupdateOverrideError::SledEdit(err) => {
+                    Error::SledEditError { sled_id, err }
+                }
+                EnsureMupdateOverrideError::Planner(err) => {
+                    Error::Planner(err.context(format!(
+                        "for sled {sled_id}, programming error ensuring mupdate override"
+                    )))
+                }
+            })
     }
 
     fn next_internal_dns_gz_address_index(&self, sled_id: SledUuid) -> u32 {
@@ -2424,6 +2477,19 @@ pub(crate) enum EnsureMupdateOverrideAction {
         /// The reason the blueprint override was not cleared.
         reason: BpMupdateOverrideNotClearedReason,
     },
+    /// The inventory had an override, but the blueprint's
+    /// `remove_mupdate_override` field was not set to match it. This happens
+    /// when the sled's inventory is stale (older than the parent blueprint), so
+    /// acting on it would potentially overwrite a previously acknowledged
+    /// mupdate override.
+    BpOverrideNotSet {
+        /// The override observed in (stale) inventory.
+        inv_override: MupdateOverrideUuid,
+        /// The current blueprint override value, left unchanged.
+        bp_override: Option<MupdateOverrideUuid>,
+        /// The reason the blueprint override was not set.
+        reason: BpMupdateOverrideNotSetReason,
+    },
     /// Sled Agent encountered an error retrieving the mupdate override from the
     /// inventory.
     ///
@@ -2511,6 +2577,20 @@ impl EnsureMupdateOverrideAction {
                     "inventory override no longer exists, but blueprint \
                      override could not be cleared";
                     "bp_override" => %bp_override,
+                    "reason" => %reason,
+                );
+            }
+            EnsureMupdateOverrideAction::BpOverrideNotSet {
+                inv_override,
+                bp_override,
+                reason,
+            } => {
+                info!(
+                    log,
+                    "inventory override observed, but blueprint override \
+                     was not set to match it";
+                    "inv_override" => %inv_override,
+                    "bp_override" => ?bp_override,
                     "reason" => %reason,
                 );
             }
@@ -2677,6 +2757,73 @@ impl fmt::Display for BpMupdateOverrideNotClearedReason {
             }
         }
     }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) enum BpMupdateOverrideNotSetReason {
+    /// The sled's inventory is stale relative to the parent blueprint, so we
+    /// can't trust an override observed in inventory to reflect current
+    /// reality.
+    InventoryStale { parent_bp_gen: Generation, inventory_gen: Generation },
+    /// The sled has not yet successfully reconciled any config, so we have no
+    /// generation to compare against.
+    NoLastReconciliation,
+}
+
+impl fmt::Display for BpMupdateOverrideNotSetReason {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            BpMupdateOverrideNotSetReason::InventoryStale {
+                parent_bp_gen,
+                inventory_gen,
+            } => {
+                write!(
+                    f,
+                    "inventory stale: inventory reported generation \
+                     ({inventory_gen}) that is older than the generation in \
+                     the parent blueprint ({parent_bp_gen})",
+                )
+            }
+            BpMupdateOverrideNotSetReason::NoLastReconciliation => {
+                write!(f, "sled doesn't have a last reconciled config")
+            }
+        }
+    }
+}
+
+fn is_external_networking_config_different(
+    blueprint1: &Blueprint,
+    blueprint2: &Blueprint,
+) -> bool {
+    // Helper function to condense a blueprint into just a set of all its
+    // external networking config, suitable only for comparison.
+    //
+    // This check is overly cautious: we never mutate a zone's properties in
+    // place, and instead always expunge it and add a new one to change
+    // properties, so it would be sufficient to only check that the set of zone
+    // IDs that have external networking matches. But it's harmless to check
+    // that the actual networking properties themselves haven't changed, either,
+    // and if in the future we allow mutating properties without expunging, this
+    // check will still be correct.
+    fn all_external_networking_config(
+        blueprint: &Blueprint,
+    ) -> BTreeSet<(
+        SledUuid,
+        OmicronZoneUuid,
+        OmicronZoneExternalIp,
+        &NetworkInterface,
+    )> {
+        blueprint
+            .in_service_zones()
+            .filter_map(|(sled_id, zone_config)| {
+                let (ip, nic) = zone_config.zone_type.external_networking()?;
+                Some((sled_id, zone_config.id, ip, nic))
+            })
+            .collect()
+    }
+
+    all_external_networking_config(blueprint1)
+        != all_external_networking_config(blueprint2)
 }
 
 #[cfg(test)]
