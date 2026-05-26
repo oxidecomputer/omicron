@@ -1253,13 +1253,16 @@ async fn siu_commit_instance_updates(
                 {
                     // The reconciler will fix this later
                     info!(log,
-                          "instance update: failed to update multicast member sled_id after migration, reconciler will fix";
+                          "instance update: failed to update multicast \
+                           member sled_id after migration, reconciler \
+                           will fix";
                           "instance_id" => %instance_id,
                           "new_sled_id" => %new_sled_id,
                           "error" => ?e);
                 } else {
                     info!(log,
-                          "instance update: updated multicast member sled_id after migration";
+                          "instance update: updated multicast member \
+                           sled_id after migration";
                           "instance_id" => %instance_id,
                           "new_sled_id" => %new_sled_id);
                 }
@@ -1280,7 +1283,8 @@ async fn siu_commit_instance_updates(
             .await
         {
             info!(log,
-                  "instance update: failed to detach multicast members on deprovision, next reconciler pass will retry";
+                  "instance update: failed to detach multicast members \
+                   on deprovision, next reconciler pass will retry";
                   "instance_id" => %instance_id,
                   "error" => ?e);
         } else {
