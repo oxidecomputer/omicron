@@ -1451,7 +1451,10 @@ impl Sled {
                     model: model.clone(),
                 },
                 SledHardware::Unknown | SledHardware::Empty => {
-                    Baseboard::Unknown
+                    Baseboard::new_pc(
+                        "unknown".to_string(),
+                        "unknown".to_string(),
+                    )
                 }
             };
             let sled_agent_address = get_sled_address(sled_subnet);
@@ -1565,7 +1568,10 @@ impl Sled {
                 model: sledhw.baseboard_id.part_number.clone(),
                 revision: sledhw.sp.baseboard_revision,
             })
-            .unwrap_or(Baseboard::Unknown);
+            .unwrap_or(Baseboard::new_pc(
+                "unknown".to_string(),
+                "unknown".to_string(),
+            ));
 
         let stage0_caboose =
             inventory_sp.as_ref().and_then(|hw| hw.stage0.clone());

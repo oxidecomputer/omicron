@@ -10,7 +10,7 @@ use super::setup::WicketdTestContext;
 use gateway_messages::SpPort;
 use gateway_test_utils::setup as gateway_setup;
 use http::StatusCode;
-use sled_hardware_types::Baseboard;
+use sled_hardware_types::BaseboardId;
 use slog::{info, warn};
 use wicket::OutputKind;
 use wicket_common::inventory::{SpIdentifier, SpType};
@@ -123,19 +123,17 @@ async fn test_inventory() {
             vec![
                 BootstrapSledDescription {
                     id: SpIdentifier { type_: SpType::Sled, slot: 0 },
-                    baseboard: Baseboard::Gimlet {
-                        identifier: "SimGimlet00".to_string(),
-                        model: "i86pc".to_string(),
-                        revision: 0
+                    baseboard_id: BaseboardId {
+                        serial_number: "SimGimlet00".to_string(),
+                        part_number: "i86pc".to_string(),
                     },
                     bootstrap_ip: None
                 },
                 BootstrapSledDescription {
                     id: SpIdentifier { type_: SpType::Sled, slot: 1 },
-                    baseboard: Baseboard::Gimlet {
-                        identifier: "SimGimlet01".to_string(),
-                        model: "i86pc".to_string(),
-                        revision: 0
+                    baseboard_id: BaseboardId {
+                        serial_number: "SimGimlet01".to_string(),
+                        part_number: "i86pc".to_string(),
                     },
                     bootstrap_ip: None
                 },

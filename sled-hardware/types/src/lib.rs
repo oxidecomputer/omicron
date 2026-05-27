@@ -95,6 +95,18 @@ impl OxideSled {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Baseboard {
     Gimlet { identifier: String, model: String, revision: u32 },
+
+    // XXX: WARNING: All uses of this variant have been removed from the
+    // code base.
+    //
+    // DO NOT ADD NEW USE CASES!!!
+    //
+    // Changing this type by removing the `Unknown` variant changes the API
+    // of the sled-agent, because of the bootstore. The bootstore is going to
+    // be removed in the future, which should remove the need to report the
+    // Baseboard at all. We can remove this variant in the same PR.
+    //
+    // https://github.com/oxidecomputer/omicron/issues/9311.
     Unknown,
 
     Pc { identifier: String, model: String },
@@ -130,19 +142,13 @@ impl Baseboard {
         Self::Pc { identifier, model }
     }
 
-    // XXX This should be removed, but it requires a refactor in how devices are
-    // polled.
-    pub fn unknown() -> Self {
-        Self::Unknown
-    }
-
     pub fn type_string(&self) -> &str {
         match &self {
             Self::Gimlet { .. } => OxideSled::try_from_model(self.model())
                 .map(|sled| sled.name())
                 .unwrap_or("oxide"),
             Self::Pc { .. } => "pc",
-            Self::Unknown => "unknown",
+            Self::Unknown => panic!("deprecated!"),
         }
     }
 
@@ -150,7 +156,7 @@ impl Baseboard {
         match &self {
             Self::Gimlet { identifier, .. } => &identifier,
             Self::Pc { identifier, .. } => &identifier,
-            Self::Unknown => "unknown",
+            Self::Unknown => panic!("deprecated!"),
         }
     }
 
@@ -158,7 +164,7 @@ impl Baseboard {
         match self {
             Self::Gimlet { model, .. } => &model,
             Self::Pc { model, .. } => &model,
-            Self::Unknown => "unknown",
+            Self::Unknown => panic!("deprecated!"),
         }
     }
 
@@ -166,7 +172,7 @@ impl Baseboard {
         match self {
             Self::Gimlet { revision, .. } => *revision,
             Self::Pc { .. } => 0,
-            Self::Unknown => 0,
+            Self::Unknown => panic!("deprecated!"),
         }
     }
 }
@@ -178,10 +184,10 @@ impl std::fmt::Display for Baseboard {
                 let oxide_sled_type = self.type_string();
                 write!(f, "{oxide_sled_type}-{identifier}-{model}-{revision}")
             }
-            Baseboard::Unknown => write!(f, "unknown"),
             Baseboard::Pc { identifier, model } => {
                 write!(f, "pc-{identifier}-{model}")
             }
+            Baseboard::Unknown => panic!("deprecated!"),
         }
     }
 }
@@ -265,24 +271,16 @@ impl slog::KV for BaseboardId {
     }
 }
 
-#[derive(Debug, thiserror::Error)]
-#[error("Baseboard is of unknown type")]
-pub struct UnknownBaseboardError;
-
-impl TryFrom<Baseboard> for BaseboardId {
-    type Error = UnknownBaseboardError;
-
-    fn try_from(value: Baseboard) -> Result<Self, Self::Error> {
+impl From<Baseboard> for BaseboardId {
+    fn from(value: Baseboard) -> Self {
         match value {
-            Baseboard::Gimlet { identifier, model, .. } => Ok(BaseboardId {
-                part_number: model,
-                serial_number: identifier,
-            }),
-            Baseboard::Pc { identifier, model } => Ok(BaseboardId {
-                part_number: model,
-                serial_number: identifier,
-            }),
-            Baseboard::Unknown => Err(UnknownBaseboardError),
+            Baseboard::Gimlet { identifier, model, .. } => {
+                BaseboardId { part_number: model, serial_number: identifier }
+            }
+            Baseboard::Pc { identifier, model } => {
+                BaseboardId { part_number: model, serial_number: identifier }
+            }
+            Baseboard::Unknown => panic!("deprecated!"),
         }
     }
 }

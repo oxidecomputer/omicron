@@ -91,7 +91,6 @@ use ntp_admin_client::ClientInfo as _;
 use ntp_admin_client::{
     Client as NtpAdminClient, Error as NtpAdminError, types::TimeSync,
 };
-use omicron_common::address::BOOTSTRAP_AGENT_HTTP_PORT;
 use omicron_common::address::{COCKROACH_ADMIN_PORT, NTP_ADMIN_PORT};
 use omicron_common::api::external::Generation;
 use omicron_common::api::internal::nexus::Certificate;
@@ -99,7 +98,7 @@ use omicron_common::backoff::{
     BackoffError, retry_notify, retry_policy_internal_service_aggressive,
 };
 use omicron_common::disk::DatasetKind;
-use omicron_ddm_admin_client::{Client as DdmAdminClient, DdmError};
+use omicron_ddm_admin_client::DdmError;
 use omicron_ledger::{self as ledger, Ledger, Ledgerable};
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::RackUuid;
@@ -122,13 +121,11 @@ use sled_agent_types::system_networking::BlueprintExternalNetworkingConfig;
 use sled_agent_types::system_networking::ServiceZoneNatEntriesError;
 use sled_agent_types::system_networking::SystemNetworkingConfig;
 use sled_hardware_types::BaseboardId;
-use sled_hardware_types::underlay::BootstrapInterface;
 use slog::Logger;
 use slog_error_chain::{InlineErrorChain, SlogInlineError};
 use std::collections::BTreeSet;
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
-use std::iter;
 use std::net::{Ipv6Addr, SocketAddrV6};
 use std::time::Duration;
 use thiserror::Error;
@@ -154,15 +151,6 @@ pub trait LocalBootstrapAgent: Send + Sync {
     fn initialize_sleds(
         self,
         requests: Vec<(SocketAddrV6, StartSledAgentRequest)>,
-    ) -> impl Future<Output = Result<(), String>> + Send;
-
-    /// Reset sled-agents on the rack's other sleds.
-    ///
-    /// Consumes the handle: RSS performs exactly one of `initialize_sleds` or
-    /// `reset_sleds` per run.
-    fn reset_sleds(
-        self,
-        requests: Vec<SocketAddrV6>,
     ) -> impl Future<Output = Result<(), String>> + Send;
 }
 
@@ -339,26 +327,6 @@ impl RackSetupService {
                 .await
             {
                 error!(log, "RSS injection failed"; &e);
-                Err(e)
-            } else {
-                Ok(())
-            }
-        });
-
-        RackSetupService { handle }
-    }
-
-    pub fn new_reset_rack<T: LocalBootstrapAgent + 'static>(
-        log: Logger,
-        local_bootstrap_agent: T,
-        our_bootstrap_address: Ipv6Addr,
-    ) -> Self {
-        let handle = tokio::task::spawn(async move {
-            let svc = ServiceInner::new(log.clone());
-            if let Err(e) =
-                svc.reset(local_bootstrap_agent, our_bootstrap_address).await
-            {
-                warn!(log, "RSS rack reset failed: {}", e);
                 Err(e)
             } else {
                 Ok(())
@@ -1085,34 +1053,6 @@ impl ServiceInner {
         .await?;
 
         info!(self.log, "Handoff to Nexus is complete");
-        Ok(())
-    }
-
-    async fn reset<T: LocalBootstrapAgent>(
-        &self,
-        local_bootstrap_agent: T,
-        our_bootstrap_address: Ipv6Addr,
-    ) -> Result<(), SetupServiceError> {
-        // Gather all peer addresses that we can currently see on the bootstrap
-        // network.
-        let ddm_admin_client = DdmAdminClient::localhost(&self.log)?;
-        let peer_addrs = ddm_admin_client
-            .derive_bootstrap_addrs_from_prefixes(&[
-                BootstrapInterface::GlobalZone,
-            ])
-            .await?;
-        let all_addrs = peer_addrs
-            .chain(iter::once(our_bootstrap_address))
-            .map(|addr| {
-                SocketAddrV6::new(addr, BOOTSTRAP_AGENT_HTTP_PORT, 0, 0)
-            })
-            .collect::<Vec<_>>();
-
-        local_bootstrap_agent
-            .reset_sleds(all_addrs)
-            .await
-            .map_err(SetupServiceError::SledReset)?;
-
         Ok(())
     }
 
@@ -1917,7 +1857,10 @@ mod test {
                 sled_id,
                 sled_agent_address,
                 sled_role: SledRole::Scrimlet,
-                baseboard: Baseboard::Unknown,
+                baseboard: Baseboard::new_pc(
+                    "test".to_string(),
+                    "test".to_string(),
+                ),
                 usable_hardware_threads: 32,
                 usable_physical_ram: ByteCount::from_gibibytes_u32(16),
                 cpu_family: SledCpuFamily::AmdMilan,

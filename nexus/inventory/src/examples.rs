@@ -677,7 +677,7 @@ pub fn representative() -> Representative {
             "fake sled agent 6",
             sled_agent(
                 sled_agent_id_unknown,
-                Baseboard::Unknown,
+                Baseboard::new_pc("test".to_string(), "test".to_string()),
                 SledRole::Gimlet,
                 vec![],
                 vec![],

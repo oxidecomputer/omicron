@@ -58,7 +58,10 @@ impl State {
             rss_config: None,
             rack_setup_state: Err("status not yet polled from wicketd".into()),
             wicketd_location: GetLocationResponse {
-                sled_baseboard: None,
+                sled_baseboard_id: sled_hardware_types::BaseboardId {
+                    part_number: "unknown".to_string(),
+                    serial_number: "unknown".to_string(),
+                },
                 sled_id: None,
                 switch_baseboard: None,
                 switch_id: None,

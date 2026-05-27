@@ -169,7 +169,10 @@ impl HostPhase2SledAgentContext {
             // random sled ID every time our `/inventory` endpoint is collected.
             id: SledUuid::new_v4(),
             role: SledRole::Gimlet,
-            baseboard: Baseboard::Unknown,
+            baseboard: Baseboard::new_pc(
+                "test".to_string(),
+                "test".to_string(),
+            ),
         }
     }
 }

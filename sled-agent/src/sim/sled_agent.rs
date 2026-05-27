@@ -15,7 +15,6 @@ use crate::nexus::NexusClient;
 use crate::sim::SimulatedUpstairs;
 use crate::sim::simulatable::Simulatable;
 use crate::support_bundle::storage::SupportBundleQueryType;
-use crate::updates::UpdateManager;
 use anyhow::Context;
 use anyhow::bail;
 use bootstore::schemes::v0 as bootstore;
@@ -92,7 +91,6 @@ pub struct SledAgent {
     /// collection of simulated VMMs, indexed by Propolis uuid
     vmms: Arc<SimCollection<SimInstance>>,
     storage: Storage,
-    updates: UpdateManager,
     pub nexus_client: Arc<NexusClient>,
     pub simulated_upstairs: Arc<SimulatedUpstairs>,
     pub v2p_mappings: Mutex<HashSet<VirtualNetworkInterfaceHost>>,
@@ -184,7 +182,6 @@ impl SledAgent {
                 sim_mode,
             )),
             storage,
-            updates: UpdateManager::new(config.updates.clone()),
             nexus_client,
             simulated_upstairs,
             v2p_mappings: Mutex::new(HashSet::new()),
@@ -553,10 +550,6 @@ impl SledAgent {
         _target: DiskStateRequested,
     ) -> Result<DiskRuntimeState, Error> {
         unimplemented!("Disk attachment not yet implemented");
-    }
-
-    pub fn updates(&self) -> &UpdateManager {
-        &self.updates
     }
 
     pub fn artifact_store(&self) -> &ArtifactStore<SimArtifactStorage> {

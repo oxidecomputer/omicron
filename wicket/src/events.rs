@@ -86,7 +86,6 @@ pub enum Action {
     ClearUpdateState(ComponentId),
     Ignition(ComponentId, IgnitionCommand),
     StartRackSetup,
-    StartRackReset,
 }
 
 impl Action {
@@ -101,8 +100,7 @@ impl Action {
             | Action::AbortUpdate(_)
             | Action::ClearUpdateState(_)
             | Action::Ignition(_, _)
-            | Action::StartRackSetup
-            | Action::StartRackReset => true,
+            | Action::StartRackSetup => true,
         }
     }
 }

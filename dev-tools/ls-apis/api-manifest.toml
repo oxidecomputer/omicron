@@ -191,13 +191,6 @@ packages = [ "oximeter-collector" ]
 ################################################################################
 
 [[apis]]
-client_package_name = "bootstrap-agent-client"
-label = "Bootstrap Agent"
-server_package_name = "bootstrap-agent-api"
-versioned_how = "client"
-versioned_how_reason = "depends on itself (i.e., instances call each other)"
-
-[[apis]]
 client_package_name = "bootstrap-agent-lockstep-client"
 label = "Bootstrap Agent Lockstep API"
 server_package_name = "bootstrap-agent-lockstep-api"

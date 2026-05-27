@@ -8,7 +8,7 @@ use crate::RssOrMultirackJoinConfigCommon;
 use crate::bgp_auth_keys::BgpAuthKeys;
 use crate::context::CommonConfigContainer;
 use omicron_common::api::external::AllowedSourceIps;
-use sled_hardware_types::Baseboard;
+use sled_hardware_types::BaseboardId;
 use std::collections::BTreeMap;
 use std::net::Ipv6Addr;
 use wicket_common::inventory::MgsV1Inventory;
@@ -48,7 +48,7 @@ impl CurrentMultirackJoinConfig {
     }
 
     pub(crate) fn new_with_inventory_and_peers(
-        our_baseboard: Option<&Baseboard>,
+        our_baseboard: &BaseboardId,
         config: MultirackJoinConfigBaseUserInput,
         inventory: &MgsV1Inventory,
         ddm_discovered_sleds: &BTreeMap<Baseboard, Ipv6Addr>,

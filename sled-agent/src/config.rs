@@ -4,7 +4,6 @@
 
 //! Interfaces for working with sled agent configuration
 
-use crate::updates::ConfigUpdates;
 use camino::{Utf8Path, Utf8PathBuf};
 use dropshot::ConfigDropshot;
 use dropshot::ConfigLogging;
@@ -102,9 +101,6 @@ pub struct Config {
     /// The data links that sled-agent will treat as a real gimlet cxgbe0/cxgbe1
     /// links.
     pub data_links: [String; 2],
-
-    #[serde(default)]
-    pub updates: ConfigUpdates,
 
     /// When running on a scrimlet, tfportd in the switch zone will create links
     /// when it boots, and maghemite in the switch zone is configured to use
