@@ -1518,7 +1518,10 @@ mod tests {
                 sled_id,
                 sled_agent_address: sled_address,
                 sled_role: SledRole::Scrimlet,
-                baseboard: Baseboard::Unknown,
+                baseboard: Baseboard::new_pc(
+                    "test".to_string(),
+                    "test".to_string(),
+                ),
                 usable_hardware_threads: 32,
                 usable_physical_ram: ByteCount::try_from(1_u64 << 40).unwrap(),
                 cpu_family: SledCpuFamily::AmdMilan,

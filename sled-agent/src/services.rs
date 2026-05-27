@@ -59,6 +59,7 @@ use internal_dns_types::names::BOUNDARY_NTP_DNS_NAME;
 use internal_dns_types::names::DNS_ZONE;
 use nexus_config::{ConfigDropshotWithTls, DeploymentConfig};
 use omicron_common::address::AZ_PREFIX;
+use omicron_common::address::BOOTSTRAP_AGENT_LOCKSTEP_PORT;
 use omicron_common::address::ConcreteIp;
 use omicron_common::address::DENDRITE_PORT;
 use omicron_common::address::LLDP_PORT;
@@ -601,6 +602,7 @@ enum SwitchZoneState {
 /// Manages miscellaneous Sled-local services.
 pub struct ServiceManagerInner {
     log: Logger,
+    global_zone_bootstrap_ip: Ipv6Addr,
     global_zone_bootstrap_link_local_address: Ipv6Addr,
     switch_zone: Mutex<SwitchZoneState>,
     sled_mode: SledMode,
@@ -780,6 +782,8 @@ impl ServiceManager {
         Self {
             inner: Arc::new(ServiceManagerInner {
                 log: log.clone(),
+                global_zone_bootstrap_ip: bootstrap_networking
+                    .global_zone_bootstrap_ip,
                 global_zone_bootstrap_link_local_address: bootstrap_networking
                     .global_zone_bootstrap_link_local_ip,
                 // TODO(https://github.com/oxidecomputer/omicron/issues/725):
@@ -2683,6 +2687,14 @@ impl ServiceManager {
                         "astring",
                         &format!("[::1]:{MGS_PORT}"),
                     )
+                    .add_property(
+                        "bootstrap-agent-lockstep-address",
+                        "astring",
+                        &format!(
+                            "[{}]:{BOOTSTRAP_AGENT_LOCKSTEP_PORT}",
+                            self.inner.global_zone_bootstrap_ip
+                        ),
+                    )
                     // We intentionally bind `nexus-proxy-address` to
                     // `::` so wicketd will serve this on all
                     // interfaces, particularly the tech port
@@ -2950,7 +2962,7 @@ impl ServiceManager {
                                     model,
                                 );
                         }
-                        Baseboard::Unknown => {}
+                        Baseboard::Unknown => panic!("deprecated"),
                     }
 
                     for address in addresses {
@@ -3481,7 +3493,14 @@ impl ServiceManager {
         let usmfh = SmfHelper::new(&zone, &SwitchService::Uplink);
         let lsmfh = SmfHelper::new(
             &zone,
-            &SwitchService::Lldpd { baseboard: Baseboard::Unknown },
+            &SwitchService::Lldpd {
+                // TODO: Why is this unknown here?
+                // This method seems to only get called from an HTTP handler.
+                baseboard: Baseboard::new_pc(
+                    "unknown".to_string(),
+                    "unknown".to_string(),
+                ),
+            },
         );
 
         // We want to delete all the properties in the `uplinks` group, but we

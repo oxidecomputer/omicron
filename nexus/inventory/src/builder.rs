@@ -636,12 +636,7 @@ impl CollectionBuilder {
                     },
                 ))
             }
-            Baseboard::Unknown => {
-                self.found_error(InventoryError::from(anyhow!(
-                    "sled {sled_id}: reported unknown baseboard",
-                )));
-                None
-            }
+            Baseboard::Unknown => panic!("deprecated"),
         };
 
         // Socket addresses come through the OpenAPI spec as strings, which

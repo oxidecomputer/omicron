@@ -4,8 +4,6 @@
 
 //! Interfaces for working with sled agent configuration
 
-use crate::updates::ConfigUpdates;
-use camino::Utf8Path;
 use dropshot::ConfigDropshot;
 use omicron_uuid_kinds::SledUuid;
 use serde::Deserialize;
@@ -82,8 +80,6 @@ pub struct Config {
     pub dropshot: ConfigDropshot,
     /// configuration for the sled agent's storage
     pub storage: ConfigStorage,
-    /// configuration for the sled agent's updates
-    pub updates: ConfigUpdates,
     /// configuration to emulate the sled agent's hardware
     pub hardware: ConfigHardware,
 }
@@ -101,7 +97,6 @@ impl Config {
         id: SledUuid,
         sim_mode: SimMode,
         nexus_address: Option<SocketAddr>,
-        update_directory: Option<&Utf8Path>,
         zpool_config: ZpoolConfig,
         cpu_family: SledCpuFamily,
     ) -> Config {
@@ -109,7 +104,6 @@ impl Config {
             id,
             sim_mode,
             nexus_address,
-            update_directory,
             zpool_config,
             cpu_family,
             None,
@@ -120,7 +114,6 @@ impl Config {
         id: SledUuid,
         sim_mode: SimMode,
         nexus_address: Option<SocketAddr>,
-        update_directory: Option<&Utf8Path>,
         zpool_config: ZpoolConfig,
         cpu_family: SledCpuFamily,
         baseboard_serial: Option<String>,
@@ -130,11 +123,6 @@ impl Config {
         // non-functioning Nexus.
         let nexus_address =
             nexus_address.unwrap_or_else(|| "[100::1]:12345".parse().unwrap());
-
-        // If the caller doesn't care to provide a directory in which to put
-        // updates, make up a path that doesn't exist.
-        let update_directory =
-            update_directory.unwrap_or_else(|| "/nonexistent".into());
 
         let zpools = match zpool_config {
             ZpoolConfig::None => vec![],
@@ -164,9 +152,6 @@ impl Config {
             storage: ConfigStorage {
                 zpools,
                 ip: IpAddr::from(Ipv6Addr::LOCALHOST),
-            },
-            updates: ConfigUpdates {
-                zone_artifact_path: update_directory.to_path_buf(),
             },
             hardware: ConfigHardware {
                 hardware_threads: TEST_HARDWARE_THREADS,

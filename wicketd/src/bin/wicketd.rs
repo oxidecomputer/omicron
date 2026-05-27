@@ -45,6 +45,10 @@ enum Args {
         #[clap(long)]
         baseboard_file: Option<PathBuf>,
 
+        /// The address of the bootstrap agent lockstep server
+        #[clap(long, action)]
+        bootstrap_agent_lockstep_address: SocketAddrV6,
+
         /// Read dynamic properties from our SMF config instead of passing them
         /// on the command line
         #[clap(long)]
@@ -89,26 +93,26 @@ async fn do_run() -> Result<(), CmdError> {
             baseboard_file,
             read_smf_config,
             rack_subnet,
+            bootstrap_agent_lockstep_address,
         } => {
+            // A baseboard is a strict requirement for the switch zone to work.
             let baseboard = if let Some(baseboard_file) = baseboard_file {
                 let baseboard_file = std::fs::read_to_string(baseboard_file)
                     .map_err(|e| CmdError::Failure(anyhow!(e)))?;
                 let baseboard: Baseboard =
                     serde_json::from_str(&baseboard_file)
                         .map_err(|e| CmdError::Failure(anyhow!(e)))?;
-
-                // TODO-correctness `Baseboard::unknown()` is slated for removal
-                // after some refactoring in sled-agent, at which point we'll
-                // need a different way for sled-agent to tell us it doesn't
-                // know our baseboard.
-                if matches!(baseboard, Baseboard::Unknown) {
-                    None
-                } else {
-                    Some(baseboard)
-                }
+                baseboard
             } else {
-                None
+                return Err(CmdError::Failure(anyhow!(
+                    "Missing baseboard file in switch zone"
+                )));
             };
+
+            // It was a mistake to use `Baseboard` all throughout
+            // wicket/wicketd. We convert to `BaseboardId` for better
+            // compatibility with the rest of the stack going forward.
+            let baseboard_id = baseboard.into();
 
             let config = Config::from_file(&config_file_path)
                 .with_context(|| format!("failed to parse {config_file_path}"))
@@ -129,8 +133,9 @@ async fn do_run() -> Result<(), CmdError> {
                 artifact_address,
                 mgs_address,
                 nexus_proxy_address,
-                baseboard,
+                baseboard_id,
                 rack_subnet,
+                bootstrap_agent_lockstep_address,
             };
             let log = config
                 .log

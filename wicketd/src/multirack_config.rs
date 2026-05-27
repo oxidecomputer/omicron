@@ -8,7 +8,7 @@ use crate::bgp_auth_keys::BgpAuthKeyError;
 use crate::bgp_auth_keys::BgpAuthKeys;
 use crate::bootstrap_addrs::BootstrapPeers;
 use omicron_common::api::external::AllowedSourceIps;
-use sled_hardware_types::Baseboard;
+use sled_hardware_types::BaseboardId;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::mem;
@@ -70,7 +70,7 @@ impl CurrentMultirackJoinConfig {
             .into_iter()
             .map(|mut sled_desc| {
                 sled_desc.bootstrap_ip =
-                    bootstrap_sleds.get(&sled_desc.baseboard).copied();
+                    bootstrap_sleds.get(&sled_desc.baseboard_id).copied();
                 sled_desc
             })
             .collect();
@@ -79,7 +79,7 @@ impl CurrentMultirackJoinConfig {
     pub(crate) fn update(
         &mut self,
         config: MultirackJoinConfigBaseUserInput,
-        our_baseboard: Option<&Baseboard>,
+        our_baseboard: &BaseboardId,
     ) -> Result<(), String> {
         self.inventory.verify_our_baseboard_is_in_inventory_slot(
             &config.bootstrap_slots,
@@ -98,7 +98,7 @@ impl CurrentMultirackJoinConfig {
     }
 
     pub(crate) fn new_with_inventory_and_bootstrap_peers(
-        our_baseboard: Option<&Baseboard>,
+        our_baseboard: &BaseboardId,
         config: MultirackJoinConfigBaseUserInput,
         inventory: &MgsV1Inventory,
         bootstrap_peers: &BootstrapPeers,

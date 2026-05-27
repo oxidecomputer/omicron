@@ -16,7 +16,7 @@ use omicron_common::snake_case_result::SnakeCaseResult;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sled_agent_types::early_networking::SwitchSlot;
-use sled_hardware_types::Baseboard;
+use sled_hardware_types::BaseboardId;
 use slog::debug;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::net::Ipv6Addr;
@@ -65,7 +65,7 @@ impl From<BTreeSet<BootstrapSledDescription>> for SledInventory {
 impl SledInventory {
     pub fn new(
         inventory: &MgsV1Inventory,
-        bootstrap_sleds: &BTreeMap<Baseboard, Ipv6Addr>,
+        bootstrap_sleds: &BTreeMap<BaseboardId, Ipv6Addr>,
         log: &slog::Logger,
     ) -> Self {
         let sleds = inventory
@@ -84,15 +84,15 @@ impl SledInventory {
                     );
                     return None;
                 };
-                let baseboard = Baseboard::new_gimlet(
-                    state.serial_number.clone(),
-                    state.model.clone(),
-                    state.revision,
-                );
-                let bootstrap_ip = bootstrap_sleds.get(&baseboard).copied();
+                let baseboard_id = BaseboardId {
+                    part_number: state.model.clone(),
+                    serial_number: state.serial_number.clone(),
+                };
+
+                let bootstrap_ip = bootstrap_sleds.get(&baseboard_id).copied();
                 Some(BootstrapSledDescription {
                     id: sp.id,
-                    baseboard,
+                    baseboard_id,
                     bootstrap_ip,
                 })
             })
@@ -106,32 +106,30 @@ impl SledInventory {
     pub fn verify_our_baseboard_is_in_inventory_slot(
         &self,
         bootstrap_sled_slots: &BTreeSet<u16>,
-        our_baseboard: Option<&Baseboard>,
+        our_baseboard: &BaseboardId,
     ) -> Result<(), String> {
-        if let Some(our_baseboard @ Baseboard::Gimlet { .. }) = our_baseboard {
-            let our_slot = self
-                .sleds
-                .iter()
-                .find_map(|sled| {
-                    if sled.baseboard == *our_baseboard {
-                        Some(sled.id.slot)
-                    } else {
-                        None
-                    }
-                })
-                .ok_or_else(|| {
-                    format!(
-                        "Inventory is missing the scrimlet where wicketd is \
+        let our_slot = self
+            .sleds
+            .iter()
+            .find_map(|sled| {
+                if sled.baseboard_id == *our_baseboard {
+                    Some(sled.id.slot)
+                } else {
+                    None
+                }
+            })
+            .ok_or_else(|| {
+                format!(
+                    "Inventory is missing the scrimlet where wicketd is \
                          running ({our_baseboard:?})",
-                    )
-                })?;
-            if !bootstrap_sled_slots.contains(&our_slot) {
-                return Err(format!(
-                    "Cannot remove the scrimlet where wicketd is running \
+                )
+            })?;
+        if !bootstrap_sled_slots.contains(&our_slot) {
+            return Err(format!(
+                "Cannot remove the scrimlet where wicketd is running \
                      (sled {our_slot}: {our_baseboard:?}) \
                      from bootstrap_sleds"
-                ));
-            }
+            ));
         }
 
         Ok(())

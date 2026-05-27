@@ -30,7 +30,7 @@ use sled_agent_types::early_networking::RouterLifetimeConfig;
 use sled_agent_types::early_networking::RouterPeerType;
 use sled_agent_types::early_networking::SwitchSlot;
 use sled_agent_types::early_networking::UplinkAddress;
-use sled_hardware_types::Baseboard;
+use sled_hardware_types::BaseboardId;
 use slog::warn;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
@@ -118,7 +118,7 @@ impl CurrentRssConfig {
             .into_iter()
             .map(|mut sled_desc| {
                 sled_desc.bootstrap_ip =
-                    bootstrap_sleds.get(&sled_desc.baseboard).copied();
+                    bootstrap_sleds.get(&sled_desc.baseboard_id).copied();
                 sled_desc
             })
             .collect();
@@ -194,12 +194,13 @@ impl CurrentRssConfig {
         let known_bootstrap_sleds = bootstrap_peers.sleds();
         let mut bootstrap_ips = Vec::new();
         for sled in &self.bootstrap_sleds {
-            let Some(ip) = known_bootstrap_sleds.get(&sled.baseboard).copied()
+            let Some(ip) =
+                known_bootstrap_sleds.get(&sled.baseboard_id).copied()
             else {
                 bail!(
                     "IP address not (yet?) known for sled {} ({:?})",
                     sled.id.slot,
-                    sled.baseboard,
+                    sled.baseboard_id,
                 );
             };
             bootstrap_ips.push(ip);
@@ -211,12 +212,12 @@ impl CurrentRssConfig {
         // a small rack cluster that does not support trust quorum.
         // https://github.com/oxidecomputer/omicron/issues/3690
         const TRUST_QUORUM_MIN_SIZE: usize = 3;
-        let trust_quorum_peers: Option<Vec<Baseboard>> =
+        let trust_quorum_peers: Option<Vec<BaseboardId>> =
             if self.bootstrap_sleds.len() >= TRUST_QUORUM_MIN_SIZE {
                 Some(
                     self.bootstrap_sleds
                         .iter()
-                        .map(|sled| sled.baseboard.clone())
+                        .map(|sled| sled.baseboard_id.clone())
                         .collect(),
                 )
             } else {
@@ -386,7 +387,7 @@ impl CurrentRssConfig {
     pub(crate) fn update(
         &mut self,
         value: PutRssUserConfigInsensitive,
-        our_baseboard: Option<&Baseboard>,
+        our_baseboard: &BaseboardId,
     ) -> Result<(), String> {
         // Updating can only fail in two ways:
         //
@@ -853,10 +854,7 @@ mod tests {
         current_config.inventory = example.inventory.into();
 
         current_config
-            .update(
-                example.put_insensitive.clone(),
-                example.our_baseboard.as_ref(),
-            )
+            .update(example.put_insensitive.clone(), &example.our_baseboard_id)
             .expect("update of example data should succeed");
 
         // At this point, both BGP keys should be unset.
@@ -955,7 +953,7 @@ mod tests {
         current_config
             .update(
                 example_data_2.put_insensitive,
-                example_data_2.our_baseboard.as_ref(),
+                &example_data_2.our_baseboard_id,
             )
             .expect("update of example data 2 should succeed");
 
@@ -970,7 +968,7 @@ mod tests {
 
         // Update the old data again.
         current_config
-            .update(example.put_insensitive, example.our_baseboard.as_ref())
+            .update(example.put_insensitive, &example.our_baseboard_id)
             .expect("update of example data should succeed");
 
         // key1 should stay set, but not key2.
