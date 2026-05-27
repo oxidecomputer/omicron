@@ -20,7 +20,6 @@ use nexus_types::saga::saga_action_failed;
 use omicron_common::api::external;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::Name;
-use omicron_common::progenitor_operation_retry::ProgenitorOperationRetryError;
 use serde::Deserialize;
 use serde::Serialize;
 use slog_error_chain::InlineErrorChain;
@@ -316,13 +315,16 @@ async fn sfd_call_pantry_detach_for_disk(
     )
     .await
     {
-        // If the detach succeeds, then proceed with finalization. If the detach
-        // fails because the associated pantry is gone, then we have to be able
-        // to proceed with finalization in order to be able to eventually delete
-        // the disk. The associated pantry may have been expunged at any time
-        // during the import and this part of the code doesn't know the state of
-        // the disk, but we can't fail and leave the disk un-deleteable.
-        Ok(()) | Err(ProgenitorOperationRetryError::Gone) => Ok(()),
+        // If the detach succeeds, then proceed with finalization.
+        Ok(()) => Ok(()),
+
+        // If the detach fails because the associated pantry is gone, then we
+        // have to be able to proceed with finalization in order to be able to
+        // eventually delete the disk. The associated pantry may have been
+        // expunged at any time during the import and this part of the code
+        // doesn't know the state of the disk, but we can't fail and leave the
+        // disk un-deleteable.
+        Err(e) if e.is_gone() => Ok(()),
 
         Err(e) => Err(saga_action_failed(Error::internal_error(&format!(
             "pantry detach failed: {}",
