@@ -211,14 +211,13 @@ impl CollectArgs {
                 step.status,
                 step.name,
             );
-        }
-        if let Some(ereports) = &report.ereports {
-            eprintln!(
-                "ereports: {} found, {} collected, {} errors",
-                ereports.n_found,
-                ereports.n_collected,
-                ereports.errors.len(),
-            );
+            if let Some(details) = &step.details {
+                eprintln!(
+                    "{}",
+                    erebor::Displayer::new(details)
+                        .with_initial_indent_spaces(6)
+                );
+            }
         }
         Ok(())
     }

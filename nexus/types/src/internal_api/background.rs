@@ -271,21 +271,31 @@ pub struct SupportBundleCleanupReport {
 
 /// Identifies what we could or could not store within a support bundle.
 ///
-/// This struct will get emitted as part of the background task infrastructure.
+/// This struct describes facts known by the end of bundle collection: the
+/// set of steps that ran and what they produced. Post-collection facts
+/// (such as whether the bundle was successfully activated in the database)
+/// live on [`SupportBundleActivationReport`], which wraps this struct.
 #[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct SupportBundleCollectionReport {
     pub bundle: SupportBundleUuid,
 
-    /// True iff the bundle was successfully made 'active' in the database.
-    pub activated_in_db_ok: bool,
-
     /// All steps taken, alongside their timing information, when collecting the
     /// bundle.
     pub steps: Vec<SupportBundleCollectionStep>,
+}
 
-    /// Status of ereport collection, or `None` if no ereports were requested
-    /// for this support bundle.
-    pub ereports: Option<SupportBundleEreportStatus>,
+/// Pairs a [`SupportBundleCollectionReport`] with facts known only after
+/// collection finishes, such as whether the bundle was successfully made
+/// 'active' in the database.
+///
+/// This is what the Nexus support-bundle-collector background task emits as
+/// its `collection_report`.
+#[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub struct SupportBundleActivationReport {
+    pub collection: SupportBundleCollectionReport,
+
+    /// True iff the bundle was successfully made 'active' in the database.
+    pub activated_in_db_ok: bool,
 }
 
 #[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -294,6 +304,13 @@ pub struct SupportBundleCollectionStep {
     pub start: DateTime<Utc>,
     pub end: DateTime<Utc>,
     pub status: SupportBundleCollectionStepStatus,
+
+    /// Optional structured payload from the step. Steps that have only
+    /// pass/fail semantics leave this `None`; steps that can partially
+    /// succeed or want to surface counts/errors serialize their detail
+    /// struct here.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub details: Option<serde_json::Value>,
 }
 
 impl SupportBundleCollectionStep {
@@ -310,7 +327,7 @@ impl SupportBundleCollectionStep {
     pub const STEP_SPAWN_SLEDS: &'static str = "spawn steps to query all sleds";
 }
 
-#[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub enum SupportBundleCollectionStepStatus {
     Ok,
     Skipped,
@@ -346,12 +363,7 @@ pub struct SupportBundleEreportStatus {
 
 impl SupportBundleCollectionReport {
     pub fn new(bundle: SupportBundleUuid) -> Self {
-        Self {
-            bundle,
-            activated_in_db_ok: false,
-            steps: vec![],
-            ereports: None,
-        }
+        Self { bundle, steps: vec![] }
     }
 }
 
