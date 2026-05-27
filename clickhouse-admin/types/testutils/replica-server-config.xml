@@ -2,11 +2,8 @@
 <clickhouse>
 
     <logger>
-        <level>trace</level>
-        <log>./log/clickhouse.log</log>
-        <errorlog>./log/clickhouse.err.log</errorlog>
-        <size>100M</size>
-        <count>1</count>
+        <level>information</level>
+        <console>true</console>
     </logger>
 
     <path>./data</path>

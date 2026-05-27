@@ -10,7 +10,9 @@ use camino::Utf8PathBuf;
 use clickhouse_admin_keeper_client::Client as ClickhouseKeeperClient;
 use clickhouse_admin_server_client::Client as ClickhouseServerClient;
 use clickhouse_admin_single_client::Client as ClickhouseSingleClient;
-use clickhouse_admin_types::config::{ClickhouseHost, RaftServerSettings};
+use clickhouse_admin_types::config::{
+    ClickhouseHost, LogConfig, LogLevel, RaftServerSettings,
+};
 use clickhouse_admin_types::keeper::{
     KeeperConfigurableSettings, KeeperSettings,
 };
@@ -316,6 +318,7 @@ where
                 listen_addr: *server_ips.get(zone_id).unwrap(),
                 keepers: keepers.clone(),
                 remote_servers: remote_servers.clone(),
+                logger: LogConfig::new(LogLevel::default()),
             },
         });
     }
@@ -371,6 +374,7 @@ where
                 // SAFETY: We already successfully performed the same lookup to compute
                 // `raft_servers` above.
                 listen_addr: *keeper_ips.get(zone_id).unwrap(),
+                logger: LogConfig::new(LogLevel::default()),
             },
         });
     }

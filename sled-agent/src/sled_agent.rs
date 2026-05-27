@@ -37,6 +37,8 @@ use illumos_utils::zfs::DatasetVolumeDeleteArgs;
 use illumos_utils::zfs::DatasetVolumeEnsureArgs;
 use illumos_utils::zfs::DestroyDatasetErrorVariant;
 use illumos_utils::zfs::Mountpoint;
+use illumos_utils::zfs::RemoveReservationError;
+use illumos_utils::zfs::RemoveReservationErrorInner;
 use illumos_utils::zfs::SizeDetails;
 use illumos_utils::zfs::Zfs;
 use illumos_utils::zpool::PathInPool;
@@ -1541,9 +1543,27 @@ impl SledAgent {
         // the volume, remove the reservation set for the parent dataset if one
         // exists.
 
-        Zfs::remove_reservation(&delegated_zvol.parent_dataset_name())
-            .await
-            .map_err(|e| HttpError::for_internal_error(e.to_string()))?;
+        let result =
+            Zfs::remove_reservation(&delegated_zvol.parent_dataset_name())
+                .await;
+
+        if let Err(e) = result {
+            let RemoveReservationError { name: _, err } = &e;
+            match err {
+                RemoveReservationErrorInner::DatasetNotFound => {
+                    // If the parent dataset is no longer found, then a
+                    // concurrent deletion occurred. Return Ok
+                    return Ok(());
+                }
+
+                _ => {
+                    // Anything else is a 500
+                    return Err(HttpError::for_internal_error(
+                        InlineErrorChain::new(&e).to_string(),
+                    ));
+                }
+            }
+        }
 
         // Then proceed with deleting the child volume dataset, then the parent
         // dataset
