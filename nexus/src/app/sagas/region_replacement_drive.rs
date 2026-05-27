@@ -140,6 +140,9 @@ use super::{
     ACTION_GENERATE_ID, ActionRegistry, NexusActionContext, NexusSaga,
     SagaInitError,
 };
+use crate::app::crucible::UpstairsHealth;
+use crate::app::crucible::UpstairsHealthDegradedDetails;
+use crate::app::crucible::propolis_client_upstairs_health;
 use crate::app::db::datastore::CrucibleDisk;
 use crate::app::db::datastore::InstanceAndActiveVmm;
 use crate::app::sagas::common_storage::get_pantry_address;
@@ -237,42 +240,6 @@ impl NexusSaga for SagaRegionReplacementDrive {
 }
 
 // region replacement drive saga: action implementations
-
-/// Walk a [`VolumeInfo`] tree to determine reconciliation status.
-///
-/// Replaces the previous `VolumeStatus.active` boolean. The shape change
-/// originated in crucible PR oxidecomputer/crucible#1928 and reached omicron
-/// via propolis PR oxidecomputer/propolis#1132.
-///
-/// # Returns
-///
-/// `true` when every [`Upstairs`] leaf reports [`Active`] state with no
-/// live-repair or reconcile in progress; `false` otherwise.
-///
-/// [`VolumeInfo`]: propolis_client::types::VolumeInfo
-/// [`Upstairs`]: propolis_client::types::VolumeInfo::Upstairs
-/// [`Active`]: propolis_client::types::UpstairsInfoStatus::Active
-fn volume_info_reconciled(info: &propolis_client::types::VolumeInfo) -> bool {
-    use propolis_client::types::{UpstairsInfoStatus, VolumeInfo};
-    match info {
-        VolumeInfo::Volume { sub_volumes, read_only_parent } => {
-            sub_volumes.iter().all(volume_info_reconciled)
-                && read_only_parent
-                    .as_deref()
-                    .map_or(true, volume_info_reconciled)
-        }
-        VolumeInfo::Upstairs {
-            state,
-            live_repair_in_progress,
-            reconcile_in_progress,
-            ..
-        } => {
-            matches!(state, UpstairsInfoStatus::Active)
-                && !live_repair_in_progress
-                && !reconcile_in_progress
-        }
-    }
-}
 
 async fn srrd_set_saga_id(
     sagactx: NexusActionContext,
@@ -810,7 +777,8 @@ async fn check_from_previous_pantry_step(
 
                             error!(
                                 log,
-                                "pantry returned an error checking on volume: {e}";
+                                "pantry returned an error checking on volume: \
+                                {e}";
                                 "region replacement id" => %request_id,
                                 "last replacement drive time" => ?step_time,
                                 "last replacement drive step" => "pantry",
@@ -1300,6 +1268,29 @@ async fn srrd_drive_region_replacement_execute(
                 .await
                 .map_err(saga_action_failed)?;
 
+            let Some(new_region_id) = params.request.new_region_id else {
+                return Err(saga_action_failed(Error::internal_error(
+                    &format!(
+                        "region replacement request {} has new_region_id = None",
+                        params.request.id,
+                    ),
+                )));
+            };
+
+            let Some(new_region_addr) = osagactx
+                .datastore()
+                .region_addr(new_region_id)
+                .await
+                .map_err(saga_action_failed)?
+            else {
+                return Err(saga_action_failed(Error::internal_error(
+                    &format!(
+                        "new region {} has a None region_addr result",
+                        new_region_id,
+                    ),
+                )));
+            };
+
             let replacement_done = execute_propolis_drive_action(
                 log,
                 params.request.id,
@@ -1308,6 +1299,7 @@ async fn srrd_drive_region_replacement_execute(
                 client,
                 disk,
                 disk_new_volume_vcr,
+                new_region_addr,
             )
             .await?;
 
@@ -1514,6 +1506,7 @@ async fn execute_pantry_drive_action(
 }
 
 /// Execute a prepared Propolis step
+#[allow(clippy::too_many_arguments)]
 async fn execute_propolis_drive_action(
     log: &Logger,
     request_id: Uuid,
@@ -1522,6 +1515,7 @@ async fn execute_propolis_drive_action(
     client: propolis_client::Client,
     disk: CrucibleDisk,
     disk_new_volume_vcr: String,
+    new_region_addr: SocketAddrV6,
 ) -> Result<bool, ActionError> {
     // This client could be for a different VMM than the step was
     // prepared for. Bail out if this is true
@@ -1612,7 +1606,7 @@ async fn execute_propolis_drive_action(
             //
             // Check if the Volume activated.
 
-            let info = client
+            let result = client
                 .disk_volume_status()
                 .id(disk.id())
                 .send()
@@ -1626,26 +1620,59 @@ async fn execute_propolis_drive_action(
                         "unexpected failure during \
                                 `disk_volume_status`: {e}",
                     ))),
-                })?
-                .into_inner()
-                .volume_info;
+                })?;
 
-            // Reconciliation finished iff every upstairs leaf reports Active
-            // with no live-repair or reconcile in progress.
+            // If the part of the Volume containing the replaced region is
+            // healthy, then reconciliation finished successfully.
             //
-            // Reasons it may not be reconciled yet:
+            // There's a few reasons it may not be healthy yet:
             //
-            // - Propolis could be shutting down, tearing down the Upstairs
-            //   (which deactivates the Volume)
+            // - Propolis could be shutting down, and tearing down the Upstairs
+            //   in the process (which deactivates the whole Volume)
             //
             // - reconciliation could still be going on
             //
             // - reconciliation could have failed
             //
-            // If not, wait until the next invocation of this saga to decide
-            // what to do next.
+            // If it's not healthy, wait until the next invocation of this saga
+            // to decide what to do next.
 
-            volume_info_reconciled(&info)
+            let health = propolis_client_upstairs_health(
+                &log,
+                &result.into_inner().volume_info,
+                new_region_addr,
+            );
+
+            match health {
+                None => {
+                    let m = format!(
+                        "did not find {new_region_addr} in volume info!",
+                    );
+
+                    error!(log, "{m}");
+
+                    return Err(saga_action_failed(Error::internal_error(m)));
+                }
+
+                Some(UpstairsHealth::Healthy { upstairs_id }) => {
+                    // If "healthy" is seen after we have replaced a downstairs,
+                    // then we're done waiting - the replacement is done
+                    info!(log, "upstairs {upstairs_id} is healthy");
+                    true
+                }
+
+                Some(UpstairsHealth::Degraded(details)) => {
+                    let UpstairsHealthDegradedDetails { upstairs_id, reason } =
+                        details;
+
+                    info!(
+                        log,
+                        "upstairs {upstairs_id} is not healthy: {reason}",
+                    );
+
+                    false
+                }
+            }
         }
 
         ReplaceResult::Missing => {
