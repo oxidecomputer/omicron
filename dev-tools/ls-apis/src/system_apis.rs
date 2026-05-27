@@ -172,12 +172,20 @@ impl SystemApis {
                 let (workspace, server_pkg) =
                     workspaces.find_package_workspace(dunit_pkg)?;
                 let dep_path = DepPath::for_pkg(server_pkg.id.clone());
-                tracker.found_package(dunit_pkg, dunit_pkg, &dep_path);
+                tracker.found_package(
+                    dunit_pkg,
+                    dunit_pkg,
+                    std::slice::from_ref(&dep_path),
+                );
 
                 let outcome =
                     workspace.walk_required_deps_recursively(server_pkg)?;
-                for (dep_pkg, dep_path) in &outcome.found {
-                    tracker.found_package(dunit_pkg, &dep_pkg.name, dep_path);
+                for pkg_outcome in &outcome.found {
+                    tracker.found_package(
+                        dunit_pkg,
+                        &pkg_outcome.package.name,
+                        &pkg_outcome.dep_paths,
+                    );
                 }
             }
         }
@@ -226,11 +234,11 @@ impl SystemApis {
                         server_pkgname
                     )
                 })?;
-            for (dep_pkg, dep_path) in &outcome.found {
+            for pkg_outcome in &outcome.found {
                 deps_tracker.found_dependency(
                     server_pkgname,
-                    &dep_pkg.name,
-                    dep_path,
+                    &pkg_outcome.package.name,
+                    &pkg_outcome.dep_paths,
                 );
             }
         }
@@ -1410,7 +1418,7 @@ impl<'a> ServerComponentsTracker<'a> {
     }
 
     /// Record that deployment unit package `dunit_pkgname` depends on package
-    /// `pkgname` via dependency chain `dep_path`
+    /// `pkgname` via each of the given dependency chains `dep_paths`
     ///
     /// This only records anything if `pkgname` turns out to be a known API
     /// client package name, in which case this records that the server
@@ -1419,14 +1427,16 @@ impl<'a> ServerComponentsTracker<'a> {
         &mut self,
         dunit_pkgname: &ServerComponentName,
         pkgname: &str,
-        dep_path: &DepPath,
+        dep_paths: &[DepPath],
     ) {
         let Some(apis) = self.known_server_packages.get(pkgname) else {
             return;
         };
 
-        for api in apis {
-            self.found_api_producer(api, dunit_pkgname, dep_path);
+        for dep_path in dep_paths {
+            for api in apis {
+                self.found_api_producer(api, dunit_pkgname, dep_path);
+            }
         }
     }
 
@@ -1484,7 +1494,7 @@ impl<'a> ClientDependenciesTracker<'a> {
     }
 
     /// Record that comopnent `server_pkgname` consumes package `pkgname` via
-    /// dependency chain `dep_path`
+    /// each of the given dependency chains `dep_paths`
     ///
     /// This only records cases where `pkgname` is a known client package for
     /// one of our APIs, in which case it records that this server component
@@ -1493,7 +1503,7 @@ impl<'a> ClientDependenciesTracker<'a> {
         &mut self,
         server_pkgname: &ServerComponentName,
         pkgname: &str,
-        dep_path: &DepPath,
+        dep_paths: &[DepPath],
     ) {
         let Some(api) = self.api_metadata.client_pkgname_lookup(pkgname) else {
             return;
@@ -1502,18 +1512,22 @@ impl<'a> ClientDependenciesTracker<'a> {
         // This is the name of a known client package.  Record it.
         let status = api.restricted_to_consumers.status(server_pkgname);
         let client_pkgname = ClientPackageName::from(pkgname.to_owned());
-        self.api_consumers
-            .entry(client_pkgname.clone())
-            .or_insert_with(IdOrdMap::new)
-            .entry(&server_pkgname)
-            .or_insert_with(|| ApiConsumer::new(server_pkgname.clone(), status))
-            .add_path(dep_path.clone());
-        self.apis_consumed
-            .entry(server_pkgname.clone())
-            .or_insert_with(BTreeMap::new)
-            .entry(client_pkgname)
-            .or_insert_with(Vec::new)
-            .push(dep_path.clone());
+        for dep_path in dep_paths {
+            self.api_consumers
+                .entry(client_pkgname.clone())
+                .or_insert_with(IdOrdMap::new)
+                .entry(&server_pkgname)
+                .or_insert_with(|| {
+                    ApiConsumer::new(server_pkgname.clone(), status.clone())
+                })
+                .add_path(dep_path.clone());
+            self.apis_consumed
+                .entry(server_pkgname.clone())
+                .or_insert_with(BTreeMap::new)
+                .entry(client_pkgname.clone())
+                .or_insert_with(Vec::new)
+                .push(dep_path.clone());
+        }
     }
 }
 

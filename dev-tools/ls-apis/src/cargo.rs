@@ -11,6 +11,9 @@ use camino::Utf8Path;
 use camino::Utf8PathBuf;
 use cargo_metadata::{CargoOpt, Package};
 use cargo_metadata::{DependencyKind, PackageId};
+use iddqd::IdOrdItem;
+use iddqd::IdOrdMap;
+use iddqd::id_upcast;
 use std::collections::BTreeSet;
 use std::collections::{BTreeMap, VecDeque};
 
@@ -237,7 +240,7 @@ impl Workspace {
     /// Walks the required (normal and build) dependencies of package `root`.
     ///
     /// Returns a [`WalkOutcome`] describing every package reachable from
-    /// `root`, each paired with a dependency path to it.
+    /// `root`, each paired with every dependency path from `root` to it.
     pub fn walk_required_deps_recursively<'a>(
         &'a self,
         root: &Package,
@@ -261,7 +264,7 @@ impl Workspace {
             path: DepPath::for_pkg(root.id.clone()),
         }];
         let mut seen: BTreeSet<PackageId> = BTreeSet::new();
-        let mut found: Vec<(&'a Package, DepPath)> = Vec::new();
+        let mut found: IdOrdMap<PackageWalkOutcome<'a>> = IdOrdMap::new();
 
         while let Some(Remaining { node: next, path }) = remaining.pop() {
             for d in &next.deps {
@@ -282,7 +285,14 @@ impl Workspace {
                 // package metadata.
                 let dep_pkg = self.packages_by_id.get(did).unwrap();
                 let dep_node = self.nodes_by_id.get(did).unwrap();
-                found.push((dep_pkg, path.clone()));
+                found
+                    .entry(&dep_pkg.id)
+                    .or_insert_with(|| PackageWalkOutcome {
+                        package: dep_pkg,
+                        dep_paths: Vec::new(),
+                    })
+                    .dep_paths
+                    .push(path.clone());
                 if seen.contains(did) {
                     continue;
                 }
@@ -340,11 +350,33 @@ fn cargo_toml_parent(
 /// The result of [`Workspace::walk_required_deps_recursively`].
 pub struct WalkOutcome<'a> {
     /// Every package encountered as a required (normal or build) dependency of
-    /// the walk's `root`, each paired with a dependency path from `root` to
-    /// that package.
+    /// the walk's `root`, each paired with every dependency path from `root`
+    /// to that package.
+    pub found: IdOrdMap<PackageWalkOutcome<'a>>,
+}
+
+/// A single entry in [`WalkOutcome::found`]: one package and every dependency
+/// path from the walk's `root` to it.
+#[derive(Debug)]
+pub struct PackageWalkOutcome<'a> {
+    /// The package that was found during the walk.
+    pub package: &'a Package,
+
+    /// The list of dependency paths from the walk's `root` to this package.
     ///
     /// A package reachable by more than one path appears once per path.
-    pub found: Vec<(&'a Package, DepPath)>,
+    pub dep_paths: Vec<DepPath>,
+}
+
+impl<'a> IdOrdItem for PackageWalkOutcome<'a> {
+    type Key<'b>
+        = &'a PackageId
+    where
+        Self: 'b;
+    fn key(&self) -> Self::Key<'_> {
+        &self.package.id
+    }
+    id_upcast!();
 }
 
 /// Describes a "dependency path": a path through the Cargo dependency graph

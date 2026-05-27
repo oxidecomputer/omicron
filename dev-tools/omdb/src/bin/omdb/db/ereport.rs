@@ -83,6 +83,22 @@ struct InfoArgs {
     restart_id: EreporterRestartUuid,
     /// The ENA of the ereport within the reporter restart
     ena: Ena,
+
+    /// If set, output the ereport as JSON, rather than using the default
+    /// human-readable format.
+    ///
+    /// Note that this will output a JSON object containing the raw ereport data
+    /// along with additional metadata from the database record for this
+    /// ereport. To emit *only* the original JSON received from the reporter,
+    /// add the `--raw` flag in addition to `--json`.
+    #[clap(long, short)]
+    json: bool,
+
+    /// If outputting the ereport as JSON, output *only* the raw JSON received
+    /// from the reporter in its original form, omitting additional metadata
+    /// from the database.
+    #[clap(long, short, requires("json"))]
+    raw: bool,
 }
 
 #[derive(Debug, Args, Clone)]
@@ -158,6 +174,7 @@ pub(super) async fn cmd_db_ereport(
         Commands::List(ref args) => {
             cmd_db_ereport_list(datastore, fetch_opts, args).await
         }
+
         Commands::Info(ref args) => {
             cmd_db_ereport_info(datastore, fetch_opts, args).await
         }
@@ -343,7 +360,7 @@ async fn cmd_db_ereport_info(
     fetch_opts: &DbFetchOptions,
     args: &InfoArgs,
 ) -> anyhow::Result<()> {
-    let &InfoArgs { restart_id, ena } = args;
+    let &InfoArgs { restart_id, ena, json, raw } = args;
     let ereport_id = ereport_types::EreportId { restart_id, ena };
     let conn = datastore.pool_connection_for_tests().await?;
     let ereport = ereport_fetch(&conn, fetch_opts, ereport_id).await?;
@@ -370,62 +387,95 @@ async fn cmd_db_ereport_info(
         SERIAL_NUMBER,
         MARKED_SEEN_IN,
     ]);
-    let db::model::Ereport {
-        ena: DbEna(ena),
-        restart_id,
-        time_deleted,
-        time_collected,
-        collector_id,
-        ref part_number,
-        ref serial_number,
-        ref class,
-        ref report,
-        reporter,
-        marked_seen_in,
-    } = ereport;
-    println!("\n{:=<80}", "== EREPORT METADATA ");
-    println!("    {ENA:>WIDTH$}: {ena}");
-    match class {
-        Some(class) => println!("    {CLASS:>WIDTH$}: {class}"),
-        None => println!("/!\\ {CLASS:>WIDTH$}: <unknown>"),
-    }
-    if let Some(time_deleted) = time_deleted {
-        println!("(i) {TIME_DELETED:>WIDTH$}: {time_deleted}");
-    }
-    println!("    {TIME_COLLECTED:>WIDTH$}: {time_collected}");
-    println!("    {COLLECTOR_ID:>WIDTH$}: {collector_id}");
-    match Reporter::try_from(reporter) {
-        Err(err) => eprintln!("{err}"),
-        Ok(Reporter::Sp { sp_type, slot }) => {
-            println!(
-                "    {REPORTER:>WIDTH$}: {sp_type:?} {slot} (service processor)"
-            )
-        }
-        Ok(Reporter::HostOs { sled, slot }) => {
-            if let Some(slot) = slot {
-                println!("    {REPORTER:>WIDTH$}: sled {slot} (host OS)");
-            } else {
-                println!(
-                    "    {REPORTER:>WIDTH$}: <unknown sled slot> (host OS)"
-                );
-            }
-            println!("    {SLED_ID:>WIDTH$}: {sled:?}")
-        }
-    }
-    println!("    {RESTART_ID:>WIDTH$}: {restart_id}");
-    println!(
-        "    {PART_NUMBER:>WIDTH$}: {}",
-        part_number.as_deref().unwrap_or("<unknown>")
-    );
-    println!(
-        "    {SERIAL_NUMBER:>WIDTH$}: {}",
-        serial_number.as_deref().unwrap_or("<unknown>")
-    );
-    println!("    {MARKED_SEEN_IN:>WIDTH$}: {marked_seen_in:?}",);
 
-    println!("\n{:=<80}", "== EREPORT ");
-    serde_json::to_writer_pretty(std::io::stdout(), &report)
-        .with_context(|| format!("failed to serialize ereport: {report:?}"))?;
+    if json && raw {
+        let ereport = ereport.report;
+        serde_json::to_writer_pretty(std::io::stdout(), &ereport)
+            .with_context(|| {
+                format!("failed to serialize raw ereport: {ereport:?}")
+            })?;
+    } else if json {
+        let raw_report = ereport.report.clone();
+        match nexus_types::fm::Ereport::try_from(ereport) {
+            Ok(ereport) => {
+                serde_json::to_writer_pretty(std::io::stdout(), &ereport)
+                    .with_context(|| {
+                        format!(
+                            "failed to serialize ereport with metadata: {ereport:?}"
+                        )
+                    })?;
+            }
+            Err(e) => {
+                eprintln!(
+                    "WARNING: failed to interpret ereport metadata, falling \
+                     back to raw JSON: {e}"
+                );
+                serde_json::to_writer_pretty(std::io::stdout(), &raw_report)
+                    .with_context(|| {
+                        format!(
+                            "failed to serialize raw ereport: {raw_report:?}"
+                        )
+                    })?;
+            }
+        }
+    } else {
+        let db::model::Ereport {
+            ena: DbEna(ena),
+            restart_id,
+            time_deleted,
+            time_collected,
+            collector_id,
+            ref part_number,
+            ref serial_number,
+            ref class,
+            ref report,
+            reporter,
+            marked_seen_in,
+        } = ereport;
+        println!("\n{:=<80}", "== EREPORT METADATA ");
+        println!("    {ENA:>WIDTH$}: {ena}");
+        match class {
+            Some(class) => println!("    {CLASS:>WIDTH$}: {class}"),
+            None => println!("/!\\ {CLASS:>WIDTH$}: <unknown>"),
+        }
+        if let Some(time_deleted) = time_deleted {
+            println!("(i) {TIME_DELETED:>WIDTH$}: {time_deleted}");
+        }
+        println!("    {TIME_COLLECTED:>WIDTH$}: {time_collected}");
+        println!("    {COLLECTOR_ID:>WIDTH$}: {collector_id}");
+        match Reporter::try_from(reporter) {
+            Err(err) => eprintln!("{err}"),
+            Ok(Reporter::Sp { sp_type, slot }) => {
+                println!(
+                    "    {REPORTER:>WIDTH$}: {sp_type:?} {slot} \
+                     (service processor)"
+                )
+            }
+            Ok(Reporter::HostOs { sled, slot }) => {
+                if let Some(slot) = slot {
+                    println!("    {REPORTER:>WIDTH$}: sled {slot} (host OS)");
+                } else {
+                    println!(
+                        "    {REPORTER:>WIDTH$}: <unknown sled slot> (host OS)"
+                    );
+                }
+                println!("    {SLED_ID:>WIDTH$}: {sled:?}")
+            }
+        }
+        println!("    {RESTART_ID:>WIDTH$}: {restart_id}");
+        println!(
+            "    {PART_NUMBER:>WIDTH$}: {}",
+            part_number.as_deref().unwrap_or("<unknown>")
+        );
+        println!(
+            "    {SERIAL_NUMBER:>WIDTH$}: {}",
+            serial_number.as_deref().unwrap_or("<unknown>")
+        );
+        println!("    {MARKED_SEEN_IN:>WIDTH$}: {marked_seen_in:?}",);
+
+        println!("\n{:=<80}", "== EREPORT ");
+        println!("{}", erebor::Displayer::new(&report));
+    }
     println!();
 
     Ok(())
