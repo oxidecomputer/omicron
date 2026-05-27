@@ -605,8 +605,8 @@ source.type = "prebuilt"
 source.repo = "management-gateway-service"
 # In general, this commit should match the pinned revision of `gateway-sp-comms`
 # in `Cargo.toml`.
-source.commit = "745a508cb97b7ca9b4c10ec9592c980eb769b10d"
-source.sha256 = "24368fb049c3bcdda56c5e4b1f18e2371aa5699ac73f161e12d1ebd842293b71"
+source.commit = "6c0aca2545a73fd75536e149d29faa7108be5862"
+source.sha256 = "48748a5090ed9c7b4d61cc127d9c6959b228864b75a4ab111468dc22ae20d656"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -624,10 +624,10 @@ only_for_targets.image = "standard"
 # 3. Use source.type = "manual" instead of "prebuilt"
 source.type = "prebuilt"
 source.repo = "crucible"
-source.commit = "3c1708d86e10f0370807388a1efe092edd99d431"
+source.commit = "bd9a0e2abe6b6b89aec8c85f4ee57474144ed150"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/crucible/image/<commit>/crucible.sha256.txt
-source.sha256 = "5c5bc85240acf5fbc8528cfd7930a025d9e00c08bf890df652b3aaee796e8093"
+source.sha256 = "918a3db80758e93b2f01c8bd78a358065f4636c4bda387e12948830d1028909a"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -636,10 +636,10 @@ service_name = "crucible_pantry_prebuilt"
 only_for_targets.image = "standard"
 source.type = "prebuilt"
 source.repo = "crucible"
-source.commit = "3c1708d86e10f0370807388a1efe092edd99d431"
+source.commit = "bd9a0e2abe6b6b89aec8c85f4ee57474144ed150"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/crucible/image/<commit>/crucible-pantry.sha256.txt
-source.sha256 = "9bdeddff8d1c2133c6be238b35a498138d7bcecb26df7820f5d50cde781dac7a"
+source.sha256 = "3567a37b4136b03fd08032ec88886223c8b33c227a7cb9e1ebdbe3e0198d6b98"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -653,10 +653,10 @@ service_name = "crucible_utils"
 only_for_targets.image = "standard"
 source.type = "prebuilt"
 source.repo = "crucible"
-source.commit = "3c1708d86e10f0370807388a1efe092edd99d431"
+source.commit = "bd9a0e2abe6b6b89aec8c85f4ee57474144ed150"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/crucible/image/<commit>/crucible-utils.sha256.txt
-source.sha256 = "13dfdf6272fbe129b7b608b248cc017f2cc3802b41f50755038669f5eb6b2c96"
+source.sha256 = "e1b87fa2a3b916ed67b31de02238691ddbf59def31336c1f73e182fd067a5c79"
 output.type = "tarball"
 
 # Refer to
@@ -833,8 +833,8 @@ setup_hint = "Run `cargo xtask download transceiver-control` to download the nec
 service_name = "thundermuffin"
 source.type = "prebuilt"
 source.repo = "thundermuffin"
-source.commit = "473a90f8081e99f1b77f2625d97ab1f7817b3468"
-source.sha256 = "757600f364dcffa2ffccf6a95918b99b4dbd71c8ec60746a776143f3e086b519"
+source.commit = "5fc5cf672dcc04cb59eda13e230195edaa902676"
+source.sha256 = "aa938be76cf2eb2071f0edc0ffc8a125d6c867d0a20da2e1c9178925b8a209a5"
 output.type = "zone"
 output.intermediate_only = true
 
