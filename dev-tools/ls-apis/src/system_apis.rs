@@ -15,6 +15,7 @@ use crate::api_metadata::ApiExpectedConsumer;
 use crate::api_metadata::ApiExpectedConsumers;
 use crate::api_metadata::ApiMetadata;
 use crate::api_metadata::Evaluation;
+use crate::api_metadata::ServerComponentKind;
 use crate::api_metadata::VersionedHow;
 use crate::cargo::DepPath;
 use crate::parse_toml_file;
@@ -22,7 +23,7 @@ use crate::workspaces::Workspaces;
 use anyhow::Result;
 use anyhow::{Context, anyhow, bail};
 use camino::Utf8PathBuf;
-use cargo_metadata::Package;
+use cargo_metadata::PackageId;
 use iddqd::IdOrdItem;
 use iddqd::IdOrdMap;
 use iddqd::id_upcast;
@@ -155,6 +156,55 @@ impl SystemApis {
                 .push(api);
         }
 
+        // For each component, compute the set of package IDs to omit when
+        // walking its dependencies.  A subcomponent's package is omitted from
+        // its parent package's walk, so that the subcomponent's dependency
+        // subgraph is attributed to the subcomponent rather than to its parent.
+        let mut omitted_nodes: BTreeMap<
+            &ServerComponentName,
+            BTreeSet<&PackageId>,
+        > = BTreeMap::new();
+        // Maps each omitted package ID back to the subcomponent that
+        // contributed it.  Used after the producer walk to produce a helpful
+        // error if a subcomponent's omission turned out to be a no-op.
+        let mut omitted_pkgid_subcomponent = BTreeMap::new();
+        for component in api_metadata.server_components() {
+            // Ensure every component has an entry, even if it omits nothing.
+            omitted_nodes.entry(component.name()).or_default();
+
+            match component.kind() {
+                ServerComponentKind::TopLevel => {}
+                ServerComponentKind::Subcomponent { inside } => {
+                    // A subcomponent is a library crate linked into the
+                    // `inside` binary, so it necessarily lives in the same
+                    // workspace as `inside`.  Resolve its package within that
+                    // workspace specifically.
+                    let (workspace, _) =
+                        workspaces.find_package_workspace(inside)?;
+                    let sub_pkg = workspace
+                        .find_workspace_package(component.name())
+                        .ok_or_else(|| {
+                            anyhow!(
+                                "subcomponent {:?} (in deployment unit \
+                                 {:?}) is not a package in workspace {:?} \
+                                 (the workspace of its `inside` package \
+                                 {:?}); check for a typo in `name`, or that \
+                                 the package actually exists",
+                                component.name(),
+                                component.deployment_unit(),
+                                workspace.name(),
+                                inside,
+                            )
+                        })?;
+                    omitted_pkgid_subcomponent.insert(&sub_pkg.id, component);
+                    omitted_nodes
+                        .entry(inside)
+                        .or_default()
+                        .insert(&sub_pkg.id);
+                }
+            }
+        }
+
         // Walk the deployment units, then walk each one's list of packages, and
         // then walk all of its dependencies.  Along the way, record whenever we
         // find a package whose name matches a known server package.  If we find
@@ -165,22 +215,80 @@ impl SystemApis {
         // component, etc.
         let mut tracker = ServerComponentsTracker::new(&server_packages);
         for dunit_info in api_metadata.deployment_units() {
-            for dunit_pkg in &dunit_info.packages {
+            for component_name in dunit_info.component_names() {
+                let component =
+                    api_metadata.server_component(component_name).expect(
+                        "a deployment unit's component names are all \
+                         registered server components",
+                    );
                 tracker.found_deployment_unit_package(
                     &dunit_info.name,
-                    dunit_pkg,
+                    component_name,
                 )?;
-                let (workspace, server_pkg) =
-                    workspaces.find_package_workspace(dunit_pkg)?;
-                let dep_path = DepPath::for_pkg(server_pkg.id.clone());
-                tracker.found_package(dunit_pkg, dunit_pkg, &dep_path);
 
-                workspace.walk_required_deps_recursively(
-                    server_pkg,
-                    &mut |p: &Package, dep_path: &DepPath| {
-                        tracker.found_package(dunit_pkg, &p.name, dep_path);
-                    },
-                )?;
+                match component.kind() {
+                    ServerComponentKind::TopLevel => {
+                        let (workspace, server_pkg) = workspaces
+                            .find_package_workspace(component_name)?;
+                        let dep_path = DepPath::for_pkg(server_pkg.id.clone());
+                        tracker.found_package(
+                            component_name,
+                            component_name,
+                            &dep_path,
+                        );
+
+                        let omitted = omitted_nodes.get(component_name).expect(
+                            "every server component has an omitted_nodes entry",
+                        );
+                        let outcome = workspace
+                            .walk_required_deps_recursively(
+                                server_pkg, omitted,
+                            )?;
+                        for (dep_pkg, dep_path) in &outcome.found {
+                            tracker.found_package(
+                                component_name,
+                                &dep_pkg.name,
+                                dep_path,
+                            );
+                        }
+
+                        // Every subcomponent declared `inside` this package
+                        // must actually be one of its required Cargo
+                        // dependencies.  Otherwise, omitting it from this walk
+                        // did nothing, and its `subcomponents` entry is stale
+                        // or wrong.
+                        if let Some(&pkgid) =
+                            omitted.difference(&outcome.omitted_seen).next()
+                        {
+                            let sub = omitted_pkgid_subcomponent
+                                .get(pkgid)
+                                .copied()
+                                .expect(
+                                    "every omitted package ID was \
+                                     registered with its subcomponent",
+                                );
+                            bail!(
+                                "subcomponent {:?} (in deployment unit \
+                                 {:?}) is declared with `inside = {:?}`, \
+                                 but {:?} has no normal or build Cargo \
+                                 dependency on it; remove the stale \
+                                 `subcomponents` entry, correct its \
+                                 `inside` field, or restore the dependency \
+                                 if it was removed or made dev-only",
+                                sub.name(),
+                                sub.deployment_unit(),
+                                component_name,
+                                component_name,
+                            );
+                        }
+                    }
+                    ServerComponentKind::Subcomponent { .. } => {
+                        // Subcomponents host no Dropshot APIs, so they are
+                        // not walked as API producers here.  Their
+                        // dependency subgraph is walked separately, as a
+                        // consumer, in the loop below.
+                    }
+                }
             }
         }
 
@@ -214,22 +322,17 @@ impl SystemApis {
 
         // Now that we've figured out what servers are where, walk dependencies
         // of each server component and assemble structures to find which APIs
-        // are produced and consumed by which components.
+        // are produced and consumed by which components.  The same omitted
+        // nodes used during the producer walk apply here too.
         let mut deps_tracker = ClientDependenciesTracker::new(&api_metadata);
         for server_pkgname in server_component_units.keys() {
             let (workspace, pkg) =
                 workspaces.find_package_workspace(server_pkgname)?;
-            workspace
-                .walk_required_deps_recursively(
-                    pkg,
-                    &mut |p: &Package, dep_path: &DepPath| {
-                        deps_tracker.found_dependency(
-                            server_pkgname,
-                            &p.name,
-                            dep_path,
-                        );
-                    },
-                )
+            let omitted = omitted_nodes
+                .get(server_pkgname)
+                .expect("every server component has an omitted_nodes entry");
+            let outcome = workspace
+                .walk_required_deps_recursively(pkg, omitted)
                 .with_context(|| {
                     format!(
                         "iterating dependencies of workspace {:?} package {:?}",
@@ -237,6 +340,13 @@ impl SystemApis {
                         server_pkgname
                     )
                 })?;
+            for (dep_pkg, dep_path) in &outcome.found {
+                deps_tracker.found_dependency(
+                    server_pkgname,
+                    &dep_pkg.name,
+                    dep_path,
+                );
+            }
         }
 
         let (apis_consumed, api_consumers) =
@@ -578,6 +688,63 @@ impl SystemApis {
         Ok(DagEdgesFile { units_without_server_side_apis, edges })
     }
 
+    /// Returns whether `component`'s consumed-API edges participate in the
+    /// upgrade DAG.
+    ///
+    /// Components with a non-steady-state lifecycle can't be affected by
+    /// version skew during an online upgrade, so their API dependencies are
+    /// excluded from the DAG and from cycle checks.
+    ///
+    /// Panics if `component` is not a registered deployment-unit component.
+    /// Every caller passes a component obtained from `server_component_units`
+    /// or `apis_consumed`, both of which are built from registered
+    /// deployment-unit packages, so the lookup always succeeds.
+    fn component_in_upgrade_dag(
+        &self,
+        component: &ServerComponentName,
+    ) -> bool {
+        self.api_metadata
+            .server_component(component)
+            .expect(
+                "component came from server_component_units or \
+                 apis_consumed, both built from registered \
+                 deployment-unit components",
+            )
+            .in_upgrade_dag()
+    }
+
+    /// Returns whether an edge from `server` to `client` should be excluded
+    /// under `edge_filter`.
+    fn edge_filtered_out(
+        &self,
+        edge_filter: EdgeFilter<'_>,
+        server: &ServerComponentName,
+        client: &ClientPackageName,
+    ) -> bool {
+        match edge_filter {
+            EdgeFilter::All => false,
+            EdgeFilter::DagOnly(idu_edges) => {
+                // unwrap(): every `client` encountered here came from
+                // `component_apis_consumed`, which only yields known APIs.
+                let api =
+                    self.api_metadata.client_pkgname_lookup(client).unwrap();
+                if api.versioned_how != VersionedHow::Server {
+                    return true;
+                }
+
+                if !self.component_in_upgrade_dag(server) {
+                    return true;
+                }
+
+                // Intra-deployment-unit-only edges always connect components in
+                // the same *instance* of the same deployment unit, so they
+                // can't induce an update-ordering constraint and shouldn't
+                // count as cycles.
+                idu_edges.contains(&(server.clone(), client.clone()))
+            }
+        }
+    }
+
     // The complex type below is only used in this one place: the return value
     // of this internal helper function.  A type alias doesn't seem better.
     #[allow(clippy::type_complexity)]
@@ -606,30 +773,12 @@ impl SystemApis {
                 for (client_pkg, _) in
                     self.component_apis_consumed(server_pkg, dependency_filter)?
                 {
-                    if let EdgeFilter::DagOnly(idu_edges) = edge_filter {
-                        let api = self
-                            .api_metadata
-                            .client_pkgname_lookup(client_pkg)
-                            .unwrap();
-                        // Filtering DAG-only edges means ignoring everything
-                        // that's not server-side-versioned.
-                        if api.versioned_how != VersionedHow::Server {
-                            continue;
-                        }
-
-                        // When filtering DAG-only edges, also skip edges that
-                        // represent intra-deployment-unit-only communication
-                        // (communication within one instance of one deployment
-                        // unit).  That's because intra-deployment-unit edges
-                        // would look like a cycle in the dependency graph, but
-                        // aren't one that we care about since they're always
-                        // referring to the same *instance* of the same
-                        // deployment unit.
-                        if idu_edges
-                            .contains(&(server_pkg.clone(), client_pkg.clone()))
-                        {
-                            continue;
-                        }
+                    if self.edge_filtered_out(
+                        edge_filter,
+                        server_pkg,
+                        client_pkg,
+                    ) {
+                        continue;
                     }
 
                     // Multiple server components may produce an API. However,
@@ -662,7 +811,8 @@ impl SystemApis {
         &self,
         filter: ApiDependencyFilter,
     ) -> Result<String> {
-        let (graph, _nodes) = self.make_component_graph(filter, false)?;
+        let (graph, _nodes) =
+            self.make_component_graph(filter, EdgeFilter::All)?;
         Ok(Dot::new(&graph).to_string())
     }
 
@@ -672,7 +822,7 @@ impl SystemApis {
     fn make_component_graph(
         &self,
         dependency_filter: ApiDependencyFilter,
-        versioned_on_server_only: bool,
+        edge_filter: EdgeFilter<'_>,
     ) -> Result<(
         Graph<&ServerComponentName, &ClientPackageName>,
         BTreeMap<&ServerComponentName, NodeIndex>,
@@ -694,14 +844,12 @@ impl SystemApis {
             let consumed_apis = self
                 .component_apis_consumed(server_component, dependency_filter)?;
             for (client_pkg, _) in consumed_apis {
-                if versioned_on_server_only {
-                    let api = self
-                        .api_metadata
-                        .client_pkgname_lookup(client_pkg)
-                        .unwrap();
-                    if api.versioned_how != VersionedHow::Server {
-                        continue;
-                    }
+                if self.edge_filtered_out(
+                    edge_filter,
+                    server_component,
+                    client_pkg,
+                ) {
+                    continue;
                 }
 
                 for other_component in self.api_producers(client_pkg) {
@@ -726,6 +874,12 @@ impl SystemApis {
         let mut required = BTreeSet::new();
 
         for (server, server_unit) in &self.server_component_units {
+            // Components that don't participate in the upgrade DAG don't
+            // require an IDU annotation for their edges.
+            if !self.component_in_upgrade_dag(server) {
+                continue;
+            }
+
             for (client, _) in self.component_apis_consumed(server, filter)? {
                 // Only consider server-side-versioned APIs.
                 let api = self
@@ -849,7 +1003,7 @@ impl SystemApis {
         // of the DAG or not.  Why would we ignore edges based on whether
         // they're already in the DAG or not?
         //
-        // Recall that there are two ways that the metadata can specify that a
+        // Recall that there are three ways that the metadata can specify that a
         // particular API is "not part of the update DAG" (which is equivalent
         // to client-side-managed):
         //
@@ -859,6 +1013,9 @@ impl SystemApis {
         //   "nexus-client" are "non-DAG".  This means we promise to make the
         //   Nexus internal API client-managed (i.e., not part of the update
         //   DAG).  We verify this promise below.
+        // - a subcomponent can be marked as not being part of the steady-state
+        //   lifecycle (e.g., `lifecycle = "rack-init"`).  Edges from such
+        //   components are excluded from the DAG.
         // - a specific API can be marked as server-managed (meaning it's part
         //   of the update DAG) or not.  That's most of what this function deals
         //   with and proposes changes to.
@@ -896,7 +1053,10 @@ impl SystemApis {
         //   APIs
         //
         // Check if this DAG is cyclic.  This can't be made to work.
-        let (graph, nodes) = self.make_component_graph(filter, true)?;
+        let (graph, nodes) = self.make_component_graph(
+            filter,
+            EdgeFilter::DagOnly(&idu_only_edges),
+        )?;
         let reverse_nodes: BTreeMap<_, _> =
             nodes.iter().map(|(s_c, node)| (node, s_c)).collect();
         if let Err(error) = petgraph::algo::toposort(&graph, None) {
@@ -1087,8 +1247,18 @@ impl SystemApis {
     }
 }
 
+#[derive(Clone, Copy)]
 enum EdgeFilter<'a> {
+    /// Include every edge.
     All,
+    /// Include only edges that participate in the upgrade DAG. This excludes:
+    ///
+    /// * Client-side versioned APIs
+    /// * Components for which `Lifecycle::in_upgrade_dag` returns `false`
+    /// * Intra-deployment-unit-only edges
+    ///
+    /// The carried data is the set of intra-deployment-unit-only
+    /// `(server_component, client_package)` pairs to exclude.
     DagOnly(&'a BTreeSet<(ServerComponentName, ClientPackageName)>),
 }
 
@@ -1435,7 +1605,7 @@ impl<'a> ServerComponentsTracker<'a> {
     }
 
     /// Record that the given package is one of the deployment unit's top-level
-    /// packages (server components)
+    /// packages or subcomponents (collectively, server components)
     pub fn found_deployment_unit_package(
         &mut self,
         deployment_unit: &DeploymentUnitName,
