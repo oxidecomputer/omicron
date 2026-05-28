@@ -172,7 +172,7 @@ pub(super) fn analyze(
                              did not deserialize as DiskFact";
                             "case_id" => %case_id,
                             "fact_id" => %fact.id,
-                            "error" => InlineErrorChain::new(&*e).to_string(),
+                            "error" => InlineErrorChain::new(&*e),
                         );
                         return None;
                     }
