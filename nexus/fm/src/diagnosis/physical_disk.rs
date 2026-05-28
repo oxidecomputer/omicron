@@ -65,14 +65,14 @@ impl IdOrdItem for ZpoolUnhealthyFact {
     id_upcast!();
 }
 
-/// One in-service disk paired with its current observed health.
-/// `health` is `None` when the disk's zpool was not seen in the current
+/// One in-service disk paired with the current observed health of its zpool.
+/// `zpool_health` is `None` when the disk's zpool was not seen in the current
 /// inventory (e.g., sled down, lossy collection).
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct DiskHealthSnapshot {
     physical_disk_id: PhysicalDiskUuid,
     zpool_id: ZpoolUuid,
-    health: Option<ZpoolHealth>,
+    zpool_health: Option<ZpoolHealth>,
 }
 
 impl IdOrdItem for DiskHealthSnapshot {
@@ -123,7 +123,7 @@ pub(super) fn analyze(
         .map(|d| DiskHealthSnapshot {
             physical_disk_id: d.physical_disk_id,
             zpool_id: d.zpool_id,
-            health: observed_health.get(&d.zpool_id).copied(),
+            zpool_health: observed_health.get(&d.zpool_id).copied(),
         })
         .collect();
 
@@ -215,12 +215,12 @@ pub(super) fn analyze(
                     summary.physical_disk_id,
                 ));
             }
-            Some(snap) if snap.health == Some(ZpoolHealth::Online) => {
+            Some(snap) if snap.zpool_health == Some(ZpoolHealth::Online) => {
                 case_mut
                     .close(format!("zpool {} back to Online", snap.zpool_id,));
             }
             Some(snap) => {
-                let Some(current_health) = snap.health else {
+                let Some(current_health) = snap.zpool_health else {
                     continue;
                 };
                 for fact_ref in summary.unhealthy_facts.iter() {
@@ -236,7 +236,7 @@ pub(super) fn analyze(
     // (reusing the parent-forwarded one for this disk if any) and add a
     // fresh fact if one with this exact health isn't already present.
     for disk in in_service_health.iter() {
-        let Some(current_health) = disk.health else {
+        let Some(current_health) = disk.zpool_health else {
             continue;
         };
         if current_health == ZpoolHealth::Online {
