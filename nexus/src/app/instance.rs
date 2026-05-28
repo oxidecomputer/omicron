@@ -30,7 +30,6 @@ use nexus_db_model::InstanceUpdate;
 use nexus_db_model::IpAttachState;
 use nexus_db_model::IpKind;
 use nexus_db_model::Vmm as DbVmm;
-use nexus_db_model::VmmRuntimeState;
 use nexus_db_model::VmmState as DbVmmState;
 use nexus_db_queries::authn;
 use nexus_db_queries::authz;
@@ -46,6 +45,7 @@ use nexus_types::external_api::instance;
 use nexus_types::external_api::ip_pool;
 use nexus_types::external_api::multicast;
 use nexus_types::external_api::project;
+use nexus_types::instance::SledVmmState;
 use omicron_common::address::ConcreteIp;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::CreateResult;
@@ -82,7 +82,6 @@ use sled_agent_client::types::VmmPutStateBody;
 use sled_agent_types::instance as sled_agent;
 use sled_agent_types::instance::ExternalIpConfig;
 use sled_agent_types::instance::ExternalIps;
-use sled_agent_types::instance::SledVmmState;
 use sled_agent_types::inventory::SourceNatConfig;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeSet;
@@ -188,6 +187,16 @@ impl SledAgentInstanceError {
                     && rv.error_code.as_deref() == Some("NO_SUCH_INSTANCE")
             }
             _ => false,
+        }
+    }
+
+    /// If this error indicates that the VMM should be marked as `Failed`,
+    /// returns the reason for the failure.
+    pub fn vmm_failure_reason(&self) -> Option<db::model::VmmFailureReason> {
+        if self.vmm_gone() {
+            Some(db::model::VmmFailureReason::NoSuchInstance)
+        } else {
+            None
         }
     }
 }
@@ -1008,9 +1017,15 @@ impl super::Nexus {
             if let (InstanceStateChangeError::SledAgent(inner), Some(vmm)) =
                 (&e, state.vmm())
             {
-                if inner.vmm_gone() {
+                if let Some(reason) = inner.vmm_failure_reason() {
                     let _ = self
-                        .mark_vmm_failed(opctx, authz_instance, vmm, inner)
+                        .mark_vmm_failed(
+                            opctx,
+                            authz_instance,
+                            vmm,
+                            inner,
+                            reason,
+                        )
                         .await;
                 }
             }
@@ -1097,20 +1112,6 @@ impl super::Nexus {
             )
             .await?;
 
-        // Update multicast member state for this instance to "Left" and clear
-        // `sled_id` - only if multicast is enabled
-        if self.multicast_enabled() {
-            self.db_datastore
-                .multicast_group_members_detach_by_instance(
-                    opctx,
-                    InstanceUuid::from_untyped_uuid(authz_instance.id()),
-                )
-                .await?;
-        }
-
-        // Activate multicast reconciler to handle switch-level changes
-        self.background_tasks.task_multicast_reconciler.activate();
-
         if let Err(e) = self
             .instance_request_state(
                 opctx,
@@ -1122,15 +1123,22 @@ impl super::Nexus {
         {
             if let (InstanceStateChangeError::SledAgent(inner), Some(vmm)) =
                 (&e, state.vmm())
+                && let Some(reason) = inner.vmm_failure_reason()
             {
-                if inner.vmm_gone() {
-                    let _ = self
-                        .mark_vmm_failed(opctx, authz_instance, vmm, inner)
-                        .await;
-                }
+                let _ = self
+                    .mark_vmm_failed(opctx, authz_instance, vmm, inner, reason)
+                    .await;
             }
 
             return Err(e);
+        }
+
+        // Idempotent stop: with no active VMM, the instance-update saga will
+        // not fire (no terminal transition to drive it), so nudge the
+        // reconciler to converge any stale "Joined" rows now rather than wait
+        // a full reconciler tick.
+        if state.vmm().is_none() && self.multicast_enabled() {
+            self.background_tasks.task_multicast_reconciler.activate();
         }
 
         self.db_datastore
@@ -1150,7 +1158,7 @@ impl super::Nexus {
         let sa = self.sled_client(&sled_id).await?;
         sa.vmm_unregister(propolis_id)
             .await
-            .map(|res| res.into_inner().updated_runtime)
+            .map(|res| res.into_inner().updated_runtime.map(Into::into))
             .map_err(|e| {
                 InstanceStateChangeError::SledAgent(SledAgentInstanceError(e))
             })
@@ -1385,7 +1393,7 @@ impl super::Nexus {
                         &VmmPutStateBody { state: requested.into() },
                     )
                     .await
-                    .map(|res| res.into_inner().updated_runtime)
+                    .map(|res| res.into_inner().updated_runtime.map(Into::into))
                     .map_err(|e| SledAgentInstanceError(e));
 
                 // If the operation succeeded, write the instance state back,
@@ -1682,29 +1690,34 @@ impl super::Nexus {
                 },
             )
             .await
-            .map(|res| res.into_inner())
+            .map(|res| res.into_inner().into())
             .map_err(|e| SledAgentInstanceError(e));
 
         match instance_register_result {
             Ok(state) => {
                 self.notify_vmm_updated(opctx, *propolis_id, &state).await?;
-                let runtime: db::model::VmmRuntimeState =
-                    state.vmm_state.into();
+                let runtime = state.vmm_state;
                 Ok(db::model::Vmm {
-                    time_state_updated: runtime.time_state_updated,
-                    generation: runtime.generation,
-                    state: runtime.state,
+                    time_state_updated: runtime.time_updated,
+                    generation: runtime.generation.into(),
+                    state: DbVmmState::from(runtime.state),
+                    failure_reason: db::model::VmmFailureReason::from_vmm_state(
+                        runtime.state,
+                    ),
                     ..initial_vmm.clone()
                 })
             }
             Err(e) => {
-                if e.vmm_gone() {
+                // If this error indicates that the VMM should be marked as
+                // `Failed`, do that now.
+                if let Some(reason) = e.vmm_failure_reason() {
                     let _ = self
                         .mark_vmm_failed(
                             &opctx,
                             authz_instance.clone(),
                             &initial_vmm,
                             &e,
+                            reason,
                         )
                         .await;
                 }
@@ -1715,7 +1728,7 @@ impl super::Nexus {
 
     /// Attempts to transition an instance to to the `Failed` state in
     /// response to an error returned from a call to a sled
-    /// agent instance API, supplied in `reason`.
+    /// agent instance API, supplied in `error`.
     ///
     /// This is done by first marking the associated `vmm` as `Failed`, and then
     /// running an `instance-update` saga which transitions the instance record
@@ -1734,25 +1747,30 @@ impl super::Nexus {
         opctx: &OpContext,
         authz_instance: authz::Instance,
         vmm: &db::model::Vmm,
-        reason: &SledAgentInstanceError,
+        error: &SledAgentInstanceError,
+        reason: db::model::VmmFailureReason,
     ) -> Result<(), Error> {
         let instance_id = InstanceUuid::from_untyped_uuid(authz_instance.id());
         let vmm_id = PropolisUuid::from_untyped_uuid(vmm.id);
-        error!(self.log, "marking VMM failed due to sled agent API error";
-               "instance_id" => %instance_id,
-               "vmm_id" => %vmm_id,
-               "error" => ?reason);
+        error!(
+            &opctx.log,
+            "marking VMM failed due to sled agent API error";
+            "instance_id" => %instance_id,
+            "vmm_id" => %vmm_id,
+            "error" => &InlineErrorChain::new(&error),
+            "reason" => %reason,
+        );
 
-        let new_runtime = VmmRuntimeState {
-            state: db::model::VmmState::Failed,
-            time_state_updated: chrono::Utc::now(),
-            generation: db::model::Generation(vmm.generation.next()),
-        };
+        let new_runtime = vmm
+            .runtime()
+            .transition(nexus_types::instance::VmmState::Failed(reason.into()));
 
         match self.db_datastore.vmm_update_runtime(&vmm_id, &new_runtime).await
         {
             Ok(_) => {
-                info!(self.log, "marked VMM as Failed, preparing update saga";
+                info!(
+                    &opctx.log,
+                    "marked VMM as Failed, preparing update saga";
                     "instance_id" => %instance_id,
                     "vmm_id" => %vmm_id,
                     "reason" => ?reason,
@@ -1946,7 +1964,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         propolis_id: PropolisUuid,
-        new_runtime_state: &sled_agent::SledVmmState,
+        new_runtime_state: &SledVmmState,
     ) -> Result<(), Error> {
         if let Some((instance_id, saga)) = process_vmm_update(
             &self.db_datastore,
@@ -2752,7 +2770,7 @@ pub(crate) async fn process_vmm_update(
             &opctx,
             propolis_id,
             // TODO(eliza): probably should take this by value...
-            &new_runtime_state.vmm_state.clone().into(),
+            &new_runtime_state.vmm_state.clone(),
             migrations,
         )
         .await?;

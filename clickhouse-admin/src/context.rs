@@ -724,7 +724,15 @@ async fn get_retention_policy(
 //
 // This is a WAG, but the computations we do today to report table usage are
 // pretty inexpensive.
+//
+// NOTE: We explicitly use a smaller value during testing. This is to avoid
+// manipulating time with Tokio's test utils. That cannot work, because we run
+// every query to ClickHouse with a timeout, and that causes the tokio timers to
+// "auto-advance" to the end of that timeout when we pause in a test.
+#[cfg(not(test))]
 const USAGE_UPDATE_INTERVAL: Duration = Duration::from_mins(2);
+#[cfg(test)]
+const USAGE_UPDATE_INTERVAL: Duration = Duration::from_millis(250);
 
 async fn long_running_usage_task(
     tx: watch::Sender<DatabaseUsageResult>,
@@ -775,12 +783,19 @@ mod tests {
     use crate::context::ServerContext;
     use crate::context::USAGE_UPDATE_INTERVAL;
     use camino::Utf8PathBuf;
+    use chrono::NaiveDate;
+    use chrono::TimeZone;
+    use chrono_tz::Tz;
     use clickhouse_admin_types::CLICKHOUSE_SERVER_CONFIG_FILE;
     use clickhouse_admin_types::retention::Days;
     use clickhouse_admin_types::retention::RetentionPolicyRequest;
     use dropshot::ErrorStatusCode;
     use omicron_common::api::external::Generation;
     use omicron_test_utils::dev;
+    use oximeter_db::native::block::Block;
+    use oximeter_db::native::block::Column;
+    use oximeter_db::native::block::Precision;
+    use oximeter_db::native::block::ValueArray;
     use slog::info;
     use std::str::FromStr;
 
@@ -891,37 +906,13 @@ mod tests {
             ErrorStatusCode::SERVICE_UNAVAILABLE
         ));
 
-        // Initialize the database, then check the retention policy again.
-        //
-        // We need to wait for the `system.query_log` table to exist, which can
-        // take a while.
         context.init_db(false).await.expect("failed to initialize database");
 
-        let policy = dev::poll::wait_for_condition(
-            || async {
-                match context.retention_policy().await {
-                    Ok(pol) => {
-                        if pol.tables.contains_key("query_log") {
-                            Ok(pol)
-                        } else {
-                            Err(dev::poll::CondCheckError::<()>::NotYet)
-                        }
-                    }
-                    Err(_) => Err(dev::poll::CondCheckError::<()>::NotYet),
-                }
-            },
-            &std::time::Duration::from_millis(100),
-            &std::time::Duration::from_secs(30),
-        )
-        .await
-        .expect("failed to get retention policy");
-        assert!(!policy.tables.is_empty());
-
-        // The query log defaults to 7 days TTL, everything else is 30.
-        assert!(policy.tables.iter().all(|pol| {
-            let expected = if pol.table == "query_log" { 7 } else { 30 };
-            u8::from(pol.days) == expected
-        }));
+        let policy = context
+            .retention_policy()
+            .await
+            .expect("failed to get retention policy");
+        assert!(policy.tables.iter().all(|pol| { u8::from(pol.days) == 30 }));
 
         // Set everything to 3, and ensure we can read it back.
         let days = Days::new(3).unwrap();
@@ -981,42 +972,127 @@ mod tests {
         let usage = context.database_usage();
         println!("{usage:#?}");
         assert!(usage.last_success.is_some());
-        assert!(
-            usage
-                .last_success
-                .expect("Should have successfully computed something")
-                .tables
-                .is_empty()
-        );
 
-        // Jump forward until we actually do compute the usage again.
-        tokio::time::pause();
-        let now = tokio::time::Instant::now();
-        while now.elapsed() < 2 * USAGE_UPDATE_INTERVAL {
-            tokio::time::advance(std::time::Duration::from_millis(10)).await;
-        }
-        tokio::time::resume();
-        let usage = context.database_usage();
+        // Wait until we actually do compute the usage again.
+        //
+        // From `grep -c "CREATE TABLE" oximeter/db/schema/single-node/db-init.sql`.
+        const N_EXPECTED_TABLES: usize = 39;
+        let usage = dev::poll::wait_for_condition(
+            || async {
+                let usage = context.database_usage();
+                match &usage.last_success {
+                    Some(success) => {
+                        if success.tables.len() < N_EXPECTED_TABLES {
+                            Err(dev::poll::CondCheckError::<()>::NotYet)
+                        } else {
+                            Ok(usage)
+                        }
+                    }
+                    None => Err(dev::poll::CondCheckError::<()>::NotYet),
+                }
+            },
+            &std::time::Duration::from_millis(50),
+            &(2 * USAGE_UPDATE_INTERVAL),
+        )
+        .await
+        .unwrap();
         println!("{usage:#?}");
         let tables = &usage
             .last_success
             .as_ref()
             .expect("Should have computed something")
             .tables;
-        tables.contains_key(&String::from("oximeter.measurements_u64"));
-        tables.contains_key(&String::from("oximeter.measurements_u64"));
-        let version = tables.get(&String::from("oximeter.version")).unwrap();
-        assert_eq!(version.n_rows, 1);
+        assert!(
+            tables.contains_key(&String::from("oximeter.measurements_u64"))
+        );
+        assert!(
+            tables.contains_key(&String::from("oximeter.measurements_f64"))
+        );
 
-        // Kill the database, and force another collection.
+        // Insert some rows in the version table, so we can see it updated.
+        let version_table = String::from("oximeter.version");
+        let version_usage =
+            tables.get(&version_table).expect("Should have this table");
+        let naive_dt = NaiveDate::from_ymd_opt(2020, 1, 1)
+            .unwrap()
+            .and_hms_opt(12, 12, 12)
+            .unwrap();
+        let timestamp = Tz::UTC.from_local_datetime(&naive_dt).unwrap();
+        oximeter_db::native::Connection::new(
+            clickhouse.native_address().into(),
+        )
+        .await
+        .expect("Should be able to make client")
+        .insert(
+            uuid::Uuid::new_v4(),
+            "INSERT INTO oximeter.version FORMAT NATIVE",
+            Block {
+                name: String::new(),
+                info: Default::default(),
+                columns: [
+                    (
+                        "value".to_string(),
+                        Column::from(ValueArray::UInt64(vec![1, 2, 3])),
+                    ),
+                    (
+                        "timestamp".to_string(),
+                        Column::from(ValueArray::DateTime64 {
+                            precision: Precision::new(9).unwrap(),
+                            tz: Tz::UTC,
+                            values: vec![timestamp; 3],
+                        }),
+                    ),
+                ]
+                .into(),
+            },
+        )
+        .await
+        .expect("Should be able to insert data");
+
+        // Check again, waiting until we get more than the previous usage.
+        let usage = dev::poll::wait_for_condition(
+            || async {
+                let usage = context.database_usage();
+                match &usage.last_success {
+                    Some(success) => {
+                        let Some(usage) = success.tables.get(&version_table)
+                        else {
+                            return Err(
+                                dev::poll::CondCheckError::<()>::NotYet,
+                            );
+                        };
+                        if usage.n_rows > version_usage.n_rows {
+                            Ok(usage.clone())
+                        } else {
+                            Err(dev::poll::CondCheckError::<()>::NotYet)
+                        }
+                    }
+                    None => Err(dev::poll::CondCheckError::<()>::NotYet),
+                }
+            },
+            &std::time::Duration::from_millis(50),
+            &(2 * USAGE_UPDATE_INTERVAL),
+        )
+        .await
+        .expect("New rows didn't show up on time");
+        assert_eq!(usage.n_rows, 4);
+
+        // Kill the database, and wait for another collection. This one should
+        // fail.
         clickhouse.cleanup().await.unwrap();
-        tokio::time::pause();
-        let now = tokio::time::Instant::now();
-        while now.elapsed() < 2 * USAGE_UPDATE_INTERVAL {
-            tokio::time::advance(std::time::Duration::from_millis(10)).await;
-        }
-        tokio::time::resume();
-        let usage = context.database_usage();
+        let usage = dev::poll::wait_for_condition(
+            || async {
+                let usage = context.database_usage();
+                match &usage.last_error {
+                    Some(_) => Ok(usage),
+                    None => Err(dev::poll::CondCheckError::<()>::NotYet),
+                }
+            },
+            &std::time::Duration::from_millis(100),
+            &(2 * USAGE_UPDATE_INTERVAL),
+        )
+        .await
+        .unwrap();
         println!("{usage:#?}");
         assert!(
             usage.last_success.is_some(),
@@ -1025,7 +1101,11 @@ mod tests {
         let Some(err) = usage.last_error.as_ref() else {
             panic!("expected an error to have occurred, but found None");
         };
-        assert!(err.error.starts_with("Failed to check out"));
+        let is_network_err = |msg: &str| -> bool {
+            msg.starts_with("Failed to check out")
+                || msg.starts_with("Native protocol error")
+        };
+        assert!(is_network_err(&err.error), "Expected a network error error");
 
         logctx.cleanup_successful();
     }
