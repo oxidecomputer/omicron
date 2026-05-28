@@ -1,0 +1,124 @@
+{
+  "physical_disk": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "definitions": {
+      "CollectionUuid": {
+        "format": "uuid",
+        "type": "string",
+        "x-rust-type": {
+          "crate": "omicron-uuid-kinds",
+          "path": "omicron_uuid_kinds::CollectionUuid",
+          "version": "*"
+        }
+      },
+      "PhysicalDiskUuid": {
+        "format": "uuid",
+        "type": "string",
+        "x-rust-type": {
+          "crate": "omicron-uuid-kinds",
+          "path": "omicron_uuid_kinds::PhysicalDiskUuid",
+          "version": "*"
+        }
+      },
+      "ZpoolHealth": {
+        "oneOf": [
+          {
+            "enum": [
+              "online"
+            ],
+            "type": "string"
+          },
+          {
+            "enum": [
+              "degraded"
+            ],
+            "type": "string"
+          },
+          {
+            "enum": [
+              "faulted"
+            ],
+            "type": "string"
+          },
+          {
+            "enum": [
+              "offline"
+            ],
+            "type": "string"
+          },
+          {
+            "enum": [
+              "removed"
+            ],
+            "type": "string"
+          },
+          {
+            "enum": [
+              "unavailable"
+            ],
+            "type": "string"
+          }
+        ]
+      },
+      "ZpoolUuid": {
+        "format": "uuid",
+        "type": "string",
+        "x-rust-type": {
+          "crate": "omicron-uuid-kinds",
+          "path": "omicron_uuid_kinds::ZpoolUuid",
+          "version": "*"
+        }
+      }
+    },
+    "oneOf": [
+      {
+        "properties": {
+          "kind": {
+            "enum": [
+              "zpool_unhealthy"
+            ],
+            "type": "string"
+          },
+          "last_seen_health": {
+            "$ref": "#/definitions/ZpoolHealth"
+          },
+          "observed_in_inv": {
+            "allOf": [
+              {
+                "$ref": "#/definitions/CollectionUuid"
+              }
+            ]
+          },
+          "physical_disk_id": {
+            "allOf": [
+              {
+                "$ref": "#/definitions/PhysicalDiskUuid"
+              }
+            ]
+          },
+          "time_observed": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "zpool_id": {
+            "allOf": [
+              {
+                "$ref": "#/definitions/ZpoolUuid"
+              }
+            ]
+          }
+        },
+        "required": [
+          "kind",
+          "last_seen_health",
+          "observed_in_inv",
+          "physical_disk_id",
+          "time_observed",
+          "zpool_id"
+        ],
+        "type": "object"
+      }
+    ],
+    "title": "DiskFact"
+  }
+}
