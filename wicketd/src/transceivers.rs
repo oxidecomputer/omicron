@@ -235,14 +235,19 @@ async fn fetch_transceivers_from_one_switch(
     // These are in an outer loop because it's possible that the actual
     // `Controller` object we use to talk to the transceivers becomes unusable.
     // It binds a UDP port on the management network, over which it talks to the
-    // switch's SPs. But we are actually _using_ the management network to
-    // bootstrap the startup of the switch zone, specifically to fetch the base
-    // MAC addresses for all our switch ports from the SP.
+    // switch's SPs for information about the transceivers.
+    //
+    // Unfortunately, we're racing with Dendrite here. `wicketd` is actively
+    // using the management network to get transceiver state. Meanwhile, `dpd`
+    // is using the management network to bootstrap the startup fo the switch
+    // zone, specifically to fetch the base MAC addresses for all our switch
+    // ports from the SP.
     //
     // That bootstrapping means that we can possibly bind a UDP port on an
-    // address that we're about to tear down, when we get those real MAC
-    // addresses. That renders the controller unusable. The outer loop is to
-    // detect this case, and rebuild the controller when we need to.
+    // address that Dendrite is about to tear down, when we get those real MAC
+    // addresses. That renders unusable any controller built before that
+    // bootstrapping process completes. The outer loop is to detect this case,
+    // and rebuild the controller when we need to.
     loop {
         let controller = build_transceiver_controller(
             &log,
