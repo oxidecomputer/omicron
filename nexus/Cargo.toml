@@ -99,7 +99,6 @@ ref-cast.workspace = true
 rdb-types.workspace = true
 regex.workspace = true
 reqwest = { workspace = true, features = ["http2", "json"] }
-reqwest012 = { workspace = true }
 ring.workspace = true
 samael.workspace = true
 schemars = { workspace = true, features = ["chrono", "uuid1"] }
@@ -118,6 +117,7 @@ slog.workspace = true
 slog-async.workspace = true
 slog-dtrace.workspace = true
 slog-error-chain.workspace = true
+strum.workspace = true
 swrite.workspace = true
 display-error-chain.workspace = true
 slog-term.workspace = true
@@ -166,12 +166,17 @@ omicron-workspace-hack.workspace = true
 omicron-uuid-kinds.workspace = true
 zip = { workspace = true, features = ["jiff-02"] }
 
+[target.'cfg(target_os = "illumos")'.dependencies]
+# See omicron-rpaths for more about the "fmd-adm-sys" dependency.
+fmd-adm-sys.workspace = true
+
 [dev-dependencies]
 async-bb8-diesel.workspace = true
 camino-tempfile.workspace = true
 criterion.workspace = true
 diesel.workspace = true
 dns-server.workspace = true
+flate2.workspace = true
 expectorate.workspace = true
 gateway-messages.workspace = true
 gateway-test-utils.workspace = true

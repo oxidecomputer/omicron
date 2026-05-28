@@ -27,28 +27,15 @@ use clap::ValueEnum;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_types::fm::ereport::EreportFilters;
+use nexus_types::support_bundle::BundleDataCategory;
 use nexus_types::support_bundle::BundleDataSelection;
 use omicron_uuid_kinds::SupportBundleUuid;
-use std::io::Seek;
-use std::io::SeekFrom;
+use std::io::Write;
 use std::sync::Arc;
 use support_bundle_collection::BundleCollection;
 use support_bundle_collection::BundleInfo;
-use support_bundle_collection::zip::bundle_to_zipfile;
-
-/// Categories of data the bundle collector knows how to gather.
-///
-/// Mirrors `nexus_types::support_bundle::BundleDataCategory`, but is
-/// declared here so it can derive `clap::ValueEnum` without making
-/// `nexus-types` depend on clap.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, ValueEnum)]
-enum BundleCategory {
-    Reconfigurator,
-    HostInfo,
-    SledCubbyInfo,
-    SpDumps,
-    Ereports,
-}
+use support_bundle_collection::zip::bundle_to_stream;
+use support_bundle_collection::zip::bundle_to_writer;
 
 /// Arguments to the "omdb support-bundle" subcommand
 #[derive(Debug, Args)]
@@ -73,9 +60,10 @@ struct CollectArgs {
     #[command(flatten)]
     db_url_opts: DbUrlOptions,
 
-    /// Path where the resulting bundle zip will be written.
+    /// Optional path where the bundle zip will be written. If omitted,
+    /// the zip is streamed to stdout (suitable for piping over ssh).
     #[clap(long, short = 'o')]
-    output: Utf8PathBuf,
+    output: Option<Utf8PathBuf>,
 
     /// Reason recorded inside the bundle's metadata.
     #[clap(long, default_value = "collected via omdb")]
@@ -88,13 +76,13 @@ struct CollectArgs {
     /// Categories of data to collect. May be supplied multiple times.
     /// Defaults to all categories.
     #[clap(long, value_enum)]
-    include: Vec<BundleCategory>,
+    include: Vec<BundleDataCategory>,
 }
 
 impl CollectArgs {
     fn data_selection(&self) -> BundleDataSelection {
-        let categories: &[BundleCategory] = if self.include.is_empty() {
-            BundleCategory::value_variants()
+        let categories: &[BundleDataCategory] = if self.include.is_empty() {
+            BundleDataCategory::value_variants()
         } else {
             self.include.as_slice()
         };
@@ -102,11 +90,11 @@ impl CollectArgs {
         let mut sel = BundleDataSelection::new();
         for category in categories {
             sel = match category {
-                BundleCategory::Reconfigurator => sel.with_reconfigurator(),
-                BundleCategory::HostInfo => sel.with_all_sleds(),
-                BundleCategory::SledCubbyInfo => sel.with_sled_cubby_info(),
-                BundleCategory::SpDumps => sel.with_sp_dumps(),
-                BundleCategory::Ereports => sel.with_ereports(
+                BundleDataCategory::Reconfigurator => sel.with_reconfigurator(),
+                BundleDataCategory::HostInfo => sel.with_all_sleds(),
+                BundleDataCategory::SledCubbyInfo => sel.with_sled_cubby_info(),
+                BundleDataCategory::SpDumps => sel.with_sp_dumps(),
+                BundleDataCategory::Ereports => sel.with_ereports(
                     EreportFilters::new()
                         .with_start_time(
                             omicron_common::now_db_precision()
@@ -134,6 +122,12 @@ impl SupportBundleArgs {
 
 impl CollectArgs {
     async fn run(&self, omdb: &Omdb, log: &slog::Logger) -> anyhow::Result<()> {
+        // Collecting a full bundle stages every file in --tempdir before
+        // (or while) writing the zip. On the switch zone, where this
+        // command typically runs during incident response, disk space is
+        // limited and a large bundle can fill it. Gate the command behind
+        // -w/--destructive so an operator opts in knowingly.
+        let _token = omdb.check_allow_destructive()?;
         self.db_url_opts
             .with_datastore(omdb, log, async |opctx, datastore| {
                 self.collect(omdb, log, opctx, datastore).await
@@ -184,20 +178,30 @@ impl CollectArgs {
         let _ = cancel_handle.await;
         let report = collect_result?;
 
-        let zip_tempdir = self.tempdir.clone();
         let output = self.output.clone();
         tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
-            let mut tempfile = bundle_to_zipfile(&dir, &zip_tempdir)?;
-            tempfile.seek(SeekFrom::Start(0))?;
-            let mut out = std::fs::File::create(&output)
-                .with_context(|| format!("creating {output}"))?;
-            std::io::copy(&mut tempfile, &mut out)?;
+            match output {
+                Some(path) => {
+                    let file = std::fs::File::create(&path)
+                        .with_context(|| format!("creating {path}"))?;
+                    bundle_to_writer(&dir, &file)?;
+                }
+                None => {
+                    let mut stdout = std::io::stdout().lock();
+                    bundle_to_stream(&dir, &mut stdout)?;
+                    stdout.flush()?;
+                }
+            }
             Ok(())
         })
         .await
         .context("zip task panicked")??;
 
-        eprintln!("Wrote bundle to {}", self.output);
+        if let Some(path) = &self.output {
+            eprintln!("Wrote bundle to {path}");
+        } else {
+            eprintln!("Bundle streamed to stdout");
+        }
         eprintln!("{} steps executed:", report.steps.len());
         for step in &report.steps {
             let dur = step.end - step.start;

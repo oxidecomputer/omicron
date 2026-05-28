@@ -2,7 +2,7 @@
 #:
 #: name = "helios / package"
 #: variety = "basic"
-#: target = "helios-2.0-16c64gb"
+#: target = "helios-3.0-16c64gb"
 #: rust_toolchain = true
 #: output_rules = [
 #:	"=/work/package.tar.gz",
@@ -60,5 +60,7 @@ files=(
 	target/release/xtask
 	target/debug/bootstrap
 	tests/*
+	tools/opte_version
+	tools/opte_version_override
 )
 ptime -m tar cvzf $WORK/package.tar.gz "${files[@]}" "${packages[@]}"

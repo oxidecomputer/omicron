@@ -19,6 +19,8 @@ use futures::stream::FuturesUnordered;
 use nexus_db_model::Sled;
 use nexus_networking;
 use nexus_types::identity::Asset;
+use slog::error;
+use slog::info;
 use slog_error_chain::InlineErrorChain;
 use tokio::io::AsyncWriteExt;
 use tokio_util::sync::CancellationToken;

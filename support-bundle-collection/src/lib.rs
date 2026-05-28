@@ -12,9 +12,6 @@
 //! See `README.md` in this crate for a developer-oriented overview of
 //! the step framework.
 
-#[macro_use]
-extern crate slog;
-
 mod cache;
 pub mod collection;
 pub mod perfetto;

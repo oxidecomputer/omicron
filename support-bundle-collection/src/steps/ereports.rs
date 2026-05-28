@@ -20,6 +20,9 @@ use nexus_types::fm::Ereport;
 use nexus_types::internal_api::background::SupportBundleEreportStatus;
 use omicron_uuid_kinds::GenericUuid;
 use slog::Logger;
+use slog::debug;
+use slog::info;
+use slog::warn;
 use slog_error_chain::InlineErrorChain;
 use std::sync::Arc;
 

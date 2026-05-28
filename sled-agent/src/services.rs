@@ -84,7 +84,7 @@ use omicron_common::backoff::{
 use omicron_common::disk::{DatasetKind, DatasetName};
 use omicron_ddm_admin_client::DdmError;
 use omicron_uuid_kinds::OmicronZoneUuid;
-use sled_agent_rack_setup::{EarlyNetworkSetup, EarlyNetworkSetupError};
+use sled_agent_early_networking::{EarlyNetworkSetup, EarlyNetworkSetupError};
 use sled_agent_resolvable_files::{
     ZoneImageSourceResolver, ramdisk_file_source,
 };
@@ -2407,7 +2407,7 @@ impl ServiceManager {
                             default_handler_task_mode:
                                 HandlerTaskMode::Detached,
                             log_headers: vec![],
-                            compression: dropshot::CompressionConfig::None,
+                            compression: dropshot::CompressionConfig::Gzip,
                         },
                     },
                     dropshot_internal: dropshot::ConfigDropshot {

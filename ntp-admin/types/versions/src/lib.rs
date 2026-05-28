@@ -32,3 +32,5 @@
 pub mod latest;
 #[path = "initial/mod.rs"]
 pub mod v1;
+#[path = "add_max_error_and_offset/mod.rs"]
+pub mod v2;

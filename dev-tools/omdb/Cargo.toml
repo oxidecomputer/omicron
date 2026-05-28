@@ -31,6 +31,7 @@ daft.workspace = true
 diesel.workspace = true
 dropshot.workspace = true
 dyn-clone.workspace = true
+erebor = { workspace = true, features = ["pmbus"] }
 ereport-types.workspace = true
 futures.workspace = true
 gateway-client.workspace = true
@@ -59,7 +60,9 @@ nexus-networking.workspace = true
 nexus-reconfigurator-preparation.workspace = true
 nexus-saga-recovery.workspace = true
 nexus-types.workspace = true
+ntp-admin-client.workspace = true
 omicron-common.workspace = true
+omicron-nexus.workspace = true
 omicron-uuid-kinds.workspace = true
 omicron-workspace-hack.workspace = true
 owo-colors.workspace = true
@@ -98,13 +101,16 @@ update-engine.workspace = true
 url.workspace = true
 uuid.workspace = true
 
+[target.'cfg(target_os = "illumos")'.dependencies]
+# See omicron-rpaths for more about the "fmd-adm-sys" dependency.
+fmd-adm-sys.workspace = true
+
 [dev-dependencies]
 camino-tempfile.workspace = true
 expectorate.workspace = true
 http.workspace = true
 nexus-test-utils.workspace = true
 nexus-test-utils-macros.workspace = true
-omicron-nexus.workspace = true
 omicron-test-utils.workspace = true
 subprocess.workspace = true
 zip.workspace = true
