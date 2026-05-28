@@ -22,7 +22,6 @@ use crate::workspaces::Workspaces;
 use anyhow::Result;
 use anyhow::{Context, anyhow, bail};
 use camino::Utf8PathBuf;
-use cargo_metadata::Package;
 use iddqd::IdOrdItem;
 use iddqd::IdOrdMap;
 use iddqd::id_upcast;
@@ -173,14 +172,21 @@ impl SystemApis {
                 let (workspace, server_pkg) =
                     workspaces.find_package_workspace(dunit_pkg)?;
                 let dep_path = DepPath::for_pkg(server_pkg.id.clone());
-                tracker.found_package(dunit_pkg, dunit_pkg, &dep_path);
+                tracker.found_package(
+                    dunit_pkg,
+                    dunit_pkg,
+                    std::slice::from_ref(&dep_path),
+                );
 
-                workspace.walk_required_deps_recursively(
-                    server_pkg,
-                    &mut |p: &Package, dep_path: &DepPath| {
-                        tracker.found_package(dunit_pkg, &p.name, dep_path);
-                    },
-                )?;
+                let outcome =
+                    workspace.walk_required_deps_recursively(server_pkg)?;
+                for pkg_outcome in &outcome.found {
+                    tracker.found_package(
+                        dunit_pkg,
+                        &pkg_outcome.package.name,
+                        &pkg_outcome.dep_paths,
+                    );
+                }
             }
         }
 
@@ -219,17 +225,8 @@ impl SystemApis {
         for server_pkgname in server_component_units.keys() {
             let (workspace, pkg) =
                 workspaces.find_package_workspace(server_pkgname)?;
-            workspace
-                .walk_required_deps_recursively(
-                    pkg,
-                    &mut |p: &Package, dep_path: &DepPath| {
-                        deps_tracker.found_dependency(
-                            server_pkgname,
-                            &p.name,
-                            dep_path,
-                        );
-                    },
-                )
+            let outcome = workspace
+                .walk_required_deps_recursively(pkg)
                 .with_context(|| {
                     format!(
                         "iterating dependencies of workspace {:?} package {:?}",
@@ -237,6 +234,13 @@ impl SystemApis {
                         server_pkgname
                     )
                 })?;
+            for pkg_outcome in &outcome.found {
+                deps_tracker.found_dependency(
+                    server_pkgname,
+                    &pkg_outcome.package.name,
+                    &pkg_outcome.dep_paths,
+                );
+            }
         }
 
         let (apis_consumed, api_consumers) =
@@ -1414,7 +1418,7 @@ impl<'a> ServerComponentsTracker<'a> {
     }
 
     /// Record that deployment unit package `dunit_pkgname` depends on package
-    /// `pkgname` via dependency chain `dep_path`
+    /// `pkgname` via each of the given dependency chains `dep_paths`
     ///
     /// This only records anything if `pkgname` turns out to be a known API
     /// client package name, in which case this records that the server
@@ -1423,14 +1427,16 @@ impl<'a> ServerComponentsTracker<'a> {
         &mut self,
         dunit_pkgname: &ServerComponentName,
         pkgname: &str,
-        dep_path: &DepPath,
+        dep_paths: &[DepPath],
     ) {
         let Some(apis) = self.known_server_packages.get(pkgname) else {
             return;
         };
 
-        for api in apis {
-            self.found_api_producer(api, dunit_pkgname, dep_path);
+        for dep_path in dep_paths {
+            for api in apis {
+                self.found_api_producer(api, dunit_pkgname, dep_path);
+            }
         }
     }
 
@@ -1488,7 +1494,7 @@ impl<'a> ClientDependenciesTracker<'a> {
     }
 
     /// Record that comopnent `server_pkgname` consumes package `pkgname` via
-    /// dependency chain `dep_path`
+    /// each of the given dependency chains `dep_paths`
     ///
     /// This only records cases where `pkgname` is a known client package for
     /// one of our APIs, in which case it records that this server component
@@ -1497,7 +1503,7 @@ impl<'a> ClientDependenciesTracker<'a> {
         &mut self,
         server_pkgname: &ServerComponentName,
         pkgname: &str,
-        dep_path: &DepPath,
+        dep_paths: &[DepPath],
     ) {
         let Some(api) = self.api_metadata.client_pkgname_lookup(pkgname) else {
             return;
@@ -1506,18 +1512,22 @@ impl<'a> ClientDependenciesTracker<'a> {
         // This is the name of a known client package.  Record it.
         let status = api.restricted_to_consumers.status(server_pkgname);
         let client_pkgname = ClientPackageName::from(pkgname.to_owned());
-        self.api_consumers
-            .entry(client_pkgname.clone())
-            .or_insert_with(IdOrdMap::new)
-            .entry(&server_pkgname)
-            .or_insert_with(|| ApiConsumer::new(server_pkgname.clone(), status))
-            .add_path(dep_path.clone());
-        self.apis_consumed
-            .entry(server_pkgname.clone())
-            .or_insert_with(BTreeMap::new)
-            .entry(client_pkgname)
-            .or_insert_with(Vec::new)
-            .push(dep_path.clone());
+        for dep_path in dep_paths {
+            self.api_consumers
+                .entry(client_pkgname.clone())
+                .or_insert_with(IdOrdMap::new)
+                .entry(&server_pkgname)
+                .or_insert_with(|| {
+                    ApiConsumer::new(server_pkgname.clone(), status.clone())
+                })
+                .add_path(dep_path.clone());
+            self.apis_consumed
+                .entry(server_pkgname.clone())
+                .or_insert_with(BTreeMap::new)
+                .entry(client_pkgname.clone())
+                .or_insert_with(Vec::new)
+                .push(dep_path.clone());
+        }
     }
 }
 
