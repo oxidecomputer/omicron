@@ -313,9 +313,8 @@ fn plan_mix() {
 
     // qsfp0: unchanged
     assert_eq!(plan.unchanged, BTreeSet::from([qsfp0]));
-    // qsfp1: speed changed, so we have to remove it before applying
     // qsfp2: in dpd but not desired
-    assert_eq!(plan.to_clear, BTreeSet::from([qsfp1.clone(), qsfp2]));
+    assert_eq!(plan.to_clear, BTreeSet::from([qsfp2]));
     // qsfp1: changed, qsfp3: new
     assert_eq!(
         plan.to_apply.keys().collect::<BTreeSet<_>>(),
@@ -684,17 +683,9 @@ impl TestInput {
                     Some(port_id.to_dpd())
                 }
                 SwitchPortSettingsTestInput::DpdAndSwitch0Changed {
-                    dpd,
-                    switch0,
-                } => {
-                    // Changes to speed/fec require a clear before applying.
-                    if dpd.speed != switch0.speed || dpd.fec != switch0.fec {
-                        Some(port_id.to_dpd())
-                    } else {
-                        None
-                    }
+                    ..
                 }
-                SwitchPortSettingsTestInput::DesiredSwitch0(_)
+                | SwitchPortSettingsTestInput::DesiredSwitch0(_)
                 | SwitchPortSettingsTestInput::DesiredSwitch1(_)
                 | SwitchPortSettingsTestInput::DpdAndSwitch0Same(_) => None,
             })

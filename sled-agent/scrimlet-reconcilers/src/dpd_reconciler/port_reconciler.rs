@@ -389,7 +389,7 @@ impl ReconciliationPlan {
 
         // Any entries removed are ports that have settings in dpd but not
         // `config`; we need to clear them.
-        let mut to_clear = removed
+        let to_clear = removed
             .into_iter()
             .map(|item| parse_port_id(&item.port_id, "dpd"))
             .collect::<Result<BTreeSet<DpdQsfp>, _>>()?;
@@ -418,15 +418,6 @@ impl ReconciliationPlan {
             } else {
                 let port_id =
                     parse_port_id(leaf.key(), "rack network config AND dpd")?;
-
-                // Workaround for dpd limitation: the speed and fec of a link
-                // require us to remove it first. Any other change can be
-                // applied in place. TODO: link to dendrite issue / PR
-                if leaf.before().speed != leaf.after().speed
-                    || leaf.before().fec != leaf.after().fec
-                {
-                    to_clear.insert(port_id.clone());
-                }
 
                 // `common` is a map of unique keys that must be distinct from
                 // the `added` keys used to seed `to_apply`, so these inserts
