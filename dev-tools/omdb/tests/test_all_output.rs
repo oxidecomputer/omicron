@@ -465,9 +465,15 @@ async fn test_omdb_success_cases() {
     });
     let mut archive =
         zip::ZipArchive::new(zip_file).expect("bundle is a valid zip archive");
-    for required in
-        ["bundle_id.txt", "meta/reason_for_creation.txt", "meta/trace.json"]
-    {
+    for required in [
+        "bundle_id.txt",
+        "meta/reason_for_creation.txt",
+        "meta/trace.json",
+        "sp_task_dumps/sled_0/dump-0.zip",
+        "sp_task_dumps/sled_1/dump-0.zip",
+        "sp_task_dumps/switch_0/dump-0.zip",
+        "sp_task_dumps/switch_1/dump-0.zip",
+    ] {
         assert!(
             archive.by_name(required).is_ok(),
             "bundle zip is missing expected entry {required}",
@@ -511,9 +517,15 @@ async fn test_omdb_success_cases() {
         .expect("captured stdout file should exist");
     let mut archive = zip::ZipArchive::new(zip_file)
         .expect("streamed bundle is a valid zip archive");
-    for required in
-        ["bundle_id.txt", "meta/reason_for_creation.txt", "meta/trace.json"]
-    {
+    for required in [
+        "bundle_id.txt",
+        "meta/reason_for_creation.txt",
+        "meta/trace.json",
+        "sp_task_dumps/sled_0/dump-0.zip",
+        "sp_task_dumps/sled_1/dump-0.zip",
+        "sp_task_dumps/switch_0/dump-0.zip",
+        "sp_task_dumps/switch_1/dump-0.zip",
+    ] {
         assert!(
             archive.by_name(required).is_ok(),
             "streamed bundle zip is missing expected entry {required}",

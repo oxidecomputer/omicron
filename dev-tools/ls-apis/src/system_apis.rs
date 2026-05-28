@@ -157,35 +157,36 @@ impl SystemApis {
         }
 
         // For each component, compute the set of package IDs to omit when
-        // walking its dependencies.  A subcomponent's package is omitted from
-        // its parent package's walk, so that the subcomponent's dependency
-        // subgraph is attributed to the subcomponent rather than to its parent.
+        // walking its dependencies.  An embedded component's package is
+        // omitted from its parent package's walk, so that the embedded
+        // component's dependency subgraph is attributed to the embedded
+        // component rather than to its parent.
         let mut omitted_nodes: BTreeMap<
             &ServerComponentName,
             BTreeSet<&PackageId>,
         > = BTreeMap::new();
-        // Maps each omitted package ID back to the subcomponent that
+        // Maps each omitted package ID back to the embedded component that
         // contributed it.  Used after the producer walk to produce a helpful
-        // error if a subcomponent's omission turned out to be a no-op.
-        let mut omitted_pkgid_subcomponent = BTreeMap::new();
+        // error if an embedded component's omission turned out to be a no-op.
+        let mut omitted_pkgid_embedded = BTreeMap::new();
         for component in api_metadata.server_components() {
             // Ensure every component has an entry, even if it omits nothing.
             omitted_nodes.entry(component.name()).or_default();
 
             match component.kind() {
                 ServerComponentKind::TopLevel => {}
-                ServerComponentKind::Subcomponent { inside } => {
-                    // A subcomponent is a library crate linked into the
-                    // `inside` binary, so it necessarily lives in the same
-                    // workspace as `inside`.  Resolve its package within that
-                    // workspace specifically.
+                ServerComponentKind::Embedded { inside } => {
+                    // An embedded component is a library crate linked into
+                    // the `inside` binary, so it necessarily lives in the
+                    // same workspace as `inside`.  Resolve its package within
+                    // that workspace specifically.
                     let (workspace, _) =
                         workspaces.find_package_workspace(inside)?;
-                    let sub_pkg = workspace
+                    let embedded_pkg = workspace
                         .find_workspace_package(component.name())
                         .ok_or_else(|| {
                             anyhow!(
-                                "subcomponent {:?} not found in its \
+                                "embedded component {:?} not found in its \
                                  expected workspace\n  \
                                  expected workspace: {:?} (the workspace \
                                  of its `inside` package {:?})\n  \
@@ -198,11 +199,12 @@ impl SystemApis {
                                 component.deployment_unit(),
                             )
                         })?;
-                    omitted_pkgid_subcomponent.insert(&sub_pkg.id, component);
+                    omitted_pkgid_embedded
+                        .insert(&embedded_pkg.id, component);
                     omitted_nodes
                         .entry(inside)
                         .or_default()
-                        .insert(&sub_pkg.id);
+                        .insert(&embedded_pkg.id);
                 }
             }
         }
@@ -254,40 +256,42 @@ impl SystemApis {
                             );
                         }
 
-                        // Every subcomponent declared `inside` this package
-                        // must actually be one of its required Cargo
-                        // dependencies.  Otherwise, omitting it from this walk
-                        // did nothing, and its `subcomponents` entry is stale
-                        // or wrong.
+                        // Every embedded component declared `inside` this
+                        // package must actually be one of its required Cargo
+                        // dependencies.  Otherwise, omitting it from this
+                        // walk did nothing, and its `embedded_components`
+                        // entry is stale or wrong.
                         if let Some(&pkgid) =
                             omitted.difference(&outcome.omitted_seen).next()
                         {
-                            let sub = omitted_pkgid_subcomponent
+                            let embedded = omitted_pkgid_embedded
                                 .get(pkgid)
                                 .copied()
                                 .expect(
                                     "every omitted package ID was \
-                                     registered with its subcomponent",
+                                     registered with its embedded component",
                                 );
                             bail!(
-                                "subcomponent {:?} is declared `inside` a \
-                                 package that doesn't depend on it\n  \
+                                "embedded component {:?} is declared \
+                                 `inside` a package that doesn't depend on \
+                                 it\n  \
                                  deployment unit: {:?}\n  \
                                  `inside` package: {:?} (no normal or build \
-                                 Cargo dependency on this subcomponent)\n  \
-                                 hint: remove the stale `subcomponents` \
-                                 entry, fix its `inside` field, or restore \
-                                 the dependency if it was removed or made \
-                                 dev-only",
-                                sub.name(),
-                                sub.deployment_unit(),
+                                 Cargo dependency on this embedded \
+                                 component)\n  \
+                                 hint: remove the stale \
+                                 `embedded_components` entry, fix its \
+                                 `inside` field, or restore the dependency \
+                                 if it was removed or made dev-only",
+                                embedded.name(),
+                                embedded.deployment_unit(),
                                 component_name,
                             );
                         }
                     }
-                    ServerComponentKind::Subcomponent { .. } => {
-                        // Subcomponents host no Dropshot APIs, so they are
-                        // not walked as API producers here.  Their
+                    ServerComponentKind::Embedded { .. } => {
+                        // Embedded components host no Dropshot APIs, so they
+                        // are not walked as API producers here.  Their
                         // dependency subgraph is walked separately, as a
                         // consumer, in the loop below.
                     }
@@ -1010,9 +1014,9 @@ impl SystemApis {
         //   "nexus-client" are "non-DAG".  This means we promise to make the
         //   Nexus internal API client-managed (i.e., not part of the update
         //   DAG).  We verify this promise below.
-        // - a subcomponent can be marked as not being part of the steady-state
-        //   lifecycle (e.g., `lifecycle = "rack-init"`).  Edges from such
-        //   components are excluded from the DAG.
+        // - an embedded component can be marked as not being part of the
+        //   steady-state lifecycle (e.g., `lifecycle = "rack-init"`).  Edges
+        //   from such components are excluded from the DAG.
         // - a specific API can be marked as server-managed (meaning it's part
         //   of the update DAG) or not.  That's most of what this function deals
         //   with and proposes changes to.
@@ -1591,7 +1595,7 @@ impl<'a> ServerComponentsTracker<'a> {
     }
 
     /// Record that the given package is one of the deployment unit's top-level
-    /// packages or subcomponents (collectively, server components)
+    /// packages or embedded components (collectively, server components)
     pub fn found_deployment_unit_package(
         &mut self,
         deployment_unit: &DeploymentUnitName,

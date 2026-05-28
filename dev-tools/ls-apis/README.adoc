@@ -167,24 +167,24 @@ packages = [
 
 Each entry in `packages` is a _top-level package_: a Rust binary shipped in that deployment unit.  ls-apis walks each top-level package's Cargo dependencies to discover the APIs it produces and consumes.
 
-==== Subcomponents
+==== Embedded components
 
 Sometimes one binary contains a body of code whose API dependencies are best tracked separately from the rest of it.  The motivating case is the Rack Setup Service (RSS): it lives in the `sled-agent-rack-setup` library crate, which is linked into the `omicron-sled-agent` binary, but it runs only once (at rack initialization) and has different semantics from the rest of the Sled Agent.
 
-A _subcomponent_ is such a library, tracked as an API consumer in its own right:
+An _embedded component_ is such a library, tracked as an API consumer in its own right:
 
 ```toml
 [[deployment_units]]
 name = "Host OS"
 packages = [ "omicron-sled-agent", ... ]
-subcomponents = [
+embedded_components = [
     { name = "sled-agent-rack-setup", inside = "omicron-sled-agent", lifecycle = "rack-init" },
 ]
 ```
 
-`inside` names the top-level package (in the same deployment unit) that links the subcomponent.  When ls-apis walks that package's dependencies, the subcomponent's own crate is skipped, so any API dependency reachable only through the subcomponent is attributed to the subcomponent instead of to the containing binary.  (A dependency the binary also reaches by another path is attributed to both.)  The subcomponent is then walked separately, as its own consumer.
+`inside` names the top-level package (in the same deployment unit) that links the embedded component.  When ls-apis walks that package's dependencies, the embedded component's own crate is skipped, so any API dependency reachable only through the embedded component is attributed to the embedded component instead of to the containing binary.  (A dependency the binary also reaches by another path is attributed to both.)  The embedded component is then walked separately, as its own consumer.
 
-A subcomponent is assumed not to host any Dropshot APIs of its own, so subcomponents are not walked as API producers.
+An embedded component is assumed not to host any Dropshot APIs of its own, so embedded components are not walked as API producers.
 
 ==== Lifecycle
 
@@ -203,7 +203,7 @@ A component's `lifecycle` describes when its code runs:
 
 |===
 
-`lifecycle` may currently be set only on a subcomponent; every top-level package is treated as `steady-state`.
+`lifecycle` may currently be set only on an embedded component; every top-level package is treated as `steady-state`.
 
 The filtering is a little complicated but very important!
 
