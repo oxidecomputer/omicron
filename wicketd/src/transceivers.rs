@@ -7,6 +7,7 @@
 use gateway_client::types::SpIdentifier;
 use sled_agent_types::early_networking::SwitchSlot;
 use slog::{Logger, debug, error};
+use slog_error_chain::InlineErrorChain;
 use std::{
     collections::HashMap,
     sync::{Arc, Mutex},
@@ -14,7 +15,7 @@ use std::{
 };
 use tokio::{
     sync::{mpsc, watch},
-    time::Instant,
+    time::{Instant, Interval},
 };
 use transceiver_controller::{
     ConfigBuilder, Controller, Error, ModuleId, ModuleResult,
@@ -204,7 +205,7 @@ struct TransceiverUpdate {
 // Task fetching all transceiver state from one switch.
 async fn fetch_transceivers_from_one_switch(
     log: Logger,
-    tx: mpsc::Sender<TransceiverUpdate>,
+    mut tx: mpsc::Sender<TransceiverUpdate>,
     switch_slot: SwitchSlot,
     interface: &'static str,
 ) {
@@ -224,47 +225,71 @@ async fn fetch_transceivers_from_one_switch(
         sp_request_rx,
     ));
 
-    // First, setup the transceiver controller.
-    let controller = loop {
-        check_interval.tick().await;
-        // NOTE: We bind any ephemeral port here, since we cannot choose the
-        // default (that's used by Dendrite). This doesn't affect functionality,
-        // in any case, since the SP doesn't send us unsolicited messages.
-        let config = match ConfigBuilder::new(interface).port(0).build() {
-            Ok(c) => c,
-            Err(e) => {
-                error!(
-                    log,
-                    "failed to create transceiver controller configuration";
-                    "interface" => interface,
-                    "error" => %e
-                );
-                continue;
-            }
-        };
-
-        match Controller::new(
-            config,
-            log.new(slog::o!("component" => "transceiver-controller")),
+    // Enter the main loop.
+    //
+    // This loop consists of two inner ones, which:
+    //
+    // - build the transciever controller, and
+    // - fetch the state of the transceivers and forward it
+    //
+    // These are in an outer loop because it's possible that the actual
+    // `Controller` object we use to talk to the transceivers becomes unusable.
+    // It binds a UDP port on the management network, over which it talks to the
+    // switch's SPs for information about the transceivers.
+    //
+    // Unfortunately, we're racing with Dendrite here. `wicketd` is actively
+    // using the management network to get transceiver state. Meanwhile, `dpd`
+    // is using the management network to bootstrap the startup fo the switch
+    // zone, specifically to fetch the base MAC addresses for all our switch
+    // ports from the SP.
+    //
+    // That bootstrapping means that we can possibly bind a UDP port on an
+    // address that Dendrite is about to tear down, when we get those real MAC
+    // addresses. That renders unusable any controller built before that
+    // bootstrapping process completes. The outer loop is to detect this case,
+    // and rebuild the controller when we need to.
+    loop {
+        let controller = build_transceiver_controller(
+            &log,
+            interface,
+            &mut check_interval,
             sp_request_tx.clone(),
         )
-        .await
-        {
-            Ok(c) => break c,
-            Err(e) => {
-                error!(
-                    log,
-                    "failed to create transceiver controller";
-                    "interface" => interface,
-                    "error" => %e,
-                );
-                continue;
-            }
-        };
-    };
+        .await;
+        debug!(log, "created transceiver controller, starting poll loop");
+        let err = poll_transceiver_state(
+            controller,
+            &log,
+            &mut tx,
+            switch_slot,
+            interface,
+            &mut check_interval,
+        )
+        .await;
+        error!(
+            log,
+            "network error fetching transceiver state, \
+            controller we be rebuilt";
+            "interface" => interface,
+            "switch_slot" => ?switch_slot,
+            "error" => InlineErrorChain::new(&err),
+        );
+    }
+}
 
-    // Then poll the transceivers periodically.
-    debug!(log, "created transceiver controller, starting poll loop");
+// Poll transceiver state forever, forwarding updates.
+//
+// This only returns if polling fails because the transceiver controller's UDP
+// socket appears broken. Other kinds of errors, like timeouts, are swallowed
+// and the polling loop continues.
+async fn poll_transceiver_state(
+    controller: Controller,
+    log: &Logger,
+    tx: &mut mpsc::Sender<TransceiverUpdate>,
+    switch_slot: SwitchSlot,
+    interface: &'static str,
+    check_interval: &mut Interval,
+) -> Error {
     loop {
         match fetch_transceiver_state(&controller).await {
             Ok(transceivers) => {
@@ -285,15 +310,85 @@ async fn fetch_transceivers_from_one_switch(
                     );
                 }
             }
+            Err(e) if is_network_error(&e) => return e,
             Err(e) => error!(
                 log,
                 "failed to fetch transceiver state";
                 "interface" => interface,
-                "error" => %e,
+                "error" => InlineErrorChain::new(&e),
             ),
         }
         check_interval.tick().await;
     }
+}
+
+// Return true if this transceiver error appears to be a networking error that
+// requries we rebuild the transceiver controller itself.
+fn is_network_error(e: &Error) -> bool {
+    match e {
+        // It's tempting to match on the error kind here. But it's also hard to
+        // predict which errors are actually permanent. Since rebuilding the
+        // controller is pretty cheap, we're being conservative.
+        Error::Io(_) | Error::BadInterface(_) => true,
+        Error::Protocol(_)
+        | Error::MessageRequiresData
+        | Error::MaxRetries(_)
+        | Error::MaxFaultMessages(_)
+        | Error::UnexpectedMessage(_)
+        | Error::InvalidWriteData { .. }
+        | Error::InvalidPowerStateTransition
+        | Error::Mac(_)
+        | Error::Transceiver(_)
+        | Error::ByteOutOfRange(_) => false,
+    }
+}
+
+// Create a transceiver controller, retrying forever until success.
+async fn build_transceiver_controller(
+    log: &Logger,
+    interface: &str,
+    check_interval: &mut Interval,
+    sp_request_tx: mpsc::Sender<SpRequest>,
+) -> Controller {
+    // First, setup the transceiver controller.
+    let controller = loop {
+        check_interval.tick().await;
+        // NOTE: We bind any ephemeral port here, since we cannot choose the
+        // default (that's used by Dendrite). This doesn't affect functionality,
+        // in any case, since the SP doesn't send us unsolicited messages.
+        let config = match ConfigBuilder::new(interface).port(0).build() {
+            Ok(c) => c,
+            Err(e) => {
+                error!(
+                    log,
+                    "failed to create transceiver controller configuration";
+                    "interface" => interface,
+                    "error" => InlineErrorChain::new(&e),
+                );
+                continue;
+            }
+        };
+
+        match Controller::new(
+            config,
+            log.new(slog::o!("component" => "transceiver-controller")),
+            sp_request_tx.clone(),
+        )
+        .await
+        {
+            Ok(c) => break c,
+            Err(e) => {
+                error!(
+                    log,
+                    "failed to create transceiver controller";
+                    "interface" => interface,
+                    "error" => InlineErrorChain::new(&e),
+                );
+                continue;
+            }
+        };
+    };
+    controller
 }
 
 // A loop that just drops any messages we get from the SP.
