@@ -185,15 +185,17 @@ impl SystemApis {
                         .find_workspace_package(component.name())
                         .ok_or_else(|| {
                             anyhow!(
-                                "subcomponent {:?} (in deployment unit \
-                                 {:?}) is not a package in workspace {:?} \
-                                 (the workspace of its `inside` package \
-                                 {:?}); check for a typo in `name`, or that \
-                                 the package actually exists",
+                                "subcomponent {:?} not found in its \
+                                 expected workspace\n  \
+                                 expected workspace: {:?} (the workspace \
+                                 of its `inside` package {:?})\n  \
+                                 deployment unit: {:?}\n  \
+                                 hint: check `name` for typos, or that the \
+                                 package exists in that workspace",
                                 component.name(),
-                                component.deployment_unit(),
                                 workspace.name(),
                                 inside,
+                                component.deployment_unit(),
                             )
                         })?;
                     omitted_pkgid_subcomponent.insert(&sub_pkg.id, component);
@@ -234,7 +236,7 @@ impl SystemApis {
                         tracker.found_package(
                             component_name,
                             component_name,
-                            &dep_path,
+                            std::slice::from_ref(&dep_path),
                         );
 
                         let omitted = omitted_nodes.get(component_name).expect(
@@ -244,11 +246,11 @@ impl SystemApis {
                             .walk_required_deps_recursively(
                                 server_pkg, omitted,
                             )?;
-                        for (dep_pkg, dep_path) in &outcome.found {
+                        for pkg_outcome in &outcome.found {
                             tracker.found_package(
                                 component_name,
-                                &dep_pkg.name,
-                                dep_path,
+                                &pkg_outcome.package.name,
+                                &pkg_outcome.dep_paths,
                             );
                         }
 
@@ -268,16 +270,17 @@ impl SystemApis {
                                      registered with its subcomponent",
                                 );
                             bail!(
-                                "subcomponent {:?} (in deployment unit \
-                                 {:?}) is declared with `inside = {:?}`, \
-                                 but {:?} has no normal or build Cargo \
-                                 dependency on it; remove the stale \
-                                 `subcomponents` entry, correct its \
-                                 `inside` field, or restore the dependency \
-                                 if it was removed or made dev-only",
+                                "subcomponent {:?} is declared `inside` a \
+                                 package that doesn't depend on it\n  \
+                                 deployment unit: {:?}\n  \
+                                 `inside` package: {:?} (no normal or build \
+                                 Cargo dependency on this subcomponent)\n  \
+                                 hint: remove the stale `subcomponents` \
+                                 entry, fix its `inside` field, or restore \
+                                 the dependency if it was removed or made \
+                                 dev-only",
                                 sub.name(),
                                 sub.deployment_unit(),
-                                component_name,
                                 component_name,
                             );
                         }
@@ -340,11 +343,11 @@ impl SystemApis {
                         server_pkgname
                     )
                 })?;
-            for (dep_pkg, dep_path) in &outcome.found {
+            for pkg_outcome in &outcome.found {
                 deps_tracker.found_dependency(
                     server_pkgname,
-                    &dep_pkg.name,
-                    dep_path,
+                    &pkg_outcome.package.name,
+                    &pkg_outcome.dep_paths,
                 );
             }
         }
@@ -1565,7 +1568,7 @@ impl<'a> ServerComponentsTracker<'a> {
     }
 
     /// Record that deployment unit package `dunit_pkgname` depends on package
-    /// `pkgname` via dependency chain `dep_path`
+    /// `pkgname` via each of the given dependency chains `dep_paths`
     ///
     /// This only records anything if `pkgname` turns out to be a known API
     /// client package name, in which case this records that the server
@@ -1574,14 +1577,16 @@ impl<'a> ServerComponentsTracker<'a> {
         &mut self,
         dunit_pkgname: &ServerComponentName,
         pkgname: &str,
-        dep_path: &DepPath,
+        dep_paths: &[DepPath],
     ) {
         let Some(apis) = self.known_server_packages.get(pkgname) else {
             return;
         };
 
-        for api in apis {
-            self.found_api_producer(api, dunit_pkgname, dep_path);
+        for dep_path in dep_paths {
+            for api in apis {
+                self.found_api_producer(api, dunit_pkgname, dep_path);
+            }
         }
     }
 
@@ -1639,7 +1644,7 @@ impl<'a> ClientDependenciesTracker<'a> {
     }
 
     /// Record that comopnent `server_pkgname` consumes package `pkgname` via
-    /// dependency chain `dep_path`
+    /// each of the given dependency chains `dep_paths`
     ///
     /// This only records cases where `pkgname` is a known client package for
     /// one of our APIs, in which case it records that this server component
@@ -1648,7 +1653,7 @@ impl<'a> ClientDependenciesTracker<'a> {
         &mut self,
         server_pkgname: &ServerComponentName,
         pkgname: &str,
-        dep_path: &DepPath,
+        dep_paths: &[DepPath],
     ) {
         let Some(api) = self.api_metadata.client_pkgname_lookup(pkgname) else {
             return;
@@ -1657,18 +1662,22 @@ impl<'a> ClientDependenciesTracker<'a> {
         // This is the name of a known client package.  Record it.
         let status = api.restricted_to_consumers.status(server_pkgname);
         let client_pkgname = ClientPackageName::from(pkgname.to_owned());
-        self.api_consumers
-            .entry(client_pkgname.clone())
-            .or_insert_with(IdOrdMap::new)
-            .entry(&server_pkgname)
-            .or_insert_with(|| ApiConsumer::new(server_pkgname.clone(), status))
-            .add_path(dep_path.clone());
-        self.apis_consumed
-            .entry(server_pkgname.clone())
-            .or_insert_with(BTreeMap::new)
-            .entry(client_pkgname)
-            .or_insert_with(Vec::new)
-            .push(dep_path.clone());
+        for dep_path in dep_paths {
+            self.api_consumers
+                .entry(client_pkgname.clone())
+                .or_insert_with(IdOrdMap::new)
+                .entry(&server_pkgname)
+                .or_insert_with(|| {
+                    ApiConsumer::new(server_pkgname.clone(), status.clone())
+                })
+                .add_path(dep_path.clone());
+            self.apis_consumed
+                .entry(server_pkgname.clone())
+                .or_insert_with(BTreeMap::new)
+                .entry(client_pkgname.clone())
+                .or_insert_with(Vec::new)
+                .push(dep_path.clone());
+        }
     }
 }
 

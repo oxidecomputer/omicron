@@ -2407,7 +2407,7 @@ impl ServiceManager {
                             default_handler_task_mode:
                                 HandlerTaskMode::Detached,
                             log_headers: vec![],
-                            compression: dropshot::CompressionConfig::None,
+                            compression: dropshot::CompressionConfig::Gzip,
                         },
                     },
                     dropshot_internal: dropshot::ConfigDropshot {

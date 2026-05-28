@@ -51,6 +51,7 @@ external_dns_servers = ["1.1.1.1", "9.9.9.9"]
 # concurrently.
 bind_address = "127.0.0.1:0"
 default_request_body_max_bytes = 1048576
+compression = "gzip"
 
 [deployment.dropshot_internal]
 bind_address = "127.0.0.1:0"
