@@ -111,21 +111,7 @@ fn rack_config(ports: Vec<PortConfig>) -> RackNetworkConfig {
     }
 }
 
-fn v4_route(
-    destination: &str,
-    nexthop: &str,
-    vlan_id: Option<u16>,
-    rib_priority: Option<u8>,
-) -> RouteConfig {
-    RouteConfig {
-        destination: destination.parse().unwrap(),
-        nexthop: nexthop.parse().unwrap(),
-        vlan_id,
-        rib_priority,
-    }
-}
-
-fn v6_route(
+fn make_route(
     destination: &str,
     nexthop: &str,
     vlan_id: Option<u16>,
@@ -168,7 +154,7 @@ fn plan_all_unchanged() {
     // Desired: one v4 route on Switch0.
     let config = rack_config(vec![port_config(
         SwitchSlot::Switch0,
-        vec![v4_route("10.0.0.0/24", "10.0.0.1", None, None)],
+        vec![make_route("10.0.0.0/24", "10.0.0.1", None, None)],
     )]);
 
     // mgd has the same route (with default priority filled in).
@@ -201,8 +187,8 @@ fn plan_add_all() {
     let config = rack_config(vec![port_config(
         SwitchSlot::Switch0,
         vec![
-            v4_route("10.0.0.0/24", "10.0.0.1", None, Some(5)),
-            v6_route("2001:db8::/64", "2001:db8::1", None, Some(3)),
+            make_route("10.0.0.0/24", "10.0.0.1", None, Some(5)),
+            make_route("2001:db8::/64", "2001:db8::1", None, Some(3)),
         ],
     )]);
 
@@ -262,8 +248,8 @@ fn plan_mix() {
     let config = rack_config(vec![port_config(
         SwitchSlot::Switch0,
         vec![
-            v4_route("10.0.0.0/24", "10.0.0.1", None, None),
-            v4_route("10.1.0.0/24", "10.1.0.1", None, None),
+            make_route("10.0.0.0/24", "10.0.0.1", None, None),
+            make_route("10.1.0.0/24", "10.1.0.1", None, None),
         ],
     )]);
 
@@ -300,11 +286,11 @@ fn plan_filters_other_switch_slot() {
     let config = rack_config(vec![
         port_config(
             SwitchSlot::Switch0,
-            vec![v4_route("10.0.0.0/24", "10.0.0.1", None, None)],
+            vec![make_route("10.0.0.0/24", "10.0.0.1", None, None)],
         ),
         port_config(
             SwitchSlot::Switch1,
-            vec![v4_route("10.1.0.0/24", "10.1.0.1", None, None)],
+            vec![make_route("10.1.0.0/24", "10.1.0.1", None, None)],
         ),
     ]);
 
@@ -335,7 +321,7 @@ fn plan_default_rib_priority() {
     // Desired route has rib_priority = None (should default to 1).
     let config = rack_config(vec![port_config(
         SwitchSlot::Switch0,
-        vec![v4_route("10.0.0.0/24", "10.0.0.1", None, None)],
+        vec![make_route("10.0.0.0/24", "10.0.0.1", None, None)],
     )]);
 
     // mgd has the same route with priority 1 (the default).
@@ -371,7 +357,7 @@ fn plan_priority_change_is_delete_plus_add() {
     // Desired: priority 5 for a route.
     let config = rack_config(vec![port_config(
         SwitchSlot::Switch0,
-        vec![v4_route("10.0.0.0/24", "10.0.0.1", None, Some(5))],
+        vec![make_route("10.0.0.0/24", "10.0.0.1", None, Some(5))],
     )]);
 
     // mgd has the same route but with priority 1.
@@ -404,7 +390,7 @@ fn plan_vlan_id_matters() {
     // Desired: route with vlan_id = Some(100).
     let config = rack_config(vec![port_config(
         SwitchSlot::Switch0,
-        vec![v4_route("10.0.0.0/24", "10.0.0.1", Some(100), None)],
+        vec![make_route("10.0.0.0/24", "10.0.0.1", Some(100), None)],
     )]);
 
     // mgd has the same route but with no vlan_id.
@@ -438,8 +424,8 @@ fn plan_multiple_nexthops_per_prefix() {
     let config = rack_config(vec![port_config(
         SwitchSlot::Switch0,
         vec![
-            v4_route("10.0.0.0/24", "10.0.0.1", None, None),
-            v4_route("10.0.0.0/24", "10.0.0.2", None, None),
+            make_route("10.0.0.0/24", "10.0.0.1", None, None),
+            make_route("10.0.0.0/24", "10.0.0.2", None, None),
         ],
     )]);
 
@@ -586,7 +572,7 @@ fn plan_v6_routes() {
     // Desired: one v6 route.
     let config = rack_config(vec![port_config(
         SwitchSlot::Switch0,
-        vec![v6_route("2001:db8::/64", "2001:db8::1", None, Some(2))],
+        vec![make_route("2001:db8::/64", "2001:db8::1", None, Some(2))],
     )]);
 
     // mgd has a different v6 route.
@@ -619,11 +605,11 @@ fn plan_routes_from_multiple_ports() {
     let config = rack_config(vec![
         port_config(
             SwitchSlot::Switch0,
-            vec![v4_route("10.0.0.0/24", "10.0.0.1", None, None)],
+            vec![make_route("10.0.0.0/24", "10.0.0.1", None, None)],
         ),
         port_config(
             SwitchSlot::Switch0,
-            vec![v4_route("10.1.0.0/24", "10.1.0.1", None, None)],
+            vec![make_route("10.1.0.0/24", "10.1.0.1", None, None)],
         ),
     ]);
 
@@ -1034,7 +1020,7 @@ impl From<MgdCurrentRoutes> for MgdStaticRouteLists {
 async fn remove_all_current_routes(
     client: &Client,
     current_routes: MgdCurrentRoutes,
-) -> Result<(), MgdClientError> {
+) {
     let MgdStaticRouteLists { v4, v6 } = current_routes.into();
 
     client
@@ -1045,14 +1031,12 @@ async fn remove_all_current_routes(
         .static_remove_v6_route(&MgdDeleteStaticRoute6Request { routes: v6 })
         .await
         .expect("removed v6 routes");
-
-    Ok(())
 }
 
 async fn create_initial_routes(
     client: &Client,
     initial_routes: MgdCurrentRoutes,
-) -> Result<(), MgdClientError> {
+) {
     let MgdStaticRouteLists { v4, v6 } = initial_routes.into();
 
     client
@@ -1063,8 +1047,6 @@ async fn create_initial_routes(
         .static_add_v6_route(&MgdAddStaticRoute6Request { routes: v6 })
         .await
         .expect("added v6 routes");
-
-    Ok(())
 }
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -1150,9 +1132,7 @@ async fn proptest_full_reconciliation() {
         // Clear all routes from a previous proptest invocation.
         let current_routes =
             MgdCurrentRoutes::fetch(&client).await.expect("fetched all routes");
-        remove_all_current_routes(&client, current_routes)
-            .await
-            .expect("removed all preexisting routes");
+        remove_all_current_routes(&client, current_routes).await;
         let current_routes =
             MgdCurrentRoutes::fetch(&client).await.expect("fetched all routes");
         assert_routes_eq(
@@ -1162,9 +1142,7 @@ async fn proptest_full_reconciliation() {
         );
 
         // Apply all initial settings.
-        create_initial_routes(&client, input.initial_mgd_routes())
-            .await
-            .expect("created initial routes");
+        create_initial_routes(&client, input.initial_mgd_routes()).await;
         let current_routes =
             MgdCurrentRoutes::fetch(&client).await.expect("fetched all routes");
         assert_routes_eq(
