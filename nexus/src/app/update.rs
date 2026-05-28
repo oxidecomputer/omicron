@@ -210,6 +210,8 @@ struct UpdateStatusProblems {
     /// Enabled SMF services that are not in an `online` state.
     enabled_smf_services_not_online_by_sled:
         BTreeMap<SledUuid, SvcsEnabledNotOnlineResult>,
+    /// IDs of sleds that aren't present in inventory or haven't reported a
+    /// reconciliation result yet.
     missing_sleds: BTreeSet<SledUuid>,
 }
 
@@ -600,6 +602,7 @@ impl super::Nexus {
     ///   STUCK_UPDATE_THRESHOLD.
     /// - All zpools are online.
     /// - All enabled SMF services are in an online state.
+    /// - All expacted sleds are present.
     async fn contact_support(
         &self,
         opctx: &OpContext,
