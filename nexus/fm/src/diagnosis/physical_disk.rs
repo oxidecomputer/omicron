@@ -39,9 +39,10 @@ pub struct ZpoolUnhealthyFactPayload {
     pub zpool_id: ZpoolUuid,
     pub last_seen_health: ZpoolHealth,
     /// Inventory collection that produced this observation. Recorded for
-    /// provenance: if multiple `ZpoolUnhealthy` facts ever end up on the
-    /// same case, this lets a human reader see which inventory each came
-    /// from.
+    /// provenance only: the diagnosis engine never looks this collection
+    /// back up (it may well have been GC'd by the time anyone reads the
+    /// fact). If multiple `ZpoolUnhealthy` facts ever end up on the same
+    /// case, this lets a human reader see which inventory each came from.
     pub observed_in_inv: CollectionUuid,
     /// `time_done` of `observed_in_inv`.
     pub time_observed: DateTime<Utc>,
