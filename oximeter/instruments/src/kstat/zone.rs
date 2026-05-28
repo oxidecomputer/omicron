@@ -94,7 +94,7 @@ impl KstatTarget for Zone {
 
             /* Parse zone kstats into cpu samples.
 
-            States for the zone module look like this (stats we don't use elided):
+            Stats for the zone module look like this (stats we don't use elided):
 
             ...
             zones:26:oxz_cockroachdb_8bbea076-ff60-:nsec_sys        112675830670973

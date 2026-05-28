@@ -67,7 +67,6 @@
 //! after a clean slate upon failure.
 //! See <https://github.com/oxidecomputer/omicron/issues/7174> for details.
 
-use crate::early_networking::{EarlyNetworkSetup, EarlyNetworkSetupError};
 use crate::plan::service::PlanError as ServicePlanError;
 use crate::plan::service::ServicePlan;
 use crate::plan::sled::SledPlan;
@@ -88,7 +87,6 @@ use nexus_lockstep_client::{
 use nexus_types::deployment::{
     Blueprint, BlueprintZoneType, blueprint_zone_type,
 };
-use nexus_types::internal_api::params::ExternalPortDiscovery;
 use ntp_admin_client::ClientInfo as _;
 use ntp_admin_client::{
     Client as NtpAdminClient, Error as NtpAdminError, types::TimeSync,
@@ -265,11 +263,6 @@ pub enum SetupServiceError {
 
     #[error("Failed to construct valid set of service zone NAT entries")]
     InvalidServiceZoneNatEntries(#[from] ServiceZoneNatEntriesError),
-
-    // We used transparent, because `EarlyNetworkSetupError` contains a subset
-    // of error variants already in this type
-    #[error(transparent)]
-    EarlyNetworkSetup(#[from] EarlyNetworkSetupError),
 
     #[error("Rack already initialized")]
     RackAlreadyInitialized,
@@ -758,15 +751,7 @@ impl ServiceInner {
     ) -> Result<TimeSync, SetupServiceError> {
         info!(client.inner(), "Checking time synchronization");
 
-        let ts = client.timesync().await?.into_inner();
-        Ok(TimeSync {
-            sync: ts.sync,
-            ref_id: ts.ref_id,
-            ip_addr: ts.ip_addr,
-            stratum: ts.stratum,
-            ref_time: ts.ref_time,
-            correction: ts.correction,
-        })
+        Ok(client.timesync().await?.into_inner())
     }
 
     async fn wait_for_timesync(
@@ -823,14 +808,12 @@ impl ServiceInner {
         Ok(())
     }
 
-    #[allow(clippy::too_many_arguments)]
     async fn handoff_to_nexus(
         &self,
         blueprint: Blueprint,
         config: &Config,
         sled_plan: &SledPlan,
         service_plan: &ServicePlan,
-        port_discovery_mode: ExternalPortDiscovery,
         nexus_lockstep_address: SocketAddrV6,
         initial_trust_quorum_configuration: Option<InitialTrustQuorumConfig>,
     ) -> Result<(), SetupServiceError> {
@@ -1078,7 +1061,6 @@ impl ServiceInner {
             external_dns_zone_name: config.external_dns_zone_name.clone(),
             recovery_silo: config.recovery_silo.clone(),
             rack_network_config,
-            external_port_count: port_discovery_mode,
             allowed_source_ips,
             initial_trust_quorum_configuration,
         };
@@ -1450,28 +1432,6 @@ impl ServiceInner {
         rss_step.update(RssStep::ConfigureDns);
         self.initialize_internal_dns_records(&service_plan).await?;
 
-        // Ask MGS in each switch zone which switch it is.
-        //
-        // lookup_uplinked_switch_zone_underlay_addrs() is shared with
-        // sled-agent, which has the network config in a watch channel that
-        // changes as Nexus pushes updates in via the bootstore. We don't have
-        // that, but can stuff the (unchanging) config into a watch channel to
-        // fit this API.
-        let (_tx, network_config_rx) = watch::channel(system_networking_config);
-        let switch_mgmt_addrs = EarlyNetworkSetup::new(&self.log)
-            .lookup_uplinked_switch_zone_underlay_addrs(
-                &resolver,
-                &network_config_rx,
-                // We willing to wait forever to find all the switches that have
-                // configured uplinks; if we attempt to proceed without doing
-                // so, we'll fail handing off to Nexus later. (Ideally we could
-                // complete RSS with only one switch up and then configure the
-                // second later, but that currently doesn't work.)
-                // <https://github.com/oxidecomputer/omicron/issues/9678>
-                Duration::MAX,
-            )
-            .await;
-
         rss_step.update(RssStep::InitNtp);
         // Next start up the NTP services.
         let v3generator = v2generator.new_version_with(
@@ -1586,7 +1546,6 @@ impl ServiceInner {
             &config,
             &sled_plan,
             &service_plan,
-            ExternalPortDiscovery::Auto(switch_mgmt_addrs),
             nexus_lockstep_address,
             initial_trust_quorum_configuration,
         )
@@ -1923,9 +1882,10 @@ mod test {
     use sled_agent_types::{
         early_networking::RackNetworkConfig,
         inventory::{
-            Baseboard, ConfigReconcilerInventoryStatus, Inventory,
-            InventoryDisk, OmicronFileSourceResolverInventory, OmicronZoneType,
-            SledCpuFamily, SledRole, SvcsEnabledNotOnlineResult,
+            Baseboard, ConfigReconcilerInventoryStatus, FmdInventory,
+            Inventory, InventoryDisk, OmicronFileSourceResolverInventory,
+            OmicronZoneType, SledCpuFamily, SledRole,
+            SvcsEnabledNotOnlineResult,
         },
     };
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
@@ -1986,6 +1946,7 @@ mod test {
                 smf_services_enabled_not_online:
                     SvcsEnabledNotOnlineResult::DataUnavailable,
                 reference_measurements: IdOrdMap::new(),
+                fmd: Ok(FmdInventory::default()),
             },
             true,
         )

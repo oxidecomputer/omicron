@@ -5247,9 +5247,6 @@ CREATE TABLE IF NOT EXISTS omicron.public.reconfigurator_config (
     -- The time at which the configuration for a version was set
     time_modified TIMESTAMPTZ NOT NULL,
 
-    -- Whether to add zones while the system has detected a mupdate override.
-    add_zones_with_mupdate_override BOOL NOT NULL,
-
     -- Enable the TUF repo pruner background task
     tuf_repo_pruner_enabled BOOL NOT NULL
 );
@@ -6022,6 +6019,37 @@ CREATE TYPE IF NOT EXISTS omicron.public.vmm_cpu_platform AS ENUM (
   'amd_turin'
 );
 
+/* Describes why a VMM record is in the 'failed' `vmm_state`. */
+CREATE TYPE IF NOT EXISTS omicron.public.vmm_failure_reason AS ENUM (
+    /*
+     * The reason for this VMM's failure is unknown, because the VMM failed
+     * prior to the recording of failure reasons.
+     */
+    'prehistoric',
+    /*
+     * The sled-agent reported that this VMM failed.
+     *
+     * TODO(eliza): once omicron#10290 is resolved or client-side API
+     * versioning is implemented (RFD 567), it would be nice if the sled-agent
+     * could report more detailed failure reasons...
+     */
+    'from_sled_agent',
+    /*
+     * A request to the sled-agent received a response indicating that this
+     * VMM is no longer present on the sled.
+     */
+    'no_such_instance',
+    /*
+     * The sled on which this VMM was running has been expunged.
+     */
+    'sled_expunged',
+    /*
+     * The sled on which this VMM was running has powered off.
+     */
+    'sled_off'
+);
+
+
 -- Per-VMM state.
 CREATE TABLE IF NOT EXISTS omicron.public.vmm (
     id UUID PRIMARY KEY,
@@ -6034,7 +6062,15 @@ CREATE TABLE IF NOT EXISTS omicron.public.vmm (
     propolis_ip INET NOT NULL,
     propolis_port INT4 NOT NULL CHECK (propolis_port BETWEEN 0 AND 65535) DEFAULT 12400,
     state omicron.public.vmm_state NOT NULL,
-    cpu_platform omicron.public.vmm_cpu_platform NOT NULL
+    cpu_platform omicron.public.vmm_cpu_platform NOT NULL,
+    failure_reason omicron.public.vmm_failure_reason,
+
+    -- If a VMM is in the 'failed' state, it must have a failure reason; if it
+    -- is not in the failed state, it must not have a failure reason.
+    CONSTRAINT failure_reason_iff_failed CHECK (
+        (state = 'failed' AND failure_reason IS NOT NULL)
+            OR (state != 'failed' AND failure_reason IS NULL)
+    )
 );
 
 CREATE INDEX IF NOT EXISTS lookup_vmms_by_sled_id ON omicron.public.vmm (
@@ -7481,6 +7517,17 @@ ON omicron.public.ereport (
 WHERE
     time_deleted IS NULL;
 
+-- Targeted partial index supporting fm_analysis preparation: filter by class
+-- (FM analysis's `known_ereport_classes`) restricted to ereports that are
+-- still unprocessed, ordered by the (restart_id, ena) pagination key.
+CREATE INDEX IF NOT EXISTS lookup_unmarked_ereports_by_class
+ON omicron.public.ereport (
+    class, restart_id, ena
+)
+WHERE
+    marked_seen_in IS NULL
+    AND time_deleted IS NULL;
+
 CREATE INDEX IF NOT EXISTS lookup_unseen_ereports
 ON omicron.public.ereport (
     restart_id, ena
@@ -8576,7 +8623,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '257.0.0', NULL)
+    (TRUE, NOW(), NOW(), '261.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;
