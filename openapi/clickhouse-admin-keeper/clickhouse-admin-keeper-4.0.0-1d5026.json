@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "3.0.0"
+    "version": "4.0.0"
   },
   "paths": {
     "/4lw-conf": {
@@ -788,6 +788,14 @@
             "type": "string",
             "format": "ipv6"
           },
+          "logger": {
+            "description": "Logger configuration",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/LogConfig"
+              }
+            ]
+          },
           "raft_servers": {
             "description": "ID and host of each server in the keeper cluster",
             "type": "array",
@@ -801,6 +809,7 @@
           "datastore_path",
           "id",
           "listen_addr",
+          "logger",
           "raft_servers"
         ]
       },
@@ -871,41 +880,20 @@
       "LogConfig": {
         "type": "object",
         "properties": {
-          "count": {
-            "type": "integer",
-            "format": "uint",
-            "minimum": 0
-          },
-          "errorlog": {
-            "type": "string",
-            "format": "Utf8PathBuf"
-          },
           "level": {
             "$ref": "#/components/schemas/LogLevel"
-          },
-          "log": {
-            "type": "string",
-            "format": "Utf8PathBuf"
-          },
-          "size": {
-            "type": "integer",
-            "format": "uint16",
-            "minimum": 0
           }
         },
         "required": [
-          "count",
-          "errorlog",
-          "level",
-          "log",
-          "size"
+          "level"
         ]
       },
       "LogLevel": {
         "type": "string",
         "enum": [
           "trace",
-          "debug"
+          "debug",
+          "information"
         ]
       },
       "Macros": {

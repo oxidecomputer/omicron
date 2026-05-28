@@ -6,8 +6,7 @@
 
 use crate::latest::config::{ClickhouseHost, LogLevel};
 use crate::latest::config::{
-    KeeperConfig, LogConfig, NodeType, RaftServerConfig, RaftServerSettings,
-    RaftServers,
+    KeeperConfig, LogConfig, RaftServerConfig, RaftServerSettings, RaftServers,
 };
 use crate::latest::keeper::{
     KeeperConf, KeeperConfigurableSettings, KeeperId, KeeperServerInfo,
@@ -27,10 +26,7 @@ use std::str::FromStr;
 impl KeeperConfigurableSettings {
     /// Generate a configuration file for a keeper node
     pub fn generate_xml_file(&self) -> Result<KeeperConfig> {
-        let logger = LogConfig::new(
-            self.settings.datastore_path.clone(),
-            NodeType::Keeper,
-        );
+        let logger = self.settings.logger.clone();
 
         let raft_servers = self
             .settings
@@ -90,8 +86,16 @@ impl KeeperSettings {
         raft_servers: Vec<RaftServerSettings>,
         datastore_path: Utf8PathBuf,
         listen_addr: Ipv6Addr,
+        logger: LogConfig,
     ) -> Self {
-        Self { config_dir, id, raft_servers, datastore_path, listen_addr }
+        Self {
+            config_dir,
+            id,
+            raft_servers,
+            datastore_path,
+            listen_addr,
+            logger,
+        }
     }
 }
 
@@ -625,7 +629,9 @@ impl KeeperConf {
 
 #[cfg(test)]
 mod tests {
-    use crate::latest::config::{ClickhouseHost, LogLevel, RaftServerSettings};
+    use crate::latest::config::{
+        ClickhouseHost, LogConfig, LogLevel, RaftServerSettings,
+    };
     use crate::latest::keeper::{
         KeeperConf, KeeperConfigurableSettings, KeeperId, KeeperServerInfo,
         KeeperServerType, KeeperSettings, Lgif, RaftConfig,
@@ -678,6 +684,7 @@ mod tests {
             keepers,
             Utf8PathBuf::from_str("./").unwrap(),
             Ipv6Addr::from_str("ff::08").unwrap(),
+            LogConfig::new(LogLevel::default()),
         );
 
         let config = KeeperConfigurableSettings {

@@ -7,7 +7,7 @@
 use crate::latest::config::{
     ClickhouseHost, KeeperConfig, KeeperConfigsForReplica,
     KeeperCoordinationSettings, KeeperNodeConfig, LogConfig, LogLevel, Macros,
-    NodeType, RaftServerConfig, RaftServerSettings, RaftServers, RemoteServers,
+    RaftServerConfig, RaftServerSettings, RaftServers, RemoteServers,
     ReplicaConfig, ServerNodeConfig,
 };
 use crate::latest::keeper::KeeperId;
@@ -406,30 +406,18 @@ impl ServerNodeConfig {
 }
 
 impl LogConfig {
-    /// A new logger configuration with default directories
-    pub fn new(path: Utf8PathBuf, node_type: NodeType) -> Self {
-        let prefix = match node_type {
-            NodeType::Server => "clickhouse",
-            NodeType::Keeper => "clickhouse-keeper",
-        };
-
-        let logs: Utf8PathBuf = path.join("log");
-        let log = logs.join(format!("{prefix}.log"));
-        let errorlog = logs.join(format!("{prefix}.err.log"));
-
-        Self { level: LogLevel::default(), log, errorlog, size: 100, count: 1 }
+    /// A new logger configuration
+    pub fn new(level: LogLevel) -> Self {
+        Self { level }
     }
 
     pub fn to_xml(&self) -> String {
-        let LogConfig { level, log, errorlog, size, count } = &self;
+        let LogConfig { level } = &self;
         format!(
             "
     <logger>
         <level>{level}</level>
-        <log>{log}</log>
-        <errorlog>{errorlog}</errorlog>
-        <size>{size}M</size>
-        <count>{count}</count>
+        <console>true</console>
     </logger>
 "
         )
@@ -562,17 +550,12 @@ impl KeeperConfig {
     }
 }
 
-impl LogLevel {
-    pub(crate) fn default() -> Self {
-        LogLevel::Trace
-    }
-}
-
 impl Display for LogLevel {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let s = match self {
             LogLevel::Trace => "trace",
             LogLevel::Debug => "debug",
+            LogLevel::Information => "information",
         };
         write!(f, "{s}")
     }
@@ -586,6 +569,8 @@ impl FromStr for LogLevel {
             Ok(LogLevel::Trace)
         } else if s == "debug" {
             Ok(LogLevel::Debug)
+        } else if s == "information" {
+            Ok(LogLevel::Information)
         } else {
             bail!("{s} is not a valid log level")
         }
