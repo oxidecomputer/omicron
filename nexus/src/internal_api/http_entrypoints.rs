@@ -117,7 +117,7 @@ impl NexusInternalApi for NexusInternalApiImpl {
         let apictx = &rqctx.context().context;
         let nexus = &apictx.nexus;
         let path = path_params.into_inner();
-        let new_state = new_runtime_state.into_inner();
+        let new_state = new_runtime_state.into_inner().into();
         let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
         let handler = async {
             nexus

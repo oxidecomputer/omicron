@@ -26,7 +26,6 @@ use nexus_types::external_api::networking;
 use nexus_types::external_api::policy;
 use nexus_types::external_api::silo;
 use nexus_types::external_api::sled as sled_types;
-use nexus_types::internal_api::params::ExternalPortDiscovery;
 use nexus_types::inventory::SpType;
 use nexus_types::silo::silo_dns_name;
 use omicron_common::address::{Ipv6Subnet, RACK_PREFIX, get_64_subnet};
@@ -296,69 +295,6 @@ impl super::Nexus {
         rack.rack_subnet =
             Some(IpNet::from(rack_network_config.rack_subnet).into());
         self.datastore().update_rack_subnet(opctx, &rack).await?;
-
-        // TODO - https://github.com/oxidecomputer/omicron/pull/3359
-        // register all switches found during rack initialization
-        // identify requested switch from config and associate
-        // uplink records to that switch
-        match request.external_port_count {
-            ExternalPortDiscovery::Auto(switch_mgmt_addrs) => {
-                use dpd_client::Client as DpdClient;
-                info!(log, "Using automatic external switchport discovery");
-
-                for (switch, addr) in switch_mgmt_addrs {
-                    let dpd_client = DpdClient::new(
-                        &format!(
-                            "http://[{}]:{}",
-                            addr,
-                            omicron_common::address::DENDRITE_PORT
-                        ),
-                        dpd_client::ClientState {
-                            tag: "nexus".to_string(),
-                            log: log.new(o!("component" => "DpdClient")),
-                        },
-                    );
-
-                    let all_ports =
-                        dpd_client.port_list().await.map_err(|e| {
-                            Error::internal_error(&format!("encountered error while discovering ports for {switch:#?}: {e}"))
-                        })?;
-
-                    info!(
-                        log, "discovered ports for switch";
-                        "switch_slot" => ?switch,
-                        "all_ports" => #?all_ports,
-                    );
-
-                    let qsfp_ports: Vec<Name> = all_ports
-                        .iter()
-                        .filter(|port| {
-                            matches!(port, dpd_client::types::PortId::Qsfp(_))
-                        })
-                        .map(|port| port.to_string().parse().unwrap())
-                        .collect();
-
-                    info!(
-                        log, "populating ports for switch";
-                        "switch_slot" => ?switch,
-                        "qsfp_ports" => #?qsfp_ports,
-                    );
-
-                    self.populate_switch_ports(&opctx, &qsfp_ports, switch)
-                        .await?;
-                }
-            }
-            // TODO: #3602 Eliminate need for static port mappings for switch ports
-            ExternalPortDiscovery::Static(port_mappings) => {
-                info!(
-                    log,
-                    "Using static configuration for external switchports"
-                );
-                for (switch, ports) in port_mappings {
-                    self.populate_switch_ports(&opctx, &ports, switch).await?;
-                }
-            }
-        }
 
         // TODO
         // configure rack networking / boundary services here

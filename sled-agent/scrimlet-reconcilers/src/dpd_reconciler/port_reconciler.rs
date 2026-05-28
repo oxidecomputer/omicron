@@ -26,6 +26,7 @@ use sled_agent_types::early_networking::PortConfig;
 use sled_agent_types::early_networking::RackNetworkConfig;
 use sled_agent_types::early_networking::TxEqConfig;
 use sled_agent_types::early_networking::UplinkAddress;
+use sled_agent_types::early_networking::UplinkAddressConfig;
 use slog::Logger;
 use slog::info;
 use slog::warn;
@@ -389,7 +390,7 @@ impl ReconciliationPlan {
 
         // Any entries removed are ports that have settings in dpd but not
         // `config`; we need to clear them.
-        let mut to_clear = removed
+        let to_clear = removed
             .into_iter()
             .map(|item| parse_port_id(&item.port_id, "dpd"))
             .collect::<Result<BTreeSet<DpdQsfp>, _>>()?;
@@ -418,15 +419,6 @@ impl ReconciliationPlan {
             } else {
                 let port_id =
                     parse_port_id(leaf.key(), "rack network config AND dpd")?;
-
-                // Workaround for dpd limitation: the speed and fec of a link
-                // require us to remove it first. Any other change can be
-                // applied in place. TODO: link to dendrite issue / PR
-                if leaf.before().speed != leaf.after().speed
-                    || leaf.before().fec != leaf.after().fec
-                {
-                    to_clear.insert(port_id.clone());
-                }
 
                 // `common` is a map of unique keys that must be distinct from
                 // the `added` keys used to seed `to_apply`, so these inserts
@@ -481,13 +473,17 @@ impl From<&'_ PortConfig> for DiffablePortSettings {
                 .addresses
                 .iter()
                 .filter_map(|a| {
-                    // TODO we're discarding any vlan_id - is that okay?
-                    match a.address {
+                    let UplinkAddressConfig {
+                        address,
+                        // Discard `vlan_id` - that's handled by `uplinkd`.
+                        vlan_id: _,
+                    } = a;
+
+                    match address {
                         UplinkAddress::AddrConf => None,
                         UplinkAddress::Static { ip_net } => {
-                            // TODO We're discarding the `ip_net.prefix()` here
-                            // and only using the IP address; at some point we
-                            // probably need to give the full CIDR to dendrite?
+                            // Discard the `ip_net` prefix, which is also
+                            // handled by `uplinkd`. We only need the IP.
                             Some(ip_net.addr())
                         }
                     }

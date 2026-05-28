@@ -982,36 +982,44 @@ async fn sis_ensure_registered_undo(
         // be a bit of a stretch. See the definition of `instance_unhealthy` for
         // more details.
         match e {
-            InstanceStateChangeError::SledAgent(inner) if inner.vmm_gone() => {
-                error!(osagactx.log(),
-                       "start saga: failing instance after unregister failure";
-                       "instance_id" => %instance_id,
-                       "start_reason" => ?params.reason,
-                       "error" => ?inner);
-
-                if let Err(set_failed_error) = osagactx
-                    .nexus()
-                    .mark_vmm_failed(&opctx, authz_instance, &db_vmm, &inner)
-                    .await
-                {
+            InstanceStateChangeError::SledAgent(inner) => {
+                if let Some(reason) = inner.vmm_failure_reason() {
                     error!(osagactx.log(),
-                           "start saga: failed to mark instance as failed";
+                           "start saga: failing instance after unregister failure";
                            "instance_id" => %instance_id,
                            "start_reason" => ?params.reason,
-                           "error" => ?set_failed_error);
+                           "error" => ?inner,
+                           "reason" => %reason);
 
-                    Err(set_failed_error.into())
+                    if let Err(set_failed_error) = osagactx
+                        .nexus()
+                        .mark_vmm_failed(
+                            &opctx,
+                            authz_instance,
+                            &db_vmm,
+                            &inner,
+                            reason,
+                        )
+                        .await
+                    {
+                        error!(osagactx.log(),
+                               "start saga: failed to mark instance as failed";
+                               "instance_id" => %instance_id,
+                               "start_reason" => ?params.reason,
+                               "error" => ?set_failed_error);
+
+                        Err(set_failed_error.into())
+                    } else {
+                        Err(inner.0.into())
+                    }
                 } else {
-                    Err(inner.0.into())
-                }
-            }
-            InstanceStateChangeError::SledAgent(_) => {
-                info!(osagactx.log(),
-                       "start saga: instance already unregistered from sled";
-                       "instance_id" => %instance_id,
-                       "start_reason" => ?params.reason);
+                    info!(osagactx.log(),
+                           "start saga: instance already unregistered from sled";
+                           "instance_id" => %instance_id,
+                           "start_reason" => ?params.reason);
 
-                Ok(())
+                    Ok(())
+                }
             }
             InstanceStateChangeError::Other(inner) => {
                 error!(osagactx.log(),
