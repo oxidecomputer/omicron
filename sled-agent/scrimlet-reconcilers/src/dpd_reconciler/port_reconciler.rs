@@ -26,6 +26,7 @@ use sled_agent_types::early_networking::PortConfig;
 use sled_agent_types::early_networking::RackNetworkConfig;
 use sled_agent_types::early_networking::TxEqConfig;
 use sled_agent_types::early_networking::UplinkAddress;
+use sled_agent_types::early_networking::UplinkAddressConfig;
 use slog::Logger;
 use slog::info;
 use slog::warn;
@@ -472,13 +473,17 @@ impl From<&'_ PortConfig> for DiffablePortSettings {
                 .addresses
                 .iter()
                 .filter_map(|a| {
-                    // TODO we're discarding any vlan_id - is that okay?
-                    match a.address {
+                    let UplinkAddressConfig {
+                        address,
+                        // Discard `vlan_id` - that's handled by `uplinkd`.
+                        vlan_id: _,
+                    } = a;
+
+                    match address {
                         UplinkAddress::AddrConf => None,
                         UplinkAddress::Static { ip_net } => {
-                            // TODO We're discarding the `ip_net.prefix()` here
-                            // and only using the IP address; at some point we
-                            // probably need to give the full CIDR to dendrite?
+                            // Discard the `ip_net` prefix, which is also
+                            // handled by `uplinkd`. We only need the IP.
                             Some(ip_net.addr())
                         }
                     }
