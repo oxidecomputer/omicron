@@ -337,6 +337,7 @@ mod test {
     };
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::external_api::instance;
+    use nexus_types_versions::latest;
     use omicron_common::api::external::ByteCount;
     use omicron_common::api::external::IdentityMetadataCreateParams;
     use omicron_common::api::external::InstanceAutoRestartPolicy;
@@ -380,40 +381,39 @@ mod test {
         // Use the first chunk of the UUID as the name, to avoid conflicts.
         // Start with a lower ascii character to satisfy the name constraints.
         let name = name.parse().unwrap();
-        let instance =
-            object_create::<_, omicron_common::api::external::Instance>(
-                &cptestctx.external_client,
-                &instances_url,
-                &instance::InstanceCreate {
-                    identity: IdentityMetadataCreateParams {
-                        name,
-                        description: "It's an instance".into(),
-                    },
-                    // In this test, we will "leak" sled resources, since we
-                    // munge the database records for the instance without
-                    // deleting its VMM (as we want to explicitly activate the
-                    // reincarnation task, rather than letting the
-                    // `instance-update` saga do so). Therefore, make our
-                    // resource requests as small as possible.
-                    ncpus: 1i64.try_into().unwrap(),
-                    memory: ByteCount::from_gibibytes_u32(2),
-                    hostname: "myhostname".try_into().unwrap(),
-                    user_data: Vec::new(),
-                    network_interfaces:
-                        instance::InstanceNetworkInterfaceAttachment::None,
-                    external_ips: Vec::new(),
-                    disks: Vec::new(),
-                    boot_disk: None,
-                    cpu_platform: None,
-                    ssh_public_keys: None,
-                    start: state == InstanceState::Vmm,
-                    auto_restart_policy,
-                    anti_affinity_groups: Vec::new(),
-                    multicast_groups: Vec::new(),
-                    enable_jumbo_frames: false,
+        let instance = object_create::<_, latest::instance::Instance>(
+            &cptestctx.external_client,
+            &instances_url,
+            &instance::InstanceCreate {
+                identity: IdentityMetadataCreateParams {
+                    name,
+                    description: "It's an instance".into(),
                 },
-            )
-            .await;
+                // In this test, we will "leak" sled resources, since we
+                // munge the database records for the instance without
+                // deleting its VMM (as we want to explicitly activate the
+                // reincarnation task, rather than letting the
+                // `instance-update` saga do so). Therefore, make our
+                // resource requests as small as possible.
+                ncpus: 1i64.try_into().unwrap(),
+                memory: ByteCount::from_gibibytes_u32(2),
+                hostname: "myhostname".try_into().unwrap(),
+                user_data: Vec::new(),
+                network_interfaces:
+                    instance::InstanceNetworkInterfaceAttachment::None,
+                external_ips: Vec::new(),
+                disks: Vec::new(),
+                boot_disk: None,
+                cpu_platform: None,
+                ssh_public_keys: None,
+                start: state == InstanceState::Vmm,
+                auto_restart_policy,
+                anti_affinity_groups: Vec::new(),
+                multicast_groups: Vec::new(),
+                enable_jumbo_frames: false,
+            },
+        )
+        .await;
 
         let id = InstanceUuid::from_untyped_uuid(instance.identity.id);
         let datastore = cptestctx.server.server_context().nexus.datastore();

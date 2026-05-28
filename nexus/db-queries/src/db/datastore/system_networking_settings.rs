@@ -23,8 +23,8 @@ impl DataStore {
         &self,
         opctx: &OpContext,
     ) -> Result<SystemNetworkingSettings, Error> {
-        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
-
+        /// Any user context can read system network settings, as they
+        /// must be consulted for some features like jumbo frames.
         use nexus_db_schema::schema::system_networking_settings::dsl;
         dsl::system_networking_settings
             .filter(dsl::singleton.eq(true))

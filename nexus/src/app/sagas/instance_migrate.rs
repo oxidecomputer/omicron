@@ -624,6 +624,7 @@ mod tests {
     };
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::external_api::instance as instance_types;
+    use nexus_types_versions::latest;
     use omicron_common::api::external::{
         ByteCount, IdentityMetadataCreateParams, InstanceCpuCount,
     };
@@ -642,7 +643,7 @@ mod tests {
 
     async fn create_instance(
         client: &ClientTestContext,
-    ) -> omicron_common::api::external::Instance {
+    ) -> latest::instance::Instance {
         let instances_url = format!("/v1/instances?project={}", PROJECT_NAME);
         object_create(
             client,

@@ -25,9 +25,9 @@ use nexus_types::external_api::project;
 use nexus_types::external_api::silo;
 use nexus_types::external_api::vpc;
 use nexus_types::identity::{Asset, Resource};
+use nexus_types_versions::latest::instance::Instance;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::IdentityMetadataUpdateParams;
-use omicron_common::api::external::Instance;
 use omicron_common::api::external::{
     RouteDestination, RouteTarget, VpcFirewallRuleAction,
     VpcFirewallRuleDirection, VpcFirewallRuleFilter, VpcFirewallRulePriority,

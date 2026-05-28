@@ -9,16 +9,20 @@
 //! update it's `Option<bool>` (omit to leave the value unchanged); for the
 //! view it's `bool` reflecting the current configured value.
 
+use api_identity::ObjectIdentity;
 use omicron_common::api::external::{
-    self, ByteCount, Hostname, IdentityMetadataCreateParams,
-    InstanceAutoRestartPolicy, InstanceCpuCount, InstanceCpuPlatform, NameOrId,
-    Nullable,
+    ByteCount, Hostname, IdentityMetadata, IdentityMetadataCreateParams,
+    InstanceAutoRestartPolicy, InstanceAutoRestartStatus, InstanceCpuCount,
+    InstanceCpuPlatform, InstanceRuntimeState, NameOrId, Nullable,
+    ObjectIdentity,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
-use crate::v2025_11_20_00::instance::{
-    InstanceDiskAttach, UserData, bool_true,
+use crate::v2025_11_20_00::{
+    self as initial,
+    instance::{InstanceDiskAttach, UserData, bool_true},
 };
 use crate::v2026_01_03_00::instance::InstanceNetworkInterfaceAttachment;
 use crate::v2026_01_05_00::instance::ExternalIpCreate;
@@ -223,11 +227,34 @@ impl From<v2026_01_08_00::instance::InstanceUpdate> for InstanceUpdate {
 }
 
 /// View of an Instance, including the per-instance jumbo-frames opt-in.
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct Instance {
-    /// All fields of the prior `Instance` view, unchanged.
+    // TODO is flattening here the intent in RFD 4?
     #[serde(flatten)]
-    pub inner: external::Instance,
+    pub identity: IdentityMetadata,
+
+    /// ID for the project containing this instance
+    pub project_id: Uuid,
+
+    /// Number of CPUs allocated for this instance
+    pub ncpus: InstanceCpuCount,
+    /// Memory allocated for this instance
+    pub memory: ByteCount,
+    /// RFC1035-compliant hostname for the instance
+    pub hostname: String,
+
+    /// The ID of the disk used to boot this instance, if a specific one is assigned
+    pub boot_disk_id: Option<Uuid>,
+
+    #[serde(flatten)]
+    pub runtime: InstanceRuntimeState,
+
+    #[serde(flatten)]
+    pub auto_restart_status: InstanceAutoRestartStatus,
+
+    /// The CPU platform for this instance. If this is `null`, the instance
+    /// requires no particular CPU platform.
+    pub cpu_platform: Option<InstanceCpuPlatform>,
 
     /// When true, this instance has opted in to jumbo frames (8500 byte MTU)
     /// on its primary network interface. The effective MTU also depends on
@@ -237,15 +264,35 @@ pub struct Instance {
     pub enable_jumbo_frames: bool,
 }
 
-impl From<Instance> for external::Instance {
-    fn from(v: Instance) -> Self {
-        v.inner
+impl From<initial::instance::Instance> for Instance {
+    fn from(value: initial::instance::Instance) -> Self {
+        Self {
+            identity: value.identity,
+            project_id: value.project_id,
+            ncpus: value.ncpus,
+            memory: value.memory,
+            hostname: value.hostname,
+            boot_disk_id: value.boot_disk_id,
+            runtime: value.runtime,
+            auto_restart_status: value.auto_restart_status,
+            cpu_platform: value.cpu_platform,
+            enable_jumbo_frames: false,
+        }
     }
 }
 
-// Delegated so paginated listings can derive a marker from the inner identity.
-impl external::ObjectIdentity for Instance {
-    fn identity(&self) -> &external::IdentityMetadata {
-        self.inner.identity()
+impl From<Instance> for initial::instance::Instance {
+    fn from(value: Instance) -> Self {
+        Self {
+            identity: value.identity,
+            project_id: value.project_id,
+            ncpus: value.ncpus,
+            memory: value.memory,
+            hostname: value.hostname,
+            boot_disk_id: value.boot_disk_id,
+            runtime: value.runtime,
+            auto_restart_status: value.auto_restart_status,
+            cpu_platform: value.cpu_platform,
+        }
     }
 }

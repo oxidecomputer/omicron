@@ -3620,12 +3620,15 @@ pub trait NexusExternalApi {
         tags = ["instances"],
         versions = ..VERSION_EXTERNAL_JUMBO_FRAMES,
     }]
-    async fn instance_list_pre_jumbo(
+    async fn instance_list_v2025_11_20_00(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<
             PaginatedByNameOrId<latest::project::ProjectSelector>,
         >,
-    ) -> Result<HttpResponseOk<ResultsPage<Instance>>, HttpError> {
+    ) -> Result<
+        HttpResponseOk<ResultsPage<v2025_11_20_00::instance::Instance>>,
+        HttpError,
+    > {
         let resp = Self::instance_list(rqctx, query_params).await?;
         let inner = resp.0;
         Ok(HttpResponseOk(ResultsPage {
@@ -3658,7 +3661,10 @@ pub trait NexusExternalApi {
         rqctx: RequestContext<Self::Context>,
         query_params: Query<v2025_11_20_00::project::ProjectSelector>,
         new_instance: TypedBody<v2026_01_31_00::instance::InstanceCreate>,
-    ) -> Result<HttpResponseCreated<Instance>, HttpError> {
+    ) -> Result<
+        HttpResponseCreated<v2025_11_20_00::instance::Instance>,
+        HttpError,
+    > {
         let resp = Self::instance_create(
             rqctx,
             query_params,
@@ -3679,7 +3685,10 @@ pub trait NexusExternalApi {
         rqctx: RequestContext<Self::Context>,
         query_params: Query<v2025_11_20_00::project::ProjectSelector>,
         new_instance: TypedBody<v2026_01_30_01::instance::InstanceCreate>,
-    ) -> Result<HttpResponseCreated<Instance>, HttpError> {
+    ) -> Result<
+        HttpResponseCreated<v2025_11_20_00::instance::Instance>,
+        HttpError,
+    > {
         Self::instance_create_v2026_01_31_00(
             rqctx,
             query_params,
@@ -3700,7 +3709,10 @@ pub trait NexusExternalApi {
         rqctx: RequestContext<Self::Context>,
         query_params: Query<v2025_11_20_00::project::ProjectSelector>,
         new_instance: TypedBody<v2026_01_08_00::instance::InstanceCreate>,
-    ) -> Result<HttpResponseCreated<Instance>, HttpError> {
+    ) -> Result<
+        HttpResponseCreated<v2025_11_20_00::instance::Instance>,
+        HttpError,
+    > {
         Self::instance_create_v2026_01_30_01(
             rqctx,
             query_params,
@@ -3721,7 +3733,10 @@ pub trait NexusExternalApi {
         rqctx: RequestContext<Self::Context>,
         query_params: Query<v2025_11_20_00::project::ProjectSelector>,
         new_instance: TypedBody<v2026_01_05_00::instance::InstanceCreate>,
-    ) -> Result<HttpResponseCreated<Instance>, HttpError> {
+    ) -> Result<
+        HttpResponseCreated<v2025_11_20_00::instance::Instance>,
+        HttpError,
+    > {
         Self::instance_create_v2026_01_08_00(
             rqctx,
             query_params,
@@ -3742,7 +3757,10 @@ pub trait NexusExternalApi {
         rqctx: RequestContext<Self::Context>,
         query_params: Query<v2025_11_20_00::project::ProjectSelector>,
         new_instance: TypedBody<v2026_01_03_00::instance::InstanceCreate>,
-    ) -> Result<HttpResponseCreated<Instance>, HttpError> {
+    ) -> Result<
+        HttpResponseCreated<v2025_11_20_00::instance::Instance>,
+        HttpError,
+    > {
         let new_instance = new_instance.try_map(TryInto::try_into)?;
         Self::instance_create_v2026_01_05_00(rqctx, query_params, new_instance)
             .await
@@ -3761,7 +3779,10 @@ pub trait NexusExternalApi {
         rqctx: RequestContext<Self::Context>,
         query_params: Query<v2025_11_20_00::project::ProjectSelector>,
         new_instance: TypedBody<v2025_12_23_00::instance::InstanceCreate>,
-    ) -> Result<HttpResponseCreated<Instance>, HttpError> {
+    ) -> Result<
+        HttpResponseCreated<v2025_11_20_00::instance::Instance>,
+        HttpError,
+    > {
         let new_instance = new_instance.try_map(TryInto::try_into)?;
         Self::instance_create_v2026_01_03_00(rqctx, query_params, new_instance)
             .await
@@ -3779,7 +3800,10 @@ pub trait NexusExternalApi {
         rqctx: RequestContext<Self::Context>,
         query_params: Query<v2025_11_20_00::project::ProjectSelector>,
         new_instance: TypedBody<v2025_12_03_00::instance::InstanceCreate>,
-    ) -> Result<HttpResponseCreated<Instance>, HttpError> {
+    ) -> Result<
+        HttpResponseCreated<v2025_11_20_00::instance::Instance>,
+        HttpError,
+    > {
         Self::instance_create_v2025_12_23_00(
             rqctx,
             query_params,
@@ -3800,7 +3824,10 @@ pub trait NexusExternalApi {
         rqctx: RequestContext<Self::Context>,
         query_params: Query<v2025_11_20_00::project::ProjectSelector>,
         new_instance: TypedBody<v2025_11_20_00::instance::InstanceCreate>,
-    ) -> Result<HttpResponseCreated<Instance>, HttpError> {
+    ) -> Result<
+        HttpResponseCreated<v2025_11_20_00::instance::Instance>,
+        HttpError,
+    > {
         Self::instance_create_v2025_12_03_00(
             rqctx,
             query_params,
@@ -3829,11 +3856,12 @@ pub trait NexusExternalApi {
         tags = ["instances"],
         versions = ..VERSION_EXTERNAL_JUMBO_FRAMES,
     }]
-    async fn instance_view_pre_jumbo(
+    async fn instance_view_v2025_11_20_00(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<latest::project::OptionalProjectSelector>,
         path_params: Path<latest::path_params::InstancePath>,
-    ) -> Result<HttpResponseOk<Instance>, HttpError> {
+    ) -> Result<HttpResponseOk<v2025_11_20_00::instance::Instance>, HttpError>
+    {
         let resp =
             Self::instance_view(rqctx, query_params, path_params).await?;
         Ok(HttpResponseOk(resp.0.into()))
@@ -3878,7 +3906,8 @@ pub trait NexusExternalApi {
         query_params: Query<v2025_11_20_00::project::OptionalProjectSelector>,
         path_params: Path<v2025_11_20_00::path_params::InstancePath>,
         instance_config: TypedBody<v2026_01_08_00::instance::InstanceUpdate>,
-    ) -> Result<HttpResponseOk<Instance>, HttpError> {
+    ) -> Result<HttpResponseOk<v2025_11_20_00::instance::Instance>, HttpError>
+    {
         let resp = Self::instance_update(
             rqctx,
             query_params,
@@ -3902,7 +3931,8 @@ pub trait NexusExternalApi {
         query_params: Query<v2025_11_20_00::project::OptionalProjectSelector>,
         path_params: Path<v2025_11_20_00::path_params::InstancePath>,
         instance_config: TypedBody<v2025_11_20_00::instance::InstanceUpdate>,
-    ) -> Result<HttpResponseOk<Instance>, HttpError> {
+    ) -> Result<HttpResponseOk<v2025_11_20_00::instance::Instance>, HttpError>
+    {
         Self::instance_update_v2026_01_08_00(
             rqctx,
             query_params,
@@ -3932,11 +3962,14 @@ pub trait NexusExternalApi {
         tags = ["instances"],
         versions = ..VERSION_EXTERNAL_JUMBO_FRAMES,
     }]
-    async fn instance_reboot_pre_jumbo(
+    async fn instance_reboot_v2025_11_20_00(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<latest::project::OptionalProjectSelector>,
         path_params: Path<latest::path_params::InstancePath>,
-    ) -> Result<HttpResponseAccepted<Instance>, HttpError> {
+    ) -> Result<
+        HttpResponseAccepted<v2025_11_20_00::instance::Instance>,
+        HttpError,
+    > {
         let resp =
             Self::instance_reboot(rqctx, query_params, path_params).await?;
         Ok(HttpResponseAccepted(resp.0.into()))
@@ -3962,11 +3995,14 @@ pub trait NexusExternalApi {
         tags = ["instances"],
         versions = ..VERSION_EXTERNAL_JUMBO_FRAMES,
     }]
-    async fn instance_start_pre_jumbo(
+    async fn instance_start_v2025_11_20_00(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<latest::project::OptionalProjectSelector>,
         path_params: Path<latest::path_params::InstancePath>,
-    ) -> Result<HttpResponseAccepted<Instance>, HttpError> {
+    ) -> Result<
+        HttpResponseAccepted<v2025_11_20_00::instance::Instance>,
+        HttpError,
+    > {
         let resp =
             Self::instance_start(rqctx, query_params, path_params).await?;
         Ok(HttpResponseAccepted(resp.0.into()))
@@ -3992,11 +4028,14 @@ pub trait NexusExternalApi {
         tags = ["instances"],
         versions = ..VERSION_EXTERNAL_JUMBO_FRAMES,
     }]
-    async fn instance_stop_pre_jumbo(
+    async fn instance_stop_v2025_11_20_00(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<latest::project::OptionalProjectSelector>,
         path_params: Path<latest::path_params::InstancePath>,
-    ) -> Result<HttpResponseAccepted<Instance>, HttpError> {
+    ) -> Result<
+        HttpResponseAccepted<v2025_11_20_00::instance::Instance>,
+        HttpError,
+    > {
         let resp =
             Self::instance_stop(rqctx, query_params, path_params).await?;
         Ok(HttpResponseAccepted(resp.0.into()))

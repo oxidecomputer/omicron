@@ -48,6 +48,7 @@ use nexus_db_lookup::DbConnection;
 use nexus_db_lookup::LookupPath;
 use nexus_db_model::Disk;
 use nexus_types::internal_api::background::ReincarnationReason;
+use nexus_types_versions::latest;
 use omicron_common::api;
 use omicron_common::api::external;
 use omicron_common::api::external::CreateResult;
@@ -208,7 +209,7 @@ impl From<(Instance, Option<Vmm>)> for InstanceAndActiveVmm {
     }
 }
 
-impl From<InstanceAndActiveVmm> for external::Instance {
+impl From<InstanceAndActiveVmm> for latest::instance::Instance {
     fn from(value: InstanceAndActiveVmm) -> Self {
         let time_run_state_updated = value
             .vmm
@@ -274,19 +275,9 @@ impl From<InstanceAndActiveVmm> for external::Instance {
                     .instance
                     .time_last_auto_restarted,
             },
-
             auto_restart_status,
+            enable_jumbo_frames: value.instance.enable_jumbo_frames,
         }
-    }
-}
-
-impl From<InstanceAndActiveVmm>
-    for nexus_types::external_api::instance::Instance
-{
-    fn from(value: InstanceAndActiveVmm) -> Self {
-        let enable_jumbo_frames = value.instance.enable_jumbo_frames;
-        let inner: external::Instance = value.into();
-        Self { inner, enable_jumbo_frames }
     }
 }
 
