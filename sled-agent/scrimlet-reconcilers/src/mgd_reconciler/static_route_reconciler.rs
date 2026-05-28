@@ -199,8 +199,10 @@ async fn apply_plan(
     // Delete before adding in case there are any conflicting routes for new
     // routes we want to add.
     //
-    // TODO-correctness If either of our deletes _fail_, should we still attempt
-    // to add? For now we do.
+    // We will always attempt to add whatever routes we need to add even if one
+    // or both of these deletes fail. That may fail too, if there are
+    // conflicting routes we failed to delete! But it may succeed (or partially
+    // succeed) if there are also routes we need to add that don't conflict.
     let (delete_v4_result, delete_v6_result) = {
         // Assemble all the v4 and v6 route deletes into two requests.
         let mut delete_v4_req = MgdDeleteStaticRoute4Request {
