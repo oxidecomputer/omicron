@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "3.0.0"
+    "version": "4.0.0"
   },
   "paths": {
     "/config": {
@@ -724,41 +724,20 @@
       "LogConfig": {
         "type": "object",
         "properties": {
-          "count": {
-            "type": "integer",
-            "format": "uint",
-            "minimum": 0
-          },
-          "errorlog": {
-            "type": "string",
-            "format": "Utf8PathBuf"
-          },
           "level": {
             "$ref": "#/components/schemas/LogLevel"
-          },
-          "log": {
-            "type": "string",
-            "format": "Utf8PathBuf"
-          },
-          "size": {
-            "type": "integer",
-            "format": "uint16",
-            "minimum": 0
           }
         },
         "required": [
-          "count",
-          "errorlog",
-          "level",
-          "log",
-          "size"
+          "level"
         ]
       },
       "LogLevel": {
         "type": "string",
         "enum": [
           "trace",
-          "debug"
+          "debug",
+          "information"
         ]
       },
       "Macros": {
@@ -1047,6 +1026,14 @@
             "type": "string",
             "format": "ipv6"
           },
+          "logger": {
+            "description": "Logger configuration",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/LogConfig"
+              }
+            ]
+          },
           "remote_servers": {
             "description": "Addresses for each of the individual replica servers",
             "type": "array",
@@ -1061,6 +1048,7 @@
           "id",
           "keepers",
           "listen_addr",
+          "logger",
           "remote_servers"
         ]
       },

@@ -2693,7 +2693,7 @@ dependencies = [
 [[package]]
 name = "ddm-admin-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=5060d5864df864741dac8a0a4078fa4ecc3c73c8#5060d5864df864741dac8a0a4078fa4ecc3c73c8"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=0ba6260587c7e427e46dcdc8e41b8b31cbc2f118#0ba6260587c7e427e46dcdc8e41b8b31cbc2f118"
 dependencies = [
  "ddm-api-types-versions",
  "oxnet",
@@ -2707,7 +2707,7 @@ dependencies = [
 [[package]]
 name = "ddm-api-types"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=5060d5864df864741dac8a0a4078fa4ecc3c73c8#5060d5864df864741dac8a0a4078fa4ecc3c73c8"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=0ba6260587c7e427e46dcdc8e41b8b31cbc2f118#0ba6260587c7e427e46dcdc8e41b8b31cbc2f118"
 dependencies = [
  "ddm-api-types-versions",
 ]
@@ -2715,15 +2715,12 @@ dependencies = [
 [[package]]
 name = "ddm-api-types-versions"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=5060d5864df864741dac8a0a4078fa4ecc3c73c8#5060d5864df864741dac8a0a4078fa4ecc3c73c8"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=0ba6260587c7e427e46dcdc8e41b8b31cbc2f118#0ba6260587c7e427e46dcdc8e41b8b31cbc2f118"
 dependencies = [
- "multicast-types",
- "omicron-common",
  "oxnet",
  "schemars 0.8.22",
  "serde",
  "serde_repr",
- "thiserror 2.0.18",
  "uuid",
 ]
 
@@ -6877,7 +6874,7 @@ dependencies = [
 [[package]]
 name = "mg-admin-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=5060d5864df864741dac8a0a4078fa4ecc3c73c8#5060d5864df864741dac8a0a4078fa4ecc3c73c8"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=0ba6260587c7e427e46dcdc8e41b8b31cbc2f118#0ba6260587c7e427e46dcdc8e41b8b31cbc2f118"
 dependencies = [
  "chrono",
  "colored 3.1.1",
@@ -6914,7 +6911,7 @@ dependencies = [
 [[package]]
 name = "mg-api-types"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=5060d5864df864741dac8a0a4078fa4ecc3c73c8#5060d5864df864741dac8a0a4078fa4ecc3c73c8"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=0ba6260587c7e427e46dcdc8e41b8b31cbc2f118#0ba6260587c7e427e46dcdc8e41b8b31cbc2f118"
 dependencies = [
  "mg-api-types-versions",
 ]
@@ -6922,17 +6919,14 @@ dependencies = [
 [[package]]
 name = "mg-api-types-versions"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=5060d5864df864741dac8a0a4078fa4ecc3c73c8#5060d5864df864741dac8a0a4078fa4ecc3c73c8"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=0ba6260587c7e427e46dcdc8e41b8b31cbc2f118#0ba6260587c7e427e46dcdc8e41b8b31cbc2f118"
 dependencies = [
  "chrono",
- "multicast-types",
  "nom 8.0.0",
  "num_enum 0.7.6",
- "omicron-common",
  "oxnet",
  "schemars 0.8.22",
  "serde",
- "serde_json",
  "slog",
  "thiserror 2.0.18",
  "uuid",
@@ -6941,7 +6935,7 @@ dependencies = [
 [[package]]
 name = "mg-common"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=5060d5864df864741dac8a0a4078fa4ecc3c73c8#5060d5864df864741dac8a0a4078fa4ecc3c73c8"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=0ba6260587c7e427e46dcdc8e41b8b31cbc2f118#0ba6260587c7e427e46dcdc8e41b8b31cbc2f118"
 dependencies = [
  "anstyle",
  "anyhow",
@@ -6950,7 +6944,6 @@ dependencies = [
  "ddm-api-types",
  "libc",
  "libnet",
- "omicron-common",
  "oximeter 0.1.0 (git+https://github.com/oxidecomputer/omicron?branch=main)",
  "oximeter-producer 0.1.0 (git+https://github.com/oxidecomputer/omicron?branch=main)",
  "oxnet",
@@ -7090,17 +7083,6 @@ dependencies = [
  "mime",
  "spin",
  "version_check",
-]
-
-[[package]]
-name = "multicast-types"
-version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=5060d5864df864741dac8a0a4078fa4ecc3c73c8#5060d5864df864741dac8a0a4078fa4ecc3c73c8"
-dependencies = [
- "omicron-common",
- "schemars 0.8.22",
- "serde",
- "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -8363,7 +8345,7 @@ dependencies = [
  "daft",
  "dropshot",
  "http",
- "mg-admin-client 0.1.0 (git+https://github.com/oxidecomputer/maghemite?rev=5060d5864df864741dac8a0a4078fa4ecc3c73c8)",
+ "mg-admin-client 0.1.0 (git+https://github.com/oxidecomputer/maghemite?rev=0ba6260587c7e427e46dcdc8e41b8b31cbc2f118)",
  "mg-api-types",
  "omicron-common",
  "omicron-passwords 0.1.0",
@@ -9293,7 +9275,7 @@ dependencies = [
  "lldpd-client",
  "macaddr",
  "maplit",
- "mg-admin-client 0.1.0 (git+https://github.com/oxidecomputer/maghemite?rev=5060d5864df864741dac8a0a4078fa4ecc3c73c8)",
+ "mg-admin-client 0.1.0 (git+https://github.com/oxidecomputer/maghemite?rev=0ba6260587c7e427e46dcdc8e41b8b31cbc2f118)",
  "mg-api-types",
  "nexus-auth",
  "nexus-background-task-interface",
@@ -9506,6 +9488,7 @@ dependencies = [
  "nexus-db-schema",
  "nexus-inventory",
  "nexus-lockstep-client",
+ "nexus-networking",
  "nexus-reconfigurator-preparation",
  "nexus-saga-recovery",
  "nexus-test-utils",
@@ -9539,6 +9522,7 @@ dependencies = [
  "steno",
  "strum 0.27.2",
  "subprocess",
+ "support-bundle-collection",
  "support-bundle-viewer",
  "supports-color 3.0.2",
  "tabled 0.15.0",
@@ -9551,6 +9535,7 @@ dependencies = [
  "url",
  "uuid",
  "vergen-gitcl",
+ "zip 4.6.1",
 ]
 
 [[package]]
@@ -14325,7 +14310,7 @@ dependencies = [
  "http",
  "internal-dns-resolver 0.1.0",
  "internal-dns-types 0.1.0",
- "mg-admin-client 0.1.0 (git+https://github.com/oxidecomputer/maghemite?rev=5060d5864df864741dac8a0a4078fa4ecc3c73c8)",
+ "mg-admin-client 0.1.0 (git+https://github.com/oxidecomputer/maghemite?rev=0ba6260587c7e427e46dcdc8e41b8b31cbc2f118)",
  "mg-api-types",
  "omicron-common",
  "omicron-ddm-admin-client",
