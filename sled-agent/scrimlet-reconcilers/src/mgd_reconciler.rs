@@ -13,12 +13,16 @@ use sled_agent_types::system_networking::SystemNetworkingConfig;
 use slog::Logger;
 use std::time::Duration;
 
+mod bgp_reconciler;
 mod static_route_reconciler;
 
+pub use bgp_reconciler::MgdBgpReconcilerStatus;
+pub use bgp_reconciler::MgdBgpReconcilerStatusOpCount;
 pub use static_route_reconciler::MgdStaticRouteReconcilerStatus;
 
 #[derive(Debug, Clone)]
 pub struct MgdReconcilerStatus {
+    pub bgp_status: MgdBgpReconcilerStatus,
     pub static_routes_status: MgdStaticRouteReconcilerStatus,
 }
 
@@ -28,7 +32,8 @@ impl slog::KV for MgdReconcilerStatus {
         record: &slog::Record<'_>,
         serializer: &mut dyn slog::Serializer,
     ) -> slog::Result {
-        let Self { static_routes_status } = self;
+        let Self { bgp_status, static_routes_status } = self;
+        bgp_status.serialize(record, serializer)?;
         static_routes_status.serialize(record, serializer)?;
         Ok(())
     }
@@ -67,6 +72,14 @@ impl Reconciler for MgdReconciler {
         )
         .await;
 
-        MgdReconcilerStatus { static_routes_status }
+        let bgp_status = bgp_reconciler::reconcile(
+            &self.client,
+            &system_networking_config.rack_network_config,
+            self.switch_slot,
+            log,
+        )
+        .await;
+
+        MgdReconcilerStatus { bgp_status, static_routes_status }
     }
 }

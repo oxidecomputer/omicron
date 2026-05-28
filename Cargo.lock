@@ -13826,6 +13826,7 @@ dependencies = [
  "gateway-messages",
  "gateway-test-utils",
  "gateway-types",
+ "http",
  "httpmock",
  "iddqd",
  "macaddr",
