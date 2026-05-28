@@ -526,9 +526,7 @@ impl nexus_test_interface::NexusServer for Server {
 
     fn sitrep_load_rx(
         &self,
-    ) -> watch::Receiver<
-        Option<Arc<(nexus_types::fm::SitrepVersion, nexus_types::fm::Sitrep)>>,
-    > {
+    ) -> watch::Receiver<Option<nexus_types::fm::CurrentSitrep>> {
         self.apictx.context.nexus.sitrep_load_rx()
     }
 
