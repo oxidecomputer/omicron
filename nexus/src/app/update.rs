@@ -126,8 +126,9 @@ impl UpdateContactSupportChecksInput {
             .sleds
             .iter()
             .filter(|sled| {
-                // `unknown()` returns the represenation of the update status
-                // for a given sled ID that isn't present in inventory.
+                // `unknown()` returns the representation of the update status
+                // for a given sled ID that isn't present in inventory or hasn't
+                // reported a reconciliation result yet.
                 **sled
                     == internal_views::SledAgentUpdateStatus::unknown(
                         sled.sled_id,
@@ -544,7 +545,7 @@ impl super::Nexus {
             .await?;
 
         let components_by_release_version =
-            self.component_version_counts(internal_status.clone()).await?;
+            component_version_counts(&internal_status).await?;
 
         let blueprint_target = self
             .update_status
@@ -742,62 +743,57 @@ impl super::Nexus {
 
         Ok(status)
     }
+}
 
-    /// Build a map of version strings to the number of components on that
-    /// version
-    async fn component_version_counts(
-        &self,
-        status: internal_views::UpdateStatus,
-    ) -> Result<BTreeMap<String, usize>, Error> {
-        let sled_versions = status.sleds.into_iter().flat_map(|sled| {
-            let zone_versions = sled.zones.into_iter().map(|zone| zone.version);
+/// Build a map of version strings to the number of components on that
+/// version
+async fn component_version_counts(
+    status: &internal_views::UpdateStatus,
+) -> Result<BTreeMap<String, usize>, Error> {
+    let sled_versions = status.sleds.iter().flat_map(|sled| {
+        let zone_versions = sled.zones.iter().map(|zone| zone.version.clone());
 
-            // boot_disk tells you which slot is relevant
-            let host_version = sled.host_phase_2.boot_disk_version();
+        // boot_disk tells you which slot is relevant
+        let host_version = sled.host_phase_2.boot_disk_version();
 
-            zone_versions.chain(iter::once(host_version))
-        });
+        zone_versions.chain(iter::once(host_version))
+    });
 
-        let mgs_driven_versions =
-            status.mgs_driven.into_iter().flat_map(|status| {
-                // for the SP, slot0_version is the active one
-                let sp_version = status.sp.slot0_version.clone();
+    let mgs_driven_versions = status.mgs_driven.iter().flat_map(|status| {
+        // for the SP, slot0_version is the active one
+        let sp_version = status.sp.slot0_version.clone();
 
-                // for the bootloader, stage0_version is the active one.
-                let bootloader_version =
-                    status.rot_bootloader.stage0_version.clone();
+        // for the bootloader, stage0_version is the active one.
+        let bootloader_version = status.rot_bootloader.stage0_version.clone();
 
-                // for the RoT, get the version of the active slot.
-                let rot_version = status.rot.active_slot_version();
+        // for the RoT, get the version of the active slot.
+        let rot_version = status.rot.active_slot_version();
 
-                // This is an SP; it will only have a host OS phase 1 if it's a
-                // sled (and not a switch / PSC). If it does, we have to check
-                // the version of the active slot.
-                let host_version = status.host_os_phase_1.active_slot_version();
+        // This is an SP; it will only have a host OS phase 1 if it's a
+        // sled (and not a switch / PSC). If it does, we have to check
+        // the version of the active slot.
+        let host_version = status.host_os_phase_1.active_slot_version();
 
-                iter::once(sp_version)
-                    .chain(iter::once(rot_version))
-                    .chain(iter::once(bootloader_version))
-                    .chain(host_version)
-            });
+        iter::once(sp_version)
+            .chain(iter::once(rot_version))
+            .chain(iter::once(bootloader_version))
+            .chain(host_version)
+    });
 
-        let mut counts = BTreeMap::new();
-        for version in sled_versions.chain(mgs_driven_versions) {
-            // Don't use `version.to_string()` here because that will report
-            // specific errors; instead, flatten all errors to just "error".
-            // It's fine to use `.to_string()` for the non-error variants.
-            let version = match version {
-                internal_views::TufRepoVersion::Unknown
-                | internal_views::TufRepoVersion::InstallDataset
-                | internal_views::TufRepoVersion::Version(_) => {
-                    version.to_string()
-                }
-                internal_views::TufRepoVersion::Error(_) => "error".to_string(),
-            };
-            *counts.entry(version).or_insert(0) += 1;
-        }
-        Ok(counts)
+    let mut counts = BTreeMap::new();
+    for version in sled_versions.chain(mgs_driven_versions) {
+        // Don't use `version.to_string()` here because that will report
+        // specific errors; instead, flatten all errors to just "error".
+        // It's fine to use `.to_string()` for the non-error variants.
+        let version = match version {
+            internal_views::TufRepoVersion::Unknown
+            | internal_views::TufRepoVersion::InstallDataset
+            | internal_views::TufRepoVersion::Version(_) => version.to_string(),
+            internal_views::TufRepoVersion::Error(_) => "error".to_string(),
+        };
+        *counts.entry(version).or_insert(0) += 1;
     }
+    Ok(counts)
 }
 
 #[cfg(test)]
