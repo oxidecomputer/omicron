@@ -199,8 +199,7 @@ impl SystemApis {
                                 component.deployment_unit(),
                             )
                         })?;
-                    omitted_pkgid_embedded
-                        .insert(&embedded_pkg.id, component);
+                    omitted_pkgid_embedded.insert(&embedded_pkg.id, component);
                     omitted_nodes
                         .entry(inside)
                         .or_default()
