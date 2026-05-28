@@ -69,6 +69,7 @@ pub enum InvalidIpAddrError {
     Ord,
 )]
 #[serde(tag = "type", rename_all = "snake_case")]
+#[cfg_attr(any(test, feature = "testing"), derive(test_strategy::Arbitrary))]
 pub enum UplinkAddress {
     // `#[serde(rename)]` this to `addrconf` so when this shows up in
     // config-rss.toml development files, it's not phrased as `addr_conf`. This
@@ -297,8 +298,19 @@ impl TryFrom<IpAddr> for RouterPeerIpAddr {
 }
 
 #[derive(
-    Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq, JsonSchema, Hash,
+    Clone,
+    Copy,
+    Debug,
+    Deserialize,
+    Serialize,
+    PartialEq,
+    Eq,
+    JsonSchema,
+    Hash,
+    PartialOrd,
+    Ord,
 )]
+#[cfg_attr(any(test, feature = "testing"), derive(test_strategy::Arbitrary))]
 pub struct UplinkAddressConfig {
     /// The address to be used on the uplink.
     pub address: UplinkAddress,
