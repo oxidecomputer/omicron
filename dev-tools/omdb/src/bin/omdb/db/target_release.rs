@@ -5,7 +5,7 @@
 //! `omdb db target-release` subcommand
 //!
 //! Shows the current target release and date when update was requested.
-//! When `--all` option is used, lists all target release records.
+//! When `--list` option is used, lists all target release records.
 
 use crate::db::DbFetchOptions;
 use crate::db::check_limit;
@@ -27,7 +27,7 @@ use tabled::Tabled;
 pub(super) struct TargetReleaseArgs {
     /// List the most recent target releases, sorted from oldest to newest
     #[clap(long)]
-    all: bool,
+    list: bool,
 }
 
 #[derive(Tabled)]
@@ -43,7 +43,7 @@ pub(super) async fn cmd_db_target_release(
     fetch_opts: &DbFetchOptions,
     args: &TargetReleaseArgs,
 ) -> Result<(), anyhow::Error> {
-    let releases = if args.all {
+    let releases = if args.list {
         let limit = fetch_opts.fetch_limit;
         let conn = datastore.pool_connection_for_tests().await?;
         let mut releases: Vec<TargetRelease> = dsl::target_release
