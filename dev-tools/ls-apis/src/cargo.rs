@@ -240,11 +240,17 @@ impl Workspace {
     /// Walks the required (normal and build) dependencies of package `root`.
     ///
     /// Returns a [`WalkOutcome`] describing every package reachable from
-    /// `root`, each paired with every dependency path from `root` to it.
-    pub fn walk_required_deps_recursively<'a>(
+    /// `root`, each paired with every dependency path from `root` to it, plus
+    /// which of the `omitted_nodes` were actually encountered.
+    ///
+    /// Packages in `omitted_nodes` are treated as if they didn't exist in the
+    /// dependency graph: they are not reported in [`WalkOutcome::found`], and
+    /// the walk does not descend into them.
+    pub fn walk_required_deps_recursively<'a, 'p>(
         &'a self,
         root: &Package,
-    ) -> Result<WalkOutcome<'a>> {
+        omitted_nodes: &BTreeSet<&'p PackageId>,
+    ) -> Result<WalkOutcome<'a, 'p>> {
         struct Remaining<'n> {
             node: &'n cargo_metadata::Node,
             path: DepPath,
@@ -265,6 +271,7 @@ impl Workspace {
         }];
         let mut seen: BTreeSet<PackageId> = BTreeSet::new();
         let mut found: IdOrdMap<PackageWalkOutcome<'a>> = IdOrdMap::new();
+        let mut omitted_seen: BTreeSet<&'p PackageId> = BTreeSet::new();
 
         while let Some(Remaining { node: next, path }) = remaining.pop() {
             for d in &next.deps {
@@ -275,6 +282,11 @@ impl Workspace {
                         DependencyKind::Normal | DependencyKind::Build
                     )
                 }) {
+                    continue;
+                }
+
+                if let Some(omitted) = omitted_nodes.get(did) {
+                    omitted_seen.insert(*omitted);
                     continue;
                 }
 
@@ -303,7 +315,7 @@ impl Workspace {
             }
         }
 
-        Ok(WalkOutcome { found })
+        Ok(WalkOutcome { found, omitted_seen })
     }
 
     /// Return all package ids for the given `pkgname`
@@ -348,11 +360,19 @@ fn cargo_toml_parent(
 }
 
 /// The result of [`Workspace::walk_required_deps_recursively`].
-pub struct WalkOutcome<'a> {
+pub struct WalkOutcome<'a, 'p> {
     /// Every package encountered as a required (normal or build) dependency of
     /// the walk's `root`, each paired with every dependency path from `root`
     /// to that package.
     pub found: IdOrdMap<PackageWalkOutcome<'a>>,
+
+    /// The subset of the walk's `omitted_nodes` argument that was actually
+    /// encountered as a required dependency of `root`.
+    ///
+    /// Comparing this against `omitted_nodes` lets the caller detect an
+    /// expected omission that was not ever seen while traversing the dependency
+    /// graph.
+    pub omitted_seen: BTreeSet<&'p PackageId>,
 }
 
 /// A single entry in [`WalkOutcome::found`]: one package and every dependency
