@@ -299,6 +299,7 @@ pub struct PortConfig {
     strum::EnumIter,
 )]
 #[serde(rename_all = "snake_case")]
+#[cfg_attr(any(test, feature = "testing"), derive(test_strategy::Arbitrary))]
 pub enum SwitchSlot {
     /// Switch in upper slot
     Switch0,

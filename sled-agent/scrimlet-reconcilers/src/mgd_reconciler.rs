@@ -13,25 +13,31 @@ use sled_agent_types::system_networking::SystemNetworkingConfig;
 use slog::Logger;
 use std::time::Duration;
 
+mod static_route_reconciler;
+
+pub use static_route_reconciler::MgdStaticRouteReconcilerStatus;
+
 #[derive(Debug, Clone)]
 pub struct MgdReconcilerStatus {
-    pub todo_status: (),
+    pub static_routes_status: MgdStaticRouteReconcilerStatus,
 }
 
 impl slog::KV for MgdReconcilerStatus {
     fn serialize(
         &self,
-        _record: &slog::Record<'_>,
+        record: &slog::Record<'_>,
         serializer: &mut dyn slog::Serializer,
     ) -> slog::Result {
-        serializer.emit_str("mgd-reconciler".into(), "not yet implemented")
+        let Self { static_routes_status } = self;
+        static_routes_status.serialize(record, serializer)?;
+        Ok(())
     }
 }
 
 #[derive(Debug)]
 pub(crate) struct MgdReconciler {
-    _client: Client,
-    _switch_slot: ThisSledSwitchSlot,
+    client: Client,
+    switch_slot: ThisSledSwitchSlot,
 }
 
 impl Reconciler for MgdReconciler {
@@ -45,14 +51,22 @@ impl Reconciler for MgdReconciler {
         switch_slot: ThisSledSwitchSlot,
         parent_log: &Logger,
     ) -> Self {
-        Self { _client: mode.mgd_client(parent_log), _switch_slot: switch_slot }
+        Self { client: mode.mgd_client(parent_log), switch_slot }
     }
 
     async fn do_reconciliation(
         &mut self,
-        _system_networking_config: &SystemNetworkingConfig,
-        _log: &Logger,
+        system_networking_config: &SystemNetworkingConfig,
+        log: &Logger,
     ) -> Self::Status {
-        MgdReconcilerStatus { todo_status: () }
+        let static_routes_status = static_route_reconciler::reconcile(
+            &self.client,
+            &system_networking_config.rack_network_config,
+            self.switch_slot,
+            log,
+        )
+        .await;
+
+        MgdReconcilerStatus { static_routes_status }
     }
 }
