@@ -14,6 +14,7 @@ pub use api_metadata::AllApiMetadata;
 pub use api_metadata::ApiConsumerStatus;
 pub use api_metadata::ApiExpectedConsumer;
 pub use api_metadata::ApiMetadata;
+pub use api_metadata::ServerComponent;
 pub use api_metadata::VersionedHow;
 pub use system_apis::ApiDependencyFilter;
 pub use system_apis::FailedConsumerCheck;
