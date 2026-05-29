@@ -44,11 +44,11 @@ use std::fmt;
 /// the Oxide system
 pub struct SystemApis {
     /// maps a deployment unit to its list of service components
+    ///
+    /// The reverse mapping, of component to deployment unit, is available via
+    /// [`SystemApis::server_component_unit`].
     unit_server_components:
         BTreeMap<DeploymentUnitName, BTreeSet<ServerComponentName>>,
-    /// maps a server component to the deployment unit that it's part of
-    /// (reverse of `unit_server_components`)
-    server_component_units: BTreeMap<ServerComponentName, DeploymentUnitName>,
 
     /// maps a server component to the list of APIs it uses (using the client
     /// package name as a primary key for the API)
@@ -214,8 +214,7 @@ impl SystemApis {
         // this, we've found which deployment unit (and which top-level package)
         // contains that server.  The result of this process is a set of data
         // structures that allow us to look up the components in a deployment
-        // unit, the deployment unit for any component, the servers in each
-        // component, etc.
+        // unit, the servers in each component, etc.
         let mut tracker = ServerComponentsTracker::new(&server_packages);
         for dunit_info in api_metadata.deployment_units() {
             for component_name in dunit_info.component_names() {
@@ -227,7 +226,7 @@ impl SystemApis {
                 tracker.found_deployment_unit_package(
                     &dunit_info.name,
                     component_name,
-                )?;
+                );
 
                 match component.kind() {
                     ServerComponentKind::TopLevel => {
@@ -298,11 +297,8 @@ impl SystemApis {
             }
         }
 
-        let (server_component_units, unit_server_components, api_producers) = (
-            tracker.server_component_units,
-            tracker.unit_server_components,
-            tracker.api_producers,
-        );
+        let (unit_server_components, api_producers) =
+            (tracker.unit_server_components, tracker.api_producers);
 
         // Ensure that if restricted_to_consumers is defined, all consumers
         // listed are specified by at least one deployment unit.
@@ -311,7 +307,9 @@ impl SystemApis {
                 ApiExpectedConsumers::Unrestricted => {}
                 ApiExpectedConsumers::Restricted(consumers) => {
                     for consumer in consumers {
-                        if !server_component_units.contains_key(&consumer.name)
+                        if api_metadata
+                            .server_component(&consumer.name)
+                            .is_none()
                         {
                             bail!(
                                 "api {} specifies unknown consumer: {} \
@@ -331,7 +329,8 @@ impl SystemApis {
         // are produced and consumed by which components.  The same omitted
         // nodes used during the producer walk apply here too.
         let mut deps_tracker = ClientDependenciesTracker::new(&api_metadata);
-        for server_pkgname in server_component_units.keys() {
+        for server_component in api_metadata.server_components() {
+            let server_pkgname = server_component.name();
             let (workspace, pkg) =
                 workspaces.find_package_workspace(server_pkgname)?;
             let omitted = omitted_nodes
@@ -411,7 +410,10 @@ impl SystemApis {
         // deployment unit.
         for edge in api_metadata.intra_deployment_unit_only_edges() {
             let server = &edge.server;
-            let Some(server_unit) = server_component_units.get(server) else {
+            let Some(server_unit) = api_metadata
+                .server_component(server)
+                .map(|c| c.deployment_unit())
+            else {
                 // This was validated earlier, but there's not an easy way to
                 // express this in the type system, so we just handle it
                 // gracefully.
@@ -435,9 +437,9 @@ impl SystemApis {
             };
 
             if !producers.iter().any(|(p, _)| {
-                server_component_units
-                    .get(p)
-                    .map(|producer_unit| producer_unit == server_unit)
+                api_metadata
+                    .server_component(p)
+                    .map(|c| c.deployment_unit() == server_unit)
                     .unwrap_or(false)
             }) {
                 bail!(
@@ -453,7 +455,6 @@ impl SystemApis {
         }
 
         Ok(SystemApis {
-            server_component_units,
             unit_server_components,
             apis_consumed,
             api_consumers,
@@ -476,7 +477,9 @@ impl SystemApis {
         &self,
         server_component: &ServerComponentName,
     ) -> Option<&DeploymentUnitName> {
-        self.server_component_units.get(server_component)
+        self.api_metadata
+            .server_component(server_component)
+            .map(|c| c.deployment_unit())
     }
 
     /// For one deployment unit, iterate over the servers contained in it
@@ -702,9 +705,6 @@ impl SystemApis {
     /// excluded from the DAG and from cycle checks.
     ///
     /// Panics if `component` is not a registered deployment-unit component.
-    /// Every caller passes a component obtained from `server_component_units`
-    /// or `apis_consumed`, both of which are built from registered
-    /// deployment-unit packages, so the lookup always succeeds.
     fn component_in_upgrade_dag(
         &self,
         component: &ServerComponentName,
@@ -712,11 +712,43 @@ impl SystemApis {
         self.api_metadata
             .server_component(component)
             .expect(
-                "component came from server_component_units or \
-                 apis_consumed, both built from registered \
-                 deployment-unit components",
+                "component came from the API metadata or apis_consumed, \
+                 both of which only contain registered deployment-unit \
+                 components",
             )
             .in_upgrade_dag()
+    }
+
+    /// Returns whether an edge from `server` to `client` should be excluded
+    /// under `edge_filter`.
+    fn edge_filtered_out(
+        &self,
+        edge_filter: EdgeFilter<'_>,
+        server: &ServerComponentName,
+        client: &ClientPackageName,
+    ) -> bool {
+        match edge_filter {
+            EdgeFilter::All => false,
+            EdgeFilter::DagOnly(idu_edges) => {
+                // unwrap(): every `client` encountered here came from
+                // `component_apis_consumed`, which only yields known APIs.
+                let api =
+                    self.api_metadata.client_pkgname_lookup(client).unwrap();
+                if api.versioned_how != VersionedHow::Server {
+                    return true;
+                }
+
+                if !self.component_in_upgrade_dag(server) {
+                    return true;
+                }
+
+                // Intra-deployment-unit-only edges always connect components in
+                // the same *instance* of the same deployment unit, so they
+                // can't induce an update-ordering constraint and shouldn't
+                // count as cycles.
+                idu_edges.contains(&(server.clone(), client.clone()))
+            }
+        }
     }
 
     // The complex type below is only used in this one place: the return value
@@ -747,34 +779,12 @@ impl SystemApis {
                 for (client_pkg, _) in
                     self.component_apis_consumed(server_pkg, dependency_filter)?
                 {
-                    if let EdgeFilter::DagOnly(idu_edges) = edge_filter {
-                        let api = self
-                            .api_metadata
-                            .client_pkgname_lookup(client_pkg)
-                            .unwrap();
-                        // Filtering DAG-only edges means ignoring everything
-                        // that's not server-side-versioned.
-                        if api.versioned_how != VersionedHow::Server {
-                            continue;
-                        }
-
-                        if !self.component_in_upgrade_dag(server_pkg) {
-                            continue;
-                        }
-
-                        // When filtering DAG-only edges, also skip edges that
-                        // represent intra-deployment-unit-only communication
-                        // (communication within one instance of one deployment
-                        // unit).  That's because intra-deployment-unit edges
-                        // would look like a cycle in the dependency graph, but
-                        // aren't one that we care about since they're always
-                        // referring to the same *instance* of the same
-                        // deployment unit.
-                        if idu_edges
-                            .contains(&(server_pkg.clone(), client_pkg.clone()))
-                        {
-                            continue;
-                        }
+                    if self.edge_filtered_out(
+                        edge_filter,
+                        server_pkg,
+                        client_pkg,
+                    ) {
+                        continue;
                     }
 
                     // Multiple server components may produce an API. However,
@@ -785,9 +795,7 @@ impl SystemApis {
                     let other_units: BTreeSet<_> = self
                         .api_producers(client_pkg)
                         .map(|other_component| {
-                            self.server_component_units
-                                .get(other_component)
-                                .unwrap()
+                            self.server_component_unit(other_component).unwrap()
                         })
                         .collect();
                     for other_unit in other_units {
@@ -807,7 +815,8 @@ impl SystemApis {
         &self,
         filter: ApiDependencyFilter,
     ) -> Result<String> {
-        let (graph, _nodes) = self.make_component_graph(filter, false)?;
+        let (graph, _nodes) =
+            self.make_component_graph(filter, EdgeFilter::All)?;
         Ok(Dot::new(&graph).to_string())
     }
 
@@ -817,17 +826,18 @@ impl SystemApis {
     fn make_component_graph(
         &self,
         dependency_filter: ApiDependencyFilter,
-        versioned_on_server_only: bool,
+        edge_filter: EdgeFilter<'_>,
     ) -> Result<(
         Graph<&ServerComponentName, &ClientPackageName>,
         BTreeMap<&ServerComponentName, NodeIndex>,
     )> {
         let mut graph = Graph::new();
         let nodes: BTreeMap<_, _> = self
-            .server_component_units
-            .keys()
-            .map(|server_component| {
-                (server_component, graph.add_node(server_component))
+            .api_metadata
+            .server_components()
+            .map(|component| {
+                let name = component.name();
+                (name, graph.add_node(name))
             })
             .collect();
 
@@ -839,17 +849,12 @@ impl SystemApis {
             let consumed_apis = self
                 .component_apis_consumed(server_component, dependency_filter)?;
             for (client_pkg, _) in consumed_apis {
-                if versioned_on_server_only {
-                    let api = self
-                        .api_metadata
-                        .client_pkgname_lookup(client_pkg)
-                        .unwrap();
-                    if api.versioned_how != VersionedHow::Server {
-                        continue;
-                    }
-                    if !self.component_in_upgrade_dag(server_component) {
-                        continue;
-                    }
+                if self.edge_filtered_out(
+                    edge_filter,
+                    server_component,
+                    client_pkg,
+                ) {
+                    continue;
                 }
 
                 for other_component in self.api_producers(client_pkg) {
@@ -873,7 +878,9 @@ impl SystemApis {
         let filter = ApiDependencyFilter::Default;
         let mut required = BTreeSet::new();
 
-        for (server, server_unit) in &self.server_component_units {
+        for component in self.api_metadata.server_components() {
+            let server = component.name();
+            let server_unit = component.deployment_unit();
             // Components that don't participate in the upgrade DAG don't
             // require an IDU annotation for their edges.
             if !self.component_in_upgrade_dag(server) {
@@ -893,8 +900,7 @@ impl SystemApis {
                 // Check if any producer is in the same deployment unit.
                 for producer in self.api_producers(client) {
                     let producer_unit = self
-                        .server_component_units
-                        .get(producer)
+                        .server_component_unit(producer)
                         .expect("API producer must be in some deployment unit");
 
                     if server_unit == producer_unit {
@@ -1053,7 +1059,10 @@ impl SystemApis {
         //   APIs
         //
         // Check if this DAG is cyclic.  This can't be made to work.
-        let (graph, nodes) = self.make_component_graph(filter, true)?;
+        let (graph, nodes) = self.make_component_graph(
+            filter,
+            EdgeFilter::DagOnly(&idu_only_edges),
+        )?;
         let reverse_nodes: BTreeMap<_, _> =
             nodes.iter().map(|(s_c, node)| (node, s_c)).collect();
         if let Err(error) = petgraph::algo::toposort(&graph, None) {
@@ -1244,8 +1253,18 @@ impl SystemApis {
     }
 }
 
+#[derive(Clone, Copy)]
 enum EdgeFilter<'a> {
+    /// Include every edge.
     All,
+    /// Include only edges that participate in the upgrade DAG. This excludes:
+    ///
+    /// * Client-side versioned APIs
+    /// * Components for which `Lifecycle::in_upgrade_dag` returns `false`
+    /// * Intra-deployment-unit-only edges
+    ///
+    /// The carried data is the set of intra-deployment-unit-only
+    /// `(server_component, client_package)` pairs to exclude.
     DagOnly(&'a BTreeSet<(ServerComponentName, ClientPackageName)>),
 }
 
@@ -1495,8 +1514,7 @@ struct ServerComponentsTracker<'a> {
     known_server_packages:
         &'a BTreeMap<ServerPackageName, Vec<&'a ApiMetadata>>,
 
-    // outputs (structures that we're building up)
-    server_component_units: BTreeMap<ServerComponentName, DeploymentUnitName>,
+    // outputs (the structures that we're building up)
     unit_server_components:
         BTreeMap<DeploymentUnitName, BTreeSet<ServerComponentName>>,
     api_producers: BTreeMap<ClientPackageName, ApiProducerMap>,
@@ -1511,7 +1529,6 @@ impl<'a> ServerComponentsTracker<'a> {
     ) -> ServerComponentsTracker<'a> {
         ServerComponentsTracker {
             known_server_packages,
-            server_component_units: BTreeMap::new(),
             unit_server_components: BTreeMap::new(),
             api_producers: BTreeMap::new(),
         }
@@ -1599,27 +1616,18 @@ impl<'a> ServerComponentsTracker<'a> {
         &mut self,
         deployment_unit: &DeploymentUnitName,
         server_component: &ServerComponentName,
-    ) -> Result<()> {
-        if let Some(previous) = self
-            .server_component_units
-            .insert(server_component.clone(), deployment_unit.clone())
-        {
-            bail!(
-                "server component {:?} found in multiple deployment \
-                 units (at least {} and {})",
-                server_component,
-                deployment_unit,
-                previous
-            );
-        }
-
+    ) {
+        // Metadata validation guarantees each component belongs to exactly one
+        // deployment unit and appears once within it, so the insert is always
+        // of a new server component.
         assert!(
             self.unit_server_components
                 .entry(deployment_unit.clone())
                 .or_default()
-                .insert(server_component.clone())
+                .insert(server_component.clone()),
+            "server component {server_component} appears more than once across \
+             deployment units",
         );
-        Ok(())
     }
 }
 
