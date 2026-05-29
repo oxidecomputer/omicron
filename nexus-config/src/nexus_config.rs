@@ -188,6 +188,30 @@ pub struct DeploymentConfig {
     /// Configuration for HTTP clients to external services.
     #[serde(default)]
     pub external_http_clients: ExternalHttpClientConfig,
+    /// POC: instance-identity token signing. When present, Nexus will verify
+    /// VM-instance attestations and mint OIDC identity tokens.
+    #[schemars(skip)]
+    #[serde(default)]
+    pub instance_identity: Option<InstanceIdentityConfig>,
+}
+
+/// POC configuration for the instance-identity token issuer.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct InstanceIdentityConfig {
+    /// Path to the PEM-encoded RSA signing private key.
+    pub signing_key_path: Utf8PathBuf,
+    /// Path to the PEM-encoded Oxide attestation root cert(s).
+    pub root_cert_path: Utf8PathBuf,
+    /// Expected organization (`O=`) in the attestation cert chain.
+    pub organization: String,
+    /// OIDC issuer URL (the `iss` claim).
+    pub issuer: String,
+    /// Audience (`aud` claim).
+    pub audience: String,
+    /// Key id advertised in the JWT header.
+    pub kid: String,
+    /// Token lifetime in seconds.
+    pub token_ttl_secs: i64,
 }
 
 fn default_techport_external_server_port() -> u16 {
@@ -1402,6 +1426,7 @@ mod test {
                     external_http_clients: ExternalHttpClientConfig {
                         interface: Some("opte0".to_string()),
                     },
+                    instance_identity: None,
                 },
                 pkg: PackageConfig {
                     console: ConsoleConfig {

@@ -77,6 +77,7 @@ mod external_subnet;
 mod iam;
 mod image;
 mod instance;
+pub mod instance_identity;
 mod instance_network;
 mod instance_platform;
 mod internet_gateway;
@@ -314,9 +315,20 @@ pub struct Nexus {
 
     /// state of overall Nexus quiesce activity
     quiesce: NexusQuiesceHandle,
+
+    /// POC: signer for VM instance-identity tokens (None unless configured).
+    instance_identity_signer:
+        Option<instance_identity::InstanceIdentitySigner>,
 }
 
 impl Nexus {
+    /// POC: the instance-identity token signer, if configured.
+    pub(crate) fn instance_identity_signer(
+        &self,
+    ) -> Option<&instance_identity::InstanceIdentitySigner> {
+        self.instance_identity_signer.as_ref()
+    }
+
     /// Create a new Nexus instance for the given rack id `rack_id`
     ///
     /// If this function fails, the pool remains unterminated.
@@ -517,6 +529,27 @@ impl Nexus {
 
         let (sitrep_load_tx, sitrep_load_rx) = watch::channel(None);
 
+        // POC: build the instance-identity token signer, if configured.
+        let instance_identity_signer = match &config
+            .deployment
+            .instance_identity
+        {
+            Some(cfg) => match instance_identity::InstanceIdentitySigner::from_config(
+                cfg,
+            ) {
+                Ok(signer) => Some(signer),
+                Err(e) => {
+                    error!(
+                        log,
+                        "failed to build instance-identity signer";
+                        "error" => InlineErrorChain::new(&e).to_string(),
+                    );
+                    None
+                }
+            },
+            None => None,
+        };
+
         let nexus = Nexus {
             id: config.deployment.id,
             rack_id,
@@ -580,6 +613,7 @@ impl Nexus {
             update_status: UpdateStatusHandle::new(blueprint_load_rx),
             quiesce,
             sitrep_load_rx,
+            instance_identity_signer,
         };
 
         // TODO-cleanup all the extra Arcs here seems wrong

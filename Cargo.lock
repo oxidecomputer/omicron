@@ -5897,6 +5897,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "jsonwebtoken"
+version = "9.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5a87cc7a48537badeae96744432de36f4be2b4a34a05a5ef32e9dd8a1c169dde"
+dependencies = [
+ "base64 0.22.1",
+ "js-sys",
+ "pem",
+ "ring",
+ "serde",
+ "serde_json",
+ "simple_asn1",
+]
+
+[[package]]
 name = "keccak"
 version = "0.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8613,6 +8628,7 @@ dependencies = [
  "assert_matches",
  "async-bb8-diesel",
  "async-trait",
+ "attest-mock",
  "base64 0.22.1",
  "bootstrap-agent-lockstep-types",
  "buf-list",
@@ -8630,6 +8646,7 @@ dependencies = [
  "crucible-agent-client",
  "crucible-common",
  "crucible-pantry-client",
+ "dice-verifier 0.3.0-pre0 (git+https://github.com/oxidecomputer/dice-util?branch=main)",
  "diesel",
  "display-error-chain",
  "dns-server",
@@ -8654,6 +8671,7 @@ dependencies = [
  "http-body-util",
  "httpmock",
  "httptest",
+ "hubpack",
  "hubtools 0.4.7 (git+https://github.com/oxidecomputer/hubtools.git?rev=2b1ef9b38d75563ea800baa3b17327eec17b1b7a)",
  "hyper",
  "hyper-rustls",
@@ -8666,6 +8684,7 @@ dependencies = [
  "ipnetwork",
  "itertools 0.14.0",
  "jiff",
+ "jsonwebtoken",
  "lldpd-client",
  "macaddr",
  "maplit",
@@ -8765,6 +8784,7 @@ dependencies = [
  "slog-error-chain",
  "slog-term",
  "sp-sim",
+ "sprockets-tls-test-utils",
  "static_assertions",
  "steno",
  "strum 0.27.2",
@@ -8787,6 +8807,7 @@ dependencies = [
  "update-engine",
  "usdt 0.5.0",
  "uuid",
+ "x509-cert",
  "zip 4.6.1",
 ]
 
@@ -13419,6 +13440,18 @@ checksum = "b5b441962c817e33508847a22bd82f03a30cff43642dc2fae8b050566121eb9a"
 dependencies = [
  "console 0.15.11",
  "similar",
+]
+
+[[package]]
+name = "simple_asn1"
+version = "0.6.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0d585997b0ac10be3c5ee635f1bab02d512760d14b7c468801ac8a01d9ae5f1d"
+dependencies = [
+ "num-bigint",
+ "num-traits",
+ "thiserror 2.0.18",
+ "time",
 ]
 
 [[package]]

@@ -58,6 +58,27 @@ const RACK_INITIALIZATION_REQUEST_MAX_BYTES: usize = 10 * 1024 * 1024;
 pub trait NexusLockstepApi {
     type Context;
 
+    /// POC: generate a challenge nonce for a VM instance-identity attestation.
+    #[endpoint {
+        method = POST,
+        path = "/instance-identity/nonce",
+    }]
+    async fn instance_identity_nonce(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<InstanceIdentityNonce>, HttpError>;
+
+    /// POC: verify a VM-instance attestation and mint an identity token (JWT)
+    /// bound to the attested instance.
+    #[endpoint {
+        method = POST,
+        path = "/instances/{instance_id}/identity-token",
+    }]
+    async fn instance_identity_token(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<InstanceIdentityPathParam>,
+        body: TypedBody<InstanceIdentityTokenRequest>,
+    ) -> Result<HttpResponseOk<InstanceIdentityToken>, HttpError>;
+
     /// Ping API
     ///
     /// Always responds with Ok if it responds at all.
@@ -650,4 +671,54 @@ pub struct VersionPathParam {
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct TrustQuorumEpochQueryParam {
     pub epoch: Option<Epoch>,
+}
+
+// --- POC: instance-identity attestation -> token ---
+
+/// A measurement log from one of the RoTs in a VM-instance attestation.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct MeasurementLog {
+    /// The producing RoT: `"OxidePlatform"` or `"OxideInstance"` (matches the
+    /// `vm-attest` wire encoding).
+    pub rot: String,
+    pub data: Vec<u8>,
+}
+
+/// Mirror of `vm-attest`'s `VmInstanceAttestation` wire shape.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct VmInstanceAttestation {
+    /// hubpack-serialized `attest_data::Attestation`.
+    pub attestation: Vec<u8>,
+    /// DER-encoded certs, ordered leaf -> first intermediate.
+    pub cert_chain: Vec<Vec<u8>>,
+    pub measurement_logs: Vec<MeasurementLog>,
+}
+
+/// Challenge nonce returned to a VM instance.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct InstanceIdentityNonce {
+    /// Hex-encoded 32-byte nonce.
+    pub nonce: String,
+}
+
+/// Path parameters for the instance-identity token endpoint.
+#[derive(Deserialize, JsonSchema)]
+pub struct InstanceIdentityPathParam {
+    pub instance_id: InstanceUuid,
+}
+
+/// Request body for minting an instance-identity token.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct InstanceIdentityTokenRequest {
+    /// The hex-encoded nonce previously issued by `instance_identity_nonce`.
+    pub nonce: String,
+    /// The attestation produced by the VM-instance RoT.
+    pub attestation: VmInstanceAttestation,
+}
+
+/// A minted instance-identity token.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct InstanceIdentityToken {
+    /// Signed JWT (RS256).
+    pub token: String,
 }

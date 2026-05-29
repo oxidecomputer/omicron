@@ -25,6 +25,7 @@ use http::Response;
 use http::StatusCode;
 use nexus_db_queries::authz;
 use nexus_lockstep_api::*;
+use omicron_uuid_kinds::GenericUuid;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintMetadata;
 use nexus_types::deployment::BlueprintTarget;
@@ -81,6 +82,54 @@ enum NexusLockstepApiImpl {}
 
 impl NexusLockstepApi for NexusLockstepApiImpl {
     type Context = ApiContext;
+
+    async fn instance_identity_nonce(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<InstanceIdentityNonce>, HttpError> {
+        let apictx = &rqctx.context().context;
+        let nexus = &apictx.nexus;
+        let signer = nexus.instance_identity_signer().ok_or_else(|| {
+            HttpError::for_unavail(
+                None,
+                "instance-identity token issuance is not configured"
+                    .to_string(),
+            )
+        })?;
+        Ok(HttpResponseOk(InstanceIdentityNonce {
+            nonce: signer.generate_nonce(),
+        }))
+    }
+
+    async fn instance_identity_token(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<InstanceIdentityPathParam>,
+        body: TypedBody<InstanceIdentityTokenRequest>,
+    ) -> Result<HttpResponseOk<InstanceIdentityToken>, HttpError> {
+        let apictx = &rqctx.context().context;
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let req = body.into_inner();
+        let signer = nexus.instance_identity_signer().ok_or_else(|| {
+            HttpError::for_unavail(
+                None,
+                "instance-identity token issuance is not configured"
+                    .to_string(),
+            )
+        })?;
+        let token = signer
+            .verify_and_mint(
+                path.instance_id.into_untyped_uuid(),
+                &req.nonce,
+                &req.attestation,
+            )
+            .map_err(|e| {
+                HttpError::for_bad_request(
+                    None,
+                    format!("attestation verification failed: {e}"),
+                )
+            })?;
+        Ok(HttpResponseOk(InstanceIdentityToken { token }))
+    }
 
     async fn rack_initialization_complete(
         rqctx: RequestContext<Self::Context>,

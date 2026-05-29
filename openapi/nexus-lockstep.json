@@ -1010,6 +1010,75 @@
         }
       }
     },
+    "/instance-identity/nonce": {
+      "post": {
+        "summary": "POC: generate a challenge nonce for a VM instance-identity attestation.",
+        "operationId": "instance_identity_nonce",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InstanceIdentityNonce"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/instances/{instance_id}/identity-token": {
+      "post": {
+        "summary": "POC: verify a VM-instance attestation and mint an identity token (JWT)",
+        "description": "bound to the attested instance.",
+        "operationId": "instance_identity_token",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "instance_id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/InstanceUuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InstanceIdentityTokenRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InstanceIdentityToken"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/instances/{instance_id}/migrate": {
       "post": {
         "operationId": "instance_migrate",
@@ -5385,6 +5454,54 @@
           }
         ]
       },
+      "InstanceIdentityNonce": {
+        "description": "Challenge nonce returned to a VM instance.",
+        "type": "object",
+        "properties": {
+          "nonce": {
+            "description": "Hex-encoded 32-byte nonce.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "nonce"
+        ]
+      },
+      "InstanceIdentityToken": {
+        "description": "A minted instance-identity token.",
+        "type": "object",
+        "properties": {
+          "token": {
+            "description": "Signed JWT (RS256).",
+            "type": "string"
+          }
+        },
+        "required": [
+          "token"
+        ]
+      },
+      "InstanceIdentityTokenRequest": {
+        "description": "Request body for minting an instance-identity token.",
+        "type": "object",
+        "properties": {
+          "attestation": {
+            "description": "The attestation produced by the VM-instance RoT.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/VmInstanceAttestation"
+              }
+            ]
+          },
+          "nonce": {
+            "description": "The hex-encoded nonce previously issued by `instance_identity_nonce`.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "attestation",
+          "nonce"
+        ]
+      },
       "InstanceMigrateRequest": {
         "description": "Parameters used when migrating an instance.",
         "type": "object",
@@ -5854,6 +5971,28 @@
         "format": "uint8",
         "minimum": 1,
         "maximum": 32
+      },
+      "MeasurementLog": {
+        "description": "A measurement log from one of the RoTs in a VM-instance attestation.",
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "uint8",
+              "minimum": 0
+            }
+          },
+          "rot": {
+            "description": "The producing RoT: `\"OxidePlatform\"` or `\"OxideInstance\"` (matches the `vm-attest` wire encoding).",
+            "type": "string"
+          }
+        },
+        "required": [
+          "data",
+          "rot"
+        ]
       },
       "MgsDrivenUpdateStatus": {
         "type": "object",
@@ -9762,6 +9901,44 @@
         "pattern": "^(?![0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$)^[a-z]([a-zA-Z0-9-]*[a-zA-Z0-9]+)?$",
         "minLength": 1,
         "maxLength": 63
+      },
+      "VmInstanceAttestation": {
+        "description": "Mirror of `vm-attest`'s `VmInstanceAttestation` wire shape.",
+        "type": "object",
+        "properties": {
+          "attestation": {
+            "description": "hubpack-serialized `attest_data::Attestation`.",
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "uint8",
+              "minimum": 0
+            }
+          },
+          "cert_chain": {
+            "description": "DER-encoded certs, ordered leaf -> first intermediate.",
+            "type": "array",
+            "items": {
+              "type": "array",
+              "items": {
+                "type": "integer",
+                "format": "uint8",
+                "minimum": 0
+              }
+            }
+          },
+          "measurement_logs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MeasurementLog"
+            }
+          }
+        },
+        "required": [
+          "attestation",
+          "cert_chain",
+          "measurement_logs"
+        ]
       },
       "Vni": {
         "description": "A Geneve Virtual Network Identifier",
