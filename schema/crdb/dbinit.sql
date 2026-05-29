@@ -7650,6 +7650,23 @@ CREATE UNIQUE INDEX IF NOT EXISTS
     lookup_sitrep_version_by_id
 ON omicron.public.fm_sitrep_history (sitrep_id);
 
+--- Human-readable debugging reports for a sitrep.
+--
+-- These are for diagnostic purposes only (i.e. for use by omdb, inclusion in
+-- support bundles, etc), and are not intended as operational data.
+CREATE TABLE IF NOT EXISTS omicron.public.fm_sitrep_debug_report (
+    -- The ID of the sitrep that these reports describe.
+    -- This is a foreign key into the `fm_sitrep` table.
+    sitrep_id UUID PRIMARY KEY,
+
+    -- A JSON object describing the inputs to the analysis phase that produced
+    -- this sitrep (collected during the analysis phase).
+    input_report JSONB NOT NULL,
+
+    -- A JSON object describing the analysis phase that produced this sitrep.
+    analysis_report JSONB NOT NULL,
+);
+
 
 CREATE TYPE IF NOT EXISTS omicron.public.diagnosis_engine AS ENUM (
     'power_shelf'
