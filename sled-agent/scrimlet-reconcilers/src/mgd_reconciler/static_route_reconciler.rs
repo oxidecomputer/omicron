@@ -39,6 +39,10 @@ use std::net::Ipv6Addr;
 
 // This is the default RIB Priority used for static routes.  This mirrors
 // the const defined in maghemite in rdb/src/lib.rs.
+//
+// TODO-cleanup Once https://github.com/oxidecomputer/maghemite/pull/757 lands
+// and is available in omicron, we should remove this in favor of using the
+// exported constant from maghemite.
 const DEFAULT_RIB_PRIORITY_STATIC: u8 = 1;
 
 type MgdClientError = mg_admin_client::Error<mg_admin_client::types::Error>;
