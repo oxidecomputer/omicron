@@ -23,7 +23,7 @@ use std::collections::BTreeSet;
 /// Describes the APIs in the system
 ///
 /// This is the programmatic interface to the `api-manifest.toml` file.  It is
-/// built from a deserialized [`RawApiMetadata`] by [`AllApiMetadata::from_raw`].
+/// built from a deserialized `RawApiMetadata` by `AllApiMetadata::from_raw`.
 pub struct AllApiMetadata {
     apis: BTreeMap<ClientPackageName, ApiMetadata>,
     deployment_units: IdOrdMap<DeploymentUnitInfo>,

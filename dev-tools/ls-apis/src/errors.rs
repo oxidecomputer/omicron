@@ -31,7 +31,7 @@ use swrite::{SWrite as _, swrite};
 /// A single problem encountered while loading API metadata.
 ///
 /// Variants are grouped by the validation pass that produces them.  Passes
-/// record these into an [`ErrorAccumulator`], so a single run can surface every
+/// record these into an `ErrorAccumulator`, so a single run can surface every
 /// problem at once.
 #[derive(Debug, thiserror::Error)]
 pub enum LoadError {
