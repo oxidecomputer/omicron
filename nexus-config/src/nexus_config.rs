@@ -1909,6 +1909,27 @@ mod test {
     }
 
     #[test]
+    fn test_instance_identity_config_parses() {
+        // POC sanity: a `[deployment.instance_identity]` block (the shape the
+        // homelab operator writes) parses cleanly. Doubles as a known-good
+        // example.
+        let cfg = toml::from_str::<InstanceIdentityConfig>(
+            r##"
+            signing_key_path = "/var/nexus/instance-identity/signing-key.pem"
+            root_cert_path = "/var/nexus/instance-identity/oxide-root.pem"
+            organization = "Oxide Computer Company"
+            issuer = "https://oxide.example"
+            audience = "vault"
+            kid = "poc-1"
+            token_ttl_secs = 300
+            "##,
+        )
+        .expect("instance_identity config should parse");
+        assert_eq!(cfg.organization, "Oxide Computer Company");
+        assert_eq!(cfg.token_ttl_secs, 300);
+    }
+
+    #[test]
     fn test_repo_configs_are_valid() {
         // The example config file should be valid.
         let config_path = "../nexus/examples/config.toml";

@@ -308,7 +308,6 @@ fn cert_organization(cert: &Certificate) -> Option<Utf8StringRef<'_>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use base64::Engine;
     use dice_verifier::Attest;
     use hubpack::SerializedSize;
     use nexus_config::InstanceIdentityConfig;
@@ -348,6 +347,19 @@ WeCtyV85HllV32Biit7ZnbG/Sml+cRXEx/HwT40CgYAgsAuiaGSto4Va6KAvbCqd
 vkjBqPjqrfLtrInnSsGhh39QuOsvtq7DfL2cTbphHBGzwjW3h+G+LONPdjXmAU6h
 avqCw+ihCp6iJ2OhES/jPQ==
 -----END PRIVATE KEY-----
+"#;
+
+    // The matching RSA public key, used in-test to verify minted tokens the way
+    // a relying party (AWS STS / Vault) would.
+    const TEST_VERIFY_KEY_PEM: &str = r#"-----BEGIN PUBLIC KEY-----
+MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAwEfF8bAKCD6tozH3Wce7
+7OKhebs4+Q/XDVwA8mHLj7FRxSgBSJjbwwvVkWMkcmxj+ewr1AMg2BjIBN5YDvME
+tFM/oynwRLIxJGX7eQv3PW/Ho/9C2X69jVxwFsvtklFIx2E40X6VStrc6TJhCs9h
+DHTFp5nZcIdFJ1iuZ+ETBJ5QCOc3XnwDWTN6QHxMd8N+oNMlXwPAgA7mP70voINP
+1NTuyLAQtIAa8TDjEOoRJI/RqCKf6gIpHALsgsHeVvO3X+vFf0BFW82ZRbkJe9oo
+atviuPyZGqZLhau+uxwEdh2nrN+E6MCkXAnCh0ZA/AVamQWAkHsJ8isTGGPLMvLl
+HQIDAQAB
+-----END PUBLIC KEY-----
 "#;
 
     /// Generate the attestation PKI (root + alias chain) and a measurement log
@@ -421,12 +433,21 @@ avqCw+ihCp6iJ2OhES/jPQ==
         }
     }
 
-    fn jwt_claims(token: &str) -> serde_json::Value {
-        let payload_b64 = token.split('.').nth(1).unwrap();
-        let payload = base64::engine::general_purpose::URL_SAFE_NO_PAD
-            .decode(payload_b64)
-            .unwrap();
-        serde_json::from_slice(&payload).unwrap()
+    /// Decode AND verify the JWT the way a relying party would: validate the
+    /// RS256 signature against the public key, plus issuer/audience/expiry.
+    fn verify_jwt(token: &str) -> serde_json::Value {
+        use jsonwebtoken::{decode, Algorithm, DecodingKey, Validation};
+        let key = DecodingKey::from_rsa_pem(TEST_VERIFY_KEY_PEM.as_bytes())
+            .expect("valid RSA public key");
+        let mut validation = Validation::new(Algorithm::RS256);
+        validation.set_issuer(&["https://oxide.test"]);
+        validation.set_audience(&["vault"]);
+        decode::<serde_json::Value>(token, &key, &validation)
+            .expect(
+                "minted JWT must verify against the public key \
+                 (signature + iss + aud + exp)",
+            )
+            .claims
     }
 
     #[test]
@@ -483,7 +504,7 @@ avqCw+ihCp6iJ2OhES/jPQ==
         let token = signer
             .verify_and_mint(instance, &nonce_hex, &attestation)
             .expect("verification + mint should succeed");
-        let claims = jwt_claims(&token);
+        let claims = verify_jwt(&token);
         assert_eq!(claims["sub"], format!("instance:{instance}"));
         assert_eq!(claims["instance"], instance.to_string());
         assert_eq!(claims["project"], project.to_string());
