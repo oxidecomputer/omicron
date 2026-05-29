@@ -156,6 +156,16 @@ impl InstanceIdentitySigner {
 
     /// Verify the attestation against our trust anchors and, on success, mint a
     /// signed instance-identity token bound to the attested instance.
+    ///
+    /// SECURITY (POC gap — no replay protection): `nonce_hex` is taken straight
+    /// from the request and used only to reconstruct the qualifying data the
+    /// attestation is checked against. We do NOT persist the nonces handed out
+    /// by `generate_nonce`, nor verify that this nonce was one we issued or that
+    /// it has not been used before. Consequently a captured `(nonce,
+    /// attestation)` pair can be replayed to mint additional tokens until the
+    /// attestation's own freshness lapses. A real implementation must record
+    /// issued nonces as single-use and time-bounded, and reject reused or
+    /// unknown ones here.
     pub fn verify_and_mint(
         &self,
         instance: Uuid,
