@@ -4,6 +4,7 @@
 
 //! Extracting fault-management fact tables from a SQL DDL file.
 
+use anyhow::Context;
 use iddqd::IdOrdMap;
 use sqlparser::ast::CreateTable;
 use sqlparser::dialect::PostgreSqlDialect;
@@ -26,6 +27,9 @@ use sqlparser::tokenizer::Whitespace;
 /// CREATE TABLE my_fact ( ... );
 /// ```
 const FM_FACT_ANNOTATION: &str = "fm_fact";
+// TODO(eliza): also parse the following required annotations:
+// - `de = <rust ident for diagnosis engine enum variant>`
+// - `fact_variant = <rust ident for fact variant enum variant>/name of generated struct`
 
 pub struct Schema {
     pub(crate) fact_tables: IdOrdMap<FactTable>,
@@ -48,17 +52,21 @@ impl iddqd::IdOrdItem for FactTable {
 impl Schema {
     pub fn from_sql(sql: &str) -> anyhow::Result<Self> {
         let mut fact_tables = IdOrdMap::new();
-        for table in fm_fact_tables(sql) {
-            let table = table?;
+        for create_stmt in fm_fact_tables(sql)? {
             // TODO(eliza): check that the table has the following:
             // - id UUID
             // - sitrep_id UUID
             // - case_id UUID
             // - PRIMARY KEY (id, sitrep_id)
             // if not, it is not valid to be a FM fact
-            fact_tables
-                .insert_unique(FactTable { create_stmt: table })
-                .with_context(|| "duplicate table name")?;
+            fact_tables.insert_unique(FactTable { create_stmt }).map_err(
+                |e| {
+                    anyhow::anyhow!(
+                        "duplicate table name {}",
+                        e.new_item().create_stmt.name
+                    )
+                },
+            )?;
         }
         Ok(Self { fact_tables })
     }
@@ -66,30 +74,33 @@ impl Schema {
 
 /// Returns an iterator over every `CREATE TABLE` statement in `sql` that is
 /// annotated with a `--! fm_fact` comment placed directly above it.
-fn fm_fact_tables(
-    sql: &str,
-) -> impl Iterator<Item = Result<CreateTable, ParserError>> {
+fn fm_fact_tables(sql: &str) -> Result<Vec<CreateTable>, ParserError> {
     let dialect = PostgreSqlDialect {};
     let tokens = Tokenizer::new(&dialect, sql).tokenize_with_location()?;
 
-    statement_segments(&tokens).filter_map(|segment| {
-        // We only care about `CREATE TABLE` statements wearing the
-        // `--! fm_fact` hat, so we can avoid parsing everything else in the
-        // file.
-        if !segment.annotated || !is_create_table(segment.tokens) {
-            return None;
-        }
+    statement_segments(&tokens)
+        .into_iter()
+        .filter_map(|segment| {
+            // We only care about `CREATE TABLE` statements wearing the
+            // `--! fm_fact` hat, so we can avoid parsing everything else in the
+            // file.
+            if !segment.annotated || !is_create_table(segment.tokens) {
+                return None;
+            }
 
-        // `parse_create_table` expects the `CREATE TABLE` keywords to already
-        // be consumed, so step over them first.
-        let mut parser = Parser::new(&dialect)
-            .with_tokens_with_locations(segment.tokens.to_vec());
-        parser.expect_keyword_is(Keyword::CREATE)?;
-        parser.expect_keyword_is(Keyword::TABLE)?;
-        let create_table =
-            parser.parse_create_table(false, false, None, false)?;
-        Some(Ok(create_table))
-    })
+            // `parse_create_table` expects the `CREATE TABLE` keywords to already
+            // be consumed, so step over them first.
+            let mut parser = Parser::new(&dialect)
+                .with_tokens_with_locations(segment.tokens.to_vec());
+            let Ok(_) = parser.expect_keyword_is(Keyword::CREATE) else {
+                return None;
+            };
+            let Ok(_) = parser.expect_keyword_is(Keyword::TABLE) else {
+                return None;
+            };
+            Some(parser.parse_create_table(false, false, None, false))
+        })
+        .collect()
 }
 
 /// Returns whether `tokens` begins with the `CREATE TABLE` keywords (ignoring
@@ -184,6 +195,7 @@ mod test {
     fn table_names(sql: &str) -> Vec<String> {
         fm_fact_tables(sql)
             .expect("SQL should parse")
+            .into_iter()
             .map(|table| table.name.to_string())
             .collect()
     }
