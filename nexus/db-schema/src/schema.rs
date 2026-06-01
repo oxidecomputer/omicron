@@ -3178,6 +3178,10 @@ table! {
 }
 
 allow_tables_to_appear_in_same_query!(fm_sitrep_analysis_report, fm_sitrep);
+allow_tables_to_appear_in_same_query!(
+    fm_sitrep_analysis_report,
+    fm_sitrep_history
+);
 
 table! {
     disk_type_local_storage (disk_id) {

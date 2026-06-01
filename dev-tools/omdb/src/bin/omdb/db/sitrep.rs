@@ -412,9 +412,56 @@ async fn cmd_db_sitrep_show(
 async fn cmd_db_sitrep_analysis_report_list(
     opctx: &OpContext,
     datastore: &DataStore,
-    _fetch_opts: &DbFetchOptions,
+    fetch_opts: &DbFetchOptions,
 ) -> anyhow::Result<()> {
-    anyhow::bail!("TODO ELIZA IMPLEMENT ME LOL")
+    use crate::helpers::display_option_blank;
+
+    #[derive(Tabled)]
+    #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+    struct Row {
+        sitrep_id: Uuid,
+        #[tabled(display_with = "display_option_blank", rename = "VERSION")]
+        version: Option<u32>,
+        git_commit: String,
+        input_bytes: i64,
+        analysis_bytes: i64,
+    }
+
+    let ctx = || "listing sitrep analysis reports";
+    let pagparams = DataPageParams {
+        marker: None,
+        limit: fetch_opts.fetch_limit,
+        direction: PaginationOrder::Ascending,
+    };
+    let summaries = datastore
+        .fm_sitrep_analysis_report_summary_fetch(opctx, &pagparams)
+        .await
+        .with_context(ctx)?;
+
+    check_limit(&summaries, fetch_opts.fetch_limit, ctx);
+
+    let mut rows = summaries
+        .into_iter()
+        .map(|s| Row {
+            sitrep_id: s.sitrep_id.into_untyped_uuid(),
+            version: s.version,
+            git_commit: s.git_commit,
+            input_bytes: s.input_report_bytes,
+            analysis_bytes: s.analysis_report_bytes,
+        })
+        .collect::<Vec<_>>();
+
+    // Sort by version descending, with reports not yet in the history table
+    // (version = None) at the end.
+    rows.sort_by_key(|row| std::cmp::Reverse(row.version));
+
+    let mut table = tabled::Table::new(rows);
+    table
+        .with(tabled::settings::Style::empty())
+        .with(tabled::settings::Padding::new(0, 1, 0, 0));
+    println!("{table}");
+
+    Ok(())
 }
 
 async fn cmd_db_sitrep_analysis_report_show(

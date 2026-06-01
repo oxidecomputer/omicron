@@ -35,6 +35,7 @@ use nexus_db_schema::schema::fm_alert_request::dsl as alert_req_dsl;
 use nexus_db_schema::schema::fm_case::dsl as case_dsl;
 use nexus_db_schema::schema::fm_ereport_in_case::dsl as case_ereport_dsl;
 use nexus_db_schema::schema::fm_sitrep::dsl as sitrep_dsl;
+use nexus_db_schema::schema::fm_sitrep_analysis_report::dsl as analysis_report_dsl;
 use nexus_db_schema::schema::fm_sitrep_history::dsl as history_dsl;
 use nexus_db_schema::schema::fm_support_bundle_request::dsl as support_bundle_req_dsl;
 use nexus_types::fm;
@@ -121,6 +122,7 @@ sitrep_child_tables! {
     SupportBundleRequestDataSelectionEreports => { table: "fm_support_bundle_request_data_selection_ereports" },
     SupportBundleRequest => { table: "fm_support_bundle_request" },
     Case => { table: "fm_case" },
+    AnalysisReport => { table: "fm_sitrep_analysis_report" },
 }
 
 /// Per-child-table statistics from a single GC pass.
@@ -137,6 +139,22 @@ pub struct GcOrphansResult {
     pub sitrep_metadata_batches: usize,
     pub batch_size: u32,
     pub child_tables: BTreeMap<SitrepChildTable, ChildTableGcStats>,
+}
+
+/// A summary of a sitrep analysis report, as returned by
+/// [`DataStore::fm_sitrep_analysis_report_summary_fetch`].
+#[derive(Clone, Debug)]
+pub struct AnalysisReportSummary {
+    /// The ID of the sitrep this analysis report describes.
+    pub sitrep_id: SitrepUuid,
+    /// The Git commit of the Nexus that produced this report.
+    pub git_commit: String,
+    /// The version of this sitrep in the history table, if present.
+    pub version: Option<u32>,
+    /// The byte size of the serialized `input_report` JSON column.
+    pub input_report_bytes: i64,
+    /// The byte size of the serialized `analysis_report` JSON column.
+    pub analysis_report_bytes: i64,
 }
 
 impl DataStore {
@@ -1541,6 +1559,78 @@ impl DataStore {
             &pagparams,
         )
         .select(model::SitrepVersion::as_select())
+    }
+
+    /// Returns a paginated list of [`AnalysisReportSummary`] records,
+    /// ordered by sitrep ID.
+    ///
+    /// Each summary includes the sitrep ID, the git commit of the Nexus that
+    /// produced the report, the sitrep history version (if the sitrep is
+    /// present in the history table), and the byte sizes of the two JSON
+    /// report columns.
+    pub async fn fm_sitrep_analysis_report_summary_fetch(
+        &self,
+        opctx: &OpContext,
+        pagparams: &DataPageParams<'_, Uuid>,
+    ) -> ListResultVec<AnalysisReportSummary> {
+        // TODO(eliza): there should probably be an authz object for the fm sitrep?
+        opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
+        let conn = self.pool_connection_authorized(opctx).await?;
+        Self::analysis_report_summary_query(pagparams)
+            .load_async(&*conn)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+            .map(|rows| {
+                rows.into_iter()
+                    .map(
+                        |(
+                            sitrep_id,
+                            git_commit,
+                            version,
+                            input_report_bytes,
+                            analysis_report_bytes,
+                        ): (
+                            Uuid,
+                            String,
+                            Option<SqlU32>,
+                            i64,
+                            i64,
+                        )| AnalysisReportSummary {
+                            sitrep_id: SitrepUuid::from_untyped_uuid(sitrep_id),
+                            git_commit,
+                            version: version.map(|v| v.0),
+                            input_report_bytes,
+                            analysis_report_bytes,
+                        },
+                    )
+                    .collect()
+            })
+    }
+
+    fn analysis_report_summary_query(
+        pagparams: &DataPageParams<'_, Uuid>,
+    ) -> impl RunnableQuery<(Uuid, String, Option<SqlU32>, i64, i64)> + use<>
+    {
+        paginated(
+            analysis_report_dsl::fm_sitrep_analysis_report,
+            analysis_report_dsl::sitrep_id,
+            pagparams,
+        )
+        .left_join(
+            history_dsl::fm_sitrep_history
+                .on(history_dsl::sitrep_id.eq(analysis_report_dsl::sitrep_id)),
+        )
+        .select((
+            analysis_report_dsl::sitrep_id,
+            analysis_report_dsl::git_commit,
+            history_dsl::version.nullable(),
+            diesel::dsl::sql::<sql_types::BigInt>(
+                "octet_length(input_report::text)",
+            ),
+            diesel::dsl::sql::<sql_types::BigInt>(
+                "octet_length(analysis_report::text)",
+            ),
+        ))
     }
 }
 
@@ -3708,6 +3798,109 @@ mod tests {
         }
 
         eprintln!("Stress test results: {stats}");
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn explain_analysis_report_summary_query() {
+        let logctx =
+            dev::test_setup_log("explain_analysis_report_summary_query");
+        let db = TestDatabase::new_with_pool(&logctx.log).await;
+        let pool = db.pool();
+        let conn = pool.claim().await.unwrap();
+
+        let pagparams = DataPageParams {
+            marker: None,
+            limit: std::num::NonZeroU32::new(420).unwrap(),
+            direction: dropshot::PaginationOrder::Ascending,
+        };
+        let query = DataStore::analysis_report_summary_query(&pagparams);
+        let explanation = query
+            .explain_async(&conn)
+            .await
+            .expect("Failed to explain query - is it valid SQL?");
+        eprintln!("{explanation}");
+        assert!(
+            !explanation.contains("FULL SCAN"),
+            "Found an unexpected FULL SCAN: {}",
+            explanation
+        );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_analysis_report_summary_fetch() {
+        let logctx = dev::test_setup_log("test_analysis_report_summary_fetch");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let pagparams = DataPageParams {
+            marker: None,
+            limit: std::num::NonZeroU32::new(10).unwrap(),
+            direction: dropshot::PaginationOrder::Ascending,
+        };
+
+        // No analysis reports yet — should return empty.
+        let summaries = datastore
+            .fm_sitrep_analysis_report_summary_fetch(opctx, &pagparams)
+            .await
+            .expect("query should succeed when table is empty");
+        assert!(summaries.is_empty());
+
+        // Insert a sitrep (this also makes it current, giving it version 1).
+        let sitrep_id = SitrepUuid::new_v4();
+        let sitrep = nexus_types::fm::Sitrep {
+            metadata: nexus_types::fm::SitrepMetadata {
+                id: sitrep_id,
+                inv_collection_id: CollectionUuid::new_v4(),
+                creator_id: OmicronZoneUuid::new_v4(),
+                comment: "test sitrep".to_string(),
+                time_created: Utc::now(),
+                parent_sitrep_id: None,
+                next_inv_min_time_started: Utc::now(),
+            },
+            cases: Default::default(),
+            ereports_by_id: Default::default(),
+        };
+        datastore.fm_sitrep_insert(opctx, sitrep).await.unwrap();
+
+        // Insert an analysis report directly.
+        {
+            let conn = datastore.pool_connection_for_tests().await.unwrap();
+            let record = model::fm::SitrepAnalysisReport {
+                sitrep_id: DbTypedUuid::from(sitrep_id),
+                git_commit: "cafebabe".to_string(),
+                input_report: serde_json::json!({"inputs": "here"}),
+                analysis_report: serde_json::json!({"analysis": "there"}),
+            };
+            diesel::insert_into(analysis_report_dsl::fm_sitrep_analysis_report)
+                .values(record)
+                .execute_async(&*conn)
+                .await
+                .unwrap();
+        }
+
+        // Now fetch the summaries — should see one row.
+        let summaries = datastore
+            .fm_sitrep_analysis_report_summary_fetch(opctx, &pagparams)
+            .await
+            .expect("query should succeed after insert");
+        assert_eq!(summaries.len(), 1);
+
+        let s = &summaries[0];
+        assert_eq!(s.sitrep_id, sitrep_id);
+        assert_eq!(s.git_commit, "cafebabe");
+        // The sitrep was inserted as the first sitrep, so version = 1.
+        assert_eq!(s.version, Some(1));
+        assert!(s.input_report_bytes > 0, "input_report_bytes should be > 0");
+        assert!(
+            s.analysis_report_bytes > 0,
+            "analysis_report_bytes should be > 0"
+        );
 
         db.terminate().await;
         logctx.cleanup_successful();
