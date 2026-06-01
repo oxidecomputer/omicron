@@ -193,15 +193,55 @@ pub struct InstanceUpdate {
     pub memory: ByteCount,
 
     /// The disk the instance is configured to boot from.
+    ///
+    /// Setting a boot disk is optional but recommended to ensure predictable
+    /// boot behavior. The boot disk can be set during instance creation or
+    /// later if the instance is stopped. The boot disk counts against the
+    /// disk attachment limit.
+    ///
+    /// An instance that does not have a boot disk set will use the boot
+    /// options specified in its UEFI settings, which are controlled by both
+    /// the instance's UEFI firmware and the guest operating system. Boot
+    /// options can change as disks are attached and detached, which may
+    /// result in an instance that only boots to the EFI shell until a boot
+    /// disk is set.
     pub boot_disk: Nullable<NameOrId>,
 
     /// The auto-restart policy for this instance.
+    ///
+    /// This policy determines whether the instance should be automatically
+    /// restarted by the control plane on failure. If this is `null`, any
+    /// explicitly configured auto-restart policy will be unset, and the
+    /// control plane will select the default policy when determining whether
+    /// the instance can be automatically restarted.
+    ///
+    /// Currently, the global default auto-restart policy is "best-effort",
+    /// so instances with `null` auto-restart policies will be automatically
+    /// restarted. However, in the future, the default policy may be
+    /// configurable through other mechanisms, such as on a per-project
+    /// basis. In that case, any configured default policy will be used if
+    /// this is `null`.
     pub auto_restart_policy: Nullable<InstanceAutoRestartPolicy>,
 
-    /// The CPU platform to be used for this instance.
+    /// The CPU platform to be used for this instance. If this is `null`,
+    /// the instance requires no particular CPU platform; when it is started
+    /// the instance will have the most general CPU platform supported by
+    /// the sled it is initially placed on.
     pub cpu_platform: Nullable<InstanceCpuPlatform>,
 
     /// Multicast groups this instance should join.
+    ///
+    /// When specified, this replaces the instance's current multicast group
+    /// membership with the new set of groups. The instance will leave any
+    /// groups not listed here and join any new groups that are specified.
+    ///
+    /// Each entry can specify the group by name, UUID, or IP address, along with
+    /// optional source IP filtering for SSM (Source-Specific Multicast). When
+    /// a group doesn't exist, it will be implicitly created using the default
+    /// multicast pool (or you can specify `ip_version` to disambiguate if needed).
+    ///
+    /// If not provided, the instance's multicast group membership will not
+    /// be changed.
     #[serde(default)]
     pub multicast_groups: Option<Vec<MulticastGroupJoinSpec>>,
 
