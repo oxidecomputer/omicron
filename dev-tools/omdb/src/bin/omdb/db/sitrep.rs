@@ -54,6 +54,9 @@ enum Commands {
         #[clap(flatten)]
         args: ShowArgs,
     },
+
+    /// Commands for showing sitrep analysis reports.
+    AnalysisReport(AnalysisReportArgs),
 }
 
 #[derive(Debug, Args, Clone)]
@@ -68,7 +71,33 @@ pub(super) struct SitrepHistoryArgs {
 }
 
 #[derive(Debug, Args, Clone)]
-struct ShowArgs {}
+struct AnalysisReportArgs {
+    #[clap(subcommand)]
+    command: AnalysisReportCommands,
+}
+
+#[derive(Debug, Subcommand, Clone)]
+enum AnalysisReportCommands {
+    /// Show the analysis reports for the requested sitrep, if any exist.
+    #[clap(alias = "show")]
+    Info {
+        /// The UUID of the sitrep to show, or "current" to show the current
+        /// sitrep.
+        sitrep: SitrepIdOrCurrent,
+
+        #[clap(flatten)]
+        args: ShowArgs,
+    },
+
+    /// List all analysis reports currently in the database.
+    List {},
+}
+
+#[derive(Debug, Args, Clone)]
+struct ShowArgs {
+    #[clap(long, short)]
+    json: bool,
+}
 
 #[derive(Debug, Clone, Copy)]
 enum SitrepIdOrCurrent {
@@ -112,6 +141,20 @@ pub(super) async fn cmd_db_sitrep(
                 SitrepIdOrCurrent::Current,
             )
             .await
+        }
+        Commands::AnalysisReport(AnalysisReportArgs {
+            command: AnalysisReportCommands::Info { sitrep, ref args },
+        }) => {
+            cmd_db_sitrep_analysis_report_show(
+                opctx, datastore, fetch_opts, args, sitrep,
+            )
+            .await
+        }
+        Commands::AnalysisReport(AnalysisReportArgs {
+            command: AnalysisReportCommands::List {},
+        }) => {
+            cmd_db_sitrep_analysis_report_list(opctx, datastore, fetch_opts)
+                .await
         }
     }
 }
@@ -364,4 +407,128 @@ async fn cmd_db_sitrep_show(
     }
 
     Ok(())
+}
+
+async fn cmd_db_sitrep_analysis_report_list(
+    opctx: &OpContext,
+    datastore: &DataStore,
+    _fetch_opts: &DbFetchOptions,
+) -> anyhow::Result<()> {
+    anyhow::bail!("TODO ELIZA IMPLEMENT ME LOL")
+}
+
+async fn cmd_db_sitrep_analysis_report_show(
+    opctx: &OpContext,
+    datastore: &DataStore,
+    _fetch_opts: &DbFetchOptions,
+    _args: &ShowArgs,
+    sitrep: SitrepIdOrCurrent,
+) -> anyhow::Result<()> {
+    let id = match sitrep {
+        SitrepIdOrCurrent::Current => {
+            datastore
+                .fm_current_sitrep_version(&opctx)
+                .await
+                .context("failed to look up the current sitrep version")?
+                .ok_or_else(|| {
+                    anyhow::anyhow!("no current sitrep exists at this time")
+                })?
+                .id
+        }
+        SitrepIdOrCurrent::Id(id) => id,
+    };
+
+    let ctx = || match sitrep {
+        SitrepIdOrCurrent::Current => {
+            "looking up analysis reports for the current fault management \
+             sitrep"
+                .to_string()
+        }
+        SitrepIdOrCurrent::Id(id) => {
+            format!(
+                "looking up analysis reports for fault management sitrep {id}"
+            )
+        }
+    };
+
+    let report = load_analysis_report(datastore, id).await.with_context(ctx)?;
+
+    Ok(())
+}
+
+fn print_analysis_reports(
+    report: &model::fm::SitrepAnalysisReport,
+    json: bool,
+) -> anyhow::Result<()> {
+    use nexus_types::fm::analysis_reports::{AnalysisReport, InputReport};
+
+    let model::fm::SitrepAnalysisReport {
+        sitrep_id: _,
+        git_commit,
+        input_report,
+        analysis_report,
+    } = report;
+
+    let our_git_commit = env!("VERGEN_GIT_SHA");
+    if our_git_commit != git_commit {
+        eprintln!(
+            "note: these sitrep analysis reports were produced by a Nexus \
+             on git commit {git_commit}. this omdb was built from \
+             {our_git_commit}."
+        );
+    }
+
+    if json {
+        let value = serde_json::json!({
+            "git_commit": &git_commit,
+            "input_report": input_report,
+            "analysis_report": analysis_report,
+        });
+        serde_json::to_writer_pretty(std::io::stdout(), &value)
+            .context("failed to serialzie reports")?;
+        return Ok(());
+    }
+
+    println!("\n{:-<80}", "== ANALYSIS INPUT REPORT ");
+    match serde_json::from_value::<InputReport>(input_report.clone()) {
+        Ok(report) => println!("{}", report.display_multiline(0)),
+        Err(e) => {
+            eprintln!(
+                "WARNING: failed to parse input report; falling back to \
+                less structured output: {e}"
+            );
+            let displayer =
+                nexus_types::fm::json_display::Displayer::new(&input_report);
+            println!("{displayer}",);
+        }
+    }
+
+    println!("\n{:-<80}", "== ANALYSIS REPORT ");
+    match serde_json::from_value::<AnalysisReport>(analysis_report.clone()) {
+        Ok(report) => println!("{}", report.display_multiline(0)),
+        Err(e) => {
+            eprintln!(
+                "WARNING: failed to parse analysis report; falling back to \
+                less structured output: {e}"
+            );
+            let displayer =
+                nexus_types::fm::json_display::Displayer::new(&analysis_report);
+            println!("{displayer}",);
+        }
+    }
+
+    Ok(())
+}
+
+async fn load_analysis_report(
+    datastore: &DataStore,
+    sitrep: SitrepUuid,
+) -> anyhow::Result<model::fm::SitrepAnalysisReport> {
+    use nexus_db_schema::schema::fm_sitrep_analysis_report::dsl;
+
+    Ok(dsl::fm_sitrep_analysis_report
+        .filter(dsl::sitrep_id.eq(sitrep.into_untyped_uuid()))
+        .select(model::fm::SitrepAnalysisReport::as_select())
+        .first_async(&*datastore.pool_connection_for_tests().await?)
+        .await?)
 }
