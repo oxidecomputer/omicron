@@ -3772,6 +3772,11 @@ dependencies = [
 [[package]]
 name = "fm-build"
 version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "iddqd",
+ "sqlparser",
+]
 
 [[package]]
 name = "fmd-adm"
