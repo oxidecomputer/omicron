@@ -23,6 +23,10 @@ pub struct Schema {
 
 pub(crate) struct FactTable {
     create_stmt: CreateTable,
+    // Rust ident for the diagnosis engine enum variant
+    de_name: String,
+    // Rust ident for the fact variant enum variant
+    fact_variant_name: String,
 }
 
 impl iddqd::IdOrdItem for FactTable {
@@ -65,14 +69,17 @@ impl Schema {
             // - case_id UUID
             // - PRIMARY KEY (id, sitrep_id)
             // if not, it is not valid to be a FM fact
-            fact_tables.insert_unique(FactTable { create_stmt }).map_err(
-                |e| {
-                    anyhow::anyhow!(
-                        "duplicate table name {}",
-                        e.new_item().create_stmt.name
-                    )
-                },
-            )?;
+            let table = FactTable {
+                create_stmt,
+                de_name: todo!("parse from annotations"),
+                fact_variant_name: todo!("parse from annotations"),
+            };
+            fact_tables.insert_unique(table).map_err(|e| {
+                anyhow::anyhow!(
+                    "duplicate table name {}",
+                    e.new_item().create_stmt.name
+                )
+            })?;
         }
         Ok(Self { fact_tables })
     }
