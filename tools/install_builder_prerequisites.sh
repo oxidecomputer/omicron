@@ -230,6 +230,7 @@ retry xtask download \
     console \
     dendrite-stub \
     maghemite-mgd \
+    lldp \
     transceiver-control
 
 # Validate the PATH:
@@ -239,6 +240,8 @@ expected_in_path=(
   'cockroach'
   'clickhouse'
   'dpd'
+  'mgd'
+  'lldpd'
 )
 
 function show_hint

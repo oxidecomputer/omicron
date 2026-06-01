@@ -29,6 +29,8 @@ pub use nexus_test::ControlPlaneBuilder;
 pub use nexus_test::ControlPlaneTestContext;
 pub use nexus_test::load_test_config;
 #[cfg(feature = "omicron-dev")]
+pub use nexus_test::omicron_dev_setup_with_bgp_loopbacks;
+#[cfg(feature = "omicron-dev")]
 pub use nexus_test::omicron_dev_setup_with_config;
 pub use starter::ControlPlaneStarter;
 pub use starter::ControlPlaneTestContextSledAgent;

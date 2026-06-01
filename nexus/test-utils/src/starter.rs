@@ -28,6 +28,7 @@ use internal_dns_types::names::ServiceName;
 use nexus_config::Database;
 use nexus_config::DpdConfig;
 use nexus_config::InternalDns;
+use nexus_config::LldpdConfig;
 use nexus_config::MgdConfig;
 use nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
 use nexus_config::NexusConfig;
@@ -107,8 +108,9 @@ use std::collections::BTreeSet;
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::iter::{once, repeat, zip};
+use std::net::SocketAddrV4;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV6};
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
 use transient_dns_server::TransientDnsServer;
 use uuid::Uuid;
@@ -146,6 +148,7 @@ pub struct ControlPlaneStarter<'a, N: NexusServer> {
     pub gateway: BTreeMap<SwitchSlot, GatewayTestContext>,
     pub dendrite: RwLock<HashMap<SwitchSlot, dev::dendrite::DendriteInstance>>,
     pub mgd: HashMap<SwitchSlot, dev::maghemite::MgdInstance>,
+    pub lldpd: HashMap<SwitchSlot, dev::lldp::LldpdInstance>,
 
     // NOTE: Only exists after starting Nexus, until external Nexus is
     // initialized.
@@ -168,6 +171,13 @@ pub struct ControlPlaneStarter<'a, N: NexusServer> {
     pub password: Option<String>,
 
     pub simulated_upstairs: Arc<sim::SimulatedUpstairs>,
+
+    /// When set, `start_mgd` allocates a unique loopback IP for each switch
+    /// slot's mgd BGP dispatcher from `mgd_bgp_addrs` instead of using
+    /// 127.0.0.1. Normal integration tests leave this `None`.
+    pub mgd_bgp_loopback:
+        Option<Arc<Mutex<loopback_ip_mgr::LoopbackIpManager>>>,
+    pub mgd_bgp_addrs: BTreeMap<SwitchSlot, Ipv4Addr>,
 }
 
 type StepInitFn<'a, N> = Box<
@@ -202,6 +212,7 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
             producer: None,
             gateway: BTreeMap::new(),
             dendrite: RwLock::new(HashMap::new()),
+            lldpd: HashMap::new(),
             mgd: HashMap::new(),
             nexus_internal: None,
             nexus_internal_addr: None,
@@ -218,6 +229,8 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
             simulated_upstairs: Arc::new(sim::SimulatedUpstairs::new(
                 simulated_upstairs_log,
             )),
+            mgd_bgp_loopback: None,
+            mgd_bgp_addrs: BTreeMap::new(),
         }
     }
 
@@ -445,16 +458,65 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
         self.config.pkg.dendrite.insert(switch_slot, config);
     }
 
-    pub async fn start_mgd(&mut self, switch_slot: SwitchSlot) {
+    pub async fn start_lldp(&mut self, switch_slot: SwitchSlot) {
         let log = &self.logctx.log;
-        debug!(log, "Starting mgd"; "switch_slot" => ?switch_slot);
+        debug!(log, "Starting LLDP for {switch_slot:?}");
         let mgs = self.gateway.get(&switch_slot).unwrap();
         let mgs_addr =
             SocketAddrV6::new(Ipv6Addr::LOCALHOST, mgs.port, 0, 0).into();
 
-        // Set up an instance of mgd
-        let mgd =
-            dev::maghemite::MgdInstance::start(0, mgs_addr).await.unwrap();
+        let dpd_port =
+            self.dendrite.read().unwrap().get(&switch_slot).unwrap().port;
+
+        // Set up an instance of lldpd
+        let lldpd =
+            dev::lldp::LldpdInstance::start(0, dpd_port, Some(mgs_addr))
+                .await
+                .unwrap();
+
+        let port = lldpd.port;
+        self.lldpd.insert(switch_slot, lldpd);
+        let address = SocketAddrV6::new(Ipv6Addr::LOCALHOST, port, 0, 0);
+
+        debug!(log, "lldp port is {port}");
+
+        let config = LldpdConfig { address: std::net::SocketAddr::V6(address) };
+        self.config.pkg.lldpd.insert(switch_slot, config);
+    }
+
+    pub async fn start_mgd(&mut self, switch_slot: SwitchSlot) {
+        let log = &self.logctx.log;
+        debug!(log, "Starting mgd"; "switch_slot" => ?switch_slot);
+        let mgs = self.gateway.get(&switch_slot).unwrap();
+        let mgs_addr: std::net::SocketAddr =
+            SocketAddrV6::new(Ipv6Addr::LOCALHOST, mgs.port, 0, 0).into();
+
+        // If a loopback manager and per-slot address were provided, allocate a
+        // unique loopback IP for this instance's BGP dispatcher so that
+        // multiple control plane instances can coexist on the same host.
+        // Otherwise, fall back to 127.0.0.1, which is always present and
+        // sufficient for single-mgd development and normal integration tests.
+        let (bgp_addr, bgp_loopback_allocation) = match (
+            &self.mgd_bgp_loopback,
+            self.mgd_bgp_addrs.get(&switch_slot),
+        ) {
+            (Some(mgr), Some(&ip)) => {
+                let alloc = loopback_ip_mgr::LoopbackIpManager::allocate(
+                    mgr.clone(),
+                    &[IpAddr::V4(ip)],
+                )
+                .expect("allocate loopback IP for mgd BGP dispatcher");
+                (SocketAddr::new(IpAddr::V4(ip), 1049), Some(alloc))
+            }
+            _ => (SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0).into(), None),
+        };
+
+        let mut mgd =
+            dev::maghemite::MgdInstance::start(0, bgp_addr, Some(mgs_addr))
+                .await
+                .unwrap();
+        mgd.bgp_loopback_allocation = bgp_loopback_allocation;
+
         let port = mgd.port;
         self.mgd.insert(switch_slot, mgd);
         let address = SocketAddrV6::new(Ipv6Addr::LOCALHOST, port, 0, 0);
@@ -486,6 +548,7 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
                 self.dendrite.read().unwrap().get(&switch_slot).unwrap().port,
                 self.gateway.get(&switch_slot).unwrap().port,
                 self.mgd.get(&switch_slot).unwrap().port,
+                self.lldpd.get(&switch_slot).unwrap().port,
             )
             .unwrap()
     }
@@ -1252,6 +1315,7 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
             logctx: self.logctx,
             gateway: self.gateway,
             dendrite: RwLock::new(self.dendrite.into_inner().unwrap()),
+            lldpd: self.lldpd,
             stopped_dendrite_ports: RwLock::new(HashMap::new()),
             mgd: self.mgd,
             external_dns_zone_name: self.external_dns_zone_name.unwrap(),
@@ -1294,6 +1358,9 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
         }
         for (_, mut mgd) in self.mgd {
             mgd.cleanup().await.unwrap();
+        }
+        for (_, mut lldpd) in self.lldpd {
+            lldpd.cleanup().await.unwrap();
         }
         self.logctx.cleanup_successful();
     }
@@ -1538,6 +1605,7 @@ pub(crate) async fn setup_with_config_impl<N: NexusServer>(
     extra_sled_agents: u16,
     gateway_config_file: Utf8PathBuf,
     second_nexus: bool,
+    // peer_routers: bool,
 ) -> ControlPlaneTestContext<N> {
     const STEP_TIMEOUT: Duration = Duration::from_secs(600);
 
@@ -1630,6 +1698,12 @@ pub(crate) async fn setup_with_config_impl<N: NexusServer>(
                     }),
                 ),
                 (
+                    "start_lldpd_switch0",
+                    Box::new(|builder| {
+                        builder.start_lldp(SwitchSlot::Switch0).boxed()
+                    }),
+                ),
+                (
                     "start_mgd_switch0",
                     Box::new(|builder| {
                         builder.start_mgd(SwitchSlot::Switch0).boxed()
@@ -1671,6 +1745,12 @@ pub(crate) async fn setup_with_config_impl<N: NexusServer>(
                         "start_dendrite_switch1",
                         Box::new(|builder| {
                             builder.start_dendrite(SwitchSlot::Switch1).boxed()
+                        }),
+                    ),
+                    (
+                        "start_lldpd_switch1",
+                        Box::new(|builder| {
+                            builder.start_lldp(SwitchSlot::Switch1).boxed()
                         }),
                     ),
                     (

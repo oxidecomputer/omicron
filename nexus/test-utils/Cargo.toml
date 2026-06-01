@@ -43,6 +43,7 @@ omicron-cockroach-admin.workspace = true
 omicron-common.workspace = true
 omicron-passwords.workspace = true
 omicron-sled-agent.workspace = true
+loopback-ip-mgr.workspace = true
 omicron-test-utils.workspace = true
 omicron-uuid-kinds.workspace = true
 omicron-workspace-hack.workspace = true

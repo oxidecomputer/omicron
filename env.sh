@@ -12,6 +12,7 @@ export PATH="$OMICRON_WS/out/cockroachdb/bin:$PATH"
 export PATH="$OMICRON_WS/out/clickhouse:$PATH"
 export PATH="$OMICRON_WS/out/dendrite-stub/bin:$PATH"
 export PATH="$OMICRON_WS/out/mgd/root/opt/oxide/mgd/bin:$PATH"
+export PATH="$OMICRON_WS/out/lldp/root/opt/oxide/bin:$PATH"
 
 # if xtrace was set previously, do not unset it
 case $OLD_SHELL_OPTS in
