@@ -4,11 +4,11 @@
 
 //! Collect SP task dumps for support bundles
 
-use crate::app::background::tasks::support_bundle::cache::Cache;
-use crate::app::background::tasks::support_bundle::collection::BundleCollection;
-use crate::app::background::tasks::support_bundle::step::CollectionStep;
-use crate::app::background::tasks::support_bundle::step::CollectionStepOutput;
-use crate::app::background::tasks::support_bundle::steps;
+use crate::cache::Cache;
+use crate::collection::BundleCollection;
+use crate::step::CollectionStep;
+use crate::step::CollectionStepOutput;
+use crate::steps;
 
 use anyhow::Context;
 use anyhow::bail;
@@ -48,16 +48,16 @@ pub async fn spawn_collection_steps(
 
     let mut extra_steps: Vec<CollectionStep> = vec![];
     for sp in available_sps {
+        let mgs_client = mgs_client.clone();
+        let sp_dumps_dir = sp_dumps_dir.clone();
         extra_steps.push(CollectionStep::new(
             format!("SP dump for {:?}", sp),
-            Box::new({
-                let mgs_client = mgs_client.clone();
-                move |collection, dir| {
-                    async move {
-                        collect_sp_dump(collection, &mgs_client, sp, dir).await
-                    }
-                    .boxed()
+            Box::new(move |collection, _dir| {
+                async move {
+                    collect_sp_dump(collection, &mgs_client, sp, &sp_dumps_dir)
+                        .await
                 }
+                .boxed()
             }),
         ));
     }

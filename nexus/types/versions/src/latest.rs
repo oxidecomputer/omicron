@@ -176,10 +176,10 @@ pub mod instance {
     pub use crate::v2026_01_23_00::instance::EphemeralIpDetachSelector;
     pub use crate::v2026_01_23_00::instance::ExternalIpDetach;
 
-    pub use crate::v2026_05_20_00::instance::Instance;
-    pub use crate::v2026_05_20_00::instance::InstanceCreate;
-    pub use crate::v2026_05_20_00::instance::InstanceDiskAttachment;
-    pub use crate::v2026_05_20_00::instance::InstanceUpdate;
+    pub use crate::v2026_06_01_00::instance::Instance;
+    pub use crate::v2026_06_01_00::instance::InstanceCreate;
+    pub use crate::v2026_06_01_00::instance::InstanceDiskAttachment;
+    pub use crate::v2026_06_01_00::instance::InstanceUpdate;
 }
 
 pub mod internet_gateway {
@@ -403,8 +403,8 @@ pub mod system {
 }
 
 pub mod system_networking {
-    pub use crate::v2026_05_20_00::system_networking::SystemNetworkingSettings;
-    pub use crate::v2026_05_20_00::system_networking::SystemNetworkingSettingsUpdate;
+    pub use crate::v2026_06_01_00::system_networking::SystemNetworkingSettings;
+    pub use crate::v2026_06_01_00::system_networking::SystemNetworkingSettingsUpdate;
 }
 
 pub mod timeseries {
@@ -418,10 +418,11 @@ pub mod update {
     pub use crate::v2025_11_20_00::update::TufRepoUpload;
     pub use crate::v2025_11_20_00::update::TufRepoUploadStatus;
     pub use crate::v2025_11_20_00::update::TufSignedRootRole;
-    pub use crate::v2025_11_20_00::update::UpdateStatus;
     pub use crate::v2025_11_20_00::update::UpdatesGetRepositoryParams;
     pub use crate::v2025_11_20_00::update::UpdatesPutRepositoryParams;
     pub use crate::v2025_11_20_00::update::UpdatesTrustRoot;
+
+    pub use crate::v2026_05_20_00::update::UpdateStatus;
 }
 
 pub mod vpc {
