@@ -6295,7 +6295,7 @@ dependencies = [
 [[package]]
 name = "lldpd-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/lldp#d22509dfdb051321b859e924948605115691b93c"
+source = "git+https://github.com/oxidecomputer/lldp?rev=61479b6922f9112fbe1e722414d2b8055212cb12#61479b6922f9112fbe1e722414d2b8055212cb12"
 dependencies = [
  "chrono",
  "futures",
@@ -6313,7 +6313,7 @@ dependencies = [
 [[package]]
 name = "lldpd-common"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/lldp#d22509dfdb051321b859e924948605115691b93c"
+source = "git+https://github.com/oxidecomputer/lldp?rev=61479b6922f9112fbe1e722414d2b8055212cb12#61479b6922f9112fbe1e722414d2b8055212cb12"
 dependencies = [
  "anyhow",
  "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?branch=main)",
@@ -8598,6 +8598,7 @@ dependencies = [
  "omicron-deployment-graph",
  "omicron-test-utils",
  "omicron-workspace-hack",
+ "omicron-zone-package",
  "parse-display",
  "petgraph 0.8.3",
  "serde",
@@ -11439,7 +11440,7 @@ dependencies = [
 [[package]]
 name = "protocol"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/lldp#d22509dfdb051321b859e924948605115691b93c"
+source = "git+https://github.com/oxidecomputer/lldp?rev=61479b6922f9112fbe1e722414d2b8055212cb12#61479b6922f9112fbe1e722414d2b8055212cb12"
 dependencies = [
  "anyhow",
  "schemars 0.8.22",
