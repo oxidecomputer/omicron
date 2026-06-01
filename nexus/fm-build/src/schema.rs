@@ -224,8 +224,11 @@ mod test {
         assert_eq!(
             fact_tables(sql),
             vec![
-                ("a_fact".to_owned(), vec![]),
-                ("another_fact".to_owned(), vec!["de = FooBar".to_owned()])
+                ("a_fact".to_owned(), vec!["fm_fact".to_owned(),]),
+                (
+                    "another_fact".to_owned(),
+                    vec!["fm_fact".to_owned(), "de = FooBar".to_owned()]
+                )
             ]
         );
     }
@@ -253,7 +256,10 @@ mod test {
         ";
         assert_eq!(
             fact_tables(sql),
-            vec![("spaced_out".to_owned(), vec!["de = FooBar".to_owned()])]
+            vec![(
+                "spaced_out".to_owned(),
+                vec!["fm_fact".to_owned(), "de = FooBar".to_owned()]
+            )]
         );
     }
 
@@ -266,13 +272,19 @@ mod test {
             --#! fm_fact
             CREATE TABLE the_fact (id UUID);
         ";
-        assert_eq!(fact_tables(sql), vec![("the_fact".to_owned(), vec![])]);
+        assert_eq!(
+            fact_tables(sql),
+            vec![("the_fact".to_owned(), vec!["fm_fact".to_owned(),])]
+        );
     }
 
     #[test]
     fn handles_final_statement_without_trailing_semicolon() {
-        let sql = "--! fm_fact\nCREATE TABLE trailing (id UUID)";
-        assert_eq!(fact_tables(sql), vec![("trailing".to_owned(), vec![])]);
+        let sql = "--#! fm_fact\nCREATE TABLE trailing (id UUID)";
+        assert_eq!(
+            fact_tables(sql),
+            vec![("trailing".to_owned(), vec!["fm_fact".to_owned(),])]
+        );
     }
 
     #[test]
