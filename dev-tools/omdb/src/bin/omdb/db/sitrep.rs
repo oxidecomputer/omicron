@@ -421,7 +421,7 @@ async fn cmd_db_sitrep_analysis_report_show(
     opctx: &OpContext,
     datastore: &DataStore,
     _fetch_opts: &DbFetchOptions,
-    _args: &ShowArgs,
+    args: &ShowArgs,
     sitrep: SitrepIdOrCurrent,
 ) -> anyhow::Result<()> {
     let id = match sitrep {
@@ -452,6 +452,7 @@ async fn cmd_db_sitrep_analysis_report_show(
     };
 
     let report = load_analysis_report(datastore, id).await.with_context(ctx)?;
+    print_analysis_reports(&report, args.json)?;
 
     Ok(())
 }
