@@ -266,7 +266,7 @@ impl From<v2026_01_08_00::instance::InstanceUpdate> for InstanceUpdate {
     }
 }
 
-/// View of an Instance, including the per-instance jumbo-frames opt-in.
+/// View of an Instance
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct Instance {
     // TODO is flattening here the intent in RFD 4?

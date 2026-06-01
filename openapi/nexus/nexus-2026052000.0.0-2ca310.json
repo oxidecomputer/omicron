@@ -22674,7 +22674,7 @@
         ]
       },
       "Instance": {
-        "description": "View of an Instance, including the per-instance jumbo-frames opt-in.",
+        "description": "View of an Instance",
         "type": "object",
         "properties": {
           "auto_restart_cooldown_expiration": {

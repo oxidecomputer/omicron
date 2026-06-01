@@ -28,7 +28,6 @@ impl super::Nexus {
         opctx: &OpContext,
         params: &system_networking::SystemNetworkingSettingsUpdate,
     ) -> Result<system_networking::SystemNetworkingSettings, Error> {
-        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
         let settings = self
             .db_datastore
             .system_networking_settings_update(
