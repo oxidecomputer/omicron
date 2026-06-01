@@ -99,6 +99,7 @@ members = [
     "nexus/defaults",
     "nexus/external-api",
     "nexus/fm",
+    "nexus/fm-build",
     "nexus/internal-api",
     "nexus/inventory",
     "nexus/lockstep-api",

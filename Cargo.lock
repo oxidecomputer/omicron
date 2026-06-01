@@ -3770,6 +3770,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "fm-build"
+version = "0.1.0"
+
+[[package]]
 name = "fmd-adm"
 version = "0.3.0"
 source = "git+https://github.com/oxidecomputer/fmd-adm?rev=846361bf0a698a8c7efefd97b2828b9aa74858c4#846361bf0a698a8c7efefd97b2828b9aa74858c4"
