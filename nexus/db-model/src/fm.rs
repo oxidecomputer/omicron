@@ -28,6 +28,8 @@ mod diagnosis_engine;
 pub use diagnosis_engine::*;
 mod support_bundle_request;
 pub use support_bundle_request::*;
+mod sitrep_analysis_report;
+pub use sitrep_analysis_report::*;
 
 #[derive(Queryable, Insertable, Clone, Debug, Selectable)]
 #[diesel(table_name = fm_sitrep)]
