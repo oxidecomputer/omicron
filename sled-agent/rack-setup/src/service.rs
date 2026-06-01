@@ -1242,11 +1242,7 @@ impl ServiceInner {
 
         let initial_trust_quorum_configuration =
             if let Some(peers) = &config.trust_quorum_peers {
-                let tq_members: BTreeSet<BaseboardId> = peers
-                    .iter()
-                    .cloned()
-                    .map(|id| id.try_into().expect("known baseboard type"))
-                    .collect();
+                let tq_members: BTreeSet<_> = peers.iter().cloned().collect();
                 let rack_id = RackUuid::from_untyped_uuid(sled_plan.rack_id);
 
                 init_trust_quorum(
