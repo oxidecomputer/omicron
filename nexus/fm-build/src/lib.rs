@@ -7,8 +7,8 @@
 use camino::Utf8Path;
 use iddqd::IdOrdMap;
 use miette::{IntoDiagnostic, WrapErr};
+use std::collections::HashMap;
 use std::sync::Arc;
-use std::collections::HashMap,
 
 pub mod parser;
 pub mod schema;
@@ -40,9 +40,12 @@ impl CodeGenerator {
             })
             .collect();
 
-        let crdb_to_diesel_enum_names = nexus_db_schema::enums::crdb_to_diesel_enum_type_names().into_iter().collect();
+        let crdb_to_diesel_enum_type_names =
+            nexus_db_schema::enums::crdb_to_diesel_enum_type_names()
+                .into_iter()
+                .collect();
 
-        Ok(Self { all_fact_tables, des, crdb_to_diesel_enum_type_names  })
+        Ok(Self { all_fact_tables, des, crdb_to_diesel_enum_type_names })
     }
 
     pub fn generate_de_enums(&self) -> impl quote::ToTokens {
@@ -66,8 +69,16 @@ impl CodeGenerator {
         )
     }
 
-    pub fn generate_schema_macros(&self) -> miette::Result<impl quote::ToTokens> {
-        let schema_macros = self.all_fact_tables.iter().map(|table| table.gen_diesel_schema(&self.crdb_to_diesel_enum_type_names)).collect::<miette::Result<Vec<_>>>()?;
+    pub fn generate_schema_macros(
+        &self,
+    ) -> miette::Result<impl quote::ToTokens> {
+        let schema_macros = self
+            .all_fact_tables
+            .iter()
+            .map(|table| {
+                table.gen_diesel_schema(&self.crdb_to_diesel_enum_type_names)
+            })
+            .collect::<miette::Result<Vec<_>>>()?;
         Ok(quote::quote!(
             #(#schema_macros)*
         ))
