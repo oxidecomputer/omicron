@@ -1,0 +1,9 @@
+  × missing required column `case_id`
+   ╭─[fm_schema.sql:5:26]
+ 4 │             --#! name = F
+ 5 │             CREATE TABLE example (
+   ·                          ───┬───
+   ·                             ╰── this fact table
+ 6 │                 id UUID NOT NULL, sitrep_id UUID NOT NULL,
+   ╰────
+  help: 'example' is not a valid fm_fact table

@@ -2,22 +2,27 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use anyhow::Context;
 use iddqd::IdOrdMap;
+use miette::LabeledSpan;
+use miette::NamedSource;
+use miette::SourceSpan;
 use sqlparser::ast::ColumnDef;
 use sqlparser::ast::ColumnOption;
 use sqlparser::ast::CreateTable;
 use sqlparser::ast::DataType;
 use sqlparser::ast::Expr;
+use sqlparser::ast::Spanned;
 use sqlparser::ast::TableConstraint;
 use sqlparser::dialect::PostgreSqlDialect;
 use sqlparser::keywords::Keyword;
 use sqlparser::parser::Parser;
-use sqlparser::parser::ParserError;
+use sqlparser::tokenizer::Location;
+use sqlparser::tokenizer::Span;
 use sqlparser::tokenizer::Token;
 use sqlparser::tokenizer::TokenWithSpan;
 use sqlparser::tokenizer::Tokenizer;
 use sqlparser::tokenizer::Whitespace;
+use std::path::Path;
 
 const ANNOTATION_PREFIX: &str = "#!";
 const FM_FACT_ANNOTATION: &str = "fm_fact";
@@ -50,113 +55,220 @@ impl iddqd::IdOrdItem for FactTable {
     iddqd::id_upcast!();
 }
 
+/// An error encountered while parsing the database schema, along with the
+/// location in the source SQL where it occurred.
+#[derive(Debug, thiserror::Error, miette::Diagnostic)]
+#[error("{message}")]
+pub struct SchemaError {
+    message: String,
+    #[source_code]
+    src: NamedSource<String>,
+    #[label(collection)]
+    labels: Vec<LabeledSpan>,
+    #[help]
+    help: Option<String>,
+}
+
 impl Schema {
-    pub fn from_sql(sql: &str) -> anyhow::Result<Self> {
-        let tokens = Tokenizer::new(&PostgreSqlDialect {}, sql)
-            .tokenize_with_location()?;
+    pub fn from_sql(path: &Path, sql: &str) -> Result<Self, Vec<SchemaError>> {
+        let ctx = SourceContext::new(path.display().to_string(), sql);
 
+        let tokens = match Tokenizer::new(&PostgreSqlDialect {}, sql)
+            .tokenize_with_location()
+        {
+            Ok(tokens) => tokens,
+            // A tokenizer error is fatal: we can't recover enough to find any
+            // tables, so it's the only error we have to report.
+            Err(e) => {
+                return Err(vec![
+                    *ctx.error(format!("syntax error: {}", e.message))
+                        .label(Span::new(e.location, e.location), "here")
+                        .build(),
+                ]);
+            }
+        };
+
+        // Find every annotated `CREATE TABLE` statement, along with any errors
+        // that were encountered while parsing the schema.
+        let (possible_fact_tables, mut errors) = fm_fact_tables(&ctx, &tokens);
+
+        // Validate each annotated table and add them to the map, continuing to
+        // accumulate errors if any table is semantically invalid.
         let mut fact_tables = IdOrdMap::new();
-        for (create_stmt, annotations) in fm_fact_tables(&tokens)? {
-            if annotations.is_empty() {
-                // The parser should not let this happen, but whatever...
-                continue;
+        for (create_stmt, annotations) in possible_fact_tables {
+            let table = match FactTable::try_from_create_table(
+                &ctx,
+                create_stmt,
+                annotations,
+            ) {
+                Ok(table) => table,
+                Err(e) => {
+                    errors.push(*e);
+                    continue;
+                }
+            };
+            if let Err(err) = fact_tables.insert_unique(table) {
+                let new = err.new_item();
+                let mut builder = ctx
+                    .error(format!(
+                        "duplicate table name {}",
+                        new.create_stmt.name
+                    ))
+                    .label(new.create_stmt.name.span(), "redefined here");
+                if let Some(existing) = err.duplicates().first() {
+                    builder = builder.label(
+                        existing.create_stmt.name.span(),
+                        "first defined here",
+                    );
+                }
+                errors.push(*builder.build());
             }
-
-            let table_name = &create_stmt.name;
-            if annotations[0] != FM_FACT_ANNOTATION {
-                // TODO(eliza): good error message with sql source location lol
-                anyhow::bail!(
-                    "expected fm_fact annotation, got {}",
-                    annotations[0]
-                );
-            }
-
-            validate_shape(&create_stmt).with_context(|| {
-                format!("'{table_name}' is not a valid fm_fact table")
-            })?;
-
-            let mut de_name = None;
-            let mut fact_variant_name = None;
-            for annotation in &annotations[1..] {
-                parse_annotation(DE_ANNOTATION, &mut de_name, annotation)?;
-                parse_annotation(
-                    VARIANT_ANNOTATION,
-                    &mut fact_variant_name,
-                    annotation,
-                )?;
-            }
-
-            let de_name = de_name.ok_or_else(|| {
-                anyhow::anyhow!(
-                    "'{table_name}' is missing a '{DE_ANNOTATION}' annotation",
-                )
-            })?;
-            let fact_variant_name = fact_variant_name.ok_or_else(|| anyhow::anyhow!(
-                "'{table_name}' is missing a '{VARIANT_ANNOTATION}' annotation",
-            ))?;
-            let table = FactTable { create_stmt, de_name, fact_variant_name };
-            fact_tables.insert_unique(table).map_err(|e| {
-                anyhow::anyhow!(
-                    "duplicate table name {}",
-                    e.new_item().create_stmt.name
-                )
-            })?;
         }
+
+        if !errors.is_empty() {
+            return Err(errors);
+        }
+
         Ok(Self { fact_tables })
     }
 }
 
-/// Returns an iterator over every `CREATE TABLE` statement in `sql` that is
-/// annotated with a `--! fm_fact` comment placed directly above it.
-fn fm_fact_tables(
-    tokens: &[TokenWithSpan],
-) -> Result<Vec<(CreateTable, Vec<&str>)>, ParserError> {
-    statement_segments(tokens)
-        .into_iter()
-        .filter_map(|segment| {
-            if !is_create_table(segment.tokens) {
-                return None;
-            }
-            let mut parser = Parser::new(&PostgreSqlDialect {})
-                .with_tokens_with_locations(segment.tokens.to_vec());
+impl FactTable {
+    fn try_from_create_table(
+        ctx: &SourceContext,
+        create_stmt: CreateTable,
+        annotations: Vec<Annotation<'_>>,
+    ) -> Result<Self, Box<SchemaError>> {
+        let table_name = &create_stmt.name;
+        if annotations[0].text != FM_FACT_ANNOTATION {
+            return Err(ctx
+                .error(format!(
+                    "expected fm_fact annotation, got {}",
+                    annotations[0].text
+                ))
+                .label(annotations[0].span, "this annotation")
+                .help(
+                    "the first `--#!` annotation on a fact table must be \
+                     `fm_fact`",
+                )
+                .build());
+        }
 
-            // `parse_create_table` expects the `CREATE TABLE` keywords to already
-            // be consumed, so step over them first.
-            let Ok(_) = parser.expect_keyword_is(Keyword::CREATE) else {
-                return None;
-            };
-            let Ok(_) = parser.expect_keyword_is(Keyword::TABLE) else {
-                return None;
-            };
-            let create_stmt = parser
-                .parse_create_table(false, false, None, false)
-                .map(|stmt| (stmt, segment.annotations));
-            Some(create_stmt)
-        })
-        .collect()
+        validate_shape(ctx, &create_stmt)?;
+
+        let mut de_name = None;
+        let mut fact_variant_name = None;
+        for annotation in &annotations[1..] {
+            parse_annotation(ctx, DE_ANNOTATION, &mut de_name, annotation)?;
+            parse_annotation(
+                ctx,
+                VARIANT_ANNOTATION,
+                &mut fact_variant_name,
+                annotation,
+            )?;
+        }
+
+        let de_name = de_name.map(|(ident, _)| ident).ok_or_else(|| {
+            ctx.error(format!(
+                "'{table_name}' is missing a '{DE_ANNOTATION}' annotation",
+            ))
+            .label(table_name.span(), "this fact table")
+            .help(format!(
+                "add a `--#! {DE_ANNOTATION} = <ident>` annotation above the table"
+            ))
+            .build()
+        })?;
+        let fact_variant_name =
+            fact_variant_name.map(|(ident, _)| ident).ok_or_else(|| {
+                ctx.error(format!(
+                    "'{table_name}' is missing a '{VARIANT_ANNOTATION}' annotation",
+                ))
+                .label(table_name.span(), "this fact table")
+                .help(format!(
+                    "add a `--#! {VARIANT_ANNOTATION} = <ident>` annotation above \
+                     the table"
+                ))
+                .build()
+            })?;
+
+        Ok(FactTable { create_stmt, de_name, fact_variant_name })
+    }
+}
+
+/// Returns every `CREATE TABLE` statement in `tokens` that is annotated with at
+/// least one `--#!` annotation comment placed directly above it, paired with
+/// those annotations, along with any errors encountered while parsing those
+/// statements.
+fn fm_fact_tables<'a>(
+    ctx: &SourceContext,
+    tokens: &'a [TokenWithSpan],
+) -> (Vec<(CreateTable, Vec<Annotation<'a>>)>, Vec<SchemaError>) {
+    let mut tables = Vec::new();
+    let mut errors = Vec::new();
+    for segment in statement_segments(tokens) {
+        if !is_create_table(segment.tokens) {
+            continue;
+        }
+        let mut parser = Parser::new(&PostgreSqlDialect {})
+            .with_tokens_with_locations(segment.tokens.to_vec());
+
+        // `parse_create_table` expects the `CREATE TABLE` keywords to already
+        // be consumed, so step over them first.
+        let Ok(_) = parser.expect_keyword_is(Keyword::CREATE) else {
+            continue;
+        };
+        let Ok(_) = parser.expect_keyword_is(Keyword::TABLE) else {
+            continue;
+        };
+        match parser.parse_create_table(false, false, None, false) {
+            Ok(stmt) => tables.push((stmt, segment.annotations)),
+            Err(e) => {
+                let span = segment
+                    .tokens
+                    .iter()
+                    .find(|t| !matches!(t.token, Token::Whitespace(_)))
+                    .map(|t| t.span)
+                    .unwrap_or(Span::empty());
+                errors.push(
+                    *ctx.error(format!("syntax error: {e}"))
+                        .label(span, "while parsing this statement")
+                        .build(),
+                );
+            }
+        }
+    }
+    (tables, errors)
 }
 
 fn parse_annotation(
+    ctx: &SourceContext,
     name: &str,
-    into: &mut Option<syn::Ident>,
-    value: &str,
-) -> anyhow::Result<()> {
-    let Some(value) = parse_annotation_kv(name, value) else {
+    into: &mut Option<(syn::Ident, Span)>,
+    annotation: &Annotation<'_>,
+) -> Result<(), Box<SchemaError>> {
+    let Some(value) = parse_annotation_kv(name, annotation.text) else {
         return Ok(());
     };
-    if let Some(prior) = into {
-        anyhow::bail!(
-            "duplicate value for '{name}' annotation: {value} (previous value \
-             was {prior})"
-        )
+    if let Some((prior, prior_span)) = into {
+        return Err(ctx
+            .error(format!(
+                "duplicate value for '{name}' annotation: {value} (previous \
+                 value was {prior})"
+            ))
+            .label(annotation.span, "redefined here")
+            .label(*prior_span, "previously defined here")
+            .build());
     }
-    let ident = syn::parse_str::<syn::Ident>(value).with_context(|| {
-        format!(
+    let ident = syn::parse_str::<syn::Ident>(value).map_err(|e| {
+        ctx.error(format!(
             "'{name}' annotation value {value:?} is not a valid Rust \
             identifier"
-        )
+        ))
+        .label(annotation.span, "this annotation")
+        .help(e.to_string())
+        .build()
     })?;
-    *into = Some(ident);
+    *into = Some((ident, annotation.span));
     Ok(())
 }
 
@@ -164,16 +276,22 @@ fn parse_annotation_kv<'v>(key: &str, value: &'v str) -> Option<&'v str> {
     Some(value.trim().strip_prefix(key)?.trim().strip_prefix("=")?.trim())
 }
 
-fn validate_shape(table: &CreateTable) -> anyhow::Result<()> {
+fn validate_shape(
+    ctx: &SourceContext,
+    table: &CreateTable,
+) -> Result<(), Box<SchemaError>> {
     const ID_COL: &str = "id";
     const SITREP_ID_COL: &str = "sitrep_id";
+
+    let not_a_fact =
+        || format!("'{}' is not a valid fm_fact table", table.name);
 
     // check all the expected UUID columns we want are there
     let mut want_columns = [(ID_COL, 0), (SITREP_ID_COL, 0), ("case_id", 0)];
     'columns: for column in &table.columns {
         for (want_name, found) in want_columns.iter_mut() {
             if column.name.value.eq_ignore_ascii_case(want_name) {
-                validate_id_col(column)?;
+                validate_id_col(ctx, table, column)?;
                 *found += 1;
                 continue 'columns;
             }
@@ -181,11 +299,19 @@ fn validate_shape(table: &CreateTable) -> anyhow::Result<()> {
     }
     for (name, found) in want_columns {
         if found < 1 {
-            anyhow::bail!("missing required column `{name}`");
+            return Err(ctx
+                .error(format!("missing required column `{name}`"))
+                .label(table.name.span(), "this fact table")
+                .help(not_a_fact())
+                .build());
         } else if found > 1 {
             // the parser should definitely not have allowed this, but it did!
             // what to heck
-            anyhow::bail!("duplicate column `{name}` (that's weird!)");
+            return Err(ctx
+                .error(format!("duplicate column `{name}` (that's weird!)"))
+                .label(table.name.span(), "this fact table")
+                .help(not_a_fact())
+                .build());
         }
     }
 
@@ -195,40 +321,57 @@ fn validate_shape(table: &CreateTable) -> anyhow::Result<()> {
         _ => None,
     });
     let Some(pk) = pk else {
-        anyhow::bail!(
-            "table's primary key must be ({ID_COL}, {SITREP_ID_COL}), but I \
-             couldn't find a compound primary key constraint (perhaps one of \
-             the columns is the PK?)"
-        )
+        return Err(ctx
+            .error(format!(
+                "table's primary key must be ({ID_COL}, {SITREP_ID_COL}), but \
+                 I couldn't find a compound primary key constraint (perhaps \
+                 one of the columns is the PK?)"
+            ))
+            .label(table.name.span(), "this fact table")
+            .help(not_a_fact())
+            .build());
     };
 
-    anyhow::ensure!(
-        pk.columns.len() == 2,
-        "primary key must be ({ID_COL}, {SITREP_ID_COL}), but is {pk}",
-    );
+    let wrong_pk = || {
+        ctx.error(format!(
+            "primary key must be ({ID_COL}, {SITREP_ID_COL}), but is {pk}",
+        ))
+        .label(pk.span(), "this primary key")
+        .help(not_a_fact())
+        .build()
+    };
+    if pk.columns.len() != 2 {
+        return Err(wrong_pk());
+    }
     for col in &pk.columns {
         let Expr::Identifier(ref colname) = col.column.expr else {
-            anyhow::bail!(
-                "primary key must be ({ID_COL}, {SITREP_ID_COL}), but is {pk}",
-            )
+            return Err(wrong_pk());
         };
-        anyhow::ensure!(
-            colname.value.eq_ignore_ascii_case(ID_COL)
-                || colname.value.eq_ignore_ascii_case(SITREP_ID_COL),
-            "primary key must be ({ID_COL}, {SITREP_ID_COL}), but is {pk}",
-        );
+        if !(colname.value.eq_ignore_ascii_case(ID_COL)
+            || colname.value.eq_ignore_ascii_case(SITREP_ID_COL))
+        {
+            return Err(wrong_pk());
+        }
     }
 
     Ok(())
 }
 
-fn validate_id_col(column: &ColumnDef) -> anyhow::Result<()> {
+fn validate_id_col(
+    ctx: &SourceContext,
+    table: &CreateTable,
+    column: &ColumnDef,
+) -> Result<(), Box<SchemaError>> {
     let name = &column.name.value;
     if !matches!(column.data_type, DataType::Uuid) {
-        anyhow::bail!(
-            "expected `{name}` column to be of type `UUID`, found `{:?}`",
-            column.data_type
-        );
+        return Err(ctx
+            .error(format!(
+                "expected `{name}` column to be of type `UUID`, found `{:?}`",
+                column.data_type
+            ))
+            .label(column.span(), "this column")
+            .help(format!("'{}' is not a valid fm_fact table", table.name))
+            .build());
     }
 
     if !column
@@ -236,9 +379,13 @@ fn validate_id_col(column: &ColumnDef) -> anyhow::Result<()> {
         .iter()
         .any(|opt| matches!(opt.option, ColumnOption::NotNull))
     {
-        anyhow::bail!(
-            "expected `{name}` column to be `NOT NULL`, but it wasn't"
-        );
+        return Err(ctx
+            .error(format!(
+                "expected `{name}` column to be `NOT NULL`, but it wasn't"
+            ))
+            .label(column.span(), "this column")
+            .help(format!("'{}' is not a valid fm_fact table", table.name))
+            .build());
     }
 
     Ok(())
@@ -258,11 +405,18 @@ fn is_create_table(tokens: &[TokenWithSpan]) -> bool {
         && keywords.next() == Some(Keyword::TABLE)
 }
 
+/// A single annotation comment, along with the span of the comment in the
+/// source SQL.
+struct Annotation<'a> {
+    text: &'a str,
+    span: Span,
+}
+
 /// A single `;`-separated statement, as a slice of the original token stream,
 /// along with any annotation comments found.
 struct StatementSegment<'a> {
     tokens: &'a [TokenWithSpan],
-    annotations: Vec<&'a str>,
+    annotations: Vec<Annotation<'a>>,
 }
 
 /// Splits a token stream into individual statements at each top-level
@@ -306,9 +460,8 @@ fn try_parse_segment<'a>(
                 comment,
                 ..
             }) => {
-                let annotation =
-                    comment.strip_prefix(ANNOTATION_PREFIX)?.trim();
-                if !annotation.is_empty() { Some(annotation) } else { None }
+                let text = comment.strip_prefix(ANNOTATION_PREFIX)?.trim();
+                (!text.is_empty()).then_some(Annotation { text, span: t.span })
             }
             _ => None,
         })
@@ -318,24 +471,143 @@ fn try_parse_segment<'a>(
     }
 }
 
+/// Holds the source SQL and its filename so that errors can be reported with a
+/// labeled location.
+struct SourceContext {
+    name: String,
+    sql: String,
+    /// Byte offset of the start of each line, used to convert a
+    /// [`Location`]'s (line, column) into a byte offset.
+    line_starts: Vec<usize>,
+}
+
+impl SourceContext {
+    fn new(name: String, sql: &str) -> Self {
+        let line_starts = std::iter::once(0)
+            .chain(sql.match_indices('\n').map(|(i, _)| i + 1))
+            .collect();
+        Self { name, sql: sql.to_string(), line_starts }
+    }
+
+    /// Converts a 1-based (line, column) [`Location`] into a byte offset into
+    /// the source. (Line 0 / column 0 are used by `sqlparser` for "empty"
+    /// locations, and map to the start of the source.)
+    fn offset(&self, loc: Location) -> usize {
+        if loc.line == 0 {
+            return 0;
+        }
+        let line = (loc.line - 1) as usize;
+        let col = loc.column.saturating_sub(1) as usize;
+        let Some(&line_start) = self.line_starts.get(line) else {
+            return self.sql.len();
+        };
+        let rest = &self.sql[line_start..];
+        let byte_in_line =
+            rest.char_indices().nth(col).map_or(rest.len(), |(i, _)| i);
+        (line_start + byte_in_line).min(self.sql.len())
+    }
+
+    /// Converts a `sqlparser` [`Span`] into a miette [`SourceSpan`].
+    fn source_span(&self, span: Span) -> SourceSpan {
+        let start = self.offset(span.start);
+        let end = self.offset(span.end);
+        SourceSpan::new(start.into(), end.saturating_sub(start))
+    }
+
+    fn named_source(&self) -> NamedSource<String> {
+        NamedSource::new(&self.name, self.sql.clone())
+    }
+
+    fn error(&self, message: impl Into<String>) -> ErrorBuilder<'_> {
+        ErrorBuilder {
+            ctx: self,
+            message: message.into(),
+            labels: Vec::new(),
+            help: None,
+        }
+    }
+}
+
+/// Builder for a [`SchemaError`], used to attach labeled source spans and help
+/// text to an error message.
+struct ErrorBuilder<'a> {
+    ctx: &'a SourceContext,
+    message: String,
+    labels: Vec<LabeledSpan>,
+    help: Option<String>,
+}
+
+impl ErrorBuilder<'_> {
+    fn label(mut self, span: Span, text: impl Into<String>) -> Self {
+        self.labels.push(LabeledSpan::new_with_span(
+            Some(text.into()),
+            self.ctx.source_span(span),
+        ));
+        self
+    }
+
+    fn help(mut self, help: impl Into<String>) -> Self {
+        self.help = Some(help.into());
+        self
+    }
+
+    fn build(self) -> Box<SchemaError> {
+        Box::new(SchemaError {
+            message: self.message,
+            src: self.ctx.named_source(),
+            labels: self.labels,
+            help: self.help,
+        })
+    }
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
 
+    /// A fixed, fake filename used for error-rendering golden tests.
+    const FAKE_PATH: &str = "fm_schema.sql";
+
     fn fact_tables(sql: &str) -> Vec<(String, Vec<String>)> {
+        let ctx = SourceContext::new(FAKE_PATH.to_string(), sql);
         let tokens = Tokenizer::new(&PostgreSqlDialect {}, sql)
             .tokenize_with_location()
             .unwrap();
-        fm_fact_tables(&tokens)
-            .expect("SQL should parse")
+        let (tables, errors) = fm_fact_tables(&ctx, &tokens);
+        assert!(errors.is_empty(), "unexpected parse errors: {errors:?}");
+        tables
             .into_iter()
             .map(|(table, annotations)| {
                 (
                     table.name.to_string(),
-                    annotations.into_iter().map(|s| s.to_string()).collect(),
+                    annotations
+                        .into_iter()
+                        .map(|a| a.text.to_string())
+                        .collect(),
                 )
             })
             .collect()
+    }
+
+    /// Renders the errors returned by `Schema::from_sql` for `sql` as graphical
+    /// (no-color) diagnostics, for golden-file comparison.
+    fn render_errors(sql: &str) -> String {
+        let errors = Schema::from_sql(Path::new(FAKE_PATH), sql)
+            .expect_err("schema should be invalid");
+        let handler = miette::GraphicalReportHandler::new_themed(
+            miette::GraphicalTheme::unicode_nocolor(),
+        )
+        .with_width(80);
+        let mut rendered = String::new();
+        for (i, error) in errors.iter().enumerate() {
+            if i > 0 {
+                rendered.push('\n');
+            }
+            handler
+                .render_report(&mut rendered, error)
+                .expect("rendering a report should succeed");
+        }
+        rendered
     }
 
     #[test]
@@ -436,8 +708,8 @@ mod test {
 
     #[test]
     fn from_sql_accepts_valid_fact_table() {
-        let schema =
-            dbg!(Schema::from_sql(VALID_FACT)).expect("should be valid");
+        let schema = Schema::from_sql(Path::new(FAKE_PATH), VALID_FACT)
+            .expect("should be valid");
         assert_eq!(schema.fact_tables.len(), 1);
         let table = schema.fact_tables.iter().next().expect("one table");
         assert_eq!(table.create_stmt.name.to_string(), "example");
@@ -454,7 +726,10 @@ mod test {
                 PRIMARY KEY (id, sitrep_id)
             );
         ";
-        assert!(dbg!(Schema::from_sql(dbg!(sql))).is_err());
+        expectorate::assert_contents(
+            "tests/output/requires_de_and_fact_variant.txt",
+            &render_errors(sql),
+        );
     }
 
     #[test]
@@ -466,7 +741,10 @@ mod test {
                 PRIMARY KEY (id, sitrep_id)
             );
         ";
-        assert!(dbg!(Schema::from_sql(dbg!(sql))).is_err());
+        expectorate::assert_contents(
+            "tests/output/requires_not_null.txt",
+            &render_errors(sql),
+        );
     }
 
     #[test]
@@ -480,7 +758,10 @@ mod test {
                 PRIMARY KEY (id, sitrep_id)
             );
         ";
-        assert!(dbg!(Schema::from_sql(dbg!(sql))).is_err());
+        expectorate::assert_contents(
+            "tests/output/rejects_invalid_rust_ident.txt",
+            &render_errors(sql),
+        );
     }
 
     #[test]
@@ -494,7 +775,10 @@ mod test {
                 PRIMARY KEY (id, sitrep_id)
             );
         ";
-        assert!(dbg!(Schema::from_sql(dbg!(sql))).is_err());
+        expectorate::assert_contents(
+            "tests/output/rejects_missing_required_column.txt",
+            &render_errors(sql),
+        );
     }
 
     #[test]
@@ -508,7 +792,10 @@ mod test {
                 PRIMARY KEY (id, sitrep_id)
             );
         ";
-        assert!(dbg!(Schema::from_sql(dbg!(sql))).is_err());
+        expectorate::assert_contents(
+            "tests/output/rejects_non_uuid_column.txt",
+            &render_errors(sql),
+        );
     }
 
     #[test]
@@ -518,11 +805,14 @@ mod test {
             --#! de = E
             --#! name = F
             CREATE TABLE example (
-                id UUID, sitrep_id UUID, case_id UUID,
+                id UUID NOT NULL, sitrep_id UUID NOT NULL, case_id UUID NOT NULL,
                 PRIMARY KEY (id)
             );
         ";
-        assert!(dbg!(Schema::from_sql(dbg!(sql))).is_err());
+        expectorate::assert_contents(
+            "tests/output/rejects_wrong_primary_key.txt",
+            &render_errors(sql),
+        );
     }
 
     #[test]
@@ -544,6 +834,42 @@ mod test {
                 PRIMARY KEY (id, sitrep_id)
             );
         ";
-        assert!(dbg!(Schema::from_sql(dbg!(sql))).is_err());
+        expectorate::assert_contents(
+            "tests/output/rejects_duplicate_table_names.txt",
+            &render_errors(sql),
+        );
+    }
+
+    #[test]
+    fn from_sql_reports_every_invalid_table() {
+        // Each of these tables is invalid in a different way; all of the
+        // errors should be reported, not just the first one.
+        let sql = "
+            --#! fm_fact
+            --#! de = First
+            --#! name = First
+            CREATE TABLE first (
+                id UUID NOT NULL, sitrep_id UUID NOT NULL,
+                PRIMARY KEY (id, sitrep_id)
+            );
+
+            --#! fm_fact
+            --#! de = Second
+            --#! name = Second
+            CREATE TABLE second (
+                id UUID NOT NULL, sitrep_id UUID NOT NULL, case_id TEXT NOT NULL,
+                PRIMARY KEY (id, sitrep_id)
+            );
+
+            --#! fm_fact
+            CREATE TABLE third (
+                id UUID NOT NULL, sitrep_id UUID NOT NULL, case_id UUID NOT NULL,
+                PRIMARY KEY (id, sitrep_id)
+            );
+        ";
+        expectorate::assert_contents(
+            "tests/output/reports_every_invalid_table.txt",
+            &render_errors(sql),
+        );
     }
 }

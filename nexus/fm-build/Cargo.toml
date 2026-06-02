@@ -6,6 +6,11 @@ edition = "2024"
 [dependencies]
 anyhow.workspace = true
 iddqd.workspace = true
+miette = { workspace = true, features = ["fancy"] }
 syn.workspace = true
 sqlparser.workspace = true
 quote.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+expectorate.workspace = true

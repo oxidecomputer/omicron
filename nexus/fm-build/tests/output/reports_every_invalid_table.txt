@@ -1,0 +1,29 @@
+  × missing required column `case_id`
+   ╭─[fm_schema.sql:5:26]
+ 4 │             --#! name = First
+ 5 │             CREATE TABLE first (
+   ·                          ──┬──
+   ·                            ╰── this fact table
+ 6 │                 id UUID NOT NULL, sitrep_id UUID NOT NULL,
+   ╰────
+  help: 'first' is not a valid fm_fact table
+
+  × expected `case_id` column to be of type `UUID`, found `Text`
+    ╭─[fm_schema.sql:14:60]
+ 13 │             CREATE TABLE second (
+ 14 │                 id UUID NOT NULL, sitrep_id UUID NOT NULL, case_id TEXT NOT NULL,
+    ·                                                            ───┬───
+    ·                                                               ╰── this column
+ 15 │                 PRIMARY KEY (id, sitrep_id)
+    ╰────
+  help: 'second' is not a valid fm_fact table
+
+  × 'third' is missing a 'de' annotation
+    ╭─[fm_schema.sql:19:26]
+ 18 │             --#! fm_fact
+ 19 │             CREATE TABLE third (
+    ·                          ──┬──
+    ·                            ╰── this fact table
+ 20 │                 id UUID NOT NULL, sitrep_id UUID NOT NULL, case_id UUID NOT NULL,
+    ╰────
+  help: add a `--#! de = <ident>` annotation above the table

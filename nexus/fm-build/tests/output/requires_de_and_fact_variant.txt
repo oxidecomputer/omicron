@@ -1,0 +1,9 @@
+  × 'example' is missing a 'de' annotation
+   ╭─[fm_schema.sql:3:26]
+ 2 │             --#! fm_fact
+ 3 │             CREATE TABLE example (
+   ·                          ───┬───
+   ·                             ╰── this fact table
+ 4 │                 id UUID NOT NULL, sitrep_id UUID NOT NULL, case_id UUID NOT NULL,
+   ╰────
+  help: add a `--#! de = <ident>` annotation above the table

@@ -1,0 +1,9 @@
+  × expected `case_id` column to be of type `UUID`, found `Text`
+   ╭─[fm_schema.sql:6:60]
+ 5 │             CREATE TABLE example (
+ 6 │                 id UUID NOT NULL, sitrep_id UUID NOT NULL, case_id TEXT NOT NULL,
+   ·                                                            ───┬───
+   ·                                                               ╰── this column
+ 7 │                 PRIMARY KEY (id, sitrep_id)
+   ╰────
+  help: 'example' is not a valid fm_fact table

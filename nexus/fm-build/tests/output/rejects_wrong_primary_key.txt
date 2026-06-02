@@ -1,0 +1,9 @@
+  × primary key must be (id, sitrep_id), but is PRIMARY KEY (id)
+   ╭─[fm_schema.sql:7:30]
+ 6 │                 id UUID NOT NULL, sitrep_id UUID NOT NULL, case_id UUID NOT NULL,
+ 7 │                 PRIMARY KEY (id)
+   ·                              ─┬
+   ·                               ╰── this primary key
+ 8 │             );
+   ╰────
+  help: 'example' is not a valid fm_fact table

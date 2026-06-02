@@ -1,0 +1,9 @@
+  × expected `case_id` column to be `NOT NULL`, but it wasn't
+   ╭─[fm_schema.sql:4:60]
+ 3 │             CREATE TABLE example (
+ 4 │                 id UUID NOT NULL, sitrep_id UUID NOT NULL, case_id UUID,
+   ·                                                            ───┬───
+   ·                                                               ╰── this column
+ 5 │                 PRIMARY KEY (id, sitrep_id)
+   ╰────
+  help: 'example' is not a valid fm_fact table

@@ -1,0 +1,10 @@
+  × 'de' annotation value "9nope" is not a valid Rust identifier
+   ╭─[fm_schema.sql:3:13]
+ 2 │             --#! fm_fact
+ 3 │             --#! de = 9nope
+   ·             ────────┬───────
+   ·                     ╰── this annotation
+ 4 │             --#! name = F
+ 5 │             CREATE TABLE example (
+   ╰────
+  help: expected identifier
