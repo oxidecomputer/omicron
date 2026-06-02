@@ -672,7 +672,7 @@ table! {
         time_deleted -> Nullable<Timestamptz>,
         rcgen -> Int8,
         ip_version -> crate::enums::IpVersionEnum,
-        reservation_type -> crate::enums::IpPoolReservationTypeEnum,
+        assignment -> crate::enums::IpPoolAssignmentEnum,
         pool_type -> crate::enums::IpPoolTypeEnum,
     }
 }

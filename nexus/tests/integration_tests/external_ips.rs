@@ -1463,7 +1463,7 @@ async fn test_floating_ip_ip_version_conflict(
             nexus_db_model::IpPool::new(
                 &v6_identity,
                 nexus_db_model::IpVersion::V6,
-                nexus_db_model::IpPoolReservationType::ExternalSilos,
+                nexus_db_model::IpPoolAssignment::Silos,
             ),
         )
         .await
