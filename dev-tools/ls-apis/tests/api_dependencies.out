@@ -106,6 +106,7 @@ Repo Depot API (client: repo-depot-client)
 
 Sled Agent (client: sled-agent-client)
     consumed by: omicron-nexus (omicron/nexus) via 9 paths
+    consumed by: propolis-server (propolis/bin/propolis-server) via 1 path
     consumed by: sled-agent-rack-setup (omicron/sled-agent/rack-setup) via 1 path [subcomponent of omicron-sled-agent; rack-init only]
 
 Wicketd (client: wicketd-client)
