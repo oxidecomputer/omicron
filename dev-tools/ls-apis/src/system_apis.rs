@@ -719,6 +719,38 @@ impl SystemApis {
             .in_upgrade_dag()
     }
 
+    /// Returns whether an edge from `server` to `client` should be excluded
+    /// under `edge_filter`.
+    fn edge_filtered_out(
+        &self,
+        edge_filter: EdgeFilter<'_>,
+        server: &ServerComponentName,
+        client: &ClientPackageName,
+    ) -> bool {
+        match edge_filter {
+            EdgeFilter::All => false,
+            EdgeFilter::DagOnly(idu_edges) => {
+                // unwrap(): every `client` encountered here came from
+                // `component_apis_consumed`, which only yields known APIs.
+                let api =
+                    self.api_metadata.client_pkgname_lookup(client).unwrap();
+                if api.versioned_how != VersionedHow::Server {
+                    return true;
+                }
+
+                if !self.component_in_upgrade_dag(server) {
+                    return true;
+                }
+
+                // Intra-deployment-unit-only edges always connect components in
+                // the same *instance* of the same deployment unit, so they
+                // can't induce an update-ordering constraint and shouldn't
+                // count as cycles.
+                idu_edges.contains(&(server.clone(), client.clone()))
+            }
+        }
+    }
+
     // The complex type below is only used in this one place: the return value
     // of this internal helper function.  A type alias doesn't seem better.
     #[allow(clippy::type_complexity)]
@@ -747,34 +779,12 @@ impl SystemApis {
                 for (client_pkg, _) in
                     self.component_apis_consumed(server_pkg, dependency_filter)?
                 {
-                    if let EdgeFilter::DagOnly(idu_edges) = edge_filter {
-                        let api = self
-                            .api_metadata
-                            .client_pkgname_lookup(client_pkg)
-                            .unwrap();
-                        // Filtering DAG-only edges means ignoring everything
-                        // that's not server-side-versioned.
-                        if api.versioned_how != VersionedHow::Server {
-                            continue;
-                        }
-
-                        if !self.component_in_upgrade_dag(server_pkg) {
-                            continue;
-                        }
-
-                        // When filtering DAG-only edges, also skip edges that
-                        // represent intra-deployment-unit-only communication
-                        // (communication within one instance of one deployment
-                        // unit).  That's because intra-deployment-unit edges
-                        // would look like a cycle in the dependency graph, but
-                        // aren't one that we care about since they're always
-                        // referring to the same *instance* of the same
-                        // deployment unit.
-                        if idu_edges
-                            .contains(&(server_pkg.clone(), client_pkg.clone()))
-                        {
-                            continue;
-                        }
+                    if self.edge_filtered_out(
+                        edge_filter,
+                        server_pkg,
+                        client_pkg,
+                    ) {
+                        continue;
                     }
 
                     // Multiple server components may produce an API. However,
@@ -807,7 +817,8 @@ impl SystemApis {
         &self,
         filter: ApiDependencyFilter,
     ) -> Result<String> {
-        let (graph, _nodes) = self.make_component_graph(filter, false)?;
+        let (graph, _nodes) =
+            self.make_component_graph(filter, EdgeFilter::All)?;
         Ok(Dot::new(&graph).to_string())
     }
 
@@ -817,7 +828,7 @@ impl SystemApis {
     fn make_component_graph(
         &self,
         dependency_filter: ApiDependencyFilter,
-        versioned_on_server_only: bool,
+        edge_filter: EdgeFilter<'_>,
     ) -> Result<(
         Graph<&ServerComponentName, &ClientPackageName>,
         BTreeMap<&ServerComponentName, NodeIndex>,
@@ -839,17 +850,12 @@ impl SystemApis {
             let consumed_apis = self
                 .component_apis_consumed(server_component, dependency_filter)?;
             for (client_pkg, _) in consumed_apis {
-                if versioned_on_server_only {
-                    let api = self
-                        .api_metadata
-                        .client_pkgname_lookup(client_pkg)
-                        .unwrap();
-                    if api.versioned_how != VersionedHow::Server {
-                        continue;
-                    }
-                    if !self.component_in_upgrade_dag(server_component) {
-                        continue;
-                    }
+                if self.edge_filtered_out(
+                    edge_filter,
+                    server_component,
+                    client_pkg,
+                ) {
+                    continue;
                 }
 
                 for other_component in self.api_producers(client_pkg) {
@@ -1053,7 +1059,10 @@ impl SystemApis {
         //   APIs
         //
         // Check if this DAG is cyclic.  This can't be made to work.
-        let (graph, nodes) = self.make_component_graph(filter, true)?;
+        let (graph, nodes) = self.make_component_graph(
+            filter,
+            EdgeFilter::DagOnly(&idu_only_edges),
+        )?;
         let reverse_nodes: BTreeMap<_, _> =
             nodes.iter().map(|(s_c, node)| (node, s_c)).collect();
         if let Err(error) = petgraph::algo::toposort(&graph, None) {
@@ -1244,8 +1253,18 @@ impl SystemApis {
     }
 }
 
+#[derive(Clone, Copy)]
 enum EdgeFilter<'a> {
+    /// Include every edge.
     All,
+    /// Include only edges that participate in the upgrade DAG. This excludes:
+    ///
+    /// * Client-side versioned APIs
+    /// * Components for which `Lifecycle::in_upgrade_dag` returns `false`
+    /// * Intra-deployment-unit-only edges
+    ///
+    /// The carried data is the set of intra-deployment-unit-only
+    /// `(server_component, client_package)` pairs to exclude.
     DagOnly(&'a BTreeSet<(ServerComponentName, ClientPackageName)>),
 }
 
