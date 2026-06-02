@@ -606,6 +606,7 @@ impl ErrorBuilder<'_> {
 #[cfg(test)]
 mod test {
     use super::*;
+    use camino::Utf8PathBuf;
 
     /// A fixed, fake filename used for error-rendering golden tests.
     const FAKE_PATH: &str = "fm_schema.sql";
@@ -633,9 +634,13 @@ mod test {
 
     /// Renders the errors returned by `Schema::from_sql` for `sql` as graphical
     /// (no-color) diagnostics, for golden-file comparison.
-    fn render_errors(sql: &str) -> String {
+    fn errors_in_sql(sql: &str) -> String {
         let errors = Schema::from_sql(Utf8Path::new(FAKE_PATH), sql)
             .expect_err("schema should be invalid");
+        render_errors(errors)
+    }
+
+    fn render_errors(errors: SchemaError) -> String {
         let handler = miette::GraphicalReportHandler::new_themed(
             miette::GraphicalTheme::unicode_nocolor(),
         )
@@ -645,6 +650,52 @@ mod test {
             .render_report(&mut rendered, &errors)
             .expect("rendering a report should succeed");
         rendered
+    }
+
+    // stolen from dev-tools/schema.rs
+    fn find_workspace_root() -> Utf8PathBuf {
+        let cargo = std::env::var("CARGO");
+        let cargo = cargo.as_deref().unwrap_or("cargo");
+        let output = std::process::Command::new(cargo)
+            .arg("locate-project")
+            .arg("--workspace")
+            .arg("--message-format")
+            .arg("plain")
+            .output()
+            .expect("Failed to run `cargo locate-project --workspace`");
+        if !output.status.success() {
+            panic!(
+                "cargo locate-project failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+        let manifest_path = Utf8PathBuf::from(
+            String::from_utf8(output.stdout)
+                .expect("cargo locate-project output is not UTF-8")
+                .trim(),
+        );
+        manifest_path
+            .parent()
+            .map(|p| p.to_path_buf())
+            .expect("workspace manifest has no parent")
+    }
+
+    #[test]
+    fn can_parse_dbinit_sql() {
+        let path = find_workspace_root()
+            .join("schema")
+            .join("crdb")
+            .join("dbinit.sql");
+        let dbinit = match std::fs::read_to_string(&path) {
+            Ok(s) => s,
+            Err(e) => panic!("couldn't read {path}: {}", e),
+        };
+        match Schema::from_sql(path, &dbinit) {
+            Ok(_) => {}
+            Err(errors) => {
+                panic!("couldn't parse dbinit.sql:\n{}", render_errors(errors))
+            }
+        }
     }
 
     #[test]
@@ -767,7 +818,7 @@ mod test {
         ";
         expectorate::assert_contents(
             "tests/output/requires_de_and_fact_variant.txt",
-            &render_errors(sql),
+            &errors_in_sql(sql),
         );
     }
 
@@ -783,7 +834,7 @@ mod test {
         ";
         expectorate::assert_contents(
             "tests/output/requires_not_null.txt",
-            &render_errors(sql),
+            &errors_in_sql(sql),
         );
     }
 
@@ -801,7 +852,7 @@ mod test {
         ";
         expectorate::assert_contents(
             "tests/output/rejects_invalid_rust_ident.txt",
-            &render_errors(sql),
+            &errors_in_sql(sql),
         );
     }
 
@@ -819,7 +870,7 @@ mod test {
         ";
         expectorate::assert_contents(
             "tests/output/rejects_missing_required_column.txt",
-            &render_errors(sql),
+            &errors_in_sql(sql),
         );
     }
 
@@ -837,7 +888,7 @@ mod test {
         ";
         expectorate::assert_contents(
             "tests/output/rejects_non_uuid_column.txt",
-            &render_errors(sql),
+            &errors_in_sql(sql),
         );
     }
 
@@ -855,7 +906,7 @@ mod test {
         ";
         expectorate::assert_contents(
             "tests/output/rejects_wrong_primary_key.txt",
-            &render_errors(sql),
+            &errors_in_sql(sql),
         );
     }
 
@@ -882,7 +933,7 @@ mod test {
         ";
         expectorate::assert_contents(
             "tests/output/rejects_duplicate_table_names.txt",
-            &render_errors(sql),
+            &errors_in_sql(sql),
         );
     }
 
@@ -918,7 +969,7 @@ mod test {
         ";
         expectorate::assert_contents(
             "tests/output/reports_every_invalid_table.txt",
-            &render_errors(sql),
+            &errors_in_sql(sql),
         );
     }
 }
