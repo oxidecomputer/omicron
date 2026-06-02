@@ -364,10 +364,15 @@ async fn test_instance_access(cptestctx: &ControlPlaneTestContext) {
     .await;
     assert_eq!(fetched_instance.identity.id, instance.identity.id);
 
-    // A project selector that does NOT match the instance's project yields a
-    // 404, regardless of whether the mismatching project is given by name or
-    // id, and whether or not it actually exists.
+    // When the instance is found and accessible but the supplied project does
+    // not match its actual project, that's a contradictory request -> 400. This
+    // holds whether the mismatching project is given by name or id, and whether
+    // or not the supplied project even exists.
     let other_project = create_project(client, "other-project").await;
+    let expected_msg = format!(
+        "instance with ID \"{}\" does not belong to project",
+        instance.identity.id
+    );
 
     // by id + wrong (but existing) project name
     let error = object_get_error(
@@ -377,12 +382,13 @@ async fn test_instance_access(cptestctx: &ControlPlaneTestContext) {
             instance.identity.id, other_project.identity.name
         )
         .as_str(),
-        StatusCode::NOT_FOUND,
+        StatusCode::BAD_REQUEST,
     )
     .await;
-    assert_eq!(
-        error.message,
-        format!("not found: instance with id \"{}\"", instance.identity.id)
+    assert!(
+        error.message.starts_with(&expected_msg),
+        "unexpected message: {}",
+        error.message
     );
 
     // by id + wrong (but existing) project id
@@ -393,7 +399,7 @@ async fn test_instance_access(cptestctx: &ControlPlaneTestContext) {
             instance.identity.id, other_project.identity.id
         )
         .as_str(),
-        StatusCode::NOT_FOUND,
+        StatusCode::BAD_REQUEST,
     )
     .await;
 
@@ -405,9 +411,34 @@ async fn test_instance_access(cptestctx: &ControlPlaneTestContext) {
             instance.identity.id
         )
         .as_str(),
-        StatusCode::NOT_FOUND,
+        StatusCode::BAD_REQUEST,
     )
     .await;
+
+    // But if the caller can't access the instance, it must stay a 404 (the same
+    // as a nonexistent instance) -- we must not reveal the instance's existence,
+    // let alone whether the project matches. An unprivileged user can't see the
+    // instance, so even with the *correct* project they get a 404.
+    let error: HttpErrorResponseBody = NexusRequest::expect_failure(
+        client,
+        StatusCode::NOT_FOUND,
+        Method::GET,
+        format!(
+            "/v1/instances/{}?project={}",
+            instance.identity.id, project.identity.name
+        )
+        .as_str(),
+    )
+    .authn_as(AuthnMode::UnprivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body()
+    .unwrap();
+    assert_eq!(
+        error.message,
+        format!("not found: instance with id \"{}\"", instance.identity.id)
+    );
 }
 
 #[nexus_test]

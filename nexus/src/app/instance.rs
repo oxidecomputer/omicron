@@ -374,36 +374,42 @@ impl super::Nexus {
                 // validate that the project matches the instance's actual
                 // project rather than rejecting the request (#10517).
                 //
-                // The by-id lookup already resolves the full ancestor chain, so
-                // `lookup_for` hands us the instance's real project's authz id
-                // at no extra query. We resolve the supplied project to an id
-                // (free if it's already an id) and compare. On mismatch we
-                // return the same "instance not found by id" error the caller
-                // would see for a nonexistent instance, so we don't leak which
-                // half of the selector was wrong.
+                // Resolve the instance by ID first. If the caller can't access
+                // it (or it doesn't exist), `lookup_for` returns the usual 404,
+                // so we never reveal the existence of an instance the caller
+                // isn't allowed to see. The by-id lookup also resolves the full
+                // ancestor chain, so it hands us the instance's real project's
+                // authz id at no extra query.
                 let instance =
                     LookupPath::new(opctx, &self.db_datastore).instance_id(id);
                 let (_, authz_project, _) =
                     instance.lookup_for(authz::Action::Read).await?;
-                let expected_project_id = match project {
-                    NameOrId::Id(project_id) => project_id,
-                    NameOrId::Name(name) => self
+
+                // The instance exists and is accessible. Require the supplied
+                // project to match the instance's actual project; a mismatch is
+                // a contradictory request, so it's a 400. We treat a project
+                // that doesn't resolve (unknown name, or one the caller can't
+                // see) as a mismatch too, since it likewise can't be the
+                // instance's project.
+                let supplied_project_id = match &project {
+                    NameOrId::Id(project_id) => Some(*project_id),
+                    NameOrId::Name(_) => self
                         .project_lookup(
                             opctx,
                             project::ProjectSelector {
-                                project: NameOrId::Name(name),
+                                project: project.clone(),
                             },
                         )?
                         .lookup_for(authz::Action::Read)
-                        .await?
-                        .1
-                        .id(),
+                        .await
+                        .ok()
+                        .map(|(_, authz_project)| authz_project.id()),
                 };
-                if authz_project.id() != expected_project_id {
-                    return Err(Error::not_found_by_id(
-                        omicron_common::api::external::ResourceType::Instance,
-                        &id,
-                    ));
+                if supplied_project_id != Some(authz_project.id()) {
+                    return Err(Error::invalid_request(format!(
+                        "instance with ID \"{id}\" does not belong to \
+                         project \"{project}\""
+                    )));
                 }
                 Ok(instance)
             }
