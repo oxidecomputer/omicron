@@ -4,7 +4,12 @@
 
 use anyhow::Context;
 use iddqd::IdOrdMap;
+use sqlparser::ast::ColumnDef;
+use sqlparser::ast::ColumnOption;
 use sqlparser::ast::CreateTable;
+use sqlparser::ast::DataType;
+use sqlparser::ast::Expr;
+use sqlparser::ast::TableConstraint;
 use sqlparser::dialect::PostgreSqlDialect;
 use sqlparser::keywords::Keyword;
 use sqlparser::parser::Parser;
@@ -16,17 +21,23 @@ use sqlparser::tokenizer::Whitespace;
 
 const ANNOTATION_PREFIX: &str = "#!";
 const FM_FACT_ANNOTATION: &str = "fm_fact";
+const DE_ANNOTATION: &str = "de";
+const VARIANT_ANNOTATION: &str = "name";
 
+#[derive(Debug)]
 pub struct Schema {
+    #[allow(dead_code)]
     pub(crate) fact_tables: IdOrdMap<FactTable>,
 }
 
+#[allow(dead_code)]
+#[derive(Debug)]
 pub(crate) struct FactTable {
     create_stmt: CreateTable,
     // Rust ident for the diagnosis engine enum variant
-    de_name: String,
+    pub(crate) de_name: syn::Ident,
     // Rust ident for the fact variant enum variant
-    fact_variant_name: String,
+    pub(crate) fact_variant_name: syn::Ident,
 }
 
 impl iddqd::IdOrdItem for FactTable {
@@ -51,6 +62,7 @@ impl Schema {
                 continue;
             }
 
+            let table_name = &create_stmt.name;
             if annotations[0] != FM_FACT_ANNOTATION {
                 // TODO(eliza): good error message with sql source location lol
                 anyhow::bail!(
@@ -59,21 +71,30 @@ impl Schema {
                 );
             }
 
-            // TODO(eliza): also parse the following required annotations:
-            // - `de = <rust ident for diagnosis engine enum variant>`
-            // - `fact_variant = <rust ident for fact variant enum variant>/name of generated struct`
+            validate_shape(&create_stmt).with_context(|| {
+                format!("'{table_name}' is not a valid fm_fact table")
+            })?;
 
-            // TODO(eliza): check that the table has the following:
-            // - id UUID
-            // - sitrep_id UUID
-            // - case_id UUID
-            // - PRIMARY KEY (id, sitrep_id)
-            // if not, it is not valid to be a FM fact
-            let table = FactTable {
-                create_stmt,
-                de_name: todo!("parse from annotations"),
-                fact_variant_name: todo!("parse from annotations"),
-            };
+            let mut de_name = None;
+            let mut fact_variant_name = None;
+            for annotation in &annotations[1..] {
+                parse_annotation(DE_ANNOTATION, &mut de_name, annotation)?;
+                parse_annotation(
+                    VARIANT_ANNOTATION,
+                    &mut fact_variant_name,
+                    annotation,
+                )?;
+            }
+
+            let de_name = de_name.ok_or_else(|| {
+                anyhow::anyhow!(
+                    "'{table_name}' is missing a '{DE_ANNOTATION}' annotation",
+                )
+            })?;
+            let fact_variant_name = fact_variant_name.ok_or_else(|| anyhow::anyhow!(
+                "'{table_name}' is missing a '{VARIANT_ANNOTATION}' annotation",
+            ))?;
+            let table = FactTable { create_stmt, de_name, fact_variant_name };
             fact_tables.insert_unique(table).map_err(|e| {
                 anyhow::anyhow!(
                     "duplicate table name {}",
@@ -113,6 +134,114 @@ fn fm_fact_tables(
             Some(create_stmt)
         })
         .collect()
+}
+
+fn parse_annotation(
+    name: &str,
+    into: &mut Option<syn::Ident>,
+    value: &str,
+) -> anyhow::Result<()> {
+    let Some(value) = parse_annotation_kv(name, value) else {
+        return Ok(());
+    };
+    if let Some(prior) = into {
+        anyhow::bail!(
+            "duplicate value for '{name}' annotation: {value} (previous value \
+             was {prior})"
+        )
+    }
+    let ident = syn::parse_str::<syn::Ident>(value).with_context(|| {
+        format!(
+            "'{name}' annotation value {value:?} is not a valid Rust \
+            identifier"
+        )
+    })?;
+    *into = Some(ident);
+    Ok(())
+}
+
+fn parse_annotation_kv<'v>(key: &str, value: &'v str) -> Option<&'v str> {
+    Some(value.trim().strip_prefix(key)?.trim().strip_prefix("=")?.trim())
+}
+
+fn validate_shape(table: &CreateTable) -> anyhow::Result<()> {
+    const ID_COL: &str = "id";
+    const SITREP_ID_COL: &str = "sitrep_id";
+
+    // check all the expected UUID columns we want are there
+    let mut want_columns = [(ID_COL, 0), (SITREP_ID_COL, 0), ("case_id", 0)];
+    'columns: for column in &table.columns {
+        for (want_name, found) in want_columns.iter_mut() {
+            if column.name.value.eq_ignore_ascii_case(want_name) {
+                validate_id_col(column)?;
+                *found += 1;
+                continue 'columns;
+            }
+        }
+    }
+    for (name, found) in want_columns {
+        if found < 1 {
+            anyhow::bail!("missing required column `{name}`");
+        } else if found > 1 {
+            // the parser should definitely not have allowed this, but it did!
+            // what to heck
+            anyhow::bail!("duplicate column `{name}` (that's weird!)");
+        }
+    }
+
+    // okay, check that the primary key is the ID and sitrep ID columns.
+    let pk = table.constraints.iter().find_map(|c| match c {
+        TableConstraint::PrimaryKey(pk) => Some(pk),
+        _ => None,
+    });
+    let Some(pk) = pk else {
+        anyhow::bail!(
+            "table's primary key must be ({ID_COL}, {SITREP_ID_COL}), but I \
+             couldn't find a compound primary key constraint (perhaps one of \
+             the columns is the PK?)"
+        )
+    };
+
+    anyhow::ensure!(
+        pk.columns.len() == 2,
+        "primary key must be ({ID_COL}, {SITREP_ID_COL}), but is {pk}",
+    );
+    for col in &pk.columns {
+        let Expr::Identifier(ref colname) = col.column.expr else {
+            anyhow::bail!(
+                "primary key must be ({ID_COL}, {SITREP_ID_COL}), but is {pk}",
+            )
+        };
+        anyhow::ensure!(
+            colname.value.eq_ignore_ascii_case(ID_COL)
+                || colname.value.eq_ignore_ascii_case(SITREP_ID_COL),
+            "primary key must be ({ID_COL}, {SITREP_ID_COL}), but is {pk}",
+        );
+    }
+
+    Ok(())
+}
+
+fn validate_id_col(column: &ColumnDef) -> anyhow::Result<()> {
+    let name = &column.name.value;
+    if !matches!(column.data_type, DataType::Uuid) {
+        anyhow::bail!(
+            "expected `{name}` column to be of type `UUID`, found `{:?}`",
+            column.data_type
+        );
+    }
+
+    if !column
+        .options
+        .iter()
+        .any(|opt| matches!(opt.option, ColumnOption::NotNull))
+    {
+        anyhow::bail!(
+            "expected `{name}` column to be `NOT NULL`, but it wasn't"
+        );
+    }
+
+    Ok(())
 }
 
 /// Returns whether `tokens` begins with the `CREATE TABLE` keywords (ignoring
@@ -291,5 +420,130 @@ mod test {
     fn empty_input_yields_no_tables() {
         assert!(fact_tables("").is_empty());
         assert!(fact_tables("-- nothing here\n").is_empty());
+    }
+
+    const VALID_FACT: &str = "
+        --#! fm_fact
+        --#! de = ExampleEngine
+        --#! name = ExampleFact
+        CREATE TABLE example (
+            id UUID NOT NULL,
+            sitrep_id UUID NOT NULL,
+            case_id UUID NOT NULL,
+            PRIMARY KEY (id, sitrep_id)
+        );
+    ";
+
+    #[test]
+    fn from_sql_accepts_valid_fact_table() {
+        let schema =
+            dbg!(Schema::from_sql(VALID_FACT)).expect("should be valid");
+        assert_eq!(schema.fact_tables.len(), 1);
+        let table = schema.fact_tables.iter().next().expect("one table");
+        assert_eq!(table.create_stmt.name.to_string(), "example");
+        assert_eq!(table.de_name, "ExampleEngine");
+        assert_eq!(table.fact_variant_name, "ExampleFact");
+    }
+
+    #[test]
+    fn from_sql_requires_de_and_fact_variant() {
+        let sql = "
+            --#! fm_fact
+            CREATE TABLE example (
+                id UUID NOT NULL, sitrep_id UUID NOT NULL, case_id UUID NOT NULL,
+                PRIMARY KEY (id, sitrep_id)
+            );
+        ";
+        assert!(dbg!(Schema::from_sql(dbg!(sql))).is_err());
+    }
+
+    #[test]
+    fn from_sql_requires_not_null() {
+        let sql = "
+            --#! fm_fact
+            CREATE TABLE example (
+                id UUID NOT NULL, sitrep_id UUID NOT NULL, case_id UUID,
+                PRIMARY KEY (id, sitrep_id)
+            );
+        ";
+        assert!(dbg!(Schema::from_sql(dbg!(sql))).is_err());
+    }
+
+    #[test]
+    fn from_sql_rejects_invalid_rust_ident() {
+        let sql = "
+            --#! fm_fact
+            --#! de = 9nope
+            --#! name = F
+            CREATE TABLE example (
+                id UUID NOT NULL, sitrep_id UUID NOT NULL, case_id UUID NOT NULL,
+                PRIMARY KEY (id, sitrep_id)
+            );
+        ";
+        assert!(dbg!(Schema::from_sql(dbg!(sql))).is_err());
+    }
+
+    #[test]
+    fn from_sql_rejects_missing_required_column() {
+        let sql = "
+            --#! fm_fact
+            --#! de = E
+            --#! name = F
+            CREATE TABLE example (
+                id UUID NOT NULL, sitrep_id UUID NOT NULL,
+                PRIMARY KEY (id, sitrep_id)
+            );
+        ";
+        assert!(dbg!(Schema::from_sql(dbg!(sql))).is_err());
+    }
+
+    #[test]
+    fn from_sql_rejects_non_uuid_column() {
+        let sql = "
+            --#! fm_fact
+            --#! de = E
+            --#! name = F
+            CREATE TABLE example (
+                id UUID NOT NULL, sitrep_id UUID NOT NULL, case_id TEXT NOT NULL,
+                PRIMARY KEY (id, sitrep_id)
+            );
+        ";
+        assert!(dbg!(Schema::from_sql(dbg!(sql))).is_err());
+    }
+
+    #[test]
+    fn from_sql_rejects_wrong_primary_key() {
+        let sql = "
+            --#! fm_fact
+            --#! de = E
+            --#! name = F
+            CREATE TABLE example (
+                id UUID, sitrep_id UUID, case_id UUID,
+                PRIMARY KEY (id)
+            );
+        ";
+        assert!(dbg!(Schema::from_sql(dbg!(sql))).is_err());
+    }
+
+    #[test]
+    fn from_sql_rejects_duplicate_table_names() {
+        let sql = "
+            --#! fm_fact
+            --#! de = E
+            --#! name = F
+            CREATE TABLE dupe (
+                id UUID NOT NULL, sitrep_id UUID NOT NULL, case_id UUID NOT NULL,
+                PRIMARY KEY (id, sitrep_id)
+            );
+
+            --#! fm_fact
+            --#! de = E2
+            --#! name = F2
+            CREATE TABLE dupe (
+                id UUID NOT NULL, sitrep_id UUID NOT NULL, case_id UUID NOT NULL,
+                PRIMARY KEY (id, sitrep_id)
+            );
+        ";
+        assert!(dbg!(Schema::from_sql(dbg!(sql))).is_err());
     }
 }

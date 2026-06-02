@@ -5,5 +5,7 @@ edition = "2024"
 
 [dependencies]
 anyhow.workspace = true
-sqlparser.workspace = true
 iddqd.workspace = true
+syn.workspace = true
+sqlparser.workspace = true
+quote.workspace = true
