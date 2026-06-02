@@ -3773,7 +3773,7 @@ dependencies = [
 name = "fm-build"
 version = "0.1.0"
 dependencies = [
- "anyhow",
+ "camino",
  "expectorate",
  "iddqd",
  "miette 7.6.0",

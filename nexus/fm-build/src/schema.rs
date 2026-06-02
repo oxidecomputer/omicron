@@ -2,6 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use camino::Utf8Path;
 use iddqd::IdOrdMap;
 use miette::LabeledSpan;
 use miette::NamedSource;
@@ -22,7 +23,8 @@ use sqlparser::tokenizer::Token;
 use sqlparser::tokenizer::TokenWithSpan;
 use sqlparser::tokenizer::Tokenizer;
 use sqlparser::tokenizer::Whitespace;
-use std::path::Path;
+use std::collections::BTreeMap;
+use std::sync::Arc;
 
 const ANNOTATION_PREFIX: &str = "#!";
 const FM_FACT_ANNOTATION: &str = "fm_fact";
@@ -32,7 +34,8 @@ const VARIANT_ANNOTATION: &str = "name";
 #[derive(Debug)]
 pub struct Schema {
     #[allow(dead_code)]
-    pub(crate) fact_tables: IdOrdMap<FactTable>,
+    pub(crate) all_fact_tables: IdOrdMap<Arc<FactTable>>,
+    pub(crate) fact_tables_by_de: BTreeMap<Arc<str>, IdOrdMap<Arc<FactTable>>>,
 }
 
 #[allow(dead_code)]
@@ -40,9 +43,9 @@ pub struct Schema {
 pub(crate) struct FactTable {
     create_stmt: CreateTable,
     // Rust ident for the diagnosis engine enum variant
-    pub(crate) de_name: syn::Ident,
+    pub(crate) de_name: Arc<str>,
     // Rust ident for the fact variant enum variant
-    pub(crate) fact_variant_name: syn::Ident,
+    pub(crate) fact_variant_name: String,
 }
 
 impl iddqd::IdOrdItem for FactTable {
@@ -55,14 +58,22 @@ impl iddqd::IdOrdItem for FactTable {
     iddqd::id_upcast!();
 }
 
+#[derive(Debug, thiserror::Error, miette::Diagnostic)]
+#[error("invalid schema")]
+#[diagnostic()]
+pub struct SchemaError {
+    #[source_code]
+    src: NamedSource<String>,
+    #[related]
+    errors: Vec<InnerSchemaError>,
+}
+
 /// An error encountered while parsing the database schema, along with the
 /// location in the source SQL where it occurred.
 #[derive(Debug, thiserror::Error, miette::Diagnostic)]
 #[error("{message}")]
-pub struct SchemaError {
+struct InnerSchemaError {
     message: String,
-    #[source_code]
-    src: NamedSource<String>,
     #[label(collection)]
     labels: Vec<LabeledSpan>,
     #[help]
@@ -70,9 +81,11 @@ pub struct SchemaError {
 }
 
 impl Schema {
-    pub fn from_sql(path: &Path, sql: &str) -> Result<Self, Vec<SchemaError>> {
-        let ctx = SourceContext::new(path.display().to_string(), sql);
-
+    pub fn from_sql(
+        path: impl AsRef<Utf8Path>,
+        sql: &str,
+    ) -> Result<Self, SchemaError> {
+        let ctx = SourceContext::new(path.as_ref(), sql);
         let tokens = match Tokenizer::new(&PostgreSqlDialect {}, sql)
             .tokenize_with_location()
         {
@@ -80,11 +93,11 @@ impl Schema {
             // A tokenizer error is fatal: we can't recover enough to find any
             // tables, so it's the only error we have to report.
             Err(e) => {
-                return Err(vec![
-                    *ctx.error(format!("syntax error: {}", e.message))
+                return Err(ctx.mk_schema_error(vec![
+                    *ctx.error(format!("SQL syntax error: {}", e.message))
                         .label(Span::new(e.location, e.location), "here")
                         .build(),
-                ]);
+                ]));
             }
         };
 
@@ -94,20 +107,23 @@ impl Schema {
 
         // Validate each annotated table and add them to the map, continuing to
         // accumulate errors if any table is semantically invalid.
-        let mut fact_tables = IdOrdMap::new();
+        let mut fact_tables_by_de: BTreeMap<_, IdOrdMap<Arc<FactTable>>> =
+            BTreeMap::new();
+        let mut all_fact_tables = IdOrdMap::new();
         for (create_stmt, annotations) in possible_fact_tables {
             let table = match FactTable::try_from_create_table(
                 &ctx,
                 create_stmt,
                 annotations,
             ) {
-                Ok(table) => table,
+                Ok(table) => Arc::new(table),
                 Err(e) => {
                     errors.push(*e);
                     continue;
                 }
             };
-            if let Err(err) = fact_tables.insert_unique(table) {
+            let de_name = table.de_name.clone();
+            if let Err(err) = all_fact_tables.insert_unique(table.clone()) {
                 let new = err.new_item();
                 let mut builder = ctx
                     .error(format!(
@@ -123,13 +139,27 @@ impl Schema {
                 }
                 errors.push(*builder.build());
             }
+            if let Err(err) = fact_tables_by_de
+                .entry(de_name)
+                .or_default()
+                .insert_unique(table)
+            {
+                unreachable!(
+                    "duplicate table name {:?} in DE index for de {:?} \
+                     this is probably a bug, and shouldn't happen, since we \
+                     successfully inserted the table into the map of all \
+                     fact tables, which ensures the table name is unique!",
+                    err.new_item().create_stmt.name,
+                    err.new_item().de_name,
+                )
+            }
         }
 
         if !errors.is_empty() {
-            return Err(errors);
+            return Err(ctx.mk_schema_error(errors));
         }
 
-        Ok(Self { fact_tables })
+        Ok(Self { fact_tables_by_de, all_fact_tables })
     }
 }
 
@@ -138,7 +168,7 @@ impl FactTable {
         ctx: &SourceContext,
         create_stmt: CreateTable,
         annotations: Vec<Annotation<'_>>,
-    ) -> Result<Self, Box<SchemaError>> {
+    ) -> Result<Self, Box<InnerSchemaError>> {
         let table_name = &create_stmt.name;
         if annotations[0].text != FM_FACT_ANNOTATION {
             return Err(ctx
@@ -177,7 +207,7 @@ impl FactTable {
                 "add a `--#! {DE_ANNOTATION} = <ident>` annotation above the table"
             ))
             .build()
-        })?;
+        })?.into();
         let fact_variant_name =
             fact_variant_name.map(|(ident, _)| ident).ok_or_else(|| {
                 ctx.error(format!(
@@ -202,7 +232,7 @@ impl FactTable {
 fn fm_fact_tables<'a>(
     ctx: &SourceContext,
     tokens: &'a [TokenWithSpan],
-) -> (Vec<(CreateTable, Vec<Annotation<'a>>)>, Vec<SchemaError>) {
+) -> (Vec<(CreateTable, Vec<Annotation<'a>>)>, Vec<InnerSchemaError>) {
     let mut tables = Vec::new();
     let mut errors = Vec::new();
     for segment in statement_segments(tokens) {
@@ -243,9 +273,9 @@ fn fm_fact_tables<'a>(
 fn parse_annotation(
     ctx: &SourceContext,
     name: &str,
-    into: &mut Option<(syn::Ident, Span)>,
+    into: &mut Option<(String, Span)>,
     annotation: &Annotation<'_>,
-) -> Result<(), Box<SchemaError>> {
+) -> Result<(), Box<InnerSchemaError>> {
     let Some(value) = parse_annotation_kv(name, annotation.text) else {
         return Ok(());
     };
@@ -259,7 +289,9 @@ fn parse_annotation(
             .label(*prior_span, "previously defined here")
             .build());
     }
-    let ident = syn::parse_str::<syn::Ident>(value).map_err(|e| {
+    // We throw out the actual identifier, since it's easier to work with names
+    // as regular Rust `String`s.
+    let _ = syn::parse_str::<syn::Ident>(value).map_err(|e| {
         ctx.error(format!(
             "'{name}' annotation value {value:?} is not a valid Rust \
             identifier"
@@ -268,7 +300,7 @@ fn parse_annotation(
         .help(e.to_string())
         .build()
     })?;
-    *into = Some((ident, annotation.span));
+    *into = Some((value.to_string(), annotation.span));
     Ok(())
 }
 
@@ -279,7 +311,7 @@ fn parse_annotation_kv<'v>(key: &str, value: &'v str) -> Option<&'v str> {
 fn validate_shape(
     ctx: &SourceContext,
     table: &CreateTable,
-) -> Result<(), Box<SchemaError>> {
+) -> Result<(), Box<InnerSchemaError>> {
     const ID_COL: &str = "id";
     const SITREP_ID_COL: &str = "sitrep_id";
 
@@ -369,7 +401,7 @@ fn validate_id_col(
     ctx: &SourceContext,
     table: &CreateTable,
     column: &ColumnDef,
-) -> Result<(), Box<SchemaError>> {
+) -> Result<(), Box<InnerSchemaError>> {
     let not_a_fact =
         || format!("'{}' is not a valid fm_fact table", table.name);
 
@@ -484,20 +516,20 @@ fn try_parse_segment<'a>(
 
 /// Holds the source SQL and its filename so that errors can be reported with a
 /// labeled location.
-struct SourceContext {
-    name: String,
-    sql: String,
+struct SourceContext<'src> {
+    path: &'src Utf8Path,
+    sql: &'src str,
     /// Byte offset of the start of each line, used to convert a
     /// [`Location`]'s (line, column) into a byte offset.
     line_starts: Vec<usize>,
 }
 
-impl SourceContext {
-    fn new(name: String, sql: &str) -> Self {
+impl<'src> SourceContext<'src> {
+    fn new(path: &'src Utf8Path, sql: &'src str) -> Self {
         let line_starts = std::iter::once(0)
             .chain(sql.match_indices('\n').map(|(i, _)| i + 1))
             .collect();
-        Self { name, sql: sql.to_string(), line_starts }
+        Self { path, sql, line_starts }
     }
 
     /// Converts a 1-based (line, column) [`Location`] into a byte offset into
@@ -525,10 +557,6 @@ impl SourceContext {
         SourceSpan::new(start.into(), end.saturating_sub(start))
     }
 
-    fn named_source(&self) -> NamedSource<String> {
-        NamedSource::new(&self.name, self.sql.clone())
-    }
-
     fn error(&self, message: impl Into<String>) -> ErrorBuilder<'_> {
         ErrorBuilder {
             ctx: self,
@@ -537,12 +565,19 @@ impl SourceContext {
             help: None,
         }
     }
+
+    fn mk_schema_error(&self, errors: Vec<InnerSchemaError>) -> SchemaError {
+        SchemaError {
+            src: NamedSource::new(self.path.as_str(), self.sql.to_string()),
+            errors,
+        }
+    }
 }
 
 /// Builder for a [`SchemaError`], used to attach labeled source spans and help
 /// text to an error message.
 struct ErrorBuilder<'a> {
-    ctx: &'a SourceContext,
+    ctx: &'a SourceContext<'a>,
     message: String,
     labels: Vec<LabeledSpan>,
     help: Option<String>,
@@ -562,10 +597,9 @@ impl ErrorBuilder<'_> {
         self
     }
 
-    fn build(self) -> Box<SchemaError> {
-        Box::new(SchemaError {
+    fn build(self) -> Box<InnerSchemaError> {
+        Box::new(InnerSchemaError {
             message: self.message,
-            src: self.ctx.named_source(),
             labels: self.labels,
             help: self.help,
         })
@@ -575,12 +609,13 @@ impl ErrorBuilder<'_> {
 #[cfg(test)]
 mod test {
     use super::*;
+    use miette::IntoDiagnostic;
 
     /// A fixed, fake filename used for error-rendering golden tests.
     const FAKE_PATH: &str = "fm_schema.sql";
 
     fn fact_tables(sql: &str) -> Vec<(String, Vec<String>)> {
-        let ctx = SourceContext::new(FAKE_PATH.to_string(), sql);
+        let ctx = SourceContext::new(Utf8Path::new(FAKE_PATH), sql);
         let tokens = Tokenizer::new(&PostgreSqlDialect {}, sql)
             .tokenize_with_location()
             .unwrap();
@@ -603,21 +638,16 @@ mod test {
     /// Renders the errors returned by `Schema::from_sql` for `sql` as graphical
     /// (no-color) diagnostics, for golden-file comparison.
     fn render_errors(sql: &str) -> String {
-        let errors = Schema::from_sql(Path::new(FAKE_PATH), sql)
+        let errors = Schema::from_sql(Utf8Path::new(FAKE_PATH), sql)
             .expect_err("schema should be invalid");
         let handler = miette::GraphicalReportHandler::new_themed(
             miette::GraphicalTheme::unicode_nocolor(),
         )
         .with_width(80);
         let mut rendered = String::new();
-        for (i, error) in errors.iter().enumerate() {
-            if i > 0 {
-                rendered.push('\n');
-            }
-            handler
-                .render_report(&mut rendered, error)
-                .expect("rendering a report should succeed");
-        }
+        handler
+            .render_report(&mut rendered, &errors)
+            .expect("rendering a report should succeed");
         rendered
     }
 
@@ -720,12 +750,12 @@ mod test {
 
     #[test]
     fn from_sql_accepts_valid_fact_table() {
-        let schema = Schema::from_sql(Path::new(FAKE_PATH), VALID_FACT)
+        let schema = Schema::from_sql(Utf8Path::new(FAKE_PATH), VALID_FACT)
             .expect("should be valid");
-        assert_eq!(schema.fact_tables.len(), 1);
-        let table = schema.fact_tables.iter().next().expect("one table");
+        assert_eq!(schema.all_fact_tables.len(), 1);
+        let table = schema.all_fact_tables.iter().next().expect("one table");
         assert_eq!(table.create_stmt.name.to_string(), "example");
-        assert_eq!(table.de_name, "ExampleEngine");
+        assert_eq!(table.de_name.as_ref(), "ExampleEngine");
         assert_eq!(table.fact_variant_name, "ExampleFact");
     }
 

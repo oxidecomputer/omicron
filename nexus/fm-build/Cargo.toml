@@ -5,7 +5,7 @@ edition = "2024"
 description = "a surprise tool that will help us later"
 
 [dependencies]
-anyhow.workspace = true
+camino.workspace = true
 iddqd.workspace = true
 miette = { workspace = true, features = ["fancy"] }
 syn.workspace = true

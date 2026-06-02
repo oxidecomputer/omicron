@@ -1,3 +1,6 @@
+  × invalid schema
+
+Error: 
   × 'de' annotation value "9nope" is not a valid Rust identifier
    ╭─[fm_schema.sql:3:13]
  2 │             --#! fm_fact
