@@ -1,7 +1,7 @@
   × invalid schema
 
 Error: 
-  × 'example' is missing a 'de' annotation
+  × table 'example' is missing a 'de' annotation
    ╭─[fm_schema.sql:3:26]
  2 │             --#! fm_fact
  3 │             CREATE TABLE example (

@@ -23,7 +23,7 @@ Error:
   help: 'second' is not a valid fm_fact table
 
 Error: 
-  × 'third' is missing a 'de' annotation
+  × table 'third' is missing a 'de' annotation
     ╭─[fm_schema.sql:21:26]
  20 │             --#! fm_fact
  21 │             CREATE TABLE third (
