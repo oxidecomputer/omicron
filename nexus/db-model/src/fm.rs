@@ -26,6 +26,8 @@ mod case;
 pub use case::*;
 mod diagnosis_engine;
 pub use diagnosis_engine::*;
+mod fact_physical_disk;
+pub use fact_physical_disk::*;
 mod support_bundle_request;
 pub use support_bundle_request::*;
 

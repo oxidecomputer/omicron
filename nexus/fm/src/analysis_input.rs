@@ -8,6 +8,7 @@ use chrono::{DateTime, Utc};
 use iddqd::IdOrdMap;
 use nexus_types::fm::analysis_reports::ClosedCaseReport;
 use nexus_types::fm::{self, Sitrep, SitrepVersion};
+use nexus_types::in_service_disk::InServiceDisk;
 use nexus_types::inventory;
 use omicron_uuid_kinds::CollectionUuid;
 use std::collections::BTreeMap;
@@ -39,6 +40,8 @@ pub struct Input {
     new_ereports: IdOrdMap<fm::Ereport>,
     open_cases: IdOrdMap<fm::Case>,
     closed_cases_copied_forward: IdOrdMap<fm::Case>,
+    /// All control plane managed disks
+    in_service_disks: Arc<IdOrdMap<InServiceDisk>>,
 }
 
 impl Input {
@@ -65,11 +68,19 @@ impl Input {
         &self.closed_cases_copied_forward
     }
 
+    /// All control-plane-managed disks (`physical_disk.disk_policy =
+    /// in_service` in the DB), indexed by `physical_disk_id`. See the
+    /// field-level documentation on `Input::in_service_disks` for semantics.
+    pub fn in_service_disks(&self) -> &IdOrdMap<InServiceDisk> {
+        &self.in_service_disks
+    }
+
     /// Returns a [`Builder`] for constructing a new `Input` from the provided
-    /// `parent_sitrep` and inventory collection.
+    /// `parent_sitrep`, inventory collection, and in-service disks.
     pub fn builder(
         parent_sitrep: Option<Arc<(SitrepVersion, Sitrep)>>,
         inv: Arc<inventory::Collection>,
+        in_service_disks: Arc<IdOrdMap<InServiceDisk>>,
     ) -> Result<Builder, InvalidInputs> {
         // Before preparing analysis inputs, check that the proposed input
         // inventory collection is at least as new as the parent sitrep's
@@ -94,6 +105,7 @@ impl Input {
         Ok(Builder {
             parent_sitrep,
             inv,
+            in_service_disks,
             new_ereports: IdOrdMap::default(),
             unmarked_seen_ereports: BTreeSet::default(),
         })
@@ -117,6 +129,7 @@ pub enum InvalidInputs {
 pub struct Builder {
     parent_sitrep: Option<Arc<(SitrepVersion, Sitrep)>>,
     inv: Arc<inventory::Collection>,
+    in_service_disks: Arc<IdOrdMap<InServiceDisk>>,
     /// Ereports which are new and should be input to analysis in the next
     /// sitrep.
     new_ereports: IdOrdMap<fm::Ereport>,
@@ -184,6 +197,11 @@ impl Builder {
                 .collect(),
             open_cases: BTreeMap::new(),
             closed_cases_copied_forward: BTreeMap::new(),
+            in_service_disks: self
+                .in_service_disks
+                .iter()
+                .map(|d| d.physical_disk_id)
+                .collect(),
         };
 
         // Determine which cases must be copied forwards into the next sitrep.
@@ -234,6 +252,7 @@ impl Builder {
             new_ereports: self.new_ereports,
             open_cases,
             closed_cases_copied_forward,
+            in_service_disks: self.in_service_disks,
         };
 
         (input, report)
@@ -346,6 +365,7 @@ mod tests {
                     .collect(),
                     alerts_requested: Default::default(),
                     support_bundles_requested: Default::default(),
+                    facts: Default::default(),
                 }
             };
             let open_case2 = {
@@ -366,6 +386,7 @@ mod tests {
                     .collect(),
                     alerts_requested: Default::default(),
                     support_bundles_requested: Default::default(),
+                    facts: Default::default(),
                 }
             };
             let closed_case_with_unmarked = {
@@ -393,6 +414,7 @@ mod tests {
                     .collect(),
                     alerts_requested: Default::default(),
                     support_bundles_requested: Default::default(),
+                    facts: Default::default(),
                 }
             };
             let closed_case_without_unmarked = {
@@ -414,6 +436,7 @@ mod tests {
                     .collect(),
                     alerts_requested: Default::default(),
                     support_bundles_requested: Default::default(),
+                    facts: Default::default(),
                 }
             };
 
@@ -463,8 +486,12 @@ mod tests {
 
         // Build analysis input
         let (input, report) = {
-            let mut builder = Input::builder(Some(parent_sitrep), inv)
-                .expect("collection start time check should always pass");
+            let mut builder = Input::builder(
+                Some(parent_sitrep),
+                inv,
+                Arc::new(IdOrdMap::new()),
+            )
+            .expect("collection start time check should always pass");
             // Pass in four ereports:
             //  - two that are in the open cases of the parent sitrep
             //  - one that is in the (to-be-copied-forward) closed case

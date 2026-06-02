@@ -187,6 +187,12 @@ async fn test_omdb_success_cases() {
         .wait_for_at_least_one_inventory_collection(Duration::from_secs(60))
         .await;
 
+    // Wait until `fm_analysis` has committed at least one sitrep, so that the
+    // omdb snapshot for FM tasks is stable. (Otherwise sitrep IDs render as
+    // `None` or `Some(...)` depending on whether the task's natural cadence
+    // had landed by the time we sample it.)
+    cptestctx.wait_for_at_least_one_sitrep(Duration::from_secs(60)).await;
+
     let mut output = String::new();
 
     let invocations: &[&[&str]] = &[
@@ -349,6 +355,15 @@ async fn test_omdb_success_cases() {
         .field("list ok:", r"\d+")
         .field("triggered by", r"[\w ]+")
         .section(&["task: \"tuf_artifact_replication\"", "request ringbuf:"]);
+
+    // The `fm_analysis` task's input report includes a line comparing the
+    // current inventory collection against the parent sitrep's collection,
+    // which can be either "same" or "different" depending on whether a new
+    // inventory was collected between sitreps. Collapse both forms.
+    redactor.variable_regex(
+        "fm_input_inv_comparison",
+        r" --> (same collection as parent sitrep|different from parent sitrep \(collection [-a-f0-9]+\))",
+    );
 
     // The `sp_ereport_ingester` task's output depends on how many simulated
     // sled agents ahppen to register with Nexus before its first execution.

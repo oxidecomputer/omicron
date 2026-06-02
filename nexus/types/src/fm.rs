@@ -12,6 +12,8 @@ pub mod ereport;
 pub use ereport::{Ereport, EreportId};
 pub mod case;
 pub use case::Case;
+pub mod fact;
+pub use fact::{DiskFact, FactPayload, ZpoolUnhealthyFactPayload};
 pub(crate) mod json_display;
 
 use case::AlertRequest;
@@ -202,6 +204,10 @@ pub struct SitrepVersion {
     pub time_made_current: DateTime<Utc>,
 }
 
+/// The current sitrep paired with its [`SitrepVersion`] metadata, wrapped in an
+/// `Arc` so it can be shared cheaply (e.g., across `watch` channels).
+pub type CurrentSitrep = Arc<(SitrepVersion, Sitrep)>;
+
 #[derive(
     Copy,
     Clone,
@@ -217,4 +223,5 @@ pub struct SitrepVersion {
 #[strum(serialize_all = "snake_case")]
 pub enum DiagnosisEngineKind {
     PowerShelf,
+    PhysicalDisk,
 }

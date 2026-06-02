@@ -88,6 +88,10 @@ pub trait NexusServer: Send + Sync + 'static {
 
     fn inventory_load_rx(&self) -> watch::Receiver<Option<Arc<Collection>>>;
 
+    fn sitrep_load_rx(
+        &self,
+    ) -> watch::Receiver<Option<nexus_types::fm::CurrentSitrep>>;
+
     fn get_http_server_external_address(&self) -> SocketAddr;
     fn get_http_server_techport_address(&self) -> SocketAddr;
     fn get_http_server_internal_address(&self) -> SocketAddr;

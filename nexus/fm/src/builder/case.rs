@@ -10,6 +10,7 @@ use nexus_types::alert::AlertClass;
 use nexus_types::fm;
 use nexus_types::support_bundle::BundleDataSelection;
 use omicron_uuid_kinds::CaseUuid;
+use omicron_uuid_kinds::FactUuid;
 use omicron_uuid_kinds::SitrepUuid;
 use std::sync::Arc;
 
@@ -76,6 +77,7 @@ impl AllCases {
                     ereports: Default::default(),
                     alerts_requested: Default::default(),
                     support_bundles_requested: Default::default(),
+                    facts: Default::default(),
                 };
                 let mut builder =
                     CaseBuilder::new(&self.log, sitrep_id, case, case_rng);
@@ -213,6 +215,63 @@ impl CaseBuilder {
         let comment = comment.to_string();
         slog::info!(&self.log, "case closed"; "comment" => %comment);
         self.report_log.entry("case closed").comment(comment);
+    }
+
+    /// Replace this case's free-form comment string.
+    pub fn set_comment(&mut self, comment: impl ToString) {
+        self.case.metadata.comment = comment.to_string();
+    }
+
+    /// Emit a new fact under this case. The fact's UUID is freshly
+    /// allocated from the case's deterministic RNG.
+    pub fn add_fact(
+        &mut self,
+        payload: impl Into<fm::FactPayload>,
+        comment: impl ToString,
+    ) -> FactUuid {
+        let id = loop {
+            let id = self.rng.next_fact();
+            if !self.case.facts.contains_key(&id) {
+                break id;
+            }
+        };
+        let payload = payload.into();
+        let comment = comment.to_string();
+        slog::info!(
+            &self.log,
+            "added a fact";
+            "fact_id" => %id,
+            "payload" => ?payload,
+            "comment" => %comment,
+        );
+        self.report_log
+            .entry("added fact")
+            .kv("fact_id", id)
+            .kv("payload", &payload)
+            .comment(comment.clone());
+        let fact = fm::case::Fact {
+            id,
+            created_sitrep_id: self.sitrep_id,
+            payload,
+            comment,
+        };
+        self.case.facts.insert_unique(fact).expect("UUID should be unused");
+        id
+    }
+
+    /// Remove a fact from this case. The fact will not be carried forward
+    /// into the next sitrep.
+    pub fn remove_fact(&mut self, id: FactUuid) {
+        if self.case.facts.remove(&id).is_some() {
+            slog::info!(&self.log, "removed a fact"; "fact_id" => %id);
+            self.report_log.entry("removed fact").kv("fact_id", id);
+        }
+    }
+
+    /// Iterate the facts currently attached to this case (including any that
+    /// were carried forward from the parent sitrep).
+    pub fn facts(&self) -> impl Iterator<Item = &fm::case::Fact> {
+        self.case.facts.iter()
     }
 
     pub fn add_ereport(
