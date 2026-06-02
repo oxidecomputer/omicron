@@ -519,6 +519,20 @@ migration, using the goldens still on disk:\n\
                     seen.pop();
                     return inlined;
                 }
+                // `{ "allOf": [S] }` is equivalent to `S`. schemars wraps a
+                // `$ref` this way only to hang a description on it, so without
+                // this collapse a doc-comment edit (which adds/removes the
+                // wrapper, since descriptions are stripped) would look like a
+                // representation change.
+                if map.len() == 1 {
+                    if let Some([only]) = map
+                        .get("allOf")
+                        .and_then(|a| a.as_array())
+                        .map(|a| a.as_slice())
+                    {
+                        return inline_refs(only, definitions, seen);
+                    }
+                }
                 serde_json::Value::Object(
                     map.iter()
                         .map(|(k, v)| {
@@ -537,6 +551,70 @@ migration, using the goldens still on disk:\n\
         }
     }
 
+    /// Collects the dotted data-paths at which two `$ref`-inlined field schemas
+    /// diverge, so every change a migration must address is listed (not just
+    /// the first). Descends through aligned object `properties` and array
+    /// `items`, reporting the shallowest path at each independent divergence: a
+    /// localized nested change yields its own path (`slot.bay`), while a
+    /// wholesale reshape collapses to the node rather than exploding per leaf.
+    /// Always pushes at least one path when the schemas differ, so no
+    /// divergence is silently dropped.
+    ///
+    /// Limitation: a nested field flipping optional <-> required *without* any
+    /// other change in its object surfaces at the enclosing field (via the
+    /// fallback below); it is not itemized the way a top-level required flip is.
+    fn diverging_paths(
+        old: &serde_json::Value,
+        new: &serde_json::Value,
+        prefix: &str,
+        out: &mut Vec<String>,
+    ) {
+        if old == new {
+            return;
+        }
+        let old_props = old.get("properties").and_then(|p| p.as_object());
+        let new_props = new.get("properties").and_then(|p| p.as_object());
+        if let (Some(op), Some(np)) = (old_props, new_props) {
+            // Only descend if the objects share a field; otherwise it is a
+            // wholesale reshape and we report the node, not every leaf.
+            if op.keys().any(|k| np.contains_key(k)) {
+                let before = out.len();
+                let mut names: std::collections::BTreeSet<&str> =
+                    op.keys().map(String::as_str).collect();
+                names.extend(np.keys().map(String::as_str));
+                for name in names {
+                    let child = format!("{prefix}.{name}");
+                    match (op.get(name), np.get(name)) {
+                        (Some(o), Some(n)) => {
+                            diverging_paths(o, n, &child, out)
+                        }
+                        // A nested field present on only one side.
+                        _ => out.push(child),
+                    }
+                }
+                // Properties all matched but the objects still differ (a shell
+                // keyword such as `required` changed): report the node so the
+                // divergence is not lost.
+                if out.len() == before {
+                    out.push(prefix.to_string());
+                }
+                return;
+            }
+            out.push(prefix.to_string());
+            return;
+        }
+        if let (Some(oi), Some(ni)) = (old.get("items"), new.get("items")) {
+            let before = out.len();
+            diverging_paths(oi, ni, &format!("{prefix}[]"), out);
+            if out.len() == before {
+                out.push(prefix.to_string());
+            }
+            return;
+        }
+        // Leaf scalar, enum/`oneOf`/`allOf`, or shapes that do not align.
+        out.push(prefix.to_string());
+    }
+
     /// A change that warrants a data migration, produced by [`diff_payload`].
     /// Holds the `kind` (and field) the change touches; the owning DE is paired
     /// in at formatting time via [`Finding::describe`], since `de` is caller
@@ -549,9 +627,10 @@ migration, using the goldens still on disk:\n\
         AddedRequired { kind: String, field: String },
         /// An existing field went optional -> required; some rows lack it.
         BecameRequired { kind: String, field: String },
-        /// An existing field's (`$ref`-inlined) schema changed: a type or
-        /// domain change.
-        SchemaChanged { kind: String, field: String },
+        /// An existing field's representation changed at `path` (a dotted data
+        /// path within the variant, e.g. `slot.bay`): a type, domain, or nested
+        /// shape change. One per divergence, so every change is listed.
+        FieldChanged { kind: String, path: String },
         /// A field disappeared; old rows still carry the now-dead key.
         Removed { kind: String, field: String },
     }
@@ -572,8 +651,8 @@ migration, using the goldens still on disk:\n\
                     "{de}::{kind}: field `{field}` became required: backfill it \
                      on rows that lack it",
                 ),
-                Finding::SchemaChanged { kind, field } => format!(
-                    "{de}::{kind}: field `{field}` changed type or domain: \
+                Finding::FieldChanged { kind, path } => format!(
+                    "{de}::{kind}: field `{path}` changed representation: \
                      re-encode or verify existing rows",
                 ),
                 Finding::Removed { kind, field } => format!(
@@ -630,12 +709,18 @@ migration, using the goldens still on disk:\n\
                             });
                         }
                         // required -> optional is fine: old rows already have it.
-                        if old_field.schema != new_field.schema {
-                            findings.push(Finding::SchemaChanged {
-                                kind: kind.clone(),
-                                field: name.clone(),
-                            });
-                        }
+                        // Report every place the (inlined) schemas diverge, so
+                        // all migrations get done before the golden is rewritten.
+                        let mut paths = Vec::new();
+                        diverging_paths(
+                            &old_field.schema,
+                            &new_field.schema,
+                            name,
+                            &mut paths,
+                        );
+                        findings.extend(paths.into_iter().map(|path| {
+                            Finding::FieldChanged { kind: kind.clone(), path }
+                        }));
                     }
                 }
             }
@@ -816,8 +901,30 @@ migration, using the goldens still on disk:\n\
         fn removed(kind: &str, field: &str) -> Finding {
             Finding::Removed { kind: kind.into(), field: field.into() }
         }
-        fn schema_changed(kind: &str, field: &str) -> Finding {
-            Finding::SchemaChanged { kind: kind.into(), field: field.into() }
+        fn field_changed(kind: &str, path: &str) -> Finding {
+            Finding::FieldChanged { kind: kind.into(), path: path.into() }
+        }
+
+        /// Builds a nested object schema (`{type:object, properties, required}`)
+        /// where every listed field is required. Lets tests nest payloads.
+        fn obj(fields: &[(&str, serde_json::Value)]) -> serde_json::Value {
+            let mut props = serde_json::Map::new();
+            let mut required = Vec::new();
+            for (name, schema) in fields {
+                props.insert((*name).to_string(), schema.clone());
+                required.push(serde_json::Value::String((*name).to_string()));
+            }
+            let mut m = serde_json::Map::new();
+            m.insert("type".to_string(), json!("object"));
+            m.insert(
+                "properties".to_string(),
+                serde_json::Value::Object(props),
+            );
+            m.insert(
+                "required".to_string(),
+                serde_json::Value::Array(required),
+            );
+            serde_json::Value::Object(m)
         }
 
         #[test]
@@ -874,7 +981,7 @@ migration, using the goldens still on disk:\n\
         fn field_type_change_is_flagged() {
             let old = payload(&[("v", &[("a", true, string())])]);
             let new = payload(&[("v", &[("a", true, integer())])]);
-            assert_eq!(diff(&old, &new), vec![schema_changed("v", "a")]);
+            assert_eq!(diff(&old, &new), vec![field_changed("v", "a")]);
         }
 
         #[test]
@@ -888,7 +995,7 @@ migration, using the goldens still on disk:\n\
                         kind: "v".into(),
                         field: "a".into(),
                     },
-                    schema_changed("v", "a"),
+                    field_changed("v", "a"),
                 ],
             );
         }
@@ -903,16 +1010,44 @@ migration, using the goldens still on disk:\n\
                         "type": "object",
                         "properties": {
                             "kind": { "enum": ["v"] },
-                            "a": { "$ref": "#/definitions/Health" },
+                            "a": { "$ref": "#/definitions/Mood" },
                         },
                         "required": ["kind", "a"],
                     }],
-                    "definitions": { "Health": { "enum": values } },
+                    "definitions": { "Mood": { "enum": values } },
                 })
             };
             let old = with_domain(json!(["ok", "bad", "ugly"]));
             let new = with_domain(json!(["ok", "bad"]));
-            assert_eq!(diff(&old, &new), vec![schema_changed("v", "a")]);
+            assert_eq!(diff(&old, &new), vec![field_changed("v", "a")]);
+        }
+
+        #[test]
+        fn allof_wrapper_around_ref_is_not_a_change() {
+            // schemars wraps a `$ref` in a single-element `allOf` to attach a
+            // description; stripping the description leaves the wrapper. A
+            // doc-comment edit thus flips a field between `{$ref}` and
+            // `{allOf:[{$ref}]}` with no representation change, so neither
+            // direction should produce a finding.
+            let with_field = |field: serde_json::Value| {
+                json!({
+                    "oneOf": [{
+                        "type": "object",
+                        "properties": {
+                            "kind": { "enum": ["v"] },
+                            "a": field,
+                        },
+                        "required": ["kind", "a"],
+                    }],
+                    "definitions": { "Mood": { "enum": ["ok", "bad"] } },
+                })
+            };
+            let bare = with_field(json!({ "$ref": "#/definitions/Mood" }));
+            let wrapped = with_field(
+                json!({ "allOf": [ { "$ref": "#/definitions/Mood" } ] }),
+            );
+            assert_eq!(diff(&bare, &wrapped), vec![]);
+            assert_eq!(diff(&wrapped, &bare), vec![]);
         }
 
         #[test]
@@ -947,7 +1082,52 @@ migration, using the goldens still on disk:\n\
             assert_eq!(diff(&old, &old), vec![]);
             // A change inside the recursive type surfaces at the field using it.
             let new = tree(integer());
-            assert_eq!(diff(&old, &new), vec![schema_changed("v", "root")]);
+            // The change is localized to the nested `value` field, not `root`.
+            assert_eq!(
+                diff(&old, &new),
+                vec![field_changed("v", "root.value")]
+            );
+        }
+
+        #[test]
+        fn independent_nested_changes_each_get_a_path() {
+            // `doohickey` is an object with two sub-objects; a leaf changes in
+            // each. Both must be reported so both migrations get done.
+            let doohickey =
+                |frob_ty: serde_json::Value, blarg_ty: serde_json::Value| {
+                    payload(&[(
+                        "v",
+                        &[(
+                            "doohickey",
+                            true,
+                            obj(&[
+                                ("frob", obj(&[("knob", frob_ty)])),
+                                ("blarg", obj(&[("thing", blarg_ty)])),
+                            ]),
+                        )],
+                    )])
+                };
+            let old = doohickey(string(), string());
+            let new = doohickey(integer(), integer());
+            // Deterministic order: `blarg` sorts before `frob`.
+            assert_eq!(
+                diff(&old, &new),
+                vec![
+                    field_changed("v", "doohickey.blarg.thing"),
+                    field_changed("v", "doohickey.frob.knob"),
+                ],
+            );
+        }
+
+        #[test]
+        fn wholesale_reshape_collapses_to_the_field() {
+            // The field's object is replaced by one with no fields in common,
+            // so we report the field once instead of one path per leaf.
+            let old =
+                payload(&[("v", &[("a", true, obj(&[("x", string())]))])]);
+            let new =
+                payload(&[("v", &[("a", true, obj(&[("y", string())]))])]);
+            assert_eq!(diff(&old, &new), vec![field_changed("v", "a")]);
         }
 
         #[test]
@@ -1006,7 +1186,7 @@ migration, using the goldens still on disk:\n\
             assert_eq!(
                 diff(&old, &new),
                 vec![
-                    schema_changed("v", "a"),
+                    field_changed("v", "a"),
                     added_required("v", "added"),
                     removed("v", "gone"),
                 ],
@@ -1016,35 +1196,34 @@ migration, using the goldens still on disk:\n\
         #[test]
         fn describe_renders_each_finding() {
             assert_eq!(
-                added_required("zpool_unhealthy", "severity")
-                    .describe("physical_disk"),
-                "physical_disk::zpool_unhealthy: required field `severity` was \
-                 added: backfill it on existing rows",
+                added_required("kaput", "frob").describe("sprockets"),
+                "sprockets::kaput: required field `frob` was added: backfill it \
+                 on existing rows",
             );
             assert_eq!(
-                removed("zpool_unhealthy", "old").describe("physical_disk"),
-                "physical_disk::zpool_unhealthy: field `old` was removed: scrub \
-                 it from existing rows",
+                removed("kaput", "obsolete").describe("sprockets"),
+                "sprockets::kaput: field `obsolete` was removed: scrub it from \
+                 existing rows",
             );
             assert_eq!(
-                schema_changed("zpool_unhealthy", "x")
-                    .describe("physical_disk"),
-                "physical_disk::zpool_unhealthy: field `x` changed type or \
-                 domain: re-encode or verify existing rows",
+                field_changed("kaput", "doohickey.frob.knob")
+                    .describe("sprockets"),
+                "sprockets::kaput: field `doohickey.frob.knob` changed \
+                 representation: re-encode or verify existing rows",
             );
             assert_eq!(
                 Finding::BecameRequired {
-                    kind: "zpool_unhealthy".into(),
-                    field: "x".into(),
+                    kind: "kaput".into(),
+                    field: "blarg".into(),
                 }
-                .describe("physical_disk"),
-                "physical_disk::zpool_unhealthy: field `x` became required: \
-                 backfill it on rows that lack it",
+                .describe("sprockets"),
+                "sprockets::kaput: field `blarg` became required: backfill it \
+                 on rows that lack it",
             );
             assert_eq!(
-                Finding::VariantRemoved { kind: "gone".into() }
-                    .describe("physical_disk"),
-                "physical_disk: variant `gone` was removed: existing `gone` \
+                Finding::VariantRemoved { kind: "gonezo".into() }
+                    .describe("sprockets"),
+                "sprockets: variant `gonezo` was removed: existing `gonezo` \
                  rows are orphaned and need migrating or deleting",
             );
         }
