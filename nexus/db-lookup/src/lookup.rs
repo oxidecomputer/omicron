@@ -95,8 +95,9 @@ impl<'a> LookupPath<'a> {
     /// Select an Instance by id, validating that it lives in `expected_project`
     /// rather than rejecting the combined `id + project` selector (#10517).
     ///
-    /// The mismatch is reported as a 404 (the same error as a nonexistent
-    /// instance), consistent with the by-name path and leaking nothing.
+    /// A mismatch against a real project is reported as a 400 (after the
+    /// instance's own authz check, so a caller who can't see the instance still
+    /// gets a 404 and learns nothing).
     pub fn instance_id_validated(
         self,
         id: Uuid,

@@ -366,10 +366,15 @@ async fn test_instance_access(cptestctx: &ControlPlaneTestContext) {
     .await;
     assert_eq!(fetched_instance.identity.id, instance.identity.id);
 
-    // A project selector that does NOT match the instance's project yields a
-    // 404 (the same error as a nonexistent instance), regardless of whether the
-    // mismatching project is given by name or id, and whether or not it exists.
+    // A project selector that names a real project the instance does NOT belong
+    // to is a contradictory request: a 400, whether given by name or id. (The
+    // resource's own authz check runs first, so a caller who can't see the
+    // instance still gets a 404 and learns nothing.)
     let other_project = create_project(client, "other-project").await;
+    let mismatch_msg = format!(
+        "instance with id \"{}\" does not belong to the specified project",
+        instance.identity.id
+    );
 
     // by id + wrong (but existing) project name
     let error = object_get_error(
@@ -379,27 +384,28 @@ async fn test_instance_access(cptestctx: &ControlPlaneTestContext) {
             instance.identity.id, other_project.identity.name
         )
         .as_str(),
-        StatusCode::NOT_FOUND,
+        StatusCode::BAD_REQUEST,
     )
     .await;
-    assert_eq!(
-        error.message,
-        format!("not found: instance with id \"{}\"", instance.identity.id)
-    );
+    assert_eq!(error.message, mismatch_msg);
 
     // by id + wrong (but existing) project id
-    object_get_error(
+    let error = object_get_error(
         client,
         format!(
             "/v1/instances/{}?project={}",
             instance.identity.id, other_project.identity.id
         )
         .as_str(),
-        StatusCode::NOT_FOUND,
+        StatusCode::BAD_REQUEST,
     )
     .await;
+    assert_eq!(error.message, mismatch_msg);
 
-    // by id + nonexistent project name
+    // by id + nonexistent project name: the supplied project simply doesn't
+    // resolve, so this is a 404 about the project (it isn't treated as a
+    // mismatch). This is the one case that differs from a unified "always 400"
+    // policy.
     object_get_error(
         client,
         format!(

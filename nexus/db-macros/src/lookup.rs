@@ -604,68 +604,83 @@ fn generate_lookup_methods(config: &Config) -> TokenStream {
             (quote! {}, quote! {})
         };
 
-    // Generate the by-id-with-validated-parent arms (see #10517). The by-id
-    // walk-up already resolves the resource's real parent for free; we compare
-    // the caller-supplied parent against it and 404 on mismatch (consistent
-    // with the by-name path, where a wrong parent simply doesn't resolve). The
-    // resource's own authz check happens before the comparison is reached
-    // (`fetch_by_id_for` authorizes; `lookup_for` authorizes after `lookup`),
-    // so a caller who can't see the resource never learns whether the parent
-    // matched.
-    let (validated_fetch_arm, validated_lookup_arm) = if config
-        .validate_by_id_parent
-    {
-        let (_, ancestor_authz_names, supplied_args) =
-            config.validated_ancestors();
-        // For each supplied ancestor, resolve it (its `lookup_for` walks up and
-        // yields its own authz chain; the last element is that ancestor's
-        // authz) and compare its id to the resource's real ancestor at that
-        // level. A mismatch is reported as the resource's own not-found, so it
-        // is indistinguishable from a nonexistent resource. Because ids are
-        // globally unique, comparing a single level transitively validates
-        // everything above it — and a supplied ancestor that is itself a
-        // validated lookup checks its own parents in turn.
-        let compare = quote! {
-            use nexus_auth::authz::ApiResource;
-            #(
-                if let Some(#supplied_args) = #supplied_args {
-                    let (.., supplied_authz) =
-                        #supplied_args.lookup_for(authz::Action::Read).await?;
-                    if #ancestor_authz_names.id() != supplied_authz.id() {
-                        return Err(#resource_authz_name.not_found());
+    // Generate the by-id-with-validated-parents machinery (see #10517). For
+    // each caller-supplied ancestor we resolve it (its `lookup_for` walks up and
+    // yields its own authz chain, whose last element is that ancestor's authz)
+    // and compare its id to the resource's real ancestor at that level. A
+    // mismatch is a contradictory request, so it's a 400. Because ids are
+    // globally unique, comparing a single level transitively validates
+    // everything above it — and a supplied ancestor that is itself a validated
+    // lookup checks its own parents in turn.
+    //
+    // The comparison only runs *after* the resource's own authz check has
+    // passed (`fetch_by_id_for` authorizes; in `lookup_for` we run it after the
+    // `authorize` call below), so a caller who can't see the resource gets the
+    // usual 404 and never learns from a 400 whether the parent matched.
+    let (validated_fetch_arm, validated_lookup_arm, validated_lookup_for_check) =
+        if config.validate_by_id_parent {
+            let (ancestor_types, ancestor_authz_names, supplied_args) =
+                config.validated_ancestors();
+            let compare = quote! {
+                use nexus_auth::authz::ApiResource;
+                #(
+                    if let Some(#supplied_args) = #supplied_args {
+                        let (.., supplied_authz) =
+                            #supplied_args.lookup_for(authz::Action::Read).await?;
+                        if #ancestor_authz_names.id() != supplied_authz.id() {
+                            return Err(Error::invalid_request(format!(
+                                "{} with id \"{}\" does not belong to the \
+                                 specified {}",
+                                ResourceType::#resource_name,
+                                #resource_authz_name.id(),
+                                ResourceType::#ancestor_types,
+                            )));
+                        }
                     }
-                }
-            )*
+                )*
+            };
+            (
+                // fetch_for: fetch_by_id_for has already authorized `action`.
+                quote! {
+                    #resource_name::PrimaryKeyWithParents(
+                        _, #(#pkey_names,)* #(#supplied_args,)*
+                    ) => {
+                        let (#(#path_authz_names,)* db_row) =
+                            Self::fetch_by_id_for(
+                                opctx, datastore, #(#pkey_names,)* action
+                            ).await?;
+                        { #compare }
+                        Ok((#(#path_authz_names,)* db_row))
+                    }
+                },
+                // lookup(): just resolve the path (no authz here, so no
+                // comparison either — that would leak before the authz check in
+                // lookup_for). The supplied ancestors are validated in
+                // lookup_for, after authorize.
+                quote! {
+                    #resource_name::PrimaryKeyWithParents(
+                        _, #(#pkey_names,)* ..
+                    ) => {
+                        let (#(#path_authz_names,)* _) =
+                            Self::lookup_by_id_no_authz(
+                                opctx, datastore, #(#pkey_names,)*
+                            ).await?;
+                        Ok((#(#path_authz_names,)*))
+                    }
+                },
+                // lookup_for: runs after `authorize`, so the 400 is only
+                // reachable by a caller allowed to do `action` on the resource.
+                quote! {
+                    if let #resource_name::PrimaryKeyWithParents(
+                        _, .., #(#supplied_args,)*
+                    ) = self {
+                        #compare
+                    }
+                },
+            )
+        } else {
+            (quote! {}, quote! {}, quote! {})
         };
-        (
-            quote! {
-                #resource_name::PrimaryKeyWithParents(
-                    _, #(#pkey_names,)* #(#supplied_args,)*
-                ) => {
-                    let (#(#path_authz_names,)* db_row) =
-                        Self::fetch_by_id_for(
-                            opctx, datastore, #(#pkey_names,)* action
-                        ).await?;
-                    { #compare }
-                    Ok((#(#path_authz_names,)* db_row))
-                }
-            },
-            quote! {
-                #resource_name::PrimaryKeyWithParents(
-                    _, #(#pkey_names,)* #(#supplied_args,)*
-                ) => {
-                    let (#(#path_authz_names,)* _) =
-                        Self::lookup_by_id_no_authz(
-                            opctx, datastore, #(#pkey_names,)*
-                        ).await?;
-                    { #compare }
-                    Ok((#(#path_authz_names,)*))
-                }
-            },
-        )
-    } else {
-        (quote! {}, quote! {})
-    };
 
     // Generate the by-name branch of the match arm in "fetch_for()"
     let fetch_for_name_variant = if config.lookup_by_name {
@@ -837,6 +852,7 @@ fn generate_lookup_methods(config: &Config) -> TokenStream {
             let opctx = &lookup.opctx;
             let (#(#path_authz_names,)*) = self.lookup().await?;
             opctx.authorize(action, &#resource_authz_name).await?;
+            #validated_lookup_for_check
             Ok((#(#path_authz_names,)*))
             #silo_check_lookup
         }
