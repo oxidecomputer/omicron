@@ -9,7 +9,9 @@ use iddqd::IdOrdMap;
 use miette::{IntoDiagnostic, WrapErr};
 use std::sync::Arc;
 
+pub mod parser;
 pub mod schema;
+use schema::Schema;
 
 pub struct CodeGenerator {
     #[allow(dead_code)]
@@ -26,8 +28,8 @@ impl CodeGenerator {
         let sql = std::fs::read_to_string(schema_path)
             .into_diagnostic()
             .wrap_err_with(|| format!("failed to read {schema_path}"))?;
-        let schema::Schema { all_fact_tables, fact_tables_by_de } =
-            schema::Schema::from_sql(schema_path, &sql)?;
+        let Schema { all_fact_tables, fact_tables_by_de } =
+            Schema::from_sql(schema_path, &sql)?;
         let des = fact_tables_by_de
             .into_iter()
             .map(|(de_name, fact_tables)| {
