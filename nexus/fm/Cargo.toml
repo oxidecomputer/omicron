@@ -38,3 +38,7 @@ omicron-workspace-hack.workspace = true
 omicron-test-utils.workspace = true
 nexus-reconfigurator-planning.workspace = true
 ereport-types.workspace = true
+expectorate.workspace = true
+schemars.workspace = true
+strum.workspace = true
+omicron-uuid-kinds = { workspace = true, features = ["schemars08"] }

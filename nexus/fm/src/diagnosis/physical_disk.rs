@@ -20,6 +20,16 @@ use std::collections::BTreeMap;
 /// Per-fact state for the disk diagnosis engine, serialized into the
 /// `fm_fact.payload` JSONB column. Other diagnosis engines must not
 /// inspect or modify this; shared FM code treats it as opaque bytes.
+///
+/// Its serialized shape is **persisted** in `fm_fact.payload`, so changing it
+/// is a data migration. The payload-stability tests in
+/// [`super`](crate::diagnosis) snapshot this representation and will fail loudly
+/// if it changes; see the migration guidance there before editing.
+#[cfg_attr(test, derive(schemars::JsonSchema, strum::EnumDiscriminants))]
+#[cfg_attr(
+    test,
+    strum_discriminants(name(DiskFactKind), derive(strum::EnumIter))
+)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum DiskFact {
@@ -28,6 +38,7 @@ pub enum DiskFact {
 }
 
 /// Payload of a [`DiskFact::ZpoolUnhealthy`] fact.
+#[cfg_attr(test, derive(schemars::JsonSchema))]
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct ZpoolUnhealthyFactPayload {
     /// The physical disk this fact (and its parent case) is about.
@@ -46,6 +57,41 @@ pub struct ZpoolUnhealthyFactPayload {
     pub observed_in_inv: CollectionUuid,
     /// `time_done` of `observed_in_inv`.
     pub time_observed: DateTime<Utc>,
+}
+
+/// Snapshots `DiskFact` for the payload-stability guardrail in
+/// [`super`](crate::diagnosis). The guardrail derives the schema, serialized
+/// bytes, and deserialize round-trip from the type itself; this impl just
+/// declares the engine kind and an obviously-fake sample of every variant.
+#[cfg(test)]
+impl super::FactPayload for DiskFact {
+    const DE: DiagnosisEngineKind = DiagnosisEngineKind::PhysicalDisk;
+
+    /// The exhaustive `match` over [`DiskFactKind`] forces a sample to be added
+    /// whenever a new variant is added (otherwise this fails to compile).
+    fn samples() -> Vec<Self> {
+        use strum::IntoEnumIterator;
+        DiskFactKind::iter()
+            .map(|kind| match kind {
+                DiskFactKind::ZpoolUnhealthy => {
+                    DiskFact::ZpoolUnhealthy(ZpoolUnhealthyFactPayload {
+                        physical_disk_id:
+                            "11111111-1111-1111-1111-111111111111"
+                                .parse()
+                                .unwrap(),
+                        zpool_id: "22222222-2222-2222-2222-222222222222"
+                            .parse()
+                            .unwrap(),
+                        last_seen_health: ZpoolHealth::Faulted,
+                        observed_in_inv: "33333333-3333-3333-3333-333333333333"
+                            .parse()
+                            .unwrap(),
+                        time_observed: "2000-01-01T00:00:00Z".parse().unwrap(),
+                    })
+                }
+            })
+            .collect()
+    }
 }
 
 /// A [`DiskFact::ZpoolUnhealthy`] payload paired with the `FactUuid` it

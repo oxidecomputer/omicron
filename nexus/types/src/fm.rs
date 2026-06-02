@@ -216,6 +216,7 @@ pub type CurrentSitrep = Arc<(SitrepVersion, Sitrep)>;
     serde::Serialize,
     serde::Deserialize,
     strum::Display,
+    strum::EnumIter,
 )]
 #[serde(rename_all = "snake_case")]
 #[strum(serialize_all = "snake_case")]
