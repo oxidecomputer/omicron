@@ -587,36 +587,14 @@ of which are deployed.
 #
 
 [[dependency_filter_rules]]
-ancestor = "dice-verifier"
-client = "sled-agent-client"
-evaluation = "bogus"
-note = """
-propolis-server does actually talk to sled-agent-client, but by virtue of both
-APIs being server-side versioned, trips a check in the component graph that
-requires server-side versioned APIs to not form a cycle. This is a deficiency
-in the server-side API checking, since this cycle is acceptable on the basis of
-propolis-server and sled-agent being in the same deployment unit.
-
-This filter should be removed when the intra-deployment relationship between
-propolis-server and sled-agent can be tolerated in the component graph check.
-"""
-
-[[dependency_filter_rules]]
 ancestor = "sled-agent-client"
 client = "propolis-client"
 evaluation = "bogus"
 note = """
-Same as the bogus rule between sled-agent-types and propolis-client.
 sled-agent-client re-exports some (Crucible!) types from propolis-client for
-sled-agent-client's consumers.
-
-This bogus rule would be fine enough on its own, though ideally we should not
-need sled-agent-client to depend on propolis-client even just for types. But,
-perhaps surprisingly, this was necessary to add even though the
-dice-verifier->sled-agent-client rule above "broke" the dependency path from
-propolis-server through to propolis-client. Once we've fixed the issue requiring
-the dice-verifier rule above, we should probably keep this dependency filter
-rule.
+sled-agent-client's consumers.  Ideally sled-agent-client would not need to
+depend on propolis-client even just for types, but until that's untangled, this
+Cargo dependency does not represent a real API relationship.
 """
 
 [[dependency_filter_rules]]
@@ -825,6 +803,22 @@ same deployment unit.
 """
 permalinks = [
     "https://github.com/oxidecomputer/omicron/blob/6cef874/sled-agent/src/instance.rs#L2283",
+]
+
+[[intra_deployment_unit_only_edges]]
+server = "propolis-server"
+client = "sled-agent-client"
+note = """
+The Propolis attestation server uses dice-verifier's AttestSledAgent to call
+RoT attestation endpoints on Sled Agent. The Sled Agent address is
+derived from propolis-server's own IPv6 listen address by computing the sled
+subnet and calling get_sled_address (propolis-server/src/main.rs:326), so it
+can only ever resolve to the same sled (and therefore, the same Host OS
+deployment unit).
+"""
+permalinks = [
+    "https://github.com/oxidecomputer/propolis/blob/58ab73bde89ade637b0ca8118682ee9575da6c2a/bin/propolis-server/src/main.rs#L326-L337",
+    "https://github.com/oxidecomputer/dice-util/blob/d7472bfa91aee859c3fe0bdc1dbb1e320285228e/verifier/src/sled_agent.rs#L19-L25",
 ]
 
 # NOTE: The following sled-agent edges are bugs: they cross deployment units.
