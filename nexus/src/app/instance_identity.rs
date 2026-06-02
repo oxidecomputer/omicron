@@ -96,6 +96,8 @@ pub enum InstanceIdentityError {
     VerifyAttestation(String),
     #[error("failed to verify measurements: {0}")]
     VerifyMeasurements(String),
+    #[error("failed to load reference measurements (CoRIM): {0}")]
+    LoadMeasurements(String),
     #[error("OxideInstance log is not valid JSON")]
     ParseInstanceConf(#[source] serde_json::Error),
     #[error(
@@ -114,8 +116,6 @@ pub struct InstanceIdentitySigner {
     root_certs: Arc<Vec<Certificate>>,
     /// Optional: when present, the OxidePlatform log is appraised against these.
     ref_measurements: Option<Arc<dice_verifier::ReferenceMeasurements>>,
-    encoding_key: Arc<EncodingKey>,
-    kid: String,
     issuer: String,
     audience: String,
     token_ttl_secs: i64,
@@ -129,18 +129,39 @@ impl InstanceIdentitySigner {
     ) -> Result<Self, InstanceIdentityError> {
         let root_pem = std::fs::read_to_string(&cfg.root_cert_path)
             .map_err(InstanceIdentityError::ReadFile)?;
-        let key_pem = std::fs::read(&cfg.signing_key_path)
-            .map_err(InstanceIdentityError::ReadFile)?;
         let root_certs = Certificate::load_pem_chain(root_pem.as_bytes())
             .map_err(|_| InstanceIdentityError::ParseCertificate)?;
-        let encoding_key = EncodingKey::from_rsa_pem(&key_pem)
-            .map_err(|_| InstanceIdentityError::LoadKeyMaterial)?;
+
+        // Optional RIM corpus: when configured, the OxidePlatform measurement
+        // log is appraised against these reference values (CoRIM). Mirrors
+        // sprue's loader. Empty corpus => appraisal skipped (None).
+        let ref_measurements = if cfg.ref_measurement_corpus.is_empty() {
+            None
+        } else {
+            let corims = cfg
+                .ref_measurement_corpus
+                .iter()
+                .map(|p| {
+                    let data = std::fs::read(p)
+                        .map_err(InstanceIdentityError::ReadFile)?;
+                    dice_verifier::Corim::from_bytes(&data).map_err(|e| {
+                        InstanceIdentityError::LoadMeasurements(e.to_string())
+                    })
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            let refs = dice_verifier::ReferenceMeasurements::try_from(
+                corims.as_slice(),
+            )
+            .map_err(|e| {
+                InstanceIdentityError::LoadMeasurements(e.to_string())
+            })?;
+            Some(Arc::new(refs))
+        };
+
         Ok(Self {
             organization: cfg.organization.clone(),
             root_certs: Arc::new(root_certs),
-            ref_measurements: None,
-            encoding_key: Arc::new(encoding_key),
-            kid: cfg.kid.clone(),
+            ref_measurements,
             issuer: cfg.issuer.clone(),
             audience: cfg.audience.clone(),
             token_ttl_secs: cfg.token_ttl_secs,
@@ -166,11 +187,16 @@ impl InstanceIdentitySigner {
     /// attestation's own freshness lapses. A real implementation must record
     /// issued nonces as single-use and time-bounded, and reject reused or
     /// unknown ones here.
+    ///
+    /// The signing key (PEM-encoded RSA private key) and its `kid` are supplied
+    /// by the caller, which loads the active key from the database per request.
     pub fn verify_and_mint(
         &self,
         instance: Uuid,
         nonce_hex: &str,
         attestation: &VmInstanceAttestation,
+        signing_key_pem: &[u8],
+        kid: &str,
     ) -> Result<String, InstanceIdentityError> {
         let nonce: [u8; 32] = hex::decode(nonce_hex)?
             .try_into()
@@ -263,7 +289,7 @@ impl InstanceIdentitySigner {
         }
 
         // 6. Mint the token, bound to the attested instance.
-        self.mint(instance, conf.project, conf.silo)
+        self.mint(instance, conf.project, conf.silo, signing_key_pem, kid)
     }
 
     fn mint(
@@ -271,7 +297,11 @@ impl InstanceIdentitySigner {
         instance: Uuid,
         project: Option<Uuid>,
         silo: Option<Uuid>,
+        signing_key_pem: &[u8],
+        kid: &str,
     ) -> Result<String, InstanceIdentityError> {
+        let encoding_key = EncodingKey::from_rsa_pem(signing_key_pem)
+            .map_err(|_| InstanceIdentityError::LoadKeyMaterial)?;
         let now = Utc::now().timestamp();
         let claims = VmClaims {
             iss: self.issuer.clone(),
@@ -285,8 +315,8 @@ impl InstanceIdentitySigner {
             silo,
         };
         let mut header = Header::new(Algorithm::RS256);
-        header.kid = Some(self.kid.clone());
-        Ok(jsonwebtoken::encode(&header, &claims, &self.encoding_key)?)
+        header.kid = Some(kid.to_string());
+        Ok(jsonwebtoken::encode(&header, &claims, &encoding_key)?)
     }
 }
 
@@ -463,8 +493,6 @@ HQIDAQAB
         )
         .unwrap();
 
-        let key_path = dir.join("jwt-key.pem");
-        std::fs::write(&key_path, TEST_SIGNING_KEY_PEM).unwrap();
         let root_path = cert_path(dir.to_path_buf(), &root_prefix());
 
         // Match the signer's expected organization to whatever the test PKI uses.
@@ -474,15 +502,18 @@ HQIDAQAB
             cert_organization(&root[0]).unwrap().as_str().to_string();
 
         let cfg = InstanceIdentityConfig {
-            signing_key_path: key_path,
             root_cert_path: root_path,
             organization,
             issuer: "https://oxide.test".into(),
             audience: "vault".into(),
-            kid: "test-kid".into(),
             token_ttl_secs: 300,
+            ref_measurement_corpus: Vec::new(),
         };
         let signer = InstanceIdentitySigner::from_config(&cfg).unwrap();
+        // The signing key + kid are supplied per request (in production from
+        // the database); the test supplies a fixed throwaway key here.
+        let signing_key_pem = TEST_SIGNING_KEY_PEM.as_bytes();
+        let kid = "test-kid";
 
         let instance = Uuid::new_v4();
         let project = Uuid::new_v4();
@@ -502,7 +533,13 @@ HQIDAQAB
 
         // Happy path: a valid attestation mints a token bound to the instance.
         let token = signer
-            .verify_and_mint(instance, &nonce_hex, &attestation)
+            .verify_and_mint(
+                instance,
+                &nonce_hex,
+                &attestation,
+                signing_key_pem,
+                kid,
+            )
             .expect("verification + mint should succeed");
         let claims = verify_jwt(&token);
         assert_eq!(claims["sub"], format!("instance:{instance}"));
@@ -515,7 +552,13 @@ HQIDAQAB
         // A token requested for a different instance id is rejected.
         let other = Uuid::new_v4();
         let err = signer
-            .verify_and_mint(other, &nonce_hex, &attestation)
+            .verify_and_mint(
+                other,
+                &nonce_hex,
+                &attestation,
+                signing_key_pem,
+                kid,
+            )
             .unwrap_err();
         assert!(
             matches!(err, InstanceIdentityError::WrongInstanceId { .. }),
@@ -526,7 +569,13 @@ HQIDAQAB
         // attestation signature check.
         let bad_nonce = hex::encode([0u8; 32]);
         let err = signer
-            .verify_and_mint(instance, &bad_nonce, &attestation)
+            .verify_and_mint(
+                instance,
+                &bad_nonce,
+                &attestation,
+                signing_key_pem,
+                kid,
+            )
             .unwrap_err();
         assert!(
             matches!(err, InstanceIdentityError::VerifyAttestation(_)),

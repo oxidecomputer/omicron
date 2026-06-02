@@ -109,6 +109,7 @@ impl NexusLockstepApi for NexusLockstepApiImpl {
         let nexus = &apictx.nexus;
         let path = path_params.into_inner();
         let req = body.into_inner();
+        let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
         let signer = nexus.instance_identity_signer().ok_or_else(|| {
             HttpError::for_unavail(
                 None,
@@ -116,11 +117,24 @@ impl NexusLockstepApi for NexusLockstepApiImpl {
                     .to_string(),
             )
         })?;
+        // Load the active signing key from the database per request.
+        let key = nexus
+            .datastore()
+            .oidc_signing_key_live(&opctx)
+            .await?
+            .ok_or_else(|| {
+                HttpError::for_unavail(
+                    None,
+                    "no OIDC signing key is configured".to_string(),
+                )
+            })?;
         let token = signer
             .verify_and_mint(
                 path.instance_id.into_untyped_uuid(),
                 &req.nonce,
                 &req.attestation,
+                &key.private_key,
+                &key.kid,
             )
             .map_err(|e| {
                 HttpError::for_bad_request(
@@ -129,6 +143,96 @@ impl NexusLockstepApi for NexusLockstepApiImpl {
                 )
             })?;
         Ok(HttpResponseOk(InstanceIdentityToken { token }))
+    }
+
+    async fn oidc_signing_key_create(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseCreated<OidcSigningKeyView>, HttpError> {
+        let apictx = &rqctx.context().context;
+        let nexus = &apictx.nexus;
+        let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
+        let datastore = nexus.datastore();
+
+        // POC: a single live signing key. Reject if one already exists.
+        if datastore.oidc_signing_key_live(&opctx).await?.is_some() {
+            return Err(HttpError::for_client_error(
+                None,
+                dropshot::ClientErrorStatusCode::CONFLICT,
+                "a live OIDC signing key already exists".to_string(),
+            ));
+        }
+
+        // Server-generate an RSA-2048 key and serialize both halves to PEM.
+        let rsa = openssl::rsa::Rsa::generate(2048).map_err(|e| {
+            HttpError::for_internal_error(format!(
+                "failed to generate RSA key: {e}"
+            ))
+        })?;
+        let private_key_pem =
+            rsa.private_key_to_pem().map_err(|e| {
+                HttpError::for_internal_error(format!(
+                    "failed to encode private key: {e}"
+                ))
+            })?;
+        let public_key_pem = rsa.public_key_to_pem().map_err(|e| {
+            HttpError::for_internal_error(format!(
+                "failed to encode public key: {e}"
+            ))
+        })?;
+
+        let kid = uuid::Uuid::new_v4().to_string();
+        let model = nexus_db_model::OidcSigningKey::new(
+            uuid::Uuid::new_v4(),
+            kid,
+            "RS256".to_string(),
+            public_key_pem.clone(),
+            private_key_pem,
+        );
+        let created =
+            datastore.oidc_signing_key_create(&opctx, model).await?;
+
+        let public_key_pem =
+            String::from_utf8(created.public_key).map_err(|_| {
+                HttpError::for_internal_error(
+                    "stored public key is not valid UTF-8".to_string(),
+                )
+            })?;
+        Ok(HttpResponseCreated(OidcSigningKeyView {
+            kid: created.kid,
+            public_key_pem,
+            algorithm: created.algorithm,
+            time_created: created.time_created,
+        }))
+    }
+
+    async fn oidc_signing_key_list(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<Vec<OidcSigningKeyMetadata>>, HttpError> {
+        let apictx = &rqctx.context().context;
+        let nexus = &apictx.nexus;
+        let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
+        let keys = nexus.datastore().oidc_signing_key_list(&opctx).await?;
+        let list = keys
+            .into_iter()
+            .map(|k| OidcSigningKeyMetadata {
+                kid: k.kid,
+                algorithm: k.algorithm,
+                time_created: k.time_created,
+            })
+            .collect();
+        Ok(HttpResponseOk(list))
+    }
+
+    async fn oidc_signing_key_delete(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<OidcSigningKeyPathParam>,
+    ) -> Result<HttpResponseDeleted, HttpError> {
+        let apictx = &rqctx.context().context;
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
+        nexus.datastore().oidc_signing_key_delete(&opctx, &path.kid).await?;
+        Ok(HttpResponseDeleted())
     }
 
     async fn rack_initialization_complete(

@@ -79,6 +79,35 @@ pub trait NexusLockstepApi {
         body: TypedBody<InstanceIdentityTokenRequest>,
     ) -> Result<HttpResponseOk<InstanceIdentityToken>, HttpError>;
 
+    /// POC: server-generate and store a new OIDC signing key. Returns 409 if a
+    /// live signing key already exists. Never returns the private key.
+    #[endpoint {
+        method = POST,
+        path = "/oidc/signing-keys",
+    }]
+    async fn oidc_signing_key_create(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseCreated<OidcSigningKeyView>, HttpError>;
+
+    /// POC: list the stored OIDC signing keys (metadata only).
+    #[endpoint {
+        method = GET,
+        path = "/oidc/signing-keys",
+    }]
+    async fn oidc_signing_key_list(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<Vec<OidcSigningKeyMetadata>>, HttpError>;
+
+    /// POC: soft-delete an OIDC signing key by its `kid`.
+    #[endpoint {
+        method = DELETE,
+        path = "/oidc/signing-keys/{kid}",
+    }]
+    async fn oidc_signing_key_delete(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<OidcSigningKeyPathParam>,
+    ) -> Result<HttpResponseDeleted, HttpError>;
+
     /// Ping API
     ///
     /// Always responds with Ok if it responds at all.
@@ -721,4 +750,37 @@ pub struct InstanceIdentityTokenRequest {
 pub struct InstanceIdentityToken {
     /// Signed JWT (RS256).
     pub token: String,
+}
+
+// --- POC: OIDC signing key management ---
+
+/// A newly-created OIDC signing key. The private key is never returned.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct OidcSigningKeyView {
+    /// Key id advertised in the JWT header.
+    pub kid: String,
+    /// PEM-encoded public key.
+    pub public_key_pem: String,
+    /// Signature algorithm, e.g. `RS256`.
+    pub algorithm: String,
+    /// When the key was created.
+    pub time_created: chrono::DateTime<chrono::Utc>,
+}
+
+/// Metadata for a stored OIDC signing key (no key material).
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct OidcSigningKeyMetadata {
+    /// Key id advertised in the JWT header.
+    pub kid: String,
+    /// Signature algorithm, e.g. `RS256`.
+    pub algorithm: String,
+    /// When the key was created.
+    pub time_created: chrono::DateTime<chrono::Utc>,
+}
+
+/// Path parameters for the OIDC-signing-key delete endpoint.
+#[derive(Deserialize, JsonSchema)]
+pub struct OidcSigningKeyPathParam {
+    /// Key id of the signing key to delete.
+    pub kid: String,
 }

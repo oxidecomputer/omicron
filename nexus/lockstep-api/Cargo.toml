@@ -8,6 +8,7 @@ license = "MPL-2.0"
 workspace = true
 
 [dependencies]
+chrono.workspace = true
 dropshot.workspace = true
 http.workspace = true
 nexus-types.workspace = true

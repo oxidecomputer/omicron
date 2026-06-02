@@ -108,6 +108,7 @@ mod migration;
 pub mod multicast;
 mod nat_entry;
 mod network_interface;
+mod oidc_signing_key;
 mod oximeter;
 mod oximeter_read_policy;
 mod physical_disk;

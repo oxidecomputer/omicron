@@ -1178,6 +1178,19 @@ table! {
 }
 
 table! {
+    oidc_signing_key (id) {
+        id -> Uuid,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+        kid -> Text,
+        algorithm -> Text,
+        public_key -> Binary,
+        private_key -> Binary,
+    }
+}
+
+table! {
     virtual_provisioning_collection {
         id -> Uuid,
         time_modified -> Timestamptz,

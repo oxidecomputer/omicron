@@ -198,8 +198,6 @@ pub struct DeploymentConfig {
 /// POC configuration for the instance-identity token issuer.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct InstanceIdentityConfig {
-    /// Path to the PEM-encoded RSA signing private key.
-    pub signing_key_path: Utf8PathBuf,
     /// Path to the PEM-encoded Oxide attestation root cert(s).
     pub root_cert_path: Utf8PathBuf,
     /// Expected organization (`O=`) in the attestation cert chain.
@@ -208,10 +206,13 @@ pub struct InstanceIdentityConfig {
     pub issuer: String,
     /// Audience (`aud` claim).
     pub audience: String,
-    /// Key id advertised in the JWT header.
-    pub kid: String,
     /// Token lifetime in seconds.
     pub token_ttl_secs: i64,
+    /// Optional CoRIM reference-measurement corpus (paths to `.cbor` files).
+    /// When non-empty, the OxidePlatform attestation log is appraised against
+    /// these reference values; empty = appraisal skipped.
+    #[serde(default)]
+    pub ref_measurement_corpus: Vec<Utf8PathBuf>,
 }
 
 fn default_techport_external_server_port() -> u16 {
@@ -1915,12 +1916,10 @@ mod test {
         // example.
         let cfg = toml::from_str::<InstanceIdentityConfig>(
             r##"
-            signing_key_path = "/var/nexus/instance-identity/signing-key.pem"
             root_cert_path = "/var/nexus/instance-identity/oxide-root.pem"
             organization = "Oxide Computer Company"
             issuer = "https://oxide.example"
             audience = "vault"
-            kid = "poc-1"
             token_ttl_secs = 300
             "##,
         )

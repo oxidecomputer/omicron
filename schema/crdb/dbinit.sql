@@ -562,6 +562,26 @@ CREATE UNIQUE INDEX IF NOT EXISTS lookup_certificate_by_silo ON omicron.public.c
 ) WHERE
     time_deleted IS NULL;
 
+-- POC: single live OIDC signing key used to mint instance-identity tokens.
+CREATE TABLE IF NOT EXISTS omicron.public.oidc_signing_key (
+    id UUID PRIMARY KEY,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+    time_deleted TIMESTAMPTZ,
+    -- key id advertised in the JWT header
+    kid STRING(255) NOT NULL,
+    -- signature algorithm, e.g. 'RS256'
+    algorithm STRING(16) NOT NULL,
+    -- public key, PEM-encoded
+    public_key BYTES NOT NULL,
+    -- private key, PEM-encoded
+    private_key BYTES NOT NULL
+);
+
+-- Enforce at most one live key per `kid` and allow lookup by `kid`.
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_oidc_signing_key_by_kid
+    ON omicron.public.oidc_signing_key (kid) WHERE time_deleted IS NULL;
+
 -- A table describing virtual resource provisioning which may be associated
 -- with a collection of objects, including:
 -- - Projects
@@ -8623,7 +8643,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '261.0.0', NULL)
+    (TRUE, NOW(), NOW(), '262.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

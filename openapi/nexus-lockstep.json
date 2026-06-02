@@ -1146,6 +1146,85 @@
         }
       }
     },
+    "/oidc/signing-keys": {
+      "get": {
+        "summary": "POC: list the stored OIDC signing keys (metadata only).",
+        "operationId": "oidc_signing_key_list",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Array_of_OidcSigningKeyMetadata",
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/OidcSigningKeyMetadata"
+                  }
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "post": {
+        "summary": "POC: server-generate and store a new OIDC signing key. Returns 409 if a",
+        "description": "live signing key already exists. Never returns the private key.",
+        "operationId": "oidc_signing_key_create",
+        "responses": {
+          "201": {
+            "description": "successful creation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OidcSigningKeyView"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/oidc/signing-keys/{kid}": {
+      "delete": {
+        "summary": "POC: soft-delete an OIDC signing key by its `kid`.",
+        "operationId": "oidc_signing_key_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "kid",
+            "description": "Key id of the signing key to delete.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "successful deletion"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/oximeter/read-policy": {
       "get": {
         "summary": "Get the current oximeter read policy",
@@ -6271,6 +6350,59 @@
       "NodeName": {
         "description": "Unique name for a saga [`Node`]\n\nEach node requires a string name that's unique within its DAG.  The name is used to identify its output.  Nodes that depend on a given node (either directly or indirectly) can access the node's output using its name.",
         "type": "string"
+      },
+      "OidcSigningKeyMetadata": {
+        "description": "Metadata for a stored OIDC signing key (no key material).",
+        "type": "object",
+        "properties": {
+          "algorithm": {
+            "description": "Signature algorithm, e.g. `RS256`.",
+            "type": "string"
+          },
+          "kid": {
+            "description": "Key id advertised in the JWT header.",
+            "type": "string"
+          },
+          "time_created": {
+            "description": "When the key was created.",
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "algorithm",
+          "kid",
+          "time_created"
+        ]
+      },
+      "OidcSigningKeyView": {
+        "description": "A newly-created OIDC signing key. The private key is never returned.",
+        "type": "object",
+        "properties": {
+          "algorithm": {
+            "description": "Signature algorithm, e.g. `RS256`.",
+            "type": "string"
+          },
+          "kid": {
+            "description": "Key id advertised in the JWT header.",
+            "type": "string"
+          },
+          "public_key_pem": {
+            "description": "PEM-encoded public key.",
+            "type": "string"
+          },
+          "time_created": {
+            "description": "When the key was created.",
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "algorithm",
+          "kid",
+          "public_key_pem",
+          "time_created"
+        ]
       },
       "OmicronZoneDataset": {
         "description": "Describes a persistent ZFS dataset associated with an Omicron zone",
