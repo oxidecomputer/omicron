@@ -80,6 +80,21 @@ packages = [
     "tfportd",
     "wicketd",
 ]
+# sled-agent-rack-setup is a library inside the omicron-sled-agent binary. It is
+# listed here as an embedded component so its API dependencies (which only
+# matter during RSS) are reported separately from the steady-state dependencies
+# of omicron-sled-agent.  Setting `inside = "omicron-sled-agent"` means that
+# when ls-apis walks omicron-sled-agent's Cargo dependencies, sled-agent-rack-
+# setup itself is skipped, so API dependencies reachable only through it are
+# attributed to the embedded component rather than to omicron-sled-agent.
+#
+# The `rack-init` lifecycle marks this embedded component as running only
+# during rack initialization.  Edges from `rack-init` components are excluded
+# from the upgrade DAG, so that sled-agent-rack-setup doesn't impose any
+# ordering constraints on the upgrade DAG.
+embedded_components = [
+    { name = "sled-agent-rack-setup", inside = "omicron-sled-agent", lifecycle = "rack-init" },
+]
 
 # Installinator gets packaged into its own host OS image.
 [[deployment_units]]
@@ -389,10 +404,12 @@ server_package_name = "nexus-lockstep-api"
 versioned_how = "client"
 versioned_how_reason = "Circular dependencies between Nexus and other services"
 # Exactly these consumers (Rust packages specified in one or more of the
-# `packages` arrays in the deployment_units table above) are allowed to use this
-# API. ls-apis check will error out if the list of consumers is incorrect.
+# `packages` arrays in the deployment_units table above, or via
+# `embedded_components` entries in the same table) are allowed to use this
+# API.  ls-apis check will error out if the list of consumers is incorrect.
 restricted_to_consumers = [
-     { name = "omicron-sled-agent", reason = "Only RSS and sled-agent-sim use this API, neither of which is part of upgrade" },
+     { name = "omicron-sled-agent", reason = "Only sled-agent-sim uses this API, which is not part of upgrade" },
+     { name = "sled-agent-rack-setup", reason = "Only RSS uses this API, which is not part of upgrade" },
 ]
 
 [[apis]]
@@ -546,24 +563,6 @@ evaluation = "not-deployed"
 note = """
 Sled Agent uses a Sled Agent client for the `zone-bundle` binary, which is not
 deployed.
-"""
-
-[[dependency_filter_rules]]
-ancestor = "sled-agent-rack-setup"
-client = "cockroach-admin-client"
-evaluation = "not-deployed"
-note = """
-The Cockroach Admin client is only used during RSS, which we don't care about
-for the purpose of upgrade.
-"""
-
-[[dependency_filter_rules]]
-ancestor = "sled-agent-rack-setup"
-client = "dns-service-client"
-evaluation = "not-deployed"
-note = """
-The DNS service client is only used during RSS, which we don't care about for
-the purpose of upgrade.
 """
 
 [[dependency_filter_rules]]
@@ -799,7 +798,6 @@ note = "Sled Agent uses Client::localhost() to connect to ddm."
 permalinks = [
     "https://github.com/oxidecomputer/omicron/blob/6cef874/sled-agent/src/ddm_reconciler.rs#L56",
     "https://github.com/oxidecomputer/omicron/blob/6cef874/sled-agent/src/bootstrap/bootstore_setup.rs#L92",
-    "https://github.com/oxidecomputer/omicron/blob/6cef874/sled-agent/src/rack_setup/service.rs#L1086",
     "https://github.com/oxidecomputer/omicron/blob/6cef874/sled-agent/src/sled_agent.rs#L1378",
 ]
 
@@ -807,12 +805,15 @@ permalinks = [
 server = "omicron-sled-agent"
 client = "mg-admin-client"
 note = """
-Sled Agent only queries the switch zone on the same sled,
-which is within the same deployment unit as the global
-zone.
+Sled Agent invokes EarlyNetworkSetup::init_switch_config
+(services.rs:3431) to configure uplinks on the local switch zone.  This in turn
+constructs an MgdClient pointed at the local switch zone
+(early-networking/lib.rs:442), which is within the same deployment unit as the
+global zone.
 """
 permalinks = [
-    "https://github.com/oxidecomputer/omicron/blob/6cef874/sled-agent/src/bootstrap/early_networking.rs#L483",
+    "https://github.com/oxidecomputer/omicron/blob/32de20c/sled-agent/src/services.rs#L3431",
+    "https://github.com/oxidecomputer/omicron/blob/32de20c/sled-agent/early-networking/src/lib.rs#L442",
 ]
 
 [[intra_deployment_unit_only_edges]]
@@ -835,38 +836,47 @@ server = "omicron-sled-agent"
 client = "gateway-client"
 note = """
 BUG: Sled Agent creates two MGS clients. One of them
-(early_networking.rs:376) queries the switch zone on
-the same sled, which is within the same deployment unit
-as the global zone, so this is okay.
+(early-networking/lib.rs:331, called from services.rs:3431) queries the
+switch zone on the same sled, which is within the same deployment unit as the
+global zone, so this is okay.
 
-The other one (early_networking.rs:277) queries both
-switch zones, so it crosses deployment units. This needs
-to be fixed.
+The other one (early-networking/lib.rs:259, called from services.rs:1095)
+queries both switch zones, so it crosses deployment units. This needs to be
+fixed.
 
 Reference: https://github.com/oxidecomputer/omicron/issues/9708
 """
 permalinks = [
-    "https://github.com/oxidecomputer/omicron/blob/6cef874/sled-agent/src/bootstrap/early_networking.rs#L376",
-    "https://github.com/oxidecomputer/omicron/blob/6cef874/sled-agent/src/bootstrap/early_networking.rs#L277-L280",
+    "https://github.com/oxidecomputer/omicron/blob/32de20c/sled-agent/src/services.rs#L3431",
+    "https://github.com/oxidecomputer/omicron/blob/32de20c/sled-agent/early-networking/src/lib.rs#L331",
+    "https://github.com/oxidecomputer/omicron/blob/32de20c/sled-agent/src/services.rs#L1095-L1102",
+    "https://github.com/oxidecomputer/omicron/blob/32de20c/sled-agent/early-networking/src/lib.rs#L259-L262",
 ]
 
 [[intra_deployment_unit_only_edges]]
 server = "omicron-sled-agent"
 client = "dpd-client"
 note = """
-BUG: Sled Agent creates two DPD clients.  One of them (early_networking.rs:419)
-is always to the switch zone on the same sled, which is in the same deployment
-unit.
+BUG: Sled Agent creates two DPD clients.  One of them
+(early-networking/lib.rs:378, called from services.rs:3431) is always to the
+switch zone on the same sled, which is in the same deployment unit.
 
-The other one (services.rs:1090) queries both switch zones, so it crosses
-deployment units.  This needs to be fixed.
+The other one (services.rs:1104, iterating addresses returned by
+EarlyNetworkSetup::lookup_uplinked_switch_zone_underlay_addrs) queries both
+switch zones, so it crosses deployment units.  This needs to be fixed.
 
 Reference: https://github.com/oxidecomputer/omicron/issues/9708
 """
 permalinks = [
-    "https://github.com/oxidecomputer/omicron/blob/6cef874/sled-agent/src/bootstrap/early_networking.rs#L419",
-    "https://github.com/oxidecomputer/omicron/blob/6cef874/sled-agent/src/services.rs#L1090",
+    "https://github.com/oxidecomputer/omicron/blob/32de20c/sled-agent/src/services.rs#L3431",
+    "https://github.com/oxidecomputer/omicron/blob/32de20c/sled-agent/early-networking/src/lib.rs#L378",
+    "https://github.com/oxidecomputer/omicron/blob/32de20c/sled-agent/src/services.rs#L1104-L1115",
 ]
+
+# Note: sled-agent-rack-setup (RSS) is marked with `lifecycle = "rack-init"`
+# in its embedded-component declaration, so its API consumption is excluded
+# from the upgrade DAG entirely.  No IDU annotation is needed for edges from
+# RSS.
 
 [[intra_deployment_unit_only_edges]]
 server = "tfportd"
