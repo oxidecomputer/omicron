@@ -13,6 +13,7 @@ use sqlparser::ast::ColumnOption;
 use sqlparser::ast::CreateTable;
 use sqlparser::ast::DataType;
 use sqlparser::ast::Expr;
+use sqlparser::ast::ObjectNamePart;
 use sqlparser::ast::Spanned;
 use sqlparser::ast::TableConstraint;
 use sqlparser::dialect::PostgreSqlDialect;
@@ -143,7 +144,24 @@ impl FactTable {
         create_stmt: CreateTable,
         annotations: Vec<Annotation<'_>>,
     ) -> Result<Self, Box<InnerSchemaError>> {
-        let table_name = &create_stmt.name;
+        let table_obj_name = &create_stmt.name;
+        let table_name = match table_obj_name
+            .0
+            .last()
+            .expect("table name must have at least one part")
+        {
+            ObjectNamePart::Identifier(i) => &i.value,
+            ObjectNamePart::Function(f) => {
+                return Err(ctx
+                    .error(
+                        "cannot generate fact table code for tables whose \
+                         names contain functions",
+                    )
+                    .label(f.name.span, "this is a function call")
+                    .help("only use identifiers in the names of fact tables")
+                    .build());
+            }
+        };
         if annotations[0].text != FM_FACT_ANNOTATION {
             return Err(ctx
                 .error(format!(
@@ -174,9 +192,9 @@ impl FactTable {
 
         let de_name = de_name.map(|(ident, _)| ident).ok_or_else(|| {
             ctx.error(format!(
-                "'{table_name}' is missing a '{DE_ANNOTATION}' annotation",
+                "table '{table_obj_name}' is missing a '{DE_ANNOTATION}' annotation",
             ))
-            .label(table_name.span(), "this fact table")
+            .label(table_obj_name.span(), "this fact table")
             .help(format!(
                 "add a `--#! {DE_ANNOTATION} = <ident>` annotation above the table"
             ))
@@ -185,9 +203,9 @@ impl FactTable {
         let fact_variant_name =
             fact_variant_name.map(|(ident, _)| ident).ok_or_else(|| {
                 ctx.error(format!(
-                    "'{table_name}' is missing a '{VARIANT_ANNOTATION}' annotation",
+                    "table '{table_obj_name}' is missing a '{VARIANT_ANNOTATION}' annotation",
                 ))
-                .label(table_name.span(), "this fact table")
+                .label(table_obj_name.span(), "this fact table")
                 .help(format!(
                     "add a `--#! {VARIANT_ANNOTATION} = <ident>` annotation above \
                      the table"
@@ -195,7 +213,12 @@ impl FactTable {
                 .build()
             })?;
 
-        Ok(FactTable { create_stmt, de_name, fact_variant_name })
+        Ok(FactTable {
+            table_name: table_name.clone(),
+            create_stmt,
+            de_name,
+            fact_variant_name,
+        })
     }
 }
 
