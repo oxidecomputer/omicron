@@ -21,7 +21,6 @@
 use chrono::Utc;
 use dice_verifier::{Attestation, Log, MeasurementSet, Nonce};
 use jsonwebtoken::{Algorithm, EncodingKey, Header};
-use nexus_config::InstanceIdentityConfig;
 use nexus_lockstep_api::VmInstanceAttestation;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -32,6 +31,11 @@ use x509_cert::{Certificate, der::Decode, der::asn1::Utf8StringRef};
 
 /// OID 2.5.4.10 (id-at-organizationName).
 const ORGANIZATION_NAME_OID: &str = "2.5.4.10";
+
+/// Organization (`O=`) every Oxide attestation cert chain must carry. Not
+/// configurable: it's a fixed property of the Oxide attestation PKI, so it's a
+/// constant rather than a stored/configured field.
+pub const INSTANCE_IDENTITY_ORGANIZATION: &str = "Oxide Computer Company";
 
 /// RoT identifiers as serialized by `vm-attest` on the wire (PascalCase).
 const ROT_OXIDE_PLATFORM: &str = "OxidePlatform";
@@ -68,8 +72,6 @@ struct VmClaims {
 
 #[derive(Debug, Error)]
 pub enum InstanceIdentityError {
-    #[error("failed to read a configured PEM file")]
-    ReadFile(#[source] std::io::Error),
     #[error("failed to load signing key or root certs")]
     LoadKeyMaterial,
     #[error("failed to decode nonce as hex")]
@@ -96,8 +98,6 @@ pub enum InstanceIdentityError {
     VerifyAttestation(String),
     #[error("failed to verify measurements: {0}")]
     VerifyMeasurements(String),
-    #[error("failed to load reference measurements (CoRIM): {0}")]
-    LoadMeasurements(String),
     #[error("OxideInstance log is not valid JSON")]
     ParseInstanceConf(#[source] serde_json::Error),
     #[error(
@@ -122,57 +122,35 @@ pub struct InstanceIdentitySigner {
 }
 
 impl InstanceIdentitySigner {
-    /// Build from the Nexus config: reads the signing key and root cert PEM
-    /// files named in the config.
-    pub fn from_config(
-        cfg: &InstanceIdentityConfig,
+    /// Build a signer from the per-request inputs: the trust anchor (root cert
+    /// PEM, read from the configured file) plus the minting policy (`iss`,
+    /// `aud`, `ttl`) that the caller loads from the active DB signing-key row.
+    ///
+    /// This is constructed per request (no caching, by design for the POC), so
+    /// the feature is "on" whenever a live signing key exists in the database
+    /// and the root cert file is staged — there is no separate config gate.
+    ///
+    /// `ref_measurements` is always `None` here: the POC skips RIM appraisal,
+    /// and the production reference-measurement source is the update/TUF/DB
+    /// path (a separate gap), not a config file.
+    pub fn new(
+        root_cert_pem: &[u8],
+        organization: String,
+        issuer: String,
+        audience: String,
+        token_ttl_secs: i64,
     ) -> Result<Self, InstanceIdentityError> {
-        let root_pem = std::fs::read_to_string(&cfg.root_cert_path)
-            .map_err(InstanceIdentityError::ReadFile)?;
-        let root_certs = Certificate::load_pem_chain(root_pem.as_bytes())
+        let root_certs = Certificate::load_pem_chain(root_cert_pem)
             .map_err(|_| InstanceIdentityError::ParseCertificate)?;
 
-        // Optional RIM corpus: when configured, the OxidePlatform measurement
-        // log is appraised against these reference values (CoRIM). Mirrors
-        // sprue's loader. Empty corpus => appraisal skipped (None).
-        let ref_measurements = if cfg.ref_measurement_corpus.is_empty() {
-            None
-        } else {
-            let corims = cfg
-                .ref_measurement_corpus
-                .iter()
-                .map(|p| {
-                    let data = std::fs::read(p)
-                        .map_err(InstanceIdentityError::ReadFile)?;
-                    dice_verifier::Corim::from_bytes(&data).map_err(|e| {
-                        InstanceIdentityError::LoadMeasurements(e.to_string())
-                    })
-                })
-                .collect::<Result<Vec<_>, _>>()?;
-            let refs = dice_verifier::ReferenceMeasurements::try_from(
-                corims.as_slice(),
-            )
-            .map_err(|e| {
-                InstanceIdentityError::LoadMeasurements(e.to_string())
-            })?;
-            Some(Arc::new(refs))
-        };
-
         Ok(Self {
-            organization: cfg.organization.clone(),
+            organization,
             root_certs: Arc::new(root_certs),
-            ref_measurements,
-            issuer: cfg.issuer.clone(),
-            audience: cfg.audience.clone(),
-            token_ttl_secs: cfg.token_ttl_secs,
+            ref_measurements: None,
+            issuer,
+            audience,
+            token_ttl_secs,
         })
-    }
-
-    /// 32 bytes of randomness, hex-encoded. The caller is responsible for any
-    /// persistence/replay-protection (not done in this POC).
-    pub fn generate_nonce(&self) -> String {
-        let nonce: [u8; 32] = rand::random();
-        hex::encode(nonce)
     }
 
     /// Verify the attestation against our trust anchors and, on success, mint a
@@ -320,6 +298,13 @@ impl InstanceIdentitySigner {
     }
 }
 
+/// 32 bytes of randomness, hex-encoded. The caller is responsible for any
+/// persistence/replay-protection (not done in this POC).
+pub fn generate_nonce() -> String {
+    let nonce: [u8; 32] = rand::random();
+    hex::encode(nonce)
+}
+
 /// Extract the organizationName (O=) from a cert's issuer.
 fn cert_organization(cert: &Certificate) -> Option<Utf8StringRef<'_>> {
     let org_oid =
@@ -340,7 +325,6 @@ mod tests {
     use super::*;
     use dice_verifier::Attest;
     use hubpack::SerializedSize;
-    use nexus_config::InstanceIdentityConfig;
     use nexus_lockstep_api::MeasurementLog;
     use sprockets_tls_test_utils::{
         OutputFileExistsBehavior, alias_prefix, cert_path, certlist_path,
@@ -501,15 +485,17 @@ HQIDAQAB
         let organization =
             cert_organization(&root[0]).unwrap().as_str().to_string();
 
-        let cfg = InstanceIdentityConfig {
-            root_cert_path: root_path,
+        // The signer is built per request from the root cert (file/trust
+        // anchor) plus the minting policy (in production loaded from the active
+        // DB signing-key row); the test supplies them directly here.
+        let signer = InstanceIdentitySigner::new(
+            root_pem.as_bytes(),
             organization,
-            issuer: "https://oxide.test".into(),
-            audience: "vault".into(),
-            token_ttl_secs: 300,
-            ref_measurement_corpus: Vec::new(),
-        };
-        let signer = InstanceIdentitySigner::from_config(&cfg).unwrap();
+            "https://oxide.test".into(),
+            "vault".into(),
+            300,
+        )
+        .unwrap();
         // The signing key + kid are supplied per request (in production from
         // the database); the test supplies a fixed throwaway key here.
         let signing_key_pem = TEST_SIGNING_KEY_PEM.as_bytes();

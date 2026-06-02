@@ -79,14 +79,16 @@ pub trait NexusLockstepApi {
         body: TypedBody<InstanceIdentityTokenRequest>,
     ) -> Result<HttpResponseOk<InstanceIdentityToken>, HttpError>;
 
-    /// POC: server-generate and store a new OIDC signing key. Returns 409 if a
-    /// live signing key already exists. Never returns the private key.
+    /// POC: server-generate and store a new OIDC signing key, along with the
+    /// minting policy (issuer/audience/ttl) it should sign with. Returns 409 if
+    /// a live signing key already exists. Never returns the private key.
     #[endpoint {
         method = POST,
         path = "/oidc/signing-keys",
     }]
     async fn oidc_signing_key_create(
         rqctx: RequestContext<Self::Context>,
+        body: TypedBody<OidcSigningKeyCreate>,
     ) -> Result<HttpResponseCreated<OidcSigningKeyView>, HttpError>;
 
     /// POC: list the stored OIDC signing keys (metadata only).
@@ -754,6 +756,18 @@ pub struct InstanceIdentityToken {
 
 // --- POC: OIDC signing key management ---
 
+/// Request to create the live OIDC signing key. Nexus generates the key
+/// material itself; the caller supplies the minting policy stored alongside it.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct OidcSigningKeyCreate {
+    /// OIDC issuer (`iss` claim) minted tokens will carry.
+    pub issuer: String,
+    /// Audience (`aud` claim) minted tokens will carry.
+    pub audience: String,
+    /// Token lifetime in seconds (drives the `exp` claim).
+    pub token_ttl_secs: i64,
+}
+
 /// A newly-created OIDC signing key. The private key is never returned.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct OidcSigningKeyView {
@@ -763,6 +777,12 @@ pub struct OidcSigningKeyView {
     pub public_key_pem: String,
     /// Signature algorithm, e.g. `RS256`.
     pub algorithm: String,
+    /// OIDC issuer (`iss` claim) minted tokens will carry.
+    pub issuer: String,
+    /// Audience (`aud` claim) minted tokens will carry.
+    pub audience: String,
+    /// Token lifetime in seconds (drives the `exp` claim).
+    pub token_ttl_secs: i64,
     /// When the key was created.
     pub time_created: chrono::DateTime<chrono::Utc>,
 }

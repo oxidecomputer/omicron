@@ -575,7 +575,13 @@ CREATE TABLE IF NOT EXISTS omicron.public.oidc_signing_key (
     -- public key, PEM-encoded
     public_key BYTES NOT NULL,
     -- private key, PEM-encoded
-    private_key BYTES NOT NULL
+    private_key BYTES NOT NULL,
+    -- OIDC issuer (`iss` claim)
+    issuer STRING(512) NOT NULL,
+    -- audience (`aud` claim)
+    audience STRING(512) NOT NULL,
+    -- token lifetime in seconds (drives the `exp` claim)
+    token_ttl_secs INT8 NOT NULL
 );
 
 -- Enforce at most one live key per `kid` and allow lookup by `kid`.

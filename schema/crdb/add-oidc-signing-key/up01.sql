@@ -6,5 +6,9 @@ CREATE TABLE IF NOT EXISTS omicron.public.oidc_signing_key (
     kid STRING(255) NOT NULL,
     algorithm STRING(16) NOT NULL,
     public_key BYTES NOT NULL,
-    private_key BYTES NOT NULL
+    private_key BYTES NOT NULL,
+    -- minting policy carried with the active key (the `iss`/`aud`/`exp` claims)
+    issuer STRING(512) NOT NULL,
+    audience STRING(512) NOT NULL,
+    token_ttl_secs INT8 NOT NULL
 );

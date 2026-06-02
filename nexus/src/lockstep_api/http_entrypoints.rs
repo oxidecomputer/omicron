@@ -88,15 +88,17 @@ impl NexusLockstepApi for NexusLockstepApiImpl {
     ) -> Result<HttpResponseOk<InstanceIdentityNonce>, HttpError> {
         let apictx = &rqctx.context().context;
         let nexus = &apictx.nexus;
-        let signer = nexus.instance_identity_signer().ok_or_else(|| {
-            HttpError::for_unavail(
+        let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
+        // The feature is "on" whenever a live signing key exists; surface a
+        // clear 503 so a guest doesn't proceed to attest pointlessly.
+        if nexus.datastore().oidc_signing_key_live(&opctx).await?.is_none() {
+            return Err(HttpError::for_unavail(
                 None,
-                "instance-identity token issuance is not configured"
-                    .to_string(),
-            )
-        })?;
+                "no OIDC signing key is configured".to_string(),
+            ));
+        }
         Ok(HttpResponseOk(InstanceIdentityNonce {
-            nonce: signer.generate_nonce(),
+            nonce: crate::app::instance_identity::generate_nonce(),
         }))
     }
 
@@ -105,19 +107,19 @@ impl NexusLockstepApi for NexusLockstepApiImpl {
         path_params: Path<InstanceIdentityPathParam>,
         body: TypedBody<InstanceIdentityTokenRequest>,
     ) -> Result<HttpResponseOk<InstanceIdentityToken>, HttpError> {
+        use crate::app::instance_identity::{
+            INSTANCE_IDENTITY_ORGANIZATION, InstanceIdentitySigner,
+        };
+
         let apictx = &rqctx.context().context;
         let nexus = &apictx.nexus;
         let path = path_params.into_inner();
         let req = body.into_inner();
         let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
-        let signer = nexus.instance_identity_signer().ok_or_else(|| {
-            HttpError::for_unavail(
-                None,
-                "instance-identity token issuance is not configured"
-                    .to_string(),
-            )
-        })?;
-        // Load the active signing key from the database per request.
+
+        // Load the active signing key + minting policy from the database, and
+        // the trust anchor (root cert) from its staged file, per request. No
+        // caching, by design for the POC.
         let key = nexus
             .datastore()
             .oidc_signing_key_live(&opctx)
@@ -128,6 +130,29 @@ impl NexusLockstepApi for NexusLockstepApiImpl {
                     "no OIDC signing key is configured".to_string(),
                 )
             })?;
+        let root_cert_path = nexus.instance_identity_root_cert_path();
+        let root_cert_pem =
+            std::fs::read(root_cert_path).map_err(|e| {
+                HttpError::for_unavail(
+                    None,
+                    format!(
+                        "instance-identity root cert not available at \
+                         {root_cert_path}: {e}"
+                    ),
+                )
+            })?;
+        let signer = InstanceIdentitySigner::new(
+            &root_cert_pem,
+            INSTANCE_IDENTITY_ORGANIZATION.to_string(),
+            key.issuer,
+            key.audience,
+            key.token_ttl_secs,
+        )
+        .map_err(|e| {
+            HttpError::for_internal_error(format!(
+                "failed to build instance-identity signer: {e}"
+            ))
+        })?;
         let token = signer
             .verify_and_mint(
                 path.instance_id.into_untyped_uuid(),
@@ -147,9 +172,11 @@ impl NexusLockstepApi for NexusLockstepApiImpl {
 
     async fn oidc_signing_key_create(
         rqctx: RequestContext<Self::Context>,
+        body: TypedBody<OidcSigningKeyCreate>,
     ) -> Result<HttpResponseCreated<OidcSigningKeyView>, HttpError> {
         let apictx = &rqctx.context().context;
         let nexus = &apictx.nexus;
+        let params = body.into_inner();
         let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
         let datastore = nexus.datastore();
 
@@ -187,6 +214,9 @@ impl NexusLockstepApi for NexusLockstepApiImpl {
             "RS256".to_string(),
             public_key_pem.clone(),
             private_key_pem,
+            params.issuer,
+            params.audience,
+            params.token_ttl_secs,
         );
         let created =
             datastore.oidc_signing_key_create(&opctx, model).await?;
@@ -201,6 +231,9 @@ impl NexusLockstepApi for NexusLockstepApiImpl {
             kid: created.kid,
             public_key_pem,
             algorithm: created.algorithm,
+            issuer: created.issuer,
+            audience: created.audience,
+            token_ttl_secs: created.token_ttl_secs,
             time_created: created.time_created,
         }))
     }

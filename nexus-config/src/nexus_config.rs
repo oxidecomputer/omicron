@@ -188,31 +188,24 @@ pub struct DeploymentConfig {
     /// Configuration for HTTP clients to external services.
     #[serde(default)]
     pub external_http_clients: ExternalHttpClientConfig,
-    /// POC: instance-identity token signing. When present, Nexus will verify
-    /// VM-instance attestations and mint OIDC identity tokens.
+    /// POC: path to the PEM-encoded attestation root cert(s) Nexus verifies
+    /// VM-instance attestations against (the trust anchor). This is the only
+    /// non-secret, environment-specific bit of the instance-identity issuer:
+    /// like sled-agent's sprockets `roots`, the trust anchor is delivered as a
+    /// packaged file referenced by path, never the database. The issuer policy
+    /// (`iss`/`aud`/`ttl`) and the secret signing key live in CockroachDB; the
+    /// signer is built per request whenever a live key exists, so this need not
+    /// gate the feature — it just names where the root cert is staged.
     #[schemars(skip)]
-    #[serde(default)]
-    pub instance_identity: Option<InstanceIdentityConfig>,
+    #[serde(default = "default_instance_identity_root_cert_path")]
+    pub instance_identity_root_cert_path: Utf8PathBuf,
 }
 
-/// POC configuration for the instance-identity token issuer.
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-pub struct InstanceIdentityConfig {
-    /// Path to the PEM-encoded Oxide attestation root cert(s).
-    pub root_cert_path: Utf8PathBuf,
-    /// Expected organization (`O=`) in the attestation cert chain.
-    pub organization: String,
-    /// OIDC issuer URL (the `iss` claim).
-    pub issuer: String,
-    /// Audience (`aud` claim).
-    pub audience: String,
-    /// Token lifetime in seconds.
-    pub token_ttl_secs: i64,
-    /// Optional CoRIM reference-measurement corpus (paths to `.cbor` files).
-    /// When non-empty, the OxidePlatform attestation log is appraised against
-    /// these reference values; empty = appraisal skipped.
-    #[serde(default)]
-    pub ref_measurement_corpus: Vec<Utf8PathBuf>,
+/// Default path for the instance-identity attestation root cert, in the Nexus
+/// zone. The homelab operator stages the (non-secret) root here once; long
+/// term this is delivered by the package/RSS path like sled-agent's `roots`.
+pub fn default_instance_identity_root_cert_path() -> Utf8PathBuf {
+    "/var/svc/manifest/site/nexus/instance-identity-root.pem".into()
 }
 
 fn default_techport_external_server_port() -> u16 {
@@ -1427,7 +1420,8 @@ mod test {
                     external_http_clients: ExternalHttpClientConfig {
                         interface: Some("opte0".to_string()),
                     },
-                    instance_identity: None,
+                    instance_identity_root_cert_path:
+                        default_instance_identity_root_cert_path(),
                 },
                 pkg: PackageConfig {
                     console: ConsoleConfig {
@@ -1907,25 +1901,6 @@ mod test {
         )
         .expect_err("retention_days = 0 should be rejected");
         assert!(error.message().contains("nonzero"), "error = {}", error);
-    }
-
-    #[test]
-    fn test_instance_identity_config_parses() {
-        // POC sanity: a `[deployment.instance_identity]` block (the shape the
-        // homelab operator writes) parses cleanly. Doubles as a known-good
-        // example.
-        let cfg = toml::from_str::<InstanceIdentityConfig>(
-            r##"
-            root_cert_path = "/var/nexus/instance-identity/oxide-root.pem"
-            organization = "Oxide Computer Company"
-            issuer = "https://oxide.example"
-            audience = "vault"
-            token_ttl_secs = 300
-            "##,
-        )
-        .expect("instance_identity config should parse");
-        assert_eq!(cfg.organization, "Oxide Computer Company");
-        assert_eq!(cfg.token_ttl_secs, 300);
     }
 
     #[test]

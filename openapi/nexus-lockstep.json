@@ -1174,9 +1174,19 @@
         }
       },
       "post": {
-        "summary": "POC: server-generate and store a new OIDC signing key. Returns 409 if a",
-        "description": "live signing key already exists. Never returns the private key.",
+        "summary": "POC: server-generate and store a new OIDC signing key, along with the",
+        "description": "minting policy (issuer/audience/ttl) it should sign with. Returns 409 if a live signing key already exists. Never returns the private key.",
         "operationId": "oidc_signing_key_create",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OidcSigningKeyCreate"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "201": {
             "description": "successful creation",
@@ -6351,6 +6361,30 @@
         "description": "Unique name for a saga [`Node`]\n\nEach node requires a string name that's unique within its DAG.  The name is used to identify its output.  Nodes that depend on a given node (either directly or indirectly) can access the node's output using its name.",
         "type": "string"
       },
+      "OidcSigningKeyCreate": {
+        "description": "Request to create the live OIDC signing key. Nexus generates the key material itself; the caller supplies the minting policy stored alongside it.",
+        "type": "object",
+        "properties": {
+          "audience": {
+            "description": "Audience (`aud` claim) minted tokens will carry.",
+            "type": "string"
+          },
+          "issuer": {
+            "description": "OIDC issuer (`iss` claim) minted tokens will carry.",
+            "type": "string"
+          },
+          "token_ttl_secs": {
+            "description": "Token lifetime in seconds (drives the `exp` claim).",
+            "type": "integer",
+            "format": "int64"
+          }
+        },
+        "required": [
+          "audience",
+          "issuer",
+          "token_ttl_secs"
+        ]
+      },
       "OidcSigningKeyMetadata": {
         "description": "Metadata for a stored OIDC signing key (no key material).",
         "type": "object",
@@ -6383,6 +6417,14 @@
             "description": "Signature algorithm, e.g. `RS256`.",
             "type": "string"
           },
+          "audience": {
+            "description": "Audience (`aud` claim) minted tokens will carry.",
+            "type": "string"
+          },
+          "issuer": {
+            "description": "OIDC issuer (`iss` claim) minted tokens will carry.",
+            "type": "string"
+          },
           "kid": {
             "description": "Key id advertised in the JWT header.",
             "type": "string"
@@ -6395,13 +6437,21 @@
             "description": "When the key was created.",
             "type": "string",
             "format": "date-time"
+          },
+          "token_ttl_secs": {
+            "description": "Token lifetime in seconds (drives the `exp` claim).",
+            "type": "integer",
+            "format": "int64"
           }
         },
         "required": [
           "algorithm",
+          "audience",
+          "issuer",
           "kid",
           "public_key_pem",
-          "time_created"
+          "time_created",
+          "token_ttl_secs"
         ]
       },
       "OmicronZoneDataset": {

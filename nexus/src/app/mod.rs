@@ -316,17 +316,17 @@ pub struct Nexus {
     /// state of overall Nexus quiesce activity
     quiesce: NexusQuiesceHandle,
 
-    /// POC: signer for VM instance-identity tokens (None unless configured).
-    instance_identity_signer:
-        Option<instance_identity::InstanceIdentitySigner>,
+    /// POC: path to the attestation root cert (trust anchor) used to verify
+    /// VM-instance attestations. The secret signing key and the minting policy
+    /// (`iss`/`aud`/`ttl`) live in the database; this is the one non-secret,
+    /// file-delivered bit, read per request when minting a token.
+    instance_identity_root_cert_path: camino::Utf8PathBuf,
 }
 
 impl Nexus {
-    /// POC: the instance-identity token signer, if configured.
-    pub(crate) fn instance_identity_signer(
-        &self,
-    ) -> Option<&instance_identity::InstanceIdentitySigner> {
-        self.instance_identity_signer.as_ref()
+    /// POC: path to the instance-identity attestation root cert (trust anchor).
+    pub(crate) fn instance_identity_root_cert_path(&self) -> &camino::Utf8Path {
+        &self.instance_identity_root_cert_path
     }
 
     /// Create a new Nexus instance for the given rack id `rack_id`
@@ -529,27 +529,6 @@ impl Nexus {
 
         let (sitrep_load_tx, sitrep_load_rx) = watch::channel(None);
 
-        // POC: build the instance-identity token signer, if configured.
-        let instance_identity_signer = match &config
-            .deployment
-            .instance_identity
-        {
-            Some(cfg) => match instance_identity::InstanceIdentitySigner::from_config(
-                cfg,
-            ) {
-                Ok(signer) => Some(signer),
-                Err(e) => {
-                    error!(
-                        log,
-                        "failed to build instance-identity signer";
-                        "error" => InlineErrorChain::new(&e).to_string(),
-                    );
-                    None
-                }
-            },
-            None => None,
-        };
-
         let nexus = Nexus {
             id: config.deployment.id,
             rack_id,
@@ -613,7 +592,10 @@ impl Nexus {
             update_status: UpdateStatusHandle::new(blueprint_load_rx),
             quiesce,
             sitrep_load_rx,
-            instance_identity_signer,
+            instance_identity_root_cert_path: config
+                .deployment
+                .instance_identity_root_cert_path
+                .clone(),
         };
 
         // TODO-cleanup all the extra Arcs here seems wrong

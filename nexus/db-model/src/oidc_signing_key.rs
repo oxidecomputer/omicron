@@ -28,15 +28,25 @@ pub struct OidcSigningKey {
     pub public_key: Vec<u8>,
     /// Private key, PEM-encoded.
     pub private_key: Vec<u8>,
+    /// OIDC issuer (`iss` claim) minted tokens carry.
+    pub issuer: String,
+    /// Audience (`aud` claim) minted tokens carry.
+    pub audience: String,
+    /// Token lifetime in seconds (drives the `exp` claim).
+    pub token_ttl_secs: i64,
 }
 
 impl OidcSigningKey {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         id: Uuid,
         kid: String,
         algorithm: String,
         public_key: Vec<u8>,
         private_key: Vec<u8>,
+        issuer: String,
+        audience: String,
+        token_ttl_secs: i64,
     ) -> Self {
         let now = Utc::now();
         Self {
@@ -48,6 +58,9 @@ impl OidcSigningKey {
             algorithm,
             public_key,
             private_key,
+            issuer,
+            audience,
+            token_ttl_secs,
         }
     }
 }
@@ -63,6 +76,9 @@ impl std::fmt::Debug for OidcSigningKey {
             .field("algorithm", &self.algorithm)
             .field("public_key", &self.public_key)
             .field("private_key", &"<redacted>")
+            .field("issuer", &self.issuer)
+            .field("audience", &self.audience)
+            .field("token_ttl_secs", &self.token_ttl_secs)
             .finish()
     }
 }

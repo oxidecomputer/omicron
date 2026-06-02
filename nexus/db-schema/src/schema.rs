@@ -1187,6 +1187,9 @@ table! {
         algorithm -> Text,
         public_key -> Binary,
         private_key -> Binary,
+        issuer -> Text,
+        audience -> Text,
+        token_ttl_secs -> Int8,
     }
 }
 

@@ -2440,7 +2440,8 @@ impl ServiceManager {
                         nexus_config::ExternalHttpClientConfig {
                             interface: Some(opte_iface_name.to_string()),
                         },
-                    instance_identity: None,
+                    instance_identity_root_cert_path:
+                        nexus_config::default_instance_identity_root_cert_path(),
                 };
 
                 // Copy the partial config file to the expected
