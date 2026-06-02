@@ -2,6 +2,7 @@
 name = "fm-build"
 version = "0.1.0"
 edition = "2024"
+description = "a surprise tool that will help us later"
 
 [dependencies]
 anyhow.workspace = true

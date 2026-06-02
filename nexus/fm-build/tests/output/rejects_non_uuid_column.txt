@@ -4,6 +4,6 @@
  6 │                 id UUID NOT NULL, sitrep_id UUID NOT NULL, case_id TEXT NOT NULL,
    ·                                                            ───┬───
    ·                                                               ╰── this column
- 7 │                 PRIMARY KEY (id, sitrep_id)
+ 7 │                 created_sitrep_id UUID NOT NULL,
    ╰────
   help: 'example' is not a valid fm_fact table

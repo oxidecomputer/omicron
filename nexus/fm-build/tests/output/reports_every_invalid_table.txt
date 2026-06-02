@@ -9,21 +9,21 @@
   help: 'first' is not a valid fm_fact table
 
   × expected `case_id` column to be of type `UUID`, found `Text`
-    ╭─[fm_schema.sql:14:60]
- 13 │             CREATE TABLE second (
- 14 │                 id UUID NOT NULL, sitrep_id UUID NOT NULL, case_id TEXT NOT NULL,
+    ╭─[fm_schema.sql:15:60]
+ 14 │             CREATE TABLE second (
+ 15 │                 id UUID NOT NULL, sitrep_id UUID NOT NULL, case_id TEXT NOT NULL,
     ·                                                            ───┬───
     ·                                                               ╰── this column
- 15 │                 PRIMARY KEY (id, sitrep_id)
+ 16 │                 created_sitrep_id UUID NOT NULL,
     ╰────
   help: 'second' is not a valid fm_fact table
 
   × 'third' is missing a 'de' annotation
-    ╭─[fm_schema.sql:19:26]
- 18 │             --#! fm_fact
- 19 │             CREATE TABLE third (
+    ╭─[fm_schema.sql:21:26]
+ 20 │             --#! fm_fact
+ 21 │             CREATE TABLE third (
     ·                          ──┬──
     ·                            ╰── this fact table
- 20 │                 id UUID NOT NULL, sitrep_id UUID NOT NULL, case_id UUID NOT NULL,
+ 22 │                 id UUID NOT NULL, sitrep_id UUID NOT NULL, case_id UUID NOT NULL,
     ╰────
   help: add a `--#! de = <ident>` annotation above the table

@@ -6,10 +6,10 @@
    ·                            ╰── first defined here
  6 │                 id UUID NOT NULL, sitrep_id UUID NOT NULL, case_id UUID NOT NULL,
    ╰────
-    ╭─[fm_schema.sql:13:26]
- 12 │             --#! name = F2
- 13 │             CREATE TABLE dupe (
+    ╭─[fm_schema.sql:14:26]
+ 13 │             --#! name = F2
+ 14 │             CREATE TABLE dupe (
     ·                          ──┬─
     ·                            ╰── redefined here
- 14 │                 id UUID NOT NULL, sitrep_id UUID NOT NULL, case_id UUID NOT NULL,
+ 15 │                 id UUID NOT NULL, sitrep_id UUID NOT NULL, case_id UUID NOT NULL,
     ╰────

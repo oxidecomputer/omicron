@@ -287,7 +287,12 @@ fn validate_shape(
         || format!("'{}' is not a valid fm_fact table", table.name);
 
     // check all the expected UUID columns we want are there
-    let mut want_columns = [(ID_COL, 0), (SITREP_ID_COL, 0), ("case_id", 0)];
+    let mut want_columns = [
+        (ID_COL, 0),
+        (SITREP_ID_COL, 0),
+        ("case_id", 0),
+        ("created_sitrep_id", 0),
+    ];
     'columns: for column in &table.columns {
         for (want_name, found) in want_columns.iter_mut() {
             if column.name.value.eq_ignore_ascii_case(want_name) {
@@ -308,9 +313,12 @@ fn validate_shape(
             // the parser should definitely not have allowed this, but it did!
             // what to heck
             return Err(ctx
-                .error(format!("duplicate column `{name}` (that's weird!)"))
+                .error(format!("duplicate column `{name}`"))
                 .label(table.name.span(), "this fact table")
-                .help(not_a_fact())
+                .help(
+                    "this is probably a bug in `fm-build`, the SQL parser \
+                     should have rejected this",
+                )
                 .build());
         }
     }
@@ -362,6 +370,9 @@ fn validate_id_col(
     table: &CreateTable,
     column: &ColumnDef,
 ) -> Result<(), Box<SchemaError>> {
+    let not_a_fact =
+        || format!("'{}' is not a valid fm_fact table", table.name);
+
     let name = &column.name.value;
     if !matches!(column.data_type, DataType::Uuid) {
         return Err(ctx
@@ -370,7 +381,7 @@ fn validate_id_col(
                 column.data_type
             ))
             .label(column.span(), "this column")
-            .help(format!("'{}' is not a valid fm_fact table", table.name))
+            .help(not_a_fact())
             .build());
     }
 
@@ -384,7 +395,7 @@ fn validate_id_col(
                 "expected `{name}` column to be `NOT NULL`, but it wasn't"
             ))
             .label(column.span(), "this column")
-            .help(format!("'{}' is not a valid fm_fact table", table.name))
+            .help(not_a_fact())
             .build());
     }
 
@@ -702,6 +713,7 @@ mod test {
             id UUID NOT NULL,
             sitrep_id UUID NOT NULL,
             case_id UUID NOT NULL,
+            created_sitrep_id UUID NOT NULL,
             PRIMARY KEY (id, sitrep_id)
         );
     ";
@@ -723,6 +735,7 @@ mod test {
             --#! fm_fact
             CREATE TABLE example (
                 id UUID NOT NULL, sitrep_id UUID NOT NULL, case_id UUID NOT NULL,
+                created_sitrep_id UUID NOT NULL,
                 PRIMARY KEY (id, sitrep_id)
             );
         ";
@@ -738,6 +751,7 @@ mod test {
             --#! fm_fact
             CREATE TABLE example (
                 id UUID NOT NULL, sitrep_id UUID NOT NULL, case_id UUID,
+                created_sitrep_id UUID NOT NULL,
                 PRIMARY KEY (id, sitrep_id)
             );
         ";
@@ -755,6 +769,7 @@ mod test {
             --#! name = F
             CREATE TABLE example (
                 id UUID NOT NULL, sitrep_id UUID NOT NULL, case_id UUID NOT NULL,
+                created_sitrep_id UUID NOT NULL,
                 PRIMARY KEY (id, sitrep_id)
             );
         ";
@@ -772,6 +787,7 @@ mod test {
             --#! name = F
             CREATE TABLE example (
                 id UUID NOT NULL, sitrep_id UUID NOT NULL,
+                created_sitrep_id UUID NOT NULL,
                 PRIMARY KEY (id, sitrep_id)
             );
         ";
@@ -789,6 +805,7 @@ mod test {
             --#! name = F
             CREATE TABLE example (
                 id UUID NOT NULL, sitrep_id UUID NOT NULL, case_id TEXT NOT NULL,
+                created_sitrep_id UUID NOT NULL,
                 PRIMARY KEY (id, sitrep_id)
             );
         ";
@@ -806,6 +823,7 @@ mod test {
             --#! name = F
             CREATE TABLE example (
                 id UUID NOT NULL, sitrep_id UUID NOT NULL, case_id UUID NOT NULL,
+                created_sitrep_id UUID NOT NULL,
                 PRIMARY KEY (id)
             );
         ";
@@ -823,6 +841,7 @@ mod test {
             --#! name = F
             CREATE TABLE dupe (
                 id UUID NOT NULL, sitrep_id UUID NOT NULL, case_id UUID NOT NULL,
+                created_sitrep_id UUID NOT NULL,
                 PRIMARY KEY (id, sitrep_id)
             );
 
@@ -831,6 +850,7 @@ mod test {
             --#! name = F2
             CREATE TABLE dupe (
                 id UUID NOT NULL, sitrep_id UUID NOT NULL, case_id UUID NOT NULL,
+                created_sitrep_id UUID NOT NULL,
                 PRIMARY KEY (id, sitrep_id)
             );
         ";
@@ -850,6 +870,7 @@ mod test {
             --#! name = First
             CREATE TABLE first (
                 id UUID NOT NULL, sitrep_id UUID NOT NULL,
+                created_sitrep_id UUID NOT NULL,
                 PRIMARY KEY (id, sitrep_id)
             );
 
@@ -858,12 +879,14 @@ mod test {
             --#! name = Second
             CREATE TABLE second (
                 id UUID NOT NULL, sitrep_id UUID NOT NULL, case_id TEXT NOT NULL,
+                created_sitrep_id UUID NOT NULL,
                 PRIMARY KEY (id, sitrep_id)
             );
 
             --#! fm_fact
             CREATE TABLE third (
                 id UUID NOT NULL, sitrep_id UUID NOT NULL, case_id UUID NOT NULL,
+                created_sitrep_id UUID NOT NULL,
                 PRIMARY KEY (id, sitrep_id)
             );
         ";
