@@ -12,7 +12,7 @@ pub mod ereport;
 pub use ereport::{Ereport, EreportId};
 pub mod case;
 pub use case::Case;
-mod json_display;
+pub(crate) mod json_display;
 
 use case::AlertRequest;
 use chrono::{DateTime, Utc};

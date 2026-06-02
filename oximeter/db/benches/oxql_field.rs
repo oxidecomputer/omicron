@@ -8,38 +8,14 @@
 
 // Copyright 2026 Oxide Computer Company
 
-use criterion::BenchmarkId;
+mod common;
+
+use common::{bench_metric, bench_oxql_query, get_client, get_socket_addr};
 use criterion::Criterion;
 use criterion::{criterion_group, criterion_main};
-use oximeter_db::Client;
 use oximeter_db::native::Connection;
-use oximeter_db::oxql::query::QueryAuthzScope;
 use rand::seq::SliceRandom;
-use std::net::IpAddr;
-use std::net::SocketAddr;
-use std::sync::Arc;
-use std::time::Duration;
 use uuid::Uuid;
-
-const DEFAULT_CLICKHOUSE_PORT: u16 = 9000;
-
-/// The metric to benchmark.
-///
-/// Set via BENCH_METRIC env var.
-enum BenchMetric {
-    /// Wall clock latency.
-    Latency,
-    /// Total cpu time (user and system).
-    CpuTime,
-}
-
-fn bench_metric() -> BenchMetric {
-    match std::env::var("BENCH_METRIC").as_deref() {
-        Ok("cpu_time") => BenchMetric::CpuTime,
-        Ok("latency") => BenchMetric::Latency,
-        _ => panic!("BENCH_METRIC must be 'cpu_time' or 'latency'"),
-    }
-}
 
 /// Timeseries to benchmark, spanning a range of field table counts.
 const TIMESERIES_NAMES: &[&str] = &[
@@ -55,35 +31,6 @@ struct TimeseriesInfo {
     name: String,
     field_tables: u64,
     cardinality: u64,
-}
-
-fn get_clickhouse_addr() -> IpAddr {
-    std::env::var("CLICKHOUSE_ADDRESS")
-        .ok()
-        .and_then(|s| s.parse().ok())
-        .unwrap_or_else(|| IpAddr::from([127, 0, 0, 1]))
-}
-
-fn get_clickhouse_port() -> u16 {
-    std::env::var("CLICKHOUSE_PORT")
-        .ok()
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(DEFAULT_CLICKHOUSE_PORT)
-}
-
-fn get_socket_addr() -> SocketAddr {
-    SocketAddr::new(get_clickhouse_addr(), get_clickhouse_port())
-}
-
-fn get_client(rt: &tokio::runtime::Runtime) -> Arc<Client> {
-    let addr = get_socket_addr();
-    let log = slog::Logger::root(slog::Discard, slog::o!());
-
-    rt.block_on(async {
-        let client = Arc::new(Client::new(addr, &log));
-        client.ping().await.unwrap();
-        client
-    })
 }
 
 /// Fetch field table count and cardinality for each timeseries.
@@ -170,8 +117,6 @@ fn oxql_field_lookup(c: &mut Criterion) {
         let query =
             format!("get {} | filter timestamp > @2200-01-01", info.name);
 
-        rt.block_on(client.oxql_query(&query, QueryAuthzScope::Fleet)).unwrap();
-
         let bench_id = format!(
             "{} tables/{:0width$} keys: {}",
             info.field_tables,
@@ -180,57 +125,14 @@ fn oxql_field_lookup(c: &mut Criterion) {
             width = cardinality_width
         );
 
-        group.bench_function(
-            BenchmarkId::new("field_lookup", &bench_id),
-            |bench| match metric {
-                BenchMetric::CpuTime => {
-                    bench.to_async(&rt).iter_custom(|iters| {
-                        let client = client.clone();
-                        let query = query.clone();
-                        async move {
-                            let mut total = Duration::ZERO;
-                            for _ in 0..iters {
-                                let result = client
-                                    .oxql_query(&query, QueryAuthzScope::Fleet)
-                                    .await
-                                    .unwrap();
-                                let cpu_us: i64 = result
-                                    .query_summaries
-                                    .iter()
-                                    .map(|s| {
-                                        // Profile events are occasionally and
-                                        // inexplicably empty; default to 0
-                                        // for rare missing events.
-                                        s.profile_summary
-                                            .get("UserTimeMicroseconds")
-                                            .copied()
-                                            .unwrap_or(0)
-                                            + s.profile_summary
-                                                .get("SystemTimeMicroseconds")
-                                                .copied()
-                                                .unwrap_or(0)
-                                    })
-                                    .sum();
-                                total +=
-                                    Duration::from_micros(cpu_us.max(0) as u64);
-                            }
-                            total
-                        }
-                    });
-                }
-                BenchMetric::Latency => {
-                    bench.to_async(&rt).iter(|| {
-                        let client = client.clone();
-                        let query = query.clone();
-                        async move {
-                            client
-                                .oxql_query(&query, QueryAuthzScope::Fleet)
-                                .await
-                                .unwrap()
-                        }
-                    });
-                }
-            },
+        bench_oxql_query(
+            &mut group,
+            &rt,
+            client.clone(),
+            "field_lookup",
+            bench_id,
+            query,
+            &metric,
         );
     }
 

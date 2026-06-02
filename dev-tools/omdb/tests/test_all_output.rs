@@ -443,6 +443,110 @@ async fn test_omdb_success_cases() {
     );
     assert!(!parsed.collections.is_empty());
 
+    // Exercise `omdb support-bundle collect` end-to-end. We don't add this
+    // to the `successes.out` snapshot because the output includes a
+    // randomly-generated bundle UUID, timing-dependent step durations,
+    // and per-sled step names that would all need redaction. Instead we
+    // run the command and verify the resulting zip is well-formed and
+    // contains the expected metadata files.
+    let bundle_path = tmpdir.path().join("bundle.zip");
+    let bundle_args: &[&str] = &[
+        "-w",
+        "support-bundle",
+        "collect",
+        "--output",
+        bundle_path.as_str(),
+        "--tempdir",
+        tmpdir.path().as_str(),
+        "--reason",
+        "integration test",
+    ];
+    let mut bundle_output = String::new();
+    let p = postgres_url.clone();
+    let dns = cptestctx.internal_dns.dns_server.local_address().to_string();
+    do_run_no_redactions(
+        &mut bundle_output,
+        move |exec| exec.env("OMDB_DB_URL", &p).env("OMDB_DNS_SERVER", &dns),
+        &cmd_path,
+        bundle_args,
+    )
+    .await;
+    let zip_file = std::fs::File::open(&bundle_path).unwrap_or_else(|err| {
+        panic!(
+            "bundle zip not produced at {bundle_path}: {}\n\
+             omdb output was:\n{bundle_output}",
+            InlineErrorChain::new(&err),
+        )
+    });
+    let mut archive =
+        zip::ZipArchive::new(zip_file).expect("bundle is a valid zip archive");
+    for required in [
+        "bundle_id.txt",
+        "meta/reason_for_creation.txt",
+        "meta/trace.json",
+        "sp_task_dumps/sled_0/dump-0.zip",
+        "sp_task_dumps/sled_1/dump-0.zip",
+        "sp_task_dumps/switch_0/dump-0.zip",
+        "sp_task_dumps/switch_1/dump-0.zip",
+    ] {
+        assert!(
+            archive.by_name(required).is_ok(),
+            "bundle zip is missing expected entry {required}",
+        );
+    }
+
+    // Now exercise the stdout-streaming path: omit `--output` and
+    // capture stdout as bytes. Verifies the data-descriptor zip variant
+    // produced by `bundle_to_stream` is well-formed and contains the
+    // expected metadata.
+    let stdout_path = tmpdir.path().join("bundle-stdout.zip");
+    let stdout_file =
+        std::fs::File::create(&stdout_path).expect("create stdout capture");
+    let cmd_path_owned = cmd_path.to_path_buf();
+    let p = postgres_url.clone();
+    let dns = cptestctx.internal_dns.dns_server.local_address().to_string();
+    let stream_tempdir = tmpdir.path().to_owned();
+    let exit_status = tokio::task::spawn_blocking(move || {
+        Exec::cmd(&cmd_path_owned)
+            .env("OMDB_DB_URL", &p)
+            .env("OMDB_DNS_SERVER", &dns)
+            .env("RUST_BACKTRACE", "1")
+            .env("RUST_LIB_BACKTRACE", "0")
+            .args(&[
+                "-w",
+                "support-bundle",
+                "collect",
+                "--tempdir",
+                stream_tempdir.as_str(),
+                "--reason",
+                "integration test (stdout)",
+            ])
+            .stdout(subprocess::Redirection::File(stdout_file))
+            .join()
+            .expect("running omdb to stream a bundle")
+    })
+    .await
+    .expect("spawn_blocking");
+    assert!(exit_status.success(), "stdout streaming failed: {exit_status:?}");
+    let zip_file = std::fs::File::open(&stdout_path)
+        .expect("captured stdout file should exist");
+    let mut archive = zip::ZipArchive::new(zip_file)
+        .expect("streamed bundle is a valid zip archive");
+    for required in [
+        "bundle_id.txt",
+        "meta/reason_for_creation.txt",
+        "meta/trace.json",
+        "sp_task_dumps/sled_0/dump-0.zip",
+        "sp_task_dumps/sled_1/dump-0.zip",
+        "sp_task_dumps/switch_0/dump-0.zip",
+        "sp_task_dumps/switch_1/dump-0.zip",
+    ] {
+        assert!(
+            archive.by_name(required).is_ok(),
+            "streamed bundle zip is missing expected entry {required}",
+        );
+    }
+
     let ox_invocation = &["oximeter", "list-producers"];
     let mut ox_output = String::new();
     let ox = ox_url.clone();
