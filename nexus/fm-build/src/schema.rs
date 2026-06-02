@@ -39,26 +39,41 @@ impl iddqd::IdOrdItem for FactTable {
 }
 
 impl FactTable {
-    pub(crate) fn gen_diesel_schema(&self) -> impl quote::ToTokens {
+    pub(crate) fn gen_diesel_schema(
+        &self,
+        crdb_to_diesel_enum_type_names: &HashMap<&str, &str>,
+    ) -> miette::Result<impl quote::ToTokens> {
         let name = &self.table_name;
-        let columns = self.create_stmt.columns.iter().map(|col| {
-            let colname = &col.name.value;
-            quote::quote!(compile_error!("eliza finishme"))
-        });
-        quote::quote! {
+        let columns = self
+            .create_stmt
+            .columns
+            .iter()
+            .map(|col| {
+                let colname = &col.name.value;
+                let coltype =
+                    to_diesel_schema_type(col, crdb_to_diesel_enum_type_names)?;
+                Ok(quote::quote!(#colname -> #coltype))
+            })
+            .collect::<miette::Result<Vec<_>>>()?;
+        let schema = quote::quote! {
             table! {
                 #name (id, sitrep_id) {
                     #(#columns),*
                 }
             }
-        }
+        };
+
+        miette::bail!("todo eliza finishme")
     }
 }
 
-fn to_diesel_schema_type(col: &ColumnDef) -> impl quote::ToTokens {
+fn to_diesel_schema_type(
+    col: &ColumnDef,
+    crdb_to_diesel_enum_type_names: &HashMap<&str, &str>,
+) -> miette::Result<impl quote::ToTokens> {
     let not_null = col
         .options
         .iter()
         .any(|opt| matches!(opt.option, ColumnOption::NotNull));
-    quote::quote!(compile_error!("eliza finishme"))
+    miette::bail!("todo")
 }

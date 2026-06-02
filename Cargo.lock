@@ -3777,6 +3777,7 @@ dependencies = [
  "expectorate",
  "iddqd",
  "miette 7.6.0",
+ "nexus-db-schema",
  "quote",
  "sqlparser",
  "syn 2.0.117",

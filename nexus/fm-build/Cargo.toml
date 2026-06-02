@@ -5,6 +5,7 @@ edition = "2024"
 description = "a surprise tool that will help us later"
 
 [dependencies]
+nexus-db-schema.workspace = true
 camino.workspace = true
 iddqd.workspace = true
 miette = { workspace = true, features = ["fancy"] }

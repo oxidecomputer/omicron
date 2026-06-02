@@ -8,6 +8,7 @@ use camino::Utf8Path;
 use iddqd::IdOrdMap;
 use miette::{IntoDiagnostic, WrapErr};
 use std::sync::Arc;
+use std::collections::HashMap,
 
 pub mod parser;
 pub mod schema;
@@ -17,6 +18,7 @@ pub struct CodeGenerator {
     #[allow(dead_code)]
     all_fact_tables: IdOrdMap<Arc<schema::FactTable>>,
     des: IdOrdMap<De>,
+    crdb_to_diesel_enum_type_names: HashMap<&'static str, &'static str>,
 }
 
 impl CodeGenerator {
@@ -38,7 +40,9 @@ impl CodeGenerator {
             })
             .collect();
 
-        Ok(Self { all_fact_tables, des })
+        let crdb_to_diesel_enum_names = nexus_db_schema::enums::crdb_to_diesel_enum_type_names().into_iter().collect();
+
+        Ok(Self { all_fact_tables, des, crdb_to_diesel_enum_type_names  })
     }
 
     pub fn generate_de_enums(&self) -> impl quote::ToTokens {
@@ -60,6 +64,13 @@ impl CodeGenerator {
         quote::quote!(
             #(#de_enums)*
         )
+    }
+
+    pub fn generate_schema_macros(&self) -> miette::Result<impl quote::ToTokens> {
+        let schema_macros = self.all_fact_tables.iter().map(|table| table.gen_diesel_schema(&self.crdb_to_diesel_enum_type_names)).collect::<miette::Result<Vec<_>>>()?;
+        Ok(quote::quote!(
+            #(#schema_macros)*
+        ))
     }
 }
 
