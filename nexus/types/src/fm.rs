@@ -12,6 +12,8 @@ pub mod ereport;
 pub use ereport::{Ereport, EreportId};
 pub mod case;
 pub use case::Case;
+mod fact;
+pub use fact::*;
 
 use case::AlertRequest;
 use chrono::{DateTime, Utc};
