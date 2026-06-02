@@ -51,6 +51,19 @@ pub struct Input {
     /// on whether it's nested under a `Silo`.
     #[serde(default)]
     visible_outside_silo: bool,
+    /// Generate an extra by-id selection path that *validates* a
+    /// caller-supplied parent against the resource's real parent instead of
+    /// rejecting `id + parent` (see #10517).
+    ///
+    /// This is "false" by default. When enabled (only meaningful for a
+    /// resource that has a parent), the macro emits a `PrimaryKeyWithParents`
+    /// variant carrying an optional supplied lookup per validatable ancestor,
+    /// plus the match arms that compare each supplied ancestor's id to the real
+    /// one resolved by the existing by-id walk-up. This is an opt-in flag so the
+    /// approach can be rolled out one resource at a time without touching every
+    /// `lookup_resource!` invocation at once.
+    #[serde(default)]
+    validate_by_id_parent: bool,
 }
 
 struct PrimaryKeyColumn {
@@ -135,6 +148,9 @@ pub struct Config {
 
     /// Description of the primary key columns
     primary_key_columns: Vec<PrimaryKeyColumn>,
+
+    /// Generate the parent-validating by-id path (see [`Input::validate_by_id_parent`])
+    validate_by_id_parent: bool,
 }
 
 impl Config {
@@ -155,6 +171,8 @@ impl Config {
         path_authz_names.push(resource.authz_name.clone());
 
         let parent = ancestors.last().cloned();
+        let validate_by_id_parent =
+            input.validate_by_id_parent && parent.is_some();
         let silo_restricted = !input.visible_outside_silo
             && ancestors.iter().any(|r| r.name == "Silo");
 
@@ -173,7 +191,40 @@ impl Config {
             lookup_by_name: input.lookup_by_name,
             primary_key_columns,
             soft_deletes: input.soft_deletes,
+            validate_by_id_parent,
         })
+    }
+
+    /// The ancestors whose selector a caller may supply alongside a by-id
+    /// lookup and that we therefore validate (see #10517), as parallel lists of
+    /// `(resource type ident, authz binding ident, supplied-arg ident)`.
+    ///
+    /// This excludes `Silo`: for these resources the silo is always the actor's
+    /// own (taken from the auth context), never a caller-supplied value, so
+    /// there's nothing to validate. (A silo-scoped resource that *does* take an
+    /// explicit silo selector would need different treatment.)
+    fn validated_ancestors(
+        &self,
+    ) -> (Vec<syn::Ident>, Vec<syn::Ident>, Vec<syn::Ident>) {
+        let nancestors = self.path_types.len() - 1;
+        let mut types = Vec::new();
+        let mut authz_names = Vec::new();
+        let mut supplied_args = Vec::new();
+        for (ty, authz) in self.path_types[..nancestors]
+            .iter()
+            .zip(&self.path_authz_names[..nancestors])
+        {
+            if ty == "Silo" {
+                continue;
+            }
+            types.push(ty.clone());
+            authz_names.push(authz.clone());
+            supplied_args.push(format_ident!(
+                "supplied_{}",
+                heck::AsSnakeCase(ty.to_string()).to_string()
+            ));
+        }
+        (types, authz_names, supplied_args)
     }
 }
 
@@ -253,6 +304,34 @@ fn generate_struct(config: &Config) -> TokenStream {
     );
     let pkey_types = config.primary_key_columns.iter().map(|c| c.ty.external());
 
+    // Optional by-id-with-validated-parents variant (see #10517). Carries the
+    // primary key plus, for each validatable ancestor, an optional
+    // caller-supplied lookup for that ancestor (boxed to keep the enum small).
+    // A `Some` ancestor must match the resource's real ancestor at that level;
+    // `None` means the caller didn't constrain that level. This shape supports
+    // partial selectors (e.g. a project but no vpc) uniformly.
+    let validated_variant = if config.validate_by_id_parent {
+        let pkey_types = config
+            .primary_key_columns
+            .iter()
+            .map(|c| c.ty.external())
+            .collect::<Vec<_>>();
+        let (ancestor_types, _, _) = config.validated_ancestors();
+        quote! {
+            /// We're looking for a resource with the given primary key, but the
+            /// caller also supplied one or more ancestor selectors that must
+            /// match the resource's real ancestors (rather than being
+            /// rejected). See #10517.
+            PrimaryKeyWithParents(
+                Root<'a>
+                #(,#pkey_types)*
+                #(, Option<::std::boxed::Box<#ancestor_types<'a>>>)*
+            ),
+        }
+    } else {
+        quote! {}
+    };
+
     /* configure the lookup enum */
     let name_variant = if config.lookup_by_name {
         let root_sym = format_ident!("Root");
@@ -286,6 +365,8 @@ fn generate_struct(config: &Config) -> TokenStream {
             ///
             /// This has no parent container -- a by-id lookup is always global
             PrimaryKey(Root<'a> #(,#pkey_types)*),
+
+            #validated_variant
         }
     }
 }
@@ -369,6 +450,14 @@ fn generate_misc_helpers(config: &Config) -> TokenStream {
         quote! {
             #resource_name::Name(parent, _)
             | #resource_name::OwnedName(parent, _) => parent.lookup_root(),
+        }
+    } else {
+        quote! {}
+    };
+
+    let validated_root_variant = if config.validate_by_id_parent {
+        quote! {
+            #resource_name::PrimaryKeyWithParents(root, ..) => root.lookup_root(),
         }
     } else {
         quote! {}
@@ -478,6 +567,8 @@ fn generate_misc_helpers(config: &Config) -> TokenStream {
                 #name_variant
 
                 #resource_name::PrimaryKey(root, ..) => root.lookup_root(),
+
+                #validated_root_variant
             }
         }
 
@@ -512,6 +603,69 @@ fn generate_lookup_methods(config: &Config) -> TokenStream {
         } else {
             (quote! {}, quote! {})
         };
+
+    // Generate the by-id-with-validated-parent arms (see #10517). The by-id
+    // walk-up already resolves the resource's real parent for free; we compare
+    // the caller-supplied parent against it and 404 on mismatch (consistent
+    // with the by-name path, where a wrong parent simply doesn't resolve). The
+    // resource's own authz check happens before the comparison is reached
+    // (`fetch_by_id_for` authorizes; `lookup_for` authorizes after `lookup`),
+    // so a caller who can't see the resource never learns whether the parent
+    // matched.
+    let (validated_fetch_arm, validated_lookup_arm) = if config
+        .validate_by_id_parent
+    {
+        let (_, ancestor_authz_names, supplied_args) =
+            config.validated_ancestors();
+        // For each supplied ancestor, resolve it (its `lookup_for` walks up and
+        // yields its own authz chain; the last element is that ancestor's
+        // authz) and compare its id to the resource's real ancestor at that
+        // level. A mismatch is reported as the resource's own not-found, so it
+        // is indistinguishable from a nonexistent resource. Because ids are
+        // globally unique, comparing a single level transitively validates
+        // everything above it — and a supplied ancestor that is itself a
+        // validated lookup checks its own parents in turn.
+        let compare = quote! {
+            use nexus_auth::authz::ApiResource;
+            #(
+                if let Some(#supplied_args) = #supplied_args {
+                    let (.., supplied_authz) =
+                        #supplied_args.lookup_for(authz::Action::Read).await?;
+                    if #ancestor_authz_names.id() != supplied_authz.id() {
+                        return Err(#resource_authz_name.not_found());
+                    }
+                }
+            )*
+        };
+        (
+            quote! {
+                #resource_name::PrimaryKeyWithParents(
+                    _, #(#pkey_names,)* #(#supplied_args,)*
+                ) => {
+                    let (#(#path_authz_names,)* db_row) =
+                        Self::fetch_by_id_for(
+                            opctx, datastore, #(#pkey_names,)* action
+                        ).await?;
+                    { #compare }
+                    Ok((#(#path_authz_names,)* db_row))
+                }
+            },
+            quote! {
+                #resource_name::PrimaryKeyWithParents(
+                    _, #(#pkey_names,)* #(#supplied_args,)*
+                ) => {
+                    let (#(#path_authz_names,)* _) =
+                        Self::lookup_by_id_no_authz(
+                            opctx, datastore, #(#pkey_names,)*
+                        ).await?;
+                    { #compare }
+                    Ok((#(#path_authz_names,)*))
+                }
+            },
+        )
+    } else {
+        (quote! {}, quote! {})
+    };
 
     // Generate the by-name branch of the match arm in "fetch_for()"
     let fetch_for_name_variant = if config.lookup_by_name {
@@ -641,6 +795,8 @@ fn generate_lookup_methods(config: &Config) -> TokenStream {
                         action
                     ).await
                 }
+
+                #validated_fetch_arm
             }
             #silo_check_fetch
         }
@@ -743,6 +899,8 @@ fn generate_lookup_methods(config: &Config) -> TokenStream {
                         ).await?;
                     Ok((#(#path_authz_names,)*))
                 }
+
+                #validated_lookup_arm
             }
         }
     }

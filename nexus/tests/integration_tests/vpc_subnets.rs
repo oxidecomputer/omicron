@@ -16,6 +16,7 @@ use nexus_test_utils::identity_eq;
 use nexus_test_utils::resource_helpers::objects_list_page_authz;
 use nexus_test_utils::resource_helpers::{
     create_default_ip_pools, create_instance, create_project, create_vpc,
+    create_vpc_subnet, object_get, object_get_error,
 };
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::vpc::{
@@ -449,6 +450,101 @@ async fn test_vpc_subnets(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(subnet_same_name.vpc_id, vpc2.identity.id);
     assert_eq!(subnet_same_name.ipv4_block, "192.168.0.0/16".parse().unwrap());
     assert!(subnet_same_name.ipv6_block.is_unique_local());
+}
+
+// Spike (#10517), two-parent case: when a subnet is addressed by id, supplied
+// `vpc`/`project` selectors are validated against the subnet's real ancestors
+// instead of being rejected. Exercises the recursive validation (vpc-by-id
+// also validates its project) and the lenient project-only selector.
+#[nexus_test]
+async fn test_vpc_subnet_id_parent_validation(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+
+    // project1/vpc1/subnet1 is the resource under test; project2/vpc2 are
+    // unrelated and used as mismatching ancestors.
+    let project1 = create_project(client, "project1").await;
+    let vpc1 = create_vpc(client, "project1", "vpc1").await;
+    let subnet = create_vpc_subnet(
+        client,
+        "project1",
+        "vpc1",
+        "subnet1",
+        "10.0.0.0/24".parse().unwrap(),
+        None,
+        None,
+    )
+    .await;
+    let project2 = create_project(client, "project2").await;
+    let vpc2 = create_vpc(client, "project2", "vpc2").await;
+
+    let sid = subnet.identity.id;
+    let get = |query: String| {
+        let url = format!("/v1/vpc-subnets/{sid}?{query}");
+        async move { object_get::<VpcSubnet>(client, &url).await }
+    };
+    let get_404 = |query: String| {
+        let url = format!("/v1/vpc-subnets/{sid}?{query}");
+        async move { object_get_error(client, &url, StatusCode::NOT_FOUND).await }
+    };
+
+    // --- Accepted: matching selectors, in every form ---
+
+    // bare id
+    assert_eq!(get(String::new()).await.identity.id, sid);
+    // id + matching vpc by name + matching project by name
+    assert_eq!(get("vpc=vpc1&project=project1".into()).await.identity.id, sid);
+    // id + matching vpc by id (no project needed)
+    assert_eq!(get(format!("vpc={}", vpc1.identity.id)).await.identity.id, sid);
+    // id + matching vpc by id + matching project by id (recursive vpc->project
+    // validation, all succeeding)
+    assert_eq!(
+        get(format!(
+            "vpc={}&project={}",
+            vpc1.identity.id, project1.identity.id
+        ))
+        .await
+        .identity
+        .id,
+        sid
+    );
+    // id + matching project only, no vpc (the lenient case)
+    assert_eq!(get("project=project1".into()).await.identity.id, sid);
+    assert_eq!(
+        get(format!("project={}", project1.identity.id)).await.identity.id,
+        sid
+    );
+
+    // --- Rejected with 404: any mismatching ancestor ---
+
+    let subnet_not_found = format!("not found: vpc-subnet with id \"{sid}\"");
+
+    // id + wrong vpc by id -> subnet's real vpc doesn't match
+    let error = get_404(format!("vpc={}", vpc2.identity.id)).await;
+    assert_eq!(error.message, subnet_not_found);
+
+    // id + matching vpc by id + WRONG project by id: the supplied vpc is real
+    // and matches the subnet, but it doesn't live in project2, so the recursive
+    // vpc validation rejects it. (404 reported at the vpc level.)
+    let error = get_404(format!(
+        "vpc={}&project={}",
+        vpc1.identity.id, project2.identity.id
+    ))
+    .await;
+    assert_eq!(
+        error.message,
+        format!("not found: vpc with id \"{}\"", vpc1.identity.id)
+    );
+
+    // id + wrong project only (no vpc) -> project-level mismatch
+    let error = get_404(format!("project={}", project2.identity.id)).await;
+    assert_eq!(error.message, subnet_not_found);
+
+    // id + wrong vpc by name + its (real) project: vpc2 exists in project2 but
+    // isn't the subnet's vpc
+    let error = get_404("vpc=vpc2&project=project2".into()).await;
+    assert_eq!(error.message, subnet_not_found);
 }
 
 fn subnets_eq(sn1: &VpcSubnet, sn2: &VpcSubnet) {

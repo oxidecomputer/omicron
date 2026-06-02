@@ -60,10 +60,18 @@ impl super::Nexus {
                     .vpc_name_owned(name.into());
                 Ok(v)
             }
-            vpc::VpcSelector { vpc: NameOrId::Id(_), project: Some(_) } => {
-                Err(Error::invalid_request(
-                    "when providing vpc as an ID, project should not be specified",
-                ))
+            vpc::VpcSelector { vpc: NameOrId::Id(id), project: Some(proj) } => {
+                // vpc by id with a project also supplied: validate the project
+                // against the vpc's real project rather than rejecting (#10517).
+                // The comparison is deferred into the builder, so this stays
+                // synchronous.
+                let expected_project = self.project_lookup(
+                    opctx,
+                    project::ProjectSelector { project: proj },
+                )?;
+                let v = LookupPath::new(opctx, &self.db_datastore)
+                    .vpc_id_validated(id, expected_project);
+                Ok(v)
             }
             _ => Err(Error::invalid_request(
                 "vpc should either be an ID or project should be specified",

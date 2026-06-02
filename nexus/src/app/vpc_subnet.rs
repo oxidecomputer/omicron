@@ -13,6 +13,7 @@ use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
 use nexus_db_queries::db::model::VpcSubnet;
+use nexus_types::external_api::project;
 use nexus_types::external_api::vpc;
 use omicron_common::api::external;
 use omicron_common::api::external::CreateResult;
@@ -53,12 +54,36 @@ impl super::Nexus {
                 Ok(subnet)
             }
             vpc::SubnetSelector {
-                subnet: NameOrId::Id(_),
-                vpc: _,
-                project: _,
-            } => Err(Error::invalid_request(
-                "when providing subnet as an ID, vpc and project should not be specified",
-            )),
+                subnet: NameOrId::Id(id),
+                vpc: Some(vpc),
+                project,
+            } => {
+                // subnet by id with a vpc also supplied: validate the supplied
+                // vpc (which validates the project too, recursively) against
+                // the subnet's real vpc rather than rejecting (#10517). Stays
+                // synchronous: the comparison is deferred into the builder.
+                let expected_vpc =
+                    self.vpc_lookup(opctx, vpc::VpcSelector { project, vpc })?;
+                let subnet = LookupPath::new(opctx, &self.db_datastore)
+                    .vpc_subnet_id_validated(id, None, Some(expected_vpc));
+                Ok(subnet)
+            }
+            vpc::SubnetSelector {
+                subnet: NameOrId::Id(id),
+                vpc: None,
+                project: Some(project),
+            } => {
+                // subnet by id with only a project supplied (no vpc): validate
+                // the project alone, for leniency/consistency. Nothing forces
+                // a caller to also name the vpc just to scope by project.
+                let expected_project = self.project_lookup(
+                    opctx,
+                    project::ProjectSelector { project },
+                )?;
+                let subnet = LookupPath::new(opctx, &self.db_datastore)
+                    .vpc_subnet_id_validated(id, Some(expected_project), None);
+                Ok(subnet)
+            }
             _ => Err(Error::invalid_request(
                 "subnet should either be an ID or vpc should be specified",
             )),

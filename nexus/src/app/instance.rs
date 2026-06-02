@@ -348,8 +348,14 @@ async fn normalize_anti_affinity_groups(
 impl super::Nexus {
     /// Look up an instance by name or UUID.
     ///
-    /// The `project` parameter is required for name-based lookup (provides scope)
-    /// and must NOT be specified for UUID-based lookup.
+    /// The `project` parameter is required for name-based lookup (provides
+    /// scope). For UUID-based lookup the project is optional; if it is
+    /// supplied, it is validated against the instance's actual project rather
+    /// than rejected (see #10517).
+    ///
+    /// Note this function stays synchronous: the `id + project` validation is
+    /// deferred into the (already-async) `lookup_for`/`fetch_for` on the
+    /// returned builder, so none of the ~40 callers need to change.
     pub fn instance_lookup<'a>(
         &'a self,
         opctx: &'a OpContext,
@@ -365,6 +371,24 @@ impl super::Nexus {
                 Ok(instance)
             }
             instance::InstanceSelector {
+                instance: NameOrId::Id(id),
+                project: Some(project),
+            } => {
+                // Instance addressed by ID with a project also supplied: build
+                // a lookup that validates the supplied project against the
+                // instance's real project when it's resolved, rather than
+                // rejecting the request (#10517). The comparison happens lazily
+                // inside the builder, so this arm — and `instance_lookup` —
+                // remain synchronous.
+                let expected_project = self.project_lookup(
+                    opctx,
+                    project::ProjectSelector { project },
+                )?;
+                let instance = LookupPath::new(opctx, &self.db_datastore)
+                    .instance_id_validated(id, expected_project);
+                Ok(instance)
+            }
+            instance::InstanceSelector {
                 instance: NameOrId::Name(name),
                 project: Some(project),
             } => {
@@ -376,11 +400,6 @@ impl super::Nexus {
                     .instance_name_owned(name.into());
                 Ok(instance)
             }
-            instance::InstanceSelector {
-                instance: NameOrId::Id(_), ..
-            } => Err(Error::invalid_request(
-                "when providing instance as an ID project should not be specified",
-            )),
             _ => Err(Error::invalid_request(
                 "instance should either be UUID or project should be specified",
             )),

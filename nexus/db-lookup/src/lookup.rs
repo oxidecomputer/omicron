@@ -92,6 +92,23 @@ impl<'a> LookupPath<'a> {
         Instance::PrimaryKey(Root { lookup_root: self }, id)
     }
 
+    /// Select an Instance by id, validating that it lives in `expected_project`
+    /// rather than rejecting the combined `id + project` selector (#10517).
+    ///
+    /// The mismatch is reported as a 404 (the same error as a nonexistent
+    /// instance), consistent with the by-name path and leaking nothing.
+    pub fn instance_id_validated(
+        self,
+        id: Uuid,
+        expected_project: Project<'a>,
+    ) -> Instance<'a> {
+        Instance::PrimaryKeyWithParents(
+            Root { lookup_root: self },
+            id,
+            Some(Box::new(expected_project)),
+        )
+    }
+
     /// Select a resource of type AffinityGroup, identified by its id
     pub fn affinity_group_id(self, id: Uuid) -> AffinityGroup<'a> {
         AffinityGroup::PrimaryKey(Root { lookup_root: self }, id)
@@ -147,9 +164,43 @@ impl<'a> LookupPath<'a> {
         Vpc::PrimaryKey(Root { lookup_root: self }, id)
     }
 
+    /// Select a Vpc by id, validating that it lives in `expected_project`
+    /// rather than rejecting the combined `id + project` selector (#10517).
+    pub fn vpc_id_validated(
+        self,
+        id: Uuid,
+        expected_project: Project<'a>,
+    ) -> Vpc<'a> {
+        Vpc::PrimaryKeyWithParents(
+            Root { lookup_root: self },
+            id,
+            Some(Box::new(expected_project)),
+        )
+    }
+
     /// Select a resource of type VpcSubnet, identified by its id
     pub fn vpc_subnet_id(self, id: Uuid) -> VpcSubnet<'a> {
         VpcSubnet::PrimaryKey(Root { lookup_root: self }, id)
+    }
+
+    /// Select a VpcSubnet by id, validating any supplied ancestors against the
+    /// subnet's real ancestors rather than rejecting the combined selector
+    /// (#10517). Either or both of `expected_project` and `expected_vpc` may be
+    /// given; a `None` simply isn't constrained. When `expected_vpc` is itself
+    /// a validated lookup, its project is checked too, so the whole supplied
+    /// chain is validated.
+    pub fn vpc_subnet_id_validated(
+        self,
+        id: Uuid,
+        expected_project: Option<Project<'a>>,
+        expected_vpc: Option<Vpc<'a>>,
+    ) -> VpcSubnet<'a> {
+        VpcSubnet::PrimaryKeyWithParents(
+            Root { lookup_root: self },
+            id,
+            expected_project.map(Box::new),
+            expected_vpc.map(Box::new),
+        )
     }
 
     /// Select a resource of type VpcRouter, identified by its id
@@ -639,7 +690,10 @@ lookup_resource! {
     ancestors = [ "Silo", "Project" ],
     lookup_by_name = true,
     soft_deletes = true,
-    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
+    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ],
+    // Spike (#10517): opt in to the by-id path that validates a supplied
+    // project against the instance's real project instead of rejecting it.
+    validate_by_id_parent = true
 }
 
 lookup_resource! {
@@ -671,7 +725,9 @@ lookup_resource! {
     ancestors = [ "Silo", "Project" ],
     lookup_by_name = true,
     soft_deletes = true,
-    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
+    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ],
+    // Spike (#10517): validate a supplied project against the vpc's real one.
+    validate_by_id_parent = true
 }
 
 lookup_resource! {
@@ -695,7 +751,12 @@ lookup_resource! {
     ancestors = [ "Silo", "Project", "Vpc" ],
     lookup_by_name = true,
     soft_deletes = true,
-    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
+    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ],
+    // Spike (#10517): validate a supplied vpc (which itself validates the
+    // project, recursively) against the subnet's real vpc. Demonstrates the
+    // two-parent case: the macro's immediate-parent comparison composes with
+    // the validated Vpc lookup to cover the whole chain.
+    validate_by_id_parent = true
 }
 
 lookup_resource! {
