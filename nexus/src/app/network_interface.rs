@@ -27,7 +27,7 @@ use nexus_db_queries::authz;
 use nexus_db_queries::db;
 
 impl super::Nexus {
-    pub fn instance_network_interface_lookup<'a>(
+    pub async fn instance_network_interface_lookup<'a>(
         &'a self,
         opctx: &'a OpContext,
         network_interface_selector: instance::InstanceNetworkInterfaceSelector,
@@ -52,7 +52,8 @@ impl super::Nexus {
                     .instance_lookup(
                         opctx,
                         instance::InstanceSelector { project, instance: inst },
-                    )?
+                    )
+                    .await?
                     .instance_network_interface_name_owned(name.into());
                 Ok(network_interface)
             }

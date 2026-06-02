@@ -115,7 +115,7 @@ use dropshot::{HttpErrorResponseBody, ResultsPage};
 use nexus_test_utils::identity_eq;
 use nexus_test_utils::resource_helpers::{
     create_instance, create_instance_with, create_instance_with_error,
-    create_project, create_vpc, create_vpc_subnet,
+    create_project, create_vpc, create_vpc_subnet, object_get_error,
 };
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::policy::{ProjectRole, SiloRole};
@@ -335,6 +335,79 @@ async fn test_instance_access(cptestctx: &ControlPlaneTestContext) {
     )
     .await;
     assert_eq!(fetched_instance.identity.id, instance.identity.id);
+
+    // When the instance is addressed by id, a project selector that matches the
+    // instance's actual project is now accepted (previously a 400). See
+    // https://github.com/oxidecomputer/omicron/issues/10517.
+
+    // Fetch instance by id and matching project_name
+    let fetched_instance = instance_get(
+        &client,
+        format!(
+            "/v1/instances/{}?project={}",
+            instance.identity.id, project.identity.name
+        )
+        .as_str(),
+    )
+    .await;
+    assert_eq!(fetched_instance.identity.id, instance.identity.id);
+
+    // Fetch instance by id and matching project_id
+    let fetched_instance = instance_get(
+        &client,
+        format!(
+            "/v1/instances/{}?project={}",
+            instance.identity.id, project.identity.id
+        )
+        .as_str(),
+    )
+    .await;
+    assert_eq!(fetched_instance.identity.id, instance.identity.id);
+
+    // A project selector that does NOT match the instance's project yields a
+    // 404, regardless of whether the mismatching project is given by name or
+    // id, and whether or not it actually exists.
+    let other_project = create_project(client, "other-project").await;
+
+    // by id + wrong (but existing) project name
+    let error = object_get_error(
+        client,
+        format!(
+            "/v1/instances/{}?project={}",
+            instance.identity.id, other_project.identity.name
+        )
+        .as_str(),
+        StatusCode::NOT_FOUND,
+    )
+    .await;
+    assert_eq!(
+        error.message,
+        format!("not found: instance with id \"{}\"", instance.identity.id)
+    );
+
+    // by id + wrong (but existing) project id
+    object_get_error(
+        client,
+        format!(
+            "/v1/instances/{}?project={}",
+            instance.identity.id, other_project.identity.id
+        )
+        .as_str(),
+        StatusCode::NOT_FOUND,
+    )
+    .await;
+
+    // by id + nonexistent project name
+    object_get_error(
+        client,
+        format!(
+            "/v1/instances/{}?project=does-not-exist",
+            instance.identity.id
+        )
+        .as_str(),
+        StatusCode::NOT_FOUND,
+    )
+    .await;
 }
 
 #[nexus_test]

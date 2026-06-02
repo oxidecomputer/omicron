@@ -55,7 +55,7 @@ pub(crate) async fn instance_start(
         };
 
     let instance_lookup =
-        nexus.instance_lookup(&opctx, instance_selector).unwrap();
+        nexus.instance_lookup(&opctx, instance_selector).await.unwrap();
     nexus
         .instance_start(&opctx, &instance_lookup, instance_start::Reason::User)
         .await
@@ -75,7 +75,7 @@ pub(crate) async fn instance_stop(
         };
 
     let instance_lookup =
-        nexus.instance_lookup(&opctx, instance_selector).unwrap();
+        nexus.instance_lookup(&opctx, instance_selector).await.unwrap();
     nexus
         .instance_stop(&opctx, &instance_lookup)
         .await
@@ -96,7 +96,7 @@ pub(crate) async fn instance_stop_by_name(
         };
 
     let instance_lookup =
-        nexus.instance_lookup(&opctx, instance_selector).unwrap();
+        nexus.instance_lookup(&opctx, instance_selector).await.unwrap();
     nexus
         .instance_stop(&opctx, &instance_lookup)
         .await
@@ -117,7 +117,7 @@ pub(crate) async fn instance_delete_by_name(
         };
 
     let instance_lookup =
-        nexus.instance_lookup(&opctx, instance_selector).unwrap();
+        nexus.instance_lookup(&opctx, instance_selector).await.unwrap();
     nexus
         .project_destroy_instance(&opctx, &instance_lookup)
         .await
@@ -181,7 +181,7 @@ pub(crate) async fn instance_simulate_by_name(
         };
 
     let instance_lookup =
-        nexus.instance_lookup(&opctx, instance_selector).unwrap();
+        nexus.instance_lookup(&opctx, instance_selector).await.unwrap();
     let (.., instance) = instance_lookup.fetch().await.unwrap();
     let instance_id = InstanceUuid::from_untyped_uuid(instance.id());
     let VmmAndSledIds { vmm_id, sled_id } =
@@ -274,7 +274,7 @@ pub async fn instance_fetch_by_name(
         };
 
     let instance_lookup =
-        nexus.instance_lookup(&opctx, instance_selector).unwrap();
+        nexus.instance_lookup(&opctx, instance_selector).await.unwrap();
     let (_, _, authz_instance, ..) = instance_lookup.fetch().await.unwrap();
 
     let db_state = datastore
@@ -322,7 +322,7 @@ pub async fn instance_wait_for_state_by_name(
         };
 
     let instance_lookup =
-        nexus.instance_lookup(&opctx, instance_selector).unwrap();
+        nexus.instance_lookup(&opctx, instance_selector).await.unwrap();
     let (_, _, authz_instance, ..) = instance_lookup.fetch().await.unwrap();
 
     instance_poll_state(cptestctx, &opctx, authz_instance, desired_state).await

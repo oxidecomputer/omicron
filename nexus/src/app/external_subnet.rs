@@ -159,7 +159,8 @@ impl super::Nexus {
             },
         };
         let (.., authz_instance, db_instance) = self
-            .instance_lookup(opctx, instance_selector)?
+            .instance_lookup(opctx, instance_selector)
+            .await?
             .fetch_for(authz::Action::Modify)
             .await?;
         if db_instance.project_id != db_subnet.project_id {
@@ -204,7 +205,8 @@ impl super::Nexus {
             instance: NameOrId::Id(instance_id.into_untyped_uuid()),
         };
         let (.., authz_instance, _db_instance) = self
-            .instance_lookup(opctx, instance_selector)?
+            .instance_lookup(opctx, instance_selector)
+            .await?
             .fetch_for(authz::Action::Modify)
             .await?;
         let params = subnet_detach::Params {

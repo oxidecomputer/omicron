@@ -215,7 +215,7 @@ impl super::Nexus {
                 };
 
                 let instance =
-                    self.instance_lookup(opctx, instance_selector)?;
+                    self.instance_lookup(opctx, instance_selector).await?;
 
                 let ip_version = match db_fip.ip {
                     ipnetwork::IpNetwork::V4(_) => IpVersion::V4,
@@ -255,7 +255,7 @@ impl super::Nexus {
             project: None,
             instance: parent_id.into(),
         };
-        let instance = self.instance_lookup(opctx, instance_selector)?;
+        let instance = self.instance_lookup(opctx, instance_selector).await?;
         let attach_params = &instance::ExternalIpDetach::Floating {
             floating_ip: authz_fip.id().into(),
         };

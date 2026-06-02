@@ -2748,7 +2748,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 instance: path.instance,
             };
             let instance_lookup =
-                nexus.instance_lookup(&opctx, instance_selector)?;
+                nexus.instance_lookup(&opctx, instance_selector).await?;
             let (.., authz_instance) =
                 instance_lookup.lookup_for(authz::Action::Read).await?;
             let instance_and_vmm = nexus
@@ -2777,7 +2777,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 instance: path.instance,
             };
             let instance_lookup =
-                nexus.instance_lookup(&opctx, instance_selector)?;
+                nexus.instance_lookup(&opctx, instance_selector).await?;
             nexus.project_destroy_instance(&opctx, &instance_lookup).await?;
             Ok(HttpResponseDeleted())
         })
@@ -2799,7 +2799,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
         };
         audit_and_time(&rqctx, |opctx, nexus| async move {
             let instance_lookup =
-                nexus.instance_lookup(&opctx, instance_selector)?;
+                nexus.instance_lookup(&opctx, instance_selector).await?;
             let instance = nexus
                 .instance_reconfigure(
                     &opctx,
@@ -2825,7 +2825,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
         };
         audit_and_time(&rqctx, |opctx, nexus| async move {
             let instance_lookup =
-                nexus.instance_lookup(&opctx, instance_selector)?;
+                nexus.instance_lookup(&opctx, instance_selector).await?;
             let instance =
                 nexus.instance_reboot(&opctx, &instance_lookup).await?;
             Ok(HttpResponseAccepted(instance.into()))
@@ -2846,7 +2846,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
         };
         audit_and_time(&rqctx, |opctx, nexus| async move {
             let instance_lookup =
-                nexus.instance_lookup(&opctx, instance_selector)?;
+                nexus.instance_lookup(&opctx, instance_selector).await?;
             let instance = nexus
                 .instance_start(
                     &opctx,
@@ -2872,7 +2872,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
         };
         audit_and_time(&rqctx, |opctx, nexus| async move {
             let instance_lookup =
-                nexus.instance_lookup(&opctx, instance_selector)?;
+                nexus.instance_lookup(&opctx, instance_selector).await?;
             let instance =
                 nexus.instance_stop(&opctx, &instance_lookup).await?;
             Ok(HttpResponseAccepted(instance.into()))
@@ -2898,7 +2898,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 instance: path.instance,
             };
             let instance_lookup =
-                nexus.instance_lookup(&opctx, instance_selector)?;
+                nexus.instance_lookup(&opctx, instance_selector).await?;
             let data = nexus
                 .instance_serial_console_data(&opctx, &instance_lookup, &query)
                 .await?;
@@ -2932,7 +2932,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             None,
         )
         .await;
-        match nexus.instance_lookup(&opctx, instance_selector) {
+        match nexus.instance_lookup(&opctx, instance_selector).await {
             Ok(instance_lookup) => {
                 nexus
                     .instance_serial_console_stream(
@@ -2979,7 +2979,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 instance: path.instance,
             };
             let instance_lookup =
-                nexus.instance_lookup(&opctx, instance_selector)?;
+                nexus.instance_lookup(&opctx, instance_selector).await?;
             let ssh_keys = nexus
                 .instance_ssh_keys_list(&opctx, &instance_lookup, &paginated_by)
                 .await?
@@ -3021,7 +3021,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 instance: path.instance,
             };
             let instance_lookup =
-                nexus.instance_lookup(&opctx, instance_selector)?;
+                nexus.instance_lookup(&opctx, instance_selector).await?;
             let disks = nexus
                 .instance_list_disks(&opctx, &instance_lookup, &paginated_by)
                 .await?
@@ -3056,7 +3056,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 instance: path.instance,
             };
             let instance_lookup =
-                nexus.instance_lookup(&opctx, instance_selector)?;
+                nexus.instance_lookup(&opctx, instance_selector).await?;
             let disk = nexus
                 .instance_attach_disk(&opctx, &instance_lookup, disk)
                 .await?;
@@ -3080,7 +3080,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 instance: path.instance,
             };
             let instance_lookup =
-                nexus.instance_lookup(&opctx, instance_selector)?;
+                nexus.instance_lookup(&opctx, instance_selector).await?;
             let disk = nexus
                 .instance_detach_disk(&opctx, &instance_lookup, disk)
                 .await?;
@@ -3112,7 +3112,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 instance: path.instance,
             };
             let instance_lookup =
-                nexus.instance_lookup(&opctx, instance_selector)?;
+                nexus.instance_lookup(&opctx, instance_selector).await?;
             let groups = nexus
                 .instance_list_affinity_groups(
                     &opctx,
@@ -3161,7 +3161,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 instance: path.instance,
             };
             let instance_lookup =
-                nexus.instance_lookup(&opctx, instance_selector)?;
+                nexus.instance_lookup(&opctx, instance_selector).await?;
             let groups = nexus
                 .instance_list_anti_affinity_groups(
                     &opctx,
@@ -3323,7 +3323,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 instance: path.instance,
             };
             let instance_lookup =
-                nexus.instance_lookup(&opctx, instance_selector)?;
+                nexus.instance_lookup(&opctx, instance_selector).await?;
 
             let group = nexus
                 .affinity_group_member_view(
@@ -3362,7 +3362,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 instance: path.instance,
             };
             let instance_lookup =
-                nexus.instance_lookup(&opctx, instance_selector)?;
+                nexus.instance_lookup(&opctx, instance_selector).await?;
 
             let member = nexus
                 .affinity_group_member_add(
@@ -3396,7 +3396,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 instance: path.instance,
             };
             let instance_lookup =
-                nexus.instance_lookup(&opctx, instance_selector)?;
+                nexus.instance_lookup(&opctx, instance_selector).await?;
             nexus
                 .affinity_group_member_delete(
                     &opctx,
@@ -3616,7 +3616,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 instance: path.instance,
             };
             let instance_lookup =
-                nexus.instance_lookup(&opctx, instance_selector)?;
+                nexus.instance_lookup(&opctx, instance_selector).await?;
 
             let group = nexus
                 .anti_affinity_group_member_instance_view(
@@ -3655,7 +3655,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 instance: path.instance,
             };
             let instance_lookup =
-                nexus.instance_lookup(&opctx, instance_selector)?;
+                nexus.instance_lookup(&opctx, instance_selector).await?;
 
             let member = nexus
                 .anti_affinity_group_member_instance_add(
@@ -3689,7 +3689,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 instance: path.instance,
             };
             let instance_lookup =
-                nexus.instance_lookup(&opctx, instance_selector)?;
+                nexus.instance_lookup(&opctx, instance_selector).await?;
 
             nexus
                 .anti_affinity_group_member_instance_delete(
@@ -4891,8 +4891,9 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let pag_params = data_page_params_for(&rqctx, &query)?;
             let scan_params = ScanByNameOrId::from_query(&query)?;
             let paginated_by = name_or_id_pagination(&pag_params, scan_params)?;
-            let instance_lookup =
-                nexus.instance_lookup(&opctx, scan_params.selector.clone())?;
+            let instance_lookup = nexus
+                .instance_lookup(&opctx, scan_params.selector.clone())
+                .await?;
             let interfaces = nexus
                 .instance_network_interface_list(
                     &opctx,
@@ -4924,7 +4925,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
         audit_and_time(&rqctx, |opctx, nexus| async move {
             let query = query_params.into_inner();
             let interface_params = interface_params.into_inner();
-            let instance_lookup = nexus.instance_lookup(&opctx, query)?;
+            let instance_lookup = nexus.instance_lookup(&opctx, query).await?;
             let iface = nexus
                 .network_interface_create(
                     &opctx,
@@ -4951,10 +4952,9 @@ impl NexusExternalApi for NexusExternalApiImpl {
                     instance: query.instance,
                     network_interface: path.interface,
                 };
-            let interface_lookup = nexus.instance_network_interface_lookup(
-                &opctx,
-                interface_selector,
-            )?;
+            let interface_lookup = nexus
+                .instance_network_interface_lookup(&opctx, interface_selector)
+                .await?;
             nexus
                 .instance_network_interface_delete(&opctx, &interface_lookup)
                 .await?;
@@ -4982,7 +4982,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
                     network_interface: path.interface,
                 };
             let (.., interface) = nexus
-                .instance_network_interface_lookup(&opctx, interface_selector)?
+                .instance_network_interface_lookup(&opctx, interface_selector)
+                .await?
                 .fetch()
                 .await?;
             interface.try_into().map(HttpResponseOk).map_err(HttpError::from)
@@ -5014,7 +5015,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 .instance_network_interface_lookup(
                     &opctx,
                     network_interface_selector,
-                )?;
+                )
+                .await?;
             let interface = nexus
                 .instance_network_interface_update(
                     &opctx,
@@ -5047,7 +5049,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 instance: path.instance,
             };
             let instance_lookup =
-                nexus.instance_lookup(&opctx, instance_selector)?;
+                nexus.instance_lookup(&opctx, instance_selector).await?;
             let ips = nexus
                 .instance_list_external_ips(&opctx, &instance_lookup)
                 .await?;
@@ -5076,7 +5078,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 instance: path.instance,
             };
             let instance_lookup =
-                nexus.instance_lookup(&opctx, instance_selector)?;
+                nexus.instance_lookup(&opctx, instance_selector).await?;
             let (pool, ip_version) = match pool_selector {
                 ip_pool::PoolSelector::Explicit { pool } => (Some(pool), None),
                 ip_pool::PoolSelector::Auto { ip_version } => {
@@ -5109,7 +5111,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 instance: path.instance,
             };
             let instance_lookup =
-                nexus.instance_lookup(&opctx, instance_selector)?;
+                nexus.instance_lookup(&opctx, instance_selector).await?;
             nexus
                 .instance_detach_external_ip(
                     &opctx,
@@ -5146,7 +5148,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 instance: path.instance,
             };
             let instance_lookup =
-                nexus.instance_lookup(&opctx, instance_selector)?;
+                nexus.instance_lookup(&opctx, instance_selector).await?;
             let subnets = nexus
                 .instance_list_external_subnets(&opctx, &instance_lookup)
                 .await?;
@@ -5192,7 +5194,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 instance: path.instance,
             };
             let instance_lookup =
-                nexus.instance_lookup(&opctx, instance_selector)?;
+                nexus.instance_lookup(&opctx, instance_selector).await?;
             let members = nexus
                 .instance_list_multicast_groups(
                     &opctx,
@@ -5238,7 +5240,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 instance: path.instance.clone(),
             };
             let instance_lookup =
-                nexus.instance_lookup(&opctx, instance_selector)?;
+                nexus.instance_lookup(&opctx, instance_selector).await?;
             let result = nexus
                 .instance_join_multicast_group(
                     &opctx,
@@ -5271,7 +5273,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 instance: path.instance.clone(),
             };
             let instance_lookup =
-                nexus.instance_lookup(&opctx, instance_selector)?;
+                nexus.instance_lookup(&opctx, instance_selector).await?;
             let group_selector = multicast::MulticastGroupSelector {
                 multicast_group: path.multicast_group,
             };
@@ -5319,7 +5321,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let instance_lookup = apictx
                 .context
                 .nexus
-                .instance_lookup(&opctx, instance_selector)?;
+                .instance_lookup(&opctx, instance_selector)
+                .await?;
             let result = apictx
                 .context
                 .nexus

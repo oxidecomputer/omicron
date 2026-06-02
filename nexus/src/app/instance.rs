@@ -348,9 +348,11 @@ async fn normalize_anti_affinity_groups(
 impl super::Nexus {
     /// Look up an instance by name or UUID.
     ///
-    /// The `project` parameter is required for name-based lookup (provides scope)
-    /// and must NOT be specified for UUID-based lookup.
-    pub fn instance_lookup<'a>(
+    /// The `project` parameter is required for name-based lookup (provides
+    /// scope). For UUID-based lookup the project is optional; if it is
+    /// supplied, it is validated against the instance's actual project rather
+    /// than rejected (see #10517).
+    pub async fn instance_lookup<'a>(
         &'a self,
         opctx: &'a OpContext,
         instance_selector: instance::InstanceSelector,
@@ -365,6 +367,47 @@ impl super::Nexus {
                 Ok(instance)
             }
             instance::InstanceSelector {
+                instance: NameOrId::Id(id),
+                project: Some(project),
+            } => {
+                // Instance addressed by ID with a project also supplied:
+                // validate that the project matches the instance's actual
+                // project rather than rejecting the request (#10517).
+                //
+                // The by-id lookup already resolves the full ancestor chain, so
+                // `lookup_for` hands us the instance's real project's authz id
+                // at no extra query. We resolve the supplied project to an id
+                // (free if it's already an id) and compare. On mismatch we
+                // return the same "instance not found by id" error the caller
+                // would see for a nonexistent instance, so we don't leak which
+                // half of the selector was wrong.
+                let instance =
+                    LookupPath::new(opctx, &self.db_datastore).instance_id(id);
+                let (_, authz_project, _) =
+                    instance.lookup_for(authz::Action::Read).await?;
+                let expected_project_id = match project {
+                    NameOrId::Id(project_id) => project_id,
+                    NameOrId::Name(name) => self
+                        .project_lookup(
+                            opctx,
+                            project::ProjectSelector {
+                                project: NameOrId::Name(name),
+                            },
+                        )?
+                        .lookup_for(authz::Action::Read)
+                        .await?
+                        .1
+                        .id(),
+                };
+                if authz_project.id() != expected_project_id {
+                    return Err(Error::not_found_by_id(
+                        omicron_common::api::external::ResourceType::Instance,
+                        &id,
+                    ));
+                }
+                Ok(instance)
+            }
+            instance::InstanceSelector {
                 instance: NameOrId::Name(name),
                 project: Some(project),
             } => {
@@ -376,11 +419,6 @@ impl super::Nexus {
                     .instance_name_owned(name.into());
                 Ok(instance)
             }
-            instance::InstanceSelector {
-                instance: NameOrId::Id(_), ..
-            } => Err(Error::invalid_request(
-                "when providing instance as an ID project should not be specified",
-            )),
             _ => Err(Error::invalid_request(
                 "instance should either be UUID or project should be specified",
             )),
