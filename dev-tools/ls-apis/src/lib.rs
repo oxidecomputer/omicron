@@ -6,6 +6,7 @@
 
 mod api_metadata;
 mod cargo;
+mod errors;
 pub mod plural;
 mod system_apis;
 mod workspaces;
@@ -16,6 +17,8 @@ pub use api_metadata::ApiExpectedConsumer;
 pub use api_metadata::ApiMetadata;
 pub use api_metadata::ServerComponent;
 pub use api_metadata::VersionedHow;
+pub use errors::LoadError;
+pub use errors::LoadErrors;
 pub use system_apis::ApiDependencyFilter;
 pub use system_apis::FailedConsumerCheck;
 pub use system_apis::SystemApis;
