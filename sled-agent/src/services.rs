@@ -2973,7 +2973,6 @@ impl ServiceManager {
                                     model,
                                 );
                         }
-                        Baseboard::Unknown => panic!("deprecated"),
                     }
 
                     for address in addresses {

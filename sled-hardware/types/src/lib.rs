@@ -96,19 +96,6 @@ impl OxideSled {
 pub enum Baseboard {
     Gimlet { identifier: String, model: String, revision: u32 },
 
-    // XXX: WARNING: All uses of this variant have been removed from the
-    // code base.
-    //
-    // DO NOT ADD NEW USE CASES!!!
-    //
-    // Changing this type by removing the `Unknown` variant changes the API
-    // of the sled-agent, because of the bootstore. The bootstore is going to
-    // be removed in the future, which should remove the need to report the
-    // Baseboard at all. We can remove this variant in the same PR.
-    //
-    // https://github.com/oxidecomputer/omicron/issues/9311.
-    Unknown,
-
     Pc { identifier: String, model: String },
 }
 
@@ -148,7 +135,6 @@ impl Baseboard {
                 .map(|sled| sled.name())
                 .unwrap_or("oxide"),
             Self::Pc { .. } => "pc",
-            Self::Unknown => panic!("deprecated!"),
         }
     }
 
@@ -156,7 +142,6 @@ impl Baseboard {
         match &self {
             Self::Gimlet { identifier, .. } => &identifier,
             Self::Pc { identifier, .. } => &identifier,
-            Self::Unknown => panic!("deprecated!"),
         }
     }
 
@@ -164,7 +149,6 @@ impl Baseboard {
         match self {
             Self::Gimlet { model, .. } => &model,
             Self::Pc { model, .. } => &model,
-            Self::Unknown => panic!("deprecated!"),
         }
     }
 
@@ -172,7 +156,6 @@ impl Baseboard {
         match self {
             Self::Gimlet { revision, .. } => *revision,
             Self::Pc { .. } => 0,
-            Self::Unknown => panic!("deprecated!"),
         }
     }
 }
@@ -187,7 +170,6 @@ impl std::fmt::Display for Baseboard {
             Baseboard::Pc { identifier, model } => {
                 write!(f, "pc-{identifier}-{model}")
             }
-            Baseboard::Unknown => panic!("deprecated!"),
         }
     }
 }
@@ -280,7 +262,6 @@ impl From<Baseboard> for BaseboardId {
             Baseboard::Pc { identifier, model } => {
                 BaseboardId { part_number: model, serial_number: identifier }
             }
-            Baseboard::Unknown => panic!("deprecated!"),
         }
     }
 }

@@ -35,14 +35,58 @@ use oxnet::IpNet;
 use schemars::schema::{Schema, SchemaObject};
 use schemars::{JsonSchema, r#gen::SchemaGenerator};
 use serde::{Deserialize, Serialize};
-// Export these types for convenience -- this way, dependents don't have to
+// Export this type for convenience -- this way, dependents don't have to
 // depend on sled-hardware-types.
-pub use sled_hardware_types::{Baseboard, SledCpuFamily};
+pub use sled_hardware_types::SledCpuFamily;
 use strum::EnumIter;
 use tufaceous_artifact::ArtifactHash;
 use uuid::Uuid;
 
 use crate::impls::inventory::SourceNatConfigError;
+
+/// Describes properties that should uniquely identify a Gimlet.
+///
+/// This is the frozen, original form of the baseboard as published by Sled
+/// Agent API versions 1 through 39. Newer versions report a [`BaseboardId`]
+/// instead. The `Unknown` variant is retained here solely to preserve the
+/// blessed schema of these older versions; it is no longer produced.
+///
+/// [`BaseboardId`]: sled_hardware_types::BaseboardId
+#[derive(
+    Clone,
+    Debug,
+    PartialOrd,
+    Ord,
+    PartialEq,
+    Eq,
+    Hash,
+    Serialize,
+    Deserialize,
+    JsonSchema,
+)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum Baseboard {
+    Gimlet { identifier: String, model: String, revision: u32 },
+
+    Unknown,
+
+    Pc { identifier: String, model: String },
+}
+
+impl From<sled_hardware_types::Baseboard> for Baseboard {
+    fn from(value: sled_hardware_types::Baseboard) -> Self {
+        match value {
+            sled_hardware_types::Baseboard::Gimlet {
+                identifier,
+                model,
+                revision,
+            } => Baseboard::Gimlet { identifier, model, revision },
+            sled_hardware_types::Baseboard::Pc { identifier, model } => {
+                Baseboard::Pc { identifier, model }
+            }
+        }
+    }
+}
 
 /// Identifies information about disks which may be attached to Sleds.
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]

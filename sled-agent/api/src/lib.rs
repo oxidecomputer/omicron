@@ -21,7 +21,7 @@ use omicron_common::api::internal::{
 };
 use sled_agent_types_versions::{
     latest, v1, v4, v6, v7, v9, v10, v11, v12, v14, v16, v17, v18, v20, v22,
-    v24, v25, v26, v28, v29, v30, v31, v32, v33, v34, v37, v39,
+    v24, v25, v26, v28, v29, v30, v31, v33, v34, v37, v39,
 };
 use sled_diagnostics::SledDiagnosticsQueryOutput;
 use slog_error_chain::InlineErrorChain;
@@ -38,6 +38,7 @@ api_versions!([
     // |  example for the next person.
     // v
     // (next_int, IDENT),
+    (42, INVENTORY_BASEBOARD_ID),
     (41, ADD_INSTANCE_PRIMARY_NIC_MTU),
     (40, ADD_FMD_TO_INVENTORY),
     (39, BOOTSTORE_SERVICE_NAT_GENERATION),
@@ -1053,7 +1054,11 @@ pub trait SledAgentApi {
     #[endpoint {
         method = GET,
         path = "/inventory",
+<<<<<<< HEAD
         versions = VERSION_ADD_FMD_TO_INVENTORY..,
+=======
+        versions = VERSION_INVENTORY_BASEBOARD_ID..,
+>>>>>>> 09d5962b1 (Remove `Baseboard::Unknown` variant)
     }]
     async fn inventory(
         rqctx: RequestContext<Self::Context>,
@@ -1064,7 +1069,11 @@ pub trait SledAgentApi {
         operation_id = "inventory",
         method = GET,
         path = "/inventory",
+<<<<<<< HEAD
         versions = VERSION_MODIFY_SVC_ENABLED_NOT_ONLINE_STATE..VERSION_ADD_FMD_TO_INVENTORY,
+=======
+        versions = VERSION_MODIFY_SVC_ENABLED_NOT_ONLINE_STATE..VERSION_INVENTORY_BASEBOARD_ID,
+>>>>>>> 09d5962b1 (Remove `Baseboard::Unknown` variant)
     }]
     async fn inventory_v37(
         rqctx: RequestContext<Self::Context>,

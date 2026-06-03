@@ -21,6 +21,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::v1;
+use crate::v1::inventory::Baseboard;
 use crate::v1::inventory::{
     BootPartitionContents, ConfigReconcilerInventoryResult,
     HostPhase2DesiredSlots, InventoryDataset, InventoryDisk, InventoryZpool,
@@ -28,7 +29,7 @@ use crate::v1::inventory::{
     OrphanedDataset, RemoveMupdateOverrideInventory, SledRole, SourceNatConfig,
     ZoneImageResolverInventory,
 };
-use sled_hardware_types::{Baseboard, SledCpuFamily};
+use sled_hardware_types::SledCpuFamily;
 
 /// Identity and basic status information about this sled agent
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
