@@ -76,7 +76,7 @@ pub struct BgpPeerConfig {
     pub vlan_id: Option<u16>,
     /// The local IP address to use when initiating BGP sessions with this peer.
     #[serde(default)]
-    pub src_addr: Option<IpAddr>,
+    pub src_addr: Option<v30::RouterPeerIpAddr>,
 }
 
 impl From<v30::BgpPeerConfig> for BgpPeerConfig {

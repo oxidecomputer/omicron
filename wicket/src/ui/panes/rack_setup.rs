@@ -39,6 +39,7 @@ use sled_agent_types::early_networking::RouteConfig;
 use sled_agent_types::early_networking::SwitchSlot;
 use sled_agent_types::early_networking::UplinkAddress;
 use std::borrow::Cow;
+use std::net::IpAddr;
 use wicket_common::rack_setup::BgpAuthKeyInfo;
 use wicket_common::rack_setup::BgpAuthKeyStatus;
 use wicket_common::rack_setup::CurrentRssUserConfigInsensitive;
@@ -1026,7 +1027,10 @@ fn rss_config_text<'a>(
                     if let Some(src_addr) = src_addr {
                         settings.extend([
                             Span::styled(" src_addr=", label_style),
-                            Span::styled(src_addr.to_string(), ok_style),
+                            Span::styled(
+                                IpAddr::from(*src_addr).to_string(),
+                                ok_style,
+                            ),
                         ]);
                     }
 

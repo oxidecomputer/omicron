@@ -16,6 +16,7 @@ use sled_hardware_types::Baseboard;
 use std::borrow::Cow;
 use std::collections::BTreeSet;
 use std::fmt;
+use std::net::IpAddr;
 use toml_edit::Array;
 use toml_edit::ArrayOfTables;
 use toml_edit::DocumentMut;
@@ -537,7 +538,7 @@ fn populate_uplink_table(cfg: &UserSpecifiedPortConfig) -> Table {
 
         // src_addr
         if let Some(x) = src_addr {
-            peer.insert("src_addr", string_item(&x.to_string()));
+            peer.insert("src_addr", string_item(&IpAddr::from(*x).to_string()));
         }
 
         peers.push(peer);

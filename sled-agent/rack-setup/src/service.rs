@@ -129,6 +129,7 @@ use std::collections::BTreeSet;
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::iter;
+use std::net::IpAddr;
 use std::net::{Ipv6Addr, SocketAddrV6};
 use std::time::Duration;
 use thiserror::Error;
@@ -942,7 +943,7 @@ impl ServiceInner {
                                 allowed_export: b.allowed_export.clone(),
                                 allowed_import: b.allowed_import.clone(),
                                 vlan_id: b.vlan_id,
-                                src_addr: b.src_addr,
+                                src_addr: b.src_addr.map(IpAddr::from),
                             })
                             .collect(),
                         lldp: config.lldp.as_ref().map(|lp| {

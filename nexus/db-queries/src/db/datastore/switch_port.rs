@@ -40,6 +40,7 @@ use omicron_common::api::external::{
 use ref_cast::RefCast;
 use serde::{Deserialize, Serialize};
 use sled_agent_types::early_networking::ImportExportPolicy;
+use sled_agent_types::early_networking::RouterPeerIpAddr;
 use sled_agent_types::early_networking::RouterPeerType;
 use sled_agent_types::early_networking::SwitchSlot;
 use slog_error_chain::InlineErrorChain;
@@ -138,7 +139,15 @@ impl BgpPeerFromDbBuilder<'_> {
                 communities,
                 allowed_import,
                 allowed_export,
-                src_addr: p.src_addr(),
+                src_addr: p
+                    .src_addr()
+                    .map(RouterPeerIpAddr::try_from)
+                    .transpose()
+                    .map_err(|err| {
+                        E::internal_error(
+                            InlineErrorChain::new(&err).to_string(),
+                        )
+                    })?,
             },
         })
     }

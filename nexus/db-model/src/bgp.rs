@@ -19,6 +19,7 @@ use sled_agent_types::early_networking::ImportExportPolicy;
 use sled_agent_types::early_networking::MaxPathConfig;
 use sled_agent_types::early_networking::RouterLifetimeConfig;
 use sled_agent_types::early_networking::RouterLifetimeConfigError;
+use sled_agent_types::early_networking::RouterPeerIpAddr;
 use sled_agent_types::early_networking::RouterPeerIpAddrError;
 use sled_agent_types::early_networking::RouterPeerType;
 use slog_error_chain::InlineErrorChain;
@@ -214,7 +215,10 @@ impl TryFrom<BgpPeerView> for BgpPeerConfig {
             allowed_export: ImportExportPolicy::NoFiltering,
             allowed_import: ImportExportPolicy::NoFiltering,
             vlan_id: value.vlan_id.map(|x| x.0),
-            src_addr: value.src_addr.map(|ip| ip.ip()),
+            src_addr: value
+                .src_addr
+                .map(|ip| RouterPeerIpAddr::try_from(ip.ip()))
+                .transpose()?,
         })
     }
 }

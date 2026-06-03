@@ -29,8 +29,8 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sled_agent_types_versions::v1::early_networking::ImportExportPolicy;
 use sled_agent_types_versions::v20::early_networking::MaxPathConfig;
+use sled_agent_types_versions::v30::early_networking::RouterPeerIpAddr;
 use sled_agent_types_versions::v30::early_networking::RouterPeerType;
-use std::net::IpAddr;
 
 /// Parameters for updating a BGP configuration.
 ///
@@ -115,7 +115,7 @@ pub struct BgpPeer {
 
     /// Local IP address to use as the source for BGP sessions with this peer.
     /// If not set, the system will choose an appropriate source address.
-    pub src_addr: Option<IpAddr>,
+    pub src_addr: Option<RouterPeerIpAddr>,
 }
 
 impl From<crate::v2026_04_16_00::networking::BgpPeer> for BgpPeer {
