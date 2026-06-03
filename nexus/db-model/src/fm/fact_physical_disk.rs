@@ -107,29 +107,36 @@ impl FmFactPhysicalDisk {
     /// indicates a corrupt row (e.g. hand-edited) and yields an internal
     /// error rather than a panic.
     pub fn into_fact(self) -> Result<fm::case::Fact, Error> {
-        let payload = match self.kind {
+        let kind = self.kind;
+        let payload = match kind {
             FmFactPhysicalDiskKind::ZpoolUnhealthy => {
                 FactPayload::PhysicalDisk(DiskFact::ZpoolUnhealthy(
                     ZpoolUnhealthyFactPayload {
                         physical_disk_id: self
                             .physical_disk_id
-                            .ok_or_else(|| missing_column("physical_disk_id"))?
+                            .ok_or_else(|| {
+                                missing_column(kind, "physical_disk_id")
+                            })?
                             .into(),
                         zpool_id: self
                             .zpool_id
-                            .ok_or_else(|| missing_column("zpool_id"))?
+                            .ok_or_else(|| missing_column(kind, "zpool_id"))?
                             .into(),
                         last_seen_health: self
                             .last_seen_health
-                            .ok_or_else(|| missing_column("last_seen_health"))?
+                            .ok_or_else(|| {
+                                missing_column(kind, "last_seen_health")
+                            })?
                             .into(),
                         observed_in_inv: self
                             .observed_in_inv
-                            .ok_or_else(|| missing_column("observed_in_inv"))?
+                            .ok_or_else(|| {
+                                missing_column(kind, "observed_in_inv")
+                            })?
                             .into(),
-                        time_observed: self
-                            .time_observed
-                            .ok_or_else(|| missing_column("time_observed"))?,
+                        time_observed: self.time_observed.ok_or_else(|| {
+                            missing_column(kind, "time_observed")
+                        })?,
                     },
                 ))
             }
@@ -143,10 +150,10 @@ impl FmFactPhysicalDisk {
     }
 }
 
-fn missing_column(column: &str) -> Error {
+fn missing_column(kind: FmFactPhysicalDiskKind, column: &str) -> Error {
     Error::internal_error(&format!(
-        "fm_fact_physical_disk row of kind 'zpool_unhealthy' has a NULL \
-         {column} (violates the zpool_unhealthy_columns_present CHECK \
-         constraint)"
+        "fm_fact_physical_disk row of kind {kind:?} has a NULL {column}, \
+         violating the CHECK constraint requiring it to be non-NULL for \
+         this kind"
     ))
 }
