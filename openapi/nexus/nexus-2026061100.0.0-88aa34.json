@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "2026060800.0.0"
+    "version": "2026061100.0.0"
   },
   "paths": {
     "/device/auth": {
@@ -5889,6 +5889,13 @@
         "parameters": [
           {
             "in": "query",
+            "name": "ip_version",
+            "schema": {
+              "$ref": "#/components/schemas/IpVersion"
+            }
+          },
+          {
+            "in": "query",
             "name": "limit",
             "description": "Maximum number of items returned by a single call",
             "schema": {
@@ -5905,6 +5912,13 @@
             "schema": {
               "nullable": true,
               "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "pool_type",
+            "schema": {
+              "$ref": "#/components/schemas/IpPoolType"
             }
           },
           {
@@ -9394,6 +9408,20 @@
         "parameters": [
           {
             "in": "query",
+            "name": "assignment",
+            "schema": {
+              "$ref": "#/components/schemas/IpPoolAssignment"
+            }
+          },
+          {
+            "in": "query",
+            "name": "ip_version",
+            "schema": {
+              "$ref": "#/components/schemas/IpVersion"
+            }
+          },
+          {
+            "in": "query",
             "name": "limit",
             "description": "Maximum number of items returned by a single call",
             "schema": {
@@ -9410,6 +9438,13 @@
             "schema": {
               "nullable": true,
               "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "pool_type",
+            "schema": {
+              "$ref": "#/components/schemas/IpPoolType"
             }
           },
           {
@@ -9581,6 +9616,54 @@
         "responses": {
           "204": {
             "description": "successful deletion"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/system/ip-pools/{pool}/assignment": {
+      "post": {
+        "tags": [
+          "system/ip-pools"
+        ],
+        "summary": "Assign IP pool",
+        "operationId": "system_ip_pool_assign",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pool",
+            "description": "Name or ID of the IP pool",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IpPoolAssignParam"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IpPool"
+                }
+              }
+            }
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -9979,154 +10062,6 @@
                 }
               }
             }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/v1/system/ip-pools-service": {
-      "get": {
-        "tags": [
-          "system/ip-pools"
-        ],
-        "summary": "Fetch Oxide service IP pool",
-        "operationId": "system_ip_pool_service_view",
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/IpPool"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/v1/system/ip-pools-service/ranges": {
-      "get": {
-        "tags": [
-          "system/ip-pools"
-        ],
-        "summary": "List IP ranges for the Oxide service pool",
-        "description": "Ranges are ordered by their first address.",
-        "operationId": "system_ip_pool_service_range_list",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "limit",
-            "description": "Maximum number of items returned by a single call",
-            "schema": {
-              "nullable": true,
-              "type": "integer",
-              "format": "uint32",
-              "minimum": 1
-            }
-          },
-          {
-            "in": "query",
-            "name": "page_token",
-            "description": "Token returned by previous call to retrieve the subsequent page",
-            "schema": {
-              "nullable": true,
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/IpPoolRangeResultsPage"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "x-dropshot-pagination": {
-          "required": []
-        }
-      }
-    },
-    "/v1/system/ip-pools-service/ranges/add": {
-      "post": {
-        "tags": [
-          "system/ip-pools"
-        ],
-        "summary": "Add IP range to Oxide service pool",
-        "description": "IPv6 ranges are not allowed yet.",
-        "operationId": "system_ip_pool_service_range_add",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/IpRange"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "201": {
-            "description": "successful creation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/IpPoolRange"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/v1/system/ip-pools-service/ranges/remove": {
-      "post": {
-        "tags": [
-          "system/ip-pools"
-        ],
-        "summary": "Remove IP range from Oxide service pool",
-        "operationId": "system_ip_pool_service_range_remove",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/IpRange"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "204": {
-            "description": "resource updated"
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -23897,9 +23832,17 @@
         ]
       },
       "IpPool": {
-        "description": "A collection of IP ranges. If a pool is linked to a silo, IP addresses from the pool can be allocated within that silo.",
+        "description": "A collection of IP ranges.",
         "type": "object",
         "properties": {
+          "assignment": {
+            "description": "What this pool is currently assigned to.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/IpPoolAssignment"
+              }
+            ]
+          },
           "description": {
             "description": "Human-readable free-form text about a resource",
             "type": "string"
@@ -23945,6 +23888,7 @@
           }
         },
         "required": [
+          "assignment",
           "description",
           "id",
           "ip_version",
@@ -23954,10 +23898,50 @@
           "time_modified"
         ]
       },
+      "IpPoolAssignParam": {
+        "description": "Body parameters for reassigning an IP pool.",
+        "type": "object",
+        "properties": {
+          "assignment": {
+            "$ref": "#/components/schemas/IpPoolAssignment"
+          }
+        },
+        "required": [
+          "assignment"
+        ]
+      },
+      "IpPoolAssignment": {
+        "description": "Assignment of an IP pool to resources and services.",
+        "oneOf": [
+          {
+            "description": "Pool is available to be linked to customer silos.",
+            "type": "string",
+            "enum": [
+              "silos"
+            ]
+          },
+          {
+            "description": "Pool is reserved for Oxide-operated rack services (NTP, DNS, etc.).",
+            "type": "string",
+            "enum": [
+              "system_services"
+            ]
+          }
+        ]
+      },
       "IpPoolCreate": {
         "description": "Create-time parameters for an `IpPool`.\n\nFor multicast pools, all ranges must be either Any-Source Multicast (ASM) or Source-Specific Multicast (SSM), but not both. Mixing ASM and SSM ranges in the same pool is not allowed.\n\nASM: IPv4 addresses outside 232.0.0.0/8, IPv6 addresses with flag field != 3 SSM: IPv4 addresses in 232.0.0.0/8, IPv6 addresses with flag field = 3",
         "type": "object",
         "properties": {
+          "assignment": {
+            "description": "What this pool is assigned to (defaults to Silos).",
+            "default": "silos",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/IpPoolAssignment"
+              }
+            ]
+          },
           "description": {
             "type": "string"
           },

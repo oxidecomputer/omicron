@@ -145,6 +145,26 @@ impl From<IpPoolType> for ip_pool_types::IpPoolType {
     }
 }
 
+impl From<ip_pool_types::IpPoolAssignment> for IpPoolAssignment {
+    fn from(value: ip_pool_types::IpPoolAssignment) -> Self {
+        match value {
+            ip_pool_types::IpPoolAssignment::Silos => Self::Silos,
+            ip_pool_types::IpPoolAssignment::SystemServices => {
+                Self::SystemServices
+            }
+        }
+    }
+}
+
+impl From<IpPoolAssignment> for ip_pool_types::IpPoolAssignment {
+    fn from(value: IpPoolAssignment) -> Self {
+        match value {
+            IpPoolAssignment::Silos => Self::Silos,
+            IpPoolAssignment::SystemServices => Self::SystemServices,
+        }
+    }
+}
+
 /// An IP Pool is a collection of IP addresses external to the rack.
 ///
 /// IP pools can be external or internal. External IP pools can be associated
@@ -228,12 +248,11 @@ impl IpPool {
 impl From<IpPool> for ip_pool_types::IpPool {
     fn from(pool: IpPool) -> Self {
         let identity = pool.identity();
-        let pool_type = pool.pool_type;
-
         Self {
             identity,
-            pool_type: pool_type.into(),
+            pool_type: pool.pool_type.into(),
             ip_version: pool.ip_version.into(),
+            assignment: pool.assignment.into(),
         }
     }
 }

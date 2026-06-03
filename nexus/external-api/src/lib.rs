@@ -86,6 +86,7 @@ api_versions!([
     // |  date-based version should be at the top of the list.
     // v
     // (next_yyyy_mm_dd_nn, IDENT),
+    (2026_06_11_00, ADD_SYSTEM_IP_POOL_APIS),
     (2026_06_08_00, INSTANCE_CPU_TYPE_TURIN_V2),
     (2026_06_05_00, EXTERNAL_JUMBO_FRAMES),
     (2026_06_04_00, IMAGE_BLOCK_SIZE_TYPE),
@@ -1226,13 +1227,29 @@ pub trait NexusExternalApi {
         method = GET,
         path = "/v1/ip-pools",
         tags = ["ip-pools"],
-        versions = VERSION_RENAME_POOL_ENDPOINTS..,
+        versions = VERSION_ADD_SYSTEM_IP_POOL_APIS..,
     }]
     async fn ip_pool_list(
         rqctx: RequestContext<Self::Context>,
-        query_params: Query<PaginatedByNameOrId>,
+        query_params: Query<PaginatedByNameOrId<latest::ip_pool::IpPoolFilter>>,
     ) -> Result<
         HttpResponseOk<ResultsPage<latest::ip_pool::SiloIpPool>>,
+        HttpError,
+    >;
+
+    /// List IP pools
+    #[endpoint {
+        operation_id = "ip_pool_list",
+        method = GET,
+        path = "/v1/ip-pools",
+        tags = ["ip-pools"],
+        versions = VERSION_RENAME_POOL_ENDPOINTS..VERSION_ADD_SYSTEM_IP_POOL_APIS,
+    }]
+    async fn ip_pool_list_v2026_02_09_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedByNameOrId>,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<v2026_01_01_00::ip_pool::SiloIpPool>>,
         HttpError,
     >;
 
@@ -1250,9 +1267,7 @@ pub trait NexusExternalApi {
     ) -> Result<
         HttpResponseOk<ResultsPage<v2026_01_01_00::ip_pool::SiloIpPool>>,
         HttpError,
-    > {
-        Self::ip_pool_list(rqctx, query_params).await
-    }
+    >;
 
     /// List IP pools
     #[endpoint {
@@ -1268,13 +1283,7 @@ pub trait NexusExternalApi {
     ) -> Result<
         HttpResponseOk<ResultsPage<v2025_11_20_00::ip_pool::SiloIpPool>>,
         HttpError,
-    > {
-        let page = Self::ip_pool_list(rqctx, query_params).await?.0;
-        Ok(HttpResponseOk(ResultsPage {
-            items: page.items.into_iter().map(Into::into).collect(),
-            next_page: page.next_page,
-        }))
-    }
+    >;
 
     /// Fetch IP pool
     #[endpoint {
@@ -1327,12 +1336,30 @@ pub trait NexusExternalApi {
         method = GET,
         path = "/v1/system/ip-pools",
         tags = ["system/ip-pools"],
-        versions = VERSION_RENAME_POOL_ENDPOINTS..,
+        versions = VERSION_ADD_SYSTEM_IP_POOL_APIS..,
     }]
     async fn system_ip_pool_list(
         rqctx: RequestContext<Self::Context>,
-        query_params: Query<PaginatedByNameOrId>,
+        query_params: Query<
+            PaginatedByNameOrId<latest::ip_pool::SystemIpPoolFilter>,
+        >,
     ) -> Result<HttpResponseOk<ResultsPage<latest::ip_pool::IpPool>>, HttpError>;
+
+    /// List IP pools
+    #[endpoint {
+        operation_id = "system_ip_pool_list",
+        method = GET,
+        path = "/v1/system/ip-pools",
+        tags = ["system/ip-pools"],
+        versions = VERSION_RENAME_POOL_ENDPOINTS..VERSION_ADD_SYSTEM_IP_POOL_APIS,
+    }]
+    async fn system_ip_pool_list_v2026_02_09_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedByNameOrId>,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<v2025_11_20_00::ip_pool::IpPool>>,
+        HttpError,
+    >;
 
     /// List IP pools
     #[endpoint {
@@ -1349,7 +1376,7 @@ pub trait NexusExternalApi {
         HttpResponseOk<ResultsPage<v2025_11_20_00::ip_pool::IpPool>>,
         HttpError,
     > {
-        Self::system_ip_pool_list(rqctx, query_params).await
+        Self::system_ip_pool_list_v2026_02_09_00(rqctx, query_params).await
     }
 
     /// Create IP pool
@@ -1357,12 +1384,30 @@ pub trait NexusExternalApi {
         method = POST,
         path = "/v1/system/ip-pools",
         tags = ["system/ip-pools"],
-        versions = VERSION_RENAME_POOL_ENDPOINTS..,
+        versions = VERSION_ADD_SYSTEM_IP_POOL_APIS..,
     }]
     async fn system_ip_pool_create(
         rqctx: RequestContext<Self::Context>,
         pool_params: TypedBody<latest::ip_pool::IpPoolCreate>,
     ) -> Result<HttpResponseCreated<latest::ip_pool::IpPool>, HttpError>;
+
+    /// Create IP pool
+    #[endpoint {
+        operation_id = "system_ip_pool_create",
+        method = POST,
+        path = "/v1/system/ip-pools",
+        tags = ["system/ip-pools"],
+        versions = VERSION_RENAME_POOL_ENDPOINTS..VERSION_ADD_SYSTEM_IP_POOL_APIS,
+    }]
+    async fn system_ip_pool_create_v2026_02_09_00(
+        rqctx: RequestContext<Self::Context>,
+        pool_params: TypedBody<v2025_11_20_00::ip_pool::IpPoolCreate>,
+    ) -> Result<HttpResponseCreated<v2025_11_20_00::ip_pool::IpPool>, HttpError>
+    {
+        Ok(Self::system_ip_pool_create(rqctx, pool_params.map(Into::into))
+            .await?
+            .map(Into::into))
+    }
 
     /// Create IP pool
     #[endpoint {
@@ -1377,7 +1422,7 @@ pub trait NexusExternalApi {
         pool_params: TypedBody<v2025_11_20_00::ip_pool::IpPoolCreate>,
     ) -> Result<HttpResponseCreated<v2025_11_20_00::ip_pool::IpPool>, HttpError>
     {
-        Self::system_ip_pool_create(rqctx, pool_params).await
+        Self::system_ip_pool_create_v2026_02_09_00(rqctx, pool_params).await
     }
 
     /// Fetch IP pool
@@ -1385,12 +1430,28 @@ pub trait NexusExternalApi {
         method = GET,
         path = "/v1/system/ip-pools/{pool}",
         tags = ["system/ip-pools"],
-        versions = VERSION_RENAME_POOL_ENDPOINTS..,
+        versions = VERSION_ADD_SYSTEM_IP_POOL_APIS..,
     }]
     async fn system_ip_pool_view(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<latest::path_params::IpPoolPath>,
     ) -> Result<HttpResponseOk<latest::ip_pool::IpPool>, HttpError>;
+
+    /// Fetch IP pool
+    #[endpoint {
+        operation_id = "system_ip_pool_view",
+        method = GET,
+        path = "/v1/system/ip-pools/{pool}",
+        tags = ["system/ip-pools"],
+        versions = VERSION_RENAME_POOL_ENDPOINTS..VERSION_ADD_SYSTEM_IP_POOL_APIS,
+    }]
+    async fn system_ip_pool_view_v2026_02_09_00(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::IpPoolPath>,
+    ) -> Result<HttpResponseOk<v2025_11_20_00::ip_pool::IpPool>, HttpError>
+    {
+        Ok(Self::system_ip_pool_view(rqctx, path_params).await?.map(Into::into))
+    }
 
     /// Fetch IP pool
     #[endpoint {
@@ -1405,7 +1466,7 @@ pub trait NexusExternalApi {
         path_params: Path<v2025_11_20_00::path_params::IpPoolPath>,
     ) -> Result<HttpResponseOk<v2025_11_20_00::ip_pool::IpPool>, HttpError>
     {
-        Self::system_ip_pool_view(rqctx, path_params).await
+        Self::system_ip_pool_view_v2026_02_09_00(rqctx, path_params).await
     }
 
     /// Delete IP pool
@@ -1440,13 +1501,32 @@ pub trait NexusExternalApi {
         method = PUT,
         path = "/v1/system/ip-pools/{pool}",
         tags = ["system/ip-pools"],
-        versions = VERSION_RENAME_POOL_ENDPOINTS..,
+        versions = VERSION_ADD_SYSTEM_IP_POOL_APIS..,
     }]
     async fn system_ip_pool_update(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<latest::path_params::IpPoolPath>,
         updates: TypedBody<latest::ip_pool::IpPoolUpdate>,
     ) -> Result<HttpResponseOk<latest::ip_pool::IpPool>, HttpError>;
+
+    /// Update IP pool
+    #[endpoint {
+        operation_id = "system_ip_pool_update",
+        method = PUT,
+        path = "/v1/system/ip-pools/{pool}",
+        tags = ["system/ip-pools"],
+        versions = VERSION_RENAME_POOL_ENDPOINTS..VERSION_ADD_SYSTEM_IP_POOL_APIS,
+    }]
+    async fn system_ip_pool_update_v2026_02_09_00(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::IpPoolPath>,
+        updates: TypedBody<latest::ip_pool::IpPoolUpdate>,
+    ) -> Result<HttpResponseOk<v2025_11_20_00::ip_pool::IpPool>, HttpError>
+    {
+        Ok(Self::system_ip_pool_update(rqctx, path_params, updates)
+            .await?
+            .map(Into::into))
+    }
 
     /// Update IP pool
     #[endpoint {
@@ -1462,7 +1542,8 @@ pub trait NexusExternalApi {
         updates: TypedBody<v2025_11_20_00::ip_pool::IpPoolUpdate>,
     ) -> Result<HttpResponseOk<v2025_11_20_00::ip_pool::IpPool>, HttpError>
     {
-        Self::system_ip_pool_update(rqctx, path_params, updates).await
+        Self::system_ip_pool_update_v2026_02_09_00(rqctx, path_params, updates)
+            .await
     }
 
     /// Fetch IP pool utilization
@@ -1665,16 +1746,30 @@ pub trait NexusExternalApi {
         .await
     }
 
+    /// Assign IP pool
+    #[endpoint {
+        method = POST,
+        path = "/v1/system/ip-pools/{pool}/assignment",
+        tags = ["system/ip-pools"],
+        versions = VERSION_ADD_SYSTEM_IP_POOL_APIS..,
+    }]
+    async fn system_ip_pool_assign(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::IpPoolPath>,
+        assign_params: TypedBody<latest::ip_pool::IpPoolAssignParam>,
+    ) -> Result<HttpResponseOk<latest::ip_pool::IpPool>, HttpError>;
+
     /// Fetch Oxide service IP pool
     #[endpoint {
         method = GET,
         path = "/v1/system/ip-pools-service",
         tags = ["system/ip-pools"],
-        versions = VERSION_RENAME_POOL_ENDPOINTS..,
+        deprecated = true,
+        versions = VERSION_RENAME_POOL_ENDPOINTS..VERSION_ADD_SYSTEM_IP_POOL_APIS,
     }]
     async fn system_ip_pool_service_view(
         rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<latest::ip_pool::IpPool>, HttpError>;
+    ) -> Result<HttpResponseOk<v2025_11_20_00::ip_pool::IpPool>, HttpError>;
 
     /// Fetch Oxide service IP pool
     #[endpoint {
@@ -1813,7 +1908,8 @@ pub trait NexusExternalApi {
         method = GET,
         path = "/v1/system/ip-pools-service/ranges",
         tags = ["system/ip-pools"],
-        versions = VERSION_RENAME_POOL_ENDPOINTS..,
+        deprecated = true,
+        versions = VERSION_RENAME_POOL_ENDPOINTS..VERSION_ADD_SYSTEM_IP_POOL_APIS,
     }]
     async fn system_ip_pool_service_range_list(
         rqctx: RequestContext<Self::Context>,
@@ -1850,7 +1946,8 @@ pub trait NexusExternalApi {
         method = POST,
         path = "/v1/system/ip-pools-service/ranges/add",
         tags = ["system/ip-pools"],
-        versions = VERSION_RENAME_POOL_ENDPOINTS..,
+        deprecated = true,
+        versions = VERSION_RENAME_POOL_ENDPOINTS..VERSION_ADD_SYSTEM_IP_POOL_APIS,
     }]
     async fn system_ip_pool_service_range_add(
         rqctx: RequestContext<Self::Context>,
@@ -1882,7 +1979,8 @@ pub trait NexusExternalApi {
         method = POST,
         path = "/v1/system/ip-pools-service/ranges/remove",
         tags = ["system/ip-pools"],
-        versions = VERSION_RENAME_POOL_ENDPOINTS..,
+        deprecated = true,
+        versions = VERSION_RENAME_POOL_ENDPOINTS..VERSION_ADD_SYSTEM_IP_POOL_APIS,
     }]
     async fn system_ip_pool_service_range_remove(
         rqctx: RequestContext<Self::Context>,
