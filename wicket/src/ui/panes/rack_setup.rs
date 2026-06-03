@@ -918,6 +918,7 @@ fn rss_config_text<'a>(
                     allowed_export,
                     vlan_id,
                     router_lifetime,
+                    src_addr,
                 } = p;
 
                 let addr_string = match addr {
@@ -1020,6 +1021,12 @@ fn rss_config_text<'a>(
                                 format!("{}s", router_lifetime),
                                 ok_style,
                             ),
+                        ]);
+                    }
+                    if let Some(src_addr) = src_addr {
+                        settings.extend([
+                            Span::styled(" src_addr=", label_style),
+                            Span::styled(src_addr.to_string(), ok_style),
                         ]);
                     }
 

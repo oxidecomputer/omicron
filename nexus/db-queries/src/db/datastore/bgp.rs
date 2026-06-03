@@ -25,7 +25,7 @@ use omicron_common::api::external;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::{
     CreateResult, DeleteResult, Error, ListResultVec, LookupResult, NameOrId,
-    ResourceType,
+    ResourceType, UpdateResult,
 };
 use ref_cast::RefCast;
 use sled_agent_types::early_networking::RouterPeerType;
@@ -219,6 +219,181 @@ impl DataStore {
                     // will fall through to here. These errors should truly be 500s
                     // because they are an internal hiccup that likely was not triggered by
                     // user input.
+                    error!(opctx.log, "{msg}"; "error" => ?e);
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                }
+            })
+    }
+
+    pub async fn bgp_config_update(
+        &self,
+        opctx: &OpContext,
+        sel: &networking::BgpConfigSelector,
+        update: &networking::BgpConfigUpdate,
+    ) -> UpdateResult<BgpConfig> {
+        use nexus_db_schema::schema::bgp_config;
+        use nexus_db_schema::schema::bgp_config::dsl as bgp_config_dsl;
+        use nexus_db_schema::schema::{
+            bgp_announce_set, bgp_announce_set::dsl as announce_set_dsl,
+        };
+
+        let err = OptionalError::new();
+        let conn = self.pool_connection_authorized(opctx).await?;
+        self.transaction_retry_wrapper("bgp_config_update")
+            .transaction(&conn, |conn| {
+                let err = err.clone();
+                async move {
+                    let name_or_id = sel.name_or_id.clone();
+
+                    // Look up the existing config
+                    let existing: BgpConfig = match name_or_id {
+                        NameOrId::Id(id) => bgp_config_dsl::bgp_config
+                            .filter(bgp_config::id.eq(id))
+                            .filter(bgp_config::time_deleted.is_null())
+                            .select(BgpConfig::as_select())
+                            .limit(1)
+                            .first_async::<BgpConfig>(&conn)
+                            .await
+                            .map_err(|e| {
+                                let msg = "failed to lookup bgp config by id";
+                                error!(opctx.log, "{msg}"; "error" => ?e);
+                                match e {
+                                    diesel::result::Error::NotFound => err
+                                        .bail(Error::not_found_by_id(
+                                            ResourceType::BgpConfig,
+                                            &id,
+                                        )),
+                                    _ => err.bail(Error::internal_error(msg)),
+                                }
+                            })?,
+                        NameOrId::Name(name) => bgp_config_dsl::bgp_config
+                            .filter(bgp_config::name.eq(name.to_string()))
+                            .filter(bgp_config::time_deleted.is_null())
+                            .select(BgpConfig::as_select())
+                            .limit(1)
+                            .first_async::<BgpConfig>(&conn)
+                            .await
+                            .map_err(|e| {
+                                let msg = "failed to lookup bgp config by name";
+                                error!(opctx.log, "{msg}"; "error" => ?e);
+                                match e {
+                                    diesel::result::Error::NotFound => err
+                                        .bail(Error::not_found_by_name(
+                                            ResourceType::BgpConfig,
+                                            &name,
+                                        )),
+                                    _ => err.bail(Error::internal_error(msg)),
+                                }
+                            })?,
+                    };
+
+                    // Resolve bgp_announce_set_id if an update was requested
+                    let new_bgp_announce_set_id = match update
+                        .bgp_announce_set_id
+                        .clone()
+                    {
+                        None => existing.bgp_announce_set_id,
+                        Some(NameOrId::Name(name)) => {
+                            announce_set_dsl::bgp_announce_set
+                                .filter(
+                                    bgp_announce_set::time_deleted.is_null(),
+                                )
+                                .filter(
+                                    bgp_announce_set::name.eq(name.to_string()),
+                                )
+                                .select(bgp_announce_set::id)
+                                .limit(1)
+                                .first_async::<Uuid>(&conn)
+                                .await
+                                .map_err(|e| {
+                                    let msg =
+                                        "failed to lookup announce set by name";
+                                    error!(opctx.log, "{msg}"; "error" => ?e);
+                                    match e {
+                                        diesel::result::Error::NotFound => err
+                                            .bail(Error::not_found_by_name(
+                                                ResourceType::BgpAnnounceSet,
+                                                &name,
+                                            )),
+                                        _ => {
+                                            err.bail(Error::internal_error(msg))
+                                        }
+                                    }
+                                })?
+                        }
+                        Some(NameOrId::Id(id)) => {
+                            announce_set_dsl::bgp_announce_set
+                                .filter(
+                                    bgp_announce_set::time_deleted.is_null(),
+                                )
+                                .filter(bgp_announce_set::id.eq(id))
+                                .select(bgp_announce_set::id)
+                                .limit(1)
+                                .first_async::<Uuid>(&conn)
+                                .await
+                                .map_err(|e| {
+                                    let msg =
+                                        "failed to lookup announce set by id";
+                                    error!(opctx.log, "{msg}"; "error" => ?e);
+                                    match e {
+                                        diesel::result::Error::NotFound => err
+                                            .bail(Error::not_found_by_id(
+                                                ResourceType::BgpAnnounceSet,
+                                                &id,
+                                            )),
+                                        _ => {
+                                            err.bail(Error::internal_error(msg))
+                                        }
+                                    }
+                                })?
+                        }
+                    };
+
+                    let new_name = update
+                        .name
+                        .as_ref()
+                        .map(|n| n.to_string())
+                        .unwrap_or_else(|| existing.name().to_string());
+                    let new_description = update
+                        .description
+                        .clone()
+                        .unwrap_or_else(|| existing.description().to_string());
+                    let new_max_paths = update
+                        .max_paths
+                        .map(|m| m.as_u8())
+                        .unwrap_or(*existing.max_paths);
+
+                    diesel::update(bgp_config_dsl::bgp_config)
+                        .filter(bgp_config_dsl::id.eq(existing.id()))
+                        .set((
+                            bgp_config_dsl::time_modified.eq(Utc::now()),
+                            bgp_config_dsl::name.eq(new_name),
+                            bgp_config_dsl::description.eq(new_description),
+                            bgp_config_dsl::bgp_announce_set_id
+                                .eq(new_bgp_announce_set_id),
+                            bgp_config_dsl::max_paths
+                                .eq(i16::from(new_max_paths)),
+                        ))
+                        .returning(BgpConfig::as_returning())
+                        .get_result_async(&conn)
+                        .await
+                        .map_err(|e| {
+                            let msg = "bgp_config_update failed";
+                            error!(opctx.log, "{msg}"; "error" => ?e);
+                            err.bail(public_error_from_diesel(
+                                e,
+                                ErrorHandler::Server,
+                            ))
+                        })
+                }
+            })
+            .await
+            .map_err(|e| {
+                let msg = "bgp_config_update failed";
+                if let Some(err) = err.take() {
+                    error!(opctx.log, "{msg}"; "error" => ?err);
+                    err
+                } else {
                     error!(opctx.log, "{msg}"; "error" => ?e);
                     public_error_from_diesel(e, ErrorHandler::Server)
                 }
@@ -1254,6 +1429,7 @@ mod tests {
             allowed_import,
             allowed_export,
             vlan_id: None,
+            src_addr: None,
         }
     }
 

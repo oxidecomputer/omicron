@@ -605,7 +605,7 @@ impl<'a> EarlyNetworkSetup<'a> {
                             }),
                             deterministic_collision_resolution: false,
                             idle_hold_jitter: None,
-                            src_addr: None,
+                            src_addr: peer.src_addr,
                             src_port: None,
                         };
                         match bgp_peer_configs.get_mut(&port.port) {
@@ -659,7 +659,7 @@ impl<'a> EarlyNetworkSetup<'a> {
                             deterministic_collision_resolution: false,
                             idle_hold_jitter: None,
                             router_lifetime: router_lifetime.as_u16(),
-                            src_addr: None,
+                            src_addr: peer.src_addr,
                             src_port: None,
                         };
                         match bgp_unnumbered_peer_configs.get_mut(&port.port) {

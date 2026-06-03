@@ -428,6 +428,7 @@ fn populate_uplink_table(cfg: &UserSpecifiedPortConfig) -> Table {
             allowed_export,
             vlan_id,
             router_lifetime,
+            src_addr,
         } = p;
 
         let mut peer = Table::new();
@@ -533,6 +534,11 @@ fn populate_uplink_table(cfg: &UserSpecifiedPortConfig) -> Table {
 
         // enforce_first_as
         peer.insert("enforce_first_as", bool_item(*enforce_first_as));
+
+        // src_addr
+        if let Some(x) = src_addr {
+            peer.insert("src_addr", string_item(&x.to_string()));
+        }
 
         peers.push(peer);
     }

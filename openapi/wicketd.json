@@ -7777,6 +7777,13 @@
               }
             ]
           },
+          "src_addr": {
+            "nullable": true,
+            "description": "The local IP address to use when initiating BGP sessions with this peer.",
+            "default": null,
+            "type": "string",
+            "format": "ip"
+          },
           "vlan_id": {
             "nullable": true,
             "description": "Associate a VLAN ID with a BGP peer session.",

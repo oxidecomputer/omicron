@@ -72,10 +72,7 @@ pub mod early_networking {
     pub use crate::v20::early_networking::RouterLifetimeConfig;
     pub use crate::v20::early_networking::RouterLifetimeConfigError;
 
-    pub use crate::v30::early_networking::BgpPeerConfig;
     pub use crate::v30::early_networking::InvalidIpAddrError;
-    pub use crate::v30::early_networking::PortConfig;
-    pub use crate::v30::early_networking::RackNetworkConfig;
     pub use crate::v30::early_networking::RouterPeerIpAddr;
     pub use crate::v30::early_networking::RouterPeerIpAddrError;
     pub use crate::v30::early_networking::RouterPeerType;
@@ -83,6 +80,12 @@ pub mod early_networking {
     pub use crate::v30::early_networking::UplinkAddressConfig;
     pub use crate::v30::early_networking::UplinkIpNet;
     pub use crate::v30::early_networking::UplinkIpNetError;
+
+    pub use crate::v41::early_networking::BgpPeerConfig;
+    pub use crate::v41::early_networking::EarlyNetworkConfigBody;
+    pub use crate::v41::early_networking::PortConfig;
+    pub use crate::v41::early_networking::RackNetworkConfig;
+    pub use crate::v41::early_networking::WriteNetworkConfigRequest;
 }
 
 pub mod firewall_rules {
@@ -246,8 +249,9 @@ pub mod system_networking {
     pub use crate::v33::system_networking::ServiceZoneNatKind;
 
     pub use crate::v39::system_networking::BlueprintExternalNetworkingConfig;
-    pub use crate::v39::system_networking::SystemNetworkingConfig;
-    pub use crate::v39::system_networking::WriteNetworkConfigRequest;
+
+    pub use crate::v41::system_networking::SystemNetworkingConfig;
+    pub use crate::v41::system_networking::WriteNetworkConfigRequest;
 }
 
 pub mod trust_quorum {

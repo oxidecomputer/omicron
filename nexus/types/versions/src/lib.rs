@@ -87,3 +87,5 @@ pub mod v2026_05_07_00;
 pub mod v2026_05_08_00;
 #[path = "add_contact_support_to_update_status/mod.rs"]
 pub mod v2026_05_20_00;
+#[path = "additional_bgp_configuration_options/mod.rs"]
+pub mod v2026_06_01_00;

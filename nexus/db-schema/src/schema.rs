@@ -271,6 +271,7 @@ table! {
         vlan_id -> Nullable<Int4>,
         id -> Uuid,
         router_lifetime -> Int4,
+        src_addr -> Nullable<Inet>,
     }
 }
 
@@ -340,6 +341,7 @@ table! {
         vlan_id -> Nullable<Int4>,
         router_lifetime -> Int4,
         asn -> Int8,
+        src_addr -> Nullable<Inet>,
     }
 }
 

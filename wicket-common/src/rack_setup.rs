@@ -344,6 +344,9 @@ pub struct UserSpecifiedBgpPeerConfig {
     /// Router lifetime in seconds for unnumbered BGP peers.
     #[serde(default)]
     pub router_lifetime: RouterLifetimeConfig,
+    /// The local IP address to use when initiating BGP sessions with this peer.
+    #[serde(default)]
+    pub src_addr: Option<IpAddr>,
 }
 
 // Type that allows either the string "unnumbered" or an IP address. Has custom

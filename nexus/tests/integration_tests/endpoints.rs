@@ -69,6 +69,7 @@ use omicron_common::api::external::VpcFirewallRuleUpdateParams;
 use omicron_test_utils::certificates::CertificateChain;
 use semver::Version;
 use sled_agent_types::early_networking::BfdMode;
+use sled_agent_types::early_networking::MaxPathConfig;
 use sled_agent_types::early_networking::SwitchSlot;
 use std::collections::BTreeSet;
 use std::net::IpAddr;
@@ -1008,6 +1009,20 @@ pub static DEMO_BGP_CONFIG: LazyLock<networking::BgpConfigCreate> =
         shaper: None,
         max_paths: Default::default(),
     });
+pub static DEMO_BGP_CONFIG_UPDATE: LazyLock<networking::BgpConfigCreate> =
+    LazyLock::new(|| networking::BgpConfigCreate {
+        identity: IdentityMetadataCreateParams {
+            name: "as47".parse().unwrap(),
+            description: "BGP config for AS47".into(),
+        },
+        bgp_announce_set_id: NameOrId::Name("instances".parse().unwrap()),
+        asn: 47,
+        vrf: None,
+        checker: None,
+        shaper: None,
+        max_paths: MaxPathConfig::new(2).unwrap(),
+    });
+
 pub const DEMO_BGP_ANNOUNCE_SET_URL: &'static str =
     "/v1/system/networking/bgp-announce-set";
 pub static DEMO_BGP_ANNOUNCE: LazyLock<networking::BgpAnnounceSetCreate> =
@@ -3416,6 +3431,9 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
                         serde_json::to_value(&*DEMO_BGP_CONFIG).unwrap(),
                     ),
                     AllowedMethod::Get,
+                    AllowedMethod::Put(
+                        serde_json::to_value(&*DEMO_BGP_CONFIG_UPDATE).unwrap(),
+                    ),
                     AllowedMethod::Delete,
                 ],
             },

@@ -316,6 +316,7 @@
         ]
       },
       "BgpPeerConfig": {
+        "description": "BGP peer configuration with an optional source address.",
         "type": "object",
         "properties": {
           "addr": {
@@ -445,6 +446,13 @@
             "type": "integer",
             "format": "uint32",
             "minimum": 0
+          },
+          "src_addr": {
+            "nullable": true,
+            "description": "The local IP address to use when initiating BGP sessions with this peer.",
+            "default": null,
+            "type": "string",
+            "format": "ip"
           },
           "vlan_id": {
             "nullable": true,

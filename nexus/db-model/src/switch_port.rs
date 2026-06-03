@@ -739,6 +739,7 @@ pub struct SwitchPortBgpPeerConfig {
     pub vlan_id: Option<SqlU16>,
     pub id: Uuid,
     router_lifetime: SqlU16,
+    src_addr: Option<IpNetwork>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -807,6 +808,11 @@ impl SwitchPortBgpPeerConfig {
     /// [`RouterPeerType`] returned by [`SwitchPortBgpPeerConfig::peer_type()`].
     pub fn raw_ip_in_db_repr(&self) -> Option<IpNetwork> {
         self.addr
+    }
+
+    /// Get the local source address for BGP sessions with this peer, if set.
+    pub fn src_addr(&self) -> Option<std::net::IpAddr> {
+        self.src_addr.map(|n| n.ip())
     }
 }
 
@@ -968,6 +974,7 @@ impl SwitchPortBgpPeerConfig {
             },
             vlan_id: p.vlan_id.map(|x| x.into()),
             router_lifetime: router_lifetime.as_u16().into(),
+            src_addr: p.src_addr.map(|ip| ip.into()),
         }
     }
 }
@@ -1125,6 +1132,7 @@ mod tests {
             allowed_import: ImportExportPolicy::NoFiltering,
             allowed_export: ImportExportPolicy::NoFiltering,
             vlan_id: None,
+            src_addr: None,
         }
     }
 

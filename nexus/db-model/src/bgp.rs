@@ -166,6 +166,7 @@ pub struct BgpPeerView {
     pub enforce_first_as: bool,
     pub vlan_id: Option<SqlU16>,
     pub router_lifetime: SqlU16,
+    pub src_addr: Option<IpNetwork>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -213,6 +214,7 @@ impl TryFrom<BgpPeerView> for BgpPeerConfig {
             allowed_export: ImportExportPolicy::NoFiltering,
             allowed_import: ImportExportPolicy::NoFiltering,
             vlan_id: value.vlan_id.map(|x| x.0),
+            src_addr: value.src_addr.map(|ip| ip.ip()),
         })
     }
 }

@@ -300,13 +300,15 @@ pub mod networking {
     pub use crate::v2026_03_06_01::networking::SwitchPort;
     pub use crate::v2026_03_06_01::networking::SwitchPortSelector;
 
-    pub use crate::v2026_04_16_00::networking::BgpPeer;
-    pub use crate::v2026_04_16_00::networking::BgpPeerConfig;
     pub use crate::v2026_04_16_00::networking::BgpPeerConversionError;
-    pub use crate::v2026_04_16_00::networking::SwitchPortSettingsCreate;
 
     pub use crate::v2026_05_07_00::networking::SwitchInterfaceConfig;
-    pub use crate::v2026_05_07_00::networking::SwitchPortSettings;
+
+    pub use crate::v2026_06_01_00::networking::BgpConfigUpdate;
+    pub use crate::v2026_06_01_00::networking::BgpPeer;
+    pub use crate::v2026_06_01_00::networking::BgpPeerConfig;
+    pub use crate::v2026_06_01_00::networking::SwitchPortSettings;
+    pub use crate::v2026_06_01_00::networking::SwitchPortSettingsCreate;
 }
 
 pub mod oxql {
