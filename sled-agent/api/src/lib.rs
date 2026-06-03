@@ -21,7 +21,7 @@ use omicron_common::api::internal::{
 };
 use sled_agent_types_versions::{
     latest, v1, v4, v6, v7, v9, v10, v11, v12, v14, v16, v17, v18, v20, v22,
-    v24, v25, v26, v28, v29, v30, v31, v33,
+    v24, v25, v26, v28, v29, v30, v31, v33, v34, v37, v39,
 };
 use sled_diagnostics::SledDiagnosticsQueryOutput;
 use slog_error_chain::InlineErrorChain;
@@ -38,6 +38,11 @@ api_versions!([
     // |  example for the next person.
     // v
     // (next_int, IDENT),
+    (40, ADD_FMD_TO_INVENTORY),
+    (39, BOOTSTORE_SERVICE_NAT_GENERATION),
+    (38, RENAME_PORT_FEC_SPEED_TO_LINK_FEC_SPEED),
+    (37, MODIFY_SVC_ENABLED_NOT_ONLINE_STATE),
+    (36, DROPSHOT_FREEFORM_BODY_DESC),
     (35, INLINE_ROUTER_PEER_IP_ADDR),
     (34, MODIFY_SVCS_TYPES),
     (33, BOOTSTORE_SERVICE_NAT),
@@ -934,7 +939,20 @@ pub trait SledAgentApi {
     #[endpoint {
         method = PUT,
         path = "/network-bootstore-config",
-        versions = VERSION_BOOTSTORE_SERVICE_NAT..,
+        versions = VERSION_BOOTSTORE_SERVICE_NAT_GENERATION..,
+        operation_id = "write_network_bootstore_config",
+    }]
+    async fn write_network_bootstore_config_v39(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<v39::system_networking::WriteNetworkConfigRequest>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    // As described above, this must not forward to newer versions; sled-agent
+    // must implement this by faithfully serializing the requested version.
+    #[endpoint {
+        method = PUT,
+        path = "/network-bootstore-config",
+        versions = VERSION_BOOTSTORE_SERVICE_NAT..VERSION_BOOTSTORE_SERVICE_NAT_GENERATION,
         operation_id = "write_network_bootstore_config",
     }]
     async fn write_network_bootstore_config_v33(
@@ -1020,11 +1038,41 @@ pub trait SledAgentApi {
     #[endpoint {
         method = GET,
         path = "/inventory",
-        versions = VERSION_MODIFY_SVCS_TYPES..,
+        versions = VERSION_ADD_FMD_TO_INVENTORY..,
     }]
     async fn inventory(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<latest::inventory::Inventory>, HttpError>;
+
+    /// Fetch basic information about this sled
+    #[endpoint {
+        operation_id = "inventory",
+        method = GET,
+        path = "/inventory",
+        versions = VERSION_MODIFY_SVC_ENABLED_NOT_ONLINE_STATE..VERSION_ADD_FMD_TO_INVENTORY,
+    }]
+    async fn inventory_v37(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<v37::inventory::Inventory>, HttpError> {
+        Self::inventory(rqctx).await.map(|HttpResponseOk(inv)| {
+            HttpResponseOk(v37::inventory::Inventory::from(inv))
+        })
+    }
+
+    /// Fetch basic information about this sled
+    #[endpoint {
+        operation_id = "inventory",
+        method = GET,
+        path = "/inventory",
+        versions = VERSION_MODIFY_SVCS_TYPES..VERSION_MODIFY_SVC_ENABLED_NOT_ONLINE_STATE,
+    }]
+    async fn inventory_v34(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<v34::inventory::Inventory>, HttpError> {
+        Self::inventory_v37(rqctx).await.map(|HttpResponseOk(inv)| {
+            HttpResponseOk(v34::inventory::Inventory::from(inv))
+        })
+    }
 
     /// Fetch basic information about this sled
     #[endpoint {
@@ -1036,7 +1084,7 @@ pub trait SledAgentApi {
     async fn inventory_v28(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<v28::inventory::Inventory>, HttpError> {
-        Self::inventory(rqctx).await.map(|HttpResponseOk(inv)| {
+        Self::inventory_v34(rqctx).await.map(|HttpResponseOk(inv)| {
             HttpResponseOk(v28::inventory::Inventory::from(inv))
         })
     }

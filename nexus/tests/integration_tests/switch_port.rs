@@ -18,13 +18,15 @@ use nexus_types::external_api::networking::{
 use nexus_types::external_api::rack::Rack;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::{
-    self, AddressLotKind, IdentityMetadataCreateParams, LinkFec, LinkSpeed,
-    NameOrId,
+    AddressLotKind, IdentityMetadataCreateParams, NameOrId,
 };
 use oxnet::IpNet;
-use sled_agent_types::early_networking::{ImportExportPolicy, RouterPeerType};
-use sled_agent_types::early_networking::{RouterLifetimeConfig, SwitchSlot};
-use std::net::IpAddr;
+use sled_agent_types::early_networking::ImportExportPolicy;
+use sled_agent_types::early_networking::LinkFec;
+use sled_agent_types::early_networking::LinkSpeed;
+use sled_agent_types::early_networking::RouterLifetimeConfig;
+use sled_agent_types::early_networking::RouterPeerType;
+use sled_agent_types::early_networking::SwitchSlot;
 use std::str::FromStr;
 
 type ControlPlaneTestContext =
@@ -230,7 +232,7 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
     let ifx0 = &created.interfaces[0];
     assert_eq!(&ifx0.interface_name.to_string(), "phy0");
     assert_eq!(ifx0.v6_enabled, true);
-    assert_eq!(ifx0.kind, external::SwitchInterfaceKind::Primary);
+    assert_eq!(ifx0.kind, SwitchInterfaceKind::Primary);
 
     let route0 = &created.routes[0];
     assert_eq!(route0.dst, IpNet::from_str("1.2.3.0/24").unwrap());
@@ -272,7 +274,7 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
     let ifx0 = &roundtrip.interfaces[0];
     assert_eq!(&ifx0.interface_name.to_string(), "phy0");
     assert_eq!(ifx0.v6_enabled, true);
-    assert_eq!(ifx0.kind, external::SwitchInterfaceKind::Primary);
+    assert_eq!(ifx0.kind, SwitchInterfaceKind::Primary);
 
     let route0 = &roundtrip.routes[0];
     assert_eq!(route0.dst, IpNet::from_str("1.2.3.0/24").unwrap());
@@ -381,11 +383,11 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
     let numbered_peer = created
         .bgp_peers
         .iter()
-        .find_map(|p| p.addr.ip_squashing_unnumbered_to_none())
+        .find(|p| p.addr.is_numbered())
         .expect("Should have a numbered peer");
     assert_eq!(
-        numbered_peer,
-        "1.2.3.4".parse::<IpAddr>().unwrap(),
+        numbered_peer.addr,
+        RouterPeerType::Numbered { ip: "1.2.3.4".parse().unwrap() },
         "Numbered peer should have addr 1.2.3.4"
     );
 

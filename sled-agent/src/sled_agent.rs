@@ -5,7 +5,6 @@
 //! Sled agent implementation
 
 use crate::artifact_store::{ArtifactStore, SledAgentArtifactStoreWrapper};
-use crate::bootstrap::early_networking::EarlyNetworkSetupError;
 use crate::config::Config;
 use crate::hardware_monitor::HardwareMonitorHandle;
 use crate::instance_manager::InstanceManager;
@@ -38,6 +37,8 @@ use illumos_utils::zfs::DatasetVolumeDeleteArgs;
 use illumos_utils::zfs::DatasetVolumeEnsureArgs;
 use illumos_utils::zfs::DestroyDatasetErrorVariant;
 use illumos_utils::zfs::Mountpoint;
+use illumos_utils::zfs::RemoveReservationError;
+use illumos_utils::zfs::RemoveReservationErrorInner;
 use illumos_utils::zfs::SizeDetails;
 use illumos_utils::zfs::Zfs;
 use illumos_utils::zpool::PathInPool;
@@ -65,6 +66,7 @@ use sled_agent_config_reconciler::{
     InternalDisksReceiver, LedgerNewConfigError, LedgerTaskError,
     ReconcilerInventory, SledAgentFacilities,
 };
+use sled_agent_early_networking::EarlyNetworkSetupError;
 use sled_agent_health_monitor::handle::HealthMonitorHandle;
 use sled_agent_measurements::MeasurementsHandle;
 use sled_agent_types::attached_subnet::AttachedSubnet;
@@ -85,7 +87,9 @@ use sled_agent_types::resolvable_files::{
     PreparedOmicronZone, RemoveMupdateOverrideResult, ResolverStatus,
 };
 use sled_agent_types::rot::Rot;
-use sled_agent_types::sled::StartSledAgentRequest;
+use sled_agent_types::sled::{
+    StartSledAgentRequest, ThisSledSwitchZoneUnderlayIpAddr,
+};
 use sled_agent_types::system_networking::SystemNetworkingConfig;
 use sled_agent_types::uplink::HostPortConfig;
 use sled_agent_types::zone_bundle::{
@@ -1275,6 +1279,8 @@ impl SledAgent {
         let smf_services_enabled_not_online =
             self.inner.health_monitor.to_inventory();
 
+        let fmd = crate::fmd::collect_fmd_inventory(&self.log).await;
+
         let ReconcilerInventory {
             disks,
             zpools,
@@ -1302,6 +1308,7 @@ impl SledAgent {
             file_source_resolver,
             smf_services_enabled_not_online,
             reference_measurements: self.inner.measurements.to_inventory(),
+            fmd,
         })
     }
 
@@ -1536,9 +1543,27 @@ impl SledAgent {
         // the volume, remove the reservation set for the parent dataset if one
         // exists.
 
-        Zfs::remove_reservation(&delegated_zvol.parent_dataset_name())
-            .await
-            .map_err(|e| HttpError::for_internal_error(e.to_string()))?;
+        let result =
+            Zfs::remove_reservation(&delegated_zvol.parent_dataset_name())
+                .await;
+
+        if let Err(e) = result {
+            let RemoveReservationError { name: _, err } = &e;
+            match err {
+                RemoveReservationErrorInner::DatasetNotFound => {
+                    // If the parent dataset is no longer found, then a
+                    // concurrent deletion occurred. Return Ok
+                    return Ok(());
+                }
+
+                _ => {
+                    // Anything else is a 500
+                    return Err(HttpError::for_internal_error(
+                        InlineErrorChain::new(&e).to_string(),
+                    ));
+                }
+            }
+        }
 
         // Then proceed with deleting the child volume dataset, then the parent
         // dataset
@@ -1854,72 +1879,5 @@ impl SledAgentFacilities for ReconcilerFacilities {
         self.service_manager
             .ddm_reconciler()
             .remove_internal_dns_subnet(prefix);
-    }
-}
-
-pub(crate) use self::local_switch_zone_ip::ThisSledSwitchZoneUnderlayIpAddr;
-
-/// Private module to enforce construction of
-/// [`ThisSledSwitchZoneUnderlayIpAddr`] only happens via the constructors we
-/// define.
-mod local_switch_zone_ip {
-    use omicron_common::address::get_switch_zone_address;
-    use sled_agent_types::sled::StartSledAgentRequest;
-    use std::fmt;
-    use std::net::IpAddr;
-    use std::net::Ipv6Addr;
-
-    /// Newtype wrapper around [`Ipv6Addr`]. This type is always the IP address
-    /// of our own, local switch zone.
-    ///
-    /// That switch zone will only exist if we are a scrimlet, but we always
-    /// know what the IP would be.
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-    pub(crate) struct ThisSledSwitchZoneUnderlayIpAddr(Ipv6Addr);
-
-    impl ThisSledSwitchZoneUnderlayIpAddr {
-        /// Construct a [`ThisSledSwitchZoneUnderlayIpAddr`] from the request to
-        /// start this sled agent.
-        ///
-        /// This takes a full request object instead of something smaller (like
-        /// just a sled subnet) to put up a roadblock to accidentally
-        /// constructing a [`ThisSledSwitchZoneUnderlayIpAddr`] that points to
-        /// any address other than our own. `sled-agent` has ready access to the
-        /// subnets and addresses of other sleds, but doesn't have ready access
-        /// to other sleds' [`StartSledAgentRequest`]s.
-        pub(crate) fn from_sled_agent_request(
-            request: &StartSledAgentRequest,
-        ) -> Self {
-            ThisSledSwitchZoneUnderlayIpAddr(get_switch_zone_address(
-                request.body.subnet,
-            ))
-        }
-    }
-
-    // NOTE: We impl `From` only in this direction: constructing a
-    // `ThisSledSwitchZoneUnderlayIpAddr` must happen only via
-    // `from_sled_agent_request()`.
-    impl From<ThisSledSwitchZoneUnderlayIpAddr> for Ipv6Addr {
-        fn from(value: ThisSledSwitchZoneUnderlayIpAddr) -> Self {
-            value.0
-        }
-    }
-
-    impl PartialEq<IpAddr> for ThisSledSwitchZoneUnderlayIpAddr {
-        fn eq(&self, other: &IpAddr) -> bool {
-            self.0.eq(other)
-        }
-    }
-
-    impl PartialEq<ThisSledSwitchZoneUnderlayIpAddr> for IpAddr {
-        fn eq(&self, other: &ThisSledSwitchZoneUnderlayIpAddr) -> bool {
-            self.eq(&other.0)
-        }
-    }
-
-    impl fmt::Display for ThisSledSwitchZoneUnderlayIpAddr {
-        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-            self.0.fmt(f)
-        }
     }
 }

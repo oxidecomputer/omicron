@@ -14,6 +14,7 @@ pub use api_metadata::AllApiMetadata;
 pub use api_metadata::ApiConsumerStatus;
 pub use api_metadata::ApiExpectedConsumer;
 pub use api_metadata::ApiMetadata;
+pub use api_metadata::ServerComponent;
 pub use api_metadata::VersionedHow;
 pub use system_apis::ApiDependencyFilter;
 pub use system_apis::FailedConsumerCheck;
@@ -42,15 +43,6 @@ impl Borrow<str> for ClientPackageName {
         self.0.as_str()
     }
 }
-
-#[derive(Clone, Deserialize, Ord, PartialOrd, Eq, PartialEq)]
-#[serde(transparent)]
-pub struct DeploymentUnitName(String);
-NewtypeDebug! { () pub struct DeploymentUnitName(String); }
-NewtypeDeref! { () pub struct DeploymentUnitName(String); }
-NewtypeDerefMut! { () pub struct DeploymentUnitName(String); }
-NewtypeDisplay! { () pub struct DeploymentUnitName(String); }
-NewtypeFrom! { () pub struct DeploymentUnitName(String); }
 
 #[derive(Clone, Deserialize, Ord, PartialOrd, Eq, PartialEq)]
 #[serde(transparent)]

@@ -123,6 +123,7 @@ define_enums! {
     UserDataExportStateEnum => "user_data_export_state",
     UserProvisionTypeEnum => "user_provision_type",
     VmmCpuPlatformEnum => "vmm_cpu_platform",
+    VmmFailureReasonEnum => "vmm_failure_reason",
     VmmStateEnum => "vmm_state",
     VolumeResourceUsageTypeEnum => "volume_resource_usage_type",
     VpcFirewallRuleActionEnum => "vpc_firewall_rule_action",

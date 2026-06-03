@@ -11,6 +11,9 @@ use camino::Utf8Path;
 use camino::Utf8PathBuf;
 use cargo_metadata::{CargoOpt, Package};
 use cargo_metadata::{DependencyKind, PackageId};
+use iddqd::IdOrdItem;
+use iddqd::IdOrdMap;
+use iddqd::id_upcast;
 use std::collections::BTreeSet;
 use std::collections::{BTreeMap, VecDeque};
 
@@ -234,23 +237,22 @@ impl Workspace {
         Ok(path)
     }
 
-    /// Iterate over the required dependencies of package `root`, invoking
-    /// `func` for each one as:
+    /// Walks the required (normal and build) dependencies of package `root`.
     ///
-    /// ```ignore
-    /// func(package: &Package, dep_path: &DepPath)
-    /// ```
+    /// Returns a [`WalkOutcome`] describing every package reachable from
+    /// `root`, each paired with every dependency path from `root` to it, plus
+    /// which of the `omitted_nodes` were actually encountered.
     ///
-    /// where `package` is the package that is (directly or indirectly) a
-    /// dependency of `root` and `dep_path` describes the dependency path from
-    /// `root` to `package`.
-    pub fn walk_required_deps_recursively(
-        &self,
+    /// Packages in `omitted_nodes` are treated as if they didn't exist in the
+    /// dependency graph: they are not reported in [`WalkOutcome::found`], and
+    /// the walk does not descend into them.
+    pub fn walk_required_deps_recursively<'a, 'p>(
+        &'a self,
         root: &Package,
-        func: &mut dyn FnMut(&Package, &DepPath),
-    ) -> Result<()> {
-        struct Remaining<'a> {
-            node: &'a cargo_metadata::Node,
+        omitted_nodes: &BTreeSet<&'p PackageId>,
+    ) -> Result<WalkOutcome<'a, 'p>> {
+        struct Remaining<'n> {
+            node: &'n cargo_metadata::Node,
             path: DepPath,
         }
 
@@ -268,6 +270,8 @@ impl Workspace {
             path: DepPath::for_pkg(root.id.clone()),
         }];
         let mut seen: BTreeSet<PackageId> = BTreeSet::new();
+        let mut found: IdOrdMap<PackageWalkOutcome<'a>> = IdOrdMap::new();
+        let mut omitted_seen: BTreeSet<&'p PackageId> = BTreeSet::new();
 
         while let Some(Remaining { node: next, path }) = remaining.pop() {
             for d in &next.deps {
@@ -281,6 +285,11 @@ impl Workspace {
                     continue;
                 }
 
+                if let Some(omitted) = omitted_nodes.get(did) {
+                    omitted_seen.insert(*omitted);
+                    continue;
+                }
+
                 // unwraps: We verified during loading that we have metadata for
                 // all package ids for which we have nodes in the dependency
                 // tree.  We also verified during loading that we have nodes in
@@ -288,7 +297,14 @@ impl Workspace {
                 // package metadata.
                 let dep_pkg = self.packages_by_id.get(did).unwrap();
                 let dep_node = self.nodes_by_id.get(did).unwrap();
-                func(dep_pkg, &path);
+                found
+                    .entry(&dep_pkg.id)
+                    .or_insert_with(|| PackageWalkOutcome {
+                        package: dep_pkg,
+                        dep_paths: Vec::new(),
+                    })
+                    .dep_paths
+                    .push(path.clone());
                 if seen.contains(did) {
                     continue;
                 }
@@ -299,7 +315,7 @@ impl Workspace {
             }
         }
 
-        Ok(())
+        Ok(WalkOutcome { found, omitted_seen })
     }
 
     /// Return all package ids for the given `pkgname`
@@ -341,6 +357,46 @@ fn cargo_toml_parent(
         .ok_or_else(|| anyhow!("unexpected manifest path: {:?}", label_path))?
         .to_owned();
     Ok(path)
+}
+
+/// The result of [`Workspace::walk_required_deps_recursively`].
+pub struct WalkOutcome<'a, 'p> {
+    /// Every package encountered as a required (normal or build) dependency of
+    /// the walk's `root`, each paired with every dependency path from `root`
+    /// to that package.
+    pub found: IdOrdMap<PackageWalkOutcome<'a>>,
+
+    /// The subset of the walk's `omitted_nodes` argument that was actually
+    /// encountered as a required dependency of `root`.
+    ///
+    /// Comparing this against `omitted_nodes` lets the caller detect an
+    /// expected omission that was not ever seen while traversing the dependency
+    /// graph.
+    pub omitted_seen: BTreeSet<&'p PackageId>,
+}
+
+/// A single entry in [`WalkOutcome::found`]: one package and every dependency
+/// path from the walk's `root` to it.
+#[derive(Debug)]
+pub struct PackageWalkOutcome<'a> {
+    /// The package that was found during the walk.
+    pub package: &'a Package,
+
+    /// The list of dependency paths from the walk's `root` to this package.
+    ///
+    /// A package reachable by more than one path appears once per path.
+    pub dep_paths: Vec<DepPath>,
+}
+
+impl<'a> IdOrdItem for PackageWalkOutcome<'a> {
+    type Key<'b>
+        = &'a PackageId
+    where
+        Self: 'b;
+    fn key(&self) -> Self::Key<'_> {
+        &self.package.id
+    }
+    id_upcast!();
 }
 
 /// Describes a "dependency path": a path through the Cargo dependency graph

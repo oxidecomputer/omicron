@@ -31,6 +31,7 @@ pub struct FmAnalysis {
     inv_rx: watch::Receiver<Option<Arc<inventory::Collection>>>,
     activators: Activators,
     nexus_id: OmicronZoneUuid,
+    analysis_enabled: bool,
 }
 
 /// This is just because I don't like it when a constructor takes multiple
@@ -48,7 +49,25 @@ impl BackgroundTask for FmAnalysis {
         opctx: &'a OpContext,
     ) -> BoxFuture<'a, serde_json::Value> {
         Box::pin(async {
-            let status = self.actually_activate(opctx).await;
+            let status = if self.analysis_enabled {
+                self.actually_activate(opctx).await
+            } else {
+                slog::info!(
+                    opctx.log,
+                    "fault management analysis explicitly disabled by config",
+                );
+                let known_classes: Vec<String> =
+                    fm::diagnosis::known_ereport_classes()
+                        .iter()
+                        .map(|s| (*s).to_string())
+                        .collect();
+                FmAnalysisStatus {
+                    parent_sitrep_id: None,
+                    inv_collection_id: None,
+                    known_classes,
+                    outcome: status::Outcome::Disabled,
+                }
+            };
             match serde_json::to_value(status) {
                 Ok(val) => val,
                 Err(err) => {
@@ -70,14 +89,30 @@ impl FmAnalysis {
         inv_rx: watch::Receiver<Option<Arc<inventory::Collection>>>,
         activators: Activators,
         nexus_id: OmicronZoneUuid,
+        analysis_enabled: bool,
     ) -> Self {
-        Self { datastore, sitrep_rx, inv_rx, activators, nexus_id }
+        Self {
+            datastore,
+            sitrep_rx,
+            inv_rx,
+            activators,
+            nexus_id,
+            analysis_enabled,
+        }
     }
 
     async fn actually_activate(
         &mut self,
         opctx: &OpContext,
     ) -> FmAnalysisStatus {
+        // Snapshot the static known-classes set once, up front, so it's
+        // reported in the activation status regardless of which outcome
+        // variant fires.
+        let known_classes: Vec<String> = fm::diagnosis::known_ereport_classes()
+            .iter()
+            .map(|s| (*s).to_string())
+            .collect();
+
         let parent_sitrep = self.sitrep_rx.borrow_and_update().clone();
         let parent_sitrep_id = parent_sitrep.as_ref().map(|s| s.1.id());
         let Some(inv) = self.inv_rx.borrow_and_update().clone() else {
@@ -88,6 +123,7 @@ impl FmAnalysis {
             return FmAnalysisStatus {
                 parent_sitrep_id,
                 inv_collection_id: None,
+                known_classes,
                 outcome: status::Outcome::WaitingForInventory,
             };
         };
@@ -123,6 +159,7 @@ impl FmAnalysis {
                 return FmAnalysisStatus {
                     parent_sitrep_id,
                     inv_collection_id: Some(inv_collection_id),
+                    known_classes,
                     outcome: status::Outcome::PreparationError(
                         error.to_string(),
                     ),
@@ -147,6 +184,7 @@ impl FmAnalysis {
                 return FmAnalysisStatus {
                     parent_sitrep_id,
                     inv_collection_id: Some(inv_collection_id),
+                    known_classes,
                     outcome: status::Outcome::WaitingForNewerInventory {
                         parent_inv_id,
                         next_inv_min_time_started,
@@ -162,6 +200,7 @@ impl FmAnalysis {
         FmAnalysisStatus {
             parent_sitrep_id,
             inv_collection_id: Some(inv_collection_id),
+            known_classes,
             outcome: status::Outcome::RanAnalysis {
                 prep_status,
                 analysis_status: outcome,
@@ -195,6 +234,8 @@ impl FmAnalysis {
         builder: &mut fm::analysis_input::Builder,
         errors: &mut Vec<String>,
     ) -> anyhow::Result<()> {
+        // Only surface ereports a diagnosis engine will consume.
+        let classes = fm::diagnosis::known_ereport_classes();
         let mut paginator = Paginator::new(
             nexus_db_queries::db::datastore::SQL_BATCH_SIZE,
             dropshot::PaginationOrder::Ascending,
@@ -203,7 +244,7 @@ impl FmAnalysis {
             let prev_total = builder.num_ereports();
             let batch = self
                 .datastore
-                .ereports_list_unmarked(opctx, &p.current_pagparams())
+                .ereports_list_unmarked(opctx, classes, &p.current_pagparams())
                 .await?;
             paginator = p.found_batch(&batch, &|e| {
                 (e.restart_id.into_untyped_uuid(), e.ena)
@@ -263,21 +304,20 @@ impl FmAnalysis {
             };
         }
 
-        // TODO(eliza): diff the sitrep against the parent, and return
-        // `Unchanged` if it's the same.
-        let unchanged = true;
-        if unchanged {
-            slog::info!(
-                &opctx.log,
-                "fault management analysis produced no changes from the \
-                 current sitrep"
-            );
-            return status::AnalysisStatus {
-                start_time,
-                end_time,
-                report,
-                outcome: status::AnalysisOutcome::Unchanged,
-            };
+        if let Some(parent) = inputs.parent_sitrep() {
+            if parent.compare_state() == sitrep {
+                slog::info!(
+                    &opctx.log,
+                    "fault management analysis produced no changes from the \
+                     current sitrep"
+                );
+                return status::AnalysisStatus {
+                    start_time,
+                    end_time,
+                    report,
+                    outcome: status::AnalysisOutcome::Unchanged,
+                };
+            }
         }
 
         let sitrep_id = sitrep.id();
@@ -349,6 +389,8 @@ mod tests {
     use nexus_types::fm::SitrepVersion;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::SitrepUuid;
+
+    const ANALYSIS_ENABLED: bool = true;
 
     fn activators() -> Activators {
         let a = Activators {
@@ -433,6 +475,7 @@ mod tests {
                 inv_rx,
                 activators(),
                 OmicronZoneUuid::new_v4(),
+                ANALYSIS_ENABLED,
             );
 
             let result = task.actually_activate(opctx).await;
@@ -465,6 +508,7 @@ mod tests {
                 inv_rx,
                 activators(),
                 OmicronZoneUuid::new_v4(),
+                ANALYSIS_ENABLED,
             );
 
             let result = task.actually_activate(opctx).await;
@@ -490,6 +534,7 @@ mod tests {
                 inv_rx,
                 activators(),
                 OmicronZoneUuid::new_v4(),
+                ANALYSIS_ENABLED,
             );
 
             let result = task.actually_activate(opctx).await;
@@ -519,6 +564,7 @@ mod tests {
                 inv_rx,
                 activators(),
                 OmicronZoneUuid::new_v4(),
+                ANALYSIS_ENABLED,
             );
 
             let result = task.actually_activate(opctx).await;
@@ -548,6 +594,7 @@ mod tests {
                 inv_rx,
                 activators(),
                 OmicronZoneUuid::new_v4(),
+                ANALYSIS_ENABLED,
             );
 
             let result = task.actually_activate(opctx).await;

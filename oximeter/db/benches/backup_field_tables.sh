@@ -32,7 +32,7 @@ for table in timeseries_schema fields_{bool,i8,i16,i32,i64,ipaddr,string,u8,u16,
     fi
     output="$OUTPUT_DIR/${table}.native.gz"
     echo "Backing up $DATABASE.$table ($count rows) to $output"
-    clickhouse client --port "$PORT" \
+    clickhouse client --port "$PORT" --compression=1 \
         --query "SELECT * FROM $DATABASE.$table FORMAT Native" \
         | gzip > "$output"
 done

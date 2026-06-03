@@ -420,7 +420,6 @@ async fn cmd_reconfigurator_config_history(
     struct SwitchesRow {
         version: String,
         planner_enabled: String,
-        add_zones_with_mupdate_override: String,
         tuf_repo_pruner_enabled: String,
         disruption_policy: String,
         time_modified: String,
@@ -434,8 +433,7 @@ async fn cmd_reconfigurator_config_history(
                 config:
                     ReconfiguratorConfig {
                         planner_enabled,
-                        planner_config:
-                            PlannerConfig { add_zones_with_mupdate_override },
+                        planner_config: PlannerConfig {},
                         tuf_repo_pruner_enabled,
                         disruption_policy,
                     },
@@ -444,8 +442,6 @@ async fn cmd_reconfigurator_config_history(
             SwitchesRow {
                 version: version.to_string(),
                 planner_enabled: planner_enabled.to_string(),
-                add_zones_with_mupdate_override:
-                    add_zones_with_mupdate_override.to_string(),
                 tuf_repo_pruner_enabled: tuf_repo_pruner_enabled.to_string(),
                 disruption_policy: disruption_policy.to_string(),
                 time_modified: time_modified.to_string(),

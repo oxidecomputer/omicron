@@ -55,6 +55,7 @@ external_dns_servers = ["1.1.1.1", "9.9.9.9"]
 # used by `omicron-dev run-all`
 bind_address = "127.0.0.1:12222"
 default_request_body_max_bytes = 1048576
+compression = "gzip"
 # To have Nexus's external HTTP endpoint use TLS, uncomment the line below.  You
 # will also need to provide an initial TLS certificate during rack
 # initialization.  If you're using this config file, you're probably running a
@@ -174,6 +175,7 @@ sp_ereport_ingester.period_secs = 30
 # Nexus).
 # This is cheap, so we should check frequently.
 fm.sitrep_load_period_secs = 15
+fm.analysis_enabled = true
 # How frequently to run analysis from the current sitrep.
 fm.analysis_period_secs = 120
 # Sitrep GC, on the other hand, does not need to be activated very frequently,
@@ -203,6 +205,7 @@ audit_log_timeout_incomplete.max_timed_out_per_activation = 1000
 audit_log_cleanup.period_secs = 600
 audit_log_cleanup.retention_days = 90
 audit_log_cleanup.max_deleted_per_activation = 10000
+populate_switch_ports.period_secs = 30
 
 [default_region_allocation_strategy]
 # allocate region on 3 random distinct zpools, on 3 random distinct sleds.

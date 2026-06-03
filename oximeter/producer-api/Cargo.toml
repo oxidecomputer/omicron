@@ -11,5 +11,4 @@ workspace = true
 [dependencies]
 dropshot.workspace = true
 omicron-workspace-hack.workspace = true
-oximeter-types.workspace = true
 oximeter-types-versions.workspace = true

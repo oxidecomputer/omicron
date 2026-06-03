@@ -61,6 +61,7 @@ use omicron_uuid_kinds::ZpoolUuid;
 use sled_agent_types::inventory::Baseboard;
 use sled_agent_types::inventory::ConfigReconcilerInventory;
 use sled_agent_types::inventory::ConfigReconcilerInventoryStatus;
+use sled_agent_types::inventory::FmdInventory;
 use sled_agent_types::inventory::Inventory;
 use sled_agent_types::inventory::InventoryDataset;
 use sled_agent_types::inventory::InventoryDisk;
@@ -169,8 +170,8 @@ impl SystemDescription {
         let rack_subnet =
             ipnet::Ipv6Net::new(rack_subnet_base, RACK_PREFIX).unwrap();
         // Skip the initial DNS subnet.
-        // (The same behavior is replicated in RSS in `Plan::create()` in
-        // sled-agent/src/rack_setup/plan/sled.rs.)
+        // (The same behavior is replicated in RSS in `SledPlan::create()` in
+        // sled-agent/rack-setup/src/plan/sled.rs.)
         let sled_subnets = SubnetIterator::new(rack_subnet);
 
         // Policy defaults
@@ -1505,6 +1506,7 @@ impl Sled {
                 smf_services_enabled_not_online:
                     SvcsEnabledNotOnlineResult::DataUnavailable,
                 reference_measurements: iddqd::IdOrdMap::new(),
+                fmd: Ok(FmdInventory::default()),
             }
         };
 
@@ -1689,6 +1691,7 @@ impl Sled {
             reference_measurements: inv_sled_agent
                 .reference_measurements
                 .clone(),
+            fmd: Ok(FmdInventory::default()),
         };
 
         Sled {
@@ -2138,8 +2141,8 @@ impl SubnetIterator {
     fn new(rack_subnet: Ipv6Net) -> Self {
         let mut subnets = rack_subnet.subnets(SLED_PREFIX).unwrap();
         // Skip the initial DNS subnet.
-        // (The same behavior is replicated in RSS in `Plan::create()` in
-        // sled-agent/src/rack_setup/plan/sled.rs.)
+        // (The same behavior is replicated in RSS in `SledPlan::create()` in
+        // sled-agent/rack-setup/src/plan/sled.rs.)
         subnets.next();
         Self { subnets }
     }
