@@ -61,7 +61,7 @@ use uuid::Uuid;
 /// practice, we use that as the threshold. Anything older is much more likely
 /// stuck than legitimately still in progress.
 // TODO-K: Remove in https://github.com/oxidecomputer/omicron/issues/10538
-#[allow(dead_code)]
+#[cfg(test)]
 const STUCK_SAGA_THRESHOLD: TimeDelta = TimeDelta::minutes(15);
 
 /// Threshold at which we consider an inventory collection too old for the
@@ -1313,8 +1313,9 @@ mod test {
         let version = fake_target_version();
         let blueprint =
             fake_blueprint(&cptestctx.logctx.log, &version, Utc::now(), false);
-        // There is a stuck active saga no update has ever been run, but we
-        // disabled stuck staga retrieval. Contact support should be false
+        // There is a stuck active saga, but no update has ever been run. This
+        // should prompt the user to contact support, but we disabled stuck
+        // staga retrieval temporarily. Contact support should be false
         assert!(
             !nexus
                 .contact_support(
