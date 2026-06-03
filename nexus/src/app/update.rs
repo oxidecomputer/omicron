@@ -1314,7 +1314,7 @@ mod test {
         let blueprint =
             fake_blueprint(&cptestctx.logctx.log, &version, Utc::now(), false);
         // There is a stuck active saga no update has ever been run, but we
-        // disabled stuck staga retrieval contact support should be false
+        // disabled stuck staga retrieval. Contact support should be false
         assert!(
             !nexus
                 .contact_support(
