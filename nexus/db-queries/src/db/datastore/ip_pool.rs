@@ -2501,8 +2501,9 @@ mod test {
     use crate::authz;
     use crate::db::datastore::external_ip::FloatingIpAllocation;
     use crate::db::datastore::ip_pool::{
-        BAD_SILO_LINK_ERROR, POOL_HAS_IPS_ERROR, REASSIGN_LAST_POOL_ERROR,
-        assign_ip_pool_query, link_ip_pool_to_external_silo_query,
+        BAD_SILO_LINK_ERROR, DELETE_LAST_POOL_ERROR, POOL_HAS_IPS_ERROR,
+        REASSIGN_LAST_POOL_ERROR, assign_ip_pool_query,
+        link_ip_pool_to_external_silo_query,
         unlink_ip_pool_from_external_silo_query,
     };
     use crate::db::explain::ExplainableAsync as _;
@@ -5599,7 +5600,7 @@ mod test {
                 IP Pool when only one remains, found {res:#?}"
             );
         };
-        assert_eq!(message.external_message(), REASSIGN_LAST_POOL_ERROR);
+        assert_eq!(message.external_message(), DELETE_LAST_POOL_ERROR);
 
         let l = datastore
             .ip_pools_list_paginated(
