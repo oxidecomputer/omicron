@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "41.0.0"
+    "version": "42.0.0"
   },
   "paths": {
     "/artifacts": {
@@ -10676,7 +10676,7 @@
               "type": {
                 "type": "string",
                 "enum": [
-                  "icmp"
+                  "icmp_v4"
                 ]
               },
               "value": {
@@ -10699,7 +10699,7 @@
               "type": {
                 "type": "string",
                 "enum": [
-                  "icmp6"
+                  "icmp_v6"
                 ]
               },
               "value": {

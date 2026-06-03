@@ -102,7 +102,7 @@ impl FromVpcFirewallRule for ResolvedVpcFirewallRule {
                 .map(|proto| match proto {
                     VpcFirewallRuleProtocol::Tcp => ProtoFilter::Tcp,
                     VpcFirewallRuleProtocol::Udp => ProtoFilter::Udp,
-                    VpcFirewallRuleProtocol::Icmp(v) => {
+                    VpcFirewallRuleProtocol::IcmpV4(v) => {
                         ProtoFilter::Icmp(v.map(|v| {
                             oxide_vpc::api::IcmpFilter {
                                 ty: v.icmp_type,
@@ -110,7 +110,7 @@ impl FromVpcFirewallRule for ResolvedVpcFirewallRule {
                             }
                         }))
                     }
-                    VpcFirewallRuleProtocol::Icmp6(v) => {
+                    VpcFirewallRuleProtocol::IcmpV6(v) => {
                         ProtoFilter::Icmpv6(v.map(|v| {
                             oxide_vpc::api::IcmpFilter {
                                 ty: v.icmp_type,

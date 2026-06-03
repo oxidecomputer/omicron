@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "2026060800.0.0"
+    "version": "2026061600.0.0"
   },
   "paths": {
     "/device/auth": {
@@ -31012,7 +31012,7 @@
               "type": {
                 "type": "string",
                 "enum": [
-                  "icmp"
+                  "icmp_v4"
                 ]
               },
               "value": {
@@ -31035,7 +31035,7 @@
               "type": {
                 "type": "string",
                 "enum": [
-                  "icmp6"
+                  "icmp_v6"
                 ]
               },
               "value": {

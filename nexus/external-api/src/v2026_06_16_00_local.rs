@@ -2,12 +2,11 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Types from API version 2026_03_14_00 that cannot live in `nexus-types-versions`
+//! Types from API version 2026_06_16_00 that cannot live in `nexus-types-versions`
 //! because they convert to/from `omicron-common` types (orphan rule).
 
 use api_identity::ObjectIdentity;
 use omicron_common::api::external;
-use omicron_common::api::external::Error;
 use omicron_common::api::external::IdentityMetadata;
 use omicron_common::api::external::L4PortRange;
 use omicron_common::api::external::Name;
@@ -26,8 +25,10 @@ use uuid::Uuid;
 
 /// The protocols that may be specified in a firewall rule's filter.
 //
-// This is the version of the enum without `Icmp6`, for API versions up
-// through `MULTICAST_DROP_MVLAN`.
+// This is the version of the enum that serializes ICMP protocols as `icmp` and
+// `icmp6`, for API versions from `ADD_ICMPV6_FIREWALL_SUPPORT` up through
+// `INSTANCE_CPU_TYPE_TURIN_V2`. The current version renames these to
+// `icmp_v4` and `icmp_v6`.
 #[derive(Clone, Copy, Debug, PartialEq, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 #[serde(tag = "type", content = "value")]
@@ -35,6 +36,7 @@ pub enum VpcFirewallRuleProtocol {
     Tcp,
     Udp,
     Icmp(Option<VpcFirewallIcmpFilter>),
+    Icmp6(Option<VpcFirewallIcmpFilter>),
 }
 
 impl From<VpcFirewallRuleProtocol> for external::VpcFirewallRuleProtocol {
@@ -43,14 +45,27 @@ impl From<VpcFirewallRuleProtocol> for external::VpcFirewallRuleProtocol {
             VpcFirewallRuleProtocol::Tcp => Self::Tcp,
             VpcFirewallRuleProtocol::Udp => Self::Udp,
             VpcFirewallRuleProtocol::Icmp(v) => Self::IcmpV4(v),
+            VpcFirewallRuleProtocol::Icmp6(v) => Self::IcmpV6(v),
+        }
+    }
+}
+
+impl From<external::VpcFirewallRuleProtocol> for VpcFirewallRuleProtocol {
+    fn from(p: external::VpcFirewallRuleProtocol) -> Self {
+        match p {
+            external::VpcFirewallRuleProtocol::Tcp => Self::Tcp,
+            external::VpcFirewallRuleProtocol::Udp => Self::Udp,
+            external::VpcFirewallRuleProtocol::IcmpV4(v) => Self::Icmp(v),
+            external::VpcFirewallRuleProtocol::IcmpV6(v) => Self::Icmp6(v),
         }
     }
 }
 
 /// Filters reduce the scope of a firewall rule.
 //
-// This is the version of the filter without `Icmp6` protocol support, for API
-// versions up through `MULTICAST_DROP_MVLAN`.
+// This is the version of the filter that serializes ICMP protocols as `icmp`
+// and `icmp6`, for API versions from `ADD_ICMPV6_FIREWALL_SUPPORT` up through
+// `INSTANCE_CPU_TYPE_TURIN_V2`.
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize, JsonSchema)]
 pub struct VpcFirewallRuleFilter {
     /// If present, host filters match the "other end" of traffic from the
@@ -68,38 +83,15 @@ pub struct VpcFirewallRuleFilter {
     pub ports: Option<Vec<L4PortRange>>,
 }
 
-impl TryFrom<external::VpcFirewallRuleFilter> for VpcFirewallRuleFilter {
-    type Error = Error;
-
-    fn try_from(f: external::VpcFirewallRuleFilter) -> Result<Self, Error> {
-        let protocols = f
-            .protocols
-            .map(|ps| {
-                ps.into_iter()
-                    .map(|p| match p {
-                        external::VpcFirewallRuleProtocol::Tcp => {
-                            Ok(VpcFirewallRuleProtocol::Tcp)
-                        }
-                        external::VpcFirewallRuleProtocol::Udp => {
-                            Ok(VpcFirewallRuleProtocol::Udp)
-                        }
-                        external::VpcFirewallRuleProtocol::IcmpV4(v) => {
-                            Ok(VpcFirewallRuleProtocol::Icmp(v))
-                        }
-                        external::VpcFirewallRuleProtocol::IcmpV6(_) => {
-                            Err(Error::invalid_value(
-                                "vpc_firewall_rule_protocol",
-                                format!(
-                                    "unrecognized protocol: {}",
-                                    p.to_api_string()
-                                ),
-                            ))
-                        }
-                    })
-                    .collect::<Result<Vec<_>, _>>()
-            })
-            .transpose()?;
-        Ok(Self { hosts: f.hosts, protocols, ports: f.ports })
+impl From<external::VpcFirewallRuleFilter> for VpcFirewallRuleFilter {
+    fn from(f: external::VpcFirewallRuleFilter) -> Self {
+        Self {
+            hosts: f.hosts,
+            protocols: f
+                .protocols
+                .map(|ps| ps.into_iter().map(Into::into).collect()),
+            ports: f.ports,
+        }
     }
 }
 
@@ -117,8 +109,9 @@ impl From<VpcFirewallRuleFilter> for external::VpcFirewallRuleFilter {
 
 /// A single rule in a VPC firewall.
 //
-// This is the version of the rule without `Icmp6` protocol support, for API
-// versions up through `MULTICAST_DROP_MVLAN`.
+// This is the version of the rule that serializes ICMP protocols as `icmp` and
+// `icmp6`, for API versions from `ADD_ICMPV6_FIREWALL_SUPPORT` up through
+// `INSTANCE_CPU_TYPE_TURIN_V2`.
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct VpcFirewallRule {
     /// Common identifying metadata
@@ -140,49 +133,42 @@ pub struct VpcFirewallRule {
     pub vpc_id: Uuid,
 }
 
-impl TryFrom<external::VpcFirewallRule> for VpcFirewallRule {
-    type Error = Error;
-
-    fn try_from(r: external::VpcFirewallRule) -> Result<Self, Error> {
-        Ok(Self {
+impl From<external::VpcFirewallRule> for VpcFirewallRule {
+    fn from(r: external::VpcFirewallRule) -> Self {
+        Self {
             identity: r.identity,
             status: r.status,
             direction: r.direction,
             targets: r.targets,
-            filters: r.filters.try_into()?,
+            filters: r.filters.into(),
             action: r.action,
             priority: r.priority,
             vpc_id: r.vpc_id,
-        })
+        }
     }
 }
 
 /// Collection of a VPC's firewall rules.
 //
-// This is the version of the collection without `Icmp6` protocol support, for
-// API versions up through `MULTICAST_DROP_MVLAN`.
+// This is the version of the collection that serializes ICMP protocols as
+// `icmp` and `icmp6`, for API versions from `ADD_ICMPV6_FIREWALL_SUPPORT` up
+// through `INSTANCE_CPU_TYPE_TURIN_V2`.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct VpcFirewallRules {
     pub rules: Vec<VpcFirewallRule>,
 }
 
-impl TryFrom<external::VpcFirewallRules> for VpcFirewallRules {
-    type Error = Error;
-
-    fn try_from(r: external::VpcFirewallRules) -> Result<Self, Error> {
-        let rules = r
-            .rules
-            .into_iter()
-            .map(VpcFirewallRule::try_from)
-            .collect::<Result<Vec<_>, _>>()?;
-        Ok(Self { rules })
+impl From<external::VpcFirewallRules> for VpcFirewallRules {
+    fn from(r: external::VpcFirewallRules) -> Self {
+        Self { rules: r.rules.into_iter().map(VpcFirewallRule::from).collect() }
     }
 }
 
 /// A single rule in a VPC firewall update request.
 //
-// This is the version of the update without `Icmp6` protocol support, for API
-// versions up through `MULTICAST_DROP_MVLAN`.
+// This is the version of the update that serializes ICMP protocols as `icmp`
+// and `icmp6`, for API versions from `ADD_ICMPV6_FIREWALL_SUPPORT` up through
+// `INSTANCE_CPU_TYPE_TURIN_V2`.
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize, JsonSchema)]
 pub struct VpcFirewallRuleUpdate {
     /// Name of the rule, unique to this VPC
@@ -221,8 +207,9 @@ impl From<VpcFirewallRuleUpdate> for external::VpcFirewallRuleUpdate {
 
 /// Updated list of firewall rules. Will replace all existing rules.
 //
-// This is the version of the params without `Icmp6` protocol support, for API
-// versions up through `MULTICAST_DROP_MVLAN`.
+// This is the version of the params that serializes ICMP protocols as `icmp`
+// and `icmp6`, for API versions from `ADD_ICMPV6_FIREWALL_SUPPORT` up through
+// `INSTANCE_CPU_TYPE_TURIN_V2`.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct VpcFirewallRuleUpdateParams {
     #[schemars(length(max = 1024))]

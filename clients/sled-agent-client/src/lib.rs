@@ -197,8 +197,8 @@ impl From<omicron_common::api::external::VpcFirewallRuleProtocol>
         match s {
             Tcp => Self::Tcp,
             Udp => Self::Udp,
-            Icmp(v) => Self::Icmp(v),
-            Icmp6(v) => Self::Icmp6(v),
+            IcmpV4(v) => Self::IcmpV4(v),
+            IcmpV6(v) => Self::IcmpV6(v),
         }
     }
 }
