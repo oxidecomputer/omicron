@@ -1365,7 +1365,7 @@ mod tests {
     use sled_agent_types::inventory::OmicronFileSourceResolverInventory;
     use sled_agent_types::inventory::SledCpuFamily;
     use sled_agent_types::inventory::SvcsEnabledNotOnlineResult;
-    use sled_hardware_types::Baseboard;
+    use sled_hardware_types::BaseboardId;
 
     const DISK_COUNT: usize = 10;
 
@@ -1518,10 +1518,10 @@ mod tests {
                 sled_id,
                 sled_agent_address: sled_address,
                 sled_role: SledRole::Scrimlet,
-                baseboard: Baseboard::new_pc(
-                    "test".to_string(),
-                    "test".to_string(),
-                ),
+                baseboard: BaseboardId {
+                    part_number: "test".to_string(),
+                    serial_number: "test".to_string(),
+                },
                 usable_hardware_threads: 32,
                 usable_physical_ram: ByteCount::try_from(1_u64 << 40).unwrap(),
                 cpu_family: SledCpuFamily::AmdMilan,

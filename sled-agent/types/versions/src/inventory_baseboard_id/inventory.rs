@@ -2,29 +2,26 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::v1::inventory::Baseboard;
 use iddqd::IdOrdMap;
 use omicron_common::api::external::ByteCount;
-use omicron_common::snake_case_result;
-use omicron_common::snake_case_result::SnakeCaseResult;
 use omicron_uuid_kinds::SledUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use sled_hardware_types::SledCpuFamily;
+use sled_hardware_types::{BaseboardId, SledCpuFamily};
 use std::net::SocketAddrV6;
 
+use crate::v1::inventory::Baseboard;
 use crate::v1::inventory::InventoryDataset;
 use crate::v1::inventory::InventoryDisk;
-use crate::v1::inventory::InventoryZpool;
 use crate::v1::inventory::SledRole;
-use crate::v12::inventory::SvcsInMaintenanceResult;
 use crate::v14::inventory::ConfigReconcilerInventoryStatus;
-use crate::v14::inventory::HealthMonitorInventory;
 use crate::v14::inventory::OmicronFileSourceResolverInventory;
 use crate::v14::inventory::OmicronSledConfig;
-use crate::v16;
 use crate::v16::inventory::ConfigReconcilerInventory;
 use crate::v16::inventory::SingleMeasurementInventory;
+use crate::v24::inventory::InventoryZpool;
+use crate::v37;
+use crate::v37::inventory::SvcsEnabledNotOnlineResult;
 
 /// Identity and basic status information about this sled agent
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
@@ -32,7 +29,7 @@ pub struct Inventory {
     pub sled_id: SledUuid,
     pub sled_agent_address: SocketAddrV6,
     pub sled_role: SledRole,
-    pub baseboard: Baseboard,
+    pub baseboard: BaseboardId,
     pub usable_hardware_threads: u32,
     pub usable_physical_ram: ByteCount,
     pub cpu_family: SledCpuFamily,
@@ -44,15 +41,11 @@ pub struct Inventory {
     pub reconciler_status: ConfigReconcilerInventoryStatus,
     pub last_reconciliation: Option<ConfigReconcilerInventory>,
     pub file_source_resolver: OmicronFileSourceResolverInventory,
-    #[serde(with = "snake_case_result")]
-    #[schemars(
-        schema_with = "SnakeCaseResult::<SvcsInMaintenanceResult, String>::json_schema"
-    )]
-    pub smf_services_in_maintenance: Result<SvcsInMaintenanceResult, String>,
+    pub smf_services_enabled_not_online: SvcsEnabledNotOnlineResult,
     pub reference_measurements: IdOrdMap<SingleMeasurementInventory>,
 }
 
-impl From<Inventory> for v16::inventory::Inventory {
+impl From<Inventory> for v37::inventory::Inventory {
     fn from(value: Inventory) -> Self {
         let Inventory {
             sled_id,
@@ -70,14 +63,23 @@ impl From<Inventory> for v16::inventory::Inventory {
             reconciler_status,
             last_reconciliation,
             file_source_resolver,
-            smf_services_in_maintenance,
+            smf_services_enabled_not_online,
             reference_measurements,
         } = value;
         Self {
             sled_id,
             sled_agent_address,
             sled_role,
-            baseboard,
+            // A `BaseboardId` only carries a part number and serial number.
+            // Older API versions report the full `Baseboard`, so reconstruct it
+            // as a Gimlet (the only kind produced for real hardware). The
+            // revision is unrecoverable and set to 0; consumers speaking these
+            // older versions discard it.
+            baseboard: Baseboard::Gimlet {
+                identifier: baseboard.serial_number,
+                model: baseboard.part_number,
+                revision: 0,
+            },
             usable_hardware_threads,
             usable_physical_ram,
             cpu_family,
@@ -89,9 +91,7 @@ impl From<Inventory> for v16::inventory::Inventory {
             reconciler_status,
             last_reconciliation,
             file_source_resolver,
-            health_monitor: HealthMonitorInventory {
-                smf_services_in_maintenance,
-            },
+            smf_services_enabled_not_online,
             reference_measurements,
         }
     }

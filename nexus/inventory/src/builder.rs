@@ -38,7 +38,6 @@ use omicron_cockroach_metrics::CockroachMetric;
 use omicron_cockroach_metrics::PrometheusMetrics;
 use omicron_common::disk::M2Slot;
 use omicron_uuid_kinds::CollectionKind;
-use sled_agent_types::inventory::Baseboard;
 use sled_agent_types::inventory::Inventory;
 use sled_hardware_types::BaseboardId;
 use std::collections::BTreeMap;
@@ -625,19 +624,9 @@ impl CollectionBuilder {
     ) -> Result<(), anyhow::Error> {
         let sled_id = inventory.sled_id;
 
-        let baseboard_id = match inventory.baseboard {
-            Baseboard::Pc { .. } => None,
-            Baseboard::Gimlet { identifier, model, .. } => {
-                Some(Self::normalize_item(
-                    &mut self.baseboards,
-                    BaseboardId {
-                        serial_number: identifier,
-                        part_number: model,
-                    },
-                ))
-            }
-            Baseboard::Unknown => panic!("deprecated"),
-        };
+        let baseboard_id = Some(
+            Self::normalize_item(&mut self.baseboards, inventory.baseboard),
+        );
 
         // Socket addresses come through the OpenAPI spec as strings, which
         // means they don't get validated when everything else does.  This
@@ -874,8 +863,6 @@ mod test {
                 "MGS \"fake MGS 1\": reading RoT state for BaseboardId \
                 { part_number: \"model1\", serial_number: \"s2\" }: test suite \
                 injected error",
-                "sled 5c5b4cf9-3e13-45fd-871c-f177d6537510: reported unknown \
-                baseboard"
             ]
         );
 
@@ -885,12 +872,14 @@ mod test {
         for bb in expected_baseboards {
             assert!(collection.baseboards.contains(*bb));
         }
-        assert_eq!(collection.baseboards.len(), expected_baseboards.len());
+        // In addition to the baseboards above, sled agents 5 and 6 each report
+        // their own baseboard, giving two more than `expected_baseboards`.
+        assert_eq!(collection.baseboards.len(), expected_baseboards.len() + 2);
 
         // Verify the stuff that's easy to verify for all SPs: timestamps.
-        // There will be one more baseboard than SP because of the one added for
-        // the extra sled agent.
-        assert_eq!(collection.sps.len() + 1, collection.baseboards.len());
+        // There will be three more baseboards than SPs: one for each of the
+        // three sled agents whose baseboards weren't also reported via an SP.
+        assert_eq!(collection.sps.len() + 3, collection.baseboards.len());
         for (bb, sp) in collection.sps.iter() {
             assert!(collection.time_started <= sp.time_collected);
             assert!(sp.time_collected <= collection.time_done);
@@ -1195,21 +1184,16 @@ mod test {
             collection.sled_agents.get(&sled_agent_id_extra).unwrap();
         let sled4_bb = sled4_agent.baseboard_id.as_ref().unwrap();
         assert_eq!(sled4_bb.serial_number, "s4");
-        assert!(
-            collection
-                .sled_agents
-                .get(&sled_agent_id_pc)
-                .unwrap()
-                .baseboard_id
-                .is_none()
+        let pc_agent = collection.sled_agents.get(&sled_agent_id_pc).unwrap();
+        assert_eq!(
+            pc_agent.baseboard_id.as_ref().unwrap().serial_number,
+            "fellofftruck1"
         );
-        assert!(
-            collection
-                .sled_agents
-                .get(&sled_agent_id_unknown)
-                .unwrap()
-                .baseboard_id
-                .is_none()
+        let unknown_agent =
+            collection.sled_agents.get(&sled_agent_id_unknown).unwrap();
+        assert_eq!(
+            unknown_agent.baseboard_id.as_ref().unwrap().serial_number,
+            "test"
         );
     }
 

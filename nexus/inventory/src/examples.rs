@@ -45,7 +45,6 @@ use sled_agent_resolvable_files_examples::NON_BOOT_PATHS;
 use sled_agent_resolvable_files_examples::NON_BOOT_UUID;
 use sled_agent_resolvable_files_examples::WriteInstallDatasetContext;
 use sled_agent_resolvable_files_examples::dataset_missing_error;
-use sled_agent_types::inventory::Baseboard;
 use sled_agent_types::inventory::BootImageHeader;
 use sled_agent_types::inventory::BootPartitionDetails;
 use sled_agent_types::inventory::ConfigReconcilerInventory;
@@ -571,10 +570,9 @@ pub fn representative() -> Representative {
             "fake sled agent 1",
             sled_agent(
                 sled_agent_id_basic,
-                Baseboard::Gimlet {
-                    identifier: String::from("s1"),
-                    model: String::from("model1"),
-                    revision: 0,
+                BaseboardId {
+                    part_number: String::from("model1"),
+                    serial_number: String::from("s1"),
                 },
                 SledRole::Gimlet,
                 disks,
@@ -606,11 +604,7 @@ pub fn representative() -> Representative {
             "fake sled agent 4",
             sled_agent(
                 sled_agent_id_extra,
-                Baseboard::Gimlet {
-                    identifier: sled4_bb.serial_number.clone(),
-                    model: sled4_bb.part_number.clone(),
-                    revision: 0,
-                },
+                (*sled4_bb).clone(),
                 SledRole::Scrimlet,
                 vec![],
                 vec![],
@@ -627,9 +621,7 @@ pub fn representative() -> Representative {
         )
         .unwrap();
 
-    // Now report a different sled as though it were a PC.  It'd be unlikely to
-    // see a mix of real Oxide hardware and PCs in the same deployment, but this
-    // exercises different code paths.
+    // Now report a couple more sleds with their own distinct baseboards.
     let sled_agent_id_pc =
         "c4a5325b-e852-4747-b28a-8aaa7eded8a0".parse().unwrap();
     builder
@@ -637,9 +629,9 @@ pub fn representative() -> Representative {
             "fake sled agent 5",
             sled_agent(
                 sled_agent_id_pc,
-                Baseboard::Pc {
-                    identifier: String::from("fellofftruck1"),
-                    model: String::from("fellofftruck"),
+                BaseboardId {
+                    part_number: String::from("fellofftruck"),
+                    serial_number: String::from("fellofftruck1"),
                 },
                 SledRole::Gimlet,
                 vec![],
@@ -665,9 +657,7 @@ pub fn representative() -> Representative {
         )
         .unwrap();
 
-    // Finally, report a sled with unknown baseboard information.  This should
-    // look the same as the PC as far as inventory is concerned but let's verify
-    // it.
+    // Finally, report one more sled with its own baseboard.
     let sled_agent_id_unknown =
         "5c5b4cf9-3e13-45fd-871c-f177d6537510".parse().unwrap();
 
@@ -676,7 +666,10 @@ pub fn representative() -> Representative {
             "fake sled agent 6",
             sled_agent(
                 sled_agent_id_unknown,
-                Baseboard::new_pc("test".to_string(), "test".to_string()),
+                BaseboardId {
+                    part_number: "test".to_string(),
+                    serial_number: "test".to_string(),
+                },
                 SledRole::Gimlet,
                 vec![],
                 vec![],
@@ -1033,7 +1026,7 @@ pub fn file_source_resolver(
 #[expect(clippy::too_many_arguments)]
 pub fn sled_agent(
     sled_id: SledUuid,
-    baseboard: Baseboard,
+    baseboard: BaseboardId,
     sled_role: SledRole,
     disks: Vec<InventoryDisk>,
     zpools: Vec<InventoryZpool>,

@@ -11,8 +11,8 @@ use dropshot::HttpServer;
 use dropshot::ServerBuilder;
 use omicron_common::disk::M2Slot;
 use omicron_uuid_kinds::SledUuid;
-use sled_agent_types::inventory::Baseboard;
 use sled_agent_types::inventory::SledRole;
+use sled_hardware_types::BaseboardId;
 use slog::Logger;
 use sp_sim::GimletPowerState;
 use std::net::SocketAddr;
@@ -157,7 +157,7 @@ struct HostPhase2SledAgentContext {
     state: watch::Receiver<HostPhase2State>,
     id: SledUuid,
     role: SledRole,
-    baseboard: Baseboard,
+    baseboard: BaseboardId,
 }
 
 impl HostPhase2SledAgentContext {
@@ -169,10 +169,10 @@ impl HostPhase2SledAgentContext {
             // random sled ID every time our `/inventory` endpoint is collected.
             id: SledUuid::new_v4(),
             role: SledRole::Gimlet,
-            baseboard: Baseboard::new_pc(
-                "test".to_string(),
-                "test".to_string(),
-            ),
+            baseboard: BaseboardId {
+                part_number: "test".to_string(),
+                serial_number: "test".to_string(),
+            },
         }
     }
 }

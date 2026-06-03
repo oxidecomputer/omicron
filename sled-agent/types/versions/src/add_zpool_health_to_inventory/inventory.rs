@@ -2,6 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use crate::v1::inventory::Baseboard;
 use iddqd::IdOrdMap;
 use omicron_common::api::external::ByteCount;
 use omicron_common::snake_case_result;
@@ -10,7 +11,7 @@ use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use sled_hardware_types::{Baseboard, SledCpuFamily};
+use sled_hardware_types::SledCpuFamily;
 use std::net::SocketAddrV6;
 
 use crate::v1;

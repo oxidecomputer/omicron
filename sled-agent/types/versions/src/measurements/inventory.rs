@@ -5,6 +5,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::SocketAddrV6;
 
+use crate::v1::inventory::Baseboard;
 use chrono::{DateTime, Utc};
 use iddqd::IdOrdItem;
 use iddqd::IdOrdMap;
@@ -20,7 +21,7 @@ use omicron_uuid_kinds::{DatasetUuid, OmicronZoneUuid};
 use omicron_uuid_kinds::{MupdateOverrideUuid, PhysicalDiskUuid};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use sled_hardware_types::{Baseboard, SledCpuFamily};
+use sled_hardware_types::SledCpuFamily;
 use std::time::Duration;
 
 use crate::v1;
