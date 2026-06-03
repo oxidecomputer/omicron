@@ -11,6 +11,7 @@ use omicron_common::api::internal::shared::SledIdentifiers;
 use omicron_uuid_kinds::GenericUuid;
 use oximeter_instruments::http::HttpService;
 use oximeter_instruments::http::LatencyTracker;
+use oximeter_instruments::kstat;
 use oximeter_instruments::kstat::CollectionDetails;
 use oximeter_instruments::kstat::Error as KstatError;
 use oximeter_instruments::kstat::KstatSampler;
@@ -49,9 +50,18 @@ const METRIC_COLLECTION_INTERVAL: Duration = Duration::from_secs(30);
 // now.
 const LINK_SAMPLE_INTERVAL: Duration = Duration::from_secs(10);
 
+/// The maximum number of samples retained for links.
+const N_MAX_LINK_SAMPLES: usize = 512;
+
 const CPU_SAMPLE_INTERVAL: Duration = Duration::from_secs(10);
 
+/// The maximum number of CPU usage samples.
+const N_MAX_CPU_SAMPLES: usize = kstat::cpu::max_cardinality() * 10;
+
 const ZONE_SAMPLE_INTERVAL: Duration = Duration::from_secs(10);
+
+/// The maximum number of zone CPU usage samples.
+const N_MAX_ZONE_CPU_SAMPLES: usize = kstat::zone::max_cardinality() * 10;
 
 /// The interval after which we expire kstat-based collection of transient
 /// links.
@@ -135,9 +145,10 @@ fn get_collection_details(kind: &str) -> CollectionDetails {
         CollectionDetails::duration(
             LINK_SAMPLE_INTERVAL,
             TRANSIENT_LINK_EXPIRATION_INTERVAL,
+            N_MAX_LINK_SAMPLES,
         )
     } else {
-        CollectionDetails::never(LINK_SAMPLE_INTERVAL)
+        CollectionDetails::never(LINK_SAMPLE_INTERVAL, N_MAX_LINK_SAMPLES)
     }
 }
 
@@ -409,7 +420,8 @@ async fn add_zone(
 
     // We have one target per sled that samples all zones, so there's no
     // need to expire it.
-    let details = CollectionDetails::never(ZONE_SAMPLE_INTERVAL);
+    let details =
+        CollectionDetails::never(ZONE_SAMPLE_INTERVAL, N_MAX_ZONE_CPU_SAMPLES);
     match kstat_sampler.add_target(zone.clone(), details).await {
         Ok(_id) => {
             debug!(log, "added zone metrics to kstat sampler");
@@ -436,7 +448,8 @@ async fn sync_zone(
     };
 
     zone.time_synced = true;
-    let details = CollectionDetails::never(ZONE_SAMPLE_INTERVAL);
+    let details =
+        CollectionDetails::never(ZONE_SAMPLE_INTERVAL, N_MAX_ZONE_CPU_SAMPLES);
     match kstat_sampler.update_target(zone.clone(), details).await {
         Ok(_) => {
             debug!(log, "updated zone metrics after time sync");
@@ -475,7 +488,8 @@ async fn add_sled_cpu(
 
     // We have one target per sled that samples all CPUs, so there's no
     // need to expire it.
-    let details = CollectionDetails::never(CPU_SAMPLE_INTERVAL);
+    let details =
+        CollectionDetails::never(CPU_SAMPLE_INTERVAL, N_MAX_CPU_SAMPLES);
     match kstat_sampler.add_target(cpu.clone(), details).await {
         Ok(_id) => {
             debug!(log, "added CPU metrics to kstat sampler");
@@ -502,7 +516,8 @@ async fn sync_sled_cpu(
     };
 
     cpu.time_synced = true;
-    let details = CollectionDetails::never(CPU_SAMPLE_INTERVAL);
+    let details =
+        CollectionDetails::never(CPU_SAMPLE_INTERVAL, N_MAX_CPU_SAMPLES);
     match kstat_sampler.update_target(cpu.clone(), details).await {
         Ok(_) => {
             debug!(log, "updated sled CPU metrics after time sync");

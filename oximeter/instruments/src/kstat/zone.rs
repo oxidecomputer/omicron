@@ -28,6 +28,12 @@ const CPU_STATES: &[&str] = &["user", "sys", "waitrq"];
 /// The prefix used for Omicron zone names.
 const ZONE_PREFIX: &str = "oxz_";
 
+/// The maximum cardinality of the data we produce, per sampling interval.
+pub const fn max_cardinality() -> usize {
+    // Assume maximum of 256 CPUs in a zone.
+    CPU_STATES.len() * 256
+}
+
 /// Parsed zone metadata from a zone name formatted as "oxz_TYPE_UUID".
 struct ZoneMetadata {
     zone_type: String,
