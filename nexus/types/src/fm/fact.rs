@@ -55,6 +55,17 @@ pub enum DiskFact {
     ZpoolUnhealthy(ZpoolUnhealthyFactPayload),
 }
 
+impl DiskFact {
+    /// The physical disk this fact is about. Common to every kind of disk
+    /// fact: a Disk case is keyed by its physical disk, and every fact on
+    /// the case agrees on this value.
+    pub fn physical_disk_id(&self) -> PhysicalDiskUuid {
+        match self {
+            DiskFact::ZpoolUnhealthy(p) => p.physical_disk_id,
+        }
+    }
+}
+
 /// Payload of a [`DiskFact::ZpoolUnhealthy`] fact.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct ZpoolUnhealthyFactPayload {

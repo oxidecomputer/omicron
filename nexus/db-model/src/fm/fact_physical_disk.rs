@@ -51,10 +51,13 @@ pub struct FmFactPhysicalDisk {
     /// Preserved unchanged when the fact is carried forward; debug-only.
     pub created_sitrep_id: DbTypedUuid<SitrepKind>,
     pub comment: String,
+
+    /// The physical disk this fact is about. Common to every `kind`, so it is
+    /// always present (the column is `NOT NULL`).
+    pub physical_disk_id: DbTypedUuid<PhysicalDiskKind>,
     pub kind: FmFactPhysicalDiskKind,
 
     // Columns for the `ZpoolUnhealthy` kind.
-    pub physical_disk_id: Option<DbTypedUuid<PhysicalDiskKind>>,
     pub zpool_id: Option<DbTypedUuid<ZpoolKind>>,
     pub last_seen_health: Option<InvZpoolHealth>,
     pub observed_in_inv: Option<DbTypedUuid<CollectionKind>>,
@@ -80,8 +83,8 @@ impl FmFactPhysicalDisk {
             case_id: case_id.into(),
             created_sitrep_id: fact.created_sitrep_id.into(),
             comment: fact.comment.clone(),
+            physical_disk_id: disk_fact.physical_disk_id().into(),
             kind: FmFactPhysicalDiskKind::ZpoolUnhealthy,
-            physical_disk_id: None,
             zpool_id: None,
             last_seen_health: None,
             observed_in_inv: None,
@@ -90,7 +93,6 @@ impl FmFactPhysicalDisk {
         match disk_fact {
             DiskFact::ZpoolUnhealthy(p) => Self {
                 kind: FmFactPhysicalDiskKind::ZpoolUnhealthy,
-                physical_disk_id: Some(p.physical_disk_id.into()),
                 zpool_id: Some(p.zpool_id.into()),
                 last_seen_health: Some(p.last_seen_health.into()),
                 observed_in_inv: Some(p.observed_in_inv.into()),
@@ -112,12 +114,7 @@ impl FmFactPhysicalDisk {
             FmFactPhysicalDiskKind::ZpoolUnhealthy => {
                 FactPayload::PhysicalDisk(DiskFact::ZpoolUnhealthy(
                     ZpoolUnhealthyFactPayload {
-                        physical_disk_id: self
-                            .physical_disk_id
-                            .ok_or_else(|| {
-                                missing_column(kind, "physical_disk_id")
-                            })?
-                            .into(),
+                        physical_disk_id: self.physical_disk_id.into(),
                         zpool_id: self
                             .zpool_id
                             .ok_or_else(|| missing_column(kind, "zpool_id"))?

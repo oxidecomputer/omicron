@@ -13,12 +13,16 @@ CREATE TABLE IF NOT EXISTS omicron.public.fm_fact_physical_disk (
     -- Free-form, debug-only comment.
     comment TEXT NOT NULL,
 
+    -- The physical disk this fact is about. Common to every kind of
+    -- physical-disk fact (the case is keyed by it), so it is always present
+    -- regardless of `kind`.
+    physical_disk_id UUID NOT NULL,
+
     -- Which physical-disk fact this row represents. The columns below are
     -- populated according to this discriminant (see the CHECK constraint).
     kind omicron.public.fm_fact_physical_disk_kind NOT NULL,
 
     -- Columns for a 'zpool_unhealthy' fact. NULL for any other kind.
-    physical_disk_id UUID,
     zpool_id UUID,
     last_seen_health omicron.public.inv_zpool_health,
     observed_in_inv UUID,
@@ -27,18 +31,10 @@ CREATE TABLE IF NOT EXISTS omicron.public.fm_fact_physical_disk (
     PRIMARY KEY (sitrep_id, id),
 
     CONSTRAINT zpool_unhealthy_columns_present CHECK (
-        (kind = 'zpool_unhealthy'
-            AND physical_disk_id IS NOT NULL
+        kind = 'zpool_unhealthy'
             AND zpool_id IS NOT NULL
             AND last_seen_health IS NOT NULL
             AND observed_in_inv IS NOT NULL
-            AND time_observed IS NOT NULL)
-        OR
-        (kind != 'zpool_unhealthy'
-            AND physical_disk_id IS NULL
-            AND zpool_id IS NULL
-            AND last_seen_health IS NULL
-            AND observed_in_inv IS NULL
-            AND time_observed IS NULL)
+            AND time_observed IS NOT NULL
     )
 );
