@@ -224,3 +224,55 @@ impl From<VpcFirewallRuleUpdateParams>
         Self { rules: p.rules.into_iter().map(Into::into).collect() }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn firewall_protocol_uses_legacy_wire_spelling() {
+        let icmp = VpcFirewallRuleProtocol::Icmp(None);
+        assert_eq!(
+            serde_json::to_value(icmp).unwrap(),
+            serde_json::json!({
+                "type": "icmp",
+                "value": null,
+            })
+        );
+
+        let icmp6 =
+            VpcFirewallRuleProtocol::Icmp6(Some(VpcFirewallIcmpFilter {
+                icmp_type: 128,
+                code: None,
+            }));
+        assert_eq!(
+            serde_json::to_value(icmp6).unwrap(),
+            serde_json::json!({
+                "type": "icmp6",
+                "value": {
+                    "icmp_type": 128,
+                    "code": null,
+                },
+            })
+        );
+    }
+
+    #[test]
+    fn firewall_protocol_converts_to_latest_variants() {
+        let icmp: external::VpcFirewallRuleProtocol =
+            VpcFirewallRuleProtocol::Icmp(None).into();
+        assert_eq!(icmp, external::VpcFirewallRuleProtocol::IcmpV4(None));
+
+        let icmp6: external::VpcFirewallRuleProtocol =
+            VpcFirewallRuleProtocol::Icmp6(None).into();
+        assert_eq!(icmp6, external::VpcFirewallRuleProtocol::IcmpV6(None));
+
+        let old: VpcFirewallRuleProtocol =
+            external::VpcFirewallRuleProtocol::IcmpV4(None).into();
+        assert_eq!(old, VpcFirewallRuleProtocol::Icmp(None));
+
+        let old6: VpcFirewallRuleProtocol =
+            external::VpcFirewallRuleProtocol::IcmpV6(None).into();
+        assert_eq!(old6, VpcFirewallRuleProtocol::Icmp6(None));
+    }
+}

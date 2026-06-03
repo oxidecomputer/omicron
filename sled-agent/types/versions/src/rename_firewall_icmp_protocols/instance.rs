@@ -158,3 +158,34 @@ impl From<v41::instance::InstanceSledLocalConfig> for InstanceSledLocalConfig {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn resolved_firewall_rule_converts_legacy_protocol_variants() {
+        let old = v31::instance::ResolvedVpcFirewallRule {
+            status: external::VpcFirewallRuleStatus::Enabled,
+            direction: external::VpcFirewallRuleDirection::Inbound,
+            targets: Vec::new(),
+            filter_hosts: None,
+            filter_ports: None,
+            filter_protocols: Some(vec![
+                v31::instance::VpcFirewallRuleProtocol::Icmp(None),
+                v31::instance::VpcFirewallRuleProtocol::Icmp6(None),
+            ]),
+            action: external::VpcFirewallRuleAction::Allow,
+            priority: external::VpcFirewallRulePriority(100),
+        };
+
+        let new = ResolvedVpcFirewallRule::from(old);
+        assert_eq!(
+            new.filter_protocols,
+            Some(vec![
+                external::VpcFirewallRuleProtocol::IcmpV4(None),
+                external::VpcFirewallRuleProtocol::IcmpV6(None),
+            ])
+        );
+    }
+}

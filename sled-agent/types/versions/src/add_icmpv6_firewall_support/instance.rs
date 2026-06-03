@@ -166,3 +166,32 @@ impl From<v18::instance::InstanceSledLocalConfig> for InstanceSledLocalConfig {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn firewall_protocol_uses_legacy_wire_spelling() {
+        assert_eq!(
+            serde_json::to_value(VpcFirewallRuleProtocol::Icmp(None)).unwrap(),
+            serde_json::json!({
+                "type": "icmp",
+                "value": null,
+            })
+        );
+        assert_eq!(
+            serde_json::to_value(VpcFirewallRuleProtocol::Icmp6(Some(
+                external::VpcFirewallIcmpFilter { icmp_type: 128, code: None }
+            )))
+            .unwrap(),
+            serde_json::json!({
+                "type": "icmp6",
+                "value": {
+                    "icmp_type": 128,
+                    "code": null,
+                },
+            })
+        );
+    }
+}

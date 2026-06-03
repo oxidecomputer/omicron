@@ -3790,6 +3790,40 @@ mod test {
     }
 
     #[test]
+    fn test_firewall_rule_protocol_wire_format() {
+        assert_eq!(
+            serde_json::to_value(VpcFirewallRuleProtocol::IcmpV4(None))
+                .unwrap(),
+            serde_json::json!({
+                "type": "icmp_v4",
+                "value": null,
+            })
+        );
+        assert_eq!(
+            serde_json::to_value(VpcFirewallRuleProtocol::IcmpV6(Some(
+                VpcFirewallIcmpFilter { icmp_type: 128, code: None }
+            )))
+            .unwrap(),
+            serde_json::json!({
+                "type": "icmp_v6",
+                "value": {
+                    "icmp_type": 128,
+                    "code": null,
+                },
+            })
+        );
+
+        assert_eq!(
+            VpcFirewallRuleProtocol::IcmpV4(None).to_api_string(),
+            "icmp"
+        );
+        assert_eq!(
+            VpcFirewallRuleProtocol::IcmpV6(None).to_api_string(),
+            "icmp6"
+        );
+    }
+
+    #[test]
     fn test_digest() {
         // No prefix
         assert!(
