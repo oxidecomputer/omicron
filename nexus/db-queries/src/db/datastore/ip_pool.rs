@@ -121,9 +121,15 @@ const POOL_HAS_IPS_ERROR: &str =
 
 // Error message emitted when a user attempts to reassign the last IP Pool
 // assigned for system services use.
-const LAST_POOL_ERROR: &str = "Cannot reassign the last IP Pool assigned for \
-    system services use. Create and assign at least one more IP Pool \
-    before reassigning this one.";
+const REASSIGN_LAST_POOL_ERROR: &str = "Cannot reassign the last IP Pool \
+    assigned for system services use. Create and assign at least one more \
+    IP Pool before reassigning this one.";
+
+// Error message emitted when a user attempts to delete the last IP Pool
+// assigned for system services use.
+const DELETE_LAST_POOL_ERROR: &str = "Cannot delete the last IP Pool \
+    assigned for system services use. Create and assign at least one more \
+    IP Pool before deleting this one.";
 
 /// Check if pool selection has an IP version conflict.
 ///
@@ -781,7 +787,7 @@ impl DataStore {
                     DatabaseErrorKind::Unknown,
                     ref info,
                 ) if info.message().ends_with("invalid bool value") => {
-                    Error::invalid_request(LAST_POOL_ERROR)
+                    Error::invalid_request(DELETE_LAST_POOL_ERROR)
                 }
                 _ => public_error_from_diesel(
                     e,
@@ -889,7 +895,7 @@ impl DataStore {
                     } else if message.starts_with("could not parse")
                         && message.contains("as type int")
                     {
-                        Error::invalid_request(LAST_POOL_ERROR)
+                        Error::invalid_request(REASSIGN_LAST_POOL_ERROR)
                     } else {
                         public_error_from_diesel(e, ErrorHandler::Server)
                     }
@@ -2495,7 +2501,7 @@ mod test {
     use crate::authz;
     use crate::db::datastore::external_ip::FloatingIpAllocation;
     use crate::db::datastore::ip_pool::{
-        BAD_SILO_LINK_ERROR, LAST_POOL_ERROR, POOL_HAS_IPS_ERROR,
+        BAD_SILO_LINK_ERROR, POOL_HAS_IPS_ERROR, REASSIGN_LAST_POOL_ERROR,
         assign_ip_pool_query, link_ip_pool_to_external_silo_query,
         unlink_ip_pool_from_external_silo_query,
     };
@@ -4150,7 +4156,7 @@ mod test {
         assert_eq!(customer_pools.len(), customer_pools_found.len());
         assert_eq!(customer_pools, customer_pools_found);
 
-        // Paginate all those _assigned for system services use.
+        // Paginate all those assigned for system services use.
         //
         // Note that we have 2 extra pools today, which are the builtin service
         // pools. These will go away in the future, so we'll unfortunately need
@@ -5593,7 +5599,7 @@ mod test {
                 IP Pool when only one remains, found {res:#?}"
             );
         };
-        assert_eq!(message.external_message(), LAST_POOL_ERROR);
+        assert_eq!(message.external_message(), REASSIGN_LAST_POOL_ERROR);
 
         let l = datastore
             .ip_pools_list_paginated(
@@ -5674,7 +5680,7 @@ mod test {
                 found {res:#?}"
             );
         };
-        assert_eq!(message.external_message(), LAST_POOL_ERROR);
+        assert_eq!(message.external_message(), REASSIGN_LAST_POOL_ERROR);
 
         let l = datastore
             .ip_pools_list_paginated(
