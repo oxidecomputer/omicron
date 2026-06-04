@@ -191,8 +191,8 @@ impl WicketdApi for WicketdApiImpl {
 
         let mut config = ctx.rss_or_multirack_join_config.lock().unwrap();
 
-        // We don't have a default (empty) version of a `join_config` like we do with
-        // an `rss_config` so we have two different paths here.
+        // We don't have a default (empty) version of a `join_config` like we do
+        // with an `rss_config` so we have two different paths here.
         if let Some(join_config) = config.multirack_join_config_mut() {
             join_config.update_with_inventory_and_bootstrap_peers(
                 &inventory,
@@ -205,15 +205,15 @@ impl WicketdApi for WicketdApiImpl {
         } else {
             // Overwrite any non-multirack-join config
             *config = RssOrMultirackJoinConfig::MultirackJoin(
-            CurrentMultirackJoinConfig::new_with_inventory_and_bootstrap_peers(
-                ctx.baseboard.as_ref(),
-                body.into_inner(),
-                &inventory,
-                &ctx.bootstrap_peers,
-                &ctx.log,
-            )
-            .map_err(|err| HttpError::for_bad_request(None, err))?,
-        );
+                CurrentMultirackJoinConfig::new_with_inventory_and_peers(
+                    ctx.baseboard.as_ref(),
+                    body.into_inner(),
+                    &inventory,
+                    &ctx.bootstrap_peers,
+                    &ctx.log,
+                )
+                .map_err(|err| HttpError::for_bad_request(None, err))?,
+            );
         }
 
         Ok(HttpResponseUpdatedNoContent())

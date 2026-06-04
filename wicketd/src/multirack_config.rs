@@ -97,7 +97,7 @@ impl CurrentMultirackJoinConfig {
         Ok(())
     }
 
-    pub(crate) fn new_with_inventory_and_bootstrap_peers(
+    pub(crate) fn new_with_inventory_and_peers(
         our_baseboard: Option<&Baseboard>,
         config: MultirackJoinConfigBaseUserInput,
         inventory: &MgsV1Inventory,

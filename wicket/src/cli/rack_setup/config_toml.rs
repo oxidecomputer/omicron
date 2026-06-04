@@ -351,7 +351,9 @@ fn populate_uplink_table(cfg: &UserSpecifiedPortConfig) -> Table {
         tx_eq,
     }) = cfg
     else {
-        unimplemented!("DdmAutoPortConfig currently unsupported")
+        let mut uplink = Table::new();
+        uplink.insert("type", string_item("ddm_auto_port_config"));
+        return uplink;
     };
 
     let mut uplink = Table::new();
