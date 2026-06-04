@@ -899,7 +899,7 @@ mod tests {
     use nexus_db_model::IncompleteIpPoolResource;
     use nexus_db_model::Instance;
     use nexus_db_model::InstanceCpuCount;
-    use nexus_db_model::IpPoolReservationType;
+    use nexus_db_model::IpPoolAssignment;
     use nexus_db_model::IpPoolResourceType;
     use nexus_db_model::Name;
     use nexus_db_model::NetworkInterfaceKind;
@@ -952,7 +952,7 @@ mod tests {
                     description: format!("ip pool {}", name),
                 },
                 ip_version.into(),
-                IpPoolReservationType::ExternalSilos,
+                IpPoolAssignment::Silos,
             );
 
             let db_pool = self

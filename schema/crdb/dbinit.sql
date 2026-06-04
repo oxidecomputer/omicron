@@ -2290,10 +2290,10 @@ CREATE TYPE IF NOT EXISTS omicron.public.ip_version AS ENUM (
 );
 
 
-/* Indicates what an IP Pool is reserved for. */
-CREATE TYPE IF NOT EXISTS omicron.public.ip_pool_reservation_type AS ENUM (
-    'external_silos',
-    'oxide_internal'
+/* Indicates what an IP Pool is assigned to. */
+CREATE TYPE IF NOT EXISTS omicron.public.ip_pool_assignment AS ENUM (
+    'silos',
+    'system_services'
 );
 
 /*
@@ -2322,11 +2322,11 @@ CREATE TABLE IF NOT EXISTS omicron.public.ip_pool (
     /* The IP version of the ranges contained in this pool. */
     ip_version omicron.public.ip_version NOT NULL,
 
-    /* Indicates what the IP Pool is reserved for. */
-    reservation_type omicron.public.ip_pool_reservation_type NOT NULL,
-
     /* Pool type for unicast (default) vs multicast pools. */
-    pool_type omicron.public.ip_pool_type NOT NULL DEFAULT 'unicast'
+    pool_type omicron.public.ip_pool_type NOT NULL DEFAULT 'unicast',
+
+    /* Indicates what the IP Pool is assigned to. */
+    assignment omicron.public.ip_pool_assignment NOT NULL
 );
 
 /*
