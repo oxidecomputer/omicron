@@ -9,6 +9,7 @@ use crate::kstat::Error;
 use crate::kstat::KstatList;
 use crate::kstat::KstatTarget;
 use crate::kstat::hrtime_to_utc;
+use crate::kstat::n_processors;
 use kstat_rs::Data;
 use kstat_rs::Kstat;
 use kstat_rs::Named;
@@ -31,9 +32,8 @@ const CPU_NSEC_PREFIX: &str = "cpu_nsec_";
 const CPU_MICROSTATES: &[&str] = &["idle", "user", "kernel", "dtrace", "intr"];
 
 /// The maximum cardinality of the data we produce, per sampling interval.
-pub const fn max_cardinality() -> usize {
-    // Assume max of 256 CPUs
-    CPU_MICROSTATES.len() * 256
+pub fn max_cardinality() -> usize {
+    CPU_MICROSTATES.len() * n_processors().unwrap_or(1024)
 }
 
 /// CPU metrics for a sled, tracking microstate statistics across all cores.
