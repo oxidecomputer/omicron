@@ -29662,7 +29662,7 @@
         ]
       },
       "SystemNetworkingSettings": {
-        "description": "Fleet-wide networking settings. Only fleet admins may view or modify these settings.",
+        "description": "Fleet-wide networking settings. Only fleet viewers may view these settings. Only fleet admins can modify them.",
         "type": "object",
         "properties": {
           "external_jumbo_frames_opt_in_enabled": {

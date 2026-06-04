@@ -7,8 +7,8 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-/// Fleet-wide networking settings. Only fleet admins may view or modify these
-/// settings.
+/// Fleet-wide networking settings. Only fleet viewers may view these settings.
+/// Only fleet admins can modify them.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
 pub struct SystemNetworkingSettings {
     /// When true, end users may opt in to jumbo frames (8500 byte MTU) on the
