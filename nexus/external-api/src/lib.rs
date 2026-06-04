@@ -84,7 +84,7 @@ api_versions!([
     // |  date-based version should be at the top of the list.
     // v
     // (next_yyyy_mm_dd_nn, IDENT),
-    (2026_06_01_00, EXTERNAL_JUMBO_FRAMES),
+    (2026_06_04_00, EXTERNAL_JUMBO_FRAMES),
     (2026_05_20_00, ADD_CONTACT_SUPPORT_TO_UPDATE_STATUS),
     (2026_05_08_00, MANUAL_DISK_ADOPTION),
     (2026_05_07_00, REMOVE_DUPLICATED_NETWORKING_TYPES),
