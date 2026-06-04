@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "2026052000.0.0"
+    "version": "2026060300.0.0"
   },
   "paths": {
     "/device/auth": {
@@ -18776,6 +18776,7 @@
       },
       "BlockSize": {
         "title": "Disk block size in bytes",
+        "description": "Valid values are: 512, 2048, or 4096.",
         "type": "integer",
         "enum": [
           512,
@@ -19773,7 +19774,7 @@
         "type": "object",
         "properties": {
           "block_size": {
-            "$ref": "#/components/schemas/ByteCount"
+            "$ref": "#/components/schemas/BlockSize"
           },
           "description": {
             "description": "Human-readable free-form text about a resource",

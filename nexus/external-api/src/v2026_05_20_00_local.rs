@@ -2,8 +2,14 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Types from API version 2026_01_30_00 that cannot live in `nexus-types-versions`
+//! Types from API version 2026_05_20_00 that cannot live in `nexus-types-versions`
 //! because they convert to/from `omicron-common` types (orphan rule).
+//!
+//! This version pre-dates `DISK_BLOCK_SIZE_TYPE`, which changed the `Disk`
+//! response field `block_size` from `ByteCount` to the constrained `BlockSize`
+//! newtype. Older API versions in the range
+//! `VERSION_READ_ONLY_DISKS_NULLABLE..VERSION_DISK_BLOCK_SIZE_TYPE` still
+//! report `block_size` as a plain `ByteCount`.
 
 use api_identity::ObjectIdentity;
 use omicron_common::api::external;
@@ -32,6 +38,8 @@ pub struct Disk {
     pub state: DiskState,
     pub device_path: String,
     pub disk_type: DiskType,
+    /// Whether or not this disk is read-only.
+    pub read_only: bool,
 }
 
 impl From<external::Disk> for Disk {
@@ -46,7 +54,7 @@ impl From<external::Disk> for Disk {
             state,
             device_path,
             disk_type,
-            read_only: _, // read_only doth not exist in v2026_01_30_00
+            read_only,
         } = new;
         Self {
             identity,
@@ -58,34 +66,7 @@ impl From<external::Disk> for Disk {
             state,
             device_path,
             disk_type,
-        }
-    }
-}
-
-impl From<crate::v2026_05_20_00_local::Disk> for Disk {
-    fn from(new: crate::v2026_05_20_00_local::Disk) -> Self {
-        let crate::v2026_05_20_00_local::Disk {
-            identity,
-            project_id,
-            snapshot_id,
-            image_id,
-            size,
-            block_size,
-            state,
-            device_path,
-            disk_type,
-            read_only: _, // read_only doth not exist in v2026_01_30_00
-        } = new;
-        Self {
-            identity,
-            project_id,
-            snapshot_id,
-            image_id,
-            size,
-            block_size,
-            state,
-            device_path,
-            disk_type,
+            read_only,
         }
     }
 }

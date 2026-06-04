@@ -42,7 +42,6 @@ pub(crate) use id_path_param;
 pub(crate) use path_param;
 
 mod alert;
-mod disk;
 mod hardware;
 mod instance;
 pub(crate) mod multicast;
