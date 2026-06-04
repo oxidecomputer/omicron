@@ -28,7 +28,7 @@ pub static KNOWN_VERSIONS: LazyLock<Vec<KnownVersion>> = LazyLock::new(|| {
         // |  leaving the first copy as an example for the next person.
         // v
         // KnownVersion::new(next_int, "unique-dirname-with-the-sql-files"),
-        KnownVersion::new(262, "sled-resource-vmm-instance-state-generation"),
+        KnownVersion::new(262, "sled-resource-vmm-state"),
         KnownVersion::new(261, "remove-add-zones-with-mupdate-override"),
         KnownVersion::new(260, "ereport-trim-serial-trailing-nulls"),
         KnownVersion::new(259, "vmm-failure-reason"),

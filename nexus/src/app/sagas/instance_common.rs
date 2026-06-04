@@ -12,12 +12,12 @@ use crate::app::instance_network::InstanceNetworkFilters;
 use http::StatusCode;
 use nexus_db_lookup::LookupPath;
 use nexus_db_model::{
-    ByteCount, ExternalIp, Generation, InstanceState, IpAttachState, IpNet,
-    NatEntry, SledReservationConstraints, SledResourceVmm, VmmCpuPlatform,
-    VmmState,
+    ByteCount, ExternalIp, InstanceState, IpAttachState, IpNet, NatEntry,
+    SledReservationConstraints, SledResourceVmm, VmmCpuPlatform, VmmState,
 };
 use nexus_db_queries::authz;
 use nexus_db_queries::db::datastore::ExternalSubnetBeginOpResult;
+use nexus_db_queries::db::datastore::sled::SledReservationType;
 use nexus_db_queries::{authn, context::OpContext, db, db::DataStore};
 use nexus_types::saga::saga_action_failed;
 use omicron_common::api::external::{Error, IpVersion, NameOrId};
@@ -43,11 +43,11 @@ pub(super) struct VmmAndSledIds {
 pub async fn reserve_vmm_resources(
     nexus: &Nexus,
     instance_id: InstanceUuid,
-    instance_state_generation: Generation,
     propolis_id: PropolisUuid,
     ncpus: u32,
     guest_memory: ByteCount,
     constraints: SledReservationConstraints,
+    reservation_type: SledReservationType,
 ) -> Result<SledResourceVmm, ActionError> {
     // ALLOCATION POLICY
     //
@@ -76,10 +76,10 @@ pub async fn reserve_vmm_resources(
     let resource = nexus
         .reserve_on_random_sled(
             instance_id,
-            instance_state_generation,
             propolis_id,
             resources,
             constraints,
+            reservation_type,
         )
         .await
         .map_err(saga_action_failed)?;

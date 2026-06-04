@@ -16,6 +16,7 @@ use crate::db::datastore::zpool::ZpoolGetForSledReservationResult;
 use crate::db::model::AffinityPolicy;
 use crate::db::model::Sled;
 use crate::db::model::SledResourceVmm;
+use crate::db::model::SledResourceVmmState;
 use crate::db::model::SledState;
 use crate::db::model::SledUpdate;
 use crate::db::model::to_db_sled_policy;
@@ -72,6 +73,37 @@ use strum::IntoEnumIterator;
 use thiserror::Error;
 use uuid::Uuid;
 
+#[derive(Clone, Debug, PartialEq)]
+pub enum SledReservationType {
+    Active,
+
+    /// The VMM will be used as a migration destination.
+    Target,
+}
+
+impl fmt::Display for SledReservationType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            SledReservationType::Active => write!(f, "active"),
+            SledReservationType::Target => write!(f, "target"),
+        }
+    }
+}
+
+impl Into<db::model::SledResourceVmmState> for SledReservationType {
+    fn into(self) -> db::model::SledResourceVmmState {
+        match self {
+            SledReservationType::Active => {
+                db::model::SledResourceVmmState::Active
+            }
+
+            SledReservationType::Target => {
+                db::model::SledResourceVmmState::Target
+            }
+        }
+    }
+}
+
 #[derive(Debug, thiserror::Error)]
 enum SledReservationError {
     #[error(
@@ -101,8 +133,8 @@ enum SledReservationError {
          group membership."
     )]
     RequiredAffinitySledNotValid,
-    #[error("Instance reservation already made for generation {generation}")]
-    ReservationExists { generation: external::Generation },
+    #[error("Instance VMM reservation of type {reservation_type} already made")]
+    ReservationExists { reservation_type: SledReservationType },
 }
 
 impl From<SledReservationError> for external::Error {
@@ -131,9 +163,9 @@ impl From<SledReservationError> for external::Error {
             | SledReservationError::ConflictingAntiAndAffinityConstraints => {
                 external::Error::invalid_request(&msg)
             },
-            // A concurrent request to place the same instance at the same
-            // generation number landed already.
-            SledReservationError::ReservationExists { generation: _ } => {
+            // A concurrent request to place the same instance with the same
+            // reservation type landed already.
+            SledReservationError::ReservationExists { reservation_type: _ } => {
                 external::Error::conflict(&msg)
             }
         }
@@ -666,9 +698,9 @@ impl<'a> Iterator for CompleteLocalStorageAllocationLists<'a> {
 }
 
 /// This constraint prevents an instance from having multiple sled_resource_vmm
-/// records for the same generation number.
+/// records for the same reservation type.
 const SINGLE_RESERVATION_CONSTRAINT: &'static str =
-    "single_vmm_reservation_per_generation";
+    "single_vmm_reservation_per_state";
 
 impl DataStore {
     /// Stores a new sled in the database.
@@ -862,18 +894,18 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         instance_id: InstanceUuid,
-        instance_state_generation: db::model::Generation,
         propolis_id: PropolisUuid,
         resources: db::model::Resources,
         constraints: db::model::SledReservationConstraints,
+        reservation_type: SledReservationType,
     ) -> CreateResult<db::model::SledResourceVmm> {
         self.sled_reservation_create_inner(
             opctx,
             instance_id,
-            instance_state_generation,
             propolis_id,
             resources,
             constraints,
+            reservation_type,
         )
         .await
         .map_err(|e| match e {
@@ -889,16 +921,16 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         instance_id: InstanceUuid,
-        instance_state_generation: db::model::Generation,
         propolis_id: PropolisUuid,
         resources: db::model::Resources,
         constraints: db::model::SledReservationConstraints,
+        reservation_type: SledReservationType,
     ) -> Result<db::model::SledResourceVmm, SledReservationTransactionError>
     {
         let log = opctx.log.new(o!(
             "query" => "sled_reservation",
             "instance_id" => instance_id.to_string(),
-            "instance_state_generation" => instance_state_generation.to_string(),
+            "reservation_type" => reservation_type.to_string(),
             "propolis_id" => propolis_id.to_string(),
         ));
 
@@ -923,9 +955,8 @@ impl DataStore {
         if let Some(existing_resource) = existing_resource {
             info!(
                 &log,
-                "existing sled reservation for this instance at generation \
-                {:?}",
-                existing_resource.instance_state_generation(),
+                "existing sled reservation for this instance with state {}",
+                existing_resource.state,
             );
 
             return Ok(existing_resource);
@@ -1199,7 +1230,7 @@ impl DataStore {
                 instance_id,
                 sled_target,
                 resources.clone(),
-                instance_state_generation,
+                reservation_type.clone().into(),
             );
 
             if !local_storage_allocation_required {
@@ -1237,12 +1268,11 @@ impl DataStore {
                         == Some(SINGLE_RESERVATION_CONSTRAINT) =>
                     {
                         // The table already has a reservation for this instance
-                        // id and generation number.
+                        // id and reservation type.
                         return Err(
                             SledReservationTransactionError::Reservation(
                                 SledReservationError::ReservationExists {
-                                    generation: instance_state_generation
-                                        .into(),
+                                    reservation_type,
                                 },
                             ),
                         );
@@ -1390,12 +1420,11 @@ impl DataStore {
                             == Some(SINGLE_RESERVATION_CONSTRAINT) =>
                         {
                             // The table already has a reservation for this
-                            // instance id and generation number.
+                            // instance id and reservation_type.
                             return Err(
                                 SledReservationTransactionError::Reservation(
                                     SledReservationError::ReservationExists {
-                                        generation: instance_state_generation
-                                            .into(),
+                                        reservation_type,
                                     },
                                 ),
                             );
@@ -1459,17 +1488,51 @@ impl DataStore {
         }
     }
 
+    /// For a successful migration, change the active sled_resource_vmm's state
+    /// to 'tombstoned' and the target sled_resource_vmm's state to 'active'
+    pub async fn sled_reservation_update_for_migrate_sucess(
+        &self,
+        opctx: &OpContext,
+        active_vmm_id: Uuid,
+        target_vmm_id: Uuid,
+    ) -> DeleteResult {
+        use nexus_db_schema::schema::sled_resource_vmm::dsl as resource_dsl;
+
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        // XXX does this need to be a single statement or transaction? would see
+        // intermediate state of "tombstoned + target"
+
+        diesel::update(resource_dsl::sled_resource_vmm)
+            .filter(resource_dsl::id.eq(active_vmm_id))
+            .set(resource_dsl::state.eq(SledResourceVmmState::Tombstoned))
+            .execute_async(&*conn)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        diesel::update(resource_dsl::sled_resource_vmm)
+            .filter(resource_dsl::id.eq(target_vmm_id))
+            .set(resource_dsl::state.eq(SledResourceVmmState::Active))
+            .execute_async(&*conn)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        Ok(())
+    }
+
     pub async fn sled_reservation_delete(
         &self,
         opctx: &OpContext,
         vmm_id: PropolisUuid,
     ) -> DeleteResult {
         use nexus_db_schema::schema::sled_resource_vmm::dsl as resource_dsl;
+
         diesel::delete(resource_dsl::sled_resource_vmm)
             .filter(resource_dsl::id.eq(to_db_typed_uuid(vmm_id)))
             .execute_async(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
         Ok(())
     }
 
@@ -2184,10 +2247,10 @@ pub(in crate::db::datastore) mod test {
             .sled_reservation_create(
                 &opctx,
                 InstanceUuid::new_v4(),
-                db::model::Generation::new(),
                 PropolisUuid::new_v4(),
                 resources.clone(),
                 constraints,
+                SledReservationType::Active,
             )
             .await
             .unwrap_err();
@@ -2206,10 +2269,10 @@ pub(in crate::db::datastore) mod test {
                 .sled_reservation_create(
                     &opctx,
                     InstanceUuid::new_v4(),
-                    db::model::Generation::new(),
                     PropolisUuid::new_v4(),
                     resources.clone(),
                     constraints,
+                    SledReservationType::Active,
                 )
                 .await
                 .unwrap();
@@ -2459,7 +2522,7 @@ pub(in crate::db::datastore) mod test {
             datastore: &DataStore,
             propolis_id: PropolisUuid,
             sled_id: SledUuid,
-            state_generation: db::model::Generation,
+            reservation_type: SledReservationType,
         ) -> bool {
             assert!(self.force_onto_sled.is_none());
 
@@ -2468,7 +2531,7 @@ pub(in crate::db::datastore) mod test {
                 self.id,
                 sled_id,
                 self.resources.clone(),
-                state_generation,
+                reservation_type.into(),
             );
 
             let conn = datastore.pool_connection_for_tests().await.unwrap();
@@ -2574,10 +2637,10 @@ pub(in crate::db::datastore) mod test {
             .sled_reservation_create_inner(
                 &opctx,
                 instance.id,
-                db::model::Generation::new(),
                 PropolisUuid::new_v4(),
                 instance.resources.clone(),
                 constraints.build(),
+                SledReservationType::Active,
             )
             .await?;
 
@@ -3390,7 +3453,7 @@ pub(in crate::db::datastore) mod test {
                         &datastore,
                         PropolisUuid::new_v4(),
                         sleds[i].id(),
-                        Generation::new(),
+                        SledReservationType::Active,
                     )
                     .await,
                 "Shouldn't have been able to insert into sled {i}"
@@ -3404,7 +3467,7 @@ pub(in crate::db::datastore) mod test {
                     &datastore,
                     PropolisUuid::new_v4(),
                     sleds[0].id(),
-                    Generation::new(),
+                    SledReservationType::Active,
                 )
                 .await
         );
@@ -3492,7 +3555,7 @@ pub(in crate::db::datastore) mod test {
                     &datastore,
                     PropolisUuid::new_v4(),
                     sleds[0].id(),
-                    Generation::new(),
+                    SledReservationType::Active,
                 )
                 .await,
             "Shouldn't have been able to insert into sleds[0]"
@@ -3505,7 +3568,7 @@ pub(in crate::db::datastore) mod test {
                     &datastore,
                     PropolisUuid::new_v4(),
                     sleds[1].id(),
-                    Generation::new(),
+                    SledReservationType::Active,
                 )
                 .await
         );
@@ -3578,7 +3641,7 @@ pub(in crate::db::datastore) mod test {
                         &datastore,
                         PropolisUuid::new_v4(),
                         sleds[i].id(),
-                        Generation::new(),
+                        SledReservationType::Active,
                     )
                     .await,
                 "Shouldn't have been able to insert into sleds[i]"
@@ -3592,7 +3655,7 @@ pub(in crate::db::datastore) mod test {
                     &datastore,
                     PropolisUuid::new_v4(),
                     sleds[1].id(),
-                    Generation::new(),
+                    SledReservationType::Active,
                 )
                 .await
         );
@@ -4689,10 +4752,10 @@ pub(in crate::db::datastore) mod test {
             .sled_reservation_create(
                 opctx,
                 instance.id,
-                db::model::Generation::new(),
                 PropolisUuid::new_v4(),
                 instance.resources(),
                 db::model::SledReservationConstraints::none(),
+                SledReservationType::Active,
             )
             .await
             .unwrap();
@@ -4807,10 +4870,10 @@ pub(in crate::db::datastore) mod test {
             .sled_reservation_create(
                 opctx,
                 instance.id,
-                db::model::Generation::new(),
                 PropolisUuid::new_v4(),
                 instance.resources(),
                 db::model::SledReservationConstraints::none(),
+                SledReservationType::Active,
             )
             .await
             .unwrap();
@@ -4892,10 +4955,10 @@ pub(in crate::db::datastore) mod test {
             .sled_reservation_create(
                 opctx,
                 instance.id,
-                db::model::Generation::new(),
                 PropolisUuid::new_v4(),
                 instance.resources(),
                 db::model::SledReservationConstraints::none(),
+                SledReservationType::Active,
             )
             .await
             .unwrap_err();
@@ -4980,10 +5043,10 @@ pub(in crate::db::datastore) mod test {
             .sled_reservation_create(
                 opctx,
                 instance.id,
-                db::model::Generation::new(),
                 PropolisUuid::new_v4(),
                 instance.resources(),
                 db::model::SledReservationConstraints::none(),
+                SledReservationType::Active,
             )
             .await
             .unwrap_err();
@@ -5000,10 +5063,10 @@ pub(in crate::db::datastore) mod test {
             .sled_reservation_create(
                 opctx,
                 instance.id,
-                db::model::Generation::new(),
                 PropolisUuid::new_v4(),
                 instance.resources(),
                 db::model::SledReservationConstraints::none(),
+                SledReservationType::Active,
             )
             .await
             .unwrap();
@@ -5087,10 +5150,10 @@ pub(in crate::db::datastore) mod test {
             .sled_reservation_create(
                 opctx,
                 instance.id,
-                db::model::Generation::new(),
                 PropolisUuid::new_v4(),
                 instance.resources(),
                 db::model::SledReservationConstraints::none(),
+                SledReservationType::Active,
             )
             .await
             .unwrap_err();
@@ -5194,10 +5257,10 @@ pub(in crate::db::datastore) mod test {
             .sled_reservation_create(
                 opctx,
                 instance.id,
-                db::model::Generation::new(),
                 PropolisUuid::new_v4(),
                 instance.resources(),
                 db::model::SledReservationConstraints::none(),
+                SledReservationType::Active,
             )
             .await
             .unwrap();
@@ -5316,10 +5379,10 @@ pub(in crate::db::datastore) mod test {
             .sled_reservation_create(
                 opctx,
                 instance.id,
-                db::model::Generation::new(),
                 PropolisUuid::new_v4(),
                 instance.resources(),
                 db::model::SledReservationConstraints::none(),
+                SledReservationType::Active,
             )
             .await
             .unwrap_err();
@@ -5369,10 +5432,10 @@ pub(in crate::db::datastore) mod test {
             .sled_reservation_create(
                 opctx,
                 instance.id,
-                db::model::Generation::new(),
                 PropolisUuid::new_v4(),
                 instance.resources(),
                 db::model::SledReservationConstraints::none(),
+                SledReservationType::Active,
             )
             .await
             .unwrap();
@@ -5493,10 +5556,10 @@ pub(in crate::db::datastore) mod test {
             .sled_reservation_create(
                 opctx,
                 instance.id,
-                db::model::Generation::new(),
                 PropolisUuid::new_v4(),
                 instance.resources(),
                 db::model::SledReservationConstraints::none(),
+                SledReservationType::Active,
             )
             .await
             .unwrap();
@@ -5636,10 +5699,10 @@ pub(in crate::db::datastore) mod test {
                 .sled_reservation_create(
                     opctx,
                     instance.id,
-                    db::model::Generation::new(),
                     PropolisUuid::new_v4(),
                     instance.resources(),
                     db::model::SledReservationConstraints::none(),
+                    SledReservationType::Active,
                 )
                 .await
                 .unwrap();
@@ -5773,10 +5836,10 @@ pub(in crate::db::datastore) mod test {
             .sled_reservation_create(
                 opctx,
                 instance.id,
-                db::model::Generation::new(),
                 PropolisUuid::new_v4(),
                 instance.resources(),
                 db::model::SledReservationConstraints::none(),
+                SledReservationType::Active,
             )
             .await
             .unwrap_err();
@@ -5874,10 +5937,10 @@ pub(in crate::db::datastore) mod test {
                 .sled_reservation_create(
                     opctx,
                     instance.id,
-                    db::model::Generation::new(),
                     PropolisUuid::new_v4(),
                     instance.resources(),
                     db::model::SledReservationConstraints::none(),
+                    SledReservationType::Active,
                 )
                 .await
                 .unwrap();
@@ -5995,10 +6058,10 @@ pub(in crate::db::datastore) mod test {
                         .sled_reservation_create_inner(
                             &opctx,
                             instance.id,
-                            db::model::Generation::new(),
                             PropolisUuid::new_v4(),
                             instance.resources(),
                             db::model::SledReservationConstraints::none(),
+                            SledReservationType::Active,
                         )
                         .await
                         .unwrap()
@@ -6133,11 +6196,11 @@ pub(in crate::db::datastore) mod test {
                                 .sled_reservation_create_inner(
                                     &opctx,
                                     instance.id,
-                                    db::model::Generation::new(),
                                     PropolisUuid::new_v4(),
                                     resources,
                                     db::model::SledReservationConstraints::none(
                                     ),
+                                    SledReservationType::Active,
                                 )
                                 .await
                         }
@@ -6162,8 +6225,10 @@ pub(in crate::db::datastore) mod test {
                     }
 
                     Err(SledReservationTransactionError::Reservation(
-                        SledReservationError::ReservationExists { generation },
-                    )) if generation == external::Generation::new() => {
+                        SledReservationError::ReservationExists {
+                            reservation_type: SledReservationType::Active,
+                        },
+                    )) => {
                         // eat this, it's expected due to concurrent requests
                         continue;
                     }
@@ -6303,10 +6368,10 @@ pub(in crate::db::datastore) mod test {
                         .sled_reservation_create_inner(
                             &opctx,
                             instance.id,
-                            db::model::Generation::new(),
                             PropolisUuid::new_v4(),
                             instance.resources(),
                             db::model::SledReservationConstraints::none(),
+                            SledReservationType::Active,
                         )
                         .await
                         .unwrap()
@@ -6449,10 +6514,10 @@ pub(in crate::db::datastore) mod test {
             .sled_reservation_create(
                 opctx,
                 instance.id,
-                db::model::Generation::new(),
                 PropolisUuid::new_v4(),
                 instance.resources(),
                 db::model::SledReservationConstraints::none(),
+                SledReservationType::Active,
             )
             .await
             .unwrap();
@@ -6472,10 +6537,10 @@ pub(in crate::db::datastore) mod test {
             .sled_reservation_create(
                 opctx,
                 instance.id,
-                db::model::Generation::new(),
                 PropolisUuid::new_v4(),
                 instance.resources(),
                 db::model::SledReservationConstraints::none(),
+                SledReservationType::Active,
             )
             .await
             .unwrap_err();
@@ -6575,10 +6640,10 @@ pub(in crate::db::datastore) mod test {
             .sled_reservation_create(
                 opctx,
                 instance.id,
-                db::model::Generation::new(),
                 PropolisUuid::new_v4(),
                 instance.resources(),
                 db::model::SledReservationConstraints::none(),
+                SledReservationType::Active,
             )
             .await
             .unwrap();
@@ -6599,10 +6664,10 @@ pub(in crate::db::datastore) mod test {
             .sled_reservation_create(
                 opctx,
                 instance.id,
-                db::model::Generation::new(),
                 PropolisUuid::new_v4(),
                 instance.resources(),
                 db::model::SledReservationConstraints::none(),
+                SledReservationType::Active,
             )
             .await
             .unwrap_err();
@@ -6740,10 +6805,10 @@ pub(in crate::db::datastore) mod test {
             .sled_reservation_create(
                 opctx,
                 instance.id,
-                db::model::Generation::new(),
                 PropolisUuid::new_v4(),
                 instance.resources(),
                 constraints,
+                SledReservationType::Active,
             )
             .await
             .unwrap_err();
@@ -6868,10 +6933,10 @@ pub(in crate::db::datastore) mod test {
             .sled_reservation_create(
                 opctx,
                 instance.id,
-                db::model::Generation::new(),
                 PropolisUuid::new_v4(),
                 instance.resources(),
                 db::model::SledReservationConstraints::none(),
+                SledReservationType::Active,
             )
             .await
             .unwrap();
@@ -6998,10 +7063,10 @@ pub(in crate::db::datastore) mod test {
                     .sled_reservation_create(
                         &opctx,
                         instance_id,
-                        db::model::Generation::new(),
                         PropolisUuid::new_v4(),
                         resources,
                         db::model::SledReservationConstraints::none(),
+                        SledReservationType::Active,
                     )
                     .await
             }
@@ -7023,10 +7088,10 @@ pub(in crate::db::datastore) mod test {
                     .sled_reservation_create(
                         &opctx,
                         instance_id,
-                        db::model::Generation::new(),
                         PropolisUuid::new_v4(),
                         resources,
                         db::model::SledReservationConstraints::none(),
+                        SledReservationType::Active,
                     )
                     .await
             }

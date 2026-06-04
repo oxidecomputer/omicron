@@ -25,6 +25,7 @@ use nexus_db_lookup::LookupPath;
 use nexus_db_queries::db::datastore::Disk;
 use nexus_db_queries::db::datastore::LocalStorageAllocation;
 use nexus_db_queries::db::datastore::LocalStorageDisk;
+use nexus_db_queries::db::datastore::sled::SledReservationType;
 use nexus_db_queries::db::identity::Resource;
 use nexus_db_queries::{authn, authz, db};
 use nexus_types::saga::saga_action_failed;
@@ -148,7 +149,6 @@ declare_saga_actions! {
     ENSURE_RUNNING -> "ensure_running" {
         + sis_ensure_running
     }
-
 }
 
 /// Node name for looking up the VMM record once it has been registered with the
@@ -231,11 +231,11 @@ async fn sis_alloc_server(
     let resource = super::instance_common::reserve_vmm_resources(
         osagactx.nexus(),
         InstanceUuid::from_untyped_uuid(params.db_instance.id()),
-        params.db_instance.state_generation,
         propolis_id,
         u32::from(hardware_threads.0),
         reservoir_ram,
         constraint_builder.build(),
+        SledReservationType::Active,
     )
     .await?;
 

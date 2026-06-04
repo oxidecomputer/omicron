@@ -1228,6 +1228,7 @@ impl DataStore {
 mod tests {
     use super::*;
 
+    use crate::db::datastore::sled::SledReservationType;
     use crate::db::pub_test_utils::TestDatabase;
     use crate::db::pub_test_utils::helpers::create_project;
     use crate::db::pub_test_utils::helpers::create_stopped_instance_record;
@@ -1314,7 +1315,7 @@ mod tests {
                     ByteCount::from_kibibytes_u32(1).into(),
                     ByteCount::from_kibibytes_u32(1).into(),
                 ),
-                nexus_db_model::Generation::new(),
+                SledReservationType::Active.into(),
             ))
             .execute_async(
                 &*datastore.pool_connection_for_tests().await.unwrap(),

@@ -8,11 +8,14 @@ use super::external_ips::floating_ip_get;
 use super::external_ips::get_floating_ip_by_id_url;
 use super::metrics::{assert_silo_metrics, assert_system_metrics};
 
+use async_bb8_diesel::AsyncRunQueryDsl;
+use diesel::prelude::*;
 use http::StatusCode;
 use http::method::Method;
 use itertools::Itertools;
 use nexus_auth::authz::Action;
 use nexus_db_lookup::LookupPath;
+use nexus_db_model::to_db_typed_uuid;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO;
@@ -751,8 +754,6 @@ async fn test_instance_migrate(cptestctx: &ControlPlaneTestContext) {
         cptestctx: &ControlPlaneTestContext,
         migration_id: Uuid,
     ) -> Migration {
-        use async_bb8_diesel::AsyncRunQueryDsl;
-        use diesel::prelude::*;
         use nexus_db_schema::schema::migration::dsl;
 
         let datastore =
@@ -941,6 +942,36 @@ async fn test_instance_migrate(cptestctx: &ControlPlaneTestContext) {
     let migration = dbg!(migration_fetch(cptestctx, migration_id).await);
     assert_eq!(migration.target_state, MigrationState::COMPLETED);
     assert_eq!(migration.source_state, MigrationState::COMPLETED);
+
+    // Assert the source sled_resource_vmm record was cleaned up, and the target
+    // switched to source.
+    {
+        use nexus_db_model::SledResourceVmm;
+        use nexus_db_model::SledResourceVmmState;
+        use nexus_db_schema::schema::sled_resource_vmm::dsl;
+
+        let datastore = apictx.nexus.datastore();
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
+
+        let maybe_record = dsl::sled_resource_vmm
+            .filter(dsl::id.eq(to_db_typed_uuid(src_propolis_id)))
+            .select(SledResourceVmm::as_select())
+            .get_result_async(&*conn)
+            .await
+            .optional()
+            .unwrap();
+
+        assert!(maybe_record.is_none());
+
+        let record = dsl::sled_resource_vmm
+            .filter(dsl::id.eq(to_db_typed_uuid(dst_propolis_id)))
+            .select(SledResourceVmm::as_select())
+            .get_result_async(&*conn)
+            .await
+            .unwrap();
+
+        assert_eq!(record.state, SledResourceVmmState::Active);
+    }
 }
 
 #[nexus_test(extra_sled_agents = 3)]

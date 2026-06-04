@@ -1375,6 +1375,7 @@ impl super::Nexus {
             &requested,
         )? {
             InstanceStateChangeRequestAction::AlreadyDone => Ok(()),
+
             InstanceStateChangeRequestAction::UpdateRuntime(new_runtime) => {
                 let instance_id =
                     InstanceUuid::from_untyped_uuid(prev_instance_state.id());
@@ -1395,6 +1396,7 @@ impl super::Nexus {
                     Ok(())
                 }
             }
+
             InstanceStateChangeRequestAction::SendToSled {
                 sled_id,
                 propolis_id,

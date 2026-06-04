@@ -196,7 +196,6 @@ mod tests {
 
     use super::*;
     use chrono::Utc;
-    use nexus_db_lookup::LookupPath;
     use nexus_db_model::ByteCount;
     use nexus_db_model::Generation;
     use nexus_db_model::Resources;
@@ -204,7 +203,7 @@ mod tests {
     use nexus_db_model::Vmm;
     use nexus_db_model::VmmCpuPlatform;
     use nexus_db_model::VmmState;
-    use nexus_db_queries::authz;
+    use nexus_db_queries::db::datastore::sled::SledReservationType;
     use nexus_test_utils::resource_helpers;
     use nexus_test_utils_macros::nexus_test;
     use omicron_uuid_kinds::InstanceUuid;
@@ -257,37 +256,27 @@ mod tests {
                 )
                 .await
                 .expect("destroyed vmm record should be created successfully");
-
             let resources = Resources::new(
                 1,
                 // Just require the bare non-zero amount of RAM.
                 ByteCount::try_from(1024).unwrap(),
                 ByteCount::try_from(1024).unwrap(),
             );
-
             let constraints =
                 nexus_db_model::SledReservationConstraints::none();
-
-            let (.., db_instance) = LookupPath::new(&opctx, datastore)
-                .instance_id(instance.identity.id)
-                .fetch_for(authz::Action::Read)
-                .await
-                .unwrap();
-
             dbg!(
                 datastore
                     .sled_reservation_create(
                         &opctx,
                         InstanceUuid::from_untyped_uuid(instance.identity.id),
-                        db_instance.state_generation,
                         destroyed_vmm_id,
                         resources.clone(),
                         constraints,
+                        SledReservationType::Active,
                     )
                     .await
                     .expect("sled reservation should be created successfully")
             );
-
             Self { destroyed_vmm_id }
         }
 

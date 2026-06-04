@@ -1103,7 +1103,7 @@ table! {
         rss_ram -> Int8,
         reservoir_ram -> Int8,
         instance_id -> Nullable<Uuid>,
-        instance_state_generation -> Nullable<Int8>,
+        state -> crate::enums::SledResourceVmmStateEnum,
     }
 }
 

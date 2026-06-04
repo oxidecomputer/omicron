@@ -12,6 +12,7 @@ use crate::app::sagas::{
 };
 use nexus_db_lookup::LookupPath;
 use nexus_db_model::VmmCpuPlatform;
+use nexus_db_queries::db::datastore::sled::SledReservationType;
 use nexus_db_queries::db::identity::Resource;
 use nexus_db_queries::{authn, authz, db};
 use nexus_types::internal_api::params::InstanceMigrateRequest;
@@ -237,11 +238,11 @@ async fn sim_reserve_sled_resources(
     let resource = super::instance_common::reserve_vmm_resources(
         osagactx.nexus(),
         InstanceUuid::from_untyped_uuid(params.instance.id()),
-        params.instance.state_generation,
         propolis_id,
         u32::from(params.instance.ncpus.0.0),
         params.instance.memory,
         constraints,
+        SledReservationType::Target,
     )
     .await?;
 

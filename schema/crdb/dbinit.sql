@@ -281,6 +281,17 @@ CREATE INDEX IF NOT EXISTS lookup_sled_by_policy_and_state ON omicron.public.sle
     sled_state
 );
 
+CREATE TYPE IF NOT EXISTS omicron.public.sled_resource_vmm_state AS ENUM (
+    -- A VMM's resources are still used, but it should be garbage collected
+    'tombstoned',
+
+    -- This VMM is running the instance
+    'active',
+
+    -- This VMM is a migration destination for the active VMM
+    'target'
+);
+
 -- Accounting for VMMs using resources on a sled
 CREATE TABLE IF NOT EXISTS omicron.public.sled_resource_vmm (
     -- Should match the UUID of the corresponding VMM
@@ -309,8 +320,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.sled_resource_vmm (
     -- values that would be more complex to fix.
     instance_id UUID,
 
-    -- The instance's state generation number at the moment of reservation
-    instance_state_generation INT
+    state omicron.public.sled_resource_vmm_state NOT NULL
 );
 
 -- Allow looking up all VMM resources which reside on a sled
@@ -319,11 +329,11 @@ CREATE UNIQUE INDEX IF NOT EXISTS lookup_vmm_resource_by_sled ON omicron.public.
     id
 );
 
--- Allow a single VMM reservation per instance state generation
-CREATE UNIQUE INDEX IF NOT EXISTS single_vmm_reservation_per_generation ON omicron.public.sled_resource_vmm (
+-- Allow a single VMM reservation per instance state
+CREATE UNIQUE INDEX IF NOT EXISTS single_vmm_reservation_per_state ON omicron.public.sled_resource_vmm (
     instance_id,
-    instance_state_generation
-);
+    state
+) WHERE state != 'tombstoned';
 
 -- Allow looking up all resources by instance
 CREATE INDEX IF NOT EXISTS lookup_vmm_resource_by_instance ON omicron.public.sled_resource_vmm (

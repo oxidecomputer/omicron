@@ -12,6 +12,7 @@ use nexus_db_lookup::lookup;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
+use nexus_db_queries::db::datastore::sled::SledReservationType;
 use nexus_types::deployment::DiskFilter;
 use nexus_types::deployment::SledFilter;
 use nexus_types::external_api::path_params;
@@ -211,19 +212,19 @@ impl super::Nexus {
     pub(crate) async fn reserve_on_random_sled(
         &self,
         instance_id: InstanceUuid,
-        instance_state_generation: db::model::Generation,
         propolis_id: PropolisUuid,
         resources: db::model::Resources,
         constraints: db::model::SledReservationConstraints,
+        reservation_type: SledReservationType,
     ) -> Result<db::model::SledResourceVmm, Error> {
         self.db_datastore
             .sled_reservation_create(
                 &self.opctx_alloc,
                 instance_id,
-                instance_state_generation,
                 propolis_id,
                 resources,
                 constraints,
+                reservation_type,
             )
             .await
     }
