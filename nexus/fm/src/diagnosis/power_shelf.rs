@@ -74,4 +74,113 @@ struct PsuLocation {
 }
 
 #[cfg(test)]
-mod tests {}
+mod tests {
+    // These are real life ereports I copied from the dogfood rack.
+    mod ereports {
+        pub(super) const PSU_REMOVE_JSON: &str = r#"{
+            "baseboard_part_number": "913-0000003",
+            "baseboard_rev": 8,
+            "baseboard_serial_number": "BRM45220004",
+            "ereport_message_version": 0,
+            "fruid": {
+                "fw_rev": "0701",
+                "mfr": "Murata-PS",
+                "mpn": "MWOCP68-3600-D-RM",
+                "serial": "LL2216RB003Z"
+            },
+            "hubris_archive_id": "qSm4IUtvQe0",
+            "hubris_task_gen": 0,
+            "hubris_task_name": "sequencer",
+            "hubris_uptime_ms": 1197337481,
+            "k": "hw.remove.psu",
+            "rail": "V54_PSU4",
+            "refdes": "PSU4",
+            "slot": 4,
+            "v": 0
+        }"#;
+
+        pub(super) const PSU_INSERT_JSON: &str = r#"{
+            "baseboard_part_number": "913-0000003",
+            "baseboard_rev": 8,
+            "baseboard_serial_number": "BRM45220004",
+            "ereport_message_version": 0,
+            "fruid": {
+                "fw_rev": "0701",
+                "mfr": "Murata-PS",
+                "mpn": "MWOCP68-3600-D-RM",
+                "serial": "LL2216RB003Z"
+            },
+            "hubris_archive_id": "qSm4IUtvQe0",
+            "hubris_task_gen": 0,
+            "hubris_task_name": "sequencer",
+            "hubris_uptime_ms": 1197337481,
+            "k": "hw.insert.psu",
+            "rail": "V54_PSU4",
+            "refdes": "PSU4",
+            "slot": 4,
+            "v": 0
+        }"#;
+
+        pub(super) const PSU_PWR_BAD_JSON: &str = r#"{
+            "baseboard_part_number": "913-0000003",
+            "baseboard_rev": 8,
+            "baseboard_serial_number": "BRM45220004",
+            "ereport_message_version": 0,
+            "fruid": {
+                "fw_rev": "0701",
+                "mfr": "Murata-PS",
+                "mpn": "MWOCP68-3600-D-RM",
+                "serial": "LL2216RB003Z"
+            },
+            "hubris_archive_id": "qSm4IUtvQe0",
+            "hubris_task_gen": 0,
+            "hubris_task_name": "sequencer",
+            "hubris_uptime_ms": 1197408566,
+            "k": "hw.pwr.pwr_good.bad",
+            "pmbus_status": {
+                "cml": 0,
+                "input": 48,
+                "iout": 0,
+                "mfr": 0,
+                "temp": 0,
+                "vout": 0,
+                "word": 10312
+            },
+            "rail": "V54_PSU4",
+            "refdes": "PSU4",
+            "slot": 4,
+            "v": 0
+        }"#;
+
+        pub(super) const PSU_PWR_GOOD_JSON: &str = r#"{
+            "baseboard_part_number": "913-0000003",
+            "baseboard_rev": 8,
+            "baseboard_serial_number": "BRM45220004",
+            "ereport_message_version": 0,
+            "fruid": {
+                "fw_rev": "0701",
+                "mfr": "Murata-PS",
+                "mpn": "MWOCP68-3600-D-RM",
+                "serial": "LL2216RB003Z"
+            },
+            "hubris_archive_id": "qSm4IUtvQe0",
+            "hubris_task_gen": 0,
+            "hubris_task_name": "sequencer",
+            "hubris_uptime_ms": 1197408580,
+            "k": "hw.pwr.pwr_good.good",
+            "pmbus_status": {
+                "cml": 0,
+                "input": 0,
+                "iout": 0,
+                "mfr": 0,
+                "temp": 0,
+                "vout": 0,
+                "word": 0
+            },
+            "rail": "V54_PSU4",
+            "refdes": "PSU4",
+            "slot": 4,
+            "v": 0
+        }"#;
+    }
+}
