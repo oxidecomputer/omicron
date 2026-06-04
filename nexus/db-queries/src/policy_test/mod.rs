@@ -225,6 +225,27 @@ async fn test_iam_roles_behavior() {
         ),
     )));
 
+    // The built-in constant actors. Their privileges come from fixed Polar
+    // rules (db-init, internal-api) and seeded fleet role assignments
+    // (external-authn) rather than per-resource role grants, so the role users
+    // above never exercise them.
+    for (name, authn) in [
+        ("db-init", authn::Context::internal_db_init()),
+        ("internal-api", authn::Context::internal_api()),
+        ("external-authn", authn::Context::external_authn()),
+    ] {
+        let user_log = logctx.log.new(o!("actor" => name));
+        user_contexts.push(Arc::new((
+            String::from(name),
+            OpContext::for_background(
+                user_log,
+                Arc::clone(&authz),
+                authn,
+                Arc::clone(&datastore) as Arc<dyn nexus_auth::storage::Storage>,
+            ),
+        )));
+    }
+
     // Create an output stream that writes to stdout as well as an in-memory
     // buffer.  The test run will write a textual summary to the stream.  Then
     // we'll use  use expectorate to verify it.  We do this rather than assert
