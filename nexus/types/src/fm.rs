@@ -13,7 +13,10 @@ pub use ereport::{Ereport, EreportId};
 pub mod case;
 pub use case::Case;
 pub mod fact;
-pub use fact::{DiskFact, FactPayload, ZpoolUnhealthyFactPayload};
+pub use fact::{
+    DiskFact, FactPayload, SagaFact, SagaNotProgressingFactPayload,
+    SagaOwnerNotCurrentFactPayload, ZpoolUnhealthyFactPayload,
+};
 pub(crate) mod json_display;
 
 use case::AlertRequest;
@@ -224,4 +227,5 @@ pub type CurrentSitrep = Arc<(SitrepVersion, Sitrep)>;
 pub enum DiagnosisEngineKind {
     PowerShelf,
     PhysicalDisk,
+    Saga,
 }

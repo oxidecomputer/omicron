@@ -10,7 +10,9 @@ use chrono::Utc;
 use fm::analysis_input::InvalidInputs;
 use futures::future::BoxFuture;
 use iddqd::IdOrdMap;
+use nexus_db_model::DbMetadataNexusState;
 use nexus_db_model::PhysicalDiskPolicy;
+use nexus_db_model::SagaState;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::datastore;
@@ -18,6 +20,9 @@ use nexus_db_queries::db::identity::Asset;
 use nexus_db_queries::db::pagination::Paginator;
 use nexus_fm as fm;
 use nexus_types::in_service_disk::InServiceDisk;
+use nexus_types::observed_saga::{
+    ObservedSaga, SagaOwnerState, SagaProgressState,
+};
 use nexus_types::internal_api::background::FmAnalysisStatus;
 use nexus_types::internal_api::background::fm_analysis as status;
 use nexus_types::inventory;
@@ -258,10 +263,13 @@ impl FmAnalysis {
                 );
         }
         let in_service_disks = Arc::new(in_service_disks_map);
+        let observed_sagas =
+            Arc::new(self.prepare_observed_sagas(opctx).await?);
         let mut builder = fm::analysis_input::Input::builder(
             parent_sitrep,
             inv,
             in_service_disks,
+            observed_sagas,
         )?;
         let mut errors = Vec::new();
         self.load_new_ereports(opctx, &mut builder, &mut errors)
@@ -270,6 +278,99 @@ impl FmAnalysis {
 
         let (input, report) = builder.build();
         Ok((input, status::PreparationStatus { errors, report }))
+    }
+
+    /// Build the saga diagnosis engine's input: every non-terminal saga,
+    /// annotated with the timestamp of its latest node event (the progress
+    /// signal) and the state of its owning Nexus.
+    async fn prepare_observed_sagas(
+        &self,
+        opctx: &OpContext,
+    ) -> anyhow::Result<IdOrdMap<ObservedSaga>> {
+        use std::collections::BTreeMap;
+
+        // All running/unwinding sagas. Terminal sagas are excluded; a parent
+        // case whose saga is absent from this set is closed by the engine.
+        let sagas = self
+            .datastore
+            .saga_list_running_or_unwinding_batched(opctx)
+            .await
+            .context("failed to list non-terminal sagas")?;
+
+        // Latest node-event time per saga: the last durably-recorded step.
+        let saga_ids: Vec<_> = sagas.iter().map(|s| s.id).collect();
+        let last_event_times: BTreeMap<
+            steno::SagaId,
+            Option<chrono::DateTime<Utc>>,
+        > = self
+            .datastore
+            .saga_latest_node_event_times(opctx, &saga_ids)
+            .await
+            .context("failed to load saga node-event times")?
+            .into_iter()
+            .map(|(id, t)| (id.0, t))
+            .collect();
+
+        // Classify each owning Nexus (current_sec) against db_metadata_nexus.
+        let nexus_states: BTreeMap<OmicronZoneUuid, DbMetadataNexusState> =
+            self.datastore
+                .get_db_metadata_nexus_in_state(
+                    opctx,
+                    vec![
+                        DbMetadataNexusState::Active,
+                        DbMetadataNexusState::NotYet,
+                        DbMetadataNexusState::Quiesced,
+                    ],
+                )
+                .await
+                .context("failed to load db_metadata_nexus records")?
+                .into_iter()
+                .map(|n| (n.nexus_id(), n.state()))
+                .collect();
+
+        let mut observed = IdOrdMap::new();
+        for saga in sagas {
+            let saga_state = match saga.saga_state {
+                SagaState::Running => SagaProgressState::Running,
+                SagaState::Unwinding => SagaProgressState::Unwinding,
+                // The query filters to non-terminal states; defend anyway.
+                SagaState::Done | SagaState::Abandoned => continue,
+            };
+            let current_sec = saga
+                .current_sec
+                .map(|sec| OmicronZoneUuid::from_untyped_uuid(sec.0));
+            let owner_state = current_sec.map(|sec_id| {
+                match nexus_states.get(&sec_id) {
+                    Some(DbMetadataNexusState::Active) => {
+                        SagaOwnerState::Active
+                    }
+                    Some(DbMetadataNexusState::NotYet) => {
+                        SagaOwnerState::NotYet
+                    }
+                    Some(DbMetadataNexusState::Quiesced) => {
+                        SagaOwnerState::Quiesced
+                    }
+                    None => SagaOwnerState::Absent,
+                }
+            });
+            let last_event_time =
+                last_event_times.get(&saga.id.0).copied().flatten();
+            observed
+                .insert_unique(ObservedSaga {
+                    saga_id: saga.id.0,
+                    saga_name: saga.name,
+                    saga_state,
+                    time_created: saga.time_created,
+                    current_sec,
+                    adopt_generation: *saga.adopt_generation,
+                    last_event_time,
+                    owner_state,
+                })
+                .expect(
+                    "saga.id is a primary key, so duplicates are impossible",
+                );
+        }
+        Ok(observed)
     }
 
     async fn load_new_ereports(

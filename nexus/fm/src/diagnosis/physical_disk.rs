@@ -373,9 +373,13 @@ mod tests {
                 s,
             ))
         });
-        let builder =
-            Input::builder(parent, Arc::new(collection), Arc::new(in_service))
-                .expect("input builder should accept fresh inventory");
+        let builder = Input::builder(
+            parent,
+            Arc::new(collection),
+            Arc::new(in_service),
+            Arc::new(IdOrdMap::new()),
+        )
+        .expect("input builder should accept fresh inventory");
         let (input, _report) = builder.build();
         input
     }

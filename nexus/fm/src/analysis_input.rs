@@ -10,6 +10,7 @@ use nexus_types::fm::analysis_reports::ClosedCaseReport;
 use nexus_types::fm::{self, Sitrep, SitrepVersion};
 use nexus_types::in_service_disk::InServiceDisk;
 use nexus_types::inventory;
+use nexus_types::observed_saga::ObservedSaga;
 use omicron_uuid_kinds::CollectionUuid;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
@@ -42,6 +43,9 @@ pub struct Input {
     closed_cases_copied_forward: IdOrdMap<fm::Case>,
     /// All control plane managed disks
     in_service_disks: Arc<IdOrdMap<InServiceDisk>>,
+    /// All non-terminal (running/unwinding) sagas, annotated with their
+    /// latest node-event time and owning-Nexus state.
+    observed_sagas: Arc<IdOrdMap<ObservedSaga>>,
 }
 
 impl Input {
@@ -75,12 +79,21 @@ impl Input {
         &self.in_service_disks
     }
 
+    /// All non-terminal sagas observed in the database, indexed by `saga_id`.
+    /// See the saga diagnosis engine for how absence (a saga that has reached
+    /// a terminal state) drives case closure.
+    pub fn observed_sagas(&self) -> &IdOrdMap<ObservedSaga> {
+        &self.observed_sagas
+    }
+
     /// Returns a [`Builder`] for constructing a new `Input` from the provided
-    /// `parent_sitrep`, inventory collection, and in-service disks.
+    /// `parent_sitrep`, inventory collection, in-service disks, and observed
+    /// sagas.
     pub fn builder(
         parent_sitrep: Option<Arc<(SitrepVersion, Sitrep)>>,
         inv: Arc<inventory::Collection>,
         in_service_disks: Arc<IdOrdMap<InServiceDisk>>,
+        observed_sagas: Arc<IdOrdMap<ObservedSaga>>,
     ) -> Result<Builder, InvalidInputs> {
         // Before preparing analysis inputs, check that the proposed input
         // inventory collection is at least as new as the parent sitrep's
@@ -106,6 +119,7 @@ impl Input {
             parent_sitrep,
             inv,
             in_service_disks,
+            observed_sagas,
             new_ereports: IdOrdMap::default(),
             unmarked_seen_ereports: BTreeSet::default(),
         })
@@ -130,6 +144,7 @@ pub struct Builder {
     parent_sitrep: Option<Arc<(SitrepVersion, Sitrep)>>,
     inv: Arc<inventory::Collection>,
     in_service_disks: Arc<IdOrdMap<InServiceDisk>>,
+    observed_sagas: Arc<IdOrdMap<ObservedSaga>>,
     /// Ereports which are new and should be input to analysis in the next
     /// sitrep.
     new_ereports: IdOrdMap<fm::Ereport>,
@@ -253,6 +268,7 @@ impl Builder {
             open_cases,
             closed_cases_copied_forward,
             in_service_disks: self.in_service_disks,
+            observed_sagas: self.observed_sagas,
         };
 
         (input, report)
@@ -489,6 +505,7 @@ mod tests {
             let mut builder = Input::builder(
                 Some(parent_sitrep),
                 inv,
+                Arc::new(IdOrdMap::new()),
                 Arc::new(IdOrdMap::new()),
             )
             .expect("collection start time check should always pass");

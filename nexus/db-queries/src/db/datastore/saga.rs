@@ -191,6 +191,70 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
+    /// Returns all sagas in a running or unwinding (i.e. non-terminal) state,
+    /// making as many queries as needed (in batches) to get them all.
+    ///
+    /// Unlike [`Self::saga_list_running_or_unwinding_older_than`], this has no
+    /// age filter and no result cap: it is used by fault management, which
+    /// needs the complete set of non-terminal sagas (a lossy list would cause
+    /// it to incorrectly close cases for sagas it simply didn't see).
+    pub async fn saga_list_running_or_unwinding_batched(
+        &self,
+        opctx: &OpContext,
+    ) -> Result<Vec<db::saga_types::Saga>, Error> {
+        let mut sagas = vec![];
+        let mut paginator = Paginator::new(
+            SQL_BATCH_SIZE,
+            dropshot::PaginationOrder::Ascending,
+        );
+        let conn = self.pool_connection_authorized(opctx).await?;
+        while let Some(p) = paginator.next() {
+            use nexus_db_schema::schema::saga::dsl;
+
+            let mut batch =
+                paginated(dsl::saga, dsl::id, &p.current_pagparams())
+                    .filter(
+                        dsl::saga_state
+                            .eq_any(SagaState::RECOVERY_CANDIDATE_STATES),
+                    )
+                    .select(db::saga_types::Saga::as_select())
+                    .load_async(&*conn)
+                    .await
+                    .map_err(|e| {
+                        public_error_from_diesel(e, ErrorHandler::Server)
+                    })?;
+
+            paginator = p.found_batch(&batch, &|row| row.id);
+            sagas.append(&mut batch);
+        }
+        Ok(sagas)
+    }
+
+    /// For each of the given sagas, returns the timestamp of its most recent
+    /// node event (`MAX(event_time)`), i.e. the last durably-recorded forward
+    /// or undo step. Sagas with no node events are absent from the result.
+    ///
+    /// This is the saga diagnosis engine's progress signal: `now - max` is how
+    /// long a saga has gone without recording progress. The query seeks by the
+    /// `saga_node_event` primary-key prefix (`saga_id`), so it does not scan
+    /// the whole table.
+    pub async fn saga_latest_node_event_times(
+        &self,
+        opctx: &OpContext,
+        saga_ids: &[db::saga_types::SagaId],
+    ) -> Result<Vec<(db::saga_types::SagaId, Option<DateTime<Utc>>)>, Error>
+    {
+        use nexus_db_schema::schema::saga_node_event::dsl;
+        let conn = self.pool_connection_authorized(opctx).await?;
+        dsl::saga_node_event
+            .filter(dsl::saga_id.eq_any(saga_ids.to_vec()))
+            .group_by(dsl::saga_id)
+            .select((dsl::saga_id, diesel::dsl::max(dsl::event_time)))
+            .load_async(&*conn)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
     /// Returns a list of all saga log entries for the given saga, making as
     /// many queries as needed (in batches) to get them all
     pub async fn saga_fetch_log_batched(
