@@ -46,14 +46,15 @@ pub fn analyze(
     }
 
     // for each case:
-    // - generate an alert for each PSU insert/remove ereport in the case that
-    //   does not already have an alert for that event.
-    // - looking at the sequence of ereports, determine if the PSU is present or
-    //   not.
+    // - looking at the sequence of ereports based on their ENAs and timestamps,
+    //   determine if the PSU is present or not.
     //   - if the PSU is present (i.e., the most recent ereport is an insert),
     //     close the case
     //   - if the PSU is not present (i.e., the most recent ereport is a
     //     remove), leave the case open
+    //
+    // - generate an alert for each PSU insert/remove ereport in the case that
+    //   does not already have an alert for that event.
     //
     // We don't actually *need* to leave the case open, and *could* get away
     // with just making a case for every ereport and requesting an alert, but
