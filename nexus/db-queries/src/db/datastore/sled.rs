@@ -43,6 +43,7 @@ use nexus_db_errors::public_error_from_diesel;
 use nexus_db_lookup::DbConnection;
 use nexus_db_model::ApplySledFilterExt;
 use nexus_db_model::DbTypedUuid;
+use nexus_db_schema::enums::SledResourceVmmStateEnum;
 use nexus_types::deployment::SledFilter;
 use nexus_types::external_api::sled::{SledPolicy, SledProvisionPolicy};
 use nexus_types::identity::Asset;
@@ -54,6 +55,7 @@ use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::ResourceType;
+use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::GenericUuid;
@@ -1490,29 +1492,37 @@ impl DataStore {
 
     /// For a successful migration, change the active sled_resource_vmm's state
     /// to 'tombstoned' and the target sled_resource_vmm's state to 'active'
-    pub async fn sled_reservation_update_for_migrate_sucess(
+    pub async fn sled_reservation_update_for_migrate_success(
         &self,
         opctx: &OpContext,
         active_vmm_id: Uuid,
         target_vmm_id: Uuid,
-    ) -> DeleteResult {
+    ) -> UpdateResult<()> {
+        use diesel::dsl::case_when;
         use nexus_db_schema::schema::sled_resource_vmm::dsl as resource_dsl;
 
         let conn = self.pool_connection_authorized(opctx).await?;
 
-        // XXX does this need to be a single statement or transaction? would see
-        // intermediate state of "tombstoned + target"
+        // Issue a single update so that a racing insert of another record with
+        // state 'active' cannot occur.
 
         diesel::update(resource_dsl::sled_resource_vmm)
-            .filter(resource_dsl::id.eq(active_vmm_id))
-            .set(resource_dsl::state.eq(SledResourceVmmState::Tombstoned))
-            .execute_async(&*conn)
-            .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
-
-        diesel::update(resource_dsl::sled_resource_vmm)
-            .filter(resource_dsl::id.eq(target_vmm_id))
-            .set(resource_dsl::state.eq(SledResourceVmmState::Active))
+            .filter(resource_dsl::id.eq_any([active_vmm_id, target_vmm_id]))
+            .set(
+                resource_dsl::state.eq(case_when::<
+                    _,
+                    SledResourceVmmState,
+                    SledResourceVmmStateEnum,
+                >(
+                    resource_dsl::id.eq(active_vmm_id),
+                    SledResourceVmmState::Tombstoned,
+                )
+                .when(
+                    resource_dsl::id.eq(target_vmm_id),
+                    SledResourceVmmState::Active,
+                )
+                .otherwise(resource_dsl::state)),
+            )
             .execute_async(&*conn)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
@@ -7136,6 +7146,150 @@ pub(in crate::db::datastore) mod test {
         assert_eq!(allocation_records.len(), 1);
 
         validate_local_storage_allocations(&datastore).await;
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_sled_reservation_update_for_migrate_success() {
+        let logctx = dev::test_setup_log(
+            "test_sled_reservation_update_for_migrate_success",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
+
+        // Insert one active, one target record
+
+        use nexus_db_schema::schema::sled_resource_vmm::dsl;
+
+        let active_vmm_id = PropolisUuid::new_v4();
+        let target_vmm_id = PropolisUuid::new_v4();
+        let instance_id = InstanceUuid::new_v4();
+
+        diesel::insert_into(dsl::sled_resource_vmm)
+            .values(SledResourceVmm::new(
+                active_vmm_id,
+                instance_id,
+                SledUuid::new_v4(),
+                db::model::Resources::new(
+                    32,
+                    ByteCount::try_from(1024).unwrap(),
+                    ByteCount::try_from(1024).unwrap(),
+                ),
+                SledResourceVmmState::Active,
+            ))
+            .execute_async(&*conn)
+            .await
+            .unwrap();
+
+        diesel::insert_into(dsl::sled_resource_vmm)
+            .values(SledResourceVmm::new(
+                target_vmm_id,
+                instance_id,
+                SledUuid::new_v4(),
+                db::model::Resources::new(
+                    32,
+                    ByteCount::try_from(1024).unwrap(),
+                    ByteCount::try_from(1024).unwrap(),
+                ),
+                SledResourceVmmState::Target,
+            ))
+            .execute_async(&*conn)
+            .await
+            .unwrap();
+
+        datastore
+            .sled_reservation_update_for_migrate_success(
+                &opctx,
+                *active_vmm_id.as_untyped_uuid(),
+                *target_vmm_id.as_untyped_uuid(),
+            )
+            .await
+            .unwrap();
+
+        // Assert the state changes
+
+        let previously_active_vmm = dsl::sled_resource_vmm
+            .filter(dsl::id.eq(to_db_typed_uuid(active_vmm_id)))
+            .select(SledResourceVmm::as_select())
+            .get_result_async(&*conn)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            previously_active_vmm.state,
+            SledResourceVmmState::Tombstoned,
+        );
+
+        let previously_target_vmm = dsl::sled_resource_vmm
+            .filter(dsl::id.eq(to_db_typed_uuid(target_vmm_id)))
+            .select(SledResourceVmm::as_select())
+            .get_result_async(&*conn)
+            .await
+            .unwrap();
+
+        assert_eq!(previously_target_vmm.state, SledResourceVmmState::Active,);
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_sled_reservation_update_for_migrate_success_deleted() {
+        let logctx = dev::test_setup_log(
+            "test_sled_reservation_update_for_migrate_success_deleted",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
+
+        // Insert only the target record, imagining the active one has already
+        // been deleted
+
+        use nexus_db_schema::schema::sled_resource_vmm::dsl;
+
+        let target_vmm_id = PropolisUuid::new_v4();
+        let instance_id = InstanceUuid::new_v4();
+
+        diesel::insert_into(dsl::sled_resource_vmm)
+            .values(SledResourceVmm::new(
+                target_vmm_id,
+                instance_id,
+                SledUuid::new_v4(),
+                db::model::Resources::new(
+                    32,
+                    ByteCount::try_from(1024).unwrap(),
+                    ByteCount::try_from(1024).unwrap(),
+                ),
+                SledResourceVmmState::Target,
+            ))
+            .execute_async(&*conn)
+            .await
+            .unwrap();
+
+        datastore
+            .sled_reservation_update_for_migrate_success(
+                &opctx,
+                Uuid::new_v4(),
+                *target_vmm_id.as_untyped_uuid(),
+            )
+            .await
+            .unwrap();
+
+        // Assert the state change
+
+        let previously_target_vmm = dsl::sled_resource_vmm
+            .filter(dsl::id.eq(to_db_typed_uuid(target_vmm_id)))
+            .select(SledResourceVmm::as_select())
+            .get_result_async(&*conn)
+            .await
+            .unwrap();
+
+        assert_eq!(previously_target_vmm.state, SledResourceVmmState::Active,);
 
         db.terminate().await;
         logctx.cleanup_successful();

@@ -1370,7 +1370,7 @@ async fn siu_update_active_vmm_for_migration_success(
 
     osagactx
         .datastore()
-        .sled_reservation_update_for_migrate_sucess(
+        .sled_reservation_update_for_migrate_success(
             &opctx,
             *active_vmm_id,
             *target_vmm_id,
