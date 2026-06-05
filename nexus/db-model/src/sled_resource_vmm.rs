@@ -17,6 +17,16 @@ use serde::Deserialize;
 use serde::Serialize;
 use std::fmt;
 
+// A note on SledResourceVmmState:
+//
+// - `tombstoned` means that the VMM is not currently running the instance, but
+//   the propolis process may still exist and/or the zone has not been destroyed
+//   yet, meaning it is still consuming sled resources.
+//
+// - `active` means that the VMM either is or will be running the instance.
+//
+// - `target` means that the VMM is a migration destination for the `active` VMM
+
 impl_enum_type!(
     SledResourceVmmStateEnum:
 

@@ -282,10 +282,12 @@ CREATE INDEX IF NOT EXISTS lookup_sled_by_policy_and_state ON omicron.public.sle
 );
 
 CREATE TYPE IF NOT EXISTS omicron.public.sled_resource_vmm_state AS ENUM (
-    -- A VMM's resources are still used, but it should be garbage collected
+    -- The VMM is not currently running the instance, but the propolis process
+    -- may still exist and/or the zone has not been destroyed yet, meaning it
+    -- is still consuming sled resources.
     'tombstoned',
 
-    -- This VMM is running the instance
+    -- This VMM either is or will be running the instance
     'active',
 
     -- This VMM is a migration destination for the active VMM
