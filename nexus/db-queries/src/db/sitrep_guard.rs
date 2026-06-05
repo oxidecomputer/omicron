@@ -361,8 +361,14 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::db::pub_test_utils::TestDatabase;
     use crate::db::raw_query_builder::expectorate_query_contents;
+    use assert_matches::assert_matches;
+    use async_bb8_diesel::AsyncRunQueryDsl;
+    use async_bb8_diesel::AsyncSimpleConnection;
     use diesel::prelude::*;
+    use omicron_test_utils::dev;
+    use uuid::uuid;
 
     // Dummy schema standing in for a real resource. These tables exist only in
     // this test module (not in the real schema) so we can exercise the typed
@@ -387,7 +393,13 @@ mod tests {
         }
     }
 
-    struct DummyResource;
+    #[derive(Queryable, Selectable, Debug)]
+    #[diesel(table_name = dummy_resource)]
+    struct DummyResource {
+        id: Uuid,
+        name: String,
+    }
+
     impl SitrepGuardedResource for DummyResource {
         type GenerationColumn = dummy_sitrep::dsl::dummy_generation;
         type MarkerIdColumn = dummy_marker::dsl::dummy_id;
@@ -397,8 +409,7 @@ mod tests {
     // hand-assembled query are caught in review.
     #[tokio::test]
     async fn expectorate_sitrep_guarded_insert() {
-        let resource_id =
-            "11111111-1111-1111-1111-111111111111".parse().unwrap();
+        let resource_id = uuid!("11111111-1111-1111-1111-111111111111");
         let insert = diesel::insert_into(dummy_resource::table)
             .values((
                 dummy_resource::dsl::id.eq(resource_id),
@@ -406,7 +417,7 @@ mod tests {
             ))
             .on_conflict(dummy_resource::dsl::id)
             .do_nothing()
-            .returning(dummy_resource::dsl::id);
+            .returning(DummyResource::as_returning());
         let query = SitrepGuardedInsert::<DummyResource, _>::new(
             resource_id,
             Generation::try_from(3).unwrap(),
@@ -417,5 +428,228 @@ mod tests {
             "tests/output/sitrep_guarded_insert.sql",
         )
         .await;
+    }
+
+    // Fixed sitrep id used by the DB-backed tests below.
+    const SITREP_ID: &str = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
+
+    // Creates the tables the combinator's SQL references but which the real
+    // schema doesn't have: the dummy marker and resource tables, plus a
+    // `dummy_generation` column on the real `fm_sitrep` (the combinator reads
+    // the resource generation off `omicron.public.fm_sitrep`).
+    async fn setup_dummy_schema(
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+    ) {
+        conn.batch_execute_async(
+            "ALTER TABLE omicron.public.fm_sitrep \
+                 ADD COLUMN IF NOT EXISTS dummy_generation INT8; \
+             CREATE SCHEMA IF NOT EXISTS test_schema; \
+             CREATE TABLE IF NOT EXISTS test_schema.dummy_marker ( \
+                 dummy_id UUID PRIMARY KEY, \
+                 created_at_generation INT8 NOT NULL \
+             ); \
+             CREATE TABLE IF NOT EXISTS test_schema.dummy_resource ( \
+                 id UUID PRIMARY KEY, \
+                 name TEXT NOT NULL \
+             );",
+        )
+        .await
+        .unwrap();
+    }
+
+    // Inserts a current sitrep at `generation`, plus the `fm_sitrep_history`
+    // row that marks it as the latest sitrep.
+    async fn insert_current_sitrep(
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        generation: i64,
+    ) {
+        conn.batch_execute_async(&format!(
+            "INSERT INTO omicron.public.fm_sitrep \
+                 (id, inv_collection_id, time_created, creator_id, comment, \
+                  next_inv_min_time_started, dummy_generation) \
+                 VALUES ('{SITREP_ID}', gen_random_uuid(), now(), \
+                         gen_random_uuid(), '', now(), {generation}); \
+             INSERT INTO omicron.public.fm_sitrep_history \
+                 (version, sitrep_id, time_made_current) \
+                 VALUES (1, '{SITREP_ID}', now());"
+        ))
+        .await
+        .unwrap();
+    }
+
+    // Builds and runs a guarded insert for `resource_id` at
+    // `expected_generation`.
+    async fn run_guarded_insert(
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        resource_id: Uuid,
+        expected_generation: i64,
+    ) -> SitrepGuardedInsertOutcome<DummyResource> {
+        let insert = diesel::insert_into(dummy_resource::table)
+            .values((
+                dummy_resource::dsl::id.eq(resource_id),
+                dummy_resource::dsl::name.eq("test"),
+            ))
+            .on_conflict(dummy_resource::dsl::id)
+            .do_nothing()
+            .returning(DummyResource::as_returning());
+        SitrepGuardedInsert::<DummyResource, _>::new(
+            resource_id,
+            Generation::try_from(expected_generation).unwrap(),
+            insert,
+        )
+        .execute_async(conn)
+        .await
+        .unwrap()
+    }
+
+    // Whether a dummy resource row exists for `id`.
+    async fn resource_exists(
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        id: Uuid,
+    ) -> bool {
+        diesel::select(diesel::dsl::exists(
+            dummy_resource::table.filter(dummy_resource::dsl::id.eq(id)),
+        ))
+        .get_result_async::<bool>(conn)
+        .await
+        .unwrap()
+    }
+
+    // The generation recorded in the marker row for `id`, if any.
+    async fn marker_generation(
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        id: Uuid,
+    ) -> Option<i64> {
+        dummy_marker::table
+            .filter(dummy_marker::dsl::dummy_id.eq(id))
+            .select(dummy_marker::dsl::created_at_generation)
+            .first_async::<i64>(conn)
+            .await
+            .optional()
+            .unwrap()
+    }
+
+    // Both guards pass: the resource row is inserted and a marker is written
+    // with the executed generation.
+    #[tokio::test]
+    async fn sitrep_guarded_insert_created_writes_marker() {
+        let logctx =
+            dev::test_setup_log("sitrep_guarded_insert_created_writes_marker");
+        let db = TestDatabase::new_with_pool(&logctx.log).await;
+        let pool = db.pool();
+        let conn = pool.claim().await.unwrap();
+        setup_dummy_schema(&conn).await;
+        insert_current_sitrep(&conn, 2).await;
+
+        let resource_id = uuid!("22222222-2222-2222-2222-222222222222");
+        let outcome = run_guarded_insert(&conn, resource_id, 2).await;
+
+        assert_matches!(
+            outcome,
+            SitrepGuardedInsertOutcome::Created(row)
+                if row.id == resource_id && row.name == "test"
+        );
+        // The marker was written with the executed generation.
+        assert_eq!(marker_generation(&conn, resource_id).await, Some(2));
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    // A pre-existing marker short-circuits `prior_marker_guard`: the insert
+    // reports `AlreadyExists` and the resource row is not written.
+    #[tokio::test]
+    async fn sitrep_guarded_insert_already_exists_via_marker() {
+        let logctx = dev::test_setup_log(
+            "sitrep_guarded_insert_already_exists_via_marker",
+        );
+        let db = TestDatabase::new_with_pool(&logctx.log).await;
+        let pool = db.pool();
+        let conn = pool.claim().await.unwrap();
+        setup_dummy_schema(&conn).await;
+        insert_current_sitrep(&conn, 2).await;
+
+        let resource_id = uuid!("33333333-3333-3333-3333-333333333333");
+        // Seed a marker for this resource id.
+        diesel::insert_into(dummy_marker::table)
+            .values((
+                dummy_marker::dsl::dummy_id.eq(resource_id),
+                dummy_marker::dsl::created_at_generation.eq(2i64),
+            ))
+            .execute_async(&*conn)
+            .await
+            .unwrap();
+
+        let outcome = run_guarded_insert(&conn, resource_id, 2).await;
+
+        assert_matches!(outcome, SitrepGuardedInsertOutcome::AlreadyExists);
+        // The resource row was not inserted; the seeded marker is unchanged.
+        assert!(!resource_exists(&conn, resource_id).await);
+        assert_eq!(marker_generation(&conn, resource_id).await, Some(2));
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    // Both guards pass, but the inner `ON CONFLICT DO NOTHING` matches a
+    // pre-existing resource row, so no row is returned and no marker is
+    // written. This is also surfaced as `AlreadyExists`.
+    #[tokio::test]
+    async fn sitrep_guarded_insert_already_exists_via_conflict() {
+        let logctx = dev::test_setup_log(
+            "sitrep_guarded_insert_already_exists_via_conflict",
+        );
+        let db = TestDatabase::new_with_pool(&logctx.log).await;
+        let pool = db.pool();
+        let conn = pool.claim().await.unwrap();
+        setup_dummy_schema(&conn).await;
+        insert_current_sitrep(&conn, 2).await;
+
+        let resource_id = uuid!("44444444-4444-4444-4444-444444444444");
+        // Seed the resource row, but no marker.
+        diesel::insert_into(dummy_resource::table)
+            .values((
+                dummy_resource::dsl::id.eq(resource_id),
+                dummy_resource::dsl::name.eq("preexisting"),
+            ))
+            .execute_async(&*conn)
+            .await
+            .unwrap();
+
+        let outcome = run_guarded_insert(&conn, resource_id, 2).await;
+
+        assert_matches!(outcome, SitrepGuardedInsertOutcome::AlreadyExists);
+        // The pre-existing resource row is still there, and no marker was
+        // written (the marker INSERT is gated on the resource INSERT producing
+        // a row).
+        assert!(resource_exists(&conn, resource_id).await);
+        assert_eq!(marker_generation(&conn, resource_id).await, None);
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    // The executed generation does not match the latest sitrep's generation:
+    // `stale_guard` aborts and nothing is written.
+    #[tokio::test]
+    async fn sitrep_guarded_insert_stale_sitrep() {
+        let logctx = dev::test_setup_log("sitrep_guarded_insert_stale_sitrep");
+        let db = TestDatabase::new_with_pool(&logctx.log).await;
+        let pool = db.pool();
+        let conn = pool.claim().await.unwrap();
+        setup_dummy_schema(&conn).await;
+        // Latest sitrep is at generation 2 ...
+        insert_current_sitrep(&conn, 2).await;
+
+        let resource_id = uuid!("55555555-5555-5555-5555-555555555555");
+        // ... but we execute expecting generation 1.
+        let outcome = run_guarded_insert(&conn, resource_id, 1).await;
+
+        assert_matches!(outcome, SitrepGuardedInsertOutcome::StaleSitrep);
+        assert!(!resource_exists(&conn, resource_id).await);
+        assert_eq!(marker_generation(&conn, resource_id).await, None);
+
+        db.terminate().await;
+        logctx.cleanup_successful();
     }
 }

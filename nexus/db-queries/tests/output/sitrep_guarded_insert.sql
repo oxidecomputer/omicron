@@ -49,7 +49,7 @@ WITH
       DO
         NOTHING
       RETURNING
-        test_schema.dummy_resource.id
+        test_schema.dummy_resource.id, test_schema.dummy_resource.name
     ),
   new_marker
     AS (
