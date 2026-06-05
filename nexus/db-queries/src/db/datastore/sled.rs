@@ -168,9 +168,18 @@ impl From<SledReservationError> for external::Error {
                 external::Error::invalid_request(&msg)
             },
             // A concurrent request to place the same instance with the same
-            // reservation type landed already.
-            SledReservationError::ReservationExists { reservation_type: _ } => {
-                external::Error::conflict(&msg)
+            // reservation type landed already. Change the user-facing messaging
+            // for the external error.
+            SledReservationError::ReservationExists { reservation_type } => {
+                match reservation_type {
+                    SledReservationType::Active => {
+                        external::Error::conflict("Instance already starting")
+                    }
+
+                    SledReservationType::Target => {
+                        external::Error::conflict("Instance already migrating")
+                    }
+                }
             }
         }
     }
