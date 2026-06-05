@@ -18775,7 +18775,7 @@
         ]
       },
       "BlockSize": {
-        "title": "Disk block size in bytes",
+        "title": "Block size in bytes",
         "description": "Valid values are: 512, 2048, or 4096.",
         "type": "integer",
         "enum": [
