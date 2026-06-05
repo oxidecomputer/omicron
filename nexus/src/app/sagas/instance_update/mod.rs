@@ -1303,17 +1303,45 @@ async fn siu_commit_instance_updates(
                 {
                     // The reconciler will fix this later
                     info!(log,
-                          "instance update: failed to update multicast member sled_id after migration, reconciler will fix";
+                          "instance update: failed to update multicast \
+                           member sled_id after migration, reconciler \
+                           will fix";
                           "instance_id" => %instance_id,
                           "new_sled_id" => %new_sled_id,
                           "error" => ?e);
                 } else {
                     info!(log,
-                          "instance update: updated multicast member sled_id after migration";
+                          "instance update: updated multicast member \
+                           sled_id after migration";
                           "instance_id" => %instance_id,
                           "new_sled_id" => %new_sled_id);
                 }
             }
+        }
+    }
+
+    // Detach all multicast members once the active VMM has reached a terminal
+    // state, which avoids tearing down M2P/forwarding while the guest is still
+    // running on its sled. Covers graceful stop and failure paths alike.
+    if update.deprovision.is_some() && nexus.multicast_enabled() {
+        if let Err(e) = osagactx
+            .datastore()
+            .multicast_group_members_detach_by_instance(
+                &opctx,
+                InstanceUuid::from_untyped_uuid(instance_id),
+            )
+            .await
+        {
+            info!(log,
+                  "instance update: failed to detach multicast members \
+                   on deprovision, next reconciler pass will retry";
+                  "instance_id" => %instance_id,
+                  "error" => ?e);
+        } else {
+            info!(log,
+                  "instance update: detached multicast members on deprovision";
+                  "instance_id" => %instance_id);
+            nexus.background_tasks.task_multicast_reconciler.activate();
         }
     }
 

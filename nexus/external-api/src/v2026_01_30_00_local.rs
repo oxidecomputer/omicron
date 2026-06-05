@@ -54,6 +54,34 @@ impl From<external::Disk> for Disk {
             snapshot_id,
             image_id,
             size,
+            block_size: block_size.into(),
+            state,
+            device_path,
+            disk_type,
+        }
+    }
+}
+
+impl From<crate::v2026_05_20_00_local::Disk> for Disk {
+    fn from(new: crate::v2026_05_20_00_local::Disk) -> Self {
+        let crate::v2026_05_20_00_local::Disk {
+            identity,
+            project_id,
+            snapshot_id,
+            image_id,
+            size,
+            block_size,
+            state,
+            device_path,
+            disk_type,
+            read_only: _, // read_only doth not exist in v2026_01_30_00
+        } = new;
+        Self {
+            identity,
+            project_id,
+            snapshot_id,
+            image_id,
+            size,
             block_size,
             state,
             device_path,

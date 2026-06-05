@@ -643,6 +643,74 @@ impl From<ByteCount> for i64 {
     }
 }
 
+/// Size of blocks for a disk. Valid values are: 512, 2048, or 4096.
+#[derive(Copy, Clone, Debug, Deserialize, Serialize)]
+#[serde(try_from = "u32")]
+pub struct BlockSize(pub u32);
+
+impl schemars::JsonSchema for BlockSize {
+    fn schema_name() -> String {
+        "BlockSize".to_string()
+    }
+
+    fn json_schema(
+        _: &mut schemars::r#gen::SchemaGenerator,
+    ) -> schemars::schema::Schema {
+        schemars::schema::Schema::Object(schemars::schema::SchemaObject {
+            metadata: Some(Box::new(schemars::schema::Metadata {
+                id: None,
+                description: Some(
+                    "Valid values are: 512, 2048, or 4096.".to_string(),
+                ),
+                title: Some("Block size in bytes".to_string()),
+                ..Default::default()
+            })),
+            instance_type: Some(schemars::schema::InstanceType::Integer.into()),
+            enum_values: Some(vec![
+                serde_json::json!(512),
+                serde_json::json!(2048),
+                serde_json::json!(4096),
+            ]),
+            ..Default::default()
+        })
+    }
+}
+
+impl BlockSize {
+    pub fn to_bytes(&self) -> u64 {
+        u64::from(self.0)
+    }
+}
+
+impl TryFrom<u32> for BlockSize {
+    type Error = anyhow::Error;
+    fn try_from(x: u32) -> Result<BlockSize, Self::Error> {
+        if ![512, 2048, 4096].contains(&x) {
+            anyhow::bail!("invalid block size {}", x);
+        }
+
+        Ok(BlockSize(x))
+    }
+}
+
+impl From<ByteCount> for BlockSize {
+    fn from(bc: ByteCount) -> BlockSize {
+        BlockSize(bc.to_bytes() as u32)
+    }
+}
+
+impl From<BlockSize> for ByteCount {
+    fn from(bs: BlockSize) -> ByteCount {
+        ByteCount::from(bs.0)
+    }
+}
+
+impl From<BlockSize> for u64 {
+    fn from(bs: BlockSize) -> u64 {
+        u64::from(bs.0)
+    }
+}
+
 /// Generation numbers stored in the database, used for optimistic concurrency
 /// control
 //
@@ -1435,7 +1503,7 @@ pub struct Disk {
     /// ID of image from which disk was created, if any
     pub image_id: Option<Uuid>,
     pub size: ByteCount,
-    pub block_size: ByteCount,
+    pub block_size: BlockSize,
     pub state: DiskState,
     pub device_path: String,
     pub disk_type: DiskType,

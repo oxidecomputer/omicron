@@ -1049,7 +1049,7 @@ impl DataStore {
                     ),
                 },
                 version,
-                nexus_db_model::IpPoolReservationType::OxideInternal,
+                nexus_db_model::IpPoolAssignment::SystemServices,
             );
             match self.ip_pool_create(opctx, internal_pool).await {
                 Ok(_) | Err(Error::ObjectAlreadyExists { .. }) => {}

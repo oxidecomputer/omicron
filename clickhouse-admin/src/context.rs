@@ -783,12 +783,19 @@ mod tests {
     use crate::context::ServerContext;
     use crate::context::USAGE_UPDATE_INTERVAL;
     use camino::Utf8PathBuf;
+    use chrono::NaiveDate;
+    use chrono::TimeZone;
+    use chrono_tz::Tz;
     use clickhouse_admin_types::CLICKHOUSE_SERVER_CONFIG_FILE;
     use clickhouse_admin_types::retention::Days;
     use clickhouse_admin_types::retention::RetentionPolicyRequest;
     use dropshot::ErrorStatusCode;
     use omicron_common::api::external::Generation;
     use omicron_test_utils::dev;
+    use oximeter_db::native::block::Block;
+    use oximeter_db::native::block::Column;
+    use oximeter_db::native::block::Precision;
+    use oximeter_db::native::block::ValueArray;
     use slog::info;
     use std::str::FromStr;
 
@@ -967,12 +974,15 @@ mod tests {
         assert!(usage.last_success.is_some());
 
         // Wait until we actually do compute the usage again.
+        //
+        // From `grep -c "CREATE TABLE" oximeter/db/schema/single-node/db-init.sql`.
+        const N_EXPECTED_TABLES: usize = 39;
         let usage = dev::poll::wait_for_condition(
             || async {
                 let usage = context.database_usage();
                 match &usage.last_success {
                     Some(success) => {
-                        if success.tables.is_empty() {
+                        if success.tables.len() < N_EXPECTED_TABLES {
                             Err(dev::poll::CondCheckError::<()>::NotYet)
                         } else {
                             Ok(usage)
@@ -998,7 +1008,74 @@ mod tests {
         assert!(
             tables.contains_key(&String::from("oximeter.measurements_f64"))
         );
-        assert!(tables.contains_key(&String::from("oximeter.version")));
+
+        // Insert some rows in the version table, so we can see it updated.
+        let version_table = String::from("oximeter.version");
+        let version_usage =
+            tables.get(&version_table).expect("Should have this table");
+        let naive_dt = NaiveDate::from_ymd_opt(2020, 1, 1)
+            .unwrap()
+            .and_hms_opt(12, 12, 12)
+            .unwrap();
+        let timestamp = Tz::UTC.from_local_datetime(&naive_dt).unwrap();
+        oximeter_db::native::Connection::new(
+            clickhouse.native_address().into(),
+        )
+        .await
+        .expect("Should be able to make client")
+        .insert(
+            uuid::Uuid::new_v4(),
+            "INSERT INTO oximeter.version FORMAT NATIVE",
+            Block {
+                name: String::new(),
+                info: Default::default(),
+                columns: [
+                    (
+                        "value".to_string(),
+                        Column::from(ValueArray::UInt64(vec![1, 2, 3])),
+                    ),
+                    (
+                        "timestamp".to_string(),
+                        Column::from(ValueArray::DateTime64 {
+                            precision: Precision::new(9).unwrap(),
+                            tz: Tz::UTC,
+                            values: vec![timestamp; 3],
+                        }),
+                    ),
+                ]
+                .into(),
+            },
+        )
+        .await
+        .expect("Should be able to insert data");
+
+        // Check again, waiting until we get more than the previous usage.
+        let usage = dev::poll::wait_for_condition(
+            || async {
+                let usage = context.database_usage();
+                match &usage.last_success {
+                    Some(success) => {
+                        let Some(usage) = success.tables.get(&version_table)
+                        else {
+                            return Err(
+                                dev::poll::CondCheckError::<()>::NotYet,
+                            );
+                        };
+                        if usage.n_rows > version_usage.n_rows {
+                            Ok(usage.clone())
+                        } else {
+                            Err(dev::poll::CondCheckError::<()>::NotYet)
+                        }
+                    }
+                    None => Err(dev::poll::CondCheckError::<()>::NotYet),
+                }
+            },
+            &std::time::Duration::from_millis(50),
+            &(2 * USAGE_UPDATE_INTERVAL),
+        )
+        .await
+        .expect("New rows didn't show up on time");
+        assert_eq!(usage.n_rows, 4);
 
         // Kill the database, and wait for another collection. This one should
         // fail.

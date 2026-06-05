@@ -142,10 +142,11 @@ pub mod headers {
 
 pub mod image {
     pub use crate::v2025_11_20_00::image::Distribution;
-    pub use crate::v2025_11_20_00::image::Image;
     pub use crate::v2025_11_20_00::image::ImageCreate;
     pub use crate::v2025_11_20_00::image::ImageSelector;
     pub use crate::v2025_11_20_00::image::ImageSource;
+
+    pub use crate::v2026_06_04_00::image::Image;
 }
 
 pub mod instance {
@@ -413,10 +414,11 @@ pub mod update {
     pub use crate::v2025_11_20_00::update::TufRepoUpload;
     pub use crate::v2025_11_20_00::update::TufRepoUploadStatus;
     pub use crate::v2025_11_20_00::update::TufSignedRootRole;
-    pub use crate::v2025_11_20_00::update::UpdateStatus;
     pub use crate::v2025_11_20_00::update::UpdatesGetRepositoryParams;
     pub use crate::v2025_11_20_00::update::UpdatesPutRepositoryParams;
     pub use crate::v2025_11_20_00::update::UpdatesTrustRoot;
+
+    pub use crate::v2026_05_20_00::update::UpdateStatus;
 }
 
 pub mod vpc {

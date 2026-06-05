@@ -20,6 +20,7 @@ use kstat_rs::Kstat;
 use oximeter::Metric;
 use oximeter::MetricsError;
 use oximeter::Sample;
+use oximeter::queue::BoundedQueue;
 use oximeter::types::Cumulative;
 use slog::Logger;
 use slog::debug;
@@ -109,7 +110,7 @@ pub enum ExpirationBehavior {
     Duration(Duration),
 }
 
-/// Details about the collection and expiration intervals for a target.
+/// Details about how to collect from a single target.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct CollectionDetails {
     /// The interval on which data from the target is collected.
@@ -122,22 +123,43 @@ pub struct CollectionDetails {
     /// The latter can occur if the physical resource (such as a datalink) that
     /// underlies the kstat has disappeared, for example.
     pub expiration: ExpirationBehavior,
+    /// The number of samples to retain before dropping the oldest.
+    ///
+    /// This avoids memory issues when data is produced more rapidly than it's
+    /// collected.
+    pub n_max_samples: usize,
 }
 
 impl CollectionDetails {
     /// Return collection details with no expiration.
-    pub fn never(interval: Duration) -> Self {
-        Self { interval, expiration: ExpirationBehavior::Never }
+    pub fn never(interval: Duration, n_max_samples: usize) -> Self {
+        Self { interval, expiration: ExpirationBehavior::Never, n_max_samples }
     }
 
     /// Return collection details that expires after a number of attempts.
-    pub fn attempts(interval: Duration, count: usize) -> Self {
-        Self { interval, expiration: ExpirationBehavior::Attempts(count) }
+    pub fn attempts(
+        interval: Duration,
+        count: usize,
+        n_max_samples: usize,
+    ) -> Self {
+        Self {
+            interval,
+            expiration: ExpirationBehavior::Attempts(count),
+            n_max_samples,
+        }
     }
 
     /// Return collection details that expires after a duration has elapsed.
-    pub fn duration(interval: Duration, duration: Duration) -> Self {
-        Self { interval, expiration: ExpirationBehavior::Duration(duration) }
+    pub fn duration(
+        interval: Duration,
+        duration: Duration,
+        n_max_samples: usize,
+    ) -> Self {
+        Self {
+            interval,
+            expiration: ExpirationBehavior::Duration(duration),
+            n_max_samples,
+        }
     }
 }
 
@@ -342,14 +364,10 @@ struct KstatSamplerWorker {
 
     /// The per-target queue of samples, pulled by the main `KstatSampler` type
     /// when producing metrics.
-    samples: Arc<Mutex<BTreeMap<TargetId, Vec<Sample>>>>,
+    samples: Arc<Mutex<BTreeMap<TargetId, BoundedQueue<Sample>>>>,
 
     /// Inbox channel on which the `KstatSampler` sends messages.
     inbox: mpsc::Receiver<Request>,
-
-    /// The maximum number of samples we allow in each per-target buffer, to
-    /// avoid huge allocations when we produce data faster than it's collected.
-    sample_limit: usize,
 
     /// Outbound queue on which to publish self statistics, which are expected to
     /// be low-volume.
@@ -397,8 +415,7 @@ impl KstatSamplerWorker {
         log: Logger,
         inbox: mpsc::Receiver<Request>,
         self_stat_queue: broadcast::Sender<Sample>,
-        samples: Arc<Mutex<BTreeMap<TargetId, Vec<Sample>>>>,
-        sample_limit: usize,
+        samples: Arc<Mutex<BTreeMap<TargetId, BoundedQueue<Sample>>>>,
     ) -> Result<Self, Error> {
         let ctl = Some(Ctl::new().map_err(Error::Kstat)?);
         let self_stats = hostname().map(self_stats::SelfStats::new);
@@ -409,7 +426,6 @@ impl KstatSamplerWorker {
             creation_times: BTreeMap::new(),
             samples,
             inbox,
-            sample_limit,
             self_stat_queue,
             self_stats,
             sample_timeouts: FuturesUnordered::new(),
@@ -590,7 +606,7 @@ impl KstatSamplerWorker {
                 if let Some(remaining_samples) =
                     self.samples.lock().unwrap().remove(&id)
                 {
-                    if !remaining_samples.is_empty() {
+                    if remaining_samples.len() > 0 {
                         warn!(
                             self.log,
                             "target removed with queued samples";
@@ -766,7 +782,7 @@ impl KstatSamplerWorker {
     fn append_per_target_samples(
         &self,
         id: TargetId,
-        mut samples: Vec<Sample>,
+        samples: Vec<Sample>,
     ) -> Option<usize> {
         // Limit the number of samples we actually contain
         // in the sample queue. This is to avoid huge
@@ -785,36 +801,17 @@ impl KstatSamplerWorker {
         };
         let n_new_samples = samples.len();
         let n_current_samples = current_samples.len();
-        let n_total_samples = n_new_samples + n_current_samples;
-        let n_overflow_samples =
-            n_total_samples.saturating_sub(self.sample_limit);
-        if n_overflow_samples > 0 {
+        let n_dropped_samples = current_samples.extend(samples);
+        if n_dropped_samples > 0 {
             warn!(
                 self.log,
                 "sample queue is too full, dropping oldest samples";
                 "n_new_samples" => n_new_samples,
                 "n_current_samples" => n_current_samples,
-                "n_overflow_samples" => n_overflow_samples,
+                "n_dropped_samples" => n_dropped_samples,
             );
-            // It's possible that the number of new samples
-            // is big enough to overflow the current
-            // capacity, and also require removing new
-            // samples.
-            if n_overflow_samples < n_current_samples {
-                let _ = current_samples.drain(..n_overflow_samples);
-            } else {
-                // Clear all the current samples, and some
-                // of the new ones. The subtraction below
-                // cannot panic, because
-                // `n_overflow_samples` is computed above by
-                // adding `n_current_samples`.
-                current_samples.clear();
-                let _ =
-                    samples.drain(..(n_overflow_samples - n_current_samples));
-            }
         }
-        current_samples.extend(samples);
-        Some(n_overflow_samples)
+        Some(n_dropped_samples)
     }
 
     /// Add samples for one target to the internal queue.
@@ -1170,26 +1167,36 @@ impl KstatSamplerWorker {
         };
         let _ = self.targets.insert(id, SampledObject::Kstat(item));
 
-        // Add to the per-target queues, making sure to keep any samples that
-        // were already there previously. This would be a bit odd, since it
-        // means that the target expired, but we hadn't been polled by oximeter.
-        // Nonetheless keep these samples anyway.
-        let n_samples =
-            self.samples.lock().unwrap().entry(id).or_default().len();
-        match n_samples {
-            0 => debug!(
-                self.log,
-                "inserted empty per-target sample queue";
-                "id" => ?id,
-            ),
-            n => debug!(
-                self.log,
-                "per-target queue appears to have old samples";
-                "id" => ?id,
-                "n_samples" => n,
-            ),
-        }
-
+        // Add to the per-target queues, possibly updating the _size_ of the
+        // queue if the caller requested it. Report any samples that were
+        // already there, and any we needed to drop to handle the new request.
+        let (n_samples_retained, n_samples_dropped) =
+            match self.samples.lock().unwrap().entry(id) {
+                Entry::Vacant(vacant) => {
+                    vacant.insert(BoundedQueue::new(details.n_max_samples));
+                    (0, 0)
+                }
+                Entry::Occupied(mut occupied) => {
+                    // Swap the queues and drain anything that was there into the
+                    // new one.
+                    let mut old_q = occupied
+                        .insert(BoundedQueue::new(details.n_max_samples));
+                    let n_total_existing_samples = old_q.len();
+                    let n_dropped =
+                        occupied.get_mut().extend(old_q.drain().into());
+                    let n_samples_retained =
+                        n_total_existing_samples - n_dropped;
+                    (n_samples_retained, n_dropped)
+                }
+            };
+        debug!(
+            self.log,
+            "inserted per-target sample queue";
+            "id" => ?id,
+            "n_samples_retained" => n_samples_retained,
+            "n_samples_dropped" => n_samples_dropped,
+            "n_max_samples" => details.n_max_samples,
+        );
         Ok(id)
     }
 }
@@ -1198,7 +1205,7 @@ impl KstatSamplerWorker {
 #[derive(Clone, Debug)]
 pub struct KstatSampler {
     log: Logger,
-    samples: Arc<Mutex<BTreeMap<TargetId, Vec<Sample>>>>,
+    samples: Arc<Mutex<BTreeMap<TargetId, BoundedQueue<Sample>>>>,
     outbox: mpsc::Sender<Request>,
     // NOTE: We're using a broadcast MPMC channel here intentionally, even
     // though there is only one receiver. That's to make use of its ring-buffer
@@ -1215,25 +1222,8 @@ pub struct KstatSampler {
 const SELF_STAT_QUEUE_SIZE: usize = 4096;
 
 impl KstatSampler {
-    /// The maximum number of samples allowed in the internal buffer, before
-    /// oldest samples are dropped.
-    ///
-    /// This is to avoid unbounded allocations in situations where data is
-    /// produced faster than it is collected.
-    ///
-    /// Note that this is a _per-target_ sample limit!
-    pub const DEFAULT_SAMPLE_LIMIT: usize = 500;
-
     /// Create a new sampler.
     pub fn new(log: &Logger) -> Result<Self, Error> {
-        Self::with_sample_limit(log, Self::DEFAULT_SAMPLE_LIMIT)
-    }
-
-    /// Create a new sampler with a sample limit.
-    pub fn with_sample_limit(
-        log: &Logger,
-        limit: usize,
-    ) -> Result<Self, Error> {
         let samples = Arc::new(Mutex::new(BTreeMap::new()));
         let (self_stat_tx, self_stat_rx) =
             broadcast::channel(SELF_STAT_QUEUE_SIZE);
@@ -1243,7 +1233,6 @@ impl KstatSampler {
             inbox,
             self_stat_tx,
             samples.clone(),
-            limit,
         )?;
         #[cfg(all(test, target_os = "illumos"))]
         let (sample_count_rx, _worker_task) = {
@@ -1378,7 +1367,7 @@ impl oximeter::Producer for KstatSampler {
         // keys.
         let mut samples = Vec::new();
         for (_id, queue) in self.samples.lock().unwrap().iter_mut() {
-            samples.append(queue);
+            samples.extend(queue.drain());
         }
 
         // Append any self-stat samples as well.
