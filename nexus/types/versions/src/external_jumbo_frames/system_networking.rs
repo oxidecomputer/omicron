@@ -20,8 +20,7 @@ pub struct SystemNetworkingSettings {
 /// Parameters for updating the fleet-wide networking settings.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
 pub struct SystemNetworkingSettingsUpdate {
-    /// Toggle the fleet-wide external jumbo-frames opt-in. Omit to leave the
-    /// current value unchanged.
+    /// Toggle the fleet-wide external jumbo-frames opt-in.
     #[serde(default)]
-    pub external_jumbo_frames_opt_in_enabled: Option<bool>,
+    pub external_jumbo_frames_opt_in_enabled: bool,
 }

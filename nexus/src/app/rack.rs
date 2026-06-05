@@ -656,7 +656,7 @@ impl super::Nexus {
         // a non-default value.
         if request.external_jumbo_frames_opt_in_enabled {
             self.db_datastore
-                .system_networking_settings_update(opctx, Some(true))
+                .system_networking_settings_update(opctx, true)
                 .await?;
         }
 

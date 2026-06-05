@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "2026060400.0.0"
+    "version": "2026060500.0.0"
   },
   "paths": {
     "/device/auth": {
@@ -29678,9 +29678,8 @@
         "type": "object",
         "properties": {
           "external_jumbo_frames_opt_in_enabled": {
-            "nullable": true,
-            "description": "Toggle the fleet-wide external jumbo-frames opt-in. Omit to leave the current value unchanged.",
-            "default": null,
+            "description": "Toggle the fleet-wide external jumbo-frames opt-in.",
+            "default": false,
             "type": "boolean"
           }
         }

@@ -6021,7 +6021,7 @@ async fn test_enable_jumbo_frames_can_be_changed(
         client,
         "/v1/system/networking/settings",
         &system_networking::SystemNetworkingSettingsUpdate {
-            external_jumbo_frames_opt_in_enabled: Some(true),
+            external_jumbo_frames_opt_in_enabled: true,
         },
     )
     .await;

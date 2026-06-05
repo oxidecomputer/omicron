@@ -29,5 +29,5 @@ pub struct SystemNetworkingSettings {
 #[derive(AsChangeset)]
 #[diesel(table_name = system_networking_settings)]
 pub struct SystemNetworkingSettingsUpdate {
-    pub external_jumbo_frames_opt_in_enabled: Option<bool>,
+    pub external_jumbo_frames_opt_in_enabled: bool,
 }

@@ -37,7 +37,7 @@ impl DataStore {
     pub async fn system_networking_settings_update(
         &self,
         opctx: &OpContext,
-        external_jumbo_frames_opt_in_enabled: Option<bool>,
+        external_jumbo_frames_opt_in_enabled: bool,
     ) -> UpdateResult<SystemNetworkingSettings> {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
 

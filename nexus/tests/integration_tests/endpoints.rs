@@ -1826,9 +1826,7 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
                     AllowedMethod::Put(
                         serde_json::to_value(
                             &system_networking::SystemNetworkingSettingsUpdate {
-                                external_jumbo_frames_opt_in_enabled: Some(
-                                    false,
-                                ),
+                                external_jumbo_frames_opt_in_enabled:  false,
                             },
                         )
                         .unwrap(),
