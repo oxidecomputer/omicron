@@ -662,7 +662,7 @@ impl schemars::JsonSchema for BlockSize {
                 description: Some(
                     "Valid values are: 512, 2048, or 4096.".to_string(),
                 ),
-                title: Some("Disk block size in bytes".to_string()),
+                title: Some("Block size in bytes".to_string()),
                 ..Default::default()
             })),
             instance_type: Some(schemars::schema::InstanceType::Integer.into()),

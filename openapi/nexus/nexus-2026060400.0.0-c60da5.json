@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "2026060300.0.0"
+    "version": "2026060400.0.0"
   },
   "paths": {
     "/device/auth": {
@@ -18775,7 +18775,7 @@
         ]
       },
       "BlockSize": {
-        "title": "Disk block size in bytes",
+        "title": "Block size in bytes",
         "description": "Valid values are: 512, 2048, or 4096.",
         "type": "integer",
         "enum": [
@@ -22398,7 +22398,7 @@
             "description": "Size of blocks in bytes",
             "allOf": [
               {
-                "$ref": "#/components/schemas/ByteCount"
+                "$ref": "#/components/schemas/BlockSize"
               }
             ]
           },
