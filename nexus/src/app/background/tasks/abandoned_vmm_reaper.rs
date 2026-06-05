@@ -102,6 +102,7 @@ impl AbandonedVmmReaper {
         for vmm in vmms {
             let vmm_id = PropolisUuid::from_untyped_uuid(vmm.id);
             slog::trace!(opctx.log, "Deleting abandoned VMM"; "vmm" => %vmm_id);
+
             // Attempt to remove the abandoned VMM's sled resource reservation.
             match self.datastore.sled_reservation_delete(opctx, vmm_id).await {
                 Ok(_) => {
@@ -272,7 +273,10 @@ mod tests {
                         destroyed_vmm_id,
                         resources.clone(),
                         constraints,
-                        SledReservationType::Active,
+                        // Setting the reservation type of `target` means this
+                        // was the target of a migration, and that migration
+                        // failed according to the VMM state of destroyed.
+                        SledReservationType::Target,
                     )
                     .await
                     .expect("sled reservation should be created successfully")
