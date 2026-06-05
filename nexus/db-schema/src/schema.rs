@@ -275,29 +275,32 @@ table! {
 }
 
 table! {
-    switch_port_settings_bgp_peer_config_communities (port_settings_id, interface_name, addr, community) {
+    switch_port_settings_bgp_peer_config_communities (id) {
         port_settings_id -> Uuid,
         interface_name -> Text,
-        addr -> Inet,
+        addr -> Nullable<Inet>,
         community -> Int8,
+        id -> Uuid,
     }
 }
 
 table! {
-    switch_port_settings_bgp_peer_config_allow_export (port_settings_id, interface_name, addr, prefix) {
+    switch_port_settings_bgp_peer_config_allow_export (id) {
         port_settings_id -> Uuid,
         interface_name -> Text,
-        addr -> Inet,
+        addr -> Nullable<Inet>,
         prefix -> Inet,
+        id -> Uuid,
     }
 }
 
 table! {
-    switch_port_settings_bgp_peer_config_allow_import (port_settings_id, interface_name, addr, prefix) {
+    switch_port_settings_bgp_peer_config_allow_import (id) {
         port_settings_id -> Uuid,
         interface_name -> Text,
-        addr -> Inet,
+        addr -> Nullable<Inet>,
         prefix -> Inet,
+        id -> Uuid,
     }
 }
 
@@ -464,6 +467,7 @@ table! {
         boot_disk_id -> Nullable<Uuid>,
         intended_state -> crate::enums::InstanceIntendedStateEnum,
         cpu_platform -> Nullable<crate::enums::InstanceCpuPlatformEnum>,
+        enable_jumbo_frames -> Bool,
     }
 }
 
@@ -482,6 +486,7 @@ table! {
         propolis_port -> Int4,
         state -> crate::enums::VmmStateEnum,
         cpu_platform -> crate::enums::VmmCpuPlatformEnum,
+        failure_reason -> Nullable<crate::enums::VmmFailureReasonEnum>,
     }
 }
 joinable!(vmm -> sled (sled_id));
@@ -592,6 +597,13 @@ table! {
 }
 
 table! {
+    system_networking_settings(singleton) {
+        singleton -> Bool,
+        external_jumbo_frames_opt_in_enabled -> Bool,
+    }
+}
+
+table! {
     network_interface (id) {
         id -> Uuid,
         name -> Text,
@@ -668,8 +680,8 @@ table! {
         time_deleted -> Nullable<Timestamptz>,
         rcgen -> Int8,
         ip_version -> crate::enums::IpVersionEnum,
-        reservation_type -> crate::enums::IpPoolReservationTypeEnum,
         pool_type -> crate::enums::IpPoolTypeEnum,
+        assignment -> crate::enums::IpPoolAssignmentEnum,
     }
 }
 
@@ -1143,6 +1155,17 @@ table! {
         sled_id -> Uuid,
         disk_policy -> crate::enums::PhysicalDiskPolicyEnum,
         disk_state -> crate::enums::PhysicalDiskStateEnum,
+    }
+}
+
+table! {
+    physical_disk_adoption_request (id) {
+        id -> Uuid,
+        vendor -> Text,
+        model -> Text,
+        serial -> Text,
+        time_created -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
     }
 }
 
@@ -1762,6 +1785,36 @@ table! {
 }
 
 table! {
+    inv_svc_enabled_not_online (inv_collection_id, sled_id, id) {
+        inv_collection_id -> Uuid,
+        sled_id -> Uuid,
+        id -> Uuid,
+        svcs_cmd_error -> Nullable<Text>,
+        time_of_status -> Timestamptz,
+    }
+}
+
+table! {
+    inv_svc_enabled_not_online_service (inv_collection_id, sled_id, id) {
+        inv_collection_id -> Uuid,
+        sled_id -> Uuid,
+        id -> Uuid,
+        fmri -> Text,
+        zone -> Text,
+        state -> crate::enums::InvSvcEnabledNotOnlineStateEnum,
+    }
+}
+
+table! {
+    inv_svc_enabled_not_online_parse_error (inv_collection_id, sled_id, id) {
+        inv_collection_id -> Uuid,
+        sled_id -> Uuid,
+        id -> Uuid,
+        error_message -> Text,
+    }
+}
+
+table! {
     inv_sled_agent (inv_collection_id, sled_id) {
         inv_collection_id -> Uuid,
         time_collected -> Timestamptz,
@@ -2118,7 +2171,6 @@ table! {
         version -> Int8,
         planner_enabled -> Bool,
         time_modified -> Timestamptz,
-        add_zones_with_mupdate_override -> Bool,
         tuf_repo_pruner_enabled -> Bool,
     }
 }
@@ -2171,6 +2223,8 @@ table! {
         nexus_generation -> Int8,
 
         source -> crate::enums::BpSourceEnum,
+
+        external_networking_generation -> Int8,
     }
 }
 
@@ -2662,6 +2716,7 @@ allow_tables_to_appear_in_same_query!(
     instance_network_interface,
     inv_physical_disk,
     inv_nvme_disk_firmware,
+    physical_disk_adoption_request,
     service_network_interface,
     oximeter,
     physical_disk,
@@ -3105,6 +3160,7 @@ table! {
         time_created -> Timestamptz,
         creator_id -> Uuid,
         comment -> Text,
+        next_inv_min_time_started -> Timestamptz,
     }
 }
 
@@ -3219,6 +3275,7 @@ table! {
         case_id -> Uuid,
         alert_class -> crate::enums::AlertClassEnum,
         payload -> Jsonb,
+        comment -> Text,
     }
 }
 
@@ -3229,6 +3286,7 @@ table! {
         sitrep_id -> Uuid,
         requested_sitrep_id -> Uuid,
         case_id -> Uuid,
+        comment -> Text,
     }
 }
 

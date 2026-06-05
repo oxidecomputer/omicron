@@ -22,9 +22,6 @@ use iddqd::IdOrdItem;
 use iddqd::IdOrdMap;
 use iddqd::id_upcast;
 use omicron_common::api::external::ByteCount;
-pub use omicron_common::api::internal::shared::NetworkInterface;
-pub use omicron_common::api::internal::shared::NetworkInterfaceKind;
-pub use omicron_common::api::internal::shared::SourceNatConfigGeneric;
 use omicron_common::disk::M2Slot;
 pub use omicron_common::zpool_name::ZpoolName;
 use omicron_uuid_kinds::CollectionUuid;
@@ -283,6 +280,61 @@ impl Collection {
             .iter()
             .max_by_key(|membership| membership.leader_committed_log_index)
             .map(|membership| membership.clone())
+    }
+
+    /// Return all zpools across all sleds whose health is not `Online`,
+    /// grouped by the id of the sled that reported them. Sleds with no
+    /// unhealthy zpools are omitted.
+    pub fn unhealthy_zpools(&self) -> BTreeMap<SledUuid, Vec<&Zpool>> {
+        self.sled_agents
+            .iter()
+            .filter_map(|sled_agent| {
+                let unhealthy: Vec<&Zpool> = sled_agent
+                    .zpools
+                    .iter()
+                    .filter(|z| match z.health {
+                        ZpoolHealth::Online => false,
+                        ZpoolHealth::Degraded
+                        | ZpoolHealth::Faulted
+                        | ZpoolHealth::Offline
+                        | ZpoolHealth::Removed
+                        | ZpoolHealth::Unavailable => true,
+                    })
+                    .collect();
+                if unhealthy.is_empty() {
+                    None
+                } else {
+                    Some((sled_agent.sled_id, unhealthy))
+                }
+            })
+            .collect()
+    }
+
+    /// Return per-sled SMF service status for any sled that reports an issue:
+    /// either an enabled service not in the `online` state, or a failure to
+    /// determine status (`svcs` command error or data unavailable). Sleds
+    /// reporting no issues on this dimension are omitted.
+    pub fn enabled_smf_services_not_online(
+        &self,
+    ) -> BTreeMap<SledUuid, &SvcsEnabledNotOnlineResult> {
+        self.sled_agents
+            .iter()
+            .filter_map(|sled_agent| {
+                match &sled_agent.smf_services_enabled_not_online {
+                    SvcsEnabledNotOnlineResult::SvcsEnabledNotOnline(svcs)
+                        if svcs.services.is_empty() =>
+                    {
+                        None
+                    }
+                    SvcsEnabledNotOnlineResult::SvcsEnabledNotOnline(_)
+                    | SvcsEnabledNotOnlineResult::SvcsCmdError(_)
+                    | SvcsEnabledNotOnlineResult::DataUnavailable => Some((
+                        sled_agent.sled_id,
+                        &sled_agent.smf_services_enabled_not_online,
+                    )),
+                }
+            })
+            .collect()
     }
 
     /// Return a type which can be used to display a collection in a
@@ -564,7 +616,9 @@ impl From<InventoryDisk> for PhysicalDisk {
 }
 
 /// A zpool reported by a sled agent.
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize,
+)]
 pub struct Zpool {
     pub time_collected: DateTime<Utc>,
     pub id: ZpoolUuid,

@@ -51,6 +51,7 @@ use sled_agent_types::inventory::BootPartitionDetails;
 use sled_agent_types::inventory::ConfigReconcilerInventory;
 use sled_agent_types::inventory::ConfigReconcilerInventoryResult;
 use sled_agent_types::inventory::ConfigReconcilerInventoryStatus;
+use sled_agent_types::inventory::FmdInventory;
 use sled_agent_types::inventory::HostPhase2DesiredSlots;
 use sled_agent_types::inventory::Inventory;
 use sled_agent_types::inventory::InventoryDataset;
@@ -63,7 +64,11 @@ use sled_agent_types::inventory::OrphanedDataset;
 use sled_agent_types::inventory::SingleMeasurementInventory;
 use sled_agent_types::inventory::SledCpuFamily;
 use sled_agent_types::inventory::SledRole;
+use sled_agent_types::inventory::SvcEnabledNotOnline;
+use sled_agent_types::inventory::SvcEnabledNotOnlineState;
+use sled_agent_types::inventory::SvcsEnabledNotOnline;
 use sled_agent_types::inventory::SvcsEnabledNotOnlineResult;
+use sled_agent_types::inventory::SvcsError;
 use sled_agent_types::inventory::ZpoolHealth;
 use sled_agent_types::resolvable_files::MeasurementManifestStatus;
 use sled_agent_types::resolvable_files::MupdateOverrideNonBootInfo;
@@ -583,6 +588,7 @@ pub fn representative() -> Representative {
                         has_mupdate_override: true,
                     },
                 ),
+                SvcsEnabledNotOnlineResult::DataUnavailable,
             ),
         )
         .unwrap();
@@ -617,6 +623,7 @@ pub fn representative() -> Representative {
                         has_mupdate_override: false,
                     },
                 ),
+                SvcsEnabledNotOnlineResult::DataUnavailable,
             ),
         )
         .unwrap();
@@ -649,6 +656,12 @@ pub fn representative() -> Representative {
                         has_mupdate_override: true,
                     },
                 ),
+                // Simulate an error running the svcs command when retrieving
+                // SMF service status
+                SvcsEnabledNotOnlineResult::SvcsCmdError(SvcsError {
+                    error: "Command failed with status: 2".to_string(),
+                    time_of_status: "2026-01-01T00:00:00Z".parse().unwrap(),
+                }),
             ),
         )
         .unwrap();
@@ -675,6 +688,17 @@ pub fn representative() -> Representative {
                 // Simulate an error here.
                 file_source_resolver(
                     OmicronFileSourceResolverExampleKind::Error,
+                ),
+                SvcsEnabledNotOnlineResult::SvcsEnabledNotOnline(
+                    SvcsEnabledNotOnline {
+                        services: vec![SvcEnabledNotOnline {
+                            fmri: "svc:/site/fake-service:default".to_string(),
+                            zone: "global".to_string(),
+                            state: SvcEnabledNotOnlineState::Maintenance,
+                        }],
+                        errors: vec!["an unimportant error".to_string()],
+                        time_of_status: "2026-01-01T00:00:00Z".parse().unwrap(),
+                    },
                 ),
             ),
         )
@@ -1017,6 +1041,7 @@ pub fn sled_agent(
     datasets: Vec<InventoryDataset>,
     ledgered_sled_config: Option<OmicronSledConfig>,
     file_source_resolver: OmicronFileSourceResolverInventory,
+    smf_services_enabled_not_online: SvcsEnabledNotOnlineResult,
 ) -> Inventory {
     // Assume the `ledgered_sled_config` was reconciled successfully.
     let last_reconciliation = ledgered_sled_config.clone().map(|config| {
@@ -1089,11 +1114,8 @@ pub fn sled_agent(
         reconciler_status,
         last_reconciliation,
         file_source_resolver,
-        // TODO-K: We'll want to have the functionality to add some services
-        // here in a future PR. This will be more useful when we add this
-        // information to the DB.
-        smf_services_enabled_not_online:
-            SvcsEnabledNotOnlineResult::DataUnavailable,
+        smf_services_enabled_not_online,
         reference_measurements,
+        fmd: Ok(FmdInventory::default()),
     }
 }

@@ -154,8 +154,7 @@ impl DataStore {
             config:
                 ReconfiguratorConfig {
                     planner_enabled,
-                    planner_config:
-                        PlannerConfig { add_zones_with_mupdate_override },
+                    planner_config: PlannerConfig {},
                     tuf_repo_pruner_enabled,
                 },
             time_modified,
@@ -164,8 +163,8 @@ impl DataStore {
         sql_query(
             r"INSERT INTO reconfigurator_config
                 (version, planner_enabled, time_modified,
-                 add_zones_with_mupdate_override, tuf_repo_pruner_enabled)
-              SELECT $1, $2, $3, $4, $5
+                 tuf_repo_pruner_enabled)
+              SELECT $1, $2, $3, $4
               WHERE $1 - 1 IN (
                   SELECT COALESCE(MAX(version), 0)
                   FROM reconfigurator_config
@@ -174,7 +173,6 @@ impl DataStore {
         .bind::<sql_types::BigInt, SqlU32>(version.into())
         .bind::<sql_types::Bool, _>(planner_enabled)
         .bind::<sql_types::Timestamptz, _>(time_modified)
-        .bind::<sql_types::Bool, _>(add_zones_with_mupdate_override)
         .bind::<sql_types::Bool, _>(tuf_repo_pruner_enabled)
         .execute_async(conn)
         .await

@@ -86,6 +86,7 @@ pub(crate) struct CurrentRssConfig {
     // Currently these are always TCP-MD5 keys,
     bgp_auth_keys: BTreeMap<BgpAuthKeyId, Option<BgpAuthKey>>,
     allowed_source_ips: Option<AllowedSourceIps>,
+    external_jumbo_frames_opt_in_enabled: bool,
     // External certificates are uploaded in two separate actions (cert then
     // key, or vice versa). Here we store a partial certificate; once we have
     // both parts, we validate it and promote it to be a member of
@@ -310,6 +311,8 @@ impl CurrentRssConfig {
                 .allowed_source_ips
                 .clone()
                 .unwrap_or(AllowedSourceIps::Any),
+            external_jumbo_frames_opt_in_enabled: self
+                .external_jumbo_frames_opt_in_enabled,
         };
 
         Ok(request)
@@ -534,6 +537,8 @@ impl CurrentRssConfig {
         self.external_dns_ips = value.external_dns_ips;
         self.external_dns_zone_name = value.external_dns_zone_name;
         self.allowed_source_ips = Some(value.allowed_source_ips);
+        self.external_jumbo_frames_opt_in_enabled =
+            value.external_jumbo_frames_opt_in_enabled;
 
         // Build a new auth key map, dropping all old keys from the map.
         let new_bgp_auth_key_ids =
@@ -589,6 +594,8 @@ impl From<&'_ CurrentRssConfig> for CurrentRssUserConfig {
                 external_dns_zone_name: rss.external_dns_zone_name.clone(),
                 rack_network_config: rss.rack_network_config.clone(),
                 allowed_source_ips: rss.allowed_source_ips.clone(),
+                external_jumbo_frames_opt_in_enabled: rss
+                    .external_jumbo_frames_opt_in_enabled,
             },
         }
     }

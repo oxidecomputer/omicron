@@ -26,6 +26,14 @@ pub struct SupportBundleRequest {
     pub sitrep_id: DbTypedUuid<SitrepKind>,
     pub requested_sitrep_id: DbTypedUuid<SitrepKind>,
     pub case_id: DbTypedUuid<CaseKind>,
+    /// A human-readable comment added by the diagnosis engine to explain why
+    /// it is requesting this support bundle.
+    ///
+    /// Sitrep comments are generally intended for debugging purposes only,
+    /// visible to Oxide support via OMDB. This comment, however, is also
+    /// propagated to the support bundle's `reason_for_creation` which is
+    /// visible to the operator.
+    pub comment: String,
 }
 
 impl SupportBundleRequest {
@@ -38,12 +46,14 @@ impl SupportBundleRequest {
             id,
             requested_sitrep_id,
             data_selection: _,
+            comment,
         } = req;
         SupportBundleRequest {
             id: id.into(),
             sitrep_id: sitrep_id.into(),
             requested_sitrep_id: requested_sitrep_id.into(),
             case_id: case_id.into(),
+            comment,
         }
     }
 }

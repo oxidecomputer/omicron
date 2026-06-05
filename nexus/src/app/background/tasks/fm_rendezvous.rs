@@ -347,6 +347,7 @@ impl FmRendezvous {
                 id: bundle_id,
                 requested_sitrep_id,
                 data_selection,
+                comment,
             } = req;
             let bundle_id = *bundle_id;
 
@@ -355,9 +356,22 @@ impl FmRendezvous {
                 status.current_sitrep_bundles_requested += 1;
             }
 
-            let reason = format!(
-                "Requested by {de:?} diagnosis engine for case {case_id}"
-            );
+            // Fall back to a generic reason for now if the diagnosis engine
+            // left the comment empty.
+            //
+            // TODO(#9672): We should generally expect that the DE will provide
+            // a comment, and just use it without a fallback. The DE name and
+            // case ID should be recorded in bundle metadata via a separate
+            // path, reading directly from the existing
+            // `support_bundle.fm_case_id` column and maybe a new
+            // `support_bundle.fm_diagnosis_engine_name` column.
+            let reason = if comment.is_empty() {
+                format!(
+                    "Requested by {de:?} diagnosis engine for case {case_id}"
+                )
+            } else {
+                comment.clone()
+            };
             match self
                 .datastore
                 .support_bundle_create(
@@ -458,7 +472,6 @@ mod tests {
     use nexus_types::fm::ereport::EreportData;
     use nexus_types::fm::ereport::Reporter;
     use nexus_types::support_bundle::BundleDataSelection;
-    use omicron_common::api::external::DataPageParams;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::AlertUuid;
     use omicron_uuid_kinds::CaseEreportUuid;
@@ -469,7 +482,6 @@ mod tests {
     use omicron_uuid_kinds::OmicronZoneUuid;
     use omicron_uuid_kinds::SitrepUuid;
     use omicron_uuid_kinds::SupportBundleUuid;
-    use std::num::NonZeroU32;
 
     /// Activators needed by `FmRendezvous`, pre-wired for testing.
     struct TestActivators {
@@ -548,6 +560,7 @@ mod tests {
                 class: AlertClass::TestFoo,
                 requested_sitrep_id: sitrep1_id,
                 payload: serde_json::json!({}),
+                comment: String::new(),
             })
             .unwrap();
         let sitrep1 = {
@@ -561,6 +574,7 @@ mod tests {
                     creator_id: OmicronZoneUuid::new_v4(),
                     comment: "test sitrep 1".to_string(),
                     time_created: Utc::now(),
+                    next_inv_min_time_started: Utc::now(),
                 },
                 cases,
                 ereports_by_id: Default::default(),
@@ -625,6 +639,7 @@ mod tests {
                 class: AlertClass::TestFooBar,
                 requested_sitrep_id: sitrep2_id,
                 payload: serde_json::json!({}),
+                comment: String::new(),
             })
             .unwrap();
         // Also, add a second alert request to the existing case.
@@ -635,6 +650,7 @@ mod tests {
                 class: AlertClass::TestFooBaz,
                 requested_sitrep_id: sitrep2_id,
                 payload: serde_json::json!({}),
+                comment: String::new(),
             })
             .unwrap();
         let sitrep2 = {
@@ -649,6 +665,7 @@ mod tests {
                     creator_id: OmicronZoneUuid::new_v4(),
                     comment: "test sitrep 2".to_string(),
                     time_created: Utc::now(),
+                    next_inv_min_time_started: Utc::now(),
                 },
                 cases,
                 ereports_by_id: Default::default(),
@@ -713,33 +730,23 @@ mod tests {
     }
 
     /// Paginate through all unseen ereports, collecting every row.
+    ///
+    /// This bypasses the production `ereports_list_unmarked` (which filters
+    /// by `known_ereport_classes`) because the test wants to verify that
+    /// rendezvous marked *every* ereport in a sitrep, regardless of class.
     async fn list_all_unseen_ereports(
         datastore: &DataStore,
-        opctx: &OpContext,
     ) -> Vec<db::model::Ereport> {
-        let batch_size = NonZeroU32::new(100).unwrap();
-        let mut all = Vec::new();
-        let mut marker = None;
-        loop {
-            let page = datastore
-                .ereports_list_unmarked(
-                    opctx,
-                    &DataPageParams {
-                        marker: marker.as_ref(),
-                        direction: dropshot::PaginationOrder::Ascending,
-                        limit: batch_size,
-                    },
-                )
-                .await
-                .expect("failed to list unseen ereports");
-            if page.is_empty() {
-                break;
-            }
-            let last = page.last().unwrap();
-            marker = Some((last.restart_id.into_untyped_uuid(), last.ena));
-            all.extend(page);
-        }
-        all
+        use nexus_db_schema::schema::ereport::dsl;
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
+        dsl::ereport
+            .filter(dsl::marked_seen_in.is_null())
+            .filter(dsl::time_deleted.is_null())
+            .order_by((dsl::restart_id, dsl::ena))
+            .select(db::model::Ereport::as_select())
+            .load_async(&*conn)
+            .await
+            .expect("failed to list unseen ereports")
     }
 
     /// Asserts that each of the provided ereport IDs has been marked as
@@ -751,7 +758,7 @@ mod tests {
         ids: &[ereport_types::EreportId],
         sitrep_id: SitrepUuid,
     ) {
-        let unseen = list_all_unseen_ereports(datastore, opctx).await;
+        let unseen = list_all_unseen_ereports(datastore).await;
         for &id in ids {
             let ereport =
                 datastore.ereport_fetch(opctx, id).await.unwrap_or_else(|e| {
@@ -781,7 +788,7 @@ mod tests {
         opctx: &OpContext,
         ids: &[ereport_types::EreportId],
     ) {
-        let unseen = list_all_unseen_ereports(datastore, opctx).await;
+        let unseen = list_all_unseen_ereports(datastore).await;
         for &id in ids {
             let ereport =
                 datastore.ereport_fetch(opctx, id).await.unwrap_or_else(|e| {
@@ -945,6 +952,7 @@ mod tests {
                     creator_id: OmicronZoneUuid::new_v4(),
                     comment: "sitrep with ereports 1 and 2".to_string(),
                     time_created: Utc::now(),
+                    next_inv_min_time_started: Utc::now(),
                 },
                 cases,
                 ereports_by_id,
@@ -1156,6 +1164,7 @@ mod tests {
                     creator_id: OmicronZoneUuid::new_v4(),
                     comment: "sitrep 1: only ereport 1".to_string(),
                     time_created: Utc::now(),
+                    next_inv_min_time_started: Utc::now(),
                 },
                 cases,
                 ereports_by_id,
@@ -1264,6 +1273,7 @@ mod tests {
                     creator_id: OmicronZoneUuid::new_v4(),
                     comment: "sitrep 2: all three ereports".to_string(),
                     time_created: Utc::now(),
+                    next_inv_min_time_started: Utc::now(),
                 },
                 cases,
                 ereports_by_id,
@@ -1445,8 +1455,8 @@ mod tests {
             .insert_unique(fm::case::SupportBundleRequest {
                 id: bundle1_id,
                 requested_sitrep_id: sitrep1_id,
-
                 data_selection: BundleDataSelection::all(),
+                comment: "test support bundle".to_string(),
             })
             .unwrap();
 
@@ -1461,6 +1471,7 @@ mod tests {
                     creator_id: OmicronZoneUuid::new_v4(),
                     comment: "test sitrep 1".to_string(),
                     time_created: Utc::now(),
+                    next_inv_min_time_started: Utc::now(),
                 },
                 cases,
                 ereports_by_id: Default::default(),
@@ -1493,6 +1504,10 @@ mod tests {
             .expect("bundle1 must have been created");
         assert_eq!(db_bundle.state, db::model::SupportBundleState::Collecting,);
         assert_eq!(db_bundle.fm_case_id.map(|id| id.into()), Some(case1_id),);
+        assert_eq!(
+            db_bundle.reason_for_creation, "test support bundle",
+            "DE-provided comment should be used as reason_for_creation",
+        );
 
         // The collector should have been activated.
         assert!(
@@ -1516,8 +1531,8 @@ mod tests {
             .insert_unique(fm::case::SupportBundleRequest {
                 id: bundle2_id,
                 requested_sitrep_id: sitrep2_id,
-
                 data_selection: BundleDataSelection::all(),
+                comment: String::new(),
             })
             .unwrap();
 
@@ -1532,6 +1547,7 @@ mod tests {
                     creator_id: OmicronZoneUuid::new_v4(),
                     comment: "test sitrep 2".to_string(),
                     time_created: Utc::now(),
+                    next_inv_min_time_started: Utc::now(),
                 },
                 cases,
                 ereports_by_id: Default::default(),
@@ -1614,8 +1630,8 @@ mod tests {
             .insert_unique(fm::case::SupportBundleRequest {
                 id: bundle_id,
                 requested_sitrep_id: sitrep_id,
-
                 data_selection: BundleDataSelection::all(),
+                comment: String::new(),
             })
             .unwrap();
 
@@ -1627,6 +1643,7 @@ mod tests {
                     id: sitrep_id,
                     inv_collection_id: CollectionUuid::new_v4(),
                     parent_sitrep_id: None,
+                    next_inv_min_time_started: Utc::now(),
                     creator_id: OmicronZoneUuid::new_v4(),
                     comment: "test sitrep no capacity".to_string(),
                     time_created: Utc::now(),

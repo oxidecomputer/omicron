@@ -5,7 +5,6 @@
 //! Mock / dummy versions of the OPTE module, for non-illumos platforms
 
 use crate::addrobj::AddrObject;
-use omicron_common::api::internal::shared::NetworkInterfaceKind;
 use oxide_vpc::api::AddRouterEntryReq;
 use oxide_vpc::api::ClearVirt2PhysReq;
 use oxide_vpc::api::DelRouterEntryReq;
@@ -23,6 +22,7 @@ use oxide_vpc::api::SetExternalIpsReq;
 use oxide_vpc::api::SetFwRulesReq;
 use oxide_vpc::api::SetVirt2PhysReq;
 use oxide_vpc::api::VpcCfg;
+use sled_agent_types::inventory::NetworkInterfaceKind;
 use slog::Logger;
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
@@ -209,7 +209,7 @@ impl Handle {
         &self,
         name: &str,
         cfg: VpcCfg,
-        _: bool,
+        _mtu: Option<u32>,
     ) -> Result<NoResp, OpteError> {
         let name = name.to_string();
         let IpCfg::Ipv4(ip_cfg) = cfg.ip_cfg else {

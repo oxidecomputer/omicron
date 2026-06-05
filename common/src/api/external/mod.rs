@@ -643,6 +643,74 @@ impl From<ByteCount> for i64 {
     }
 }
 
+/// Size of blocks for a disk. Valid values are: 512, 2048, or 4096.
+#[derive(Copy, Clone, Debug, Deserialize, Serialize)]
+#[serde(try_from = "u32")]
+pub struct BlockSize(pub u32);
+
+impl schemars::JsonSchema for BlockSize {
+    fn schema_name() -> String {
+        "BlockSize".to_string()
+    }
+
+    fn json_schema(
+        _: &mut schemars::r#gen::SchemaGenerator,
+    ) -> schemars::schema::Schema {
+        schemars::schema::Schema::Object(schemars::schema::SchemaObject {
+            metadata: Some(Box::new(schemars::schema::Metadata {
+                id: None,
+                description: Some(
+                    "Valid values are: 512, 2048, or 4096.".to_string(),
+                ),
+                title: Some("Block size in bytes".to_string()),
+                ..Default::default()
+            })),
+            instance_type: Some(schemars::schema::InstanceType::Integer.into()),
+            enum_values: Some(vec![
+                serde_json::json!(512),
+                serde_json::json!(2048),
+                serde_json::json!(4096),
+            ]),
+            ..Default::default()
+        })
+    }
+}
+
+impl BlockSize {
+    pub fn to_bytes(&self) -> u64 {
+        u64::from(self.0)
+    }
+}
+
+impl TryFrom<u32> for BlockSize {
+    type Error = anyhow::Error;
+    fn try_from(x: u32) -> Result<BlockSize, Self::Error> {
+        if ![512, 2048, 4096].contains(&x) {
+            anyhow::bail!("invalid block size {}", x);
+        }
+
+        Ok(BlockSize(x))
+    }
+}
+
+impl From<ByteCount> for BlockSize {
+    fn from(bc: ByteCount) -> BlockSize {
+        BlockSize(bc.to_bytes() as u32)
+    }
+}
+
+impl From<BlockSize> for ByteCount {
+    fn from(bs: BlockSize) -> ByteCount {
+        ByteCount::from(bs.0)
+    }
+}
+
+impl From<BlockSize> for u64 {
+    fn from(bs: BlockSize) -> u64 {
+        u64::from(bs.0)
+    }
+}
+
 /// Generation numbers stored in the database, used for optimistic concurrency
 /// control
 //
@@ -1095,22 +1163,6 @@ pub enum InstanceState {
     Destroyed,
 }
 
-impl From<crate::api::internal::nexus::VmmState> for InstanceState {
-    fn from(state: crate::api::internal::nexus::VmmState) -> Self {
-        use crate::api::internal::nexus::VmmState as InternalVmmState;
-        match state {
-            InternalVmmState::Starting => Self::Starting,
-            InternalVmmState::Running => Self::Running,
-            InternalVmmState::Stopping => Self::Stopping,
-            InternalVmmState::Stopped => Self::Stopped,
-            InternalVmmState::Rebooting => Self::Rebooting,
-            InternalVmmState::Migrating => Self::Migrating,
-            InternalVmmState::Failed => Self::Failed,
-            InternalVmmState::Destroyed => Self::Destroyed,
-        }
-    }
-}
-
 impl Display for InstanceState {
     fn fmt(&self, f: &mut Formatter) -> FormatResult {
         write!(f, "{}", self.label())
@@ -1190,37 +1242,6 @@ pub struct InstanceRuntimeState {
     /// If this is not present, then this instance has not been automatically
     /// restarted.
     pub time_last_auto_restarted: Option<DateTime<Utc>>,
-}
-
-/// View of an Instance
-#[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct Instance {
-    // TODO is flattening here the intent in RFD 4?
-    #[serde(flatten)]
-    pub identity: IdentityMetadata,
-
-    /// ID for the project containing this instance
-    pub project_id: Uuid,
-
-    /// Number of CPUs allocated for this instance
-    pub ncpus: InstanceCpuCount,
-    /// Memory allocated for this instance
-    pub memory: ByteCount,
-    /// RFC1035-compliant hostname for the instance
-    pub hostname: String,
-
-    /// The ID of the disk used to boot this instance, if a specific one is assigned
-    pub boot_disk_id: Option<Uuid>,
-
-    #[serde(flatten)]
-    pub runtime: InstanceRuntimeState,
-
-    #[serde(flatten)]
-    pub auto_restart_status: InstanceAutoRestartStatus,
-
-    /// The CPU platform for this instance. If this is `null`, the instance
-    /// requires no particular CPU platform.
-    pub cpu_platform: Option<InstanceCpuPlatform>,
 }
 
 /// Status of control-plane driven automatic failure recovery for this instance.
@@ -1451,7 +1472,7 @@ pub struct Disk {
     /// ID of image from which disk was created, if any
     pub image_id: Option<Uuid>,
     pub size: ByteCount,
-    pub block_size: ByteCount,
+    pub block_size: BlockSize,
     pub state: DiskState,
     pub device_path: String,
     pub disk_type: DiskType,
@@ -1848,6 +1869,9 @@ pub struct VpcFirewallRuleUpdateParams {
 #[repr(transparent)]
 pub struct VpcFirewallRulePriority(pub u16);
 
+/// Maximum number of entries in each filter field of a [`VpcFirewallRuleFilter`].
+pub const VPC_FIREWALL_RULE_MAX_FILTER_LEN: usize = 256;
+
 /// Filters reduce the scope of a firewall rule. Without filters, the rule
 /// applies to all packets to the targets (or from the targets, if it's an
 /// outbound rule). With multiple filters, the rule applies only to packets
@@ -1857,15 +1881,15 @@ pub struct VpcFirewallRuleFilter {
     /// If present, host filters match the "other end" of traffic from the
     /// target’s perspective: for an inbound rule, they match the source of
     /// traffic. For an outbound rule, they match the destination.
-    #[schemars(length(max = 256))]
+    #[schemars(length(max = "VPC_FIREWALL_RULE_MAX_FILTER_LEN"))]
     pub hosts: Option<Vec<VpcFirewallRuleHostFilter>>,
 
     /// If present, the networking protocols this rule applies to.
-    #[schemars(length(max = 256))]
+    #[schemars(length(max = "VPC_FIREWALL_RULE_MAX_FILTER_LEN"))]
     pub protocols: Option<Vec<VpcFirewallRuleProtocol>>,
 
     /// If present, the destination ports or port ranges this rule applies to.
-    #[schemars(length(max = 256))]
+    #[schemars(length(max = "VPC_FIREWALL_RULE_MAX_FILTER_LEN"))]
     pub ports: Option<Vec<L4PortRange>>,
 }
 
@@ -2372,7 +2396,11 @@ impl JsonSchema for IcmpParamRange {
     Diffable,
 )]
 #[daft(leaf)]
-pub struct MacAddr(pub macaddr::MacAddr6);
+#[cfg_attr(any(test, feature = "testing"), derive(test_strategy::Arbitrary))]
+pub struct MacAddr(
+    #[cfg_attr(any(test, feature = "testing"), map(|x: [u8; 6]| x.into()))]
+    pub macaddr::MacAddr6,
+);
 
 impl MacAddr {
     // Guest MAC addresses begin with the Oxide OUI A8:40:25. Further, guest
@@ -2539,7 +2567,10 @@ impl JsonSchema for MacAddr {
     JsonSchema,
     Diffable,
 )]
-pub struct Vni(u32);
+#[cfg_attr(any(test, feature = "testing"), derive(test_strategy::Arbitrary))]
+pub struct Vni(
+    #[cfg_attr(any(test, feature = "testing"), strategy(0..=Vni::MAX_VNI))] u32,
+);
 
 impl Vni {
     /// Virtual Network Identifiers are constrained to be 24-bit values.
@@ -2849,159 +2880,6 @@ pub struct AddressLotBlock {
     pub last_address: IpAddr,
 }
 
-/// A switch port settings identity whose id may be used to view additional
-/// details.
-#[derive(
-    ObjectIdentity, Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq,
-)]
-pub struct SwitchPortSettingsIdentity {
-    #[serde(flatten)]
-    pub identity: IdentityMetadata,
-}
-
-/// This structure maps a port settings object to a port settings groups. Port
-/// settings objects may inherit settings from groups. This mapping defines the
-/// relationship between settings objects and the groups they reference.
-#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
-pub struct SwitchPortSettingsGroups {
-    /// The id of a port settings object referencing a port settings group.
-    pub port_settings_id: Uuid,
-
-    /// The id of a port settings group being referenced by a port settings
-    /// object.
-    pub port_settings_group_id: Uuid,
-}
-
-/// A port settings group is a named object that references a port settings
-/// object.
-#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
-pub struct SwitchPortSettingsGroup {
-    #[serde(flatten)]
-    pub identity: IdentityMetadata,
-
-    /// The port settings that comprise this group.
-    pub port_settings_id: Uuid,
-}
-
-/// The link geometry associated with a switch port.
-#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
-#[serde(rename_all = "lowercase")]
-pub enum SwitchPortGeometry {
-    /// The port contains a single QSFP28 link with four lanes.
-    Qsfp28x1,
-
-    /// The port contains two QSFP28 links each with two lanes.
-    Qsfp28x2,
-
-    /// The port contains four SFP28 links each with one lane.
-    Sfp28x4,
-}
-
-/// A physical port configuration for a port settings object.
-#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
-pub struct SwitchPortConfig {
-    /// The id of the port settings object this configuration belongs to.
-    pub port_settings_id: Uuid,
-
-    /// The physical link geometry of the port.
-    pub geometry: SwitchPortGeometry,
-}
-
-/// The speed of a link.
-#[derive(Copy, Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
-#[serde(rename_all = "snake_case")]
-pub enum LinkSpeed {
-    /// Zero gigabits per second.
-    Speed0G,
-    /// 1 gigabit per second.
-    Speed1G,
-    /// 10 gigabits per second.
-    Speed10G,
-    /// 25 gigabits per second.
-    Speed25G,
-    /// 40 gigabits per second.
-    Speed40G,
-    /// 50 gigabits per second.
-    Speed50G,
-    /// 100 gigabits per second.
-    Speed100G,
-    /// 200 gigabits per second.
-    Speed200G,
-    /// 400 gigabits per second.
-    Speed400G,
-}
-
-/// The forward error correction mode of a link.
-#[derive(Copy, Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
-#[serde(rename_all = "snake_case")]
-pub enum LinkFec {
-    /// Firecode forward error correction.
-    Firecode,
-    /// No forward error correction.
-    None,
-    /// Reed-Solomon forward error correction.
-    Rs,
-}
-
-/// A link configuration for a port settings object.
-#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
-pub struct SwitchPortLinkConfig {
-    /// The port settings this link configuration belongs to.
-    pub port_settings_id: Uuid,
-
-    /// The name of this link.
-    pub link_name: Name,
-
-    /// The maximum transmission unit for this link.
-    pub mtu: u16,
-
-    /// The requested forward-error correction method.  If this is not
-    /// specified, the standard FEC for the underlying media will be applied
-    /// if it can be determined.
-    pub fec: Option<LinkFec>,
-
-    /// The configured speed of the link.
-    pub speed: LinkSpeed,
-
-    /// Whether or not the link has autonegotiation enabled.
-    pub autoneg: bool,
-
-    /// The link-layer discovery protocol service configuration for this
-    /// link.
-    pub lldp_link_config: Option<LldpLinkConfig>,
-
-    /// The tx_eq configuration for this link.
-    pub tx_eq_config: Option<TxEqConfig>,
-}
-
-/// A link layer discovery protocol (LLDP) service configuration.
-#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
-pub struct LldpLinkConfig {
-    /// The id of this LLDP service instance.
-    pub id: Uuid,
-
-    /// Whether or not the LLDP service is enabled.
-    pub enabled: bool,
-
-    /// The LLDP link name TLV.
-    pub link_name: Option<String>,
-
-    /// The LLDP link description TLV.
-    pub link_description: Option<String>,
-
-    /// The LLDP chassis identifier TLV.
-    pub chassis_id: Option<String>,
-
-    /// The LLDP system name TLV.
-    pub system_name: Option<String>,
-
-    /// The LLDP system description TLV.
-    pub system_description: Option<String>,
-
-    /// The LLDP management IP TLV.
-    pub management_ip: Option<IpAddr>,
-}
-
 /// Information about LLDP advertisements from other network entities directly
 /// connected to a switch port.  This structure contains both metadata about
 /// when and where the neighbor was seen, as well as the specific information
@@ -3044,72 +2922,6 @@ impl SimpleIdentity for LldpNeighbor {
     fn id(&self) -> Uuid {
         self.id
     }
-}
-
-/// Per-port tx-eq overrides.  This can be used to fine-tune the transceiver
-/// equalization settings to improve signal integrity.
-#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
-pub struct TxEqConfig {
-    /// Pre-cursor tap1
-    pub pre1: Option<i32>,
-    /// Pre-cursor tap2
-    pub pre2: Option<i32>,
-    /// Main tap
-    pub main: Option<i32>,
-    /// Post-cursor tap2
-    pub post2: Option<i32>,
-    /// Post-cursor tap1
-    pub post1: Option<i32>,
-}
-
-/// Describes the kind of an switch interface.
-#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
-#[serde(rename_all = "snake_case")]
-pub enum SwitchInterfaceKind {
-    /// Primary interfaces are associated with physical links. There is exactly
-    /// one primary interface per physical link.
-    Primary,
-
-    /// VLAN interfaces allow physical interfaces to be multiplexed onto
-    /// multiple logical links, each distinguished by a 12-bit 802.1Q Ethernet
-    /// tag.
-    Vlan,
-
-    /// Loopback interfaces are anchors for IP addresses that are not specific
-    /// to any particular port.
-    Loopback,
-}
-
-/// A switch port interface configuration for a port settings object.
-#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
-pub struct SwitchInterfaceConfig {
-    /// The port settings object this switch interface configuration belongs to.
-    pub port_settings_id: Uuid,
-
-    /// A unique identifier for this switch interface.
-    pub id: Uuid,
-
-    /// The name of this switch interface.
-    pub interface_name: Name,
-
-    /// Whether or not IPv6 is enabled on this interface.
-    pub v6_enabled: bool,
-
-    /// The switch interface kind.
-    pub kind: SwitchInterfaceKind,
-}
-
-/// A switch port VLAN interface configuration for a port settings object.
-#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
-pub struct SwitchVlanInterfaceConfig {
-    /// The switch interface configuration this VLAN interface configuration
-    /// belongs to.
-    pub interface_config_id: Uuid,
-
-    /// The virtual network id for this interface that is used for producing and
-    /// consuming 802.1Q Ethernet tags. This field has a maximum value of 4095
-    /// as 802.1Q tags are twelve bits.
-    pub vlan_id: u16,
 }
 
 /// A route configuration for a port settings object.
@@ -3280,6 +3092,7 @@ pub struct TufArtifactMeta {
     pub sign: Option<Vec<u8>>,
 }
 
+/// A networking probe
 #[derive(
     Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq, ObjectIdentity,
 )]

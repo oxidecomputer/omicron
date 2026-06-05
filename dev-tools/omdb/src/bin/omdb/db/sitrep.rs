@@ -246,6 +246,7 @@ async fn cmd_db_sitrep_show(
         parent_sitrep_id,
         inv_collection_id,
         comment,
+        next_inv_min_time_started,
     } = metadata;
 
     const ID: &'static str = "ID";
@@ -259,6 +260,8 @@ async fn cmd_db_sitrep_show(
     const INV_COLLECTION_ID: &'static str = "inventory collection ID";
     const INV_STARTED_AT: &'static str = "  started at";
     const INV_FINISHED_AT: &'static str = "  finished at";
+    const NEXT_INV_MIN_START: &'static str =
+        "  next inventory minimum start time";
     const TOTAL_EREPORTS: &'static str = "ereports in this sitrep";
 
     const WIDTH: usize = const_max_len(&[
@@ -273,6 +276,7 @@ async fn cmd_db_sitrep_show(
         INV_COLLECTION_ID,
         INV_STARTED_AT,
         INV_FINISHED_AT,
+        NEXT_INV_MIN_START,
         TOTAL_EREPORTS,
     ]);
 
@@ -346,6 +350,8 @@ async fn cmd_db_sitrep_show(
             )
         }
     }
+    println!("    {NEXT_INV_MIN_START:>WIDTH$}: {next_inv_min_time_started}");
+    println!("    ");
     println!("    {TOTAL_EREPORTS}: {}", ereports_by_id.len());
     // TODO(eliza): perhaps display a table summarizing those ereports? possibly
     // behind a verbose flag?

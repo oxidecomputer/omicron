@@ -899,7 +899,7 @@ mod tests {
     use nexus_db_model::IncompleteIpPoolResource;
     use nexus_db_model::Instance;
     use nexus_db_model::InstanceCpuCount;
-    use nexus_db_model::IpPoolReservationType;
+    use nexus_db_model::IpPoolAssignment;
     use nexus_db_model::IpPoolResourceType;
     use nexus_db_model::Name;
     use nexus_db_model::NetworkInterfaceKind;
@@ -909,7 +909,6 @@ mod tests {
     use nexus_types::deployment::OmicronZoneExternalSnatIp;
     use nexus_types::external_api::instance::InstanceCreate;
     use nexus_types::external_api::instance::InstanceNetworkInterfaceAttachment;
-    use nexus_types::inventory::SourceNatConfigGeneric;
     use omicron_common::address::IpRange;
     use omicron_common::address::NUM_SOURCE_NAT_PORTS;
     use omicron_common::api::external::Error;
@@ -919,6 +918,7 @@ mod tests {
     use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::InstanceUuid;
     use omicron_uuid_kinds::OmicronZoneUuid;
+    use sled_agent_types::inventory::SourceNatConfigGeneric;
     use sled_agent_types::inventory::ZoneKind;
     use std::net::IpAddr;
     use std::net::Ipv4Addr;
@@ -952,7 +952,7 @@ mod tests {
                     description: format!("ip pool {}", name),
                 },
                 ip_version.into(),
-                IpPoolReservationType::ExternalSilos,
+                IpPoolAssignment::Silos,
             );
 
             let db_pool = self
@@ -1044,6 +1044,7 @@ mod tests {
                 auto_restart_policy: Default::default(),
                 anti_affinity_groups: Vec::new(),
                 multicast_groups: Vec::new(),
+                enable_jumbo_frames: false,
             });
 
             let conn = self
@@ -2426,6 +2427,7 @@ mod tests {
             auto_restart_policy: Default::default(),
             anti_affinity_groups: Vec::new(),
             multicast_groups: Vec::new(),
+            enable_jumbo_frames: false,
         });
 
         let conn = context

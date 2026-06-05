@@ -15,7 +15,6 @@
 use crate::external_api::sled::SledState;
 use crate::internal_api::params::DnsConfigParams;
 use crate::inventory::Collection;
-pub use crate::inventory::SourceNatConfigGeneric;
 pub use crate::inventory::ZpoolName;
 use blueprint_diff::ClickhouseClusterConfigDiffTablesForSingleBlueprint;
 use blueprint_display::BpDatasetsTableSchema;
@@ -33,6 +32,7 @@ use ipnet::IpAdd;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::SLED_PREFIX;
 use omicron_common::address::SLED_RESERVED_ADDRESSES;
+use omicron_common::address::get_sled_address;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Generation;
 use omicron_common::api::external::TufArtifactMeta;
@@ -54,6 +54,10 @@ use omicron_uuid_kinds::ZpoolUuid;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
+use sled_agent_types::system_networking::ServiceZoneNatEntries;
+use sled_agent_types::system_networking::ServiceZoneNatEntriesError;
+use sled_agent_types::system_networking::ServiceZoneNatEntry;
+use sled_agent_types::system_networking::ServiceZoneNatKind;
 use sled_agent_types_versions::latest::inventory::HostPhase2DesiredContents;
 use sled_agent_types_versions::latest::inventory::HostPhase2DesiredSlots;
 use sled_agent_types_versions::latest::inventory::OmicronSingleMeasurement;
@@ -149,7 +153,6 @@ pub use planning_report::ZoneUnsafeToShutdown;
 pub use planning_report::ZoneUpdatesWaitingOn;
 pub use planning_report::ZoneWaitingToExpunge;
 pub use reconfigurator_config::PlannerConfig;
-pub use reconfigurator_config::PlannerConfigDiff;
 pub use reconfigurator_config::PlannerConfigDisplay;
 pub use reconfigurator_config::ReconfiguratorConfig;
 pub use reconfigurator_config::ReconfiguratorConfigDiff;
@@ -253,6 +256,14 @@ pub struct Blueprint {
     /// control to the newer generation (see: RFD 588).
     pub nexus_generation: Generation,
 
+    /// The generation of the collective set of all external networking required
+    /// for in-service zones
+    ///
+    /// This generation number is bumped any time a zone with external
+    /// networking is added, expunged, or changed in a way that affects the way
+    /// NAT entries have to be configured in dendrite.
+    pub external_networking_generation: Generation,
+
     /// CockroachDB state fingerprint when this blueprint was created
     // See `nexus/db-queries/src/db/datastore/cockroachdb_settings.rs` for more
     // on this.
@@ -302,6 +313,7 @@ impl Blueprint {
             target_release_minimum_generation: self
                 .target_release_minimum_generation,
             nexus_generation: self.nexus_generation,
+            external_networking_generation: self.external_networking_generation,
             cockroachdb_fingerprint: self.cockroachdb_fingerprint.clone(),
             cockroachdb_setting_preserve_downgrade: Some(
                 self.cockroachdb_setting_preserve_downgrade,
@@ -311,6 +323,79 @@ impl Blueprint {
             comment: self.comment.clone(),
             source: self.source.clone(),
         }
+    }
+
+    /// Construct a [`ServiceZoneNatEntries`] containing all NAT entries for
+    /// relevant in-service zones in this blueprint.
+    ///
+    /// # Errors
+    ///
+    /// This method will fail if the blueprint contains overlapping NAT entries
+    /// (never expected) or has no in-service zones of the types required by
+    /// `ServiceZoneNatEntries` (boundary NTP, external DNS, and Nexus). Real
+    /// blueprints should always have at least one zone of this type, but many
+    /// test blueprints will not.
+    pub fn to_service_zone_nat_entries(
+        &self,
+    ) -> Result<ServiceZoneNatEntries, ServiceZoneNatEntriesError> {
+        let entries = self
+            .in_service_zones()
+            .filter_map(|(sled_id, zone_config)| {
+                let (nic_mac, vni, kind) = match &zone_config.zone_type {
+                    BlueprintZoneType::BoundaryNtp(ntp) => (
+                        ntp.nic.mac,
+                        ntp.nic.vni,
+                        ServiceZoneNatKind::BoundaryNtp {
+                            snat_cfg: ntp.external_ip.snat_cfg,
+                        },
+                    ),
+                    BlueprintZoneType::ExternalDns(dns) => (
+                        dns.nic.mac,
+                        dns.nic.vni,
+                        ServiceZoneNatKind::ExternalDns {
+                            external_ip: dns.dns_address.addr.ip(),
+                        },
+                    ),
+                    BlueprintZoneType::Nexus(nexus) => (
+                        nexus.nic.mac,
+                        nexus.nic.vni,
+                        ServiceZoneNatKind::Nexus {
+                            external_ip: nexus.external_ip.ip,
+                        },
+                    ),
+
+                    // None of these zone types have external NAT.
+                    BlueprintZoneType::Clickhouse(_)
+                    | BlueprintZoneType::ClickhouseKeeper(_)
+                    | BlueprintZoneType::ClickhouseServer(_)
+                    | BlueprintZoneType::CockroachDb(_)
+                    | BlueprintZoneType::Crucible(_)
+                    | BlueprintZoneType::CruciblePantry(_)
+                    | BlueprintZoneType::InternalDns(_)
+                    | BlueprintZoneType::InternalNtp(_)
+                    | BlueprintZoneType::Oximeter(_) => return None,
+                };
+
+                // in_service_zones() iterates over `self.sleds`, so it can only
+                // give us `sled_id`s that exist there. It's safe for us to
+                // unwrap here.
+                let sled_subnet = self
+                    .sleds
+                    .get(&sled_id)
+                    .expect("sled must exist if we have in-service zones")
+                    .subnet;
+
+                Some(ServiceZoneNatEntry {
+                    zone_id: zone_config.id,
+                    sled_underlay_ip: *get_sled_address(sled_subnet).ip(),
+                    nic_mac,
+                    vni,
+                    kind,
+                })
+            })
+            .collect::<IdOrdMap<_>>();
+
+        entries.try_into()
     }
 
     /// Iterate over the in-service [`BlueprintZoneConfig`] instances in the
@@ -1359,6 +1444,10 @@ impl BlueprintDisplay<'_> {
                         .to_string(),
                 ),
                 (NEXUS_GENERATION, self.blueprint.nexus_generation.to_string()),
+                (
+                    EXTERNAL_NETWORKING_GENERATION,
+                    self.blueprint.external_networking_generation.to_string(),
+                ),
             ],
         )
     }
@@ -1388,6 +1477,7 @@ impl fmt::Display for BlueprintDisplay<'_> {
             sleds,
             pending_mgs_updates,
             parent_blueprint_id,
+            source,
             // These two cockroachdb_* fields are handled by
             // `make_cockroachdb_table()`, called below.
             cockroachdb_fingerprint: _,
@@ -1398,16 +1488,15 @@ impl fmt::Display for BlueprintDisplay<'_> {
             // Handled by `make_oximeter_table`, called below.
             oximeter_read_version: _,
             oximeter_read_mode: _,
-            // These six fields are handled by `make_metadata_table()`, called
-            // below.
+            // Handled by `make_metadata_table()`, called below.
             target_release_minimum_generation: _,
             nexus_generation: _,
+            external_networking_generation: _,
             internal_dns_version: _,
             external_dns_version: _,
             time_created: _,
             creator: _,
             comment: _,
-            source,
         } = self.blueprint;
 
         writeln!(f, "blueprint  {}", id)?;
@@ -3233,6 +3322,11 @@ pub struct BlueprintMetadata {
     ///
     /// See [`Blueprint::nexus_generation`].
     pub nexus_generation: Generation,
+    /// The current generation of the collective set of external networking
+    /// configuration across all in-service zones
+    ///
+    /// See [`Blueprint::external_networking_generation`].
+    pub external_networking_generation: Generation,
     /// CockroachDB state fingerprint when this blueprint was created
     pub cockroachdb_fingerprint: String,
     /// Whether to set `cluster.preserve_downgrade_option` and what to set it to

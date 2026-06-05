@@ -5,6 +5,7 @@
 //! Code that manages command dispatch from a shell for wicket.
 
 use std::net::{Ipv6Addr, SocketAddrV6};
+use std::process::ExitCode;
 
 use anyhow::{Context, Result, bail};
 use camino::{Utf8Path, Utf8PathBuf};
@@ -17,7 +18,7 @@ use crate::{
     cli::{CommandOutput, ShellApp},
 };
 
-pub fn exec() -> Result<()> {
+pub fn exec() -> Result<ExitCode> {
     let wicketd_addr =
         SocketAddrV6::new(Ipv6Addr::LOCALHOST, WICKETD_PORT, 0, 0);
 
@@ -40,7 +41,8 @@ pub fn exec() -> Result<()> {
             // Do not expose log messages via standard error since they'll show up
             // on top of the TUI.
             let log = setup_log(&log_path()?, WithStderr::No)?;
-            Runner::new(log, wicketd_addr).run()
+            Runner::new(log, wicketd_addr).run()?;
+            Ok(ExitCode::SUCCESS)
         }
     }
 }
@@ -62,7 +64,7 @@ pub async fn exec_with_args<S>(
     wicketd_addr: SocketAddrV6,
     args: Vec<S>,
     output: OutputKind<'_>,
-) -> Result<()>
+) -> Result<ExitCode>
 where
     S: AsRef<str>,
 {
