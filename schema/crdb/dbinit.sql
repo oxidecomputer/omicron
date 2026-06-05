@@ -332,6 +332,12 @@ CREATE UNIQUE INDEX IF NOT EXISTS lookup_vmm_resource_by_sled ON omicron.public.
 );
 
 -- Allow a single VMM reservation per instance state
+--
+-- Note: `tombstoned` means that the propolis zone may not have been cleaned up
+-- yet, and should be considered as still consuming sled resources. This should
+-- not block out reserving another active VMM for an instance if the sled
+-- reservation algorithm can find a spot for it, hence why this unique index
+-- does not include the `tombstoned` state.
 CREATE UNIQUE INDEX IF NOT EXISTS single_vmm_reservation_per_state ON omicron.public.sled_resource_vmm (
     instance_id,
     state
