@@ -42,7 +42,7 @@ use nexus_types::internal_api::views::SupportBundleInfo;
 use nexus_types::internal_api::views::UpdateStatus;
 use nexus_types::trust_quorum::TrustQuorumConfig;
 use nexus_types_versions::latest::headers::RangeRequest;
-use omicron_common::api::external::Instance;
+use nexus_types_versions::latest::instance::Instance;
 use omicron_common::api::external::http_pagination::PaginatedById;
 use omicron_common::api::external::http_pagination::PaginatedByTimeAndId;
 use omicron_uuid_kinds::*;

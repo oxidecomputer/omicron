@@ -118,8 +118,8 @@ pub mod instance {
     pub use crate::v32::instance::ExternalIps;
     pub use crate::v32::instance::ExternalIpv4Config;
     pub use crate::v32::instance::ExternalIpv6Config;
-    pub use crate::v32::instance::InstanceEnsureBody;
-    pub use crate::v32::instance::InstanceSledLocalConfig;
+    pub use crate::v41::instance::InstanceEnsureBody;
+    pub use crate::v41::instance::InstanceSledLocalConfig;
 }
 
 pub mod inventory {

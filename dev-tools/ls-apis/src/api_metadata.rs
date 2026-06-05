@@ -8,6 +8,7 @@ use crate::ClientPackageName;
 use crate::ServerComponentName;
 use crate::ServerPackageName;
 use crate::cargo::DepPath;
+use crate::errors::{ErrorAccumulator, LoadError};
 use crate::workspaces::Workspaces;
 use anyhow::{Result, bail};
 use iddqd::IdOrdItem;
@@ -21,10 +22,8 @@ use std::collections::BTreeSet;
 
 /// Describes the APIs in the system
 ///
-/// This is the programmatic interface to the `api-manifest.toml` file.
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-#[serde(try_from = "RawApiMetadata")]
+/// This is the programmatic interface to the `api-manifest.toml` file.  It is
+/// built from a deserialized `RawApiMetadata` by `AllApiMetadata::from_raw`.
 pub struct AllApiMetadata {
     apis: BTreeMap<ClientPackageName, ApiMetadata>,
     deployment_units: IdOrdMap<DeploymentUnitInfo>,
@@ -40,6 +39,138 @@ pub struct AllApiMetadata {
 }
 
 impl AllApiMetadata {
+    /// Validate a deserialized [`RawApiMetadata`] into an `AllApiMetadata`,
+    /// recording any problems into `errors`.
+    ///
+    /// Returns `None` if any problems were recorded.
+    pub(crate) fn from_raw(
+        raw: RawApiMetadata,
+        errors: &mut ErrorAccumulator,
+    ) -> Option<AllApiMetadata> {
+        let mut apis = BTreeMap::new();
+
+        for api in raw.apis {
+            // Keep the first definition of any client package name; record each
+            // duplicate so the manifest author can resolve it.
+            if apis.contains_key(&api.client_package_name) {
+                errors.push(LoadError::DuplicateClientPackage {
+                    name: api.client_package_name.clone(),
+                });
+                continue;
+            }
+            apis.insert(api.client_package_name.clone(), api);
+        }
+
+        let mut deployment_units = IdOrdMap::new();
+        let mut server_components: IdOrdMap<ServerComponent> = IdOrdMap::new();
+        for raw_unit in raw.deployment_units {
+            // Build this unit's list of component names (packages first, then
+            // embedded components) while registering each component in
+            // `server_components`.
+            let mut component_names = Vec::new();
+
+            for pkg in &raw_unit.packages {
+                component_names.push(pkg.clone());
+                register_server_component(
+                    &mut server_components,
+                    ServerComponent {
+                        name: pkg.clone(),
+                        deployment_unit: raw_unit.name.clone(),
+                        lifecycle: Lifecycle::SteadyState,
+                        kind: ServerComponentKind::TopLevel,
+                    },
+                    errors,
+                );
+            }
+
+            for embedded in &raw_unit.embedded_components {
+                if !raw_unit.packages.contains(&embedded.inside) {
+                    errors.push(LoadError::EmbeddedComponentInsideMissing {
+                        embedded_component: embedded.name.clone(),
+                        inside: embedded.inside.clone(),
+                        deployment_unit: raw_unit.name.clone(),
+                    });
+                    continue;
+                }
+                component_names.push(embedded.name.clone());
+                register_server_component(
+                    &mut server_components,
+                    ServerComponent {
+                        name: embedded.name.clone(),
+                        deployment_unit: raw_unit.name.clone(),
+                        lifecycle: embedded.lifecycle,
+                        kind: ServerComponentKind::Embedded {
+                            inside: embedded.inside.clone(),
+                        },
+                    },
+                    errors,
+                );
+            }
+
+            let info =
+                DeploymentUnitInfo { name: raw_unit.name, component_names };
+            if let Err(e) = deployment_units.insert_unique(info) {
+                errors.push(LoadError::DuplicateDeploymentUnit {
+                    name: e.new_item().name.clone(),
+                });
+            }
+        }
+
+        let mut dependency_rules = BTreeMap::new();
+        for rule in raw.dependency_filter_rules {
+            if !apis.contains_key(&rule.client) {
+                errors.push(LoadError::UnknownDependencyRuleClient {
+                    client: rule.client.clone(),
+                });
+                continue;
+            }
+
+            dependency_rules
+                .entry(rule.client.clone())
+                .or_insert_with(Vec::new)
+                .push(rule);
+        }
+
+        let mut ignored_non_clients = BTreeSet::new();
+        for client_pkg in raw.ignored_non_clients {
+            if !ignored_non_clients.insert(client_pkg.clone()) {
+                errors.push(LoadError::DuplicateIgnoredNonClient {
+                    client: client_pkg,
+                });
+            }
+        }
+
+        // Validate that IDU-only edges reference only known server components
+        // and APIs.
+        for edge in &raw.intra_deployment_unit_only_edges {
+            if server_components.get(&edge.server).is_none() {
+                errors.push(LoadError::IduUnknownServerComponent {
+                    server: edge.server.clone(),
+                });
+            }
+
+            if !apis.contains_key(&edge.client) {
+                errors.push(LoadError::IduUnknownClient {
+                    client: edge.client.clone(),
+                });
+            }
+        }
+
+        if errors.has_errors() {
+            return None;
+        }
+
+        Some(AllApiMetadata {
+            apis,
+            deployment_units,
+            server_components,
+            dependency_rules,
+            ignored_non_clients,
+            intra_deployment_unit_only_edges: raw
+                .intra_deployment_unit_only_edges,
+        })
+    }
+
     /// Iterate over the distinct APIs described by the metadata
     pub fn apis(&self) -> impl Iterator<Item = &ApiMetadata> {
         self.apis.values()
@@ -162,7 +293,7 @@ impl AllApiMetadata {
 /// the transformation to `AllApiMetadata`.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct RawApiMetadata {
+pub(crate) struct RawApiMetadata {
     apis: Vec<ApiMetadata>,
     deployment_units: Vec<RawDeploymentUnitInfo>,
     dependency_filter_rules: Vec<DependencyFilterRule>,
@@ -170,8 +301,8 @@ struct RawApiMetadata {
     intra_deployment_unit_only_edges: Vec<IntraDeploymentUnitOnlyEdge>,
 }
 
-/// Registers a server component, failing if a component with the same name has
-/// already been registered.
+/// Registers a server component, recording an error if a component with the
+/// same name has already been registered.
 ///
 /// `server_components` is keyed by component name and spans every deployment
 /// unit, so this enforces that each component name appears exactly once across
@@ -181,8 +312,11 @@ struct RawApiMetadata {
 fn register_server_component(
     server_components: &mut IdOrdMap<ServerComponent>,
     component: ServerComponent,
-) -> Result<()> {
+    errors: &mut ErrorAccumulator,
+) {
     if let Err(error) = server_components.insert_unique(component) {
+        // On conflict, the first-registered component stays in the map and the
+        // duplicate is dropped, so validation can keep going.
         let new = error.new_item();
         // `IdOrdMap` is keyed by component name alone, so the new component
         // conflicts with exactly one previously-registered component.
@@ -190,153 +324,17 @@ fn register_server_component(
             "a duplicate-key conflict has exactly one conflicting item",
         );
         if previous.deployment_unit == new.deployment_unit {
-            bail!(
-                "server component {:?} appears more than once in \
-                 deployment unit {}; each component must appear exactly \
-                 once across `packages` and `embedded_components`",
-                new.name,
-                new.deployment_unit,
-            );
+            errors.push(LoadError::ServerComponentRepeatedInUnit {
+                component: new.name.clone(),
+                deployment_unit: new.deployment_unit.clone(),
+            });
+        } else {
+            errors.push(LoadError::ServerComponentDeclaredInMultipleUnits {
+                component: new.name.clone(),
+                first: previous.deployment_unit.clone(),
+                second: new.deployment_unit.clone(),
+            });
         }
-        bail!(
-            "server component {:?} appears in multiple deployment unit \
-             entries ({} and {}); each component must appear exactly once \
-             across `packages` and `embedded_components`",
-            new.name,
-            previous.deployment_unit,
-            new.deployment_unit,
-        );
-    }
-    Ok(())
-}
-
-impl TryFrom<RawApiMetadata> for AllApiMetadata {
-    type Error = anyhow::Error;
-
-    fn try_from(raw: RawApiMetadata) -> anyhow::Result<AllApiMetadata> {
-        let mut apis = BTreeMap::new();
-
-        for api in raw.apis {
-            if let Some(previous) =
-                apis.insert(api.client_package_name.clone(), api)
-            {
-                bail!(
-                    "duplicate client package name in API metadata: {}",
-                    &previous.client_package_name,
-                );
-            }
-        }
-
-        let mut deployment_units = IdOrdMap::new();
-        let mut server_components: IdOrdMap<ServerComponent> = IdOrdMap::new();
-        for raw_unit in raw.deployment_units {
-            // Build this unit's list of component names (packages first, then
-            // embedded components) while registering each component in
-            // `server_components`.
-            let mut component_names = Vec::new();
-
-            for pkg in &raw_unit.packages {
-                component_names.push(pkg.clone());
-                register_server_component(
-                    &mut server_components,
-                    ServerComponent {
-                        name: pkg.clone(),
-                        deployment_unit: raw_unit.name.clone(),
-                        lifecycle: Lifecycle::SteadyState,
-                        kind: ServerComponentKind::TopLevel,
-                    },
-                )?;
-            }
-
-            for embedded in &raw_unit.embedded_components {
-                if !raw_unit.packages.contains(&embedded.inside) {
-                    bail!(
-                        "embedded component {:?} has `inside = {:?}`, but \
-                         no such package exists in deployment unit {:?}'s \
-                         `packages` list",
-                        embedded.name,
-                        embedded.inside,
-                        raw_unit.name,
-                    );
-                }
-                component_names.push(embedded.name.clone());
-                register_server_component(
-                    &mut server_components,
-                    ServerComponent {
-                        name: embedded.name.clone(),
-                        deployment_unit: raw_unit.name.clone(),
-                        lifecycle: embedded.lifecycle,
-                        kind: ServerComponentKind::Embedded {
-                            inside: embedded.inside.clone(),
-                        },
-                    },
-                )?;
-            }
-
-            let info =
-                DeploymentUnitInfo { name: raw_unit.name, component_names };
-            if let Err(e) = deployment_units.insert_unique(info) {
-                bail!(
-                    "duplicate deployment unit name in API metadata: {}",
-                    e.new_item().name,
-                );
-            }
-        }
-
-        let mut dependency_rules = BTreeMap::new();
-        for rule in raw.dependency_filter_rules {
-            if !apis.contains_key(&rule.client) {
-                bail!(
-                    "dependency rule references unknown client: {:?}",
-                    rule.client
-                );
-            }
-
-            dependency_rules
-                .entry(rule.client.clone())
-                .or_insert_with(Vec::new)
-                .push(rule);
-        }
-
-        let mut ignored_non_clients = BTreeSet::new();
-        for client_pkg in raw.ignored_non_clients {
-            if !ignored_non_clients.insert(client_pkg.clone()) {
-                bail!(
-                    "entry in ignored_non_clients appeared twice: {:?}",
-                    &client_pkg
-                );
-            }
-        }
-
-        // Validate that IDU-only edges reference only known server components
-        // and APIs.
-        for edge in &raw.intra_deployment_unit_only_edges {
-            if server_components.get(&edge.server).is_none() {
-                bail!(
-                    "intra_deployment_unit_only_edges: \
-                     unknown server component {:?}",
-                    edge.server
-                );
-            }
-
-            if !apis.contains_key(&edge.client) {
-                bail!(
-                    "intra_deployment_unit_only_edges: \
-                     unknown client {:?}",
-                    edge.client,
-                );
-            }
-        }
-
-        Ok(AllApiMetadata {
-            apis,
-            deployment_units,
-            server_components,
-            dependency_rules,
-            ignored_non_clients,
-            intra_deployment_unit_only_edges: raw
-                .intra_deployment_unit_only_edges,
-        })
     }
 }
 
@@ -763,5 +761,101 @@ impl IntraDeploymentUnitOnlyEdge {
         client: &ClientPackageName,
     ) -> bool {
         self.server == *server && self.client == *client
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A manifest with three independent, simultaneous defects:
+    ///
+    /// 1. two APIs sharing a client package name,
+    /// 2. an embedded component whose `inside` names no package in its unit,
+    /// 3. a dependency rule referencing an unknown client.
+    ///
+    /// All three are caught by `from_raw` alone, so tests built on this
+    /// manifest never reach the point at which they run `cargo metadata` and
+    /// analyze the Omicron repo itself.
+    const THREE_DEFECTS_TOML: &str = r#"
+ignored_non_clients = []
+intra_deployment_unit_only_edges = []
+
+[[apis]]
+client_package_name = "dup-client"
+label = "Dup One"
+server_package_name = "server-one"
+versioned_how = "unknown"
+
+[[apis]]
+client_package_name = "dup-client"
+label = "Dup Two"
+server_package_name = "server-two"
+versioned_how = "unknown"
+
+[[deployment_units]]
+name = "Unit One"
+packages = ["server-one"]
+
+[[deployment_units.embedded_components]]
+name = "embedded-comp"
+inside = "nonexistent-package"
+
+[[dependency_filter_rules]]
+ancestor = "some-ancestor"
+client = "unknown-client"
+note = "why this rule exists"
+"#;
+
+    #[test]
+    fn from_raw_collects_multiple_errors() {
+        let raw: RawApiMetadata =
+            toml::from_str(THREE_DEFECTS_TOML).expect("test manifest parses");
+
+        let mut errors = ErrorAccumulator::new();
+        let metadata = AllApiMetadata::from_raw(raw, &mut errors);
+        assert!(
+            metadata.is_none(),
+            "from_raw should return None when it records errors",
+        );
+
+        let collected = errors
+            .take_load_errors()
+            .expect("from_raw recorded errors, so this is non-empty");
+        match collected.errors() {
+            [
+                LoadError::DuplicateClientPackage { name },
+                LoadError::EmbeddedComponentInsideMissing {
+                    embedded_component,
+                    inside,
+                    deployment_unit,
+                },
+                LoadError::UnknownDependencyRuleClient { client },
+            ] => {
+                assert_eq!(name.as_str(), "dup-client");
+                assert_eq!(embedded_component.as_str(), "embedded-comp");
+                assert_eq!(inside.as_str(), "nonexistent-package");
+                assert_eq!(deployment_unit.to_string(), "Unit One");
+                assert_eq!(client.as_str(), "unknown-client");
+            }
+            other => panic!("unexpected set of load errors: {other:#?}"),
+        }
+    }
+
+    #[test]
+    fn load_errors_display_lists_every_error() {
+        let raw: RawApiMetadata =
+            toml::from_str(THREE_DEFECTS_TOML).expect("test manifest parses");
+
+        let mut errors = ErrorAccumulator::new();
+        assert!(AllApiMetadata::from_raw(raw, &mut errors).is_none());
+        let collected = errors
+            .take_load_errors()
+            .expect("from_raw recorded errors, so this is non-empty");
+
+        expectorate::assert_contents(
+            "tests/output/load_errors_display.txt",
+            &collected.to_string(),
+        );
     }
 }

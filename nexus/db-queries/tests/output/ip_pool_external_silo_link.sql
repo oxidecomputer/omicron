@@ -2,7 +2,7 @@ WITH
   ip_pool
     AS (
       SELECT
-        CAST(IF(reservation_type != $1, 'bad-link-type', $2) AS UUID) AS id, pool_type, ip_version
+        CAST(IF(assignment != $1, 'bad-link-type', $2) AS UUID) AS id, pool_type, ip_version
       FROM
         ip_pool
       WHERE

@@ -348,7 +348,7 @@ mod tests {
             zone_name: ZONE_NAME.into(),
         };
         let dl = SledDataLink::new(target, true);
-        let details = CollectionDetails::never(Duration::from_secs(1));
+        let details = CollectionDetails::never(Duration::from_secs(1), 512);
         let id = sampler.add_target(dl, details).await.unwrap();
         let samples: Vec<_> = sampler.produce().unwrap().collect();
         assert!(samples.is_empty());
@@ -385,8 +385,7 @@ mod tests {
     #[tokio::test]
     async fn test_kstat_sampler_with_overflow() {
         let limit = 2;
-        let mut sampler =
-            KstatSampler::with_sample_limit(&test_logger(), limit).unwrap();
+        let mut sampler = KstatSampler::new(&test_logger()).unwrap();
         let link = TestEtherstub::new();
         let target = SledDataLinkTarget {
             rack_id: RACK_ID,
@@ -399,8 +398,8 @@ mod tests {
             zone_name: ZONE_NAME.into(),
         };
         let dl = SledDataLink::new(target, true);
-        let details = CollectionDetails::never(Duration::from_secs(1));
-        sampler.add_target(dl, details).await.unwrap();
+        let details = CollectionDetails::never(Duration::from_secs(1), limit);
+        sampler.add_target(dl.clone(), details).await.unwrap();
         let samples: Vec<_> = sampler.produce().unwrap().collect();
         assert!(samples.is_empty());
 
@@ -448,6 +447,47 @@ mod tests {
             unreachable!();
         };
         assert_eq!(overflow.value(), expected_counts.overflow as u64);
+
+        // Now, resize the target queue, and test again.
+        //
+        // This is nearly the same test as above, just with a new value of
+        // limit. We also handle slightly different overflow conditions.
+        tokio::time::resume();
+        let limit = 4;
+        let details = CollectionDetails::never(Duration::from_secs(1), limit);
+        sampler.update_target(dl, details).await.unwrap();
+        tokio::time::pause();
+        let now = Instant::now();
+        let old_expected_counts = expected_counts;
+        let expected_counts = loop {
+            tokio::time::advance(STEP_DURATION).await;
+            if now.elapsed() > MAX_DURATION {
+                panic!("Waited too long for samples");
+            }
+            if let Some(counts) = sampler.sample_counts() {
+                break counts;
+            }
+        };
+        let samples: Vec<_> = sampler.produce().unwrap().collect();
+        let (link_samples, dropped_samples): (Vec<_>, Vec<_>) = samples
+            .iter()
+            .partition(|s| s.timeseries_name.contains("sled_data_link"));
+        println!("{link_samples:#?}");
+        assert_eq!(link_samples.len(), limit);
+        assert_eq!(
+            link_samples.len(),
+            expected_counts.total - expected_counts.overflow
+        );
+        println!("{dropped_samples:#?}");
+        assert_eq!(dropped_samples.len(), 1);
+        let oximeter::Datum::CumulativeU64(overflow) =
+            dropped_samples[0].measurement.datum()
+        else {
+            unreachable!();
+        };
+        let all_overflow =
+            old_expected_counts.overflow + expected_counts.overflow;
+        assert_eq!(overflow.value(), all_overflow as u64);
     }
 
     #[tokio::test]
@@ -471,7 +511,8 @@ mod tests {
         let dl = SledDataLink::new(target, true);
         let collection_interval = Duration::from_secs(1);
         let expiry = Duration::from_secs(1);
-        let details = CollectionDetails::duration(collection_interval, expiry);
+        let details =
+            CollectionDetails::duration(collection_interval, expiry, 512);
         let id = sampler.add_target(dl, details).await.unwrap();
         info!(log, "target added"; "id" => ?id);
         assert!(matches!(
@@ -531,7 +572,8 @@ mod tests {
         let dl = SledDataLink::new(target, true);
         let collection_interval = Duration::from_secs(1);
         let expiry = Duration::from_secs(1);
-        let details = CollectionDetails::duration(collection_interval, expiry);
+        let details =
+            CollectionDetails::duration(collection_interval, expiry, 512);
         let id = sampler.add_target(dl, details).await.unwrap();
         info!(log, "target added"; "id" => ?id);
         assert!(matches!(
@@ -583,7 +625,8 @@ mod tests {
         let dl = SledDataLink::new(target, true);
         let collection_interval = Duration::from_secs(1);
         let expiry = Duration::from_secs(1);
-        let details = CollectionDetails::duration(collection_interval, expiry);
+        let details =
+            CollectionDetails::duration(collection_interval, expiry, 512);
         let id = sampler.add_target(dl, details).await.unwrap();
         info!(log, "target added"; "id" => ?id);
         assert!(matches!(
@@ -633,7 +676,8 @@ mod tests {
         let dl = SledDataLink::new(target, true);
         let collection_interval = Duration::from_secs(1);
         let expiry = Duration::from_secs(1);
-        let details = CollectionDetails::duration(collection_interval, expiry);
+        let details =
+            CollectionDetails::duration(collection_interval, expiry, 512);
         let id = sampler.add_target(dl, details).await.unwrap();
         info!(log, "target added"; "id" => ?id);
         assert!(matches!(
@@ -661,7 +705,7 @@ mod tests {
     #[tokio::test]
     async fn overflowing_self_stat_queue_does_not_block_sampler() {
         let log = test_logger();
-        let mut sampler = KstatSampler::with_sample_limit(&log, 1).unwrap();
+        let mut sampler = KstatSampler::new(&log).unwrap();
 
         // We'll create an actual link, so that we can generate valid samples
         // and overflow the per-target queue. This will ensure we continually
@@ -680,7 +724,7 @@ mod tests {
         };
         let dl = SledDataLink::new(target, true);
         let collection_interval = Duration::from_millis(10);
-        let details = CollectionDetails::never(collection_interval);
+        let details = CollectionDetails::never(collection_interval, 1);
         let _id = sampler.add_target(dl, details).await.unwrap();
 
         // Pause time long enough for the sampler to have produced a bunch of
@@ -760,13 +804,13 @@ mod tests {
         };
         let dl = SledDataLink::new(target.clone(), true);
         let collection_interval = Duration::from_millis(10);
-        let details = CollectionDetails::never(collection_interval);
+        let details = CollectionDetails::never(collection_interval, 512);
         let id = sampler.add_target(dl.clone(), details).await.unwrap();
 
         // Update the target.
         let new_duration = Duration::from_millis(15);
         sampler
-            .update_target(dl, CollectionDetails::never(new_duration))
+            .update_target(dl, CollectionDetails::never(new_duration, 512))
             .await
             .unwrap();
 
@@ -799,7 +843,7 @@ mod tests {
         };
         let dl = SledDataLink::new(target.clone(), true);
         let collection_interval = Duration::from_millis(100);
-        let details = CollectionDetails::never(collection_interval);
+        let details = CollectionDetails::never(collection_interval, 512);
         let id = sampler.add_target(dl.clone(), details).await.unwrap();
 
         // And remove right away.
