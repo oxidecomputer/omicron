@@ -944,7 +944,8 @@ impl NexusSaga for SagaDoActualInstanceUpdate {
         if update_active_vmm_for_migration_success.is_some() {
             // Only perform this update if the target VMM is not to be destroyed.
             if destroy_target_vmm.is_none() {
-                builder.append(update_active_vmm_for_migration_success_action());
+                builder
+                    .append(update_active_vmm_for_migration_success_action());
             }
         }
 
