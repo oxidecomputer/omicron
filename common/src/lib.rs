@@ -24,7 +24,6 @@ pub mod backoff;
 pub mod cmd;
 pub mod disk;
 pub mod policy;
-pub mod progenitor_operation_retry;
 pub mod resolvable_files;
 pub mod snake_case_result;
 pub mod update;
