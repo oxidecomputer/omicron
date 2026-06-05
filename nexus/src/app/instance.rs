@@ -569,9 +569,26 @@ impl super::Nexus {
             boot_disk,
             cpu_platform,
             multicast_groups,
+            enable_jumbo_frames,
         } = params;
 
         check_instance_cpu_memory_sizes(*ncpus, *memory)?;
+
+        // Opting in to jumbo frames requires the fleet-wide opt-in. Opting out
+        // (`Some(false)`) is always allowed.
+        if *enable_jumbo_frames {
+            let settings = self
+                .db_datastore
+                .system_networking_settings_view(opctx)
+                .await?;
+            if !settings.external_jumbo_frames_opt_in_enabled {
+                return Err(Error::invalid_request(
+                    "enable_jumbo_frames may only be set to true when the \
+                     fleet-wide jumbo-frames opt-in is enabled by a fleet \
+                     administrator",
+                ));
+            }
+        }
 
         let boot_disk_id = match boot_disk.as_ref() {
             Some(disk) => {
@@ -603,6 +620,7 @@ impl super::Nexus {
             ncpus,
             memory,
             cpu_platform,
+            enable_jumbo_frames: *enable_jumbo_frames,
         };
 
         // Update the instance configuration
@@ -673,6 +691,22 @@ impl super::Nexus {
                 "An instance may not join more than {} multicast groups",
                 MAX_MULTICAST_GROUPS_PER_INSTANCE,
             )));
+        }
+
+        // Requiring jumbo frames on a new instance requires the fleet-wide
+        // opt-in.
+        if params.enable_jumbo_frames {
+            let settings = self
+                .db_datastore
+                .system_networking_settings_view(opctx)
+                .await?;
+            if !settings.external_jumbo_frames_opt_in_enabled {
+                return Err(Error::invalid_request(
+                    "enable_jumbo_frames may only be set on an instance when \
+                     the fleet-wide jumbo-frames opt-in is enabled by a \
+                     fleet administrator",
+                ));
+            }
         }
 
         // Collect ephemeral IP selectors for validation
@@ -1636,6 +1670,20 @@ impl super::Nexus {
             })
             .collect();
 
+        // Compute the effective MTU for the instance's primary OPTE port.
+        let primary_nic_mtu = if db_instance.enable_jumbo_frames {
+            let settings = self
+                .db_datastore
+                .system_networking_settings_view(opctx)
+                .await?;
+            primary_nic_mtu_for_jumbo_frames(
+                db_instance.enable_jumbo_frames,
+                settings.external_jumbo_frames_opt_in_enabled,
+            )
+        } else {
+            None
+        };
+
         let local_config = sled_agent_client::types::InstanceSledLocalConfig {
             hostname,
             nics,
@@ -1650,6 +1698,7 @@ impl super::Nexus {
             },
             delegated_zvols,
             attached_subnets,
+            primary_nic_mtu,
         };
 
         let instance_id = InstanceUuid::from_untyped_uuid(db_instance.id());
@@ -2866,6 +2915,20 @@ fn check_instance_cpu_memory_sizes(
     Ok(())
 }
 
+/// Effective MTU for an instance's primary OPTE port. Jumbo frames are only
+/// applied when both the fleet-wide opt-in is enabled and the per-instance bit
+/// is set; otherwise this returns `None` and OPTE applies the default MTU.
+fn primary_nic_mtu_for_jumbo_frames(
+    instance_jumbo_frames_enabled: bool,
+    fleet_jumbo_frames_opt_in_enabled: bool,
+) -> Option<u32> {
+    if instance_jumbo_frames_enabled && fleet_jumbo_frames_opt_in_enabled {
+        Some(omicron_common::address::EXTERNAL_JUMBO_FRAMES_MTU)
+    } else {
+        None
+    }
+}
+
 /// Determines the disposition of a request to start an instance given its state
 /// (and its current VMM's state, if it has one) in the database.
 fn instance_start_allowed(
@@ -3090,6 +3153,7 @@ mod tests {
             auto_restart_policy: Default::default(),
             anti_affinity_groups: Vec::new(),
             multicast_groups: Vec::new(),
+            enable_jumbo_frames: false,
         };
 
         let instance_id = InstanceUuid::from_untyped_uuid(Uuid::new_v4());
@@ -3220,5 +3284,59 @@ mod tests {
             .is_ok()
         );
         logctx.cleanup_successful();
+    }
+
+    /// Build a DbInstance from `make_instance_and_vmm`'s base params with the
+    /// `enable_jumbo_frames` field overridden.
+    fn make_instance_with_jumbo_frames(
+        enable_jumbo_frames: bool,
+    ) -> DbInstance {
+        let params = instance::InstanceCreate {
+            identity: IdentityMetadataCreateParams {
+                name: Name::try_from("jumbo".to_owned()).unwrap(),
+                description: "instance under jumbo-frames test".to_owned(),
+            },
+            ncpus: InstanceCpuCount(1),
+            memory: ByteCount::from_gibibytes_u32(1),
+            hostname: Hostname::try_from("jumbo").unwrap(),
+            user_data: vec![],
+            network_interfaces: InstanceNetworkInterfaceAttachment::None,
+            external_ips: vec![],
+            disks: vec![],
+            boot_disk: None,
+            cpu_platform: None,
+            ssh_public_keys: None,
+            start: false,
+            auto_restart_policy: Default::default(),
+            anti_affinity_groups: Vec::new(),
+            multicast_groups: Vec::new(),
+            enable_jumbo_frames,
+        };
+        let instance_id = InstanceUuid::from_untyped_uuid(Uuid::new_v4());
+        let project_id = Uuid::new_v4();
+        DbInstance::new(instance_id, project_id, &params)
+    }
+
+    /// `InstanceCreate::enable_jumbo_frames` must be propagated into the
+    /// resulting `DbInstance`, so that downstream code (VMM registration, view
+    /// rendering) sees the value the user requested.
+    #[test]
+    fn test_instance_create_propagates_enable_jumbo_frames() {
+        assert!(!make_instance_with_jumbo_frames(false).enable_jumbo_frames);
+        assert!(make_instance_with_jumbo_frames(true).enable_jumbo_frames);
+    }
+
+    /// The effective primary-NIC MTU is jumbo only when both the per-instance
+    /// bit and the fleet-wide opt-in are enabled. Any other combination must
+    /// leave the MTU unset so OPTE applies its default.
+    #[test]
+    fn test_primary_nic_mtu_for_jumbo_frames() {
+        assert_eq!(primary_nic_mtu_for_jumbo_frames(false, false), None);
+        assert_eq!(primary_nic_mtu_for_jumbo_frames(true, false), None);
+        assert_eq!(primary_nic_mtu_for_jumbo_frames(false, true), None);
+        assert_eq!(
+            primary_nic_mtu_for_jumbo_frames(true, true),
+            Some(omicron_common::address::EXTERNAL_JUMBO_FRAMES_MTU),
+        );
     }
 }

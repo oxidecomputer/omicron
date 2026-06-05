@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "2026060400.0.0"
+    "version": "2026060500.0.0"
   },
   "paths": {
     "/device/auth": {
@@ -11259,6 +11259,68 @@
         "responses": {
           "204": {
             "description": "successful deletion"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/system/networking/settings": {
+      "get": {
+        "tags": [
+          "system/networking"
+        ],
+        "summary": "Fetch fleet-wide networking settings",
+        "operationId": "system_networking_settings_view",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SystemNetworkingSettings"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "system/networking"
+        ],
+        "summary": "Update fleet-wide networking settings",
+        "operationId": "system_networking_settings_update",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SystemNetworkingSettingsUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SystemNetworkingSettings"
+                }
+              }
+            }
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -22654,6 +22716,10 @@
             "description": "Human-readable free-form text about a resource",
             "type": "string"
           },
+          "enable_jumbo_frames": {
+            "description": "When true, this instance has opted in to jumbo frames (8500 byte MTU) on its primary network interface. The effective MTU also depends on the fleet-wide jumbo-frames opt-in; if that is disabled, the primary interface uses the default MTU regardless of this value. Changes only take effect on the next instance restart.",
+            "type": "boolean"
+          },
           "hostname": {
             "description": "RFC1035-compliant hostname for the instance",
             "type": "string"
@@ -22719,6 +22785,7 @@
         "required": [
           "auto_restart_enabled",
           "description",
+          "enable_jumbo_frames",
           "hostname",
           "id",
           "memory",
@@ -22827,6 +22894,11 @@
             "items": {
               "$ref": "#/components/schemas/InstanceDiskAttachment"
             }
+          },
+          "enable_jumbo_frames": {
+            "description": "Enable jumbo frames (8500 byte MTU) on the instance's primary OPTE interface. Requires the fleet-wide jumbo-frames opt-in to be enabled by an operator; otherwise this field must be `false`. Changes only take effect on the next instance restart.",
+            "default": false,
+            "type": "boolean"
           },
           "external_ips": {
             "description": "The external IP addresses provided to this instance.\n\nBy default, all instances have outbound connectivity, but no inbound connectivity. These external addresses can be used to provide a fixed, known IP address for making inbound connections to the instance.",
@@ -23437,6 +23509,10 @@
               }
             ]
           },
+          "enable_jumbo_frames": {
+            "description": "Update the per-instance jumbo-frames opt-in. Setting this to `true` requires the fleet-wide jumbo-frames opt-in to be enabled. Changes only take effect on the next instance restart.",
+            "type": "boolean"
+          },
           "memory": {
             "description": "The amount of RAM (in bytes) to be allocated to the instance",
             "allOf": [
@@ -23467,6 +23543,7 @@
           "auto_restart_policy",
           "boot_disk",
           "cpu_platform",
+          "enable_jumbo_frames",
           "memory",
           "ncpus"
         ]
@@ -29582,6 +29659,30 @@
             ]
           }
         ]
+      },
+      "SystemNetworkingSettings": {
+        "description": "Fleet-wide networking settings. Only fleet viewers may view these settings. Only fleet admins can modify them.",
+        "type": "object",
+        "properties": {
+          "external_jumbo_frames_opt_in_enabled": {
+            "description": "When true, end users may opt in to jumbo frames (8500 byte MTU) on the primary interface of an instance. When false, instance-level opt-in is ignored and OPTE ports are created with the default MTU.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "external_jumbo_frames_opt_in_enabled"
+        ]
+      },
+      "SystemNetworkingSettingsUpdate": {
+        "description": "Parameters for updating the fleet-wide networking settings.",
+        "type": "object",
+        "properties": {
+          "external_jumbo_frames_opt_in_enabled": {
+            "description": "Toggle the fleet-wide external jumbo-frames opt-in.",
+            "default": false,
+            "type": "boolean"
+          }
+        }
       },
       "TargetRelease": {
         "description": "View of a system software target release",
