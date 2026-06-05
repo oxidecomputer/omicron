@@ -77,9 +77,11 @@ use uuid::Uuid;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum SledReservationType {
+    /// The VMM will be reserved to run the instance, and could be a migration
+    /// source in the future.
     Active,
 
-    /// The VMM will be used as a migration destination.
+    /// The VMM will be reserved as a migration destination.
     Target,
 }
 
