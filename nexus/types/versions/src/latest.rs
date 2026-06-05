@@ -142,10 +142,11 @@ pub mod headers {
 
 pub mod image {
     pub use crate::v2025_11_20_00::image::Distribution;
-    pub use crate::v2025_11_20_00::image::Image;
     pub use crate::v2025_11_20_00::image::ImageCreate;
     pub use crate::v2025_11_20_00::image::ImageSelector;
     pub use crate::v2025_11_20_00::image::ImageSource;
+
+    pub use crate::v2026_06_04_00::image::Image;
 }
 
 pub mod instance {
