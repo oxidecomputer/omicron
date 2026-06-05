@@ -49,12 +49,6 @@ pub(crate) async fn deploy_dns(
     let active_nexus_generation =
         blueprint.find_generation_for_self(nexus_id)?;
 
-    // We could check here that the DNS version we found isn't newer than when
-    // the blueprint was generated.  But we have to check later when we try to
-    // update the database anyway.  And we're not wasting much effort allowing
-    // this proceed for now.  This way, we have only one code path for this and
-    // we know it's being hit when we exercise this condition.
-
     // Next, construct the DNS config represented by the blueprint.
     let internal_dns_zone_blueprint = blueprint_internal_dns_config(
         blueprint,
@@ -95,7 +89,9 @@ pub(crate) async fn deploy_dns(
         active_nexus_generation,
     );
 
-    // Deploy the changes.
+    // Deploy the computed config.  (These calls will do nothing if there
+    // are no changes from what's currently in DNS or if something else has
+    // bumped the current DNS generation in the database.)
     deploy_dns_one(
         opctx,
         datastore,
@@ -229,7 +225,7 @@ pub(crate) async fn deploy_dns_one(
     info!(
         log,
         "attempting to update from generation {} to generation {}",
-        dns_config_current.generation,
+        blueprint_generation,
         new_dns_generation,
     );
     datastore
@@ -1710,8 +1706,8 @@ mod test {
     // The scenario:
     //
     // 1. Blueprint B1 is the current target with internal_dns_version = G.
-    // 2. Blueprint B2 is built from B1 and executed; it adds a new Nexus zone,
-    //    which bumps internal DNS to G+1.
+    // 2. Blueprint B2 is built from B1 and executed; it adds a new Oximeter
+    //    zone, which bumps internal DNS to G+1.
     // 3. The stale blueprint B1 is re-executed.
     //
     // The goal is to ensure that executing B1 again does not cause DNS to
@@ -1732,13 +1728,10 @@ mod test {
         );
 
         // Fetch the initial blueprint (B1).
-        let (_blueprint_target, mut blueprint) = datastore
+        let (_blueprint_target, blueprint) = datastore
             .blueprint_target_get_current_full(&opctx)
             .await
             .expect("failed to read current target blueprint");
-        // Override the CockroachDB settings so that we don't try to set them.
-        blueprint.cockroachdb_setting_preserve_downgrade =
-            CockroachDbPreserveDowngrade::DoNotModify;
 
         // Record the zpools so we don't fail to ensure datasets (unrelated to
         // DNS) during blueprint execution.
@@ -1757,22 +1750,12 @@ mod test {
             .await
             .expect("fetching DNS after B1 execution");
 
-        // Build blueprint B2 from B1, adding a new Nexus zone.  When B2 is
+        // Build blueprint B2 from B1, adding a new Oximeter zone.  When B2 is
         // executed, internal DNS will gain a new AAAA record and updated SRV
         // records for that zone.
         //
         // We use the same process as in test_silos_external_dns_end_to_end()
         // above.
-        let ip_pool_range_rows =
-            fetch_all_service_ip_pool_ranges(&datastore, &opctx).await;
-        let external_ip_policy = {
-            let mut builder = ExternalIpPolicy::builder();
-            for range in ip_pool_range_rows {
-                let range = IpRange::try_from(&range).unwrap();
-                builder.push_service_pool_range(range).unwrap();
-            }
-            builder.build()
-        };
         let mut builder = BlueprintBuilder::new_based_on(
             &log,
             &blueprint,
@@ -1782,20 +1765,10 @@ mod test {
         .unwrap();
         let sled_id =
             blueprint.sleds().next().expect("expected at least one sled");
-        let new_nexus_external_ip =
-            ExternalNetworkingAllocator::from_current_zones(
-                &builder,
-                &external_ip_policy,
-            )
-            .expect("constructed ExternalNetworkingAllocator")
-            .for_new_nexus()
-            .expect("found external IP for Nexus");
         builder
-            .sled_add_zone_nexus(
+            .sled_add_zone_oximeter(
                 sled_id,
                 BlueprintZoneImageSource::InstallDataset,
-                new_nexus_external_ip,
-                blueprint.nexus_generation,
             )
             .unwrap();
         let blueprint2 = builder.build(BlueprintSource::Test);
@@ -1815,7 +1788,7 @@ mod test {
             .await
             .expect("failed to set blueprint2 as target");
 
-        // Execute B2.  Internal DNS should now include the new Nexus zone.
+        // Execute B2.  Internal DNS should now include the new zone.
         _ = realize_blueprint_and_expect(
             &opctx,
             datastore,
@@ -1834,10 +1807,7 @@ mod test {
             "executing B2 should have bumped the internal DNS generation"
         );
         let diff = diff_sole_zones(&dns_after_b1, &dns_after_b2);
-        assert!(
-            !diff.is_empty(),
-            "executing B2 changed DNS generation but not its contents",
-        );
+        assert!(!diff.is_empty(), "executing B2 changed DNS");
 
         // Now simulate execution of the DNS step of blueprint B1 when it's
         // stale -- i.e., after blueprint B2 has executed its DNS step.  We have
