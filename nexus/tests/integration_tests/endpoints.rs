@@ -834,7 +834,7 @@ pub static DEMO_INSTANCE_UPDATE: LazyLock<instance::InstanceUpdate> =
         ncpus: InstanceCpuCount(1),
         memory: ByteCount::from_gibibytes_u32(16),
         multicast_groups: None,
-        enable_jumbo_frames: None,
+        enable_jumbo_frames: false,
     });
 
 // The instance needs a network interface, too.

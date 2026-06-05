@@ -599,8 +599,6 @@ table! {
 table! {
     system_networking_settings(singleton) {
         singleton -> Bool,
-        time_created -> Timestamptz,
-        time_modified -> Timestamptz,
         external_jumbo_frames_opt_in_enabled -> Bool,
     }
 }

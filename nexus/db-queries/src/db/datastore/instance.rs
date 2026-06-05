@@ -1155,6 +1155,7 @@ impl DataStore {
                     ncpus,
                     memory,
                     cpu_platform,
+                    enable_jumbo_frames,
                 } = update.clone();
                 async move {
                     // Set the auto-restart policy.
@@ -1163,6 +1164,16 @@ impl DataStore {
                         .set(
                             instance_dsl::auto_restart_policy
                                 .eq(auto_restart_policy),
+                        )
+                        .execute_async(&conn)
+                        .await?;
+
+                    // Set the per-instance jumbo-frames opt-in.
+                    diesel::update(instance_dsl::instance)
+                        .filter(instance_dsl::id.eq(authz_instance.id()))
+                        .set(
+                            instance_dsl::enable_jumbo_frames
+                                .eq(enable_jumbo_frames),
                         )
                         .execute_async(&conn)
                         .await?;
@@ -1202,26 +1213,6 @@ impl DataStore {
             })?;
 
         Ok(instance_and_vmm)
-    }
-
-    /// Update the per-instance jumbo-frames opt-in. Changes take effect on the
-    /// next instance restart.
-    pub async fn instance_set_enable_jumbo_frames(
-        &self,
-        opctx: &OpContext,
-        authz_instance: &authz::Instance,
-        enable_jumbo_frames: bool,
-    ) -> Result<(), Error> {
-        opctx.authorize(authz::Action::Modify, authz_instance).await?;
-        use nexus_db_schema::schema::instance::dsl as instance_dsl;
-        diesel::update(instance_dsl::instance)
-            .filter(instance_dsl::id.eq(authz_instance.id()))
-            .filter(instance_dsl::time_deleted.is_null())
-            .set(instance_dsl::enable_jumbo_frames.eq(enable_jumbo_frames))
-            .execute_async(&*self.pool_connection_authorized(opctx).await?)
-            .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
-        Ok(())
     }
 
     /// Set the boot disk on an instance, bypassing the rest of an instance

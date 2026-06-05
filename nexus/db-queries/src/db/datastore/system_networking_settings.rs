@@ -8,7 +8,6 @@ use super::DataStore;
 use crate::authz;
 use crate::context::OpContext;
 use async_bb8_diesel::AsyncRunQueryDsl;
-use chrono::Utc;
 use diesel::prelude::*;
 use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::public_error_from_diesel;
@@ -44,7 +43,6 @@ impl DataStore {
 
         let updates = SystemNetworkingSettingsUpdate {
             external_jumbo_frames_opt_in_enabled,
-            time_modified: Utc::now(),
         };
 
         use nexus_db_schema::schema::system_networking_settings::dsl;

@@ -62,6 +62,7 @@ use nexus_types::external_api::project;
 use nexus_types::external_api::silo::{self, SiloIdentityMode};
 use nexus_types::external_api::sled::{self, Sled, SledProvisionPolicy};
 use nexus_types::external_api::ssh_key::{SshKey, SshKeyCreate};
+use nexus_types::external_api::system_networking;
 use nexus_types::external_api::vpc;
 use nexus_types::external_api::vpc::VpcSubnet;
 use nexus_types::identity::Resource;
@@ -5332,7 +5333,7 @@ async fn test_cannot_detach_boot_disk(cptestctx: &ControlPlaneTestContext) {
             ncpus: InstanceCpuCount::try_from(2).unwrap(),
             memory: ByteCount::from_gibibytes_u32(4),
             multicast_groups: None,
-            enable_jumbo_frames: None,
+            enable_jumbo_frames: false,
         },
     )
     .await;
@@ -5442,7 +5443,7 @@ async fn test_updating_running_instance_boot_disk_is_conflict(
             ncpus: InstanceCpuCount::try_from(2).unwrap(),
             memory: ByteCount::from_gibibytes_u32(4),
             multicast_groups: None,
-            enable_jumbo_frames: None,
+            enable_jumbo_frames: false,
         },
         http::StatusCode::CONFLICT,
     )
@@ -5465,7 +5466,7 @@ async fn test_updating_running_instance_boot_disk_is_conflict(
             ncpus: InstanceCpuCount::try_from(2).unwrap(),
             memory: ByteCount::from_gibibytes_u32(4),
             multicast_groups: None,
-            enable_jumbo_frames: None,
+            enable_jumbo_frames: false,
         },
     )
     .await;
@@ -5490,7 +5491,7 @@ async fn test_updating_missing_instance_is_not_found(
             ncpus: InstanceCpuCount::try_from(0).unwrap(),
             memory: ByteCount::from_gibibytes_u32(0),
             multicast_groups: None,
-            enable_jumbo_frames: None,
+            enable_jumbo_frames: false,
         },
         http::StatusCode::NOT_FOUND,
     )
@@ -5614,7 +5615,7 @@ async fn test_size_can_be_changed(cptestctx: &ControlPlaneTestContext) {
         ncpus: initial_ncpus,
         memory: initial_memory,
         multicast_groups: None,
-        enable_jumbo_frames: None,
+        enable_jumbo_frames: false,
     };
 
     // Resizing the instance immediately will error; the instance is running.
@@ -5836,7 +5837,7 @@ async fn test_auto_restart_policy_can_be_changed(
                 ncpus: InstanceCpuCount::try_from(2).unwrap(),
                 memory: ByteCount::from_gibibytes_u32(4),
                 multicast_groups: None,
-                enable_jumbo_frames: None,
+                enable_jumbo_frames: false,
             }),
         )
         .await;
@@ -5914,7 +5915,7 @@ async fn test_cpu_platform_can_be_changed(cptestctx: &ControlPlaneTestContext) {
                 ncpus: InstanceCpuCount::try_from(2).unwrap(),
                 memory: ByteCount::from_gibibytes_u32(4),
                 multicast_groups: None,
-                enable_jumbo_frames: None,
+                enable_jumbo_frames: false,
             }),
         )
         .await;
@@ -5929,6 +5930,127 @@ async fn test_cpu_platform_can_be_changed(cptestctx: &ControlPlaneTestContext) {
 
     // Reconfigure back to None.
     assert_reconfigured(None).await;
+}
+
+// Test reconfiguring an instance's `enable_jumbo_frames` field. Enabling the
+// per-instance opt-in is gated on the fleet-wide opt-in; disabling it is always
+// permitted.
+#[nexus_test]
+async fn test_enable_jumbo_frames_can_be_changed(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    let instance_name = "got-the-big-mtu";
+
+    create_project_and_pool(&client).await;
+
+    let instance_params = instance::InstanceCreate {
+        identity: IdentityMetadataCreateParams {
+            name: instance_name.parse().unwrap(),
+            description: String::from("stuff"),
+        },
+        ncpus: InstanceCpuCount::try_from(2).unwrap(),
+        memory: ByteCount::from_gibibytes_u32(4),
+        hostname: instance_name.parse().unwrap(),
+        user_data: vec![],
+        ssh_public_keys: None,
+        network_interfaces:
+            instance::InstanceNetworkInterfaceAttachment::DefaultIpv4,
+        external_ips: vec![],
+        boot_disk: None,
+        cpu_platform: None,
+        disks: Vec::new(),
+        start: false,
+        auto_restart_policy: None,
+        anti_affinity_groups: Vec::new(),
+        multicast_groups: vec![],
+        // Start out opted out.
+        enable_jumbo_frames: false,
+    };
+
+    let builder =
+        RequestBuilder::new(client, http::Method::POST, &get_instances_url())
+            .body(Some(&instance_params))
+            .expect_status(Some(http::StatusCode::CREATED));
+    let response = NexusRequest::new(builder)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("Expected instance creation to work!");
+
+    let instance = response.parsed_body::<Instance>().unwrap();
+    assert!(!instance.enable_jumbo_frames);
+
+    let base_update = || instance::InstanceUpdate {
+        boot_disk: Nullable(None),
+        auto_restart_policy: Nullable(None),
+        cpu_platform: Nullable(None),
+        ncpus: InstanceCpuCount::try_from(2).unwrap(),
+        memory: ByteCount::from_gibibytes_u32(4),
+        multicast_groups: None,
+        enable_jumbo_frames: false,
+    };
+
+    // Without the fleet-wide opt-in, requesting `enable_jumbo_frames: true` is
+    // rejected.
+    let err = expect_instance_reconfigure_err(
+        &client,
+        &instance.identity.id,
+        instance::InstanceUpdate { enable_jumbo_frames: true, ..base_update() },
+        http::StatusCode::BAD_REQUEST,
+    )
+    .await;
+    assert!(
+        err.message.contains("fleet-wide jumbo-frames opt-in"),
+        "unexpected error message: {}",
+        err.message,
+    );
+
+    // Setting it (or leaving it) to false is always allowed, even without the
+    // fleet-wide opt-in.
+    let reconfigured = expect_instance_reconfigure_ok(
+        client,
+        &instance.identity.id,
+        base_update(),
+    )
+    .await;
+    assert!(!reconfigured.enable_jumbo_frames);
+
+    // Enable the fleet-wide opt-in.
+    let settings: system_networking::SystemNetworkingSettings = object_put(
+        client,
+        "/v1/system/networking/settings",
+        &system_networking::SystemNetworkingSettingsUpdate {
+            external_jumbo_frames_opt_in_enabled: Some(true),
+        },
+    )
+    .await;
+    assert!(settings.external_jumbo_frames_opt_in_enabled);
+
+    // With the fleet-wide opt-in enabled, the per-instance bit can be set to
+    // true.
+    let reconfigured = expect_instance_reconfigure_ok(
+        client,
+        &instance.identity.id,
+        instance::InstanceUpdate { enable_jumbo_frames: true, ..base_update() },
+    )
+    .await;
+    assert!(reconfigured.enable_jumbo_frames);
+
+    // The new value is persisted and observed by subsequent reads.
+    let fetched: Instance =
+        object_get(client, &format!("/v1/instances/{}", instance.identity.id))
+            .await;
+    assert!(fetched.enable_jumbo_frames);
+
+    // Opting back out succeeds.
+    let reconfigured = expect_instance_reconfigure_ok(
+        client,
+        &instance.identity.id,
+        base_update(),
+    )
+    .await;
+    assert!(!reconfigured.enable_jumbo_frames);
 }
 
 // Create an instance with boot disk set to one of its attached disks, then set
@@ -6014,7 +6136,7 @@ async fn test_boot_disk_can_be_changed(cptestctx: &ControlPlaneTestContext) {
             ncpus: InstanceCpuCount::try_from(2).unwrap(),
             memory: ByteCount::from_gibibytes_u32(4),
             multicast_groups: None,
-            enable_jumbo_frames: None,
+            enable_jumbo_frames: false,
         },
     )
     .await;
@@ -6088,7 +6210,7 @@ async fn test_boot_disk_must_be_attached(cptestctx: &ControlPlaneTestContext) {
             ncpus: InstanceCpuCount::try_from(2).unwrap(),
             memory: ByteCount::from_gibibytes_u32(4),
             multicast_groups: None,
-            enable_jumbo_frames: None,
+            enable_jumbo_frames: false,
         },
         http::StatusCode::CONFLICT,
     )
@@ -6124,7 +6246,7 @@ async fn test_boot_disk_must_be_attached(cptestctx: &ControlPlaneTestContext) {
             ncpus: InstanceCpuCount::try_from(2).unwrap(),
             memory: ByteCount::from_gibibytes_u32(4),
             multicast_groups: None,
-            enable_jumbo_frames: None,
+            enable_jumbo_frames: false,
         },
     )
     .await;
@@ -7142,7 +7264,7 @@ async fn test_can_start_instance_with_cpu_platform(
             ncpus: InstanceCpuCount::try_from(1).unwrap(),
             memory: ByteCount::from_gibibytes_u32(4),
             multicast_groups: None,
-            enable_jumbo_frames: None,
+            enable_jumbo_frames: false,
         },
     )
     .await;

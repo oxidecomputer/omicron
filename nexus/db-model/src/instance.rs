@@ -570,4 +570,6 @@ pub struct InstanceUpdate {
     pub memory: ByteCount,
 
     pub cpu_platform: Option<InstanceCpuPlatform>,
+
+    pub enable_jumbo_frames: bool,
 }

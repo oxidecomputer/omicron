@@ -2,7 +2,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use chrono::{DateTime, Utc};
 use nexus_db_schema::schema::system_networking_settings;
 use serde::{Deserialize, Serialize};
 
@@ -20,8 +19,6 @@ use serde::{Deserialize, Serialize};
 #[diesel(table_name = system_networking_settings)]
 pub struct SystemNetworkingSettings {
     pub singleton: bool,
-    pub time_created: DateTime<Utc>,
-    pub time_modified: DateTime<Utc>,
     /// When true, end users may opt in to jumbo frames on the primary
     /// interface of an instance. When false, the per-instance opt-in is
     /// ignored and OPTE ports are created with the default MTU.
@@ -33,5 +30,4 @@ pub struct SystemNetworkingSettings {
 #[diesel(table_name = system_networking_settings)]
 pub struct SystemNetworkingSettingsUpdate {
     pub external_jumbo_frames_opt_in_enabled: Option<bool>,
-    pub time_modified: DateTime<Utc>,
 }

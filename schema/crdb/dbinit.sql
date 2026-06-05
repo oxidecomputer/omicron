@@ -1215,8 +1215,6 @@ CREATE TABLE IF NOT EXISTS omicron.public.silo_auth_settings (
  */
 CREATE TABLE IF NOT EXISTS omicron.public.system_networking_settings (
     singleton BOOL NOT NULL PRIMARY KEY,
-    time_created TIMESTAMPTZ NOT NULL,
-    time_modified TIMESTAMPTZ NOT NULL,
 
     -- When true, end users may opt in to jumbo frames (8500 byte MTU) on the
     -- primary interface of an instance. When false, the per-instance bit is
@@ -1228,11 +1226,9 @@ CREATE TABLE IF NOT EXISTS omicron.public.system_networking_settings (
 
 INSERT INTO omicron.public.system_networking_settings (
     singleton,
-    time_created,
-    time_modified,
     external_jumbo_frames_opt_in_enabled
 ) VALUES (
-    TRUE, NOW(), NOW(), FALSE
+    TRUE, FALSE
 ) ON CONFLICT DO NOTHING;
 
 /*
@@ -8659,7 +8655,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '262.0.0', NULL)
+    (TRUE, NOW(), NOW(), '263.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

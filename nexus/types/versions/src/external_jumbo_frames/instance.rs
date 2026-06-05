@@ -248,8 +248,7 @@ pub struct InstanceUpdate {
     /// Update the per-instance jumbo-frames opt-in. Setting this to `true`
     /// requires the fleet-wide jumbo-frames opt-in to be enabled. Changes only
     /// take effect on the next instance restart.
-    #[serde(default)]
-    pub enable_jumbo_frames: Option<bool>,
+    pub enable_jumbo_frames: bool,
 }
 
 impl From<v2026_01_08_00::instance::InstanceUpdate> for InstanceUpdate {
@@ -261,7 +260,7 @@ impl From<v2026_01_08_00::instance::InstanceUpdate> for InstanceUpdate {
             auto_restart_policy: old.auto_restart_policy,
             cpu_platform: old.cpu_platform,
             multicast_groups: old.multicast_groups,
-            enable_jumbo_frames: None,
+            enable_jumbo_frames: false,
         }
     }
 }

@@ -23510,9 +23510,7 @@
             ]
           },
           "enable_jumbo_frames": {
-            "nullable": true,
             "description": "Update the per-instance jumbo-frames opt-in. Setting this to `true` requires the fleet-wide jumbo-frames opt-in to be enabled. Changes only take effect on the next instance restart.",
-            "default": null,
             "type": "boolean"
           },
           "memory": {
@@ -23545,6 +23543,7 @@
           "auto_restart_policy",
           "boot_disk",
           "cpu_platform",
+          "enable_jumbo_frames",
           "memory",
           "ncpus"
         ]
