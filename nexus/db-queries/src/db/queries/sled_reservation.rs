@@ -849,35 +849,17 @@ pub fn sled_insert_resource_query(
             ",
         )
         .param()
-        .sql(
-            ",
-            ",
-        )
+        .sql(",")
         .param()
-        .sql(
-            ",
-            ",
-        )
+        .sql(",")
         .param()
-        .sql(
-            ",
-            ",
-        )
+        .sql(",")
         .param()
-        .sql(
-            ",
-            ",
-        )
+        .sql(",")
         .param()
-        .sql(
-            ",
-            ",
-        )
+        .sql(",")
         .param()
-        .sql(
-            ",
-            ",
-        )
+        .sql(",")
         .param()
         .sql(
             "
