@@ -11,6 +11,7 @@ use omicron_common::api::internal::shared::SledIdentifiers;
 use omicron_uuid_kinds::GenericUuid;
 use oximeter_instruments::http::HttpService;
 use oximeter_instruments::http::LatencyTracker;
+use oximeter_instruments::kstat;
 use oximeter_instruments::kstat::CollectionDetails;
 use oximeter_instruments::kstat::Error as KstatError;
 use oximeter_instruments::kstat::KstatSampler;
@@ -49,9 +50,28 @@ const METRIC_COLLECTION_INTERVAL: Duration = Duration::from_secs(30);
 // now.
 const LINK_SAMPLE_INTERVAL: Duration = Duration::from_secs(10);
 
+/// The maximum number of samples retained for links.
+const N_MAX_LINK_SAMPLES: usize = 512;
+
 const CPU_SAMPLE_INTERVAL: Duration = Duration::from_secs(10);
 
+/// The maximum number of CPU usage samples.
+fn n_max_cpu_samples() -> usize {
+    // Enough for 10 collection intervals before dropping.
+    kstat::cpu::max_cardinality()
+        * samples_per_collection(CPU_SAMPLE_INTERVAL)
+        * 10
+}
+
 const ZONE_SAMPLE_INTERVAL: Duration = Duration::from_secs(10);
+
+/// The maximum number of zone CPU usage samples.
+fn n_max_zone_cpu_samples() -> usize {
+    // Enough for 10 collection intervals before dropping.
+    kstat::zone::max_cardinality()
+        * samples_per_collection(ZONE_SAMPLE_INTERVAL)
+        * 10
+}
 
 /// The interval after which we expire kstat-based collection of transient
 /// links.
@@ -135,9 +155,10 @@ fn get_collection_details(kind: &str) -> CollectionDetails {
         CollectionDetails::duration(
             LINK_SAMPLE_INTERVAL,
             TRANSIENT_LINK_EXPIRATION_INTERVAL,
+            N_MAX_LINK_SAMPLES,
         )
     } else {
-        CollectionDetails::never(LINK_SAMPLE_INTERVAL)
+        CollectionDetails::never(LINK_SAMPLE_INTERVAL, N_MAX_LINK_SAMPLES)
     }
 }
 
@@ -409,7 +430,10 @@ async fn add_zone(
 
     // We have one target per sled that samples all zones, so there's no
     // need to expire it.
-    let details = CollectionDetails::never(ZONE_SAMPLE_INTERVAL);
+    let details = CollectionDetails::never(
+        ZONE_SAMPLE_INTERVAL,
+        n_max_zone_cpu_samples(),
+    );
     match kstat_sampler.add_target(zone.clone(), details).await {
         Ok(_id) => {
             debug!(log, "added zone metrics to kstat sampler");
@@ -436,7 +460,10 @@ async fn sync_zone(
     };
 
     zone.time_synced = true;
-    let details = CollectionDetails::never(ZONE_SAMPLE_INTERVAL);
+    let details = CollectionDetails::never(
+        ZONE_SAMPLE_INTERVAL,
+        n_max_zone_cpu_samples(),
+    );
     match kstat_sampler.update_target(zone.clone(), details).await {
         Ok(_) => {
             debug!(log, "updated zone metrics after time sync");
@@ -475,7 +502,8 @@ async fn add_sled_cpu(
 
     // We have one target per sled that samples all CPUs, so there's no
     // need to expire it.
-    let details = CollectionDetails::never(CPU_SAMPLE_INTERVAL);
+    let details =
+        CollectionDetails::never(CPU_SAMPLE_INTERVAL, n_max_cpu_samples());
     match kstat_sampler.add_target(cpu.clone(), details).await {
         Ok(_id) => {
             debug!(log, "added CPU metrics to kstat sampler");
@@ -502,7 +530,8 @@ async fn sync_sled_cpu(
     };
 
     cpu.time_synced = true;
-    let details = CollectionDetails::never(CPU_SAMPLE_INTERVAL);
+    let details =
+        CollectionDetails::never(CPU_SAMPLE_INTERVAL, n_max_cpu_samples());
     match kstat_sampler.update_target(cpu.clone(), details).await {
         Ok(_) => {
             debug!(log, "updated sled CPU metrics after time sync");
@@ -788,4 +817,34 @@ fn start_producer_server(
         log: LogConfig::Logger(log),
     };
     ProducerServer::start(&config).map_err(Error::ProducerServer)
+}
+
+// Compute the number of samples expected per collection interval,
+// per-timeseries.
+//
+// # Panics
+//
+// This panics if the sample interval is more than 10k times smaller than the
+// metric collection interval. That should be enough for anybody...
+fn samples_per_collection(sample_interval: Duration) -> usize {
+    let collection = METRIC_COLLECTION_INTERVAL.as_secs_f64();
+    let sample = sample_interval.as_secs_f64();
+    let ratio = (collection / sample).ceil();
+    assert!(ratio > 0.0);
+    assert!(
+        ratio <= 10000.0,
+        "Sample interval is too small to appropriately buffer"
+    );
+    ratio as usize
+}
+
+#[cfg(test)]
+#[test]
+fn test_samples_per_collection() {
+    assert_eq!(samples_per_collection(CPU_SAMPLE_INTERVAL), 3);
+    assert_eq!(samples_per_collection(ZONE_SAMPLE_INTERVAL), 3);
+    assert_eq!(samples_per_collection(METRIC_COLLECTION_INTERVAL), 1);
+    // Edge case, but if we're generating samples less often than each
+    // collection interval, just pin that at 1.
+    assert_eq!(samples_per_collection(METRIC_COLLECTION_INTERVAL * 2), 1);
 }
