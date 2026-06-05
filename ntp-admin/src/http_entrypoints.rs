@@ -211,7 +211,7 @@ impl NtpAdminImpl {
 
     // Look up the property group within our snapshot by stepping through
     // each level.
-    let Some(service) = scope.service("chrony-setup").unwrap() else {
+    let Some(service) = scope.service("oxide/chrony-setup").unwrap() else {
         error!(log, "DEBUG: DID NOT FIND SERVICE");
         panic!("NO SERVICE") 
     };
@@ -267,7 +267,7 @@ impl NtpAdminImpl {
         // Boundary zone: Can I reach the upstream NTP server (e.g. ICMP ping)?
         // Internal zone: Can I reach the boundary NTP server (e.g. ICMP ping)?
 
-        Ok(DebugInfo { data: "DEBUG INFO HERE".to_string() })
+        Ok(DebugInfo { data: format!("PROPERTIES: {all_properties:?}") })
     }
 }
 
