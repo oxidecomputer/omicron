@@ -206,52 +206,44 @@ impl NtpAdminImpl {
 
         // TODO-K: get rid of unwraps
         // Get a handle to scf and the local scope.
-    let scf = Scf::connect_current_zone().unwrap();
-    let scope = scf.scope_local().unwrap();
+        let scf = Scf::connect_current_zone().unwrap();
+        let scope = scf.scope_local().unwrap();
 
-    // Look up the property group within our snapshot by stepping through
-    // each level.
-    let Some(service) = scope.service("oxide/chrony-setup").unwrap() else {
-        error!(log, "DEBUG: DID NOT FIND SERVICE");
-        panic!("NO SERVICE") 
-    };
-    let Some(instance) = service.instance("default").unwrap() else {
-        error!(log, "instance default not found within {}", service.fmri());
-        panic!("NO instance")
-    };
-//    let Some(snapshot) = instance.snapshot("running")? else {
-//        bail!("no running snapshot found for {}", instance.fmri());
-//    };
-    let Some(pg) = instance.property_group_direct("config").unwrap() else {
-        error!(log,
-            "property group 'config' not found for {}",
-            instance.fmri(),
-        );
-        panic!("NO PROPERTY group")
-    };
+        // Look up the property group within our snapshot by stepping through
+        // each level.
+        let Some(service) = scope.service("oxide/chrony-setup").unwrap() else {
+            error!(log, "DEBUG: DID NOT FIND SERVICE");
+            panic!("NO SERVICE")
+        };
+        let Some(instance) = service.instance("default").unwrap() else {
+            error!(log, "instance default not found within {}", service.fmri());
+            panic!("NO instance")
+        };
+        //    let Some(snapshot) = instance.snapshot("running")? else {
+        //        bail!("no running snapshot found for {}", instance.fmri());
+        //    };
+        let Some(pg) = instance.property_group_direct("config").unwrap() else {
+            error!(
+                log,
+                "property group 'config' not found for {}",
+                instance.fmri(),
+            );
+            panic!("NO PROPERTY group")
+        };
 
-    let Some(property) = pg.property("server").unwrap() else {
-        error!(log,
-            "property 'server' not found for {:?}",
-            pg,
-        );
-        panic!("NO PROPERTY")
-    };
+        let Some(property) = pg.property("server").unwrap() else {
+            error!(log, "property 'server' not found for {:?}", pg,);
+            panic!("NO PROPERTY")
+        };
 
-    let values: Vec<Value> =
-        property.values().unwrap().collect::<Result<_, _>>().unwrap();
-    let mut all_properties = vec![];
-    for value in values {
-        all_properties.push(value.display_smf().to_string());
-    }
+        let values: Vec<Value> =
+            property.values().unwrap().collect::<Result<_, _>>().unwrap();
+        let mut all_properties = vec![];
+        for value in values {
+            all_properties.push(value.display_smf().to_string());
+        }
 
-   // let mut all_properties = BTreeMap::new();
-   // for property in pg.properties()? {
-   //     let property = property?;
-   //     let values = property.values()?.collect::<Result<_, _>>()?;
-   //     all_properties.insert(property.name().to_string(), values);
-   // }
-    info!(log, "DEBUG: server: {all_properties:?}");
+        info!(log, "DEBUG: server: {all_properties:?}");
 
         // Is this a boundary zone?
 
