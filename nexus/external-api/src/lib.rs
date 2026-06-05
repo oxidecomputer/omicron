@@ -5608,8 +5608,9 @@ pub trait NexusExternalApi {
 
     /// List images
     ///
-    /// List images which are global or scoped to the specified project. The images
-    /// are returned sorted by creation date, with the most recent images appearing first.
+    /// List images which are global or scoped to the specified project.
+    /// The images are returned sorted by creation date, with the most
+    /// recent images appearing first.
     #[endpoint {
         method = GET,
         path = "/v1/images",
@@ -5625,8 +5626,9 @@ pub trait NexusExternalApi {
 
     /// List images
     ///
-    /// List images which are global or scoped to the specified project. The images
-    /// are returned sorted by creation date, with the most recent images appearing first.
+    /// List images which are global or scoped to the specified project.
+    /// The images are returned sorted by creation date, with the most
+    /// recent images appearing first.
     #[endpoint {
         operation_id = "image_list",
         method = GET,
