@@ -42,7 +42,7 @@ enum Commands {
     /// Show the current situation report.
     ///
     /// This is an alias for `omdb db sitrep info current`.
-    Current(ShowArgs),
+    Current(ShowOptions),
 
     /// Show details on a situation report.
     #[clap(alias = "show")]
@@ -52,10 +52,10 @@ enum Commands {
         sitrep: SitrepIdOrCurrent,
 
         #[clap(flatten)]
-        args: ShowArgs,
+        opts: ShowOptions,
     },
 
-    /// Commands for showing sitrep analysis reports.
+    /// Show the analysis report for the requested sitrep, if one exists.
     AnalysisReport(AnalysisReportArgs),
 }
 
@@ -72,29 +72,16 @@ pub(super) struct SitrepHistoryArgs {
 
 #[derive(Debug, Args, Clone)]
 struct AnalysisReportArgs {
-    #[clap(subcommand)]
-    command: AnalysisReportCommands,
-}
+    /// The UUID of the sitrep to show, or "current" to show the current
+    /// sitrep.
+    sitrep: SitrepIdOrCurrent,
 
-#[derive(Debug, Subcommand, Clone)]
-enum AnalysisReportCommands {
-    /// Show the analysis reports for the requested sitrep, if any exist.
-    #[clap(alias = "show")]
-    Info {
-        /// The UUID of the sitrep to show, or "current" to show the current
-        /// sitrep.
-        sitrep: SitrepIdOrCurrent,
-
-        #[clap(flatten)]
-        args: ShowArgs,
-    },
-
-    /// List all analysis reports currently in the database.
-    List {},
+    #[clap(flatten)]
+    opts: ShowOptions,
 }
 
 #[derive(Debug, Args, Clone)]
-struct ShowArgs {
+struct ShowOptions {
     #[clap(long, short)]
     json: bool,
 }
@@ -129,7 +116,7 @@ pub(super) async fn cmd_db_sitrep(
         Commands::History(ref args) => {
             cmd_db_sitrep_history(opctx, datastore, fetch_opts, args).await
         }
-        Commands::Info { sitrep, ref args } => {
+        Commands::Info { sitrep, opts: ref args } => {
             cmd_db_sitrep_show(opctx, datastore, fetch_opts, args, sitrep).await
         }
         Commands::Current(ref args) => {
@@ -142,18 +129,8 @@ pub(super) async fn cmd_db_sitrep(
             )
             .await
         }
-        Commands::AnalysisReport(AnalysisReportArgs {
-            command: AnalysisReportCommands::Info { sitrep, ref args },
-        }) => {
-            cmd_db_sitrep_analysis_report_show(
-                opctx, datastore, fetch_opts, args, sitrep,
-            )
-            .await
-        }
-        Commands::AnalysisReport(AnalysisReportArgs {
-            command: AnalysisReportCommands::List {},
-        }) => {
-            cmd_db_sitrep_analysis_report_list(opctx, datastore, fetch_opts)
+        Commands::AnalysisReport(ref args) => {
+            cmd_db_sitrep_analysis_report(opctx, datastore, fetch_opts, args)
                 .await
         }
     }
@@ -236,7 +213,7 @@ async fn cmd_db_sitrep_show(
     opctx: &OpContext,
     datastore: &DataStore,
     _fetch_opts: &DbFetchOptions,
-    _args: &ShowArgs,
+    opts: &ShowOptions,
     sitrep: SitrepIdOrCurrent,
 ) -> anyhow::Result<()> {
     let ctx = || match sitrep {
@@ -280,6 +257,12 @@ async fn cmd_db_sitrep_show(
             (Some(version), sitrep)
         }
     };
+
+    if opts.json {
+        serde_json::to_writer_pretty(std::io::stdout(), &sitrep)
+            .context("failed to serialize sitrep")?;
+        return Ok(());
+    }
 
     let fm::Sitrep { metadata, cases, ereports_by_id } = sitrep;
     let fm::SitrepMetadata {
@@ -409,21 +392,13 @@ async fn cmd_db_sitrep_show(
     Ok(())
 }
 
-async fn cmd_db_sitrep_analysis_report_list(
+async fn cmd_db_sitrep_analysis_report(
     opctx: &OpContext,
     datastore: &DataStore,
     _fetch_opts: &DbFetchOptions,
+    args: &AnalysisReportArgs,
 ) -> anyhow::Result<()> {
-    anyhow::bail!("TODO ELIZA IMPLEMENT ME LOL")
-}
-
-async fn cmd_db_sitrep_analysis_report_show(
-    opctx: &OpContext,
-    datastore: &DataStore,
-    _fetch_opts: &DbFetchOptions,
-    args: &ShowArgs,
-    sitrep: SitrepIdOrCurrent,
-) -> anyhow::Result<()> {
+    let &AnalysisReportArgs { sitrep, ref opts } = args;
     let id = match sitrep {
         SitrepIdOrCurrent::Current => {
             datastore
@@ -452,7 +427,7 @@ async fn cmd_db_sitrep_analysis_report_show(
     };
 
     let report = load_analysis_report(datastore, id).await.with_context(ctx)?;
-    print_analysis_reports(&report, args.json)?;
+    print_analysis_reports(&report, opts.json)?;
 
     Ok(())
 }
