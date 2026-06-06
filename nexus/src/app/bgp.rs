@@ -198,22 +198,10 @@ impl super::Nexus {
 
                 for (peer_id, exports) in exported {
                     for ex in exports.iter() {
-                        let prefix = match ex {
-                            mg_api_types::rdb::prefix::Prefix::V4(v4) => {
-                                oxnet::IpNet::V4(oxnet::Ipv4Net::new_unchecked(
-                                    v4.value, v4.length,
-                                ))
-                            }
-                            mg_api_types::rdb::prefix::Prefix::V6(v6) => {
-                                oxnet::IpNet::V6(oxnet::Ipv6Net::new_unchecked(
-                                    v6.value, v6.length,
-                                ))
-                            }
-                        };
                         let export = networking::BgpExported {
                             peer_id: peer_id.clone(),
                             switch: switch_slot,
-                            prefix,
+                            prefix: ex.clone(),
                         };
                         result.push(export);
                     }
