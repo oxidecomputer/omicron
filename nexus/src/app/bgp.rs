@@ -201,7 +201,7 @@ impl super::Nexus {
                         let export = networking::BgpExported {
                             peer_id: peer_id.clone(),
                             switch: switch_slot,
-                            prefix: ex.clone(),
+                            prefix: *ex,
                         };
                         result.push(export);
                     }
