@@ -848,7 +848,7 @@ pub fn turin_v2(vcpu_count: u16) -> Result<CpuIdDump, CpuPlatformError> {
     // future hardware.
     //
     // For the sake of doing *something*, we go with the most pessistic form of
-    // Turn: assume 8 cores/16 threads per CCD, that each CCD has 32 MiB of
+    // Turin: assume 8 cores/16 threads per CCD, that each CCD has 32 MiB of
     // memory, and that we can size a VM's "L3" as "32M / 16 * vCPUs".
     //
     // The above hopefully informs you, dear reader, about why we'd really
