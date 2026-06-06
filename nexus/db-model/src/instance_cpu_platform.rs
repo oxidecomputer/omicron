@@ -24,6 +24,7 @@ impl_enum_type!(
 
     AmdMilan => b"amd_milan"
     AmdTurin => b"amd_turin"
+    AmdTurinV2 => b"amd_turin_v2"
 );
 
 impl InstanceCpuPlatform {
@@ -37,6 +38,7 @@ impl InstanceCpuPlatform {
                 &[SledCpuFamily::AmdMilan, SledCpuFamily::AmdTurin]
             }
             Self::AmdTurin => &[SledCpuFamily::AmdTurin],
+            Self::AmdTurinV2 => &[SledCpuFamily::AmdTurin],
         }
     }
 }
@@ -49,6 +51,7 @@ impl From<omicron_common::api::external::InstanceCpuPlatform>
         match value {
             ApiPlatform::AmdMilan => Self::AmdMilan,
             ApiPlatform::AmdTurin => Self::AmdTurin,
+            ApiPlatform::AmdTurinV2 => Self::AmdTurinV2,
         }
     }
 }
@@ -60,6 +63,7 @@ impl From<InstanceCpuPlatform>
         match value {
             InstanceCpuPlatform::AmdMilan => Self::AmdMilan,
             InstanceCpuPlatform::AmdTurin => Self::AmdTurin,
+            InstanceCpuPlatform::AmdTurinV2 => Self::AmdTurinV2,
         }
     }
 }

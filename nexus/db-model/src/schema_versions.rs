@@ -28,6 +28,7 @@ pub static KNOWN_VERSIONS: LazyLock<Vec<KnownVersion>> = LazyLock::new(|| {
         // |  leaving the first copy as an example for the next person.
         // v
         // KnownVersion::new(next_int, "unique-dirname-with-the-sql-files"),
+        KnownVersion::new(263, "instance-cpu-type-turin-v2"),
         KnownVersion::new(262, "rename-ip-pool-reservation-type"),
         KnownVersion::new(261, "remove-add-zones-with-mupdate-override"),
         KnownVersion::new(260, "ereport-trim-serial-trailing-nulls"),
