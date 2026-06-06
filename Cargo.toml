@@ -615,8 +615,8 @@ ntp-admin-client = { path = "clients/ntp-admin-client" }
 ntp-admin-v1-client = { path = "clients/ntp-admin-v1-client" }
 ntp-admin-types = { path = "ntp-admin/types" }
 ntp-admin-types-versions = { path = "ntp-admin/types/versions" }
-mg-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "285ac69039f853a7d5124583500f3c81e0e2134c" }
-ddm-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "285ac69039f853a7d5124583500f3c81e0e2134c" }
+mg-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "657e9155e12dee27b05882e8bb208595085648aa" }
+ddm-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "657e9155e12dee27b05882e8bb208595085648aa" }
 multimap = "0.10.1"
 nexus-auth = { path = "nexus/auth" }
 nexus-background-task-interface = { path = "nexus/background-task-interface" }
@@ -753,7 +753,7 @@ rats-corim = { git = "https://github.com/oxidecomputer/rats-corim.git", rev = "f
 raw-cpuid = { git = "https://github.com/oxidecomputer/rust-cpuid.git", rev = "a4cf01df76f35430ff5d39dc2fe470bcb953503b" }
 rayon = "1.10"
 rcgen = "0.12.1"
-mg-api-types = { git = "https://github.com/oxidecomputer/maghemite", rev = "285ac69039f853a7d5124583500f3c81e0e2134c" }
+mg-api-types = { git = "https://github.com/oxidecomputer/maghemite", rev = "657e9155e12dee27b05882e8bb208595085648aa" }
 reconfigurator-cli = { path = "dev-tools/reconfigurator-cli" }
 reedline = "0.40.0"
 ref-cast = "1.0"
