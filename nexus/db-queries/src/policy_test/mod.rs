@@ -357,9 +357,10 @@ async fn authorize_one_resource(
                     "result" => ?result,
                 );
                 let summary = match result {
-                    Ok(_) => '\u{2714}', // ✔
-                    Err(Error::Forbidden)
-                    | Err(Error::ObjectNotFound { .. }) => '\u{2718}', // ✘
+                    Ok(_) => '\u{2714}',                 // ✔
+                    Err(Error::Forbidden) => '\u{2718}', // ✘ 403, visible
+                    // ∅ 404, hidden
+                    Err(Error::ObjectNotFound { .. }) => '\u{2205}',
                     Err(Error::Unauthenticated { .. }) => '!',
                     Err(_) => '\u{26a0}', // ⚠
                 };
