@@ -2384,7 +2384,7 @@ mod tests {
         // that a record exists. But it's worth noting that the input report is
         // kinda wrong.
         let input_report = InputReport {
-            parent_sitrep_id: sitrep.parent_id().clone(),
+            parent_sitrep_id: sitrep.parent_id(),
             parent_inv_id: None,
             inv_id: sitrep.inv_id(),
             new_ereport_ids: Default::default(),
@@ -2392,7 +2392,7 @@ mod tests {
             closed_cases_copied_forward: Default::default(),
         };
         let analysis_report = AnalysisReport {
-            sitrep_id: sitrep.id.clone(),
+            sitrep_id: sitrep.id(),
             comment: format!(
                 "{} (totally fake analysis report)",
                 sitrep.metadata.comment
@@ -2896,6 +2896,7 @@ mod tests {
             cases: Default::default(),
             ereports_by_id: Default::default(),
         };
+        let sitrep1_id = sitrep1.id();
         let sitrep1_report = make_test_analysis_report(&sitrep1);
         datastore
             .fm_sitrep_insert(opctx, sitrep1, Some(sitrep1_report))
@@ -2993,7 +2994,7 @@ mod tests {
                 AnalysisReport, InputReport,
             };
             let input_report = InputReport {
-                parent_sitrep_id: Some(sitrep1.id()),
+                parent_sitrep_id: Some(sitrep1_id),
                 parent_inv_id: None,
                 inv_id: CollectionUuid::new_v4(),
                 new_ereport_ids: Default::default(),
@@ -3001,7 +3002,7 @@ mod tests {
                 closed_cases_copied_forward: Default::default(),
             };
             let analysis_report = AnalysisReport {
-                sitrep_id: ghost_sitrep_id.clone(),
+                sitrep_id: ghost_sitrep_id,
                 comment: "spooky ghost analysis report".to_string(),
                 cases: Default::default(),
             };
