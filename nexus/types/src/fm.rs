@@ -69,6 +69,12 @@ impl Sitrep {
         self.metadata.parent_sitrep_id
     }
 
+    /// Returns the inventory collection ID of the collection that was used as
+    /// input to this sitrep.
+    pub fn inv_id(&self) -> CollectionUuid {
+        self.metadata.inv_collection_id
+    }
+
     /// Iterate over all the open cases in this sitrep.
     ///
     /// All cases returned by this iterator will be copied forward into any

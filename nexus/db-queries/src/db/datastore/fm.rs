@@ -35,6 +35,7 @@ use nexus_db_schema::schema::fm_alert_request::dsl as alert_req_dsl;
 use nexus_db_schema::schema::fm_case::dsl as case_dsl;
 use nexus_db_schema::schema::fm_ereport_in_case::dsl as case_ereport_dsl;
 use nexus_db_schema::schema::fm_sitrep::dsl as sitrep_dsl;
+use nexus_db_schema::schema::fm_sitrep_analysis_report::dsl as analysis_report_dsl;
 use nexus_db_schema::schema::fm_sitrep_history::dsl as history_dsl;
 use nexus_db_schema::schema::fm_support_bundle_request::dsl as support_bundle_req_dsl;
 use nexus_types::fm;
@@ -121,6 +122,7 @@ sitrep_child_tables! {
     SupportBundleRequestDataSelectionEreports => { table: "fm_support_bundle_request_data_selection_ereports" },
     SupportBundleRequest => { table: "fm_support_bundle_request" },
     Case => { table: "fm_case" },
+    AnalysisReport => { table: "fm_sitrep_analysis_report" },
 }
 
 /// Per-child-table statistics from a single GC pass.
@@ -666,6 +668,11 @@ impl DataStore {
     /// section](https://rfd.shared.oxide.computer/rfd/0603#_creating_sitreps)
     /// in RFD 603 for details.
     ///
+    /// If `analysis_report` is provided, the human-readable debug reports
+    /// describing the analysis step that produced the sitrep are stored
+    /// alongside it. These reports are diagnostic metadata only (consumed by
+    /// `omdb`), and are not part of the canonical sitrep state.
+    ///
     /// # Returns
     ///
     /// - `Ok(())` if the new sitrep was both successfully inserted *and* added
@@ -685,6 +692,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         sitrep: Sitrep,
+        analysis_report: Option<model::fm::SitrepAnalysisReport>,
     ) -> Result<(), InsertSitrepError> {
         let conn = self.pool_connection_authorized(opctx).await?;
 
@@ -786,6 +794,24 @@ impl DataStore {
                 .map_err(|e| {
                     public_error_from_diesel(e, ErrorHandler::Server)
                         .internal_context("failed to insert alert requests")
+                })?;
+        }
+
+        // Store the analysis reports describing how this sitrep was produced,
+        // if any were provided. Like the other child records above, this is
+        // keyed on `sitrep_id`, so it is protected from concurrent GC by the
+        // metadata row inserted first, and will be cleaned up by the GC if this
+        // sitrep ends up orphaned.
+        if let Some(analysis_report) = analysis_report {
+            diesel::insert_into(analysis_report_dsl::fm_sitrep_analysis_report)
+                .values(analysis_report)
+                .execute_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                        .internal_context(
+                            "failed to insert sitrep analysis report",
+                        )
                 })?;
         }
 
@@ -1138,6 +1164,7 @@ impl DataStore {
             alert_requests_deleted: usize,
             support_bundle_requests_deleted: usize,
             cases_deleted: usize,
+            analysis_reports_deleted: usize,
         }
 
         let err = OptionalError::new();
@@ -1147,6 +1174,7 @@ impl DataStore {
             alert_requests_deleted,
             support_bundle_requests_deleted,
             cases_deleted,
+            analysis_reports_deleted,
         } = self
             // Sitrep deletion is transactional to prevent a sitrep from being
             // left in a partially-deleted state should the Nexus instance
@@ -1198,6 +1226,16 @@ impl DataStore {
                     .execute_async(&conn)
                     .await?;
 
+                    // Delete sitrep analysis report records.
+                    let analysis_reports_deleted = diesel::delete(
+                        analysis_report_dsl::fm_sitrep_analysis_report.filter(
+                            analysis_report_dsl::sitrep_id
+                                .eq_any(ids.clone()),
+                        ),
+                    )
+                    .execute_async(&conn)
+                    .await?;
+
                     // Delete sitrep metadata records.
                     let sitreps_deleted = diesel::delete(
                         sitrep_dsl::fm_sitrep
@@ -1212,6 +1250,7 @@ impl DataStore {
                         alert_requests_deleted,
                         support_bundle_requests_deleted,
                         case_ereports_deleted,
+                        analysis_reports_deleted,
                     })
                 }
             })
@@ -1230,6 +1269,7 @@ impl DataStore {
             "case_ereports_deleted" => case_ereports_deleted,
             "alert_requests_deleted" => alert_requests_deleted,
             "support_bundle_requests_deleted" => support_bundle_requests_deleted,
+            "analysis_reports_deleted" => analysis_reports_deleted,
         );
 
         Ok(sitreps_deleted)
@@ -1786,7 +1826,7 @@ mod tests {
             ereports_by_id: Default::default(),
         };
 
-        datastore.fm_sitrep_insert(&opctx, sitrep.clone()).await.unwrap();
+        datastore.fm_sitrep_insert(&opctx, sitrep.clone(), None).await.unwrap();
 
         let current = datastore
             .fm_sitrep_read_current(&opctx)
@@ -1805,7 +1845,7 @@ mod tests {
 
         // Trying to insert the same sitrep again should fail.
         let err = datastore
-            .fm_sitrep_insert(&opctx, sitrep.clone())
+            .fm_sitrep_insert(&opctx, sitrep.clone(), None)
             .await
             .unwrap_err();
         assert!(err.to_string().contains("duplicate key"));
@@ -1836,7 +1876,10 @@ mod tests {
             cases: Default::default(),
             ereports_by_id: Default::default(),
         };
-        datastore.fm_sitrep_insert(&opctx, sitrep1.clone()).await.unwrap();
+        datastore
+            .fm_sitrep_insert(&opctx, sitrep1.clone(), None)
+            .await
+            .unwrap();
 
         // Create a second sitrep with the first as parent
         let sitrep2 = nexus_types::fm::Sitrep {
@@ -1852,7 +1895,7 @@ mod tests {
             cases: Default::default(),
             ereports_by_id: Default::default(),
         };
-        datastore.fm_sitrep_insert(&opctx, sitrep2.clone()).await.expect(
+        datastore.fm_sitrep_insert(&opctx, sitrep2.clone(), None).await.expect(
             "inserting a sitrep whose parent is current should succeed",
         );
 
@@ -1895,7 +1938,10 @@ mod tests {
             cases: Default::default(),
             ereports_by_id: Default::default(),
         };
-        datastore.fm_sitrep_insert(&opctx, sitrep1.clone()).await.unwrap();
+        datastore
+            .fm_sitrep_insert(&opctx, sitrep1.clone(), None)
+            .await
+            .unwrap();
 
         // Try to insert a sitrep with a non-existent parent ID
         let nonexistent_id = SitrepUuid::new_v4();
@@ -1913,7 +1959,7 @@ mod tests {
             ereports_by_id: Default::default(),
         };
 
-        let result = datastore.fm_sitrep_insert(&opctx, sitrep2).await;
+        let result = datastore.fm_sitrep_insert(&opctx, sitrep2, None).await;
 
         // Should fail with ParentNotCurrent error
         match result {
@@ -1949,7 +1995,10 @@ mod tests {
             cases: Default::default(),
             ereports_by_id: Default::default(),
         };
-        datastore.fm_sitrep_insert(&opctx, sitrep1.clone()).await.unwrap();
+        datastore
+            .fm_sitrep_insert(&opctx, sitrep1.clone(), None)
+            .await
+            .unwrap();
 
         // Create a second sitrep with the first as parent
         let sitrep2 = nexus_types::fm::Sitrep {
@@ -1965,7 +2014,10 @@ mod tests {
             cases: Default::default(),
             ereports_by_id: Default::default(),
         };
-        datastore.fm_sitrep_insert(&opctx, sitrep2.clone()).await.unwrap();
+        datastore
+            .fm_sitrep_insert(&opctx, sitrep2.clone(), None)
+            .await
+            .unwrap();
 
         // Try to create a third sitrep with sitrep1 (outdated) as parent.
         // This should fail, as sitrep2 is now the current sitrep.
@@ -1982,7 +2034,8 @@ mod tests {
             cases: Default::default(),
             ereports_by_id: Default::default(),
         };
-        let result = datastore.fm_sitrep_insert(&opctx, sitrep3.clone()).await;
+        let result =
+            datastore.fm_sitrep_insert(&opctx, sitrep3.clone(), None).await;
 
         // Should fail with ParentNotCurrent error
         match result {
@@ -2315,6 +2368,80 @@ mod tests {
         }
     }
 
+    /// Make an empty analysis report for testing purposes.
+    fn make_test_analysis_report(
+        sitrep: &fm::Sitrep,
+    ) -> model::fm::SitrepAnalysisReport {
+        use nexus_types::fm::analysis_reports::{AnalysisReport, InputReport};
+
+        // XXX(eliza): this is not actually representative of the new sitrep,
+        // since we don't have access to its parent (and there may not actually
+        // be one, as the test sitrep may be initialized with a non-existant
+        // parent). Therefore, we can't populate most of the parent fields of
+        // the analysis report --- we don't know which cases were open in the
+        // parent, or its inventory ID. This doesn't actually matter, as the
+        // tests don't care about the *contents* of the analysis reports, just
+        // that a record exists. But it's worth noting that the input report is
+        // kinda wrong.
+        let input_report = InputReport {
+            parent_sitrep_id: sitrep.parent_id().clone(),
+            parent_inv_id: None,
+            inv_id: sitrep.inv_id(),
+            new_ereport_ids: Default::default(),
+            open_cases: Default::default(),
+            closed_cases_copied_forward: Default::default(),
+        };
+        let analysis_report = AnalysisReport {
+            sitrep_id: sitrep.id.clone(),
+            comment: format!(
+                "{} (totally fake analysis report)",
+                sitrep.metadata.comment
+            ),
+            cases: Default::default(),
+        };
+        model::fm::SitrepAnalysisReport::new(&input_report, &analysis_report)
+            .expect("failed to serialize analysis report")
+    }
+
+    #[tokio::test]
+    async fn test_sitrep_analysis_report_roundtrip() {
+        let logctx =
+            dev::test_setup_log("test_sitrep_analysis_report_roundtrip");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let sitrep = make_sitrep_with_cases(&opctx, &datastore).await;
+        let sitrep_id = sitrep.id();
+        let report = make_test_analysis_report(&sitrep);
+
+        datastore
+            .fm_sitrep_insert(&opctx, sitrep.clone(), Some(report.clone()))
+            .await
+            .expect("failed to insert sitrep with analysis report");
+
+        // Read the analysis report back directly, mirroring how `omdb` loads
+        // it.
+        let read: model::fm::SitrepAnalysisReport = {
+            use nexus_db_schema::schema::fm_sitrep_analysis_report::dsl;
+            dsl::fm_sitrep_analysis_report
+                .filter(dsl::sitrep_id.eq(sitrep_id.into_untyped_uuid()))
+                .select(model::fm::SitrepAnalysisReport::as_select())
+                .first_async(
+                    &*datastore.pool_connection_for_tests().await.unwrap(),
+                )
+                .await
+                .expect("failed to read back analysis report")
+        };
+
+        assert_eq!(read.sitrep_id, report.sitrep_id);
+        assert_eq!(read.git_commit, report.git_commit);
+        assert_eq!(read.input_report, report.input_report);
+        assert_eq!(read.analysis_report, report.analysis_report);
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
     #[tokio::test]
     async fn test_sitrep_cases_roundtrip() {
         let logctx = dev::test_setup_log("test_sitrep_cases_roundtrip");
@@ -2322,10 +2449,11 @@ mod tests {
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
         let sitrep = make_sitrep_with_cases(&opctx, &datastore).await;
+        let report = make_test_analysis_report(&sitrep);
         let sitrep_id = sitrep.id();
 
         datastore
-            .fm_sitrep_insert(&opctx, sitrep.clone())
+            .fm_sitrep_insert(&opctx, sitrep.clone(), Some(report))
             .await
             .expect("failed to insert sitrep");
 
@@ -2425,7 +2553,7 @@ mod tests {
         };
 
         datastore
-            .fm_sitrep_insert(&opctx, sitrep.clone())
+            .fm_sitrep_insert(&opctx, sitrep.clone(), None)
             .await
             .expect("failed to insert sitrep");
 
@@ -2448,10 +2576,11 @@ mod tests {
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
         let sitrep = make_sitrep_with_cases(&opctx, &datastore).await;
+        let report = make_test_analysis_report(&sitrep);
         let sitrep_id = sitrep.id();
 
         datastore
-            .fm_sitrep_insert(&opctx, sitrep.clone())
+            .fm_sitrep_insert(&opctx, sitrep.clone(), Some(report))
             .await
             .expect("failed to insert sitrep");
 
@@ -2475,6 +2604,7 @@ mod tests {
                     cases: Default::default(),
                     ereports_by_id: Default::default(),
                 },
+                None,
             )
             .await
             .expect("failed to insert second sitrep");
@@ -2600,8 +2730,9 @@ mod tests {
         // Create a sitrep and insert it.
         let sitrep = make_sitrep_with_cases(opctx, datastore).await;
         let sitrep_id = sitrep.metadata.id;
+        let report = make_test_analysis_report(&sitrep);
         datastore
-            .fm_sitrep_insert(opctx, sitrep.clone())
+            .fm_sitrep_insert(opctx, sitrep.clone(), Some(report))
             .await
             .expect("failed to insert sitrep");
 
@@ -2616,23 +2747,22 @@ mod tests {
         // sitrep we intend to delete, as the sitrep insert operation makes a
         // sitrep the current sitrep, and a sitrep cannot be deleted if it is
         // current.
+        let child = fm::Sitrep {
+            metadata: fm::SitrepMetadata {
+                parent_sitrep_id: Some(sitrep_id),
+                id: SitrepUuid::new_v4(),
+                time_created: Utc::now(),
+                creator_id: OmicronZoneUuid::new_v4(),
+                comment: "my cool sitrep".to_string(),
+                inv_collection_id: CollectionUuid::new_v4(),
+                next_inv_min_time_started: Utc::now(),
+            },
+            cases: Default::default(),
+            ereports_by_id: Default::default(),
+        };
+        let child_report = make_test_analysis_report(&child);
         datastore
-            .fm_sitrep_insert(
-                opctx,
-                fm::Sitrep {
-                    metadata: fm::SitrepMetadata {
-                        parent_sitrep_id: Some(sitrep_id),
-                        id: SitrepUuid::new_v4(),
-                        time_created: Utc::now(),
-                        creator_id: OmicronZoneUuid::new_v4(),
-                        comment: "my cool sitrep".to_string(),
-                        inv_collection_id: CollectionUuid::new_v4(),
-                        next_inv_min_time_started: Utc::now(),
-                    },
-                    cases: Default::default(),
-                    ereports_by_id: Default::default(),
-                },
-            )
+            .fm_sitrep_insert(opctx, child, Some(child_report))
             .await
             .expect("failed to insert second sitrep");
 
@@ -2766,8 +2896,9 @@ mod tests {
             cases: Default::default(),
             ereports_by_id: Default::default(),
         };
+        let sitrep1_report = make_test_analysis_report(&sitrep1);
         datastore
-            .fm_sitrep_insert(opctx, sitrep1)
+            .fm_sitrep_insert(opctx, sitrep1, Some(sitrep1_report))
             .await
             .expect("inserting initial sitrep should succeed");
 
@@ -2856,6 +2987,36 @@ mod tests {
             .expect("inserting deeply orphaned data selection host_info");
         }
 
+        // Insert a deeply-orphaned analysis report.
+        let ghost_analysis_report = {
+            use nexus_types::fm::analysis_reports::{
+                AnalysisReport, InputReport,
+            };
+            let input_report = InputReport {
+                parent_sitrep_id: Some(sitrep1.id()),
+                parent_inv_id: None,
+                inv_id: CollectionUuid::new_v4(),
+                new_ereport_ids: Default::default(),
+                open_cases: Default::default(),
+                closed_cases_copied_forward: Default::default(),
+            };
+            let analysis_report = AnalysisReport {
+                sitrep_id: ghost_sitrep_id.clone(),
+                comment: "spooky ghost analysis report".to_string(),
+                cases: Default::default(),
+            };
+            model::fm::SitrepAnalysisReport::new(
+                &input_report,
+                &analysis_report,
+            )
+            .expect("ghost analysis report should be valid")
+        };
+        diesel::insert_into(analysis_report_dsl::fm_sitrep_analysis_report)
+            .values(ghost_analysis_report)
+            .execute_async(&*conn)
+            .await
+            .expect("inserting deeply orphaned analysis reports");
+
         // Verify the rows exist.
         let sb_requests_before: i64 =
             support_bundle_req_dsl::fm_support_bundle_request
@@ -2890,6 +3051,21 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(alerts_before, 1, "alert request should exist before GC");
+
+        let analysis_reports_before: i64 =
+            analysis_report_dsl::fm_sitrep_analysis_report
+                .filter(
+                    analysis_report_dsl::sitrep_id
+                        .eq(ghost_sitrep_id.into_untyped_uuid()),
+                )
+                .count()
+                .get_result_async::<i64>(&*conn)
+                .await
+                .unwrap();
+        assert_eq!(
+            analysis_reports_before, 1,
+            "analysis report should exist before GC"
+        );
 
         // Verify the ghost sitrep does NOT exist in fm_sitrep.
         let sitrep_exists: i64 = sitrep_dsl::fm_sitrep
@@ -2939,6 +3115,10 @@ mod tests {
                 .rows_deleted,
             0, // we didn't insert any
         );
+        assert_eq!(
+            result.child_tables[&SitrepChildTable::AnalysisReport].rows_deleted,
+            1,
+        );
 
         // Verify the rows are gone.
         let cases_after: i64 = case_dsl::fm_case
@@ -2975,6 +3155,21 @@ mod tests {
             "support bundle request should be gone after GC"
         );
 
+        let analysis_reports_after: i64 =
+            analysis_report_dsl::fm_sitrep_analysis_report
+                .filter(
+                    analysis_report_dsl::sitrep_id
+                        .eq(ghost_sitrep_id.into_untyped_uuid()),
+                )
+                .count()
+                .get_result_async::<i64>(&*conn)
+                .await
+                .unwrap();
+        assert_eq!(
+            analysis_reports_after, 0,
+            "analysis report should be gone after GC"
+        );
+
         db.terminate().await;
         logctx.cleanup_successful();
     }
@@ -3003,8 +3198,9 @@ mod tests {
             cases: Default::default(),
             ereports_by_id: Default::default(),
         };
+        let sitrep1_report = make_test_analysis_report(&sitrep1);
         datastore
-            .fm_sitrep_insert(opctx, sitrep1)
+            .fm_sitrep_insert(opctx, sitrep1, Some(sitrep1_report))
             .await
             .expect("inserting initial sitrep should succeed");
 
@@ -3130,8 +3326,9 @@ mod tests {
             cases: Default::default(),
             ereports_by_id: Default::default(),
         };
+        let sitrep1_report = make_test_analysis_report(&sitrep1);
         datastore
-            .fm_sitrep_insert(opctx, sitrep1)
+            .fm_sitrep_insert(opctx, sitrep1, Some(sitrep1_report))
             .await
             .expect("inserting initial sitrep should succeed");
 
@@ -3397,9 +3594,10 @@ mod tests {
         // Build a representative sitrep that populates every child table.
         let sitrep = make_sitrep_with_cases(&opctx, &datastore).await;
         let sitrep_id = sitrep.id();
+        let report = make_test_analysis_report(&sitrep);
 
         datastore
-            .fm_sitrep_insert(&opctx, sitrep.clone())
+            .fm_sitrep_insert(&opctx, sitrep.clone(), Some(report))
             .await
             .expect("failed to insert sitrep");
 
@@ -3409,23 +3607,22 @@ mod tests {
 
         // Insert a child sitrep so the original is no longer current
         // and can be deleted.
+        let child = fm::Sitrep {
+            metadata: fm::SitrepMetadata {
+                parent_sitrep_id: Some(sitrep_id),
+                id: SitrepUuid::new_v4(),
+                time_created: Utc::now(),
+                creator_id: OmicronZoneUuid::new_v4(),
+                comment: "child sitrep".to_string(),
+                inv_collection_id: CollectionUuid::new_v4(),
+                next_inv_min_time_started: Utc::now(),
+            },
+            cases: Default::default(),
+            ereports_by_id: Default::default(),
+        };
+        let child_report = make_test_analysis_report(&child);
         datastore
-            .fm_sitrep_insert(
-                opctx,
-                fm::Sitrep {
-                    metadata: fm::SitrepMetadata {
-                        parent_sitrep_id: Some(sitrep_id),
-                        id: SitrepUuid::new_v4(),
-                        time_created: Utc::now(),
-                        creator_id: OmicronZoneUuid::new_v4(),
-                        comment: "child sitrep".to_string(),
-                        inv_collection_id: CollectionUuid::new_v4(),
-                        next_inv_min_time_started: Utc::now(),
-                    },
-                    cases: Default::default(),
-                    ereports_by_id: Default::default(),
-                },
-            )
+            .fm_sitrep_insert(opctx, child, Some(child_report))
             .await
             .expect("failed to insert child sitrep");
 
@@ -3530,8 +3727,9 @@ mod tests {
                         make_sitrep_with_cases(&opctx, &datastore).await;
                     sitrep.metadata.parent_sitrep_id = last_child_id;
                     let sitrep_id = sitrep.id();
+                    let report = make_test_analysis_report(&sitrep);
                     match datastore
-                        .fm_sitrep_insert(&opctx, sitrep.clone())
+                        .fm_sitrep_insert(&opctx, sitrep.clone(), Some(report))
                         .await
                     {
                         Ok(()) => {}
@@ -3559,7 +3757,11 @@ mod tests {
                         make_sitrep_with_cases(&opctx, &datastore).await;
                     child.metadata.parent_sitrep_id = Some(sitrep_id);
                     let child_id = child.id();
-                    match datastore.fm_sitrep_insert(&opctx, child).await {
+                    let child_report = make_test_analysis_report(&child);
+                    match datastore
+                        .fm_sitrep_insert(&opctx, child, Some(child_report))
+                        .await
+                    {
                         Ok(()) => {}
                         Err(InsertSitrepError::ParentNotCurrent(_)) => {
                             slog::info!(

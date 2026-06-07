@@ -6,7 +6,9 @@
 //! sitrep.
 
 use crate::DbTypedUuid;
+use anyhow::Context;
 use nexus_db_schema::schema::fm_sitrep_analysis_report;
+use nexus_types::fm::analysis_reports::{AnalysisReport, InputReport};
 use omicron_uuid_kinds::SitrepKind;
 
 #[derive(Queryable, Insertable, Clone, Debug, Selectable)]
@@ -16,4 +18,32 @@ pub struct SitrepAnalysisReport {
     pub git_commit: String,
     pub input_report: serde_json::Value,
     pub analysis_report: serde_json::Value,
+}
+
+impl SitrepAnalysisReport {
+    /// Construct a new analysis report record from the [`InputReport`] and
+    /// [`AnalysisReport`] values produced during a sitrep's analysis phase.
+    ///
+    /// The git commit of the Nexus producing this record is embedded so that
+    /// `omdb` can warn when it was built from a different revision than the
+    /// Nexus that generated the reports.
+    pub fn new(
+        input_report: &InputReport,
+        analysis_report: &AnalysisReport,
+    ) -> anyhow::Result<Self> {
+        let sitrep_id = analysis_report.sitrep_id.into();
+        let input_report = serde_json::to_value(input_report)
+            .context("failed to serialize sitrep input report")?;
+        let analysis_report = serde_json::to_value(analysis_report)
+            .context("failed to serialize sitrep analysis report")?;
+
+        let git_commit = if env!("VERGEN_GIT_DIRTY") == "true" {
+            concat!(env!("VERGEN_GIT_SHA"), "-dirty")
+        } else {
+            env!("VERGEN_GIT_SHA")
+        }
+        .to_string();
+
+        Ok(Self { sitrep_id, git_commit, input_report, analysis_report })
+    }
 }

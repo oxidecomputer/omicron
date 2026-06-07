@@ -3518,6 +3518,7 @@ fn print_task_fm_analysis(details: &serde_json::Value) {
         inv_collection_id,
         known_classes,
         outcome,
+        warnings,
     } = match serde_json::from_value::<FmAnalysisStatus>(details.clone()) {
         Err(error) => {
             eprintln!(
@@ -3637,12 +3638,19 @@ fn print_task_fm_analysis(details: &serde_json::Value) {
     }
     println!();
 
-    let PreparationStatus { errors, report: prep_report } = prep_status;
+    if !warnings.is_empty() {
+        println!("{ERRICON}   non-fatal errors occurred during analysis:");
+        for error in warnings {
+            println!("      > {error}")
+        }
+    }
+
+    let PreparationStatus { warnings, report: prep_report } = prep_status;
     println!("    preparation report:");
     print!("{}", prep_report.display_multiline(6));
-    if !errors.is_empty() {
-        println!("{ERRICON}   errors preparing analysis inputs:");
-        for error in errors {
+    if !warnings.is_empty() {
+        println!("{ERRICON}   non-fatal errors preparing analysis inputs:");
+        for error in warnings {
             println!("      > {error}")
         }
     }
