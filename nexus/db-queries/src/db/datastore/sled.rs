@@ -714,6 +714,14 @@ impl<'a> Iterator for CompleteLocalStorageAllocationLists<'a> {
 const SINGLE_RESERVATION_CONSTRAINT: &'static str =
     "single_vmm_reservation_per_state";
 
+/// Define this struct to be passed into the associated function so that the
+/// positional arguments are defined as named fields instead: swapping the order
+/// would be _bad_.
+pub struct MigrateSuccessUpdate {
+    pub active_vmm_id: Uuid,
+    pub target_vmm_id: Uuid,
+}
+
 impl DataStore {
     /// Stores a new sled in the database.
     ///
@@ -1505,9 +1513,10 @@ impl DataStore {
     pub async fn sled_reservation_update_for_migrate_success(
         &self,
         opctx: &OpContext,
-        active_vmm_id: Uuid,
-        target_vmm_id: Uuid,
+        update: MigrateSuccessUpdate,
     ) -> UpdateResult<()> {
+        let MigrateSuccessUpdate { active_vmm_id, target_vmm_id } = update;
+
         use nexus_db_schema::schema::sled_resource_vmm::dsl as resource_dsl;
 
         let conn = self.pool_connection_authorized(opctx).await?;
@@ -7218,8 +7227,10 @@ pub(in crate::db::datastore) mod test {
         datastore
             .sled_reservation_update_for_migrate_success(
                 &opctx,
-                *active_vmm_id.as_untyped_uuid(),
-                *target_vmm_id.as_untyped_uuid(),
+                db::datastore::sled::MigrateSuccessUpdate {
+                    active_vmm_id: *active_vmm_id.as_untyped_uuid(),
+                    target_vmm_id: *target_vmm_id.as_untyped_uuid(),
+                },
             )
             .await
             .unwrap();
@@ -7288,8 +7299,13 @@ pub(in crate::db::datastore) mod test {
         datastore
             .sled_reservation_update_for_migrate_success(
                 &opctx,
-                Uuid::new_v4(),
-                *target_vmm_id.as_untyped_uuid(),
+                db::datastore::sled::MigrateSuccessUpdate {
+                    // imagining the active one is already deleted, make this a
+                    // random UUID to test that the function doesn't fail if the
+                    // record isn't there.
+                    active_vmm_id: Uuid::new_v4(),
+                    target_vmm_id: *target_vmm_id.as_untyped_uuid(),
+                },
             )
             .await
             .unwrap();

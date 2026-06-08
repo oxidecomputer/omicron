@@ -344,6 +344,7 @@ use super::{
     ACTION_GENERATE_ID, ActionRegistry, NexusActionContext, NexusSaga,
     SagaContext, SagaInitError,
 };
+use crate::app::db::datastore;
 use crate::app::db::datastore::InstanceGestalt;
 use crate::app::db::datastore::VmmStateUpdateResult;
 use crate::app::db::datastore::instance;
@@ -1372,8 +1373,10 @@ async fn siu_update_active_vmm_for_migration_success(
         .datastore()
         .sled_reservation_update_for_migrate_success(
             &opctx,
-            *active_vmm_id,
-            *target_vmm_id,
+            datastore::sled::MigrateSuccessUpdate {
+                active_vmm_id: *active_vmm_id,
+                target_vmm_id: *target_vmm_id,
+            },
         )
         .await
         .map_err(saga_action_failed)?;
