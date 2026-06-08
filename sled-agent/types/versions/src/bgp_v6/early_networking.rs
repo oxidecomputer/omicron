@@ -371,7 +371,9 @@ pub struct BgpConfig {
     pub max_paths: MaxPathConfig,
 }
 
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, Serialize, daft::Diffable)]
+#[derive(
+    Debug, Copy, Clone, Eq, PartialEq, Hash, Serialize, daft::Diffable,
+)]
 #[cfg_attr(any(test, feature = "testing"), derive(test_strategy::Arbitrary))]
 pub struct MaxPathConfig(
     #[cfg_attr(

@@ -9405,6 +9405,7 @@ version = "0.1.0"
 dependencies = [
  "ahash",
  "aho-corasick",
+ "anstream 0.6.21",
  "anyhow",
  "aws-lc-rs",
  "base16ct",
