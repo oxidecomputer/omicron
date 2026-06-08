@@ -826,10 +826,10 @@ pub fn turin_v2(vcpu_count: u16) -> Result<CpuIdDump, CpuPlatformError> {
     //
     // How do we describe L3? The amount of L3 "actually" available to a guest
     // is just the whole unified L3 of the physical processor. On actual Turin
-    // hardware, that is approximately always 32 MiB of L3 per CCD, times the
-    // number of dies in the package. This is just in contention with everyone
-    // else's use (or not!) of L3. And the number of CPUs does not predict the
-    // number of CCDs.
+    // hardware to date that is 32 MiB of L3 per CCD, times the number of dies
+    // in the package. This is just in contention with everyone else's use (or
+    // not!) of L3. And the number of CPUs does not predict the number of CCDs -
+    // Turin Dense, for example, has twice as many CPUs and threads per CCD!
     //
     // Since, as seen so far, guest software uses L3 size to tune when to choose
     // non-temporal accesses so as to not churn cache, we can *kind of* reflect
@@ -847,9 +847,12 @@ pub fn turin_v2(vcpu_count: u16) -> Result<CpuIdDump, CpuPlatformError> {
     // correctly given different CPU-per-CCD parts, and further variance on
     // future hardware.
     //
-    // For the sake of doing *something*, we go with the most pessistic form of
+    // For the sake of doing *something*, we go with a more common form of
     // Turin: assume 8 cores/16 threads per CCD, that each CCD has 32 MiB of
-    // memory, and that we can size a VM's "L3" as "32M / 16 * vCPUs".
+    // memory, and that we can size a VM's "L3" as "32M / 16 * vCPUs". This
+    // under-reports available L3 for parts with more vCPU-per-L3 ("high cache"
+    // and some higher-frequency SKUs), and over-reports available L3 on parts
+    // with more vCPU-per-L3 (particularly Turin Dense).
     //
     // The above hopefully informs you, dear reader, about why we'd really
     // rather not populate this leaf in the general case. glibc considered the
