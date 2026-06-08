@@ -3756,16 +3756,22 @@ impl UnstableReconfiguratorState {
 
 #[cfg(test)]
 mod test {
-    use std::sync::Arc;
-
+    use super::BlueprintSource;
     use super::ExpectedVersion;
     use super::PendingMgsUpdate;
     use super::PendingMgsUpdateDetails;
     use super::PendingMgsUpdateSpDetails;
     use super::PendingMgsUpdates;
+    use super::ReconfiguratorStateInput;
+    use super::UnstableReconfiguratorState;
+    use chrono::Duration;
     use gateway_types::component::SpType;
+    use omicron_test_utils::dev::test_setup_log;
+    use reconfigurator_cli::test_utils::ReconfiguratorCliTestState;
     use sled_hardware_types::BaseboardId;
     use sled_hardware_types::GIMLET_SLED_MODEL;
+    use slog_error_chain::InlineErrorChain;
+    use std::sync::Arc;
 
     #[test]
     fn test_serialize_pending_mgs_updates() {
@@ -3803,47 +3809,29 @@ mod test {
         assert_eq!(deserialized, pending_mgs_updates);
         assert!(!deserialized.is_empty());
     }
-}
 
-#[cfg(test)]
-mod read_series_tests {
-    //! Tests for [`UnstableReconfiguratorState::read_series`].
-    //!
-    //! These complement the script-based tests in `reconfigurator-cli`'s
-    //! `tests/input/cmds-load-*.txt` by directly exercising the merge logic,
-    //! including the warning and error paths that aren't reachable from a
-    //! clean CLI session.
-
-    use super::BlueprintSource;
-    use super::ReconfiguratorStateInput;
-    use super::UnstableReconfiguratorState;
-    use chrono::Duration;
-    use omicron_test_utils::dev::test_setup_log;
-    use reconfigurator_cli::test_utils::ReconfiguratorCliTestState;
-    use slog_error_chain::InlineErrorChain;
+    // Unit tests for [`UnstableReconfiguratorState::read_series`]
 
     /// Builds a baseline state by running `load_example` and then the planner,
     /// so the resulting state has at least one blueprint whose source is
     /// `BlueprintSource::Planner(report)` and at least one non-genesis
     /// blueprint.
-    ///
-    /// Note: `reconfigurator-cli` (a dev-dep, brought in for this fixture)
-    /// transitively depends on `nexus-types`, so Cargo's dev-dep-cycle handling
-    /// builds two distinct instances of `nexus-types` — one for the crate
-    /// under test, one underneath the dev-deps.  The `UnstableReconfiguratorState`
-    /// that comes out of `to_serializable` is therefore a structurally
-    /// identical but type-distinct sibling of the one we test against here.
-    /// To bridge the two type universes we serialize to JSON and deserialize
-    /// back into the local type.
+    //
+    // Note: `reconfigurator-cli` (a dev-dep, brought in for this fixture)
+    // transitively depends on `nexus-types`, so Cargo's dev-dep-cycle handling
+    // builds two distinct instances of `nexus-types` — one for the crate
+    // under test, one underneath the dev-deps.  The `UnstableReconfiguratorState`
+    // that comes out of `to_serializable` is therefore a structurally
+    // identical but type-distinct sibling of the one we test against here.
+    // To bridge the two type universes we serialize to JSON and deserialize
+    // back into the local type.
     fn base_state(test_name: &str) -> UnstableReconfiguratorState {
         let logctx = test_setup_log(test_name);
         let mut sim = ReconfiguratorCliTestState::new(test_name, &logctx.log);
         sim.load_example().expect("loaded example system");
         sim.run_planner().expect("planning succeeded");
-        let foreign_state = sim
-            .current_state()
-            .to_serializable()
-            .expect("serialize state");
+        let foreign_state =
+            sim.current_state().to_serializable().expect("serialize state");
         let bytes =
             serde_json::to_vec(&foreign_state).expect("serialize fixture");
         let state: UnstableReconfiguratorState =
@@ -3893,9 +3881,9 @@ mod read_series_tests {
         }
     }
 
-    /// Case 1: a single valid input round-trips cleanly through `read_series`.
+    /// A single valid input round-trips cleanly through `read_series`.
     #[test]
-    fn case_01_single_input_happy_path() {
+    fn single_input_happy_path() {
         let state = base_state("multi_load_single_input");
         let bytes = serialize(&state);
         let result = UnstableReconfiguratorState::read_series([input(
@@ -3921,12 +3909,12 @@ mod read_series_tests {
         assert_eq!(result.state.collections.len(), state.collections.len());
     }
 
-    /// Case 2: feeding byte-identical content under two different labels also
+    /// Feeding byte-identical content under two different labels also
     /// succeeds without warnings.  The retained `latest` label is the first
     /// one processed (the merge keeps whichever label first entered
     /// `all_states`).
     #[test]
-    fn case_02_identical_inputs() {
+    fn identical_inputs() {
         let state = base_state("multi_load_identical_inputs");
         let bytes = serialize(&state);
         let result = UnstableReconfiguratorState::read_series([
@@ -3946,12 +3934,11 @@ mod read_series_tests {
         assert_eq!(result.state.collections.len(), state.collections.len());
     }
 
-    /// Case 3: two consistent inputs whose targets sit on the same parent
-    /// chain.  The latest is unambiguously whichever has the descendant
-    /// target, and that must hold regardless of the order in which inputs
-    /// were passed.
+    /// Two consistent inputs whose targets sit on the same parent chain.
+    /// The latest is unambiguously whichever has the descendant target, and
+    /// that must hold regardless of the order in which inputs were passed.
     #[test]
-    fn case_03_overlapping_inputs_order_independent() {
+    fn overlapping_inputs_order_independent() {
         // The base state has a parent blueprint and a planner-generated
         // child.  We construct two inputs that differ only in which one each
         // declares as its `target_blueprint`: file A targets the parent, file
@@ -3991,10 +3978,7 @@ mod read_series_tests {
         ] {
             let result = UnstableReconfiguratorState::read_series(inputs)
                 .unwrap_or_else(|err| {
-                    panic!(
-                        "read_series failed ({label}): {}",
-                        err_chain(&err)
-                    )
+                    panic!("read_series failed ({label}): {}", err_chain(&err))
                 });
             assert_eq!(result.latest, "b.out", "case {label}");
             assert_eq!(
@@ -4009,10 +3993,10 @@ mod read_series_tests {
         }
     }
 
-    /// Case 4: two inputs share a collection id but differ in collection
-    /// content.  The merge must reject this as inconsistent.
+    /// Two inputs share a collection id but differ in collection content.
+    /// The merge must reject this as inconsistent.
     #[test]
-    fn case_04_collection_mismatch() {
+    fn collection_mismatch() {
         let state = base_state("multi_load_collection_mismatch");
         assert!(!state.collections.is_empty(), "need a collection to mutate");
         let mut mutated = state.clone();
@@ -4036,10 +4020,10 @@ mod read_series_tests {
         assert_contains(&rendered, "b.out");
     }
 
-    /// Case 5: two inputs share a blueprint id but differ on a content field.
-    /// The merge must reject the inconsistency.
+    /// Two inputs share a blueprint id but differ on a content field.  The
+    /// merge must reject the inconsistency.
     #[test]
-    fn case_05_blueprint_mismatch() {
+    fn blueprint_mismatch() {
         let state = base_state("multi_load_blueprint_mismatch");
         assert!(!state.blueprints.is_empty(), "need a blueprint to mutate");
         let mut mutated = state.clone();
@@ -4062,13 +4046,13 @@ mod read_series_tests {
         assert_contains(&rendered, "b.out");
     }
 
-    /// Case 6: the planner-report reconciliation branch.  Two inputs share a
+    /// The planner-report reconciliation branch.  Two inputs share a
     /// blueprint id, but one has `BlueprintSource::Planner(report)` and the
     /// other has `BlueprintSource::PlannerLoadedFromDatabase`.  The merge
     /// should accept both and keep the report regardless of which input was
     /// processed first.
     #[test]
-    fn case_06_blueprint_source_reconciliation() {
+    fn blueprint_source_reconciliation() {
         let state = base_state("multi_load_source_reconciliation");
         let planner_blueprint = state
             .blueprints
@@ -4107,10 +4091,7 @@ mod read_series_tests {
         ] {
             let result = UnstableReconfiguratorState::read_series(inputs)
                 .unwrap_or_else(|err| {
-                    panic!(
-                        "read_series failed ({label}): {}",
-                        err_chain(&err)
-                    )
+                    panic!("read_series failed ({label}): {}", err_chain(&err))
                 });
             assert!(
                 result.warnings.is_empty(),
@@ -4132,10 +4113,10 @@ mod read_series_tests {
         }
     }
 
-    /// Case 7: two inputs share an internal-DNS generation but differ in
-    /// contents.  The merge must reject the inconsistency.
+    /// Two inputs share an internal-DNS generation but differ in contents.
+    /// The merge must reject the inconsistency.
     #[test]
-    fn case_07_internal_dns_mismatch() {
+    fn internal_dns_mismatch() {
         use omicron_common::api::external::Generation;
 
         let state = base_state("multi_load_internal_dns_mismatch");
@@ -4169,9 +4150,9 @@ mod read_series_tests {
         assert_contains(&rendered, "b.out");
     }
 
-    /// Case 8: same as case 7, for external DNS.
+    /// Same as the internal-DNS mismatch test above, but for external DNS.
     #[test]
-    fn case_08_external_dns_mismatch() {
+    fn external_dns_mismatch() {
         use omicron_common::api::external::Generation;
 
         let state = base_state("multi_load_external_dns_mismatch");
@@ -4203,12 +4184,12 @@ mod read_series_tests {
         assert_contains(&rendered, "b.out");
     }
 
-    /// Case 9: a file whose `target_blueprint` refers to a blueprint id that
-    /// isn't in that same file.  read_series should emit a warning (not an
+    /// A file whose `target_blueprint` refers to a blueprint id that isn't
+    /// in that same file.  `read_series` should emit a warning (not an
     /// error) and still return a valid merged state, drawing the target
     /// from the other input.
     #[test]
-    fn case_09_target_missing_from_its_own_file() {
+    fn target_missing_from_its_own_file() {
         let state = base_state("multi_load_target_missing_from_file");
         let target_id = state.target_blueprint.target_id;
 
@@ -4245,12 +4226,12 @@ mod read_series_tests {
         );
     }
 
-    /// Case 10: two files have different target blueprints that share the
-    /// same parent.  Neither target is the parent of the other, so both look
+    /// Two files have different target blueprints that share the same
+    /// parent.  Neither target is the parent of the other, so both look
     /// like "latest" candidates.  Expect a warning and a `time_made_target`
     /// tiebreak that's stable regardless of input order.
     #[test]
-    fn case_10_multiple_latest_candidates() {
+    fn multiple_latest_candidates() {
         use omicron_uuid_kinds::BlueprintUuid;
 
         let state = base_state("multi_load_multiple_latest_candidates");
@@ -4307,10 +4288,7 @@ mod read_series_tests {
         ] {
             let result = UnstableReconfiguratorState::read_series(inputs)
                 .unwrap_or_else(|err| {
-                    panic!(
-                        "read_series failed ({label}): {}",
-                        err_chain(&err)
-                    )
+                    panic!("read_series failed ({label}): {}", err_chain(&err))
                 });
             assert_eq!(result.warnings.len(), 1, "case {label}");
             let warning_text = result.warnings[0].to_string();
@@ -4328,9 +4306,9 @@ mod read_series_tests {
         }
     }
 
-    /// Case 11: passing no inputs at all bails immediately.
+    /// Passing no inputs at all bails immediately.
     #[test]
-    fn case_11_no_inputs() {
+    fn no_inputs() {
         let inputs: Vec<ReconfiguratorStateInput<&[u8]>> = Vec::new();
         let err = UnstableReconfiguratorState::read_series(inputs)
             .err()
@@ -4342,10 +4320,10 @@ mod read_series_tests {
         );
     }
 
-    /// Case 12: feeding bytes that aren't valid JSON yields a parse error
-    /// whose chain includes the input's label and a serde error.
+    /// Feeding bytes that aren't valid JSON yields a parse error whose
+    /// chain includes the input's label and a serde error.
     #[test]
-    fn case_12_malformed_json() {
+    fn malformed_json() {
         let bytes: &[u8] = b"not json at all";
         let err = UnstableReconfiguratorState::read_series([input(
             "garbage.out",
