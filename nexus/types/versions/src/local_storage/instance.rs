@@ -6,7 +6,7 @@
 
 use omicron_common::api::external::{
     ByteCount, Hostname, IdentityMetadataCreateParams,
-    InstanceAutoRestartPolicy, InstanceCpuCount, InstanceCpuPlatform, Name,
+    InstanceAutoRestartPolicy, InstanceCpuCount, Name,
     NameOrId,
 };
 use schemars::JsonSchema;
@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use super::disk::DiskCreate;
 use crate::v2025_11_20_00;
 use crate::v2025_11_20_00::instance::{
-    ExternalIpCreate, InstanceDiskAttach, InstanceNetworkInterfaceAttachment,
+    ExternalIpCreate, InstanceCpuPlatform, InstanceDiskAttach, InstanceNetworkInterfaceAttachment,
     UserData, bool_true,
 };
 

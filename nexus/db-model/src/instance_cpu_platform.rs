@@ -6,6 +6,7 @@ use crate::SledCpuFamily;
 
 use super::impl_enum_type;
 use serde::{Deserialize, Serialize};
+use nexus_types::external_api::instance as instance_api;
 
 impl_enum_type!(
     InstanceCpuPlatformEnum:
@@ -43,11 +44,11 @@ impl InstanceCpuPlatform {
     }
 }
 
-impl From<omicron_common::api::external::InstanceCpuPlatform>
+impl From<instance_api::InstanceCpuPlatform>
     for InstanceCpuPlatform
 {
-    fn from(value: omicron_common::api::external::InstanceCpuPlatform) -> Self {
-        use omicron_common::api::external::InstanceCpuPlatform as ApiPlatform;
+    fn from(value: instance_api::InstanceCpuPlatform) -> Self {
+        use instance_api::InstanceCpuPlatform as ApiPlatform;
         match value {
             ApiPlatform::AmdMilan => Self::AmdMilan,
             ApiPlatform::AmdTurin => Self::AmdTurin,
@@ -57,7 +58,7 @@ impl From<omicron_common::api::external::InstanceCpuPlatform>
 }
 
 impl From<InstanceCpuPlatform>
-    for omicron_common::api::external::InstanceCpuPlatform
+    for instance_api::InstanceCpuPlatform
 {
     fn from(value: InstanceCpuPlatform) -> Self {
         match value {

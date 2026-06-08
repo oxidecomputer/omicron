@@ -29,6 +29,7 @@ use nexus_types::external_api::affinity::AntiAffinityGroup;
 use nexus_types::external_api::instance;
 use nexus_types::external_api::sled::Sled;
 use nexus_types::external_api::sled::SledInstance;
+use nexus_types_versions::latest;
 use omicron_common::api::external;
 use omicron_common::api::external::AffinityGroupMember;
 use omicron_common::api::external::AntiAffinityGroupMember;
@@ -58,7 +59,7 @@ impl<T: AffinityGroupish> ProjectScopedApiHelper<'_, T> {
     async fn create_stopped_instance(
         &self,
         instance_name: &str,
-    ) -> external::Instance {
+    ) -> latest::instance::Instance {
         create_instance_with(
             &self.client,
             &self.project.as_ref().expect("Need to specify project name"),
@@ -288,8 +289,8 @@ impl<'a> ApiHelper<'a> {
 
     async fn start_instance(
         &self,
-        instance: &external::Instance,
-    ) -> external::Instance {
+        instance: &latest::instance::Instance,
+    ) -> latest::instance::Instance {
         let uri = format!("/v1/instances/{}/start", instance.identity.id);
 
         NexusRequest::new(
