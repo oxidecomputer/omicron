@@ -459,14 +459,7 @@ mod tests {
         .unwrap();
     }
 
-    // Inserts a current sitrep via the production `fm_sitrep_insert` path, then
-    // sets the test-only `dummy_generation` column the combinator reads.
-    //
-    // Going through `fm_sitrep_insert` rather than a hand-written INSERT
-    // populates every real `fm_sitrep` column for us -- including the
-    // per-resource generation counters that later commits in this stack add.
-    // The sitrep is built from `SitrepMetadata::default()`, so those new columns
-    // are filled in without this test having to know about them.
+    // Inserts a current sitrep with a given `dummy_generation`.
     async fn insert_current_sitrep(
         datastore: &DataStore,
         opctx: &OpContext,
@@ -482,7 +475,7 @@ mod tests {
         datastore.fm_sitrep_insert(opctx, sitrep).await.unwrap();
 
         // `dummy_generation` is a test-only column that `fm_sitrep_insert`
-        // doesn't write, so set it directly; the combinator reads it as
+        // doesn't write, so set it directly; `SitrepGuardedInsert` reads it as
         // `DummyResource`'s generation column.
         conn.batch_execute_async(&format!(
             "UPDATE omicron.public.fm_sitrep \
