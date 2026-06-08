@@ -975,7 +975,7 @@ impl DataStore {
         if let Some(existing_resource) = existing_resource {
             info!(
                 &log,
-                "existing sled reservation for this instance with state {}",
+                "existing {} sled reservation for this VMM ID",
                 existing_resource.state,
             );
 
