@@ -35,6 +35,7 @@ use nexus_types_versions::v2026_01_22_00;
 use nexus_types_versions::v2026_01_30_01;
 use nexus_types_versions::v2026_02_13_01;
 use nexus_types_versions::v2026_04_16_00;
+use nexus_types_versions::v2026_06_08_00;
 use omicron_common::address::IpRange;
 use omicron_common::api::external::{
     http_pagination::{
@@ -3643,6 +3644,7 @@ pub trait NexusExternalApi {
         method = GET,
         path = "/v1/instances",
         tags = ["instances"],
+        versions = VERSION_INSTANCE_CPU_TYPE_TURIN_V2..,
     }]
     async fn instance_list(
         rqctx: RequestContext<Self::Context>,
@@ -3651,18 +3653,51 @@ pub trait NexusExternalApi {
         >,
     ) -> Result<HttpResponseOk<ResultsPage<Instance>>, HttpError>;
 
+    #[endpoint {
+        method = GET,
+        path = "/v1/instances",
+        tags = ["instances"],
+        versions = ..VERSION_INSTANCE_CPU_TYPE_TURIN_V2,
+    }]
+    async fn instance_list_v2026_06_08_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<
+            PaginatedByNameOrId<latest::project::ProjectSelector>,
+        >,
+    ) -> Result<HttpResponseOk<ResultsPage<Instance>>, HttpError> {
+        Self::instance_list(rqctx, query_params)
+            .await
+            .and_then(|resp| resp.try_map(TryInto::try_into))
+    }
+
     /// Create instance
     #[endpoint {
         method = POST,
         path = "/v1/instances",
         tags = ["instances"],
-        versions = VERSION_READ_ONLY_DISKS_NULLABLE..,
+        versions = VERSION_INSTANCE_CPU_TYPE_TURIN_V2..,
     }]
     async fn instance_create(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<latest::project::ProjectSelector>,
         new_instance: TypedBody<latest::instance::InstanceCreate>,
     ) -> Result<HttpResponseCreated<Instance>, HttpError>;
+
+    /// Create instance
+    #[endpoint {
+        method = POST,
+        path = "/v1/instances",
+        tags = ["instances"],
+        versions = VERSION_READ_ONLY_DISKS_NULLABLE..VERSION_INSTANCE_CPU_TYPE_TURIN_V2,
+    }]
+    async fn instance_create_v2026_06_08_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<latest::project::ProjectSelector>,
+        new_instance: TypedBody<latest::instance::InstanceCreate>,
+    ) -> Result<HttpResponseCreated<Instance>, HttpError> {
+        Self::instance_create(rqctx, query_params, new_instance.map(Into::into))
+            .await
+    }
 
     #[endpoint {
         operation_id = "instance_create",
@@ -3676,7 +3711,7 @@ pub trait NexusExternalApi {
         query_params: Query<v2025_11_20_00::project::ProjectSelector>,
         new_instance: TypedBody<v2026_01_30_01::instance::InstanceCreate>,
     ) -> Result<HttpResponseCreated<Instance>, HttpError> {
-        Self::instance_create(rqctx, query_params, new_instance.map(Into::into))
+        Self::instance_create_v2026_06_08_00(rqctx, query_params, new_instance.map(Into::into))
             .await
     }
 
@@ -3806,12 +3841,32 @@ pub trait NexusExternalApi {
         method = GET,
         path = "/v1/instances/{instance}",
         tags = ["instances"],
+        versions = VERSION_INSTANCE_CPU_TYPE_TURIN_V2..,
     }]
     async fn instance_view(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<latest::project::OptionalProjectSelector>,
         path_params: Path<latest::path_params::InstancePath>,
     ) -> Result<HttpResponseOk<Instance>, HttpError>;
+
+    #[endpoint {
+        method = GET,
+        path = "/v1/instances/{instance}",
+        tags = ["instances"],
+        versions = ..VERSION_INSTANCE_CPU_TYPE_TURIN_V2,
+    }]
+    async fn instance_view_v2026_06_08_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<latest::project::OptionalProjectSelector>,
+        path_params: Path<latest::path_params::InstancePath>,
+    ) -> Result<HttpResponseOk<Instance>, HttpError> {
+        Self::instance_view(
+            rqctx,
+            query_params,
+            new_instance.map(Into::into),
+        )
+        .await
+    }
 
     /// Delete instance
     #[endpoint {
@@ -3830,7 +3885,7 @@ pub trait NexusExternalApi {
         method = PUT,
         path = "/v1/instances/{instance}",
         tags = ["instances"],
-        versions = VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES..,
+        versions = VERSION_INSTANCE_CPU_TYPE_TURIN_V2..,
     }]
     async fn instance_update(
         rqctx: RequestContext<Self::Context>,
@@ -3838,6 +3893,29 @@ pub trait NexusExternalApi {
         path_params: Path<latest::path_params::InstancePath>,
         instance_config: TypedBody<latest::instance::InstanceUpdate>,
     ) -> Result<HttpResponseOk<Instance>, HttpError>;
+
+    /// Update instance
+    #[endpoint {
+        operation_id = "instance_update",
+        method = PUT,
+        path = "/v1/instances/{instance}",
+        tags = ["instances"],
+        versions = VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES..VERSION_INSTANCE_CPU_TYPE_TURIN_V2,
+    }]
+    async fn instance_update_v2026_06_08_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<v2025_11_20_00::project::OptionalProjectSelector>,
+        path_params: Path<v2025_11_20_00::path_params::InstancePath>,
+        instance_config: TypedBody<v2025_11_20_00::instance::InstanceUpdate>,
+    ) -> Result<HttpResponseOk<Instance>, HttpError> {
+        Self::instance_update(
+            rqctx,
+            query_params,
+            path_params,
+            instance_config.map(Into::into),
+        )
+        .await
+    }
 
     /// Update instance
     #[endpoint {
@@ -3853,7 +3931,7 @@ pub trait NexusExternalApi {
         path_params: Path<v2025_11_20_00::path_params::InstancePath>,
         instance_config: TypedBody<v2025_11_20_00::instance::InstanceUpdate>,
     ) -> Result<HttpResponseOk<Instance>, HttpError> {
-        Self::instance_update(
+        Self::instance_update_v2026_06_08_00(
             rqctx,
             query_params,
             path_params,

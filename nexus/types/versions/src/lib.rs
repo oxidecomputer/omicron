@@ -89,3 +89,5 @@ pub mod v2026_05_08_00;
 pub mod v2026_05_20_00;
 #[path = "image_block_size_type/mod.rs"]
 pub mod v2026_06_04_00;
+#[path = "instancecpu_type_turin_v2/mod.rs"]
+pub mod v2026_06_08_00;

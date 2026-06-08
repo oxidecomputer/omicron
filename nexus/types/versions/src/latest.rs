@@ -181,6 +181,9 @@ pub mod instance {
 
     pub use crate::v2026_01_31_00::instance::InstanceCreate;
     pub use crate::v2026_01_31_00::instance::InstanceDiskAttachment;
+
+    pub use crate::v2026_06_08_00::instance::Instance;
+    pub use crate::v2026_06_08_00::instance::InstanceCpuPlatform;
 }
 
 pub mod internet_gateway {
