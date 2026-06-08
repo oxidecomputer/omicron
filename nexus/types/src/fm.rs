@@ -114,7 +114,7 @@ impl Sitrep {
 /// Metadata describing a sitrep.
 ///
 /// This corresponds to the records stored in the `fm_sitrep` database table.
-#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Deserialize, Serialize)]
 pub struct SitrepMetadata {
     /// The ID of this sitrep.
     pub id: SitrepUuid,

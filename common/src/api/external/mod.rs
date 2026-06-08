@@ -777,6 +777,13 @@ impl Generation {
     }
 }
 
+impl Default for Generation {
+    /// Returns the initial generation, [`Generation::new`] (i.e. 1).
+    fn default() -> Self {
+        Generation::new()
+    }
+}
+
 impl<'de> Deserialize<'de> for Generation {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where

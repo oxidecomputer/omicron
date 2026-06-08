@@ -56,7 +56,15 @@ impl IdOrdItem for OmicronPhysicalDiskConfig {
 }
 
 #[derive(
-    Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
+    Clone,
+    Debug,
+    Default,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+    PartialEq,
+    Eq,
+    Hash,
 )]
 pub struct OmicronPhysicalDisksConfig {
     /// generation number of this configuration
@@ -70,12 +78,6 @@ pub struct OmicronPhysicalDisksConfig {
     pub generation: Generation,
 
     pub disks: Vec<OmicronPhysicalDiskConfig>,
-}
-
-impl Default for OmicronPhysicalDisksConfig {
-    fn default() -> Self {
-        Self { generation: Generation::new(), disks: vec![] }
-    }
 }
 
 impl Ledgerable for OmicronPhysicalDisksConfig {
@@ -424,7 +426,15 @@ impl IdOrdItem for DatasetConfig {
 }
 
 #[derive(
-    Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
+    Clone,
+    Debug,
+    Default,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+    PartialEq,
+    Eq,
+    Hash,
 )]
 pub struct DatasetsConfig {
     /// generation number of this configuration
@@ -442,12 +452,6 @@ pub struct DatasetsConfig {
     pub generation: Generation,
 
     pub datasets: BTreeMap<DatasetUuid, DatasetConfig>,
-}
-
-impl Default for DatasetsConfig {
-    fn default() -> Self {
-        Self { generation: Generation::new(), datasets: BTreeMap::new() }
-    }
 }
 
 impl Ledgerable for DatasetsConfig {
