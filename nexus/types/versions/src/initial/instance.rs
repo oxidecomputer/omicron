@@ -6,14 +6,16 @@
 
 use std::net::IpAddr;
 
+use api_identity::ObjectIdentity;
 use omicron_common::api::external::{
-    ByteCount, Hostname, IdentityMetadataCreateParams,
-    InstanceAutoRestartPolicy, InstanceCpuCount, InstanceCpuPlatform, Name,
-    NameOrId,
+    ByteCount, Hostname, IdentityMetadata, IdentityMetadataCreateParams,
+    InstanceAutoRestartPolicy, InstanceAutoRestartStatus, InstanceCpuCount,
+    InstanceCpuPlatform, InstanceRuntimeState, Name, NameOrId, ObjectIdentity,
 };
 use oxnet::IpNet;
 use schemars::JsonSchema;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use uuid::Uuid;
 
 use super::disk::DiskCreate;
 
@@ -431,4 +433,35 @@ pub struct InstanceSerialConsoleData {
     /// The absolute offset since boot (suitable for use as `byte_offset` in a subsequent request)
     /// of the last byte returned in `data`.
     pub last_byte_offset: u64,
+}
+
+/// View of an Instance
+#[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct Instance {
+    // TODO is flattening here the intent in RFD 4?
+    #[serde(flatten)]
+    pub identity: IdentityMetadata,
+
+    /// ID for the project containing this instance
+    pub project_id: Uuid,
+
+    /// Number of CPUs allocated for this instance
+    pub ncpus: InstanceCpuCount,
+    /// Memory allocated for this instance
+    pub memory: ByteCount,
+    /// RFC1035-compliant hostname for the instance
+    pub hostname: String,
+
+    /// The ID of the disk used to boot this instance, if a specific one is assigned
+    pub boot_disk_id: Option<Uuid>,
+
+    #[serde(flatten)]
+    pub runtime: InstanceRuntimeState,
+
+    #[serde(flatten)]
+    pub auto_restart_status: InstanceAutoRestartStatus,
+
+    /// The CPU platform for this instance. If this is `null`, the instance
+    /// requires no particular CPU platform.
+    pub cpu_platform: Option<InstanceCpuPlatform>,
 }

@@ -48,6 +48,7 @@ use nexus_db_lookup::DbConnection;
 use nexus_db_lookup::LookupPath;
 use nexus_db_model::Disk;
 use nexus_types::internal_api::background::ReincarnationReason;
+use nexus_types_versions::latest;
 use omicron_common::api;
 use omicron_common::api::external;
 use omicron_common::api::external::CreateResult;
@@ -208,7 +209,7 @@ impl From<(Instance, Option<Vmm>)> for InstanceAndActiveVmm {
     }
 }
 
-impl From<InstanceAndActiveVmm> for external::Instance {
+impl From<InstanceAndActiveVmm> for latest::instance::Instance {
     fn from(value: InstanceAndActiveVmm) -> Self {
         let time_run_state_updated = value
             .vmm
@@ -274,8 +275,8 @@ impl From<InstanceAndActiveVmm> for external::Instance {
                     .instance
                     .time_last_auto_restarted,
             },
-
             auto_restart_status,
+            enable_jumbo_frames: value.instance.enable_jumbo_frames,
         }
     }
 }
@@ -1154,6 +1155,7 @@ impl DataStore {
                     ncpus,
                     memory,
                     cpu_platform,
+                    enable_jumbo_frames,
                 } = update.clone();
                 async move {
                     // Set the auto-restart policy.
@@ -1162,6 +1164,16 @@ impl DataStore {
                         .set(
                             instance_dsl::auto_restart_policy
                                 .eq(auto_restart_policy),
+                        )
+                        .execute_async(&conn)
+                        .await?;
+
+                    // Set the per-instance jumbo-frames opt-in.
+                    diesel::update(instance_dsl::instance)
+                        .filter(instance_dsl::id.eq(authz_instance.id()))
+                        .set(
+                            instance_dsl::enable_jumbo_frames
+                                .eq(enable_jumbo_frames),
                         )
                         .execute_async(&conn)
                         .await?;
@@ -2307,7 +2319,6 @@ mod tests {
     use nexus_db_model::InstanceState;
     use nexus_db_model::Project;
     use nexus_db_model::VmmCpuPlatform;
-    use nexus_db_model::VmmRuntimeState;
     use nexus_db_model::VmmState;
     use nexus_types::external_api::instance as instance_types;
     use nexus_types::external_api::project;
@@ -2377,6 +2388,7 @@ mod tests {
                         auto_restart_policy: Default::default(),
                         anti_affinity_groups: Vec::new(),
                         multicast_groups: Vec::new(),
+                        enable_jumbo_frames: false,
                     },
                 ),
             )
@@ -2991,6 +3003,7 @@ mod tests {
                     time_state_updated: Utc::now(),
                     generation: Generation::new(),
                     state: VmmState::Running,
+                    failure_reason: None,
                 },
             )
             .await
@@ -3052,6 +3065,7 @@ mod tests {
                     time_state_updated: Utc::now(),
                     generation: Generation::new(),
                     state: VmmState::Running,
+                    failure_reason: None,
                 },
             )
             .await
@@ -3148,6 +3162,7 @@ mod tests {
                     time_state_updated: Utc::now(),
                     generation: Generation::new(),
                     state: VmmState::Stopped,
+                    failure_reason: None,
                 },
             )
             .await
@@ -3187,6 +3202,7 @@ mod tests {
                     time_state_updated: Utc::now(),
                     generation: Generation::new(),
                     state: VmmState::Running,
+                    failure_reason: None,
                 },
             )
             .await
@@ -3217,15 +3233,13 @@ mod tests {
         assert!(res.is_err());
 
         // Okay, now, advance the active VMM to Running, and try again.
+        let vmm1_state =
+            vmm1.runtime().transition(nexus_types::instance::VmmState::Running);
         let updated = dbg!(
             datastore
                 .vmm_update_runtime(
                     &PropolisUuid::from_untyped_uuid(vmm1.id),
-                    &VmmRuntimeState {
-                        time_state_updated: Utc::now(),
-                        generation: Generation(vmm2.generation.0.next()),
-                        state: VmmState::Running,
-                    },
+                    &vmm1_state,
                 )
                 .await
         )
@@ -3288,6 +3302,7 @@ mod tests {
                     time_state_updated: Utc::now(),
                     generation: Generation::new(),
                     state: VmmState::Running,
+                    failure_reason: None,
                 },
             )
             .await
@@ -3320,11 +3335,9 @@ mod tests {
             datastore
                 .vmm_update_runtime(
                     &PropolisUuid::from_untyped_uuid(vmm2.id),
-                    &VmmRuntimeState {
-                        time_state_updated: Utc::now(),
-                        generation: Generation(vmm2.generation.0.next().next()),
-                        state: VmmState::SagaUnwound,
-                    },
+                    &vmm2.runtime().transition(
+                        nexus_types::instance::VmmState::SagaUnwound
+                    )
                 )
                 .await
         )
@@ -3433,6 +3446,7 @@ mod tests {
                             time_state_updated: Utc::now(),
                             generation: Generation::new(),
                             state: VmmState::Running,
+                            failure_reason: None,
                         },
                     )
                     .await

@@ -31,6 +31,10 @@ signal-hook-tokio.workspace = true
 tokio.workspace = true
 toml.workspace = true
 
+[target.'cfg(target_os = "illumos")'.dependencies]
+# See omicron-rpaths for more about the "fmd-adm-sys" dependency.
+fmd-adm-sys.workspace = true
+
 [dev-dependencies]
 expectorate.workspace = true
 omicron-dev-lib.workspace = true

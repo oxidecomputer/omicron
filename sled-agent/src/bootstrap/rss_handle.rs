@@ -5,9 +5,6 @@
 //! sled-agent's handle to the Rack Setup Service it spawns
 
 use super::client as bootstrap_agent_client;
-use crate::rack_setup::service::RackInitializeRequestParams;
-use crate::rack_setup::service::RackSetupService;
-use crate::rack_setup::service::SetupServiceError;
 use ::bootstrap_agent_client::Client as BootstrapAgentClient;
 use bootstore::schemes::v0 as bootstore;
 use bootstrap_agent_lockstep_types::RssStep;
@@ -18,6 +15,10 @@ use omicron_common::backoff::retry_notify;
 use omicron_common::backoff::retry_policy_local;
 use sled_agent_config_reconciler::InternalDisksReceiver;
 use sled_agent_measurements::MeasurementsHandle;
+use sled_agent_rack_setup::LocalBootstrapAgent;
+use sled_agent_rack_setup::RackInitializeRequestParams;
+use sled_agent_rack_setup::RackSetupService;
+use sled_agent_rack_setup::SetupServiceError;
 use sled_agent_types::sled::StartSledAgentRequest;
 use slog::Logger;
 use slog_error_chain::InlineErrorChain;
@@ -60,14 +61,14 @@ impl RssHandle {
         trust_quorum: trust_quorum::NodeTaskHandle,
         step_tx: watch::Sender<RssStep>,
     ) -> Result<(), SetupServiceError> {
-        let (tx, rx) =
-            rss_channel(our_bootstrap_address, sprockets, measurements.clone());
+        let (tx, rx) = rss_channel(sprockets, measurements.clone());
 
         let rss = RackSetupService::new(
             log.new(o!("component" => "RSS")),
             config,
             internal_disks_rx,
             tx,
+            our_bootstrap_address,
             bootstore,
             trust_quorum,
             step_tx,
@@ -84,12 +85,12 @@ impl RssHandle {
         sprockets: SprocketsConfig,
         measurements: Arc<MeasurementsHandle>,
     ) -> Result<(), SetupServiceError> {
-        let (tx, rx) =
-            rss_channel(our_bootstrap_address, sprockets, measurements);
+        let (tx, rx) = rss_channel(sprockets, measurements);
 
         let rss = RackSetupService::new_reset_rack(
             log.new(o!("component" => "RSS")),
             tx,
+            our_bootstrap_address,
         );
         let log = log.new(o!("component" => "BootstrapAgentRssHandler"));
         rx.await_local_rss_request(&log).await;
@@ -138,13 +139,12 @@ async fn initialize_sled_agent(
 // leave a breadcrumb for where the work will need to be done to switch the
 // communication mechanism.
 fn rss_channel(
-    our_bootstrap_address: Ipv6Addr,
     sprockets: SprocketsConfig,
     measurements: Arc<MeasurementsHandle>,
 ) -> (BootstrapAgentHandle, BootstrapAgentHandleReceiver) {
     let (tx, rx) = mpsc::channel(32);
     (
-        BootstrapAgentHandle { inner: tx, our_bootstrap_address },
+        BootstrapAgentHandle { inner: tx },
         BootstrapAgentHandleReceiver { inner: rx, sprockets, measurements },
     )
 }
@@ -166,19 +166,10 @@ enum RequestKind {
 
 pub(crate) struct BootstrapAgentHandle {
     inner: mpsc::Sender<Request>,
-    our_bootstrap_address: Ipv6Addr,
 }
 
-impl BootstrapAgentHandle {
-    /// Instruct the local bootstrap-agent to initialize sled-agents based on
-    /// the contents of `requests`.
-    ///
-    /// This function takes `self` and can only be called once with the full set
-    /// of sleds to initialize. Returns `Ok(())` if initializing all sleds
-    /// succeeds; if any sled fails to initialize, an error is returned
-    /// immediately (i.e., the error message will pertain only to the first sled
-    /// that failed to initialize).
-    pub(crate) async fn initialize_sleds(
+impl LocalBootstrapAgent for BootstrapAgentHandle {
+    async fn initialize_sleds(
         self,
         requests: Vec<(SocketAddrV6, StartSledAgentRequest)>,
     ) -> Result<(), String> {
@@ -197,7 +188,7 @@ impl BootstrapAgentHandle {
         rx.await.unwrap()
     }
 
-    pub(crate) async fn reset_sleds(
+    async fn reset_sleds(
         self,
         requests: Vec<SocketAddrV6>,
     ) -> Result<(), String> {
@@ -207,10 +198,6 @@ impl BootstrapAgentHandle {
             .await
             .unwrap();
         rx.await.unwrap()
-    }
-
-    pub(crate) fn our_address(&self) -> Ipv6Addr {
-        self.our_bootstrap_address
     }
 }
 

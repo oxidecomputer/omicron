@@ -852,6 +852,8 @@ pub struct SpEreportIngesterStatus {
     /// the config file.
     pub disabled: bool,
     pub sps: Vec<SpEreporterStatus>,
+    /// Total number of present SPs discovered via ignition.
+    pub sps_found: usize,
     pub sps_not_present: usize,
     pub errors: Vec<String>,
 }
@@ -916,6 +918,13 @@ pub struct SitrepGcStatus {
 pub struct FmAnalysisStatus {
     pub parent_sitrep_id: Option<SitrepUuid>,
     pub inv_collection_id: Option<CollectionUuid>,
+    /// Ereport classes that *this* Nexus's diagnosis engine consumes
+    /// (per `nexus_fm::diagnosis::known_ereport_classes`). Recorded here so
+    /// an operator interpreting the activation outcome can see what the
+    /// loader was configured to surface — e.g. whether `RanAnalysis`
+    /// produced no new ereports because the set is empty vs. because
+    /// nothing matched.
+    pub known_classes: Vec<String>,
     pub outcome: fm_analysis::Outcome,
 }
 
@@ -932,6 +941,9 @@ pub mod fm_analysis {
     #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
     #[allow(clippy::large_enum_variant)]
     pub enum Outcome {
+        /// The task is disabled by config.
+        Disabled,
+
         /// Fault management analysis was not performed, as no inventory
         /// collection has been loaded.
         WaitingForInventory,
@@ -1144,6 +1156,26 @@ pub struct AuditLogCleanupStatus {
     pub error: Option<String>,
 }
 
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum SwitchPortPopulatorStatusKind {
+    /// A previous activation of this task had already populated the ports for
+    /// this switch.
+    PreviouslyPopulated,
+
+    /// We successfully populated the ports of this switch.
+    Populated { num_ports: usize },
+}
+
+/// The status of a `populate_switch_ports` background task activation.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub struct SwitchPortPopulatorStatus {
+    /// Result of populating switch 0's ports, if any.
+    pub switch0: Result<SwitchPortPopulatorStatusKind, String>,
+    /// Result of populating switch 1's ports, if any.
+    pub switch1: Result<SwitchPortPopulatorStatusKind, String>,
+}
+
 /// The status of a `session_cleanup` background task activation.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct SessionCleanupStatus {
@@ -1155,6 +1187,25 @@ pub struct SessionCleanupStatus {
     pub limit: u32,
     /// Errors encountered during this activation.
     pub error: Option<String>,
+}
+
+/// Status of the background task pushing service firewall rules.
+#[derive(Default, Deserialize, Serialize)]
+pub struct ServiceFirewallRuleStatus {
+    /// An error encountered looking firewall rules up in the database.
+    pub lookup_error: Option<String>,
+    /// Errors encountered pushing the set of rules to each sled.
+    pub sled_push_errors: Option<BTreeMap<SledUuid, String>>,
+}
+
+/// Status of the `PhysicalDiskAdoption` background task
+#[derive(Debug, Default, Deserialize, Serialize)]
+pub struct PhysicalDiskAdoptionStatus {
+    /// The number of physical disks added during this activation
+    pub disks_added: usize,
+
+    /// Errors encountered during this activation
+    pub errors: Vec<String>,
 }
 
 #[cfg(test)]

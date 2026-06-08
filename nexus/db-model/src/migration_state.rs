@@ -5,9 +5,9 @@
 //! Database representation of a migration's state as understood by Nexus.
 
 use super::impl_enum_wrapper;
-use omicron_common::api::internal::nexus;
 use serde::Deserialize;
 use serde::Serialize;
+use sled_agent_types::instance;
 use std::fmt;
 use std::io::Write;
 
@@ -15,7 +15,7 @@ impl_enum_wrapper!(
     MigrationStateEnum:
 
     #[derive(Clone, Copy, Debug, AsExpression, FromSqlRow, Serialize, Deserialize, PartialEq, Eq)]
-    pub struct MigrationState(pub nexus::MigrationState);
+    pub struct MigrationState(pub instance::MigrationState);
 
     // Enum values
     Pending => b"pending"
@@ -26,13 +26,13 @@ impl_enum_wrapper!(
 
 impl MigrationState {
     pub const COMPLETED: MigrationState =
-        MigrationState(nexus::MigrationState::Completed);
+        MigrationState(instance::MigrationState::Completed);
     pub const FAILED: MigrationState =
-        MigrationState(nexus::MigrationState::Failed);
+        MigrationState(instance::MigrationState::Failed);
     pub const PENDING: MigrationState =
-        MigrationState(nexus::MigrationState::Pending);
+        MigrationState(instance::MigrationState::Pending);
     pub const IN_PROGRESS: MigrationState =
-        MigrationState(nexus::MigrationState::InProgress);
+        MigrationState(instance::MigrationState::InProgress);
 
     pub const TERMINAL_STATES: &'static [MigrationState] =
         &[Self::COMPLETED, Self::FAILED];
@@ -51,8 +51,8 @@ impl fmt::Display for MigrationState {
     }
 }
 
-impl From<nexus::MigrationState> for MigrationState {
-    fn from(s: nexus::MigrationState) -> Self {
+impl From<instance::MigrationState> for MigrationState {
+    fn from(s: instance::MigrationState) -> Self {
         Self(s)
     }
 }

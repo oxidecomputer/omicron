@@ -28,9 +28,7 @@ use iddqd::IdOrdMap;
 use omicron_common::api::external::{
     ByteCount, Error, Generation, ResourceType,
 };
-use omicron_common::api::internal::nexus::{
-    DiskRuntimeState, MigrationRuntimeState, MigrationState, SledVmmState,
-};
+use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::shared::{
     ResolvedVpcRoute, ResolvedVpcRouteSet, ResolvedVpcRouteState, RouterId,
     RouterKind, RouterVersion, VirtualNetworkInterfaceHost,
@@ -58,12 +56,13 @@ use sled_agent_types::early_networking::EarlyNetworkConfigEnvelope;
 use sled_agent_types::early_networking::RackNetworkConfig;
 use sled_agent_types::instance::{
     InstanceEnsureBody, InstanceExternalIpBody, InstanceMulticastMembership,
-    VmmPutStateResponse, VmmStateRequested, VmmUnregisterResponse,
+    MigrationRuntimeState, MigrationState, SledVmmState, VmmPutStateResponse,
+    VmmStateRequested, VmmUnregisterResponse,
 };
 use sled_agent_types::inventory::{
     ConfigReconcilerInventory, ConfigReconcilerInventoryResult,
-    ConfigReconcilerInventoryStatus, HostPhase2DesiredSlots, Inventory,
-    InventoryDataset, InventoryDisk, InventoryZpool,
+    ConfigReconcilerInventoryStatus, FmdInventory, HostPhase2DesiredSlots,
+    Inventory, InventoryDataset, InventoryDisk, InventoryZpool,
     OmicronFileSourceResolverInventory, OmicronSledConfig, OmicronZonesConfig,
     SingleMeasurementInventory, SledRole, ZpoolHealth,
 };
@@ -155,7 +154,7 @@ impl SledAgent {
                 },
                 // TODO-correctness Can we fill this in for the simulated
                 // sled-agent?
-                service_zone_nat_entries: None,
+                blueprint_external_networking_config: None,
             })
             .serialize_to_bootstore_with_generation(0),
         );
@@ -995,6 +994,7 @@ impl SledAgent {
             ),
             smf_services_enabled_not_online,
             reference_measurements,
+            fmd: Ok(FmdInventory::default()),
         })
     }
 

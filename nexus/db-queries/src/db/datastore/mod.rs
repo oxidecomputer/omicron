@@ -129,7 +129,7 @@ mod silo;
 mod silo_auth_settings;
 mod silo_group;
 mod silo_user;
-mod sled;
+pub mod sled;
 mod sled_instance;
 mod snapshot;
 mod ssh_key;
@@ -137,6 +137,7 @@ mod support_bundle;
 mod switch;
 mod switch_interface;
 mod switch_port;
+mod system_networking_settings;
 mod target_release;
 #[cfg(test)]
 pub(crate) mod test_utils;
@@ -1013,7 +1014,7 @@ mod test {
         kind: PhysicalDiskKind,
         serial: String,
     ) -> PhysicalDiskUuid {
-        let physical_disk = PhysicalDisk::new(
+        let physical_disk = PhysicalDisk::from_parts(
             PhysicalDiskUuid::new_v4(),
             TEST_VENDOR.into(),
             serial,

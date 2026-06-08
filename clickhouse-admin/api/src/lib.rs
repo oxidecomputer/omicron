@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use clickhouse_admin_types_versions::latest;
+use clickhouse_admin_types_versions::{latest, v1, v2};
 use dropshot::{
     HttpError, HttpResponseCreated, HttpResponseOk,
     HttpResponseUpdatedNoContent, Path, Query, RequestContext, TypedBody,
@@ -27,6 +27,9 @@ api_versions!([
     // |  example for the next person.
     // v
     // (next_int, IDENT), // NOTE: read the note at the start of this macro!
+    (4, LOG_TO_CONSOLE),
+    (3, ADD_RETENTION_POLICY_FOR_ALL_TABLES),
+    (2, ADD_RETENTION_POLICY_AND_TABLE_USAGE),
     (1, INITIAL),
 ]);
 
@@ -65,6 +68,7 @@ pub trait ClickhouseAdminKeeperApi {
     #[endpoint {
         method = PUT,
         path = "/config",
+        versions = VERSION_LOG_TO_CONSOLE..,
     }]
     async fn generate_config_and_enable_svc(
         rqctx: RequestContext<Self::Context>,
@@ -73,6 +77,25 @@ pub trait ClickhouseAdminKeeperApi {
         HttpResponseCreated<latest::config::GenerateConfigResult>,
         HttpError,
     >;
+
+    /// Generate a ClickHouse configuration file for a keeper node on a specified
+    /// directory and enable the SMF service if not currently enabled.
+    #[endpoint {
+        operation_id = "generate_config_and_enable_svc",
+        method = PUT,
+        path = "/config",
+        versions = ..VERSION_LOG_TO_CONSOLE,
+    }]
+    async fn generate_config_and_enable_svc_v1(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<v1::keeper::KeeperConfigurableSettings>,
+    ) -> Result<HttpResponseCreated<v1::config::GenerateConfigResult>, HttpError>
+    {
+        let HttpResponseCreated(result) =
+            Self::generate_config_and_enable_svc(rqctx, body.map(Into::into))
+                .await?;
+        Ok(HttpResponseCreated(result.into()))
+    }
 
     /// Retrieve the generation number of a configuration
     #[endpoint {
@@ -108,10 +131,25 @@ pub trait ClickhouseAdminKeeperApi {
     #[endpoint {
         method = GET,
         path = "/4lw-conf",
+        versions = VERSION_LOG_TO_CONSOLE..,
     }]
     async fn keeper_conf(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<latest::keeper::KeeperConf>, HttpError>;
+
+    /// Retrieve configuration information from a keeper node.
+    #[endpoint {
+        operation_id = "keeper_conf",
+        method = GET,
+        path = "/4lw-conf",
+        versions = ..VERSION_LOG_TO_CONSOLE,
+    }]
+    async fn keeper_conf_v1(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<v1::keeper::KeeperConf>, HttpError> {
+        let HttpResponseOk(conf) = Self::keeper_conf(rqctx).await?;
+        Ok(HttpResponseOk(conf.into()))
+    }
 
     /// Retrieve cluster membership information from a keeper node.
     #[endpoint {
@@ -145,7 +183,8 @@ pub trait ClickhouseAdminServerApi {
     /// directory and enable the SMF service.
     #[endpoint {
         method = PUT,
-        path = "/config"
+        path = "/config",
+        versions = VERSION_LOG_TO_CONSOLE..,
     }]
     async fn generate_config_and_enable_svc(
         rqctx: RequestContext<Self::Context>,
@@ -154,6 +193,25 @@ pub trait ClickhouseAdminServerApi {
         HttpResponseCreated<latest::config::GenerateConfigResult>,
         HttpError,
     >;
+
+    /// Generate a ClickHouse configuration file for a server node on a specified
+    /// directory and enable the SMF service.
+    #[endpoint {
+        operation_id = "generate_config_and_enable_svc",
+        method = PUT,
+        path = "/config",
+        versions = ..VERSION_LOG_TO_CONSOLE,
+    }]
+    async fn generate_config_and_enable_svc_v1(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<v1::server::ServerConfigurableSettings>,
+    ) -> Result<HttpResponseCreated<v1::config::GenerateConfigResult>, HttpError>
+    {
+        let HttpResponseCreated(result) =
+            Self::generate_config_and_enable_svc(rqctx, body.map(Into::into))
+                .await?;
+        Ok(HttpResponseCreated(result.into()))
+    }
 
     /// Retrieve the generation number of a configuration
     #[endpoint {
@@ -200,6 +258,77 @@ pub trait ClickhouseAdminServerApi {
     async fn init_db(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    /// Set the retention policy for timeseries data.
+    #[endpoint {
+        method = PUT,
+        path = "/retention-policy",
+        versions = VERSION_ADD_RETENTION_POLICY_FOR_ALL_TABLES..,
+    }]
+    async fn set_retention_policy(
+        rqctx: RequestContext<Self::Context>,
+        policy: TypedBody<latest::retention::RetentionPolicyRequest>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    /// Set the retention policy for timeseries data.
+    #[endpoint {
+        method = PUT,
+        path = "/retention-policy",
+        versions =
+            VERSION_ADD_RETENTION_POLICY_AND_TABLE_USAGE..VERSION_ADD_RETENTION_POLICY_FOR_ALL_TABLES,
+    }]
+    async fn set_retention_policy_v2(
+        rqctx: RequestContext<Self::Context>,
+        policy: TypedBody<v2::retention::RetentionPolicy>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        Self::set_retention_policy(rqctx, policy.map(Into::into)).await
+    }
+
+    /// Get the retention policy for timeseries data from the database
+    #[endpoint {
+        method = GET,
+        path = "/retention-policy",
+        versions = VERSION_ADD_RETENTION_POLICY_FOR_ALL_TABLES..,
+    }]
+    async fn retention_policy(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<
+        HttpResponseOk<latest::retention::DatabaseRetentionPolicy>,
+        HttpError,
+    >;
+
+    /// Get the retention policy for timeseries data from the database
+    #[endpoint {
+        method = GET,
+        path = "/retention-policy",
+        versions =
+            VERSION_ADD_RETENTION_POLICY_AND_TABLE_USAGE..VERSION_ADD_RETENTION_POLICY_FOR_ALL_TABLES,
+    }]
+    async fn retention_policy_v2(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<v2::retention::RetentionPolicy>, HttpError> {
+        let HttpResponseOk(mut policy) = Self::retention_policy(rqctx).await?;
+        policy
+            .tables
+            .pop_first()
+            .ok_or_else(|| {
+                HttpError::for_unavail(
+                    None,
+                    "Database is not yet populated".to_string(),
+                )
+            })
+            .map(|pol| HttpResponseOk(pol.into()))
+    }
+
+    /// Return the resource usage of database tables.
+    #[endpoint {
+        method = GET,
+        path = "/usage/database",
+        versions = VERSION_ADD_RETENTION_POLICY_AND_TABLE_USAGE..,
+    }]
+    async fn database_usage(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<latest::usage::DatabaseUsageResult>, HttpError>;
 }
 
 /// API interface for our clickhouse-admin-single server
@@ -235,4 +364,75 @@ pub trait ClickhouseAdminSingleApi {
         path_params: Path<latest::server::MetricInfoPath>,
         query_params: Query<latest::server::TimeSeriesSettingsQuery>,
     ) -> Result<HttpResponseOk<Vec<latest::server::SystemTimeSeries>>, HttpError>;
+
+    /// Set the retention policy for timeseries data.
+    #[endpoint {
+        method = PUT,
+        path = "/retention-policy",
+        versions = VERSION_ADD_RETENTION_POLICY_FOR_ALL_TABLES..,
+    }]
+    async fn set_retention_policy(
+        rqctx: RequestContext<Self::Context>,
+        policy: TypedBody<latest::retention::RetentionPolicyRequest>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    /// Set the retention policy for timeseries data.
+    #[endpoint {
+        method = PUT,
+        path = "/retention-policy",
+        versions =
+            VERSION_ADD_RETENTION_POLICY_AND_TABLE_USAGE..VERSION_ADD_RETENTION_POLICY_FOR_ALL_TABLES,
+    }]
+    async fn set_retention_policy_v2(
+        rqctx: RequestContext<Self::Context>,
+        policy: TypedBody<v2::retention::RetentionPolicy>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        Self::set_retention_policy(rqctx, policy.map(Into::into)).await
+    }
+
+    /// Get the retention policy for timeseries data from the database
+    #[endpoint {
+        method = GET,
+        path = "/retention-policy",
+        versions = VERSION_ADD_RETENTION_POLICY_FOR_ALL_TABLES..,
+    }]
+    async fn retention_policy(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<
+        HttpResponseOk<latest::retention::DatabaseRetentionPolicy>,
+        HttpError,
+    >;
+
+    /// Get the retention policy for timeseries data from the database
+    #[endpoint {
+        method = GET,
+        path = "/retention-policy",
+        versions =
+            VERSION_ADD_RETENTION_POLICY_AND_TABLE_USAGE..VERSION_ADD_RETENTION_POLICY_FOR_ALL_TABLES,
+    }]
+    async fn retention_policy_v2(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<v2::retention::RetentionPolicy>, HttpError> {
+        let HttpResponseOk(mut policy) = Self::retention_policy(rqctx).await?;
+        policy
+            .tables
+            .pop_first()
+            .ok_or_else(|| {
+                HttpError::for_unavail(
+                    None,
+                    "Database is not yet populated".to_string(),
+                )
+            })
+            .map(|pol| HttpResponseOk(pol.into()))
+    }
+
+    /// Return the resource usage of database tables.
+    #[endpoint {
+        method = GET,
+        path = "/usage/database",
+        versions = VERSION_ADD_RETENTION_POLICY_AND_TABLE_USAGE..,
+    }]
+    async fn database_usage(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<latest::usage::DatabaseUsageResult>, HttpError>;
 }

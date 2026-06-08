@@ -10,12 +10,14 @@ use crate::DropshotServer;
 use crate::app::background::BackgroundTasksData;
 use crate::app::background::CurrentSitrep;
 use crate::app::background::SagaRecoveryHelpers;
+use crate::app::background::resolve_mgd_clients;
 use crate::app::update::UpdateStatusHandle;
 use crate::populate::PopulateArgs;
 use crate::populate::PopulateStatus;
 use crate::populate::populate_start;
 use ::oximeter::types::ProducerRegistry;
 use anyhow::anyhow;
+use internal_dns_resolver::ResolveError;
 use internal_dns_types::names::ServiceName;
 use nexus_background_task_interface::BackgroundTasks;
 use nexus_config::NexusConfig;
@@ -32,7 +34,6 @@ use nexus_mgs_updates::MgsUpdateDriver;
 use nexus_types::deployment::PendingMgsUpdates;
 use nexus_types::deployment::ReconfiguratorConfigParam;
 
-use omicron_common::address::MGD_PORT;
 use omicron_common::address::MGS_PORT;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Error;
@@ -65,7 +66,7 @@ pub(crate) mod background;
 mod bfd;
 mod bgp;
 mod certificate;
-mod crucible;
+pub mod crucible;
 mod deployment;
 mod device_auth;
 mod disk;
@@ -104,6 +105,7 @@ pub(crate) mod support_bundles;
 mod switch;
 mod switch_interface;
 mod switch_port;
+mod system_networking;
 pub mod test_interfaces;
 mod trust_quorum;
 mod update;
@@ -223,17 +225,7 @@ pub struct Nexus {
     ///
     /// (This does not need to be in an `Arc` because `reqwest::Client` uses
     /// `Arc` internally.)
-    ///
-    /// Currently unused because all `new_with_client` call sites use
-    /// `reqwest012_client` for cross-repo dependencies that are still on
-    /// reqwest 0.12. This field will be used again once rev pins are updated.
-    #[allow(dead_code)]
     reqwest_client: reqwest::Client,
-
-    /// `reqwest012::Client` for cross-repo dependencies where the rev-pinned
-    /// dependency is still on reqwest 0.12. Remove once all rev pins are
-    /// updated.
-    reqwest012_client: reqwest012::Client,
 
     /// Client to the timeseries database.
     timeseries_client: oximeter_db::Client,
@@ -436,14 +428,6 @@ impl Nexus {
             .build()
             .map_err(|e| InlineErrorChain::new(&e).to_string())?;
 
-        // reqwest 0.12 client for cross-repo dependencies still on reqwest
-        // 0.12. Remove once all rev pins are updated.
-        let reqwest012_client = reqwest012::ClientBuilder::new()
-            .connect_timeout(std::time::Duration::from_secs(15))
-            .timeout(std::time::Duration::from_secs(15))
-            .build()
-            .map_err(|e| InlineErrorChain::new(&e).to_string())?;
-
         // Client to the ClickHouse database.
         let timeseries_client = match &config.pkg.timeseries_db.address {
             None => {
@@ -548,7 +532,6 @@ impl Nexus {
             producer_server: std::sync::Mutex::new(None),
             populate_status,
             reqwest_client,
-            reqwest012_client,
             timeseries_client,
             webhook_delivery_client,
             tunables: config.pkg.tunables.clone(),
@@ -781,6 +764,12 @@ impl Nexus {
     pub(crate) fn activate_inventory_collection(&self) {
         self.background_tasks
             .activate(&self.background_tasks.task_inventory_collection);
+    }
+
+    // Called to trigger propagation of service firewall rules.
+    pub(crate) fn activate_service_firewall_propagation(&self) {
+        self.background_tasks
+            .activate(&self.background_tasks.task_service_firewall_propagation);
     }
 
     // Called to hand off management of external servers to Nexus.
@@ -1171,24 +1160,21 @@ impl Nexus {
         lldpd_clients(resolver, rack_id, &self.log).await
     }
 
+    /// Get all MGD known `SwitchSlot -> MGD client` pairs.
+    ///
+    /// # Errors
+    ///
+    /// Fails if we cannot resolve MGD in DNS.
+    ///
+    /// For any MGD instance we resolve via DNS, if the MGD instance does not
+    /// know its own switch slot, the switch slot -> client mapping for that
+    /// instance will be omitted from the returned map. Callers must not
+    /// assume an `Ok(_)` return value contains any client.
     pub(crate) async fn mg_clients(
         &self,
-    ) -> Result<HashMap<SwitchSlot, mg_admin_client::Client>, String> {
-        let resolver = self.resolver();
-        let mappings =
-            switch_zone_address_mappings(resolver, &self.log).await?;
-        let mut clients: Vec<(SwitchSlot, mg_admin_client::Client)> = vec![];
-        for (switch_slot, addr) in &mappings {
-            let port = MGD_PORT;
-            let socketaddr =
-                std::net::SocketAddr::V6(SocketAddrV6::new(*addr, port, 0, 0));
-            let client = mg_admin_client::Client::new(
-                format!("http://{}", socketaddr).as_str(),
-                self.log.clone(),
-            );
-            clients.push((*switch_slot, client));
-        }
-        Ok(clients.into_iter().collect::<HashMap<_, _>>())
+    ) -> Result<HashMap<SwitchSlot, mg_admin_client::Client>, ResolveError>
+    {
+        resolve_mgd_clients(self.resolver(), &self.log).await
     }
 
     pub(crate) fn demo_sagas(

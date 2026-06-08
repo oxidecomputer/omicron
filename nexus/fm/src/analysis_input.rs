@@ -24,8 +24,8 @@ pub use nexus_types::fm::analysis_reports::InputReport as Report;
 /// - The current [inventory collection](Input::inventory)
 /// - Any [new ereports](Input::new_ereports) which were received since when
 ///   the parent sitrep was produced
-/// - The set of [cases](Input::cases) which must be copied forwards into
-///   the next sitrep
+/// - The set of [open cases](Input::open_cases) which must be copied
+///   forwards into the next sitrep
 ///
 /// This type represents the outputs of the analysis preparation phase. Once it
 /// is constructed, the inputs are immutable and cannot be modified. To
@@ -54,7 +54,10 @@ impl Input {
         &self.new_ereports
     }
 
-    pub fn cases(&self) -> &IdOrdMap<fm::Case> {
+    /// Open cases from the parent sitrep, copied forward into this analysis
+    /// input. Closed cases live separately on the (crate-private)
+    /// `closed_cases_copied_forward` accessor.
+    pub fn open_cases(&self) -> &IdOrdMap<fm::Case> {
         &self.open_cases
     }
 
@@ -531,14 +534,18 @@ mod tests {
 
         // Check the contents of open cases.
         assert!(
-            input.cases().contains_key(&open_case1_id),
-            "open case 1 from the parent sitrep should be in input.cases()"
+            input.open_cases().contains_key(&open_case1_id),
+            "open case 1 from the parent sitrep should be in input.open_cases()"
         );
         assert!(
-            input.cases().contains_key(&open_case2_id),
-            "open case 2 from the parent sitrep should be in input.cases()"
+            input.open_cases().contains_key(&open_case2_id),
+            "open case 2 from the parent sitrep should be in input.open_cases()"
         );
-        assert_eq!(input.cases().len(), 2, "exactly two cases should be open");
+        assert_eq!(
+            input.open_cases().len(),
+            2,
+            "exactly two cases should be open"
+        );
 
         // Start building a sitrep...
         let mut sitrep_builder =
@@ -586,12 +593,10 @@ mod tests {
                     "requesting an alert to tell someone about something",
                 )
                 .unwrap();
-            new_case
-                .request_support_bundle(
-                    nexus_types::support_bundle::BundleDataSelection::all(),
-                    "requesting a support bundle",
-                )
-                .unwrap();
+            new_case.request_support_bundle(
+                nexus_types::support_bundle::BundleDataSelection::all(),
+                "requesting a support bundle",
+            );
             *new_case.id()
         };
 
