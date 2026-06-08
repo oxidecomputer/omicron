@@ -125,9 +125,10 @@ where
 
         tokio::select! {
             _ = rx.changed() => continue,
-            // If we're already past the deadline, `duration_since` returns 0,
-            // so this sleep will be ready immediately.
-            _ = tokio::time::sleep(deadline.duration_since(start)) => {
+            // Sleep for the time remaining until the deadline. If we're already
+            // past the deadline, `saturating_duration_since` returns 0, so this
+            // sleep will be ready immediately.
+            _ = tokio::time::sleep(deadline.saturating_duration_since(Instant::now())) => {
                 return Err(Error::TimedOut(timeout));
             }
         }
