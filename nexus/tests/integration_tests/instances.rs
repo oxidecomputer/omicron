@@ -974,6 +974,290 @@ async fn test_instance_migrate(cptestctx: &ControlPlaneTestContext) {
     }
 }
 
+#[nexus_test(extra_sled_agents = 1)]
+async fn test_instance_migrate_target_finishes_first(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    use nexus_db_model::{Migration, MigrationState};
+    async fn migration_fetch(
+        cptestctx: &ControlPlaneTestContext,
+        migration_id: Uuid,
+    ) -> Migration {
+        use nexus_db_schema::schema::migration::dsl;
+
+        let datastore =
+            cptestctx.server.server_context().nexus.datastore().clone();
+        let db_state = dsl::migration
+            // N.B. that for the purposes of this test, we explicitly should
+            // *not* filter out migrations that are marked as deleted, as the
+            // migration record is marked as deleted once the migration completes.
+            .filter(dsl::id.eq(migration_id))
+            .select(Migration::as_select())
+            .get_results_async::<Migration>(
+                &*datastore.pool_connection_for_tests().await.unwrap(),
+            )
+            .await
+            .unwrap();
+
+        info!(&cptestctx.logctx.log, "refetched migration info from db";
+                "migration" => ?db_state);
+
+        db_state.into_iter().next().unwrap()
+    }
+
+    let client = &cptestctx.external_client;
+    let lockstep_client = &cptestctx.lockstep_client;
+    let apictx = &cptestctx.server.server_context();
+    let nexus = &apictx.nexus;
+    let instance_name = "bird-ecology";
+
+    // Get the second sled to migrate to/from.
+    let default_sled_id = cptestctx.first_sled_id();
+    let other_sled_id = cptestctx.second_sled_id();
+
+    create_project_and_pool(&client).await;
+    let instance_url = get_instance_url(instance_name);
+
+    // Explicitly create an instance with no disks. Simulated sled agent assumes
+    // that disks are co-located with their instances.
+    let instance = nexus_test_utils::resource_helpers::create_instance_with(
+        client,
+        PROJECT_NAME,
+        instance_name,
+        &instance::InstanceNetworkInterfaceAttachment::DefaultIpv4,
+        Vec::<instance::InstanceDiskAttachment>::new(),
+        Vec::<ExternalIpCreate>::new(),
+        true,
+        Default::default(),
+        None,
+        Vec::new(),
+    )
+    .await;
+    let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
+
+    // Poke the instance into an active state.
+    instance_simulate(nexus, &instance_id).await;
+    let instance_next = instance_get(&client, &instance_url).await;
+    assert_eq!(instance_next.runtime.run_state, InstanceState::Running);
+
+    let sled_info = nexus
+        .active_instance_info(&instance_id, None)
+        .await
+        .unwrap()
+        .expect("running instance should have a sled");
+
+    let original_sled = sled_info.sled_id;
+    let dst_sled_id = if original_sled == default_sled_id {
+        other_sled_id
+    } else {
+        default_sled_id
+    };
+
+    let migrate_url =
+        format!("/instances/{}/migrate", &instance_id.to_string());
+    let instance = NexusRequest::new(
+        RequestBuilder::new(lockstep_client, Method::POST, &migrate_url)
+            .body(Some(&InstanceMigrateRequest { dst_sled_id }))
+            .expect_status(Some(StatusCode::OK)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body::<Instance>()
+    .unwrap();
+
+    let new_sled_info = nexus
+        .active_instance_info(&instance_id, None)
+        .await
+        .unwrap()
+        .expect("running instance should have a sled");
+
+    let current_sled = new_sled_info.sled_id;
+    assert_eq!(current_sled, original_sled);
+
+    // Ensure that both sled agents report that the migration is in progress.
+    let migration_id = {
+        let datastore = apictx.nexus.datastore();
+        let opctx = OpContext::for_tests(
+            cptestctx.logctx.log.new(o!()),
+            datastore.clone(),
+        );
+        let (.., authz_instance) = LookupPath::new(&opctx, datastore)
+            .instance_id(instance.identity.id)
+            .lookup_for(nexus_db_queries::authz::Action::Read)
+            .await
+            .unwrap();
+        datastore
+            .instance_refetch(&opctx, &authz_instance)
+            .await
+            .unwrap()
+            .migration_id
+            .expect("since we've started a migration, the instance record must have a migration id!")
+    };
+    let migration = dbg!(migration_fetch(cptestctx, migration_id).await);
+    assert_eq!(migration.target_state, MigrationState::PENDING);
+    assert_eq!(migration.source_state, MigrationState::PENDING);
+
+    let info = nexus
+        .active_instance_info(&instance_id, None)
+        .await
+        .unwrap()
+        .expect("instance should be on a sled");
+    let src_propolis_id = info.propolis_id;
+    let dst_propolis_id =
+        info.dst_propolis_id.expect("instance should have a migration target");
+
+    // Simulate the migration. We will use `instance_single_step_on_sled` to
+    // single-step both sled-agents through the migration state machine and
+    // ensure that the migration state looks nice at each step.
+    instance_simulate_migration_source(
+        cptestctx,
+        nexus,
+        original_sled,
+        src_propolis_id,
+        migration_id,
+    )
+    .await;
+
+    // Move source to "migrating".
+    vmm_single_step_on_sled(cptestctx, nexus, original_sled, src_propolis_id)
+        .await;
+    vmm_single_step_on_sled(cptestctx, nexus, original_sled, src_propolis_id)
+        .await;
+
+    let migration = dbg!(migration_fetch(cptestctx, migration_id).await);
+    assert_eq!(migration.source_state, MigrationState::IN_PROGRESS);
+    assert_eq!(migration.target_state, MigrationState::PENDING);
+    let instance = instance_get(&client, &instance_url).await;
+    assert_eq!(instance.runtime.run_state, InstanceState::Migrating);
+
+    // Move target to "migrating".
+    vmm_single_step_on_sled(cptestctx, nexus, dst_sled_id, dst_propolis_id)
+        .await;
+    vmm_single_step_on_sled(cptestctx, nexus, dst_sled_id, dst_propolis_id)
+        .await;
+
+    let migration = dbg!(migration_fetch(cptestctx, migration_id).await);
+    assert_eq!(migration.source_state, MigrationState::IN_PROGRESS);
+    assert_eq!(migration.target_state, MigrationState::IN_PROGRESS);
+    let instance = instance_get(&client, &instance_url).await;
+    assert_eq!(instance.runtime.run_state, InstanceState::Migrating);
+
+    // Move the target to "completed" before the source.
+    vmm_simulate_on_sled(cptestctx, nexus, dst_sled_id, dst_propolis_id).await;
+
+    instance_wait_for_state(&client, instance_id, InstanceState::Running).await;
+
+    let current_sled = nexus
+        .active_instance_info(&instance_id, None)
+        .await
+        .unwrap()
+        .expect("migrated instance should still have a sled")
+        .sled_id;
+
+    assert_eq!(current_sled, dst_sled_id);
+
+    let migration = dbg!(migration_fetch(cptestctx, migration_id).await);
+    assert_eq!(migration.target_state, MigrationState::COMPLETED);
+    assert_eq!(migration.source_state, MigrationState::IN_PROGRESS);
+
+    // Assert the source sled_resource_vmm record was tombstoned, and the target
+    // switched to source.
+    {
+        use nexus_db_model::SledResourceVmm;
+        use nexus_db_model::SledResourceVmmState;
+        use nexus_db_schema::schema::sled_resource_vmm::dsl;
+
+        let datastore = apictx.nexus.datastore();
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
+
+        let record = dsl::sled_resource_vmm
+            .filter(dsl::id.eq(to_db_typed_uuid(src_propolis_id)))
+            .select(SledResourceVmm::as_select())
+            .get_result_async(&*conn)
+            .await
+            .unwrap();
+
+        assert_eq!(record.state, SledResourceVmmState::Tombstoned); // XXX
+
+        let record = dsl::sled_resource_vmm
+            .filter(dsl::id.eq(to_db_typed_uuid(dst_propolis_id)))
+            .select(SledResourceVmm::as_select())
+            .get_result_async(&*conn)
+            .await
+            .unwrap();
+
+        assert_eq!(record.state, SledResourceVmmState::Active);
+    }
+
+    // Now, move the source to "completed"
+
+    vmm_simulate_on_sled(cptestctx, nexus, original_sled, src_propolis_id)
+        .await;
+
+    let migration = dbg!(migration_fetch(cptestctx, migration_id).await);
+    assert_eq!(migration.source_state, MigrationState::COMPLETED);
+    assert_eq!(migration.target_state, MigrationState::COMPLETED);
+
+    // Assert the source sled_resource_vmm record was set to tombstoned
+    {
+        use nexus_db_model::SledResourceVmm;
+        use nexus_db_model::SledResourceVmmState;
+        use nexus_db_schema::schema::sled_resource_vmm::dsl;
+
+        let datastore = apictx.nexus.datastore();
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
+
+        let record = dsl::sled_resource_vmm
+            .filter(dsl::id.eq(to_db_typed_uuid(src_propolis_id)))
+            .select(SledResourceVmm::as_select())
+            .get_result_async(&*conn)
+            .await
+            .unwrap();
+
+        assert_eq!(record.state, SledResourceVmmState::Tombstoned);
+    }
+
+    // Kick the instance_watcher backgound task
+
+    nexus_test_utils::background::activate_background_task(
+        &cptestctx.lockstep_client,
+        "instance_watcher",
+    )
+    .await;
+
+    // Assert the source record was cleaned up
+
+    poll::wait_for_condition(
+        || async {
+            use nexus_db_model::SledResourceVmm;
+            use nexus_db_schema::schema::sled_resource_vmm::dsl;
+
+            let datastore = apictx.nexus.datastore();
+            let conn = datastore.pool_connection_for_tests().await.unwrap();
+
+            let maybe_record = dsl::sled_resource_vmm
+                .filter(dsl::id.eq(to_db_typed_uuid(src_propolis_id)))
+                .select(SledResourceVmm::as_select())
+                .get_result_async(&*conn)
+                .await
+                .optional()
+                .unwrap();
+
+            if maybe_record.is_none() {
+                Ok(())
+            } else {
+                Err(CondCheckError::<()>::NotYet)
+            }
+        },
+        &Duration::from_secs(5),
+        &Duration::from_secs(60),
+    )
+    .await
+    .unwrap();
+}
+
 #[nexus_test(extra_sled_agents = 3)]
 async fn test_instance_migrate_v2p_and_routes(
     cptestctx: &ControlPlaneTestContext,
