@@ -43,7 +43,6 @@ use nexus_db_errors::public_error_from_diesel;
 use nexus_db_lookup::DbConnection;
 use nexus_db_model::ApplySledFilterExt;
 use nexus_db_model::DbTypedUuid;
-use nexus_db_schema::enums::SledResourceVmmStateEnum;
 use nexus_types::deployment::SledFilter;
 use nexus_types::external_api::sled::{SledPolicy, SledProvisionPolicy};
 use nexus_types::identity::Asset;
@@ -1509,34 +1508,38 @@ impl DataStore {
         active_vmm_id: Uuid,
         target_vmm_id: Uuid,
     ) -> UpdateResult<()> {
-        use diesel::dsl::case_when;
         use nexus_db_schema::schema::sled_resource_vmm::dsl as resource_dsl;
 
         let conn = self.pool_connection_authorized(opctx).await?;
 
-        // Issue a single update so that a racing insert of another record with
-        // state 'active' cannot occur.
+        // TODO: Cockroach DB, at the time of this writing, will, depending on
+        // the order of the UUIDs returned here, will apply the update to change
+        // the target_vmm_id's record to active before changing the
+        // active_vmm_id's record to tombstoned, meaning the unique index that
+        // prevents multiple records from being in state `active` will cause the
+        // UPDATE to fail. It would be nice to issue a single update for this
+        // but we can't.
 
-        diesel::update(resource_dsl::sled_resource_vmm)
-            .filter(resource_dsl::id.eq_any([active_vmm_id, target_vmm_id]))
-            .set(
-                resource_dsl::state.eq(case_when::<
-                    _,
-                    SledResourceVmmState,
-                    SledResourceVmmStateEnum,
-                >(
-                    resource_dsl::id.eq(active_vmm_id),
-                    SledResourceVmmState::Tombstoned,
-                )
-                .when(
-                    resource_dsl::id.eq(target_vmm_id),
-                    SledResourceVmmState::Active,
-                )
-                .otherwise(resource_dsl::state)),
-            )
-            .execute_async(&*conn)
-            .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+        self.transaction_retry_wrapper(
+            "sled_reservation_update_for_migrate_success",
+        )
+        .transaction(&conn, |conn| async move {
+            diesel::update(resource_dsl::sled_resource_vmm)
+                .filter(resource_dsl::id.eq(active_vmm_id))
+                .set(resource_dsl::state.eq(SledResourceVmmState::Tombstoned))
+                .execute_async(&conn)
+                .await?;
+
+            diesel::update(resource_dsl::sled_resource_vmm)
+                .filter(resource_dsl::id.eq(target_vmm_id))
+                .set(resource_dsl::state.eq(SledResourceVmmState::Active))
+                .execute_async(&conn)
+                .await?;
+
+            Ok(())
+        })
+        .await
+        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
         Ok(())
     }
