@@ -3650,7 +3650,7 @@ impl UnstableReconfiguratorState {
             // The parent blueprint definitely can't be the latest target.
             //
             // Insert it into `non_targets` so that a subsequent iteration that
-            // finds this blueprint as the target know that it cannot be the
+            // finds this blueprint as the target knows that it cannot be the
             // final target.
             //
             // Remove it from `maybe_targets` in case a previous iteration
