@@ -7621,6 +7621,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "futures",
+ "iddqd",
  "nexus-db-model",
  "nexus-db-queries",
  "nexus-types",
@@ -7667,6 +7668,7 @@ dependencies = [
  "anyhow",
  "camino",
  "chrono",
+ "iddqd",
  "indent_write",
  "indexmap 2.14.0",
  "itertools 0.14.0",

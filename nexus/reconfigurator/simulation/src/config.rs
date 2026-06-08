@@ -4,6 +4,7 @@
 
 use std::{collections::BTreeSet, fmt};
 
+use iddqd::IdOrdMap;
 use indexmap::IndexSet;
 use nexus_types::deployment::{Blueprint, BlueprintTarget};
 use omicron_common::api::external::{Generation, Name};
@@ -167,7 +168,7 @@ impl SimConfigBuilder {
         silo_names: Vec<Name>,
         active_nexus_zones: &BTreeSet<OmicronZoneUuid>,
         target_blueprint: &BlueprintTarget,
-        all_blueprints: &[Blueprint],
+        all_blueprints: &IdOrdMap<Blueprint>,
         res: &mut LoadSerializedResultBuilder,
     ) -> LoadSerializedConfigResult {
         self.inner.load_serialized_inner(
@@ -367,7 +368,7 @@ impl SimConfigBuilderInner {
         silo_names: Vec<Name>,
         active_nexus_zones: &BTreeSet<OmicronZoneUuid>,
         target_blueprint: &BlueprintTarget,
-        all_blueprints: &[Blueprint],
+        all_blueprints: &IdOrdMap<Blueprint>,
         res: &mut LoadSerializedResultBuilder,
     ) -> LoadSerializedConfigResult {
         let nnames = external_dns_zone_names.len();
@@ -469,7 +470,7 @@ impl SimConfigBuilderInner {
 fn determine_active_nexus_generation(
     active_nexus_zones: &BTreeSet<OmicronZoneUuid>,
     target_blueprint: &BlueprintTarget,
-    all_blueprints: &[Blueprint],
+    all_blueprints: &IdOrdMap<Blueprint>,
 ) -> Result<Generation, String> {
     // Real systems always have at least one active Nexus zone, but our
     // simulated system has some cases where we have none at all. We'll never be
@@ -480,8 +481,7 @@ fn determine_active_nexus_generation(
         return Ok(Generation::new());
     }
 
-    let Some(blueprint) =
-        all_blueprints.iter().find(|bp| bp.id == target_blueprint.target_id)
+    let Some(blueprint) = all_blueprints.get(&target_blueprint.target_id)
     else {
         return Err(format!(
             "target blueprint {} not found",

@@ -3410,12 +3410,12 @@ impl From<&crate::inventory::Dataset> for CollectionDatasetIdentifier {
 ///
 /// **This format is not stable.  It may change at any time without
 /// backwards-compatibility guarantees.**
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct UnstableReconfiguratorState {
     pub planning_input: PlanningInput,
-    pub collections: Vec<Collection>,
+    pub collections: IdOrdMap<Collection>,
     pub target_blueprint: BlueprintTarget,
-    pub blueprints: Vec<Blueprint>,
+    pub blueprints: IdOrdMap<Blueprint>,
     pub internal_dns: BTreeMap<Generation, DnsConfigParams>,
     pub external_dns: BTreeMap<Generation, DnsConfigParams>,
     pub silo_names: Vec<omicron_common::api::external::Name>,
@@ -3742,9 +3742,9 @@ impl UnstableReconfiguratorState {
             warnings,
             state: UnstableReconfiguratorState {
                 planning_input: latest.planning_input,
-                collections: collections.into_iter().collect(),
+                collections,
                 target_blueprint: latest.target_blueprint,
-                blueprints: blueprints.into_iter().collect(),
+                blueprints,
                 internal_dns,
                 external_dns,
                 silo_names: latest.silo_names,
@@ -3898,15 +3898,7 @@ mod test {
             "expected no warnings, got: {:?}",
             result.warnings
         );
-        // The merged state should agree with the input on the things
-        // `read_series` tracks (target blueprint and the set of blueprints /
-        // collections).
-        assert_eq!(
-            result.state.target_blueprint.target_id,
-            state.target_blueprint.target_id,
-        );
-        assert_eq!(result.state.blueprints.len(), state.blueprints.len());
-        assert_eq!(result.state.collections.len(), state.collections.len());
+        assert_eq!(state, result.state);
     }
 
     /// Feeding byte-identical content under two different labels also
@@ -3930,8 +3922,7 @@ mod test {
             "expected no warnings, got: {:?}",
             result.warnings
         );
-        assert_eq!(result.state.blueprints.len(), state.blueprints.len());
-        assert_eq!(result.state.collections.len(), state.collections.len());
+        assert_eq!(state, result.state);
     }
 
     /// Two consistent inputs whose targets sit on the same parent chain.
@@ -3982,8 +3973,8 @@ mod test {
                 });
             assert_eq!(result.latest, "b.out", "case {label}");
             assert_eq!(
-                result.state.target_blueprint.target_id, child_target,
-                "case {label}",
+                state_b, result.state,
+                "case {label}: merged state should equal file B's state",
             );
             assert!(
                 result.warnings.is_empty(),
@@ -4000,11 +3991,16 @@ mod test {
         let state = base_state("multi_load_collection_mismatch");
         assert!(!state.collections.is_empty(), "need a collection to mutate");
         let mut mutated = state.clone();
-        // Bump `time_done` on the first collection without changing its id.
-        // Any observable change is enough to trip the equality check.
-        mutated.collections[0].time_done =
-            mutated.collections[0].time_done + Duration::seconds(1);
-        let mismatched_id = mutated.collections[0].id;
+        // Bump `time_done` on one collection without changing its id.  Any
+        // observable change is enough to trip the equality check.
+        let mut entry = mutated
+            .collections
+            .iter_mut()
+            .next()
+            .expect("at least one collection");
+        entry.time_done = entry.time_done + Duration::seconds(1);
+        let mismatched_id = entry.id;
+        drop(entry);
 
         let bytes_a = serialize(&state);
         let bytes_b = serialize(&mutated);
@@ -4029,8 +4025,14 @@ mod test {
         let mut mutated = state.clone();
         // `creator` is a free-form string that doesn't affect any other
         // invariant.
-        mutated.blueprints[0].creator = "mutated-creator".to_owned();
-        let mismatched_id = mutated.blueprints[0].id;
+        let mut entry = mutated
+            .blueprints
+            .iter_mut()
+            .next()
+            .expect("at least one blueprint");
+        entry.creator = "mutated-creator".to_owned();
+        let mismatched_id = entry.id;
+        drop(entry);
 
         let bytes_a = serialize(&state);
         let bytes_b = serialize(&mutated);
@@ -4064,7 +4066,7 @@ mod test {
         let target_id = planner_blueprint.id;
 
         let mut stripped = state.clone();
-        for b in stripped.blueprints.iter_mut() {
+        for mut b in stripped.blueprints.iter_mut() {
             if b.id == target_id {
                 b.source = BlueprintSource::PlannerLoadedFromDatabase;
             }
@@ -4098,17 +4100,12 @@ mod test {
                 "case {label}: unexpected warnings: {:?}",
                 result.warnings,
             );
-            let merged_blueprint = result
-                .state
-                .blueprints
-                .iter()
-                .find(|b| b.id == target_id)
-                .expect("blueprint preserved through merge");
-            assert!(
-                matches!(merged_blueprint.source, BlueprintSource::Planner(_)),
-                "case {label}: expected planning report to be retained, \
-                 got {:?}",
-                merged_blueprint.source,
+            // Regardless of the order in which the inputs were processed,
+            // the merged state should match the with-report side (the
+            // reconciliation copies the report over to the other copy).
+            assert_eq!(
+                state, result.state,
+                "case {label}: planning report should be retained",
             );
         }
     }
@@ -4198,7 +4195,10 @@ mod test {
         // both because only the second file provides the target blueprint
         // that lets `read_series` finish successfully.
         let mut missing = state.clone();
-        missing.blueprints.retain(|b| b.id != target_id);
+        missing
+            .blueprints
+            .remove(&target_id)
+            .expect("target blueprint present");
 
         let bytes_missing = serialize(&missing);
         let bytes_full = serialize(&state);
@@ -4260,7 +4260,7 @@ mod test {
         let mut sibling_a = original_target_blueprint.clone();
         sibling_a.id = sibling_a_id;
         sibling_a.parent_blueprint_id = Some(shared_parent_id);
-        state_a.blueprints.push(sibling_a);
+        state_a.blueprints.insert_unique(sibling_a).unwrap();
         state_a.target_blueprint.target_id = sibling_a_id;
         state_a.target_blueprint.time_made_target = t1;
 
@@ -4269,12 +4269,26 @@ mod test {
         let mut sibling_b = original_target_blueprint.clone();
         sibling_b.id = sibling_b_id;
         sibling_b.parent_blueprint_id = Some(shared_parent_id);
-        state_b.blueprints.push(sibling_b);
+        state_b.blueprints.insert_unique(sibling_b).unwrap();
         state_b.target_blueprint.target_id = sibling_b_id;
         state_b.target_blueprint.time_made_target = t2;
 
         let bytes_a = serialize(&state_a);
         let bytes_b = serialize(&state_b);
+
+        // Expected merged state: state_b (the tiebreaker winner) supplies
+        // `target_blueprint`, `planning_input`, `silo_names`, and
+        // `external_dns_zone_names`.  Blueprints and collections are merged
+        // across both inputs, so the result also contains sibling_a's
+        // blueprint (sibling_b is already in state_b).
+        let mut expected = state_b.clone();
+        let sibling_a_clone = state_a
+            .blueprints
+            .iter()
+            .find(|b| b.id == sibling_a_id)
+            .expect("sibling_a in state_a")
+            .clone();
+        expected.blueprints.insert_unique(sibling_a_clone).unwrap();
 
         for (label, inputs) in [
             (
@@ -4297,12 +4311,8 @@ mod test {
                 &warning_text,
                 "were not the parent of some other blueprint",
             );
-            // The later `time_made_target` wins, which is sibling_b.
-            assert_eq!(
-                result.state.target_blueprint.target_id, sibling_b_id,
-                "case {label}: latest target should be sibling_b",
-            );
             assert_eq!(result.latest, "b.out", "case {label}");
+            assert_eq!(expected, result.state, "case {label}");
         }
     }
 

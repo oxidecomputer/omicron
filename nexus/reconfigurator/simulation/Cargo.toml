@@ -10,6 +10,7 @@ workspace = true
 anyhow.workspace = true
 camino.workspace = true
 chrono.workspace = true
+iddqd.workspace = true
 indent_write.workspace = true
 indexmap.workspace = true
 itertools.workspace = true
