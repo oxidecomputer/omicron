@@ -69,6 +69,7 @@ use nexus_types::identity::Resource;
 use nexus_types::internal_api::params::InstanceMigrateRequest;
 use nexus_types::silo::DEFAULT_SILO_ID;
 use nexus_types_versions::latest::instance::Instance;
+use nexus_types_versions::latest::instance::InstanceCpuPlatform;
 use omicron_common::address::IpVersion;
 use omicron_common::api::external::AffinityPolicy;
 use omicron_common::api::external::ByteCount;
@@ -80,7 +81,6 @@ use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::IdentityMetadataUpdateParams;
 use omicron_common::api::external::InstanceAutoRestartPolicy;
 use omicron_common::api::external::InstanceCpuCount;
-use omicron_common::api::external::InstanceCpuPlatform;
 use omicron_common::api::external::InstanceNetworkInterface;
 use omicron_common::api::external::InstanceState;
 use omicron_common::api::external::Name;
@@ -7323,6 +7323,7 @@ async fn test_can_start_instance_with_cpu_platform(
             ncpus: InstanceCpuCount::try_from(1).unwrap(),
             memory: ByteCount::from_gibibytes_u32(4),
             multicast_groups: None,
+            enable_jumbo_frames: false,
         },
     )
     .await;
