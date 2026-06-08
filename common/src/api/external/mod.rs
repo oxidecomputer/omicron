@@ -1306,65 +1306,6 @@ pub enum InstanceAutoRestartPolicy {
     BestEffort,
 }
 
-/*
-/// A required CPU platform for an instance.
-///
-/// When an instance specifies a required CPU platform:
-///
-/// - The system may expose (to the VM) new CPU features that are only present
-///   on that platform (or on newer platforms of the same lineage that also
-///   support those features).
-/// - The instance must run on hosts that have CPUs that support all the
-///   features of the supplied platform.
-///
-/// That is, the instance is restricted to hosts that have the CPUs which
-/// support all features of the required platform, but in exchange the CPU
-/// features exposed by the platform are available for the guest to use. Note
-/// that this may prevent an instance from starting (if the hosts that could run
-/// it are full but there is capacity on other incompatible hosts).
-///
-/// If an instance does not specify a required CPU platform, then when
-/// it starts, the control plane selects a host for the instance and then
-/// supplies the guest with the "minimum" CPU platform supported by that host.
-/// This maximizes the number of hosts that can run the VM if it later needs to
-/// migrate to another host.
-///
-/// In all cases, the CPU features presented by a given CPU platform are a
-/// subset of what the corresponding hardware may actually support; features
-/// which cannot be used from a virtual environment or do not have full
-/// hypervisor support may be masked off.
-#[derive(
-    Copy, Clone, Debug, Deserialize, Serialize, JsonSchema, Eq, PartialEq,
-)]
-#[serde(rename_all = "snake_case")]
-pub enum InstanceCpuPlatform {
-    /// An AMD Milan-like CPU platform.
-    AmdMilan,
-
-    /// An AMD Turin-like CPU platform.
-    ///
-    /// This initial version of the Turin CPU platform includes no cache
-    /// or TLB information in CPUID leaf `8000_0006`. While this was
-    /// intentional, some guest software interprets the zeroed leaves as
-    /// reporting cache sizes of 0 bytes, to disastrous outcomes (see
-    /// [Propolis#1152](https://github.com/oxidecomputer/propolis/issues/1152)).
-    // Note that there is only Turin, not Turin Dense - feature-wise there are
-    // collapsed together as the guest-visible platform is the same.
-    // If the two must be distinguished for instance placement, we'll want to
-    // track whatever the motivating constraint is more explicitly. CPU
-    // families, and especially the vendor code names, don't necessarily promise
-    // details about specific processor packaging choices.
-    AmdTurin,
-
-    /// An AMD Turin-like CPU platform.
-    ///
-    /// This version of the Turin CPU platform includes cache and TLB
-    /// information in CPUID leaf `8000_0006`, similar to the cache information
-    /// included in the initial Milan-like CPU platform.
-    AmdTurinV2,
-}
-*/
-
 // AFFINITY GROUPS
 
 /// Affinity policy used to describe "what to do when a request cannot be satisfied"

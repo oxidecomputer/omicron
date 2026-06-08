@@ -54,12 +54,15 @@ pub enum InstanceCpuPlatform {
     /// An AMD Milan-like CPU platform.
     AmdMilan,
 
-    /// An AMD Turin-like CPU platform. Most users should prefer `AmdTurinV2`.
+    /// An AMD Turin-like CPU platform. Prefer `AmdTurinV2` over this; this CPU
+    /// platform is retained for instances that specifically requested it before
+    /// `AmdTurinV2` was added.
     ///
     /// This initial version of the Turin CPU platform includes no cache
     /// or TLB information in CPUID leaf `8000_0006`. While this was
-    /// intentional, some guest software interprets the zeroed leaves as
-    /// reporting cache sizes of 0 bytes, to disastrous outcomes (see
+    /// intentional, Oxide later discovered some guest software interprets the
+    /// zeroed leaves as reporting cache sizes of 0 bytes and behaves
+    /// incorrectly and unpredictably as a result (see
     /// [Propolis#1152](https://github.com/oxidecomputer/propolis/issues/1152)).
     // Note that there is only Turin, not Turin Dense - feature-wise there are
     // collapsed together as the guest-visible platform is the same.
