@@ -7855,6 +7855,7 @@ dependencies = [
  "oxql-types",
  "parse-display",
  "proptest",
+ "reconfigurator-cli",
  "regex",
  "schemars 0.8.22",
  "semver 1.0.28",
