@@ -136,6 +136,13 @@ pub struct Instance {
     /// a sled by any other constraints the instance will be incarnated with the
     /// most general CPU platform supported by the selected sled.
     pub cpu_platform: Option<InstanceCpuPlatform>,
+
+    /// When true, the instance has opted in to jumbo frames (8500 byte MTU)
+    /// on its primary OPTE interface. The effective MTU also depends on the
+    /// fleet-wide setting in `system_networking_settings`; if that flag is off
+    /// the OPTE port is created with the default MTU regardless of this field.
+    /// Changes to this field only take effect on the next instance restart.
+    pub enable_jumbo_frames: bool,
 }
 
 impl Instance {
@@ -185,6 +192,7 @@ impl Instance {
             boot_disk_id: None,
             intended_state,
             cpu_platform: params.cpu_platform.map(Into::into),
+            enable_jumbo_frames: params.enable_jumbo_frames,
         }
     }
 
@@ -562,4 +570,6 @@ pub struct InstanceUpdate {
     pub memory: ByteCount,
 
     pub cpu_platform: Option<InstanceCpuPlatform>,
+
+    pub enable_jumbo_frames: bool,
 }

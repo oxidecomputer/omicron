@@ -60,6 +60,8 @@ use uuid::Uuid;
 /// and 19m23s). Since sagas running longer than 15 minutes are so rare in
 /// practice, we use that as the threshold. Anything older is much more likely
 /// stuck than legitimately still in progress.
+// TODO-K: Remove in https://github.com/oxidecomputer/omicron/issues/10538
+#[cfg(test)]
 const STUCK_SAGA_THRESHOLD: TimeDelta = TimeDelta::minutes(15);
 
 /// Threshold at which we consider an inventory collection too old for the
@@ -103,6 +105,7 @@ struct UpdateContactSupportChecksInput {
     blueprint: Arc<Blueprint>,
     // None when no target release has ever been set on the system.
     current_target_version: Option<Version>,
+    internal_update_status: internal_views::UpdateStatus,
 }
 
 impl UpdateContactSupportChecksInput {
@@ -119,6 +122,22 @@ impl UpdateContactSupportChecksInput {
                     None
                 }
             };
+
+        let missing_sleds: BTreeSet<SledUuid> = self
+            .internal_update_status
+            .sleds
+            .iter()
+            .filter(|sled| {
+                // `unknown()` returns the representation of the update status
+                // for a given sled ID that isn't present in inventory or hasn't
+                // reported a reconciliation result yet.
+                **sled
+                    == internal_views::SledAgentUpdateStatus::unknown(
+                        sled.sled_id,
+                    )
+            })
+            .map(|sled| sled.sled_id)
+            .collect();
 
         let (stuck_sagas, stuck_sagas_error_message) = match &self.stuck_sagas {
             Ok(sagas) => (
@@ -162,6 +181,7 @@ impl UpdateContactSupportChecksInput {
             stale_inventory_last_collection_time_done,
             unhealthy_zpools_by_sled,
             enabled_smf_services_not_online_by_sled,
+            missing_sleds,
         }
     }
 }
@@ -192,6 +212,9 @@ struct UpdateStatusProblems {
     /// Enabled SMF services that are not in an `online` state.
     enabled_smf_services_not_online_by_sled:
         BTreeMap<SledUuid, SvcsEnabledNotOnlineResult>,
+    /// IDs of sleds that aren't present in inventory or haven't reported a
+    /// reconciliation result yet.
+    missing_sleds: BTreeSet<SledUuid>,
 }
 
 impl UpdateStatusProblems {
@@ -203,6 +226,7 @@ impl UpdateStatusProblems {
             stale_inventory_last_collection_time_done,
             unhealthy_zpools_by_sled,
             enabled_smf_services_not_online_by_sled,
+            missing_sleds,
         } = self;
         stuck_sagas.is_empty()
             && stuck_sagas_error_message.is_none()
@@ -210,6 +234,7 @@ impl UpdateStatusProblems {
             && stale_inventory_last_collection_time_done.is_none()
             && unhealthy_zpools_by_sled.is_empty()
             && enabled_smf_services_not_online_by_sled.is_empty()
+            && missing_sleds.is_empty()
     }
 }
 
@@ -228,6 +253,7 @@ impl KV for UpdateStatusProblems {
             stale_inventory_last_collection_time_done,
             unhealthy_zpools_by_sled,
             enabled_smf_services_not_online_by_sled,
+            missing_sleds,
         } = self;
 
         if !stuck_sagas.is_empty() {
@@ -268,6 +294,12 @@ impl KV for UpdateStatusProblems {
             serializer.emit_arguments(
                 "enabled_smf_services_not_online_by_sled".into(),
                 &format_args!("{:?}", enabled_smf_services_not_online_by_sled),
+            )?;
+        }
+        if !missing_sleds.is_empty() {
+            serializer.emit_arguments(
+                "missing_sleds".into(),
+                &format_args!("{:?}", missing_sleds),
             )?;
         }
         Ok(())
@@ -507,14 +539,17 @@ impl super::Nexus {
             return Err(Error::internal_error("No inventory collection found"));
         };
 
-        let components_by_release_version = self
-            .component_version_counts(
+        let internal_status = self
+            .get_internal_update_status(
                 opctx,
                 &db_target_release,
                 current_tuf_repo,
                 &inventory,
             )
             .await?;
+
+        let components_by_release_version =
+            component_version_counts(&internal_status).await?;
 
         let blueprint_target = self
             .update_status
@@ -543,6 +578,7 @@ impl super::Nexus {
                 inventory,
                 Arc::clone(&blueprint_target.blueprint),
                 target_release.as_ref().map(|t| &t.version),
+                internal_status,
             )
             .await?;
 
@@ -568,12 +604,14 @@ impl super::Nexus {
     ///   STUCK_UPDATE_THRESHOLD.
     /// - All zpools are online.
     /// - All enabled SMF services are in an online state.
+    /// - All expacted sleds are present.
     async fn contact_support(
         &self,
         opctx: &OpContext,
         inventory: Arc<Collection>,
         blueprint: Arc<Blueprint>,
         current_target_version: Option<&Version>,
+        internal_update_status: internal_views::UpdateStatus,
     ) -> Result<bool, Error> {
         // If an update is in progress but not stuck, the remaining checks
         // could fail mid-update and shouldn't trigger a contact-support
@@ -591,19 +629,19 @@ impl super::Nexus {
             UpdateActivityState::Idle | UpdateActivityState::Stuck => {}
         };
 
-        let stuck_sagas = self
-            .datastore()
-            .saga_list_running_or_unwinding_older_than(
-                opctx,
-                Utc::now() - STUCK_SAGA_THRESHOLD,
-            )
-            .await;
-
         let checks = UpdateContactSupportChecksInput {
             inventory,
-            stuck_sagas,
+            // TODO-K: Temporarily disabling the retrieval of stuck sagas.
+            // In https://github.com/oxidecomputer/omicron/issues/10531 we found
+            // some old unwinding sagas that didn't really affect the update
+            // process in any way. The actual new retrieval method will be in
+            // https://github.com/oxidecomputer/omicron/issues/10538, but to
+            // make sure we don't block the upcoming release, we are disabling
+            // saga reporting for now.
+            stuck_sagas: Ok(vec![]),
             blueprint,
             current_target_version: current_target_version.cloned(),
+            internal_update_status,
         };
 
         let problems = checks.problems();
@@ -620,15 +658,13 @@ impl super::Nexus {
         Ok(contact_support)
     }
 
-    /// Build a map of version strings to the number of components on that
-    /// version
-    async fn component_version_counts(
+    async fn get_internal_update_status(
         &self,
         opctx: &OpContext,
         target_release: &nexus_db_model::TargetRelease,
         current_tuf_repo: Option<nexus_db_model::TufRepoDescription>,
         inventory: &Arc<Collection>,
-    ) -> Result<BTreeMap<String, usize>, Error> {
+    ) -> Result<internal_views::UpdateStatus, Error> {
         // Build current TargetReleaseDescription, defaulting to Initial if
         // there is no tuf repo ID which, based on DB constraints, happens if
         // and only if target_release_source is 'unspecified', which should only
@@ -709,55 +745,59 @@ impl super::Nexus {
             &inventory,
         );
 
-        let sled_versions = status.sleds.into_iter().flat_map(|sled| {
-            let zone_versions = sled.zones.into_iter().map(|zone| zone.version);
-
-            // boot_disk tells you which slot is relevant
-            let host_version = sled.host_phase_2.boot_disk_version();
-
-            zone_versions.chain(iter::once(host_version))
-        });
-
-        let mgs_driven_versions =
-            status.mgs_driven.into_iter().flat_map(|status| {
-                // for the SP, slot0_version is the active one
-                let sp_version = status.sp.slot0_version.clone();
-
-                // for the bootloader, stage0_version is the active one.
-                let bootloader_version =
-                    status.rot_bootloader.stage0_version.clone();
-
-                // for the RoT, get the version of the active slot.
-                let rot_version = status.rot.active_slot_version();
-
-                // This is an SP; it will only have a host OS phase 1 if it's a
-                // sled (and not a switch / PSC). If it does, we have to check
-                // the version of the active slot.
-                let host_version = status.host_os_phase_1.active_slot_version();
-
-                iter::once(sp_version)
-                    .chain(iter::once(rot_version))
-                    .chain(iter::once(bootloader_version))
-                    .chain(host_version)
-            });
-
-        let mut counts = BTreeMap::new();
-        for version in sled_versions.chain(mgs_driven_versions) {
-            // Don't use `version.to_string()` here because that will report
-            // specific errors; instead, flatten all errors to just "error".
-            // It's fine to use `.to_string()` for the non-error variants.
-            let version = match version {
-                internal_views::TufRepoVersion::Unknown
-                | internal_views::TufRepoVersion::InstallDataset
-                | internal_views::TufRepoVersion::Version(_) => {
-                    version.to_string()
-                }
-                internal_views::TufRepoVersion::Error(_) => "error".to_string(),
-            };
-            *counts.entry(version).or_insert(0) += 1;
-        }
-        Ok(counts)
+        Ok(status)
     }
+}
+
+/// Build a map of version strings to the number of components on that
+/// version
+async fn component_version_counts(
+    status: &internal_views::UpdateStatus,
+) -> Result<BTreeMap<String, usize>, Error> {
+    let sled_versions = status.sleds.iter().flat_map(|sled| {
+        let zone_versions = sled.zones.iter().map(|zone| zone.version.clone());
+
+        // boot_disk tells you which slot is relevant
+        let host_version = sled.host_phase_2.boot_disk_version();
+
+        zone_versions.chain(iter::once(host_version))
+    });
+
+    let mgs_driven_versions = status.mgs_driven.iter().flat_map(|status| {
+        // for the SP, slot0_version is the active one
+        let sp_version = status.sp.slot0_version.clone();
+
+        // for the bootloader, stage0_version is the active one.
+        let bootloader_version = status.rot_bootloader.stage0_version.clone();
+
+        // for the RoT, get the version of the active slot.
+        let rot_version = status.rot.active_slot_version();
+
+        // This is an SP; it will only have a host OS phase 1 if it's a
+        // sled (and not a switch / PSC). If it does, we have to check
+        // the version of the active slot.
+        let host_version = status.host_os_phase_1.active_slot_version();
+
+        iter::once(sp_version)
+            .chain(iter::once(rot_version))
+            .chain(iter::once(bootloader_version))
+            .chain(host_version)
+    });
+
+    let mut counts = BTreeMap::new();
+    for version in sled_versions.chain(mgs_driven_versions) {
+        // Don't use `version.to_string()` here because that will report
+        // specific errors; instead, flatten all errors to just "error".
+        // It's fine to use `.to_string()` for the non-error variants.
+        let version = match version {
+            internal_views::TufRepoVersion::Unknown
+            | internal_views::TufRepoVersion::InstallDataset
+            | internal_views::TufRepoVersion::Version(_) => version.to_string(),
+            internal_views::TufRepoVersion::Error(_) => "error".to_string(),
+        };
+        *counts.entry(version).or_insert(0) += 1;
+    }
+    Ok(counts)
 }
 
 #[cfg(test)]
@@ -1033,6 +1073,58 @@ mod test {
         problems
     }
 
+    // Build an empty `internal_views::UpdateStatus` for tests that don't care
+    // about the missing-sleds check.
+    fn empty_internal_update_status() -> internal_views::UpdateStatus {
+        internal_views::UpdateStatus {
+            mgs_driven: iddqd::IdOrdMap::new(),
+            sleds: iddqd::IdOrdMap::new(),
+        }
+    }
+
+    // Build a `SledAgentUpdateStatus` that looks "healthy" (i.e. has a known
+    // boot disk and known slot versions).
+    fn healthy_sled_agent_update_status(
+        sled_id: SledUuid,
+    ) -> internal_views::SledAgentUpdateStatus {
+        internal_views::SledAgentUpdateStatus {
+            sled_id,
+            zones: iddqd::IdOrdMap::new(),
+            host_phase_2: internal_views::HostPhase2Status {
+                boot_disk: Ok(omicron_common::disk::M2Slot::A),
+                slot_a_version: internal_views::TufRepoVersion::Version(
+                    fake_target_version(),
+                ),
+                slot_b_version: internal_views::TufRepoVersion::Version(
+                    fake_target_version(),
+                ),
+            },
+        }
+    }
+
+    // Build an `internal_views::UpdateStatus` whose `sleds` contains an
+    // "unknown" entry for each provided missing sled id, plus a healthy entry
+    // for each provided healthy sled id.
+    fn internal_update_status_with_missing_sleds(
+        missing_sled_ids: impl IntoIterator<Item = SledUuid>,
+        healthy_sled_ids: impl IntoIterator<Item = SledUuid>,
+    ) -> internal_views::UpdateStatus {
+        let mut sleds: iddqd::IdOrdMap<internal_views::SledAgentUpdateStatus> =
+            missing_sled_ids
+                .into_iter()
+                .map(internal_views::SledAgentUpdateStatus::unknown)
+                .collect();
+        for sled_id in healthy_sled_ids {
+            sleds
+                .insert_unique(healthy_sled_agent_update_status(sled_id))
+                .expect("sled ids are unique");
+        }
+        internal_views::UpdateStatus {
+            mgs_driven: iddqd::IdOrdMap::new(),
+            sleds,
+        }
+    }
+
     #[nexus_test(server = crate::Server)]
     async fn test_contact_support_healthy_system(
         cptestctx: &ControlPlaneTestContext,
@@ -1064,7 +1156,13 @@ mod test {
         // should be false
         assert!(
             !nexus
-                .contact_support(&opctx, inventory, blueprint, Some(&version),)
+                .contact_support(
+                    &opctx,
+                    inventory,
+                    blueprint,
+                    Some(&version),
+                    empty_internal_update_status(),
+                )
                 .await
                 .unwrap()
         );
@@ -1098,7 +1196,13 @@ mod test {
         // should be true
         assert!(
             nexus
-                .contact_support(&opctx, inventory, blueprint, Some(&version),)
+                .contact_support(
+                    &opctx,
+                    inventory,
+                    blueprint,
+                    Some(&version),
+                    empty_internal_update_status(),
+                )
                 .await
                 .unwrap()
         );
@@ -1132,7 +1236,13 @@ mod test {
         // support should be true
         assert!(
             nexus
-                .contact_support(&opctx, inventory, blueprint, Some(&version),)
+                .contact_support(
+                    &opctx,
+                    inventory,
+                    blueprint,
+                    Some(&version),
+                    empty_internal_update_status(),
+                )
                 .await
                 .unwrap()
         );
@@ -1166,7 +1276,13 @@ mod test {
             fake_blueprint(&cptestctx.logctx.log, &version, Utc::now(), false);
         assert!(
             nexus
-                .contact_support(&opctx, inventory, blueprint, None,)
+                .contact_support(
+                    &opctx,
+                    inventory,
+                    blueprint,
+                    None,
+                    empty_internal_update_status(),
+                )
                 .await
                 .unwrap()
         );
@@ -1197,11 +1313,18 @@ mod test {
         let version = fake_target_version();
         let blueprint =
             fake_blueprint(&cptestctx.logctx.log, &version, Utc::now(), false);
-        // There is a stuck active saga no update has ever been run, contact
-        // support should be true
+        // There is a stuck active saga, but no update has ever been run. This
+        // should prompt the user to contact support, but we disabled stuck
+        // staga retrieval temporarily. Contact support should be false
         assert!(
-            nexus
-                .contact_support(&opctx, inventory, blueprint, None,)
+            !nexus
+                .contact_support(
+                    &opctx,
+                    inventory,
+                    blueprint,
+                    None,
+                    empty_internal_update_status(),
+                )
                 .await
                 .unwrap()
         );
@@ -1240,7 +1363,13 @@ mod test {
         // update is considered stuck and contact support is true.
         assert!(
             nexus
-                .contact_support(&opctx, inventory, blueprint, Some(&version),)
+                .contact_support(
+                    &opctx,
+                    inventory,
+                    blueprint,
+                    Some(&version),
+                    empty_internal_update_status(),
+                )
                 .await
                 .unwrap()
         );
@@ -1285,11 +1414,21 @@ mod test {
             true,
         );
         // Every health check is unhealthy: stuck saga, stuck update, stale
-        // inventory, unhealthy zpools, and unhealthy SMF services. Contact
-        // support should be true.
+        // inventory, unhealthy zpools, and unhealthy SMF services, plus a
+        // missing sled. Contact support should be true.
+        let missing_sled_id = SledUuid::new_v4();
         assert!(
             nexus
-                .contact_support(&opctx, inventory, blueprint, Some(&version),)
+                .contact_support(
+                    &opctx,
+                    inventory,
+                    blueprint,
+                    Some(&version),
+                    internal_update_status_with_missing_sleds(
+                        [missing_sled_id],
+                        [sled_id()],
+                    ),
+                )
                 .await
                 .unwrap()
         );
@@ -1324,7 +1463,57 @@ mod test {
             fake_blueprint(&cptestctx.logctx.log, &version, Utc::now(), true);
         assert!(
             !nexus
-                .contact_support(&opctx, inventory, blueprint, Some(&version),)
+                .contact_support(
+                    &opctx,
+                    inventory,
+                    blueprint,
+                    Some(&version),
+                    empty_internal_update_status(),
+                )
+                .await
+                .unwrap()
+        );
+    }
+
+    #[nexus_test(server = crate::Server)]
+    async fn test_contact_support_missing_sleds(
+        cptestctx: &ControlPlaneTestContext,
+    ) {
+        let nexus = &cptestctx.server.server_context().nexus;
+        let opctx = fake_opctx(cptestctx);
+        insert_fake_collection(
+            cptestctx,
+            &opctx,
+            healthy_zpools(),
+            healthy_services(),
+        )
+        .await;
+        let inventory = Arc::new(
+            nexus
+                .datastore()
+                .inventory_get_latest_collection(&opctx)
+                .await
+                .unwrap()
+                .unwrap(),
+        );
+        let version = fake_target_version();
+        let blueprint =
+            fake_blueprint(&cptestctx.logctx.log, &version, Utc::now(), false);
+        // The system is otherwise healthy, but a sled we expected to see in
+        // inventory is missing. Contact support should be true.
+        let missing_sled_id = SledUuid::new_v4();
+        assert!(
+            nexus
+                .contact_support(
+                    &opctx,
+                    inventory,
+                    blueprint,
+                    Some(&version),
+                    internal_update_status_with_missing_sleds(
+                        [missing_sled_id],
+                        [sled_id()],
+                    ),
+                )
                 .await
                 .unwrap()
         );
@@ -1378,6 +1567,7 @@ mod test {
                     inventory,
                     blueprint,
                     Some(&target_release),
+                    empty_internal_update_status(),
                 )
                 .await
                 .unwrap()
@@ -1403,6 +1593,7 @@ mod test {
             stuck_sagas: Ok(vec![]),
             blueprint,
             current_target_version: Some(fake_target_version()),
+            internal_update_status: empty_internal_update_status(),
         };
         assert_eq!(checks.problems(), UpdateStatusProblems::default());
 
@@ -1431,6 +1622,7 @@ mod test {
             stuck_sagas: Ok(vec![saga]),
             blueprint,
             current_target_version: Some(fake_target_version()),
+            internal_update_status: empty_internal_update_status(),
         };
 
         let expected = UpdateStatusProblems {
@@ -1463,6 +1655,7 @@ mod test {
             stuck_sagas: Err(err),
             blueprint,
             current_target_version: Some(fake_target_version()),
+            internal_update_status: empty_internal_update_status(),
         };
 
         let expected = UpdateStatusProblems {
@@ -1495,6 +1688,7 @@ mod test {
             stuck_sagas: Ok(vec![]),
             blueprint,
             current_target_version: Some(fake_target_version()),
+            internal_update_status: empty_internal_update_status(),
         };
 
         let expected = UpdateStatusProblems {
@@ -1529,6 +1723,7 @@ mod test {
             stuck_sagas: Ok(vec![]),
             blueprint,
             current_target_version: Some(fake_target_version()),
+            internal_update_status: empty_internal_update_status(),
         };
         assert_eq!(checks.problems(), UpdateStatusProblems::default());
 
@@ -1558,6 +1753,7 @@ mod test {
             stuck_sagas: Ok(vec![]),
             blueprint,
             current_target_version: Some(fake_target_version()),
+            internal_update_status: empty_internal_update_status(),
         };
 
         let expected = UpdateStatusProblems {
@@ -1594,6 +1790,7 @@ mod test {
             stuck_sagas: Ok(vec![]),
             blueprint,
             current_target_version: Some(fake_target_version()),
+            internal_update_status: empty_internal_update_status(),
         };
 
         let expected_zpool = Zpool {
@@ -1636,6 +1833,7 @@ mod test {
             stuck_sagas: Ok(vec![]),
             blueprint,
             current_target_version: Some(fake_target_version()),
+            internal_update_status: empty_internal_update_status(),
         };
 
         let expected = UpdateStatusProblems {
@@ -1677,6 +1875,7 @@ mod test {
             stuck_sagas: Ok(vec![saga]),
             blueprint,
             current_target_version: Some(fake_target_version()),
+            internal_update_status: empty_internal_update_status(),
         };
 
         let expected_zpool = Zpool {
@@ -1728,11 +1927,16 @@ mod test {
             Utc::now() - STALE_INVENTORY_THRESHOLD - TimeDelta::seconds(10);
         collection.time_done = collection_time_done;
 
+        let missing_sled_id = SledUuid::new_v4();
         let checks = UpdateContactSupportChecksInput {
             inventory: Arc::new(collection),
             stuck_sagas: Ok(vec![saga]),
             blueprint,
             current_target_version: Some(fake_target_version()),
+            internal_update_status: internal_update_status_with_missing_sleds(
+                [missing_sled_id],
+                [sled_id],
+            ),
         };
 
         let expected_zpool = Zpool {
@@ -1757,8 +1961,47 @@ mod test {
             enabled_smf_services_not_online_by_sled: BTreeMap::from([(
                 sled_id, services,
             )]),
+            missing_sleds: BTreeSet::from([missing_sled_id]),
         };
         assert_eq!(normalise_zpool_times(checks.problems()), expected);
+
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn test_problems_missing_sleds() {
+        let logctx = test_setup_log("test_problems_missing_sleds");
+        let blueprint = fake_blueprint(
+            &logctx.log,
+            &fake_target_version(),
+            Utc::now(),
+            false,
+        );
+
+        // Two sleds expected: one missing from inventory, one present and
+        // healthy. Only the missing sled should be picked up.
+        let missing_sled_id = SledUuid::new_v4();
+        let healthy_sled_id = SledUuid::new_v4();
+        let checks = UpdateContactSupportChecksInput {
+            inventory: Arc::new(fake_collection_with_ids(
+                healthy_sled_id,
+                healthy_zpools(),
+                healthy_services(),
+            )),
+            stuck_sagas: Ok(vec![]),
+            blueprint,
+            current_target_version: Some(fake_target_version()),
+            internal_update_status: internal_update_status_with_missing_sleds(
+                [missing_sled_id],
+                [healthy_sled_id],
+            ),
+        };
+
+        let expected = UpdateStatusProblems {
+            missing_sleds: BTreeSet::from([missing_sled_id]),
+            ..Default::default()
+        };
+        assert_eq!(checks.problems(), expected);
 
         logctx.cleanup_successful();
     }

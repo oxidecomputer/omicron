@@ -51,7 +51,7 @@ impl From<Disk> for external::Disk {
             snapshot_id: old.snapshot_id,
             image_id: old.image_id,
             size: old.size,
-            block_size: old.block_size,
+            block_size: old.block_size.into(),
             state: old.state,
             device_path: old.device_path,
             disk_type: old.disk_type.into(),
@@ -70,7 +70,7 @@ impl TryFrom<external::Disk> for Disk {
             snapshot_id: new.snapshot_id,
             image_id: new.image_id,
             size: new.size,
-            block_size: new.block_size,
+            block_size: new.block_size.into(),
             state: new.state,
             device_path: new.device_path,
             disk_type: match new.disk_type {

@@ -9,21 +9,21 @@ use daft::BTreeSetDiff;
 use daft::Diffable;
 use either::Either;
 use mg_admin_client::Client;
-use mg_admin_client::types::AddStaticRoute4Request as MgdAddStaticRoute4Request;
-use mg_admin_client::types::AddStaticRoute6Request as MgdAddStaticRoute6Request;
-use mg_admin_client::types::DeleteStaticRoute4Request as MgdDeleteStaticRoute4Request;
-use mg_admin_client::types::DeleteStaticRoute6Request as MgdDeleteStaticRoute6Request;
 use mg_admin_client::types::Path as MgdPath;
-use mg_admin_client::types::StaticRoute4 as MgdStaticRoute4;
-use mg_admin_client::types::StaticRoute4List as MgdStaticRoute4List;
-use mg_admin_client::types::StaticRoute6 as MgdStaticRoute6;
-use mg_admin_client::types::StaticRoute6List as MgdStaticRoute6List;
+use mg_api_types::rdb::prefix::Prefix4 as MgdPrefix4;
+use mg_api_types::rdb::prefix::Prefix6 as MgdPrefix6;
+use mg_api_types::static_routes::AddStaticRoute4Request as MgdAddStaticRoute4Request;
+use mg_api_types::static_routes::AddStaticRoute6Request as MgdAddStaticRoute6Request;
+use mg_api_types::static_routes::DeleteStaticRoute4Request as MgdDeleteStaticRoute4Request;
+use mg_api_types::static_routes::DeleteStaticRoute6Request as MgdDeleteStaticRoute6Request;
+use mg_api_types::static_routes::StaticRoute4 as MgdStaticRoute4;
+use mg_api_types::static_routes::StaticRoute4List as MgdStaticRoute4List;
+use mg_api_types::static_routes::StaticRoute6 as MgdStaticRoute6;
+use mg_api_types::static_routes::StaticRoute6List as MgdStaticRoute6List;
 use oxnet::IpNet;
 use oxnet::IpNetParseError;
 use oxnet::Ipv4Net;
 use oxnet::Ipv6Net;
-use rdb_types::Prefix4 as MgdPrefix4;
-use rdb_types::Prefix6 as MgdPrefix6;
 use sled_agent_types::early_networking::RackNetworkConfig;
 use sled_agent_types::early_networking::RouteConfig;
 use slog::Logger;
@@ -472,7 +472,7 @@ impl DiffableStaticRoute {
         match self.description {
             DiffableStaticRouteDescription::V4 { nexthop, prefix } => {
                 MgdStaticRoute::V4(MgdStaticRoute4 {
-                    nexthop,
+                    nexthop: nexthop.into(),
                     prefix: MgdPrefix4 {
                         value: prefix.addr(),
                         length: prefix.width(),

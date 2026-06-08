@@ -667,10 +667,10 @@ service_name = "propolis-server"
 only_for_targets.image = "standard"
 source.type = "prebuilt"
 source.repo = "propolis"
-source.commit = "58ab73bde89ade637b0ca8118682ee9575da6c2a"
+source.commit = "6873add79b835f7932d9fe928340886df8e49676"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/propolis/image/<commit>/propolis-server.sha256.txt
-source.sha256 = "7344b58d0243a293d0eceb4e323c7f4efdce3e5effb549c593478662de24add5"
+source.sha256 = "ccac586c3ed1e996d9554fb1db1b1096c0bcd0dd5712c14579924ea85dd16a34"
 output.type = "zone"
 
 [package.mg-ddm-gz]
@@ -683,10 +683,10 @@ source.repo = "maghemite"
 # `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
 # building `ddm-admin-client` (which will instruct you to update
 # `tools/maghemite_openapi_version`).
-source.commit = "7696ee48d5ee29a917dea459e281fe2e8ff20513"
+source.commit = "951f759b1d8e61cf65c2a823e61933ff3ea0bdf1"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/mg-ddm-gz.sha256.txt
-source.sha256 = "ce52b9094adf0ed567bd3ed1e3ac48ac1c983cc7859adacf4f392e415a1189ad"
+source.sha256 = "9f2f0181232b9d776100fb1f95470783f5e19b1e827bb9f92836ecf7790aa879"
 output.type = "tarball"
 
 [package.mg-ddm]
@@ -699,10 +699,10 @@ source.repo = "maghemite"
 # `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
 # building `ddm-admin-client` (which will instruct you to update
 # `tools/maghemite_openapi_version`).
-source.commit = "7696ee48d5ee29a917dea459e281fe2e8ff20513"
+source.commit = "951f759b1d8e61cf65c2a823e61933ff3ea0bdf1"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/mg-ddm.sha256.txt
-source.sha256 = "23950a4e73a07fa7f087ba3312e4bc5a8981fd9ebad54af2350baaa86ad6bbf3"
+source.sha256 = "7680d445cce94bbfa2ea1b952086d2ca7c0410cc3f34f3386befc4a16c38261d"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -714,10 +714,10 @@ source.repo = "maghemite"
 # `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
 # building `ddm-admin-client` (which will instruct you to update
 # `tools/maghemite_openapi_version`).
-source.commit = "7696ee48d5ee29a917dea459e281fe2e8ff20513"
+source.commit = "951f759b1d8e61cf65c2a823e61933ff3ea0bdf1"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/mgd.sha256.txt
-source.sha256 = "301d31ca481e4822f69484feacca31dd08a7c4aae87d96641d384bda3178d2f3"
+source.sha256 = "5a0c407a91c1fb68af5770a33549e9d1695653f476520562a087eb9f42bd9d25"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -725,8 +725,8 @@ output.intermediate_only = true
 service_name = "lldp"
 source.type = "prebuilt"
 source.repo = "lldp"
-source.commit = "61479b6922f9112fbe1e722414d2b8055212cb12"
-source.sha256 = "8f988c0b0fa3ad4121ab0e825298601035e56c5c054bdc3a1dfb4d6c8fd5b300"
+source.commit = "54b266174d4de9628bca9c97b0db176e16f12154"
+source.sha256 = "0c56ec13dcb11f724e158281947062aa4e70160b202728e85b05ca765673c819"
 output.type = "zone"
 output.intermediate_only = true
 

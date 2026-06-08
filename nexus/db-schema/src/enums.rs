@@ -74,7 +74,7 @@ define_enums! {
     InvZpoolHealthEnum => "inv_zpool_health",
     IpAttachStateEnum => "ip_attach_state",
     IpKindEnum => "ip_kind",
-    IpPoolReservationTypeEnum => "ip_pool_reservation_type",
+    IpPoolAssignmentEnum => "ip_pool_assignment",
     IpPoolResourceTypeEnum => "ip_pool_resource_type",
     IpPoolTypeEnum => "ip_pool_type",
     IpVersionEnum => "ip_version",

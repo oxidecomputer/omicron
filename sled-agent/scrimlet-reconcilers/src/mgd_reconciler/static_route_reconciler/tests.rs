@@ -979,7 +979,7 @@ impl From<MgdCurrentRoutes> for MgdStaticRouteLists {
                                 }
                             };
                             MgdStaticRoute4 {
-                                nexthop,
+                                nexthop: nexthop.into(),
                                 prefix,
                                 rib_priority: path.rib_priority,
                                 vlan_id: path.vlan_id,

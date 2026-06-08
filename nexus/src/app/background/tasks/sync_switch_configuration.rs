@@ -30,13 +30,25 @@ use dpd_client::{Client as DpdClient, types as DpdTypes};
 use futures::FutureExt;
 use futures::future::BoxFuture;
 use mg_admin_client::types::{
-    AddStaticRoute4Request, AddStaticRoute6Request, ApplyRequest,
-    BestpathFanoutRequest, BgpPeerConfig, CheckerSource,
-    DeleteStaticRoute4Request, DeleteStaticRoute6Request,
+    ApplyRequest, BgpPeerConfig,
+    UnnumberedBgpPeerConfig as MgUnnumberedBgpPeerConfig,
+};
+use mg_api_types::bgp::policy::{
     ImportExportPolicy4 as MgImportExportPolicy4,
-    ImportExportPolicy6 as MgImportExportPolicy6, Ipv4UnicastConfig,
-    Ipv6UnicastConfig, JitterRange, ShaperSource, StaticRoute4,
-    StaticRoute4List, StaticRoute6, StaticRoute6List, UnnumberedBgpPeerConfig,
+    ImportExportPolicy6 as MgImportExportPolicy6,
+};
+use mg_api_types::rdb::prefix::{Prefix, Prefix4, Prefix6};
+use mg_api_types::rib::BestpathFanoutRequest;
+use mg_api_types::static_routes::{
+    AddStaticRoute4Request, AddStaticRoute6Request, StaticRoute4,
+    StaticRoute4List, StaticRoute6, StaticRoute6List,
+};
+use mg_api_types::{
+    bgp::config::{
+        CheckerSource, Ipv4UnicastConfig, Ipv6UnicastConfig, JitterRange,
+        ShaperSource,
+    },
+    static_routes::{DeleteStaticRoute4Request, DeleteStaticRoute6Request},
 };
 use nexus_db_queries::{
     context::OpContext,
@@ -49,7 +61,6 @@ use omicron_common::{
     address::{Ipv6Subnet, get_sled_address},
     api::external::{DataPageParams, Name},
 };
-use rdb_types::{Prefix, Prefix4, Prefix6};
 use serde_json::json;
 use sled_agent_client::types::HostPortConfig;
 use sled_agent_types::early_networking::BgpConfig as SledBgpConfig;
@@ -78,7 +89,7 @@ use slog_error_chain::InlineErrorChain;
 use std::{
     collections::{HashMap, HashSet, hash_map::Entry},
     hash::Hash,
-    net::{IpAddr, Ipv4Addr, Ipv6Addr},
+    net::{IpAddr, Ipv6Addr, SocketAddr},
     str::FromStr,
     sync::{Arc, LazyLock},
 };
@@ -549,7 +560,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
 
                     // desired peer configurations for a given switch port
                     let mut peers: HashMap<String, Vec<BgpPeerConfig>> = HashMap::new();
-                    let mut unnumbered_peers: HashMap<String, Vec<UnnumberedBgpPeerConfig>> = HashMap::new();
+                    let mut unnumbered_peers: HashMap<String, Vec<MgUnnumberedBgpPeerConfig>> = HashMap::new();
 
                     for peer in &settings.bgp_peers {
                         let bgp_config_id = peer.bgp_config_id();
@@ -817,7 +828,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                                 // now that the peer passes the above validations, add it to the list for configuration
                                 let peer_config = BgpPeerConfig {
                                     name: format!("{ip}"),
-                                    host: format!("{ip}:179"),
+                                    host: SocketAddr::new(ip.into(), 179).to_string(),
                                     hold_time: peer.hold_time.into(),
                                     idle_hold_time: peer.idle_hold_time.into(),
                                     delay_open: peer.delay_open.into(),
@@ -866,9 +877,10 @@ impl BackgroundTask for SwitchPortSettingsManager {
                             }
                             // Unnumbered peer - identified by interface
                             RouterPeerType::Unnumbered { router_lifetime } => {
-                                let peer_config = UnnumberedBgpPeerConfig {
+                                let peer_config = MgUnnumberedBgpPeerConfig {
                                     name: format!("unnumbered-{}", port.port_name),
                                     interface: format!("tfport{}_0", port.port_name),
+                                    router_lifetime: router_lifetime.as_u16(),
                                     hold_time: peer.hold_time.into(),
                                     idle_hold_time: peer.idle_hold_time.into(),
                                     delay_open: peer.delay_open.into(),
@@ -900,7 +912,6 @@ impl BackgroundTask for SwitchPortSettingsManager {
                                     }),
                                     deterministic_collision_resolution: false,
                                     idle_hold_jitter: None,
-                                    router_lifetime: router_lifetime.as_u16(),
                                     src_port: None,
                                     src_addr: None,
                                 };
@@ -998,7 +1009,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                         "switch_slot" => ?switch_slot,
                         "config" => ?config,
                     );
-                    if let Err(e) = client.bgp_apply_v2(config).await {
+                    if let Err(e) = client.bgp_apply(config).await {
                         error!(log, "error while applying bgp configuration"; "error" => ?e);
                     }
 
@@ -1848,7 +1859,7 @@ fn build_sled_agent_clients(
 
 #[derive(PartialEq, Eq, Hash, Debug)]
 struct SwitchStaticRouteV4 {
-    nexthop: Ipv4Addr,
+    nexthop: IpAddr,
     prefix: Prefix4,
     vlan: Option<u16>,
     priority: u8,
@@ -2031,7 +2042,7 @@ fn static_routes_in_db(
                         None => DEFAULT_RIB_PRIORITY_STATIC,
                     };
                     routes.insert(SwitchStaticRoute::V4(SwitchStaticRouteV4 {
-                        nexthop,
+                        nexthop: IpAddr::V4(nexthop),
                         prefix: Prefix4 {
                             value: dst,
                             length: route.dst.prefix(),
@@ -2053,6 +2064,21 @@ fn static_routes_in_db(
                     routes.insert(SwitchStaticRoute::V6(SwitchStaticRouteV6 {
                         nexthop,
                         prefix: Prefix6 {
+                            value: dst,
+                            length: route.dst.prefix(),
+                        },
+                        vlan: route.vid.map(|x| x.0),
+                        priority,
+                    }));
+                }
+                (IpAddr::V6(nexthop), IpAddr::V4(dst)) => {
+                    let priority = match route.rib_priority {
+                        Some(v) => v.0,
+                        None => DEFAULT_RIB_PRIORITY_STATIC,
+                    };
+                    routes.insert(SwitchStaticRoute::V4(SwitchStaticRouteV4 {
+                        nexthop: IpAddr::V6(nexthop),
+                        prefix: Prefix4 {
                             value: dst,
                             length: route.dst.prefix(),
                         },
@@ -2291,7 +2317,7 @@ async fn static_routes_on_switch(
                         };
                         flattened.insert(SwitchStaticRoute::V4(
                             SwitchStaticRouteV4 {
-                                nexthop: addr,
+                                nexthop: IpAddr::V4(addr),
                                 prefix: dst,
                                 vlan: p.vlan_id,
                                 priority: p.rib_priority,
@@ -2299,22 +2325,33 @@ async fn static_routes_on_switch(
                         ));
                     }
                     IpAddr::V6(addr) => {
-                        let Ok(dst) = destination.parse() else {
-                            error!(
-                                log,
-                                "failed to parse static route destination: \
-                                 {destination}"
-                            );
+                        if let Ok(dst) = destination.parse::<Prefix6>() {
+                            flattened.insert(SwitchStaticRoute::V6(
+                                SwitchStaticRouteV6 {
+                                    nexthop: addr,
+                                    prefix: dst,
+                                    vlan: p.vlan_id,
+                                    priority: p.rib_priority,
+                                },
+                            ));
                             continue;
                         };
-                        flattened.insert(SwitchStaticRoute::V6(
-                            SwitchStaticRouteV6 {
-                                nexthop: addr,
-                                prefix: dst,
-                                vlan: p.vlan_id,
-                                priority: p.rib_priority,
-                            },
-                        ));
+                        if let Ok(dst) = destination.parse::<Prefix4>() {
+                            flattened.insert(SwitchStaticRoute::V4(
+                                SwitchStaticRouteV4 {
+                                    nexthop: IpAddr::V6(addr),
+                                    prefix: dst,
+                                    vlan: p.vlan_id,
+                                    priority: p.rib_priority,
+                                },
+                            ));
+                            continue;
+                        };
+                        error!(
+                            log,
+                            "failed to parse static route destination: \
+                                 {destination}"
+                        );
                     }
                 };
             }

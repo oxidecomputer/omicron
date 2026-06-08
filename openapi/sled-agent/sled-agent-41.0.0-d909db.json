@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "40.0.0"
+    "version": "41.0.0"
   },
   "paths": {
     "/artifacts": {
@@ -6082,6 +6082,13 @@
             "items": {
               "$ref": "#/components/schemas/NetworkInterface"
             }
+          },
+          "primary_nic_mtu": {
+            "nullable": true,
+            "description": "The MTU to apply to the instance's primary OPTE port, in bytes. If `None`, the OPTE default is used (1500). Set when the fleet has enabled external jumbo frames and the instance has opted in.",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
           }
         },
         "required": [

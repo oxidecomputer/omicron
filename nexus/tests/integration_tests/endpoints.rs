@@ -46,6 +46,7 @@ use nexus_types::external_api::ssh_key;
 use nexus_types::external_api::subnet_pool;
 use nexus_types::external_api::support_bundle;
 use nexus_types::external_api::system;
+use nexus_types::external_api::system_networking;
 use nexus_types::external_api::timeseries;
 use nexus_types::external_api::update;
 use nexus_types::external_api::vpc;
@@ -215,6 +216,8 @@ pub const DEMO_ACCESS_TOKEN_DELETE_URL: &str =
 
 // Global policy
 pub const SYSTEM_POLICY_URL: &'static str = "/v1/system/policy";
+pub const SYSTEM_NETWORKING_SETTINGS_URL: &'static str =
+    "/v1/system/networking/settings";
 
 // Silo used for testing
 pub static DEMO_SILO_NAME: LazyLock<Name> =
@@ -794,6 +797,7 @@ pub static DEMO_INSTANCE_CREATE: LazyLock<instance::InstanceCreate> =
         auto_restart_policy: Default::default(),
         anti_affinity_groups: Vec::new(),
         multicast_groups: Vec::new(),
+        enable_jumbo_frames: false,
     });
 pub static DEMO_STOPPED_INSTANCE_CREATE: LazyLock<instance::InstanceCreate> =
     LazyLock::new(|| instance::InstanceCreate {
@@ -820,6 +824,7 @@ pub static DEMO_STOPPED_INSTANCE_CREATE: LazyLock<instance::InstanceCreate> =
         auto_restart_policy: Default::default(),
         anti_affinity_groups: Vec::new(),
         multicast_groups: Vec::new(),
+        enable_jumbo_frames: false,
     });
 pub static DEMO_INSTANCE_UPDATE: LazyLock<instance::InstanceUpdate> =
     LazyLock::new(|| instance::InstanceUpdate {
@@ -829,6 +834,7 @@ pub static DEMO_INSTANCE_UPDATE: LazyLock<instance::InstanceUpdate> =
         ncpus: InstanceCpuCount(1),
         memory: ByteCount::from_gibibytes_u32(16),
         multicast_groups: None,
+        enable_jumbo_frames: false,
     });
 
 // The instance needs a network interface, too.
@@ -1806,6 +1812,23 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
                         > {
                             role_assignments: vec![],
                         })
+                        .unwrap(),
+                    ),
+                ],
+            },
+            // Fleet-wide networking settings
+            VerifyEndpoint {
+                url: &SYSTEM_NETWORKING_SETTINGS_URL,
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![
+                    AllowedMethod::Get,
+                    AllowedMethod::Put(
+                        serde_json::to_value(
+                            &system_networking::SystemNetworkingSettingsUpdate {
+                                external_jumbo_frames_opt_in_enabled:  false,
+                            },
+                        )
                         .unwrap(),
                     ),
                 ],
