@@ -5,11 +5,12 @@
 //! Generic stale-execution-guarded inserts for resources created by fault
 //! management.
 //!
-//! The caller is expected to be a subtask of fm_rendezvous, executing either an
-//! [`AlertRequest`] or [`SupportBundleRequest`] in a sitrep. Given some
-//! unconditional Diesel `INSERT` statement for the requested alert or support
-//! bundle, the goal here is to wrap the statement such that it's conditional
-//! on a couple things:
+//! The caller is expected to be a subtask of fm_rendezvous, creating some
+//! resource requested by the sitrep currently being executed. A "resource" here
+//! is any object requested by a sitrep (e.g. [`AlertRequest`],
+//! [`SupportBundleRequest`]). Given some unconditional Diesel `INSERT`
+//! statement for the requested resource, the goal here is to wrap the statement
+//! such that it's conditional on a couple things:
 //!
 //!   - The generation number in `GENERATION_COLUMN` on the sitrep being
 //!     executed must be equal to the generation of the latest sitrep in
@@ -110,15 +111,24 @@ where
     R: SitrepGuardedResource,
     MarkerTable<R>: HasTable<Table = MarkerTable<R>>,
 {
-    /// Build a guarded insert for `resource_id` at `expected_generation`.
+    /// Build a guarded insert for `resource_id` at `expected_generation`. The
+    /// wrapped `resource_insert` statement must satisfy the following:
     ///
-    /// The wrapped `resource_insert` statement should be built with
-    /// `ON CONFLICT DO NOTHING`. This combinator distinguishes "freshly
-    /// created" from "already exists" purely by whether the inner INSERT's
-    /// `RETURNING` produced a row: [`Self::execute_async`] maps an empty result
-    /// to [`SitrepGuardedInsertOutcome::AlreadyExists`]. An inner INSERT that
-    /// errored (rather than silently no-op'd) on a primary-key conflict would
-    /// turn the "row already exists" outcome into a hard error.
+    /// 1. It has a `RETURNING` clause that projects to `R`.
+    /// 2. It is a single-row INSERT.
+    /// 3. The id it writes matches the given `resource_id`.
+    /// 4. It is built with `ON CONFLICT DO NOTHING`. This combinator
+    ///    distinguishes "freshly created" from "already exists" purely by
+    ///    whether the inner INSERT's `RETURNING` produced a row:
+    ///    [`Self::execute_async`] maps an empty result to
+    ///    [`SitrepGuardedInsertOutcome::AlreadyExists`]. An inner INSERT that
+    ///    errored (rather than silently no-op'd) on a primary-key conflict
+    ///    would turn the "row already exists" outcome into a hard error.
+    /// 
+    /// Ideally we'd enforce most of these constraints in the type system, but
+    /// the Diesel traits we'd need to reference (`IntoConflictValueClause`,
+    /// `OnConflictValues`, `DoNothing`) are not exposed in its public API.
+    ///
     pub fn new(
         resource_id: Uuid,
         expected_generation: Generation,
@@ -229,6 +239,11 @@ where
         // guard clauses into fields of `SitrepGuardedInsert` to give them the
         // correct lifetimes, but that would be way less readable than just
         // writing the guards inline here.
+        //
+        // Also note that an empty `fm_sitrep_history` will also yield a "stale
+        // generation" sentinel here. Assuming `SitrepGuardedInsert` is used in
+        // the intended context of `FmRendezvous::actually_activate`, where we
+        // first check for the presence of a current sitrep, this won't happen.
         out.push_sql(
             ", stale_guard AS MATERIALIZED (SELECT CAST(IF(\
                 ((SELECT s.",
