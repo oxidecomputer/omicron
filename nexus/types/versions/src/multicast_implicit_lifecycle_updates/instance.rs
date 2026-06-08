@@ -11,8 +11,7 @@
 
 use omicron_common::api::external::{
     ByteCount, Hostname, IdentityMetadataCreateParams,
-    InstanceAutoRestartPolicy, InstanceCpuCount,  NameOrId,
-    Nullable,
+    InstanceAutoRestartPolicy, InstanceCpuCount, NameOrId, Nullable,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};

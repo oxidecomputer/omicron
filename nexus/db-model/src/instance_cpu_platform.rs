@@ -5,8 +5,8 @@
 use crate::SledCpuFamily;
 
 use super::impl_enum_type;
-use serde::{Deserialize, Serialize};
 use nexus_types::external_api::instance as instance_api;
+use serde::{Deserialize, Serialize};
 
 impl_enum_type!(
     InstanceCpuPlatformEnum:
@@ -44,9 +44,7 @@ impl InstanceCpuPlatform {
     }
 }
 
-impl From<instance_api::InstanceCpuPlatform>
-    for InstanceCpuPlatform
-{
+impl From<instance_api::InstanceCpuPlatform> for InstanceCpuPlatform {
     fn from(value: instance_api::InstanceCpuPlatform) -> Self {
         use instance_api::InstanceCpuPlatform as ApiPlatform;
         match value {
@@ -57,9 +55,7 @@ impl From<instance_api::InstanceCpuPlatform>
     }
 }
 
-impl From<InstanceCpuPlatform>
-    for instance_api::InstanceCpuPlatform
-{
+impl From<InstanceCpuPlatform> for instance_api::InstanceCpuPlatform {
     fn from(value: InstanceCpuPlatform) -> Self {
         match value {
             InstanceCpuPlatform::AmdMilan => Self::AmdMilan,

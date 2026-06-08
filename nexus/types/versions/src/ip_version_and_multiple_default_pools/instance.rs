@@ -10,8 +10,7 @@
 use omicron_common::address::IpVersion;
 use omicron_common::api::external::{
     ByteCount, Hostname, IdentityMetadataCreateParams,
-    InstanceAutoRestartPolicy, InstanceCpuCount, Name,
-    NameOrId,
+    InstanceAutoRestartPolicy, InstanceCpuCount, Name, NameOrId,
 };
 use oxnet::IpNet;
 use schemars::JsonSchema;
@@ -19,7 +18,9 @@ use serde::{Deserialize, Serialize};
 use std::net::IpAddr;
 
 use crate::v2025_11_20_00;
-use crate::v2025_11_20_00::instance::{InstanceCpuPlatform, UserData, bool_true};
+use crate::v2025_11_20_00::instance::{
+    InstanceCpuPlatform, UserData, bool_true,
+};
 use crate::v2025_12_03_00;
 use crate::v2025_12_03_00::instance::InstanceDiskAttachment;
 

@@ -30,8 +30,7 @@ use nexus_types::external_api::silo::{self, SiloIdentityMode};
 use nexus_types::external_api::user::CurrentUser;
 use nexus_types::{identity::Asset, silo::DEFAULT_SILO_ID};
 use omicron_common::api::external::{
-    IdentityMetadataCreateParams, InstanceAutoRestartPolicy,
-    Name, UserId,
+    IdentityMetadataCreateParams, InstanceAutoRestartPolicy, Name, UserId,
 };
 use std::str::FromStr;
 

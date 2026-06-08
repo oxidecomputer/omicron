@@ -15,7 +15,9 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use super::ip_pool::PoolSelector;
-use crate::v2025_11_20_00::instance::{InstanceCpuPlatform, UserData, bool_true};
+use crate::v2025_11_20_00::instance::{
+    InstanceCpuPlatform, UserData, bool_true,
+};
 use crate::v2025_12_03_00::instance::InstanceDiskAttachment;
 use crate::v2025_12_23_00;
 use crate::v2026_01_03_00;
