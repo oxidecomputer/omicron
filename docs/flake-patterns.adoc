@@ -46,6 +46,24 @@ This is most commonly observed with inventory collections, with two variations:
 
 - https://github.com/oxidecomputer/omicron/commit/1bb7b11bbbe3[`1bb7b11bbbe3`] tells ClickHouse to perform an `ALTER TABLE` operation synchronously.
 
+=== Stale watch channel notifications
+
+**What this is:** A test triggers a background operation, then waits for it to complete by awaiting `changed()` on a Tokio watch channel. The notification that satisfies `changed()` can come from an _earlier_, still-in-flight operation rather than the one the test triggered.
+
+`changed()` answers "has the value changed since this receiver last observed it?", not "has the value reached the state I need?". This can lead to two kinds of races:
+
+- If the receiver is subscribed (or `mark_unchanged()` is called) while a previous operation is still in flight, that operation's completion satisfies `changed()`, and the test proceeds before the operation it actually cares about has run.
+- Watch channels coalesce notifications: several writes in quick succession may be observed as a single change, so it is incorrect to assume one notification per write.
+
+**Why this is bad:** The test's assertions race with the operation it believed it had waited for.
+
+**How to fix this:** Wait on a predicate over the channel's _value_, not on change notifications. Use `wait_for_watch_channel_condition` with a reasonable timeout  (preferred), or `watch::Receiver::wait_for`. This requires the channel to carry enough state to express "the operation I triggered is done". This could be, for example, a generation number the test compares with `>=` (which also tolerates coalescing).
+
+**Example commits:**
+
+// FIXME: replace XXXX with the merged commit hash of the test_repo_upload race-fix PR.
+- https://github.com/oxidecomputer/omicron/commit/XXXX[`XXXX`] replaces `changed()` waits on the sled agents' delete-reconciler channels with a `generation >= pruned_generation` predicate.
+
 === Infinite retry loops
 
 **What this is:** A Nexus or other integration test starts, but waits forever for a condition to be met rather than setting a reasonable timeout.
