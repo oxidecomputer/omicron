@@ -8,6 +8,8 @@ use schemars::JsonSchema;
 use serde::Serialize;
 use std::fmt;
 
+pub mod power_shelf;
+
 /// Trait implemented by alerts.
 pub trait AlertPayload: Serialize + JsonSchema + std::fmt::Debug {
     const CLASS: AlertClass;
