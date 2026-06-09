@@ -1237,6 +1237,29 @@ CREATE TABLE IF NOT EXISTS omicron.public.silo_auth_settings (
     -- null means no max: users can tokens that never expire
     device_token_max_ttl_seconds INT8 CHECK (device_token_max_ttl_seconds > 0)
 );
+
+/*
+ * Fleet-wide networking settings. Singleton row; see `db_metadata` for an
+ * explanation of the singleton pattern.
+ */
+CREATE TABLE IF NOT EXISTS omicron.public.system_networking_settings (
+    singleton BOOL NOT NULL PRIMARY KEY,
+
+    -- When true, end users may opt in to jumbo frames (8500 byte MTU) on the
+    -- primary interface of an instance. When false, the per-instance bit is
+    -- ignored and ports are created with the default MTU.
+    external_jumbo_frames_opt_in_enabled BOOL NOT NULL,
+
+    CHECK (singleton = true)
+);
+
+INSERT INTO omicron.public.system_networking_settings (
+    singleton,
+    external_jumbo_frames_opt_in_enabled
+) VALUES (
+    TRUE, FALSE
+) ON CONFLICT DO NOTHING;
+
 /*
  * Projects
  */
@@ -1325,7 +1348,8 @@ CREATE TYPE IF NOT EXISTS omicron.public.instance_auto_restart AS ENUM (
 
 CREATE TYPE IF NOT EXISTS omicron.public.instance_cpu_platform AS ENUM (
   'amd_milan',
-  'amd_turin'
+  'amd_turin',
+  'amd_turin_v2'
 );
 
 /*
@@ -1451,6 +1475,15 @@ CREATE TABLE IF NOT EXISTS omicron.public.instance (
      * sled to maximize the number of sleds the VM can migrate to.
      */
     cpu_platform omicron.public.instance_cpu_platform,
+
+    /*
+     * When set this instance has opted in to jumbo frames (8500 byte MTU)
+     * on its primary OPTE interface. The effective MTU also depends on the
+     * fleet-wide setting in `system_networking_settings`; if that flag is off,
+     * the OPTE port is created with the default MTU regardless of this column.
+     * Changes to this column only take effect on the next instance restart.
+     */
+    enable_jumbo_frames BOOL NOT NULL,
 
     CONSTRAINT vmm_iff_active_propolis CHECK (
         ((state = 'vmm') AND (active_propolis_id IS NOT NULL)) OR
@@ -6045,7 +6078,8 @@ CREATE INDEX IF NOT EXISTS lookup_anti_affinity_group_instance_membership_by_ins
 CREATE TYPE IF NOT EXISTS omicron.public.vmm_cpu_platform AS ENUM (
   'sled_default',
   'amd_milan',
-  'amd_turin'
+  'amd_turin',
+  'amd_turin_v2'
 );
 
 /* Describes why a VMM record is in the 'failed' `vmm_state`. */
@@ -8652,7 +8686,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '263.0.0', NULL)
+    (TRUE, NOW(), NOW(), '265.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

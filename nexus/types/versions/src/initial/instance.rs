@@ -6,14 +6,16 @@
 
 use std::net::IpAddr;
 
+use api_identity::ObjectIdentity;
 use omicron_common::api::external::{
-    ByteCount, Hostname, IdentityMetadataCreateParams,
-    InstanceAutoRestartPolicy, InstanceCpuCount, InstanceCpuPlatform, Name,
-    NameOrId,
+    ByteCount, Hostname, IdentityMetadata, IdentityMetadataCreateParams,
+    InstanceAutoRestartPolicy, InstanceAutoRestartStatus, InstanceCpuCount,
+    InstanceRuntimeState, Name, NameOrId, ObjectIdentity,
 };
 use oxnet::IpNet;
 use schemars::JsonSchema;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use uuid::Uuid;
 
 use super::disk::DiskCreate;
 
@@ -151,6 +153,51 @@ pub enum InstanceDiskAttachment {
 
     /// During instance creation, attach this disk
     Attach(InstanceDiskAttach),
+}
+
+/// A required CPU platform for an instance.
+///
+/// When an instance specifies a required CPU platform:
+///
+/// - The system may expose (to the VM) new CPU features that are only present
+///   on that platform (or on newer platforms of the same lineage that also
+///   support those features).
+/// - The instance must run on hosts that have CPUs that support all the
+///   features of the supplied platform.
+///
+/// That is, the instance is restricted to hosts that have the CPUs which
+/// support all features of the required platform, but in exchange the CPU
+/// features exposed by the platform are available for the guest to use. Note
+/// that this may prevent an instance from starting (if the hosts that could run
+/// it are full but there is capacity on other incompatible hosts).
+///
+/// If an instance does not specify a required CPU platform, then when
+/// it starts, the control plane selects a host for the instance and then
+/// supplies the guest with the "minimum" CPU platform supported by that host.
+/// This maximizes the number of hosts that can run the VM if it later needs to
+/// migrate to another host.
+///
+/// In all cases, the CPU features presented by a given CPU platform are a
+/// subset of what the corresponding hardware may actually support; features
+/// which cannot be used from a virtual environment or do not have full
+/// hypervisor support may be masked off. See RFD 314 for specific CPU features
+/// in a CPU platform
+#[derive(
+    Copy, Clone, Debug, Deserialize, Serialize, JsonSchema, Eq, PartialEq,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum InstanceCpuPlatform {
+    /// An AMD Milan-like CPU platform.
+    AmdMilan,
+
+    /// An AMD Turin-like CPU platform.
+    // Note that there is only Turin, not Turin Dense - feature-wise there are
+    // collapsed together as the guest-visible platform is the same.
+    // If the two must be distinguished for instance placement, we'll want to
+    // track whatever the motivating constraint is more explicitly. CPU
+    // families, and especially the vendor code names, don't necessarily promise
+    // details about specific processor packaging choices.
+    AmdTurin,
 }
 
 /// Create-time parameters for an `Instance`
@@ -431,4 +478,35 @@ pub struct InstanceSerialConsoleData {
     /// The absolute offset since boot (suitable for use as `byte_offset` in a subsequent request)
     /// of the last byte returned in `data`.
     pub last_byte_offset: u64,
+}
+
+/// View of an Instance
+#[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct Instance {
+    // TODO is flattening here the intent in RFD 4?
+    #[serde(flatten)]
+    pub identity: IdentityMetadata,
+
+    /// ID for the project containing this instance
+    pub project_id: Uuid,
+
+    /// Number of CPUs allocated for this instance
+    pub ncpus: InstanceCpuCount,
+    /// Memory allocated for this instance
+    pub memory: ByteCount,
+    /// RFC1035-compliant hostname for the instance
+    pub hostname: String,
+
+    /// The ID of the disk used to boot this instance, if a specific one is assigned
+    pub boot_disk_id: Option<Uuid>,
+
+    #[serde(flatten)]
+    pub runtime: InstanceRuntimeState,
+
+    #[serde(flatten)]
+    pub auto_restart_status: InstanceAutoRestartStatus,
+
+    /// The CPU platform for this instance. If this is `null`, the instance
+    /// requires no particular CPU platform.
+    pub cpu_platform: Option<InstanceCpuPlatform>,
 }

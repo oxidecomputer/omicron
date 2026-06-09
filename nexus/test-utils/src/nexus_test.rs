@@ -166,7 +166,7 @@ impl<N: NexusServer> ControlPlaneTestContext<N> {
     }
 
     /// Wait until at least one inventory collection has been inserted into the
-    /// datastore.
+    /// datastore, and the inventory watch channel is populated.
     ///
     /// # Panics
     ///

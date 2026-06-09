@@ -66,6 +66,39 @@ pub async fn vpc_list_firewall_rules(
     Ok(rules)
 }
 
+/// Ensure that none of the given rules reference a VPC other than the one they
+/// belong to.
+///
+/// Cross-VPC targets and host filters are unsupported. This check must run
+/// before any rules are persisted; otherwise an invalid update is rejected but
+/// the rules are modified anyway (see omicron#10561).
+pub fn ensure_no_cross_vpc_references(
+    vpc: &db::model::Vpc,
+    rules: &[db::model::VpcFirewallRule],
+) -> Result<(), Error> {
+    for rule in rules {
+        for target in &rule.targets {
+            if let external::VpcFirewallRuleTarget::Vpc(name) = &target.0 {
+                if name != vpc.name() {
+                    return Err(Error::invalid_request(
+                        "cross-VPC firewall target unsupported",
+                    ));
+                }
+            }
+        }
+        for host in rule.filter_hosts.iter().flatten() {
+            if let external::VpcFirewallRuleHostFilter::Vpc(name) = &host.0 {
+                if name != vpc.name() {
+                    return Err(Error::invalid_request(
+                        "cross-VPC firewall host filter unsupported",
+                    ));
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Resolve a set of VPC firewall rules into the form expected by sled-agents.
 ///
 /// NOTE: This function injects the Nexus-specific allowlist rules, if the VPC
@@ -95,6 +128,12 @@ pub async fn resolve_firewall_rules_for_sled_agent(
         Vec::new()
     };
 
+    // Reject any cross-VPC references up front. (When called from the firewall
+    // rule update path, the rules have already been validated before being
+    // persisted, but other callers pass rules straight from the database.)
+    ensure_no_cross_vpc_references(vpc, rules)
+        .map_err(FirewallRulesError::Lookup)?;
+
     // Collect the names of instances, subnets, and VPCs that are either
     // targets or host filters. We have to find the sleds for all the
     // targets, and we'll need information about the IP addresses or
@@ -112,13 +151,6 @@ pub async fn resolve_firewall_rules_for_sled_agent(
                     subnets.insert(name.clone().into());
                 }
                 external::VpcFirewallRuleTarget::Vpc(name) => {
-                    if name != vpc.name() {
-                        return Err(FirewallRulesError::Lookup(
-                            Error::invalid_request(
-                                "cross-VPC firewall target unsupported",
-                            ),
-                        ));
-                    }
                     vpcs.insert(name.clone().into());
                 }
                 external::VpcFirewallRuleTarget::Ip(_)
@@ -137,13 +169,6 @@ pub async fn resolve_firewall_rules_for_sled_agent(
                     subnets.insert(name.clone().into());
                 }
                 external::VpcFirewallRuleHostFilter::Vpc(name) => {
-                    if name != vpc.name() {
-                        return Err(FirewallRulesError::Lookup(
-                            Error::invalid_request(
-                                "cross-VPC firewall host filter unsupported",
-                            ),
-                        ));
-                    }
                     vpcs.insert(name.clone().into());
                 }
                 // We don't need to resolve anything for Ip(Net)s.

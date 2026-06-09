@@ -174,13 +174,15 @@ pub mod instance {
     pub use crate::v2026_01_05_00::instance::EphemeralIpCreate;
     pub use crate::v2026_01_05_00::instance::ExternalIpCreate;
 
-    pub use crate::v2026_01_08_00::instance::InstanceUpdate;
-
     pub use crate::v2026_01_23_00::instance::EphemeralIpDetachSelector;
     pub use crate::v2026_01_23_00::instance::ExternalIpDetach;
 
-    pub use crate::v2026_01_31_00::instance::InstanceCreate;
-    pub use crate::v2026_01_31_00::instance::InstanceDiskAttachment;
+    pub use crate::v2026_06_05_00::instance::InstanceDiskAttachment;
+
+    pub use crate::v2026_06_08_00::instance::Instance;
+    pub use crate::v2026_06_08_00::instance::InstanceCpuPlatform;
+    pub use crate::v2026_06_08_00::instance::InstanceCreate;
+    pub use crate::v2026_06_08_00::instance::InstanceUpdate;
 }
 
 pub mod internet_gateway {
@@ -401,6 +403,11 @@ pub mod system {
     pub use crate::v2025_11_20_00::system::AllowListUpdate;
     pub use crate::v2025_11_20_00::system::Ping;
     pub use crate::v2025_11_20_00::system::PingStatus;
+}
+
+pub mod system_networking {
+    pub use crate::v2026_06_05_00::system_networking::SystemNetworkingSettings;
+    pub use crate::v2026_06_05_00::system_networking::SystemNetworkingSettingsUpdate;
 }
 
 pub mod timeseries {
