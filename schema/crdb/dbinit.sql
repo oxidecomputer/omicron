@@ -338,7 +338,9 @@ CREATE UNIQUE INDEX IF NOT EXISTS lookup_vmm_resource_by_sled ON omicron.public.
 -- not block out reserving another active VMM for an instance if the sled
 -- reservation algorithm can find a spot for it, hence why this unique index
 -- does not include the `tombstoned` state.
-CREATE UNIQUE INDEX IF NOT EXISTS single_vmm_reservation_per_state ON omicron.public.sled_resource_vmm (
+CREATE UNIQUE INDEX IF NOT EXISTS
+    single_vmm_reservation_per_state
+ON omicron.public.sled_resource_vmm (
     instance_id,
     state
 ) WHERE state != 'tombstoned';
