@@ -20,7 +20,7 @@ const PROJECT_ID: Uuid =
 const REGULAR_INSTANCE_ID: Uuid =
     Uuid::from_u128(0x3272631c_9117_4170_b979_cc2fcade2129);
 const REGULAR_ACTIVE_VMM_ID: Uuid =
-    Uuid::from_u128(0x3272631c_9117_4170_b979_cc2fcade2129);
+    Uuid::from_u128(0xcde8f413_9af3_48cb_9fda_21b8c18c61e2);
 
 const MIGRATING_INSTANCE_ID: Uuid =
     Uuid::from_u128(0x96f6cd58_b09b_4445_a382_8a3a20858f61);
