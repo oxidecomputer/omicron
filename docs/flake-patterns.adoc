@@ -6,14 +6,14 @@
 
 Omicron is a large distributed system, as a result of which it is somewhat susceptible to flaky tests. This document outlines some common patterns that have been observed to lead to flaky tests and how to avoid them.
 
-== Glossary
+== Glossary [[glossary]]
 
 Nexus test:: A test that uses the Nexus test framework, typically represented as an async function annotated with `#[nexus_test]`. (Some tests may manually set up Nexus.)
 System under test (SUT):: The production code (components or systems) being tested.
 
-== Patterns
+== Patterns [[patterns]]
 
-=== Asserting before async setup completes
+=== Asserting before async setup completes [[asserting-before-async-setup-completes]]
 
 **What this is:** A Nexus or other integration test starts, and an assertion made by the test races with a background async setup task that the SUT requires.
 
@@ -34,7 +34,7 @@ This is most commonly observed with inventory collections, with two variations:
 - https://github.com/oxidecomputer/omicron/commit/ab351dd669b8[`ab351dd669b8`] fixes several flaky tests by waiting for an inventory collection in the database.
 - https://github.com/oxidecomputer/omicron/commit/3026d8207604[`3026d8207604`] and https://github.com/oxidecomputer/omicron/commit/e082eb161e71[`e082eb161e71`] are followups that fix some of _those_ tests to wait on the watch channel instead of the database.
 
-=== Asserting before an async operation completes
+=== Asserting before an async operation completes [[asserting-before-async-operation-completes]]
 
 **What this is:** A test performs an async operation, then does not wait for it to complete before making assertions.
 
@@ -46,7 +46,7 @@ This is most commonly observed with inventory collections, with two variations:
 
 - https://github.com/oxidecomputer/omicron/commit/1bb7b11bbbe3[`1bb7b11bbbe3`] tells ClickHouse to perform an `ALTER TABLE` operation synchronously.
 
-=== Stale watch channel notifications
+=== Stale watch channel notifications [[stale-watch-channel-notifications]]
 
 **What this is:** A test triggers a background operation, then waits for it to complete by awaiting `changed()` on a Tokio watch channel. The notification that satisfies `changed()` can come from an _earlier_, still-in-flight operation rather than the one the test triggered.
 
@@ -64,7 +64,7 @@ This is most commonly observed with inventory collections, with two variations:
 // FIXME: replace XXXX with the merged commit hash of the test_repo_upload race-fix PR.
 - https://github.com/oxidecomputer/omicron/commit/XXXX[`XXXX`] replaces `changed()` waits on the sled agents' delete-reconciler channels with a `generation >= pruned_generation` predicate.
 
-=== Infinite retry loops
+=== Infinite retry loops [[infinite-retry-loops]]
 
 **What this is:** A Nexus or other integration test starts, but waits forever for a condition to be met rather than setting a reasonable timeout.
 
@@ -76,7 +76,7 @@ This is most commonly observed with inventory collections, with two variations:
 
 - https://github.com/oxidecomputer/omicron/commit/9ec43bc28a0e[`9ec43bc28a0e`] switches the `restart_dendrite` method to have a 60 second timeout on restarting Dendrite.
 
-=== Background tasks mutating the SUT
+=== Background tasks mutating the SUT [[background-tasks-mutating-the-sut]]
 
 **What this is:** A background task is started that mutates the SUT state in a way that is not expected by the test.
 
@@ -89,7 +89,7 @@ This is most commonly observed with inventory collections, with two variations:
 - https://github.com/oxidecomputer/omicron/commit/2050ef3a67d2[`2050ef3a67d2`] disables the `sp_ereport_ingester` background task for most tests, but re-enables it for `test_omdb_success_cases`.
 - https://github.com/oxidecomputer/omicron/commit/4bd9ebbc71e9[`4bd9ebbc71e9`] makes Nexus's startup-time switch-port insertion (exercised by `omicron-dev run-all`) accept `Error::ObjectAlreadyExists` when a background task wins the race to insert the same record.
 
-=== Teardown ordering races
+=== Teardown ordering races [[teardown-ordering-races]]
 
 **What this is:** A test completes, but two or more bits of teardown code race with each other during process shutdown. This may be a bug in either the test or the SUT.
 
@@ -104,7 +104,7 @@ This is most commonly observed with inventory collections, with two variations:
 
 NOTE: Flaky tests sometimes reveal genuine SUT bugs rather than test bugs. Besides the multicast example above, https://github.com/oxidecomputer/omicron/commit/e6733679c2ad[`e6733679c2ad`] fixed a NULL-handling bug in the next-item allocator that had been surfacing as flaky Terraform tests downstream.
 
-=== Bounded-channel backpressure
+=== Bounded-channel backpressure [[bounded-channel-backpressure]]
 
 **What this is:** A bounded channel is full, and the test fails rather than waiting until the channel has available capacity.
 
@@ -119,7 +119,7 @@ This is particularly susceptible to happening with Tokio's paused timer, which w
 - https://github.com/oxidecomputer/omicron/commit/ca3b41b1e3f4[`ca3b41b1e3f4`] treats a `QueueFull` error as a transient `CondCheckError::NotYet`.
 - https://github.com/oxidecomputer/omicron/commit/9b5d906eb468[`9b5d906eb468`] advances Tokio's time by one Oximeter collection at a time, and uses a watch channel to signal that collection has been completed.
 
-=== Database time resolution mismatch
+=== Database time resolution mismatch [[database-time-resolution-mismatch]]
 
 **What this is:** `Utc::now()` in Rust represents timestamps with nanosecond precision, while the CockroachDB database truncates to microsecond precision.
 This can lead to assertions like `after > before` failing, if `after` is derived from the database while `before` is `Utc::now()`.
@@ -141,7 +141,7 @@ Then, `after` is compared to `before`, and this assertion fails.
 
 - https://github.com/oxidecomputer/omicron/commit/8676f301cd44[`8676f301cd44`] switches timestamps from `Utc::now()` to `now_db_precision()`.
 
-=== Inadequate test isolation
+=== Inadequate test isolation [[inadequate-test-isolation]]
 
 **What this is:** Tests do not use sufficient isolation, causing either two tests or two concurrently running tasks within the same test to trample over each other's state while executing.
 
