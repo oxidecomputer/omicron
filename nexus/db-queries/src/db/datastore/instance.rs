@@ -161,7 +161,7 @@ impl<'s> InstanceStateComputer<'s> {
             // that.
             (_instance_state, Some(vmm_state)) => {
                 debug_assert_eq!(_instance_state, &InstanceState::Vmm);
-                nexus_types::instance::VmmState::from(*vmm_state).into()
+                (*vmm_state).into()
             }
             // If there's no VMM state, use the instance's state.
             (instance_state, None) => (*instance_state).into(),
