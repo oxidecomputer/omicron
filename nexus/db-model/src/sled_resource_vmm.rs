@@ -24,7 +24,12 @@ impl_enum_type!(
     ///   but the propolis process may still exist and/or the zone has not been
     ///   destroyed yet, meaning it is still consuming sled resources.
     ///
-    /// - `active` means that the VMM either is or will be running the instance.
+    /// - `active` means that the VMM is currently running the instance.
+    ///    A sled resource reservation is in the `active` state if either
+    ///    of the following are true:
+    ///    1. It was created in order to start a previously `Stopped` 
+    ///       instance.
+    ///    2. A migration into that VMM has completed successfully.
     ///
     /// - `target` means that the VMM is a migration destination for the
     ///   `active` VMM
