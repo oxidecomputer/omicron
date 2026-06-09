@@ -88,7 +88,9 @@ impl fmt::Display for SledReservationReason {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             SledReservationReason::Start => write!(f, "start"),
-            SledReservationReason::MigrationTarget => write!(f, "migration_target"),
+            SledReservationReason::MigrationTarget => {
+                write!(f, "migration_target")
+            }
         }
     }
 }
