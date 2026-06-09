@@ -72,9 +72,9 @@ pub enum AlertClass {
     TestQuuxBar,
     #[strum(serialize = "test.quux.bar.baz")]
     TestQuuxBarBaz,
-    #[strum(serialize = "hw.insert.power.power_shelf.psu")]
+    #[strum(serialize = "hardware.power_shelf.psu.insert")]
     PsuInserted,
-    #[strum(serialize = "hw.remove.power.power_shelf.psu")]
+    #[strum(serialize = "hardware.power_shelf.psu.remove")]
     PsuRemoved,
 }
 

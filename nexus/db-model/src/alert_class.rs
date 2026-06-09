@@ -29,8 +29,8 @@ impl_enum_type!(
     TestFooBaz => b"test.foo.baz"
     TestQuuxBar => b"test.quux.bar"
     TestQuuxBarBaz => b"test.quux.bar.baz"
-    PsuInserted => b"hw.insert.power.power_shelf.psu"
-    PsuRemoved => b"hw.remove.power.power_shelf.psu"
+    PsuInserted => b"hardware.power_shelf.psu.insert"
+    PsuRemoved => b"hardware.power_shelf.psu.remove"
 );
 
 impl AlertClass {
