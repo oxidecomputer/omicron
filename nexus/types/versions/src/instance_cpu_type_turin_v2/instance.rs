@@ -2,13 +2,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Instance types for version EXTERNAL_JUMBO_FRAMES.
-//!
-//! Adds `enable_jumbo_frames` to `InstanceCreate`, `InstanceUpdate`, and the
-//! `Instance` view. For create the field is `bool` (defaults to `false`); for
-//! update it's `Option<bool>` (omit to leave the value unchanged); for the
-//! view it's `bool` reflecting the current configured value.
-
 use api_identity::ObjectIdentity;
 use omicron_common::api::external::{
     ByteCount, Hostname, IdentityMetadata, IdentityMetadataCreateParams,
@@ -19,40 +12,190 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::v2025_11_20_00::{
-    self as initial,
-    instance::{InstanceCpuPlatform, InstanceDiskAttach, UserData, bool_true},
-};
+use crate::v2025_11_20_00;
+use crate::v2025_11_20_00::instance::{UserData, bool_true};
 use crate::v2026_01_03_00::instance::InstanceNetworkInterfaceAttachment;
 use crate::v2026_01_05_00::instance::ExternalIpCreate;
 use crate::v2026_01_08_00::multicast::MulticastGroupJoinSpec;
-use crate::v2026_01_31_00::disk::DiskCreate;
+use crate::v2026_06_05_00;
+use crate::v2026_06_05_00::instance::InstanceDiskAttachment;
 
-use crate::v2026_01_08_00;
-use crate::v2026_01_31_00;
+/// A required CPU platform for an instance.
+///
+/// When an instance specifies a required CPU platform:
+///
+/// - The system may expose (to the VM) new CPU features that are only present
+///   on that platform (or on newer platforms of the same lineage that also
+///   support those features).
+/// - The instance must run on hosts that have CPUs that support all the
+///   features of the supplied platform.
+///
+/// That is, the instance is restricted to hosts that have the CPUs which
+/// support all features of the required platform, but in exchange the CPU
+/// features exposed by the platform are available for the guest to use. Note
+/// that this may prevent an instance from starting (if the hosts that could run
+/// it are full but there is capacity on other incompatible hosts).
+///
+/// If an instance does not specify a required CPU platform, then when
+/// it starts, the control plane selects a host for the instance and then
+/// supplies the guest with the "minimum" CPU platform supported by that host.
+/// This maximizes the number of hosts that can run the VM if it later needs to
+/// migrate to another host.
+///
+/// In all cases, the CPU features presented by a given CPU platform are a
+/// subset of what the corresponding hardware may actually support; features
+/// which cannot be used from a virtual environment or do not have full
+/// hypervisor support may be masked off.
+#[derive(
+    Copy, Clone, Debug, Deserialize, Serialize, JsonSchema, Eq, PartialEq,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum InstanceCpuPlatform {
+    /// An AMD Milan-like CPU platform.
+    AmdMilan,
 
-/// Describe the instance's disks at creation time
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum InstanceDiskAttachment {
-    /// During instance creation, create and attach disks
-    Create(DiskCreate),
-    /// During instance creation, attach this disk
-    Attach(InstanceDiskAttach),
+    /// An AMD Turin-like CPU platform. Prefer `amd_turin_v2` over this; this
+    /// CPU platform is retained for instances that specifically requested it
+    /// before `amd_turin_v2` was added.
+    ///
+    /// This initial version of the Turin CPU platform includes no cache
+    /// or TLB information in CPUID leaf `8000_0006`. While this was
+    /// intentional, Oxide later discovered some guest software interprets the
+    /// zeroed leaves as reporting cache sizes of 0 bytes and behaves
+    /// incorrectly and unpredictably as a result (see
+    /// [Propolis#1152](https://github.com/oxidecomputer/propolis/issues/1152)).
+    // Note that there is only Turin, not Turin Dense - feature-wise there are
+    // collapsed together as the guest-visible platform is the same.
+    // If the two must be distinguished for instance placement, we'll want to
+    // track whatever the motivating constraint is more explicitly. CPU
+    // families, and especially the vendor code names, don't necessarily promise
+    // details about specific processor packaging choices.
+    AmdTurin,
+
+    /// An AMD Turin-like CPU platform.
+    ///
+    /// This version of the Turin CPU platform includes cache and TLB
+    /// information in CPUID leaf `8000_0006`, similar to the cache information
+    /// included in the initial Milan-like CPU platform.
+    AmdTurinV2,
 }
 
-impl From<v2026_01_31_00::instance::InstanceDiskAttachment>
-    for InstanceDiskAttachment
+impl From<v2025_11_20_00::instance::InstanceCpuPlatform>
+    for InstanceCpuPlatform
 {
-    fn from(old: v2026_01_31_00::instance::InstanceDiskAttachment) -> Self {
+    fn from(old: v2025_11_20_00::instance::InstanceCpuPlatform) -> Self {
         match old {
-            v2026_01_31_00::instance::InstanceDiskAttachment::Create(
-                create,
-            ) => Self::Create(create),
-            v2026_01_31_00::instance::InstanceDiskAttachment::Attach(
-                attach,
-            ) => Self::Attach(attach),
+            v2025_11_20_00::instance::InstanceCpuPlatform::AmdMilan => {
+                InstanceCpuPlatform::AmdMilan
+            }
+            v2025_11_20_00::instance::InstanceCpuPlatform::AmdTurin => {
+                InstanceCpuPlatform::AmdTurin
+            }
         }
+    }
+}
+
+impl TryFrom<InstanceCpuPlatform>
+    for v2025_11_20_00::instance::InstanceCpuPlatform
+{
+    type Error = dropshot::HttpError;
+
+    fn try_from(new: InstanceCpuPlatform) -> Result<Self, Self::Error> {
+        match new {
+            InstanceCpuPlatform::AmdMilan => {
+                Ok(v2025_11_20_00::instance::InstanceCpuPlatform::AmdMilan)
+            }
+            InstanceCpuPlatform::AmdTurin => {
+                Ok(v2025_11_20_00::instance::InstanceCpuPlatform::AmdTurin)
+            }
+            InstanceCpuPlatform::AmdTurinV2 => {
+                Err(dropshot::HttpError::for_client_error(
+                    Some(String::from("Not Acceptable")),
+                    dropshot::ClientErrorStatusCode::NOT_ACCEPTABLE,
+                    String::from(
+                        "CPU platform amd_turin_v2 not supported for client version",
+                    ),
+                ))
+            }
+        }
+    }
+}
+
+/// View of an Instance
+#[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct Instance {
+    // TODO is flattening here the intent in RFD 4?
+    #[serde(flatten)]
+    pub identity: IdentityMetadata,
+
+    /// ID for the project containing this instance
+    pub project_id: Uuid,
+
+    /// Number of CPUs allocated for this instance
+    pub ncpus: InstanceCpuCount,
+    /// Memory allocated for this instance
+    pub memory: ByteCount,
+    /// RFC1035-compliant hostname for the instance
+    pub hostname: String,
+
+    /// The ID of the disk used to boot this instance, if a specific one is assigned
+    pub boot_disk_id: Option<Uuid>,
+
+    #[serde(flatten)]
+    pub runtime: InstanceRuntimeState,
+
+    #[serde(flatten)]
+    pub auto_restart_status: InstanceAutoRestartStatus,
+
+    /// The CPU platform for this instance. If this is `null`, the instance
+    /// requires no particular CPU platform.
+    pub cpu_platform: Option<InstanceCpuPlatform>,
+
+    /// When true, this instance has opted in to jumbo frames (8500 byte MTU)
+    /// on its primary network interface. The effective MTU also depends on
+    /// the fleet-wide jumbo-frames opt-in; if that is disabled, the primary
+    /// interface uses the default MTU regardless of this value. Changes only
+    /// take effect on the next instance restart.
+    pub enable_jumbo_frames: bool,
+}
+
+impl From<v2026_06_05_00::instance::Instance> for Instance {
+    fn from(value: v2026_06_05_00::instance::Instance) -> Self {
+        Instance {
+            identity: value.identity,
+            project_id: value.project_id,
+            ncpus: value.ncpus,
+            memory: value.memory,
+            hostname: value.hostname,
+            boot_disk_id: value.boot_disk_id,
+            runtime: value.runtime,
+            auto_restart_status: value.auto_restart_status,
+            cpu_platform: value.cpu_platform.map(Into::into),
+            enable_jumbo_frames: value.enable_jumbo_frames,
+        }
+    }
+}
+
+impl TryFrom<Instance> for v2026_06_05_00::instance::Instance {
+    type Error = dropshot::HttpError;
+
+    fn try_from(value: Instance) -> Result<Self, Self::Error> {
+        let converted_cpu = match value.cpu_platform {
+            Some(platform) => Some(platform.try_into()?),
+            None => None,
+        };
+        Ok(v2026_06_05_00::instance::Instance {
+            identity: value.identity,
+            project_id: value.project_id,
+            ncpus: value.ncpus,
+            memory: value.memory,
+            hostname: value.hostname,
+            boot_disk_id: value.boot_disk_id,
+            runtime: value.runtime,
+            auto_restart_status: value.auto_restart_status,
+            cpu_platform: converted_cpu,
+            enable_jumbo_frames: value.enable_jumbo_frames,
+        })
     }
 }
 
@@ -159,9 +302,9 @@ pub struct InstanceCreate {
     pub enable_jumbo_frames: bool,
 }
 
-impl From<v2026_01_31_00::instance::InstanceCreate> for InstanceCreate {
-    fn from(old: v2026_01_31_00::instance::InstanceCreate) -> Self {
-        Self {
+impl From<v2026_06_05_00::instance::InstanceCreate> for InstanceCreate {
+    fn from(old: v2026_06_05_00::instance::InstanceCreate) -> Self {
+        InstanceCreate {
             identity: old.identity,
             ncpus: old.ncpus,
             memory: old.memory,
@@ -170,14 +313,14 @@ impl From<v2026_01_31_00::instance::InstanceCreate> for InstanceCreate {
             network_interfaces: old.network_interfaces,
             external_ips: old.external_ips,
             multicast_groups: old.multicast_groups,
-            disks: old.disks.into_iter().map(Into::into).collect(),
-            boot_disk: old.boot_disk.map(Into::into),
+            disks: old.disks,
+            boot_disk: old.boot_disk,
             ssh_public_keys: old.ssh_public_keys,
             start: old.start,
             auto_restart_policy: old.auto_restart_policy,
             anti_affinity_groups: old.anti_affinity_groups,
-            cpu_platform: old.cpu_platform,
-            enable_jumbo_frames: false,
+            cpu_platform: old.cpu_platform.map(Into::into),
+            enable_jumbo_frames: old.enable_jumbo_frames,
         }
     }
 }
@@ -250,87 +393,16 @@ pub struct InstanceUpdate {
     pub enable_jumbo_frames: bool,
 }
 
-impl From<v2026_01_08_00::instance::InstanceUpdate> for InstanceUpdate {
-    fn from(old: v2026_01_08_00::instance::InstanceUpdate) -> Self {
+impl From<v2026_06_05_00::instance::InstanceUpdate> for InstanceUpdate {
+    fn from(old: v2026_06_05_00::instance::InstanceUpdate) -> Self {
         Self {
             ncpus: old.ncpus,
             memory: old.memory,
             boot_disk: old.boot_disk,
             auto_restart_policy: old.auto_restart_policy,
-            cpu_platform: old.cpu_platform,
+            cpu_platform: Nullable(old.cpu_platform.0.map(Into::into)),
             multicast_groups: old.multicast_groups,
-            enable_jumbo_frames: false,
-        }
-    }
-}
-
-/// View of an Instance
-#[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct Instance {
-    // TODO is flattening here the intent in RFD 4?
-    #[serde(flatten)]
-    pub identity: IdentityMetadata,
-
-    /// ID for the project containing this instance
-    pub project_id: Uuid,
-
-    /// Number of CPUs allocated for this instance
-    pub ncpus: InstanceCpuCount,
-    /// Memory allocated for this instance
-    pub memory: ByteCount,
-    /// RFC1035-compliant hostname for the instance
-    pub hostname: String,
-
-    /// The ID of the disk used to boot this instance, if a specific one is assigned
-    pub boot_disk_id: Option<Uuid>,
-
-    #[serde(flatten)]
-    pub runtime: InstanceRuntimeState,
-
-    #[serde(flatten)]
-    pub auto_restart_status: InstanceAutoRestartStatus,
-
-    /// The CPU platform for this instance. If this is `null`, the instance
-    /// requires no particular CPU platform.
-    pub cpu_platform: Option<InstanceCpuPlatform>,
-
-    /// When true, this instance has opted in to jumbo frames (8500 byte MTU)
-    /// on its primary network interface. The effective MTU also depends on
-    /// the fleet-wide jumbo-frames opt-in; if that is disabled, the primary
-    /// interface uses the default MTU regardless of this value. Changes only
-    /// take effect on the next instance restart.
-    pub enable_jumbo_frames: bool,
-}
-
-impl From<initial::instance::Instance> for Instance {
-    fn from(value: initial::instance::Instance) -> Self {
-        Self {
-            identity: value.identity,
-            project_id: value.project_id,
-            ncpus: value.ncpus,
-            memory: value.memory,
-            hostname: value.hostname,
-            boot_disk_id: value.boot_disk_id,
-            runtime: value.runtime,
-            auto_restart_status: value.auto_restart_status,
-            cpu_platform: value.cpu_platform,
-            enable_jumbo_frames: false,
-        }
-    }
-}
-
-impl From<Instance> for initial::instance::Instance {
-    fn from(value: Instance) -> Self {
-        Self {
-            identity: value.identity,
-            project_id: value.project_id,
-            ncpus: value.ncpus,
-            memory: value.memory,
-            hostname: value.hostname,
-            boot_disk_id: value.boot_disk_id,
-            runtime: value.runtime,
-            auto_restart_status: value.auto_restart_status,
-            cpu_platform: value.cpu_platform,
+            enable_jumbo_frames: old.enable_jumbo_frames,
         }
     }
 }

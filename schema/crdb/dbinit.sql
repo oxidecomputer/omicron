@@ -1319,7 +1319,8 @@ CREATE TYPE IF NOT EXISTS omicron.public.instance_auto_restart AS ENUM (
 
 CREATE TYPE IF NOT EXISTS omicron.public.instance_cpu_platform AS ENUM (
   'amd_milan',
-  'amd_turin'
+  'amd_turin',
+  'amd_turin_v2'
 );
 
 /*
@@ -6048,7 +6049,8 @@ CREATE INDEX IF NOT EXISTS lookup_anti_affinity_group_instance_membership_by_ins
 CREATE TYPE IF NOT EXISTS omicron.public.vmm_cpu_platform AS ENUM (
   'sled_default',
   'amd_milan',
-  'amd_turin'
+  'amd_turin',
+  'amd_turin_v2'
 );
 
 /* Describes why a VMM record is in the 'failed' `vmm_state`. */
@@ -8655,7 +8657,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '263.0.0', NULL)
+    (TRUE, NOW(), NOW(), '264.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

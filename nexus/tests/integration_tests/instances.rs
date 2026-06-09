@@ -69,6 +69,7 @@ use nexus_types::identity::Resource;
 use nexus_types::internal_api::params::InstanceMigrateRequest;
 use nexus_types::silo::DEFAULT_SILO_ID;
 use nexus_types_versions::latest::instance::Instance;
+use nexus_types_versions::latest::instance::InstanceCpuPlatform;
 use omicron_common::address::IpVersion;
 use omicron_common::api::external::AffinityPolicy;
 use omicron_common::api::external::ByteCount;
@@ -80,7 +81,6 @@ use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::IdentityMetadataUpdateParams;
 use omicron_common::api::external::InstanceAutoRestartPolicy;
 use omicron_common::api::external::InstanceCpuCount;
-use omicron_common::api::external::InstanceCpuPlatform;
 use omicron_common::api::external::InstanceNetworkInterface;
 use omicron_common::api::external::InstanceState;
 use omicron_common::api::external::Name;
@@ -7298,6 +7298,39 @@ async fn test_can_start_instance_with_cpu_platform(
     expect_instance_start_ok(client, instance.identity.name.as_str()).await;
 
     // The VMM should specifically be on our new fake Turin sled.
+    let instance_sled = nexus
+        .active_instance_info(&instance_id, None)
+        .await
+        .unwrap()
+        .expect("running instance should have a sled")
+        .sled_id;
+
+    assert_eq!(instance_sled, new_sled_id);
+
+    // We're free to switch this instance from the initial AmdTurin to AmdTurinV2, which has
+    // identical placement constraints and should land on the same simulated Turin sled.
+    expect_instance_stop_ok(client, instance.identity.name.as_str()).await;
+    instance_simulate(nexus, &instance_id).await;
+    instance_wait_for_state(client, instance_id, InstanceState::Stopped).await;
+
+    let instance = expect_instance_reconfigure_ok(
+        &client,
+        &instance.identity.id,
+        instance::InstanceUpdate {
+            boot_disk: Nullable(None),
+            auto_restart_policy: Nullable(None),
+            cpu_platform: Nullable(Some(InstanceCpuPlatform::AmdTurinV2)),
+            ncpus: InstanceCpuCount::try_from(1).unwrap(),
+            memory: ByteCount::from_gibibytes_u32(4),
+            multicast_groups: None,
+            enable_jumbo_frames: false,
+        },
+    )
+    .await;
+
+    expect_instance_start_ok(client, instance.identity.name.as_str()).await;
+
+    // The VMM should still be on our new fake Turin sled.
     let instance_sled = nexus
         .active_instance_info(&instance_id, None)
         .await
