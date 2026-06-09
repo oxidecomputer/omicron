@@ -485,7 +485,8 @@ struct UpdatesRequired {
     ///
     /// - the previously active record has to have its state set to `tombstoned`
     /// - the migration target record has to have its state set to `active`
-    update_active_vmm_for_migration_success: Option<MigrateSuccessUpdate>,
+    update_sled_reservations_for_migration_success:
+        Option<MigrateSuccessUpdate>,
 
     /// If this is [`Some`], the instance's migration target VMM with this UUID
     /// has transitioned to [`VmmState::Destroyed`], and its resources must be
@@ -539,7 +540,7 @@ impl UpdatesRequired {
         let mut update_required = false;
         let mut active_vmm_failed = false;
         let mut network_config = None;
-        let mut update_active_vmm_for_migration_success = None;
+        let mut update_sled_reservations_for_migration_success = None;
 
         // Has the active VMM been destroyed?
         let destroy_active_vmm =
@@ -707,7 +708,7 @@ impl UpdatesRequired {
                     new_runtime.migration_id = None;
                     new_runtime.dst_propolis_id = None;
 
-                    update_active_vmm_for_migration_success =
+                    update_sled_reservations_for_migration_success =
                         Some(MigrateSuccessUpdate {
                             active_vmm_id: migration.source_propolis_id,
                             target_vmm_id: migration.target_propolis_id,
@@ -764,7 +765,7 @@ impl UpdatesRequired {
             new_intent,
             new_runtime,
             destroy_active_vmm,
-            update_active_vmm_for_migration_success,
+            update_sled_reservations_for_migration_success,
             destroy_target_vmm,
             deprovision,
             network_config,
@@ -859,9 +860,9 @@ declare_saga_actions! {
 
     // If a migration was successfully completed, update the target VMM's
     // `sled_resource_vmm` record to be the active one, and tombstone the source
-    // VMM's record.
-    UPDATE_ACTIVE_VMM_FOR_MIGRATION_SUCCESS -> "update_active_vmm" {
-        + siu_update_active_vmm_for_migration_success
+    // record.
+    UPDATE_SLED_RESERVATIONS_FOR_MIGRATION_SUCCESS -> "update_active_vmm" {
+        + siu_update_sled_reservations_for_migration_success
     }
 
     // Check if the VMM or migration state has changed while the update saga was
@@ -919,7 +920,7 @@ impl NexusSaga for SagaDoActualInstanceUpdate {
             new_runtime: _,
             new_intent: _,
             destroy_active_vmm,
-            update_active_vmm_for_migration_success,
+            update_sled_reservations_for_migration_success,
             destroy_target_vmm,
             deprovision,
             network_config,
@@ -945,11 +946,12 @@ impl NexusSaga for SagaDoActualInstanceUpdate {
         // If a migration succeeded, we need to set the destination propolis'
         // associated sled_resource_vmm record's state to active, and the
         // source's to tombstoned.
-        if update_active_vmm_for_migration_success.is_some() {
+        if update_sled_reservations_for_migration_success.is_some() {
             // Only perform this update if the target VMM is not to be destroyed.
             if destroy_target_vmm.is_none() {
-                builder
-                    .append(update_active_vmm_for_migration_success_action());
+                builder.append(
+                    update_sled_reservations_for_migration_success_action(),
+                );
             }
         }
 
@@ -1352,7 +1354,7 @@ async fn siu_commit_instance_updates(
     Ok(())
 }
 
-async fn siu_update_active_vmm_for_migration_success(
+async fn siu_update_sled_reservations_for_migration_success(
     sagactx: NexusActionContext,
 ) -> Result<(), ActionError> {
     let osagactx = sagactx.user_data();
@@ -1364,7 +1366,8 @@ async fn siu_update_active_vmm_for_migration_success(
     let log = osagactx.log();
     let instance_id = authz_instance.id();
 
-    let Some(update) = &update.update_active_vmm_for_migration_success else {
+    let Some(update) = &update.update_sled_reservations_for_migration_success
+    else {
         return Err(saga_action_failed(Error::internal_error(
             "saga node called with None update_active_vmm_for_migration_success",
         )));
@@ -1387,8 +1390,8 @@ async fn siu_update_active_vmm_for_migration_success(
 
     info!(
         log,
-        "instance update: updated active VMM from {active_vmm_id} to \
-        {target_vmm_id}";
+        "instance update: set sled reservation record {active_vmm_id} to \
+        state 'tombstoned' and reservation {target_vmm_id} to state 'active'";
         "instance_id" => %instance_id,
     );
 
