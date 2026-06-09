@@ -226,11 +226,19 @@ impl From<VmmState> for omicron_common::api::external::InstanceState {
             // be `Stopped`. This is because instances with unwound VMMs can
             // be started by a subsequent instance-start saga, just like
             // instances whose internal state actually is `Stopped`.
-            VmmState::Stopped | VmmState::SagaUnwound => Output::Stopped,
+            VmmState::SagaUnwound => Output::Stopped,
             VmmState::Rebooting => Output::Rebooting,
             VmmState::Migrating => Output::Migrating,
-            VmmState::Failed(_) => Output::Failed,
-            VmmState::Destroyed => Output::Destroyed,
+            // An instance with a "failed" VMM should *not* be counted as
+            // failed until the VMM is unlinked, because a start saga must be
+            // able to run for a "failed" instance. Until then, it will
+            // continue to appear "stopping".
+            VmmState::Failed(_) => Output::Stopping,
+            // An instance with a "stopped" or "destroyed" VMM needs to be
+            // recast as a "stopping" instance, as the virtual provisioning
+            // resources for that instance have not been deallocated until the
+            // active VMM ID has been unlinked by an update saga.
+            VmmState::Stopped | VmmState::Destroyed => Output::Stopping,
         }
     }
 }
