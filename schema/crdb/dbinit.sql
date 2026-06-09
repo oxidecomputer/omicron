@@ -3789,6 +3789,8 @@ CREATE TABLE IF NOT EXISTS omicron.public.switch_port_settings_bgp_peer_config (
     id UUID NOT NULL,
     -- Maximum valid router lifetime is 9000 seconds (2.5 hours) per RFC 4861
     router_lifetime INT4 NOT NULL CHECK (router_lifetime >= 0 AND router_lifetime <= 9000),
+    -- Source address for this BGP session (optional, only applies to numbered peers).
+    src_addr INET,
 
     -- router_lifetime is only meaningful to set for unnumbered peers; ensure
     -- it's left at 0 for numbered peers
@@ -8655,7 +8657,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '263.0.0', NULL)
+    (TRUE, NOW(), NOW(), '264.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

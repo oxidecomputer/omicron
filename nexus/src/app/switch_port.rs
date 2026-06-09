@@ -19,7 +19,6 @@ use omicron_common::api::external::{
     CreateResult, DataPageParams, DeleteResult, Error, ListResultVec,
     LookupResult, Name, NameOrId, UpdateResult,
 };
-use sled_agent_types::early_networking::RouterPeerType;
 use sled_agent_types::early_networking::SwitchSlot;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -64,10 +63,10 @@ impl super::Nexus {
             for p in x.peers.iter() {
                 if let Some(ref key) = p.md5_auth_key {
                     let peer_id = match p.addr {
-                        RouterPeerType::Numbered { ip } => {
+                        networking::RouterPeerType::Numbered { ip, .. } => {
                             format!("peer {ip}")
                         }
-                        RouterPeerType::Unnumbered { .. } => {
+                        networking::RouterPeerType::Unnumbered { .. } => {
                             format!("unnumbered peer {}", p.bgp_config)
                         }
                     };
