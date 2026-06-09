@@ -55,7 +55,7 @@ impl From<omicron_common::api::external::Disk> for Disk {
             snapshot_id,
             image_id,
             size,
-            block_size,
+            block_size: block_size.into(),
             state,
             device_path,
             disk_type,

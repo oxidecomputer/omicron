@@ -35,11 +35,11 @@ use nexus_types::external_api::disk;
 use nexus_types::external_api::instance;
 use nexus_types::external_api::sled;
 use nexus_types::external_api::snapshot;
+use nexus_types_versions::latest::instance::Instance;
 use omicron_common::api::external;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::DiskState;
 use omicron_common::api::external::IdentityMetadataCreateParams;
-use omicron_common::api::external::Instance;
 use omicron_common::api::external::InstanceCpuCount;
 use omicron_common::api::external::Name;
 use omicron_nexus::app::MIN_DISK_SIZE_BYTES;
@@ -143,6 +143,7 @@ async fn test_snapshot_basic(cptestctx: &ControlPlaneTestContext) {
             auto_restart_policy: Default::default(),
             anti_affinity_groups: Vec::new(),
             multicast_groups: Vec::new(),
+            enable_jumbo_frames: false,
         },
     )
     .await;
@@ -325,6 +326,7 @@ async fn test_snapshot_stopped_instance(cptestctx: &ControlPlaneTestContext) {
             auto_restart_policy: Default::default(),
             anti_affinity_groups: Vec::new(),
             multicast_groups: Vec::new(),
+            enable_jumbo_frames: false,
         },
     )
     .await;

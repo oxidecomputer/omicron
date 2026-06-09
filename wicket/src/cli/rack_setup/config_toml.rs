@@ -107,6 +107,13 @@ impl TomlTemplate {
             config.allowed_source_ips.as_ref(),
         );
 
+        *doc.get_mut("external_jumbo_frames_opt_in_enabled")
+            .unwrap()
+            .as_value_mut()
+            .unwrap() = Value::Boolean(Formatted::new(
+            config.external_jumbo_frames_opt_in_enabled,
+        ));
+
         *doc.get_mut("bootstrap_sleds").unwrap().as_array_mut().unwrap() =
             build_sleds_array(&config.bootstrap_sleds);
 

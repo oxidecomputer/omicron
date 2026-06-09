@@ -1177,6 +1177,17 @@ impl ServiceManager {
                 dhcp_config: DhcpCfg::default(),
                 // Services do not use attached subnets, only instances.
                 attached_subnets: vec![],
+                // TODO(RFD 689): plumb the fleet-wide jumbo-frames opt-in
+                // (`system_networking_settings.external_jumbo_frames_opt_in_enabled`)
+                // through blueprints / reconfigurator-execution to this point
+                // so that external-facing service zones (Nexus, ExternalDns,
+                // BoundaryNtp) are brought up with `EXTERNAL_JUMBO_FRAMES_MTU`
+                // when the operator has enabled the opt-in.
+                //
+                // For now, services always use the default MTU. The
+                // per-instance jumbo opt-in (the primary user-facing feature
+                // from RFD 689) is fully wired through `instance_ensure_registered`.
+                mtu: None,
             })
             .map_err(|err| Error::ServicePortCreation {
                 service: zone_kind,
@@ -2407,7 +2418,7 @@ impl ServiceManager {
                             default_handler_task_mode:
                                 HandlerTaskMode::Detached,
                             log_headers: vec![],
-                            compression: dropshot::CompressionConfig::None,
+                            compression: dropshot::CompressionConfig::Gzip,
                         },
                     },
                     dropshot_internal: dropshot::ConfigDropshot {
