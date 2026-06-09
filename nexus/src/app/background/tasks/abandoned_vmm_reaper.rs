@@ -273,7 +273,7 @@ mod tests {
                         destroyed_vmm_id,
                         resources.clone(),
                         constraints,
-                        // Setting the reservation type of `target` means this
+                        // Setting the reservation reason of `target` means this
                         // was the target of a migration, and that migration
                         // failed according to the VMM state of destroyed.
                         SledReservationReason::MigrationTarget,
