@@ -78,7 +78,8 @@ fn insert_instance_query(
 
             boot_disk_id,
             intended_state,
-            cpu_platform
+            cpu_platform,
+            enable_jumbo_frames
         ) VALUES (
             '{id}',
             '{name}',
@@ -110,7 +111,8 @@ fn insert_instance_query(
 
             null,
             'running',
-            'amd_turin'
+            'amd_turin',
+            false
         );
     "#,
         match active_vmm_id {
