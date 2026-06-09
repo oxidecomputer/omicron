@@ -186,6 +186,7 @@ impl super::Nexus {
         let inventory = datastore
             .inventory_get_latest_collection(opctx)
             .await
+            .map_err(Error::from)
             .internal_context(
                 "fetching latest inventory collection for blueprint planner",
             )?;

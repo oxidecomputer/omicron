@@ -171,6 +171,7 @@ pub use instance::{
     InstanceAndActiveVmm, InstanceGestalt, InstanceStateComputer,
 };
 pub use inventory::DataStoreInventoryTest;
+pub use inventory::InventoryReadError;
 use nexus_db_model::AllSchemaVersions;
 use nexus_types::internal_api::views::HeldDbClaimInfo;
 pub use oximeter::CollectorReassignment;

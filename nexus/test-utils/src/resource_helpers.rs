@@ -62,7 +62,6 @@ use nexus_types_versions::latest::instance::InstanceCpuPlatform;
 use omicron_common::api::external::AffinityPolicy;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Disk;
-use omicron_common::api::external::Error;
 use omicron_common::api::external::FailureDomain;
 use omicron_common::api::external::Generation;
 use omicron_common::api::external::IdentityMetadataCreateParams;
@@ -95,6 +94,7 @@ use oxnet::Ipv4Net;
 use oxnet::Ipv6Net;
 use sled_agent_types::inventory::ZpoolHealth;
 use slog::debug;
+use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::net::IpAddr;
 use std::sync::Arc;
@@ -2108,20 +2108,10 @@ impl<'a, N: NexusServer> DiskTest<'a, N> {
                     .server
                     .inventory_collect_and_get_latest_collection()
                     .await;
-                let log_result = match &result {
-                    Ok(Some(_)) => Ok("found"),
-                    Ok(None) => Ok("not found"),
-                    Err(error) => Err(error),
-                };
-                debug!(
-                    log,
-                    "attempt to fetch latest inventory collection";
-                    "result" => ?log_result,
-                );
-
+                let log_msg = "attempt to fetch latest inventory collection";
                 match result {
-                    Ok(None) => Err(CondCheckError::NotYet),
                     Ok(Some(c)) => {
+                        debug!(log, "{log_msg}"; "result" => "found");
                         let all_zpools = c
                             .sled_agents
                             .iter()
@@ -2136,10 +2126,14 @@ impl<'a, N: NexusServer> DiskTest<'a, N> {
                             Err(CondCheckError::NotYet)
                         }
                     }
-                    Err(Error::ServiceUnavailable { .. }) => {
+                    Ok(None) => {
+                        debug!(log, "{log_msg}"; "result" => "not found");
                         Err(CondCheckError::NotYet)
                     }
-                    Err(error) => Err(CondCheckError::Failed(error)),
+                    Err(err) => {
+                        debug!(log, "{log_msg}"; InlineErrorChain::new(&err));
+                        Err(CondCheckError::Failed(err))
+                    }
                 }
             },
             &Duration::from_millis(50),

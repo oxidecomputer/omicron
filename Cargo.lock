@@ -7490,6 +7490,7 @@ dependencies = [
  "serde",
  "serde_json",
  "slog",
+ "slog-error-chain",
  "subprocess",
  "swrite",
  "tokio",

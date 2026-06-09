@@ -34,12 +34,12 @@
 use async_trait::async_trait;
 use nexus_config::NexusConfig;
 use nexus_db_queries::db;
+use nexus_db_queries::db::datastore::InventoryReadError;
 use nexus_types::deployment::Blueprint;
 use nexus_types::internal_api::params::{
     PhysicalDiskPutRequest, ZpoolPutRequest,
 };
 use nexus_types::inventory::Collection;
-use omicron_common::api::external::Error;
 use omicron_common::disk::DatasetKind;
 use omicron_uuid_kinds::DatasetUuid;
 use slog::Logger;
@@ -128,7 +128,7 @@ pub trait NexusServer: Send + Sync + 'static {
 
     async fn inventory_collect_and_get_latest_collection(
         &self,
-    ) -> Result<Option<Collection>, Error>;
+    ) -> Result<Option<Collection>, InventoryReadError>;
 
     async fn close(self);
 }

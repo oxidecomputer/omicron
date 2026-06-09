@@ -31,6 +31,7 @@ use nexus_db_model::HwBaseboardId;
 use nexus_db_model::RendezvousDebugDataset;
 use nexus_db_model::RendezvousLocalStorageUnencryptedDataset;
 use nexus_db_queries::db;
+use nexus_db_queries::db::datastore::InventoryReadError;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::blueprint_zone_type;
@@ -621,7 +622,7 @@ impl nexus_test_interface::NexusServer for Server {
 
     async fn inventory_collect_and_get_latest_collection(
         &self,
-    ) -> Result<Option<Collection>, Error> {
+    ) -> Result<Option<Collection>, InventoryReadError> {
         let nexus = &self.apictx.context.nexus;
 
         nexus.activate_inventory_collection();

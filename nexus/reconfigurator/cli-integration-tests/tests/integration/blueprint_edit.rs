@@ -13,7 +13,6 @@ use nexus_test_utils_macros::nexus_test;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::SledFilter;
 use nexus_types::deployment::UnstableReconfiguratorState;
-use omicron_common::api::external::Error;
 use omicron_test_utils::dev::poll::CondCheckError;
 use omicron_test_utils::dev::poll::wait_for_condition;
 use omicron_test_utils::dev::test_cmds::EXIT_SUCCESS;
@@ -23,6 +22,7 @@ use omicron_test_utils::dev::test_cmds::run_command;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SledUuid;
 use slog::debug;
+use slog_error_chain::InlineErrorChain;
 use std::io::BufReader;
 use std::io::BufWriter;
 use std::path::PathBuf;
@@ -89,24 +89,20 @@ async fn test_blueprint_edit(cptestctx: &ControlPlaneTestContext) {
         || async {
             let result =
                 datastore.inventory_get_latest_collection(&opctx).await;
-            let log_result = match &result {
-                Ok(Some(_)) => Ok("found"),
-                Ok(None) => Ok("not found"),
-                Err(error) => Err(error),
-            };
-            debug!(
-                log,
-                "attempt to fetch latest inventory collection";
-                "result" => ?log_result,
-            );
-
+            let log_msg = "attempt to fetch latest inventory collection";
             match result {
-                Ok(None) => Err(CondCheckError::NotYet),
-                Ok(Some(c)) => Ok(c),
-                Err(Error::ServiceUnavailable { .. }) => {
+                Ok(Some(c)) => {
+                    debug!(log, "{log_msg}"; "result" => "found");
+                    Ok(c)
+                }
+                Ok(None) => {
+                    debug!(log, "{log_msg}"; "result" => "not found");
                     Err(CondCheckError::NotYet)
                 }
-                Err(error) => Err(CondCheckError::Failed(error)),
+                Err(err) => {
+                    debug!(log, "{log_msg}"; InlineErrorChain::new(&err));
+                    Err(CondCheckError::Failed(err))
+                }
             }
         },
         &Duration::from_millis(50),
