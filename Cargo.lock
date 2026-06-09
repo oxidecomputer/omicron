@@ -7003,6 +7003,7 @@ dependencies = [
  "omicron-certificates",
  "omicron-cockroach-metrics",
  "omicron-common",
+ "omicron-git-version",
  "omicron-passwords",
  "omicron-rpaths",
  "omicron-uuid-kinds",
@@ -8633,6 +8634,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "omicron-git-version"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_with 3.17.0",
+ "vergen-gitcl",
+]
+
+[[package]]
 name = "omicron-ledger"
 version = "0.1.0"
 dependencies = [
@@ -8995,6 +9005,7 @@ dependencies = [
  "nexus-types",
  "ntp-admin-client",
  "omicron-common",
+ "omicron-git-version",
  "omicron-nexus",
  "omicron-rpaths",
  "omicron-test-utils",
