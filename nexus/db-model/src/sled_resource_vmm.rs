@@ -27,7 +27,7 @@ impl_enum_type!(
     /// - `active` means that the VMM is currently running the instance.
     ///    A sled resource reservation is in the `active` state if either
     ///    of the following are true:
-    ///    1. It was created in order to start a previously `Stopped` 
+    ///    1. It was created in order to start a previously `Stopped`
     ///       instance.
     ///    2. A migration into that VMM has completed successfully.
     ///
