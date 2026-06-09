@@ -6268,11 +6268,18 @@ pub(in crate::db::datastore) mod test {
                     Err(SledReservationTransactionError::Reservation(
                         SledReservationError::NotFound,
                     )) => {
-                        // This can be returned if both of the sled reservation
-                        // requests for the same instance succeed as the
-                        // instances are sized such that only one reservation
-                        // per instance will fit. Eat this, double check number
-                        // of VMMs later.
+                        // If the two sled reservation requests for the same
+                        // instance execute concurrently, and one creates a sled
+                        // reservation (plus local storage allocations), the
+                        // second one may bail out because the iterator that
+                        // returns local storage allocations to try _may_ detect
+                        // that there is no more space available and bail out of
+                        // the search with a NotFound. If this is going to
+                        // happen it's likely it will happen for the last
+                        // instance's second request, as there really won't be
+                        // any space left to try.
+                        //
+                        // Eat this error and double check number of VMMs later.
                         continue;
                     }
 
