@@ -34,7 +34,7 @@ const DESTROYED_INSTANCE_ID: Uuid =
 const DESTROYED_ACTIVE_VMM_ID: Uuid =
     Uuid::from_u128(0x7aad4bf3_34ee_4468_a4de_3bdc6e567662);
 
-const RANDOM_ACTIVE_VMM_ID: Uuid =
+const ORPHANED_VMM_ID: Uuid =
     Uuid::from_u128(0x81713959_c89a_4cc5_b542_b9d945969393);
 
 fn insert_instance_query(
@@ -207,12 +207,12 @@ fn before<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
             .await
             .unwrap();
 
-        // one deleted instance that still has a sled_resource_vmm
+        // one destroyed instance that still has a sled_resource_vmm
 
         ctx.client
             .batch_execute(&insert_instance_query(
                 DESTROYED_INSTANCE_ID,
-                "deleted",
+                "destroyed",
                 "destroyed",
                 None,
                 None,
@@ -233,7 +233,7 @@ fn before<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
 
         ctx.client
             .batch_execute(&insert_sled_resource_vmm_query(
-                RANDOM_ACTIVE_VMM_ID,
+                ORPHANED_VMM_ID,
                 Uuid::new_v4(),
             ))
             .await
@@ -254,58 +254,32 @@ fn after<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
 
         assert_eq!(rows.len(), 5);
 
-        let mut expected: HashMap<Uuid, AnySqlType> = HashMap::default();
+        let mut expected: HashMap<Uuid, &str> = HashMap::default();
 
         // The regular instance's VMM should be active
-        expected.insert(
-            REGULAR_ACTIVE_VMM_ID,
-            AnySqlType::Enum(SqlEnum::from((
-                "sled_resource_vmm_state",
-                "active",
-            ))),
-        );
+        expected.insert(REGULAR_ACTIVE_VMM_ID, "active");
 
         // The migrating instance's VMMs should be target and active as
         // appropriate
-        expected.insert(
-            MIGRATING_ACTIVE_VMM_ID,
-            AnySqlType::Enum(SqlEnum::from((
-                "sled_resource_vmm_state",
-                "active",
-            ))),
-        );
-        expected.insert(
-            MIGRATING_TARGET_VMM_ID,
-            AnySqlType::Enum(SqlEnum::from((
-                "sled_resource_vmm_state",
-                "target",
-            ))),
-        );
+        expected.insert(MIGRATING_ACTIVE_VMM_ID, "active");
+        expected.insert(MIGRATING_TARGET_VMM_ID, "target");
 
         // The destroyed instance's VMM should be tombstoned
-        expected.insert(
-            DESTROYED_ACTIVE_VMM_ID,
-            AnySqlType::Enum(SqlEnum::from((
-                "sled_resource_vmm_state",
-                "tombstoned",
-            ))),
-        );
+        expected.insert(DESTROYED_ACTIVE_VMM_ID, "tombstoned");
 
-        // The orphaned random VMM id should also be tombstoned
-        expected.insert(
-            RANDOM_ACTIVE_VMM_ID,
-            AnySqlType::Enum(SqlEnum::from((
-                "sled_resource_vmm_state",
-                "tombstoned",
-            ))),
-        );
+        // The orphaned VMM id should also be tombstoned
+        expected.insert(ORPHANED_VMM_ID, "tombstoned");
 
         for row in &rows {
             let id: Uuid = row.get("id");
             let state: AnySqlType = row.get("state");
+            let expected_state = AnySqlType::Enum(SqlEnum::from((
+                "sled_resource_vmm_state",
+                *expected.get(&id).unwrap(),
+            )));
 
-            if expected.get(&id).unwrap() != &state {
-                panic!("unexpected {id} + {state:?}!");
+            if expected_state != state {
+                panic!("{id} state is {state:?}, should be {expected_state:?}");
             }
         }
     })
