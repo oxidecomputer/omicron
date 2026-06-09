@@ -57,7 +57,7 @@ This is most commonly observed with inventory collections, with two variations:
 
 **Why this is bad:** The test's assertions race with the operation it believed it had waited for.
 
-**How to fix this:** Wait on a predicate over the channel's _value_, not on change notifications. Use `wait_for_watch_channel_condition` with a reasonable timeout  (preferred), or `watch::Receiver::wait_for`. This requires the channel to carry enough state to express "the operation I triggered is done". This could be, for example, a generation number the test compares with `>=` (which also tolerates coalescing).
+**How to fix this:** Wait on a predicate over the channel's _value_, not on change notifications. Use `wait_for_watch_channel_condition` with a reasonable timeout  (preferred). This requires the channel to carry enough state to express "the operation I triggered is done". This could be, for example, a generation number the test compares with `>=` (which also tolerates coalescing).
 
 **Example commits:**
 
