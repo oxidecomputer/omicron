@@ -865,8 +865,8 @@ pub fn turin_v2(vcpu_count: u16) -> Result<CpuIdDump, CpuPlatformError> {
     //
     // The above hopefully informs you, dear reader, about why we'd really
     // rather not populate this leaf in the general case. glibc considered the
-    // misbehavior that led has us here to be a bug, which was fixed in glibc
-    // 2.39 and backported to 2.38 as well as 2.37. This was *not* backported to
+    // misbehavior that led us here to be a bug, which was fixed in glibc 2.39
+    // and backported to 2.38 as well as 2.37. This was *not* backported to
     // 2.35, which is in Ubuntu 22.04, which has LTS extending another year or
     // so. So while this is a (fixed!) guest software bug, we'll not try being
     // clever about 8000_0006h for a while longer.
