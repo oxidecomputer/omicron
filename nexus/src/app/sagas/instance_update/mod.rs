@@ -480,8 +480,11 @@ struct UpdatesRequired {
     destroy_active_vmm: Option<PropolisUuid>,
 
     /// If this is [`Some`], then a migration finished successfully, and the
-    /// instance's previous active VMM has to have its state set to tombstoned,
-    /// and the new VMM has to have its state set to active.
+    /// associated sled resource reservation records for the instance have to be
+    /// updated:
+    ///
+    /// - the previously active record has to have its state set to `tombstoned`
+    /// - the migration target record has to have its state set to `active`
     update_active_vmm_for_migration_success: Option<MigrateSuccessUpdate>,
 
     /// If this is [`Some`], the instance's migration target VMM with this UUID
