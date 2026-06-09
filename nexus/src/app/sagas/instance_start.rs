@@ -25,7 +25,7 @@ use nexus_db_lookup::LookupPath;
 use nexus_db_queries::db::datastore::Disk;
 use nexus_db_queries::db::datastore::LocalStorageAllocation;
 use nexus_db_queries::db::datastore::LocalStorageDisk;
-use nexus_db_queries::db::datastore::sled::SledReservationType;
+use nexus_db_queries::db::datastore::sled::SledReservationReason;
 use nexus_db_queries::db::identity::Resource;
 use nexus_db_queries::{authn, authz, db};
 use nexus_types::saga::saga_action_failed;
@@ -235,7 +235,7 @@ async fn sis_alloc_server(
         u32::from(hardware_threads.0),
         reservoir_ram,
         constraint_builder.build(),
-        SledReservationType::Active,
+        SledReservationReason::Start,
     )
     .await?;
 

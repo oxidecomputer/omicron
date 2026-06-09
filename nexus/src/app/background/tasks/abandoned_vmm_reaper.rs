@@ -204,7 +204,7 @@ mod tests {
     use nexus_db_model::Vmm;
     use nexus_db_model::VmmCpuPlatform;
     use nexus_db_model::VmmState;
-    use nexus_db_queries::db::datastore::sled::SledReservationType;
+    use nexus_db_queries::db::datastore::sled::SledReservationReason;
     use nexus_test_utils::resource_helpers;
     use nexus_test_utils_macros::nexus_test;
     use omicron_uuid_kinds::InstanceUuid;
@@ -276,7 +276,7 @@ mod tests {
                         // Setting the reservation type of `target` means this
                         // was the target of a migration, and that migration
                         // failed according to the VMM state of destroyed.
-                        SledReservationType::Target,
+                        SledReservationReason::MigrationTarget,
                     )
                     .await
                     .expect("sled reservation should be created successfully")

@@ -12,7 +12,7 @@ use nexus_db_lookup::lookup;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
-use nexus_db_queries::db::datastore::sled::SledReservationType;
+use nexus_db_queries::db::datastore::sled::SledReservationReason;
 use nexus_types::deployment::DiskFilter;
 use nexus_types::deployment::SledFilter;
 use nexus_types::external_api::path_params;
@@ -215,7 +215,7 @@ impl super::Nexus {
         propolis_id: PropolisUuid,
         resources: db::model::Resources,
         constraints: db::model::SledReservationConstraints,
-        reservation_type: SledReservationType,
+        reservation_reason: SledReservationReason,
     ) -> Result<db::model::SledResourceVmm, Error> {
         self.db_datastore
             .sled_reservation_create(
@@ -224,7 +224,7 @@ impl super::Nexus {
                 propolis_id,
                 resources,
                 constraints,
-                reservation_type,
+                reservation_reason,
             )
             .await
     }

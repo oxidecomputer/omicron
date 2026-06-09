@@ -75,32 +75,32 @@ use thiserror::Error;
 use uuid::Uuid;
 
 #[derive(Clone, Debug, PartialEq)]
-pub enum SledReservationType {
+pub enum SledReservationReason {
     /// The VMM will be reserved to run the instance, and could be a migration
     /// source in the future.
-    Active,
+    Start,
 
     /// The VMM will be reserved as a migration destination.
-    Target,
+    MigrationTarget,
 }
 
-impl fmt::Display for SledReservationType {
+impl fmt::Display for SledReservationReason {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            SledReservationType::Active => write!(f, "active"),
-            SledReservationType::Target => write!(f, "target"),
+            SledReservationReason::Start => write!(f, "active"),
+            SledReservationReason::MigrationTarget => write!(f, "target"),
         }
     }
 }
 
-impl Into<db::model::SledResourceVmmState> for SledReservationType {
+impl Into<db::model::SledResourceVmmState> for SledReservationReason {
     fn into(self) -> db::model::SledResourceVmmState {
         match self {
-            SledReservationType::Active => {
+            SledReservationReason::Start => {
                 db::model::SledResourceVmmState::Active
             }
 
-            SledReservationType::Target => {
+            SledReservationReason::MigrationTarget => {
                 db::model::SledResourceVmmState::Target
             }
         }
@@ -136,8 +136,10 @@ enum SledReservationError {
          group membership."
     )]
     RequiredAffinitySledNotValid,
-    #[error("Instance VMM reservation of type {reservation_type} already made")]
-    ReservationExists { reservation_type: SledReservationType },
+    #[error(
+        "Instance VMM reservation for reason {reservation_reason} already made"
+    )]
+    ReservationExists { reservation_reason: SledReservationReason },
 }
 
 impl From<SledReservationError> for external::Error {
@@ -169,13 +171,13 @@ impl From<SledReservationError> for external::Error {
             // A concurrent request to place the same instance with the same
             // reservation type landed already. Change the user-facing messaging
             // for the external error.
-            SledReservationError::ReservationExists { reservation_type } => {
-                match reservation_type {
-                    SledReservationType::Active => {
+            SledReservationError::ReservationExists { reservation_reason } => {
+                match reservation_reason {
+                    SledReservationReason::Start => {
                         external::Error::conflict("Instance already starting")
                     }
 
-                    SledReservationType::Target => {
+                    SledReservationReason::MigrationTarget => {
                         external::Error::conflict("Instance already migrating")
                     }
                 }
@@ -917,7 +919,7 @@ impl DataStore {
         propolis_id: PropolisUuid,
         resources: db::model::Resources,
         constraints: db::model::SledReservationConstraints,
-        reservation_type: SledReservationType,
+        reservation_reason: SledReservationReason,
     ) -> CreateResult<db::model::SledResourceVmm> {
         self.sled_reservation_create_inner(
             opctx,
@@ -925,7 +927,7 @@ impl DataStore {
             propolis_id,
             resources,
             constraints,
-            reservation_type,
+            reservation_reason,
         )
         .await
         .map_err(|e| match e {
@@ -944,13 +946,13 @@ impl DataStore {
         propolis_id: PropolisUuid,
         resources: db::model::Resources,
         constraints: db::model::SledReservationConstraints,
-        reservation_type: SledReservationType,
+        reservation_reason: SledReservationReason,
     ) -> Result<db::model::SledResourceVmm, SledReservationTransactionError>
     {
         let log = opctx.log.new(o!(
             "query" => "sled_reservation",
             "instance_id" => instance_id.to_string(),
-            "reservation_type" => reservation_type.to_string(),
+            "reservation_reason" => reservation_reason.to_string(),
             "propolis_id" => propolis_id.to_string(),
         ));
 
@@ -1250,7 +1252,7 @@ impl DataStore {
                 instance_id,
                 sled_target,
                 resources.clone(),
-                reservation_type.clone().into(),
+                reservation_reason.clone().into(),
             );
 
             if !local_storage_allocation_required {
@@ -1292,7 +1294,7 @@ impl DataStore {
                         return Err(
                             SledReservationTransactionError::Reservation(
                                 SledReservationError::ReservationExists {
-                                    reservation_type,
+                                    reservation_reason,
                                 },
                             ),
                         );
@@ -1440,11 +1442,11 @@ impl DataStore {
                             == Some(SINGLE_RESERVATION_CONSTRAINT) =>
                         {
                             // The table already has a reservation for this
-                            // instance id and reservation_type.
+                            // instance id and reservation_reason.
                             return Err(
                                 SledReservationTransactionError::Reservation(
                                     SledReservationError::ReservationExists {
-                                        reservation_type,
+                                        reservation_reason,
                                     },
                                 ),
                             );
@@ -2287,7 +2289,7 @@ pub(in crate::db::datastore) mod test {
                 PropolisUuid::new_v4(),
                 resources.clone(),
                 constraints,
-                SledReservationType::Active,
+                SledReservationReason::Start,
             )
             .await
             .unwrap_err();
@@ -2309,7 +2311,7 @@ pub(in crate::db::datastore) mod test {
                     PropolisUuid::new_v4(),
                     resources.clone(),
                     constraints,
-                    SledReservationType::Active,
+                    SledReservationReason::Start,
                 )
                 .await
                 .unwrap();
@@ -2559,7 +2561,7 @@ pub(in crate::db::datastore) mod test {
             datastore: &DataStore,
             propolis_id: PropolisUuid,
             sled_id: SledUuid,
-            reservation_type: SledReservationType,
+            reservation_reason: SledReservationReason,
         ) -> bool {
             assert!(self.force_onto_sled.is_none());
 
@@ -2568,7 +2570,7 @@ pub(in crate::db::datastore) mod test {
                 self.id,
                 sled_id,
                 self.resources.clone(),
-                reservation_type.into(),
+                reservation_reason.into(),
             );
 
             let conn = datastore.pool_connection_for_tests().await.unwrap();
@@ -2677,7 +2679,7 @@ pub(in crate::db::datastore) mod test {
                 PropolisUuid::new_v4(),
                 instance.resources.clone(),
                 constraints.build(),
-                SledReservationType::Active,
+                SledReservationReason::Start,
             )
             .await?;
 
@@ -3490,7 +3492,7 @@ pub(in crate::db::datastore) mod test {
                         &datastore,
                         PropolisUuid::new_v4(),
                         sleds[i].id(),
-                        SledReservationType::Active,
+                        SledReservationReason::Start,
                     )
                     .await,
                 "Shouldn't have been able to insert into sled {i}"
@@ -3504,7 +3506,7 @@ pub(in crate::db::datastore) mod test {
                     &datastore,
                     PropolisUuid::new_v4(),
                     sleds[0].id(),
-                    SledReservationType::Active,
+                    SledReservationReason::Start,
                 )
                 .await
         );
@@ -3592,7 +3594,7 @@ pub(in crate::db::datastore) mod test {
                     &datastore,
                     PropolisUuid::new_v4(),
                     sleds[0].id(),
-                    SledReservationType::Active,
+                    SledReservationReason::Start,
                 )
                 .await,
             "Shouldn't have been able to insert into sleds[0]"
@@ -3605,7 +3607,7 @@ pub(in crate::db::datastore) mod test {
                     &datastore,
                     PropolisUuid::new_v4(),
                     sleds[1].id(),
-                    SledReservationType::Active,
+                    SledReservationReason::Start,
                 )
                 .await
         );
@@ -3678,7 +3680,7 @@ pub(in crate::db::datastore) mod test {
                         &datastore,
                         PropolisUuid::new_v4(),
                         sleds[i].id(),
-                        SledReservationType::Active,
+                        SledReservationReason::Start,
                     )
                     .await,
                 "Shouldn't have been able to insert into sleds[i]"
@@ -3692,7 +3694,7 @@ pub(in crate::db::datastore) mod test {
                     &datastore,
                     PropolisUuid::new_v4(),
                     sleds[1].id(),
-                    SledReservationType::Active,
+                    SledReservationReason::Start,
                 )
                 .await
         );
@@ -4792,7 +4794,7 @@ pub(in crate::db::datastore) mod test {
                 PropolisUuid::new_v4(),
                 instance.resources(),
                 db::model::SledReservationConstraints::none(),
-                SledReservationType::Active,
+                SledReservationReason::Start,
             )
             .await
             .unwrap();
@@ -4910,7 +4912,7 @@ pub(in crate::db::datastore) mod test {
                 PropolisUuid::new_v4(),
                 instance.resources(),
                 db::model::SledReservationConstraints::none(),
-                SledReservationType::Active,
+                SledReservationReason::Start,
             )
             .await
             .unwrap();
@@ -4995,7 +4997,7 @@ pub(in crate::db::datastore) mod test {
                 PropolisUuid::new_v4(),
                 instance.resources(),
                 db::model::SledReservationConstraints::none(),
-                SledReservationType::Active,
+                SledReservationReason::Start,
             )
             .await
             .unwrap_err();
@@ -5083,7 +5085,7 @@ pub(in crate::db::datastore) mod test {
                 PropolisUuid::new_v4(),
                 instance.resources(),
                 db::model::SledReservationConstraints::none(),
-                SledReservationType::Active,
+                SledReservationReason::Start,
             )
             .await
             .unwrap_err();
@@ -5103,7 +5105,7 @@ pub(in crate::db::datastore) mod test {
                 PropolisUuid::new_v4(),
                 instance.resources(),
                 db::model::SledReservationConstraints::none(),
-                SledReservationType::Active,
+                SledReservationReason::Start,
             )
             .await
             .unwrap();
@@ -5190,7 +5192,7 @@ pub(in crate::db::datastore) mod test {
                 PropolisUuid::new_v4(),
                 instance.resources(),
                 db::model::SledReservationConstraints::none(),
-                SledReservationType::Active,
+                SledReservationReason::Start,
             )
             .await
             .unwrap_err();
@@ -5297,7 +5299,7 @@ pub(in crate::db::datastore) mod test {
                 PropolisUuid::new_v4(),
                 instance.resources(),
                 db::model::SledReservationConstraints::none(),
-                SledReservationType::Active,
+                SledReservationReason::Start,
             )
             .await
             .unwrap();
@@ -5419,7 +5421,7 @@ pub(in crate::db::datastore) mod test {
                 PropolisUuid::new_v4(),
                 instance.resources(),
                 db::model::SledReservationConstraints::none(),
-                SledReservationType::Active,
+                SledReservationReason::Start,
             )
             .await
             .unwrap_err();
@@ -5472,7 +5474,7 @@ pub(in crate::db::datastore) mod test {
                 PropolisUuid::new_v4(),
                 instance.resources(),
                 db::model::SledReservationConstraints::none(),
-                SledReservationType::Active,
+                SledReservationReason::Start,
             )
             .await
             .unwrap();
@@ -5596,7 +5598,7 @@ pub(in crate::db::datastore) mod test {
                 PropolisUuid::new_v4(),
                 instance.resources(),
                 db::model::SledReservationConstraints::none(),
-                SledReservationType::Active,
+                SledReservationReason::Start,
             )
             .await
             .unwrap();
@@ -5739,7 +5741,7 @@ pub(in crate::db::datastore) mod test {
                     PropolisUuid::new_v4(),
                     instance.resources(),
                     db::model::SledReservationConstraints::none(),
-                    SledReservationType::Active,
+                    SledReservationReason::Start,
                 )
                 .await
                 .unwrap();
@@ -5876,7 +5878,7 @@ pub(in crate::db::datastore) mod test {
                 PropolisUuid::new_v4(),
                 instance.resources(),
                 db::model::SledReservationConstraints::none(),
-                SledReservationType::Active,
+                SledReservationReason::Start,
             )
             .await
             .unwrap_err();
@@ -5977,7 +5979,7 @@ pub(in crate::db::datastore) mod test {
                     PropolisUuid::new_v4(),
                     instance.resources(),
                     db::model::SledReservationConstraints::none(),
-                    SledReservationType::Active,
+                    SledReservationReason::Start,
                 )
                 .await
                 .unwrap();
@@ -6098,7 +6100,7 @@ pub(in crate::db::datastore) mod test {
                             PropolisUuid::new_v4(),
                             instance.resources(),
                             db::model::SledReservationConstraints::none(),
-                            SledReservationType::Active,
+                            SledReservationReason::Start,
                         )
                         .await
                         .unwrap()
@@ -6237,7 +6239,7 @@ pub(in crate::db::datastore) mod test {
                                     resources,
                                     db::model::SledReservationConstraints::none(
                                     ),
-                                    SledReservationType::Active,
+                                    SledReservationReason::Start,
                                 )
                                 .await
                         }
@@ -6263,7 +6265,7 @@ pub(in crate::db::datastore) mod test {
 
                     Err(SledReservationTransactionError::Reservation(
                         SledReservationError::ReservationExists {
-                            reservation_type: SledReservationType::Active,
+                            reservation_reason: SledReservationReason::Start,
                         },
                     )) => {
                         // eat this, it's expected due to concurrent requests
@@ -6408,7 +6410,7 @@ pub(in crate::db::datastore) mod test {
                             PropolisUuid::new_v4(),
                             instance.resources(),
                             db::model::SledReservationConstraints::none(),
-                            SledReservationType::Active,
+                            SledReservationReason::Start,
                         )
                         .await
                         .unwrap()
@@ -6554,7 +6556,7 @@ pub(in crate::db::datastore) mod test {
                 PropolisUuid::new_v4(),
                 instance.resources(),
                 db::model::SledReservationConstraints::none(),
-                SledReservationType::Active,
+                SledReservationReason::Start,
             )
             .await
             .unwrap();
@@ -6577,7 +6579,7 @@ pub(in crate::db::datastore) mod test {
                 PropolisUuid::new_v4(),
                 instance.resources(),
                 db::model::SledReservationConstraints::none(),
-                SledReservationType::Active,
+                SledReservationReason::Start,
             )
             .await
             .unwrap_err();
@@ -6680,7 +6682,7 @@ pub(in crate::db::datastore) mod test {
                 PropolisUuid::new_v4(),
                 instance.resources(),
                 db::model::SledReservationConstraints::none(),
-                SledReservationType::Active,
+                SledReservationReason::Start,
             )
             .await
             .unwrap();
@@ -6704,7 +6706,7 @@ pub(in crate::db::datastore) mod test {
                 PropolisUuid::new_v4(),
                 instance.resources(),
                 db::model::SledReservationConstraints::none(),
-                SledReservationType::Active,
+                SledReservationReason::Start,
             )
             .await
             .unwrap_err();
@@ -6845,7 +6847,7 @@ pub(in crate::db::datastore) mod test {
                 PropolisUuid::new_v4(),
                 instance.resources(),
                 constraints,
-                SledReservationType::Active,
+                SledReservationReason::Start,
             )
             .await
             .unwrap_err();
@@ -6973,7 +6975,7 @@ pub(in crate::db::datastore) mod test {
                 PropolisUuid::new_v4(),
                 instance.resources(),
                 db::model::SledReservationConstraints::none(),
-                SledReservationType::Active,
+                SledReservationReason::Start,
             )
             .await
             .unwrap();
@@ -7103,7 +7105,7 @@ pub(in crate::db::datastore) mod test {
                         PropolisUuid::new_v4(),
                         resources,
                         db::model::SledReservationConstraints::none(),
-                        SledReservationType::Active,
+                        SledReservationReason::Start,
                     )
                     .await
             }
@@ -7128,7 +7130,7 @@ pub(in crate::db::datastore) mod test {
                         PropolisUuid::new_v4(),
                         resources,
                         db::model::SledReservationConstraints::none(),
-                        SledReservationType::Active,
+                        SledReservationReason::Start,
                     )
                     .await
             }

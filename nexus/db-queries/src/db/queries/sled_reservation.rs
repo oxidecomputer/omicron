@@ -880,7 +880,7 @@ pub fn sled_insert_resource_query(
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::db::datastore::sled::SledReservationType;
+    use crate::db::datastore::sled::SledReservationReason;
     use crate::db::explain::ExplainableAsync;
     use crate::db::model;
     use crate::db::pub_test_utils::TestDatabase;
@@ -975,7 +975,7 @@ mod test {
                     external::ByteCount::from_gibibytes_u32(0),
                 ),
             ),
-            SledReservationType::Active.into(),
+            SledReservationReason::Start.into(),
         );
 
         // with no local storage
@@ -1048,7 +1048,7 @@ mod test {
                     external::ByteCount::from_gibibytes_u32(0),
                 ),
             ),
-            SledReservationType::Active.into(),
+            SledReservationReason::Start.into(),
         );
 
         let query = sled_insert_resource_query(
