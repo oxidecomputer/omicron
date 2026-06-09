@@ -8637,6 +8637,7 @@ dependencies = [
 name = "omicron-git-version"
 version = "0.1.0"
 dependencies = [
+ "omicron-workspace-hack",
  "serde",
  "serde_with 3.17.0",
  "vergen-gitcl",
