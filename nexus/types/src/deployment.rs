@@ -3816,20 +3816,15 @@ mod test {
     /// so the resulting state has at least one blueprint whose source is
     /// `BlueprintSource::Planner(report)` and at least one non-genesis
     /// blueprint.
-    //
-    // Note: `reconfigurator-cli` (a dev-dep, brought in for this fixture)
-    // transitively depends on `nexus-types`, so Cargo's dev-dep-cycle handling
-    // builds two distinct instances of `nexus-types` — one for the crate
-    // under test, one underneath the dev-deps.  The `UnstableReconfiguratorState`
-    // that comes out of `to_serializable` is therefore a structurally
-    // identical but type-distinct sibling of the one we test against here.
-    // To bridge the two type universes we serialize to JSON and deserialize
-    // back into the local type.
     fn base_state(test_name: &str) -> UnstableReconfiguratorState {
         let logctx = test_setup_log(test_name);
         let mut sim = ReconfiguratorCliTestState::new(test_name, &logctx.log);
         sim.load_example().expect("loaded example system");
         sim.run_planner().expect("planning succeeded");
+        // We're using `reconfigurator-cli` as a helper here.  It uses this very
+        // crate, but `cargo` builds a separate copy.  That means this is a
+        // different, identical `UnstableReconfiguratorState`.  We obtain our
+        // own by round-tripping through serde.
         let foreign_state =
             sim.current_state().to_serializable().expect("serialize state");
         let bytes =
@@ -3881,7 +3876,8 @@ mod test {
         }
     }
 
-    /// A single valid input round-trips cleanly through `read_series`.
+    /// Verifies that a single valid input round-trips cleanly through
+    /// `read_series`.
     #[test]
     fn single_input_happy_path() {
         let state = base_state("multi_load_single_input");
@@ -3901,10 +3897,9 @@ mod test {
         assert_eq!(state, result.state);
     }
 
-    /// Feeding byte-identical content under two different labels also
-    /// succeeds without warnings.  The retained `latest` label is the first
-    /// one processed (the merge keeps whichever label first entered
-    /// `all_states`).
+    /// Verifies that reading two files of byte-identical content under two
+    /// different labels also succeeds without warnings.  We don't care which
+    /// one gets labeled "latest".
     #[test]
     fn identical_inputs() {
         let state = base_state("multi_load_identical_inputs");
@@ -3916,7 +3911,6 @@ mod test {
         .unwrap_or_else(|err| {
             panic!("read_series failed: {}", err_chain(&err))
         });
-        assert_eq!(result.latest, "first.out");
         assert!(
             result.warnings.is_empty(),
             "expected no warnings, got: {:?}",
@@ -3925,9 +3919,9 @@ mod test {
         assert_eq!(state, result.state);
     }
 
-    /// Two consistent inputs whose targets sit on the same parent chain.
-    /// The latest is unambiguously whichever has the descendant target, and
-    /// that must hold regardless of the order in which inputs were passed.
+    /// Verifies that with two inputs whose targets are part of the same chain,
+    /// the latest is unambiguously whichever has the descendant target.  That
+    /// must hold regardless of the order in which inputs were passed.
     #[test]
     fn overlapping_inputs_order_independent() {
         // The base state has a parent blueprint and a planner-generated
@@ -3984,8 +3978,8 @@ mod test {
         }
     }
 
-    /// Two inputs share a collection id but differ in collection content.
-    /// The merge must reject this as inconsistent.
+    /// Verifies that with two inputs that share a collection id but differ in
+    /// collection content, loading fails with an explicit error.
     #[test]
     fn collection_mismatch() {
         let state = base_state("multi_load_collection_mismatch");
@@ -4016,8 +4010,8 @@ mod test {
         assert_contains(&rendered, "b.out");
     }
 
-    /// Two inputs share a blueprint id but differ on a content field.  The
-    /// merge must reject the inconsistency.
+    /// Verifies that when two inputs share a blueprint but differ on contents,
+    /// loading fails with an explicit error.
     #[test]
     fn blueprint_mismatch() {
         let state = base_state("multi_load_blueprint_mismatch");
@@ -4048,70 +4042,8 @@ mod test {
         assert_contains(&rendered, "b.out");
     }
 
-    /// The planner-report reconciliation branch.  Two inputs share a
-    /// blueprint id, but one has `BlueprintSource::Planner(report)` and the
-    /// other has `BlueprintSource::PlannerLoadedFromDatabase`.  The merge
-    /// should accept both and keep the report regardless of which input was
-    /// processed first.
-    #[test]
-    fn blueprint_source_reconciliation() {
-        let state = base_state("multi_load_source_reconciliation");
-        let planner_blueprint = state
-            .blueprints
-            .iter()
-            .find(|b| matches!(b.source, BlueprintSource::Planner(_)))
-            .expect(
-                "base_state runs the planner, so a Planner blueprint exists",
-            );
-        let target_id = planner_blueprint.id;
-
-        let mut stripped = state.clone();
-        for mut b in stripped.blueprints.iter_mut() {
-            if b.id == target_id {
-                b.source = BlueprintSource::PlannerLoadedFromDatabase;
-            }
-        }
-
-        let bytes_with = serialize(&state);
-        let bytes_without = serialize(&stripped);
-
-        for (label, inputs) in [
-            (
-                "with-report first",
-                vec![
-                    input("with.out", &bytes_with),
-                    input("without.out", &bytes_without),
-                ],
-            ),
-            (
-                "without-report first",
-                vec![
-                    input("without.out", &bytes_without),
-                    input("with.out", &bytes_with),
-                ],
-            ),
-        ] {
-            let result = UnstableReconfiguratorState::read_series(inputs)
-                .unwrap_or_else(|err| {
-                    panic!("read_series failed ({label}): {}", err_chain(&err))
-                });
-            assert!(
-                result.warnings.is_empty(),
-                "case {label}: unexpected warnings: {:?}",
-                result.warnings,
-            );
-            // Regardless of the order in which the inputs were processed,
-            // the merged state should match the with-report side (the
-            // reconciliation copies the report over to the other copy).
-            assert_eq!(
-                state, result.state,
-                "case {label}: planning report should be retained",
-            );
-        }
-    }
-
-    /// Two inputs share an internal-DNS generation but differ in contents.
-    /// The merge must reject the inconsistency.
+    /// Verifies that when two inputs share an internal-DNS generation but
+    /// differ in its contents, loading fails with an explicit error.
     #[test]
     fn internal_dns_mismatch() {
         use omicron_common::api::external::Generation;
@@ -4181,10 +4113,72 @@ mod test {
         assert_contains(&rendered, "b.out");
     }
 
-    /// A file whose `target_blueprint` refers to a blueprint id that isn't
-    /// in that same file.  `read_series` should emit a warning (not an
-    /// error) and still return a valid merged state, drawing the target
-    /// from the other input.
+    /// Verifies the behavior around preserving planner reports.  We use two
+    /// inputs with the same blueprint, but one has
+    /// `BlueprintSource::Planner(report)` and the other has
+    /// `BlueprintSource::PlannerLoadedFromDatabase`.  The merge should accept
+    /// both and keep the report regardless of which input was processed first.
+    #[test]
+    fn blueprint_source_reconciliation() {
+        let state = base_state("multi_load_source_reconciliation");
+        let planner_blueprint = state
+            .blueprints
+            .iter()
+            .find(|b| matches!(b.source, BlueprintSource::Planner(_)))
+            .expect(
+                "base_state runs the planner, so a Planner blueprint exists",
+            );
+        let target_id = planner_blueprint.id;
+
+        let mut stripped = state.clone();
+        for mut b in stripped.blueprints.iter_mut() {
+            if b.id == target_id {
+                b.source = BlueprintSource::PlannerLoadedFromDatabase;
+            }
+        }
+
+        let bytes_with = serialize(&state);
+        let bytes_without = serialize(&stripped);
+
+        for (label, inputs) in [
+            (
+                "with-report first",
+                vec![
+                    input("with.out", &bytes_with),
+                    input("without.out", &bytes_without),
+                ],
+            ),
+            (
+                "without-report first",
+                vec![
+                    input("without.out", &bytes_without),
+                    input("with.out", &bytes_with),
+                ],
+            ),
+        ] {
+            let result = UnstableReconfiguratorState::read_series(inputs)
+                .unwrap_or_else(|err| {
+                    panic!("read_series failed ({label}): {}", err_chain(&err))
+                });
+            assert!(
+                result.warnings.is_empty(),
+                "case {label}: unexpected warnings: {:?}",
+                result.warnings,
+            );
+            // Regardless of the order in which the inputs were processed,
+            // the merged state should match the with-report side (the
+            // reconciliation copies the report over to the other copy).
+            assert_eq!(
+                state, result.state,
+                "case {label}: planning report should be retained",
+            );
+        }
+    }
+
+    /// Verifies the behavior when given a file whose `target_blueprint` refers
+    /// to a blueprint id that isn't in that same file.  `read_series` should
+    /// emit a warning (not an error) and still return a valid merged state,
+    /// drawing the target from the other input.
     #[test]
     fn target_missing_from_its_own_file() {
         let state = base_state("multi_load_target_missing_from_file");
@@ -4226,10 +4220,10 @@ mod test {
         );
     }
 
-    /// Two files have different target blueprints that share the same
-    /// parent.  Neither target is the parent of the other, so both look
-    /// like "latest" candidates.  Expect a warning and a `time_made_target`
-    /// tiebreak that's stable regardless of input order.
+    /// Verifies the behavior when two files have different target blueprints
+    /// that share the same parent.  Neither target is the parent of the other,
+    /// so both look like "latest" candidates.  Expect a warning and a
+    /// `time_made_target` tiebreak that's stable regardless of input order.
     #[test]
     fn multiple_latest_candidates() {
         use omicron_uuid_kinds::BlueprintUuid;
