@@ -1521,13 +1521,17 @@ impl DataStore {
 
         let conn = self.pool_connection_authorized(opctx).await?;
 
-        // TODO: Cockroach DB, at the time of this writing, will, depending on
-        // the order of the UUIDs returned here, will apply the update to change
-        // the target_vmm_id's record to active before changing the
-        // active_vmm_id's record to tombstoned, meaning the unique index that
-        // prevents multiple records from being in state `active` will cause the
-        // UPDATE to fail. It would be nice to issue a single update for this
-        // but we can't.
+        // It would be nice to issue a single update that sets the states of
+        // both active_vmm_id and target_vmm_id in the same statement, but we
+        // can't: CockroachDB upholds the unique index that blocks out multiple
+        // records with state `active` even if both of those would change in
+        // that same statement, and what's frustrating is this depends on the
+        // sorted order of the UUIDs. Sometimes that single UPDATE statement
+        // would work, sometimes it wouldn't.
+        //
+        // Unfortunately, this has to be done in a transaction, explicitly
+        // setting active_vmm_id's state to tombstoned first to ensure the swap
+        // succeeds.
 
         self.transaction_retry_wrapper(
             "sled_reservation_update_for_migrate_success",
