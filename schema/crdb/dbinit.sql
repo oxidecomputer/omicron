@@ -287,7 +287,14 @@ CREATE TYPE IF NOT EXISTS omicron.public.sled_resource_vmm_state AS ENUM (
     -- is still consuming sled resources.
     'tombstoned',
 
-    -- This VMM either is or will be running the instance
+    -- This VMM either is or will be running the instance.
+    --
+    -- A sled resource reservation is in the active state under
+    -- either of the following conditions:
+    --
+    -- 1. It was reserved in order to start a previously-stopped
+    --    instance.
+    -- 2. A migration into that VMM has completed successfully.
     'active',
 
     -- This VMM is a migration destination for the active VMM
