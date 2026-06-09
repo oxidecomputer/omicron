@@ -3,6 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::context::ServerContext;
+use anyhow::bail;
 use dropshot::HttpError;
 use dropshot::HttpResponseOk;
 use dropshot::RequestContext;
@@ -12,10 +13,8 @@ use ntp_admin_types::timesync::TimeSync;
 use scuffle::HasDirectPropertyGroups;
 use scuffle::Scf;
 use scuffle::Value;
-use slog::error;
 use slog::info;
 use slog_error_chain::InlineErrorChain;
-use std::collections::BTreeMap;
 use std::net::IpAddr;
 use std::net::Ipv6Addr;
 use std::str::FromStr;
@@ -178,6 +177,76 @@ const fn compute_max_error(
     correction.abs() + root_delay / 2.0 + root_dispersion
 }
 
+struct ChronySetupProperties {
+    server: Vec<Value>,
+    boundary: Value,
+    boundary_pool: Value,
+}
+
+impl ChronySetupProperties {
+    fn load() -> Result<Self, anyhow::Error> {
+        // TODO-K: add with_context to all errors returned
+
+        let scf = Scf::connect_current_zone()?;
+        let scope = scf.scope_local()?;
+
+        let Some(service) = scope.service("oxide/chrony-setup")? else {
+            bail!("SMF service 'oxide/chrony-setup' was not found")
+        };
+
+        let Some(instance) = service.instance("default")? else {
+            bail!("instance default not found within {}", service.fmri())
+        };
+
+        let Some(pg) = instance.property_group_direct("config")? else {
+            bail!("property group 'config' not found for {}", instance.fmri())
+        };
+
+        // TODO-K: Should I mark a property as blank if a property isn't set?
+        // This is for debugging purposes anyway will want to capture as much
+        // as possible?
+
+        // Retrieve whether this is a boundary zone or not
+        let Some(property) = pg.property("boundary")? else {
+            bail!("property 'boundary' not found for {:?}", pg,);
+        };
+        let boundary = property.single_value()?;
+
+        let is_boundary = match &boundary {
+            Value::Bool(b) => *b,
+            _ => bail!(
+                "the value for property 'boundary' is {};\
+            should be a boolean",
+                &boundary.kind()
+            ),
+        };
+
+        // Retrieve the server property, should only be present in boundary zones
+        let mut server = vec![];
+        if is_boundary {
+            if let Some(property) = pg.property("server")? {
+                let values: Vec<Value> =
+                    property.values()?.collect::<Result<_, _>>()?;
+                server = values;
+            } else {
+                bail!(
+                    "property 'server' not found for {:?} in a boundary zone",
+                    pg
+                )
+            }
+        }
+
+        // Retrieve the hostname that resolves to the boundary NTP server
+        // addresses
+        let Some(property) = pg.property("boundary_pool")? else {
+            bail!("unable to find value for boundary pool");
+        };
+        let boundary_pool = property.single_value()?;
+
+        Ok(Self { server, boundary, boundary_pool })
+    }
+}
+
 enum NtpAdminImpl {}
 
 impl NtpAdminImpl {
@@ -202,98 +271,9 @@ impl NtpAdminImpl {
         let log = ctx.log();
         info!(log, "collecting NTP zone debug info");
 
-        // TODO-K: Check if zone is a boundary NTP zone and if it is then check
-        // connectivity.
-
-        // Use https://github.com/oxidecomputer/scuffle to read properties
-
-        // TODO-K: get rid of unwraps
-        // TODO-K: extract this
-        let (server_values, boundary_pool_value, boundary_value): (
-            Vec<String>,
-            String,
-            String,
-        ) = {
-            // Get a handle to scf and the local scope.
-            let scf = Scf::connect_current_zone().unwrap();
-            let scope = scf.scope_local().unwrap();
-
-            // Look up the property group within our snapshot by stepping through
-            // each level.
-            let Some(service) = scope.service("oxide/chrony-setup").unwrap()
-            else {
-                error!(log, "DEBUG: DID NOT FIND SERVICE");
-                panic!("NO SERVICE")
-            };
-            let Some(instance) = service.instance("default").unwrap() else {
-                error!(
-                    log,
-                    "instance default not found within {}",
-                    service.fmri()
-                );
-                panic!("NO instance")
-            };
-            // TODO-K: Do I even need this?
-            //    let Some(snapshot) = instance.snapshot("running")? else {
-            //        bail!("no running snapshot found for {}", instance.fmri());
-            //    };
-            let Some(pg) = instance.property_group_direct("config").unwrap()
-            else {
-                error!(
-                    log,
-                    "property group 'config' not found for {}",
-                    instance.fmri(),
-                );
-                panic!("NO PROPERTY group")
-            };
-
-            // TODO-K: Should probably recover as much info as possible, and mark
-            // blank if a property isn't set? This is for debugging purposes anyway
-            // will want to capture as much as possible
-
-            // Retrieve whether this is a boundary zone or not
-
-            // Is this a boundary zone?
-            let Some(property) = pg.property("boundary").unwrap() else {
-                error!(log, "property 'boundary' not found for {:?}", pg,);
-                panic!("NO Boundary")
-            };
-            let boundary_value =
-                property.single_value().unwrap().display_smf().to_string();
-
-            // Retrieve the server property, should only be present in boundary zones
-            let mut server_values = vec![];
-            if let Some(property) = pg.property("server").unwrap() {
-                let values: Vec<Value> = property
-                    .values()
-                    .unwrap()
-                    .collect::<Result<_, _>>()
-                    .unwrap();
-                for value in values {
-                    server_values.push(value.display_smf().to_string());
-                }
-            } else {
-                // We use info because it doesn't matter if this isn't present for
-                // the internal NTP zones
-                info!(log, "property 'server' not found for {:?}", pg,);
-            };
-
-            info!(log, "DEBUG: server: {server_values:?}");
-
-            let mut boundary_pool_value = "".to_string();
-            // What is the boundary pool?
-            if let Some(property) = pg.property("boundary_pool").unwrap() {
-                boundary_pool_value =
-                    property.single_value().unwrap().display_smf().to_string();
-            } else {
-                // We use info because it doesn't matter if this isn't present for
-                // the boundary NTP zones.
-                // Or is it? It appears on boundary zones too hmmmm
-                error!(log, "property 'boundary_pool' not found for {:?}", pg,);
-            };
-
-            (server_values, boundary_pool_value, boundary_value)
-        };
+        // TODO-K: get rid of unwrap
+        let ChronySetupProperties { server, boundary, boundary_pool } =
+            ChronySetupProperties::load().unwrap();
 
         // TODO-K: This doesn't seem to work on an a4x2 for some reason
         // when I ping time.cloudflare.com, it just times out, or if I leave it
@@ -304,19 +284,21 @@ impl NtpAdminImpl {
         //
         // `tokio::net::lookup_host` goes through getaddrinfo -> /etc/resolv.conf,
         // so a successful lookup means at least one nameserver in resolv.conf
-        // answered. We probe every configured upstream NTP name; in an airgapped
-        // rack these are the only names guaranteed to be resolvable.
+        // answered. We probe every configured upstream NTP name.
 
         // TODO-K: clean this up, probably should separate external NTP servers
         // and internal ones?
+        let mut server_values = vec![];
+        for value in &server {
+            server_values.push(value.display_smf().to_string());
+        }
         let mut all_ntp_servers = server_values.clone();
-        all_ntp_servers.push(boundary_pool_value.clone());
+        all_ntp_servers.push(boundary_pool.clone().display_smf().to_string());
 
         let mut name_lookups: Vec<(String, String)> =
             Vec::with_capacity(all_ntp_servers.len());
 
-        //let mut name_to_ips = BTreeMap::new();
-
+        // TODO-K: Should spawn tasks for this
         for name in &all_ntp_servers {
             let result = match tokio::time::timeout(
                 // TODO-K: set this timeout as a constant
@@ -352,13 +334,17 @@ impl NtpAdminImpl {
         //                svcprop -p config/boundary_pool svc:/oxide/chrony-setup:default
         //                Should look like boundary_ntp.<some-uuid>.oxide.internal
 
+        // TODO-K: Log the data too
+
         Ok(DebugInfo {
             data: format!(
-                "IS BOUNDARY: {boundary_value}\n
+                "IS BOUNDARY: {}\n
                 EXTERNAL NTP SERVER: {server_values:?}\n
-                BOUNDARY POOL: {boundary_pool_value}\n
+                BOUNDARY POOL: {}\n
                 NAME LOOKUPS: {}\n
             ",
+                boundary.display_smf(),
+                boundary_pool.display_smf(),
                 lookup_lines.join("\n  "),
             ),
         })
