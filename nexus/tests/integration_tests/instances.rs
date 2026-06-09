@@ -944,7 +944,7 @@ async fn test_instance_migrate(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(migration.source_state, MigrationState::COMPLETED);
 
     // Assert the source sled_resource_vmm record was cleaned up, and the target
-    // switched to source.
+    // switched to active.
     {
         use nexus_db_model::SledResourceVmm;
         use nexus_db_model::SledResourceVmmState;
@@ -1093,7 +1093,10 @@ async fn test_instance_migrate_target_finishes_first(
             .await
             .unwrap()
             .migration_id
-            .expect("since we've started a migration, the instance record must have a migration id!")
+            .expect(
+                "since we've started a migration, the instance record must \
+                have a migration id!",
+            )
     };
     let migration = dbg!(migration_fetch(cptestctx, migration_id).await);
     assert_eq!(migration.target_state, MigrationState::PENDING);
@@ -1163,7 +1166,7 @@ async fn test_instance_migrate_target_finishes_first(
     assert_eq!(migration.source_state, MigrationState::IN_PROGRESS);
 
     // Assert the source sled_resource_vmm record was tombstoned, and the target
-    // switched to source.
+    // switched to active.
     {
         use nexus_db_model::SledResourceVmm;
         use nexus_db_model::SledResourceVmmState;
@@ -1179,7 +1182,7 @@ async fn test_instance_migrate_target_finishes_first(
             .await
             .unwrap();
 
-        assert_eq!(record.state, SledResourceVmmState::Tombstoned); // XXX
+        assert_eq!(record.state, SledResourceVmmState::Tombstoned);
 
         let record = dsl::sled_resource_vmm
             .filter(dsl::id.eq(to_db_typed_uuid(dst_propolis_id)))
