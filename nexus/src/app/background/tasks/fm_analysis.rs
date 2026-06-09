@@ -107,7 +107,7 @@ impl FmAnalysis {
         opctx: &OpContext,
     ) -> FmAnalysisStatus {
         // We shall collect a list of non-fatal errors to report in the
-        // activation status, in addition to the outcode. These are errors which
+        // activation status, in addition to the outcome. These are errors which
         // did *not* prevent the analysis step from succeeding, but which should
         // be surfaced in the activation status.
         let mut warnings = Vec::new();

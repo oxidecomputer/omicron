@@ -461,7 +461,7 @@ fn print_analysis_reports(
             "analysis_report": analysis_report,
         });
         serde_json::to_writer_pretty(std::io::stdout(), &value)
-            .context("failed to serialzie reports")?;
+            .context("failed to serialize reports")?;
         return Ok(());
     }
 
