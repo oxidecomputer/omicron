@@ -93,9 +93,9 @@ impl fmt::Display for SledReservationReason {
     }
 }
 
-impl Into<db::model::SledResourceVmmState> for SledReservationReason {
-    fn into(self) -> db::model::SledResourceVmmState {
-        match self {
+impl From<SledReservationReason> for db::model::SledResourceVmmState {
+    fn from(r: SledReservationReason) -> Self {
+        match r {
             SledReservationReason::Start => {
                 db::model::SledResourceVmmState::Active
             }
