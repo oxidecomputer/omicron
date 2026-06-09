@@ -716,9 +716,9 @@ impl<'a> Iterator for CompleteLocalStorageAllocationLists<'a> {
 const SINGLE_RESERVATION_CONSTRAINT: &'static str =
     "single_vmm_reservation_per_state";
 
-/// Define this struct to be passed into the associated function so that the
-/// positional arguments are defined as named fields instead: swapping the order
-/// would be _bad_.
+/// Arguments to `sled_reservation_update_for_migrate_success`, which will set
+/// the `active_vmm_id` record's state to `tombstoned` and the `target_vmm_id`
+/// record's state to `active`.
 pub struct MigrateSuccessUpdate {
     pub active_vmm_id: Uuid,
     pub target_vmm_id: Uuid,
