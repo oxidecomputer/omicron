@@ -6221,7 +6221,9 @@ pub(in crate::db::datastore) mod test {
                     &config_instance,
                 );
 
-                // Issue the same request twice
+                // Issue the same request twice: one should succeed, and the
+                // other should be blocked from succeeding due to the UNIQUE
+                // constraint.
 
                 for _ in 0..2 {
                     let datastore = datastore.clone();
@@ -6263,7 +6265,11 @@ pub(in crate::db::datastore) mod test {
                     Err(SledReservationTransactionError::Reservation(
                         SledReservationError::NotFound,
                     )) => {
-                        // eat this, double check number of VMMs later
+                        // This can be returned if both of the sled reservation
+                        // requests for the same instance succeed as the
+                        // instances are sized such that only one reservation
+                        // per instance will fit. Eat this, double check number
+                        // of VMMs later.
                         continue;
                     }
 
@@ -6272,7 +6278,9 @@ pub(in crate::db::datastore) mod test {
                             reservation_reason: SledReservationReason::Start,
                         },
                     )) => {
-                        // eat this, it's expected due to concurrent requests
+                        // Eat this, it's expected: it'll be returned when one
+                        // of the two concurrent requests are blocked from
+                        // succeeding.
                         continue;
                     }
 
