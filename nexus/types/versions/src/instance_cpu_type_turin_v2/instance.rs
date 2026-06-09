@@ -54,9 +54,9 @@ pub enum InstanceCpuPlatform {
     /// An AMD Milan-like CPU platform.
     AmdMilan,
 
-    /// An AMD Turin-like CPU platform. Prefer `AmdTurinV2` over this; this CPU
-    /// platform is retained for instances that specifically requested it before
-    /// `AmdTurinV2` was added.
+    /// An AMD Turin-like CPU platform. Prefer `amd_turin_v2` over this; this
+    /// CPU platform is retained for instances that specifically requested it
+    /// before `amd_turin_v2` was added.
     ///
     /// This initial version of the Turin CPU platform includes no cache
     /// or TLB information in CPUID leaf `8000_0006`. While this was
