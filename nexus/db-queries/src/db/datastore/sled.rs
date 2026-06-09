@@ -722,6 +722,7 @@ const SINGLE_RESERVATION_CONSTRAINT: &'static str =
 pub struct MigrateSuccessUpdate {
     pub active_vmm_id: Uuid,
     pub target_vmm_id: Uuid,
+    pub instance_id: Uuid,
 }
 
 impl DataStore {
@@ -1517,7 +1518,8 @@ impl DataStore {
         opctx: &OpContext,
         update: MigrateSuccessUpdate,
     ) -> UpdateResult<()> {
-        let MigrateSuccessUpdate { active_vmm_id, target_vmm_id } = update;
+        let MigrateSuccessUpdate { active_vmm_id, target_vmm_id, instance_id } =
+            update;
 
         use nexus_db_schema::schema::sled_resource_vmm::dsl as resource_dsl;
 
@@ -1541,12 +1543,14 @@ impl DataStore {
         .transaction(&conn, |conn| async move {
             diesel::update(resource_dsl::sled_resource_vmm)
                 .filter(resource_dsl::id.eq(active_vmm_id))
+                .filter(resource_dsl::instance_id.eq(instance_id))
                 .set(resource_dsl::state.eq(SledResourceVmmState::Tombstoned))
                 .execute_async(&conn)
                 .await?;
 
             diesel::update(resource_dsl::sled_resource_vmm)
                 .filter(resource_dsl::id.eq(target_vmm_id))
+                .filter(resource_dsl::instance_id.eq(instance_id))
                 .set(resource_dsl::state.eq(SledResourceVmmState::Active))
                 .execute_async(&conn)
                 .await?;
@@ -7236,6 +7240,7 @@ pub(in crate::db::datastore) mod test {
                 db::datastore::sled::MigrateSuccessUpdate {
                     active_vmm_id: *active_vmm_id.as_untyped_uuid(),
                     target_vmm_id: *target_vmm_id.as_untyped_uuid(),
+                    instance_id: *instance_id.as_untyped_uuid(),
                 },
             )
             .await
@@ -7311,6 +7316,7 @@ pub(in crate::db::datastore) mod test {
                     // record isn't there.
                     active_vmm_id: Uuid::new_v4(),
                     target_vmm_id: *target_vmm_id.as_untyped_uuid(),
+                    instance_id: *instance_id.as_untyped_uuid(),
                 },
             )
             .await

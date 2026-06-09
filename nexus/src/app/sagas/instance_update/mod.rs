@@ -1376,6 +1376,7 @@ async fn siu_update_active_vmm_for_migration_success(
             datastore::sled::MigrateSuccessUpdate {
                 active_vmm_id: *active_vmm_id,
                 target_vmm_id: *target_vmm_id,
+                instance_id,
             },
         )
         .await
