@@ -1,6 +1,6 @@
 ALTER TYPE
    omicron.public.alert_class
 ADD VALUE IF NOT EXISTS
-   'hw.insert.power.power_shelf.psu'
+   'hardware.power_shelf.psu.insert'
 AFTER
    'test.quux.bar.baz'

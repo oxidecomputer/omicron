@@ -3,4 +3,4 @@ ALTER TYPE
 ADD VALUE IF NOT EXISTS
    'hw.remove.power.power_shelf.psu'
 AFTER
-   'hw.insert.power.power_shelf.psu'
+   'hardware.power_shelf.psu.insert'
