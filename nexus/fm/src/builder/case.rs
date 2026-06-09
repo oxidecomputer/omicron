@@ -151,7 +151,7 @@ impl CaseBuilder {
             requested_sitrep_id: self.sitrep_id,
             payload: serde_json::to_value(alert).with_context(|| {
                 format!(
-                    "failed to serialize payload for {class} v{version} alert\
+                    "failed to serialize payload for {class} v{version} alert \
                      (Rust type {payload_type})",
                 )
             })?,
