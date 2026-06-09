@@ -525,10 +525,9 @@ pub async fn wait_for_running_sagas(cptestctx: &ControlPlaneTestContext) {
     let datastore = cptestctx.server.server_context().nexus.datastore();
     let log = &cptestctx.logctx.log;
 
-    // running or unwinding
     let conn = datastore.pool_connection_for_tests().await.unwrap();
 
-    // list all that are now running - wait for only these
+    // wait for only sagas are running or unwinding right now
     let waiting_for: HashSet<Uuid> = {
         use nexus_db_schema::schema::saga::dsl;
 
