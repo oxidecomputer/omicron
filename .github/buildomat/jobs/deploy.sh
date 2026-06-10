@@ -1,5 +1,6 @@
 #!/bin/bash
 #:
+#: enable = false
 #: name = "helios / deploy"
 #: variety = "basic"
 #: target = "lab-3.0-opte-0.41"

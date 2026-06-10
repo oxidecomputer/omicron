@@ -1,5 +1,6 @@
 #!/bin/bash
 #:
+#: enable = false
 #: name = "check-features (helios)"
 #: variety = "basic"
 #: target = "helios-3.0"

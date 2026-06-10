@@ -1,5 +1,6 @@
 #!/bin/bash
 #:
+#: enable = false
 #: name = "helios / package"
 #: variety = "basic"
 #: target = "helios-3.0-16c64gb"

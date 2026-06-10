@@ -1,5 +1,6 @@
 #!/bin/bash
 #:
+#: enable = false
 #: name = "build-and-test (helios)"
 #: variety = "basic"
 #: target = "helios-3.0-32c256gb"

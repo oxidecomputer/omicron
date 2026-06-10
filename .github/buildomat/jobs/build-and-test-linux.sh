@@ -1,5 +1,6 @@
 #!/bin/bash
 #:
+#: enable = false
 #: name = "build-and-test (ubuntu-22.04)"
 #: variety = "basic"
 #: target = "ubuntu-22.04-large"

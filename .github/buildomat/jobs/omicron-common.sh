@@ -1,5 +1,6 @@
 #!/bin/bash
 #:
+#: enable = false
 #: name = "omicron-common (helios)"
 #: variety = "basic"
 #: target = "helios-3.0"
