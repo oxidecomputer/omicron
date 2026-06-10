@@ -19,20 +19,20 @@ System under test (SUT):: The production code (components or systems) being test
 
 This is most commonly observed with inventory collections, with two variations:
 
-- A SUT requires that an inventory be present in the database, but the test does not wait for inventory to be present before making an assertion.
-- A SUT requires that an inventory be present in the Nexus in-memory watch channel, but the test either does not wait for inventory to be present, or waits for it to be present in the _database_ but not the _watch channel_.
+* A SUT requires that an inventory be present in the database, but the test does not wait for inventory to be present before making an assertion.
+* A SUT requires that an inventory be present in the Nexus in-memory watch channel, but the test either does not wait for inventory to be present, or waits for it to be present in the _database_ but not the _watch channel_.
 
 **Why this is bad:** In most cases the test takes long enough before making the assertions that the async setup completes, but sometimes, particularly when the machine is under heavy load, it does not. This results in a race condition.
 
 **How to fix this:** Use the appropriate `wait_for_condition` helper at the start of the test. For example:
 
-- `test-utils/src/dev/poll.rs` has `wait_for_condition` and `wait_for_watch_channel_condition`.
-- `nexus/test-utils/src/nexus_test.rs` has `wait_for_at_least_one_inventory_collection`.
+* `test-utils/src/dev/poll.rs` has `wait_for_condition` and `wait_for_watch_channel_condition`.
+* `nexus/test-utils/src/nexus_test.rs` has `wait_for_at_least_one_inventory_collection`.
 
 **Example commits:**
 
-- https://github.com/oxidecomputer/omicron/commit/ab351dd669b8[`ab351dd669b8`] fixes several flaky tests by waiting for an inventory collection in the database.
-- https://github.com/oxidecomputer/omicron/commit/3026d8207604[`3026d8207604`] and https://github.com/oxidecomputer/omicron/commit/e082eb161e71[`e082eb161e71`] are followups that fix some of _those_ tests to wait on the watch channel instead of the database.
+* https://github.com/oxidecomputer/omicron/commit/ab351dd669b8[`ab351dd669b8`] fixes several flaky tests by waiting for an inventory collection in the database.
+* https://github.com/oxidecomputer/omicron/commit/3026d8207604[`3026d8207604`] and https://github.com/oxidecomputer/omicron/commit/e082eb161e71[`e082eb161e71`] are followups that fix some of _those_ tests to wait on the watch channel instead of the database.
 
 === Asserting before an async operation completes [[asserting-before-async-operation-completes]]
 
@@ -44,7 +44,7 @@ This is most commonly observed with inventory collections, with two variations:
 
 **Example commits:**
 
-- https://github.com/oxidecomputer/omicron/commit/1bb7b11bbbe3[`1bb7b11bbbe3`] tells ClickHouse to perform an `ALTER TABLE` operation synchronously.
+* https://github.com/oxidecomputer/omicron/commit/1bb7b11bbbe3[`1bb7b11bbbe3`] tells ClickHouse to perform an `ALTER TABLE` operation synchronously.
 
 === Stale watch channel notifications [[stale-watch-channel-notifications]]
 
@@ -52,8 +52,8 @@ This is most commonly observed with inventory collections, with two variations:
 
 `changed()` answers "has the value changed since this receiver last observed it?", not "has the value reached the state I need?". This can lead to two kinds of races:
 
-- If the receiver is subscribed (or `mark_unchanged()` is called) while a previous operation is still in flight, that operation's completion satisfies `changed()`, and the test proceeds before the operation it actually cares about has run.
-- Watch channels coalesce notifications: several writes in quick succession may be observed as a single change, so it is incorrect to assume one notification per write.
+* If the receiver is subscribed (or `mark_unchanged()` is called) while a previous operation is still in flight, that operation's completion satisfies `changed()`, and the test proceeds before the operation it actually cares about has run.
+* Watch channels coalesce notifications: several writes in quick succession may be observed as a single change, so it is incorrect to assume one notification per write.
 
 **Why this is bad:** The test's assertions race with the operation it believed it had waited for. In other words, the wait is _edge-triggered_ on a changed notification rather than _level-triggered_ on reaching the desired state.
 
@@ -62,7 +62,7 @@ This is most commonly observed with inventory collections, with two variations:
 **Example commits:**
 
 // FIXME: replace XXXX with the merged commit hash of the test_repo_upload race-fix PR.
-- https://github.com/oxidecomputer/omicron/commit/XXXX[`XXXX`] replaces `changed()` waits on the sled agents' delete-reconciler channels with a `generation >= pruned_generation` predicate.
+* https://github.com/oxidecomputer/omicron/commit/XXXX[`XXXX`] replaces `changed()` waits on the sled agents' delete-reconciler channels with a `generation >= pruned_generation` predicate.
 
 === Infinite retry loops [[infinite-retry-loops]]
 
@@ -74,7 +74,7 @@ This is most commonly observed with inventory collections, with two variations:
 
 **Example commits:**
 
-- https://github.com/oxidecomputer/omicron/commit/9ec43bc28a0e[`9ec43bc28a0e`] switches the `restart_dendrite` method to have a 60 second timeout on restarting Dendrite.
+* https://github.com/oxidecomputer/omicron/commit/9ec43bc28a0e[`9ec43bc28a0e`] switches the `restart_dendrite` method to have a 60 second timeout on restarting Dendrite.
 
 === Background tasks mutating the SUT [[background-tasks-mutating-the-sut]]
 
@@ -86,8 +86,8 @@ This is most commonly observed with inventory collections, with two variations:
 
 **Example commits:**
 
-- https://github.com/oxidecomputer/omicron/commit/2050ef3a67d2[`2050ef3a67d2`] disables the `sp_ereport_ingester` background task for most tests, but re-enables it for `test_omdb_success_cases`.
-- https://github.com/oxidecomputer/omicron/commit/4bd9ebbc71e9[`4bd9ebbc71e9`] makes Nexus's startup-time switch-port insertion (exercised by `omicron-dev run-all`) accept `Error::ObjectAlreadyExists` when a background task wins the race to insert the same record.
+* https://github.com/oxidecomputer/omicron/commit/2050ef3a67d2[`2050ef3a67d2`] disables the `sp_ereport_ingester` background task for most tests, but re-enables it for `test_omdb_success_cases`.
+* https://github.com/oxidecomputer/omicron/commit/4bd9ebbc71e9[`4bd9ebbc71e9`] makes Nexus's startup-time switch-port insertion (exercised by `omicron-dev run-all`) accept `Error::ObjectAlreadyExists` when a background task wins the race to insert the same record.
 
 === Teardown ordering races [[teardown-ordering-races]]
 
@@ -99,8 +99,8 @@ This is most commonly observed with inventory collections, with two variations:
 
 **Example commits:**
 
-- https://github.com/oxidecomputer/omicron/commit/be164f13ba4f[`be164f13ba4f`] manually constructs a Tokio runtime to ensure that a `Utf8TempDir` is always dropped after the Tokio runtime is fully shut down.
-- https://github.com/oxidecomputer/omicron/commit/6a9df62a4d7f[`6a9df62a4d7f`] only detaches multicast state after the active VMM reaches a terminal state. This was a **genuine SUT bug**, not a test bug.
+* https://github.com/oxidecomputer/omicron/commit/be164f13ba4f[`be164f13ba4f`] manually constructs a Tokio runtime to ensure that a `Utf8TempDir` is always dropped after the Tokio runtime is fully shut down.
+* https://github.com/oxidecomputer/omicron/commit/6a9df62a4d7f[`6a9df62a4d7f`] only detaches multicast state after the active VMM reaches a terminal state. This was a **genuine SUT bug**, not a test bug.
 
 NOTE: Flaky tests sometimes reveal genuine SUT bugs rather than test bugs. Besides the multicast example above, https://github.com/oxidecomputer/omicron/commit/e6733679c2ad[`e6733679c2ad`] fixed a NULL-handling bug in the next-item allocator that had been surfacing as flaky Terraform tests downstream.
 
@@ -116,8 +116,8 @@ This is particularly susceptible to happening with Tokio's paused timer, which w
 
 **Example commits:**
 
-- https://github.com/oxidecomputer/omicron/commit/ca3b41b1e3f4[`ca3b41b1e3f4`] treats a `QueueFull` error as a transient `CondCheckError::NotYet`.
-- https://github.com/oxidecomputer/omicron/commit/9b5d906eb468[`9b5d906eb468`] advances Tokio's time by one Oximeter collection at a time, and uses a watch channel to signal that collection has been completed.
+* https://github.com/oxidecomputer/omicron/commit/ca3b41b1e3f4[`ca3b41b1e3f4`] treats a `QueueFull` error as a transient `CondCheckError::NotYet`.
+* https://github.com/oxidecomputer/omicron/commit/9b5d906eb468[`9b5d906eb468`] advances Tokio's time by one Oximeter collection at a time, and uses a watch channel to signal that collection has been completed.
 
 === Database time resolution mismatch [[database-time-resolution-mismatch]]
 
@@ -126,10 +126,10 @@ This can lead to assertions like `after > before` failing, if `after` is derived
 
 For example:
 
-- Suppose `before` is `Utc::now()`, which is `2026-01-01 00:00:00.100_000_100` (i.e., 100 nanoseconds after the last microsecond).
-- Then an operation is made at `2026-01-01 00:00:00.100_000_200` (200 nanoseconds after the last microsecond).
-- This is stored in the database as `2026-01-01 00:00:00.100_000_000` (truncating to the nearest microsecond).
-- The value stored in the database is returned as `after`.
+* Suppose `before` is `Utc::now()`, which is `2026-01-01 00:00:00.100_000_100` (i.e., 100 nanoseconds after the last microsecond).
+* Then an operation is made at `2026-01-01 00:00:00.100_000_200` (200 nanoseconds after the last microsecond).
+* This is stored in the database as `2026-01-01 00:00:00.100_000_000` (truncating to the nearest microsecond).
+* The value stored in the database is returned as `after`.
 
 Then, `after` is compared to `before`, and this assertion fails.
 
@@ -139,7 +139,7 @@ Then, `after` is compared to `before`, and this assertion fails.
 
 **Example commits:**
 
-- https://github.com/oxidecomputer/omicron/commit/8676f301cd44[`8676f301cd44`] switches timestamps from `Utc::now()` to `now_db_precision()`.
+* https://github.com/oxidecomputer/omicron/commit/8676f301cd44[`8676f301cd44`] switches timestamps from `Utc::now()` to `now_db_precision()`.
 
 === Inadequate test isolation [[inadequate-test-isolation]]
 
@@ -156,5 +156,5 @@ NOTE: The `serial_test` crate **does not work** within Omicron: it depends on an
 
 **Example commits:**
 
-- https://github.com/oxidecomputer/omicron/commit/c9dec4111860[`c9dec4111860`] ensures that learner nodes' ledger file names cannot collide with those of regular peer nodes. (Learner 1 and peer node `pc-b-1` both generated `test-1-network-config-ledger`.)
-- https://github.com/oxidecomputer/omicron/commit/067c79302158[`067c79302158`] changes a scenario from being a separate test to being listed within `test_replicated`.
+* https://github.com/oxidecomputer/omicron/commit/c9dec4111860[`c9dec4111860`] ensures that learner nodes' ledger file names cannot collide with those of regular peer nodes. (Learner 1 and peer node `pc-b-1` both generated `test-1-network-config-ledger`.)
+* https://github.com/oxidecomputer/omicron/commit/067c79302158[`067c79302158`] changes a scenario from being a separate test to being listed within `test_replicated`.
