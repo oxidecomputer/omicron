@@ -345,7 +345,7 @@ impl FmAnalysis {
     ) -> status::AnalysisStatus {
         let start_time = Utc::now();
         let mut sitrep_builder = fm::SitrepBuilder::new(&opctx.log, &inputs);
-        let result = fm::diagnosis::analyze(&inputs, &mut sitrep_builder);
+        let result = fm::diagnosis::analyze(&mut sitrep_builder);
         let end_time = Utc::now();
         let (sitrep, report) = sitrep_builder.build(self.nexus_id, end_time);
 

@@ -32,6 +32,7 @@ pub use nexus_types::fm::analysis_reports::InputReport as Report;
 /// is constructed, the inputs are immutable and cannot be modified. To
 /// construct a new `Input` as part of a preparaation phase, use
 /// [`Input::builder`].
+#[derive(Debug)]
 pub struct Input {
     parent_sitrep: Option<Arc<(SitrepVersion, Sitrep)>>,
     inv: Arc<inventory::Collection>,

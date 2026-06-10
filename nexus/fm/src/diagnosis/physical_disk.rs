@@ -5,7 +5,6 @@
 //! Disk diagnosis engine.
 
 use crate::SitrepBuilder;
-use crate::analysis_input::Input;
 use iddqd::{IdOrdItem, IdOrdMap, id_upcast};
 use nexus_types::fm::DiagnosisEngineKind;
 use nexus_types::fm::{DiskFact, ZpoolUnhealthyFactPayload};
@@ -59,10 +58,10 @@ struct ParentCaseSummary {
     unhealthy_facts: IdOrdMap<ZpoolUnhealthyFact>,
 }
 
-pub(super) fn analyze(
-    input: &Input,
-    builder: &mut SitrepBuilder<'_>,
-) -> anyhow::Result<()> {
+pub(super) fn analyze(builder: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
+    // The input borrow has lifetime 'a, not a borrow of `builder`, so we may
+    // hold it while mutating the builder below.
+    let input = builder.input();
     let inv_collection_id = input.inventory().id;
     let inv_time_done = input.inventory().time_done;
 
@@ -172,10 +171,10 @@ pub(super) fn analyze(
     //    is NOT a recovery signal: sled could be powered off, or
     //    inventory could be lossy)
     for (case_id, summary) in &parent_cases {
-        let mut case_mut = builder
-            .cases
-            .case_mut(case_id)
-            .expect("case_id came from iterating builder.cases");
+        let mut case_mut = builder.cases.case_mut(case_id).expect(
+            "builder.cases is seeded from the open cases of builder.input(), \
+             which is where this case_id came from",
+        );
         match in_service_health.get(&summary.physical_disk_id) {
             None => {
                 case_mut.close(format!(
@@ -392,7 +391,7 @@ mod tests {
             input,
             SitrepBuilderRng::from_seed("disk-analyze"),
         );
-        analyze(input, &mut builder).expect("analyze ok");
+        analyze(&mut builder).expect("analyze ok");
         builder.build(OmicronZoneUuid::new_v4(), Utc::now())
     }
 

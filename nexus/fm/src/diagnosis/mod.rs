@@ -9,15 +9,11 @@
 //! so the dispatch order does not matter.
 
 use crate::SitrepBuilder;
-use crate::analysis_input::Input;
 
 mod physical_disk;
 
-pub fn analyze(
-    input: &Input,
-    builder: &mut SitrepBuilder<'_>,
-) -> anyhow::Result<()> {
-    physical_disk::analyze(input, builder)?;
+pub fn analyze(builder: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
+    physical_disk::analyze(builder)?;
     Ok(())
 }
 
