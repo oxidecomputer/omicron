@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! "Currently non-terminal sagas" — the executed view from the `saga` and
+//! "Currently non-terminal sagas": the executed view from the `saga` and
 //! `saga_node_event` DB tables, annotated with the state of each saga's
 //! owning Nexus.
 //!
@@ -43,14 +43,16 @@ pub enum SagaOwnerState {
     NotYet,
     /// The owning Nexus has quiesced (an older generation handed off).
     Quiesced,
-    /// The owning Nexus has no `db_metadata_nexus` record at all (expunged),
-    /// or the saga has no `current_sec`.
+    /// The owning Nexus has no `db_metadata_nexus` record at all (expunged).
+    ///
+    /// A saga with no `current_sec` is *not* classified as `Absent`; it has
+    /// no owner state at all (see [`ObservedSaga::owner_state`]).
     Absent,
 }
 
 impl SagaOwnerState {
-    /// If this owner state means the saga is orphaned — owned by a Nexus that
-    /// will not make progress on it — the reason why; otherwise `None`.
+    /// If this owner state means the saga is orphaned (owned by a Nexus that
+    /// will not make progress on it), the reason why; otherwise `None`.
     pub fn orphaned_reason(self) -> Option<OrphanedReason> {
         match self {
             SagaOwnerState::Active | SagaOwnerState::NotYet => None,
@@ -94,7 +96,7 @@ pub struct ObservedSaga {
     /// recording progress.
     pub last_event_time: Option<DateTime<Utc>>,
     /// The classified state of the owning Nexus, or `None` if the saga has no
-    /// `current_sec` (it is between adoptions and not classifiable — and not
+    /// `current_sec` (it is between adoptions, not classifiable, and not
     /// treated as orphaned). Always `Some` when `current_sec` is `Some`.
     pub owner_state: Option<SagaOwnerState>,
 }
