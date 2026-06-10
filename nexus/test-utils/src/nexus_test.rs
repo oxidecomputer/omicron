@@ -27,7 +27,6 @@ use omicron_common::api::internal::nexus::Certificate;
 use omicron_sled_agent::sim;
 use omicron_test_utils::dev;
 use omicron_test_utils::dev::poll;
-use omicron_test_utils::dev::poll::CondCheckError;
 use omicron_test_utils::dev::poll::wait_for_condition;
 use omicron_test_utils::dev::poll::wait_for_watch_channel_condition;
 use omicron_uuid_kinds::BlueprintUuid;
@@ -181,23 +180,20 @@ impl<N: NexusServer> ControlPlaneTestContext<N> {
 
         match wait_for_watch_channel_condition(
             &mut inv_rx,
-            async |inv| {
-                if inv.is_some() {
-                    Ok(())
-                } else {
-                    Err(CondCheckError::<()>::NotYet)
-                }
-            },
+            |inv| inv.is_some(),
             timeout,
         )
         .await
         {
             Ok(()) => (),
-            Err(poll::Error::TimedOut(elapsed)) => {
+            Err(poll::WatchChannelError::TimedOut(elapsed)) => {
                 panic!("no inventory collection found within {elapsed:?}");
             }
-            Err(poll::Error::PermanentError(())) => {
-                unreachable!("check can only fail via timeout")
+            Err(poll::WatchChannelError::SenderDropped) => {
+                panic!(
+                    "inventory watch channel sender dropped before a \
+                     collection was available"
+                );
             }
         }
     }
