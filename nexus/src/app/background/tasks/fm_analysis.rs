@@ -20,12 +20,12 @@ use nexus_db_queries::db::identity::Asset;
 use nexus_db_queries::db::pagination::Paginator;
 use nexus_fm as fm;
 use nexus_types::in_service_disk::InServiceDisk;
-use nexus_types::observed_saga::{
-    ObservedSaga, SagaOwnerState, SagaProgressState,
-};
 use nexus_types::internal_api::background::FmAnalysisStatus;
 use nexus_types::internal_api::background::fm_analysis as status;
 use nexus_types::inventory;
+use nexus_types::observed_saga::{
+    ObservedSaga, SagaOwnerState, SagaProgressState,
+};
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use serde_json::json;
@@ -339,8 +339,8 @@ impl FmAnalysis {
             let current_sec = saga
                 .current_sec
                 .map(|sec| OmicronZoneUuid::from_untyped_uuid(sec.0));
-            let owner_state = current_sec.map(|sec_id| {
-                match nexus_states.get(&sec_id) {
+            let owner_state =
+                current_sec.map(|sec_id| match nexus_states.get(&sec_id) {
                     Some(DbMetadataNexusState::Active) => {
                         SagaOwnerState::Active
                     }
@@ -351,8 +351,7 @@ impl FmAnalysis {
                         SagaOwnerState::Quiesced
                     }
                     None => SagaOwnerState::Absent,
-                }
-            });
+                });
             let last_event_time =
                 last_event_times.get(&saga.id.0).copied().flatten();
             observed

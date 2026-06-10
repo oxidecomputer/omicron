@@ -643,6 +643,74 @@ impl From<ByteCount> for i64 {
     }
 }
 
+/// Size of blocks for a disk. Valid values are: 512, 2048, or 4096.
+#[derive(Copy, Clone, Debug, Deserialize, Serialize)]
+#[serde(try_from = "u32")]
+pub struct BlockSize(pub u32);
+
+impl schemars::JsonSchema for BlockSize {
+    fn schema_name() -> String {
+        "BlockSize".to_string()
+    }
+
+    fn json_schema(
+        _: &mut schemars::r#gen::SchemaGenerator,
+    ) -> schemars::schema::Schema {
+        schemars::schema::Schema::Object(schemars::schema::SchemaObject {
+            metadata: Some(Box::new(schemars::schema::Metadata {
+                id: None,
+                description: Some(
+                    "Valid values are: 512, 2048, or 4096.".to_string(),
+                ),
+                title: Some("Block size in bytes".to_string()),
+                ..Default::default()
+            })),
+            instance_type: Some(schemars::schema::InstanceType::Integer.into()),
+            enum_values: Some(vec![
+                serde_json::json!(512),
+                serde_json::json!(2048),
+                serde_json::json!(4096),
+            ]),
+            ..Default::default()
+        })
+    }
+}
+
+impl BlockSize {
+    pub fn to_bytes(&self) -> u64 {
+        u64::from(self.0)
+    }
+}
+
+impl TryFrom<u32> for BlockSize {
+    type Error = anyhow::Error;
+    fn try_from(x: u32) -> Result<BlockSize, Self::Error> {
+        if ![512, 2048, 4096].contains(&x) {
+            anyhow::bail!("invalid block size {}", x);
+        }
+
+        Ok(BlockSize(x))
+    }
+}
+
+impl From<ByteCount> for BlockSize {
+    fn from(bc: ByteCount) -> BlockSize {
+        BlockSize(bc.to_bytes() as u32)
+    }
+}
+
+impl From<BlockSize> for ByteCount {
+    fn from(bs: BlockSize) -> ByteCount {
+        ByteCount::from(bs.0)
+    }
+}
+
+impl From<BlockSize> for u64 {
+    fn from(bs: BlockSize) -> u64 {
+        u64::from(bs.0)
+    }
+}
+
 /// Generation numbers stored in the database, used for optimistic concurrency
 /// control
 //
@@ -1176,37 +1244,6 @@ pub struct InstanceRuntimeState {
     pub time_last_auto_restarted: Option<DateTime<Utc>>,
 }
 
-/// View of an Instance
-#[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct Instance {
-    // TODO is flattening here the intent in RFD 4?
-    #[serde(flatten)]
-    pub identity: IdentityMetadata,
-
-    /// ID for the project containing this instance
-    pub project_id: Uuid,
-
-    /// Number of CPUs allocated for this instance
-    pub ncpus: InstanceCpuCount,
-    /// Memory allocated for this instance
-    pub memory: ByteCount,
-    /// RFC1035-compliant hostname for the instance
-    pub hostname: String,
-
-    /// The ID of the disk used to boot this instance, if a specific one is assigned
-    pub boot_disk_id: Option<Uuid>,
-
-    #[serde(flatten)]
-    pub runtime: InstanceRuntimeState,
-
-    #[serde(flatten)]
-    pub auto_restart_status: InstanceAutoRestartStatus,
-
-    /// The CPU platform for this instance. If this is `null`, the instance
-    /// requires no particular CPU platform.
-    pub cpu_platform: Option<InstanceCpuPlatform>,
-}
-
 /// Status of control-plane driven automatic failure recovery for this instance.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct InstanceAutoRestartStatus {
@@ -1267,51 +1304,6 @@ pub enum InstanceAutoRestartPolicy {
     /// best-effort attempt to restart it. The control plane may choose not to
     /// restart the instance to preserve the overall availability of the system.
     BestEffort,
-}
-
-/// A required CPU platform for an instance.
-///
-/// When an instance specifies a required CPU platform:
-///
-/// - The system may expose (to the VM) new CPU features that are only present
-///   on that platform (or on newer platforms of the same lineage that also
-///   support those features).
-/// - The instance must run on hosts that have CPUs that support all the
-///   features of the supplied platform.
-///
-/// That is, the instance is restricted to hosts that have the CPUs which
-/// support all features of the required platform, but in exchange the CPU
-/// features exposed by the platform are available for the guest to use. Note
-/// that this may prevent an instance from starting (if the hosts that could run
-/// it are full but there is capacity on other incompatible hosts).
-///
-/// If an instance does not specify a required CPU platform, then when
-/// it starts, the control plane selects a host for the instance and then
-/// supplies the guest with the "minimum" CPU platform supported by that host.
-/// This maximizes the number of hosts that can run the VM if it later needs to
-/// migrate to another host.
-///
-/// In all cases, the CPU features presented by a given CPU platform are a
-/// subset of what the corresponding hardware may actually support; features
-/// which cannot be used from a virtual environment or do not have full
-/// hypervisor support may be masked off. See RFD 314 for specific CPU features
-/// in a CPU platform.
-#[derive(
-    Copy, Clone, Debug, Deserialize, Serialize, JsonSchema, Eq, PartialEq,
-)]
-#[serde(rename_all = "snake_case")]
-pub enum InstanceCpuPlatform {
-    /// An AMD Milan-like CPU platform.
-    AmdMilan,
-
-    /// An AMD Turin-like CPU platform.
-    // Note that there is only Turin, not Turin Dense - feature-wise there are
-    // collapsed together as the guest-visible platform is the same.
-    // If the two must be distinguished for instance placement, we'll want to
-    // track whatever the motivating constraint is more explicitly. CPU
-    // families, and especially the vendor code names, don't necessarily promise
-    // details about specific processor packaging choices.
-    AmdTurin,
 }
 
 // AFFINITY GROUPS
@@ -1435,7 +1427,7 @@ pub struct Disk {
     /// ID of image from which disk was created, if any
     pub image_id: Option<Uuid>,
     pub size: ByteCount,
-    pub block_size: ByteCount,
+    pub block_size: BlockSize,
     pub state: DiskState,
     pub device_path: String,
     pub disk_type: DiskType,

@@ -149,9 +149,9 @@ pub(super) fn analyze(
             continue;
         }
 
-        let parent = case_for_saga
-            .get(&obs.saga_id)
-            .and_then(|case_id| parent_cases.get(case_id).map(|s| (*case_id, s)));
+        let parent = case_for_saga.get(&obs.saga_id).and_then(|case_id| {
+            parent_cases.get(case_id).map(|s| (*case_id, s))
+        });
 
         // A carried-forward fact already covers a condition only if its
         // recorded payload exactly matches what we'd emit now (otherwise the
@@ -417,10 +417,10 @@ mod tests {
     #[test]
     fn opens_not_progressing_when_stale() {
         let (logctx, collection) = setup("saga_open_not_progressing");
-        let stale = collection.time_done - (STALE_SAGA_THRESHOLD + TimeDelta::minutes(1));
+        let stale = collection.time_done
+            - (STALE_SAGA_THRESHOLD + TimeDelta::minutes(1));
         let id = saga_id(1);
-        let observed =
-            observed_map([mk_observed(id, Some(stale), None, None)]);
+        let observed = observed_map([mk_observed(id, Some(stale), None, None)]);
         let input = build_input(collection, None, observed);
         let sitrep = run_analyze(&logctx.log, &input);
 
@@ -440,12 +440,8 @@ mod tests {
     fn no_case_when_progress_recent() {
         let (logctx, collection) = setup("saga_no_case_when_recent");
         let recent = collection.time_done - TimeDelta::minutes(1);
-        let observed = observed_map([mk_observed(
-            saga_id(1),
-            Some(recent),
-            None,
-            None,
-        )]);
+        let observed =
+            observed_map([mk_observed(saga_id(1), Some(recent), None, None)]);
         let input = build_input(collection, None, observed);
         let sitrep = run_analyze(&logctx.log, &input);
         assert!(
@@ -477,7 +473,9 @@ mod tests {
                 assert_eq!(p.current_sec, sec);
                 assert_eq!(p.orphan_reason, OrphanedReason::Quiesced);
             }
-            other => panic!("expected OwnerNotCurrentGeneration, got {other:?}"),
+            other => {
+                panic!("expected OwnerNotCurrentGeneration, got {other:?}")
+            }
         }
         logctx.cleanup_successful();
     }
@@ -535,7 +533,9 @@ mod tests {
         let open_cases: Vec<_> = sitrep
             .cases
             .iter()
-            .filter(|c| c.metadata.de == DiagnosisEngineKind::Saga && c.is_open())
+            .filter(|c| {
+                c.metadata.de == DiagnosisEngineKind::Saga && c.is_open()
+            })
             .collect();
         assert_eq!(open_cases.len(), 1);
         assert!(
@@ -602,16 +602,8 @@ mod tests {
             inv_id,
             SagaFact::NotProgressing(payload.clone()),
         );
-        let parent_fact_id = parent
-            .cases
-            .iter()
-            .next()
-            .unwrap()
-            .facts
-            .iter()
-            .next()
-            .unwrap()
-            .id;
+        let parent_fact_id =
+            parent.cases.iter().next().unwrap().facts.iter().next().unwrap().id;
         // Observed saga matches the parent fact exactly (same last_event_time,
         // same created time, same state).
         let observed = observed_map([ObservedSaga {
@@ -639,8 +631,8 @@ mod tests {
     fn fact_uuid_rotates_when_last_event_changes() {
         let (logctx, collection) = setup("saga_fact_rotates");
         let id = saga_id(1);
-        let old = collection.time_done
-            - (STALE_SAGA_THRESHOLD + TimeDelta::hours(2));
+        let old =
+            collection.time_done - (STALE_SAGA_THRESHOLD + TimeDelta::hours(2));
         let new = collection.time_done
             - (STALE_SAGA_THRESHOLD + TimeDelta::minutes(1));
         let time_created = Utc::now() - TimeDelta::days(1);
@@ -656,16 +648,8 @@ mod tests {
                 last_event_time: old,
             }),
         );
-        let parent_fact_id = parent
-            .cases
-            .iter()
-            .next()
-            .unwrap()
-            .facts
-            .iter()
-            .next()
-            .unwrap()
-            .id;
+        let parent_fact_id =
+            parent.cases.iter().next().unwrap().facts.iter().next().unwrap().id;
         // Still stale, but last_event_time advanced.
         let observed = observed_map([ObservedSaga {
             saga_id: id,

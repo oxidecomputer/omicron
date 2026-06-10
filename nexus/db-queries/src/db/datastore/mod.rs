@@ -137,6 +137,7 @@ mod support_bundle;
 mod switch;
 mod switch_interface;
 mod switch_port;
+mod system_networking_settings;
 mod target_release;
 #[cfg(test)]
 pub(crate) mod test_utils;

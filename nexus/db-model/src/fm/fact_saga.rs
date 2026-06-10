@@ -10,8 +10,8 @@
 //! columns are non-NULL for each kind. See [`nexus_types::fm::SagaFact`] for
 //! semantics.
 
-use crate::Generation;
 use crate::DbTypedUuid;
+use crate::Generation;
 use crate::SagaState;
 use crate::impl_enum_type;
 use chrono::{DateTime, Utc};
@@ -76,9 +76,7 @@ impl From<SagaProgressState> for SagaState {
 /// Convert a DB `saga_state` back into the non-terminal [`SagaProgressState`]
 /// recorded on a fact. Terminal states never appear on a saga fact (the case
 /// is closed once the saga terminates), so they are treated as corrupt rows.
-fn saga_progress_state(
-    state: SagaState,
-) -> Result<SagaProgressState, Error> {
+fn saga_progress_state(state: SagaState) -> Result<SagaProgressState, Error> {
     match state {
         SagaState::Running => Ok(SagaProgressState::Running),
         SagaState::Unwinding => Ok(SagaProgressState::Unwinding),
@@ -183,25 +181,23 @@ impl FmFactSaga {
         let saga_id = steno::SagaId(self.saga_id);
         let saga_name = self.saga_name;
         let payload = match kind {
-            FmFactSagaKind::NotProgressing => {
-                FactPayload::Saga(SagaFact::NotProgressing(
-                    SagaNotProgressingFactPayload {
-                        saga_id,
-                        saga_name,
-                        saga_state: saga_progress_state(
-                            self.saga_state.ok_or_else(|| {
-                                missing_column(kind, "saga_state")
-                            })?,
-                        )?,
-                        time_created: self.time_created.ok_or_else(|| {
-                            missing_column(kind, "time_created")
+            FmFactSagaKind::NotProgressing => FactPayload::Saga(
+                SagaFact::NotProgressing(SagaNotProgressingFactPayload {
+                    saga_id,
+                    saga_name,
+                    saga_state: saga_progress_state(
+                        self.saga_state.ok_or_else(|| {
+                            missing_column(kind, "saga_state")
                         })?,
-                        last_event_time: self.last_event_time.ok_or_else(
-                            || missing_column(kind, "last_event_time"),
-                        )?,
-                    },
-                ))
-            }
+                    )?,
+                    time_created: self
+                        .time_created
+                        .ok_or_else(|| missing_column(kind, "time_created"))?,
+                    last_event_time: self.last_event_time.ok_or_else(|| {
+                        missing_column(kind, "last_event_time")
+                    })?,
+                }),
+            ),
             FmFactSagaKind::OwnerNotCurrentGeneration => {
                 FactPayload::Saga(SagaFact::OwnerNotCurrentGeneration(
                     SagaOwnerNotCurrentFactPayload {
@@ -209,9 +205,7 @@ impl FmFactSaga {
                         saga_name,
                         current_sec: self
                             .current_sec
-                            .ok_or_else(|| {
-                                missing_column(kind, "current_sec")
-                            })?
+                            .ok_or_else(|| missing_column(kind, "current_sec"))?
                             .into(),
                         orphan_reason: self
                             .orphan_reason

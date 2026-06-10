@@ -16,18 +16,23 @@ use internal_dns_resolver::{ResolveError, Resolver as DnsResolver};
 use internal_dns_types::names::ServiceName;
 use mg_admin_client::Client as MgdClient;
 use mg_admin_client::types::{
-    AddStaticRoute4Request, AddStaticRoute6Request, ApplyRequest,
-    BestpathFanoutRequest, CheckerSource,
-    ImportExportPolicy4 as MgImportExportPolicy4,
-    ImportExportPolicy6 as MgImportExportPolicy6, JitterRange, ShaperSource,
-    StaticRoute4, StaticRoute4List, StaticRoute6, StaticRoute6List,
-};
-use mg_admin_client::types::{
-    BfdPeerConfig as MgBfdPeerConfig, Ipv4UnicastConfig,
-};
-use mg_admin_client::types::{
-    BgpPeerConfig as MgBgpPeerConfig, Ipv6UnicastConfig,
+    ApplyRequest, BfdPeerConfig as MgBfdPeerConfig,
+    BgpPeerConfig as MgBgpPeerConfig,
     UnnumberedBgpPeerConfig as MgUnnumberedBgpPeerConfig,
+};
+use mg_api_types::bgp::config::{
+    CheckerSource, Ipv4UnicastConfig, Ipv6UnicastConfig, JitterRange,
+    ShaperSource,
+};
+use mg_api_types::bgp::policy::{
+    ImportExportPolicy4 as MgImportExportPolicy4,
+    ImportExportPolicy6 as MgImportExportPolicy6,
+};
+use mg_api_types::rdb::prefix::{Prefix, Prefix4, Prefix6};
+use mg_api_types::rib::BestpathFanoutRequest;
+use mg_api_types::static_routes::{
+    AddStaticRoute4Request, AddStaticRoute6Request, StaticRoute4,
+    StaticRoute4List, StaticRoute6, StaticRoute6List,
 };
 use omicron_common::OMICRON_DPD_TAG;
 use omicron_common::address::DENDRITE_PORT;
@@ -37,7 +42,6 @@ use omicron_common::backoff::{
 };
 use omicron_ddm_admin_client::DdmError;
 use oxnet::IpNet;
-use rdb_types::{Prefix, Prefix4, Prefix6};
 use sled_agent_types::early_networking::{
     BfdMode, BgpConfig, BgpPeerConfig, ImportExportPolicy, LinkFec, LinkSpeed,
     PortConfig, RouterPeerType, SwitchSlot, UplinkAddress,
@@ -712,7 +716,7 @@ impl<'a> EarlyNetworkSetup<'a> {
                     fanout: config.max_paths.as_nonzero_u8(),
                 };
 
-                if let Err(e) = mgd.bgp_apply_v2(&request).await {
+                if let Err(e) = mgd.bgp_apply(&request).await {
                     error!(
                         self.log,
                         "BGP peer configuration failed";
@@ -754,7 +758,20 @@ impl<'a> EarlyNetworkSetup<'a> {
                             length: r.destination.width(),
                         };
                         let sr = StaticRoute4 {
-                            nexthop,
+                            nexthop: IpAddr::V4(nexthop),
+                            prefix,
+                            vlan_id,
+                            rib_priority,
+                        };
+                        rq.routes.list.push(sr);
+                    }
+                    (IpAddr::V6(nexthop), IpAddr::V4(dest_addr)) => {
+                        let prefix = Prefix4 {
+                            value: dest_addr,
+                            length: r.destination.width(),
+                        };
+                        let sr = StaticRoute4 {
+                            nexthop: IpAddr::V6(nexthop),
                             prefix,
                             vlan_id,
                             rib_priority,
@@ -774,10 +791,10 @@ impl<'a> EarlyNetworkSetup<'a> {
                         };
                         rqv6.routes.list.push(sr);
                     }
-                    _ => {
+                    (IpAddr::V4(_), IpAddr::V6(_)) => {
                         error!(
                             self.log,
-                            "nexthop and destination are different address types";
+                            "v6 destination over v4 nexthop not supported";
                             "nexthop" => ?r.nexthop,
                             "destination" => ?r.destination.addr(),
                         );
@@ -800,7 +817,7 @@ impl<'a> EarlyNetworkSetup<'a> {
                 self.log,
                 "static route configuration failed";
                 "error" => ?e,
-                "configuration" => ?rq,
+                "configuration" => ?rqv6,
             );
         };
 
