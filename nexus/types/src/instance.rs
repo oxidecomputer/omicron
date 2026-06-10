@@ -208,41 +208,6 @@ impl From<VmmState> for sled_agent::VmmState {
     }
 }
 
-impl From<VmmState> for omicron_common::api::external::InstanceState {
-    fn from(value: VmmState) -> Self {
-        use omicron_common::api::external::InstanceState as Output;
-
-        match value {
-            // An instance with a VMM which is in the `Creating` state maps to
-            // `InstanceState::Starting`, rather than `InstanceState::Creating`.
-            // If we are still creating the VMM, this is because we are
-            // attempting to *start* the instance; instances may be created
-            // without creating a VMM to run them, and then started later.
-            VmmState::Creating | VmmState::Starting => Output::Starting,
-            VmmState::Running => Output::Running,
-            VmmState::Stopping => Output::Stopping,
-            // `SagaUnwound` should map to `Stopped` so that an `instance_view`
-            // API call that produces an instance with an unwound VMM will appear to
-            // be `Stopped`. This is because instances with unwound VMMs can
-            // be started by a subsequent instance-start saga, just like
-            // instances whose internal state actually is `Stopped`.
-            VmmState::SagaUnwound => Output::Stopped,
-            VmmState::Rebooting => Output::Rebooting,
-            VmmState::Migrating => Output::Migrating,
-            // An instance with a "failed" VMM should *not* be counted as
-            // failed until the VMM is unlinked, because a start saga must be
-            // able to run for a "failed" instance. Until then, it will
-            // continue to appear "stopping".
-            VmmState::Failed(_) => Output::Stopping,
-            // An instance with a "stopped" or "destroyed" VMM needs to be
-            // recast as a "stopping" instance, as the virtual provisioning
-            // resources for that instance have not been deallocated until the
-            // active VMM ID has been unlinked by an update saga.
-            VmmState::Stopped | VmmState::Destroyed => Output::Stopping,
-        }
-    }
-}
-
 #[derive(
     Copy,
     Clone,
