@@ -44,6 +44,53 @@ pub enum ForcedCollectionError {
     Closed,
 }
 
+/// Whether a collection task schedules collections automatically on its
+/// producer's collection interval.
+#[derive(Clone, Copy, Debug)]
+pub enum ScheduledCollections {
+    /// Schedule a collection each time the producer's interval elapses.
+    Enabled,
+    /// Never schedule collections automatically; collections occur only via
+    /// explicit requests like `CollectionTaskHandle::try_force_collect`.
+    ///
+    /// Tests use this to control exactly how many collections occur.
+    Disabled,
+}
+
+/// The timer scheduling collections from the producer.
+#[derive(Debug)]
+enum CollectionTimer {
+    /// Ticks each time the producer's collection interval elapses.
+    Scheduled(Interval),
+    /// Never ticks; see [`ScheduledCollections::Disabled`].
+    Disabled,
+}
+
+impl CollectionTimer {
+    fn new(scheduled: ScheduledCollections, period: Duration) -> Self {
+        match scheduled {
+            ScheduledCollections::Enabled => {
+                // If we miss a tick, say because the results sink is full
+                // when we try to pass off our collection result, we'll delay
+                // the next tick rather than burst to catch up.
+                let mut timer = interval(period);
+                timer.set_missed_tick_behavior(MissedTickBehavior::Delay);
+                Self::Scheduled(timer)
+            }
+            ScheduledCollections::Disabled => Self::Disabled,
+        }
+    }
+
+    /// Complete when the timer next ticks, pending forever if collections
+    /// are not scheduled.
+    async fn tick(&mut self) -> Instant {
+        match self {
+            Self::Scheduled(timer) => timer.tick().await,
+            Self::Disabled => std::future::pending().await,
+        }
+    }
+}
+
 /// Timeout on any single collection from a producer.
 const COLLECTION_TIMEOUT: Duration = Duration::from_secs(30);
 
@@ -385,9 +432,10 @@ impl CollectionTaskHandle {
         collector: self_stats::OximeterCollector,
         producer: ProducerEndpoint,
         outbox: CollectionTaskSenderWrapper,
+        scheduled: ScheduledCollections,
     ) -> Self {
         let (task, notifiers) =
-            CollectionTask::new(log, collector, producer, outbox);
+            CollectionTask::new(log, collector, producer, outbox, scheduled);
         tokio::spawn(task.run());
         let log = log.new(o!(
             "component" => "collection-task-handle",
@@ -542,7 +590,7 @@ struct CollectionTask {
     outbox: CollectionTaskSenderWrapper,
 
     // Timer for making collections periodically.
-    collection_timer: Interval,
+    collection_timer: CollectionTimer,
 
     // Timer for reporting our own collection statistics to the database.
     self_collection_timer: Interval,
@@ -559,6 +607,7 @@ impl CollectionTask {
         collector: self_stats::OximeterCollector,
         producer: ProducerEndpoint,
         outbox: CollectionTaskSenderWrapper,
+        scheduled: ScheduledCollections,
     ) -> (Self, CollectionTaskNotifiers) {
         // Create our own logger.
         let log = log.new(o!(
@@ -629,8 +678,8 @@ impl CollectionTask {
         // to pass off our collection result, we'll delay the next tick rather
         // than burst to catch up.
         let stats = self_stats::CollectionTaskStats::new(collector, &producer);
-        let mut collection_timer = interval(producer.interval);
-        collection_timer.set_missed_tick_behavior(MissedTickBehavior::Delay);
+        let collection_timer =
+            CollectionTimer::new(scheduled, producer.interval);
         let mut self_collection_timer =
             interval(self_stats::COLLECTION_INTERVAL);
         self_collection_timer
@@ -721,9 +770,15 @@ impl CollectionTask {
         self.producer_details_tx
             .send_modify(|details| details.update(&new_info));
         self.stats.update(&new_info);
-        self.collection_timer = interval(new_info.interval);
-        self.collection_timer
-            .set_missed_tick_behavior(MissedTickBehavior::Delay);
+        match self.collection_timer {
+            CollectionTimer::Scheduled(_) => {
+                self.collection_timer = CollectionTimer::new(
+                    ScheduledCollections::Enabled,
+                    new_info.interval,
+                );
+            }
+            CollectionTimer::Disabled => {}
+        }
     }
 
     /// Handle a single message from the task handle.
@@ -789,16 +844,10 @@ impl CollectionTask {
             }
             #[cfg(test)]
             CollectionMessage::Statistics { reply_tx } => {
-                // Time should be paused when using this retrieval
-                // mechanism. We advance time to cause a panic if this
-                // message were to be sent with time *not* paused.
-                tokio::time::advance(Duration::from_nanos(1)).await;
-                // The collection timer *may* be ready to go in which
-                // case we would do a collection right after
-                // processesing this message, thus changing the actual
-                // data. Instead we reset the timer to prevent
-                // additional collections (i.e. since time is paused).
-                self.collection_timer.reset();
+                // The test is responsible for quiescing collections before
+                // requesting them, by disabling scheduled collections
+                // (`ScheduledCollections::Disabled`) and waiting for
+                // explicitly requested collections to complete.
                 debug!(
                     self.log,
                     "received request for current task statistics"

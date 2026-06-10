@@ -12,6 +12,7 @@ use crate::ProducerEndpoint;
 use crate::collection_task::CollectionTaskHandle;
 use crate::collection_task::CollectionTaskOutput;
 use crate::collection_task::ForcedCollectionError;
+use crate::collection_task::ScheduledCollections;
 use crate::probes;
 use crate::results_sink;
 use crate::self_stats;
@@ -68,6 +69,10 @@ pub struct OximeterAgent {
     refresh_task: Arc<Mutex<Option<tokio::task::JoinHandle<()>>>>,
     /// The last time we've refreshed our list of producers from Nexus.
     pub last_refresh_time: Arc<Mutex<Option<DateTime<Utc>>>>,
+    // Whether collection tasks schedule collections on their producers'
+    // intervals. Always enabled in production; tests disable it to control
+    // exactly how many collections occur.
+    scheduled_collections: ScheduledCollections,
 }
 
 impl OximeterAgent {
@@ -206,6 +211,7 @@ impl OximeterAgent {
             refresh_interval,
             refresh_task: Arc::new(Mutex::new(None)),
             last_refresh_time: Arc::new(Mutex::new(None)),
+            scheduled_collections: ScheduledCollections::Enabled,
         };
 
         Ok(self_)
@@ -240,6 +246,7 @@ impl OximeterAgent {
         address: SocketAddrV6,
         refresh_interval: Duration,
         db_config: Option<DbConfig>,
+        scheduled_collections: ScheduledCollections,
         log: &Logger,
     ) -> Result<Self, Error> {
         let log = log.new(o!(
@@ -310,6 +317,7 @@ impl OximeterAgent {
             refresh_interval,
             refresh_task: Arc::new(Mutex::new(None)),
             last_refresh_time,
+            scheduled_collections,
         })
     }
 
@@ -349,6 +357,7 @@ impl OximeterAgent {
                     self.collection_target,
                     info,
                     self.result_sender.clone(),
+                    self.scheduled_collections,
                 );
                 value.insert(handle);
             }
@@ -677,6 +686,7 @@ async fn claim_nexus_with_backoff(
 mod tests {
     use super::OximeterAgent;
     use super::ProducerEndpoint;
+    use crate::collection_task::ScheduledCollections;
     use crate::self_stats::FailureReason;
     use chrono::Utc;
     use dropshot::HttpError;
@@ -685,6 +695,9 @@ mod tests {
     use dropshot::RequestContext;
     use dropshot::ServerBuilder;
     use omicron_common::api::internal::nexus::ProducerKind;
+    use omicron_test_utils::dev::poll::CondCheckError;
+    use omicron_test_utils::dev::poll::wait_for_condition;
+    use omicron_test_utils::dev::poll::wait_for_watch_channel_condition;
     use omicron_test_utils::dev::test_setup_log;
     use oximeter::types::ProducerResults;
     use oximeter_types::producer::ProducerDetails;
@@ -696,22 +709,26 @@ mod tests {
     use std::sync::atomic::AtomicUsize;
     use std::sync::atomic::Ordering;
     use std::time::Duration;
-    use tokio::time::Instant;
     use uuid::Uuid;
 
-    // Interval on which oximeter collects from producers in these tests.
+    // Collection interval reported in producer endpoint information in these
+    // tests.
+    //
+    // Scheduled collections are disabled in these tests
+    // (`ScheduledCollections::Disabled`), so this interval never causes a
+    // collection: every collection is requested explicitly. Tests therefore
+    // control exactly how many collections occur, with no race against the
+    // collection timer.
     const COLLECTION_INTERVAL: Duration = Duration::from_secs(1);
 
-    // Interval in calls to `tokio::time::advance`. This must be sufficiently
-    // small relative to `COLLECTION_INTERVAL` to ensure all ticks of internal
-    // timers complete as expected.
-    const TICK_INTERVAL: Duration = Duration::from_millis(10);
+    // Polling interval used when waiting for conditions in real time.
+    const POLL_INTERVAL: Duration = Duration::from_millis(10);
 
     // Total number of collection attempts, and the expected number of
     // collections which fail in the "unreachability" test below.
     const N_COLLECTIONS: u64 = 5;
 
-    /// Maximum simulated time to wait for a collection to complete.
+    /// Maximum real time to wait for a collection to complete.
     const COLLECTION_TIMEOUT: Duration = Duration::from_secs(60);
 
     /// Return a watch receiver for the given producer's collection details.
@@ -728,50 +745,67 @@ mod tests {
             .details_watcher()
     }
 
-    /// Pause time and advance it one collection at a time, waiting for each
-    /// collection to complete before advancing to the next. Time is
-    /// intentionally left paused when this function returns, since some callers
-    /// (e.g. `verify_producer_details`) continue to advance time manually
-    /// afterward.
+    /// Wait until the producer's details satisfy `condition`, panicking with
+    /// `description` and the current details on timeout.
     ///
-    /// This avoids the flake described in #8636, where blindly advancing time
-    /// could cause the collection timer to fire while a previous collection was
-    /// still in-flight, overflowing the bounded channel and recording spurious
-    /// `FailedCollection` entries.
-    ///
-    /// The approach: advance time in small increments until the details watch
-    /// channel signals that a collection completed, then repeat. By waiting for
-    /// each collection to finish before continuing, we ensure the channel is
-    /// drained before the next timer tick fires.
-    async fn advance_n_collections(
-        collector: &OximeterAgent,
-        id: Uuid,
-        n: u64,
+    /// The condition is level-triggered on the details' value rather than
+    /// edge-triggered on `changed()`. (See "Stale watch channel notifications"
+    /// in docs/flake-patterns.adoc.)
+    async fn wait_for_details(
+        details_rx: &mut tokio::sync::watch::Receiver<ProducerDetails>,
+        condition: impl FnMut(&ProducerDetails) -> bool,
+        description: &str,
     ) {
-        const TIMEOUT: Duration = COLLECTION_TIMEOUT;
+        wait_for_watch_channel_condition(
+            details_rx,
+            condition,
+            COLLECTION_TIMEOUT,
+        )
+        .await
+        .unwrap_or_else(|err| {
+            panic!(
+                "failed waiting for {description}: {err}; \
+                current details: {:?}",
+                *details_rx.borrow(),
+            )
+        });
+    }
+
+    /// Explicitly request a collection from the producer.
+    fn force_collect(collector: &OximeterAgent, id: Uuid) {
+        collector
+            .collection_tasks
+            .lock()
+            .unwrap()
+            .get(&id)
+            .unwrap()
+            .try_force_collect()
+            .expect("forced-collection request is enqueued");
+    }
+
+    /// Run `n` collections from the producer, waiting for each to complete
+    /// before starting the next.
+    ///
+    /// Scheduled collections are disabled in these tests, so each collection
+    /// is requested explicitly: exactly `n` collections are initiated, and
+    /// none are in flight when this function returns.
+    ///
+    /// Earlier versions of these tests paused tokio's clock and advanced it to
+    /// fire the producer's interval timer. But this runs into a complex set of
+    /// problems: collections are real network I/O that completes in real time,
+    /// and mixing the two time domains was a persistent source of flakes
+    /// (#8636, #7255). So we instead use real time and disable scheduled
+    /// collections.
+    async fn run_n_collections(collector: &OximeterAgent, id: Uuid, n: u64) {
         let mut details_rx = details_watcher(collector, id);
-        // Mark current state as seen so has_changed() only reflects
-        // new updates from this point forward.
-        details_rx.borrow_and_update();
-        tokio::time::pause();
-        for i in 0..n {
-            let start = Instant::now();
-            // Advance time until this collection completes.
-            loop {
-                assert!(
-                    start.elapsed() < TIMEOUT,
-                    "timed out waiting for collection {i} after \
-                    {:?} of simulated time",
-                    start.elapsed(),
-                );
-                tokio::time::advance(TICK_INTERVAL).await;
-                if details_rx.has_changed().expect(
-                    "producer details watch channel closed unexpectedly",
-                ) {
-                    details_rx.borrow_and_update();
-                    break;
-                }
-            }
+        for i in 1..=n {
+            force_collect(collector, id);
+            wait_for_details(
+                &mut details_rx,
+                |details| details.n_collections + details.n_failures >= i,
+                &format!("{i} total collection attempts"),
+            )
+            .await;
         }
     }
 
@@ -845,6 +879,7 @@ mod tests {
             SocketAddrV6::new(Ipv6Addr::LOCALHOST, 0, 0, 0),
             crate::default_refresh_interval(),
             None,
+            ScheduledCollections::Disabled,
             log,
         )
         .await
@@ -871,10 +906,9 @@ mod tests {
         let id = endpoint.id;
         collector.register_producer(endpoint);
 
-        // Advance time one collection at a time, waiting for each to
-        // complete before proceeding. This avoids overflowing the
-        // collection task's bounded channel on slow/loaded machines.
-        advance_n_collections(&collector, id, N_COLLECTIONS).await;
+        // Run collections one at a time, waiting for each to complete
+        // before starting the next.
+        run_n_collections(&collector, id, N_COLLECTIONS).await;
 
         // Request the statistics from the task itself.
         let rx = collector
@@ -887,10 +921,13 @@ mod tests {
         let stats = rx.await.unwrap();
         let count = stats.collections.datum.value() as usize;
 
-        assert!(count != 0);
+        // Exactly `N_COLLECTIONS` collections ran: nothing is in flight when
+        // `run_n_collections` returns, and scheduled collections are
+        // disabled.
+        assert_eq!(count, N_COLLECTIONS as usize);
         let server_count = collection_count.load(Ordering::SeqCst);
-        assert!(
-            count == server_count || count + 1 == server_count,
+        assert_eq!(
+            count, server_count,
             "number of collections reported by the collection \
             task ({count}) differs from the number reported by the empty \
             producer server itself ({server_count})"
@@ -911,6 +948,7 @@ mod tests {
             SocketAddrV6::new(Ipv6Addr::LOCALHOST, 0, 0, 0),
             crate::default_refresh_interval(),
             None,
+            ScheduledCollections::Disabled,
             log,
         )
         .await
@@ -932,9 +970,9 @@ mod tests {
         let id = endpoint.id;
         collector.register_producer(endpoint);
 
-        // Advance time one collection at a time, waiting for each to
-        // complete before proceeding.
-        advance_n_collections(&collector, id, N_COLLECTIONS).await;
+        // Run collections one at a time, waiting for each to complete
+        // before starting the next.
+        run_n_collections(&collector, id, N_COLLECTIONS).await;
 
         // Request the statistics from the task itself.
         let rx = collector
@@ -971,6 +1009,7 @@ mod tests {
             SocketAddrV6::new(Ipv6Addr::LOCALHOST, 0, 0, 0),
             crate::default_refresh_interval(),
             None,
+            ScheduledCollections::Disabled,
             log,
         )
         .await
@@ -997,9 +1036,9 @@ mod tests {
         let id = endpoint.id;
         collector.register_producer(endpoint);
 
-        // Advance time one collection at a time, waiting for each to
-        // complete before proceeding.
-        advance_n_collections(&collector, id, N_COLLECTIONS).await;
+        // Run collections one at a time, waiting for each to complete
+        // before starting the next.
+        run_n_collections(&collector, id, N_COLLECTIONS).await;
 
         // Request the statistics from the task itself.
         let rx = collector
@@ -1044,6 +1083,7 @@ mod tests {
             SocketAddrV6::new(Ipv6Addr::LOCALHOST, 0, 0, 0),
             crate::default_refresh_interval(),
             None,
+            ScheduledCollections::Disabled,
             log,
         )
         .await
@@ -1071,26 +1111,34 @@ mod tests {
         let before = Utc::now();
         collector.register_producer(endpoint);
 
-        // We don't manipulate time manually here, since this is pretty short
-        // and we want to assert things about the actual timing in the test
-        // below.
-        let is_ready = || async {
-            // We need to check if the server has had a collection request, and
-            // also if we've processed it on our task side. If we don't wait for
-            // the second bit, updating our collection details in the task races
-            // with the rest of this test that checks those details.
-            if collection_count.load(Ordering::SeqCst) < 1 {
-                return false;
-            }
-            collector
-                .producer_details(id)
-                .expect("Should be able to get producer details")
-                .n_collections
-                > 0
-        };
-        while !is_ready().await {
-            tokio::time::sleep(TICK_INTERVAL).await;
-        }
+        // Request a collection, then wait for it to complete. We want to
+        // assert things about the actual timing in the test below.
+        force_collect(&collector, id);
+        wait_for_condition(
+            || async {
+                // We need to check if the server has had a collection
+                // request, and also if we've processed it on our task side.
+                // If we don't wait for the second bit, updating our
+                // collection details in the task races with the rest of this
+                // test that checks those details.
+                if collection_count.load(Ordering::SeqCst) < 1 {
+                    return Err(CondCheckError::<()>::NotYet);
+                }
+                let n_collections = collector
+                    .producer_details(id)
+                    .expect("Should be able to get producer details")
+                    .n_collections;
+                if n_collections > 0 {
+                    Ok(())
+                } else {
+                    Err(CondCheckError::NotYet)
+                }
+            },
+            &POLL_INTERVAL,
+            &COLLECTION_TIMEOUT,
+        )
+        .await
+        .expect("first collection completed within the timeout");
 
         // Get details about the producer.
         let count = collection_count.load(Ordering::SeqCst) as u64;
@@ -1129,6 +1177,7 @@ mod tests {
             SocketAddrV6::new(Ipv6Addr::LOCALHOST, 0, 0, 0),
             crate::default_refresh_interval(),
             None,
+            ScheduledCollections::Disabled,
             log,
         )
         .await
@@ -1159,7 +1208,7 @@ mod tests {
         println!("{details:#?}");
 
         // Ensure we get at least one collection from it.
-        advance_n_collections(&collector, id, 1).await;
+        run_n_collections(&collector, id, 1).await;
 
         // Now, drop and recreate the server, and register with the same ID at a
         // different address.
@@ -1172,6 +1221,11 @@ mod tests {
         .config(Default::default())
         .start()
         .expect("failed to spawn empty dropshot server");
+
+        // Snapshot the collection count before re-registering, so we can
+        // wait for a collection that strictly follows the update.
+        let mut details_rx = details_watcher(&collector, id);
+        let n_collections_before = details_rx.borrow().n_collections;
 
         // Register the dummy producer.
         let endpoint =
@@ -1186,26 +1240,17 @@ mod tests {
             same UUID",
         );
 
-        let mut details_rx = details_watcher(&collector, id);
-        let start = Instant::now();
-        loop {
-            assert!(
-                start.elapsed() < COLLECTION_TIMEOUT,
-                "timed out waiting for collection from re-registered producer",
-            );
-            tokio::time::advance(TICK_INTERVAL).await;
-            if details_rx
-                .has_changed()
-                .expect("producer details watch channel closed unexpectedly")
-            {
-                details_rx.borrow_and_update();
-                // Only break once a new collection has actually completed
-                // (not just a producer info update).
-                if collection_count.load(Ordering::SeqCst) >= 1 {
-                    break;
-                }
-            }
-        }
+        // Explicitly request a collection. The producer info watch channel
+        // was updated synchronously above, and the collection loop reads it
+        // when it dequeues the request, so this collection is guaranteed to
+        // target the new server.
+        force_collect(&collector, id);
+        wait_for_details(
+            &mut details_rx,
+            |details| details.n_collections > n_collections_before,
+            "a successful collection from the re-registered producer",
+        )
+        .await;
         let details = collector.producer_details(id).unwrap();
         println!("{details:#?}");
         assert_eq!(details.id, id);
