@@ -74,6 +74,16 @@ impl<'a> ResourceBuilder<'a> {
         self.resources.push(Arc::new(resource));
     }
 
+    /// Register a user as a test actor without granting it any role.
+    ///
+    /// Unlike [`Self::new_resource_with_users`], this creates no role
+    /// assignment. Bind `user_id` to the owning user of a resource already in
+    /// the set (e.g. a `SiloUser`'s own id) to exercise identity-based
+    /// self-access, which role assignments alone can't reach.
+    pub fn push_user(&mut self, username: &str, user_id: SiloUserUuid) {
+        self.users.push((username.to_string(), user_id));
+    }
+
     /// Register a new resource for later testing and also: for each supported
     /// role on this resource, create a user that has that role on this resource
     pub async fn new_resource_with_users<T>(&mut self, resource: T)

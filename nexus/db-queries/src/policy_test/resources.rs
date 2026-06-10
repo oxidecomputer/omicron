@@ -311,6 +311,13 @@ async fn make_silo(
         LookupType::ByName(format!("{}-user", silo_name)),
     );
     builder.new_resource(silo_user.clone());
+    // Register this silo user itself as a roleless actor (only in the branch
+    // whose silo is the main silo, where actors live). This exercises
+    // identity-based self-access: the actor acting on its own SiloUser, SshKey,
+    // and session/token lists, which no role assignment can grant.
+    if first_branch {
+        builder.push_user(&format!("{}-user-self", silo_name), silo_user_id);
+    }
     let ssh_key_id = Uuid::new_v4();
     builder.new_resource(authz::SshKey::new(
         silo_user.clone(),
