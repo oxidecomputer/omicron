@@ -27,6 +27,7 @@ use omicron_common::api::internal::nexus::Certificate;
 use omicron_sled_agent::sim;
 use omicron_test_utils::dev;
 use omicron_test_utils::dev::poll;
+use omicron_test_utils::dev::poll::wait_for_condition;
 use omicron_test_utils::dev::poll::wait_for_watch_channel_condition;
 use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::SledUuid;
@@ -116,6 +117,7 @@ pub struct ControlPlaneTestContext<N> {
     /// Ports of stopped dendrite instances (for use by start_dendrite)
     pub stopped_dendrite_ports: RwLock<HashMap<SwitchSlot, u16>>,
     pub mgd: HashMap<SwitchSlot, dev::maghemite::MgdInstance>,
+    pub ddm: HashMap<SwitchSlot, dev::maghemite::DdmInstance>,
     pub external_dns_zone_name: String,
     pub external_dns: TransientDnsServer,
     pub internal_dns: TransientDnsServer,
@@ -238,20 +240,35 @@ impl<N: NexusServer> ControlPlaneTestContext<N> {
     /// Works both when Dendrite is currently running (will stop and restart)
     /// or when it was previously stopped via [`Self::stop_dendrite`].
     pub async fn restart_dendrite(&self, switch_slot: SwitchSlot) {
+        use slog::debug;
+        let log = self.logctx.log.new(slog::o!(
+            "switch_slot" => format!("{switch_slot:?}"),
+        ));
+        debug!(log, "Restarting Dendrite");
+
         // Get port either from running instance or from stored port after stop
         // Extract from mutex first to avoid holding lock across await
         let old = self.dendrite.write().unwrap().remove(&switch_slot);
         let port = if let Some(mut old) = old {
             let port = old.port;
+            debug!(
+                log, "Shutting down old dpd instance for restart";
+                "port" => port,
+            );
             old.cleanup().await.unwrap();
             port
         } else {
             // Must have been stopped - get stored port
-            self.stopped_dendrite_ports
+            let port = self.stopped_dendrite_ports
                 .write()
                 .unwrap()
                 .remove(&switch_slot)
-                .expect("Dendrite not running and no stored port from stop_dendrite")
+                .expect("Dendrite not running and no stored port from stop_dendrite");
+            debug!(
+                log, "Reusing port from previously-shut-down dpd instance";
+                "port" => port,
+            );
+            port
         };
 
         let mgs = self.gateway.get(&switch_slot).unwrap();
@@ -283,15 +300,18 @@ impl<N: NexusServer> ControlPlaneTestContext<N> {
                 log: self.logctx.log.clone(),
             },
         );
-        loop {
-            match dpd_client.switch_identifiers().await {
-                Ok(_) => break,
-                Err(_) => {
-                    tokio::time::sleep(std::time::Duration::from_millis(50))
-                        .await;
+        wait_for_condition(
+            || async {
+                match dpd_client.switch_identifiers().await {
+                    Ok(_) => Ok(()),
+                    Err(_) => Err(dev::poll::CondCheckError::<()>::NotYet),
                 }
-            }
-        }
+            },
+            &Duration::from_millis(50),
+            &Duration::from_secs(60),
+        )
+        .await
+        .expect("contacted dpd within timeout after restart");
 
         self.dendrite.write().unwrap().insert(switch_slot, dendrite);
     }
@@ -315,6 +335,9 @@ impl<N: NexusServer> ControlPlaneTestContext<N> {
         }
         for (_, mut mgd) in self.mgd {
             mgd.cleanup().await.unwrap();
+        }
+        for (_, mut ddm) in self.ddm {
+            ddm.cleanup().await.unwrap();
         }
         self.logctx.cleanup_successful();
     }

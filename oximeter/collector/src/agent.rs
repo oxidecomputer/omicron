@@ -12,7 +12,6 @@ use crate::ProducerEndpoint;
 use crate::collection_task::CollectionTaskHandle;
 use crate::collection_task::CollectionTaskOutput;
 use crate::collection_task::ForcedCollectionError;
-use crate::collection_task::ScheduledCollections;
 use crate::probes;
 use crate::results_sink;
 use crate::self_stats;
@@ -69,10 +68,6 @@ pub struct OximeterAgent {
     refresh_task: Arc<Mutex<Option<tokio::task::JoinHandle<()>>>>,
     /// The last time we've refreshed our list of producers from Nexus.
     pub last_refresh_time: Arc<Mutex<Option<DateTime<Utc>>>>,
-    // Whether collection tasks schedule collections on their producers'
-    // intervals. Always enabled in production; tests disable it to control
-    // exactly how many collections occur.
-    scheduled_collections: ScheduledCollections,
 }
 
 impl OximeterAgent {
@@ -211,7 +206,6 @@ impl OximeterAgent {
             refresh_interval,
             refresh_task: Arc::new(Mutex::new(None)),
             last_refresh_time: Arc::new(Mutex::new(None)),
-            scheduled_collections: ScheduledCollections::Enabled,
         };
 
         Ok(self_)
@@ -246,7 +240,6 @@ impl OximeterAgent {
         address: SocketAddrV6,
         refresh_interval: Duration,
         db_config: Option<DbConfig>,
-        scheduled_collections: ScheduledCollections,
         log: &Logger,
     ) -> Result<Self, Error> {
         let log = log.new(o!(
@@ -317,7 +310,6 @@ impl OximeterAgent {
             refresh_interval,
             refresh_task: Arc::new(Mutex::new(None)),
             last_refresh_time,
-            scheduled_collections,
         })
     }
 
@@ -357,7 +349,6 @@ impl OximeterAgent {
                     self.collection_target,
                     info,
                     self.result_sender.clone(),
-                    self.scheduled_collections,
                 );
                 value.insert(handle);
             }
@@ -686,7 +677,6 @@ async fn claim_nexus_with_backoff(
 mod tests {
     use super::OximeterAgent;
     use super::ProducerEndpoint;
-    use crate::collection_task::ScheduledCollections;
     use crate::self_stats::FailureReason;
     use chrono::Utc;
     use dropshot::HttpError;
@@ -711,15 +701,13 @@ mod tests {
     use std::time::Duration;
     use uuid::Uuid;
 
-    // Collection interval reported in producer endpoint information in these
-    // tests.
+    // Interval on which oximeter collects from producers in these tests.
     //
-    // Scheduled collections are disabled in these tests
-    // (`ScheduledCollections::Disabled`), so this interval never causes a
-    // collection: every collection is requested explicitly. Tests therefore
-    // control exactly how many collections occur, with no race against the
-    // collection timer.
-    const COLLECTION_INTERVAL: Duration = Duration::from_secs(1);
+    // This is far longer than any test's runtime, and effectively disables
+    // periodic collections after the first one (`tokio::time::interval` fires
+    // once at creation time). This means that the test gets to control exactly
+    // how many collections occur, with no race against the timer.
+    const COLLECTION_INTERVAL: Duration = Duration::from_secs(60 * 60 * 24);
 
     // Polling interval used when waiting for conditions in real time.
     const POLL_INTERVAL: Duration = Duration::from_millis(10);
@@ -786,20 +774,24 @@ mod tests {
     /// Run `n` collections from the producer, waiting for each to complete
     /// before starting the next.
     ///
-    /// Scheduled collections are disabled in these tests, so each collection
-    /// is requested explicitly: exactly `n` collections are initiated, and
-    /// none are in flight when this function returns.
+    /// The first collection is triggered by the producer's interval timer,
+    /// which fires once when the collection task starts; the remaining `n - 1`
+    /// are requested explicitly. (`COLLECTION_INTERVAL` is far longer than any
+    /// test's runtime, so background collections are effectively disabled.)
     ///
     /// Earlier versions of these tests paused tokio's clock and advanced it to
     /// fire the producer's interval timer. But this runs into a complex set of
     /// problems: collections are real network I/O that completes in real time,
-    /// and mixing the two time domains was a persistent source of flakes
-    /// (#8636, #7255). So we instead use real time and disable scheduled
-    /// collections.
+    /// and mixing the two time domains was a persistent source of flakes (see
+    /// omicron#8636, omicron#7255). So we instead use real time and a
+    /// collection interval far longer than the test's runtime.
     async fn run_n_collections(collector: &OximeterAgent, id: Uuid, n: u64) {
         let mut details_rx = details_watcher(collector, id);
         for i in 1..=n {
-            force_collect(collector, id);
+            // The first collection happens automatically, so skip over it here.
+            if i > 1 {
+                force_collect(collector, id);
+            }
             wait_for_details(
                 &mut details_rx,
                 |details| details.n_collections + details.n_failures >= i,
@@ -879,7 +871,6 @@ mod tests {
             SocketAddrV6::new(Ipv6Addr::LOCALHOST, 0, 0, 0),
             crate::default_refresh_interval(),
             None,
-            ScheduledCollections::Disabled,
             log,
         )
         .await
@@ -922,8 +913,8 @@ mod tests {
         let count = stats.collections.datum.value() as usize;
 
         // Exactly `N_COLLECTIONS` collections ran: nothing is in flight when
-        // `run_n_collections` returns, and scheduled collections are
-        // disabled.
+        // `run_n_collections` returns, and the long collection interval
+        // prevents any further timer ticks.
         assert_eq!(count, N_COLLECTIONS as usize);
         let server_count = collection_count.load(Ordering::SeqCst);
         assert_eq!(
@@ -948,7 +939,6 @@ mod tests {
             SocketAddrV6::new(Ipv6Addr::LOCALHOST, 0, 0, 0),
             crate::default_refresh_interval(),
             None,
-            ScheduledCollections::Disabled,
             log,
         )
         .await
@@ -1009,7 +999,6 @@ mod tests {
             SocketAddrV6::new(Ipv6Addr::LOCALHOST, 0, 0, 0),
             crate::default_refresh_interval(),
             None,
-            ScheduledCollections::Disabled,
             log,
         )
         .await
@@ -1083,7 +1072,6 @@ mod tests {
             SocketAddrV6::new(Ipv6Addr::LOCALHOST, 0, 0, 0),
             crate::default_refresh_interval(),
             None,
-            ScheduledCollections::Disabled,
             log,
         )
         .await
@@ -1111,9 +1099,10 @@ mod tests {
         let before = Utc::now();
         collector.register_producer(endpoint);
 
-        // Request a collection, then wait for it to complete. We want to
-        // assert things about the actual timing in the test below.
-        force_collect(&collector, id);
+        // We don't manipulate time manually here, since this is pretty short
+        // and we want to assert things about the actual timing in the test
+        // below. The first collection is triggered by the interval timer,
+        // which fires once immediately.
         wait_for_condition(
             || async {
                 // We need to check if the server has had a collection
@@ -1177,7 +1166,6 @@ mod tests {
             SocketAddrV6::new(Ipv6Addr::LOCALHOST, 0, 0, 0),
             crate::default_refresh_interval(),
             None,
-            ScheduledCollections::Disabled,
             log,
         )
         .await
@@ -1240,10 +1228,13 @@ mod tests {
             same UUID",
         );
 
-        // Explicitly request a collection. The producer info watch channel
-        // was updated synchronously above, and the collection loop reads it
-        // when it dequeues the request, so this collection is guaranteed to
-        // target the new server.
+        // Explicitly request a collection rather than relying on the
+        // re-registered producer's rebuilt interval timer (whose immediate
+        // first tick may also start one; the assertions below tolerate
+        // both). The producer info watch channel was updated synchronously
+        // above, and the collection loop reads it when it dequeues the
+        // request, so this collection is guaranteed to target the new
+        // server.
         force_collect(&collector, id);
         wait_for_details(
             &mut details_rx,

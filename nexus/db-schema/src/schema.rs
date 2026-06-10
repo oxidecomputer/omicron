@@ -2903,6 +2903,7 @@ table! {
         time_dispatched -> Nullable<Timestamptz>,
         num_dispatched -> Int8,
         case_id -> Nullable<Uuid>,
+        alert_version -> Int8,
     }
 }
 
@@ -3277,6 +3278,7 @@ table! {
         alert_class -> crate::enums::AlertClassEnum,
         payload -> Jsonb,
         comment -> Text,
+        alert_version -> Int8,
     }
 }
 

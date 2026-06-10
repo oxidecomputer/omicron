@@ -121,7 +121,7 @@ This is particularly susceptible to happening with Tokio's paused timer, which w
 * https://github.com/oxidecomputer/omicron/commit/ca3b41b1e3f4[`ca3b41b1e3f4`] treats a `QueueFull` error as a transient `CondCheckError::NotYet`.
 * https://github.com/oxidecomputer/omicron/commit/9b5d906eb468[`9b5d906eb468`] advances Tokio's time by one Oximeter collection at a time, and uses a watch channel to signal that collection has been completed.
 ** This fix, while necessary, turned out to not be sufficient: it stopped advancing time once a collection completed, but kept advancing while one was in flight, so under load further timer ticks could still overflow the channel.
-** The followup https://github.com/oxidecomputer/omicron/commit/YYYY[`YYYY`] disables scheduled collections in the Oximeter agent tests entirely, and makes the tests request each collection explicitly. This prevents the bounded channel from ever filling up.
+** The followup https://github.com/oxidecomputer/omicron/commit/YYYY[`YYYY`] makes the Oximeter collection interval far longer than the test's runtime (effectively disabling periodic collections after the first one), and makes the tests request each further collection explicitly. This prevents the bounded channel from ever filling up.
 // FIXME: replace YYYY with the merged commit hash of the oximeter agent test fix.
 
 === Database time resolution mismatch [[database-time-resolution-mismatch]]

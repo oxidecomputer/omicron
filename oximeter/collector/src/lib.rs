@@ -7,7 +7,6 @@
 // Copyright 2025 Oxide Computer Company
 
 pub use collection_task::ForcedCollectionError;
-pub use collection_task::ScheduledCollections;
 use dropshot::ConfigDropshot;
 use dropshot::ConfigLogging;
 use dropshot::HttpError;
@@ -480,7 +479,6 @@ impl Oximeter {
                 args.address,
                 crate::default_refresh_interval(),
                 db_config,
-                ScheduledCollections::Enabled,
                 &log,
             )
             .await?,
