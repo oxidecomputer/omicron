@@ -30,12 +30,18 @@ use std::collections::BTreeMap;
 const STALE_SAGA_THRESHOLD: TimeDelta = TimeDelta::minutes(30);
 
 /// Per-case view of a parent saga case, built from its facts. Every fact on a
-/// saga case is about the same `saga_id`; at most one fact of each kind is
-/// expected.
+/// saga case is about the same `saga_id`, and a case carries at most one fact
+/// of each kind.
 struct ParentSagaCase {
     saga_id: steno::SagaId,
+    /// The fact to consider when advancing the case: at most one per kind
+    /// (the lowest fact UUID wins if a case pathologically carries several).
     not_progressing: Option<(FactUuid, SagaNotProgressingFactPayload)>,
     owner_not_current: Option<(FactUuid, SagaOwnerNotCurrentFactPayload)>,
+    /// Facts that should not exist: duplicates of a kind beyond the first.
+    /// These carry no information the kept fact doesn't; they are removed
+    /// unconditionally, regardless of what the observation says.
+    duplicate_facts: Vec<FactUuid>,
 }
 
 pub(super) fn analyze(builder: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
@@ -61,8 +67,17 @@ pub(super) fn analyze(builder: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
     {
         let case_id = case.id;
         let mut saga_id: Option<steno::SagaId> = None;
-        let mut not_progressing = None;
-        let mut owner_not_current = None;
+        let mut not_progressing: Option<(
+            FactUuid,
+            SagaNotProgressingFactPayload,
+        )> = None;
+        let mut owner_not_current: Option<(
+            FactUuid,
+            SagaOwnerNotCurrentFactPayload,
+        )> = None;
+        let mut duplicate_facts = Vec::new();
+        // `case.facts` iterates in fact UUID order, so the kept fact for
+        // each kind is deterministically the one with the lowest UUID.
         for fact in case.facts.iter() {
             let Some(saga_fact) = fact.payload.as_saga() else {
                 slog::warn!(
@@ -85,12 +100,29 @@ pub(super) fn analyze(builder: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
             }
             match saga_fact {
                 SagaFact::NotProgressing(p) => {
-                    not_progressing = Some((fact.id, p.clone()));
+                    if not_progressing.is_none() {
+                        not_progressing = Some((fact.id, p.clone()));
+                    } else {
+                        duplicate_facts.push(fact.id);
+                    }
                 }
                 SagaFact::OwnerNotCurrentGeneration(p) => {
-                    owner_not_current = Some((fact.id, p.clone()));
+                    if owner_not_current.is_none() {
+                        owner_not_current = Some((fact.id, p.clone()));
+                    } else {
+                        duplicate_facts.push(fact.id);
+                    }
                 }
             }
+        }
+        if !duplicate_facts.is_empty() {
+            slog::warn!(
+                &builder.log,
+                "Saga case has more than one fact of the same kind; \
+                 the duplicates will be removed";
+                "case_id" => %case_id,
+                "duplicate_fact_ids" => ?duplicate_facts,
+            );
         }
         let Some(saga_id) = saga_id else {
             slog::warn!(
@@ -102,7 +134,12 @@ pub(super) fn analyze(builder: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
         };
         parent_cases.insert(
             case_id,
-            ParentSagaCase { saga_id, not_progressing, owner_not_current },
+            ParentSagaCase {
+                saga_id,
+                not_progressing,
+                owner_not_current,
+                duplicate_facts,
+            },
         );
         case_for_saga.insert(saga_id, case_id);
     }
@@ -137,6 +174,11 @@ pub(super) fn analyze(builder: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
                 summary.saga_id,
             ));
             continue;
+        }
+        // Duplicate facts carry no information the kept facts don't; remove
+        // them regardless of what the observation says.
+        for fact_id in &summary.duplicate_facts {
+            case_mut.remove_fact(*fact_id);
         }
         if let Some((fact_id, payload)) = &summary.not_progressing {
             if desired_np.as_ref() != Some(payload) {
@@ -401,6 +443,20 @@ mod tests {
                 })
                 .unwrap();
         }
+        make_parent_with_saga_case_from_facts(
+            parent_sitrep_id,
+            inv_collection_id,
+            facts,
+        )
+    }
+
+    /// Like [`make_parent_with_saga_case`], but with caller-controlled
+    /// `Fact`s (e.g., for tests that need specific fact UUIDs).
+    fn make_parent_with_saga_case_from_facts(
+        parent_sitrep_id: SitrepUuid,
+        inv_collection_id: omicron_uuid_kinds::CollectionUuid,
+        facts: IdOrdMap<fm::case::Fact>,
+    ) -> Sitrep {
         let mut cases = IdOrdMap::new();
         cases
             .insert_unique(fm::Case {
@@ -858,6 +914,158 @@ mod tests {
             &facts[0].1,
             SagaFact::OwnerNotCurrentGeneration(p) if p.current_sec == sec
         ));
+        logctx.cleanup_successful();
+    }
+
+    fn fact_uuid(n: u128) -> FactUuid {
+        use omicron_uuid_kinds::GenericUuid;
+        FactUuid::from_untyped_uuid(uuid::Uuid::from_u128(n))
+    }
+
+    fn np_fact(
+        id: FactUuid,
+        created_sitrep_id: SitrepUuid,
+        saga: steno::SagaId,
+        time_created: chrono::DateTime<Utc>,
+        last_event_time: chrono::DateTime<Utc>,
+    ) -> fm::case::Fact {
+        fm::case::Fact {
+            id,
+            created_sitrep_id,
+            payload: SagaFact::NotProgressing(SagaNotProgressingFactPayload {
+                saga_id: saga,
+                saga_name: "test-saga".to_string(),
+                saga_state: SagaProgressState::Unwinding,
+                time_created,
+                last_event_time,
+            })
+            .into(),
+            comment: "parent saga fact".to_string(),
+        }
+    }
+
+    /// A pathological parent case carrying two `NotProgressing` facts
+    /// (which the engine never creates itself), where the kept fact (lowest
+    /// UUID) matches the current observation: the duplicate is removed and
+    /// the kept fact survives with its UUID intact.
+    #[test]
+    fn duplicate_fact_removed_when_kept_fact_matches() {
+        let (logctx, collection) = setup("saga_dup_kept_matches");
+        let id = saga_id(1);
+        let time_created = collection.time_done - TimeDelta::days(1);
+        let current = collection.time_done
+            - (STALE_SAGA_THRESHOLD + TimeDelta::minutes(5));
+        let old =
+            collection.time_done - (STALE_SAGA_THRESHOLD + TimeDelta::hours(2));
+        let parent_id = SitrepUuid::new_v4();
+        let kept_id = fact_uuid(1);
+        let dup_id = fact_uuid(2);
+        let mut parent_facts = IdOrdMap::new();
+        parent_facts
+            .insert_unique(np_fact(
+                kept_id,
+                parent_id,
+                id,
+                time_created,
+                current,
+            ))
+            .unwrap();
+        parent_facts
+            .insert_unique(np_fact(dup_id, parent_id, id, time_created, old))
+            .unwrap();
+        let parent = make_parent_with_saga_case_from_facts(
+            parent_id,
+            collection.id,
+            parent_facts,
+        );
+        // Still stale; the observation matches the kept fact exactly.
+        let observed = observed_map([ObservedSaga {
+            saga_id: id,
+            saga_name: "test-saga".to_string(),
+            saga_state: SagaProgressState::Unwinding,
+            time_created,
+            current_sec: None,
+            adopt_generation: Generation::new(),
+            last_event_time: Some(current),
+            owner_state: None,
+        }]);
+        let input = build_input(collection, Some(parent), observed);
+        let (sitrep, _report) = run_analyze(&logctx.log, &input);
+
+        let facts = saga_facts(&sitrep, true);
+        assert_eq!(facts.len(), 1, "the duplicate fact should be removed");
+        assert_eq!(
+            facts[0].0.id, kept_id,
+            "the kept fact matches the observation, so its UUID is stable",
+        );
+        logctx.cleanup_successful();
+    }
+
+    /// As above, but the kept fact (lowest UUID) is the stale one: both
+    /// parent facts are removed (the kept one for mismatching, the
+    /// duplicate unconditionally) and one fresh fact replaces them.
+    #[test]
+    fn duplicate_fact_removed_when_kept_fact_is_stale() {
+        let (logctx, collection) = setup("saga_dup_kept_stale");
+        let id = saga_id(1);
+        let time_created = collection.time_done - TimeDelta::days(1);
+        let current = collection.time_done
+            - (STALE_SAGA_THRESHOLD + TimeDelta::minutes(5));
+        let old =
+            collection.time_done - (STALE_SAGA_THRESHOLD + TimeDelta::hours(2));
+        let parent_id = SitrepUuid::new_v4();
+        let kept_id = fact_uuid(1);
+        let dup_id = fact_uuid(2);
+        let mut parent_facts = IdOrdMap::new();
+        parent_facts
+            .insert_unique(np_fact(kept_id, parent_id, id, time_created, old))
+            .unwrap();
+        parent_facts
+            .insert_unique(np_fact(
+                dup_id,
+                parent_id,
+                id,
+                time_created,
+                current,
+            ))
+            .unwrap();
+        let parent = make_parent_with_saga_case_from_facts(
+            parent_id,
+            collection.id,
+            parent_facts,
+        );
+        // Still stale; the observation matches the duplicate, not the kept
+        // fact.
+        let observed = observed_map([ObservedSaga {
+            saga_id: id,
+            saga_name: "test-saga".to_string(),
+            saga_state: SagaProgressState::Unwinding,
+            time_created,
+            current_sec: None,
+            adopt_generation: Generation::new(),
+            last_event_time: Some(current),
+            owner_state: None,
+        }]);
+        let input = build_input(collection, Some(parent), observed);
+        let (sitrep, _report) = run_analyze(&logctx.log, &input);
+
+        let facts = saga_facts(&sitrep, true);
+        assert_eq!(
+            facts.len(),
+            1,
+            "both parent facts should be removed and one fresh fact added",
+        );
+        assert_ne!(facts[0].0.id, kept_id, "the stale kept fact was removed");
+        assert_ne!(
+            facts[0].0.id, dup_id,
+            "the duplicate was removed unconditionally",
+        );
+        match &facts[0].1 {
+            SagaFact::NotProgressing(p) => {
+                assert_eq!(p.last_event_time, current);
+            }
+            other => panic!("expected NotProgressing, got {other:?}"),
+        }
         logctx.cleanup_successful();
     }
 }
