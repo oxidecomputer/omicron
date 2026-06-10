@@ -211,6 +211,28 @@ impl<'s> InstanceStateComputer<'s> {
         }
     }
 
+    /// Determine the [`external::InstanceState`] to report for the instance,
+    /// based on the provided `instance_state`, `vmm_state`, and `migration_id`.
+    ///
+    /// Note that these fields *must* all come from the the same instance record
+    /// in the database; otherwise, an incorrect state may be synthesized.
+    ///
+    /// # Panics
+    ///
+    /// In debug mode only, this function panics if it encounters a combination
+    /// of instance and VMM states that should not occur: namely, if the
+    /// instance is in [`InstanceState::Vmm`] but has no active VMM, or if it is
+    /// in any other [`InstanceState`] and *does* have an active VMM.
+    ///
+    /// These cases should be unrepresentable in the database due to CHECK
+    /// constraints on the `instance` table. If they are encountered here, it is
+    /// due to a programmer error; either the check constraint is not working
+    /// correctly or the instance and VMM records did not come from the same
+    /// database query. Therefore, we panic when running tests if these
+    /// conditions are encountered in order to loudly alert the programmer that
+    /// they've made a mistake. If we are not running in debug mode, we instead
+    /// produce a state based on the `InstanceState` so that Nexus does not
+    /// crash upon encountering an invalid situation.
     pub fn compute_state_from(
         instance_state: &'s InstanceState,
         migration_id: Option<&'s Uuid>,
@@ -220,6 +242,26 @@ impl<'s> InstanceStateComputer<'s> {
             .compute_state()
     }
 
+    /// Determine the [`external::InstanceState`] to report for the instance,
+    /// based on the state of the instance record and its active VMM record (if
+    /// one exists).
+    ///
+    /// # Panics
+    ///
+    /// In debug mode only, this function panics if it encounters a combination
+    /// of instance and VMM states that should not occur: namely, if the
+    /// instance is in [`InstanceState::Vmm`] but has no active VMM, or if it is
+    /// in any other [`InstanceState`] and *does* have an active VMM.
+    ///
+    /// These cases should be unrepresentable in the database due to CHECK
+    /// constraints on the `instance` table. If they are encountered here, it is
+    /// due to a programmer error; either the check constraint is not working
+    /// correctly or the instance and VMM records did not come from the same
+    /// database query. Therefore, we panic when running tests if these
+    /// conditions are encountered in order to loudly alert the programmer that
+    /// they've made a mistake. If we are not running in debug mode, we instead
+    /// produce a state based on the `InstanceState` so that Nexus does not
+    /// crash upon encountering an invalid situation.
     pub fn compute_state(&self) -> external::InstanceState {
         // We want to only report that an instance is `Stopped` when a new
         // `instance-start` saga is able to proceed. That means that:
@@ -295,11 +337,29 @@ impl<'s> InstanceStateComputer<'s> {
             }
             // - An instance with no VMM is always "stopped" (as long as it's
             //   not "starting" etc.)
+            (InstanceState::NoVmm, None) => external::InstanceState::Stopped,
+            // - The instance should not be in `InstanceState::Vmm` if there is
+            //   no active VMM record, this is probably a bug, but return
+            //   `InstanceState::Stopped`, because that's basically true
+            //   regardless.
+            (InstanceState::Vmm, None) => {
+                debug_assert!(
+                    false,
+                    "if the instance state is `InstanceState::Vmm`, there \
+                     should be a VMM state"
+                );
+                external::InstanceState::Stopped
+            }
             (InstanceState::NoVmm, _vmm_state) => {
-                debug_assert_eq!(_vmm_state, None);
+                debug_assert_eq!(
+                    _vmm_state, None,
+                    "if the instance is in `InstanceState::NoVmm`, there \
+                     should be no VMM state"
+                );
                 external::InstanceState::Stopped
             }
             // - If there's no VMM state, use the instance's state.
+            (instance_state, None) => instance_state.into(),
             (instance_state, _vmm_state) => {
                 debug_assert_eq!(
                     _vmm_state, None,
