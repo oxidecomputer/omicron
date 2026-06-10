@@ -40,6 +40,46 @@ use std::str::FromStr;
 // TODO(eliza): we could probably validate that the SHA consists only of the
 // expected hex digits and is of the expected length, but that gets a bit
 // complex and is not necessary here.
+///
+/// ## Known Limitations
+///
+/// Currently, the determination of whether or not the repository is "dirty"
+/// (contains uncommitted changes) in [`GitVersion::current`] relies on a build
+/// script for this crate, which may not be re-run under some circumstances. In
+/// particular, the build script currently emits a `cargo::rerun-if-changed`
+/// directive that ensures it is re-run any time the `.git/HEAD` file changes.
+/// This ensures that the git version is re-generated whenever a commit is made
+/// or a branch is checked out. In order to detect transitions between clean (no
+/// uncommitted changes) and dirty (uncommitted changes) states reliably, the
+/// build script must issue `cargo::rerun-if-changed` directives for...every
+/// file in the workspace. If it does this unconditionally, this results in this
+/// crate, and any other crates that depend on it, being rebuilt every time any
+/// file in the workspace changes. This could substantially increase the amount
+/// of code which must be compiled for incremental builds while a developer is
+/// working in the repository, since any changes would invalidate the build
+/// cache for all crates that depend on this one.
+///
+/// In the future, we could potentially enhance the build script to emit
+/// rerun-if-changed directives only when it is in a clean state, so that any
+/// change causes the git version to become dirty, but to cease doing so once
+/// the repository has become dirty --- it is still dirty if additional files
+/// change. While the repository is dirty, the build script would only emit
+/// `cargo::rerun-if-changed` directives for `.git/HEAD`. This avoids
+/// invalidating the build cache on any change in the repository, while
+/// improving the accuracy of detecting dirty repos. However, it still has
+/// potential deficiencies, such as missing a transition back to the "clean"
+/// state due to _deleting_ uncommitted added files, rather than making a new
+/// commit.
+///
+/// For now, we accept that the dirty flag may not always be set accurately,
+/// since the primary purpose of including these versions is to compare the Git
+/// SHAs of TUF repos produced by CI. In that case, we are comparing between
+/// commits, and the repo should never be dirty. So...whatever. In the future,
+/// we may want to improve this.
+///
+/// See [here][1] for discussion of this limitation.
+///
+/// [1]: https://github.com/oxidecomputer/omicron/pull/10578#discussion_r3384362440
 #[derive(Debug, serde_with::DeserializeFromStr)]
 pub struct GitVersion {
     // We use a `Cow` here so that we need not allocate when constructing a
