@@ -11,7 +11,6 @@
 //! [`nexus_types::fm::SagaFact`] for semantics.
 
 use crate::DbTypedUuid;
-use crate::Generation;
 use crate::SagaState;
 use crate::impl_enum_type;
 use chrono::{DateTime, Utc};
@@ -115,19 +114,15 @@ pub struct FmFactSaga {
     /// The saga this fact is about. Common to every `kind`, so it is always
     /// present (the column is `NOT NULL`).
     pub saga_id: Uuid,
-    /// The saga's name. Common to every `kind`, always present.
-    pub saga_name: String,
     pub kind: FmFactSagaKind,
 
     // Columns for the `NotProgressing` kind.
     pub saga_state: Option<SagaState>,
-    pub time_created: Option<DateTime<Utc>>,
     pub last_event_time: Option<DateTime<Utc>>,
 
     // Columns for the `OwnerNotCurrentGeneration` kind.
     pub current_sec: Option<DbTypedUuid<OmicronZoneKind>>,
     pub orphan_reason: Option<FmFactSagaOrphanReason>,
-    pub adopt_generation: Option<Generation>,
 }
 
 impl FmFactSaga {
@@ -146,20 +141,16 @@ impl FmFactSaga {
             created_sitrep_id: fact.created_sitrep_id.into(),
             comment: fact.comment.clone(),
             saga_id: saga_fact.saga_id().0,
-            saga_name: saga_fact.saga_name().to_string(),
             kind: FmFactSagaKind::NotProgressing,
             saga_state: None,
-            time_created: None,
             last_event_time: None,
             current_sec: None,
             orphan_reason: None,
-            adopt_generation: None,
         };
         match saga_fact {
             SagaFact::NotProgressing(p) => Self {
                 kind: FmFactSagaKind::NotProgressing,
                 saga_state: Some(p.saga_state.into()),
-                time_created: Some(p.time_created),
                 last_event_time: Some(p.last_event_time),
                 ..base
             },
@@ -167,7 +158,6 @@ impl FmFactSaga {
                 kind: FmFactSagaKind::OwnerNotCurrentGeneration,
                 current_sec: Some(p.current_sec.into()),
                 orphan_reason: Some(p.orphan_reason.into()),
-                adopt_generation: Some(Generation::from(p.adopt_generation)),
                 ..base
             },
         }
@@ -181,20 +171,15 @@ impl FmFactSaga {
     pub fn into_fact(self) -> Result<fm::case::Fact, Error> {
         let kind = self.kind;
         let saga_id = steno::SagaId(self.saga_id);
-        let saga_name = self.saga_name;
         let payload = match kind {
             FmFactSagaKind::NotProgressing => FactPayload::Saga(
                 SagaFact::NotProgressing(SagaNotProgressingFactPayload {
                     saga_id,
-                    saga_name,
                     saga_state: saga_progress_state(
                         self.saga_state.ok_or_else(|| {
                             missing_column(kind, "saga_state")
                         })?,
                     )?,
-                    time_created: self
-                        .time_created
-                        .ok_or_else(|| missing_column(kind, "time_created"))?,
                     last_event_time: self.last_event_time.ok_or_else(|| {
                         missing_column(kind, "last_event_time")
                     })?,
@@ -204,7 +189,6 @@ impl FmFactSaga {
                 FactPayload::Saga(SagaFact::OwnerNotCurrentGeneration(
                     SagaOwnerNotCurrentFactPayload {
                         saga_id,
-                        saga_name,
                         current_sec: self
                             .current_sec
                             .ok_or_else(|| missing_column(kind, "current_sec"))?
@@ -215,9 +199,6 @@ impl FmFactSaga {
                                 missing_column(kind, "orphan_reason")
                             })?
                             .into(),
-                        adopt_generation: *self.adopt_generation.ok_or_else(
-                            || missing_column(kind, "adopt_generation"),
-                        )?,
                     },
                 ))
             }

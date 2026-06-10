@@ -15,7 +15,6 @@
 use crate::inventory::ZpoolHealth;
 use crate::observed_saga::{OrphanedReason, SagaProgressState};
 use chrono::{DateTime, Utc};
-use omicron_common::api::external::Generation;
 use omicron_uuid_kinds::{
     CollectionUuid, OmicronZoneUuid, PhysicalDiskUuid, ZpoolUuid,
 };
@@ -133,48 +132,42 @@ impl SagaFact {
             SagaFact::OwnerNotCurrentGeneration(p) => p.saga_id,
         }
     }
-
-    /// The saga's name. Common to every kind of saga fact.
-    pub fn saga_name(&self) -> &str {
-        match self {
-            SagaFact::NotProgressing(p) => &p.saga_name,
-            SagaFact::OwnerNotCurrentGeneration(p) => &p.saga_name,
-        }
-    }
 }
 
 /// Payload of a [`SagaFact::NotProgressing`] fact.
+///
+/// Payloads carry only the fields that define the condition: the subject's
+/// ID, plus the parameters whose change means the condition itself changed
+/// (which rotates the fact). Anything a human wants for presentation (e.g.,
+/// the saga's name) is looked up from the database when a case is acted on;
+/// a case is only open while its saga row still exists.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct SagaNotProgressingFactPayload {
     /// The saga this fact (and its parent case) is about.
     pub saga_id: steno::SagaId,
-    /// The saga's name (e.g. `instance-start`).
-    pub saga_name: String,
     /// Whether the saga is running forward or unwinding. Unwinding-but-stuck
     /// is the more dangerous case (it may have half-torn-down resources).
     pub saga_state: SagaProgressState,
-    /// When the saga was created.
-    pub time_created: DateTime<Utc>,
-    /// The latest `saga_node_event.event_time` observed for this saga, i.e.
-    /// the last durably-recorded step. The case was opened because
-    /// `now - last_event_time` exceeded the staleness threshold.
+    /// The last durably-recorded progress: the latest
+    /// `saga_node_event.event_time` observed for this saga, or the saga's
+    /// creation time if it has recorded no node events at all. The case was
+    /// opened because `now - last_event_time` exceeded the staleness
+    /// threshold.
     pub last_event_time: DateTime<Utc>,
 }
 
 /// Payload of a [`SagaFact::OwnerNotCurrentGeneration`] fact.
+///
+/// See [`SagaNotProgressingFactPayload`] for why payloads carry only
+/// condition-defining fields.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct SagaOwnerNotCurrentFactPayload {
     /// The saga this fact (and its parent case) is about.
     pub saga_id: steno::SagaId,
-    /// The saga's name (e.g. `instance-start`).
-    pub saga_name: String,
     /// The owning Nexus zone (`saga.current_sec`). This fact only fires when
     /// the saga has a current SEC, so it is always present.
     pub current_sec: OmicronZoneUuid,
     /// Why the owner is not current: quiesced (older generation) or expunged
     /// (no `db_metadata_nexus` record).
     pub orphan_reason: OrphanedReason,
-    /// `saga.adopt_generation`: how many times the saga has been re-adopted
-    /// to a SEC. Recorded for triage (thrashing across Nexus restarts).
-    pub adopt_generation: Generation,
 }

@@ -2361,11 +2361,8 @@ mod tests {
                         fm::SagaFact::NotProgressing(
                             fm::SagaNotProgressingFactPayload {
                                 saga_id: steno::SagaId(uuid::Uuid::new_v4()),
-                                saga_name: "test-saga".to_string(),
                                 saga_state:
                                     nexus_types::observed_saga::SagaProgressState::Unwinding,
-                                time_created:
-                                    omicron_common::now_db_precision(),
                                 last_event_time:
                                     omicron_common::now_db_precision(),
                             },
@@ -2383,13 +2380,10 @@ mod tests {
                         fm::SagaFact::OwnerNotCurrentGeneration(
                             fm::SagaOwnerNotCurrentFactPayload {
                                 saga_id: steno::SagaId(uuid::Uuid::new_v4()),
-                                saga_name: "test-saga".to_string(),
                                 current_sec:
                                     omicron_uuid_kinds::OmicronZoneUuid::new_v4(),
                                 orphan_reason:
                                     nexus_types::observed_saga::OrphanedReason::Quiesced,
-                                adopt_generation:
-                                    omicron_common::api::external::Generation::new(),
                             },
                         ),
                     ),

@@ -7800,9 +7800,11 @@ CREATE TABLE IF NOT EXISTS omicron.public.fm_fact_saga (
 
     -- The saga this fact is about. Common to every kind of saga fact (the
     -- case is keyed by it), so it is always present regardless of `kind`.
+    --
+    -- Fact payloads carry only the fields that define the condition; data
+    -- that merely describes the saga (e.g., its name) is looked up from the
+    -- saga table when a case is acted on.
     saga_id UUID NOT NULL,
-    -- The saga's name (e.g. 'instance-start'). Common to every kind.
-    saga_name TEXT NOT NULL,
 
     -- Which saga fact this row represents. The columns below are populated
     -- according to this discriminant (see the CHECK constraint).
@@ -7810,14 +7812,12 @@ CREATE TABLE IF NOT EXISTS omicron.public.fm_fact_saga (
 
     -- Columns for a 'not_progressing' fact. NULL for any other kind.
     saga_state omicron.public.saga_state,
-    time_created TIMESTAMPTZ,
     last_event_time TIMESTAMPTZ,
 
     -- Columns for an 'owner_not_current_generation' fact. NULL for any other
     -- kind.
     current_sec UUID,
     orphan_reason omicron.public.fm_fact_saga_orphan_reason,
-    adopt_generation INT8,
 
     PRIMARY KEY (sitrep_id, id),
 
@@ -7827,7 +7827,6 @@ CREATE TABLE IF NOT EXISTS omicron.public.fm_fact_saga (
     CONSTRAINT not_progressing_columns_present CHECK (
         kind != 'not_progressing' OR (
             saga_state IS NOT NULL
-            AND time_created IS NOT NULL
             AND last_event_time IS NOT NULL
         )
     ),
@@ -7835,7 +7834,6 @@ CREATE TABLE IF NOT EXISTS omicron.public.fm_fact_saga (
         kind != 'owner_not_current_generation' OR (
             current_sec IS NOT NULL
             AND orphan_reason IS NOT NULL
-            AND adopt_generation IS NOT NULL
         )
     )
 );

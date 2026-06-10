@@ -3276,14 +3276,11 @@ table! {
         created_sitrep_id -> Uuid,
         comment -> Text,
         saga_id -> Uuid,
-        saga_name -> Text,
         kind -> crate::enums::FmFactSagaKindEnum,
         saga_state -> Nullable<crate::enums::SagaStateEnum>,
-        time_created -> Nullable<Timestamptz>,
         last_event_time -> Nullable<Timestamptz>,
         current_sec -> Nullable<Uuid>,
         orphan_reason -> Nullable<crate::enums::FmFactSagaOrphanReasonEnum>,
-        adopt_generation -> Nullable<Int8>,
     }
 }
 

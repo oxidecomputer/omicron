@@ -285,9 +285,7 @@ fn desired_not_progressing(
     {
         Some(SagaNotProgressingFactPayload {
             saga_id: obs.saga_id,
-            saga_name: obs.saga_name.clone(),
             saga_state: obs.saga_state,
-            time_created: obs.time_created,
             last_event_time: last_progress,
         })
     } else {
@@ -306,10 +304,8 @@ fn desired_owner_not_current(
     let current_sec = obs.current_sec?;
     Some(SagaOwnerNotCurrentFactPayload {
         saga_id: obs.saga_id,
-        saga_name: obs.saga_name.clone(),
         current_sec,
         orphan_reason: reason,
-        adopt_generation: obs.adopt_generation,
     })
 }
 
@@ -636,9 +632,7 @@ mod tests {
             inv_id,
             [SagaFact::NotProgressing(SagaNotProgressingFactPayload {
                 saga_id: id,
-                saga_name: "test-saga".to_string(),
                 saga_state: SagaProgressState::Unwinding,
-                time_created: Utc::now() - TimeDelta::days(1),
                 last_event_time: stale,
             })],
         );
@@ -664,9 +658,7 @@ mod tests {
             - (STALE_SAGA_THRESHOLD + TimeDelta::minutes(5));
         let payload = SagaNotProgressingFactPayload {
             saga_id: id,
-            saga_name: "test-saga".to_string(),
             saga_state: SagaProgressState::Unwinding,
-            time_created: Utc::now() - TimeDelta::days(1),
             last_event_time: stale,
         };
         let parent_id = SitrepUuid::new_v4();
@@ -679,12 +671,12 @@ mod tests {
         let parent_fact_id =
             parent.cases.iter().next().unwrap().facts.iter().next().unwrap().id;
         // Observed saga matches the parent fact exactly (same last_event_time,
-        // same created time, same state).
+        // same state).
         let observed = observed_map([ObservedSaga {
             saga_id: id,
             saga_name: "test-saga".to_string(),
             saga_state: SagaProgressState::Unwinding,
-            time_created: payload.time_created,
+            time_created: Utc::now() - TimeDelta::days(1),
             current_sec: None,
             adopt_generation: Generation::new(),
             last_event_time: Some(stale),
@@ -716,9 +708,7 @@ mod tests {
             inv_id,
             [SagaFact::NotProgressing(SagaNotProgressingFactPayload {
                 saga_id: id,
-                saga_name: "test-saga".to_string(),
                 saga_state: SagaProgressState::Unwinding,
-                time_created,
                 last_event_time: old,
             })],
         );
@@ -767,9 +757,7 @@ mod tests {
             collection.id,
             [SagaFact::NotProgressing(SagaNotProgressingFactPayload {
                 saga_id: id,
-                saga_name: "test-saga".to_string(),
                 saga_state: SagaProgressState::Unwinding,
-                time_created: Utc::now() - TimeDelta::days(1),
                 last_event_time: stale,
             })],
         );
@@ -813,10 +801,8 @@ mod tests {
             [SagaFact::OwnerNotCurrentGeneration(
                 SagaOwnerNotCurrentFactPayload {
                     saga_id: id,
-                    saga_name: "test-saga".to_string(),
                     current_sec: OmicronZoneUuid::new_v4(),
                     orphan_reason: OrphanedReason::Quiesced,
-                    adopt_generation: Generation::new(),
                 },
             )],
         );
@@ -858,10 +844,8 @@ mod tests {
         let sec = OmicronZoneUuid::new_v4();
         let owner_payload = SagaOwnerNotCurrentFactPayload {
             saga_id: id,
-            saga_name: "test-saga".to_string(),
             current_sec: sec,
             orphan_reason: OrphanedReason::Quiesced,
-            adopt_generation: Generation::new(),
         };
         let parent = make_parent_with_saga_case(
             SitrepUuid::new_v4(),
@@ -869,9 +853,7 @@ mod tests {
             [
                 SagaFact::NotProgressing(SagaNotProgressingFactPayload {
                     saga_id: id,
-                    saga_name: "test-saga".to_string(),
                     saga_state: SagaProgressState::Unwinding,
-                    time_created: Utc::now() - TimeDelta::days(1),
                     last_event_time: stale,
                 }),
                 SagaFact::OwnerNotCurrentGeneration(owner_payload.clone()),
@@ -926,7 +908,6 @@ mod tests {
         id: FactUuid,
         created_sitrep_id: SitrepUuid,
         saga: steno::SagaId,
-        time_created: chrono::DateTime<Utc>,
         last_event_time: chrono::DateTime<Utc>,
     ) -> fm::case::Fact {
         fm::case::Fact {
@@ -934,9 +915,7 @@ mod tests {
             created_sitrep_id,
             payload: SagaFact::NotProgressing(SagaNotProgressingFactPayload {
                 saga_id: saga,
-                saga_name: "test-saga".to_string(),
                 saga_state: SagaProgressState::Unwinding,
-                time_created,
                 last_event_time,
             })
             .into(),
@@ -962,16 +941,10 @@ mod tests {
         let dup_id = fact_uuid(2);
         let mut parent_facts = IdOrdMap::new();
         parent_facts
-            .insert_unique(np_fact(
-                kept_id,
-                parent_id,
-                id,
-                time_created,
-                current,
-            ))
+            .insert_unique(np_fact(kept_id, parent_id, id, current))
             .unwrap();
         parent_facts
-            .insert_unique(np_fact(dup_id, parent_id, id, time_created, old))
+            .insert_unique(np_fact(dup_id, parent_id, id, old))
             .unwrap();
         let parent = make_parent_with_saga_case_from_facts(
             parent_id,
@@ -1018,16 +991,10 @@ mod tests {
         let dup_id = fact_uuid(2);
         let mut parent_facts = IdOrdMap::new();
         parent_facts
-            .insert_unique(np_fact(kept_id, parent_id, id, time_created, old))
+            .insert_unique(np_fact(kept_id, parent_id, id, old))
             .unwrap();
         parent_facts
-            .insert_unique(np_fact(
-                dup_id,
-                parent_id,
-                id,
-                time_created,
-                current,
-            ))
+            .insert_unique(np_fact(dup_id, parent_id, id, current))
             .unwrap();
         let parent = make_parent_with_saga_case_from_facts(
             parent_id,
