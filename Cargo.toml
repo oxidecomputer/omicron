@@ -259,6 +259,7 @@ default-members = [
     "gateway-test-utils",
     "gateway-types",
     "gateway-types/versions",
+    "git-version",
     "illumos-utils",
     "installinator-api",
     "installinator-common",
