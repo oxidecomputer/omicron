@@ -357,9 +357,10 @@ async fn authorize_one_resource(
                     "result" => ?result,
                 );
                 let summary = match result {
-                    Ok(_) => '\u{2714}', // ✔
-                    Err(Error::Forbidden)
-                    | Err(Error::ObjectNotFound { .. }) => '\u{2718}', // ✘
+                    Ok(_) => '\u{2714}',                 // ✔
+                    Err(Error::Forbidden) => '\u{2718}', // ✘ 403, visible
+                    // ∅ 404, hidden
+                    Err(Error::ObjectNotFound { .. }) => '\u{2205}',
                     Err(Error::Unauthenticated { .. }) => '!',
                     Err(_) => '\u{26a0}', // ⚠
                 };
@@ -447,6 +448,19 @@ async fn test_conferred_roles() {
         ResourceBuilder::new(&opctx, &datastore, &mut coverage, main_silo_id);
     builder.new_resource(authz::FLEET);
     builder.new_resource(authz::IP_POOL_LIST);
+    // A second Silo, distinct from the conferring users' own (main) Silo. A user
+    // whose main-Silo role confers a Fleet role is effectively a Fleet-level
+    // principal and must be able to reach OTHER Silos too; the Fleet-only
+    // resources above can't exercise that cross-Silo path. This also exercises
+    // the 404-vs-403 distinction: a user with no path to this Silo can't even
+    // see it, so it gets a 404 (∅) rather than a 403 (✘).
+    let other_silo_id: Uuid =
+        "22222222-2222-4222-8222-222222222222".parse().unwrap();
+    builder.new_resource(authz::Silo::new(
+        authz::FLEET,
+        other_silo_id,
+        LookupType::ByName("other-silo".to_string()),
+    ));
     let test_resources = builder.build();
 
     // We also create a Silo because the ResourceBuilder will create for us
