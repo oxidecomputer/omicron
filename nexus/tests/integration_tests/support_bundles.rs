@@ -972,7 +972,7 @@ async fn test_support_bundle_fm_case_id(cptestctx: &ControlPlaneTestContext) {
     let user_bundle = bundle_create(&client).await.unwrap();
 
     // The FM provenance path is gated by a sitrep-generation guard, so we
-    // need a sitrep present before calling. Insert one at generation 0; the
+    // need a sitrep present before calling. Insert one at generation 1; the
     // FM call below uses the same expected generation.
     let sitrep = Sitrep {
         metadata: SitrepMetadata {

@@ -150,7 +150,6 @@ use nexus_db_lookup::LookupPath;
 use nexus_db_lookup::lookup;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
-use nexus_db_queries::db::datastore::AlertProvenance;
 use nexus_db_queries::db::model::Alert;
 use nexus_db_queries::db::model::AlertClass;
 use nexus_db_queries::db::model::AlertDeliveryState;
@@ -174,7 +173,11 @@ use omicron_uuid_kinds::WebhookDeliveryUuid;
 use uuid::Uuid;
 
 impl Nexus {
-    /// Publish a new alert, with the provided `id`, `alert_class`, and
+    /// Publish a new alert, with the provided `id`.
+    ///
+    /// The alert's class and schema version are determined by the
+    /// [`nexus_types::alert::AlertPayload`] trait implementation of the
+    /// provided `alert` value, and the value is serialized to form the alert's
     /// JSON data payload.
     ///
     /// If this method returns `Ok`, the event has been durably recorded in
@@ -183,27 +186,14 @@ impl Nexus {
     /// event to receivers.  However, if (for whatever reason) this Nexus fails
     /// to do that, the event remains durably in the database to be dispatched
     /// and delivered by someone else.
-    ///
-    /// Note: as of this writing, this method has no production callers; it
-    /// is exercised only by integration tests under
-    /// `tests/integration_tests/webhooks.rs`. It is preserved as the
-    /// framework entry point for recording control-plane events per the
-    /// module-level docs and RFD 538.
-    pub async fn alert_publish(
+    pub async fn alert_publish<A: nexus_types::alert::AlertPayload>(
         &self,
         opctx: &OpContext,
         id: AlertUuid,
-        class: impl Into<AlertClass>,
-        event: serde_json::Value,
+        alert: &A,
     ) -> Result<Alert, Error> {
-        let alert = self
-            .datastore()
-            .alert_create(
-                opctx,
-                Alert::new(id, class, event),
-                AlertProvenance::Unspecified,
-            )
-            .await?;
+        let alert = Alert::new(id, alert)?;
+        let alert = self.datastore().alert_create(opctx, alert).await?;
 
         // Once the alert has been inserted, activate the dispatcher task to
         // ensure its propagated to receivers.

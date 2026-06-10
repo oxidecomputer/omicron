@@ -850,12 +850,13 @@ impl DataStore {
         Ok(())
     }
 
-    /// Returns the subset of `candidates` for which a marker row exists in
-    /// `rendezvous_support_bundle_created`. Used by FM analysis to see which
-    /// support bundle requests on closed cases have been satisfied, to
-    /// determine whether any cases can be dropped (see
+    /// Given a set of support bundle ids, returns those that have a creation
+    /// marker row in the FM `rendezvous_support_bundle_created` table (i.e. the
+    /// support bundles that FM rendezvous has already created). Used by FM
+    /// analysis to tell which support bundle requests on closed cases have been
+    /// satisfied, to determine whether any cases can be dropped (see
     /// `nexus_fm::analysis_input::Builder::build`).
-    pub async fn support_bundle_markers_existing_in(
+    pub async fn fm_rendezvous_existing_support_bundle_markers(
         &self,
         opctx: &OpContext,
         candidates: &[SupportBundleUuid],
@@ -2421,12 +2422,13 @@ mod test {
     }
 
     #[tokio::test]
-    async fn support_bundle_markers_existing_in_returns_only_present_ids() {
+    async fn fm_rendezvous_existing_support_bundle_markers_returns_only_present_ids()
+     {
         use nexus_db_model::fm::RendezvousSupportBundleCreated;
         use nexus_db_schema::schema::rendezvous_support_bundle_created::dsl as bundle_marker_dsl;
 
         let logctx = dev::test_setup_log(
-            "support_bundle_markers_existing_in_returns_only_present_ids",
+            "fm_rendezvous_existing_support_bundle_markers_returns_only_present_ids",
         );
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
@@ -2458,7 +2460,7 @@ mod test {
 
         let candidates = vec![present_a, absent, present_b];
         let existing = datastore
-            .support_bundle_markers_existing_in(opctx, &candidates)
+            .fm_rendezvous_existing_support_bundle_markers(opctx, &candidates)
             .await
             .expect("query should succeed");
 
@@ -2472,15 +2474,16 @@ mod test {
     }
 
     #[tokio::test]
-    async fn support_bundle_markers_existing_in_empty_input_returns_empty() {
+    async fn fm_rendezvous_existing_support_bundle_markers_empty_input_returns_empty()
+     {
         let logctx = dev::test_setup_log(
-            "support_bundle_markers_existing_in_empty_input_returns_empty",
+            "fm_rendezvous_existing_support_bundle_markers_empty_input_returns_empty",
         );
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
         let existing = datastore
-            .support_bundle_markers_existing_in(opctx, &[])
+            .fm_rendezvous_existing_support_bundle_markers(opctx, &[])
             .await
             .expect("empty input must return Ok");
 
@@ -2491,12 +2494,13 @@ mod test {
     }
 
     #[tokio::test]
-    async fn support_bundle_markers_existing_in_explain_no_full_scan() {
+    async fn fm_rendezvous_existing_support_bundle_markers_explain_no_full_scan()
+     {
         use crate::db::explain::ExplainableAsync;
         use nexus_db_schema::schema::rendezvous_support_bundle_created::dsl as bundle_marker_dsl;
 
         let logctx = dev::test_setup_log(
-            "support_bundle_markers_existing_in_explain_no_full_scan",
+            "fm_rendezvous_existing_support_bundle_markers_explain_no_full_scan",
         );
         let db = TestDatabase::new_with_pool(&logctx.log).await;
         let pool = db.pool();

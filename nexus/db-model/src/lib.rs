@@ -470,6 +470,7 @@ pub(crate) use impl_enum_wrapper;
 /// our database into our model types. See [`VpcRouterKind`] for a sample usage.
 macro_rules! impl_enum_type {
     (
+        $(#[doc = $doc:expr])*
         $diesel_type:ident:
 
         $(#[$model_meta:meta])*
@@ -477,6 +478,7 @@ macro_rules! impl_enum_type {
 
         $($enum_item:ident => $sql_value:literal)+
     ) => {
+        $(#[doc = $doc])*
         $(#[$model_meta])*
         #[diesel(sql_type = ::nexus_db_schema::enums::$diesel_type)]
         pub enum $model_type {

@@ -8639,6 +8639,7 @@ name = "omicron-ledger"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "atomicwrites",
  "camino",
  "camino-tempfile",
  "dropshot",

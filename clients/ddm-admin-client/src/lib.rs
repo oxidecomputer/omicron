@@ -13,6 +13,7 @@ pub use ddm_admin_client::types;
 
 use ddm_admin_client::Client as InnerClient;
 use either::Either;
+use omicron_common::address::DDMD_PORT;
 use oxnet::Ipv6Net;
 use sled_hardware_types::underlay::BOOTSTRAP_MASK;
 use sled_hardware_types::underlay::BOOTSTRAP_PREFIX;
@@ -25,9 +26,6 @@ use std::net::SocketAddrV6;
 use thiserror::Error;
 
 use crate::types::EnableStatsRequest;
-
-// TODO-cleanup Is it okay to hardcode this port number here?
-const DDMD_PORT: u16 = 8000;
 
 #[derive(Debug, Error, SlogInlineError)]
 pub enum DdmError {

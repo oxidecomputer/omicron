@@ -6,7 +6,7 @@ use super::rng;
 use anyhow::Context;
 use fm::analysis_reports;
 use iddqd::id_ord_map::{self, IdOrdMap};
-use nexus_types::alert::AlertClass;
+use nexus_types::alert::AlertPayload;
 use nexus_types::fm;
 use nexus_types::support_bundle::BundleDataSelection;
 use omicron_uuid_kinds::CaseUuid;
@@ -153,12 +153,15 @@ impl CaseBuilder {
         }
     }
 
-    pub fn request_alert(
+    pub fn request_alert<A: AlertPayload>(
         &mut self,
-        class: AlertClass,
-        alert: &impl serde::Serialize,
+        alert: &A,
         comment: impl ToString,
     ) -> anyhow::Result<()> {
+        let class = A::CLASS;
+        let version = A::VERSION;
+        let payload_type = std::any::type_name::<A>();
+
         let id = loop {
             let id = self.rng.next_alert();
             if !self.case.alerts_requested.contains_key(&id) {
@@ -168,9 +171,13 @@ impl CaseBuilder {
         let req = fm::case::AlertRequest {
             id,
             class,
+            version,
             requested_sitrep_id: self.sitrep_id,
-            payload: serde_json::to_value(&alert).with_context(|| {
-                format!("failed to serialize payload for {class:?} alert")
+            payload: serde_json::to_value(alert).with_context(|| {
+                format!(
+                    "failed to serialize payload for {class} v{version} alert \
+                     (Rust type {payload_type})",
+                )
             })?,
             comment: comment.to_string(),
         };
@@ -185,12 +192,16 @@ impl CaseBuilder {
             "requested an alert";
             "alert_id" => %id,
             "alert_class" => ?class,
+            "alert_version" => version,
+            "alert_payload_type" => %payload_type,
             "comment" => %comment,
         );
         self.report_log
             .entry("requested alert")
             .kv("alert_id", id)
             .kv("alert_class", &class)
+            .kv("alert_version", version)
+            .kv("alert_payload_type", payload_type)
             .comment(comment);
         self.alerts_changed = true;
         Ok(())
@@ -333,12 +344,13 @@ impl iddqd::IdOrdItem for CaseBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nexus_types::alert::AlertClass;
+    use nexus_types::alert::test_alerts;
     use nexus_types::support_bundle::BundleDataSelection;
+    use omicron_test_utils::dev;
 
-    fn make_all_cases() -> AllCases {
+    fn make_all_cases(log: &slog::Logger) -> AllCases {
         AllCases {
-            log: slog::Logger::root(slog::Discard, slog::o!()),
+            log: log.clone(),
             sitrep_id: SitrepUuid::new_v4(),
             cases: IdOrdMap::new(),
             rng: rng::SitrepBuilderRng::from_seed("make_all_cases"),
@@ -347,21 +359,24 @@ mod tests {
 
     #[test]
     fn dirty_bits_default_false() {
-        let mut all_cases = make_all_cases();
+        let logctx = dev::test_setup_log("dirty_bits_default_false");
+        let mut all_cases = make_all_cases(&logctx.log);
         let case = all_cases.open_case(fm::DiagnosisEngineKind::PowerShelf);
         assert!(!case.alerts_changed);
         assert!(!case.support_bundles_changed);
+        logctx.cleanup_successful();
     }
 
     #[test]
     fn request_alert_flips_alert_state() {
-        let mut all_cases = make_all_cases();
+        let logctx = dev::test_setup_log("request_alert_flips_alert_state");
+        let mut all_cases = make_all_cases(&logctx.log);
         assert!(!all_cases.alert_set_changed());
 
         {
             let mut case =
                 all_cases.open_case(fm::DiagnosisEngineKind::PowerShelf);
-            case.request_alert(AlertClass::TestFoo, &serde_json::json!({}), "")
+            case.request_alert(&test_alerts::Foo(serde_json::json!({})), "")
                 .unwrap();
             assert!(case.alerts_changed);
             assert!(!case.support_bundles_changed);
@@ -369,11 +384,14 @@ mod tests {
 
         assert!(all_cases.alert_set_changed());
         assert!(!all_cases.support_bundle_set_changed());
+        logctx.cleanup_successful();
     }
 
     #[test]
     fn request_support_bundle_flips_bundle_state() {
-        let mut all_cases = make_all_cases();
+        let logctx =
+            dev::test_setup_log("request_support_bundle_flips_bundle_state");
+        let mut all_cases = make_all_cases(&logctx.log);
         assert!(!all_cases.support_bundle_set_changed());
 
         {
@@ -386,5 +404,6 @@ mod tests {
 
         assert!(all_cases.support_bundle_set_changed());
         assert!(!all_cases.alert_set_changed());
+        logctx.cleanup_successful();
     }
 }

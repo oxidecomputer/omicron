@@ -23,6 +23,7 @@ use futures::future::BoxFuture;
 use gateway_test_utils::setup::GatewayTestContext;
 use iddqd::IdOrdMap;
 use internal_dns_types::config::DnsConfigBuilder;
+use internal_dns_types::config::HostSwitchZonePorts;
 use internal_dns_types::names::DNS_ZONE_EXTERNAL_TESTING;
 use internal_dns_types::names::ServiceName;
 use nexus_config::Database;
@@ -146,6 +147,7 @@ pub struct ControlPlaneStarter<'a, N: NexusServer> {
     pub gateway: BTreeMap<SwitchSlot, GatewayTestContext>,
     pub dendrite: RwLock<HashMap<SwitchSlot, dev::dendrite::DendriteInstance>>,
     pub mgd: HashMap<SwitchSlot, dev::maghemite::MgdInstance>,
+    pub ddm: HashMap<SwitchSlot, dev::maghemite::DdmInstance>,
 
     // NOTE: Only exists after starting Nexus, until external Nexus is
     // initialized.
@@ -203,6 +205,7 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
             gateway: BTreeMap::new(),
             dendrite: RwLock::new(HashMap::new()),
             mgd: HashMap::new(),
+            ddm: HashMap::new(),
             nexus_internal: None,
             nexus_internal_addr: None,
             external_dns_zone_name: None,
@@ -465,6 +468,17 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
         self.config.pkg.mgd.insert(switch_slot, config);
     }
 
+    pub async fn start_ddm(&mut self, switch_slot: SwitchSlot) {
+        let log = &self.logctx.log;
+        debug!(log, "Starting DDM sim"; "switch_slot" => ?switch_slot);
+
+        let ddm = dev::maghemite::DdmInstance::start().await.unwrap();
+        let port = ddm.port;
+        self.ddm.insert(switch_slot, ddm);
+
+        debug!(log, "DDM sim started"; "port" => port);
+    }
+
     pub async fn record_switch_dns(
         &mut self,
         sled_id: SledUuid,
@@ -483,9 +497,18 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
             .host_zone_switch(
                 sled_id,
                 Ipv6Addr::LOCALHOST,
-                self.dendrite.read().unwrap().get(&switch_slot).unwrap().port,
-                self.gateway.get(&switch_slot).unwrap().port,
-                self.mgd.get(&switch_slot).unwrap().port,
+                HostSwitchZonePorts {
+                    dendrite: self
+                        .dendrite
+                        .read()
+                        .unwrap()
+                        .get(&switch_slot)
+                        .unwrap()
+                        .port,
+                    mgs: self.gateway.get(&switch_slot).unwrap().port,
+                    mgd: self.mgd.get(&switch_slot).unwrap().port,
+                    ddm: self.ddm.get(&switch_slot).unwrap().port,
+                },
             )
             .unwrap()
     }
@@ -1254,6 +1277,7 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
             dendrite: RwLock::new(self.dendrite.into_inner().unwrap()),
             stopped_dendrite_ports: RwLock::new(HashMap::new()),
             mgd: self.mgd,
+            ddm: self.ddm,
             external_dns_zone_name: self.external_dns_zone_name.unwrap(),
             external_dns: self.external_dns.unwrap(),
             internal_dns: self.internal_dns.unwrap(),
@@ -1294,6 +1318,9 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
         }
         for (_, mut mgd) in self.mgd {
             mgd.cleanup().await.unwrap();
+        }
+        for (_, mut ddm) in self.ddm {
+            ddm.cleanup().await.unwrap();
         }
         self.logctx.cleanup_successful();
     }
@@ -1636,6 +1663,12 @@ pub(crate) async fn setup_with_config_impl<N: NexusServer>(
                     }),
                 ),
                 (
+                    "start_ddm_switch0",
+                    Box::new(|builder| {
+                        builder.start_ddm(SwitchSlot::Switch0).boxed()
+                    }),
+                ),
+                (
                     "record_switch_dns",
                     Box::new(|builder| {
                         builder
@@ -1677,6 +1710,12 @@ pub(crate) async fn setup_with_config_impl<N: NexusServer>(
                         "start_mgd_switch1",
                         Box::new(|builder| {
                             builder.start_mgd(SwitchSlot::Switch1).boxed()
+                        }),
+                    ),
+                    (
+                        "start_ddm_switch1",
+                        Box::new(|builder| {
+                            builder.start_ddm(SwitchSlot::Switch1).boxed()
                         }),
                     ),
                     (

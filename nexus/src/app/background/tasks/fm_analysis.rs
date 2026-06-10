@@ -318,7 +318,7 @@ impl FmAnalysis {
         }
         let existing = self
             .datastore
-            .alert_markers_existing_in(opctx, &candidate_ids)
+            .fm_rendezvous_existing_alert_markers(opctx, &candidate_ids)
             .await
             .context("failed to look up alert marker existence")?;
         builder.add_existing_alerts(existing);
@@ -346,7 +346,10 @@ impl FmAnalysis {
         }
         let existing = self
             .datastore
-            .support_bundle_markers_existing_in(opctx, &candidate_ids)
+            .fm_rendezvous_existing_support_bundle_markers(
+                opctx,
+                &candidate_ids,
+            )
             .await
             .context("failed to look up support bundle marker existence")?;
         builder.add_existing_support_bundles(existing);

@@ -351,12 +351,17 @@ impl fmt::Display for InputReportMultilineDisplay<'_> {
                     writeln!(f, "{:indent$}* case {case_id}", "")?;
                     let indent = indent + 2;
                     metadata.display_multiline(indent, None).fmt(f)?;
+                    // A closed case is only carried forward when it has
+                    // outstanding work, so spell out why.
+                    writeln!(f, "{:indent$}copied forwards due to:", "")?;
+                    let indent = indent + 2;
                     if !unmarked_ereports.is_empty() {
                         writeln!(
                             f,
                             "{:indent$}ereports not yet marked seen:",
                             ""
                         )?;
+                        let indent = indent + 2;
                         for ereport_id in unmarked_ereports {
                             writeln!(
                                 f,
@@ -371,6 +376,7 @@ impl fmt::Display for InputReportMultilineDisplay<'_> {
                             "{:indent$}alert requests not yet satisfied:",
                             ""
                         )?;
+                        let indent = indent + 2;
                         for alert_id in unmarked_alert_requests {
                             writeln!(f, "{:indent$}* alert {alert_id}", "")?;
                         }
@@ -382,6 +388,7 @@ impl fmt::Display for InputReportMultilineDisplay<'_> {
                              satisfied:",
                             ""
                         )?;
+                        let indent = indent + 2;
                         for bundle_id in unmarked_support_bundle_requests {
                             writeln!(
                                 f,

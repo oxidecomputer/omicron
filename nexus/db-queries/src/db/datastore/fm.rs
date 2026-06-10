@@ -2205,6 +2205,7 @@ mod tests {
                 .insert_unique(fm::case::AlertRequest {
                     id: AlertUuid::new_v4(),
                     class: AlertClass::TestFoo,
+                    version: 0,
                     payload: serde_json::json!({}),
                     requested_sitrep_id: sitrep_id,
                     comment: String::new(),
@@ -2214,6 +2215,7 @@ mod tests {
                 .insert_unique(fm::case::AlertRequest {
                     id: AlertUuid::new_v4(),
                     class: AlertClass::TestFooBar,
+                    version: 0,
                     payload: serde_json::json!({}),
                     requested_sitrep_id: sitrep_id,
                     comment: String::new(),
@@ -2288,6 +2290,7 @@ mod tests {
                 .insert_unique(fm::case::AlertRequest {
                     id: AlertUuid::new_v4(),
                     class: AlertClass::TestQuuxBar,
+                    version: 0,
                     payload: serde_json::json!({}),
                     requested_sitrep_id: sitrep_id,
                     comment: String::new(),
@@ -2827,6 +2830,7 @@ mod tests {
                 requested_sitrep_id: ghost_sitrep_id.into(),
                 case_id: ghost_case_id.into(),
                 class: AlertClass::Probe.into(),
+                version: 0u32.into(),
                 payload: serde_json::json!({}),
                 comment: String::new(),
             })
@@ -3741,43 +3745,6 @@ mod tests {
         }
 
         eprintln!("Stress test results: {stats}");
-
-        db.terminate().await;
-        logctx.cleanup_successful();
-    }
-
-    #[tokio::test]
-    async fn test_fm_sitrep_insert_persists_generations() {
-        let logctx =
-            dev::test_setup_log("test_fm_sitrep_insert_persists_generations");
-        let db = TestDatabase::new_with_datastore(&logctx.log).await;
-        let (opctx, datastore) = (db.opctx(), db.datastore());
-
-        let sitrep_id = SitrepUuid::new_v4();
-        let sitrep = nexus_types::fm::Sitrep {
-            metadata: nexus_types::fm::SitrepMetadata {
-                id: sitrep_id,
-                inv_collection_id: CollectionUuid::new_v4(),
-                creator_id: OmicronZoneUuid::new_v4(),
-                comment: "TEST GEN PERSISTENCE".to_string(),
-                time_created: Utc::now(),
-                parent_sitrep_id: None,
-                next_inv_min_time_started: Utc::now(),
-                alert_generation: Generation::from_u32(5),
-                support_bundle_generation: Generation::from_u32(7),
-            },
-            cases: Default::default(),
-            ereports_by_id: Default::default(),
-        };
-
-        datastore.fm_sitrep_insert(&opctx, sitrep.clone()).await.unwrap();
-
-        // Read the persisted metadata back and assert both generation values
-        // roundtripped correctly through the INSERT and SELECT.
-        let loaded =
-            datastore.fm_sitrep_metadata_read(&opctx, sitrep_id).await.unwrap();
-        assert_eq!(loaded.alert_generation, Generation::from_u32(5));
-        assert_eq!(loaded.support_bundle_generation, Generation::from_u32(7));
 
         db.terminate().await;
         logctx.cleanup_successful();

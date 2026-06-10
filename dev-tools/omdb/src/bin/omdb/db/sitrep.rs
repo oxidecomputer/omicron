@@ -357,6 +357,8 @@ async fn cmd_db_sitrep_show(
         }
     }
     println!("    {NEXT_INV_MIN_START:>WIDTH$}: {next_inv_min_time_started}");
+    println!("    ");
+    println!("    rendezvous resource generation numbers:");
     println!("    {ALERT_GEN:>WIDTH$}: {alert_generation}");
     println!("    {SUPPORT_BUNDLE_GEN:>WIDTH$}: {support_bundle_generation}");
     println!("    ");
