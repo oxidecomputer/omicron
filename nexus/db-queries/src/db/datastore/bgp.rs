@@ -1185,8 +1185,124 @@ mod tests {
     use omicron_test_utils::dev;
     use oxnet::IpNet;
     use sled_agent_types::early_networking::ImportExportPolicy;
+    use sled_agent_types::early_networking::MaxPathConfig;
     use sled_agent_types::early_networking::RouterLifetimeConfig;
     use std::net::IpAddr;
+
+    #[tokio::test]
+    async fn test_update_bgp_config() {
+        let logctx = dev::test_setup_log("test_update_bgp_config");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let config_name: Name = "config-name".parse().unwrap();
+        let announce_name: Name = "announce-name".parse().unwrap();
+
+        let config = networking::BgpConfigCreate {
+            identity: IdentityMetadataCreateParams {
+                name: config_name.clone(),
+                description: String::from("a test config"),
+            },
+            asn: 47,
+            bgp_announce_set_id: NameOrId::Name(announce_name.clone()),
+            vrf: None,
+            shaper: None,
+            checker: None,
+            max_paths: MaxPathConfig::new(1).unwrap(),
+        };
+
+        let new_announce_name: Name = "new-announce-name".parse().unwrap();
+        let new_max_paths = MaxPathConfig::new(2).unwrap();
+        let new_config_name: Name = "new-config-name".parse().unwrap();
+        let new_description = String::from("updated description");
+
+        let update = networking::BgpConfigUpdate {
+            name: Some(new_config_name.clone()),
+            description: Some(new_description.clone()),
+            bgp_announce_set_id: Some(NameOrId::Name(
+                new_announce_name.clone(),
+            )),
+            max_paths: Some(new_max_paths),
+        };
+
+        // Make sure the announces exist
+        datastore
+            .bgp_create_announce_set(
+                &opctx,
+                &networking::BgpAnnounceSetCreate {
+                    identity: IdentityMetadataCreateParams {
+                        name: announce_name.clone(),
+                        description: String::from("the first announce set"),
+                    },
+                    announcement: Vec::default(),
+                },
+            )
+            .await
+            .expect("create bgp announce set");
+
+        let new_announce_id = datastore
+            .bgp_create_announce_set(
+                &opctx,
+                &networking::BgpAnnounceSetCreate {
+                    identity: IdentityMetadataCreateParams {
+                        name: new_announce_name.clone(),
+                        description: String::from("the second announce set"),
+                    },
+                    announcement: Vec::default(),
+                },
+            )
+            .await
+            .expect("create bgp announce set")
+            .0
+            .identity
+            .id;
+
+        // Try to update an inexistent BGP config
+        let res = datastore
+            .bgp_config_update(
+                &opctx,
+                &networking::BgpConfigSelector {
+                    name_or_id: NameOrId::Name(config_name.clone()),
+                },
+                &update,
+            )
+            .await;
+        assert!(res.is_err());
+
+        // Create the BGP config
+        let config_id = datastore
+            .bgp_config_create(&opctx, &config)
+            .await
+            .expect("create bgp config")
+            .identity
+            .id;
+
+        // Update the BGP config
+        datastore
+            .bgp_config_update(
+                &opctx,
+                &networking::BgpConfigSelector {
+                    name_or_id: NameOrId::Name(config_name.clone()),
+                },
+                &update,
+            )
+            .await
+            .expect("update bgp config");
+
+        // Verify the BGP config was updated
+        let bgp_config = datastore
+            .bgp_config_get(&opctx, &NameOrId::Id(config_id))
+            .await
+            .expect("get bgp config");
+
+        assert_eq!(
+            bgp_config.identity.name.to_string(),
+            new_config_name.to_string()
+        );
+        assert_eq!(bgp_config.identity.description, new_description);
+        assert_eq!(bgp_config.bgp_announce_set_id, new_announce_id);
+        assert_eq!(bgp_config.max_paths.0, new_max_paths.as_u8());
+    }
 
     #[tokio::test]
     async fn test_delete_bgp_config_and_announce_set_by_name() {
