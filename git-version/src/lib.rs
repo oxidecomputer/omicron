@@ -13,7 +13,7 @@
 //! This lives in its own crate, rather than someplace like `omicron-common`,
 //! because the `vergen` stuff in the build script will invoke
 //! `cargo::rerun_if_changed` and so on any time the Git SHA changes. For
-//! incremental builds, like during development, don't want to invalidate the
+//! incremental builds, like during development, we don't want to invalidate the
 //! build cache for *every* crate in the workspace every time the developer
 //! makes a commit; we'd rather just invalidate the ones that actually need the
 //! Git version.
