@@ -357,7 +357,6 @@ fn populate_uplink_table(cfg: &UserSpecifiedPortConfig) -> Table {
     };
 
     let mut uplink = Table::new();
-    uplink.insert("type", string_item("manual"));
 
     // routes = []
     let mut routes_out = Array::new();

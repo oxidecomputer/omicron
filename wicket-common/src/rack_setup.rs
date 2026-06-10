@@ -199,8 +199,12 @@ pub struct ManualPortConfig {
     pub tx_eq: Option<TxEqConfig>,
 }
 
+// We use `serde(untagged)` here, since the variants are vastly different.
+// This prevents having backwards incompatible changes in the RSS config before
+// multirack ships. Once multirack ships, we may wish to use internal tagging,
+// but it's not mandatory.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "snake_case", tag = "type")]
+#[serde(rename_all = "snake_case", untagged)]
 #[allow(clippy::large_enum_variant)]
 pub enum UserSpecifiedPortConfig {
     Manual(ManualPortConfig),
