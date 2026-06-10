@@ -181,17 +181,13 @@ mod tests {
     use super::*;
     use crate::analysis_input::Input;
     use nexus_inventory::CollectionBuilder;
-    use nexus_types::alert::AlertClass;
+    use nexus_types::alert::test_alerts;
     use nexus_types::fm;
     use nexus_types::fm::SitrepVersion;
     use nexus_types::inventory;
+    use omicron_test_utils::dev;
     use omicron_uuid_kinds::OmicronZoneUuid;
     use std::sync::Arc;
-
-    /// A logger that discards all output.
-    fn test_log() -> Logger {
-        slog::Logger::root(slog::Discard, slog::o!())
-    }
 
     /// Build an empty inventory `Collection`. The id is irrelevant to these
     /// tests, so we let `CollectionBuilder` pick one.
@@ -250,54 +246,66 @@ mod tests {
 
     #[test]
     fn first_sitrep_with_no_requests_stamps_initial_generation() {
-        let log = test_log();
+        let logctx = dev::test_setup_log(
+            "first_sitrep_with_no_requests_stamps_initial_generation",
+        );
         let inputs = make_input();
-        let sitrep = build_sitrep(SitrepBuilder::new(&log, &inputs));
+        let sitrep = build_sitrep(SitrepBuilder::new(&logctx.log, &inputs));
         assert_eq!(sitrep.metadata.alert_generation, Generation::new());
+        logctx.cleanup_successful();
     }
 
     #[test]
     fn first_sitrep_with_alert_request_bumps_generation() {
-        let log = test_log();
+        let logctx = dev::test_setup_log(
+            "first_sitrep_with_alert_request_bumps_generation",
+        );
         let inputs = make_input();
-        let mut builder = SitrepBuilder::new(&log, &inputs);
+        let mut builder = SitrepBuilder::new(&logctx.log, &inputs);
         {
             let mut case =
                 builder.cases.open_case(fm::DiagnosisEngineKind::PowerShelf);
-            case.request_alert(AlertClass::TestFoo, &serde_json::json!({}), "")
+            case.request_alert(&test_alerts::Foo(serde_json::json!({})), "")
                 .unwrap();
         }
         let sitrep = build_sitrep(builder);
         assert_eq!(sitrep.metadata.alert_generation, Generation::new().next());
+        logctx.cleanup_successful();
     }
 
     #[test]
     fn alert_generation_stable_when_no_new_alert_requests_with_parent() {
-        let log = test_log();
+        let logctx = dev::test_setup_log(
+            "alert_generation_stable_when_no_new_alert_requests_with_parent",
+        );
         let inputs = make_input_with_parent_generations(ParentGenerations {
             alert_generation: Generation::from_u32(5),
         });
-        let sitrep = build_sitrep(SitrepBuilder::new(&log, &inputs));
+        let sitrep = build_sitrep(SitrepBuilder::new(&logctx.log, &inputs));
         assert_eq!(sitrep.metadata.alert_generation, Generation::from_u32(5));
+        logctx.cleanup_successful();
     }
 
     #[test]
     fn child_sitrep_with_new_alert_bumps_alert_generation() {
         // Catches a regression where the alert-side bump uses a hard-coded
         // 0 instead of reading the parent's generation.
-        let log = test_log();
+        let logctx = dev::test_setup_log(
+            "child_sitrep_with_new_alert_bumps_alert_generation",
+        );
         let inputs = make_input_with_parent_generations(ParentGenerations {
             alert_generation: Generation::from_u32(5),
         });
-        let mut builder = SitrepBuilder::new(&log, &inputs);
+        let mut builder = SitrepBuilder::new(&logctx.log, &inputs);
         {
             let mut case =
                 builder.cases.open_case(fm::DiagnosisEngineKind::PowerShelf);
-            case.request_alert(AlertClass::TestFoo, &serde_json::json!({}), "")
+            case.request_alert(&test_alerts::Foo(serde_json::json!({})), "")
                 .unwrap();
         }
         let sitrep = build_sitrep(builder);
         assert_eq!(sitrep.metadata.alert_generation, Generation::from_u32(6));
+        logctx.cleanup_successful();
     }
 
     #[test]
@@ -309,7 +317,8 @@ mod tests {
         use nexus_types::fm::case::AlertRequest;
         use omicron_uuid_kinds::AlertUuid;
 
-        let log = test_log();
+        let logctx =
+            dev::test_setup_log("carry_forward_drop_bumps_alert_generation");
         let inv = make_collection();
         let alert_id = AlertUuid::new_v4();
         let case_id = omicron_uuid_kinds::CaseUuid::new_v4();
@@ -327,6 +336,7 @@ mod tests {
             alerts_requested: [AlertRequest {
                 id: alert_id,
                 class: AlertClass::TestFoo,
+                version: 0,
                 payload: serde_json::json!({}),
                 requested_sitrep_id: parent_id,
                 comment: String::new(),
@@ -364,11 +374,12 @@ mod tests {
         builder_inputs.add_existing_alerts([alert_id]);
         let (input, _) = builder_inputs.build();
 
-        let sitrep = build_sitrep(SitrepBuilder::new(&log, &input));
+        let sitrep = build_sitrep(SitrepBuilder::new(&logctx.log, &input));
         assert_eq!(
             sitrep.metadata.alert_generation,
             Generation::new().next(),
             "carry-forward drop must bump alert_generation past the parent's"
         );
+        logctx.cleanup_successful();
     }
 }

@@ -16,6 +16,7 @@ use crate::db::datastore::zpool::ZpoolGetForSledReservationResult;
 use crate::db::model::AffinityPolicy;
 use crate::db::model::Sled;
 use crate::db::model::SledResourceVmm;
+use crate::db::model::SledResourceVmmState;
 use crate::db::model::SledState;
 use crate::db::model::SledUpdate;
 use crate::db::model::to_db_sled_policy;
@@ -53,6 +54,7 @@ use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::ResourceType;
+use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::GenericUuid;
@@ -71,6 +73,41 @@ use std::fmt;
 use strum::IntoEnumIterator;
 use thiserror::Error;
 use uuid::Uuid;
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum SledReservationReason {
+    /// The VMM will be reserved to run the instance, and could be a migration
+    /// source in the future.
+    Start,
+
+    /// The VMM will be reserved as a migration destination.
+    MigrationTarget,
+}
+
+impl fmt::Display for SledReservationReason {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            SledReservationReason::Start => write!(f, "start"),
+            SledReservationReason::MigrationTarget => {
+                write!(f, "migration_target")
+            }
+        }
+    }
+}
+
+impl From<SledReservationReason> for db::model::SledResourceVmmState {
+    fn from(r: SledReservationReason) -> Self {
+        match r {
+            SledReservationReason::Start => {
+                db::model::SledResourceVmmState::Active
+            }
+
+            SledReservationReason::MigrationTarget => {
+                db::model::SledResourceVmmState::Target
+            }
+        }
+    }
+}
 
 #[derive(Debug, thiserror::Error)]
 enum SledReservationError {
@@ -101,6 +138,10 @@ enum SledReservationError {
          group membership."
     )]
     RequiredAffinitySledNotValid,
+    #[error(
+        "Instance VMM reservation for reason {reservation_reason} already made"
+    )]
+    ReservationExists { reservation_reason: SledReservationReason },
 }
 
 impl From<SledReservationError> for external::Error {
@@ -129,6 +170,20 @@ impl From<SledReservationError> for external::Error {
             | SledReservationError::ConflictingAntiAndAffinityConstraints => {
                 external::Error::invalid_request(&msg)
             },
+            // A concurrent request to place the same instance with the same
+            // reservation type landed already. Change the user-facing messaging
+            // for the external error.
+            SledReservationError::ReservationExists { reservation_reason } => {
+                match reservation_reason {
+                    SledReservationReason::Start => {
+                        external::Error::conflict("Instance already starting")
+                    }
+
+                    SledReservationReason::MigrationTarget => {
+                        external::Error::conflict("Instance already migrating")
+                    }
+                }
+            }
         }
     }
 }
@@ -658,6 +713,20 @@ impl<'a> Iterator for CompleteLocalStorageAllocationLists<'a> {
     }
 }
 
+/// This constraint prevents an instance from having multiple sled_resource_vmm
+/// records for the same reservation type.
+const SINGLE_RESERVATION_CONSTRAINT: &'static str =
+    "single_vmm_reservation_per_state";
+
+/// Arguments to `sled_reservation_update_for_migrate_success`, which will set
+/// the `active_vmm_id` record's state to `tombstoned` and the `target_vmm_id`
+/// record's state to `active`.
+pub struct MigrateSuccessUpdate {
+    pub active_vmm_id: Uuid,
+    pub target_vmm_id: Uuid,
+    pub instance_id: Uuid,
+}
+
 impl DataStore {
     /// Stores a new sled in the database.
     ///
@@ -853,6 +922,7 @@ impl DataStore {
         propolis_id: PropolisUuid,
         resources: db::model::Resources,
         constraints: db::model::SledReservationConstraints,
+        reservation_reason: SledReservationReason,
     ) -> CreateResult<db::model::SledResourceVmm> {
         self.sled_reservation_create_inner(
             opctx,
@@ -860,6 +930,7 @@ impl DataStore {
             propolis_id,
             resources,
             constraints,
+            reservation_reason,
         )
         .await
         .map_err(|e| match e {
@@ -878,11 +949,13 @@ impl DataStore {
         propolis_id: PropolisUuid,
         resources: db::model::Resources,
         constraints: db::model::SledReservationConstraints,
+        reservation_reason: SledReservationReason,
     ) -> Result<db::model::SledResourceVmm, SledReservationTransactionError>
     {
         let log = opctx.log.new(o!(
             "query" => "sled_reservation",
             "instance_id" => instance_id.to_string(),
+            "reservation_reason" => reservation_reason.to_string(),
             "propolis_id" => propolis_id.to_string(),
         ));
 
@@ -890,22 +963,28 @@ impl DataStore {
 
         let conn = self.pool_connection_authorized(opctx).await?;
 
-        // Check if resource ID already exists - if so, return it.
+        // Check if resource with a matching propolis ID already exists - if so,
+        // return it.
         //
         // This check makes this function idempotent. Beyond this point, however
         // we rely on primary key constraints in the database to prevent
         // concurrent reservations for same propolis_id.
         use nexus_db_schema::schema::sled_resource_vmm::dsl as resource_dsl;
-        let old_resource = resource_dsl::sled_resource_vmm
+        let existing_resource = resource_dsl::sled_resource_vmm
             .filter(resource_dsl::id.eq(*propolis_id.as_untyped_uuid()))
             .select(SledResourceVmm::as_select())
-            .limit(1)
-            .load_async(&*conn)
-            .await?;
+            .get_result_async(&*conn)
+            .await
+            .optional()?;
 
-        if !old_resource.is_empty() {
-            info!(&log, "sled reservation already occurred, returning");
-            return Ok(old_resource[0].clone());
+        if let Some(existing_resource) = existing_resource {
+            info!(
+                &log,
+                "existing {} sled reservation for this VMM ID",
+                existing_resource.state,
+            );
+
+            return Ok(existing_resource);
         }
 
         // Get a list of local storage disks attached to this instance
@@ -1176,6 +1255,7 @@ impl DataStore {
                 instance_id,
                 sled_target,
                 resources.clone(),
+                reservation_reason.clone().into(),
             );
 
             if !local_storage_allocation_required {
@@ -1204,6 +1284,23 @@ impl DataStore {
                             info!(&log, "reservation succeeded!");
                             return Ok(resource);
                         }
+                    }
+
+                    Err(diesel::result::Error::DatabaseError(
+                        diesel::result::DatabaseErrorKind::UniqueViolation,
+                        error_info,
+                    )) if error_info.constraint_name()
+                        == Some(SINGLE_RESERVATION_CONSTRAINT) =>
+                    {
+                        // The table already has a reservation for this instance
+                        // id and reservation type.
+                        return Err(
+                            SledReservationTransactionError::Reservation(
+                                SledReservationError::ReservationExists {
+                                    reservation_reason,
+                                },
+                            ),
+                        );
                     }
 
                     Err(e) => {
@@ -1341,6 +1438,23 @@ impl DataStore {
                             }
                         }
 
+                        Err(diesel::result::Error::DatabaseError(
+                            diesel::result::DatabaseErrorKind::UniqueViolation,
+                            error_info,
+                        )) if error_info.constraint_name()
+                            == Some(SINGLE_RESERVATION_CONSTRAINT) =>
+                        {
+                            // The table already has a reservation for this
+                            // instance id and reservation_reason.
+                            return Err(
+                                SledReservationTransactionError::Reservation(
+                                    SledReservationError::ReservationExists {
+                                        reservation_reason,
+                                    },
+                                ),
+                            );
+                        }
+
                         Err(e) => {
                             if let Some(sentinel) = matches_sentinel(
                                 &e,
@@ -1399,17 +1513,71 @@ impl DataStore {
         }
     }
 
+    /// For a successful migration, change the active sled_resource_vmm's state
+    /// to 'tombstoned' and the target sled_resource_vmm's state to 'active'
+    pub async fn sled_reservation_update_for_migrate_success(
+        &self,
+        opctx: &OpContext,
+        update: MigrateSuccessUpdate,
+    ) -> UpdateResult<()> {
+        let MigrateSuccessUpdate { active_vmm_id, target_vmm_id, instance_id } =
+            update;
+
+        use nexus_db_schema::schema::sled_resource_vmm::dsl as resource_dsl;
+
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        // It would be nice to issue a single update that sets the states of
+        // both active_vmm_id and target_vmm_id in the same statement, but we
+        // can't: CockroachDB upholds the unique index that blocks out multiple
+        // records with state `active` even if both of those would change in
+        // that same statement, and what's frustrating is this depends on the
+        // sorted order of the UUIDs. Sometimes that single UPDATE statement
+        // would work, sometimes it wouldn't.
+        //
+        // Unfortunately, this has to be done in a transaction, explicitly
+        // setting active_vmm_id's state to tombstoned first to ensure the swap
+        // succeeds.
+
+        self.transaction_retry_wrapper(
+            "sled_reservation_update_for_migrate_success",
+        )
+        .transaction(&conn, |conn| async move {
+            diesel::update(resource_dsl::sled_resource_vmm)
+                .filter(resource_dsl::id.eq(active_vmm_id))
+                .filter(resource_dsl::instance_id.eq(instance_id))
+                .set(resource_dsl::state.eq(SledResourceVmmState::Tombstoned))
+                .execute_async(&conn)
+                .await?;
+
+            diesel::update(resource_dsl::sled_resource_vmm)
+                .filter(resource_dsl::id.eq(target_vmm_id))
+                .filter(resource_dsl::instance_id.eq(instance_id))
+                .set(resource_dsl::state.eq(SledResourceVmmState::Active))
+                .execute_async(&conn)
+                .await?;
+
+            Ok(())
+        })
+        .await
+        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        Ok(())
+    }
+
     pub async fn sled_reservation_delete(
         &self,
         opctx: &OpContext,
         vmm_id: PropolisUuid,
     ) -> DeleteResult {
         use nexus_db_schema::schema::sled_resource_vmm::dsl as resource_dsl;
+
         diesel::delete(resource_dsl::sled_resource_vmm)
             .filter(resource_dsl::id.eq(to_db_typed_uuid(vmm_id)))
             .execute_async(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
         Ok(())
     }
 
@@ -2127,6 +2295,7 @@ pub(in crate::db::datastore) mod test {
                 PropolisUuid::new_v4(),
                 resources.clone(),
                 constraints,
+                SledReservationReason::Start,
             )
             .await
             .unwrap_err();
@@ -2148,6 +2317,7 @@ pub(in crate::db::datastore) mod test {
                     PropolisUuid::new_v4(),
                     resources.clone(),
                     constraints,
+                    SledReservationReason::Start,
                 )
                 .await
                 .unwrap();
@@ -2336,6 +2506,26 @@ pub(in crate::db::datastore) mod test {
             }
         }
 
+        fn from_local_storage_test_instance(
+            local_storage_test_instance: &LocalStorageTestInstance,
+        ) -> Self {
+            Self {
+                id: local_storage_test_instance.id,
+                groups: vec![],
+                force_onto_sled: None,
+                resources: db::model::Resources::new(
+                    local_storage_test_instance.ncpus.into(),
+                    local_storage_test_instance.memory.into(),
+                    local_storage_test_instance.memory.into(),
+                ),
+                cpu_platform: None,
+            }
+        }
+
+        fn resources(&self) -> db::model::Resources {
+            self.resources.clone()
+        }
+
         // This is the first half of creating a sled reservation.
         // It can be called during tests trying to invoke contention manually.
         async fn find_targets(
@@ -2377,6 +2567,7 @@ pub(in crate::db::datastore) mod test {
             datastore: &DataStore,
             propolis_id: PropolisUuid,
             sled_id: SledUuid,
+            reservation_reason: SledReservationReason,
         ) -> bool {
             assert!(self.force_onto_sled.is_none());
 
@@ -2385,6 +2576,7 @@ pub(in crate::db::datastore) mod test {
                 self.id,
                 sled_id,
                 self.resources.clone(),
+                reservation_reason.into(),
             );
 
             let conn = datastore.pool_connection_for_tests().await.unwrap();
@@ -2493,6 +2685,7 @@ pub(in crate::db::datastore) mod test {
                 PropolisUuid::new_v4(),
                 instance.resources.clone(),
                 constraints.build(),
+                SledReservationReason::Start,
             )
             .await?;
 
@@ -3305,6 +3498,7 @@ pub(in crate::db::datastore) mod test {
                         &datastore,
                         PropolisUuid::new_v4(),
                         sleds[i].id(),
+                        SledReservationReason::Start,
                     )
                     .await,
                 "Shouldn't have been able to insert into sled {i}"
@@ -3318,6 +3512,7 @@ pub(in crate::db::datastore) mod test {
                     &datastore,
                     PropolisUuid::new_v4(),
                     sleds[0].id(),
+                    SledReservationReason::Start,
                 )
                 .await
         );
@@ -3405,6 +3600,7 @@ pub(in crate::db::datastore) mod test {
                     &datastore,
                     PropolisUuid::new_v4(),
                     sleds[0].id(),
+                    SledReservationReason::Start,
                 )
                 .await,
             "Shouldn't have been able to insert into sleds[0]"
@@ -3417,6 +3613,7 @@ pub(in crate::db::datastore) mod test {
                     &datastore,
                     PropolisUuid::new_v4(),
                     sleds[1].id(),
+                    SledReservationReason::Start,
                 )
                 .await
         );
@@ -3489,6 +3686,7 @@ pub(in crate::db::datastore) mod test {
                         &datastore,
                         PropolisUuid::new_v4(),
                         sleds[i].id(),
+                        SledReservationReason::Start,
                     )
                     .await,
                 "Shouldn't have been able to insert into sleds[i]"
@@ -3502,6 +3700,7 @@ pub(in crate::db::datastore) mod test {
                     &datastore,
                     PropolisUuid::new_v4(),
                     sleds[1].id(),
+                    SledReservationReason::Start,
                 )
                 .await
         );
@@ -3992,6 +4191,8 @@ pub(in crate::db::datastore) mod test {
     struct LocalStorageTestInstance {
         id: InstanceUuid,
         name: String,
+        ncpus: u16,
+        memory: external::ByteCount,
         affinity: Option<(Affinity, usize)>,
         disks: Vec<LocalStorageTestInstanceDisk>,
     }
@@ -4021,7 +4222,7 @@ pub(in crate::db::datastore) mod test {
                     is_scrimlet: false,
                     usable_hardware_threads: 128,
                     usable_physical_ram: (64 << 30).try_into().unwrap(),
-                    reservoir_size: (16 << 30).try_into().unwrap(),
+                    reservoir_size: (56 << 30).try_into().unwrap(),
                     cpu_family: SledCpuFamily::AmdMilan,
                 },
                 Uuid::new_v4(),
@@ -4138,6 +4339,8 @@ pub(in crate::db::datastore) mod test {
                 &authz_project,
                 instance.id,
                 &instance.name.as_str(),
+                instance.ncpus,
+                instance.memory,
             )
             .await;
 
@@ -4395,6 +4598,8 @@ pub(in crate::db::datastore) mod test {
         authz_project: &authz::Project,
         instance_id: InstanceUuid,
         name: &str,
+        ncpus: u16,
+        memory: external::ByteCount,
     ) -> authz::Instance {
         datastore
             .project_create_instance(
@@ -4408,8 +4613,8 @@ pub(in crate::db::datastore) mod test {
                             name: name.parse().unwrap(),
                             description: "It's an instance".into(),
                         },
-                        ncpus: 2i64.try_into().unwrap(),
-                        memory: external::ByteCount::from_gibibytes_u32(16),
+                        ncpus: external::InstanceCpuCount(ncpus),
+                        memory,
                         hostname: "myhostname".try_into().unwrap(),
                         user_data: Vec::new(),
                         network_interfaces:
@@ -4568,6 +4773,8 @@ pub(in crate::db::datastore) mod test {
             instances: vec![LocalStorageTestInstance {
                 id: InstanceUuid::new_v4(),
                 name: "local".to_string(),
+                ncpus: 2,
+                memory: external::ByteCount::from_gibibytes_u32(16),
                 affinity: None,
                 disks: vec![LocalStorageTestInstanceDisk {
                     id: Uuid::new_v4(),
@@ -4579,7 +4786,8 @@ pub(in crate::db::datastore) mod test {
         };
 
         setup_local_storage_allocation_test(&opctx, datastore, &config).await;
-        let instance = Instance::new_with_id(config.instances[0].id);
+        let instance =
+            Instance::from_local_storage_test_instance(&config.instances[0]);
 
         // the output of the find targets query does not currently take required
         // local storage allocations into account
@@ -4591,12 +4799,9 @@ pub(in crate::db::datastore) mod test {
                 opctx,
                 instance.id,
                 PropolisUuid::new_v4(),
-                db::model::Resources::new(
-                    1,
-                    ByteCount::try_from(1024).unwrap(),
-                    ByteCount::try_from(1024).unwrap(),
-                ),
+                instance.resources(),
                 db::model::SledReservationConstraints::none(),
+                SledReservationReason::Start,
             )
             .await
             .unwrap();
@@ -4673,6 +4878,8 @@ pub(in crate::db::datastore) mod test {
             instances: vec![LocalStorageTestInstance {
                 id: InstanceUuid::new_v4(),
                 name: "local".to_string(),
+                ncpus: 2,
+                memory: external::ByteCount::from_gibibytes_u32(16),
                 affinity: None,
                 disks: vec![LocalStorageTestInstanceDisk {
                     id: Uuid::new_v4(),
@@ -4684,7 +4891,8 @@ pub(in crate::db::datastore) mod test {
         };
 
         setup_local_storage_allocation_test(&opctx, datastore, &config).await;
-        let instance = Instance::new_with_id(config.instances[0].id);
+        let instance =
+            Instance::from_local_storage_test_instance(&config.instances[0]);
 
         // Add an allocation for this disk to the first sled's zpool
         set_local_storage_unencrypted_allocation(
@@ -4709,12 +4917,9 @@ pub(in crate::db::datastore) mod test {
                 opctx,
                 instance.id,
                 PropolisUuid::new_v4(),
-                db::model::Resources::new(
-                    1,
-                    ByteCount::try_from(1024).unwrap(),
-                    ByteCount::try_from(1024).unwrap(),
-                ),
+                instance.resources(),
                 db::model::SledReservationConstraints::none(),
+                SledReservationReason::Start,
             )
             .await
             .unwrap();
@@ -4765,6 +4970,8 @@ pub(in crate::db::datastore) mod test {
             instances: vec![LocalStorageTestInstance {
                 id: InstanceUuid::new_v4(),
                 name: "local".to_string(),
+                ncpus: 2,
+                memory: external::ByteCount::from_gibibytes_u32(16),
                 affinity: None,
                 disks: vec![LocalStorageTestInstanceDisk {
                     id: Uuid::new_v4(),
@@ -4776,7 +4983,8 @@ pub(in crate::db::datastore) mod test {
         };
 
         setup_local_storage_allocation_test(&opctx, datastore, &config).await;
-        let instance = Instance::new_with_id(config.instances[0].id);
+        let instance =
+            Instance::from_local_storage_test_instance(&config.instances[0]);
 
         set_local_storage_unencrypted_dataset_no_provision(
             datastore,
@@ -4794,12 +5002,9 @@ pub(in crate::db::datastore) mod test {
                 opctx,
                 instance.id,
                 PropolisUuid::new_v4(),
-                db::model::Resources::new(
-                    1,
-                    ByteCount::try_from(1024).unwrap(),
-                    ByteCount::try_from(1024).unwrap(),
-                ),
+                instance.resources(),
                 db::model::SledReservationConstraints::none(),
+                SledReservationReason::Start,
             )
             .await
             .unwrap_err();
@@ -4848,6 +5053,8 @@ pub(in crate::db::datastore) mod test {
             instances: vec![LocalStorageTestInstance {
                 id: InstanceUuid::new_v4(),
                 name: "local".to_string(),
+                ncpus: 2,
+                memory: external::ByteCount::from_gibibytes_u32(16),
                 affinity: None,
                 disks: vec![LocalStorageTestInstanceDisk {
                     id: Uuid::new_v4(),
@@ -4859,7 +5066,8 @@ pub(in crate::db::datastore) mod test {
         };
 
         setup_local_storage_allocation_test(&opctx, datastore, &config).await;
-        let instance = Instance::new_with_id(config.instances[0].id);
+        let instance =
+            Instance::from_local_storage_test_instance(&config.instances[0]);
 
         // The zpool size is 1 TiB, and the control plane buffer is 250 GiB. If
         // we set a crucible dataset size_used of 300 GiB, then ensure a 512 GiB
@@ -4882,12 +5090,9 @@ pub(in crate::db::datastore) mod test {
                 opctx,
                 instance.id,
                 PropolisUuid::new_v4(),
-                db::model::Resources::new(
-                    1,
-                    ByteCount::try_from(1024).unwrap(),
-                    ByteCount::try_from(1024).unwrap(),
-                ),
+                instance.resources(),
                 db::model::SledReservationConstraints::none(),
+                SledReservationReason::Start,
             )
             .await
             .unwrap_err();
@@ -4905,12 +5110,9 @@ pub(in crate::db::datastore) mod test {
                 opctx,
                 instance.id,
                 PropolisUuid::new_v4(),
-                db::model::Resources::new(
-                    1,
-                    ByteCount::try_from(1024).unwrap(),
-                    ByteCount::try_from(1024).unwrap(),
-                ),
+                instance.resources(),
                 db::model::SledReservationConstraints::none(),
+                SledReservationReason::Start,
             )
             .await
             .unwrap();
@@ -4961,6 +5163,8 @@ pub(in crate::db::datastore) mod test {
             instances: vec![LocalStorageTestInstance {
                 id: InstanceUuid::new_v4(),
                 name: "local".to_string(),
+                ncpus: 2,
+                memory: external::ByteCount::from_gibibytes_u32(16),
                 affinity: None,
                 disks: vec![
                     LocalStorageTestInstanceDisk {
@@ -4980,7 +5184,8 @@ pub(in crate::db::datastore) mod test {
         };
 
         setup_local_storage_allocation_test(&opctx, datastore, &config).await;
-        let instance = Instance::new_with_id(config.instances[0].id);
+        let instance =
+            Instance::from_local_storage_test_instance(&config.instances[0]);
 
         // the output of the find targets query does not currently take required
         // local storage allocations into account
@@ -4992,12 +5197,9 @@ pub(in crate::db::datastore) mod test {
                 opctx,
                 instance.id,
                 PropolisUuid::new_v4(),
-                db::model::Resources::new(
-                    1,
-                    ByteCount::try_from(1024).unwrap(),
-                    ByteCount::try_from(1024).unwrap(),
-                ),
+                instance.resources(),
                 db::model::SledReservationConstraints::none(),
+                SledReservationReason::Start,
             )
             .await
             .unwrap_err();
@@ -5068,6 +5270,8 @@ pub(in crate::db::datastore) mod test {
             instances: vec![LocalStorageTestInstance {
                 id: InstanceUuid::new_v4(),
                 name: "local".to_string(),
+                ncpus: 2,
+                memory: external::ByteCount::from_gibibytes_u32(16),
                 affinity: None,
                 disks: vec![
                     LocalStorageTestInstanceDisk {
@@ -5087,7 +5291,8 @@ pub(in crate::db::datastore) mod test {
         };
 
         setup_local_storage_allocation_test(&opctx, datastore, &config).await;
-        let instance = Instance::new_with_id(config.instances[0].id);
+        let instance =
+            Instance::from_local_storage_test_instance(&config.instances[0]);
 
         // the output of the find targets query does not currently take required
         // local storage allocations into account
@@ -5099,12 +5304,9 @@ pub(in crate::db::datastore) mod test {
                 opctx,
                 instance.id,
                 PropolisUuid::new_v4(),
-                db::model::Resources::new(
-                    1,
-                    ByteCount::try_from(1024).unwrap(),
-                    ByteCount::try_from(1024).unwrap(),
-                ),
+                instance.resources(),
                 db::model::SledReservationConstraints::none(),
+                SledReservationReason::Start,
             )
             .await
             .unwrap();
@@ -5179,6 +5381,8 @@ pub(in crate::db::datastore) mod test {
             instances: vec![LocalStorageTestInstance {
                 id: InstanceUuid::new_v4(),
                 name: "local".to_string(),
+                ncpus: 2,
+                memory: external::ByteCount::from_gibibytes_u32(16),
                 affinity: None,
                 disks: vec![
                     LocalStorageTestInstanceDisk {
@@ -5198,7 +5402,8 @@ pub(in crate::db::datastore) mod test {
         };
 
         setup_local_storage_allocation_test(&opctx, datastore, &config).await;
-        let instance = Instance::new_with_id(config.instances[0].id);
+        let instance =
+            Instance::from_local_storage_test_instance(&config.instances[0]);
 
         // The zpool size is 1 TiB, and the control plane buffer is 250 GiB. If
         // we set the first U2's crucible dataset size_used of 300 GiB, then
@@ -5221,12 +5426,9 @@ pub(in crate::db::datastore) mod test {
                 opctx,
                 instance.id,
                 PropolisUuid::new_v4(),
-                db::model::Resources::new(
-                    1,
-                    ByteCount::try_from(1024).unwrap(),
-                    ByteCount::try_from(1024).unwrap(),
-                ),
+                instance.resources(),
                 db::model::SledReservationConstraints::none(),
+                SledReservationReason::Start,
             )
             .await
             .unwrap_err();
@@ -5277,12 +5479,9 @@ pub(in crate::db::datastore) mod test {
                 opctx,
                 instance.id,
                 PropolisUuid::new_v4(),
-                db::model::Resources::new(
-                    1,
-                    ByteCount::try_from(1024).unwrap(),
-                    ByteCount::try_from(1024).unwrap(),
-                ),
+                instance.resources(),
                 db::model::SledReservationConstraints::none(),
+                SledReservationReason::Start,
             )
             .await
             .unwrap();
@@ -5357,6 +5556,8 @@ pub(in crate::db::datastore) mod test {
             instances: vec![LocalStorageTestInstance {
                 id: InstanceUuid::new_v4(),
                 name: "local".to_string(),
+                ncpus: 2,
+                memory: external::ByteCount::from_gibibytes_u32(16),
                 affinity: None,
                 disks: vec![
                     LocalStorageTestInstanceDisk {
@@ -5376,7 +5577,8 @@ pub(in crate::db::datastore) mod test {
         };
 
         setup_local_storage_allocation_test(&opctx, datastore, &config).await;
-        let instance = Instance::new_with_id(config.instances[0].id);
+        let instance =
+            Instance::from_local_storage_test_instance(&config.instances[0]);
 
         // One of the local storage have been allocated already.
 
@@ -5401,12 +5603,9 @@ pub(in crate::db::datastore) mod test {
                 opctx,
                 instance.id,
                 PropolisUuid::new_v4(),
-                db::model::Resources::new(
-                    1,
-                    ByteCount::try_from(1024).unwrap(),
-                    ByteCount::try_from(1024).unwrap(),
-                ),
+                instance.resources(),
                 db::model::SledReservationConstraints::none(),
+                SledReservationReason::Start,
             )
             .await
             .unwrap();
@@ -5482,6 +5681,8 @@ pub(in crate::db::datastore) mod test {
                 LocalStorageTestInstance {
                     id: InstanceUuid::new_v4(),
                     name: "local".to_string(),
+                    ncpus: 32,
+                    memory: external::ByteCount::from_gibibytes_u32(16),
                     affinity: None,
                     disks: vec![
                         LocalStorageTestInstanceDisk {
@@ -5505,6 +5706,8 @@ pub(in crate::db::datastore) mod test {
                 LocalStorageTestInstance {
                     id: InstanceUuid::new_v4(),
                     name: "local2".to_string(),
+                    ncpus: 32,
+                    memory: external::ByteCount::from_gibibytes_u32(16),
                     affinity: None,
                     disks: vec![
                         LocalStorageTestInstanceDisk {
@@ -5531,7 +5734,8 @@ pub(in crate::db::datastore) mod test {
         setup_local_storage_allocation_test(&opctx, datastore, &config).await;
 
         for instance in &config.instances {
-            let instance = Instance::new_with_id(instance.id);
+            let instance =
+                Instance::from_local_storage_test_instance(&instance);
 
             // the output of the find targets query does not currently take
             // required local storage allocations into account
@@ -5542,12 +5746,9 @@ pub(in crate::db::datastore) mod test {
                     opctx,
                     instance.id,
                     PropolisUuid::new_v4(),
-                    db::model::Resources::new(
-                        32,
-                        ByteCount::try_from(1024).unwrap(),
-                        ByteCount::try_from(1024).unwrap(),
-                    ),
+                    instance.resources(),
                     db::model::SledReservationConstraints::none(),
+                    SledReservationReason::Start,
                 )
                 .await
                 .unwrap();
@@ -5624,6 +5825,8 @@ pub(in crate::db::datastore) mod test {
             instances: vec![LocalStorageTestInstance {
                 id: InstanceUuid::new_v4(),
                 name: "local".to_string(),
+                ncpus: 2,
+                memory: external::ByteCount::from_gibibytes_u32(16),
                 affinity: None,
                 disks: vec![
                     LocalStorageTestInstanceDisk {
@@ -5643,7 +5846,8 @@ pub(in crate::db::datastore) mod test {
         };
 
         setup_local_storage_allocation_test(&opctx, datastore, &config).await;
-        let instance = Instance::new_with_id(config.instances[0].id);
+        let instance =
+            Instance::from_local_storage_test_instance(&config.instances[0]);
 
         // One of the local storage have been allocated already to the first U2
 
@@ -5679,12 +5883,9 @@ pub(in crate::db::datastore) mod test {
                 opctx,
                 instance.id,
                 PropolisUuid::new_v4(),
-                db::model::Resources::new(
-                    1,
-                    ByteCount::try_from(1024).unwrap(),
-                    ByteCount::try_from(1024).unwrap(),
-                ),
+                instance.resources(),
                 db::model::SledReservationConstraints::none(),
+                SledReservationReason::Start,
             )
             .await
             .unwrap_err();
@@ -5757,6 +5958,9 @@ pub(in crate::db::datastore) mod test {
             config.instances.push(LocalStorageTestInstance {
                 id: InstanceUuid::new_v4(),
                 name: format!("inst{i}"),
+                // consume all the available threads
+                ncpus: 128,
+                memory: external::ByteCount::from_gibibytes_u32(16),
                 affinity: None,
                 disks,
             });
@@ -5767,7 +5971,8 @@ pub(in crate::db::datastore) mod test {
         let mut vmms = vec![];
 
         for (i, config_instance) in config.instances.iter().enumerate() {
-            let instance = Instance::new_with_id(config_instance.id);
+            let instance =
+                Instance::from_local_storage_test_instance(&config_instance);
 
             // the output of the find targets query does not currently take
             // required local storage allocations into account, but each VMM
@@ -5779,12 +5984,9 @@ pub(in crate::db::datastore) mod test {
                     opctx,
                     instance.id,
                     PropolisUuid::new_v4(),
-                    db::model::Resources::new(
-                        128,
-                        ByteCount::try_from(1024).unwrap(),
-                        ByteCount::try_from(1024).unwrap(),
-                    ),
+                    instance.resources(),
                     db::model::SledReservationConstraints::none(),
+                    SledReservationReason::Start,
                 )
                 .await
                 .unwrap();
@@ -5868,6 +6070,9 @@ pub(in crate::db::datastore) mod test {
             config.instances.push(LocalStorageTestInstance {
                 id: InstanceUuid::new_v4(),
                 name: format!("inst{i}"),
+                // consume all the available threads
+                ncpus: 128,
+                memory: external::ByteCount::from_gibibytes_u32(16),
                 affinity: None,
                 disks,
             });
@@ -5883,7 +6088,9 @@ pub(in crate::db::datastore) mod test {
             let mut jhs = vec![];
 
             for (i, config_instance) in chunk.iter().enumerate() {
-                let instance = Instance::new_with_id(config_instance.id);
+                let instance = Instance::from_local_storage_test_instance(
+                    &config_instance,
+                );
 
                 let datastore = datastore.clone();
 
@@ -5898,12 +6105,9 @@ pub(in crate::db::datastore) mod test {
                             &opctx,
                             instance.id,
                             PropolisUuid::new_v4(),
-                            db::model::Resources::new(
-                                128,
-                                ByteCount::try_from(1024).unwrap(),
-                                ByteCount::try_from(1024).unwrap(),
-                            ),
+                            instance.resources(),
                             db::model::SledReservationConstraints::none(),
+                            SledReservationReason::Start,
                         )
                         .await
                         .unwrap()
@@ -5917,6 +6121,187 @@ pub(in crate::db::datastore) mod test {
                 vmms.push(vmm);
             }
         }
+
+        let sleds: HashSet<_> =
+            vmms.into_iter().map(|vmm| vmm.sled_id).collect();
+
+        assert_eq!(sleds.len(), 32);
+
+        validate_local_storage_allocations(&datastore).await;
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    /// Ensure that a full rack can have one VMM take all the U.2s on each sled,
+    /// where the sled reservations happen concurrently in chunks, and multiple
+    /// requests for the same instance occur.
+    #[tokio::test]
+    async fn local_storage_allocation_full_rack_concurrent_multi() {
+        let logctx = dev::test_setup_log(
+            "local_storage_allocation_full_rack_concurrent_multi",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let mut config = LocalStorageTest {
+            sleds: vec![],
+            affinity_groups: vec![],
+            anti_affinity_groups: vec![],
+            instances: vec![],
+        };
+
+        const MAX_U2_PER_INSTANCE: usize = 10;
+
+        for i in 0..32 {
+            let mut u2s = vec![];
+
+            for n in 0..MAX_U2_PER_INSTANCE {
+                u2s.push(LocalStorageTestSledU2 {
+                    physical_disk_id: PhysicalDiskUuid::new_v4(),
+                    physical_disk_serial: format!("phys_{i}_{n}"),
+
+                    zpool_id: ZpoolUuid::new_v4(),
+                    control_plane_storage_buffer:
+                        external::ByteCount::from_gibibytes_u32(250),
+
+                    inventory_total_size:
+                        external::ByteCount::from_gibibytes_u32(1024),
+
+                    crucible_dataset_id: DatasetUuid::new_v4(),
+                    crucible_dataset_addr: format!(
+                        "[fd00:1122:3344:{i}{n:02x}::1]:12345"
+                    )
+                    .parse()
+                    .unwrap(),
+
+                    local_storage_unencrypted_dataset_id: DatasetUuid::new_v4(),
+                });
+            }
+
+            config.sleds.push(LocalStorageTestSled {
+                sled_id: SledUuid::new_v4(),
+                sled_serial: format!("sled_{i}"),
+                u2s,
+            });
+
+            let mut disks = vec![];
+
+            for n in 0..MAX_U2_PER_INSTANCE {
+                disks.push(LocalStorageTestInstanceDisk {
+                    id: Uuid::new_v4(),
+                    name: external::Name::try_from(format!("local-{i}-{n}"))
+                        .unwrap(),
+                    size: external::ByteCount::from_gibibytes_u32(512),
+                });
+            }
+
+            config.instances.push(LocalStorageTestInstance {
+                id: InstanceUuid::new_v4(),
+                name: format!("inst{i}"),
+                // consume all the available threads
+                ncpus: 128,
+                memory: external::ByteCount::from_gibibytes_u32(16),
+                affinity: None,
+                disks,
+            });
+        }
+
+        setup_local_storage_allocation_test(&opctx, datastore, &config).await;
+
+        let mut vmms = vec![];
+
+        let mut success = 0;
+
+        // Reserve the instances concurrently in chunks - 4 at a time, because
+        // qorb currently supports a max of 8, and we're issuing the same
+        // request twice.
+        for chunk in config.instances.chunks(4) {
+            let mut jhs = vec![];
+
+            for (i, config_instance) in chunk.iter().enumerate() {
+                let instance = Instance::from_local_storage_test_instance(
+                    &config_instance,
+                );
+
+                // Issue the same request twice: one should succeed, and the
+                // other should be blocked from succeeding due to the UNIQUE
+                // constraint.
+
+                for _ in 0..2 {
+                    let datastore = datastore.clone();
+
+                    let opctx = opctx.child(BTreeMap::from([(
+                        String::from("task"),
+                        format!("{i}"),
+                    )]));
+
+                    let jh = tokio::spawn({
+                        let resources = instance.resources();
+
+                        async move {
+                            datastore
+                                .sled_reservation_create_inner(
+                                    &opctx,
+                                    instance.id,
+                                    PropolisUuid::new_v4(),
+                                    resources,
+                                    db::model::SledReservationConstraints::none(
+                                    ),
+                                    SledReservationReason::Start,
+                                )
+                                .await
+                        }
+                    });
+
+                    jhs.push(jh);
+                }
+            }
+
+            for jh in jhs {
+                let vmm = match jh.await.unwrap() {
+                    Ok(vmm) => {
+                        success += 1;
+                        vmm
+                    }
+
+                    Err(SledReservationTransactionError::Reservation(
+                        SledReservationError::NotFound,
+                    )) => {
+                        // If the two sled reservation requests for the same
+                        // instance execute concurrently, and one creates a sled
+                        // reservation (plus local storage allocations), the
+                        // second one may bail out because the iterator that
+                        // returns local storage allocations to try _may_ detect
+                        // that there is no more space available and bail out of
+                        // the search with a NotFound. If this is going to
+                        // happen it's likely it will happen for the last
+                        // instance's second request, as there really won't be
+                        // any space left to try.
+                        //
+                        // Eat this error and double check number of VMMs later.
+                        continue;
+                    }
+
+                    Err(SledReservationTransactionError::Reservation(
+                        SledReservationError::ReservationExists {
+                            reservation_reason: SledReservationReason::Start,
+                        },
+                    )) => {
+                        // Eat this, it's expected: it'll be returned when one
+                        // of the two concurrent requests are blocked from
+                        // succeeding.
+                        continue;
+                    }
+
+                    Err(e) => panic!("{e:?}"),
+                };
+
+                vmms.push(vmm);
+            }
+        }
+
+        assert_eq!(success, 32);
 
         let sleds: HashSet<_> =
             vmms.into_iter().map(|vmm| vmm.sled_id).collect();
@@ -6009,6 +6394,10 @@ pub(in crate::db::datastore) mod test {
             config.instances.push(LocalStorageTestInstance {
                 id: InstanceUuid::new_v4(),
                 name: format!("inst{i}"),
+                ncpus: 2,
+                // 64 instances per sled, where each sled has 56 GB of reservoir
+                // RAM = 875 MB per instance
+                memory: external::ByteCount::from_mebibytes_u32(512),
                 affinity: None,
                 disks,
             });
@@ -6024,7 +6413,9 @@ pub(in crate::db::datastore) mod test {
             let mut jhs = vec![];
 
             for (i, config_instance) in chunk.iter().enumerate() {
-                let instance = Instance::new_with_id(config_instance.id);
+                let instance = Instance::from_local_storage_test_instance(
+                    &config_instance,
+                );
 
                 let datastore = datastore.clone();
 
@@ -6039,12 +6430,9 @@ pub(in crate::db::datastore) mod test {
                             &opctx,
                             instance.id,
                             PropolisUuid::new_v4(),
-                            db::model::Resources::new(
-                                2,
-                                ByteCount::try_from(1024).unwrap(),
-                                ByteCount::try_from(1024).unwrap(),
-                            ),
+                            instance.resources(),
                             db::model::SledReservationConstraints::none(),
+                            SledReservationReason::Start,
                         )
                         .await
                         .unwrap()
@@ -6144,6 +6532,8 @@ pub(in crate::db::datastore) mod test {
                 LocalStorageTestInstance {
                     id: InstanceUuid::new_v4(),
                     name: "local".to_string(),
+                    ncpus: 2,
+                    memory: external::ByteCount::from_gibibytes_u32(16),
                     affinity: Some((Affinity::Positive, 0)),
                     disks: vec![LocalStorageTestInstanceDisk {
                         id: Uuid::new_v4(),
@@ -6155,6 +6545,8 @@ pub(in crate::db::datastore) mod test {
                 LocalStorageTestInstance {
                     id: InstanceUuid::new_v4(),
                     name: "local2".to_string(),
+                    ncpus: 2,
+                    memory: external::ByteCount::from_gibibytes_u32(16),
                     affinity: Some((Affinity::Positive, 0)),
                     disks: vec![LocalStorageTestInstanceDisk {
                         id: Uuid::new_v4(),
@@ -6171,7 +6563,8 @@ pub(in crate::db::datastore) mod test {
         // The first instance's sled reservation should succeed, there's enough
         // space for the disk
 
-        let instance = Instance::new_with_id(config.instances[0].id);
+        let instance =
+            Instance::from_local_storage_test_instance(&config.instances[0]);
 
         // the output of the find targets query does not currently take required
         // local storage allocations into account
@@ -6183,12 +6576,9 @@ pub(in crate::db::datastore) mod test {
                 opctx,
                 instance.id,
                 PropolisUuid::new_v4(),
-                db::model::Resources::new(
-                    1,
-                    ByteCount::try_from(1024).unwrap(),
-                    ByteCount::try_from(1024).unwrap(),
-                ),
+                instance.resources(),
                 db::model::SledReservationConstraints::none(),
+                SledReservationReason::Start,
             )
             .await
             .unwrap();
@@ -6197,7 +6587,8 @@ pub(in crate::db::datastore) mod test {
         // the affinity group's policy is set to Fail, and there isn't enough
         // space for the second instance's disk on the one sled.
 
-        let instance = Instance::new_with_id(config.instances[1].id);
+        let instance =
+            Instance::from_local_storage_test_instance(&config.instances[1]);
 
         // the output of the find targets query does not currently take required
         // local storage allocations into account
@@ -6208,12 +6599,9 @@ pub(in crate::db::datastore) mod test {
                 opctx,
                 instance.id,
                 PropolisUuid::new_v4(),
-                db::model::Resources::new(
-                    1,
-                    ByteCount::try_from(1024).unwrap(),
-                    ByteCount::try_from(1024).unwrap(),
-                ),
+                instance.resources(),
                 db::model::SledReservationConstraints::none(),
+                SledReservationReason::Start,
             )
             .await
             .unwrap_err();
@@ -6271,6 +6659,8 @@ pub(in crate::db::datastore) mod test {
                 LocalStorageTestInstance {
                     id: InstanceUuid::new_v4(),
                     name: "local".to_string(),
+                    ncpus: 2,
+                    memory: external::ByteCount::from_gibibytes_u32(16),
                     affinity: Some((Affinity::Negative, 0)),
                     disks: vec![LocalStorageTestInstanceDisk {
                         id: Uuid::new_v4(),
@@ -6282,6 +6672,8 @@ pub(in crate::db::datastore) mod test {
                 LocalStorageTestInstance {
                     id: InstanceUuid::new_v4(),
                     name: "local2".to_string(),
+                    ncpus: 2,
+                    memory: external::ByteCount::from_gibibytes_u32(16),
                     affinity: Some((Affinity::Negative, 0)),
                     disks: vec![LocalStorageTestInstanceDisk {
                         id: Uuid::new_v4(),
@@ -6297,7 +6689,8 @@ pub(in crate::db::datastore) mod test {
 
         // The first instance's sled reservation should succeed
 
-        let instance = Instance::new_with_id(config.instances[0].id);
+        let instance =
+            Instance::from_local_storage_test_instance(&config.instances[0]);
 
         // the output of the find targets query does not currently take required
         // local storage allocations into account
@@ -6309,12 +6702,9 @@ pub(in crate::db::datastore) mod test {
                 opctx,
                 instance.id,
                 PropolisUuid::new_v4(),
-                db::model::Resources::new(
-                    1,
-                    ByteCount::try_from(1024).unwrap(),
-                    ByteCount::try_from(1024).unwrap(),
-                ),
+                instance.resources(),
                 db::model::SledReservationConstraints::none(),
+                SledReservationReason::Start,
             )
             .await
             .unwrap();
@@ -6324,7 +6714,8 @@ pub(in crate::db::datastore) mod test {
         // The second instance's sled reservation should not succeed, because
         // the anti-affinity group's policy is set to Fail.
 
-        let instance = Instance::new_with_id(config.instances[1].id);
+        let instance =
+            Instance::from_local_storage_test_instance(&config.instances[1]);
 
         // the output of the find targets query does not currently take required
         // local storage allocations into account
@@ -6335,12 +6726,9 @@ pub(in crate::db::datastore) mod test {
                 opctx,
                 instance.id,
                 PropolisUuid::new_v4(),
-                db::model::Resources::new(
-                    1,
-                    ByteCount::try_from(1024).unwrap(),
-                    ByteCount::try_from(1024).unwrap(),
-                ),
+                instance.resources(),
                 db::model::SledReservationConstraints::none(),
+                SledReservationReason::Start,
             )
             .await
             .unwrap_err();
@@ -6436,6 +6824,8 @@ pub(in crate::db::datastore) mod test {
             instances: vec![LocalStorageTestInstance {
                 id: InstanceUuid::new_v4(),
                 name: "local".to_string(),
+                ncpus: 2,
+                memory: external::ByteCount::from_gibibytes_u32(16),
                 affinity: None,
                 disks: vec![
                     LocalStorageTestInstanceDisk {
@@ -6460,7 +6850,8 @@ pub(in crate::db::datastore) mod test {
         // succeed, as it needs two local storage allocations (which it could
         // get if it was allowed to use sled_1).
 
-        let instance = Instance::new_with_id(config.instances[0].id);
+        let instance =
+            Instance::from_local_storage_test_instance(&config.instances[0]);
 
         // the output of the find targets query does not currently take required
         // local storage allocations into account
@@ -6476,12 +6867,9 @@ pub(in crate::db::datastore) mod test {
                 opctx,
                 instance.id,
                 PropolisUuid::new_v4(),
-                db::model::Resources::new(
-                    1,
-                    ByteCount::try_from(1024).unwrap(),
-                    ByteCount::try_from(1024).unwrap(),
-                ),
+                instance.resources(),
                 constraints,
+                SledReservationReason::Start,
             )
             .await
             .unwrap_err();
@@ -6555,6 +6943,8 @@ pub(in crate::db::datastore) mod test {
             instances: vec![LocalStorageTestInstance {
                 id: InstanceUuid::new_v4(),
                 name: "local".to_string(),
+                ncpus: 2,
+                memory: external::ByteCount::from_gibibytes_u32(16),
                 affinity: None,
                 disks: vec![
                     LocalStorageTestInstanceDisk {
@@ -6575,7 +6965,8 @@ pub(in crate::db::datastore) mod test {
 
         setup_local_storage_allocation_test(&opctx, datastore, &config).await;
 
-        let instance = Instance::new_with_id(config.instances[0].id);
+        let instance =
+            Instance::from_local_storage_test_instance(&config.instances[0]);
 
         // Detach the second disk from the instance
         let (.., authz_instance) = LookupPath::new(&opctx, datastore)
@@ -6604,12 +6995,9 @@ pub(in crate::db::datastore) mod test {
                 opctx,
                 instance.id,
                 PropolisUuid::new_v4(),
-                db::model::Resources::new(
-                    1,
-                    ByteCount::try_from(1024).unwrap(),
-                    ByteCount::try_from(1024).unwrap(),
-                ),
+                instance.resources(),
                 db::model::SledReservationConstraints::none(),
+                SledReservationReason::Start,
             )
             .await
             .unwrap();
@@ -6688,6 +7076,9 @@ pub(in crate::db::datastore) mod test {
                     id: InstanceUuid::new_v4(),
                     name: "local".to_string(),
                     affinity: None,
+                    // consume _almost_ all available threads
+                    ncpus: 96,
+                    memory: external::ByteCount::from_gibibytes_u32(16),
                     disks: vec![LocalStorageTestInstanceDisk {
                         id: Uuid::new_v4(),
                         name: external::Name::try_from("local".to_string())
@@ -6698,6 +7089,9 @@ pub(in crate::db::datastore) mod test {
                 LocalStorageTestInstance {
                     id: InstanceUuid::new_v4(),
                     name: "local2".to_string(),
+                    // consume _almost_ all available threads
+                    ncpus: 96,
+                    memory: external::ByteCount::from_gibibytes_u32(16),
                     affinity: None,
                     disks: vec![LocalStorageTestInstanceDisk {
                         id: Uuid::new_v4(),
@@ -6718,7 +7112,12 @@ pub(in crate::db::datastore) mod test {
             let datastore = db.datastore().clone();
             let opctx =
                 OpContext::for_tests(logctx.log.clone(), datastore.clone());
-            let instance_id = config.instances[0].id;
+
+            let instance = Instance::from_local_storage_test_instance(
+                &config.instances[0],
+            );
+            let instance_id = instance.id;
+            let resources = instance.resources();
 
             async move {
                 datastore
@@ -6726,12 +7125,9 @@ pub(in crate::db::datastore) mod test {
                         &opctx,
                         instance_id,
                         PropolisUuid::new_v4(),
-                        db::model::Resources::new(
-                            96,
-                            ByteCount::try_from(1024).unwrap(),
-                            ByteCount::try_from(1024).unwrap(),
-                        ),
+                        resources,
                         db::model::SledReservationConstraints::none(),
+                        SledReservationReason::Start,
                     )
                     .await
             }
@@ -6741,7 +7137,12 @@ pub(in crate::db::datastore) mod test {
             let datastore = db.datastore().clone();
             let opctx =
                 OpContext::for_tests(logctx.log.clone(), datastore.clone());
-            let instance_id = config.instances[1].id;
+
+            let instance = Instance::from_local_storage_test_instance(
+                &config.instances[1],
+            );
+            let instance_id = instance.id;
+            let resources = instance.resources();
 
             async move {
                 datastore
@@ -6749,12 +7150,9 @@ pub(in crate::db::datastore) mod test {
                         &opctx,
                         instance_id,
                         PropolisUuid::new_v4(),
-                        db::model::Resources::new(
-                            96,
-                            ByteCount::try_from(1024).unwrap(),
-                            ByteCount::try_from(1024).unwrap(),
-                        ),
+                        resources,
                         db::model::SledReservationConstraints::none(),
+                        SledReservationReason::Start,
                     )
                     .await
             }
@@ -6799,6 +7197,159 @@ pub(in crate::db::datastore) mod test {
         assert_eq!(allocation_records.len(), 1);
 
         validate_local_storage_allocations(&datastore).await;
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_sled_reservation_update_for_migrate_success() {
+        let logctx = dev::test_setup_log(
+            "test_sled_reservation_update_for_migrate_success",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
+
+        // Insert one active, one target record
+
+        use nexus_db_schema::schema::sled_resource_vmm::dsl;
+
+        let active_vmm_id = PropolisUuid::new_v4();
+        let target_vmm_id = PropolisUuid::new_v4();
+        let instance_id = InstanceUuid::new_v4();
+
+        diesel::insert_into(dsl::sled_resource_vmm)
+            .values(SledResourceVmm::new(
+                active_vmm_id,
+                instance_id,
+                SledUuid::new_v4(),
+                db::model::Resources::new(
+                    32,
+                    ByteCount::try_from(1024).unwrap(),
+                    ByteCount::try_from(1024).unwrap(),
+                ),
+                SledResourceVmmState::Active,
+            ))
+            .execute_async(&*conn)
+            .await
+            .unwrap();
+
+        diesel::insert_into(dsl::sled_resource_vmm)
+            .values(SledResourceVmm::new(
+                target_vmm_id,
+                instance_id,
+                SledUuid::new_v4(),
+                db::model::Resources::new(
+                    32,
+                    ByteCount::try_from(1024).unwrap(),
+                    ByteCount::try_from(1024).unwrap(),
+                ),
+                SledResourceVmmState::Target,
+            ))
+            .execute_async(&*conn)
+            .await
+            .unwrap();
+
+        datastore
+            .sled_reservation_update_for_migrate_success(
+                &opctx,
+                db::datastore::sled::MigrateSuccessUpdate {
+                    active_vmm_id: *active_vmm_id.as_untyped_uuid(),
+                    target_vmm_id: *target_vmm_id.as_untyped_uuid(),
+                    instance_id: *instance_id.as_untyped_uuid(),
+                },
+            )
+            .await
+            .unwrap();
+
+        // Assert the state changes
+
+        let previously_active_vmm = dsl::sled_resource_vmm
+            .filter(dsl::id.eq(to_db_typed_uuid(active_vmm_id)))
+            .select(SledResourceVmm::as_select())
+            .get_result_async(&*conn)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            previously_active_vmm.state,
+            SledResourceVmmState::Tombstoned,
+        );
+
+        let previously_target_vmm = dsl::sled_resource_vmm
+            .filter(dsl::id.eq(to_db_typed_uuid(target_vmm_id)))
+            .select(SledResourceVmm::as_select())
+            .get_result_async(&*conn)
+            .await
+            .unwrap();
+
+        assert_eq!(previously_target_vmm.state, SledResourceVmmState::Active,);
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_sled_reservation_update_for_migrate_success_deleted() {
+        let logctx = dev::test_setup_log(
+            "test_sled_reservation_update_for_migrate_success_deleted",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
+
+        // Insert only the target record, imagining the active one has already
+        // been deleted
+
+        use nexus_db_schema::schema::sled_resource_vmm::dsl;
+
+        let target_vmm_id = PropolisUuid::new_v4();
+        let instance_id = InstanceUuid::new_v4();
+
+        diesel::insert_into(dsl::sled_resource_vmm)
+            .values(SledResourceVmm::new(
+                target_vmm_id,
+                instance_id,
+                SledUuid::new_v4(),
+                db::model::Resources::new(
+                    32,
+                    ByteCount::try_from(1024).unwrap(),
+                    ByteCount::try_from(1024).unwrap(),
+                ),
+                SledResourceVmmState::Target,
+            ))
+            .execute_async(&*conn)
+            .await
+            .unwrap();
+
+        datastore
+            .sled_reservation_update_for_migrate_success(
+                &opctx,
+                db::datastore::sled::MigrateSuccessUpdate {
+                    // imagining the active one is already deleted, make this a
+                    // random UUID to test that the function doesn't fail if the
+                    // record isn't there.
+                    active_vmm_id: Uuid::new_v4(),
+                    target_vmm_id: *target_vmm_id.as_untyped_uuid(),
+                    instance_id: *instance_id.as_untyped_uuid(),
+                },
+            )
+            .await
+            .unwrap();
+
+        // Assert the state change
+
+        let previously_target_vmm = dsl::sled_resource_vmm
+            .filter(dsl::id.eq(to_db_typed_uuid(target_vmm_id)))
+            .select(SledResourceVmm::as_select())
+            .get_result_async(&*conn)
+            .await
+            .unwrap();
+
+        assert_eq!(previously_target_vmm.state, SledResourceVmmState::Active,);
 
         db.terminate().await;
         logctx.cleanup_successful();

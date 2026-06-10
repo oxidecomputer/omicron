@@ -5,13 +5,18 @@
 //! [`DataStore`] methods for alerts and alert delivery dispatching.
 
 use super::DataStore;
+use super::RunnableQuery;
 use crate::authz;
 use crate::context::OpContext;
 use crate::db::model::Alert;
 use crate::db::sitrep_guard::SitrepGuardedInsert;
 use crate::db::sitrep_guard::SitrepGuardedInsertOutcome;
 use async_bb8_diesel::AsyncRunQueryDsl;
+use diesel::dsl::AsSelect;
+use diesel::dsl::SqlTypeOf;
+use diesel::pg::Pg;
 use diesel::prelude::*;
+use diesel::query_builder::Query;
 use diesel::result::OptionalExtension;
 use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::public_error_from_diesel;
@@ -26,84 +31,36 @@ use omicron_uuid_kinds::{AlertUuid, GenericUuid};
 use std::collections::HashSet;
 use uuid::Uuid;
 
-/// Provenance for an alert: where did it come from?
-#[derive(Debug, Clone, Copy)]
-pub enum AlertProvenance {
-    /// Requested by the fault management subsystem. Uses a specific alert ID
-    /// for idempotent creation, and inserts a "created" marker to avoid FM
-    /// rendezvous resurrecting deleted alerts.
-    Fm {
-        /// Generation counter the FM rendezvous executor expects to see in
-        /// the latest sitrep's `alert_generation` column. Used by the
-        /// [`SitrepGuardedInsert`] generation guard.
-        expected_alert_generation: Generation,
-    },
-    /// Catch-all for any non-FM caller. Today this is exercised only by
-    /// `#[cfg(test)]` callers of `alert_create` and by `Nexus::alert_publish`,
-    /// which has no production callers yet. The defining property of this
-    /// variant is the absence of an FM generation guard.
-    ///
-    // TODO: replace `Unspecified` with one or more concrete variants once
-    // `alert_publish` (or some other path) gains a real production caller.
-    Unspecified,
-}
-
 impl DataStore {
+    fn alert_insert_query(
+        alert: Alert,
+    ) -> impl RunnableQuery<Alert> + Query<SqlType = SqlTypeOf<AsSelect<Alert, Pg>>>
+    {
+        diesel::insert_into(alert_dsl::alert)
+            .values(alert)
+            .on_conflict_do_nothing()
+            .returning(Alert::as_returning())
+    }
+
     /// Insert an alert row, returning the inserted alert on success.
     ///
     /// If a row with this alert's id already exists, returns
     /// [`Error::ObjectAlreadyExists`]. This isn't really an error: multiple
-    /// Nexus instances may race to insert the same alert, and FM rendezvous
-    /// retries while a request is current. The caller decides how to treat
-    /// it.
-    ///
-    /// When `provenance` is [`AlertProvenance::Fm`], the insert is gated by
-    /// [`SitrepGuardedInsert`]. If the latest sitrep's `alert_generation`
-    /// has advanced past the executing sitrep's `expected_alert_generation`,
-    /// this returns [`Error::Conflict`] indicating that the sitrep being
-    /// executed is stale and should be skipped.
+    /// Nexus instances may race to insert the same alert. The caller decides
+    /// how to treat it.
     pub async fn alert_create(
         &self,
         opctx: &OpContext,
         alert: Alert,
-        provenance: AlertProvenance,
     ) -> CreateResult<Alert> {
         let conn = self.pool_connection_authorized(opctx).await?;
         let alert_id = alert.id();
 
-        let insert = diesel::insert_into(alert_dsl::alert)
-            .values(alert)
-            .on_conflict_do_nothing()
-            .returning(Alert::as_returning());
-
-        let inserted: Option<Alert> = match provenance {
-            AlertProvenance::Unspecified => {
-                insert.get_result_async(&*conn).await.optional().map_err(
-                    |e| public_error_from_diesel(e, ErrorHandler::Server),
-                )?
-            }
-            AlertProvenance::Fm { expected_alert_generation } => {
-                let guarded = SitrepGuardedInsert::<Alert, _>::new(
-                    alert_id.into_untyped_uuid(),
-                    expected_alert_generation.into(),
-                    insert,
-                );
-                match guarded.execute_async(&conn).await.map_err(|e| {
-                    public_error_from_diesel(e, ErrorHandler::Server)
-                })? {
-                    SitrepGuardedInsertOutcome::Created(row) => Some(row),
-                    SitrepGuardedInsertOutcome::AlreadyExists => None,
-                    SitrepGuardedInsertOutcome::StaleSitrep => {
-                        // We signal stale sitrep to the caller as a `Conflict`
-                        // error. This is unambiguous; no other path produces
-                        // `Conflict`.
-                        return Err(Error::conflict(
-                            "cannot create alert for stale sitrep",
-                        ));
-                    }
-                }
-            }
-        };
+        let inserted: Option<Alert> = Self::alert_insert_query(alert)
+            .get_result_async(&*conn)
+            .await
+            .optional()
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
         let alert = inserted.ok_or_else(|| Error::ObjectAlreadyExists {
             type_name: ResourceType::Alert,
@@ -117,7 +74,62 @@ impl DataStore {
             "alert_class" => %alert.class,
             "alert_case_id" => ?alert.case_id,
             "time_created" => ?alert.identity.time_created,
-            "fm" => matches!(provenance, AlertProvenance::Fm { .. }),
+        );
+
+        Ok(alert)
+    }
+
+    /// Insert an alert requested by FM rendezvous, guarded against stale-sitrep
+    /// execution.
+    ///
+    /// Like [`Self::alert_create`], but the insert is wrapped in a
+    /// [`SitrepGuardedInsert`]: it writes a `rendezvous_alert_created` marker
+    /// so a deleted alert is not resurrected by a later rendezvous pass, and
+    /// it is gated on the executing sitrep still being current. If the latest
+    /// sitrep's `alert_generation` has advanced past `expected_alert_generation`,
+    /// the sitrep being executed is stale and this returns [`Error::Conflict`].
+    pub async fn fm_rendezvous_alert_create(
+        &self,
+        opctx: &OpContext,
+        alert: Alert,
+        expected_alert_generation: Generation,
+    ) -> CreateResult<Alert> {
+        let conn = self.pool_connection_authorized(opctx).await?;
+        let alert_id = alert.id();
+
+        let guarded = SitrepGuardedInsert::<Alert, _>::new(
+            alert_id.into_untyped_uuid(),
+            expected_alert_generation.into(),
+            Self::alert_insert_query(alert),
+        );
+
+        let alert =
+            match guarded.execute_async(&conn).await.map_err(|e| {
+                public_error_from_diesel(e, ErrorHandler::Server)
+            })? {
+                SitrepGuardedInsertOutcome::Created(row) => row,
+                SitrepGuardedInsertOutcome::AlreadyExists => {
+                    return Err(Error::ObjectAlreadyExists {
+                        type_name: ResourceType::Alert,
+                        object_name: alert_id.to_string(),
+                    });
+                }
+                SitrepGuardedInsertOutcome::StaleSitrep => {
+                    // We signal stale sitrep to the caller as a `Conflict` error.
+                    // This is unambiguous; no other path produces `Conflict`.
+                    return Err(Error::conflict(
+                        "cannot create alert for stale sitrep",
+                    ));
+                }
+            };
+
+        slog::debug!(
+            &opctx.log,
+            "published alert for FM alert request";
+            "alert_id" => ?alert.id(),
+            "alert_class" => %alert.class,
+            "alert_case_id" => ?alert.case_id,
+            "time_created" => ?alert.identity.time_created,
         );
 
         Ok(alert)
@@ -175,11 +187,12 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
-    /// Returns the subset of `candidates` for which a marker row exists in
-    /// `rendezvous_alert_created`. Used by FM analysis to see which alert
+    /// Given a set of alert ids, returns those that have a creation marker row
+    /// in the FM `rendezvous_alert_created` table (i.e. the alerts that FM
+    /// rendezvous has already created). Used by FM analysis to tell which alert
     /// requests on closed cases have been satisfied, to determine whether any
     /// cases can be dropped (see `nexus_fm::analysis_input::Builder::build`).
-    pub async fn alert_markers_existing_in(
+    pub async fn fm_rendezvous_existing_alert_markers(
         &self,
         opctx: &OpContext,
         candidates: &[AlertUuid],
@@ -212,9 +225,9 @@ mod tests {
     use crate::db::pub_test_utils::TestDatabase;
     use assert_matches::assert_matches;
     use chrono::Utc;
-    use nexus_db_model::AlertClass;
     use nexus_db_model::fm::RendezvousAlertCreated;
     use nexus_db_schema::schema::rendezvous_alert_created::dsl as alert_marker_dsl;
+    use nexus_types::alert::test_alerts;
     use nexus_types::fm::Sitrep;
     use nexus_types::fm::SitrepMetadata;
     use omicron_test_utils::dev;
@@ -242,34 +255,29 @@ mod tests {
     }
 
     fn make_fm_alert(alert_id: AlertUuid, case_id: CaseUuid) -> Alert {
-        let mut alert = Alert::new(alert_id, AlertClass::TestFoo, json!({}));
+        let mut alert =
+            Alert::new(alert_id, &test_alerts::Foo(json!({}))).unwrap();
         alert.case_id = Some(case_id.into());
         alert
     }
 
     #[tokio::test]
-    async fn alert_create_non_fm_created_then_already_exists() {
-        let logctx = dev::test_setup_log(
-            "alert_create_non_fm_created_then_already_exists",
-        );
+    async fn alert_create_then_already_exists() {
+        let logctx = dev::test_setup_log("alert_create_then_already_exists");
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
         let alert =
-            Alert::new(AlertUuid::new_v4(), AlertClass::TestFoo, json!({}));
+            Alert::new(AlertUuid::new_v4(), &test_alerts::Foo(json!({})))
+                .unwrap();
         let alert_id = alert.id();
 
-        let inserted = datastore
-            .alert_create(opctx, alert.clone(), AlertProvenance::Unspecified)
-            .await
-            .unwrap();
+        let inserted =
+            datastore.alert_create(opctx, alert.clone()).await.unwrap();
         assert_eq!(inserted.id(), alert_id);
         assert!(inserted.case_id.is_none());
 
-        let err = datastore
-            .alert_create(opctx, alert, AlertProvenance::Unspecified)
-            .await
-            .unwrap_err();
+        let err = datastore.alert_create(opctx, alert).await.unwrap_err();
         assert!(
             matches!(err, Error::ObjectAlreadyExists { .. }),
             "expected ObjectAlreadyExists, got {err:?}"
@@ -280,9 +288,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn alert_create_fm_created_writes_marker() {
+    async fn fm_rendezvous_alert_create_writes_marker() {
         let logctx =
-            dev::test_setup_log("alert_create_fm_created_writes_marker");
+            dev::test_setup_log("fm_rendezvous_alert_create_writes_marker");
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
         let conn = datastore.pool_connection_for_tests().await.unwrap();
@@ -295,12 +303,10 @@ mod tests {
         let alert_id = AlertUuid::new_v4();
         let case_id = CaseUuid::new_v4();
         let inserted = datastore
-            .alert_create(
+            .fm_rendezvous_alert_create(
                 opctx,
                 make_fm_alert(alert_id, case_id),
-                AlertProvenance::Fm {
-                    expected_alert_generation: Generation::from_u32(1),
-                },
+                Generation::from_u32(1),
             )
             .await
             .unwrap();
@@ -323,9 +329,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn alert_create_fm_already_exists_via_marker() {
-        let logctx =
-            dev::test_setup_log("alert_create_fm_already_exists_via_marker");
+    async fn fm_rendezvous_alert_create_already_exists_via_marker() {
+        let logctx = dev::test_setup_log(
+            "fm_rendezvous_alert_create_already_exists_via_marker",
+        );
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
         let conn = datastore.pool_connection_for_tests().await.unwrap();
@@ -351,12 +358,10 @@ mod tests {
             .unwrap();
 
         let err = datastore
-            .alert_create(
+            .fm_rendezvous_alert_create(
                 opctx,
                 make_fm_alert(alert_id, case_id),
-                AlertProvenance::Fm {
-                    expected_alert_generation: Generation::from_u32(2),
-                },
+                Generation::from_u32(2),
             )
             .await
             .unwrap_err();
@@ -402,9 +407,9 @@ mod tests {
     // a bare `DieselError::NotFound` bubble out as HTTP 500, AND must NOT
     // fabricate a marker row for an alert this executor did not produce.
     #[tokio::test]
-    async fn alert_create_fm_already_exists_without_marker() {
+    async fn fm_rendezvous_alert_create_already_exists_without_marker() {
         let logctx = dev::test_setup_log(
-            "alert_create_fm_already_exists_without_marker",
+            "fm_rendezvous_alert_create_already_exists_without_marker",
         );
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
@@ -426,12 +431,10 @@ mod tests {
             .unwrap();
 
         let err = datastore
-            .alert_create(
+            .fm_rendezvous_alert_create(
                 opctx,
                 make_fm_alert(alert_id, case_id),
-                AlertProvenance::Fm {
-                    expected_alert_generation: Generation::from_u32(1),
-                },
+                Generation::from_u32(1),
             )
             .await
             .unwrap_err();
@@ -452,24 +455,23 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn alert_create_fm_stale_sitrep() {
-        let logctx = dev::test_setup_log("alert_create_fm_stale_sitrep");
+    async fn fm_rendezvous_alert_create_stale_sitrep() {
+        let logctx =
+            dev::test_setup_log("fm_rendezvous_alert_create_stale_sitrep");
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
-        // Latest sitrep is at generation 5; executor expects 0.
+        // Latest sitrep is at generation 5; executor expects 1.
         datastore
             .fm_sitrep_insert(opctx, make_sitrep(Generation::from_u32(5)))
             .await
             .unwrap();
 
         let err = datastore
-            .alert_create(
+            .fm_rendezvous_alert_create(
                 opctx,
                 make_fm_alert(AlertUuid::new_v4(), CaseUuid::new_v4()),
-                AlertProvenance::Fm {
-                    expected_alert_generation: Generation::from_u32(0),
-                },
+                Generation::new(),
             )
             .await
             .unwrap_err();
@@ -484,9 +486,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn alert_markers_existing_in_returns_only_present_ids() {
+    async fn fm_rendezvous_existing_alert_markers_returns_only_present_ids() {
         let logctx = dev::test_setup_log(
-            "alert_markers_existing_in_returns_only_present_ids",
+            "fm_rendezvous_existing_alert_markers_returns_only_present_ids",
         );
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
@@ -516,7 +518,7 @@ mod tests {
 
         let candidates = vec![present_a, absent, present_b];
         let existing = datastore
-            .alert_markers_existing_in(opctx, &candidates)
+            .fm_rendezvous_existing_alert_markers(opctx, &candidates)
             .await
             .expect("query should succeed");
 
@@ -530,15 +532,15 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn alert_markers_existing_in_empty_input_returns_empty() {
+    async fn fm_rendezvous_existing_alert_markers_empty_input_returns_empty() {
         let logctx = dev::test_setup_log(
-            "alert_markers_existing_in_empty_input_returns_empty",
+            "fm_rendezvous_existing_alert_markers_empty_input_returns_empty",
         );
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
         let existing = datastore
-            .alert_markers_existing_in(opctx, &[])
+            .fm_rendezvous_existing_alert_markers(opctx, &[])
             .await
             .expect("empty input must return Ok");
 
@@ -549,11 +551,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn alert_markers_existing_in_explain_no_full_scan() {
+    async fn fm_rendezvous_existing_alert_markers_explain_no_full_scan() {
         use crate::db::explain::ExplainableAsync;
 
         let logctx = dev::test_setup_log(
-            "alert_markers_existing_in_explain_no_full_scan",
+            "fm_rendezvous_existing_alert_markers_explain_no_full_scan",
         );
         let db = TestDatabase::new_with_pool(&logctx.log).await;
         let pool = db.pool();

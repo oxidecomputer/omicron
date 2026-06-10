@@ -20,7 +20,8 @@ cases (2 total):
       diagnosis engine: power_shelf
       opened in sitrep: 44444444-4444-4444-4444-444444444444
       closed in sitrep: 55555555-5555-5555-5555-555555555555
-      ereports not yet marked seen:
-      * ereport dddddddd-dddd-dddd-dddd-dddddddddddd:2
-      alert requests not yet satisfied:
-      * alert 66666666-6666-6666-6666-666666666666
+      copied forwards due to:
+        ereports not yet marked seen:
+          * ereport dddddddd-dddd-dddd-dddd-dddddddddddd:2
+        alert requests not yet satisfied:
+          * alert 66666666-6666-6666-6666-666666666666

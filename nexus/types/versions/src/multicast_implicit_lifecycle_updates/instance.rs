@@ -11,12 +11,12 @@
 
 use omicron_common::api::external::{
     ByteCount, Hostname, IdentityMetadataCreateParams,
-    InstanceAutoRestartPolicy, InstanceCpuCount, InstanceCpuPlatform, NameOrId,
-    Nullable,
+    InstanceAutoRestartPolicy, InstanceCpuCount, NameOrId, Nullable,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+use crate::v2025_11_20_00::instance::InstanceCpuPlatform;
 use crate::v2025_11_20_00::instance::InstanceDiskAttach;
 use crate::v2025_11_20_00::instance::{UserData, bool_true};
 use crate::v2026_01_03_00::instance::InstanceNetworkInterfaceAttachment;

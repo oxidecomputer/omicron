@@ -141,9 +141,11 @@ pub struct Builder {
     /// copied forwards due to containing unmarked ereports.
     unmarked_seen_ereports: BTreeSet<fm::EreportId>,
 
-    /// The set of alert ids requested in the parent sitrep that have a marker
-    /// row in `rendezvous_alert_created`, and therefore don't force a closed
-    /// case to be copied forward.
+    /// The set of parent-sitrep alert request ids that already have a marker
+    /// row in `rendezvous_alert_created` (i.e. have been created by rendezvous).
+    /// An alert request *absent* from this set is outstanding work: alongside
+    /// unmarked ereports, it is one of the signals that forces a closed case to
+    /// be copied forward.
     existing_alerts: HashSet<AlertUuid>,
 }
 
@@ -220,10 +222,11 @@ impl Builder {
         // Cases from the parent sitrep should be copied forwards if:
         // - The case is still open
         let mut open_cases = IdOrdMap::new();
-        // - The case has been closed, but still has outstanding work: either an
-        //   ereport which has not yet been marked as "seen" in the database, or
-        //   an alert request whose `rendezvous_alert_created` marker is not yet
-        //   present.
+        // - The case has been closed, but still has outstanding work:
+        //   - an ereport which has not yet been marked as "seen" in the
+        //     database, or
+        //   - an alert request whose `rendezvous_alert_created` marker is not
+        //     yet present.
         let mut closed_cases_copied_forward = IdOrdMap::new();
         let mut alerts_changed = false;
         for case in parent_sitrep.iter().flat_map(|s| s.cases.iter()) {
@@ -255,10 +258,11 @@ impl Builder {
                 let has_outstanding_work = !unmarked_ereports.is_empty()
                     || !unmarked_alert_requests.is_empty();
                 if has_outstanding_work {
-                    // Carry the case forward intact: satisfied alert
-                    // requests are harmless to keep around (the marker
-                    // prevents resurrection) and pruning them would force a
-                    // generation bump that buys us only earlier marker GC.
+                    // The case has ereport work and/or alert work remaining, so
+                    // carry it forward intact. We keep even already-satisfied
+                    // alert requests around: the marker prevents their
+                    // resurrection, and pruning them would force a generation
+                    // bump that buys us only earlier marker GC.
                     report.closed_cases_copied_forward.insert(
                         case.id,
                         ClosedCaseReport {
@@ -299,6 +303,7 @@ mod tests {
     use super::*;
     use crate::builder::SitrepBuilder;
     use crate::test_util::FmTest;
+    use nexus_types::alert::test_alerts;
     use nexus_types::fm;
     use nexus_types::fm::case::CaseEreport;
     use nexus_types::fm::ereport::Reporter;
@@ -649,8 +654,7 @@ mod tests {
             );
             new_case
                 .request_alert(
-                    nexus_types::alert::AlertClass::TestFooBar,
-                    &serde_json::json!({"alert": true}),
+                    &test_alerts::FooBar(serde_json::json!({"alert": true})),
                     "requesting an alert to tell someone about something",
                 )
                 .unwrap();
@@ -801,6 +805,7 @@ mod tests {
             alerts_requested: [AlertRequest {
                 id: alert_id,
                 class: AlertClass::TestFoo,
+                version: 0,
                 payload: serde_json::json!({}),
                 requested_sitrep_id: parent_sitrep_id,
                 comment: String::new(),
@@ -822,15 +827,12 @@ mod tests {
         );
     }
 
-    /// One of two alert requests has a marker; the other does not. The closed
-    /// case must be carried forward intact (both alert requests still present)
-    /// and `alerts_changed` must remain `false`.
-    ///
-    /// Pre-this-change the absence of unmarked ereports alone would have
-    /// dropped the case (closed cases were only carried forward for ereport
-    /// bookkeeping); now an outstanding alert request keeps the case alive
-    /// through carry-forward until its marker is observed. Satisfied requests
-    /// are not pruned: the marker prevents resurrection.
+    /// One of two alert requests has a marker; the other does not. An
+    /// outstanding alert request keeps the closed case alive through
+    /// carry-forward until its marker is observed, so the case must be carried
+    /// forward intact (both alert requests still present) and `alerts_changed`
+    /// must remain `false` (satisfied requests are not pruned: the marker
+    /// prevents resurrection).
     #[test]
     fn build_keeps_closed_case_intact_when_not_all_alerts_satisfied() {
         use nexus_types::alert::AlertClass;
@@ -844,6 +846,7 @@ mod tests {
         let alert_request = |id| AlertRequest {
             id,
             class: AlertClass::TestFoo,
+            version: 0,
             payload: serde_json::json!({}),
             requested_sitrep_id: parent_sitrep_id,
             comment: String::new(),

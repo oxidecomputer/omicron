@@ -310,7 +310,7 @@ impl FmAnalysis {
         }
         let existing = self
             .datastore
-            .alert_markers_existing_in(opctx, &candidate_ids)
+            .fm_rendezvous_existing_alert_markers(opctx, &candidate_ids)
             .await
             .context("failed to look up alert marker existence")?;
         builder.add_existing_alerts(existing);
@@ -456,7 +456,7 @@ mod tests {
                     creator_id: OmicronZoneUuid::new_v4(),
                     comment: "test sitrep".to_string(),
                     time_created: Utc::now(),
-                    alert_generation: Generation::from_u32(0),
+                    alert_generation: Generation::new(),
                 },
                 cases: Default::default(),
                 ereports_by_id: Default::default(),

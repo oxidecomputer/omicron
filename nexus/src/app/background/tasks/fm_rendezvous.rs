@@ -11,7 +11,6 @@ use futures::future::BoxFuture;
 use nexus_background_task_interface::Activator;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
-use nexus_db_queries::db::datastore::AlertProvenance;
 use nexus_db_queries::db::datastore::SupportBundleCreateParams;
 use nexus_db_queries::db::datastore::SupportBundleProvenance;
 use nexus_db_queries::db::model::Alert;
@@ -165,10 +164,10 @@ impl FmRendezvous {
             }
             match self
                 .datastore
-                .alert_create(
+                .fm_rendezvous_alert_create(
                     &opctx,
                     Alert::for_fm_alert_request(req, case_id),
-                    AlertProvenance::Fm { expected_alert_generation },
+                    expected_alert_generation,
                 )
                 .await
             {
@@ -583,6 +582,7 @@ mod tests {
             .insert_unique(fm::case::AlertRequest {
                 id: alert1_id,
                 class: AlertClass::TestFoo,
+                version: 0,
                 requested_sitrep_id: sitrep1_id,
                 payload: serde_json::json!({}),
                 comment: String::new(),
@@ -600,17 +600,17 @@ mod tests {
                     comment: "test sitrep 1".to_string(),
                     time_created: Utc::now(),
                     next_inv_min_time_started: Utc::now(),
-                    alert_generation: Generation::from_u32(0),
+                    alert_generation: Generation::new(),
                 },
                 cases,
                 ereports_by_id: Default::default(),
             }
         };
 
-        // The sitrep-guard combinator in `alert_create` (FM provenance)
-        // consults `fm_sitrep_history` to check that this executor's expected
-        // generation matches the current one. Insert the sitrep so it shows up
-        // in the DB before activating.
+        // The sitrep-guard combinator in `fm_rendezvous_alert_create` consults
+        // `fm_sitrep_history` to check that this executor's expected generation
+        // matches the current one. Insert the sitrep so it shows up in the DB
+        // before activating.
         datastore
             .fm_sitrep_insert(opctx, sitrep1.clone())
             .await
@@ -674,6 +674,7 @@ mod tests {
             .insert_unique(fm::case::AlertRequest {
                 id: alert2_id,
                 class: AlertClass::TestFooBar,
+                version: 0,
                 requested_sitrep_id: sitrep2_id,
                 payload: serde_json::json!({}),
                 comment: String::new(),
@@ -685,6 +686,7 @@ mod tests {
             .insert_unique(fm::case::AlertRequest {
                 id: alert3_id,
                 class: AlertClass::TestFooBaz,
+                version: 0,
                 requested_sitrep_id: sitrep2_id,
                 payload: serde_json::json!({}),
                 comment: String::new(),
@@ -703,7 +705,7 @@ mod tests {
                     comment: "test sitrep 2".to_string(),
                     time_created: Utc::now(),
                     next_inv_min_time_started: Utc::now(),
-                    alert_generation: Generation::from_u32(0),
+                    alert_generation: Generation::new(),
                 },
                 cases,
                 ereports_by_id: Default::default(),
@@ -776,8 +778,9 @@ mod tests {
 
     /// A stale executor activation (one whose sitrep's `alert_generation` is
     /// behind the latest sitrep in `fm_sitrep_history`) should be rejected by
-    /// `SitrepGuardedInsert` inside `alert_create`. The rendezvous task is
-    /// responsible for translating that `Conflict` into `stale_sitrep = true`,
+    /// `SitrepGuardedInsert` inside `fm_rendezvous_alert_create`. The
+    /// rendezvous task is responsible for translating that `Conflict` into
+    /// `stale_sitrep = true`,
     /// breaking out of the alert loop without inserting any rows, and still
     /// running the support bundle op.
     #[tokio::test]
@@ -824,6 +827,7 @@ mod tests {
                 .insert_unique(fm::case::AlertRequest {
                     id: stale_alert_id,
                     class: AlertClass::TestFoo,
+                    version: 0,
                     requested_sitrep_id: stale_sitrep_id,
                     payload: serde_json::json!({}),
                     comment: String::new(),
@@ -1146,7 +1150,7 @@ mod tests {
                     comment: "sitrep with ereports 1 and 2".to_string(),
                     time_created: Utc::now(),
                     next_inv_min_time_started: Utc::now(),
-                    alert_generation: Generation::from_u32(0),
+                    alert_generation: Generation::new(),
                 },
                 cases,
                 ereports_by_id,
@@ -1359,7 +1363,7 @@ mod tests {
                     comment: "sitrep 1: only ereport 1".to_string(),
                     time_created: Utc::now(),
                     next_inv_min_time_started: Utc::now(),
-                    alert_generation: Generation::from_u32(0),
+                    alert_generation: Generation::new(),
                 },
                 cases,
                 ereports_by_id,
@@ -1469,7 +1473,7 @@ mod tests {
                     comment: "sitrep 2: all three ereports".to_string(),
                     time_created: Utc::now(),
                     next_inv_min_time_started: Utc::now(),
-                    alert_generation: Generation::from_u32(0),
+                    alert_generation: Generation::new(),
                 },
                 cases,
                 ereports_by_id,
@@ -1668,7 +1672,7 @@ mod tests {
                     comment: "test sitrep 1".to_string(),
                     time_created: Utc::now(),
                     next_inv_min_time_started: Utc::now(),
-                    alert_generation: Generation::from_u32(0),
+                    alert_generation: Generation::new(),
                 },
                 cases,
                 ereports_by_id: Default::default(),
@@ -1745,7 +1749,7 @@ mod tests {
                     comment: "test sitrep 2".to_string(),
                     time_created: Utc::now(),
                     next_inv_min_time_started: Utc::now(),
-                    alert_generation: Generation::from_u32(0),
+                    alert_generation: Generation::new(),
                 },
                 cases,
                 ereports_by_id: Default::default(),
@@ -1845,7 +1849,7 @@ mod tests {
                     creator_id: OmicronZoneUuid::new_v4(),
                     comment: "test sitrep no capacity".to_string(),
                     time_created: Utc::now(),
-                    alert_generation: Generation::from_u32(0),
+                    alert_generation: Generation::new(),
                 },
                 cases,
                 ereports_by_id: Default::default(),

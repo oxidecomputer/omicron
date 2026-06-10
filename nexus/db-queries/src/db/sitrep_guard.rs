@@ -125,7 +125,7 @@ where
     ///    [`SitrepGuardedInsertOutcome::AlreadyExists`]. An inner INSERT that
     ///    errored (rather than silently no-op'd) on a primary-key conflict
     ///    would turn the "row already exists" outcome into a hard error.
-    /// 
+    ///
     /// Ideally we'd enforce most of these constraints in the type system, but
     /// the Diesel traits we'd need to reference (`IntoConflictValueClause`,
     /// `OnConflictValues`, `DoNothing`) are not exposed in its public API.
