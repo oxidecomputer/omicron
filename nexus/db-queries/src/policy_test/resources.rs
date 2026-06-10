@@ -9,6 +9,8 @@ use super::resource_builder::ResourceSet;
 use nexus_auth::authz;
 use omicron_common::api::external::LookupType;
 use omicron_uuid_kinds::AccessTokenKind;
+use omicron_uuid_kinds::BuiltInUserKind;
+use omicron_uuid_kinds::ConsoleSessionKind;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::RackUuid;
@@ -203,6 +205,29 @@ pub async fn make_resources(
         authz::FLEET,
         subnet_pool_id,
         LookupType::by_id(subnet_pool_id),
+    ));
+
+    let ip_pool_id = "f9bf2e93-1f3f-4f4e-9c0f-3c8f6a8d6f2a".parse().unwrap();
+    builder.new_resource(authz::IpPool::new(
+        authz::FLEET,
+        ip_pool_id,
+        LookupType::by_id(ip_pool_id),
+    ));
+
+    let console_session_id: TypedUuid<ConsoleSessionKind> =
+        "a1b2c3d4-0000-4000-8000-000000000001".parse().unwrap();
+    builder.new_resource(authz::ConsoleSession::new(
+        authz::FLEET,
+        console_session_id,
+        LookupType::by_id(console_session_id),
+    ));
+
+    let user_builtin_id: TypedUuid<BuiltInUserKind> =
+        "a1b2c3d4-0000-4000-8000-000000000002".parse().unwrap();
+    builder.new_resource(authz::UserBuiltin::new(
+        authz::FLEET,
+        user_builtin_id,
+        LookupType::by_id(user_builtin_id),
     ));
 
     builder.build()
@@ -411,6 +436,19 @@ async fn make_project(
         Uuid::new_v4(),
         LookupType::ByName(format!("{}-subnet1", vpc1_name)),
     ));
+    let router_name = format!("{}-router1", vpc1_name);
+    let router = authz::VpcRouter::new(
+        vpc1.clone(),
+        Uuid::new_v4(),
+        LookupType::ByName(router_name.clone()),
+    );
+    builder.new_resource(router.clone());
+    // Test a resource nested three levels below Project
+    builder.new_resource(authz::RouterRoute::new(
+        router,
+        Uuid::new_v4(),
+        LookupType::ByName(format!("{}-route1", router_name)),
+    ));
 
     builder.new_resource(authz::Snapshot::new(
         project.clone(),
@@ -522,11 +560,8 @@ pub fn exempted_authz_classes() -> BTreeSet<String> {
         // need to call the macro `impl_dyn_authorized_resource_for_resource!`
         // for the type you are implementing the test for. See
         // resource_builder.rs for examples.
-        authz::IpPool::get_polar_class(),
-        authz::VpcRouter::get_polar_class(),
-        authz::RouterRoute::get_polar_class(),
-        authz::ConsoleSession::get_polar_class(),
-        authz::UserBuiltin::get_polar_class(),
+        //
+        // none yet.
     ]
     .into_iter()
     .map(|c| c.name)
