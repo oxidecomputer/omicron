@@ -281,6 +281,26 @@ CREATE INDEX IF NOT EXISTS lookup_sled_by_policy_and_state ON omicron.public.sle
     sled_state
 );
 
+CREATE TYPE IF NOT EXISTS omicron.public.sled_resource_vmm_state AS ENUM (
+    -- The VMM is not currently running the instance, but the propolis process
+    -- may still exist and/or the zone has not been destroyed yet, meaning it
+    -- is still consuming sled resources.
+    'tombstoned',
+
+    -- This VMM either is or will be running the instance.
+    --
+    -- A sled resource reservation is in the active state under
+    -- either of the following conditions:
+    --
+    -- 1. It was reserved in order to start a previously-stopped
+    --    instance.
+    -- 2. A migration into that VMM has completed successfully.
+    'active',
+
+    -- This VMM is a migration destination for the active VMM
+    'target'
+);
+
 -- Accounting for VMMs using resources on a sled
 CREATE TABLE IF NOT EXISTS omicron.public.sled_resource_vmm (
     -- Should match the UUID of the corresponding VMM
@@ -307,7 +327,9 @@ CREATE TABLE IF NOT EXISTS omicron.public.sled_resource_vmm (
     -- If we tried to backfill + make this column non-nullable while that saga
     -- was mid-execution, we would still have some rows in this table with nullable
     -- values that would be more complex to fix.
-    instance_id UUID
+    instance_id UUID,
+
+    state omicron.public.sled_resource_vmm_state NOT NULL
 );
 
 -- Allow looking up all VMM resources which reside on a sled
@@ -315,6 +337,20 @@ CREATE UNIQUE INDEX IF NOT EXISTS lookup_vmm_resource_by_sled ON omicron.public.
     sled_id,
     id
 );
+
+-- Allow a single VMM reservation per instance state
+--
+-- Note: `tombstoned` means that the propolis zone may not have been cleaned up
+-- yet, and should be considered as still consuming sled resources. This should
+-- not block out reserving another active VMM for an instance if the sled
+-- reservation algorithm can find a spot for it, hence why this unique index
+-- does not include the `tombstoned` state.
+CREATE UNIQUE INDEX IF NOT EXISTS
+    single_vmm_reservation_per_state
+ON omicron.public.sled_resource_vmm (
+    instance_id,
+    state
+) WHERE state != 'tombstoned';
 
 -- Allow looking up all resources by instance
 CREATE INDEX IF NOT EXISTS lookup_vmm_resource_by_instance ON omicron.public.sled_resource_vmm (
@@ -1208,6 +1244,29 @@ CREATE TABLE IF NOT EXISTS omicron.public.silo_auth_settings (
     -- null means no max: users can tokens that never expire
     device_token_max_ttl_seconds INT8 CHECK (device_token_max_ttl_seconds > 0)
 );
+
+/*
+ * Fleet-wide networking settings. Singleton row; see `db_metadata` for an
+ * explanation of the singleton pattern.
+ */
+CREATE TABLE IF NOT EXISTS omicron.public.system_networking_settings (
+    singleton BOOL NOT NULL PRIMARY KEY,
+
+    -- When true, end users may opt in to jumbo frames (8500 byte MTU) on the
+    -- primary interface of an instance. When false, the per-instance bit is
+    -- ignored and ports are created with the default MTU.
+    external_jumbo_frames_opt_in_enabled BOOL NOT NULL,
+
+    CHECK (singleton = true)
+);
+
+INSERT INTO omicron.public.system_networking_settings (
+    singleton,
+    external_jumbo_frames_opt_in_enabled
+) VALUES (
+    TRUE, FALSE
+) ON CONFLICT DO NOTHING;
+
 /*
  * Projects
  */
@@ -1296,7 +1355,8 @@ CREATE TYPE IF NOT EXISTS omicron.public.instance_auto_restart AS ENUM (
 
 CREATE TYPE IF NOT EXISTS omicron.public.instance_cpu_platform AS ENUM (
   'amd_milan',
-  'amd_turin'
+  'amd_turin',
+  'amd_turin_v2'
 );
 
 /*
@@ -1422,6 +1482,15 @@ CREATE TABLE IF NOT EXISTS omicron.public.instance (
      * sled to maximize the number of sleds the VM can migrate to.
      */
     cpu_platform omicron.public.instance_cpu_platform,
+
+    /*
+     * When set this instance has opted in to jumbo frames (8500 byte MTU)
+     * on its primary OPTE interface. The effective MTU also depends on the
+     * fleet-wide setting in `system_networking_settings`; if that flag is off,
+     * the OPTE port is created with the default MTU regardless of this column.
+     * Changes to this column only take effect on the next instance restart.
+     */
+    enable_jumbo_frames BOOL NOT NULL,
 
     CONSTRAINT vmm_iff_active_propolis CHECK (
         ((state = 'vmm') AND (active_propolis_id IS NOT NULL)) OR
@@ -2254,10 +2323,10 @@ CREATE TYPE IF NOT EXISTS omicron.public.ip_version AS ENUM (
 );
 
 
-/* Indicates what an IP Pool is reserved for. */
-CREATE TYPE IF NOT EXISTS omicron.public.ip_pool_reservation_type AS ENUM (
-    'external_silos',
-    'oxide_internal'
+/* Indicates what an IP Pool is assigned to. */
+CREATE TYPE IF NOT EXISTS omicron.public.ip_pool_assignment AS ENUM (
+    'silos',
+    'system_services'
 );
 
 /*
@@ -2286,11 +2355,11 @@ CREATE TABLE IF NOT EXISTS omicron.public.ip_pool (
     /* The IP version of the ranges contained in this pool. */
     ip_version omicron.public.ip_version NOT NULL,
 
-    /* Indicates what the IP Pool is reserved for. */
-    reservation_type omicron.public.ip_pool_reservation_type NOT NULL,
-
     /* Pool type for unicast (default) vs multicast pools. */
-    pool_type omicron.public.ip_pool_type NOT NULL DEFAULT 'unicast'
+    pool_type omicron.public.ip_pool_type NOT NULL DEFAULT 'unicast',
+
+    /* Indicates what the IP Pool is assigned to. */
+    assignment omicron.public.ip_pool_assignment NOT NULL
 );
 
 /*
@@ -6016,7 +6085,8 @@ CREATE INDEX IF NOT EXISTS lookup_anti_affinity_group_instance_membership_by_ins
 CREATE TYPE IF NOT EXISTS omicron.public.vmm_cpu_platform AS ENUM (
   'sled_default',
   'amd_milan',
-  'amd_turin'
+  'amd_turin',
+  'amd_turin_v2'
 );
 
 /* Describes why a VMM record is in the 'failed' `vmm_state`. */
@@ -8677,7 +8747,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '262.0.0', NULL)
+    (TRUE, NOW(), NOW(), '266.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

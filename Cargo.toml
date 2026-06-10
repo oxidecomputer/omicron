@@ -456,7 +456,7 @@ cfg-if = "1.0"
 chrono = { version = "0.4", features = [ "serde" ] }
 chrono-tz = { version = "0.10.4", features = [ "serde" ] }
 ciborium = "0.2.2"
-clap = { version = "4.5", features = ["cargo", "derive", "env", "wrap_help"] }
+clap = { version = "4.6", features = ["cargo", "derive", "env", "wrap_help"] }
 clickana = { path = "dev-tools/clickana" }
 clickhouse-admin-api = { path = "clickhouse-admin/api" }
 clickhouse-admin-keeper-client = { path = "clients/clickhouse-admin-keeper-client" }
@@ -615,8 +615,8 @@ ntp-admin-client = { path = "clients/ntp-admin-client" }
 ntp-admin-v1-client = { path = "clients/ntp-admin-v1-client" }
 ntp-admin-types = { path = "ntp-admin/types" }
 ntp-admin-types-versions = { path = "ntp-admin/types/versions" }
-mg-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "7696ee48d5ee29a917dea459e281fe2e8ff20513" }
-ddm-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "7696ee48d5ee29a917dea459e281fe2e8ff20513" }
+mg-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "951f759b1d8e61cf65c2a823e61933ff3ea0bdf1" }
+ddm-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "951f759b1d8e61cf65c2a823e61933ff3ea0bdf1" }
 multimap = "0.10.1"
 nexus-auth = { path = "nexus/auth" }
 nexus-background-task-interface = { path = "nexus/background-task-interface" }
@@ -678,16 +678,16 @@ omicron-workspace-hack = "0.1.0"
 omicron-zone-package = "0.12.2"
 oxide-client = { path = "clients/oxide-client" }
 oxide-tokio-rt = "0.1.4"
-oxide-vpc = { git = "https://github.com/oxidecomputer/opte", rev = "2c6efefe14321dafe7e9e80129d38316adb2d238", features = [ "api", "std" ] }
+oxide-vpc = { git = "https://github.com/oxidecomputer/opte", rev = "8b44982bf0d3f8ea52c810b2b00425a1e350e2f8", features = [ "api", "std" ] }
 oxlog = { path = "dev-tools/oxlog" }
-oxnet = "0.1.4"
+oxnet = "0.1.5"
 once_cell = "1.21.3"
 openapi-lint = { git = "https://github.com/oxidecomputer/openapi-lint", branch = "main" }
 openapiv3 = "2.2.0"
 # must match samael's crate!
 openssl = "0.10"
 openssl-sys = "0.9"
-opte-ioctl = { git = "https://github.com/oxidecomputer/opte", rev = "2c6efefe14321dafe7e9e80129d38316adb2d238" }
+opte-ioctl = { git = "https://github.com/oxidecomputer/opte", rev = "8b44982bf0d3f8ea52c810b2b00425a1e350e2f8" }
 oso = "0.27"
 owo-colors = "4.2.2"
 oximeter = { path = "oximeter/oximeter" }
@@ -753,7 +753,7 @@ rats-corim = { git = "https://github.com/oxidecomputer/rats-corim.git", rev = "f
 raw-cpuid = { git = "https://github.com/oxidecomputer/rust-cpuid.git", rev = "a4cf01df76f35430ff5d39dc2fe470bcb953503b" }
 rayon = "1.10"
 rcgen = "0.12.1"
-rdb-types = { git = "https://github.com/oxidecomputer/maghemite", rev = "7696ee48d5ee29a917dea459e281fe2e8ff20513" }
+mg-api-types = { git = "https://github.com/oxidecomputer/maghemite", rev = "951f759b1d8e61cf65c2a823e61933ff3ea0bdf1" }
 reconfigurator-cli = { path = "dev-tools/reconfigurator-cli" }
 reedline = "0.40.0"
 ref-cast = "1.0"

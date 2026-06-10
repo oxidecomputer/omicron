@@ -15,9 +15,13 @@ use crate::api_metadata::ApiExpectedConsumer;
 use crate::api_metadata::ApiExpectedConsumers;
 use crate::api_metadata::ApiMetadata;
 use crate::api_metadata::Evaluation;
+use crate::api_metadata::RawApiMetadata;
 use crate::api_metadata::ServerComponentKind;
 use crate::api_metadata::VersionedHow;
 use crate::cargo::DepPath;
+use crate::errors::ErrorAccumulator;
+use crate::errors::LoadError;
+use crate::errors::LoadErrors;
 use crate::parse_toml_file;
 use crate::workspaces::Workspaces;
 use anyhow::Result;
@@ -27,7 +31,6 @@ use cargo_metadata::PackageId;
 use iddqd::IdOrdItem;
 use iddqd::IdOrdMap;
 use iddqd::id_upcast;
-use itertools::Itertools;
 use omicron_deployment_graph::DagEdge;
 use omicron_deployment_graph::DagEdgesFile;
 use omicron_deployment_graph::DeploymentUnitName;
@@ -126,25 +129,41 @@ impl<'a> IdOrdItem for FilteredApiConsumer<'a> {
 impl SystemApis {
     /// Load information about APIs in the system based on both developer-
     /// maintained metadata and Cargo-provided metadata
-    pub fn load(args: LoadArgs) -> Result<SystemApis> {
-        // Load the API manifest.
-        let api_metadata: AllApiMetadata =
-            parse_toml_file(&args.api_manifest_path)?;
-        // Load Cargo metadata and validate it against the manifest.
-        let (workspaces, warnings) = Workspaces::load(&api_metadata)?;
-        if !warnings.is_empty() {
-            // We treat these warnings as fatal here.
-            for e in warnings {
-                eprintln!("error: {:#}", e);
-            }
+    pub fn load(args: LoadArgs) -> Result<SystemApis, LoadErrors> {
+        let mut errors = ErrorAccumulator::new();
 
-            bail!(
-                "found inconsistency between API manifest ({}) and \
-                 information found from the Cargo dependency tree \
-                 (see above)",
-                &args.api_manifest_path
-            );
-        }
+        // Parse the API manifest.  If the file can't be read or parsed, there's
+        // nothing else to validate, so report that and exit early.
+        let raw: RawApiMetadata = match parse_toml_file(&args.api_manifest_path)
+        {
+            Ok(raw) => raw,
+            Err(source) => {
+                errors.push(LoadError::ReadManifest {
+                    path: args.api_manifest_path.clone(),
+                    source,
+                });
+                return Err(errors
+                    .take_load_errors()
+                    .expect("the manifest read error was just recorded"));
+            }
+        };
+
+        // Validate the manifest.  Every later pass assumes valid metadata, so
+        // we stop early if the manifest had any problems.
+        let Some(api_metadata) = AllApiMetadata::from_raw(raw, &mut errors)
+        else {
+            return Err(errors.take_load_errors().expect(
+                "from_raw returns None only after recording an error",
+            ));
+        };
+
+        // Load Cargo metadata and cross-check it against the manifest.
+        let Some(workspaces) = Workspaces::load(&api_metadata, &mut errors)
+        else {
+            return Err(errors.take_load_errors().expect(
+                "Workspaces::load returns None only after recording an error",
+            ));
+        };
 
         // Create an index of server package names, mapping each one to the list
         // of APIs that it produces.
@@ -180,25 +199,37 @@ impl SystemApis {
                     // the `inside` binary, so it necessarily lives in the
                     // same workspace as `inside`.  Resolve its package within
                     // that workspace specifically.
-                    let (workspace, _) =
-                        workspaces.find_package_workspace(inside)?;
-                    let embedded_pkg = workspace
-                        .find_workspace_package(component.name())
-                        .ok_or_else(|| {
-                            anyhow!(
-                                "embedded component {:?} not found in its \
-                                 expected workspace\n  \
-                                 expected workspace: {:?} (the workspace \
-                                 of its `inside` package {:?})\n  \
-                                 deployment unit: {:?}\n  \
-                                 hint: check `name` for typos, or that the \
-                                 package exists in that workspace",
-                                component.name(),
-                                workspace.name(),
-                                inside,
-                                component.deployment_unit(),
-                            )
-                        })?;
+                    let workspace =
+                        match workspaces.find_package_workspace(inside) {
+                            Ok((workspace, _)) => workspace,
+                            Err(source) => {
+                                errors.push(
+                                LoadError::ResolveEmbeddedComponentWorkspace {
+                                    embedded_component: component
+                                        .name()
+                                        .clone(),
+                                    inside: inside.clone(),
+                                    source,
+                                },
+                            );
+                                continue;
+                            }
+                        };
+                    let Some(embedded_pkg) =
+                        workspace.find_workspace_package(component.name())
+                    else {
+                        errors.push(
+                            LoadError::EmbeddedComponentNotInWorkspace {
+                                embedded_component: component.name().clone(),
+                                workspace: workspace.name().to_owned(),
+                                inside: inside.clone(),
+                                deployment_unit: component
+                                    .deployment_unit()
+                                    .clone(),
+                            },
+                        );
+                        continue;
+                    };
                     omitted_pkgid_embedded.insert(&embedded_pkg.id, component);
                     omitted_nodes
                         .entry(inside)
@@ -230,8 +261,20 @@ impl SystemApis {
 
                 match component.kind() {
                     ServerComponentKind::TopLevel => {
-                        let (workspace, server_pkg) = workspaces
-                            .find_package_workspace(component_name)?;
+                        let (workspace, server_pkg) = match workspaces
+                            .find_package_workspace(component_name)
+                        {
+                            Ok(found) => found,
+                            Err(source) => {
+                                errors.push(
+                                    LoadError::ResolveServerComponentWorkspace {
+                                        component: component_name.clone(),
+                                        source,
+                                    },
+                                );
+                                continue;
+                            }
+                        };
                         let dep_path = DepPath::for_pkg(server_pkg.id.clone());
                         tracker.found_package(
                             component_name,
@@ -242,10 +285,18 @@ impl SystemApis {
                         let omitted = omitted_nodes.get(component_name).expect(
                             "every server component has an omitted_nodes entry",
                         );
-                        let outcome = workspace
-                            .walk_required_deps_recursively(
-                                server_pkg, omitted,
-                            )?;
+                        let outcome = match workspace
+                            .walk_required_deps_recursively(server_pkg, omitted)
+                        {
+                            Ok(outcome) => outcome,
+                            Err(source) => {
+                                errors.push(LoadError::WalkDependencies {
+                                    component: component_name.clone(),
+                                    source,
+                                });
+                                continue;
+                            }
+                        };
                         for pkg_outcome in &outcome.found {
                             tracker.found_package(
                                 component_name,
@@ -269,22 +320,13 @@ impl SystemApis {
                                     "every omitted package ID was \
                                      registered with its embedded component",
                                 );
-                            bail!(
-                                "embedded component {:?} is declared \
-                                 `inside` a package that doesn't depend on \
-                                 it\n  \
-                                 deployment unit: {:?}\n  \
-                                 `inside` package: {:?} (no normal or build \
-                                 Cargo dependency on this embedded \
-                                 component)\n  \
-                                 hint: remove the stale \
-                                 `embedded_components` entry, fix its \
-                                 `inside` field, or restore the dependency \
-                                 if it was removed or made dev-only",
-                                embedded.name(),
-                                embedded.deployment_unit(),
-                                component_name,
-                            );
+                            errors.push(LoadError::StaleEmbeddedComponent {
+                                embedded_component: embedded.name().clone(),
+                                deployment_unit: embedded
+                                    .deployment_unit()
+                                    .clone(),
+                                inside: component_name.clone(),
+                            });
                         }
                     }
                     ServerComponentKind::Embedded { .. } => {
@@ -300,6 +342,13 @@ impl SystemApis {
         let (unit_server_components, api_producers) =
             (tracker.unit_server_components, tracker.api_producers);
 
+        // The remaining passes interpret the producer/consumer graph we just
+        // built.  If constructing the graph hit any problems, it is incomplete
+        // and further checks would report spurious errors, so bail out.
+        if let Some(load_errors) = errors.take_load_errors() {
+            return Err(load_errors);
+        }
+
         // Ensure that if restricted_to_consumers is defined, all consumers
         // listed are specified by at least one deployment unit.
         for api in api_metadata.apis() {
@@ -311,12 +360,12 @@ impl SystemApis {
                             .server_component(&consumer.name)
                             .is_none()
                         {
-                            bail!(
-                                "api {} specifies unknown consumer: {} \
-                                 (with expected reason: {})",
-                                api.client_package_name,
-                                consumer.name,
-                                consumer.reason,
+                            errors.push(
+                                LoadError::ApiUnknownRestrictedConsumer {
+                                    client: api.client_package_name.clone(),
+                                    consumer: consumer.name.clone(),
+                                    reason: consumer.reason.clone(),
+                                },
                             );
                         }
                     }
@@ -331,20 +380,32 @@ impl SystemApis {
         let mut deps_tracker = ClientDependenciesTracker::new(&api_metadata);
         for server_component in api_metadata.server_components() {
             let server_pkgname = server_component.name();
-            let (workspace, pkg) =
-                workspaces.find_package_workspace(server_pkgname)?;
+            let (workspace, pkg) = match workspaces
+                .find_package_workspace(server_pkgname)
+            {
+                Ok(found) => found,
+                Err(source) => {
+                    errors.push(LoadError::ResolveServerComponentWorkspace {
+                        component: server_pkgname.clone(),
+                        source,
+                    });
+                    continue;
+                }
+            };
             let omitted = omitted_nodes
                 .get(server_pkgname)
                 .expect("every server component has an omitted_nodes entry");
-            let outcome = workspace
-                .walk_required_deps_recursively(pkg, omitted)
-                .with_context(|| {
-                    format!(
-                        "iterating dependencies of workspace {:?} package {:?}",
-                        workspace.name(),
-                        server_pkgname
-                    )
-                })?;
+            let outcome =
+                match workspace.walk_required_deps_recursively(pkg, omitted) {
+                    Ok(outcome) => outcome,
+                    Err(source) => {
+                        errors.push(LoadError::WalkDependencies {
+                            component: server_pkgname.clone(),
+                            source,
+                        });
+                        continue;
+                    }
+                };
             for pkg_outcome in &outcome.found {
                 deps_tracker.found_dependency(
                     server_pkgname,
@@ -363,22 +424,16 @@ impl SystemApis {
             let found_producer = api_producers.get(&api.client_package_name);
             if api.deployed() {
                 if found_producer.is_none() {
-                    bail!(
-                        "error: found no producer for API with client package \
-                         name {:?} in any deployment unit (should have been \
-                         one that contains server package {:?})",
-                        api.client_package_name,
-                        api.server_package_name,
-                    );
+                    errors.push(LoadError::NoProducerForApi {
+                        client: api.client_package_name.clone(),
+                        server: api.server_package_name.clone(),
+                    });
                 }
             } else if let Some(found) = found_producer {
-                bail!(
-                    "error: metadata says there should be no deployed \
-                     producer for API with client package name {:?}, but found \
-                     one: {:?}",
-                    api.client_package_name,
-                    found
-                );
+                errors.push(LoadError::UnexpectedProducerForApi {
+                    client: api.client_package_name.clone(),
+                    producers: found.keys().cloned().collect(),
+                });
             }
 
             // Do any of the expected consumers of this API not actually use it?
@@ -408,32 +463,66 @@ impl SystemApis {
 
         // Validate that the IDU-only edges' components belong to the same
         // deployment unit.
+        //
+        // Each `(server, client)` edge produces one of the following outcomes.
+        // `from_raw` already validates that both `server` and `client` are
+        // known, so the two "internal" rows are unreachable in practice.
+        //
+        // Row 3 fires only for non-deployed APIs: a *deployed* API with no
+        // producer is already reported as `NoProducerForApi` in the
+        // producer/consumer pass above, and we report each misconfiguration
+        // exactly once.
+        //
+        //      server known?  client known?  has producer?  in server's unit? | outcome
+        //
+        //  (1)      no              -              -                -         | IduServerNotTracked (internal)
+        //  (2)      yes            no              -                -         | IduClientNotTracked (internal)
+        //  (3)      yes            yes            no                -         | IduClientWithoutProducer (non-deployed only)
+        //  (4)      yes            yes            yes              no         | IduProducersNotInServerUnit
+        //  (5)      yes            yes            yes              yes        | ok (edge satisfied)
         for edge in api_metadata.intra_deployment_unit_only_edges() {
             let server = &edge.server;
             let Some(server_unit) = api_metadata
                 .server_component(server)
                 .map(|c| c.deployment_unit())
             else {
-                // This was validated earlier, but there's not an easy way to
-                // express this in the type system, so we just handle it
-                // gracefully.
-                bail!(
-                    "internal error: intra_deployment_unit_only specifies \
-                    server {:?} that does not exist in server components",
-                    server,
-                );
+                // Row 1 above.
+                errors.push(LoadError::IduServerNotTracked {
+                    server: server.clone(),
+                });
+                continue;
             };
 
             let client = &edge.client;
+            let Some(client_api) = api_metadata.client_pkgname_lookup(client)
+            else {
+                // Row 2 above.
+                //
+                // (This is checked against the full set of known APIs, not
+                // against `api_producers`, which only contains APIs that have a
+                // producer.)
+                errors.push(LoadError::IduClientNotTracked {
+                    client: client.clone(),
+                });
+                continue;
+            };
+
             let Some(producers) = api_producers.get(client) else {
-                // This was validated earlier, but there's not an easy way to
-                // express this in the type system, so we just handle it
-                // gracefully.
-                bail!(
-                    "internal error: intra_deployment_unit_only specifies \
-                     client {:?} that does not correspond to a known API",
-                    client,
-                );
+                // Row 3 above.
+                //
+                // A known API with no producer is a real error in the manifest:
+                // the edge names an API that nothing produces, so it can never
+                // be satisfied.  A *deployed* API in this state was already
+                // reported as `NoProducerForApi` above, so to report each
+                // misconfiguration exactly once we only fire here for
+                // non-deployed APIs, which that pass deliberately ignores.
+                if !client_api.deployed() {
+                    errors.push(LoadError::IduClientWithoutProducer {
+                        server: server.clone(),
+                        client: client.clone(),
+                    });
+                }
+                continue;
             };
 
             if !producers.iter().any(|(p, _)| {
@@ -442,16 +531,19 @@ impl SystemApis {
                     .map(|c| c.deployment_unit() == server_unit)
                     .unwrap_or(false)
             }) {
-                bail!(
-                    "error: intra_deployment_unit_only specifies server \
-                     {:?} in deployment unit {:?}, but none of the producers \
-                     of client {:?} are in that deployment_unit: {}",
-                    server,
-                    server_unit,
-                    client,
-                    producers.keys().map(|p| p.as_str()).join(", "),
-                );
+                // Row 4 above.
+                errors.push(LoadError::IduProducersNotInServerUnit {
+                    server: server.clone(),
+                    deployment_unit: server_unit.clone(),
+                    client: client.clone(),
+                    producers: producers.keys().cloned().collect(),
+                });
             }
+        }
+
+        // Report everything collected by the final group of validation passes.
+        if let Some(load_errors) = errors.take_load_errors() {
+            return Err(load_errors);
         }
 
         Ok(SystemApis {
