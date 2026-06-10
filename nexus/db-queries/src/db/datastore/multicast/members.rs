@@ -2289,7 +2289,7 @@ mod tests {
         assert_eq!(unchanged_member.state, MulticastGroupMemberState::Joined);
         assert_eq!(unchanged_member.time_modified, before_modification);
 
-        // Test starting instance that has no multicast memberships (should be no-op)
+        // Test starting instance that has no multicast memberships (should be noop)
         let non_member_instance = InstanceUuid::new_v4();
         datastore
             .multicast_group_member_set_instance_sled(
@@ -2454,7 +2454,7 @@ mod tests {
             .await
             .expect("Should handle duplicate mark for removal");
 
-        // Test marking instance with no memberships (should be no-op)
+        // Test marking instance with no memberships (should be noop)
         let non_member_instance = InstanceUuid::new_v4();
         datastore
             .multicast_group_members_mark_for_removal(
@@ -2672,7 +2672,7 @@ mod tests {
             .expect("Should list group2 members");
         assert_eq!(group2_members.len(), 2);
 
-        // Test deleting from group with no members (should be no-op)
+        // Test deleting from group with no members (should be noop)
         datastore
             .multicast_group_members_delete_by_group(
                 &opctx,
@@ -2681,7 +2681,7 @@ mod tests {
             .await
             .expect("Should handle deleting from empty group");
 
-        // Test deleting from nonexistent group (should be no-op)
+        // Test deleting from nonexistent group (should be noop)
         let fake_group_id = Uuid::new_v4();
         datastore
             .multicast_group_members_delete_by_group(

@@ -201,7 +201,7 @@ impl SledAgentApi for SledAgentSimImpl {
         let sa = rqctx.context();
         let propolis_id = path_params.into_inner().propolis_id;
         let membership = body.into_inner();
-        sa.instance_join_multicast_group(propolis_id, &membership).await?;
+        sa.vmm_join_multicast_group(propolis_id, &membership).await?;
         Ok(HttpResponseUpdatedNoContent())
     }
 
@@ -213,7 +213,7 @@ impl SledAgentApi for SledAgentSimImpl {
         let sa = rqctx.context();
         let propolis_id = path_params.into_inner().propolis_id;
         let membership = body.into_inner();
-        sa.instance_leave_multicast_group(propolis_id, &membership).await?;
+        sa.vmm_leave_multicast_group(propolis_id, &membership).await?;
         Ok(HttpResponseUpdatedNoContent())
     }
 

@@ -1077,6 +1077,30 @@
         }
       }
     },
+    "/multicast/ddm-peers": {
+      "get": {
+        "summary": "Read-only view of DDM underlay peers across switch zones",
+        "operationId": "multicast_ddm_peers",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MulticastDdmPeersView"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/oximeter/read-policy": {
       "get": {
         "summary": "Get the current oximeter read policy",
@@ -5945,6 +5969,78 @@
           "in_progress",
           "recent",
           "waiting"
+        ]
+      },
+      "MulticastDdmPeer": {
+        "description": "A single DDM underlay peer as observed from a switch zone.\n\nUnder RFD 488, `mg-lower` derives underlay multicast members from the DDM peer subscriptions reported here. The `if_name` field names the switch interface the peer was discovered on (e.g. \"tfportrear0_0\").",
+        "type": "object",
+        "properties": {
+          "addr": {
+            "description": "The peer's underlay address.",
+            "type": "string",
+            "format": "ipv6"
+          },
+          "host": {
+            "description": "The peer's reported hostname.",
+            "type": "string"
+          },
+          "if_name": {
+            "nullable": true,
+            "description": "The switch interface the peer was discovered on, if known.",
+            "type": "string"
+          },
+          "status": {
+            "description": "The peer's DDM session state.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/MulticastDdmPeerStatus"
+              }
+            ]
+          },
+          "status_duration": {
+            "description": "How long the peer has held its current session state.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Duration"
+              }
+            ]
+          },
+          "switch": {
+            "description": "The switch zone the peer was observed from.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "addr",
+          "host",
+          "status",
+          "status_duration",
+          "switch"
+        ]
+      },
+      "MulticastDdmPeerStatus": {
+        "description": "DDM session state of an underlay peer.\n\nMirrors the variants of the DDM admin API's `PeerStatus` without the state-duration payload, which is carried separately on [`MulticastDdmPeer::status_duration`] so consumers can match on the state directly.",
+        "type": "string",
+        "enum": [
+          "init",
+          "solicit",
+          "exchange",
+          "expired"
+        ]
+      },
+      "MulticastDdmPeersView": {
+        "description": "Read-only view of DDM underlay peers across all switch zones.\n\nSurfaced via `omdb nexus multicast ddm-peers` for operators inspecting the underlay topology that drives multicast member programming.",
+        "type": "object",
+        "properties": {
+          "peers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MulticastDdmPeer"
+            }
+          }
+        },
+        "required": [
+          "peers"
         ]
       },
       "MupdateOverrideUuid": {
