@@ -24,3 +24,7 @@ cases (2 total):
       * ereport dddddddd-dddd-dddd-dddd-dddddddddddd:2
 
 no in-service control plane disks
+
+non-terminal sagas observed (2 total):
+  * saga 5a9a0001-5a9a-45a9-85a9-5a9a5a9a5a9a (fake-saga): Unwinding, last event: 1970-01-01 00:00:00 UTC, owner: Quiesced
+  * saga 5a9a0002-5a9a-45a9-85a9-5a9a5a9a5a9a (another-fake-saga): Running, last event: <none recorded>, owner: <no current SEC>

@@ -218,6 +218,21 @@ impl Builder {
                 .iter()
                 .map(|d| d.physical_disk_id)
                 .collect(),
+            observed_sagas: self
+                .observed_sagas
+                .iter()
+                .map(|s| {
+                    (
+                        s.saga_id,
+                        fm::analysis_reports::ObservedSagaReport {
+                            saga_name: s.saga_name.clone(),
+                            saga_state: s.saga_state,
+                            last_event_time: s.last_event_time,
+                            owner_state: s.owner_state,
+                        },
+                    )
+                })
+                .collect(),
         };
 
         // Determine which cases must be copied forwards into the next sitrep.

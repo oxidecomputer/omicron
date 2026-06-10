@@ -8,6 +8,8 @@
 use super::case;
 use super::ereport::EreportId;
 use super::json_display::fmt_json_value;
+use crate::observed_saga::{SagaOwnerState, SagaProgressState};
+use chrono::{DateTime, Utc};
 use iddqd::IdOrdMap;
 use omicron_uuid_kinds::{
     CaseUuid, CollectionUuid, PhysicalDiskUuid, SitrepUuid,
@@ -232,6 +234,22 @@ pub struct InputReport {
     /// All control-plane-managed physical disks visible to the diagnosis
     /// engines for this analysis pass.
     pub in_service_disks: BTreeSet<PhysicalDiskUuid>,
+    /// All non-terminal sagas visible to the diagnosis engines for this
+    /// analysis pass.
+    pub observed_sagas: BTreeMap<steno::SagaId, ObservedSagaReport>,
+}
+
+/// Summary of one non-terminal saga in an [`InputReport`].
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ObservedSagaReport {
+    pub saga_name: String,
+    pub saga_state: SagaProgressState,
+    /// The latest node event recorded for this saga, or `None` if it has
+    /// recorded none.
+    pub last_event_time: Option<DateTime<Utc>>,
+    /// The classified state of the owning Nexus, or `None` if the saga has
+    /// no current SEC.
+    pub owner_state: Option<SagaOwnerState>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -263,6 +281,7 @@ impl fmt::Display for InputReportMultilineDisplay<'_> {
                     open_cases,
                     closed_cases_copied_forward,
                     in_service_disks,
+                    observed_sagas,
                 },
             indent,
         } = self;
@@ -378,6 +397,40 @@ impl fmt::Display for InputReportMultilineDisplay<'_> {
             }
         }
 
+        if observed_sagas.is_empty() {
+            writeln!(f, "\n{:indent$}no non-terminal sagas observed", "")?;
+        } else {
+            writeln!(
+                f,
+                "\n{:indent$}non-terminal sagas observed ({} total):",
+                "",
+                observed_sagas.len()
+            )?;
+            let indent = indent + 2;
+            for (saga_id, saga) in observed_sagas {
+                let ObservedSagaReport {
+                    saga_name,
+                    saga_state,
+                    last_event_time,
+                    owner_state,
+                } = saga;
+                write!(
+                    f,
+                    "{:indent$}* saga {saga_id} ({saga_name}): \
+                     {saga_state:?}, last event: ",
+                    ""
+                )?;
+                match last_event_time {
+                    Some(t) => write!(f, "{t}")?,
+                    None => write!(f, "<none recorded>")?,
+                }
+                match owner_state {
+                    Some(s) => writeln!(f, ", owner: {s:?}")?,
+                    None => writeln!(f, ", owner: <no current SEC>")?,
+                }
+            }
+        }
+
         Ok(())
     }
 }
@@ -455,6 +508,8 @@ mod tests {
             },
         );
 
+        let observed_sagas = example_observed_sagas();
+
         InputReport {
             parent_sitrep_id: Some(parent_sitrep_id),
             parent_inv_id: Some(parent_inv_id),
@@ -463,7 +518,37 @@ mod tests {
             open_cases,
             closed_cases_copied_forward,
             in_service_disks: BTreeSet::new(),
+            observed_sagas,
         }
+    }
+
+    fn example_observed_sagas() -> BTreeMap<steno::SagaId, ObservedSagaReport> {
+        let mut observed_sagas = BTreeMap::new();
+        observed_sagas.insert(
+            steno::SagaId(
+                uuid::Uuid::from_str("5a9a0001-5a9a-45a9-85a9-5a9a5a9a5a9a")
+                    .unwrap(),
+            ),
+            ObservedSagaReport {
+                saga_name: "fake-saga".to_string(),
+                saga_state: SagaProgressState::Unwinding,
+                last_event_time: DateTime::from_timestamp(0, 0),
+                owner_state: Some(SagaOwnerState::Quiesced),
+            },
+        );
+        observed_sagas.insert(
+            steno::SagaId(
+                uuid::Uuid::from_str("5a9a0002-5a9a-45a9-85a9-5a9a5a9a5a9a")
+                    .unwrap(),
+            ),
+            ObservedSagaReport {
+                saga_name: "another-fake-saga".to_string(),
+                saga_state: SagaProgressState::Running,
+                last_event_time: None,
+                owner_state: None,
+            },
+        );
+        observed_sagas
     }
 
     fn example_report_empty() -> InputReport {
@@ -479,6 +564,7 @@ mod tests {
             open_cases: BTreeMap::new(),
             closed_cases_copied_forward: BTreeMap::new(),
             in_service_disks: BTreeSet::new(),
+            observed_sagas: BTreeMap::new(),
         }
     }
 
@@ -498,6 +584,7 @@ mod tests {
             open_cases: BTreeMap::new(),
             closed_cases_copied_forward: BTreeMap::new(),
             in_service_disks: BTreeSet::new(),
+            observed_sagas: BTreeMap::new(),
         }
     }
 

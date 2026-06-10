@@ -717,6 +717,8 @@ task: "fm_analysis"
 
     no in-service control plane disks
 
+    no non-terminal sagas observed
+
     fault management analysis report
     --------------------------------
     sitrep ID: ..........<REDACTED_UUID>...........
@@ -766,6 +768,8 @@ task: "fm_sitrep_gc"
     orphaned fm_ereport_in_case rows deleted:                                    0
       batches:                                                                   1
     orphaned fm_fact_physical_disk rows deleted:                                 0
+      batches:                                                                   1
+    orphaned fm_fact_saga rows deleted:                                          0
       batches:                                                                   1
     orphaned fm_support_bundle_request rows deleted:                             0
       batches:                                                                   1
@@ -1415,6 +1419,8 @@ task: "fm_analysis"
 
     no in-service control plane disks
 
+    no non-terminal sagas observed
+
     fault management analysis report
     --------------------------------
     sitrep ID: ..........<REDACTED_UUID>...........
@@ -1464,6 +1470,8 @@ task: "fm_sitrep_gc"
     orphaned fm_ereport_in_case rows deleted:                                    0
       batches:                                                                   1
     orphaned fm_fact_physical_disk rows deleted:                                 0
+      batches:                                                                   1
+    orphaned fm_fact_saga rows deleted:                                          0
       batches:                                                                   1
     orphaned fm_support_bundle_request rows deleted:                             0
       batches:                                                                   1
