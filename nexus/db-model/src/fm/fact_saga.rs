@@ -5,10 +5,10 @@
 //! Database representation of the saga diagnosis engine's facts.
 //!
 //! Each saga fact is stored as typed columns in the `fm_fact_saga` table. The
-//! `kind` discriminant selects which payload columns are populated; a CHECK
-//! constraint (`fm_fact_saga_columns_match_kind`) enforces that the right
-//! columns are non-NULL for each kind. See [`nexus_types::fm::SagaFact`] for
-//! semantics.
+//! `kind` discriminant selects which payload columns are populated; per-kind
+//! CHECK constraints (e.g. `not_progressing_columns_present`) enforce that
+//! the right columns are non-NULL for each kind. See
+//! [`nexus_types::fm::SagaFact`] for semantics.
 
 use crate::DbTypedUuid;
 use crate::Generation;
@@ -92,8 +92,10 @@ fn saga_progress_state(state: SagaState) -> Result<SagaProgressState, Error> {
 /// Diesel row for the `fm_fact_saga` table.
 ///
 /// The payload columns are populated according to `kind`: a column is `Some`
-/// iff it belongs to that `kind`'s payload, enforced in the database by the
-/// `fm_fact_saga_columns_match_kind` CHECK constraint.
+/// if it belongs to that `kind`'s payload, and `None` otherwise (by
+/// convention; the per-kind CHECK constraints, e.g.
+/// `not_progressing_columns_present`, enforce only the "present for the
+/// matching kind" direction so that future kinds may share columns).
 #[derive(Queryable, Insertable, Clone, Debug, Selectable)]
 #[diesel(table_name = fm_fact_saga)]
 pub struct FmFactSaga {

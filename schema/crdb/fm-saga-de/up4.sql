@@ -35,26 +35,21 @@ CREATE TABLE IF NOT EXISTS omicron.public.fm_fact_saga (
 
     PRIMARY KEY (sitrep_id, id),
 
-    -- Exactly one kind's columns are populated; all other kinds' columns are
-    -- NULL. A `kind` not handled here fails closed (ELSE false), so adding a
-    -- new kind requires extending this constraint.
-    CONSTRAINT fm_fact_saga_columns_match_kind CHECK (
-        CASE kind
-            WHEN 'not_progressing' THEN
-                saga_state IS NOT NULL
-                AND time_created IS NOT NULL
-                AND last_event_time IS NOT NULL
-                AND current_sec IS NULL
-                AND orphan_reason IS NULL
-                AND adopt_generation IS NULL
-            WHEN 'owner_not_current_generation' THEN
-                current_sec IS NOT NULL
-                AND orphan_reason IS NOT NULL
-                AND adopt_generation IS NOT NULL
-                AND saga_state IS NULL
-                AND time_created IS NULL
-                AND last_event_time IS NULL
-            ELSE false
-        END
+    -- Each variant validates that the columns it expects are present.
+    -- Future variants should add their own constraint like this one,
+    -- leaving existing constraints untouched.
+    CONSTRAINT not_progressing_columns_present CHECK (
+        kind != 'not_progressing' OR (
+            saga_state IS NOT NULL
+            AND time_created IS NOT NULL
+            AND last_event_time IS NOT NULL
+        )
+    ),
+    CONSTRAINT owner_not_current_generation_columns_present CHECK (
+        kind != 'owner_not_current_generation' OR (
+            current_sec IS NOT NULL
+            AND orphan_reason IS NOT NULL
+            AND adopt_generation IS NOT NULL
+        )
     )
 );
