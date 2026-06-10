@@ -38,7 +38,6 @@ use nexus_db_lookup::LookupPath;
 use nexus_db_lookup::lookup;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
-use nexus_db_queries::db::model::AlertClass;
 use nexus_db_queries::db::model::AlertDeliveryState;
 use nexus_db_queries::db::model::AlertDeliveryTrigger;
 use nexus_db_queries::db::model::AlertReceiver;
@@ -49,6 +48,8 @@ use nexus_db_queries::db::model::WebhookDeliveryAttemptResult;
 use nexus_db_queries::db::model::WebhookReceiverConfig;
 use nexus_db_queries::db::model::WebhookSecret;
 use nexus_types::alert as alert_types;
+use nexus_types::alert::AlertClass;
+use nexus_types::alert::AlertPayload;
 use nexus_types::external_api::alert;
 use nexus_types::identity::Asset;
 use nexus_types::identity::Resource;
@@ -192,11 +193,13 @@ impl Nexus {
         )?;
         let mut delivery = WebhookDelivery::new_probe(&rx_id, &self.id);
 
-        const CLASS: AlertClass = AlertClass::Probe;
-        const VERSION: u32 =
-            <alert_types::Probe as alert_types::AlertPayload>::VERSION;
-        static DATA: LazyLock<serde_json::Value> =
-            LazyLock::new(|| serde_json::json!({}));
+        const CLASS: AlertClass = <alert_types::Probe as AlertPayload>::CLASS;
+        const VERSION: u32 = <alert_types::Probe as AlertPayload>::VERSION;
+        static DATA: LazyLock<serde_json::Value> = LazyLock::new(|| {
+            serde_json::to_value(&alert_types::Probe {}).expect(
+                "a struct with no fields should always serialize properly",
+            )
+        });
 
         let attempt = match client
             .send_delivery_request(opctx, &delivery, CLASS, VERSION, &DATA)
@@ -378,7 +381,7 @@ impl<'a> ReceiverClient<'a> {
         &mut self,
         opctx: &OpContext,
         delivery: &WebhookDelivery,
-        alert_class: AlertClass,
+        alert_class: impl Into<AlertClass>,
         alert_version: u32,
         data: &serde_json::Value,
     ) -> Result<WebhookDeliveryAttempt, anyhow::Error> {
@@ -415,6 +418,7 @@ impl<'a> ReceiverClient<'a> {
         }
 
         // okay, actually do the thing...
+        let alert_class = alert_class.into();
         let time_attempted = Utc::now();
         let sent_at = time_attempted.to_rfc3339();
         let payload = Payload {
