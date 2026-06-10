@@ -880,40 +880,6 @@ resource: RouterRoute "silo1-proj1-vpc1-router1-route1"
   internal-api                      ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
   external-authn                    ∅  ∅  ∅  ∅  ∅  ∅  ∅  ∅
 
-resource: VpcRouter "silo1-proj1-vpc1-router1"
-
-  USER                              Q  R LC RP  M MP CC  D
-  fleet-admin                       ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  fleet-collaborator                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  fleet-viewer                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-admin                       ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
-  silo1-collaborator                ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
-  silo1-limited-collaborator        ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
-  silo1-viewer                      ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
-  silo1-proj1-admin                 ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
-  silo1-proj1-collaborator          ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
-  silo1-proj1-limited-collaborator  ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
-  silo1-proj1-viewer                ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
-  unauthenticated                   !  !  !  !  !  !  !  !
-  scim                              ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-
-resource: RouterRoute "silo1-proj1-vpc1-router1-route1"
-
-  USER                              Q  R LC RP  M MP CC  D
-  fleet-admin                       ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  fleet-collaborator                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  fleet-viewer                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-admin                       ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
-  silo1-collaborator                ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
-  silo1-limited-collaborator        ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
-  silo1-viewer                      ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
-  silo1-proj1-admin                 ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
-  silo1-proj1-collaborator          ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
-  silo1-proj1-limited-collaborator  ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
-  silo1-proj1-viewer                ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
-  unauthenticated                   !  !  !  !  !  !  !  !
-  scim                              ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-
 resource: Snapshot "silo1-proj1-disk1-snapshot1"
 
   USER                              Q  R LC RP  M MP CC  D
@@ -1312,40 +1278,6 @@ resource: RouterRoute "silo1-proj2-vpc1-router1-route1"
   db-init                           ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
   internal-api                      ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
   external-authn                    ∅  ∅  ∅  ∅  ∅  ∅  ∅  ∅
-
-resource: VpcRouter "silo1-proj2-vpc1-router1"
-
-  USER                              Q  R LC RP  M MP CC  D
-  fleet-admin                       ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  fleet-collaborator                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  fleet-viewer                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-admin                       ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
-  silo1-collaborator                ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
-  silo1-limited-collaborator        ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
-  silo1-viewer                      ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
-  silo1-proj1-admin                 ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-proj1-collaborator          ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-proj1-limited-collaborator  ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-proj1-viewer                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  unauthenticated                   !  !  !  !  !  !  !  !
-  scim                              ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-
-resource: RouterRoute "silo1-proj2-vpc1-router1-route1"
-
-  USER                              Q  R LC RP  M MP CC  D
-  fleet-admin                       ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  fleet-collaborator                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  fleet-viewer                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-admin                       ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
-  silo1-collaborator                ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
-  silo1-limited-collaborator        ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
-  silo1-viewer                      ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
-  silo1-proj1-admin                 ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-proj1-collaborator          ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-proj1-limited-collaborator  ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-proj1-viewer                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  unauthenticated                   !  !  !  !  !  !  !  !
-  scim                              ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
 
 resource: Snapshot "silo1-proj2-disk1-snapshot1"
 
@@ -2103,40 +2035,6 @@ resource: RouterRoute "silo2-proj1-vpc1-router1-route1"
   internal-api                      ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
   external-authn                    ∅  ∅  ∅  ∅  ∅  ∅  ∅  ∅
 
-resource: VpcRouter "silo2-proj1-vpc1-router1"
-
-  USER                              Q  R LC RP  M MP CC  D
-  fleet-admin                       ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  fleet-collaborator                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  fleet-viewer                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-admin                       ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-collaborator                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-limited-collaborator        ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-viewer                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-proj1-admin                 ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-proj1-collaborator          ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-proj1-limited-collaborator  ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-proj1-viewer                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  unauthenticated                   !  !  !  !  !  !  !  !
-  scim                              ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-
-resource: RouterRoute "silo2-proj1-vpc1-router1-route1"
-
-  USER                              Q  R LC RP  M MP CC  D
-  fleet-admin                       ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  fleet-collaborator                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  fleet-viewer                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-admin                       ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-collaborator                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-limited-collaborator        ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-viewer                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-proj1-admin                 ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-proj1-collaborator          ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-proj1-limited-collaborator  ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-proj1-viewer                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  unauthenticated                   !  !  !  !  !  !  !  !
-  scim                              ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-
 resource: Snapshot "silo2-proj1-disk1-snapshot1"
 
   USER                              Q  R LC RP  M MP CC  D
@@ -2808,57 +2706,6 @@ resource: UserBuiltin id "a1b2c3d4-0000-4000-8000-000000000002"
   db-init                           ∅  ∅  ∅  ∅  ∅  ∅  ∅  ∅
   internal-api                      ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
   external-authn                    ∅  ∅  ∅  ∅  ∅  ∅  ∅  ∅
-
-resource: IpPool id "f9bf2e93-1f3f-4f4e-9c0f-3c8f6a8d6f2a"
-
-  USER                              Q  R LC RP  M MP CC  D
-  fleet-admin                       ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
-  fleet-collaborator                ✘  ✔  ✔  ✔  ✘  ✘  ✔  ✘
-  fleet-viewer                      ✘  ✔  ✔  ✔  ✘  ✘  ✔  ✘
-  silo1-admin                       ✘  ✘  ✘  ✘  ✘  ✘  ✔  ✘
-  silo1-collaborator                ✘  ✘  ✘  ✘  ✘  ✘  ✔  ✘
-  silo1-limited-collaborator        ✘  ✘  ✘  ✘  ✘  ✘  ✔  ✘
-  silo1-viewer                      ✘  ✘  ✘  ✘  ✘  ✘  ✔  ✘
-  silo1-proj1-admin                 ✘  ✘  ✘  ✘  ✘  ✘  ✔  ✘
-  silo1-proj1-collaborator          ✘  ✘  ✘  ✘  ✘  ✘  ✔  ✘
-  silo1-proj1-limited-collaborator  ✘  ✘  ✘  ✘  ✘  ✘  ✔  ✘
-  silo1-proj1-viewer                ✘  ✘  ✘  ✘  ✘  ✘  ✔  ✘
-  unauthenticated                   !  !  !  !  !  !  !  !
-  scim                              ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-
-resource: ConsoleSession id "a1b2c3d4-0000-4000-8000-000000000001"
-
-  USER                              Q  R LC RP  M MP CC  D
-  fleet-admin                       ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
-  fleet-collaborator                ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
-  fleet-viewer                      ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
-  silo1-admin                       ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-collaborator                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-limited-collaborator        ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-viewer                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-proj1-admin                 ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-proj1-collaborator          ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-proj1-limited-collaborator  ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-proj1-viewer                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  unauthenticated                   !  !  !  !  !  !  !  !
-  scim                              ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-
-resource: UserBuiltin id "a1b2c3d4-0000-4000-8000-000000000002"
-
-  USER                              Q  R LC RP  M MP CC  D
-  fleet-admin                       ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
-  fleet-collaborator                ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
-  fleet-viewer                      ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
-  silo1-admin                       ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-collaborator                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-limited-collaborator        ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-viewer                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-proj1-admin                 ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-proj1-collaborator          ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-proj1-limited-collaborator  ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-proj1-viewer                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  unauthenticated                   !  !  !  !  !  !  !  !
-  scim                              ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
 
 ACTIONS:
 
