@@ -193,11 +193,9 @@ impl ChronySetupProperties {
         let Some(service) = scope.service("oxide/chrony-setup")? else {
             bail!("SMF service 'oxide/chrony-setup' was not found")
         };
-
         let Some(instance) = service.instance("default")? else {
             bail!("instance default not found within {}", service.fmri())
         };
-
         let Some(pg) = instance.property_group_direct("config")? else {
             bail!("property group 'config' not found for {}", instance.fmri())
         };
@@ -215,7 +213,7 @@ impl ChronySetupProperties {
         let is_boundary = match &boundary {
             Value::Bool(b) => *b,
             _ => bail!(
-                "the value for property 'boundary' is {};\
+                "the value kind for property 'boundary' is {};\
             should be a boolean",
                 &boundary.kind()
             ),
