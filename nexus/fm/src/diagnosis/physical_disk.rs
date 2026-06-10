@@ -5,7 +5,6 @@
 //! Disk diagnosis engine.
 
 use crate::SitrepBuilder;
-use crate::analysis_input::Input;
 use iddqd::{IdOrdItem, IdOrdMap, id_upcast};
 use nexus_types::fm::DiagnosisEngineKind;
 use nexus_types::fm::{DiskFact, ZpoolUnhealthyFactPayload};
@@ -59,10 +58,10 @@ struct ParentCaseSummary {
     unhealthy_facts: IdOrdMap<ZpoolUnhealthyFact>,
 }
 
-pub(super) fn analyze(
-    input: &Input,
-    builder: &mut SitrepBuilder<'_>,
-) -> anyhow::Result<()> {
+pub(super) fn analyze(builder: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
+    // The input borrow has lifetime 'a, not a borrow of `builder`, so we may
+    // hold it while mutating the builder below.
+    let input = builder.input();
     let inv_collection_id = input.inventory().id;
     let inv_time_done = input.inventory().time_done;
 
@@ -162,6 +161,19 @@ pub(super) fn analyze(
         })
         .collect();
 
+    // Inverse index: which parent case is about which disk. Cases are
+    // per-disk, so a disk with two parent cases is pathological; keep the
+    // lowest case ID.
+    let mut case_by_disk: BTreeMap<
+        PhysicalDiskUuid,
+        (CaseUuid, &ParentCaseSummary),
+    > = BTreeMap::new();
+    for (case_id, summary) in &parent_cases {
+        case_by_disk
+            .entry(summary.physical_disk_id)
+            .or_insert((*case_id, summary));
+    }
+
     // For each parent case, decide what to do based on its disk's current
     // state:
     //  - disk no longer in service → close the case (expungement)
@@ -172,10 +184,10 @@ pub(super) fn analyze(
     //    is NOT a recovery signal: sled could be powered off, or
     //    inventory could be lossy)
     for (case_id, summary) in &parent_cases {
-        let mut case_mut = builder
-            .cases
-            .case_mut(case_id)
-            .expect("case_id came from iterating builder.cases");
+        let mut case_mut = builder.cases.case_mut(case_id).expect(
+            "builder.cases is seeded from the open cases of builder.input(), \
+             which is where this case_id came from",
+        );
         match in_service_health.get(&summary.physical_disk_id) {
             None => {
                 case_mut.close(format!(
@@ -211,17 +223,10 @@ pub(super) fn analyze(
             continue;
         }
 
-        let parent_for_disk =
-            parent_cases.iter().find_map(|(case_id, summary)| {
-                if summary.physical_disk_id == disk.physical_disk_id {
-                    Some((*case_id, summary))
-                } else {
-                    None
-                }
-            });
+        let parent_for_disk = case_by_disk.get(&disk.physical_disk_id).copied();
 
         let case_id_for_fact = match parent_for_disk {
-            // Parent case already has an accurate fact — fully covered.
+            // Parent case already has an accurate fact; fully covered.
             Some((_, summary))
                 if summary
                     .unhealthy_facts
@@ -233,7 +238,7 @@ pub(super) fn analyze(
             // Parent case exists; its stale facts were removed above.
             // Refresh under the same case.
             Some((case_id, _)) => case_id,
-            // No parent case for this disk — open one.
+            // No parent case for this disk; open one.
             None => {
                 let mut new_case =
                     builder.cases.open_case(DiagnosisEngineKind::PhysicalDisk);
@@ -396,7 +401,7 @@ mod tests {
             input,
             SitrepBuilderRng::from_seed("disk-analyze"),
         );
-        analyze(input, &mut builder).expect("analyze ok");
+        analyze(&mut builder).expect("analyze ok");
         builder.build(OmicronZoneUuid::new_v4(), Utc::now())
     }
 

@@ -24,6 +24,11 @@ pub struct SitrepBuilder<'a> {
     pub parent_sitrep: Option<&'a fm::Sitrep>,
     pub sitrep_id: SitrepUuid,
     pub cases: case::AllCases,
+    /// The analysis input this builder was constructed from. `cases` is
+    /// seeded from this input's open cases, so diagnosis engines must read
+    /// their inputs from here rather than taking a separate `Input` argument
+    /// that might disagree.
+    input: &'a analysis_input::Input,
     closed_cases_copied_forward: &'a IdOrdMap<fm::Case>,
     comment: String,
 }
@@ -66,9 +71,18 @@ impl<'a> SitrepBuilder<'a> {
             inventory,
             parent_sitrep,
             comment: String::new(),
+            input: inputs,
             closed_cases_copied_forward,
             cases,
         }
+    }
+
+    /// The analysis input this builder was constructed from.
+    ///
+    /// The returned reference borrows the input (lifetime `'a`), not the
+    /// builder, so callers may hold it while mutating the builder.
+    pub fn input(&self) -> &'a analysis_input::Input {
+        self.input
     }
 
     pub fn comment(&self) -> &str {

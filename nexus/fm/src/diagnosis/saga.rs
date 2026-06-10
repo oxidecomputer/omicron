@@ -14,7 +14,6 @@
 //! See omicron#10530 for motivation.
 
 use crate::SitrepBuilder;
-use crate::analysis_input::Input;
 use chrono::{DateTime, TimeDelta, Utc};
 use nexus_types::fm::DiagnosisEngineKind;
 use nexus_types::fm::{
@@ -39,10 +38,10 @@ struct ParentSagaCase {
     owner_not_current: Option<(FactUuid, SagaOwnerNotCurrentFactPayload)>,
 }
 
-pub(super) fn analyze(
-    input: &Input,
-    builder: &mut SitrepBuilder<'_>,
-) -> anyhow::Result<()> {
+pub(super) fn analyze(builder: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
+    // The input borrow has lifetime 'a, not a borrow of `builder`, so we may
+    // hold it while mutating the builder below.
+    let input = builder.input();
     // Reference "now" for staleness. We use the inventory collection's
     // completion time (rather than `Utc::now()`) so analysis is deterministic
     // and reproducible in tests, matching the physical-disk engine's use of
@@ -262,6 +261,7 @@ fn desired_owner_not_current(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::analysis_input::Input;
     use crate::builder::{SitrepBuilder, SitrepBuilderRng};
     use crate::test_util::FmTest;
     use chrono::Utc;
@@ -347,7 +347,7 @@ mod tests {
             input,
             SitrepBuilderRng::from_seed("saga-analyze"),
         );
-        analyze(input, &mut builder).expect("analyze ok");
+        analyze(&mut builder).expect("analyze ok");
         builder.build(OmicronZoneUuid::new_v4(), Utc::now()).0
     }
 

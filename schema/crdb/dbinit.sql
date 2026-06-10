@@ -7759,18 +7759,18 @@ CREATE TABLE IF NOT EXISTS omicron.public.fm_fact_physical_disk (
 
     PRIMARY KEY (sitrep_id, id),
 
+    -- Each variant validates that the columns it expects are present.
+    -- Future variants should add their own constraint like this one,
+    -- leaving existing constraints untouched.
     CONSTRAINT zpool_unhealthy_columns_present CHECK (
-        kind = 'zpool_unhealthy'
-            AND zpool_id IS NOT NULL
+        kind != 'zpool_unhealthy' OR (
+            zpool_id IS NOT NULL
             AND last_seen_health IS NOT NULL
             AND observed_in_inv IS NOT NULL
             AND time_observed IS NOT NULL
+        )
     )
 );
-
-CREATE INDEX IF NOT EXISTS
-    lookup_fm_fact_physical_disk_for_case
-ON omicron.public.fm_fact_physical_disk (sitrep_id, case_id);
 
 -- The saga diagnosis engine's facts. See the comment on the physical-disk
 -- engine above: one table per engine, fact content as typed columns.
