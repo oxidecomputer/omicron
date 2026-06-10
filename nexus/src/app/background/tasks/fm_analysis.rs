@@ -227,7 +227,7 @@ impl FmAnalysis {
         // represented as control plane disks today, so the U.2-only filter
         // on the underlying query matches reality.
         //
-        // This is the executed view from the DB — flipped only after sagas /
+        // This is the executed view from the DB, flipped only after sagas /
         // cleaners have actually drained resources, not while a planner is
         // merely proposing changes. A faulty disk a planner proposes to
         // expunge is still the diagnoser's concern until the control plane
@@ -239,23 +239,36 @@ impl FmAnalysis {
             .context("failed to load in-service control plane disks")?;
         let mut in_service_disks_map = IdOrdMap::new();
         for (zpool, disk) in zpools_and_disks {
-            if disk.disk_policy != PhysicalDiskPolicy::InService {
+            if disk.time_deleted().is_some()
+                || disk.disk_policy != PhysicalDiskPolicy::InService
+            {
                 continue;
             }
-            in_service_disks_map
+            let physical_disk_id = disk.id();
+            let zpool_id = zpool.id();
+            if in_service_disks_map
                 .insert_unique(InServiceDisk {
-                    physical_disk_id: disk.id(),
-                    zpool_id: zpool.id(),
+                    physical_disk_id,
+                    zpool_id,
                     sled_id: disk.sled_id.into(),
                     vendor: disk.vendor,
                     serial: disk.serial,
                     model: disk.model,
                     variant: disk.variant.into(),
                 })
-                .expect(
-                    "physical_disk.id is a primary key, so duplicates are \
-                     impossible",
+                .is_err()
+            {
+                // One live zpool per disk is a code-maintained invariant,
+                // not a schema constraint. Tolerate a violation rather than
+                // panicking the analysis task: keep the first zpool seen
+                // for the disk.
+                slog::warn!(
+                    &opctx.log,
+                    "multiple live zpools reference the same physical disk";
+                    "physical_disk_id" => %physical_disk_id,
+                    "zpool_id" => %zpool_id,
                 );
+            }
         }
         let in_service_disks = Arc::new(in_service_disks_map);
         let mut builder = fm::analysis_input::Input::builder(

@@ -34,8 +34,10 @@ impl_enum_type!(
 /// Diesel row for the `fm_fact_physical_disk` table.
 ///
 /// The payload columns are populated according to `kind`: a column is `Some`
-/// iff it belongs to that `kind`'s payload. This is enforced in the database
-/// by the per-kind CHECK constraints (e.g. `zpool_unhealthy_columns_present`).
+/// if it belongs to that `kind`'s payload, and `None` otherwise (by
+/// convention; the per-kind CHECK constraints, e.g.
+/// `zpool_unhealthy_columns_present`, enforce only the "present for the
+/// matching kind" direction so that future kinds may share columns).
 #[derive(Queryable, Insertable, Clone, Debug, Selectable)]
 #[diesel(table_name = fm_fact_physical_disk)]
 pub struct FmFactPhysicalDisk {
