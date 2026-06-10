@@ -10,6 +10,7 @@ use nexus_types::external_api::networking;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::{
     self, CreateResult, DeleteResult, ListResultVec, LookupResult, NameOrId,
+    UpdateResult,
 };
 use slog_error_chain::InlineErrorChain;
 
@@ -40,6 +41,21 @@ impl super::Nexus {
     ) -> ListResultVec<BgpConfig> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
         self.db_datastore.bgp_config_list(opctx, pagparams).await
+    }
+
+    pub async fn bgp_config_update(
+        &self,
+        opctx: &OpContext,
+        sel: &networking::BgpConfigSelector,
+        update: &networking::BgpConfigUpdate,
+    ) -> UpdateResult<BgpConfig> {
+        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
+        let result =
+            self.db_datastore.bgp_config_update(opctx, sel, update).await?;
+        // Eagerly propagate changes via background task
+        self.background_tasks
+            .activate(&self.background_tasks.task_switch_port_settings_manager);
+        Ok(result)
     }
 
     pub async fn bgp_config_delete(
