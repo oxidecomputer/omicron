@@ -161,6 +161,19 @@ pub(super) fn analyze(builder: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
         })
         .collect();
 
+    // Inverse index: which parent case is about which disk. Cases are
+    // per-disk, so a disk with two parent cases is pathological; keep the
+    // lowest case ID.
+    let mut case_by_disk: BTreeMap<
+        PhysicalDiskUuid,
+        (CaseUuid, &ParentCaseSummary),
+    > = BTreeMap::new();
+    for (case_id, summary) in &parent_cases {
+        case_by_disk
+            .entry(summary.physical_disk_id)
+            .or_insert((*case_id, summary));
+    }
+
     // For each parent case, decide what to do based on its disk's current
     // state:
     //  - disk no longer in service → close the case (expungement)
@@ -210,17 +223,10 @@ pub(super) fn analyze(builder: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
             continue;
         }
 
-        let parent_for_disk =
-            parent_cases.iter().find_map(|(case_id, summary)| {
-                if summary.physical_disk_id == disk.physical_disk_id {
-                    Some((*case_id, summary))
-                } else {
-                    None
-                }
-            });
+        let parent_for_disk = case_by_disk.get(&disk.physical_disk_id).copied();
 
         let case_id_for_fact = match parent_for_disk {
-            // Parent case already has an accurate fact — fully covered.
+            // Parent case already has an accurate fact; fully covered.
             Some((_, summary))
                 if summary
                     .unhealthy_facts
@@ -232,7 +238,7 @@ pub(super) fn analyze(builder: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
             // Parent case exists; its stale facts were removed above.
             // Refresh under the same case.
             Some((case_id, _)) => case_id,
-            // No parent case for this disk — open one.
+            // No parent case for this disk; open one.
             None => {
                 let mut new_case =
                     builder.cases.open_case(DiagnosisEngineKind::PhysicalDisk);
