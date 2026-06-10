@@ -7771,10 +7771,6 @@ CREATE TABLE IF NOT EXISTS omicron.public.fm_fact_physical_disk (
     )
 );
 
-CREATE INDEX IF NOT EXISTS
-    lookup_fm_fact_physical_disk_for_case
-ON omicron.public.fm_fact_physical_disk (sitrep_id, case_id);
-
 CREATE TABLE IF NOT EXISTS omicron.public.fm_ereport_in_case (
     -- ID of this association. When an ereport is assigned to a case, that
     -- association is assigned a UUID. These are used primarily to aid in
