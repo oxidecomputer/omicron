@@ -1169,31 +1169,6 @@ impl Display for InstanceState {
     }
 }
 
-// TODO-cleanup why is this error type different from the one for Name?  The
-// reason is probably that Name can be provided by the user, so we want a
-// good validation error.  InstanceState cannot.  Still, is there a way to
-// unify these?
-impl TryFrom<&str> for InstanceState {
-    type Error = String;
-
-    fn try_from(variant: &str) -> Result<Self, Self::Error> {
-        let r = match variant {
-            "creating" => InstanceState::Creating,
-            "starting" => InstanceState::Starting,
-            "running" => InstanceState::Running,
-            "stopping" => InstanceState::Stopping,
-            "stopped" => InstanceState::Stopped,
-            "rebooting" => InstanceState::Rebooting,
-            "migrating" => InstanceState::Migrating,
-            "repairing" => InstanceState::Repairing,
-            "failed" => InstanceState::Failed,
-            "destroyed" => InstanceState::Destroyed,
-            _ => return Err(format!("Unexpected variant {}", variant)),
-        };
-        Ok(r)
-    }
-}
-
 impl InstanceState {
     pub fn label(&self) -> &'static str {
         match self {
