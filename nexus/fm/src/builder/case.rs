@@ -335,10 +335,11 @@ impl iddqd::IdOrdItem for CaseBuilder {
 mod tests {
     use super::*;
     use nexus_types::alert::test_alerts;
+    use omicron_test_utils::dev;
 
-    fn make_all_cases() -> AllCases {
+    fn make_all_cases(log: &slog::Logger) -> AllCases {
         AllCases {
-            log: slog::Logger::root(slog::Discard, slog::o!()),
+            log: log.clone(),
             sitrep_id: SitrepUuid::new_v4(),
             cases: IdOrdMap::new(),
             rng: rng::SitrepBuilderRng::from_seed("make_all_cases"),
@@ -347,14 +348,17 @@ mod tests {
 
     #[test]
     fn dirty_bit_default_false() {
-        let mut all_cases = make_all_cases();
+        let logctx = dev::test_setup_log("dirty_bit_default_false");
+        let mut all_cases = make_all_cases(&logctx.log);
         let case = all_cases.open_case(fm::DiagnosisEngineKind::PowerShelf);
         assert!(!case.alerts_changed);
+        logctx.cleanup_successful();
     }
 
     #[test]
     fn request_alert_flips_alert_state() {
-        let mut all_cases = make_all_cases();
+        let logctx = dev::test_setup_log("request_alert_flips_alert_state");
+        let mut all_cases = make_all_cases(&logctx.log);
         assert!(!all_cases.alert_set_changed());
 
         {
@@ -366,5 +370,6 @@ mod tests {
         }
 
         assert!(all_cases.alert_set_changed());
+        logctx.cleanup_successful();
     }
 }
