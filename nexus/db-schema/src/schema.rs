@@ -1111,6 +1111,7 @@ table! {
         rss_ram -> Int8,
         reservoir_ram -> Int8,
         instance_id -> Nullable<Uuid>,
+        state -> crate::enums::SledResourceVmmStateEnum,
     }
 }
 
