@@ -108,14 +108,15 @@ pub(super) fn analyze(builder: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
     }
 
     // First pass: for each parent case, close it if its saga has reached a
-    // terminal state (no longer observed), otherwise drop any facts whose
-    // recorded contents no longer match the current observation. The second
-    // pass re-adds a fresh fact if the condition still holds.
+    // terminal state (no longer observed) or has fully recovered (no
+    // condition holds anymore), otherwise drop any facts whose recorded
+    // contents no longer match the current observation. The second pass
+    // re-adds a fresh fact if the condition still holds.
     for (case_id, summary) in &parent_cases {
-        let mut case_mut = builder
-            .cases
-            .case_mut(case_id)
-            .expect("case_id came from iterating builder.cases");
+        let mut case_mut = builder.cases.case_mut(case_id).expect(
+            "builder.cases is seeded from the open cases of builder.input(), \
+             which is where this case_id came from",
+        );
         let Some(obs) = observed.get(&summary.saga_id) else {
             case_mut.close(format!(
                 "saga {} reached a terminal state",
@@ -125,6 +126,18 @@ pub(super) fn analyze(builder: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
         };
         let desired_np = desired_not_progressing(obs, reference_time);
         let desired_owner = desired_owner_not_current(obs);
+        // A case is an episode of a problem, not a dossier on the saga: when
+        // no condition holds anymore, the episode is over and the case
+        // closes. Its facts stay attached as the record of why it existed;
+        // they age out with the case once it stops being copied forward. If
+        // the saga becomes a problem again later, a fresh case opens.
+        if desired_np.is_none() && desired_owner.is_none() {
+            case_mut.close(format!(
+                "saga {} is progressing under a current owner again",
+                summary.saga_id,
+            ));
+            continue;
+        }
         if let Some((fact_id, payload)) = &summary.not_progressing {
             if desired_np.as_ref() != Some(payload) {
                 case_mut.remove_fact(*fact_id);
@@ -341,14 +354,17 @@ mod tests {
         builder.build().0
     }
 
-    fn run_analyze(log: &slog::Logger, input: &Input) -> Sitrep {
+    fn run_analyze(
+        log: &slog::Logger,
+        input: &Input,
+    ) -> (Sitrep, fm::analysis_reports::AnalysisReport) {
         let mut builder = SitrepBuilder::new_with_rng(
             log,
             input,
             SitrepBuilderRng::from_seed("saga-analyze"),
         );
         analyze(&mut builder).expect("analyze ok");
-        builder.build(OmicronZoneUuid::new_v4(), Utc::now()).0
+        builder.build(OmicronZoneUuid::new_v4(), Utc::now())
     }
 
     /// Collect every saga fact in the sitrep, optionally only on open cases.
@@ -372,17 +388,19 @@ mod tests {
     fn make_parent_with_saga_case(
         parent_sitrep_id: SitrepUuid,
         inv_collection_id: omicron_uuid_kinds::CollectionUuid,
-        fact_payload: SagaFact,
+        fact_payloads: impl IntoIterator<Item = SagaFact>,
     ) -> Sitrep {
         let mut facts = IdOrdMap::new();
-        facts
-            .insert_unique(fm::case::Fact {
-                id: omicron_uuid_kinds::FactUuid::new_v4(),
-                created_sitrep_id: parent_sitrep_id,
-                payload: fact_payload.into(),
-                comment: "parent saga fact".to_string(),
-            })
-            .unwrap();
+        for fact_payload in fact_payloads {
+            facts
+                .insert_unique(fm::case::Fact {
+                    id: omicron_uuid_kinds::FactUuid::new_v4(),
+                    created_sitrep_id: parent_sitrep_id,
+                    payload: fact_payload.into(),
+                    comment: "parent saga fact".to_string(),
+                })
+                .unwrap();
+        }
         let mut cases = IdOrdMap::new();
         cases
             .insert_unique(fm::Case {
@@ -422,7 +440,7 @@ mod tests {
         let id = saga_id(1);
         let observed = observed_map([mk_observed(id, Some(stale), None, None)]);
         let input = build_input(collection, None, observed);
-        let sitrep = run_analyze(&logctx.log, &input);
+        let (sitrep, _report) = run_analyze(&logctx.log, &input);
 
         let facts = saga_facts(&sitrep, true);
         assert_eq!(facts.len(), 1);
@@ -443,7 +461,7 @@ mod tests {
         let observed =
             observed_map([mk_observed(saga_id(1), Some(recent), None, None)]);
         let input = build_input(collection, None, observed);
-        let sitrep = run_analyze(&logctx.log, &input);
+        let (sitrep, _report) = run_analyze(&logctx.log, &input);
         assert!(
             saga_facts(&sitrep, false).is_empty(),
             "a saga making recent progress should not be flagged",
@@ -464,7 +482,7 @@ mod tests {
             Some(SagaOwnerState::Quiesced),
         )]);
         let input = build_input(collection, None, observed);
-        let sitrep = run_analyze(&logctx.log, &input);
+        let (sitrep, _report) = run_analyze(&logctx.log, &input);
 
         let facts = saga_facts(&sitrep, true);
         assert_eq!(facts.len(), 1);
@@ -491,7 +509,7 @@ mod tests {
             Some(SagaOwnerState::Active),
         )]);
         let input = build_input(collection, None, observed);
-        let sitrep = run_analyze(&logctx.log, &input);
+        let (sitrep, _report) = run_analyze(&logctx.log, &input);
         assert!(saga_facts(&sitrep, false).is_empty());
         logctx.cleanup_successful();
     }
@@ -507,7 +525,7 @@ mod tests {
             Some(SagaOwnerState::NotYet),
         )]);
         let input = build_input(collection, None, observed);
-        let sitrep = run_analyze(&logctx.log, &input);
+        let (sitrep, _report) = run_analyze(&logctx.log, &input);
         assert!(saga_facts(&sitrep, false).is_empty());
         logctx.cleanup_successful();
     }
@@ -525,7 +543,7 @@ mod tests {
             Some(SagaOwnerState::Absent),
         )]);
         let input = build_input(collection, None, observed);
-        let sitrep = run_analyze(&logctx.log, &input);
+        let (sitrep, _report) = run_analyze(&logctx.log, &input);
 
         let facts = saga_facts(&sitrep, true);
         assert_eq!(facts.len(), 2, "expected both fact kinds on one case");
@@ -560,17 +578,17 @@ mod tests {
         let parent = make_parent_with_saga_case(
             parent_id,
             inv_id,
-            SagaFact::NotProgressing(SagaNotProgressingFactPayload {
+            [SagaFact::NotProgressing(SagaNotProgressingFactPayload {
                 saga_id: id,
                 saga_name: "test-saga".to_string(),
                 saga_state: SagaProgressState::Unwinding,
                 time_created: Utc::now() - TimeDelta::days(1),
                 last_event_time: stale,
-            }),
+            })],
         );
         // The saga is no longer observed (it reached a terminal state).
         let input = build_input(collection, Some(parent), observed_map([]));
-        let sitrep = run_analyze(&logctx.log, &input);
+        let (sitrep, _report) = run_analyze(&logctx.log, &input);
         let all = saga_facts(&sitrep, false);
         assert_eq!(all.len(), 1, "the fact carries forward on the closed case");
         let case = sitrep
@@ -600,7 +618,7 @@ mod tests {
         let parent = make_parent_with_saga_case(
             parent_id,
             inv_id,
-            SagaFact::NotProgressing(payload.clone()),
+            [SagaFact::NotProgressing(payload.clone())],
         );
         let parent_fact_id =
             parent.cases.iter().next().unwrap().facts.iter().next().unwrap().id;
@@ -617,7 +635,7 @@ mod tests {
             owner_state: None,
         }]);
         let input = build_input(collection, Some(parent), observed);
-        let sitrep = run_analyze(&logctx.log, &input);
+        let (sitrep, _report) = run_analyze(&logctx.log, &input);
         let facts = saga_facts(&sitrep, true);
         assert_eq!(facts.len(), 1);
         assert_eq!(
@@ -640,13 +658,13 @@ mod tests {
         let parent = make_parent_with_saga_case(
             SitrepUuid::new_v4(),
             inv_id,
-            SagaFact::NotProgressing(SagaNotProgressingFactPayload {
+            [SagaFact::NotProgressing(SagaNotProgressingFactPayload {
                 saga_id: id,
                 saga_name: "test-saga".to_string(),
                 saga_state: SagaProgressState::Unwinding,
                 time_created,
                 last_event_time: old,
-            }),
+            })],
         );
         let parent_fact_id =
             parent.cases.iter().next().unwrap().facts.iter().next().unwrap().id;
@@ -662,7 +680,7 @@ mod tests {
             owner_state: None,
         }]);
         let input = build_input(collection, Some(parent), observed);
-        let sitrep = run_analyze(&logctx.log, &input);
+        let (sitrep, _report) = run_analyze(&logctx.log, &input);
         let facts = saga_facts(&sitrep, true);
         assert_eq!(facts.len(), 1);
         assert_ne!(
@@ -675,6 +693,171 @@ mod tests {
             }
             other => panic!("expected NotProgressing, got {other:?}"),
         }
+        logctx.cleanup_successful();
+    }
+
+    /// A saga that was flagged as not progressing but has since resumed
+    /// recording node events: the episode is over, so the case closes. Its
+    /// fact stays attached as the record of why the case existed.
+    #[test]
+    fn closes_on_progress_resumed() {
+        let (logctx, collection) = setup("saga_closes_on_progress_resumed");
+        let id = saga_id(1);
+        let stale =
+            collection.time_done - (STALE_SAGA_THRESHOLD + TimeDelta::hours(1));
+        let recent = collection.time_done - TimeDelta::minutes(1);
+        let parent = make_parent_with_saga_case(
+            SitrepUuid::new_v4(),
+            collection.id,
+            [SagaFact::NotProgressing(SagaNotProgressingFactPayload {
+                saga_id: id,
+                saga_name: "test-saga".to_string(),
+                saga_state: SagaProgressState::Unwinding,
+                time_created: Utc::now() - TimeDelta::days(1),
+                last_event_time: stale,
+            })],
+        );
+        let observed =
+            observed_map([mk_observed(id, Some(recent), None, None)]);
+        let input = build_input(collection, Some(parent), observed);
+        let (sitrep, report) = run_analyze(&logctx.log, &input);
+
+        let case = sitrep
+            .cases
+            .iter()
+            .find(|c| c.metadata.de == DiagnosisEngineKind::Saga)
+            .expect("saga case should be present in the closing sitrep");
+        assert!(
+            !case.is_open(),
+            "case should close when the saga resumes progress",
+        );
+        assert_eq!(
+            case.facts.len(),
+            1,
+            "the stale fact stays attached to the closed case as evidence",
+        );
+        let report_str = format!("{}", report.display_multiline(0));
+        assert!(
+            report_str.contains("progressing under a current owner again"),
+            "close comment should call out the recovery, got: {report_str}",
+        );
+        logctx.cleanup_successful();
+    }
+
+    /// A saga whose case was opened because its owner was quiesced, since
+    /// re-adopted by an active Nexus: the case closes, fact attached.
+    #[test]
+    fn closes_on_owner_readopted() {
+        let (logctx, collection) = setup("saga_closes_on_owner_readopted");
+        let id = saga_id(1);
+        let recent = collection.time_done - TimeDelta::minutes(1);
+        let parent = make_parent_with_saga_case(
+            SitrepUuid::new_v4(),
+            collection.id,
+            [SagaFact::OwnerNotCurrentGeneration(
+                SagaOwnerNotCurrentFactPayload {
+                    saga_id: id,
+                    saga_name: "test-saga".to_string(),
+                    current_sec: OmicronZoneUuid::new_v4(),
+                    orphan_reason: OrphanedReason::Quiesced,
+                    adopt_generation: Generation::new(),
+                },
+            )],
+        );
+        // The saga has been re-adopted by an active Nexus and is making
+        // progress.
+        let observed = observed_map([mk_observed(
+            id,
+            Some(recent),
+            Some(OmicronZoneUuid::new_v4()),
+            Some(SagaOwnerState::Active),
+        )]);
+        let input = build_input(collection, Some(parent), observed);
+        let (sitrep, _report) = run_analyze(&logctx.log, &input);
+
+        let case = sitrep
+            .cases
+            .iter()
+            .find(|c| c.metadata.de == DiagnosisEngineKind::Saga)
+            .expect("saga case should be present in the closing sitrep");
+        assert!(
+            !case.is_open(),
+            "case should close when the saga is re-adopted by a current Nexus",
+        );
+        assert_eq!(case.facts.len(), 1);
+        logctx.cleanup_successful();
+    }
+
+    /// One condition clears (progress resumes) while the other persists
+    /// (owner still quiesced): the case stays open, the cleared condition's
+    /// fact is removed, and the persisting fact carries forward with a
+    /// stable UUID.
+    #[test]
+    fn partial_recovery_keeps_case_open() {
+        let (logctx, collection) = setup("saga_partial_recovery");
+        let id = saga_id(1);
+        let stale =
+            collection.time_done - (STALE_SAGA_THRESHOLD + TimeDelta::hours(1));
+        let recent = collection.time_done - TimeDelta::minutes(1);
+        let sec = OmicronZoneUuid::new_v4();
+        let owner_payload = SagaOwnerNotCurrentFactPayload {
+            saga_id: id,
+            saga_name: "test-saga".to_string(),
+            current_sec: sec,
+            orphan_reason: OrphanedReason::Quiesced,
+            adopt_generation: Generation::new(),
+        };
+        let parent = make_parent_with_saga_case(
+            SitrepUuid::new_v4(),
+            collection.id,
+            [
+                SagaFact::NotProgressing(SagaNotProgressingFactPayload {
+                    saga_id: id,
+                    saga_name: "test-saga".to_string(),
+                    saga_state: SagaProgressState::Unwinding,
+                    time_created: Utc::now() - TimeDelta::days(1),
+                    last_event_time: stale,
+                }),
+                SagaFact::OwnerNotCurrentGeneration(owner_payload.clone()),
+            ],
+        );
+        let parent_owner_fact_id = parent
+            .cases
+            .iter()
+            .next()
+            .unwrap()
+            .facts
+            .iter()
+            .find_map(|f| match f.payload.as_saga() {
+                Some(SagaFact::OwnerNotCurrentGeneration(_)) => Some(f.id),
+                _ => None,
+            })
+            .expect("parent case should have an owner fact");
+        // Progress has resumed, but the owner is still quiesced with the
+        // same SEC and adopt generation, so the owner fact still matches.
+        let observed = observed_map([mk_observed(
+            id,
+            Some(recent),
+            Some(sec),
+            Some(SagaOwnerState::Quiesced),
+        )]);
+        let input = build_input(collection, Some(parent), observed);
+        let (sitrep, _report) = run_analyze(&logctx.log, &input);
+
+        let facts = saga_facts(&sitrep, true);
+        assert_eq!(
+            facts.len(),
+            1,
+            "only the owner fact should remain on the open case",
+        );
+        assert_eq!(
+            facts[0].0.id, parent_owner_fact_id,
+            "the persisting fact carries forward with a stable UUID",
+        );
+        assert!(matches!(
+            &facts[0].1,
+            SagaFact::OwnerNotCurrentGeneration(p) if p.current_sec == sec
+        ));
         logctx.cleanup_successful();
     }
 }
