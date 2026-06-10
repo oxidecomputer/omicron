@@ -256,9 +256,9 @@ mod tests {
     }
 
     #[test]
-    fn first_sitrep_with_alert_request_bumps_generation() {
+    fn first_sitrep_with_alert_request_bumps_alert_generation() {
         let logctx = dev::test_setup_log(
-            "first_sitrep_with_alert_request_bumps_generation",
+            "first_sitrep_with_alert_request_bumps_alert_generation",
         );
         let inputs = make_input();
         let mut builder = SitrepBuilder::new(&logctx.log, &inputs);
