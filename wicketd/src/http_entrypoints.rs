@@ -92,7 +92,11 @@ impl WicketdApi for WicketdApiImpl {
 
         let mut config = ctx.rss_or_multirack_join_config.lock().unwrap();
         let rss_config = config.rss_config_mut().ok_or_else(|| {
-            HttpError::for_not_found(None, "rss config not found".to_string())
+            HttpError::for_client_error(
+                Some("Conflict".to_string()),
+                ClientErrorStatusCode::CONFLICT,
+                "cannot get RSS config when not preparing for RSS".to_string(),
+            )
         })?;
 
         let inventory = inventory
@@ -329,7 +333,12 @@ impl WicketdApi for WicketdApiImpl {
 
         let mut config = ctx.rss_or_multirack_join_config.lock().unwrap();
         let rss_config = config.rss_config_mut().ok_or_else(|| {
-            HttpError::for_not_found(None, "rss config not found".to_string())
+            HttpError::for_client_error(
+                Some("Conflict".to_string()),
+                ClientErrorStatusCode::CONFLICT,
+                "cannot delete RSS config when not preparing for RSS"
+                    .to_string(),
+            )
         })?;
 
         *rss_config = Default::default();
