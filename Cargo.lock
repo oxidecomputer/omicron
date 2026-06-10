@@ -7033,7 +7033,6 @@ dependencies = [
  "trust-quorum-protocol",
  "tufaceous-artifact",
  "uuid",
- "vergen-gitcl",
 ]
 
 [[package]]
@@ -9045,7 +9044,6 @@ dependencies = [
  "update-engine",
  "url",
  "uuid",
- "vergen-gitcl",
  "zip 4.6.1",
 ]
 

@@ -9,7 +9,6 @@ workspace = true
 
 [build-dependencies]
 omicron-rpaths.workspace = true
-vergen-gitcl.workspace = true
 
 [dependencies]
 anyhow.workspace = true
