@@ -7840,10 +7840,6 @@ CREATE TABLE IF NOT EXISTS omicron.public.fm_fact_saga (
     )
 );
 
-CREATE INDEX IF NOT EXISTS
-    lookup_fm_fact_saga_for_case
-ON omicron.public.fm_fact_saga (sitrep_id, case_id);
-
 CREATE TABLE IF NOT EXISTS omicron.public.fm_ereport_in_case (
     -- ID of this association. When an ereport is assigned to a case, that
     -- association is assigned a UUID. These are used primarily to aid in
