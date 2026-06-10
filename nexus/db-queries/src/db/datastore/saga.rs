@@ -246,13 +246,25 @@ impl DataStore {
     {
         use nexus_db_schema::schema::saga_node_event::dsl;
         let conn = self.pool_connection_authorized(opctx).await?;
-        dsl::saga_node_event
-            .filter(dsl::saga_id.eq_any(saga_ids.to_vec()))
-            .group_by(dsl::saga_id)
-            .select((dsl::saga_id, diesel::dsl::max(dsl::event_time)))
-            .load_async(&*conn)
-            .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+        let mut results = Vec::with_capacity(saga_ids.len());
+        // Chunk the IDs so a large non-terminal saga population (exactly the
+        // situation fault management exists for) doesn't produce one giant
+        // statement. Chunks are disjoint, so GROUP BY keys never cross them
+        // and concatenating per-chunk results is the full result set.
+        for chunk in saga_ids.chunks(SQL_BATCH_SIZE.get() as usize) {
+            let batch: Vec<(db::saga_types::SagaId, Option<DateTime<Utc>>)> =
+                dsl::saga_node_event
+                    .filter(dsl::saga_id.eq_any(chunk.to_vec()))
+                    .group_by(dsl::saga_id)
+                    .select((dsl::saga_id, diesel::dsl::max(dsl::event_time)))
+                    .load_async(&*conn)
+                    .await
+                    .map_err(|e| {
+                        public_error_from_diesel(e, ErrorHandler::Server)
+                    })?;
+            results.extend(batch);
+        }
+        Ok(results)
     }
 
     /// Returns a list of all saga log entries for the given saga, making as
