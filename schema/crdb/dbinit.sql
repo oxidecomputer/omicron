@@ -7153,7 +7153,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.alert (
     case_id UUID,
 
     -- The version of the alert class' schema that this alert's payload conforms
-    -- to.
+    -- to, starting at version 0.
     alert_version INT8 NOT NULL,
 
     CONSTRAINT time_dispatched_set_if_dispatched CHECK (
@@ -7162,6 +7162,10 @@ CREATE TABLE IF NOT EXISTS omicron.public.alert (
 
     CONSTRAINT num_dispatched_is_positive CHECK (
         (num_dispatched >= 0)
+    ),
+
+    CONSTRAINT alert_version_is_non_negative CHECK (
+        (alert_version >= 0)
     )
 );
 
@@ -7800,10 +7804,14 @@ CREATE TABLE IF NOT EXISTS omicron.public.fm_alert_request (
     comment TEXT NOT NULL,
 
     -- The version of the alert class' schema that this alert's payload conforms
-    -- to.
+    -- to, starting at version 0.
     alert_version INT8 NOT NULL,
 
-    PRIMARY KEY (sitrep_id, id)
+    PRIMARY KEY (sitrep_id, id),
+
+    CONSTRAINT alert_version_is_non_negative CHECK (
+        (alert_version >= 0)
+    )
 );
 
 CREATE INDEX IF NOT EXISTS
