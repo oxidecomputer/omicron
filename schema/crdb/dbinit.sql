@@ -7684,8 +7684,10 @@ CREATE TABLE IF NOT EXISTS omicron.public.fm_sitrep (
 
     -- Generation counter for alerts: `SitrepBuilder` increments this each time
     -- it builds a sitrep whose alert request set differs from its parent's.
-    -- `SitrepGuardedInsert` compares it against the latest sitrep, preventing
-    -- stale executors from resurrecting deleted alerts.
+    -- Alert creation compares it against the latest sitrep's value, rejecting
+    -- inserts from a rendezvous task working from a stale sitrep. (It is the
+    -- `rendezvous_alert_created` marker, not this generation, that prevents a
+    -- deleted alert from being resurrected.)
     alert_generation INT8 NOT NULL
 );
 

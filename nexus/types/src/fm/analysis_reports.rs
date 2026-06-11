@@ -348,7 +348,20 @@ impl fmt::Display for InputReportMultilineDisplay<'_> {
                     let indent = indent + 2;
                     metadata.display_multiline(indent, None).fmt(f)?;
                     // A closed case is only carried forward when it has
-                    // outstanding work, so spell out why.
+                    // outstanding work, so spell out why. If we don't seem to
+                    // have any outstanding work but the closed case was carried
+                    // forward anyway, that's weird and worth a warning.
+                    if unmarked_ereports.is_empty()
+                        && unmarked_alert_requests.is_empty()
+                    {
+                        writeln!(
+                            f,
+                            "{:indent$}/!\\ WEIRD: this case has no recorded \
+                             reason for being copied forwards!",
+                            ""
+                        )?;
+                        continue;
+                    }
                     writeln!(f, "{:indent$}copied forwards due to:", "")?;
                     let indent = indent + 2;
                     if !unmarked_ereports.is_empty() {
@@ -428,6 +441,9 @@ mod tests {
             SitrepUuid::from_str("55555555-5555-5555-5555-555555555555")
                 .unwrap();
 
+        let case3_id =
+            CaseUuid::from_str("77777777-7777-7777-7777-777777777777").unwrap();
+
         let mut open_cases = BTreeMap::new();
         open_cases.insert(
             case1_id,
@@ -463,6 +479,22 @@ mod tests {
                 },
                 unmarked_ereports,
                 unmarked_alert_requests,
+            },
+        );
+        // A closed case with no recorded reason for being copied forwards. The
+        // real input builder never produces this; the display code prints a
+        // warning instead of an empty reason list.
+        closed_cases_copied_forward.insert(
+            case3_id,
+            ClosedCaseReport {
+                metadata: case::Metadata {
+                    created_sitrep_id: case2_created_sitrep,
+                    closed_sitrep_id: Some(case2_closed_sitrep),
+                    de: DiagnosisEngineKind::PowerShelf,
+                    comment: "PSU 2 replaced".to_string(),
+                },
+                unmarked_ereports: BTreeSet::new(),
+                unmarked_alert_requests: BTreeSet::new(),
             },
         );
 

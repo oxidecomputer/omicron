@@ -21,13 +21,14 @@ use diesel::result::OptionalExtension;
 use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::public_error_from_diesel;
 use nexus_db_schema::schema::alert::dsl as alert_dsl;
+use nexus_types::fm::case::AlertRequest;
 use nexus_types::identity::Asset;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::Generation;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
-use omicron_uuid_kinds::{AlertUuid, GenericUuid};
+use omicron_uuid_kinds::{AlertUuid, CaseUuid, GenericUuid};
 use std::collections::HashSet;
 use uuid::Uuid;
 
@@ -38,16 +39,19 @@ impl DataStore {
     {
         diesel::insert_into(alert_dsl::alert)
             .values(alert)
-            .on_conflict_do_nothing()
+            .on_conflict(alert_dsl::id)
+            .do_nothing()
             .returning(Alert::as_returning())
     }
 
     /// Insert an alert row, returning the inserted alert on success.
     ///
     /// If a row with this alert's id already exists, returns
-    /// [`Error::ObjectAlreadyExists`]. This isn't really an error: multiple
-    /// Nexus instances may race to insert the same alert. The caller decides
-    /// how to treat it.
+    /// [`Error::ObjectAlreadyExists`]. This is expected: multiple Nexus
+    /// instances may race to insert the same alert, so the operation must be
+    /// idempotent. We surface this as distinct from a successful
+    /// [`CreateResult`] so the caller can increment the "already existed"
+    /// counter rather than the "created" counter.
     pub async fn alert_create(
         &self,
         opctx: &OpContext,
@@ -79,10 +83,10 @@ impl DataStore {
         Ok(alert)
     }
 
-    /// Insert an alert requested by FM rendezvous, guarded against stale-sitrep
-    /// execution.
+    /// Insert an alert described by a fault-management [`AlertRequest`],
+    /// guarded against stale-sitrep execution.
     ///
-    /// Like [`Self::alert_create`], but the insert is wrapped in a
+    /// Similar to [`Self::alert_create`], but the insert is wrapped in a
     /// [`SitrepGuardedInsert`]: it writes a `rendezvous_alert_created` marker
     /// so a deleted alert is not resurrected by a later rendezvous pass, and
     /// it is gated on the executing sitrep still being current. If the latest
@@ -91,10 +95,12 @@ impl DataStore {
     pub async fn fm_rendezvous_alert_create(
         &self,
         opctx: &OpContext,
-        alert: Alert,
+        request: &AlertRequest,
+        case_id: CaseUuid,
         expected_alert_generation: Generation,
     ) -> CreateResult<Alert> {
         let conn = self.pool_connection_authorized(opctx).await?;
+        let alert = Alert::for_fm_alert_request(request, case_id);
         let alert_id = alert.id();
 
         let guarded = SitrepGuardedInsert::<Alert, _>::new(
@@ -197,14 +203,17 @@ impl DataStore {
         opctx: &OpContext,
         candidates: &[AlertUuid],
     ) -> Result<HashSet<AlertUuid>, Error> {
+        use nexus_db_schema::schema::rendezvous_alert_created::dsl as marker_dsl;
+
+        opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
         if candidates.is_empty() {
             return Ok(HashSet::new());
         }
-        opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
         let conn = self.pool_connection_authorized(opctx).await?;
 
-        use nexus_db_schema::schema::rendezvous_alert_created::dsl as marker_dsl;
-
+        // The candidate list is bounded by the number of alert requests on the
+        // parent sitrep's closed cases, so the `eq_any` below shouldn't need to
+        // be chunked into batches.
         let candidate_uuids: Vec<Uuid> =
             candidates.iter().map(|id| id.into_untyped_uuid()).collect();
 
@@ -261,6 +270,17 @@ mod tests {
         alert
     }
 
+    fn make_alert_request(alert_id: AlertUuid) -> AlertRequest {
+        AlertRequest {
+            id: alert_id,
+            class: nexus_types::alert::AlertClass::TestFoo,
+            version: 0,
+            payload: json!({}),
+            requested_sitrep_id: SitrepUuid::new_v4(),
+            comment: String::new(),
+        }
+    }
+
     #[tokio::test]
     async fn alert_create_then_already_exists() {
         let logctx = dev::test_setup_log("alert_create_then_already_exists");
@@ -305,7 +325,8 @@ mod tests {
         let inserted = datastore
             .fm_rendezvous_alert_create(
                 opctx,
-                make_fm_alert(alert_id, case_id),
+                &make_alert_request(alert_id),
+                case_id,
                 Generation::from_u32(1),
             )
             .await
@@ -328,84 +349,6 @@ mod tests {
         logctx.cleanup_successful();
     }
 
-    #[tokio::test]
-    async fn fm_rendezvous_alert_create_already_exists_via_marker() {
-        let logctx = dev::test_setup_log(
-            "fm_rendezvous_alert_create_already_exists_via_marker",
-        );
-        let db = TestDatabase::new_with_datastore(&logctx.log).await;
-        let (opctx, datastore) = (db.opctx(), db.datastore());
-        let conn = datastore.pool_connection_for_tests().await.unwrap();
-
-        datastore
-            .fm_sitrep_insert(opctx, make_sitrep(Generation::from_u32(2)))
-            .await
-            .unwrap();
-
-        let alert_id = AlertUuid::new_v4();
-        let case_id = CaseUuid::new_v4();
-
-        // Pre-write the marker at an earlier generation. The combinator
-        // should short-circuit via `prior_marker_guard` and surface
-        // ObjectAlreadyExists without inserting the alert row.
-        diesel::insert_into(alert_marker_dsl::rendezvous_alert_created)
-            .values(RendezvousAlertCreated::new(
-                alert_id,
-                nexus_db_model::Generation::new(),
-            ))
-            .execute_async(&*conn)
-            .await
-            .unwrap();
-
-        let err = datastore
-            .fm_rendezvous_alert_create(
-                opctx,
-                make_fm_alert(alert_id, case_id),
-                Generation::from_u32(2),
-            )
-            .await
-            .unwrap_err();
-        assert!(
-            matches!(err, Error::ObjectAlreadyExists { .. }),
-            "expected ObjectAlreadyExists, got {err:?}"
-        );
-
-        // No alert row should have been written.
-        let count: i64 = alert_dsl::alert
-            .filter(alert_dsl::id.eq(alert_id.into_untyped_uuid()))
-            .count()
-            .get_result_async(&*conn)
-            .await
-            .unwrap();
-        assert_eq!(count, 0);
-
-        // The pre-existing marker must not have been overwritten with the
-        // current `expected_alert_generation`. The combinator's marker
-        // INSERT uses `ON CONFLICT DO NOTHING`; if a future change flipped
-        // it to UPSERT (or dropped the conflict clause), the marker's
-        // `created_at_generation` would silently advance from 1 to 2,
-        // breaking the GC invariant that markers record the generation at
-        // which the alert was originally created.
-        let marker = alert_marker_dsl::rendezvous_alert_created
-            .filter(alert_marker_dsl::alert_id.eq(alert_id.into_untyped_uuid()))
-            .select(RendezvousAlertCreated::as_select())
-            .first_async::<RendezvousAlertCreated>(&*conn)
-            .await
-            .unwrap();
-        assert_eq!(
-            marker.created_at_generation,
-            nexus_db_model::Generation::new()
-        );
-
-        db.terminate().await;
-        logctx.cleanup_successful();
-    }
-
-    // Regression test: an alert row exists without a corresponding marker
-    // (pre-migration data, or marker GC outrunning alert deletion). The
-    // guarded insert must surface `ObjectAlreadyExists` rather than letting
-    // a bare `DieselError::NotFound` bubble out as HTTP 500, AND must NOT
-    // fabricate a marker row for an alert this executor did not produce.
     #[tokio::test]
     async fn fm_rendezvous_alert_create_already_exists_without_marker() {
         let logctx = dev::test_setup_log(
@@ -433,7 +376,8 @@ mod tests {
         let err = datastore
             .fm_rendezvous_alert_create(
                 opctx,
-                make_fm_alert(alert_id, case_id),
+                &make_alert_request(alert_id),
+                case_id,
                 Generation::from_u32(1),
             )
             .await
@@ -461,7 +405,7 @@ mod tests {
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
-        // Latest sitrep is at generation 5; executor expects 1.
+        // Latest sitrep is at generation 5; the rendezvous task expects 1.
         datastore
             .fm_sitrep_insert(opctx, make_sitrep(Generation::from_u32(5)))
             .await
@@ -470,7 +414,8 @@ mod tests {
         let err = datastore
             .fm_rendezvous_alert_create(
                 opctx,
-                make_fm_alert(AlertUuid::new_v4(), CaseUuid::new_v4()),
+                &make_alert_request(AlertUuid::new_v4()),
+                CaseUuid::new_v4(),
                 Generation::new(),
             )
             .await

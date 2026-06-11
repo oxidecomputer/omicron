@@ -41,7 +41,7 @@ pub struct Input {
     new_ereports: IdOrdMap<fm::Ereport>,
     open_cases: IdOrdMap<fm::Case>,
     closed_cases_copied_forward: IdOrdMap<fm::Case>,
-    /// Indicates whether `Input::Builder::build` dropped any closed case
+    /// Indicates whether `Builder::build` dropped any closed case
     /// from the carry-forward list whose alert request set was non-empty.
     /// ORed with [`crate::builder::AllCases::alert_set_changed`] in
     /// [`crate::builder::SitrepBuilder::build`] to decide whether to bump the
@@ -108,7 +108,7 @@ impl Input {
             inv,
             new_ereports: IdOrdMap::default(),
             unmarked_seen_ereports: BTreeSet::default(),
-            existing_alerts: HashSet::new(),
+            marked_alert_requests: HashSet::new(),
         })
     }
 }
@@ -141,12 +141,17 @@ pub struct Builder {
     /// copied forwards due to containing unmarked ereports.
     unmarked_seen_ereports: BTreeSet<fm::EreportId>,
 
-    /// The set of parent-sitrep alert request ids that already have a marker
-    /// row in `rendezvous_alert_created` (i.e. have been created by rendezvous).
-    /// An alert request *absent* from this set is outstanding work: alongside
-    /// unmarked ereports, it is one of the signals that forces a closed case to
-    /// be copied forward.
-    existing_alerts: HashSet<AlertUuid>,
+    /// The IDs of alert requests on the parent sitrep's closed cases that
+    /// already have a marker row in `rendezvous_alert_created`. A closed-case
+    /// request absent from this set is outstanding work, and (like an unmarked
+    /// ereport) forces its case to be copied forward. Open cases are copied
+    /// forward unconditionally, so we don't need to track their requests here.
+    ///
+    /// Unlike [`Self::unmarked_seen_ereports`], this set holds the requests
+    /// whose work is done rather than the outstanding ones. This is an artifact
+    /// of the query shape in `fm_rendezvous_existing_alert_markers`, which
+    /// needs to be an index lookup rather than a table scan.
+    marked_alert_requests: HashSet<AlertUuid>,
 }
 
 impl Builder {
@@ -175,16 +180,15 @@ impl Builder {
         }))
     }
 
-    /// Records the set of alert ids whose `rendezvous_alert_created` marker
-    /// already exists in the database. During [`Self::build`], any closed
-    /// case in the parent sitrep that has an alert request whose id is
-    /// **not** in this set counts as having outstanding work, and therefore
-    /// is carried forward.
-    pub fn add_existing_alerts(
+    /// Records the alert request ids (from the parent sitrep's closed cases)
+    /// whose `rendezvous_alert_created` marker already exists in the database.
+    /// During [`Self::build`], a closed case with a request *not* in this set
+    /// counts as having outstanding work, and is carried forward.
+    pub fn add_marked_alert_requests(
         &mut self,
         marker_ids: impl IntoIterator<Item = AlertUuid>,
     ) {
-        self.existing_alerts.extend(marker_ids);
+        self.marked_alert_requests.extend(marker_ids);
     }
 
     pub fn num_ereports(&self) -> usize {
@@ -253,7 +257,7 @@ impl Builder {
                     .alerts_requested
                     .iter()
                     .map(|r| r.id)
-                    .filter(|id| !self.existing_alerts.contains(id))
+                    .filter(|id| !self.marked_alert_requests.contains(id))
                     .collect();
                 let has_outstanding_work = !unmarked_ereports.is_empty()
                     || !unmarked_alert_requests.is_empty();
@@ -747,9 +751,9 @@ mod tests {
     }
 
     /// Helper for the closed-case-filter tests below: build a parent sitrep
-    /// containing a single closed `case`, then construct an `Input::Builder`
-    /// pointing at it. The caller can optionally add existing alert markers
-    /// before calling `build()`.
+    /// containing a single closed `case`, then construct a `Builder` pointing
+    /// at it. The caller can optionally add existing alert markers before
+    /// calling `build()`.
     fn builder_with_closed_case(case: fm::Case) -> Builder {
         let parent_sitrep_id = case
             .metadata
@@ -816,7 +820,7 @@ mod tests {
         };
 
         let mut builder = builder_with_closed_case(closed_case);
-        builder.add_existing_alerts([alert_id]);
+        builder.add_marked_alert_requests([alert_id]);
         let (input, _) = builder.build();
 
         assert_eq!(input.closed_cases_copied_forward().len(), 0);
@@ -870,7 +874,7 @@ mod tests {
         };
 
         let mut builder = builder_with_closed_case(closed_case);
-        builder.add_existing_alerts([satisfied_alert_id]);
+        builder.add_marked_alert_requests([satisfied_alert_id]);
         let (input, _) = builder.build();
 
         let carried = input.closed_cases_copied_forward().get(&case_id).expect(

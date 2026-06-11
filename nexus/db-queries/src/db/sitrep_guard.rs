@@ -331,8 +331,8 @@ pub enum SitrepGuardedInsertOutcome<R> {
     /// both guards passed but the inner INSERT `ON CONFLICT DO NOTHING` matched
     /// a pre-existing row.
     AlreadyExists,
-    /// The executor's expected generation does not match the current generation
-    /// on the latest sitrep; nothing was inserted.
+    /// The rendezvous task's expected generation does not match the current
+    /// generation on the latest sitrep; nothing was inserted.
     StaleSitrep,
 }
 
@@ -372,6 +372,15 @@ where
             Err(e) => Err(e),
         }
     }
+}
+
+// --------------------------------------------------------------------
+// Per-resource impls
+// --------------------------------------------------------------------
+
+impl SitrepGuardedResource for nexus_db_model::Alert {
+    type GenerationColumn = schema::fm_sitrep::dsl::alert_generation;
+    type MarkerIdColumn = schema::rendezvous_alert_created::dsl::alert_id;
 }
 
 #[cfg(test)]
@@ -574,7 +583,7 @@ mod tests {
     // with the executed generation.
     //
     // The history deliberately contains *two* sitreps at the same generation
-    // (the request set did not change between them), and the executor is
+    // (the request set did not change between them), and the rendezvous task is
     // working from the older one. Along a sitrep chain, an unchanged generation
     // means an unchanged request set, so the executor here is creating exactly
     // the resources a "fresh" one would, rather than a stale set.
@@ -690,7 +699,7 @@ mod tests {
     // `stale_guard` aborts and nothing is written.
     //
     // The executed generation (1) deliberately matches an ancestor sitrep in
-    // the history: this is exactly the stale-executor case the guard exists
+    // the history: this is exactly the stale-sitrep case the guard exists
     // for, and a `stale_guard` that matched any sitrep in `fm_sitrep_history`
     // (rather than only the current one) would incorrectly let the insert
     // through.
@@ -745,13 +754,4 @@ mod tests {
         db.terminate().await;
         logctx.cleanup_successful();
     }
-}
-
-// --------------------------------------------------------------------
-// Per-resource impls
-// --------------------------------------------------------------------
-
-impl SitrepGuardedResource for nexus_db_model::Alert {
-    type GenerationColumn = schema::fm_sitrep::dsl::alert_generation;
-    type MarkerIdColumn = schema::rendezvous_alert_created::dsl::alert_id;
 }

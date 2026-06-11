@@ -13,7 +13,6 @@ use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::datastore::SupportBundleCreateParams;
 use nexus_db_queries::db::datastore::SupportBundleProvenance;
-use nexus_db_queries::db::model::Alert;
 use nexus_types::fm;
 use nexus_types::fm::case::AlertRequest;
 use nexus_types::internal_api::background::FmRendezvousStatus as Status;
@@ -152,21 +151,27 @@ impl FmRendezvous {
         let mut status = AlertCreationStatus::default();
         let expected_alert_generation = sitrep.metadata.alert_generation;
 
+        // Count the request set up front, so the totals describe the sitrep
+        // itself even if the loop below aborts partway through on a stale
+        // sitrep.
+        status.total_alerts_requested = sitrep.alerts_requested().count();
+        status.current_sitrep_alerts_requested = sitrep
+            .alerts_requested()
+            .filter(|(_, req)| req.requested_sitrep_id == sitrep.id())
+            .count();
+
         // XXX(eliza): is it better to allocate all of these into a big array
         // and do a single `INSERT INTO` query, or iterate over them one by one
         // (not allocating) but insert one at a time? Note that a batched insert
         // would require changes to `SitrepGuardedInsert`.
         for (case_id, req) in sitrep.alerts_requested() {
-            let &AlertRequest { id, class, requested_sitrep_id, .. } = req;
-            status.total_alerts_requested += 1;
-            if requested_sitrep_id == sitrep.id() {
-                status.current_sitrep_alerts_requested += 1;
-            }
+            let &AlertRequest { id, class, .. } = req;
             match self
                 .datastore
                 .fm_rendezvous_alert_create(
                     &opctx,
-                    Alert::for_fm_alert_request(req, case_id),
+                    req,
+                    case_id,
                     expected_alert_generation,
                 )
                 .await
@@ -608,9 +613,9 @@ mod tests {
         };
 
         // The sitrep-guard combinator in `fm_rendezvous_alert_create` consults
-        // `fm_sitrep_history` to check that this executor's expected generation
-        // matches the current one. Insert the sitrep so it shows up in the DB
-        // before activating.
+        // `fm_sitrep_history` to check that the rendezvous task's expected
+        // generation matches the current one. Insert the sitrep so it shows up
+        // in the DB before activating.
         datastore
             .fm_sitrep_insert(opctx, sitrep1.clone())
             .await
@@ -776,7 +781,7 @@ mod tests {
         logctx.cleanup_successful();
     }
 
-    /// A stale executor activation (one whose sitrep's `alert_generation` is
+    /// A stale activation (one whose sitrep's `alert_generation` is
     /// behind the latest sitrep in `fm_sitrep_history`) should be rejected by
     /// `SitrepGuardedInsert` inside `fm_rendezvous_alert_create`. The
     /// rendezvous task is responsible for translating that `Conflict` into
@@ -805,10 +810,13 @@ mod tests {
             OmicronZoneUuid::new_v4(),
         );
 
-        // The stale executor's sitrep: carries one alert request and
-        // stamps `alert_generation = 1`.
+        // The stale activation's sitrep: carries two alert requests and
+        // stamps `alert_generation = 1`. Two requests (rather than one) pin
+        // the totals' semantics: they count the sitrep's full request set,
+        // not how far the loop got before aborting on the first insert.
         let stale_sitrep_id = SitrepUuid::new_v4();
         let stale_alert_id = AlertUuid::new_v4();
+        let stale_alert2_id = AlertUuid::new_v4();
         let stale_case_id = CaseUuid::new_v4();
         let stale_case = {
             let mut c = fm::Case {
@@ -823,16 +831,18 @@ mod tests {
                 ereports: iddqd::IdOrdMap::new(),
                 support_bundles_requested: iddqd::IdOrdMap::new(),
             };
-            c.alerts_requested
-                .insert_unique(fm::case::AlertRequest {
-                    id: stale_alert_id,
-                    class: AlertClass::TestFoo,
-                    version: 0,
-                    requested_sitrep_id: stale_sitrep_id,
-                    payload: serde_json::json!({}),
-                    comment: String::new(),
-                })
-                .unwrap();
+            for id in [stale_alert_id, stale_alert2_id] {
+                c.alerts_requested
+                    .insert_unique(fm::case::AlertRequest {
+                        id,
+                        class: AlertClass::TestFoo,
+                        version: 0,
+                        requested_sitrep_id: stale_sitrep_id,
+                        payload: serde_json::json!({}),
+                        comment: String::new(),
+                    })
+                    .unwrap();
+            }
             c
         };
         let stale_sitrep = {
@@ -859,7 +869,7 @@ mod tests {
             .expect("inserted stale sitrep");
 
         // A newer sitrep whose alert generation is ahead. Once it lands in
-        // `fm_sitrep_history`, the database considers the stale executor's
+        // `fm_sitrep_history`, the database considers the stale activation's
         // sitrep out of date.
         let current_sitrep_id = SitrepUuid::new_v4();
         let current_sitrep = fm::Sitrep {
@@ -881,10 +891,10 @@ mod tests {
             .await
             .expect("inserted current sitrep");
 
-        // Hand the stale sitrep to the rendezvous task. Its single alert
+        // Hand the stale sitrep to the rendezvous task. Its first alert
         // request should trip the sitrep-guard combinator and surface as a
         // `Conflict`, which the task translates into `stale_sitrep = true` and
-        // breaks out of the alert loop.
+        // breaks out of the alert loop before the second request is attempted.
         sitrep_tx
             .send(Some(Arc::new((
                 fm::SitrepVersion {
@@ -901,20 +911,26 @@ mod tests {
         assert_eq!(
             status.alerts.details,
             AlertCreationStatus {
-                total_alerts_requested: 1,
-                current_sitrep_alerts_requested: 1,
+                // The totals count the sitrep's request set, not loop
+                // progress: both requests are reported even though the loop
+                // aborted on the first.
+                total_alerts_requested: 2,
+                current_sitrep_alerts_requested: 2,
                 alerts_created: 0,
                 alerts_already_existed: 0,
                 stale_sitrep: true,
                 errors: Vec::new(),
             }
         );
-        // The alert row must not have been inserted: the sitrep-guard fired
-        // before the inner INSERT could run.
-        assert_matches!(
-            fetch_alert(&datastore, stale_alert_id).await,
-            Err(diesel::result::Error::NotFound)
-        );
+        // Neither alert row may have been inserted: the sitrep-guard fired
+        // before the first request's inner INSERT could run, and the abort
+        // skipped the second request entirely.
+        for id in [stale_alert_id, stale_alert2_id] {
+            assert_matches!(
+                fetch_alert(&datastore, id).await,
+                Err(diesel::result::Error::NotFound)
+            );
+        }
         // Support bundle processing should still have run: the stale-sitrep
         // outcome aborts only the alert loop, not the whole activation.
         assert_matches!(

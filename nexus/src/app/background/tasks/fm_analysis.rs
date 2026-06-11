@@ -308,12 +308,12 @@ impl FmAnalysis {
         if candidate_ids.is_empty() {
             return Ok(());
         }
-        let existing = self
+        let marked = self
             .datastore
             .fm_rendezvous_existing_alert_markers(opctx, &candidate_ids)
             .await
             .context("failed to look up alert marker existence")?;
-        builder.add_existing_alerts(existing);
+        builder.add_marked_alert_requests(marked);
         Ok(())
     }
 
@@ -420,12 +420,18 @@ mod tests {
     use super::*;
     use nexus_db_queries::db::pub_test_utils::TestDatabase;
     use nexus_inventory::CollectionBuilder;
+    use nexus_types::alert::AlertClass;
+    use nexus_types::fm::Case;
+    use nexus_types::fm::DiagnosisEngineKind;
     use nexus_types::fm::Sitrep;
     use nexus_types::fm::SitrepMetadata;
     use nexus_types::fm::SitrepVersion;
+    use nexus_types::fm::case;
     use omicron_common::api::external::Generation;
     use omicron_test_utils::dev;
+    use omicron_uuid_kinds::CaseUuid;
     use omicron_uuid_kinds::SitrepUuid;
+    use std::collections::BTreeSet;
 
     const ANALYSIS_ENABLED: bool = true;
 
@@ -656,6 +662,182 @@ mod tests {
                 ),
             }
         }
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    /// Exercises the wiring in `load_existing_alert_markers`: alert request
+    /// ids are collected from the parent sitrep's *closed* cases only, their
+    /// `rendezvous_alert_created` markers are looked up in the database, and
+    /// the results are fed to the input builder, so that:
+    ///
+    /// - a closed case whose alert requests are all satisfied (markers
+    ///   present) is dropped from the carry-forward set,
+    /// - a closed case with an unsatisfied alert request is copied forward,
+    /// - open cases are copied forward as open, regardless of markers.
+    ///
+    /// The builder-side policy itself (including the alert-generation bump
+    /// when a satisfied case is dropped) is pinned by the analysis-input
+    /// tests in the `nexus-fm` crate; this test pins the datastore glue in
+    /// this module.
+    #[tokio::test]
+    async fn test_prepare_inputs_observes_alert_markers() {
+        let logctx =
+            dev::test_setup_log("test_prepare_inputs_observes_alert_markers");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let inv = Arc::new(CollectionBuilder::new("test").build());
+        let sitrep_id = SitrepUuid::new_v4();
+
+        let open_case_id = CaseUuid::new_v4();
+        let satisfied_case_id = CaseUuid::new_v4();
+        let unsatisfied_case_id = CaseUuid::new_v4();
+        let satisfied_alert_id = AlertUuid::new_v4();
+        let unsatisfied_alert_id = AlertUuid::new_v4();
+
+        let alert_request = |id: AlertUuid| case::AlertRequest {
+            id,
+            class: AlertClass::TestFoo,
+            version: 0,
+            payload: json!({}),
+            requested_sitrep_id: sitrep_id,
+            comment: String::new(),
+        };
+        let make_case =
+            |id: CaseUuid, closed: bool, alert: Option<AlertUuid>| {
+                let mut alerts_requested = iddqd::IdOrdMap::new();
+                if let Some(alert_id) = alert {
+                    alerts_requested
+                        .insert_unique(alert_request(alert_id))
+                        .unwrap();
+                }
+                Case {
+                    id,
+                    metadata: case::Metadata {
+                        created_sitrep_id: sitrep_id,
+                        closed_sitrep_id: closed.then_some(sitrep_id),
+                        de: DiagnosisEngineKind::PowerShelf,
+                        comment: String::new(),
+                    },
+                    ereports: iddqd::IdOrdMap::new(),
+                    alerts_requested,
+                    support_bundles_requested: iddqd::IdOrdMap::new(),
+                }
+            };
+
+        let mut cases = iddqd::IdOrdMap::new();
+        cases.insert_unique(make_case(open_case_id, false, None)).unwrap();
+        cases
+            .insert_unique(make_case(
+                satisfied_case_id,
+                true,
+                Some(satisfied_alert_id),
+            ))
+            .unwrap();
+        cases
+            .insert_unique(make_case(
+                unsatisfied_case_id,
+                true,
+                Some(unsatisfied_alert_id),
+            ))
+            .unwrap();
+
+        let sitrep = Sitrep {
+            metadata: SitrepMetadata {
+                id: sitrep_id,
+                parent_sitrep_id: None,
+                inv_collection_id: inv.id,
+                next_inv_min_time_started: inv.time_done,
+                creator_id: OmicronZoneUuid::new_v4(),
+                comment: "test sitrep".to_string(),
+                time_created: Utc::now(),
+                alert_generation: Generation::new(),
+            },
+            cases,
+            ereports_by_id: Default::default(),
+        };
+
+        // Insert the sitrep, then satisfy one of the closed cases' alert
+        // requests through the real rendezvous path, which writes the
+        // `rendezvous_alert_created` marker that input preparation must
+        // observe.
+        datastore
+            .fm_sitrep_insert(opctx, sitrep.clone())
+            .await
+            .expect("inserted parent sitrep");
+        datastore
+            .fm_rendezvous_alert_create(
+                opctx,
+                &alert_request(satisfied_alert_id),
+                satisfied_case_id,
+                Generation::new(),
+            )
+            .await
+            .expect("created the satisfied case's alert");
+
+        let parent: CurrentSitrep = Arc::new((
+            SitrepVersion {
+                id: sitrep_id,
+                version: 1,
+                time_made_current: Utc::now(),
+            },
+            sitrep,
+        ));
+
+        let (_sitrep_tx, sitrep_rx) = watch::channel(None);
+        let (_inv_tx, inv_rx) = watch::channel(None);
+        let mut task = FmAnalysis::new(
+            datastore.clone(),
+            sitrep_rx,
+            inv_rx,
+            activators(),
+            OmicronZoneUuid::new_v4(),
+            ANALYSIS_ENABLED,
+        );
+
+        let (input, prep) = task
+            .prepare_inputs(opctx, Some(parent), inv)
+            .await
+            .expect("input preparation should succeed");
+        assert!(
+            prep.errors.is_empty(),
+            "unexpected preparation errors: {:?}",
+            prep.errors,
+        );
+
+        // The open case is copied forward as open.
+        assert!(input.open_cases().contains_key(&open_case_id));
+        assert_eq!(input.open_cases().len(), 1);
+        assert_eq!(
+            prep.report.open_cases.keys().collect::<Vec<_>>(),
+            vec![&open_case_id]
+        );
+
+        // The closed case whose only alert request has a marker is dropped
+        // from the carry-forward set entirely...
+        assert!(
+            !prep
+                .report
+                .closed_cases_copied_forward
+                .contains_key(&satisfied_case_id),
+            "satisfied closed case should be dropped, got: {:?}",
+            prep.report.closed_cases_copied_forward,
+        );
+        // ...while the closed case with an unsatisfied alert request is
+        // copied forward, with that request reported as outstanding.
+        let carried = prep
+            .report
+            .closed_cases_copied_forward
+            .get(&unsatisfied_case_id)
+            .expect("unsatisfied closed case must be copied forward");
+        assert_eq!(
+            carried.unmarked_alert_requests,
+            BTreeSet::from([unsatisfied_alert_id])
+        );
+        assert!(carried.unmarked_ereports.is_empty());
+        assert_eq!(prep.report.closed_cases_copied_forward.len(), 1);
 
         db.terminate().await;
         logctx.cleanup_successful();

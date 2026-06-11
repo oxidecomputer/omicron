@@ -20,10 +20,12 @@ pub struct CaseBuilder {
     sitrep_id: SitrepUuid,
     rng: rng::CaseBuilderRng,
     report_log: analysis_reports::DebugLog,
-    /// Set by [`Self::request_alert`]. [`super::SitrepBuilder::build`] reads
-    /// this through [`AllCases::alert_set_changed`] to decide whether to bump
-    /// its [`fm::SitrepMetadata::alert_generation`].
-    pub(super) alerts_changed: bool,
+    /// Set to `true` if this case requested at least one new alert during the
+    /// current analysis run. This means the new sitrep's alert request set will
+    /// differ from its parent's, so its alert generation must be bumped. Set by
+    /// [`Self::request_alert`], read by [`super::SitrepBuilder::build`] via
+    /// [`AllCases::alert_set_changed`].
+    pub(super) new_alerts_requested: bool,
 }
 
 #[derive(Debug)]
@@ -118,7 +120,7 @@ impl AllCases {
     }
 
     pub(super) fn alert_set_changed(&self) -> bool {
-        self.cases.iter().any(|c| c.alerts_changed)
+        self.cases.iter().any(|c| c.new_alerts_requested)
     }
 }
 
@@ -140,7 +142,7 @@ impl CaseBuilder {
             sitrep_id,
             rng,
             report_log: Default::default(),
-            alerts_changed: false,
+            new_alerts_requested: false,
         }
     }
 
@@ -194,7 +196,7 @@ impl CaseBuilder {
             .kv("alert_version", version)
             .kv("alert_payload_type", payload_type)
             .comment(comment);
-        self.alerts_changed = true;
+        self.new_alerts_requested = true;
         Ok(())
     }
 
@@ -351,7 +353,7 @@ mod tests {
         let logctx = dev::test_setup_log("dirty_bit_default_false");
         let mut all_cases = make_all_cases(&logctx.log);
         let case = all_cases.open_case(fm::DiagnosisEngineKind::PowerShelf);
-        assert!(!case.alerts_changed);
+        assert!(!case.new_alerts_requested);
         logctx.cleanup_successful();
     }
 
@@ -366,7 +368,7 @@ mod tests {
                 all_cases.open_case(fm::DiagnosisEngineKind::PowerShelf);
             case.request_alert(&test_alerts::Foo(serde_json::json!({})), "")
                 .unwrap();
-            assert!(case.alerts_changed);
+            assert!(case.new_alerts_requested);
         }
 
         assert!(all_cases.alert_set_changed());

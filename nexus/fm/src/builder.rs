@@ -41,8 +41,9 @@ struct ParentGenerations {
     alert_generation: Generation,
 }
 
-impl Default for ParentGenerations {
-    fn default() -> Self {
+impl ParentGenerations {
+    /// Initial generations for the first sitrep, which has no parent.
+    fn new() -> Self {
         Self { alert_generation: Generation::new() }
     }
 }
@@ -106,7 +107,7 @@ impl<'a> SitrepBuilder<'a> {
             .map(|p| ParentGenerations {
                 alert_generation: p.metadata.alert_generation,
             })
-            .unwrap_or_default()
+            .unwrap_or_else(ParentGenerations::new)
     }
 
     pub fn build(
@@ -288,8 +289,8 @@ mod tests {
 
     #[test]
     fn child_sitrep_with_new_alert_bumps_alert_generation() {
-        // Catches a regression where the alert-side bump uses a hard-coded
-        // 0 instead of reading the parent's generation.
+        // Verifies that the bump is relative to the parent sitrep's generation,
+        // not restarted from a fixed initial value.
         let logctx = dev::test_setup_log(
             "child_sitrep_with_new_alert_bumps_alert_generation",
         );
@@ -371,7 +372,7 @@ mod tests {
         )
         .unwrap();
         // Marker exists, so carry-forward will drop the case.
-        builder_inputs.add_existing_alerts([alert_id]);
+        builder_inputs.add_marked_alert_requests([alert_id]);
         let (input, _) = builder_inputs.build();
 
         let sitrep = build_sitrep(SitrepBuilder::new(&logctx.log, &input));

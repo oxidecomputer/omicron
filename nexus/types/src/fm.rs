@@ -162,9 +162,9 @@ pub struct SitrepMetadata {
     pub time_created: DateTime<Utc>,
 
     /// `SitrepBuilder` increments this each time it builds a sitrep whose alert
-    /// request set differs from its parent's. `alert_create` compares it
-    /// against the latest sitrep to reject inserts from stale FM rendezvous
-    /// executors.
+    /// request set differs from its parent's. Alert creation is guarded on this
+    /// value: a rendezvous task working from a sitrep whose generation no
+    /// longer matches the current sitrep's has its inserts rejected as stale.
     pub alert_generation: Generation,
 }
 
