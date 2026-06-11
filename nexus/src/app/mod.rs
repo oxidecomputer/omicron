@@ -105,6 +105,7 @@ pub(crate) mod support_bundles;
 mod switch;
 mod switch_interface;
 mod switch_port;
+mod system_networking;
 pub mod test_interfaces;
 mod trust_quorum;
 mod update;

@@ -205,6 +205,10 @@ pub struct RackInitializationRequest {
     ///   * Trust quorum is not fully complete yet, and we only want this to be
     ///     used in production once it is complete.
     pub initial_trust_quorum_configuration: Option<InitialTrustQuorumConfig>,
+    /// Fleet-wide jumbo-frames opt-in (defaults to false). Operators can change
+    /// this post-init via the Nexus API.
+    #[serde(default)]
+    pub external_jumbo_frames_opt_in_enabled: bool,
 }
 
 pub type DnsConfigParams = internal_dns_types::config::DnsConfigParams;

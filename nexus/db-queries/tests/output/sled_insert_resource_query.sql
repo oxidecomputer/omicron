@@ -116,8 +116,8 @@ WITH
     )
 INSERT
 INTO
-  sled_resource_vmm (id, sled_id, hardware_threads, rss_ram, reservoir_ram, instance_id)
+  sled_resource_vmm (id, sled_id, hardware_threads, rss_ram, reservoir_ram, instance_id, state)
 SELECT
-  $11, $12, $13, $14, $15, $16
+  $11, $12, $13, $14, $15, $16, $17
 WHERE
   EXISTS(SELECT 1 FROM insert_valid)

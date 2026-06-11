@@ -39,6 +39,7 @@ nexus-db-queries = { workspace = true, features = [ "testing" ] }
 nexus-lockstep-client.workspace = true
 nexus-test-interface.workspace = true
 nexus-types.workspace = true
+nexus-types-versions.workspace = true
 omicron-cockroach-admin.workspace = true
 omicron-common.workspace = true
 omicron-passwords.workspace = true

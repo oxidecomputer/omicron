@@ -1636,6 +1636,11 @@
           "external_dns_zone_name": {
             "type": "string"
           },
+          "external_jumbo_frames_opt_in_enabled": {
+            "description": "Enable the fleet-wide jumbo-frames opt-in. Operators can also toggle this at runtime via the Nexus API after handoff.",
+            "default": false,
+            "type": "boolean"
+          },
           "internal_services_ip_pool_ranges": {
             "type": "array",
             "items": {
@@ -3402,6 +3407,11 @@
           },
           "external_dns_zone_name": {
             "type": "string"
+          },
+          "external_jumbo_frames_opt_in_enabled": {
+            "description": "Enable the fleet-wide jumbo-frames opt-in.",
+            "default": false,
+            "type": "boolean"
           },
           "internal_services_ip_pool_ranges": {
             "type": "array",

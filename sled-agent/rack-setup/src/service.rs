@@ -1063,6 +1063,8 @@ impl ServiceInner {
             rack_network_config,
             allowed_source_ips,
             initial_trust_quorum_configuration,
+            external_jumbo_frames_opt_in_enabled: config
+                .external_jumbo_frames_opt_in_enabled,
         };
 
         let notify_nexus = || async {
@@ -2211,6 +2213,7 @@ mod test {
                 bfd: Vec::new(),
             },
             allowed_source_ips: AllowedSourceIps::Any,
+            external_jumbo_frames_opt_in_enabled: false,
         };
 
         assert_eq!(

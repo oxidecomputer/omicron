@@ -7,6 +7,7 @@
 use crate::ClientPackageName;
 use crate::api_metadata::AllApiMetadata;
 use crate::cargo::Workspace;
+use crate::errors::{ErrorAccumulator, LoadError};
 use anyhow::{Context, Result, anyhow, ensure};
 use camino::Utf8Path;
 use cargo_metadata::CargoOpt;
@@ -26,13 +27,63 @@ impl Workspaces {
     /// Use `cargo metadata` to load workspace metadata for all the workspaces
     /// that we care about
     ///
-    /// The data found is validated against `api_metadata`.
+    /// The data found is validated against `api_metadata`.  Any inconsistencies
+    /// between the API metadata and the Cargo metadata are recorded into
+    /// `errors`.
     ///
-    /// On success, returns `(workspaces, warnings)`, where `warnings` is a list
-    /// of inconsistencies between API metadata and Cargo metadata.
+    /// Returns `None` if the workspaces couldn't be loaded at all (e.g., a
+    /// `cargo metadata` invocation failed) or if an inconsistency was
+    /// recorded.
     pub fn load(
         api_metadata: &AllApiMetadata,
-    ) -> Result<(Workspaces, Vec<anyhow::Error>)> {
+        errors: &mut ErrorAccumulator,
+    ) -> Option<Workspaces> {
+        // If `cargo metadata` won't run, there's no `Workspaces` to return, so
+        // record that as a single fatal error.
+        let workspaces = match Self::load_workspace_map(api_metadata) {
+            Ok(workspaces) => workspaces,
+            Err(source) => {
+                errors.push(LoadError::LoadWorkspaces { source });
+                return None;
+            }
+        };
+
+        // Validate the metadata against what we found in the workspaces.
+        let mut client_pkgnames_unused: BTreeSet<_> =
+            api_metadata.client_pkgnames().collect();
+        for (_, workspace) in &workspaces {
+            for client_pkgname in workspace.client_packages() {
+                if api_metadata.client_pkgname_lookup(client_pkgname).is_some()
+                {
+                    // It's possible that we will find multiple references
+                    // to the same client package name.  That's okay.
+                    client_pkgnames_unused.remove(client_pkgname);
+                } else {
+                    errors.push(LoadError::ClientPackageMissingFromManifest {
+                        workspace: workspace.name().to_owned(),
+                        client: client_pkgname.clone(),
+                    });
+                }
+            }
+        }
+
+        for c in client_pkgnames_unused {
+            errors.push(LoadError::UnknownClientPackageInManifest {
+                client: c.clone(),
+            });
+        }
+
+        if errors.has_errors() {
+            return None;
+        }
+
+        Some(Workspaces { workspaces })
+    }
+
+    /// Load every workspace we care about via `cargo metadata`.
+    fn load_workspace_map(
+        api_metadata: &AllApiMetadata,
+    ) -> Result<BTreeMap<String, Workspace>> {
         // First, load information about the "omicron" workspace.  This is the
         // current workspace so we don't need to provide the path to it.
         let ignored_non_clients = api_metadata.ignored_non_clients();
@@ -128,36 +179,7 @@ impl Workspaces {
             )?,
         );
 
-        // Validate the metadata against what we found in the workspaces.
-        let mut client_pkgnames_unused: BTreeSet<_> =
-            api_metadata.client_pkgnames().collect();
-        let mut warnings = Vec::new();
-        for (_, workspace) in &workspaces {
-            for client_pkgname in workspace.client_packages() {
-                if api_metadata.client_pkgname_lookup(client_pkgname).is_some()
-                {
-                    // It's possible that we will find multiple references
-                    // to the same client package name.  That's okay.
-                    client_pkgnames_unused.remove(client_pkgname);
-                } else {
-                    warnings.push(anyhow!(
-                        "workspace {}: found Progenitor-based client package \
-                         missing from API manifest: {}",
-                        workspace.name(),
-                        client_pkgname
-                    ));
-                }
-            }
-        }
-
-        for c in client_pkgnames_unused {
-            warnings.push(anyhow!(
-                "API manifest refers to unknown client package: {}",
-                c
-            ));
-        }
-
-        Ok((Workspaces { workspaces }, warnings))
+        Ok(workspaces)
     }
 
     /// Given the name of a workspace package from one of our workspaces, return

@@ -88,6 +88,7 @@ async fn instance_launch() -> Result<()> {
             anti_affinity_groups: Vec::new(),
             cpu_platform: None,
             multicast_groups: Vec::new(),
+            enable_jumbo_frames: false,
         })
         .send()
         .await?;

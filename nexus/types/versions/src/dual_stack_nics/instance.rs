@@ -9,15 +9,16 @@
 use omicron_common::address::ConcreteIp;
 use omicron_common::api::external::{
     ByteCount, Error, Hostname, IdentityMetadataCreateParams,
-    InstanceAutoRestartPolicy, InstanceCpuCount, InstanceCpuPlatform, Name,
-    NameOrId,
+    InstanceAutoRestartPolicy, InstanceCpuCount, Name, NameOrId,
 };
 use oxnet::{Ipv4Net, Ipv6Net};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::net::{Ipv4Addr, Ipv6Addr};
 
-use crate::v2025_11_20_00::instance::{UserData, bool_true};
+use crate::v2025_11_20_00::instance::{
+    InstanceCpuPlatform, UserData, bool_true,
+};
 use crate::v2025_12_03_00::instance::InstanceDiskAttachment;
 use crate::v2025_12_23_00;
 

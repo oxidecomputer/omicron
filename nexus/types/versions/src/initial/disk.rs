@@ -4,41 +4,14 @@
 
 //! Disk types for version INITIAL.
 
+pub use omicron_common::api::external::BlockSize;
+
 use omicron_common::api::external::{
     ByteCount, DiskState, IdentityMetadata, IdentityMetadataCreateParams,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
-
-#[derive(Copy, Clone, Debug, Deserialize, Serialize)]
-#[serde(try_from = "u32")]
-pub struct BlockSize(pub u32);
-
-impl schemars::JsonSchema for BlockSize {
-    fn schema_name() -> String {
-        "BlockSize".to_string()
-    }
-
-    fn json_schema(
-        _: &mut schemars::r#gen::SchemaGenerator,
-    ) -> schemars::schema::Schema {
-        schemars::schema::Schema::Object(schemars::schema::SchemaObject {
-            metadata: Some(Box::new(schemars::schema::Metadata {
-                id: None,
-                title: Some("Disk block size in bytes".to_string()),
-                ..Default::default()
-            })),
-            instance_type: Some(schemars::schema::InstanceType::Integer.into()),
-            enum_values: Some(vec![
-                serde_json::json!(512),
-                serde_json::json!(2048),
-                serde_json::json!(4096),
-            ]),
-            ..Default::default()
-        })
-    }
-}
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]

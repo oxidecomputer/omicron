@@ -480,6 +480,7 @@ impl nexus_test_interface::NexusServer for Server {
                         bfd: Vec::new(),
                     },
                     allowed_source_ips: AllowedSourceIps::Any,
+                    external_jumbo_frames_opt_in_enabled: false,
                     // Insert a fake trust quorum config such that existing
                     // sleds will never be present.
                     //

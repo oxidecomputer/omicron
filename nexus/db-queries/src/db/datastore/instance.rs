@@ -48,6 +48,7 @@ use nexus_db_lookup::DbConnection;
 use nexus_db_lookup::LookupPath;
 use nexus_db_model::Disk;
 use nexus_types::internal_api::background::ReincarnationReason;
+use nexus_types_versions::latest;
 use omicron_common::api;
 use omicron_common::api::external;
 use omicron_common::api::external::CreateResult;
@@ -208,7 +209,7 @@ impl From<(Instance, Option<Vmm>)> for InstanceAndActiveVmm {
     }
 }
 
-impl From<InstanceAndActiveVmm> for external::Instance {
+impl From<InstanceAndActiveVmm> for latest::instance::Instance {
     fn from(value: InstanceAndActiveVmm) -> Self {
         let time_run_state_updated = value
             .vmm
@@ -274,8 +275,8 @@ impl From<InstanceAndActiveVmm> for external::Instance {
                     .instance
                     .time_last_auto_restarted,
             },
-
             auto_restart_status,
+            enable_jumbo_frames: value.instance.enable_jumbo_frames,
         }
     }
 }
@@ -1154,6 +1155,7 @@ impl DataStore {
                     ncpus,
                     memory,
                     cpu_platform,
+                    enable_jumbo_frames,
                 } = update.clone();
                 async move {
                     // Set the auto-restart policy.
@@ -1162,6 +1164,16 @@ impl DataStore {
                         .set(
                             instance_dsl::auto_restart_policy
                                 .eq(auto_restart_policy),
+                        )
+                        .execute_async(&conn)
+                        .await?;
+
+                    // Set the per-instance jumbo-frames opt-in.
+                    diesel::update(instance_dsl::instance)
+                        .filter(instance_dsl::id.eq(authz_instance.id()))
+                        .set(
+                            instance_dsl::enable_jumbo_frames
+                                .eq(enable_jumbo_frames),
                         )
                         .execute_async(&conn)
                         .await?;
@@ -2376,6 +2388,7 @@ mod tests {
                         auto_restart_policy: Default::default(),
                         anti_affinity_groups: Vec::new(),
                         multicast_groups: Vec::new(),
+                        enable_jumbo_frames: false,
                     },
                 ),
             )

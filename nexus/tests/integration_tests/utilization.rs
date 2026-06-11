@@ -242,6 +242,7 @@ async fn create_resources_in_test_suite_silo(
         auto_restart_policy: Default::default(),
         anti_affinity_groups: Vec::new(),
         multicast_groups: Vec::new(),
+        enable_jumbo_frames: false,
     };
 
     NexusRequest::objects_post(

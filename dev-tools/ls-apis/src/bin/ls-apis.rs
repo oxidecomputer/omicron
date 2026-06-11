@@ -172,13 +172,21 @@ fn run_apis(apis: &SystemApis, args: ShowDepsArgs) -> Result<()> {
         for c in apis.api_consumers(&api.client_package_name, args.filter)? {
             let (repo_name, package_path) =
                 apis.package_label(c.server_pkgname)?;
+            let note = match metadata
+                .server_component(c.server_pkgname)
+                .and_then(|component| component.display_note())
+            {
+                Some(note) => format!(" [{note}]"),
+                None => String::new(),
+            };
             println!(
-                "    consumed by: {} ({}/{}) via {} path{}",
+                "    consumed by: {} ({}/{}) via {} path{}{}",
                 c.server_pkgname,
                 repo_name,
                 package_path,
                 c.dep_paths.len(),
                 if c.dep_paths.len() == 1 { "" } else { "s" },
+                note,
             );
             if args.show_deps {
                 for (i, dep_path) in c.dep_paths.iter().enumerate() {
@@ -266,7 +274,15 @@ fn print_server_components<'a>(
 ) -> Result<()> {
     for s in server_components.into_iter() {
         let (repo_name, pkg_path) = apis.package_label(s)?;
-        println!("{}{} ({}/{})", prefix, s, repo_name, pkg_path);
+        match metadata.server_component(s).and_then(|c| c.display_note()) {
+            Some(note) => println!(
+                "{}{} ({}/{}) [{}]",
+                prefix, s, repo_name, pkg_path, note,
+            ),
+            None => {
+                println!("{}{} ({}/{})", prefix, s, repo_name, pkg_path)
+            }
+        }
         for api in metadata
             .apis()
             .filter(|a| apis.is_producer_of(s, &a.client_package_name))
@@ -307,7 +323,7 @@ fn run_servers(apis: &SystemApis, args: DotArgs) -> Result<()> {
             print_server_components(
                 apis,
                 metadata,
-                metadata.server_components(),
+                metadata.server_components().map(|c| c.name()),
                 "",
                 args.show_deps,
                 args.filter,

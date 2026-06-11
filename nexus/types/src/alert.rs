@@ -4,7 +4,27 @@
 
 //! Internal alert types.
 
+use schemars::JsonSchema;
+use serde::Serialize;
 use std::fmt;
+
+/// Trait implemented by alerts.
+pub trait AlertPayload: Serialize + JsonSchema + std::fmt::Debug {
+    const CLASS: AlertClass;
+    const VERSION: u32;
+}
+
+/// A webhook receiver liveness probe.
+///
+/// Probes are synthetic alerts of the [`AlertClass::Probe`] class, used to
+/// check whether a webhook receiver endpoint is reachable. They carry no data.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize, JsonSchema)]
+pub struct Probe {}
+
+impl AlertPayload for Probe {
+    const CLASS: AlertClass = AlertClass::Probe;
+    const VERSION: u32 = 0;
+}
 
 /// Alert classes.
 ///
@@ -130,6 +150,39 @@ impl AlertClassParseError {
 }
 
 impl std::error::Error for AlertClassParseError {}
+
+/// Test alert types.
+///
+/// These wrap an arbitrary JSON payload so that tests of the alert subsystem
+/// may construct alerts with whatever data they like, while implementing the
+/// [`AlertPayload`] trait. These should not be used outside of tests.
+pub mod test_alerts {
+    use super::*;
+
+    macro_rules! impl_test_alerts {
+        ($( $(#[$m:meta])* $Name:ident($Class:ident)),+ $(,)?) => {
+            $(
+                $(#[$m])*
+                #[derive(Clone, Debug, PartialEq, Serialize, JsonSchema)]
+                #[serde(transparent)]
+                pub struct $Name(pub serde_json::Value);
+
+                impl AlertPayload for $Name {
+                    const CLASS: AlertClass = AlertClass::$Class;
+                    const VERSION: u32 = 0;
+                }
+            )+
+        };
+    }
+
+    impl_test_alerts! {
+        Foo(TestFoo),
+        FooBar(TestFooBar),
+        FooBaz(TestFooBaz),
+        QuuxBar(TestQuuxBar),
+        QuuxBarBaz(TestQuuxBarBaz),
+    }
+}
 
 #[cfg(test)]
 mod tests {

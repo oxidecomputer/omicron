@@ -467,6 +467,7 @@ table! {
         boot_disk_id -> Nullable<Uuid>,
         intended_state -> crate::enums::InstanceIntendedStateEnum,
         cpu_platform -> Nullable<crate::enums::InstanceCpuPlatformEnum>,
+        enable_jumbo_frames -> Bool,
     }
 }
 
@@ -596,6 +597,13 @@ table! {
 }
 
 table! {
+    system_networking_settings(singleton) {
+        singleton -> Bool,
+        external_jumbo_frames_opt_in_enabled -> Bool,
+    }
+}
+
+table! {
     network_interface (id) {
         id -> Uuid,
         name -> Text,
@@ -672,8 +680,8 @@ table! {
         time_deleted -> Nullable<Timestamptz>,
         rcgen -> Int8,
         ip_version -> crate::enums::IpVersionEnum,
-        reservation_type -> crate::enums::IpPoolReservationTypeEnum,
         pool_type -> crate::enums::IpPoolTypeEnum,
+        assignment -> crate::enums::IpPoolAssignmentEnum,
     }
 }
 
@@ -1103,6 +1111,7 @@ table! {
         rss_ram -> Int8,
         reservoir_ram -> Int8,
         instance_id -> Nullable<Uuid>,
+        state -> crate::enums::SledResourceVmmStateEnum,
     }
 }
 
@@ -2894,6 +2903,7 @@ table! {
         time_dispatched -> Nullable<Timestamptz>,
         num_dispatched -> Int8,
         case_id -> Nullable<Uuid>,
+        alert_version -> Int8,
     }
 }
 
@@ -3272,6 +3282,7 @@ table! {
         alert_class -> crate::enums::AlertClassEnum,
         payload -> Jsonb,
         comment -> Text,
+        alert_version -> Int8,
     }
 }
 

@@ -903,7 +903,6 @@ mod tests {
     use assert_matches::assert_matches;
     use iddqd::id_ord_map;
     use omicron_test_utils::dev;
-    use omicron_test_utils::dev::poll::CondCheckError;
     use omicron_test_utils::dev::poll::wait_for_watch_channel_condition;
     use omicron_uuid_kinds::InternalZpoolUuid;
     use proptest::sample::size_range;
@@ -1254,13 +1253,7 @@ mod tests {
         // disk is adopted.
         wait_for_watch_channel_condition(
             &mut disks_rx.errors_rx,
-            async |errors| {
-                if errors.is_empty() {
-                    Ok(())
-                } else {
-                    Err(CondCheckError::<()>::NotYet)
-                }
-            },
+            |errors| errors.is_empty(),
             Duration::from_secs(30),
         )
         .await

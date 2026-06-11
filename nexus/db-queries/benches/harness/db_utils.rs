@@ -19,6 +19,7 @@ use nexus_db_model::SledReservationConstraintBuilder;
 use nexus_db_model::SledUpdate;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
+use nexus_db_queries::db::datastore::sled::SledReservationReason;
 use nexus_db_queries::db::pub_test_utils::helpers::SledUpdateBuilder;
 use nexus_db_queries::db::pub_test_utils::helpers::small_resource_request;
 use omicron_uuid_kinds::InstanceUuid;
@@ -76,6 +77,7 @@ pub async fn create_reservation(
                 vmm_id,
                 small_resource_request(),
                 SledReservationConstraintBuilder::new().build(),
+                SledReservationReason::Start,
             )
             .await
         {

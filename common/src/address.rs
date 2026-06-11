@@ -24,6 +24,11 @@ pub const AZ_PREFIX: u8 = 48;
 pub const RACK_PREFIX: u8 = 56;
 pub const SLED_PREFIX: u8 = 64;
 
+/// Effective MTU for external-facing OPTE ports when jumbo frames have been
+/// opted into. 500 bytes of headroom under the 9000 byte underlay MTU leaves
+/// room for encapsulation overhead.
+pub const EXTERNAL_JUMBO_FRAMES_MTU: u32 = 8500;
+
 // Multicast constants
 
 /// IPv4 Source-Specific Multicast (SSM) subnet.

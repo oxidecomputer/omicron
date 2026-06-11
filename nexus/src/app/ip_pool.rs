@@ -8,7 +8,7 @@ use ipnetwork::IpNetwork;
 use nexus_db_lookup::LookupPath;
 use nexus_db_lookup::lookup;
 use nexus_db_model::IpPool;
-use nexus_db_model::IpPoolReservationType;
+use nexus_db_model::IpPoolAssignment;
 use nexus_db_model::IpPoolType;
 use nexus_db_model::IpPoolUpdate;
 use nexus_db_model::IpVersion;
@@ -209,12 +209,12 @@ impl super::Nexus {
             ip_pool::IpPoolType::Unicast => IpPool::new(
                 &pool_params.identity,
                 ip_version,
-                IpPoolReservationType::ExternalSilos,
+                IpPoolAssignment::Silos,
             ),
             ip_pool::IpPoolType::Multicast => IpPool::new_multicast(
                 &pool_params.identity,
                 ip_version,
-                IpPoolReservationType::ExternalSilos,
+                IpPoolAssignment::Silos,
             ),
         };
 
@@ -314,7 +314,11 @@ impl super::Nexus {
         let (authz_pool,) =
             pool_lookup.lookup_for(authz::Action::Modify).await?;
 
-        if self.db_datastore.ip_pool_is_internal(opctx, &authz_pool).await? {
+        if self
+            .db_datastore
+            .ip_pool_is_assigned_to_system_services(opctx, &authz_pool)
+            .await?
+        {
             return Err(not_found_from_lookup(pool_lookup));
         }
 
@@ -344,7 +348,11 @@ impl super::Nexus {
         let (.., authz_pool) =
             pool_lookup.lookup_for(authz::Action::Modify).await?;
 
-        if self.db_datastore.ip_pool_is_internal(opctx, &authz_pool).await? {
+        if self
+            .db_datastore
+            .ip_pool_is_assigned_to_system_services(opctx, &authz_pool)
+            .await?
+        {
             return Err(not_found_from_lookup(pool_lookup));
         }
 
@@ -366,7 +374,11 @@ impl super::Nexus {
         let (.., authz_pool) =
             pool_lookup.lookup_for(authz::Action::Modify).await?;
 
-        if self.db_datastore.ip_pool_is_internal(opctx, &authz_pool).await? {
+        if self
+            .db_datastore
+            .ip_pool_is_assigned_to_system_services(opctx, &authz_pool)
+            .await?
+        {
             return Err(not_found_from_lookup(pool_lookup));
         }
 
@@ -399,7 +411,11 @@ impl super::Nexus {
         let (.., authz_pool, db_pool) =
             pool_lookup.fetch_for(authz::Action::Delete).await?;
 
-        if self.db_datastore.ip_pool_is_internal(opctx, &authz_pool).await? {
+        if self
+            .db_datastore
+            .ip_pool_is_assigned_to_system_services(opctx, &authz_pool)
+            .await?
+        {
             return Err(not_found_from_lookup(pool_lookup));
         }
 
@@ -415,7 +431,11 @@ impl super::Nexus {
         let (.., authz_pool) =
             pool_lookup.lookup_for(authz::Action::Modify).await?;
 
-        if self.db_datastore.ip_pool_is_internal(opctx, &authz_pool).await? {
+        if self
+            .db_datastore
+            .ip_pool_is_assigned_to_system_services(opctx, &authz_pool)
+            .await?
+        {
             return Err(not_found_from_lookup(pool_lookup));
         }
 
@@ -433,7 +453,11 @@ impl super::Nexus {
         let (.., authz_pool) =
             pool_lookup.lookup_for(authz::Action::ListChildren).await?;
 
-        if self.db_datastore.ip_pool_is_internal(opctx, &authz_pool).await? {
+        if self
+            .db_datastore
+            .ip_pool_is_assigned_to_system_services(opctx, &authz_pool)
+            .await?
+        {
             return Err(not_found_from_lookup(pool_lookup));
         }
 
@@ -451,7 +475,11 @@ impl super::Nexus {
         let (.., authz_pool, db_pool) =
             pool_lookup.fetch_for(authz::Action::Modify).await?;
 
-        if self.db_datastore.ip_pool_is_internal(opctx, &authz_pool).await? {
+        if self
+            .db_datastore
+            .ip_pool_is_assigned_to_system_services(opctx, &authz_pool)
+            .await?
+        {
             return Err(not_found_from_lookup(pool_lookup));
         }
 
@@ -538,7 +566,11 @@ impl super::Nexus {
         let (.., authz_pool, _db_pool) =
             pool_lookup.fetch_for(authz::Action::Modify).await?;
 
-        if self.db_datastore.ip_pool_is_internal(opctx, &authz_pool).await? {
+        if self
+            .db_datastore
+            .ip_pool_is_assigned_to_system_services(opctx, &authz_pool)
+            .await?
+        {
             return Err(not_found_from_lookup(pool_lookup));
         }
 

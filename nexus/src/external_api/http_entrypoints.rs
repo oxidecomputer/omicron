@@ -45,8 +45,8 @@ use nexus_types::external_api::{
     external_subnet, floating_ip, hardware, identity_provider, image, instance,
     internet_gateway, ip_pool, metrics, multicast, networking, oxql,
     path_params, policy, probe, project, rack, scim, silo, sled, snapshot,
-    ssh_key, subnet_pool, support_bundle, switch, system, timeseries, update,
-    user, vpc,
+    ssh_key, subnet_pool, support_bundle, switch, system, system_networking,
+    timeseries, update, user, vpc,
 };
 // Type imports for API implementations (per RFD 619)
 use nexus_types::external_api::bfd::BfdStatus;
@@ -84,7 +84,6 @@ use omicron_common::api::external::AntiAffinityGroupMember;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Disk;
 use omicron_common::api::external::Error;
-use omicron_common::api::external::Instance;
 use omicron_common::api::external::InstanceNetworkInterface;
 use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::LldpNeighbor;
@@ -167,6 +166,47 @@ impl NexusExternalApi for NexusExternalApiImpl {
             bail_unless!(nasgns <= policy::MAX_ROLE_ASSIGNMENTS_PER_RESOURCE);
             let policy = nexus.fleet_update_policy(&opctx, &new_policy).await?;
             Ok(HttpResponseOk(policy))
+        })
+        .await
+    }
+
+    async fn system_networking_settings_view(
+        rqctx: RequestContext<ApiContext>,
+    ) -> Result<
+        HttpResponseOk<system_networking::SystemNetworkingSettings>,
+        HttpError,
+    > {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let settings =
+                nexus.system_networking_settings_view(&opctx).await?;
+            Ok(HttpResponseOk(settings))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn system_networking_settings_update(
+        rqctx: RequestContext<ApiContext>,
+        new_settings: TypedBody<
+            system_networking::SystemNetworkingSettingsUpdate,
+        >,
+    ) -> Result<
+        HttpResponseOk<system_networking::SystemNetworkingSettings>,
+        HttpError,
+    > {
+        audit_and_time(&rqctx, |opctx, nexus| async move {
+            let new_settings = new_settings.into_inner();
+            let settings = nexus
+                .system_networking_settings_update(&opctx, &new_settings)
+                .await?;
+            Ok(HttpResponseOk(settings))
         })
         .await
     }
@@ -2679,7 +2719,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
     async fn instance_list(
         rqctx: RequestContext<ApiContext>,
         query_params: Query<PaginatedByNameOrId<project::ProjectSelector>>,
-    ) -> Result<HttpResponseOk<ResultsPage<Instance>>, HttpError> {
+    ) -> Result<HttpResponseOk<ResultsPage<instance::Instance>>, HttpError>
+    {
         let apictx = rqctx.context();
         let handler = async {
             let nexus = &apictx.context.nexus;
@@ -2714,7 +2755,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
         rqctx: RequestContext<ApiContext>,
         query_params: Query<project::ProjectSelector>,
         new_instance: TypedBody<instance::InstanceCreate>,
-    ) -> Result<HttpResponseCreated<Instance>, HttpError> {
+    ) -> Result<HttpResponseCreated<instance::Instance>, HttpError> {
         audit_and_time(&rqctx, |opctx, nexus| async move {
             let project_selector = query_params.into_inner();
             let new_instance_params = new_instance.into_inner();
@@ -2736,7 +2777,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
         rqctx: RequestContext<ApiContext>,
         query_params: Query<project::OptionalProjectSelector>,
         path_params: Path<path_params::InstancePath>,
-    ) -> Result<HttpResponseOk<Instance>, HttpError> {
+    ) -> Result<HttpResponseOk<instance::Instance>, HttpError> {
         let apictx = rqctx.context();
         let nexus = &apictx.context.nexus;
         let path = path_params.into_inner();
@@ -2790,7 +2831,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
         query_params: Query<project::OptionalProjectSelector>,
         path_params: Path<path_params::InstancePath>,
         instance_config: TypedBody<instance::InstanceUpdate>,
-    ) -> Result<HttpResponseOk<Instance>, HttpError> {
+    ) -> Result<HttpResponseOk<instance::Instance>, HttpError> {
         let query = query_params.into_inner();
         let path = path_params.into_inner();
         let instance_config = instance_config.into_inner();
@@ -2817,7 +2858,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
         rqctx: RequestContext<ApiContext>,
         query_params: Query<project::OptionalProjectSelector>,
         path_params: Path<path_params::InstancePath>,
-    ) -> Result<HttpResponseAccepted<Instance>, HttpError> {
+    ) -> Result<HttpResponseAccepted<instance::Instance>, HttpError> {
         let path = path_params.into_inner();
         let query = query_params.into_inner();
         let instance_selector = instance::InstanceSelector {
@@ -2838,7 +2879,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
         rqctx: RequestContext<ApiContext>,
         query_params: Query<project::OptionalProjectSelector>,
         path_params: Path<path_params::InstancePath>,
-    ) -> Result<HttpResponseAccepted<Instance>, HttpError> {
+    ) -> Result<HttpResponseAccepted<instance::Instance>, HttpError> {
         let path = path_params.into_inner();
         let query = query_params.into_inner();
         let instance_selector = instance::InstanceSelector {
@@ -2864,7 +2905,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
         rqctx: RequestContext<ApiContext>,
         query_params: Query<project::OptionalProjectSelector>,
         path_params: Path<path_params::InstancePath>,
-    ) -> Result<HttpResponseAccepted<Instance>, HttpError> {
+    ) -> Result<HttpResponseAccepted<instance::Instance>, HttpError> {
         let path = path_params.into_inner();
         let query = query_params.into_inner();
         let instance_selector = instance::InstanceSelector {
