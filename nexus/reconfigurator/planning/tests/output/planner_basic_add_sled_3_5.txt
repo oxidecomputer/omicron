@@ -4,6 +4,7 @@ to:   blueprint 4ebbcbb6-a8f3-439e-ae8d-663ac21dcb3a
  MODIFIED SLEDS:
 
   sled ec61eded-c34f-443d-a580-dadf757529c4 (active, config generation 2 -> 3):
+    update disposition:   available (unchanged)
 
     measurements:
     ---------------------------

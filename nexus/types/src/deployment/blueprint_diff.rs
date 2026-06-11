@@ -2084,7 +2084,11 @@ impl fmt::Display for BlueprintDiffDisplay<'_, '_> {
                     sled.state, sled.sled_agent_generation
                 )?;
 
-                let mut rows = Vec::new();
+                let mut rows = vec![KvPair::new(
+                    BpDiffState::Removed,
+                    UPDATE_DISPOSITION,
+                    sled.update_disposition.to_string(),
+                )];
                 if let Some(id) = sled.remove_mupdate_override {
                     rows.push(KvPair::new(
                         BpDiffState::Removed,
@@ -2128,6 +2132,23 @@ impl fmt::Display for BlueprintDiffDisplay<'_, '_> {
                 )?;
 
                 let mut rows = Vec::new();
+                if sled.before.update_disposition
+                    != sled.after.update_disposition
+                {
+                    rows.push(KvPair::new(
+                        BpDiffState::Modified,
+                        UPDATE_DISPOSITION,
+                        linear_table_modified(
+                            &sled.before.update_disposition,
+                            &sled.after.update_disposition,
+                        ),
+                    ));
+                } else {
+                    rows.push(KvPair::new_unchanged(
+                        UPDATE_DISPOSITION,
+                        linear_table_unchanged(&sled.after.update_disposition),
+                    ));
+                }
                 // If either before or after is set for remove_mupdate_override,
                 // display it.
                 if sled.before.remove_mupdate_override.is_some()
@@ -2158,7 +2179,11 @@ impl fmt::Display for BlueprintDiffDisplay<'_, '_> {
                     sled.state, sled.sled_agent_generation
                 )?;
 
-                let mut rows = Vec::new();
+                let mut rows = vec![KvPair::new(
+                    BpDiffState::Added,
+                    UPDATE_DISPOSITION,
+                    sled.update_disposition.to_string(),
+                )];
                 if let Some(id) = sled.remove_mupdate_override {
                     rows.push(KvPair::new(
                         BpDiffState::Added,

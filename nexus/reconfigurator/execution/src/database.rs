@@ -72,6 +72,7 @@ mod test {
     use nexus_types::deployment::BlueprintHostPhase2DesiredSlots;
     use nexus_types::deployment::BlueprintMeasurements;
     use nexus_types::deployment::BlueprintSledConfig;
+    use nexus_types::deployment::BlueprintSledUpdateDisposition;
     use nexus_types::deployment::BlueprintSource;
     use nexus_types::deployment::BlueprintTarget;
     use nexus_types::deployment::BlueprintZoneConfig;
@@ -165,6 +166,7 @@ mod test {
             sled_id,
             BlueprintSledConfig {
                 state: SledState::Active,
+                update_disposition: BlueprintSledUpdateDisposition::Available,
                 subnet: Ipv6Subnet::new(Ipv6Addr::LOCALHOST),
                 last_allocated_ip_subnet_offset:
                     LastAllocatedSubnetIpOffset::initial(),

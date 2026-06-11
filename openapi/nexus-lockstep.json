@@ -2612,6 +2612,14 @@
           "subnet": {
             "$ref": "#/components/schemas/Ipv6Subnet"
           },
+          "update_disposition": {
+            "description": "Controls this sled's availability for provisioning, and whether its migratable instances are evacuated during an update.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/BlueprintSledUpdateDisposition"
+              }
+            ]
+          },
           "zones": {
             "title": "IdOrdMap",
             "x-rust-type": {
@@ -2640,7 +2648,47 @@
           "sled_agent_generation",
           "state",
           "subnet",
+          "update_disposition",
           "zones"
+        ]
+      },
+      "BlueprintSledUpdateDisposition": {
+        "description": "Controls a sled's availability for provisioning and whether its migratable instances are evacuated during an update.\n\nStored in [`BlueprintSledConfig::update_disposition`]. See RFD 666.",
+        "oneOf": [
+          {
+            "description": "The sled is available for use for all provisions.",
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "available"
+                ]
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          {
+            "description": "The sled is disallowed for all use, and its migratable instances are evacuated according to `policy`.",
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "evacuating"
+                ]
+              },
+              "policy": {
+                "$ref": "#/components/schemas/ReconfiguratorDisruptionPolicy"
+              }
+            },
+            "required": [
+              "kind",
+              "policy"
+            ]
+          }
         ]
       },
       "BlueprintSource": {

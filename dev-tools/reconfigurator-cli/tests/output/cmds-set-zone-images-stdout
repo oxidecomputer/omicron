@@ -12,10 +12,11 @@ blueprint  971eeb12-1830-4fa0-a699-98ea0164505c
 parent:    1b013011-2062-4b48-b544-a32b23bce83a
 
   sled: 868d5b02-7792-4fc0-b6a9-654afcae9ea0
-    state:::::::::::::   active
-    config generation:   2
-    subnet::::::::::::   fd00:1122:3344:101::/64
-    last allocated IP:   fd00:1122:3344:101::10
+    state::::::::::::::   active
+    update disposition:   available
+    config generation::   2
+    subnet:::::::::::::   fd00:1122:3344:101::/64
+    last allocated IP::   fd00:1122:3344:101::10
 
     host phase 2 contents:
     ------------------------
@@ -149,10 +150,11 @@ blueprint  f714e6ea-e85a-4d7d-93c2-a018744fe176
 parent:    9766ca20-38d4-4380-b005-e7c43c797e7c
 
   sled: 868d5b02-7792-4fc0-b6a9-654afcae9ea0
-    state:::::::::::::   active
-    config generation:   4
-    subnet::::::::::::   fd00:1122:3344:101::/64
-    last allocated IP:   fd00:1122:3344:101::10
+    state::::::::::::::   active
+    update disposition:   available
+    config generation::   4
+    subnet:::::::::::::   fd00:1122:3344:101::/64
+    last allocated IP::   fd00:1122:3344:101::10
 
     host phase 2 contents:
     ------------------------
@@ -277,6 +279,7 @@ to:   blueprint f714e6ea-e85a-4d7d-93c2-a018744fe176
  MODIFIED SLEDS:
 
   sled 868d5b02-7792-4fc0-b6a9-654afcae9ea0 (active, config generation 2 -> 4):
+    update disposition:   available (unchanged)
 
     measurements:
     ---------------------------
@@ -412,10 +415,11 @@ blueprint  d9c572a1-a68c-4945-b1ec-5389bd588fe9
 parent:    bb128f06-a2e1-44c1-8874-4f789d0ff896
 
   sled: 868d5b02-7792-4fc0-b6a9-654afcae9ea0
-    state:::::::::::::   active
-    config generation:   6
-    subnet::::::::::::   fd00:1122:3344:101::/64
-    last allocated IP:   fd00:1122:3344:101::10
+    state::::::::::::::   active
+    update disposition:   available
+    config generation::   6
+    subnet:::::::::::::   fd00:1122:3344:101::/64
+    last allocated IP::   fd00:1122:3344:101::10
 
     host phase 2 contents:
     ------------------------
@@ -540,6 +544,7 @@ to:   blueprint d9c572a1-a68c-4945-b1ec-5389bd588fe9
  MODIFIED SLEDS:
 
   sled 868d5b02-7792-4fc0-b6a9-654afcae9ea0 (active, config generation 4 -> 6):
+    update disposition:   available (unchanged)
 
     measurements:
     ---------------------------

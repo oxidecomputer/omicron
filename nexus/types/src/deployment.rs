@@ -1525,12 +1525,14 @@ impl fmt::Display for BlueprintDisplay<'_> {
                 remove_mupdate_override,
                 host_phase_2,
                 measurements,
+                update_disposition,
             } = config;
 
             // Report toplevel sled info
             writeln!(f, "\n  sled: {sled_id}")?;
             let mut rows = vec![
                 (STATE, state.to_string()),
+                (UPDATE_DISPOSITION, update_disposition.to_string()),
                 (CONFIG_GENERATION, sled_agent_generation.to_string()),
                 (SUBNET, subnet.to_string()),
                 (LAST_ALLOCATED_IP, last_allocated_ip.to_string()),
@@ -1676,6 +1678,49 @@ pub struct BlueprintSledConfig {
     pub remove_mupdate_override: Option<MupdateOverrideUuid>,
     pub host_phase_2: BlueprintHostPhase2DesiredSlots,
     pub measurements: BlueprintMeasurements,
+
+    /// Controls this sled's availability for provisioning, and whether its
+    /// migratable instances are evacuated during an update.
+    pub update_disposition: BlueprintSledUpdateDisposition,
+}
+
+/// Controls a sled's availability for provisioning and whether its migratable
+/// instances are evacuated during an update.
+///
+/// Stored in [`BlueprintSledConfig::update_disposition`]. See RFD 666.
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Diffable,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    JsonSchema,
+)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum BlueprintSledUpdateDisposition {
+    /// The sled is available for use for all provisions.
+    Available,
+
+    /// The sled is disallowed for all use, and its migratable instances are
+    /// evacuated according to `policy`.
+    Evacuating { policy: ReconfiguratorDisruptionPolicy },
+    // In the future, this will gain `ReservedForMigrationTarget`, for a sled
+    // that is disallowed for general provisioning but usable as a target for
+    // update-related migrations.
+}
+
+impl fmt::Display for BlueprintSledUpdateDisposition {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            BlueprintSledUpdateDisposition::Available => write!(f, "available"),
+            BlueprintSledUpdateDisposition::Evacuating { policy } => {
+                write!(f, "evacuating ({policy})")
+            }
+        }
+    }
 }
 
 impl BlueprintSledConfig {

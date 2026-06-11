@@ -31,6 +31,7 @@ use nexus_types::deployment::BlueprintMeasurements;
 use nexus_types::deployment::BlueprintPhysicalDiskConfig;
 use nexus_types::deployment::BlueprintPhysicalDiskDisposition;
 use nexus_types::deployment::BlueprintSledConfig;
+use nexus_types::deployment::BlueprintSledUpdateDisposition;
 use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::BlueprintZoneImageSource;
 use nexus_types::deployment::BlueprintZoneType;
@@ -166,6 +167,11 @@ pub enum EnsureMupdateOverrideError {
 pub struct SledEditor {
     underlay_ip_allocator: SledUnderlayIpAllocator,
     incoming_sled_agent_generation: Generation,
+    // The planner does not currently set the update disposition. Note that this
+    // is purely an internal planner decision and is never part of the
+    // `OmicronSledConfig` sent to sled-agent, so a change to it should not
+    // result in a sled_agent_generation bump.
+    incoming_update_disposition: BlueprintSledUpdateDisposition,
     zones: ZonesEditor,
     disks: DisksEditor,
     datasets: DatasetsEditor,
@@ -213,6 +219,7 @@ impl SledEditor {
                 config.last_allocated_ip_subnet_offset,
             ),
             incoming_sled_agent_generation: config.sled_agent_generation,
+            incoming_update_disposition: config.update_disposition,
             zones,
             disks: DisksEditor::new(config.sled_agent_generation, config.disks),
             datasets: DatasetsEditor::new(config.datasets)?,
@@ -232,6 +239,8 @@ impl SledEditor {
                 LastAllocatedSubnetIpOffset::initial(),
             ),
             incoming_sled_agent_generation: Generation::new(),
+            incoming_update_disposition:
+                BlueprintSledUpdateDisposition::Available,
             zones: ZonesEditor::empty(),
             disks: DisksEditor::empty(),
             datasets: DatasetsEditor::empty(),
@@ -289,6 +298,7 @@ impl SledEditor {
                     .finalize(),
                 host_phase_2: self.host_phase_2.finalize(),
                 measurements,
+                update_disposition: self.incoming_update_disposition,
             },
             edit_counts: SledEditCounts {
                 disks: disks_counts,

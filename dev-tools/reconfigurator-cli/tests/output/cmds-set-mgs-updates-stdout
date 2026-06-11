@@ -12,10 +12,11 @@ blueprint  ad97e762-7bf1-45a6-a98f-60afb7e491c0
 parent:    6ccc786b-17f1-4562-958f-5a7d9a5a15fd
 
   sled: bb0ec23a-f97c-4b6a-a5bc-864b1ebc9236
-    state:::::::::::::   active
-    config generation:   2
-    subnet::::::::::::   fd00:1122:3344:101::/64
-    last allocated IP:   fd00:1122:3344:101::a
+    state::::::::::::::   active
+    update disposition:   available
+    config generation::   2
+    subnet:::::::::::::   fd00:1122:3344:101::/64
+    last allocated IP::   fd00:1122:3344:101::a
 
     host phase 2 contents:
     ------------------------
@@ -91,10 +92,11 @@ parent:    6ccc786b-17f1-4562-958f-5a7d9a5a15fd
 
 
   sled: bba6ea73-6c9c-4ab5-8bb4-1dd145071407
-    state:::::::::::::   active
-    config generation:   2
-    subnet::::::::::::   fd00:1122:3344:102::/64
-    last allocated IP:   fd00:1122:3344:102::9
+    state::::::::::::::   active
+    update disposition:   available
+    config generation::   2
+    subnet:::::::::::::   fd00:1122:3344:102::/64
+    last allocated IP::   fd00:1122:3344:102::9
 
     host phase 2 contents:
     ------------------------
@@ -167,10 +169,11 @@ parent:    6ccc786b-17f1-4562-958f-5a7d9a5a15fd
 
 
   sled: cc00b21a-5685-480a-ab5e-d2e29cf369df
-    state:::::::::::::   active
-    config generation:   2
-    subnet::::::::::::   fd00:1122:3344:103::/64
-    last allocated IP:   fd00:1122:3344:103::9
+    state::::::::::::::   active
+    update disposition:   available
+    config generation::   2
+    subnet:::::::::::::   fd00:1122:3344:103::/64
+    last allocated IP::   fd00:1122:3344:103::9
 
     host phase 2 contents:
     ------------------------
@@ -276,10 +279,11 @@ blueprint  cca24b71-09b5-4042-9185-b33e9f2ebba0
 parent:    ad97e762-7bf1-45a6-a98f-60afb7e491c0
 
   sled: bb0ec23a-f97c-4b6a-a5bc-864b1ebc9236
-    state:::::::::::::   active
-    config generation:   2
-    subnet::::::::::::   fd00:1122:3344:101::/64
-    last allocated IP:   fd00:1122:3344:101::a
+    state::::::::::::::   active
+    update disposition:   available
+    config generation::   2
+    subnet:::::::::::::   fd00:1122:3344:101::/64
+    last allocated IP::   fd00:1122:3344:101::a
 
     host phase 2 contents:
     ------------------------
@@ -355,10 +359,11 @@ parent:    ad97e762-7bf1-45a6-a98f-60afb7e491c0
 
 
   sled: bba6ea73-6c9c-4ab5-8bb4-1dd145071407
-    state:::::::::::::   active
-    config generation:   2
-    subnet::::::::::::   fd00:1122:3344:102::/64
-    last allocated IP:   fd00:1122:3344:102::9
+    state::::::::::::::   active
+    update disposition:   available
+    config generation::   2
+    subnet:::::::::::::   fd00:1122:3344:102::/64
+    last allocated IP::   fd00:1122:3344:102::9
 
     host phase 2 contents:
     ------------------------
@@ -431,10 +436,11 @@ parent:    ad97e762-7bf1-45a6-a98f-60afb7e491c0
 
 
   sled: cc00b21a-5685-480a-ab5e-d2e29cf369df
-    state:::::::::::::   active
-    config generation:   2
-    subnet::::::::::::   fd00:1122:3344:103::/64
-    last allocated IP:   fd00:1122:3344:103::9
+    state::::::::::::::   active
+    update disposition:   available
+    config generation::   2
+    subnet:::::::::::::   fd00:1122:3344:103::/64
+    last allocated IP::   fd00:1122:3344:103::9
 
     host phase 2 contents:
     ------------------------
@@ -622,10 +628,11 @@ blueprint  5bf974f3-81f9-455b-b24e-3099f765664c
 parent:    cca24b71-09b5-4042-9185-b33e9f2ebba0
 
   sled: bb0ec23a-f97c-4b6a-a5bc-864b1ebc9236
-    state:::::::::::::   active
-    config generation:   2
-    subnet::::::::::::   fd00:1122:3344:101::/64
-    last allocated IP:   fd00:1122:3344:101::a
+    state::::::::::::::   active
+    update disposition:   available
+    config generation::   2
+    subnet:::::::::::::   fd00:1122:3344:101::/64
+    last allocated IP::   fd00:1122:3344:101::a
 
     host phase 2 contents:
     ------------------------
@@ -701,10 +708,11 @@ parent:    cca24b71-09b5-4042-9185-b33e9f2ebba0
 
 
   sled: bba6ea73-6c9c-4ab5-8bb4-1dd145071407
-    state:::::::::::::   active
-    config generation:   2
-    subnet::::::::::::   fd00:1122:3344:102::/64
-    last allocated IP:   fd00:1122:3344:102::9
+    state::::::::::::::   active
+    update disposition:   available
+    config generation::   2
+    subnet:::::::::::::   fd00:1122:3344:102::/64
+    last allocated IP::   fd00:1122:3344:102::9
 
     host phase 2 contents:
     ------------------------
@@ -777,10 +785,11 @@ parent:    cca24b71-09b5-4042-9185-b33e9f2ebba0
 
 
   sled: cc00b21a-5685-480a-ab5e-d2e29cf369df
-    state:::::::::::::   active
-    config generation:   2
-    subnet::::::::::::   fd00:1122:3344:103::/64
-    last allocated IP:   fd00:1122:3344:103::9
+    state::::::::::::::   active
+    update disposition:   available
+    config generation::   2
+    subnet:::::::::::::   fd00:1122:3344:103::/64
+    last allocated IP::   fd00:1122:3344:103::9
 
     host phase 2 contents:
     ------------------------
@@ -971,10 +980,11 @@ blueprint  1b837a27-3be1-4fcb-8499-a921c839e1d0
 parent:    5bf974f3-81f9-455b-b24e-3099f765664c
 
   sled: bb0ec23a-f97c-4b6a-a5bc-864b1ebc9236
-    state:::::::::::::   active
-    config generation:   2
-    subnet::::::::::::   fd00:1122:3344:101::/64
-    last allocated IP:   fd00:1122:3344:101::a
+    state::::::::::::::   active
+    update disposition:   available
+    config generation::   2
+    subnet:::::::::::::   fd00:1122:3344:101::/64
+    last allocated IP::   fd00:1122:3344:101::a
 
     host phase 2 contents:
     ------------------------
@@ -1050,10 +1060,11 @@ parent:    5bf974f3-81f9-455b-b24e-3099f765664c
 
 
   sled: bba6ea73-6c9c-4ab5-8bb4-1dd145071407
-    state:::::::::::::   active
-    config generation:   2
-    subnet::::::::::::   fd00:1122:3344:102::/64
-    last allocated IP:   fd00:1122:3344:102::9
+    state::::::::::::::   active
+    update disposition:   available
+    config generation::   2
+    subnet:::::::::::::   fd00:1122:3344:102::/64
+    last allocated IP::   fd00:1122:3344:102::9
 
     host phase 2 contents:
     ------------------------
@@ -1126,10 +1137,11 @@ parent:    5bf974f3-81f9-455b-b24e-3099f765664c
 
 
   sled: cc00b21a-5685-480a-ab5e-d2e29cf369df
-    state:::::::::::::   active
-    config generation:   2
-    subnet::::::::::::   fd00:1122:3344:103::/64
-    last allocated IP:   fd00:1122:3344:103::9
+    state::::::::::::::   active
+    update disposition:   available
+    config generation::   2
+    subnet:::::::::::::   fd00:1122:3344:103::/64
+    last allocated IP::   fd00:1122:3344:103::9
 
     host phase 2 contents:
     ------------------------
@@ -1279,10 +1291,11 @@ blueprint  3682a71b-c6ca-4b7e-8f84-16df80c85960
 parent:    1b837a27-3be1-4fcb-8499-a921c839e1d0
 
   sled: bb0ec23a-f97c-4b6a-a5bc-864b1ebc9236
-    state:::::::::::::   active
-    config generation:   2
-    subnet::::::::::::   fd00:1122:3344:101::/64
-    last allocated IP:   fd00:1122:3344:101::a
+    state::::::::::::::   active
+    update disposition:   available
+    config generation::   2
+    subnet:::::::::::::   fd00:1122:3344:101::/64
+    last allocated IP::   fd00:1122:3344:101::a
 
     host phase 2 contents:
     ------------------------
@@ -1358,10 +1371,11 @@ parent:    1b837a27-3be1-4fcb-8499-a921c839e1d0
 
 
   sled: bba6ea73-6c9c-4ab5-8bb4-1dd145071407
-    state:::::::::::::   active
-    config generation:   2
-    subnet::::::::::::   fd00:1122:3344:102::/64
-    last allocated IP:   fd00:1122:3344:102::9
+    state::::::::::::::   active
+    update disposition:   available
+    config generation::   2
+    subnet:::::::::::::   fd00:1122:3344:102::/64
+    last allocated IP::   fd00:1122:3344:102::9
 
     host phase 2 contents:
     ------------------------
@@ -1434,10 +1448,11 @@ parent:    1b837a27-3be1-4fcb-8499-a921c839e1d0
 
 
   sled: cc00b21a-5685-480a-ab5e-d2e29cf369df
-    state:::::::::::::   active
-    config generation:   2
-    subnet::::::::::::   fd00:1122:3344:103::/64
-    last allocated IP:   fd00:1122:3344:103::9
+    state::::::::::::::   active
+    update disposition:   available
+    config generation::   2
+    subnet:::::::::::::   fd00:1122:3344:103::/64
+    last allocated IP::   fd00:1122:3344:103::9
 
     host phase 2 contents:
     ------------------------

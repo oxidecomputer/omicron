@@ -2247,6 +2247,8 @@ table! {
         sled_id -> Uuid,
 
         sled_state -> crate::enums::SledStateEnum,
+        update_availability -> crate::enums::SledUpdateAvailabilityEnum,
+        update_disruption_policy -> Nullable<crate::enums::ReconfiguratorDisruptionPolicyEnum>,
         sled_agent_generation -> Int8,
         remove_mupdate_override -> Nullable<Uuid>,
 

@@ -150,6 +150,7 @@ impl Default for ReconfiguratorConfig {
     Serialize,
     Deserialize,
     JsonSchema,
+    strum::VariantArray,
 )]
 #[serde(rename_all = "snake_case")]
 pub enum ReconfiguratorDisruptionPolicy {
@@ -169,6 +170,10 @@ pub enum ReconfiguratorDisruptionPolicy {
     /// This will still cause instances to be terminated if it is impossible for
     /// them to be live-migrated, such as if they use local storage.
     MigrateOnly,
+}
+
+impl ReconfiguratorDisruptionPolicy {
+    pub const ALL_VARIANTS: &[Self] = <Self as strum::VariantArray>::VARIANTS;
 }
 
 impl fmt::Display for ReconfiguratorDisruptionPolicy {

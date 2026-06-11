@@ -88,6 +88,7 @@ mod tests {
     use nexus_types::deployment::BlueprintMeasurements;
     use nexus_types::deployment::BlueprintPhysicalDiskConfig;
     use nexus_types::deployment::BlueprintPhysicalDiskDisposition;
+    use nexus_types::deployment::BlueprintSledUpdateDisposition;
     use nexus_types::deployment::BlueprintZoneConfig;
     use nexus_types::deployment::BlueprintZoneDisposition;
     use nexus_types::deployment::BlueprintZoneImageSource;
@@ -263,6 +264,7 @@ mod tests {
 
         let sled_config = BlueprintSledConfig {
             state: SledState::Active,
+            update_disposition: BlueprintSledUpdateDisposition::Available,
             subnet: Ipv6Subnet::new(Ipv6Addr::LOCALHOST),
             last_allocated_ip_subnet_offset:
                 LastAllocatedSubnetIpOffset::initial(),

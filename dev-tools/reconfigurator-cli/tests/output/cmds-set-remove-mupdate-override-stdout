@@ -50,10 +50,11 @@ blueprint  7f976e0d-d2a5-4eeb-9e82-c82bc2824aba
 parent:    df06bb57-ad42-4431-9206-abff322896c7
 
   sled: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c
-    state:::::::::::::   active
-    config generation:   2
-    subnet::::::::::::   fd00:1122:3344:102::/64
-    last allocated IP:   fd00:1122:3344:102::8
+    state::::::::::::::   active
+    update disposition:   available
+    config generation::   2
+    subnet:::::::::::::   fd00:1122:3344:102::/64
+    last allocated IP::   fd00:1122:3344:102::8
 
     host phase 2 contents:
     ------------------------
@@ -113,10 +114,11 @@ parent:    df06bb57-ad42-4431-9206-abff322896c7
 
 
   sled: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6
-    state:::::::::::::   active
-    config generation:   2
-    subnet::::::::::::   fd00:1122:3344:101::/64
-    last allocated IP:   fd00:1122:3344:101::7
+    state::::::::::::::   active
+    update disposition:   available
+    config generation::   2
+    subnet:::::::::::::   fd00:1122:3344:101::/64
+    last allocated IP::   fd00:1122:3344:101::7
 
     host phase 2 contents:
     ------------------------
@@ -174,6 +176,7 @@ parent:    df06bb57-ad42-4431-9206-abff322896c7
 
   sled: 9a867dc9-d505-427f-9eff-cdb1d4d9bd73
     state::::::::::::::::::::::::   active
+    update disposition:::::::::::   available
     config generation::::::::::::   3
     subnet:::::::::::::::::::::::   fd00:1122:3344:106::/64
     last allocated IP::::::::::::   fd00:1122:3344:106::7
@@ -235,6 +238,7 @@ parent:    df06bb57-ad42-4431-9206-abff322896c7
 
   sled: aff6c093-197d-42c5-ad80-9f10ba051a34
     state::::::::::::::::::::::::   active
+    update disposition:::::::::::   available
     config generation::::::::::::   3
     subnet:::::::::::::::::::::::   fd00:1122:3344:104::/64
     last allocated IP::::::::::::   fd00:1122:3344:104::4
@@ -286,6 +290,7 @@ parent:    df06bb57-ad42-4431-9206-abff322896c7
 
   sled: b82ede02-399c-48c6-a1de-411df4fa49a7
     state::::::::::::::::::::::::   active
+    update disposition:::::::::::   available
     config generation::::::::::::   3
     subnet:::::::::::::::::::::::   fd00:1122:3344:105::/64
     last allocated IP::::::::::::   fd00:1122:3344:105::4
@@ -337,6 +342,7 @@ parent:    df06bb57-ad42-4431-9206-abff322896c7
 
   sled: d81c6a84-79b8-4958-ae41-ea46c9b19763
     state::::::::::::::::::::::::   active
+    update disposition:::::::::::   available
     config generation::::::::::::   3
     subnet:::::::::::::::::::::::   fd00:1122:3344:103::/64
     last allocated IP::::::::::::   fd00:1122:3344:103::4
@@ -388,6 +394,7 @@ parent:    df06bb57-ad42-4431-9206-abff322896c7
 
   sled: e96e226f-4ed9-4c01-91b9-69a9cd076c9e
     state::::::::::::::::::::::::   active
+    update disposition:::::::::::   available
     config generation::::::::::::   3
     subnet:::::::::::::::::::::::   fd00:1122:3344:107::/64
     last allocated IP::::::::::::   fd00:1122:3344:107::4
@@ -499,6 +506,7 @@ to:   blueprint afb09faf-a586-4483-9289-04d4f1d8ba23
  REMOVED SLEDS:
 
   sled e96e226f-4ed9-4c01-91b9-69a9cd076c9e (was active, config generation 3):
+-   update disposition::::::::::::::::::   available
 -   would have removed mupdate override:   00000000-0000-0000-0000-000000000000
 
     measurements:
@@ -547,6 +555,7 @@ to:   blueprint afb09faf-a586-4483-9289-04d4f1d8ba23
  MODIFIED SLEDS:
 
   sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c (active, config generation 2 -> 3):
+    update disposition:::::::::::   available (unchanged)
 +   will remove mupdate override:   (none) -> ffffffff-ffff-ffff-ffff-ffffffffffff
 
     measurements:
@@ -606,6 +615,7 @@ to:   blueprint afb09faf-a586-4483-9289-04d4f1d8ba23
 
 
   sled 9a867dc9-d505-427f-9eff-cdb1d4d9bd73 (active, config generation 3 -> 4):
+    update disposition:::::::::::   available (unchanged)
     will remove mupdate override:   00000000-0000-0000-0000-000000000000 (unchanged)
 
     measurements:
@@ -662,6 +672,7 @@ to:   blueprint afb09faf-a586-4483-9289-04d4f1d8ba23
 
 
   sled b82ede02-399c-48c6-a1de-411df4fa49a7 (active, config generation 3 -> 4):
+    update disposition:::::::::::   available (unchanged)
 *   will remove mupdate override:   00000000-0000-0000-0000-000000000000 -> ffffffff-ffff-ffff-ffff-ffffffffffff
 
     measurements:
@@ -708,6 +719,7 @@ to:   blueprint afb09faf-a586-4483-9289-04d4f1d8ba23
 
 
   sled d81c6a84-79b8-4958-ae41-ea46c9b19763 (active, config generation 3 -> 4):
+    update disposition:::::::::::   available (unchanged)
 -   will remove mupdate override:   00000000-0000-0000-0000-000000000000 -> (none)
 
     measurements:
@@ -756,6 +768,7 @@ to:   blueprint afb09faf-a586-4483-9289-04d4f1d8ba23
  ADDED SLEDS:
 
   sled 00320471-945d-413c-85e7-03e091a70b3c (active, config generation 2):
++   update disposition:::::::::::   available
 +   will remove mupdate override:   ffffffff-ffff-ffff-ffff-ffffffffffff
 
     measurements:
@@ -829,6 +842,7 @@ parent:    afb09faf-a586-4483-9289-04d4f1d8ba23
 
   sled: 00320471-945d-413c-85e7-03e091a70b3c
     state::::::::::::::::::::::::   active
+    update disposition:::::::::::   available
     config generation::::::::::::   2
     subnet:::::::::::::::::::::::   fd00:1122:3344:108::/64
     last allocated IP::::::::::::   fd00:1122:3344:108::2
@@ -870,6 +884,7 @@ parent:    afb09faf-a586-4483-9289-04d4f1d8ba23
 
   sled: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c
     state::::::::::::::::::::::::   active
+    update disposition:::::::::::   available
     config generation::::::::::::   3
     subnet:::::::::::::::::::::::   fd00:1122:3344:102::/64
     last allocated IP::::::::::::   fd00:1122:3344:102::8
@@ -933,10 +948,11 @@ parent:    afb09faf-a586-4483-9289-04d4f1d8ba23
 
 
   sled: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6
-    state:::::::::::::   active
-    config generation:   2
-    subnet::::::::::::   fd00:1122:3344:101::/64
-    last allocated IP:   fd00:1122:3344:101::7
+    state::::::::::::::   active
+    update disposition:   available
+    config generation::   2
+    subnet:::::::::::::   fd00:1122:3344:101::/64
+    last allocated IP::   fd00:1122:3344:101::7
 
     host phase 2 contents:
     ------------------------
@@ -994,6 +1010,7 @@ parent:    afb09faf-a586-4483-9289-04d4f1d8ba23
 
   sled: 9a867dc9-d505-427f-9eff-cdb1d4d9bd73
     state::::::::::::::::::::::::   active
+    update disposition:::::::::::   available
     config generation::::::::::::   4
     subnet:::::::::::::::::::::::   fd00:1122:3344:106::/64
     last allocated IP::::::::::::   fd00:1122:3344:106::7
@@ -1055,6 +1072,7 @@ parent:    afb09faf-a586-4483-9289-04d4f1d8ba23
 
   sled: aff6c093-197d-42c5-ad80-9f10ba051a34
     state::::::::::::::::::::::::   active
+    update disposition:::::::::::   available
     config generation::::::::::::   3
     subnet:::::::::::::::::::::::   fd00:1122:3344:104::/64
     last allocated IP::::::::::::   fd00:1122:3344:104::4
@@ -1106,6 +1124,7 @@ parent:    afb09faf-a586-4483-9289-04d4f1d8ba23
 
   sled: b82ede02-399c-48c6-a1de-411df4fa49a7
     state::::::::::::::::::::::::   active
+    update disposition:::::::::::   available
     config generation::::::::::::   4
     subnet:::::::::::::::::::::::   fd00:1122:3344:105::/64
     last allocated IP::::::::::::   fd00:1122:3344:105::4
@@ -1156,10 +1175,11 @@ parent:    afb09faf-a586-4483-9289-04d4f1d8ba23
 
 
   sled: d81c6a84-79b8-4958-ae41-ea46c9b19763
-    state:::::::::::::   active
-    config generation:   4
-    subnet::::::::::::   fd00:1122:3344:103::/64
-    last allocated IP:   fd00:1122:3344:103::4
+    state::::::::::::::   active
+    update disposition:   available
+    config generation::   4
+    subnet:::::::::::::   fd00:1122:3344:103::/64
+    last allocated IP::   fd00:1122:3344:103::4
 
     host phase 2 contents:
     ------------------------
