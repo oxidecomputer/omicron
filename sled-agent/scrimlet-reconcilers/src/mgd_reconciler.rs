@@ -13,15 +13,19 @@ use sled_agent_types::system_networking::SystemNetworkingConfig;
 use slog::Logger;
 use std::time::Duration;
 
+mod bfd_reconciler;
 mod bgp_reconciler;
 mod static_route_reconciler;
 
+pub use bfd_reconciler::MgdBfdOperationFailure;
+pub use bfd_reconciler::MgdBfdReconcilerStatus;
 pub use bgp_reconciler::MgdBgpReconcilerStatus;
 pub use bgp_reconciler::MgdBgpReconcilerStatusOpCount;
 pub use static_route_reconciler::MgdStaticRouteReconcilerStatus;
 
 #[derive(Debug, Clone)]
 pub struct MgdReconcilerStatus {
+    pub bfd_status: MgdBfdReconcilerStatus,
     pub bgp_status: MgdBgpReconcilerStatus,
     pub static_routes_status: MgdStaticRouteReconcilerStatus,
 }
@@ -32,7 +36,8 @@ impl slog::KV for MgdReconcilerStatus {
         record: &slog::Record<'_>,
         serializer: &mut dyn slog::Serializer,
     ) -> slog::Result {
-        let Self { bgp_status, static_routes_status } = self;
+        let Self { bfd_status, bgp_status, static_routes_status } = self;
+        bfd_status.serialize(record, serializer)?;
         bgp_status.serialize(record, serializer)?;
         static_routes_status.serialize(record, serializer)?;
         Ok(())
@@ -80,6 +85,14 @@ impl Reconciler for MgdReconciler {
         )
         .await;
 
-        MgdReconcilerStatus { bgp_status, static_routes_status }
+        let bfd_status = bfd_reconciler::reconcile(
+            &self.client,
+            &system_networking_config.rack_network_config,
+            self.switch_slot,
+            log,
+        )
+        .await;
+
+        MgdReconcilerStatus { static_routes_status, bgp_status, bfd_status }
     }
 }
