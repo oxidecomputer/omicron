@@ -1302,6 +1302,9 @@ mod tests {
         assert_eq!(bgp_config.identity.description, new_description);
         assert_eq!(bgp_config.bgp_announce_set_id, new_announce_id);
         assert_eq!(bgp_config.max_paths.0, new_max_paths.as_u8());
+
+        db.terminate().await;
+        logctx.cleanup_successful();
     }
 
     #[tokio::test]
