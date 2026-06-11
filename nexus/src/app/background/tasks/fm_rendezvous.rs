@@ -559,6 +559,7 @@ mod tests {
             .insert_unique(fm::case::AlertRequest {
                 id: alert1_id,
                 class: AlertClass::TestFoo,
+                version: 0,
                 requested_sitrep_id: sitrep1_id,
                 payload: serde_json::json!({}),
                 comment: String::new(),
@@ -639,6 +640,7 @@ mod tests {
             .insert_unique(fm::case::AlertRequest {
                 id: alert2_id,
                 class: AlertClass::TestFooBar,
+                version: 0,
                 requested_sitrep_id: sitrep2_id,
                 payload: serde_json::json!({}),
                 comment: String::new(),
@@ -650,6 +652,7 @@ mod tests {
             .insert_unique(fm::case::AlertRequest {
                 id: alert3_id,
                 class: AlertClass::TestFooBaz,
+                version: 0,
                 requested_sitrep_id: sitrep2_id,
                 payload: serde_json::json!({}),
                 comment: String::new(),
