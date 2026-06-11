@@ -14,7 +14,9 @@ use http::StatusCode;
 use http::method::Method;
 use itertools::Itertools;
 use nexus_auth::authz::Action;
+use nexus_db_lookup::AsyncConnection;
 use nexus_db_lookup::LookupPath;
+use nexus_db_model::SledResourceVmm;
 use nexus_db_model::to_db_typed_uuid;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
@@ -750,6 +752,25 @@ async fn test_instance_start_creates_networking_state(
     assert!(checked);
 }
 
+/// Fetch the `sled_resource_vmm` record for `propolis_id`, returning `None` if
+/// no such record exists.
+///
+/// Panics if a database error occurs.
+async fn fetch_sled_resource_vmm_record(
+    propolis_id: PropolisUuid,
+    conn: &AsyncConnection,
+) -> Option<SledResourceVmm> {
+    use nexus_db_schema::schema::sled_resource_vmm::dsl;
+
+    dsl::sled_resource_vmm
+        .filter(dsl::id.eq(to_db_typed_uuid(propolis_id)))
+        .select(SledResourceVmm::as_select())
+        .get_result_async(conn)
+        .await
+        .optional()
+        .expect("querying for sled_resource_vmm record should not fail")
+}
+
 #[nexus_test(extra_sled_agents = 1)]
 async fn test_instance_migrate(cptestctx: &ControlPlaneTestContext) {
     use nexus_db_model::{Migration, MigrationState};
@@ -962,9 +983,7 @@ async fn test_instance_migrate(cptestctx: &ControlPlaneTestContext) {
     // wait out the task's periodic activation interval. (See "Relying on
     // periodic background-task activation" in docs/flake-patterns.adoc.)
     {
-        use nexus_db_model::SledResourceVmm;
         use nexus_db_model::SledResourceVmmState;
-        use nexus_db_schema::schema::sled_resource_vmm::dsl;
 
         wait_for_condition(
             || async {
@@ -976,26 +995,18 @@ async fn test_instance_migrate(cptestctx: &ControlPlaneTestContext) {
                 let datastore = apictx.nexus.datastore();
                 let conn = datastore.pool_connection_for_tests().await.unwrap();
 
-                let maybe_source_record = dsl::sled_resource_vmm
-                    .filter(dsl::id.eq(to_db_typed_uuid(src_propolis_id)))
-                    .select(SledResourceVmm::as_select())
-                    .get_result_async(&*conn)
-                    .await
-                    .optional()
-                    .expect(
-                        "source sled_resource_vmm record query should \
-                         succeed",
-                    );
+                let maybe_source_record =
+                    fetch_sled_resource_vmm_record(src_propolis_id, &conn)
+                        .await;
 
-                let target_record = dsl::sled_resource_vmm
-                    .filter(dsl::id.eq(to_db_typed_uuid(dst_propolis_id)))
-                    .select(SledResourceVmm::as_select())
-                    .get_result_async(&*conn)
-                    .await
-                    .expect(
-                        "target sled_resource_vmm record should exist: the \
-                         instance is running on its VMM",
-                    );
+                let target_record =
+                    fetch_sled_resource_vmm_record(dst_propolis_id, &conn)
+                        .await
+                        .expect(
+                            "sled_resource_vmm record for the migration target \
+                             VMM record should exist: the instance is running \
+                             on that VMM",
+                        );
 
                 let source_state =
                     maybe_source_record.map(|record| record.state);
@@ -1016,34 +1027,26 @@ async fn test_instance_migrate(cptestctx: &ControlPlaneTestContext) {
                         ),
                         SledResourceVmmState::Active
                         | SledResourceVmmState::Target,
-                    ) => Err(CondCheckError::<()>::NotYetWithStatus(format!(
-                        "source record: {}, target record state: {}",
-                        match source_state {
+                    ) => {
+                        let source_record_status = match source_state {
                             Some(state) => format!("still present ({state})"),
                             None => "deleted".to_string(),
-                        },
-                        target_record.state,
-                    ))),
+                        };
+                        Err(CondCheckError::<()>::NotYet {
+                            status: Some(format!(
+                                "source record: {}, target record state: {}",
+                                source_record_status, target_record.state,
+                            )),
+                        })
+                    }
 
                     // States that should never occur.
-                    (
-                        Some(SledResourceVmmState::Target),
-                        SledResourceVmmState::Active
-                        | SledResourceVmmState::Target
-                        | SledResourceVmmState::Tombstoned,
-                    ) => panic!(
+                    (Some(SledResourceVmmState::Target), _) => panic!(
                         "source sled_resource_vmm record should never be in \
                          the `target` state: its VMM was never a migration \
                          target",
                     ),
-                    (
-                        None
-                        | Some(
-                            SledResourceVmmState::Active
-                            | SledResourceVmmState::Tombstoned,
-                        ),
-                        SledResourceVmmState::Tombstoned,
-                    ) => panic!(
+                    (_, SledResourceVmmState::Tombstoned) => panic!(
                         "target sled_resource_vmm record should never be \
                          tombstoned: the instance is running on its VMM",
                     ),
@@ -1262,35 +1265,30 @@ async fn test_instance_migrate_target_finishes_first(
     // migrating, so it is neither cleaned up by a destroy-VMM subsaga nor
     // eligible for the `abandoned_vmm_reaper`.
     {
-        use nexus_db_model::SledResourceVmm;
         use nexus_db_model::SledResourceVmmState;
-        use nexus_db_schema::schema::sled_resource_vmm::dsl;
 
         wait_for_condition(
             || async {
                 let datastore = apictx.nexus.datastore();
                 let conn = datastore.pool_connection_for_tests().await.unwrap();
 
-                let source_record = dsl::sled_resource_vmm
-                    .filter(dsl::id.eq(to_db_typed_uuid(src_propolis_id)))
-                    .select(SledResourceVmm::as_select())
-                    .get_result_async(&*conn)
-                    .await
-                    .expect(
-                        "source sled_resource_vmm record should exist: its \
-                         VMM is still migrating, so nothing may delete it \
-                         yet",
-                    );
+                let source_record =
+                    fetch_sled_resource_vmm_record(src_propolis_id, &conn)
+                        .await
+                        .expect(
+                            "source sled_resource_vmm record should exist: \
+                             its VMM is still migrating, so nothing may delete \
+                             it yet",
+                        );
 
-                let target_record = dsl::sled_resource_vmm
-                    .filter(dsl::id.eq(to_db_typed_uuid(dst_propolis_id)))
-                    .select(SledResourceVmm::as_select())
-                    .get_result_async(&*conn)
-                    .await
-                    .expect(
-                        "target sled_resource_vmm record should exist: the \
-                         instance is running on its VMM",
-                    );
+                let target_record =
+                    fetch_sled_resource_vmm_record(dst_propolis_id, &conn)
+                        .await
+                        .expect(
+                            "sled_resource_vmm record for the migration target \
+                             VMM record should exist: the instance is running \
+                             on that VMM",
+                        );
 
                 match (source_record.state, target_record.state) {
                     (
@@ -1307,27 +1305,20 @@ async fn test_instance_migrate_target_finishes_first(
                         | SledResourceVmmState::Tombstoned,
                         SledResourceVmmState::Active
                         | SledResourceVmmState::Target,
-                    ) => Err(CondCheckError::<()>::NotYetWithStatus(format!(
-                        "source record state: {}, target record state: {}",
-                        source_record.state, target_record.state,
-                    ))),
+                    ) => Err(CondCheckError::<()>::NotYet {
+                        status: Some(format!(
+                            "source record state: {}, target record state: {}",
+                            source_record.state, target_record.state,
+                        )),
+                    }),
 
                     // States that should never occur.
-                    (
-                        SledResourceVmmState::Target,
-                        SledResourceVmmState::Active
-                        | SledResourceVmmState::Target
-                        | SledResourceVmmState::Tombstoned,
-                    ) => panic!(
+                    (SledResourceVmmState::Target, _) => panic!(
                         "source sled_resource_vmm record should never be in \
                          the `target` state: its VMM was never a migration \
                          target",
                     ),
-                    (
-                        SledResourceVmmState::Active
-                        | SledResourceVmmState::Tombstoned,
-                        SledResourceVmmState::Tombstoned,
-                    ) => panic!(
+                    (_, SledResourceVmmState::Tombstoned) => panic!(
                         "target sled_resource_vmm record should never be \
                          tombstoned: the instance is running on its VMM",
                     ),
@@ -1365,9 +1356,7 @@ async fn test_instance_migrate_target_finishes_first(
 
     wait_for_condition(
         || async {
-            use nexus_db_model::SledResourceVmm;
             use nexus_db_model::SledResourceVmmState;
-            use nexus_db_schema::schema::sled_resource_vmm::dsl;
 
             nexus_test_utils::background::run_abandoned_vmm_reaper(
                 &cptestctx.lockstep_client,
@@ -1377,22 +1366,19 @@ async fn test_instance_migrate_target_finishes_first(
             let datastore = apictx.nexus.datastore();
             let conn = datastore.pool_connection_for_tests().await.unwrap();
 
-            let maybe_record = dsl::sled_resource_vmm
-                .filter(dsl::id.eq(to_db_typed_uuid(src_propolis_id)))
-                .select(SledResourceVmm::as_select())
-                .get_result_async(&*conn)
-                .await
-                .optional()
-                .expect("source sled_resource_vmm record query should succeed");
+            let maybe_record =
+                fetch_sled_resource_vmm_record(src_propolis_id, &conn).await;
 
             match maybe_record.map(|record| record.state) {
                 None => Ok(()),
                 Some(SledResourceVmmState::Tombstoned) => {
-                    Err(CondCheckError::<()>::NotYetWithStatus(
-                        "source record still tombstoned; the reaper has not \
-                         deleted it"
-                            .to_string(),
-                    ))
+                    Err(CondCheckError::<()>::NotYet {
+                        status: Some(
+                            "source record still tombstoned; the reaper has \
+                             not deleted it"
+                                .to_string(),
+                        ),
+                    })
                 }
                 Some(
                     state @ (SledResourceVmmState::Active
@@ -7645,7 +7631,7 @@ async fn start_sled_and_wait(
             if items.len() == initial_sled_count + 1 {
                 Ok(())
             } else {
-                Err(CondCheckError::<()>::NotYet)
+                Err(CondCheckError::<()>::NotYet { status: None })
             }
         },
         &Duration::from_secs(5),
@@ -7908,7 +7894,7 @@ async fn test_instance_serial(cptestctx: &ControlPlaneTestContext) {
             if instance_next.runtime.run_state == InstanceState::Running {
                 Ok(instance_next)
             } else {
-                Err(CondCheckError::<()>::NotYet)
+                Err(CondCheckError::<()>::NotYet { status: None })
             }
         },
         &Duration::from_secs(5),
@@ -9270,7 +9256,7 @@ async fn test_instance_v2p_mappings(cptestctx: &ControlPlaneTestContext) {
             if v2p_mappings.is_empty() {
                 Ok(())
             } else {
-                Err(CondCheckError::NotYet::<()>)
+                Err(CondCheckError::<()>::NotYet { status: None })
             }
         };
         wait_for_condition(
@@ -9366,7 +9352,7 @@ pub async fn instance_wait_for_state_as(
                     "instance_id" => %instance.identity.id,
                     "instance_runtime_state" => ?instance.runtime,
                 );
-                Err(CondCheckError::<anyhow::Error>::NotYet)
+                Err(CondCheckError::<anyhow::Error>::NotYet { status: None })
             }
         },
         &Duration::from_secs(1),
@@ -9435,7 +9421,7 @@ pub async fn instance_wait_for_vmm_registration(
                             it will soon...";
                         "instance_id" => %instance_id,
                     );
-                    return Err(CondCheckError::<Error>::NotYet);
+                    return Err(CondCheckError::<Error>::NotYet { status: None });
                 }
             };
 
@@ -9445,7 +9431,7 @@ pub async fn instance_wait_for_vmm_registration(
                     "instance's active VMM is still Creating";
                     "instance_id" => %instance_id,
                 );
-                Err(poll::CondCheckError::<Error>::NotYet)
+                Err(poll::CondCheckError::<Error>::NotYet { status: None })
             } else {
                 info!(
                     log,
@@ -9560,7 +9546,7 @@ async fn assert_sled_v2p_mappings(
         if have_needed_ipv4_mappings && have_needed_ipv6_mappings {
             Ok(())
         } else {
-            Err(CondCheckError::NotYet::<()>)
+            Err(CondCheckError::<()>::NotYet { status: None })
         }
     };
     wait_for_condition(
@@ -9660,7 +9646,7 @@ pub async fn assert_sled_vpc_routes(
                 "custom diff (+): {:?}\n-----",
                 found_custom.routes.difference(&custom_routes)
             );
-            Err(CondCheckError::NotYet::<()>)
+            Err(CondCheckError::<()>::NotYet { status: None })
         }
     };
     wait_for_condition(
@@ -9788,7 +9774,7 @@ async fn instance_wait_for_simulated_transition(
                 );
                 instance_simulate(&cptestctx.server.server_context().nexus, id)
                     .await;
-                Err(CondCheckError::<anyhow::Error>::NotYet)
+                Err(CondCheckError::<anyhow::Error>::NotYet { status: None })
             }
         },
         &Duration::from_secs(1),

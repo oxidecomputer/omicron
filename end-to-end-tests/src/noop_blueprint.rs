@@ -44,7 +44,7 @@ async fn new_blueprint_noop() {
                         "obtaining a working Nexus client failed";
                         InlineErrorChain::new(&e),
                     );
-                    Err(CondCheckError::<()>::NotYet)
+                    Err(CondCheckError::<()>::NotYet { status: None })
                 }
             }
         },

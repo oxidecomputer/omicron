@@ -40,7 +40,7 @@ pub async fn wait_background_task(
                     }
                 }
             } else {
-                Err(CondCheckError::<()>::NotYet)
+                Err(CondCheckError::<()>::NotYet { status: None })
             }
         },
         &Duration::from_millis(50),
@@ -100,7 +100,7 @@ pub async fn activate_background_task_with_timeout(
                 "waiting for {task_name} to go idle",
             );
 
-            Err(CondCheckError::<()>::NotYet)
+            Err(CondCheckError::<()>::NotYet { status: None })
         },
         &Duration::from_millis(50),
         &timeout,
@@ -144,7 +144,7 @@ pub async fn activate_background_task_with_timeout(
                         LastResult::NeverCompleted,
                     ) => {
                         // task hasn't started yet
-                        Err(CondCheckError::<()>::NotYet)
+                        Err(CondCheckError::<()>::NotYet { status: None })
                     }
 
                     // task was activated for the first time by this function
@@ -168,7 +168,7 @@ pub async fn activate_background_task_with_timeout(
                             Ok(task)
                         } else if last.iteration == current.iteration {
                             // task hasn't started yet
-                            Err(CondCheckError::<()>::NotYet)
+                            Err(CondCheckError::<()>::NotYet { status: None })
                         } else {
                             // last.iteration > current.iteration
                             panic!(
@@ -179,7 +179,7 @@ pub async fn activate_background_task_with_timeout(
                     }
                 }
             } else {
-                Err(CondCheckError::<()>::NotYet)
+                Err(CondCheckError::<()>::NotYet { status: None })
             }
         },
         &Duration::from_millis(50),
