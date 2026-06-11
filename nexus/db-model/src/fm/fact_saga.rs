@@ -17,8 +17,8 @@ use chrono::{DateTime, Utc};
 use nexus_db_schema::schema::fm_fact_saga;
 use nexus_types::fm;
 use nexus_types::fm::{
-    FactPayload, SagaFact, SagaNotProgressingFactPayload,
-    SagaOwnerNotCurrentFactPayload,
+    FactPayload, SagaAbandonedFactPayload, SagaFact,
+    SagaNotProgressingFactPayload, SagaOwnerNotCurrentFactPayload,
 };
 use nexus_types::observed_saga::{OrphanedReason, SagaProgressState};
 use omicron_common::api::external::Error;
@@ -33,6 +33,7 @@ impl_enum_type!(
 
     NotProgressing => b"not_progressing"
     OwnerNotCurrentGeneration => b"owner_not_current_generation"
+    Abandoned => b"abandoned"
 );
 
 impl_enum_type!(
@@ -160,6 +161,11 @@ impl FmFactSaga {
                 orphan_reason: Some(p.orphan_reason.into()),
                 ..base
             },
+            // The Abandoned payload is pure identity (the condition is
+            // boolean), so the row carries only the common columns.
+            SagaFact::Abandoned(_) => {
+                Self { kind: FmFactSagaKind::Abandoned, ..base }
+            }
         }
     }
 
@@ -202,6 +208,9 @@ impl FmFactSaga {
                     },
                 ))
             }
+            FmFactSagaKind::Abandoned => FactPayload::Saga(
+                SagaFact::Abandoned(SagaAbandonedFactPayload { saga_id }),
+            ),
         };
         Ok(fm::case::Fact {
             id: self.id.into(),

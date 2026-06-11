@@ -8,7 +8,7 @@
 use super::case;
 use super::ereport::EreportId;
 use super::json_display::fmt_json_value;
-use crate::observed_saga::{SagaOwnerState, SagaProgressState};
+use crate::observed_saga::{ObservedSagaState, SagaOwnerState};
 use chrono::{DateTime, Utc};
 use iddqd::IdOrdMap;
 use omicron_uuid_kinds::{
@@ -243,7 +243,7 @@ pub struct InputReport {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ObservedSagaReport {
     pub saga_name: String,
-    pub saga_state: SagaProgressState,
+    pub saga_state: ObservedSagaState,
     /// The latest node event recorded for this saga, or `None` if it has
     /// recorded none.
     pub last_event_time: Option<DateTime<Utc>>,
@@ -531,7 +531,7 @@ mod tests {
             ),
             ObservedSagaReport {
                 saga_name: "fake-saga".to_string(),
-                saga_state: SagaProgressState::Unwinding,
+                saga_state: ObservedSagaState::Unwinding,
                 last_event_time: DateTime::from_timestamp(0, 0),
                 owner_state: Some(SagaOwnerState::Quiesced),
             },
@@ -543,7 +543,7 @@ mod tests {
             ),
             ObservedSagaReport {
                 saga_name: "another-fake-saga".to_string(),
-                saga_state: SagaProgressState::Running,
+                saga_state: ObservedSagaState::Abandoned,
                 last_event_time: None,
                 owner_state: None,
             },

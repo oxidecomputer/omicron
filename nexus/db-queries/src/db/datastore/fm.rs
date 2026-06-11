@@ -2390,6 +2390,18 @@ mod tests {
                     comment: "a representative orphaned saga fact".to_string(),
                 })
                 .unwrap();
+            facts
+                .insert_unique(fm::case::Fact {
+                    id: FactUuid::new_v4(),
+                    created_sitrep_id: sitrep_id,
+                    payload: fm::FactPayload::Saga(fm::SagaFact::Abandoned(
+                        fm::SagaAbandonedFactPayload {
+                            saga_id: steno::SagaId(uuid::Uuid::new_v4()),
+                        },
+                    )),
+                    comment: "a representative abandoned saga fact".to_string(),
+                })
+                .unwrap();
 
             fm::Case {
                 id: omicron_uuid_kinds::CaseUuid::new_v4(),

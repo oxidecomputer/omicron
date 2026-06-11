@@ -24,7 +24,7 @@ use nexus_types::internal_api::background::FmAnalysisStatus;
 use nexus_types::internal_api::background::fm_analysis as status;
 use nexus_types::inventory;
 use nexus_types::observed_saga::{
-    ObservedSaga, SagaOwnerState, SagaProgressState,
+    ObservedSaga, ObservedSagaState, SagaOwnerState,
 };
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
@@ -302,13 +302,14 @@ impl FmAnalysis {
     ) -> anyhow::Result<IdOrdMap<ObservedSaga>> {
         use std::collections::BTreeMap;
 
-        // All running/unwinding sagas. Terminal sagas are excluded; a parent
-        // case whose saga is absent from this set is closed by the engine.
+        // All unfinished (running, unwinding, or abandoned) sagas. Completed
+        // sagas are excluded; a parent case whose saga is absent from this
+        // set is closed by the engine.
         let sagas = self
             .datastore
-            .saga_list_running_or_unwinding_batched(opctx)
+            .saga_list_unfinished_batched(opctx)
             .await
-            .context("failed to list non-terminal sagas")?;
+            .context("failed to list unfinished sagas")?;
 
         // Latest node-event time per saga: the last durably-recorded step.
         let saga_ids: Vec<_> = sagas.iter().map(|s| s.id).collect();
@@ -344,10 +345,11 @@ impl FmAnalysis {
         let mut observed = IdOrdMap::new();
         for saga in sagas {
             let saga_state = match saga.saga_state {
-                SagaState::Running => SagaProgressState::Running,
-                SagaState::Unwinding => SagaProgressState::Unwinding,
-                // The query filters to non-terminal states; defend anyway.
-                SagaState::Done | SagaState::Abandoned => continue,
+                SagaState::Running => ObservedSagaState::Running,
+                SagaState::Unwinding => ObservedSagaState::Unwinding,
+                SagaState::Abandoned => ObservedSagaState::Abandoned,
+                // The query filters to unfinished states; defend anyway.
+                SagaState::Done => continue,
             };
             let current_sec = saga
                 .current_sec

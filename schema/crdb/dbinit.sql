@@ -7776,7 +7776,8 @@ CREATE TABLE IF NOT EXISTS omicron.public.fm_fact_physical_disk (
 -- engine above: one table per engine, fact content as typed columns.
 CREATE TYPE IF NOT EXISTS omicron.public.fm_fact_saga_kind AS ENUM (
     'not_progressing',
-    'owner_not_current_generation'
+    'owner_not_current_generation',
+    'abandoned'
 );
 
 CREATE TYPE IF NOT EXISTS omicron.public.fm_fact_saga_orphan_reason AS ENUM (

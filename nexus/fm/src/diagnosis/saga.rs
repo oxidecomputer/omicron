@@ -4,12 +4,22 @@
 
 //! Saga diagnosis engine.
 //!
-//! Opens a case (keyed by `saga_id`) for any non-terminal saga that is either
-//! *not making progress* (no node event recorded for a while) or *orphaned*
-//! (owned by a Nexus that is no longer of the current generation). These are
-//! two independent fact kinds; a saga's case may carry either or both. A case
-//! is closed once the saga reaches a terminal state (it drops out of the set
-//! of non-terminal sagas the preparation phase observed).
+//! Opens a case (keyed by `saga_id`) for any unfinished saga that is
+//! *not making progress* (no node event recorded for a while), *orphaned*
+//! (owned by a Nexus that is no longer of the current generation), or
+//! *abandoned* (Nexus permanently gave up on recovering it; see
+//! omicron#10581 / RFD 555). A live saga's case may carry the first two
+//! facts together; abandonment supersedes both. A case closes when its
+//! saga completes or recovers, or, for an abandoned saga, only when the
+//! saga row is removed from the database: abandonment is the beginning of
+//! an escalation, not a resolution.
+//!
+//! The owner facts detect *stranded* sagas, not *wrongly-resumed* ones: if
+//! an orphaned saga is re-adopted by a current-generation Nexus, the owner
+//! fact clears, even though running a saga built by a different Nexus
+//! version is itself dangerous. That risk is mitigated upstream: recovery
+//! abandons sagas it cannot recover (omicron#10581), and saga quiesce
+//! prevents cross-version adoption in the normal path.
 //!
 //! See omicron#10530 for motivation.
 
@@ -17,9 +27,12 @@ use crate::SitrepBuilder;
 use chrono::{DateTime, TimeDelta, Utc};
 use nexus_types::fm::DiagnosisEngineKind;
 use nexus_types::fm::{
-    SagaFact, SagaNotProgressingFactPayload, SagaOwnerNotCurrentFactPayload,
+    SagaAbandonedFactPayload, SagaFact, SagaNotProgressingFactPayload,
+    SagaOwnerNotCurrentFactPayload,
 };
-use nexus_types::observed_saga::ObservedSaga;
+use nexus_types::observed_saga::{
+    ObservedSaga, ObservedSagaState, SagaProgressState,
+};
 use omicron_uuid_kinds::{CaseUuid, FactUuid};
 use std::collections::BTreeMap;
 
@@ -38,6 +51,7 @@ struct ParentSagaCase {
     /// (the lowest fact UUID wins if a case pathologically carries several).
     not_progressing: Option<(FactUuid, SagaNotProgressingFactPayload)>,
     owner_not_current: Option<(FactUuid, SagaOwnerNotCurrentFactPayload)>,
+    abandoned: Option<(FactUuid, SagaAbandonedFactPayload)>,
     /// Facts that should not exist: duplicates of a kind beyond the first.
     /// These carry no information the kept fact doesn't; they are removed
     /// unconditionally, regardless of what the observation says.
@@ -75,6 +89,7 @@ pub(super) fn analyze(builder: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
             FactUuid,
             SagaOwnerNotCurrentFactPayload,
         )> = None;
+        let mut abandoned: Option<(FactUuid, SagaAbandonedFactPayload)> = None;
         let mut duplicate_facts = Vec::new();
         // `case.facts` iterates in fact UUID order, so the kept fact for
         // each kind is deterministically the one with the lowest UUID.
@@ -113,6 +128,13 @@ pub(super) fn analyze(builder: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
                         duplicate_facts.push(fact.id);
                     }
                 }
+                SagaFact::Abandoned(p) => {
+                    if abandoned.is_none() {
+                        abandoned = Some((fact.id, p.clone()));
+                    } else {
+                        duplicate_facts.push(fact.id);
+                    }
+                }
             }
         }
         if !duplicate_facts.is_empty() {
@@ -138,6 +160,7 @@ pub(super) fn analyze(builder: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
                 saga_id,
                 not_progressing,
                 owner_not_current,
+                abandoned,
                 duplicate_facts,
             },
         );
@@ -156,19 +179,27 @@ pub(super) fn analyze(builder: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
         );
         let Some(obs) = observed.get(&summary.saga_id) else {
             case_mut.close(format!(
-                "saga {} reached a terminal state",
+                "saga {} completed or was removed",
                 summary.saga_id,
             ));
             continue;
         };
         let desired_np = desired_not_progressing(obs, reference_time);
         let desired_owner = desired_owner_not_current(obs);
+        let desired_abandoned = desired_abandoned(obs);
         // A case is an episode of a problem, not a dossier on the saga: when
         // no condition holds anymore, the episode is over and the case
         // closes. Its facts stay attached as the record of why it existed;
         // they age out with the case once it stops being copied forward. If
         // the saga becomes a problem again later, a fresh case opens.
-        if desired_np.is_none() && desired_owner.is_none() {
+        //
+        // An abandoned saga never reaches this close: `desired_abandoned`
+        // holds until the saga row itself is removed (the `else` branch
+        // above), keeping the case open while remediation is pending.
+        if desired_np.is_none()
+            && desired_owner.is_none()
+            && desired_abandoned.is_none()
+        {
             case_mut.close(format!(
                 "saga {} is progressing under a current owner again",
                 summary.saga_id,
@@ -190,6 +221,11 @@ pub(super) fn analyze(builder: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
                 case_mut.remove_fact(*fact_id);
             }
         }
+        if let Some((fact_id, payload)) = &summary.abandoned {
+            if desired_abandoned.as_ref() != Some(payload) {
+                case_mut.remove_fact(*fact_id);
+            }
+        }
     }
 
     // Second pass: for each observed saga with a problem, ensure a case exists
@@ -199,7 +235,11 @@ pub(super) fn analyze(builder: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
     for obs in observed.iter() {
         let desired_np = desired_not_progressing(obs, reference_time);
         let desired_owner = desired_owner_not_current(obs);
-        if desired_np.is_none() && desired_owner.is_none() {
+        let desired_abandoned = desired_abandoned(obs);
+        if desired_np.is_none()
+            && desired_owner.is_none()
+            && desired_abandoned.is_none()
+        {
             continue;
         }
 
@@ -219,6 +259,10 @@ pub(super) fn analyze(builder: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
                 &desired_owner,
                 parent.and_then(|(_, s)| s.owner_not_current.as_ref()),
             ),
+            (Some(want), Some((_, have))) if want == have
+        );
+        let abandoned_already = matches!(
+            (&desired_abandoned, parent.and_then(|(_, s)| s.abandoned.as_ref())),
             (Some(want), Some((_, have))) if want == have
         );
 
@@ -266,6 +310,28 @@ pub(super) fn analyze(builder: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
                     );
             }
         }
+        if let Some(payload) = desired_abandoned {
+            if !abandoned_already {
+                // The payload is pure identity; the human-readable context
+                // (which a promoted problem would otherwise look up from the
+                // saga row) goes in the comment.
+                let comment = format!(
+                    "saga {} ({}) abandoned by Nexus; created at {}, last \
+                     node event: {}",
+                    obs.saga_id,
+                    obs.saga_name,
+                    obs.time_created,
+                    obs.last_event_time
+                        .map(|t| t.to_string())
+                        .unwrap_or_else(|| "<none recorded>".to_string()),
+                );
+                builder
+                    .cases
+                    .case_mut(&case_id)
+                    .expect("case_id came from this fn")
+                    .add_fact(SagaFact::Abandoned(payload), comment);
+            }
+        }
     }
 
     Ok(())
@@ -275,17 +341,25 @@ pub(super) fn analyze(builder: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
 /// has recorded no node event at all, its creation time stands in for the
 /// last-progress timestamp (a saga that has existed past the threshold without
 /// recording a single step is itself stuck at the start).
+///
+/// An abandoned saga is never "not progressing": [`desired_abandoned`]
+/// supersedes the live-saga conditions.
 fn desired_not_progressing(
     obs: &ObservedSaga,
     reference_time: DateTime<Utc>,
 ) -> Option<SagaNotProgressingFactPayload> {
+    let saga_state = match obs.saga_state {
+        ObservedSagaState::Running => SagaProgressState::Running,
+        ObservedSagaState::Unwinding => SagaProgressState::Unwinding,
+        ObservedSagaState::Abandoned => return None,
+    };
     let last_progress = obs.last_event_time.unwrap_or(obs.time_created);
     if reference_time.signed_duration_since(last_progress)
         > STALE_SAGA_THRESHOLD
     {
         Some(SagaNotProgressingFactPayload {
             saga_id: obs.saga_id,
-            saga_state: obs.saga_state,
+            saga_state,
             last_event_time: last_progress,
         })
     } else {
@@ -297,9 +371,15 @@ fn desired_not_progressing(
 /// Only fires when the saga has a `current_sec` whose owner is orphaned
 /// (quiesced or expunged); a saga with no current SEC is between adoptions and
 /// is not treated as orphaned.
+///
+/// An abandoned saga has no meaningful owner (nobody will ever run it):
+/// [`desired_abandoned`] supersedes the live-saga conditions.
 fn desired_owner_not_current(
     obs: &ObservedSaga,
 ) -> Option<SagaOwnerNotCurrentFactPayload> {
+    if obs.saga_state == ObservedSagaState::Abandoned {
+        return None;
+    }
     let reason = obs.owner_state?.orphaned_reason()?;
     let current_sec = obs.current_sec?;
     Some(SagaOwnerNotCurrentFactPayload {
@@ -307,6 +387,14 @@ fn desired_owner_not_current(
         current_sec,
         orphan_reason: reason,
     })
+}
+
+/// The `Abandoned` fact this saga should carry now, if any. The condition is
+/// boolean, so the payload is pure identity and never rotates; the case stays
+/// open, carrying this fact, until the saga row is removed from the database.
+fn desired_abandoned(obs: &ObservedSaga) -> Option<SagaAbandonedFactPayload> {
+    (obs.saga_state == ObservedSagaState::Abandoned)
+        .then(|| SagaAbandonedFactPayload { saga_id: obs.saga_id })
 }
 
 #[cfg(test)]
@@ -352,7 +440,7 @@ mod tests {
         ObservedSaga {
             saga_id: id,
             saga_name: "test-saga".to_string(),
-            saga_state: SagaProgressState::Unwinding,
+            saga_state: ObservedSagaState::Unwinding,
             time_created: Utc::now() - TimeDelta::days(1),
             current_sec,
             adopt_generation: Generation::new(),
@@ -675,7 +763,7 @@ mod tests {
         let observed = observed_map([ObservedSaga {
             saga_id: id,
             saga_name: "test-saga".to_string(),
-            saga_state: SagaProgressState::Unwinding,
+            saga_state: ObservedSagaState::Unwinding,
             time_created: Utc::now() - TimeDelta::days(1),
             current_sec: None,
             adopt_generation: Generation::new(),
@@ -718,7 +806,7 @@ mod tests {
         let observed = observed_map([ObservedSaga {
             saga_id: id,
             saga_name: "test-saga".to_string(),
-            saga_state: SagaProgressState::Unwinding,
+            saga_state: ObservedSagaState::Unwinding,
             time_created,
             current_sec: None,
             adopt_generation: Generation::new(),
@@ -955,7 +1043,7 @@ mod tests {
         let observed = observed_map([ObservedSaga {
             saga_id: id,
             saga_name: "test-saga".to_string(),
-            saga_state: SagaProgressState::Unwinding,
+            saga_state: ObservedSagaState::Unwinding,
             time_created,
             current_sec: None,
             adopt_generation: Generation::new(),
@@ -1006,7 +1094,7 @@ mod tests {
         let observed = observed_map([ObservedSaga {
             saga_id: id,
             saga_name: "test-saga".to_string(),
-            saga_state: SagaProgressState::Unwinding,
+            saga_state: ObservedSagaState::Unwinding,
             time_created,
             current_sec: None,
             adopt_generation: Generation::new(),
@@ -1033,6 +1121,155 @@ mod tests {
             }
             other => panic!("expected NotProgressing, got {other:?}"),
         }
+        logctx.cleanup_successful();
+    }
+
+    fn mk_abandoned(id: steno::SagaId) -> ObservedSaga {
+        ObservedSaga {
+            saga_id: id,
+            saga_name: "test-saga".to_string(),
+            saga_state: ObservedSagaState::Abandoned,
+            time_created: Utc::now() - TimeDelta::days(1),
+            current_sec: None,
+            adopt_generation: Generation::new(),
+            last_event_time: None,
+            owner_state: None,
+        }
+    }
+
+    fn abandoned_fact(
+        id: FactUuid,
+        created_sitrep_id: SitrepUuid,
+        saga: steno::SagaId,
+    ) -> fm::case::Fact {
+        fm::case::Fact {
+            id,
+            created_sitrep_id,
+            payload: SagaFact::Abandoned(SagaAbandonedFactPayload {
+                saga_id: saga,
+            })
+            .into(),
+            comment: "parent abandoned fact".to_string(),
+        }
+    }
+
+    /// An abandoned saga opens a case carrying a single `Abandoned` fact.
+    #[test]
+    fn opens_abandoned_case() {
+        let (logctx, collection) = setup("saga_opens_abandoned");
+        let id = saga_id(1);
+        let observed = observed_map([mk_abandoned(id)]);
+        let input = build_input(collection, None, observed);
+        let (sitrep, _report) = run_analyze(&logctx.log, &input);
+
+        let facts = saga_facts(&sitrep, true);
+        assert_eq!(facts.len(), 1);
+        match &facts[0].1 {
+            SagaFact::Abandoned(p) => assert_eq!(p.saga_id, id),
+            other => panic!("expected Abandoned, got {other:?}"),
+        }
+        logctx.cleanup_successful();
+    }
+
+    /// A stuck saga that Nexus then abandons keeps its case (it is the same
+    /// episode, escalated), swapping the `NotProgressing` fact for an
+    /// `Abandoned` fact.
+    #[test]
+    fn stuck_saga_escalates_to_abandoned() {
+        let (logctx, collection) = setup("saga_escalates_to_abandoned");
+        let id = saga_id(1);
+        let stale =
+            collection.time_done - (STALE_SAGA_THRESHOLD + TimeDelta::hours(1));
+        let parent = make_parent_with_saga_case(
+            SitrepUuid::new_v4(),
+            collection.id,
+            [SagaFact::NotProgressing(SagaNotProgressingFactPayload {
+                saga_id: id,
+                saga_state: SagaProgressState::Unwinding,
+                last_event_time: stale,
+            })],
+        );
+        let parent_case_id = parent.cases.iter().next().unwrap().id;
+        let observed = observed_map([mk_abandoned(id)]);
+        let input = build_input(collection, Some(parent), observed);
+        let (sitrep, _report) = run_analyze(&logctx.log, &input);
+
+        let case = sitrep
+            .cases
+            .iter()
+            .find(|c| c.metadata.de == DiagnosisEngineKind::Saga)
+            .expect("saga case should be present");
+        assert_eq!(
+            case.id, parent_case_id,
+            "the same case carries forward; abandonment escalates the \
+             episode rather than starting a new one",
+        );
+        assert!(case.is_open(), "abandonment must not close the case");
+        let facts = saga_facts(&sitrep, true);
+        assert_eq!(facts.len(), 1, "the NotProgressing fact is superseded");
+        match &facts[0].1 {
+            SagaFact::Abandoned(p) => assert_eq!(p.saga_id, id),
+            other => panic!("expected Abandoned, got {other:?}"),
+        }
+        logctx.cleanup_successful();
+    }
+
+    /// The `Abandoned` payload is pure identity, so the fact carries forward
+    /// with a stable UUID for as long as the saga stays abandoned.
+    #[test]
+    fn abandoned_fact_uuid_stable() {
+        let (logctx, collection) = setup("saga_abandoned_stable");
+        let id = saga_id(1);
+        let parent_id = SitrepUuid::new_v4();
+        let parent_fact_id = fact_uuid(1);
+        let mut parent_facts = IdOrdMap::new();
+        parent_facts
+            .insert_unique(abandoned_fact(parent_fact_id, parent_id, id))
+            .unwrap();
+        let parent = make_parent_with_saga_case_from_facts(
+            parent_id,
+            collection.id,
+            parent_facts,
+        );
+        let observed = observed_map([mk_abandoned(id)]);
+        let input = build_input(collection, Some(parent), observed);
+        let (sitrep, _report) = run_analyze(&logctx.log, &input);
+
+        let facts = saga_facts(&sitrep, true);
+        assert_eq!(facts.len(), 1);
+        assert_eq!(
+            facts[0].0.id, parent_fact_id,
+            "the Abandoned fact UUID is stable across sitreps",
+        );
+        logctx.cleanup_successful();
+    }
+
+    /// An abandoned saga's case closes only when the saga row is removed
+    /// from the database (i.e., it drops out of the observed set).
+    #[test]
+    fn abandoned_case_closes_when_saga_removed() {
+        let (logctx, collection) = setup("saga_abandoned_closes_on_removal");
+        let id = saga_id(1);
+        let parent_id = SitrepUuid::new_v4();
+        let mut parent_facts = IdOrdMap::new();
+        parent_facts
+            .insert_unique(abandoned_fact(fact_uuid(1), parent_id, id))
+            .unwrap();
+        let parent = make_parent_with_saga_case_from_facts(
+            parent_id,
+            collection.id,
+            parent_facts,
+        );
+        let input = build_input(collection, Some(parent), observed_map([]));
+        let (sitrep, _report) = run_analyze(&logctx.log, &input);
+
+        let case = sitrep
+            .cases
+            .iter()
+            .find(|c| c.metadata.de == DiagnosisEngineKind::Saga)
+            .expect("saga case should be present in the closing sitrep");
+        assert!(!case.is_open(), "case should close once the saga row is gone",);
+        assert_eq!(case.facts.len(), 1, "the fact stays attached as evidence");
         logctx.cleanup_successful();
     }
 }

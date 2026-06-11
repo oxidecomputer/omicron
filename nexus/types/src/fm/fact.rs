@@ -110,17 +110,26 @@ pub struct ZpoolUnhealthyFactPayload {
 
 /// Per-fact state for the saga diagnosis engine.
 ///
-/// A saga case (keyed by `saga_id`) may carry either or both of these,
-/// reflecting two independent problems with the same saga.
+/// A saga case (keyed by `saga_id`) may carry `NotProgressing` and
+/// `OwnerNotCurrentGeneration` together (two independent problems with a
+/// live saga). `Abandoned` supersedes both: once Nexus has permanently
+/// given up on a saga, the live-saga conditions are vacuous, and the case
+/// carries the `Abandoned` fact alone.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum SagaFact {
-    /// The saga is non-terminal but has recorded no node event in a long
-    /// time, i.e. it is not making durable forward or undo progress.
+    /// The saga is live but has recorded no node event in a long time,
+    /// i.e. it is not making durable forward or undo progress.
     NotProgressing(SagaNotProgressingFactPayload),
     /// The saga is owned by a Nexus that is no longer of the current
     /// generation (quiesced or expunged), so that Nexus will not advance it.
     OwnerNotCurrentGeneration(SagaOwnerNotCurrentFactPayload),
+    /// Nexus failed to recover the saga for a non-transient reason and has
+    /// permanently given up on running it. The saga may be holding
+    /// partially-allocated resources; remediation is manual and
+    /// saga-specific (see omicron#10581 / RFD 555). The case stays open
+    /// until the saga row is removed from the database.
+    Abandoned(SagaAbandonedFactPayload),
 }
 
 impl SagaFact {
@@ -130,6 +139,7 @@ impl SagaFact {
         match self {
             SagaFact::NotProgressing(p) => p.saga_id,
             SagaFact::OwnerNotCurrentGeneration(p) => p.saga_id,
+            SagaFact::Abandoned(p) => p.saga_id,
         }
     }
 }
@@ -170,4 +180,15 @@ pub struct SagaOwnerNotCurrentFactPayload {
     /// Why the owner is not current: quiesced (older generation) or expunged
     /// (no `db_metadata_nexus` record).
     pub orphan_reason: OrphanedReason,
+}
+
+/// Payload of a [`SagaFact::Abandoned`] fact.
+///
+/// The condition is boolean (the saga is abandoned or it isn't), so the
+/// payload is pure identity. See [`SagaNotProgressingFactPayload`] for why
+/// payloads carry only condition-defining fields.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct SagaAbandonedFactPayload {
+    /// The saga this fact (and its parent case) is about.
+    pub saga_id: steno::SagaId,
 }

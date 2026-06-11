@@ -19,10 +19,31 @@ use omicron_common::api::external::Generation;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use serde::{Deserialize, Serialize};
 
-/// The non-terminal execution state of a saga, as recorded in the `saga`
-/// table's `saga_state` column. Terminal states (`done`, `abandoned`) are
-/// deliberately excluded: a saga that has reached one of those is no longer a
-/// candidate for the saga diagnosis engine (its case, if any, is closed).
+/// The state of an observed saga, as recorded in the `saga` table's
+/// `saga_state` column.
+///
+/// `done` is deliberately excluded: a saga that completed (including a
+/// completed unwind) needs no attention, and its case, if any, is closed.
+/// `abandoned` is *included*: Nexus has permanently given up on the saga
+/// without completing it, so it may be holding partially-allocated
+/// resources and needs saga-specific manual remediation (see
+/// omicron#10581 / RFD 555).
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ObservedSagaState {
+    /// The saga is executing forward actions.
+    Running,
+    /// One or more actions failed and the saga is executing undo actions.
+    Unwinding,
+    /// Nexus failed to recover the saga for a non-transient reason and has
+    /// permanently given up on running it.
+    Abandoned,
+}
+
+/// The execution state of a *live* (running or unwinding) saga. This is the
+/// subset of [`ObservedSagaState`] that can appear in a `NotProgressing`
+/// fact: an abandoned saga is never "not progressing" (it is never going to
+/// progress); it carries an `Abandoned` fact instead.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SagaProgressState {
@@ -74,13 +95,14 @@ pub enum OrphanedReason {
     Expunged,
 }
 
-/// One non-terminal saga, joined with the timestamp of its most recent node
-/// event and the state of its owning Nexus.
+/// One unfinished (running, unwinding, or abandoned) saga, joined with the
+/// timestamp of its most recent node event and the state of its owning
+/// Nexus.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ObservedSaga {
     pub saga_id: steno::SagaId,
     pub saga_name: String,
-    pub saga_state: SagaProgressState,
+    pub saga_state: ObservedSagaState,
     /// When the saga was created (`saga.time_created`).
     pub time_created: DateTime<Utc>,
     /// The owning Nexus zone (`saga.current_sec`), or `None` if the saga has no

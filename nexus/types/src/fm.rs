@@ -14,8 +14,9 @@ pub mod case;
 pub use case::Case;
 pub mod fact;
 pub use fact::{
-    DiskFact, FactPayload, SagaFact, SagaNotProgressingFactPayload,
-    SagaOwnerNotCurrentFactPayload, ZpoolUnhealthyFactPayload,
+    DiskFact, FactPayload, SagaAbandonedFactPayload, SagaFact,
+    SagaNotProgressingFactPayload, SagaOwnerNotCurrentFactPayload,
+    ZpoolUnhealthyFactPayload,
 };
 pub(crate) mod json_display;
 

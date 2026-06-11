@@ -191,17 +191,21 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
-    /// Returns all sagas in a running or unwinding (i.e. non-terminal) state,
-    /// making as many queries as needed (in batches) to get them all.
+    /// Returns all unfinished sagas: running, unwinding, or abandoned. Makes
+    /// as many queries as needed (in batches) to get them all.
     ///
     /// Unlike [`Self::saga_list_running_or_unwinding_older_than`], this has no
     /// age filter and no result cap: it is used by fault management, which
-    /// needs the complete set of non-terminal sagas (a lossy list would cause
+    /// needs the complete set of unfinished sagas (a lossy list would cause
     /// it to incorrectly close cases for sagas it simply didn't see).
-    pub async fn saga_list_running_or_unwinding_batched(
+    /// Abandoned sagas are included because they need manual remediation;
+    /// only `done` means a saga requires no further attention.
+    pub async fn saga_list_unfinished_batched(
         &self,
         opctx: &OpContext,
     ) -> Result<Vec<db::saga_types::Saga>, Error> {
+        const UNFINISHED_STATES: &[SagaState] =
+            &[SagaState::Running, SagaState::Unwinding, SagaState::Abandoned];
         let mut sagas = vec![];
         let mut paginator = Paginator::new(
             SQL_BATCH_SIZE,
@@ -213,10 +217,7 @@ impl DataStore {
 
             let mut batch =
                 paginated(dsl::saga, dsl::id, &p.current_pagparams())
-                    .filter(
-                        dsl::saga_state
-                            .eq_any(SagaState::RECOVERY_CANDIDATE_STATES),
-                    )
+                    .filter(dsl::saga_state.eq_any(UNFINISHED_STATES))
                     .select(db::saga_types::Saga::as_select())
                     .load_async(&*conn)
                     .await
