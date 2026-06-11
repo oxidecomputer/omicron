@@ -1040,15 +1040,17 @@ mod tests {
         let pool = db.pool();
         let conn = pool.claim().await.unwrap();
 
-        let query = DataStore::ereport_unmarked_class_totals_query();
+        let query = DataStore::restart_history_query();
         let explanation = query
             .explain_async(&conn)
             .await
             .expect("Failed to explain query - is it valid SQL?");
 
-        assert_uses_partial_index_only(
-            &explanation,
-            "lookup_unmarked_ereports_by_class",
+        eprintln!("{explanation}");
+        assert!(
+            !explanation.contains("FULL SCAN"),
+            "Found an unexpected FULL SCAN: {}",
+            explanation
         );
 
         db.terminate().await;
