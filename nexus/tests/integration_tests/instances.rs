@@ -946,34 +946,117 @@ async fn test_instance_migrate(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(migration.target_state, MigrationState::COMPLETED);
     assert_eq!(migration.source_state, MigrationState::COMPLETED);
 
-    // Assert the source sled_resource_vmm record was cleaned up, and the target
-    // switched to active.
+    // Wait for the source sled_resource_vmm record to be cleaned up and the
+    // target record to switch to active.
+    //
+    // Both changes happen after the saga node that commits the instance's new
+    // runtime state (which is what makes the instance externally `Running`), so
+    // we must wait until the condition is true (level-triggered) rather than
+    // assert immediately.
+    //
+    // However, if an update saga commits the active-VMM swap before the
+    // source VMM's `Destroyed` state is observed, no update saga ever cleans
+    // up the source record: the source becomes an *abandoned* VMM, whose
+    // record is instead deleted by the `abandoned_vmm_reaper` background
+    // task. Activate that task on each poll so this test does not have to
+    // wait out the task's periodic activation interval. (See "Relying on
+    // periodic background-task activation" in docs/flake-patterns.adoc.)
     {
         use nexus_db_model::SledResourceVmm;
         use nexus_db_model::SledResourceVmmState;
         use nexus_db_schema::schema::sled_resource_vmm::dsl;
 
-        let datastore = apictx.nexus.datastore();
-        let conn = datastore.pool_connection_for_tests().await.unwrap();
+        wait_for_condition(
+            || async {
+                nexus_test_utils::background::run_abandoned_vmm_reaper(
+                    &cptestctx.lockstep_client,
+                )
+                .await;
 
-        let maybe_record = dsl::sled_resource_vmm
-            .filter(dsl::id.eq(to_db_typed_uuid(src_propolis_id)))
-            .select(SledResourceVmm::as_select())
-            .get_result_async(&*conn)
-            .await
-            .optional()
-            .unwrap();
+                let datastore = apictx.nexus.datastore();
+                let conn = datastore.pool_connection_for_tests().await.unwrap();
 
-        assert!(maybe_record.is_none());
+                let maybe_source_record = dsl::sled_resource_vmm
+                    .filter(dsl::id.eq(to_db_typed_uuid(src_propolis_id)))
+                    .select(SledResourceVmm::as_select())
+                    .get_result_async(&*conn)
+                    .await
+                    .optional()
+                    .expect(
+                        "source sled_resource_vmm record query should \
+                         succeed",
+                    );
 
-        let record = dsl::sled_resource_vmm
-            .filter(dsl::id.eq(to_db_typed_uuid(dst_propolis_id)))
-            .select(SledResourceVmm::as_select())
-            .get_result_async(&*conn)
-            .await
-            .unwrap();
+                let target_record = dsl::sled_resource_vmm
+                    .filter(dsl::id.eq(to_db_typed_uuid(dst_propolis_id)))
+                    .select(SledResourceVmm::as_select())
+                    .get_result_async(&*conn)
+                    .await
+                    .expect(
+                        "target sled_resource_vmm record should exist: the \
+                         instance is running on its VMM",
+                    );
 
-        assert_eq!(record.state, SledResourceVmmState::Active);
+                let source_state =
+                    maybe_source_record.map(|record| record.state);
+                match (source_state, target_record.state) {
+                    (None, SledResourceVmmState::Active) => Ok(()),
+
+                    // Not done yet. Note that `(None, Target)` is a
+                    // legitimate transient state: the instance stops
+                    // referencing the source VMM when the active-VMM swap
+                    // commits, so the reaper may delete the source record
+                    // before the later saga node activates the target
+                    // record.
+                    (
+                        None
+                        | Some(
+                            SledResourceVmmState::Active
+                            | SledResourceVmmState::Tombstoned,
+                        ),
+                        SledResourceVmmState::Active
+                        | SledResourceVmmState::Target,
+                    ) => Err(CondCheckError::<()>::NotYetWithStatus(format!(
+                        "source record: {}, target record state: {}",
+                        match source_state {
+                            Some(state) => format!("still present ({state})"),
+                            None => "deleted".to_string(),
+                        },
+                        target_record.state,
+                    ))),
+
+                    // States that should never occur.
+                    (
+                        Some(SledResourceVmmState::Target),
+                        SledResourceVmmState::Active
+                        | SledResourceVmmState::Target
+                        | SledResourceVmmState::Tombstoned,
+                    ) => panic!(
+                        "source sled_resource_vmm record should never be in \
+                         the `target` state: its VMM was never a migration \
+                         target",
+                    ),
+                    (
+                        None
+                        | Some(
+                            SledResourceVmmState::Active
+                            | SledResourceVmmState::Tombstoned,
+                        ),
+                        SledResourceVmmState::Tombstoned,
+                    ) => panic!(
+                        "target sled_resource_vmm record should never be \
+                         tombstoned: the instance is running on its VMM",
+                    ),
+                }
+            },
+            &Duration::from_millis(50),
+            &Duration::from_secs(60),
+        )
+        .await
+        .expect(
+            "source sled_resource_vmm record should be deleted and target \
+             record should become active",
+        );
     }
 }
 
@@ -1168,33 +1251,96 @@ async fn test_instance_migrate_target_finishes_first(
     assert_eq!(migration.target_state, MigrationState::COMPLETED);
     assert_eq!(migration.source_state, MigrationState::IN_PROGRESS);
 
-    // Assert the source sled_resource_vmm record was tombstoned, and the target
-    // switched to active.
+    // Wait for the source sled_resource_vmm record to be tombstoned and the
+    // target record to switch to active.
+    //
+    // Both changes are made by an instance-update saga node that runs *after*
+    // the node that commits the instance's new runtime state (which is what
+    // makes the instance externally `Running`), so we must wait until the
+    // condition is true (level-triggered) rather than assert immediately. The
+    // source record cannot be deleted outright at this point: its VMM is still
+    // migrating, so it is neither cleaned up by a destroy-VMM subsaga nor
+    // eligible for the `abandoned_vmm_reaper`.
     {
         use nexus_db_model::SledResourceVmm;
         use nexus_db_model::SledResourceVmmState;
         use nexus_db_schema::schema::sled_resource_vmm::dsl;
 
-        let datastore = apictx.nexus.datastore();
-        let conn = datastore.pool_connection_for_tests().await.unwrap();
+        wait_for_condition(
+            || async {
+                let datastore = apictx.nexus.datastore();
+                let conn = datastore.pool_connection_for_tests().await.unwrap();
 
-        let record = dsl::sled_resource_vmm
-            .filter(dsl::id.eq(to_db_typed_uuid(src_propolis_id)))
-            .select(SledResourceVmm::as_select())
-            .get_result_async(&*conn)
-            .await
-            .unwrap();
+                let source_record = dsl::sled_resource_vmm
+                    .filter(dsl::id.eq(to_db_typed_uuid(src_propolis_id)))
+                    .select(SledResourceVmm::as_select())
+                    .get_result_async(&*conn)
+                    .await
+                    .expect(
+                        "source sled_resource_vmm record should exist: its \
+                         VMM is still migrating, so nothing may delete it \
+                         yet",
+                    );
 
-        assert_eq!(record.state, SledResourceVmmState::Tombstoned);
+                let target_record = dsl::sled_resource_vmm
+                    .filter(dsl::id.eq(to_db_typed_uuid(dst_propolis_id)))
+                    .select(SledResourceVmm::as_select())
+                    .get_result_async(&*conn)
+                    .await
+                    .expect(
+                        "target sled_resource_vmm record should exist: the \
+                         instance is running on its VMM",
+                    );
 
-        let record = dsl::sled_resource_vmm
-            .filter(dsl::id.eq(to_db_typed_uuid(dst_propolis_id)))
-            .select(SledResourceVmm::as_select())
-            .get_result_async(&*conn)
-            .await
-            .unwrap();
+                match (source_record.state, target_record.state) {
+                    (
+                        SledResourceVmmState::Tombstoned,
+                        SledResourceVmmState::Active,
+                    ) => Ok(()),
 
-        assert_eq!(record.state, SledResourceVmmState::Active);
+                    // Not done yet. The tombstone-and-activate swap is a
+                    // single transaction, so the expected transient state is
+                    // `(Active, Target)`; the other combinations covered
+                    // here are unexpected but harmless to retry on.
+                    (
+                        SledResourceVmmState::Active
+                        | SledResourceVmmState::Tombstoned,
+                        SledResourceVmmState::Active
+                        | SledResourceVmmState::Target,
+                    ) => Err(CondCheckError::<()>::NotYetWithStatus(format!(
+                        "source record state: {}, target record state: {}",
+                        source_record.state, target_record.state,
+                    ))),
+
+                    // States that should never occur.
+                    (
+                        SledResourceVmmState::Target,
+                        SledResourceVmmState::Active
+                        | SledResourceVmmState::Target
+                        | SledResourceVmmState::Tombstoned,
+                    ) => panic!(
+                        "source sled_resource_vmm record should never be in \
+                         the `target` state: its VMM was never a migration \
+                         target",
+                    ),
+                    (
+                        SledResourceVmmState::Active
+                        | SledResourceVmmState::Tombstoned,
+                        SledResourceVmmState::Tombstoned,
+                    ) => panic!(
+                        "target sled_resource_vmm record should never be \
+                         tombstoned: the instance is running on its VMM",
+                    ),
+                }
+            },
+            &Duration::from_millis(50),
+            &Duration::from_secs(60),
+        )
+        .await
+        .expect(
+            "source sled_resource_vmm record should be tombstoned and target \
+             record should become active",
+        );
     }
 
     // Now, move the source to "completed"
@@ -1206,39 +1352,27 @@ async fn test_instance_migrate_target_finishes_first(
     assert_eq!(migration.source_state, MigrationState::COMPLETED);
     assert_eq!(migration.target_state, MigrationState::COMPLETED);
 
-    // Assert the source sled_resource_vmm record was set to tombstoned
-    {
-        use nexus_db_model::SledResourceVmm;
-        use nexus_db_model::SledResourceVmmState;
-        use nexus_db_schema::schema::sled_resource_vmm::dsl;
+    // Wait for the source sled_resource_vmm record to be cleaned up.
+    //
+    // Now that the source VMM is destroyed and no longer referenced by the
+    // instance, it is an *abandoned* VMM: its (tombstoned) record is deleted
+    // by the `abandoned_vmm_reaper` background task. Activate that task on
+    // each poll so this test does not have to wait out the task's periodic
+    // activation interval. (See "Relying on periodic background-task
+    // activation" in docs/flake-patterns.adoc.) Until the reaper deletes the
+    // record, it must remain tombstoned; any other state is a bug, so fail
+    // fast rather than timing out.
 
-        let datastore = apictx.nexus.datastore();
-        let conn = datastore.pool_connection_for_tests().await.unwrap();
-
-        let record = dsl::sled_resource_vmm
-            .filter(dsl::id.eq(to_db_typed_uuid(src_propolis_id)))
-            .select(SledResourceVmm::as_select())
-            .get_result_async(&*conn)
-            .await
-            .unwrap();
-
-        assert_eq!(record.state, SledResourceVmmState::Tombstoned);
-    }
-
-    // Kick the instance_watcher backgound task
-
-    nexus_test_utils::background::activate_background_task(
-        &cptestctx.lockstep_client,
-        "instance_watcher",
-    )
-    .await;
-
-    // Assert the source record was cleaned up
-
-    poll::wait_for_condition(
+    wait_for_condition(
         || async {
             use nexus_db_model::SledResourceVmm;
+            use nexus_db_model::SledResourceVmmState;
             use nexus_db_schema::schema::sled_resource_vmm::dsl;
+
+            nexus_test_utils::background::run_abandoned_vmm_reaper(
+                &cptestctx.lockstep_client,
+            )
+            .await;
 
             let datastore = apictx.nexus.datastore();
             let conn = datastore.pool_connection_for_tests().await.unwrap();
@@ -1249,19 +1383,31 @@ async fn test_instance_migrate_target_finishes_first(
                 .get_result_async(&*conn)
                 .await
                 .optional()
-                .unwrap();
+                .expect("source sled_resource_vmm record query should succeed");
 
-            if maybe_record.is_none() {
-                Ok(())
-            } else {
-                Err(CondCheckError::<()>::NotYet)
+            match maybe_record.map(|record| record.state) {
+                None => Ok(()),
+                Some(SledResourceVmmState::Tombstoned) => {
+                    Err(CondCheckError::<()>::NotYetWithStatus(
+                        "source record still tombstoned; the reaper has not \
+                         deleted it"
+                            .to_string(),
+                    ))
+                }
+                Some(
+                    state @ (SledResourceVmmState::Active
+                    | SledResourceVmmState::Target),
+                ) => panic!(
+                    "source sled_resource_vmm record should be tombstoned \
+                     until the reaper deletes it, but its state is {state}",
+                ),
             }
         },
-        &Duration::from_secs(5),
+        &Duration::from_millis(50),
         &Duration::from_secs(60),
     )
     .await
-    .unwrap();
+    .expect("source sled_resource_vmm record should be deleted");
 }
 
 #[nexus_test(extra_sled_agents = 3)]

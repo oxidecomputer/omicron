@@ -45,6 +45,8 @@ This is most commonly observed with inventory collections, with two variations:
 **Example commits:**
 
 * https://github.com/oxidecomputer/omicron/commit/1bb7b11bbbe3[`1bb7b11bbbe3`] tells ClickHouse to perform an `ALTER TABLE` operation synchronously.
+// FIXME: replace ZZZZ with the merged commit hash of the test_instance_migrate race-fix PR.
+* https://github.com/oxidecomputer/omicron/commit/ZZZZ[`ZZZZ`] waits for instance-update saga nodes that run after the node that makes the instance externally `Running`, instead of asserting on their effects immediately.
 
 === Stale watch channel notifications [[stale-watch-channel-notifications]]
 
@@ -90,6 +92,26 @@ This is most commonly observed with inventory collections, with two variations:
 
 * https://github.com/oxidecomputer/omicron/commit/2050ef3a67d2[`2050ef3a67d2`] disables the `sp_ereport_ingester` background task for most tests, but re-enables it for `test_omdb_success_cases`.
 * https://github.com/oxidecomputer/omicron/commit/4bd9ebbc71e9[`4bd9ebbc71e9`] makes Nexus's startup-time switch-port insertion (exercised by `omicron-dev run-all`) accept `Error::ObjectAlreadyExists` when a background task wins the race to insert the same record.
+
+=== Relying on periodic background-task activation [[relying-on-periodic-background-task-activation]]
+
+**What this is:** A test waits for a state change that only a Nexus background task performs, but never activates the task explicitly. Instead, it relies on the task's periodic timer firing while the test waits.
+
+**Why this is bad:** Task activation periods are often at the same time scale as test timeouts. For example, the `abandoned_vmm_reaper` task's period and a typical `wait_for_condition` timeout are both 60 seconds, so whether an activation lands inside the wait window depends on when the timer last fired. Even when the test doesn't flake, it spends most of its runtime sleeping.
+
+**How to fix this:** Activate the task explicitly through the Nexus lockstep API, using either `activate_background_task` in `nexus/test-utils/src/background.rs` or a task-specific `run_*` wrapper.
+
+Note that a background task activation that fires too early (e.g., one that requires a saga to complete) can be a no-op.
+
+* If the prerequisite is directly observable, wait for it first and then activate the task once.
+* If it is not, activate the task on each iteration of the surrounding `wait_for_condition` loop, which makes the wait level-triggered. This relies on the general design principle that background tasks are idempotent.
+
+It is fine to call `activate_background_task` in a loop since it is synchronous: it waits for the task to go idle, activates it, and waits for a newer completed iteration before returning.
+
+**Example commits:**
+
+// FIXME: replace ZZZZ with the merged commit hash of the test_instance_migrate race-fix PR.
+* https://github.com/oxidecomputer/omicron/commit/ZZZZ[`ZZZZ`] activates the `abandoned_vmm_reaper` task on each poll instead of waiting out its periodic activation interval.
 
 === Teardown ordering races [[teardown-ordering-races]]
 
