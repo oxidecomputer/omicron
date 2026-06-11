@@ -34,8 +34,7 @@ fn base_state(test_name: &str) -> UnstableReconfiguratorState {
     let mut sim = ReconfiguratorCliTestState::new(test_name, &logctx.log);
     sim.load_example().expect("loaded example system");
     sim.run_planner().expect("planning succeeded");
-    let state =
-        sim.current_state().to_serializable().expect("serialize state");
+    let state = sim.current_state().to_serializable().expect("serialize state");
     logctx.cleanup_successful();
     state
 }
@@ -86,10 +85,11 @@ fn make_dns_entry(
 fn single_input_happy_path() {
     let state = base_state("multi_load_single_input");
     let bytes = serialize(&state);
-    let result = UnstableReconfiguratorState::read_series([input(
-        "only.out", &bytes,
-    )])
-    .unwrap_or_else(|err| panic!("read_series failed: {}", err_chain(&err)));
+    let result =
+        UnstableReconfiguratorState::read_series([input("only.out", &bytes)])
+            .unwrap_or_else(|err| {
+                panic!("read_series failed: {}", err_chain(&err))
+            });
     assert_eq!(result.latest, "only.out");
     assert!(
         result.warnings.is_empty(),
@@ -151,14 +151,8 @@ fn overlapping_inputs_order_independent() {
     let bytes_b = serialize(&state_b);
 
     for (label, inputs) in [
-        (
-            "a then b",
-            vec![input("a.out", &bytes_a), input("b.out", &bytes_b)],
-        ),
-        (
-            "b then a",
-            vec![input("b.out", &bytes_b), input("a.out", &bytes_a)],
-        ),
+        ("a then b", vec![input("a.out", &bytes_a), input("b.out", &bytes_b)]),
+        ("b then a", vec![input("b.out", &bytes_b), input("a.out", &bytes_a)]),
     ] {
         let result = UnstableReconfiguratorState::read_series(inputs)
             .unwrap_or_else(|err| {
@@ -186,11 +180,8 @@ fn collection_mismatch() {
     let mut mutated = state.clone();
     // Bump `time_done` on one collection without changing its id.  Any
     // observable change is enough to trip the equality check.
-    let mut entry = mutated
-        .collections
-        .iter_mut()
-        .next()
-        .expect("at least one collection");
+    let mut entry =
+        mutated.collections.iter_mut().next().expect("at least one collection");
     entry.time_done = entry.time_done + Duration::seconds(1);
     let mismatched_id = entry.id;
     drop(entry);
@@ -218,11 +209,8 @@ fn blueprint_mismatch() {
     let mut mutated = state.clone();
     // `creator` is a free-form string that doesn't affect any other
     // invariant.
-    let mut entry = mutated
-        .blueprints
-        .iter_mut()
-        .next()
-        .expect("at least one blueprint");
+    let mut entry =
+        mutated.blueprints.iter_mut().next().expect("at least one blueprint");
     entry.creator = "mutated-creator".to_owned();
     let mismatched_id = entry.id;
     drop(entry);
@@ -386,10 +374,7 @@ fn target_missing_from_its_own_file() {
     // because only the second file provides the target blueprint that lets
     // `read_series` finish successfully.
     let mut missing = state.clone();
-    missing
-        .blueprints
-        .remove(&target_id)
-        .expect("target blueprint present");
+    missing.blueprints.remove(&target_id).expect("target blueprint present");
 
     let bytes_missing = serialize(&missing);
     let bytes_full = serialize(&state);
@@ -477,14 +462,8 @@ fn multiple_latest_candidates() {
     expected.blueprints.insert_unique(sibling_a_clone).unwrap();
 
     for (label, inputs) in [
-        (
-            "a then b",
-            vec![input("a.out", &bytes_a), input("b.out", &bytes_b)],
-        ),
-        (
-            "b then a",
-            vec![input("b.out", &bytes_b), input("a.out", &bytes_a)],
-        ),
+        ("a then b", vec![input("a.out", &bytes_a), input("b.out", &bytes_b)]),
+        ("b then a", vec![input("b.out", &bytes_b), input("a.out", &bytes_a)]),
     ] {
         let result = UnstableReconfiguratorState::read_series(inputs)
             .unwrap_or_else(|err| {
@@ -521,12 +500,10 @@ fn no_inputs() {
 #[test]
 fn malformed_json() {
     let bytes: &[u8] = b"not json at all";
-    let err = UnstableReconfiguratorState::read_series([input(
-        "garbage.out",
-        bytes,
-    )])
-    .err()
-    .expect("expected parse error");
+    let err =
+        UnstableReconfiguratorState::read_series([input("garbage.out", bytes)])
+            .err()
+            .expect("expected parse error");
     let rendered = err_chain(&err);
     assert_contains(&rendered, "parse \"garbage.out\"");
 }
