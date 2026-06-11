@@ -40,6 +40,8 @@ impl Arbitrary for DiffableStaticRouteDescription {
             .prop_flat_map(|prefix| {
                 let prefix = IpNet::from(prefix);
 
+                // ipv4 prefixes can have either ipv4 or ipv6 for its nexthop
+                // address, but ipv6 prefixes must have an ipv6 nexthop
                 let (prefix, nexthop_strategy) = match prefix {
                     IpNet::V4(prefix) => {
                         let prefix = Ipv4Net::new(
@@ -48,10 +50,7 @@ impl Arbitrary for DiffableStaticRouteDescription {
                         )
                         .expect("still valid after applying mask");
 
-                        (
-                            IpNet::from(prefix),
-                            any::<Ipv4Addr>().prop_map(IpAddr::from).boxed(),
-                        )
+                        (IpNet::from(prefix), any::<IpAddr>().boxed())
                     }
                     IpNet::V6(prefix) => {
                         let prefix = Ipv6Net::new(
@@ -72,11 +71,13 @@ impl Arbitrary for DiffableStaticRouteDescription {
                 (IpNet::V4(prefix), IpAddr::V4(nexthop)) => {
                     Self::V4 { nexthop, prefix }
                 }
+                (IpNet::V4(prefix), IpAddr::V6(nexthop)) => {
+                    Self::V4OverV6 { nexthop, prefix }
+                }
                 (IpNet::V6(prefix), IpAddr::V6(nexthop)) => {
                     Self::V6 { nexthop, prefix }
                 }
-                (IpNet::V4(_), IpAddr::V6(_))
-                | (IpNet::V6(_), IpAddr::V4(_)) => {
+                (IpNet::V6(_), IpAddr::V4(_)) => {
                     unreachable!("invalid v4/v6 combo in Arbitrary impl")
                 }
             })
@@ -480,9 +481,10 @@ fn plan_rejects_bad_mgd_prefix() {
 }
 
 #[test]
-fn plan_rejects_mixed_ip_families_in_config() {
-    let logctx =
-        dev::test_setup_log("plan_rejects_mixed_ip_families_in_config");
+fn plan_rejects_ipv6_prefix_with_ipv4_nexthop_in_config() {
+    let logctx = dev::test_setup_log(
+        "plan_rejects_ipv6_prefix_with_ipv4_nextho_in_config",
+    );
     let log = &logctx.log;
 
     // A route with a v4 nexthop and a v6 destination.
@@ -504,24 +506,28 @@ fn plan_rejects_mixed_ip_families_in_config() {
         ThisSledSwitchSlot::TEST_FAKE,
         log,
     )
-    .expect_err("plan should fail with mixed families");
+    .expect_err("plan should fail");
 
-    assert!(err.contains("mixed IP families"), "unexpected error: {err}",);
+    assert!(
+        err.contains("ipv4 nexthop 10.0.0.1 for ipv6 prefix 2001:db8::/64"),
+        "unexpected error: {err}",
+    );
 
     logctx.cleanup_successful();
 }
 
 #[test]
-fn plan_rejects_wrong_nexthop_family_from_mgd() {
-    let logctx =
-        dev::test_setup_log("plan_rejects_wrong_nexthop_family_from_mgd");
+fn plan_rejects_ipv6_prefix_with_ipv4_nexthop_from_mgd() {
+    let logctx = dev::test_setup_log(
+        "plan_rejects_ipv6_prefix_with_ipv4_nexthop_from_mgd",
+    );
     let log = &logctx.log;
 
     let config = rack_config(vec![]);
 
-    // mgd has a v4 prefix but a v6 nexthop.
+    // mgd has a v6 prefix but a v4 nexthop.
     let current = mgd_routes(
-        vec![("10.0.0.0/24", vec![mgd_path("2001:db8::1", 1, None)])],
+        vec![("2001:db8::/64", vec![mgd_path("10.0.0.1", 1, None)])],
         vec![],
     );
 
@@ -688,7 +694,8 @@ struct TestInput {
 impl From<&'_ DiffableStaticRoute> for RouteConfig {
     fn from(value: &'_ DiffableStaticRoute) -> Self {
         let destination = match value.description {
-            DiffableStaticRouteDescription::V4 { prefix, .. } => {
+            DiffableStaticRouteDescription::V4 { prefix, .. }
+            | DiffableStaticRouteDescription::V4OverV6 { prefix, .. } => {
                 IpNet::V4(prefix)
             }
             DiffableStaticRouteDescription::V6 { prefix, .. } => {
@@ -699,7 +706,8 @@ impl From<&'_ DiffableStaticRoute> for RouteConfig {
             DiffableStaticRouteDescription::V4 { nexthop, .. } => {
                 IpAddr::V4(nexthop)
             }
-            DiffableStaticRouteDescription::V6 { nexthop, .. } => {
+            DiffableStaticRouteDescription::V4OverV6 { nexthop, .. }
+            | DiffableStaticRouteDescription::V6 { nexthop, .. } => {
                 IpAddr::V6(nexthop)
             }
         };
@@ -759,6 +767,19 @@ impl TestInput {
                     v4.entry(prefix.to_string()).or_default().push(MgdPath {
                         bgp: None,
                         nexthop: IpAddr::V4(nexthop),
+                        nexthop_interface: None,
+                        rib_priority: route.priority,
+                        shutdown: false,
+                        vlan_id: route.vlan_id,
+                    });
+                }
+                DiffableStaticRouteDescription::V4OverV6 {
+                    nexthop,
+                    prefix,
+                } => {
+                    v4.entry(prefix.to_string()).or_default().push(MgdPath {
+                        bgp: None,
+                        nexthop: IpAddr::V6(nexthop),
                         nexthop_interface: None,
                         rib_priority: route.priority,
                         shutdown: false,
@@ -881,7 +902,8 @@ impl TestInput {
         for (key, val) in &self.routes {
             match val.input {
                 StaticRouteTestInput::MgdOnly => match key.description {
-                    DiffableStaticRouteDescription::V4 { .. } => {
+                    DiffableStaticRouteDescription::V4 { .. }
+                    | DiffableStaticRouteDescription::V4OverV6 { .. } => {
                         deleted_v4 += 1;
                     }
                     DiffableStaticRouteDescription::V6 { .. } => {
@@ -891,7 +913,8 @@ impl TestInput {
                 StaticRouteTestInput::DesiredConfigOnly(
                     SwitchSlot::Switch0,
                 ) => match key.description {
-                    DiffableStaticRouteDescription::V4 { .. } => {
+                    DiffableStaticRouteDescription::V4 { .. }
+                    | DiffableStaticRouteDescription::V4OverV6 { .. } => {
                         added_v4 += 1;
                     }
                     DiffableStaticRouteDescription::V6 { .. } => {
@@ -903,7 +926,10 @@ impl TestInput {
                         unchanged += 1;
                     } else {
                         match key.description {
-                            DiffableStaticRouteDescription::V4 { .. } => {
+                            DiffableStaticRouteDescription::V4 { .. }
+                            | DiffableStaticRouteDescription::V4OverV6 {
+                                ..
+                            } => {
                                 deleted_v4 += 1;
                                 added_v4 += 1;
                             }
@@ -971,19 +997,11 @@ impl From<MgdCurrentRoutes> for MgdStaticRouteLists {
                         let prefix = prefix
                             .parse::<MgdPrefix4>()
                             .expect("valid MgdPrefix4");
-                        paths.into_iter().map(move |path| {
-                            let nexthop = match path.nexthop {
-                                IpAddr::V4(ip) => ip,
-                                IpAddr::V6(_) => {
-                                    panic!("invalid path: v4 with v6 nexthop")
-                                }
-                            };
-                            MgdStaticRoute4 {
-                                nexthop: nexthop.into(),
-                                prefix,
-                                rib_priority: path.rib_priority,
-                                vlan_id: path.vlan_id,
-                            }
+                        paths.into_iter().map(move |path| MgdStaticRoute4 {
+                            nexthop: path.nexthop,
+                            prefix,
+                            rib_priority: path.rib_priority,
+                            vlan_id: path.vlan_id,
                         })
                     })
                     .collect(),
