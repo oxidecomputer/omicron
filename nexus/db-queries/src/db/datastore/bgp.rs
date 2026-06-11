@@ -311,9 +311,14 @@ impl DataStore {
                 }
             };
 
-            let new_name =
-                update.name.as_ref().unwrap_or(existing.name()).to_string();
+            let new_name = update
+                .identity
+                .name
+                .as_ref()
+                .unwrap_or(existing.name())
+                .to_string();
             let new_description = update
+                .identity
                 .description
                 .as_deref()
                 .unwrap_or(existing.description())
@@ -1181,6 +1186,7 @@ mod tests {
     use nexus_db_model::SwitchPortBgpPeerConfig;
     use nexus_types::external_api::networking::BgpPeer;
     use omicron_common::api::external::IdentityMetadataCreateParams;
+    use omicron_common::api::external::IdentityMetadataUpdateParams;
     use omicron_common::api::external::Name;
     use omicron_test_utils::dev;
     use oxnet::IpNet;
@@ -1217,8 +1223,10 @@ mod tests {
         let new_description = String::from("updated description");
 
         let update = networking::BgpConfigUpdate {
-            name: Some(new_config_name.clone()),
-            description: Some(new_description.clone()),
+            identity: IdentityMetadataUpdateParams {
+                name: Some(new_config_name.clone()),
+                description: Some(new_description.clone()),
+            },
             bgp_announce_set_id: Some(NameOrId::Name(
                 new_announce_name.clone(),
             )),

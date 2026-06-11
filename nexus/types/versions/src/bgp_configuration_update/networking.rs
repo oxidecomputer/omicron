@@ -10,8 +10,7 @@
 //!   `name`, `description`, `max_paths` and `bgp_announce_set_id` fields
 //!   without deleting and recreating the object.
 
-use omicron_common::api::external::Name;
-use omicron_common::api::external::NameOrId;
+use omicron_common::api::external::{IdentityMetadataUpdateParams, NameOrId};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sled_agent_types_versions::v20::early_networking::MaxPathConfig;
@@ -23,11 +22,8 @@ use sled_agent_types_versions::v20::early_networking::MaxPathConfig;
 /// things are keyed off the ASN.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct BgpConfigUpdate {
-    /// Update the name of this BGP configuration.
-    pub name: Option<Name>,
-
-    /// Update the description of this BGP configuration.
-    pub description: Option<String>,
+    #[serde(flatten)]
+    pub identity: IdentityMetadataUpdateParams,
 
     /// Update the BGP announce set associated with this configuration.
     pub bgp_announce_set_id: Option<NameOrId>,
