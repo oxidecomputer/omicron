@@ -7692,8 +7692,11 @@ CREATE TABLE IF NOT EXISTS omicron.public.fm_sitrep (
 
     -- Generation counter for support bundles: `SitrepBuilder` increments this
     -- each time it builds a sitrep whose support bundle request set differs
-    -- from its parent's. `SitrepGuardedInsert` compares it against the latest
-    -- sitrep, preventing stale executors from resurrecting deleted bundles.
+    -- from its parent's. Support bundle creation compares it against the
+    -- latest sitrep's value, rejecting inserts from a rendezvous task working
+    -- from a stale sitrep. (It is the `rendezvous_support_bundle_created`
+    -- marker, not this generation, that prevents a deleted bundle from being
+    -- resurrected.)
     support_bundle_generation INT8 NOT NULL
 );
 
@@ -7931,6 +7934,12 @@ CREATE TABLE IF NOT EXISTS omicron.public.rendezvous_alert_created (
 -- initial creation, but an executing sitrep still contains an
 -- fm_support_bundle_request for the same bundle, this marker prevents
 -- `SitrepGuardedInsert` from re-creating the bundle.
+--
+-- Note that this means creation is attempted exactly once per requested
+-- bundle id: once the marker exists, fault management treats the request as
+-- satisfied and will not create the bundle again, even if bundle collection
+-- subsequently fails, the bundle expires, or a user deletes it. Collecting
+-- another bundle requires a new request with a new bundle id.
 --
 -- A marker can be GC'ed in FM rendezvous when:
 --   * its support_bundle_id is not present in any fm_support_bundle_request in

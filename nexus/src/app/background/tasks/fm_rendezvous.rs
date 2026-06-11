@@ -361,6 +361,16 @@ impl FmRendezvous {
         let expected_support_bundle_generation =
             sitrep.metadata.support_bundle_generation;
 
+        // Count the request set up front, so the totals describe the sitrep
+        // itself even if the loop below aborts partway through on a stale
+        // sitrep.
+        status.total_bundles_requested =
+            sitrep.support_bundles_requested().count();
+        status.current_sitrep_bundles_requested = sitrep
+            .support_bundles_requested()
+            .filter(|(_, req)| req.requested_sitrep_id == sitrep.id())
+            .count();
+
         // Like alert creation (see `create_requested_alerts`), we iterate all
         // bundle requests in the sitrep, not just new ones.
         // `SitrepGuardedInsert` makes each insert idempotent and short-circuits
@@ -370,16 +380,11 @@ impl FmRendezvous {
             let de = case.metadata.de;
             let fm::case::SupportBundleRequest {
                 id: bundle_id,
-                requested_sitrep_id,
+                requested_sitrep_id: _,
                 data_selection,
                 comment,
             } = req;
             let bundle_id = *bundle_id;
-
-            status.total_bundles_requested += 1;
-            if *requested_sitrep_id == sitrep.id() {
-                status.current_sitrep_bundles_requested += 1;
-            }
 
             // Fall back to a generic reason for now if the diagnosis engine
             // left the comment empty.
@@ -980,7 +985,7 @@ mod tests {
         logctx.cleanup_successful();
     }
 
-    /// A stale executor activation whose sitrep's `support_bundle_generation`
+    /// A stale activation whose sitrep's `support_bundle_generation`
     /// is behind the latest sitrep should be rejected by the sitrep-guard
     /// combinator inside `support_bundle_create`. The rendezvous task
     /// translates that `Conflict` into `stale_sitrep = true`, breaks out of
@@ -1013,10 +1018,14 @@ mod tests {
         // without one we'd hit a capacity error before the staleness check).
         create_sled_with_zpools(&datastore, &opctx, 1).await;
 
-        // The stale executor's sitrep: carries one support bundle request and
-        // stamps the initial `support_bundle_generation`.
+        // The stale activation's sitrep: carries two support bundle requests
+        // and stamps the initial `support_bundle_generation`. Two requests
+        // (rather than one) pin the totals' semantics: they count the
+        // sitrep's full request set, not how far the loop got before
+        // aborting on the first insert.
         let stale_sitrep_id = SitrepUuid::new_v4();
         let stale_bundle_id = SupportBundleUuid::new_v4();
+        let stale_bundle2_id = SupportBundleUuid::new_v4();
         let stale_case_id = CaseUuid::new_v4();
         let stale_case = {
             let mut c = fm::Case {
@@ -1031,14 +1040,16 @@ mod tests {
                 ereports: iddqd::IdOrdMap::new(),
                 support_bundles_requested: iddqd::IdOrdMap::new(),
             };
-            c.support_bundles_requested
-                .insert_unique(fm::case::SupportBundleRequest {
-                    id: stale_bundle_id,
-                    requested_sitrep_id: stale_sitrep_id,
-                    data_selection: BundleDataSelection::all(),
-                    comment: String::new(),
-                })
-                .unwrap();
+            for id in [stale_bundle_id, stale_bundle2_id] {
+                c.support_bundles_requested
+                    .insert_unique(fm::case::SupportBundleRequest {
+                        id,
+                        requested_sitrep_id: stale_sitrep_id,
+                        data_selection: BundleDataSelection::all(),
+                        comment: String::new(),
+                    })
+                    .unwrap();
+            }
             c
         };
         let stale_sitrep = {
@@ -1067,7 +1078,7 @@ mod tests {
 
         // A newer sitrep whose support bundle generation is ahead. Once it
         // lands in `fm_sitrep_history`, the database considers the stale
-        // executor's sitrep out of date.
+        // activation's sitrep out of date.
         let current_sitrep_id = SitrepUuid::new_v4();
         let current_sitrep = fm::Sitrep {
             metadata: fm::SitrepMetadata {
@@ -1089,10 +1100,11 @@ mod tests {
             .await
             .expect("inserted current sitrep");
 
-        // Hand the stale sitrep to the rendezvous task. Its single support
+        // Hand the stale sitrep to the rendezvous task. Its first support
         // bundle request should trip the sitrep-guard combinator and surface
         // as a `Conflict`, which the task translates into `stale_sitrep = true`
-        // and breaks out of the bundle loop.
+        // and breaks out of the bundle loop before the second request is
+        // attempted.
         sitrep_tx
             .send(Some(Arc::new((
                 fm::SitrepVersion {
@@ -1109,20 +1121,26 @@ mod tests {
         assert_eq!(
             status.support_bundles.details,
             SupportBundleCreationStatus {
-                total_bundles_requested: 1,
-                current_sitrep_bundles_requested: 1,
+                // The totals count the sitrep's request set, not loop
+                // progress: both requests are reported even though the loop
+                // aborted on the first.
+                total_bundles_requested: 2,
+                current_sitrep_bundles_requested: 2,
                 bundles_created: 0,
                 bundles_already_existed: 0,
                 stale_sitrep: true,
                 errors: Vec::new(),
             }
         );
-        // The bundle row must not have been inserted: the sitrep-guard fired
-        // before the inner INSERT could run.
-        assert_matches!(
-            fetch_support_bundle(&datastore, stale_bundle_id).await,
-            Err(diesel::result::Error::NotFound)
-        );
+        // Neither bundle row may have been inserted: the sitrep-guard fired
+        // before the first request's inner INSERT could run, and the abort
+        // skipped the second request entirely.
+        for id in [stale_bundle_id, stale_bundle2_id] {
+            assert_matches!(
+                fetch_support_bundle(&datastore, id).await,
+                Err(diesel::result::Error::NotFound)
+            );
+        }
         // Alert processing should still have run: the stale-sitrep outcome
         // aborts only the bundle loop, not the whole activation.
         assert_matches!(status.alerts.result, OpResult::Executed { .. });
@@ -1889,9 +1907,9 @@ mod tests {
         };
 
         // The sitrep-guard combinator in `support_bundle_create` (FM
-        // provenance) consults `fm_sitrep_history` to check that this
-        // executor's expected generation matches the current one. Insert the
-        // sitrep so it shows up in the DB before activating.
+        // provenance) consults `fm_sitrep_history` to check that the
+        // rendezvous task's expected generation matches the current one.
+        // Insert the sitrep so it shows up in the DB before activating.
         datastore
             .fm_sitrep_insert(opctx, sitrep1.clone())
             .await
@@ -1911,11 +1929,17 @@ mod tests {
         // First activation: should create the support bundle.
         let status = dbg!(task.actually_activate(opctx).await);
         assert_eq!(status.sitrep_id, Some(sitrep1_id));
-        let support_bundles = &status.support_bundles.details;
-        assert_eq!(support_bundles.total_bundles_requested, 1);
-        assert_eq!(support_bundles.current_sitrep_bundles_requested, 1);
-        assert_eq!(support_bundles.bundles_created, 1);
-        assert!(support_bundles.errors.is_empty());
+        assert_eq!(
+            status.support_bundles.details,
+            SupportBundleCreationStatus {
+                total_bundles_requested: 1,
+                current_sitrep_bundles_requested: 1,
+                bundles_created: 1,
+                bundles_already_existed: 0,
+                stale_sitrep: false,
+                errors: Vec::new(),
+            }
+        );
 
         // The bundle should exist in the database in Collecting state.
         let db_bundle = fetch_support_bundle(&datastore, bundle1_id)
@@ -1991,13 +2015,21 @@ mod tests {
             ))))
             .unwrap();
 
-        // Activation with sitrep2: should create only the new bundle.
+        // Activation with sitrep2: should create only the new bundle. The
+        // carried-forward request is satisfied by its marker, so it counts as
+        // already-existed rather than created.
         let status = dbg!(task.actually_activate(opctx).await);
-        let support_bundles = &status.support_bundles.details;
-        assert_eq!(support_bundles.total_bundles_requested, 2);
-        assert_eq!(support_bundles.current_sitrep_bundles_requested, 1);
-        assert_eq!(support_bundles.bundles_created, 1);
-        assert!(support_bundles.errors.is_empty());
+        assert_eq!(
+            status.support_bundles.details,
+            SupportBundleCreationStatus {
+                total_bundles_requested: 2,
+                current_sitrep_bundles_requested: 1,
+                bundles_created: 1,
+                bundles_already_existed: 1,
+                stale_sitrep: false,
+                errors: Vec::new(),
+            }
+        );
 
         // Verify the second bundle exists.
         let db_bundle2 = fetch_support_bundle(&datastore, bundle2_id)

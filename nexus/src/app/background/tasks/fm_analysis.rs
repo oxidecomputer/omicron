@@ -344,7 +344,7 @@ impl FmAnalysis {
         if candidate_ids.is_empty() {
             return Ok(());
         }
-        let existing = self
+        let marked = self
             .datastore
             .fm_rendezvous_existing_support_bundle_markers(
                 opctx,
@@ -352,7 +352,7 @@ impl FmAnalysis {
             )
             .await
             .context("failed to look up support bundle marker existence")?;
-        builder.add_existing_support_bundles(existing);
+        builder.add_marked_support_bundle_requests(marked);
         Ok(())
     }
 

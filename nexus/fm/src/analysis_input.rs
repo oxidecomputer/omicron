@@ -48,7 +48,7 @@ pub struct Input {
     /// [`crate::builder::SitrepBuilder::build`] to decide whether to bump the
     /// new sitrep's `alert_generation`.
     alerts_changed: bool,
-    /// Indicates whether `Input::Builder::build` dropped any closed case
+    /// Indicates whether `Builder::build` dropped any closed case
     /// from the carry-forward list whose support bundle request set was
     /// non-empty. ORed with
     /// [`crate::builder::AllCases::support_bundle_set_changed`] in
@@ -121,7 +121,7 @@ impl Input {
             new_ereports: IdOrdMap::default(),
             unmarked_seen_ereports: BTreeSet::default(),
             marked_alert_requests: HashSet::new(),
-            existing_support_bundles: HashSet::new(),
+            marked_support_bundle_requests: HashSet::new(),
         })
     }
 }
@@ -166,12 +166,18 @@ pub struct Builder {
     /// needs to be an index lookup rather than a table scan.
     marked_alert_requests: HashSet<AlertUuid>,
 
-    /// The set of parent-sitrep support bundle request ids that already have a
-    /// marker row in `rendezvous_support_bundle_created` (i.e. have been created
-    /// by rendezvous). A support bundle request *absent* from this set is
-    /// outstanding work: alongside unmarked ereports, it is one of the signals
-    /// that forces a closed case to be copied forward.
-    existing_support_bundles: HashSet<SupportBundleUuid>,
+    /// The IDs of support bundle requests on the parent sitrep's closed cases
+    /// that already have a marker row in `rendezvous_support_bundle_created`.
+    /// A closed-case request absent from this set is outstanding work, and
+    /// (like an unmarked ereport) forces its case to be copied forward. Open
+    /// cases are copied forward unconditionally, so we don't need to track
+    /// their requests here.
+    ///
+    /// Unlike [`Self::unmarked_seen_ereports`], this set holds the requests
+    /// whose work is done rather than the outstanding ones. This is an artifact
+    /// of the query shape in `fm_rendezvous_existing_support_bundle_markers`,
+    /// which needs to be an index lookup rather than a table scan.
+    marked_support_bundle_requests: HashSet<SupportBundleUuid>,
 }
 
 impl Builder {
@@ -211,16 +217,16 @@ impl Builder {
         self.marked_alert_requests.extend(marker_ids);
     }
 
-    /// Records the set of bundle ids whose `rendezvous_support_bundle_created`
-    /// marker already exists in the database. During [`Self::build`], any
-    /// closed case in the parent sitrep that has a bundle request whose id is
-    /// **not** in this set still counts as having outstanding work, and
-    /// therefore must be carried forward.
-    pub fn add_existing_support_bundles(
+    /// Records the support bundle request ids (from the parent sitrep's
+    /// closed cases) whose `rendezvous_support_bundle_created` marker already
+    /// exists in the database. During [`Self::build`], a closed case with a
+    /// request *not* in this set counts as having outstanding work, and is
+    /// carried forward.
+    pub fn add_marked_support_bundle_requests(
         &mut self,
         marker_ids: impl IntoIterator<Item = SupportBundleUuid>,
     ) {
-        self.existing_support_bundles.extend(marker_ids);
+        self.marked_support_bundle_requests.extend(marker_ids);
     }
 
     pub fn num_ereports(&self) -> usize {
@@ -300,7 +306,9 @@ impl Builder {
                     .support_bundles_requested
                     .iter()
                     .map(|r| r.id)
-                    .filter(|id| !self.existing_support_bundles.contains(id))
+                    .filter(|id| {
+                        !self.marked_support_bundle_requests.contains(id)
+                    })
                     .collect();
                 let has_outstanding_work = !unmarked_ereports.is_empty()
                     || !unmarked_alert_requests.is_empty()
@@ -981,7 +989,7 @@ mod tests {
         };
 
         let mut builder = builder_with_closed_case(closed_case);
-        builder.add_existing_support_bundles([bundle_id]);
+        builder.add_marked_support_bundle_requests([bundle_id]);
         let (input, _) = builder.build();
 
         assert_eq!(input.closed_cases_copied_forward().len(), 0);
@@ -1031,7 +1039,7 @@ mod tests {
         };
 
         let mut builder = builder_with_closed_case(closed_case);
-        builder.add_existing_support_bundles([satisfied_bundle_id]);
+        builder.add_marked_support_bundle_requests([satisfied_bundle_id]);
         let (input, _) = builder.build();
 
         let carried = input.closed_cases_copied_forward().get(&case_id).expect(

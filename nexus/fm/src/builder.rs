@@ -561,7 +561,7 @@ mod tests {
         )
         .unwrap();
         // Marker exists, so carry-forward will drop the case.
-        builder_inputs.add_existing_support_bundles([bundle_id]);
+        builder_inputs.add_marked_support_bundle_requests([bundle_id]);
         let (input, _) = builder_inputs.build();
 
         let sitrep = build_sitrep(SitrepBuilder::new(&logctx.log, &input));

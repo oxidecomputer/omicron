@@ -26,10 +26,14 @@ pub struct CaseBuilder {
     /// [`Self::request_alert`], read by [`super::SitrepBuilder::build`] via
     /// [`AllCases::alert_set_changed`].
     pub(super) new_alerts_requested: bool,
-    /// Set by [`Self::request_support_bundle`]. [`super::SitrepBuilder::build`]
-    /// reads this through [`AllCases::support_bundle_set_changed`] to decide
-    /// whether to bump its [`fm::SitrepMetadata::support_bundle_generation`].
-    pub(super) support_bundles_changed: bool,
+    /// Set to `true` if this case requested at least one new support bundle
+    /// during the current analysis run. This means the new sitrep's support
+    /// bundle request set will differ from its parent's, so its support
+    /// bundle generation must be bumped. Set by
+    /// [`Self::request_support_bundle`], read by
+    /// [`super::SitrepBuilder::build`] via
+    /// [`AllCases::support_bundle_set_changed`].
+    pub(super) new_support_bundles_requested: bool,
 }
 
 #[derive(Debug)]
@@ -128,7 +132,7 @@ impl AllCases {
     }
 
     pub(super) fn support_bundle_set_changed(&self) -> bool {
-        self.cases.iter().any(|c| c.support_bundles_changed)
+        self.cases.iter().any(|c| c.new_support_bundles_requested)
     }
 }
 
@@ -151,7 +155,7 @@ impl CaseBuilder {
             rng,
             report_log: Default::default(),
             new_alerts_requested: false,
-            support_bundles_changed: false,
+            new_support_bundles_requested: false,
         }
     }
 
@@ -242,7 +246,7 @@ impl CaseBuilder {
             .entry("requested support bundle")
             .kv("support_bundle_id", id)
             .comment(comment);
-        self.support_bundles_changed = true;
+        self.new_support_bundles_requested = true;
     }
 
     pub fn close(&mut self, comment: impl ToString) {
@@ -365,7 +369,7 @@ mod tests {
         let mut all_cases = make_all_cases(&logctx.log);
         let case = all_cases.open_case(fm::DiagnosisEngineKind::PowerShelf);
         assert!(!case.new_alerts_requested);
-        assert!(!case.support_bundles_changed);
+        assert!(!case.new_support_bundles_requested);
         logctx.cleanup_successful();
     }
 
@@ -381,7 +385,7 @@ mod tests {
             case.request_alert(&test_alerts::Foo(serde_json::json!({})), "")
                 .unwrap();
             assert!(case.new_alerts_requested);
-            assert!(!case.support_bundles_changed);
+            assert!(!case.new_support_bundles_requested);
         }
 
         assert!(all_cases.alert_set_changed());
@@ -400,7 +404,7 @@ mod tests {
             let mut case =
                 all_cases.open_case(fm::DiagnosisEngineKind::PowerShelf);
             case.request_support_bundle(BundleDataSelection::default(), "");
-            assert!(case.support_bundles_changed);
+            assert!(case.new_support_bundles_requested);
             assert!(!case.new_alerts_requested);
         }
 
