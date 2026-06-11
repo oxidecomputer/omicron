@@ -22,6 +22,7 @@ impl_enum_type!(
         AsExpression,
         FromSqlRow,
         strum::VariantArray,
+        Hash,
     )]
     #[serde(rename_all = "snake_case")]
     pub enum EreporterType;

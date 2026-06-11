@@ -437,7 +437,8 @@ impl_enum_type!(
         PartialOrd,
         Ord,
         PartialEq,
-        Eq
+        Eq,
+        Hash,
     )]
     pub enum SpType;
 

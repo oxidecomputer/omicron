@@ -23,7 +23,7 @@ use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::DateTime;
 use chrono::Utc;
 use diesel::AggregateExpressionMethods;
-use diesel::dsl::{count, min};
+use diesel::dsl::{count, max, min};
 use diesel::prelude::*;
 use diesel::sql_types;
 use iddqd::IdOrdMap;
@@ -43,6 +43,7 @@ use omicron_uuid_kinds::EreporterRestartUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SitrepUuid;
 use omicron_uuid_kinds::SledUuid;
+use std::collections::BTreeSet;
 use uuid::Uuid;
 
 type EreportIdTuple = (Uuid, DbEna);
@@ -58,7 +59,7 @@ pub struct EreporterRestartBySerial {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ReporterRestartHistory {
     pub location: ReporterLocation,
-    pub restarts: Vec<Restart>,
+    pub restarts: BTreeSet<Restart>,
 }
 
 impl iddqd::IdOrdItem for ReporterRestartHistory {
@@ -100,7 +101,7 @@ impl Ord for Restart {
 }
 
 /// Describes the physical location of an ereport reporter.
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub struct ReporterLocation {
     pub slot_type: SpType,
     pub reporter_type: EreporterType,
@@ -224,10 +225,59 @@ impl DataStore {
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
-        let mut by_location = IdOrdMap::default();
-        for (restart_id, reporter_type, slot_type, slot, first_seen) in results
+        let mut by_location = IdOrdMap::new();
+        for (
+            restart_id,
+            reporter_type,
+            slot_type,
+            slot,
+            distinct_slots,
+            first_seen,
+        ) in results
         {
-            todo!()
+            let Some(SqlU16(slot)) = slot else {
+                // The query contains a `HAVING max(slot) IS NOT NULL` clause,
+                // which *should* filter out any restart IDs for which ALL slot
+                // number fields are NULL.
+                slog::warn!(
+                    opctx.log,
+                    "ereporter restart history query returned a row with a \
+                     NULL slot number; this should never happen. ignoring it...";
+                    "restart_id" => %restart_id,
+                    "reporter_type" => ?reporter_type,
+                    "slot_type" => ?slot_type,
+                );
+                continue;
+            };
+            if distinct_slots > 1 {
+                slog::warn!(
+                    opctx.log,
+                    "ereporter restart history query returned > 1 distinct \
+                     slot numbers for a single restart ID; this is weird \
+                     and nonsensical so we shall ignore it.";
+                    "restart_id" => %restart_id,
+                    "reporter_type" => ?reporter_type,
+                    "slot_type" => ?slot_type,
+                );
+                continue;
+            }
+            let first_seen_at = first_seen.expect(
+                "`min(time_collected)` should never  return `NULL`, since the \
+                 `time_collected` column is not nullable, and the `SELECT` \
+                 clause should return nothing if the result set is empty",
+            );
+            let location = ReporterLocation { slot_type, reporter_type, slot };
+            by_location
+                .entry(&location)
+                .or_insert_with(|| ReporterRestartHistory {
+                    location,
+                    restarts: BTreeSet::new(),
+                })
+                .restarts
+                .insert(Restart {
+                    id: EreporterRestartUuid::from_untyped_uuid(restart_id),
+                    first_seen_at,
+                });
         }
 
         Ok(by_location)
@@ -238,23 +288,55 @@ impl DataStore {
         EreporterType,
         SpType,
         Option<SqlU16>,
+        i64,
         Option<DateTime<Utc>>,
     )> {
+        // Okay, yes, this query is really weird and messed-up-looking. Here's
+        // what's going on here:
+        //
+        // A given restart ID may have some ereports where `slot` is NULL (if
+        // the reporter is a sled's host OS, it may have produced some ereports
+        // before the sled's physical location was known). Such ereports may be
+        // followed by ereports with a non-NULL slot, once we figured out where
+        // that sled was. We don't want those ereports split into separate
+        // groups when considering when the earliest ereport from the reporter
+        // was recorded. Therefore, we deliberately *don't* group by `slot`.
+        // Instead, we use `MAX(slot)` to recover the non-NULL slot value: SQL's
+        // `MIN`/`MAX` aggregates skip NULLs, so as long as all the non-NULL
+        // slot values for a restart ID agree (which they always should), this
+        // returns that value. Grouping by `reporter` and `slot_type` is fine,
+        // as those are constant for a given restart ID. This way, When we
+        // select the `MIN(time_collected)`, it is taken across *all* of a
+        // restart ID's ereports --- both the NULL- and non-NULL-slot rows ---
+        // yielding the earliest time the restart ID was observed.
+        //
+        // Nothing in the schema actually *enforces* that the non-NULL slot
+        // values are all the same, even though they should never change once
+        // the sled's location is determined: if it were to move to a different
+        // slot in the rack, it would have a new, unique restart ID. However,
+        // selecting `MAX(slot)` doesn't guard against such cases where the
+        // database contains data that *should* be invalid. Instead, the `MAX`
+        // will simply silently give us the higher-numbered slot. To detect this
+        // condition, we also select `COUNT(DISTINCT slot)`, to check if there
+        // are multiple slot numbers for a restart, which we can at least scream
+        // loudly about and ignore the presumably-corrupt data.
+        //
+        // Finally, `HAVING MAX(slot) IS NOT NULL` discards restart IDs whose
+        // `slot` is NULL in *every* row, so we only return restarts whose
+        // physical location was resolved at some point.
+        //
         // TODO(eliza): would really like to paginate this but i'm not sure if
         // that plays nice with the `group_by`?
         dsl::ereport
             .filter(dsl::time_deleted.is_null())
-            .group_by((
-                dsl::restart_id,
-                dsl::reporter,
-                dsl::slot_type,
-                dsl::slot,
-            ))
+            .group_by((dsl::restart_id, dsl::reporter, dsl::slot_type))
+            .having(max(dsl::slot).is_not_null())
             .select((
                 dsl::restart_id,
                 dsl::reporter,
                 dsl::slot_type,
-                dsl::slot,
+                max(dsl::slot),
+                count(dsl::slot).aggregate_distinct(),
                 min(dsl::time_collected),
             ))
     }
@@ -275,19 +357,23 @@ impl DataStore {
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
-        let restarts = rows.into_iter().map(|(restart_id, reporter, first_seen, ereports)| {
-            let first_seen_at = first_seen.expect(
-                "`min(time_collected)` should never  return `NULL`, since the \
-                 `time_collected` column is not nullable, and the `SELECT` clause \
-                  should return nothing if the result set is empty"
-            );
-            EreporterRestartBySerial {
-                id: EreporterRestartUuid::from_untyped_uuid(restart_id),
-                reporter_kind: reporter.try_into().unwrap(),
-                first_seen_at,
-                ereports: ereports.into(),
-            }
-        }).collect();
+        let restarts = rows
+            .into_iter()
+            .map(|(restart_id, reporter, first_seen, ereports)| {
+                let first_seen_at = first_seen.expect(
+                    "`min(time_collected)` should never  return `NULL`, since \
+                    the `time_collected` column is not nullable, and the \
+                    `SELECT` clause should return nothing if the result set is \
+                    empty",
+                );
+                EreporterRestartBySerial {
+                    id: EreporterRestartUuid::from_untyped_uuid(restart_id),
+                    reporter_kind: reporter.try_into().unwrap(),
+                    first_seen_at,
+                    ereports: ereports.into(),
+                }
+            })
+            .collect();
 
         Ok(restarts)
     }
