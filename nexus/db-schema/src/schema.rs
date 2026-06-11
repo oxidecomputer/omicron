@@ -2173,6 +2173,7 @@ table! {
         planner_enabled -> Bool,
         time_modified -> Timestamptz,
         tuf_repo_pruner_enabled -> Bool,
+        disruption_policy -> crate::enums::ReconfiguratorDisruptionPolicyEnum,
     }
 }
 
