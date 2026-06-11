@@ -1011,18 +1011,14 @@ pub static DEMO_BGP_CONFIG: LazyLock<networking::BgpConfigCreate> =
         shaper: None,
         max_paths: Default::default(),
     });
-pub static DEMO_BGP_CONFIG_UPDATE: LazyLock<networking::BgpConfigCreate> =
-    LazyLock::new(|| networking::BgpConfigCreate {
-        identity: IdentityMetadataCreateParams {
-            name: "as47".parse().unwrap(),
-            description: "BGP config for AS47".into(),
+pub static DEMO_BGP_CONFIG_UPDATE: LazyLock<networking::BgpConfigUpdate> =
+    LazyLock::new(|| networking::BgpConfigUpdate {
+        identity: IdentityMetadataUpdateParams {
+            name: Some("as47".parse().unwrap()),
+            description: Some("BGP config for AS47".into()),
         },
-        bgp_announce_set_id: NameOrId::Name("instances".parse().unwrap()),
-        asn: 47,
-        vrf: None,
-        checker: None,
-        shaper: None,
-        max_paths: MaxPathConfig::new(2).unwrap(),
+        bgp_announce_set_id: Some(NameOrId::Name("instances".parse().unwrap())),
+        max_paths: Some(MaxPathConfig::new(1).unwrap()),
     });
 
 pub const DEMO_BGP_ANNOUNCE_SET_URL: &'static str =
