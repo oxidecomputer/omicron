@@ -20,7 +20,7 @@ use tokio::{
 /// Specifies the amount of time we will wait for `mgd` to launch,
 /// which is currently confirmed by watching `mgd`'s log output
 /// for a message specifying the address and port `mgd` is listening on.
-pub const MGD_TIMEOUT: Duration = Duration::new(5, 0);
+pub const MGD_TIMEOUT: Duration = Duration::from_secs(30);
 
 pub struct MgdInstance {
     /// Port number the mgd instance is listening on. This can be provided
@@ -284,7 +284,7 @@ async fn find_mgd_port_in_log(logfile: String) -> Result<u16, anyhow::Error> {
 /// Specifies the amount of time we will wait for `ddmd` to bind its admin
 /// port, confirmed by asking the kernel which TCP port `ddmd`'s pid is
 /// listening on.
-const DDMD_TIMEOUT: Duration = Duration::from_secs(5);
+const DDMD_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Test fixture that spawns and supervises a legit `ddmd` subprocess.
 ///
