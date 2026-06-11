@@ -104,6 +104,7 @@ define_enums! {
     ServiceKindEnum => "service_kind",
     SledCpuFamilyEnum => "sled_cpu_family",
     SledPolicyEnum => "sled_policy",
+    SledResourceVmmStateEnum => "sled_resource_vmm_state",
     SledRoleEnum => "sled_role",
     SledStateEnum => "sled_state",
     SnapshotStateEnum => "snapshot_state",
