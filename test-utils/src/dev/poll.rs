@@ -41,7 +41,7 @@ pub enum Error<E> {
         "timed out after {elapsed:?}{}",
         .last_status
             .as_ref()
-            .map_or(String::new(), |status| format!("; last status: {status}"))
+            .map_or_else(String::new, |status| format!("; last status: {status}"))
     )]
     TimedOut { elapsed: Duration, last_status: Option<String> },
     #[error("non-retryable error while polling on condition: {0:#}")]
