@@ -13,8 +13,7 @@ use omicron_uuid_kinds::{CaseUuid, FactUuid, PhysicalDiskUuid, ZpoolUuid};
 use std::collections::BTreeMap;
 
 /// A [`DiskFact::ZpoolUnhealthy`] payload paired with the `FactUuid` it
-/// lives under. Used to build in-memory indices over facts during
-/// analysis; not serialized.
+/// lives under.
 #[derive(Clone, Copy, Debug)]
 struct ZpoolUnhealthyFact {
     fact_id: FactUuid,
@@ -59,8 +58,6 @@ struct ParentCaseSummary {
 }
 
 pub(super) fn analyze(builder: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
-    // The input borrow has lifetime 'a, not a borrow of `builder`, so we may
-    // hold it while mutating the builder below.
     let input = builder.input();
     let inv_collection_id = input.inventory().id;
     let inv_time_done = input.inventory().time_done;
@@ -79,8 +76,7 @@ pub(super) fn analyze(builder: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
     // The current health snapshot for every in-service disk, keyed by
     // physical_disk_id. Absence from this index is a positive signal that
     // the control plane has moved on from the disk (expungement /
-    // decommissioning); see prepare_inputs in
-    // nexus/src/app/background/tasks/fm_analysis.rs.
+    // decommissioning); see the analysis task's input preparation.
     let in_service_health: IdOrdMap<DiskHealthSnapshot> = input
         .in_service_disks()
         .iter()
@@ -91,11 +87,9 @@ pub(super) fn analyze(builder: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
         })
         .collect();
 
-    // Index parent-forwarded Disk cases from the input — the state copied
-    // from the parent sitrep.
-    // Every case is about one physical disk; we derive the disk
-    // from its facts. Skip (with a warning) any case we can't safely
-    // interpret.
+    // Index the Disk cases copied forward from the parent sitrep. Every case
+    // is about one physical disk; we derive the disk from its facts. Skip
+    // (with a warning) any case we can't safely interpret.
     let parent_cases: BTreeMap<CaseUuid, ParentCaseSummary> = input
         .open_cases()
         .iter()
@@ -287,9 +281,9 @@ mod tests {
     };
     use std::sync::Arc;
 
-    /// Synthesize a synthetic in-service disk set from a list of zpool IDs.
-    /// Each zpool gets its own fresh `PhysicalDiskUuid` and dummy identity
-    /// facts — tests in this module only care about the zpool dimension.
+    /// Make an in-service disk set from a list of zpool IDs. Each zpool gets
+    /// its own fresh `PhysicalDiskUuid` and dummy identity facts; tests in
+    /// this module only care about the zpool dimension.
     fn mk_in_service(
         zpool_ids: impl IntoIterator<Item = ZpoolUuid>,
     ) -> IdOrdMap<InServiceDisk> {
@@ -385,9 +379,8 @@ mod tests {
         input
     }
 
-    /// Run `disk::analyze` over an input and return the resulting Sitrep
-    /// along with the analysis report (whose log entries the close-comment
-    /// assertions in `closes_*` tests inspect).
+    /// Run `analyze` over an input and return the resulting Sitrep along
+    /// with the analysis report.
     fn run_analyze(
         log: &slog::Logger,
         input: &Input,
@@ -455,7 +448,7 @@ mod tests {
         }
     }
 
-    /// Helper: collect (case, fact, DiskFact) triples for every fact on a
+    /// Collect (case, fact, DiskFact) triples for every fact on a
     /// physical-disk case in a sitrep. Optionally filtered to open cases
     /// only.
     fn disk_facts(
@@ -590,9 +583,9 @@ mod tests {
             setup("disk_close_on_expungement");
         let target = zpools[0];
         set_health(&mut collection, target, ZpoolHealth::Degraded);
-        // Target is NOT in-service in this sitrep (just expunged).
+        // Target is NOT in-service in this sitrep (just expunged), so
+        // disk_id_for fabricates a stable PhysicalDiskUuid for it.
         let in_service = mk_in_service(zpools.iter().copied().skip(1));
-        // Target isn't in the in-service set; fabricate a stable PhysicalDiskUuid.
         let target_disk_id = disk_id_for(&in_service, target);
         let parent_id = SitrepUuid::new_v4();
         let parent = make_parent_with_disk_case(
@@ -704,9 +697,9 @@ mod tests {
         logctx.cleanup_successful();
     }
 
-    /// When the parent sitrep's fact content matches the diagnosis engine's current
-    /// observation, the fact carries forward with the same UUID — no
-    /// remove-and-readd churn.
+    /// When the parent sitrep's fact content matches the diagnosis engine's
+    /// current observation, the fact carries forward with the same UUID,
+    /// with no remove-and-readd churn.
     #[test]
     fn fact_uuid_stable_when_observation_unchanged() {
         let (logctx, mut collection, zpools) = setup("disk_fact_uuid_stable");
@@ -758,7 +751,7 @@ mod tests {
     /// When the parent's fact recorded a different `last_seen_health` than
     /// what we observe now, the diagnosis engine removes the stale fact and emits
     /// a fresh one (new UUID). The case stays open because the zpool is
-    /// still unhealthy — just with a different value.
+    /// still unhealthy, just with a different value.
     #[test]
     fn fact_uuid_rotates_when_observation_changes() {
         let (logctx, mut collection, zpools) = setup("disk_fact_uuid_rotates");
@@ -808,7 +801,7 @@ mod tests {
             }
         }
         // The case itself should still be the same one that was carried
-        // forward — only the fact rotated.
+        // forward; only the fact rotated.
         assert!(open[0].0.is_open());
         logctx.cleanup_successful();
     }

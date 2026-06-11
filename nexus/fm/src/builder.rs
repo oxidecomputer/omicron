@@ -24,10 +24,8 @@ pub struct SitrepBuilder<'a> {
     pub parent_sitrep: Option<&'a fm::Sitrep>,
     pub sitrep_id: SitrepUuid,
     pub cases: case::AllCases,
-    /// The analysis input this builder was constructed from. `cases` is
-    /// seeded from this input's open cases, so diagnosis engines must read
-    /// their inputs from here rather than taking a separate `Input` argument
-    /// that might disagree.
+    /// The analysis input this builder was constructed from; `cases` is
+    /// seeded from its open cases.
     input: &'a analysis_input::Input,
     closed_cases_copied_forward: &'a IdOrdMap<fm::Case>,
     comment: String,

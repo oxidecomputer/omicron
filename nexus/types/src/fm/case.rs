@@ -174,9 +174,6 @@ impl CaseEreport {
 ///
 /// The `payload` is a fully-typed [`FactPayload`] whose variant is owned by
 /// the case's diagnosis engine (see [`Metadata::de`]).
-///
-/// `Eq`/`PartialEq` derive over all fields, including the typed payload.
-/// This is the equality the DB round-trip test needs.
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
 pub struct Fact {
     pub id: FactUuid,

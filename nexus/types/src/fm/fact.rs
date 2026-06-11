@@ -72,7 +72,7 @@ pub struct ZpoolUnhealthyFactPayload {
     /// The physical disk this fact (and its parent case) is about.
     /// Every fact on a Disk case must agree on this value.
     pub physical_disk_id: PhysicalDiskUuid,
-    /// The zpool whose health was observed. Kept for provenance — the
+    /// The zpool whose health was observed. Kept for provenance: the
     /// case is keyed by `physical_disk_id`, but knowing the exact zpool
     /// makes the fact self-describing when read in isolation.
     pub zpool_id: ZpoolUuid,

@@ -41,7 +41,6 @@ pub struct Input {
     new_ereports: IdOrdMap<fm::Ereport>,
     open_cases: IdOrdMap<fm::Case>,
     closed_cases_copied_forward: IdOrdMap<fm::Case>,
-    /// All control plane managed disks
     in_service_disks: Arc<IdOrdMap<InServiceDisk>>,
 }
 
@@ -70,8 +69,7 @@ impl Input {
     }
 
     /// All control-plane-managed disks (`physical_disk.disk_policy =
-    /// in_service` in the DB), indexed by `physical_disk_id`. See the
-    /// field-level documentation on `Input::in_service_disks` for semantics.
+    /// in_service` in the DB), indexed by `physical_disk_id`.
     pub fn in_service_disks(&self) -> &IdOrdMap<InServiceDisk> {
         &self.in_service_disks
     }
