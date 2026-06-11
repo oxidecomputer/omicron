@@ -1706,6 +1706,7 @@ mod test {
     use omicron_uuid_kinds::PropolisUuid;
     use sled_agent_types::early_networking::SwitchSlot;
     use sled_agent_types::instance::{MigrationRuntimeState, MigrationState};
+    use slog_error_chain::InlineErrorChain;
     use std::sync::Arc;
     use std::sync::Mutex;
     use std::time::Duration;
@@ -2849,8 +2850,7 @@ mod test {
 
         poll::wait_for_condition(
             async || {
-                // Force dendrite's NAT RPW to reconcile against Nexus now,
-                // rather than waiting for its next periodic poll. (See
+                // Force dendrite's NAT to reconcile against Nexus now. (See
                 // "Relying on periodic background-task activation" in
                 // docs/flake-patterns.adoc.)
                 //
@@ -2861,7 +2861,7 @@ mod test {
                         log,
                         "failed to trigger NAT reconciliation, will retry";
                         "switch" => ?switch,
-                        "error" => ?error,
+                        InlineErrorChain::new(&error),
                     );
                     return Err(poll::CondCheckError::<&'static str>::NotYet {
                         status: None,
