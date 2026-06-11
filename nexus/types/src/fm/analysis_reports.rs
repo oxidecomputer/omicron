@@ -9,7 +9,9 @@ use super::case;
 use super::ereport::EreportId;
 use super::json_display::fmt_json_value;
 use iddqd::IdOrdMap;
-use omicron_uuid_kinds::{AlertUuid, CaseUuid, CollectionUuid, SitrepUuid};
+use omicron_uuid_kinds::{
+    AlertUuid, CaseUuid, CollectionUuid, SitrepUuid, SupportBundleUuid,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
@@ -234,6 +236,7 @@ pub struct ClosedCaseReport {
     pub metadata: case::Metadata,
     pub unmarked_ereports: BTreeSet<EreportId>,
     pub unmarked_alert_requests: BTreeSet<AlertUuid>,
+    pub unmarked_support_bundle_requests: BTreeSet<SupportBundleUuid>,
 }
 
 impl InputReport {
@@ -341,6 +344,7 @@ impl fmt::Display for InputReportMultilineDisplay<'_> {
                         metadata,
                         unmarked_ereports,
                         unmarked_alert_requests,
+                        unmarked_support_bundle_requests,
                     },
                 ) in closed_cases_copied_forward
                 {
@@ -353,6 +357,7 @@ impl fmt::Display for InputReportMultilineDisplay<'_> {
                     // forward anyway, that's weird and worth a warning.
                     if unmarked_ereports.is_empty()
                         && unmarked_alert_requests.is_empty()
+                        && unmarked_support_bundle_requests.is_empty()
                     {
                         writeln!(
                             f,
@@ -388,6 +393,22 @@ impl fmt::Display for InputReportMultilineDisplay<'_> {
                         let indent = indent + 2;
                         for alert_id in unmarked_alert_requests {
                             writeln!(f, "{:indent$}* alert {alert_id}", "")?;
+                        }
+                    }
+                    if !unmarked_support_bundle_requests.is_empty() {
+                        writeln!(
+                            f,
+                            "{:indent$}support bundle requests not yet \
+                             satisfied:",
+                            ""
+                        )?;
+                        let indent = indent + 2;
+                        for bundle_id in unmarked_support_bundle_requests {
+                            writeln!(
+                                f,
+                                "{:indent$}* support bundle {bundle_id}",
+                                ""
+                            )?;
                         }
                     }
                 }
@@ -442,7 +463,7 @@ mod tests {
                 .unwrap();
 
         let case3_id =
-            CaseUuid::from_str("77777777-7777-7777-7777-777777777777").unwrap();
+            CaseUuid::from_str("88888888-8888-8888-8888-888888888888").unwrap();
 
         let mut open_cases = BTreeMap::new();
         open_cases.insert(
@@ -468,6 +489,11 @@ mod tests {
             AlertUuid::from_str("66666666-6666-6666-6666-666666666666")
                 .unwrap(),
         );
+        let mut unmarked_support_bundle_requests = BTreeSet::new();
+        unmarked_support_bundle_requests.insert(
+            SupportBundleUuid::from_str("77777777-7777-7777-7777-777777777777")
+                .unwrap(),
+        );
         closed_cases_copied_forward.insert(
             case2_id,
             ClosedCaseReport {
@@ -479,6 +505,7 @@ mod tests {
                 },
                 unmarked_ereports,
                 unmarked_alert_requests,
+                unmarked_support_bundle_requests,
             },
         );
         // A closed case with no recorded reason for being copied forwards. The
@@ -495,6 +522,7 @@ mod tests {
                 },
                 unmarked_ereports: BTreeSet::new(),
                 unmarked_alert_requests: BTreeSet::new(),
+                unmarked_support_bundle_requests: BTreeSet::new(),
             },
         );
 

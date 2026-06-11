@@ -1059,6 +1059,16 @@ pub mod fm_rendezvous {
         pub current_sitrep_bundles_requested: usize,
         /// The number of support bundles created by this activation.
         pub bundles_created: usize,
+        /// The number of support bundles that were already created by an
+        /// earlier activation (the `SitrepGuardedInsert` short-circuited on
+        /// the `rendezvous_support_bundle_created` marker).
+        pub bundles_already_existed: usize,
+        /// If `true`, the activation aborted early because the
+        /// `SitrepGuardedInsert` guard detected that this executor's sitrep
+        /// is older than the current sitrep in the database. The remaining
+        /// bundle requests for this activation were skipped; a fresher
+        /// activation will retry them.
+        pub stale_sitrep: bool,
         /// Errors that occurred during this activation.
         pub errors: Vec<String>,
     }

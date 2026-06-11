@@ -166,6 +166,12 @@ pub struct SitrepMetadata {
     /// value: a rendezvous task working from a sitrep whose generation no
     /// longer matches the current sitrep's has its inserts rejected as stale.
     pub alert_generation: Generation,
+
+    /// `SitrepBuilder` increments this each time it builds a sitrep whose
+    /// support bundle request set differs from its parent's.
+    /// `support_bundle_create` compares it against the latest sitrep to reject
+    /// inserts from stale FM rendezvous executors.
+    pub support_bundle_generation: Generation,
 }
 
 pub struct SitrepStateComparison<'sitrep> {

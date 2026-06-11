@@ -25,6 +25,7 @@ use nexus_types::internal_api::background::SupportBundleCleanupReport;
 use nexus_types::internal_api::background::SupportBundleCollectionReport;
 use nexus_types::internal_api::background::SupportBundleCollectionStep;
 use nexus_types::internal_api::background::SupportBundleEreportStatus;
+use omicron_common::api::external::Generation;
 use omicron_common::api::external::LookupType;
 use omicron_uuid_kinds::SupportBundleUuid;
 use serde::Deserialize;
@@ -948,9 +949,14 @@ async fn test_support_bundle_delete_failed_bundle(
 async fn test_support_bundle_fm_case_id(cptestctx: &ControlPlaneTestContext) {
     use nexus_db_queries::db::datastore::SupportBundleCreateParams;
     use nexus_db_queries::db::datastore::SupportBundleProvenance;
+    use nexus_types::fm::Sitrep;
+    use nexus_types::fm::SitrepMetadata;
     use nexus_types::support_bundle::BundleDataSelection;
     use omicron_uuid_kinds::CaseUuid;
+    use omicron_uuid_kinds::CollectionUuid;
     use omicron_uuid_kinds::GenericUuid;
+    use omicron_uuid_kinds::OmicronZoneUuid;
+    use omicron_uuid_kinds::SitrepUuid;
 
     let client = &cptestctx.external_client;
     let nexus = &cptestctx.server.server_context().nexus;
@@ -965,6 +971,26 @@ async fn test_support_bundle_fm_case_id(cptestctx: &ControlPlaneTestContext) {
     // Create a user bundle through the external API.
     let user_bundle = bundle_create(&client).await.unwrap();
 
+    // The FM provenance path is gated by a sitrep-generation guard, so we
+    // need a sitrep present before calling. Insert one at generation 1; the
+    // FM call below uses the same expected generation.
+    let sitrep = Sitrep {
+        metadata: SitrepMetadata {
+            id: SitrepUuid::new_v4(),
+            inv_collection_id: CollectionUuid::new_v4(),
+            creator_id: OmicronZoneUuid::new_v4(),
+            comment: String::new(),
+            time_created: chrono::Utc::now(),
+            parent_sitrep_id: None,
+            next_inv_min_time_started: chrono::Utc::now(),
+            alert_generation: Generation::new(),
+            support_bundle_generation: Generation::new(),
+        },
+        cases: Default::default(),
+        ereports_by_id: Default::default(),
+    };
+    datastore.fm_sitrep_insert(&opctx, sitrep).await.unwrap();
+
     // Create an FM bundle directly through the datastore.
     let case_id = CaseUuid::new_v4();
     let fm_bundle = datastore
@@ -974,6 +1000,7 @@ async fn test_support_bundle_fm_case_id(cptestctx: &ControlPlaneTestContext) {
                 provenance: SupportBundleProvenance::Fm {
                     id: SupportBundleUuid::new_v4(),
                     case_id,
+                    expected_support_bundle_generation: Generation::new(),
                 },
                 reason: "FM test bundle",
                 nexus_id: nexus.id(),

@@ -26,6 +26,10 @@ pub struct CaseBuilder {
     /// [`Self::request_alert`], read by [`super::SitrepBuilder::build`] via
     /// [`AllCases::alert_set_changed`].
     pub(super) new_alerts_requested: bool,
+    /// Set by [`Self::request_support_bundle`]. [`super::SitrepBuilder::build`]
+    /// reads this through [`AllCases::support_bundle_set_changed`] to decide
+    /// whether to bump its [`fm::SitrepMetadata::support_bundle_generation`].
+    pub(super) support_bundles_changed: bool,
 }
 
 #[derive(Debug)]
@@ -122,6 +126,10 @@ impl AllCases {
     pub(super) fn alert_set_changed(&self) -> bool {
         self.cases.iter().any(|c| c.new_alerts_requested)
     }
+
+    pub(super) fn support_bundle_set_changed(&self) -> bool {
+        self.cases.iter().any(|c| c.support_bundles_changed)
+    }
 }
 
 impl CaseBuilder {
@@ -143,6 +151,7 @@ impl CaseBuilder {
             rng,
             report_log: Default::default(),
             new_alerts_requested: false,
+            support_bundles_changed: false,
         }
     }
 
@@ -233,6 +242,7 @@ impl CaseBuilder {
             .entry("requested support bundle")
             .kv("support_bundle_id", id)
             .comment(comment);
+        self.support_bundles_changed = true;
     }
 
     pub fn close(&mut self, comment: impl ToString) {
@@ -337,6 +347,7 @@ impl iddqd::IdOrdItem for CaseBuilder {
 mod tests {
     use super::*;
     use nexus_types::alert::test_alerts;
+    use nexus_types::support_bundle::BundleDataSelection;
     use omicron_test_utils::dev;
 
     fn make_all_cases(log: &slog::Logger) -> AllCases {
@@ -349,11 +360,12 @@ mod tests {
     }
 
     #[test]
-    fn dirty_bit_default_false() {
-        let logctx = dev::test_setup_log("dirty_bit_default_false");
+    fn dirty_bits_default_false() {
+        let logctx = dev::test_setup_log("dirty_bits_default_false");
         let mut all_cases = make_all_cases(&logctx.log);
         let case = all_cases.open_case(fm::DiagnosisEngineKind::PowerShelf);
         assert!(!case.new_alerts_requested);
+        assert!(!case.support_bundles_changed);
         logctx.cleanup_successful();
     }
 
@@ -369,9 +381,31 @@ mod tests {
             case.request_alert(&test_alerts::Foo(serde_json::json!({})), "")
                 .unwrap();
             assert!(case.new_alerts_requested);
+            assert!(!case.support_bundles_changed);
         }
 
         assert!(all_cases.alert_set_changed());
+        assert!(!all_cases.support_bundle_set_changed());
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn request_support_bundle_flips_bundle_state() {
+        let logctx =
+            dev::test_setup_log("request_support_bundle_flips_bundle_state");
+        let mut all_cases = make_all_cases(&logctx.log);
+        assert!(!all_cases.support_bundle_set_changed());
+
+        {
+            let mut case =
+                all_cases.open_case(fm::DiagnosisEngineKind::PowerShelf);
+            case.request_support_bundle(BundleDataSelection::default(), "");
+            assert!(case.support_bundles_changed);
+            assert!(!case.new_alerts_requested);
+        }
+
+        assert!(all_cases.support_bundle_set_changed());
+        assert!(!all_cases.alert_set_changed());
         logctx.cleanup_successful();
     }
 }

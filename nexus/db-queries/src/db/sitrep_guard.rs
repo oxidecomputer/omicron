@@ -509,6 +509,8 @@ mod tests {
                 time_created: Utc::now(),
                 alert_generation:
                     omicron_common::api::external::Generation::new(),
+                support_bundle_generation:
+                    omicron_common::api::external::Generation::new(),
             },
             cases: IdOrdMap::new(),
             ereports_by_id: IdOrdMap::new(),
@@ -754,4 +756,10 @@ mod tests {
         db.terminate().await;
         logctx.cleanup_successful();
     }
+}
+
+impl SitrepGuardedResource for nexus_db_model::SupportBundle {
+    type GenerationColumn = schema::fm_sitrep::dsl::support_bundle_generation;
+    type MarkerIdColumn =
+        schema::rendezvous_support_bundle_created::dsl::support_bundle_id;
 }
