@@ -237,7 +237,9 @@ impl<'a, N> MetricsQuerier<'a, N> {
                 match self.ctx.oximeter.try_force_collect() {
                     Ok(()) => {}
                     Err(ForcedCollectionError::QueueFull) => {
-                        return Err(CondCheckError::<()>::NotYet);
+                        return Err(CondCheckError::<()>::NotYet {
+                            status: None,
+                        });
                     }
                     Err(e) => {
                         panic!("failed to start oximeter collection: {e:?}");
@@ -258,9 +260,9 @@ impl<'a, N> MetricsQuerier<'a, N> {
                             "Metrics condition not yet true (will retry)";
                             "note" => %note,
                         );
-                        Err(CondCheckError::<()>::NotYetWithStatus(
-                            note.into_owned(),
-                        ))
+                        Err(CondCheckError::<()>::NotYet {
+                            status: Some(note.into_owned()),
+                        })
                     }
                 }
             },
@@ -312,7 +314,9 @@ impl<'a, N> MetricsQuerier<'a, N> {
                 match self.ctx.oximeter.try_force_collect() {
                     Ok(()) => {}
                     Err(ForcedCollectionError::QueueFull) => {
-                        return Err(CondCheckError::<()>::NotYet);
+                        return Err(CondCheckError::<()>::NotYet {
+                            status: None,
+                        });
                     }
                     Err(e) => {
                         panic!("failed to start oximeter collection: {e:?}");
@@ -330,7 +334,9 @@ impl<'a, N> MetricsQuerier<'a, N> {
                             "Timeseries not found (will retry)";
                             "query" => %query,
                         );
-                        return Err(CondCheckError::<()>::NotYet);
+                        return Err(CondCheckError::<()>::NotYet {
+                            status: None,
+                        });
                     }
                 };
 
@@ -342,7 +348,9 @@ impl<'a, N> MetricsQuerier<'a, N> {
                             "Metrics condition not yet true (will retry)";
                             "note" => %note,
                         );
-                        Err(CondCheckError::NotYetWithStatus(note.into_owned()))
+                        Err(CondCheckError::NotYet {
+                            status: Some(note.into_owned()),
+                        })
                     }
                 }
             },

@@ -14,17 +14,23 @@ use tokio::sync::watch;
 #[derive(Debug, Error)]
 pub enum CondCheckError<E> {
     /// the condition we're waiting for is not true
-    #[error("poll condition not yet ready")]
-    NotYet,
-    /// the condition we're waiting for is not true -- the status describes the
-    /// state that was observed instead
     ///
-    /// If the poll ultimately times out, the most recent status is reported
-    /// in [`Error::TimedOut`]'s `last_status` field. Use this variant when a
-    /// plain timeout would not say which part of a compound condition never
-    /// became true.
-    #[error("poll condition not yet ready: {0}")]
-    NotYetWithStatus(String),
+    #[error(
+        "poll condition not yet ready{}",
+        .status
+            .as_ref()
+            .map_or_else(String::new, |status| format!(": {status}"))
+    )]
+    NotYet {
+        /// A status string.
+        ///
+        /// Provide this when a plain timeout would not indicate which part of a
+        /// compound condition never became true.
+        ///
+        /// If the poll ultimately times out, the most recent status is reported in
+        /// [`Error::TimedOut`]'s `last_status` field.
+        status: Option<String>,
+    },
     #[error("non-retryable error while polling on condition")]
     Failed(#[from] E),
 }
@@ -34,14 +40,13 @@ pub enum CondCheckError<E> {
 pub enum Error<E> {
     /// operation timed out before succeeding or failing permanently
     ///
-    /// `last_status` is the most recent
-    /// [`CondCheckError::NotYetWithStatus`] returned by the condition, if
-    /// any.
+    /// `last_status` is the most recent status carried by a
+    /// [`CondCheckError::NotYet`] returned by the condition, if any.
     #[error(
         "timed out after {elapsed:?}{}",
         .last_status
             .as_ref()
-            .map_or(String::new(), |status| format!("; last status: {status}"))
+            .map_or_else(String::new, |status| format!("; last status: {status}"))
     )]
     TimedOut { elapsed: Duration, last_status: Option<String> },
     #[error("non-retryable error while polling on condition: {0:#}")]
@@ -99,13 +104,12 @@ where
 
         match cond().await {
             Ok(output) => return Ok(output),
-            Err(CondCheckError::NotYet) => {
-                // Reset the last status in this case -- better to not present a
-                // stale status in the final error message.
-                last_status = None;
-            }
-            Err(CondCheckError::NotYetWithStatus(status)) => {
-                last_status = Some(status);
+            Err(CondCheckError::NotYet { status }) => {
+                // Record this iteration's status (which may be `None`). `NotYet
+                // { status: None }` clears the last status -- better to present
+                // nothing than something out of date in the final error
+                // message.
+                last_status = status;
             }
             Err(CondCheckError::Failed(e)) => {
                 return Err(Error::PermanentError(e));

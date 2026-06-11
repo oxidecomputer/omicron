@@ -157,7 +157,7 @@ async fn test_nexus_add_remove(lc: &LiveTestContext) {
                 debug!(log,
                     "waiting for new Nexus to be available: listing sagas: {e:#}"
                 );
-                CondCheckError::<()>::NotYet
+                CondCheckError::<()>::NotYet { status: None }
             })?;
             debug!(log, "new Nexus: listing sagas: ok");
 
@@ -167,7 +167,7 @@ async fn test_nexus_add_remove(lc: &LiveTestContext) {
                 .expect("fetching quiesce state from new zone");
             debug!(log, "new Nexus: quiesce state"; "state" => ?qq);
             if let QuiesceState::Undetermined = qq.state {
-                Err(CondCheckError::<()>::NotYet)
+                Err(CondCheckError::<()>::NotYet { status: None })
             } else {
                 Ok(list)
             }
@@ -233,13 +233,13 @@ async fn test_nexus_add_remove(lc: &LiveTestContext) {
                 }
                 Ok(_) => {
                     debug!(log, "expunged Nexus is still reachable");
-                    Err(CondCheckError::<()>::NotYet)
+                    Err(CondCheckError::<()>::NotYet { status: None })
                 }
                 Err(error) => {
                     debug!(log, "expunged Nexus is still reachable";
                         "error" => slog_error_chain::InlineErrorChain::new(&error),
                     );
-                    Err(CondCheckError::NotYet)
+                    Err(CondCheckError::NotYet { status: None })
                 }
             }
         },
@@ -352,7 +352,7 @@ async fn test_nexus_add_remove(lc: &LiveTestContext) {
                 }
             }
 
-            return Err(CondCheckError::<()>::NotYet);
+            return Err(CondCheckError::<()>::NotYet { status: None });
         },
         &Duration::from_millis(1000),
         &Duration::from_secs(120),
@@ -381,7 +381,7 @@ async fn test_nexus_add_remove(lc: &LiveTestContext) {
             if matches!(found.state, SagaState::Succeeded) {
                 Ok(found)
             } else {
-                Err(CondCheckError::<()>::NotYet)
+                Err(CondCheckError::<()>::NotYet { status: None })
             }
         },
         &Duration::from_millis(50),

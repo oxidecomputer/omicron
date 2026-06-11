@@ -1256,7 +1256,9 @@ pub async fn wait_for_ready(
                                 inner.kind(),
                                 std::io::ErrorKind::NotFound
                             ) {
-                                return Err(poll::CondCheckError::NotYet);
+                                return Err(poll::CondCheckError::NotYet {
+                                    status: None,
+                                });
                             }
                         }
                         _ => {}
