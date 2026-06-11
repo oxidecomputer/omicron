@@ -9,6 +9,7 @@ use crate::authz;
 use crate::context::OpContext;
 use crate::db::datastore::RunnableQuery;
 use crate::db::model::Ereport;
+use crate::db::model::EreporterType;
 use crate::db::model::SpMgsSlot;
 use crate::db::model::SpType;
 use crate::db::model::SqlU16;
@@ -25,6 +26,7 @@ use diesel::AggregateExpressionMethods;
 use diesel::dsl::{count, min};
 use diesel::prelude::*;
 use diesel::sql_types;
+use iddqd::IdOrdMap;
 use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::public_error_from_diesel;
 use nexus_db_lookup::DbConnection;
@@ -51,6 +53,58 @@ pub struct EreporterRestartBySerial {
     pub first_seen_at: DateTime<Utc>,
     pub reporter_kind: fm::Reporter,
     pub ereports: u32,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ReporterRestartHistory {
+    pub location: ReporterLocation,
+    pub restarts: Vec<Restart>,
+}
+
+impl iddqd::IdOrdItem for ReporterRestartHistory {
+    type Key<'a> = &'a ReporterLocation;
+
+    fn key(&self) -> Self::Key<'_> {
+        &self.location
+    }
+
+    iddqd::id_upcast!();
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Restart {
+    pub id: EreporterRestartUuid,
+    pub first_seen_at: DateTime<Utc>,
+}
+
+impl PartialOrd for Restart {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for Restart {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.first_seen_at
+            .cmp(&other.first_seen_at)
+            // Break ties using the restart ID. This should really not ever have
+            // to happen, since the first seen time is determined from the
+            // timestamp of the ereport ingestion request that first saw the
+            // restart ID, and it is not possible to ingest ereports with
+            // multiple restart IDs in the same request. But there is no way to
+            // guarantee that it cannot happen, so we must make the wholly
+            // arbitrary decision should the first seen timestamp be equal, I
+            // guess. Yucky. Sigh. I don't know how to solve this better.
+            .then_with(|| self.id.cmp(&other.id))
+    }
+}
+
+/// Describes the physical location of an ereport reporter.
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
+pub struct ReporterLocation {
+    pub slot_type: SpType,
+    pub reporter_type: EreporterType,
+    pub slot: u16,
 }
 
 impl DataStore {
@@ -156,6 +210,53 @@ impl DataStore {
             .load_async(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    /// Returns a list of ereporter restarts for each [`ReporterLocation`].
+    pub async fn ereporter_restart_history(
+        &self,
+        opctx: &OpContext,
+    ) -> Result<IdOrdMap<ReporterRestartHistory>, Error> {
+        opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
+
+        let results = Self::restart_history_query()
+            .load_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        let mut by_location = IdOrdMap::default();
+        for (restart_id, reporter_type, slot_type, slot, first_seen) in results
+        {
+            todo!()
+        }
+
+        Ok(by_location)
+    }
+
+    fn restart_history_query() -> impl RunnableQuery<(
+        Uuid,
+        EreporterType,
+        SpType,
+        Option<SqlU16>,
+        Option<DateTime<Utc>>,
+    )> {
+        // TODO(eliza): would really like to paginate this but i'm not sure if
+        // that plays nice with the `group_by`?
+        dsl::ereport
+            .filter(dsl::time_deleted.is_null())
+            .group_by((
+                dsl::restart_id,
+                dsl::reporter,
+                dsl::slot_type,
+                dsl::slot,
+            ))
+            .select((
+                dsl::restart_id,
+                dsl::reporter,
+                dsl::slot_type,
+                dsl::slot,
+                min(dsl::time_collected),
+            ))
     }
 
     /// List unique ereporter restarts for the given serial number.
@@ -816,6 +917,39 @@ mod tests {
     async fn explain_ereport_unmarked_class_totals_query() {
         let logctx =
             dev::test_setup_log("explain_ereport_unmarked_class_totals_query");
+        let db = TestDatabase::new_with_pool(&logctx.log).await;
+        let pool = db.pool();
+        let conn = pool.claim().await.unwrap();
+
+        let query = DataStore::ereport_unmarked_class_totals_query();
+        let explanation = query
+            .explain_async(&conn)
+            .await
+            .expect("Failed to explain query - is it valid SQL?");
+
+        assert_uses_partial_index_only(
+            &explanation,
+            "lookup_unmarked_ereports_by_class",
+        );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn expectorate_ereporter_restart_history_query() {
+        let query = DataStore::restart_history_query();
+        expectorate_query_contents(
+            &query,
+            "tests/output/ereporter_restart_history.sql",
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn explain_ereporter_restart_history_query() {
+        let logctx =
+            dev::test_setup_log("explain_ereporter_restart_history_query");
         let db = TestDatabase::new_with_pool(&logctx.log).await;
         let pool = db.pool();
         let conn = pool.claim().await.unwrap();
