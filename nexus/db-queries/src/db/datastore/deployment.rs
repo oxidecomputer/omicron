@@ -4647,7 +4647,7 @@ mod tests {
                 if target_check_done.load(Ordering::SeqCst) {
                     Ok(())
                 } else {
-                    Err(CondCheckError::<()>::NotYet)
+                    Err(CondCheckError::<()>::NotYet { status: None })
                 }
             },
             &Duration::from_millis(50),
