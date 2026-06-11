@@ -38,9 +38,9 @@ DNS Server (client: dns-service-client)
     consumed by: sled-agent-rack-setup (omicron/sled-agent/rack-setup) via 1 path [embedded in omicron-sled-agent; rack-init only]
 
 Dendrite DPD (client: dpd-client)
-    consumed by: ddmd (maghemite/ddmd) via 2 paths
+    consumed by: ddmd (maghemite/ddmd) via 3 paths
     consumed by: lldpd (lldp/lldpd) via 2 paths
-    consumed by: mgd (maghemite/mgd) via 1 path
+    consumed by: mgd (maghemite/mgd) via 2 paths
     consumed by: omicron-nexus (omicron/nexus) via 2 paths
     consumed by: omicron-sled-agent (omicron/sled-agent) via 2 paths
     consumed by: tfportd (dendrite/tfportd) via 2 paths
