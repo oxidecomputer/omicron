@@ -142,14 +142,14 @@ impl SledInventory {
     /// inventory, then return an error.
     pub fn load_bootstrap_sleds(
         &self,
-        bootstrap_sled_slots: BTreeSet<u16>,
+        bootstrap_sled_slots: &BTreeSet<u16>,
     ) -> Result<BTreeSet<BootstrapSledDescription>, String> {
         let mut bootstrap_sleds = BTreeSet::new();
         for slot in bootstrap_sled_slots {
             let sled =
                 self.sleds
                     .iter()
-                    .find(|sled| sled.id.slot == slot)
+                    .find(|sled| sled.id.slot == *slot)
                     .ok_or_else(|| {
                         format!(
                             "cannot add unknown sled {slot} to bootstrap_sleds",

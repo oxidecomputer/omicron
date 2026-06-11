@@ -25,6 +25,7 @@ use artifacts::{
 };
 use bootstrap_addrs::BootstrapPeers;
 pub use config::Config;
+pub(crate) use context::RssOrMultirackJoinConfigCommon;
 pub(crate) use context::ServerContext;
 use display_error_chain::DisplayErrorChain;
 use dropshot::{ConfigDropshot, HandlerTaskMode, HttpServer};

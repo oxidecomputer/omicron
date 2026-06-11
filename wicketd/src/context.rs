@@ -6,6 +6,7 @@
 
 use crate::MgsHandle;
 use crate::bgp_auth_keys::BgpAuthKeyError;
+use crate::bgp_auth_keys::BgpAuthKeys;
 use crate::bootstrap_addrs::BootstrapPeers;
 use crate::multirack_config::CurrentMultirackJoinConfig;
 use crate::preflight_check::PreflightCheckerHandler;
@@ -19,16 +20,102 @@ use internal_dns_resolver::Resolver;
 use sled_hardware_types::Baseboard;
 use slog::info;
 use std::collections::BTreeMap;
+use std::collections::BTreeSet;
+use std::mem;
 use std::net::Ipv6Addr;
 use std::net::SocketAddrV6;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::OnceLock;
+use wicket_common::inventory::MgsV1Inventory;
+use wicket_common::inventory::SledInventory;
 use wicket_common::inventory::SpIdentifier;
 use wicket_common::rack_setup::BgpAuthKey;
 use wicket_common::rack_setup::BgpAuthKeyId;
 use wicket_common::rack_setup::BgpAuthKeyStatus;
+use wicket_common::rack_setup::BootstrapSledDescription;
 use wicketd_api::SetBgpAuthKeyStatus;
+
+#[derive(Default)]
+pub(crate) struct RssOrMultirackJoinConfigCommon {
+    pub inventory: SledInventory,
+    pub bootstrap_sleds: BTreeSet<BootstrapSledDescription>,
+    pub bgp_auth_keys: BgpAuthKeys,
+}
+
+impl RssOrMultirackJoinConfigCommon {
+    pub(crate) fn check_bgp_auth_keys_valid<'a>(
+        &self,
+        check_valid: impl IntoIterator<Item = &'a BgpAuthKeyId>,
+    ) -> Result<(), BgpAuthKeyError> {
+        self.bgp_auth_keys.check_valid(check_valid)
+    }
+
+    pub(crate) fn get_bgp_auth_key_data(
+        &self,
+    ) -> BTreeMap<BgpAuthKeyId, BgpAuthKeyStatus> {
+        self.bgp_auth_keys.get_data()
+    }
+
+    pub(crate) fn set_bgp_auth_key(
+        &mut self,
+        key_id: BgpAuthKeyId,
+        key: BgpAuthKey,
+    ) -> Result<SetBgpAuthKeyStatus, BgpAuthKeyError> {
+        self.bgp_auth_keys.set_key(key_id, key)
+    }
+
+    pub(crate) fn update(
+        &mut self,
+        bootstrap_slots: &BTreeSet<u16>,
+        new_bgp_auth_key_ids: impl IntoIterator<Item = BgpAuthKeyId>,
+        our_baseboard: Option<&Baseboard>,
+    ) -> Result<(), String> {
+        // Updating can only fail in two ways:
+        //
+        // 1. If we have a real gimlet baseboard, that baseboard must be present
+        //    in our inventory and in `value`'s list of sleds: we cannot exclude
+        //    ourself from the rack.
+        // 2. `value`'s bootstrap sleds includes sleds that aren't in our
+        //    `inventory`.
+
+        // First, confirm we have ourself in the inventory _and_ the user didn't
+        // remove us from the list.
+        self.inventory.verify_our_baseboard_is_in_inventory_slot(
+            bootstrap_slots,
+            our_baseboard,
+        )?;
+        // Next, confirm the user's list only consists of sleds in our
+        // inventory and return those sleds.
+        self.bootstrap_sleds =
+            self.inventory.load_bootstrap_sleds(bootstrap_slots)?;
+
+        self.bgp_auth_keys.sync_keys(new_bgp_auth_key_ids);
+
+        Ok(())
+    }
+    pub(crate) fn update_with_inventory_and_bootstrap_peers(
+        &mut self,
+        inventory: &MgsV1Inventory,
+        bootstrap_peers: &BootstrapPeers,
+        log: &slog::Logger,
+    ) {
+        let bootstrap_sleds = bootstrap_peers.sleds();
+        self.inventory = SledInventory::new(inventory, &bootstrap_sleds, log);
+
+        // If the user has already uploaded a config specifying bootstrap_sleds,
+        // also update our knowledge of those sleds' bootstrap addresses.
+        let our_bootstrap_sleds = mem::take(&mut self.bootstrap_sleds);
+        self.bootstrap_sleds = our_bootstrap_sleds
+            .into_iter()
+            .map(|mut sled_desc| {
+                sled_desc.bootstrap_ip =
+                    bootstrap_sleds.get(&sled_desc.baseboard).copied();
+                sled_desc
+            })
+            .collect();
+    }
+}
 
 #[allow(clippy::large_enum_variant)]
 pub(crate) enum RssOrMultirackJoinConfig {
@@ -87,8 +174,10 @@ impl RssOrMultirackJoinConfig {
         check_valid: impl IntoIterator<Item = &'a BgpAuthKeyId>,
     ) -> Result<(), BgpAuthKeyError> {
         match self {
-            Self::Rss(c) => c.check_bgp_auth_keys_valid(check_valid),
-            Self::MultirackJoin(c) => c.check_bgp_auth_keys_valid(check_valid),
+            Self::Rss(c) => c.common.check_bgp_auth_keys_valid(check_valid),
+            Self::MultirackJoin(c) => {
+                c.common.check_bgp_auth_keys_valid(check_valid)
+            }
         }
     }
 
@@ -96,8 +185,8 @@ impl RssOrMultirackJoinConfig {
         &self,
     ) -> BTreeMap<BgpAuthKeyId, BgpAuthKeyStatus> {
         match self {
-            Self::Rss(c) => c.get_bgp_auth_key_data(),
-            Self::MultirackJoin(c) => c.get_bgp_auth_key_data(),
+            Self::Rss(c) => c.common.get_bgp_auth_key_data(),
+            Self::MultirackJoin(c) => c.common.get_bgp_auth_key_data(),
         }
     }
 
@@ -107,8 +196,8 @@ impl RssOrMultirackJoinConfig {
         key: BgpAuthKey,
     ) -> Result<SetBgpAuthKeyStatus, BgpAuthKeyError> {
         match self {
-            Self::Rss(c) => c.set_bgp_auth_key(key_id, key),
-            Self::MultirackJoin(c) => c.set_bgp_auth_key(key_id, key),
+            Self::Rss(c) => c.common.set_bgp_auth_key(key_id, key),
+            Self::MultirackJoin(c) => c.common.set_bgp_auth_key(key_id, key),
         }
     }
 }

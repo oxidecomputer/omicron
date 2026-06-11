@@ -4,7 +4,7 @@
 
 //! Support for user-provided RSS configuration options.
 
-use crate::bgp_auth_keys::BgpAuthKeyError;
+use crate::RssOrMultirackJoinConfigCommon;
 use crate::bgp_auth_keys::BgpAuthKeys;
 use crate::bootstrap_addrs::BootstrapPeers;
 use anyhow::Context;
@@ -32,17 +32,9 @@ use sled_agent_types::early_networking::SwitchSlot;
 use sled_agent_types::early_networking::UplinkAddress;
 use sled_hardware_types::Baseboard;
 use slog::warn;
-use std::collections::BTreeMap;
-use std::collections::BTreeSet;
-use std::mem;
 use std::net::IpAddr;
 use std::net::Ipv6Addr;
-use wicket_common::inventory::MgsV1Inventory;
-use wicket_common::inventory::SledInventory;
 use wicket_common::rack_setup::BgpAuthKey;
-use wicket_common::rack_setup::BgpAuthKeyId;
-use wicket_common::rack_setup::BgpAuthKeyStatus;
-use wicket_common::rack_setup::BootstrapSledDescription;
 use wicket_common::rack_setup::CurrentRssUserConfigInsensitive;
 use wicket_common::rack_setup::GetBgpAuthKeyInfoResponse;
 use wicket_common::rack_setup::ManualPortConfig;
@@ -52,7 +44,6 @@ use wicket_common::rack_setup::UserSpecifiedRouterPeerAddr;
 use wicketd_api::CertificateUploadResponse;
 use wicketd_api::CurrentRssUserConfig;
 use wicketd_api::CurrentRssUserConfigSensitive;
-use wicketd_api::SetBgpAuthKeyStatus;
 
 const RECOVERY_SILO_NAME: &str = "recovery";
 const RECOVERY_SILO_USERNAME: &str = "recovery";
@@ -67,9 +58,7 @@ struct PartialCertificate {
 /// the user to fill it in piecemeal.
 #[derive(Default)]
 pub(crate) struct CurrentRssConfig {
-    inventory: SledInventory,
-
-    bootstrap_sleds: BTreeSet<BootstrapSledDescription>,
+    pub common: RssOrMultirackJoinConfigCommon,
     ntp_servers: Vec<String>,
     dns_servers: Vec<IpAddr>,
     internal_services_ip_pool_ranges: Vec<address::IpRange>,
@@ -78,7 +67,6 @@ pub(crate) struct CurrentRssConfig {
     external_certificates: Vec<Certificate>,
     recovery_silo_password_hash: Option<omicron_passwords::NewPasswordHash>,
     rack_network_config: Option<UserSpecifiedRackNetworkConfig>,
-    bgp_auth_keys: BgpAuthKeys,
     allowed_source_ips: Option<AllowedSourceIps>,
     // External certificates are uploaded in two separate actions (cert then
     // key, or vice versa). Here we store a partial certificate; once we have
@@ -102,28 +90,6 @@ impl CurrentRssConfig {
         self.rack_network_config.as_ref()
     }
 
-    pub(crate) fn update_with_inventory_and_bootstrap_peers(
-        &mut self,
-        inventory: &MgsV1Inventory,
-        bootstrap_peers: &BootstrapPeers,
-        log: &slog::Logger,
-    ) {
-        let bootstrap_sleds = bootstrap_peers.sleds();
-        self.inventory = SledInventory::new(inventory, &bootstrap_sleds, log);
-
-        // If the user has already uploaded a config specifying bootstrap_sleds,
-        // also update our knowledge of those sleds' bootstrap addresses.
-        let our_bootstrap_sleds = mem::take(&mut self.bootstrap_sleds);
-        self.bootstrap_sleds = our_bootstrap_sleds
-            .into_iter()
-            .map(|mut sled_desc| {
-                sled_desc.bootstrap_ip =
-                    bootstrap_sleds.get(&sled_desc.baseboard).copied();
-                sled_desc
-            })
-            .collect();
-    }
-
     pub(crate) fn start_rss_request(
         &mut self,
         bootstrap_peers: &BootstrapPeers,
@@ -134,7 +100,7 @@ impl CurrentRssConfig {
         // TODO: Instead, we should collect a list of failed checks that we can
         // send down to the client, and that the client can then display as
         // action items.
-        if self.bootstrap_sleds.is_empty() {
+        if self.common.bootstrap_sleds.is_empty() {
             bail!("bootstrap_sleds is empty (have you uploaded a config?)");
         }
         if self.ntp_servers.is_empty() {
@@ -188,12 +154,12 @@ impl CurrentRssConfig {
         };
         let rack_network_config = validate_rack_network_config(
             rack_network_config,
-            &self.bgp_auth_keys,
+            &self.common.bgp_auth_keys,
         )?;
 
         let known_bootstrap_sleds = bootstrap_peers.sleds();
         let mut bootstrap_ips = Vec::new();
-        for sled in &self.bootstrap_sleds {
+        for sled in &self.common.bootstrap_sleds {
             let Some(ip) = known_bootstrap_sleds.get(&sled.baseboard).copied()
             else {
                 bail!(
@@ -212,9 +178,10 @@ impl CurrentRssConfig {
         // https://github.com/oxidecomputer/omicron/issues/3690
         const TRUST_QUORUM_MIN_SIZE: usize = 3;
         let trust_quorum_peers: Option<Vec<Baseboard>> =
-            if self.bootstrap_sleds.len() >= TRUST_QUORUM_MIN_SIZE {
+            if self.common.bootstrap_sleds.len() >= TRUST_QUORUM_MIN_SIZE {
                 Some(
-                    self.bootstrap_sleds
+                    self.common
+                        .bootstrap_sleds
                         .iter()
                         .map(|sled| sled.baseboard.clone())
                         .collect(),
@@ -354,76 +321,24 @@ impl CurrentRssConfig {
         Ok(CertificateUploadResponse::CertKeyAccepted)
     }
 
-    pub(crate) fn check_bgp_auth_keys_valid<'a>(
-        &self,
-        check_valid: impl IntoIterator<Item = &'a BgpAuthKeyId>,
-    ) -> Result<(), BgpAuthKeyError> {
-        if self.rack_network_config.is_none() {
-            return Err(BgpAuthKeyError::RackNetworkConfigNotSet);
-        }
-
-        self.bgp_auth_keys.check_valid(check_valid)
-    }
-
-    pub(crate) fn get_bgp_auth_key_data(
-        &self,
-    ) -> BTreeMap<BgpAuthKeyId, BgpAuthKeyStatus> {
-        self.bgp_auth_keys.get_data()
-    }
-
-    pub(crate) fn set_bgp_auth_key(
-        &mut self,
-        key_id: BgpAuthKeyId,
-        key: BgpAuthKey,
-    ) -> Result<SetBgpAuthKeyStatus, BgpAuthKeyError> {
-        if self.rack_network_config.is_none() {
-            return Err(BgpAuthKeyError::RackNetworkConfigNotSet);
-        }
-
-        self.bgp_auth_keys.set_key(key_id, key)
-    }
-
     pub(crate) fn update(
         &mut self,
-        value: PutRssUserConfigInsensitive,
+        config: PutRssUserConfigInsensitive,
         our_baseboard: Option<&Baseboard>,
     ) -> Result<(), String> {
-        // Updating can only fail in two ways:
-        //
-        // 1. If we have a real gimlet baseboard, that baseboard must be present
-        //    in our inventory and in `value`'s list of sleds: we cannot exclude
-        //    ourself from the rack.
-        // 2. `value`'s bootstrap sleds includes sleds that aren't in our
-        //    `inventory`.
-
-        // First, confirm we have ourself in the inventory _and_ the user didn't
-        // remove us from the list.
-        self.inventory.verify_our_baseboard_is_in_inventory_slot(
-            &value.bootstrap_sleds,
+        self.common.update(
+            &config.bootstrap_sleds,
+            config.rack_network_config.get_bgp_auth_key_ids(),
             our_baseboard,
         )?;
-
-        // Next, confirm the user's list only consists of sleds in our
-        // inventory and return those sleds.
-        let bootstrap_sleds =
-            self.inventory.load_bootstrap_sleds(value.bootstrap_sleds)?;
-
-        self.bootstrap_sleds = bootstrap_sleds;
-        self.ntp_servers = value.ntp_servers;
-        self.dns_servers = value.dns_servers;
+        self.ntp_servers = config.ntp_servers;
+        self.dns_servers = config.dns_servers;
         self.internal_services_ip_pool_ranges =
-            value.internal_services_ip_pool_ranges;
-        self.external_dns_ips = value.external_dns_ips;
-        self.external_dns_zone_name = value.external_dns_zone_name;
-        self.allowed_source_ips = Some(value.allowed_source_ips);
-
-        // Sync the auth key map with the new config, preserving existing
-        // keys and dropping ones no longer referenced.
-        let new_bgp_auth_key_ids =
-            value.rack_network_config.get_bgp_auth_key_ids();
-        self.bgp_auth_keys.sync_keys(new_bgp_auth_key_ids);
-
-        self.rack_network_config = Some(value.rack_network_config);
+            config.internal_services_ip_pool_ranges;
+        self.external_dns_ips = config.external_dns_ips;
+        self.external_dns_zone_name = config.external_dns_zone_name;
+        self.allowed_source_ips = Some(config.allowed_source_ips);
+        self.rack_network_config = Some(config.rack_network_config);
 
         Ok(())
     }
@@ -433,10 +348,10 @@ impl From<&'_ CurrentRssConfig> for CurrentRssUserConfig {
     fn from(rss: &CurrentRssConfig) -> Self {
         // If the user has selected bootstrap sleds, use those; otherwise,
         // default to the full inventory list.
-        let bootstrap_sleds = if !rss.bootstrap_sleds.is_empty() {
-            rss.bootstrap_sleds.clone()
+        let bootstrap_sleds = if !rss.common.bootstrap_sleds.is_empty() {
+            rss.common.bootstrap_sleds.clone()
         } else {
-            rss.inventory.sleds.clone()
+            rss.common.inventory.sleds.clone()
         };
 
         Self {
@@ -446,7 +361,7 @@ impl From<&'_ CurrentRssConfig> for CurrentRssUserConfig {
                     .recovery_silo_password_hash
                     .is_some(),
                 bgp_auth_keys: GetBgpAuthKeyInfoResponse {
-                    data: rss.get_bgp_auth_key_data(),
+                    data: rss.common.get_bgp_auth_key_data(),
                 },
             },
             insensitive: CurrentRssUserConfigInsensitive {
@@ -743,7 +658,11 @@ impl CertificateValidator {
 
 #[cfg(test)]
 mod tests {
+    use crate::bgp_auth_keys::BgpAuthKeyError;
     use wicket_common::example::ExampleRackSetupData;
+    use wicket_common::rack_setup::BgpAuthKeyId;
+    use wicket_common::rack_setup::BgpAuthKeyStatus;
+    use wicketd_api::SetBgpAuthKeyStatus;
 
     use super::*;
 
@@ -851,7 +770,7 @@ mod tests {
 
         // XXX: This is a hack -- ideally we'd go through the front door of
         // update_with_inventory_and_bootstrap_peers. But it works for now.
-        current_config.inventory = example.inventory.into();
+        current_config.common.inventory = example.inventory.into();
 
         current_config
             .update(
@@ -861,7 +780,7 @@ mod tests {
             .expect("update of example data should succeed");
 
         // At this point, both BGP keys should be unset.
-        let key_data = current_config.get_bgp_auth_key_data();
+        let key_data = current_config.common.get_bgp_auth_key_data();
         assert_eq!(key_data.len(), 2);
 
         let key1 = example.bgp_auth_keys[0].clone();
@@ -877,12 +796,13 @@ mod tests {
         // Add a key for the first key ID.
         {
             let status = current_config
+                .common
                 .set_bgp_auth_key(key1.clone(), shared_key.clone())
                 .expect("setting key1 succeeded");
             assert_eq!(status, SetBgpAuthKeyStatus::Added);
 
             // Check that the key is now set.
-            let key_data = current_config.get_bgp_auth_key_data();
+            let key_data = current_config.common.get_bgp_auth_key_data();
             assert_eq!(
                 key_data.get(&key1),
                 Some(&BgpAuthKeyStatus::Set { info: shared_key.info() })
@@ -892,10 +812,11 @@ mod tests {
         // Try replacing the key with the same one.
         {
             let status = current_config
+                .common
                 .set_bgp_auth_key(key1.clone(), shared_key.clone())
                 .expect("replacing key1 succeeded");
             assert_eq!(status, SetBgpAuthKeyStatus::Unchanged);
-            let key_data = current_config.get_bgp_auth_key_data();
+            let key_data = current_config.common.get_bgp_auth_key_data();
             assert_eq!(
                 key_data.get(&key1),
                 Some(&BgpAuthKeyStatus::Set { info: shared_key.info() })
@@ -905,10 +826,11 @@ mod tests {
         // Replace the key with a different one.
         {
             let status = current_config
+                .common
                 .set_bgp_auth_key(key1.clone(), new_key.clone())
                 .expect("replacing key1 succeeded");
             assert_eq!(status, SetBgpAuthKeyStatus::Replaced);
-            let key_data = current_config.get_bgp_auth_key_data();
+            let key_data = current_config.common.get_bgp_auth_key_data();
             assert_eq!(
                 key_data.get(&key1),
                 Some(&BgpAuthKeyStatus::Set { info: new_key.info() })
@@ -919,8 +841,9 @@ mod tests {
         {
             let does_not_exist: BgpAuthKeyId =
                 "does-not-exist".parse().unwrap();
-            let err =
-                current_config.check_bgp_auth_keys_valid([&does_not_exist]);
+            let err = current_config
+                .common
+                .check_bgp_auth_keys_valid([&does_not_exist]);
             assert_eq!(
                 err,
                 Err(BgpAuthKeyError::KeyIdsNotFound {
@@ -929,6 +852,7 @@ mod tests {
                 })
             );
             let err = current_config
+                .common
                 .set_bgp_auth_key(does_not_exist.clone(), shared_key.clone())
                 .expect_err("setting a non-existent key should fail");
             assert_key_ids_not_found(
@@ -941,10 +865,12 @@ mod tests {
         // Set key2 as well.
         {
             let status = current_config
+                .common
                 .set_bgp_auth_key(key2.clone(), shared_key.clone())
                 .expect("setting key2 succeeded");
             assert_eq!(status, SetBgpAuthKeyStatus::Added);
-            let key_data = current_config.get_bgp_auth_key_data();
+            let key_data = current_config.common.get_bgp_auth_key_data();
+
             assert_eq!(
                 key_data.get(&key2),
                 Some(&BgpAuthKeyStatus::Set { info: shared_key.info() })
@@ -961,7 +887,7 @@ mod tests {
             .expect("update of example data 2 should succeed");
 
         // key1 should have been retained, but key2 should have been dropped.
-        let key_data = current_config.get_bgp_auth_key_data();
+        let key_data = current_config.common.get_bgp_auth_key_data();
         assert_eq!(key_data.len(), 1);
         assert_eq!(
             key_data.get(&key1),
@@ -975,7 +901,7 @@ mod tests {
             .expect("update of example data should succeed");
 
         // key1 should stay set, but not key2.
-        let key_data = current_config.get_bgp_auth_key_data();
+        let key_data = current_config.common.get_bgp_auth_key_data();
         assert_eq!(key_data.len(), 2);
         assert_eq!(
             key_data.get(&key1),
