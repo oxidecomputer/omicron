@@ -309,11 +309,14 @@ impl fmt::Display for LinkFec {
 #[cfg(any(test, feature = "testing"))]
 mod complicated_arbitrary_impls {
     use super::*;
+    use crate::latest::early_networking::BfdMode;
+    use crate::latest::early_networking::BfdPeerConfig;
     use crate::latest::early_networking::BgpConfig;
     use crate::latest::early_networking::ImportExportPolicy;
     use oxnet::Ipv4Net;
     use proptest::prelude::*;
     use std::net::Ipv4Addr;
+    use std::num::NonZeroU8;
 
     // Some of our stricter IP address newtypes reject a variety of
     // otherwise-valid IPs that proptest can generate: loopback addresses,
@@ -578,6 +581,66 @@ mod complicated_arbitrary_impls {
             }
 
             bgp_peer_config_strategy().boxed()
+        }
+    }
+
+    impl Arbitrary for BfdPeerConfig {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            // Initial set of fields that are generated at random.
+            #[derive(Debug, Clone, test_strategy::Arbitrary)]
+            struct InitialFields {
+                remote: IpAddr,
+                // TODO-cleanup mgd rejects requests with a detection threshold
+                // of 0; we should push this type out to BfdPeerConfig.
+                detection_threshold: NonZeroU8,
+                required_rx: u64,
+                mode: BfdMode,
+                switch: SwitchSlot,
+            }
+
+            // We only want to tell proptests to attempt to use a local
+            // listening address of localhost, but we have to pick the right
+            // protocol family of localhost that matches the remote address.
+            //
+            // TODO-correctness What actual validation should be performed on
+            // BFD listening addresses? Taking an arbitrary IP doesn't seem
+            // right; we can only listen on an address that exists within the
+            // switch zone, but even then shouldn't listen on some  (e.g., the
+            // underlay/bootstrap addrs).
+            fn arb_local(initial: &InitialFields) -> Just<Option<IpAddr>> {
+                match initial.remote {
+                    IpAddr::V4(_) => {
+                        Just(Some(IpAddr::V4(Ipv4Addr::LOCALHOST)))
+                    }
+                    IpAddr::V6(_) => {
+                        Just(Some(IpAddr::V6(Ipv6Addr::LOCALHOST)))
+                    }
+                }
+            }
+
+            prop_compose! {
+                fn bfd_peer_config_strategy()(
+                    initial_fields in any::<InitialFields>(),
+                )(
+                    local in arb_local(&initial_fields),
+                    initial_fields in Just(initial_fields),
+                ) -> BfdPeerConfig {
+                    BfdPeerConfig {
+                        local,
+                        remote: initial_fields.remote,
+                        detection_threshold:
+                            initial_fields.detection_threshold.get(),
+                        required_rx: initial_fields.required_rx,
+                        mode: initial_fields.mode,
+                        switch: initial_fields.switch,
+                    }
+                }
+            }
+
+            bfd_peer_config_strategy().boxed()
         }
     }
 }

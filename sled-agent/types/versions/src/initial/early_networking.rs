@@ -384,6 +384,7 @@ pub enum LinkFec {
     PartialOrd,
     Hash,
 )]
+#[cfg_attr(any(test, feature = "testing"), derive(test_strategy::Arbitrary))]
 #[serde(rename_all = "snake_case")]
 pub enum BfdMode {
     SingleHop,
