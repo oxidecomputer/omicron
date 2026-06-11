@@ -300,7 +300,7 @@ pub async fn create_affinity_group(
     db: &DataStore,
     authz_project: &authz::Project,
     group_name: &'static str,
-    policy: external::AffinityPolicy,
+    policy: affinity::AffinityPolicy,
 ) -> AffinityGroup {
     db.affinity_group_create(
         &opctx,
@@ -313,7 +313,7 @@ pub async fn create_affinity_group(
                     description: "desc".to_string(),
                 },
                 policy,
-                failure_domain: external::FailureDomain::Sled,
+                failure_domain: affinity::FailureDomain::Sled,
             },
         ),
     )
@@ -344,7 +344,7 @@ pub async fn create_anti_affinity_group(
     db: &DataStore,
     authz_project: &authz::Project,
     group_name: &'static str,
-    policy: external::AffinityPolicy,
+    policy: affinity::AffinityPolicy,
 ) -> AntiAffinityGroup {
     db.anti_affinity_group_create(
         &opctx,
@@ -357,7 +357,7 @@ pub async fn create_anti_affinity_group(
                     description: "desc".to_string(),
                 },
                 policy,
-                failure_domain: external::FailureDomain::Sled,
+                failure_domain: affinity::FailureDomain::Sled,
             },
         ),
     )

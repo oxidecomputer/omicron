@@ -57,6 +57,10 @@ use nexus_types::external_api::instance::IpAssignment;
 use nexus_types::external_api::instance::PrivateIpStackCreate;
 use nexus_types::external_api::instance::PrivateIpv4StackCreate;
 use nexus_types::external_api::instance::PrivateIpv6StackCreate;
+use nexus_types::external_api::instance::{
+    Instance, InstanceAutoRestartPolicy, InstanceCpuCount, InstanceCpuPlatform,
+    InstanceState,
+};
 use nexus_types::external_api::ip_pool::{
     self, IpRange, Ipv4Range, PoolSelector,
 };
@@ -71,21 +75,14 @@ use nexus_types::external_api::vpc::VpcSubnet;
 use nexus_types::identity::Resource;
 use nexus_types::internal_api::params::InstanceMigrateRequest;
 use nexus_types::silo::DEFAULT_SILO_ID;
-use nexus_types_versions::latest::instance::Instance;
-use nexus_types_versions::latest::instance::InstanceCpuPlatform;
 use omicron_common::address::IpVersion;
-use omicron_common::api::external::AffinityPolicy;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Disk;
 use omicron_common::api::external::DiskState;
 use omicron_common::api::external::Error;
-use omicron_common::api::external::FailureDomain;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::IdentityMetadataUpdateParams;
-use omicron_common::api::external::InstanceAutoRestartPolicy;
-use omicron_common::api::external::InstanceCpuCount;
 use omicron_common::api::external::InstanceNetworkInterface;
-use omicron_common::api::external::InstanceState;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::Nullable;
@@ -6749,8 +6746,8 @@ async fn create_anti_affinity_groups(
                     name: name.parse().unwrap(),
                     description: String::from("This is a description"),
                 },
-                policy: AffinityPolicy::Allow,
-                failure_domain: FailureDomain::Sled,
+                policy: affinity::AffinityPolicy::Allow,
+                failure_domain: affinity::FailureDomain::Sled,
             },
         )
         .await;
@@ -9178,7 +9175,7 @@ pub enum InstanceOp {
 pub async fn instance_wait_for_state(
     client: &ClientTestContext,
     instance_id: InstanceUuid,
-    state: omicron_common::api::external::InstanceState,
+    state: instance::InstanceState,
 ) -> Instance {
     instance_wait_for_state_as(
         client,
@@ -9195,7 +9192,7 @@ pub async fn instance_wait_for_state_as(
     client: &ClientTestContext,
     authn_as: AuthnMode,
     instance_id: InstanceUuid,
-    state: omicron_common::api::external::InstanceState,
+    state: instance::InstanceState,
 ) -> Instance {
     const MAX_WAIT: Duration = Duration::from_secs(320);
 

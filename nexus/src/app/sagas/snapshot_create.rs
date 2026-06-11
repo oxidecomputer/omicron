@@ -1794,7 +1794,6 @@ mod test {
     use nexus_types_versions::latest::instance::Instance;
     use omicron_common::api::external::ByteCount;
     use omicron_common::api::external::IdentityMetadataCreateParams;
-    use omicron_common::api::external::InstanceCpuCount;
     use omicron_common::api::external::Name;
     use omicron_common::api::external::NameOrId;
     use sled_agent_client::CrucibleOpts;
@@ -2178,7 +2177,7 @@ mod test {
                     name: INSTANCE_NAME.parse().unwrap(),
                     description: format!("instance {:?}", INSTANCE_NAME),
                 },
-                ncpus: InstanceCpuCount(2),
+                ncpus: instance_types::InstanceCpuCount(2),
                 memory: ByteCount::from_gibibytes_u32(1),
                 hostname: "base-instance".parse().unwrap(),
                 user_data:

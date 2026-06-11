@@ -1696,8 +1696,7 @@ mod test {
     use nexus_types::instance::VmmState as NexusVmmState;
     use nexus_types::internal_api::params::InstanceMigrateRequest;
     use omicron_common::api::external::{
-        ByteCount, DataPageParams, IdentityMetadataCreateParams,
-        InstanceCpuCount, Name,
+        ByteCount, DataPageParams, IdentityMetadataCreateParams, Name,
     };
     use omicron_test_utils::dev::poll;
     use omicron_uuid_kinds::GenericUuid;
@@ -1753,7 +1752,7 @@ mod test {
                     name: INSTANCE_NAME.parse().unwrap(),
                     description: format!("instance {:?}", INSTANCE_NAME),
                 },
-                ncpus: InstanceCpuCount(1),
+                ncpus: instance_types::InstanceCpuCount(1),
                 memory: ByteCount::from_gibibytes_u32(1),
                 hostname: INSTANCE_NAME.parse().unwrap(),
                 user_data: b"#cloud-config".to_vec(),

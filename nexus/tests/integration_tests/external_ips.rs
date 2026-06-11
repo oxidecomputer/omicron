@@ -47,7 +47,9 @@ use nexus_types::external_api::external_ip;
 use nexus_types::external_api::floating_ip;
 use nexus_types::external_api::floating_ip::FloatingIp;
 use nexus_types::external_api::instance;
-use nexus_types::external_api::instance::InstanceNetworkInterfaceAttachment;
+use nexus_types::external_api::instance::{
+    InstanceCpuCount, InstanceNetworkInterfaceAttachment,
+};
 use nexus_types::external_api::ip_pool;
 use nexus_types::external_api::policy::SiloRole;
 use nexus_types::external_api::project;
@@ -62,8 +64,6 @@ use omicron_common::address::NUM_SOURCE_NAT_PORTS;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::IdentityMetadataUpdateParams;
-use omicron_common::api::external::InstanceCpuCount;
-use omicron_common::api::external::InstanceState;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::PrivateIpStack;
@@ -802,7 +802,12 @@ async fn test_floating_ip_create_attachment(
     .unwrap();
 
     instance_simulate(nexus, &instance_id).await;
-    instance_wait_for_state(client, instance_id, InstanceState::Stopped).await;
+    instance_wait_for_state(
+        client,
+        instance_id,
+        instance::InstanceState::Stopped,
+    )
+    .await;
 
     NexusRequest::object_delete(
         &client,

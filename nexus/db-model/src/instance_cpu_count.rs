@@ -7,7 +7,7 @@ use diesel::deserialize::{self, FromSql};
 use diesel::pg::Pg;
 use diesel::serialize::{self, ToSql};
 use diesel::sql_types;
-use omicron_common::api::external;
+use nexus_types::external_api::instance;
 use serde::Deserialize;
 use serde::Serialize;
 use std::convert::TryFrom;
@@ -24,10 +24,10 @@ use std::convert::TryFrom;
     Eq,
 )]
 #[diesel(sql_type = sql_types::BigInt)]
-pub struct InstanceCpuCount(pub external::InstanceCpuCount);
+pub struct InstanceCpuCount(pub instance::InstanceCpuCount);
 
-NewtypeFrom! { () pub struct InstanceCpuCount(external::InstanceCpuCount); }
-NewtypeDeref! { () pub struct InstanceCpuCount(external::InstanceCpuCount); }
+NewtypeFrom! { () pub struct InstanceCpuCount(instance::InstanceCpuCount); }
+NewtypeDeref! { () pub struct InstanceCpuCount(instance::InstanceCpuCount); }
 
 impl ToSql<sql_types::BigInt, Pg> for InstanceCpuCount {
     fn to_sql<'a>(
@@ -47,7 +47,7 @@ where
     i64: FromSql<sql_types::BigInt, DB>,
 {
     fn from_sql(bytes: DB::RawValue<'_>) -> deserialize::Result<Self> {
-        external::InstanceCpuCount::try_from(i64::from_sql(bytes)?)
+        instance::InstanceCpuCount::try_from(i64::from_sql(bytes)?)
             .map(InstanceCpuCount)
             .map_err(|e| e.into())
     }

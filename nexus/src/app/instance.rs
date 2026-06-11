@@ -53,8 +53,6 @@ use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::Hostname;
-use omicron_common::api::external::InstanceCpuCount;
-use omicron_common::api::external::InstanceState;
 use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::IpVersion;
 use omicron_common::api::external::ListResultVec;
@@ -1235,7 +1233,7 @@ impl super::Nexus {
                 // If there's no active sled because the instance is stopped,
                 // allow requests to stop to succeed silently for idempotency,
                 // but reject requests to do anything else.
-                InstanceState::Stopped => match requested {
+                instance::InstanceState::Stopped => match requested {
                     InstanceStateChangeRequest::Run => {
                         return Err(Error::invalid_request(&format!(
                             "cannot run an instance in state {} with no VMM",
@@ -1264,7 +1262,7 @@ impl super::Nexus {
                 // If the instance is still being created (such that it hasn't
                 // even begun to start yet), no runtime state change is valid.
                 // Return a specific error message explaining the problem.
-                InstanceState::Creating => {
+                instance::InstanceState::Creating => {
                     return Err(Error::invalid_request(
                         "cannot change instance state while it is \
                                 still being created",
@@ -1283,7 +1281,7 @@ impl super::Nexus {
                 // that a Failed instance is definitely not incarnated on a
                 // sled, so all we need to do to "stop" it is to update its
                 // state in the database.
-                InstanceState::Failed
+                instance::InstanceState::Failed
                     if matches!(
                         requested,
                         InstanceStateChangeRequest::Stop
@@ -1316,7 +1314,8 @@ impl super::Nexus {
                 }
                 // If the instance has no sled beacuse it's been destroyed or
                 // has fallen over, reject the state change.
-                InstanceState::Failed | InstanceState::Destroyed => {
+                instance::InstanceState::Failed
+                | instance::InstanceState::Destroyed => {
                     return Err(Error::invalid_request(&format!(
                         "instance state cannot be changed from {}",
                         effective_state
@@ -1346,27 +1345,28 @@ impl super::Nexus {
             InstanceStateChangeRequest::Run
             | InstanceStateChangeRequest::Reboot
             | InstanceStateChangeRequest::Stop => match effective_state {
-                InstanceState::Creating
-                | InstanceState::Starting
-                | InstanceState::Running
-                | InstanceState::Stopping
-                | InstanceState::Stopped
-                | InstanceState::Rebooting
-                | InstanceState::Migrating => true,
-                InstanceState::Repairing | InstanceState::Failed => false,
-                InstanceState::Destroyed => false,
+                instance::InstanceState::Creating
+                | instance::InstanceState::Starting
+                | instance::InstanceState::Running
+                | instance::InstanceState::Stopping
+                | instance::InstanceState::Stopped
+                | instance::InstanceState::Rebooting
+                | instance::InstanceState::Migrating => true,
+                instance::InstanceState::Repairing
+                | instance::InstanceState::Failed => false,
+                instance::InstanceState::Destroyed => false,
             },
             InstanceStateChangeRequest::Migrate(_) => match effective_state {
-                InstanceState::Running
-                | InstanceState::Rebooting
-                | InstanceState::Migrating => true,
-                InstanceState::Creating
-                | InstanceState::Starting
-                | InstanceState::Stopping
-                | InstanceState::Stopped
-                | InstanceState::Repairing
-                | InstanceState::Failed
-                | InstanceState::Destroyed => false,
+                instance::InstanceState::Running
+                | instance::InstanceState::Rebooting
+                | instance::InstanceState::Migrating => true,
+                instance::InstanceState::Creating
+                | instance::InstanceState::Starting
+                | instance::InstanceState::Stopping
+                | instance::InstanceState::Stopped
+                | instance::InstanceState::Repairing
+                | instance::InstanceState::Failed
+                | instance::InstanceState::Destroyed => false,
             },
         };
 
@@ -2866,7 +2866,7 @@ pub(crate) async fn process_vmm_update(
 /// Determines whether the supplied instance sizes (CPU count and memory size)
 /// are acceptable.
 fn check_instance_cpu_memory_sizes(
-    ncpus: InstanceCpuCount,
+    ncpus: instance::InstanceCpuCount,
     memory: ByteCount,
 ) -> Result<(), Error> {
     if ncpus.0 > MAX_VCPU_PER_INSTANCE {
@@ -2949,10 +2949,10 @@ fn instance_start_allowed(
     match state.effective_state() {
         // If the VMM is already starting or is in another "active"
         // state, succeed to make successful start attempts idempotent.
-        s @ InstanceState::Starting
-        | s @ InstanceState::Running
-        | s @ InstanceState::Rebooting
-        | s @ InstanceState::Migrating => {
+        s @ instance::InstanceState::Starting
+        | s @ instance::InstanceState::Running
+        | s @ instance::InstanceState::Rebooting
+        | s @ instance::InstanceState::Migrating => {
             debug!(log, "asked to start an active instance";
                    "instance_id" => %instance.id(),
                    "state" => ?s,
@@ -2960,7 +2960,8 @@ fn instance_start_allowed(
 
             Ok(InstanceStartDisposition::AlreadyStarted)
         }
-        s @ InstanceState::Stopped | s @ InstanceState::Failed => {
+        s @ instance::InstanceState::Stopped
+        | s @ instance::InstanceState::Failed => {
             match vmm.as_ref() {
                 // If a previous start saga failed and left behind a VMM in the
                 // SagaUnwound state, allow a new start saga to try to overwrite
@@ -2996,7 +2997,7 @@ fn instance_start_allowed(
                 None => Ok(InstanceStartDisposition::Start),
             }
         }
-        InstanceState::Stopping => {
+        instance::InstanceState::Stopping => {
             let (propolis_id, propolis_state) = match vmm.as_ref() {
                 Some(vmm) => (Some(vmm.id), Some(vmm.state)),
                 None => (None, None),
@@ -3013,7 +3014,7 @@ fn instance_start_allowed(
         s => {
             return Err(Error::conflict(&format!(
                 "instance is in state {s} but it must be {} to be started",
-                InstanceState::Stopped
+                instance::InstanceState::Stopped
             )));
         }
     }
@@ -3030,8 +3031,9 @@ mod tests {
         Instance as DbInstance, InstanceState as DbInstanceState,
         VmmCpuPlatform, VmmState as DbVmmState,
     };
+    use nexus_types::external_api::instance;
     use omicron_common::api::external::{
-        Hostname, IdentityMetadataCreateParams, InstanceCpuCount, Name,
+        Hostname, IdentityMetadataCreateParams, Name,
     };
     use omicron_test_utils::dev::test_setup_log;
     use propolis_client::support::tungstenite::protocol::Role;
@@ -3141,7 +3143,7 @@ mod tests {
                 name: Name::try_from("elysium".to_owned()).unwrap(),
                 description: "this instance is disco".to_owned(),
             },
-            ncpus: InstanceCpuCount(1),
+            ncpus: instance::InstanceCpuCount(1),
             memory: ByteCount::from_gibibytes_u32(1),
             hostname: Hostname::try_from("elysium").unwrap(),
             user_data: vec![],
@@ -3298,7 +3300,7 @@ mod tests {
                 name: Name::try_from("jumbo".to_owned()).unwrap(),
                 description: "instance under jumbo-frames test".to_owned(),
             },
-            ncpus: InstanceCpuCount(1),
+            ncpus: instance::InstanceCpuCount(1),
             memory: ByteCount::from_gibibytes_u32(1),
             hostname: Hostname::try_from("jumbo").unwrap(),
             user_data: vec![],

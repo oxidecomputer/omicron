@@ -628,7 +628,7 @@ mod tests {
     use nexus_types::external_api::instance as instance_types;
     use nexus_types_versions::latest;
     use omicron_common::api::external::{
-        ByteCount, IdentityMetadataCreateParams, InstanceCpuCount,
+        ByteCount, IdentityMetadataCreateParams,
     };
 
     type ControlPlaneTestContext =
@@ -655,7 +655,7 @@ mod tests {
                     name: INSTANCE_NAME.parse().unwrap(),
                     description: format!("instance {:?}", INSTANCE_NAME),
                 },
-                ncpus: InstanceCpuCount(2),
+                ncpus: instance_types::InstanceCpuCount(2),
                 memory: ByteCount::from_gibibytes_u32(2),
                 hostname: INSTANCE_NAME.parse().unwrap(),
                 user_data: b"#cloud-config".to_vec(),

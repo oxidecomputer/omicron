@@ -48,7 +48,8 @@ impl VmmStateRequested {
     }
 }
 
-impl From<VmmState> for omicron_common::api::external::InstanceState {
+/*
+impl From<VmmState> for nexus_types::external_api::instance::InstanceState {
     fn from(state: VmmState) -> Self {
         match state {
             VmmState::Starting => Self::Starting,
@@ -62,6 +63,7 @@ impl From<VmmState> for omicron_common::api::external::InstanceState {
         }
     }
 }
+*/
 
 impl VmmSpec {
     pub fn crucible_backends(

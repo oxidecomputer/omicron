@@ -1182,7 +1182,7 @@ mod test {
     use nexus_types::identity::Resource;
     use nexus_types_versions::latest;
     use omicron_common::api::external::{
-        ByteCount, IdentityMetadataCreateParams, InstanceCpuCount, Name,
+        ByteCount, IdentityMetadataCreateParams, Name,
     };
     use omicron_test_utils::dev::poll;
     use sled_agent_types::early_networking::SwitchSlot;
@@ -1214,7 +1214,7 @@ mod test {
                     name: INSTANCE_NAME.parse().unwrap(),
                     description: format!("instance {:?}", INSTANCE_NAME),
                 },
-                ncpus: InstanceCpuCount(2),
+                ncpus: instance_types::InstanceCpuCount(2),
                 memory: ByteCount::from_gibibytes_u32(2),
                 hostname: INSTANCE_NAME.parse().unwrap(),
                 user_data: b"#cloud-config".to_vec(),

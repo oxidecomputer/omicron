@@ -1492,7 +1492,7 @@ pub mod test {
     use nexus_types::external_api::ip_pool::PoolSelector;
     use omicron_common::address::IpVersion;
     use omicron_common::api::external::{
-        ByteCount, IdentityMetadataCreateParams, InstanceCpuCount,
+        ByteCount, IdentityMetadataCreateParams,
     };
     use omicron_sled_agent::sim::SledAgent;
     use sled_agent_types::early_networking::SwitchSlot;
@@ -1523,7 +1523,7 @@ pub mod test {
                     name: INSTANCE_NAME.parse().unwrap(),
                     description: "My instance".to_string(),
                 },
-                ncpus: InstanceCpuCount::try_from(2).unwrap(),
+                ncpus: instance_types::InstanceCpuCount::try_from(2).unwrap(),
                 memory: ByteCount::from_gibibytes_u32(4),
                 hostname: "inst".parse().unwrap(),
                 user_data: vec![],
