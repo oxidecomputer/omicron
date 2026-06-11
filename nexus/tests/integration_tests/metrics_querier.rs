@@ -258,7 +258,9 @@ impl<'a, N> MetricsQuerier<'a, N> {
                             "Metrics condition not yet true (will retry)";
                             "note" => %note,
                         );
-                        Err(CondCheckError::<()>::NotYet)
+                        Err(CondCheckError::<()>::NotYetWithStatus(
+                            note.into_owned(),
+                        ))
                     }
                 }
             },
@@ -269,11 +271,12 @@ impl<'a, N> MetricsQuerier<'a, N> {
 
         match result {
             Ok(r) => r,
-            Err(poll::Error::TimedOut(duration)) => {
+            Err(poll::Error::TimedOut { elapsed, last_status }) => {
                 panic!(
-                    "Timed out after {duration:?} waiting for objects list \
-                    success, endpoint: '{}'",
+                    "Timed out after {elapsed:?} waiting for objects list \
+                    success, endpoint: '{}', last status: {}",
                     endpoint(),
+                    last_status.as_deref().unwrap_or("<none>"),
                 );
             }
             Err(poll::Error::PermanentError(_)) => unreachable!(
@@ -339,7 +342,7 @@ impl<'a, N> MetricsQuerier<'a, N> {
                             "Metrics condition not yet true (will retry)";
                             "note" => %note,
                         );
-                        Err(CondCheckError::NotYet)
+                        Err(CondCheckError::NotYetWithStatus(note.into_owned()))
                     }
                 }
             },
@@ -350,10 +353,12 @@ impl<'a, N> MetricsQuerier<'a, N> {
 
         match result {
             Ok(r) => r,
-            Err(poll::Error::TimedOut(duration)) => {
+            Err(poll::Error::TimedOut { elapsed, last_status }) => {
                 panic!(
-                    "Timed out after {duration:?} waiting for timeseries query \
-                    success, endpoint: '{endpoint}', query: '{query}'"
+                    "Timed out after {elapsed:?} waiting for timeseries query \
+                    success, endpoint: '{endpoint}', query: '{query}', \
+                    last status: {}",
+                    last_status.as_deref().unwrap_or("<none>"),
                 );
             }
             Err(poll::Error::PermanentError(_)) => unreachable!(
