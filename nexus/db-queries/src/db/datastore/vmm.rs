@@ -430,10 +430,10 @@ impl DataStore {
     ///
     /// A VMM is considered "abandoned" if (and only if):
     ///
-    /// - It is in the `Destroyed` or `SagaUnwound` state.
+    /// - It is in the `Destroyed`, `Failed`, or `SagaUnwound` state.
     /// - It is not currently running an instance, and it is also not the
-    ///   migration target of any instance (i.e. it is not pointed to by
-    ///   any instance record's `active_propolis_id` and `target_propolis_id`
+    ///   migration target of an instance (i.e. it is not pointed to by its
+    ///   owning instance's `active_propolis_id` or `target_propolis_id`
     ///   fields).
     /// - It has not been deleted yet.
     pub async fn vmm_list_abandoned(
@@ -445,12 +445,12 @@ impl DataStore {
 
         paginated(dsl::vmm, dsl::id, pagparams)
             // In order to be considered "abandoned", a VMM must be:
-            // - in the `Destroyed`, `SagaUnwound`, or `Failed` states
+            // - in the `Destroyed`, `Failed`, or `SagaUnwound` states
             .filter(dsl::state.eq_any(DbVmmState::DESTROYABLE_STATES))
             // - not deleted yet
             .filter(dsl::time_deleted.is_null())
-            // - not pointed to by any instance's `active_propolis_id` or
-            //   `target_propolis_id`.
+            // - not pointed to by its owning instance's `active_propolis_id`
+            //   or `target_propolis_id`.
             .left_join(
                 // Left join with the `instance` table on the VMM's instance ID, so
                 // that we can check if the instance pointed to by this VMM (if

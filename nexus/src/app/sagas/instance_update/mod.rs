@@ -475,8 +475,9 @@ struct UpdatesRequired {
     new_intent: Option<InstanceIntendedState>,
 
     /// If this is [`Some`], the instance's active VMM with this UUID has
-    /// transitioned to [`VmmState::Destroyed`], and its resources must be
-    /// cleaned up by a [`destroyed`] subsaga.
+    /// transitioned to a terminal state ([`VmmState::Destroyed`] or
+    /// [`VmmState::Failed`]), and its resources must be cleaned up by a
+    /// [`destroyed`] subsaga.
     destroy_active_vmm: Option<PropolisUuid>,
 
     /// If this is [`Some`], then a migration finished successfully, and the
@@ -489,8 +490,9 @@ struct UpdatesRequired {
         Option<MigrateSuccessUpdate>,
 
     /// If this is [`Some`], the instance's migration target VMM with this UUID
-    /// has transitioned to [`VmmState::Destroyed`], and its resources must be
-    /// cleaned up by a [`destroyed`] subsaga.
+    /// has transitioned to a terminal state ([`VmmState::Destroyed`] or
+    /// [`VmmState::Failed`]), and its resources must be cleaned up by a
+    /// [`destroyed`] subsaga.
     destroy_target_vmm: Option<PropolisUuid>,
 
     /// If this is [`Some`], the instance no longer has an active VMM, and its
@@ -2847,6 +2849,25 @@ mod test {
 
         poll::wait_for_condition(
             async || {
+                // Force dendrite's NAT RPW to reconcile against Nexus now,
+                // rather than waiting for its next periodic poll. (See
+                // "Relying on periodic background-task activation" in
+                // docs/flake-patterns.adoc.)
+                //
+                // (Triggering reconciliation is idempotent, so it is safe to do
+                // on every iteration.)
+                if let Err(error) = client.nat_trigger_update().await {
+                    slog::info!(
+                        log,
+                        "failed to trigger NAT reconciliation, will retry";
+                        "switch" => ?switch,
+                        "error" => ?error,
+                    );
+                    return Err(poll::CondCheckError::<&'static str>::NotYet {
+                        status: None,
+                    });
+                }
+
                 let result =
                     client.nat_ipv4_list(&NAT_SUBNET, None, None).await;
 
@@ -2861,7 +2882,9 @@ mod test {
                     // implements `Display`, which is necessary for the
                     // `poll::Error` to be `Display`...even though we never
                     // return a `Permanent` error here. I love types.
-                    poll::CondCheckError::<&'static str>::NotYet
+                    poll::CondCheckError::<&'static str>::NotYet {
+                        status: None,
+                    }
                 })?;
                 let len = data.items.len();
                 if len != n {
@@ -2872,7 +2895,9 @@ mod test {
                         "entries" => ?data.items,
                         "expected_len" => n,
                     );
-                    return Err(poll::CondCheckError::<&'static str>::NotYet);
+                    return Err(poll::CondCheckError::<&'static str>::NotYet {
+                        status: None,
+                    });
                 }
 
                 Ok(())
