@@ -430,6 +430,29 @@ impl<N: MakeSagaContext> SagaRecoveryInner<N> {
                     error
                 ))
             })?;
+
+        // The saga stays "pending" (and so blocks quiesce from declaring
+        // itself fully drained) until the DB write lands.
+        //
+        // In case of cancellation the saga is still listed as in-progress in
+        // the database, so the next recovery pass re-resumes it, it gets stuck
+        // again, and we retry the DB write.
+        let abandon_log = saga_logger.clone();
+        let saga_completion = async move {
+            let result = saga_completion.await;
+            if let Err(error) = &result.kind {
+                if error.undo_failure.is_some() {
+                    warn!(abandon_log, "recovered saga is stuck; marking abandoned";
+                        "saga_id" => %saga_id,
+                        "error" => ?error,
+                    );
+                    // TODO-K: Actually mark the saga as abandoned here
+                }
+            }
+            result
+        }
+        .boxed();
+
         let saga_completion = recovery
             .record_saga_recovery(saga_id, &steno::SagaName::new(&saga.name))
             .saga_completion_future(saga_completion);
