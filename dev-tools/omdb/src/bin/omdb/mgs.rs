@@ -132,7 +132,7 @@ async fn cmd_mgs_inventory(
         .await
         .context("listing ignition")?
         .into_inner();
-    sp_list_ignition.sort_by(|a, b| a.id.cmp(&b.id));
+    sp_list_ignition.sort_by_key(|a| a.id);
     show_sps_from_ignition(&sp_list_ignition)?;
     println!("");
 
