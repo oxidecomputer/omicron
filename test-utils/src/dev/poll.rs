@@ -16,6 +16,15 @@ pub enum CondCheckError<E> {
     /// the condition we're waiting for is not true
     #[error("poll condition not yet ready")]
     NotYet,
+    /// the condition we're waiting for is not true -- the status describes the
+    /// state that was observed instead
+    ///
+    /// If the poll ultimately times out, the most recent status is reported
+    /// in [`Error::TimedOut`]'s `last_status` field. Use this variant when a
+    /// plain timeout would not say which part of a compound condition never
+    /// became true.
+    #[error("poll condition not yet ready: {0}")]
+    NotYetWithStatus(String),
     #[error("non-retryable error while polling on condition")]
     Failed(#[from] E),
 }
@@ -24,8 +33,17 @@ pub enum CondCheckError<E> {
 #[derive(Debug, Error)]
 pub enum Error<E> {
     /// operation timed out before succeeding or failing permanently
-    #[error("timed out after {0:?}")]
-    TimedOut(Duration),
+    ///
+    /// `last_status` is the most recent
+    /// [`CondCheckError::NotYetWithStatus`] returned by the condition, if
+    /// any.
+    #[error(
+        "timed out after {elapsed:?}{}",
+        .last_status
+            .as_ref()
+            .map_or(String::new(), |status| format!("; last status: {status}"))
+    )]
+    TimedOut { elapsed: Duration, last_status: Option<String> },
     #[error("non-retryable error while polling on condition: {0:#}")]
     PermanentError(E),
 }
@@ -72,19 +90,26 @@ where
     Fut: Future<Output = Result<O, CondCheckError<E>>>,
 {
     let poll_start = Instant::now();
+    let mut last_status = None;
     loop {
         let duration = Instant::now().duration_since(poll_start);
         if duration > *poll_max {
-            return Err(Error::TimedOut(duration));
+            return Err(Error::TimedOut { elapsed: duration, last_status });
         }
 
-        let check = cond().await;
-        if let Ok(output) = check {
-            return Ok(output);
-        }
-
-        if let Err(CondCheckError::Failed(e)) = check {
-            return Err(Error::PermanentError(e));
+        match cond().await {
+            Ok(output) => return Ok(output),
+            Err(CondCheckError::NotYet) => {
+                // Reset the last status in this case -- better to not present a
+                // stale status in the final error message.
+                last_status = None;
+            }
+            Err(CondCheckError::NotYetWithStatus(status)) => {
+                last_status = Some(status);
+            }
+            Err(CondCheckError::Failed(e)) => {
+                return Err(Error::PermanentError(e));
+            }
         }
 
         tokio::time::sleep(*poll_interval).await;

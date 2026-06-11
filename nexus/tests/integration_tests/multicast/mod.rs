@@ -393,7 +393,7 @@ pub(crate) async fn ensure_inventory_ready(
         Ok(_) => {
             info!(log, "inventory ready with SP data for all sleds");
         }
-        Err(poll::Error::TimedOut(elapsed)) => {
+        Err(poll::Error::TimedOut { elapsed, .. }) => {
             panic!(
                 "inventory did not get SP data for all sleds within {elapsed:?}"
             );
@@ -456,7 +456,7 @@ pub(crate) async fn ensure_dpd_ready(cptestctx: &ControlPlaneTestContext) {
         Ok(_) => {
             info!(log, "DPD/switch infrastructure is ready");
         }
-        Err(poll::Error::TimedOut(elapsed)) => {
+        Err(poll::Error::TimedOut { elapsed, .. }) => {
             panic!(
                 "DPD/switch infrastructure did not become ready within {elapsed:?}"
             );
@@ -526,7 +526,7 @@ pub(crate) async fn wait_for_group_state(
     .await
     {
         Ok(group) => group,
-        Err(poll::Error::TimedOut(elapsed)) => {
+        Err(poll::Error::TimedOut { elapsed, .. }) => {
             panic!(
                 "group {group_name} did not reach state '{expected_state_as_str}' within {elapsed:?}",
             );
@@ -640,7 +640,7 @@ pub(crate) async fn wait_for_member_state(
 
     match res {
         Ok(member) => member,
-        Err(poll::Error::TimedOut(elapsed)) => {
+        Err(poll::Error::TimedOut { elapsed, .. }) => {
             panic!(
                 "member {instance_id} in group {group_name} did not reach state '{expected_state_as_str}' within {elapsed:?}",
             );
@@ -731,7 +731,7 @@ pub(crate) async fn wait_for_instance_sled_assignment(
                 "instance_id" => %instance_id
             );
         }
-        Err(poll::Error::TimedOut(elapsed)) => {
+        Err(poll::Error::TimedOut { elapsed, .. }) => {
             panic!(
                 "instance {instance_id} did not get sled_id assigned within {elapsed:?}"
             );
@@ -790,7 +790,7 @@ pub(crate) async fn instance_wait_for_running_with_simulation(
     .await
     {
         Ok(instance) => instance,
-        Err(poll::Error::TimedOut(elapsed)) => {
+        Err(poll::Error::TimedOut { elapsed, .. }) => {
             panic!(
                 "instance {instance_id} did not reach {expected_state:?} within {elapsed:?}"
             );
@@ -871,7 +871,7 @@ pub(crate) async fn wait_for_instance_stopped(
                 "instance_id" => %instance_id,
             );
         }
-        Err(poll::Error::TimedOut(elapsed)) => {
+        Err(poll::Error::TimedOut { elapsed, .. }) => {
             panic!(
                 "instance {instance_name} ({instance_id}) did not stop \
                  within {elapsed:?}"
@@ -1042,7 +1042,7 @@ pub(crate) async fn wait_for_member_count(
     .await
     {
         Ok(_) => {}
-        Err(poll::Error::TimedOut(elapsed)) => {
+        Err(poll::Error::TimedOut { elapsed, .. }) => {
             panic!(
                 "group {group_name} did not reach member count {expected_count} within {elapsed:?}",
             );
@@ -1088,7 +1088,7 @@ pub(crate) async fn wait_for_group_deleted(
     .await
     {
         Ok(_) => {}
-        Err(poll::Error::TimedOut(elapsed)) => {
+        Err(poll::Error::TimedOut { elapsed, .. }) => {
             panic!("group {group_name} was not deleted within {elapsed:?}",);
         }
         Err(poll::Error::PermanentError(err)) => {
@@ -1127,7 +1127,7 @@ pub(crate) async fn wait_for_group_deleted_from_dpd(
     .await
     {
         Ok(_) => {}
-        Err(poll::Error::TimedOut(elapsed)) => {
+        Err(poll::Error::TimedOut { elapsed, .. }) => {
             panic!(
                 "group with IP {multicast_ip} was not deleted from DPD within {elapsed:?}",
             );

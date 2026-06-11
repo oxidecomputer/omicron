@@ -493,7 +493,7 @@ impl CockroachStarter {
 
                 Err(match poll_error {
                     poll::Error::PermanentError(e) => e,
-                    poll::Error::TimedOut(time_waited) => {
+                    poll::Error::TimedOut { elapsed: time_waited, .. } => {
                         CockroachStartError::TimedOut { pid, time_waited }
                     }
                 })
