@@ -7133,7 +7133,7 @@ CREATE TYPE IF NOT EXISTS omicron.public.alert_class AS ENUM (
     'test.quux.bar',
     'test.quux.bar.baz',
     'hardware.power_shelf.psu.insert',
-    'hardware.power_shelf.psu.remove',
+    'hardware.power_shelf.psu.remove'
     -- Add new alert classes here!
 );
 
