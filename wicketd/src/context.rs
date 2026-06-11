@@ -16,6 +16,8 @@ use crate::update_tracker::UpdateTracker;
 use anyhow::Result;
 use anyhow::anyhow;
 use anyhow::bail;
+use dropshot::ClientErrorStatusCode;
+use dropshot::HttpError;
 use internal_dns_resolver::Resolver;
 use sled_hardware_types::Baseboard;
 use slog::info;
@@ -141,6 +143,21 @@ impl RssOrMultirackJoinConfig {
             Self::Rss(c) => Some(c),
             _ => None,
         }
+    }
+
+    /// Return the [`CurrentRssConfig`] from the `Rss` variant if set or return
+    /// a 409 CONFLICT HTTP error with the given message.
+    pub fn rss_config_mut_or_conflict(
+        &mut self,
+        msg: impl Into<String>,
+    ) -> Result<&mut CurrentRssConfig, HttpError> {
+        self.rss_config_mut().ok_or_else(|| {
+            HttpError::for_client_error(
+                Some("Conflict".to_string()),
+                ClientErrorStatusCode::CONFLICT,
+                msg.into(),
+            )
+        })
     }
 
     /// Return the [`CurrentMultirackJoinConfig`] from the `MultirackJoin`

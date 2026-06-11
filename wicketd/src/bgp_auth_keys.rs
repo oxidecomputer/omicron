@@ -14,11 +14,6 @@ use wicketd_api::SetBgpAuthKeyStatus;
 #[derive(Clone, Debug, PartialEq, Eq, Error)]
 pub(crate) enum BgpAuthKeyError {
     #[error(
-        "rack network config not set (upload the config before setting a key)"
-    )]
-    RackNetworkConfigNotSet,
-
-    #[error(
         "key IDs not found: {} (valid key IDs: {})",
         DisplaySlice(.not_found),
         DisplaySlice(.valid_keys),

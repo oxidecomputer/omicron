@@ -17,7 +17,6 @@ use crate::transceivers::GetTransceiversResponse;
 use crate::transceivers::Handle as TransceiverHandle;
 use bootstrap_agent_lockstep_client::types::RackOperationStatus;
 use dropshot::ApiDescription;
-use dropshot::ClientErrorStatusCode;
 use dropshot::HttpError;
 use dropshot::HttpResponseOk;
 use dropshot::HttpResponseUpdatedNoContent;
@@ -91,19 +90,15 @@ impl WicketdApi for WicketdApiImpl {
                 .await?;
 
         let mut config = ctx.rss_or_multirack_join_config.lock().unwrap();
-        let rss_config = config.rss_config_mut().ok_or_else(|| {
-            HttpError::for_client_error(
-                Some("Conflict".to_string()),
-                ClientErrorStatusCode::CONFLICT,
-                "cannot get RSS config when not preparing for RSS".to_string(),
-            )
-        })?;
+        let rss_config = config.rss_config_mut_or_conflict(
+            "cannot get RSS config when not preparing for RSS",
+        )?;
 
         let inventory = inventory
             .mgs
             .expect("verified by `inventory_or_unavail`")
             .inventory;
-        rss_config.update_with_inventory_and_bootstrap_peers(
+        rss_config.common.update_with_inventory_and_bootstrap_peers(
             &inventory,
             &ctx.bootstrap_peers,
             &ctx.log,
@@ -137,7 +132,7 @@ impl WicketdApi for WicketdApiImpl {
             .expect("verified by `inventory_or_unavail`")
             .inventory;
 
-        join_config.update_with_inventory_and_bootstrap_peers(
+        join_config.common.update_with_inventory_and_bootstrap_peers(
             &inventory,
             &ctx.bootstrap_peers,
             &ctx.log,
@@ -166,7 +161,7 @@ impl WicketdApi for WicketdApiImpl {
         // Overwrite any non-rss config
         let rss_config = config.rss_config_mut_or_default();
 
-        rss_config.update_with_inventory_and_bootstrap_peers(
+        rss_config.common.update_with_inventory_and_bootstrap_peers(
             &inventory,
             &ctx.bootstrap_peers,
             &ctx.log,
@@ -198,7 +193,7 @@ impl WicketdApi for WicketdApiImpl {
         // We don't have a default (empty) version of a `join_config` like we do
         // with an `rss_config` so we have two different paths here.
         if let Some(join_config) = config.multirack_join_config_mut() {
-            join_config.update_with_inventory_and_bootstrap_peers(
+            join_config.common.update_with_inventory_and_bootstrap_peers(
                 &inventory,
                 &ctx.bootstrap_peers,
                 &ctx.log,
@@ -231,14 +226,9 @@ impl WicketdApi for WicketdApiImpl {
 
         let mut config = ctx.rss_or_multirack_join_config.lock().unwrap();
 
-        let rss_config = config.rss_config_mut().ok_or_else(|| {
-            HttpError::for_client_error(
-                Some("Conflict".to_string()),
-                ClientErrorStatusCode::CONFLICT,
-                "cannot post certificates when not preparing for RSS"
-                    .to_string(),
-            )
-        })?;
+        let rss_config = config.rss_config_mut_or_conflict(
+            "cannot post certificates when not preparing for RSS",
+        )?;
 
         let response = rss_config
             .push_cert(body.into_inner())
@@ -254,14 +244,9 @@ impl WicketdApi for WicketdApiImpl {
         let ctx = rqctx.context();
 
         let mut config = ctx.rss_or_multirack_join_config.lock().unwrap();
-        let rss_config = config.rss_config_mut().ok_or_else(|| {
-            HttpError::for_client_error(
-                Some("Conflict".to_string()),
-                ClientErrorStatusCode::CONFLICT,
-                "cannot post private keys when not preparing for RSS"
-                    .to_string(),
-            )
-        })?;
+        let rss_config = config.rss_config_mut_or_conflict(
+            "cannot post private keys when not preparing for RSS",
+        )?;
 
         let response = rss_config
             .push_key(body.into_inner())
@@ -312,14 +297,9 @@ impl WicketdApi for WicketdApiImpl {
 
         let mut config = ctx.rss_or_multirack_join_config.lock().unwrap();
 
-        let rss_config = config.rss_config_mut().ok_or_else(|| {
-            HttpError::for_client_error(
-                Some("Conflict".to_string()),
-                ClientErrorStatusCode::CONFLICT,
-                "cannot put recovery user password when not preparing for RSS"
-                    .to_string(),
-            )
-        })?;
+        let rss_config = config.rss_config_mut_or_conflict(
+            "cannot put recovery user password when not preparing for RSS",
+        )?;
 
         rss_config.set_recovery_user_password_hash(body.into_inner().hash);
 
@@ -332,14 +312,9 @@ impl WicketdApi for WicketdApiImpl {
         let ctx = rqctx.context();
 
         let mut config = ctx.rss_or_multirack_join_config.lock().unwrap();
-        let rss_config = config.rss_config_mut().ok_or_else(|| {
-            HttpError::for_client_error(
-                Some("Conflict".to_string()),
-                ClientErrorStatusCode::CONFLICT,
-                "cannot delete RSS config when not preparing for RSS"
-                    .to_string(),
-            )
-        })?;
+        let rss_config = config.rss_config_mut_or_conflict(
+            "cannot delete RSS config when not preparing for RSS",
+        )?;
 
         *rss_config = Default::default();
 
@@ -406,14 +381,9 @@ impl WicketdApi for WicketdApiImpl {
         let request = {
             let mut config = ctx.rss_or_multirack_join_config.lock().unwrap();
 
-            let rss_config = config.rss_config_mut().ok_or_else(|| {
-                HttpError::for_client_error(
-                    Some("Conflict".to_string()),
-                    ClientErrorStatusCode::CONFLICT,
-                    "cannot run rack setup when not preparing for RSS"
-                        .to_string(),
-                )
-            })?;
+            let rss_config = config.rss_config_mut_or_conflict(
+                "cannot run rack setup when not preparing for RSS",
+            )?;
 
             rss_config.start_rss_request(&ctx.bootstrap_peers, log).map_err(
                 |err| HttpError::for_bad_request(None, format!("{err:#}")),
@@ -968,14 +938,9 @@ impl WicketdApi for WicketdApiImpl {
         let (network_config, dns_servers, ntp_servers) = {
             let mut config = rqctx.rss_or_multirack_join_config.lock().unwrap();
 
-            let rss_config = config.rss_config_mut().ok_or_else(|| {
-                HttpError::for_client_error(
-                    Some("Conflict".to_string()),
-                    ClientErrorStatusCode::CONFLICT,
-                    "cannot run preflight when not preparing for RSS"
-                        .to_string(),
-                )
-            })?;
+            let rss_config = config.rss_config_mut_or_conflict(
+                "cannot run preflight when not preparing for RSS",
+            )?;
             let network_config = rss_config
                 .user_specified_rack_network_config()
                 .cloned()
