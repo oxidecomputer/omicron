@@ -57,6 +57,8 @@ use nexus_types::external_api::vpc;
 use nexus_types::external_api::vpc::{Vpc, VpcRouter, VpcSubnet};
 use nexus_types::identity::Resource;
 use nexus_types::internal_api::params as internal_params;
+use nexus_types_versions::latest::instance::Instance;
+use nexus_types_versions::latest::instance::InstanceCpuPlatform;
 use omicron_common::api::external::AffinityPolicy;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Disk;
@@ -64,10 +66,8 @@ use omicron_common::api::external::Error;
 use omicron_common::api::external::FailureDomain;
 use omicron_common::api::external::Generation;
 use omicron_common::api::external::IdentityMetadataCreateParams;
-use omicron_common::api::external::Instance;
 use omicron_common::api::external::InstanceAutoRestartPolicy;
 use omicron_common::api::external::InstanceCpuCount;
-use omicron_common::api::external::InstanceCpuPlatform;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::RouteDestination;
@@ -963,6 +963,7 @@ pub async fn create_instance_with(
             auto_restart_policy,
             anti_affinity_groups: Vec::new(),
             multicast_groups,
+            enable_jumbo_frames: false,
         },
     )
     .await

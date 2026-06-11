@@ -271,6 +271,7 @@ impl ExampleRackSetupData {
             ntp_servers,
             rack_network_config: Some(rack_network_config),
             allowed_source_ips: Some(AllowedSourceIps::Any),
+            external_jumbo_frames_opt_in_enabled: false,
         };
 
         for tweak in tweaks {
@@ -305,6 +306,7 @@ impl ExampleRackSetupData {
                 .clone()
                 .unwrap(),
             allowed_source_ips: AllowedSourceIps::Any,
+            external_jumbo_frames_opt_in_enabled: false,
         };
 
         Self {

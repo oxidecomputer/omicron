@@ -383,6 +383,7 @@ impl ProbeManagerInner {
             // possible. We should consider if we want to support them here.
             attached_subnets: vec![],
             multicast_groups: &[],
+            mtu: None,
         })?;
 
         let installed_zone = ZoneBuilderFactory::new()

@@ -117,7 +117,7 @@ const ZPOOL: &'static str = "/usr/sbin/zpool";
 const ZONEADM: &'static str = "/usr/sbin/zoneadm";
 
 const SIDECAR_LITE_COMMIT: &'static str =
-    "69fae2ac230cd29f4ea2bf3bcbd6d99554c7bc47";
+    "6f3311e8acd7e7e95c167aab61188355a93afe72";
 const SOFTNPU_COMMIT: &'static str = "284c6830722548714128e63ea04bcca78ee27154";
 const PXA_MAC_DEFAULT: &'static str = "a8:e1:de:01:70:1d";
 

@@ -568,6 +568,11 @@ struct InstanceRunner {
     firewall_rules: Vec<ResolvedVpcFirewallRule>,
     dhcp_config: DhcpCfg,
 
+    // Effective MTU for the primary NIC's OPTE port. `None` means use the OPTE
+    // default (1500). Populated by Nexus based on jumbo-frame opt-in (fleet
+    // flag AND instance bit).
+    primary_nic_mtu: Option<u32>,
+
     // Internal State management
     state: InstanceStates,
     running_state: Option<RunningState>,
@@ -1925,6 +1930,7 @@ impl Instance {
             multicast_groups: local_config.multicast_groups,
             firewall_rules: local_config.firewall_rules,
             dhcp_config,
+            primary_nic_mtu: local_config.primary_nic_mtu,
             state: InstanceStates::new(vmm_runtime, migration_id),
             running_state: None,
             nexus_client,
@@ -2342,6 +2348,7 @@ impl InstanceRunner {
                     .map(Into::into)
                     .collect(),
                 multicast_groups: groups,
+                mtu: if nic.primary { self.primary_nic_mtu } else { None },
             })?;
             opte_port_names.push(port.0.name().to_string());
             opte_ports.push(port);
@@ -2971,6 +2978,7 @@ mod tests {
             },
             delegated_zvols: vec![],
             attached_subnets: vec![],
+            primary_nic_mtu: None,
         };
 
         InstanceInitialState {
@@ -3600,6 +3608,7 @@ mod tests {
                 multicast_groups: local_config.multicast_groups,
                 firewall_rules: local_config.firewall_rules,
                 dhcp_config,
+                primary_nic_mtu: local_config.primary_nic_mtu,
                 state: InstanceStates::new(vmm_runtime, migration_id),
                 running_state: None,
                 nexus_client,

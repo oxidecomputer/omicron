@@ -30,9 +30,9 @@ use nexus_types::external_api::instance::{
     InstanceNetworkInterfaceAttachment,
 };
 use nexus_types::external_api::ip_pool::{IpVersion, PoolSelector};
+use nexus_types_versions::latest::instance::Instance;
 use omicron_common::api::external::{
-    ByteCount, IdentityMetadataCreateParams, Instance, InstanceCpuCount,
-    NameOrId,
+    ByteCount, IdentityMetadataCreateParams, InstanceCpuCount, NameOrId,
 };
 use omicron_nexus::TestInterfaces;
 use omicron_test_utils::dev::poll::{CondCheckError, wait_for_condition};
@@ -102,6 +102,7 @@ async fn test_multicast_external_ip_scenarios(
             start: true, // Start the instance
             auto_restart_policy: Default::default(),
             anti_affinity_groups: Vec::new(),
+            enable_jumbo_frames: false,
         };
 
         let instance_url = format!("/v1/instances?project={project_name}");
@@ -248,6 +249,7 @@ async fn test_multicast_external_ip_scenarios(
             start: true,
             auto_restart_policy: Default::default(),
             anti_affinity_groups: Vec::new(),
+            enable_jumbo_frames: false,
         };
 
         let instance_url = format!("/v1/instances?project={project_name}");
@@ -411,6 +413,7 @@ async fn test_multicast_external_ip_scenarios(
             start: true,
             auto_restart_policy: Default::default(),
             anti_affinity_groups: Vec::new(),
+            enable_jumbo_frames: false,
         };
 
         let instance_url = format!("/v1/instances?project={project_name}");
@@ -534,6 +537,7 @@ async fn test_multicast_with_floating_ip_basic(
         start: true, // Start the instance
         auto_restart_policy: Default::default(),
         anti_affinity_groups: Vec::new(),
+        enable_jumbo_frames: false,
     };
 
     let instance_url = format!("/v1/instances?project={project_name}");
@@ -767,6 +771,7 @@ async fn test_multicast_sled_agent_m2p_and_subscriptions(
         start: true,
         auto_restart_policy: Default::default(),
         anti_affinity_groups: Vec::new(),
+        enable_jumbo_frames: false,
     };
 
     let instance_url = format!("/v1/instances?project={project_name}");

@@ -22,13 +22,13 @@ use nexus_test_utils::resource_helpers::{
     create_project, link_ip_pool, object_put_upsert, objects_list_page_authz,
 };
 use nexus_test_utils_macros::nexus_test;
+use nexus_types::external_api::instance::Instance;
 use nexus_types::external_api::instance::InstanceNetworkInterfaceAttachment;
 use nexus_types::external_api::multicast::{
     InstanceMulticastGroupJoin, MulticastGroup, MulticastGroupMember,
 };
 use nexus_types::identity::Resource;
 use omicron_common::address::{IpRange, Ipv4Range};
-use omicron_common::api::external::Instance;
 use omicron_test_utils::dev::poll::{self, CondCheckError, wait_for_condition};
 
 type ControlPlaneTestContext =

@@ -758,7 +758,20 @@ impl<'a> EarlyNetworkSetup<'a> {
                             length: r.destination.width(),
                         };
                         let sr = StaticRoute4 {
-                            nexthop,
+                            nexthop: IpAddr::V4(nexthop),
+                            prefix,
+                            vlan_id,
+                            rib_priority,
+                        };
+                        rq.routes.list.push(sr);
+                    }
+                    (IpAddr::V6(nexthop), IpAddr::V4(dest_addr)) => {
+                        let prefix = Prefix4 {
+                            value: dest_addr,
+                            length: r.destination.width(),
+                        };
+                        let sr = StaticRoute4 {
+                            nexthop: IpAddr::V6(nexthop),
                             prefix,
                             vlan_id,
                             rib_priority,
@@ -778,10 +791,10 @@ impl<'a> EarlyNetworkSetup<'a> {
                         };
                         rqv6.routes.list.push(sr);
                     }
-                    _ => {
+                    (IpAddr::V4(_), IpAddr::V6(_)) => {
                         error!(
                             self.log,
-                            "nexthop and destination are different address types";
+                            "v6 destination over v4 nexthop not supported";
                             "nexthop" => ?r.nexthop,
                             "destination" => ?r.destination.addr(),
                         );
@@ -804,7 +817,7 @@ impl<'a> EarlyNetworkSetup<'a> {
                 self.log,
                 "static route configuration failed";
                 "error" => ?e,
-                "configuration" => ?rq,
+                "configuration" => ?rqv6,
             );
         };
 

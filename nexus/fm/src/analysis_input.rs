@@ -245,6 +245,7 @@ mod tests {
     use super::*;
     use crate::builder::SitrepBuilder;
     use crate::test_util::FmTest;
+    use nexus_types::alert::test_alerts;
     use nexus_types::fm;
     use nexus_types::fm::case::CaseEreport;
     use nexus_types::fm::ereport::Reporter;
@@ -588,8 +589,7 @@ mod tests {
             );
             new_case
                 .request_alert(
-                    nexus_types::alert::AlertClass::TestFooBar,
-                    &serde_json::json!({"alert": true}),
+                    &test_alerts::FooBar(serde_json::json!({"alert": true})),
                     "requesting an alert to tell someone about something",
                 )
                 .unwrap();

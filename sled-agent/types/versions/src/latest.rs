@@ -90,15 +90,15 @@ pub mod firewall_rules {
 }
 
 pub mod multicast {
-    pub use crate::v41::multicast::ClearMcast2Phys;
-    pub use crate::v41::multicast::ClearMcastForwarding;
-    pub use crate::v41::multicast::Mcast2PhysMapping;
-    pub use crate::v41::multicast::McastFilterMode;
-    pub use crate::v41::multicast::McastForwardingEntry;
-    pub use crate::v41::multicast::McastForwardingNextHop;
-    pub use crate::v41::multicast::McastReplication;
-    pub use crate::v41::multicast::McastSourceFilter;
-    pub use crate::v41::multicast::MulticastGroupCfg;
+    pub use crate::v42::multicast::ClearMcast2Phys;
+    pub use crate::v42::multicast::ClearMcastForwarding;
+    pub use crate::v42::multicast::Mcast2PhysMapping;
+    pub use crate::v42::multicast::McastFilterMode;
+    pub use crate::v42::multicast::McastForwardingEntry;
+    pub use crate::v42::multicast::McastForwardingNextHop;
+    pub use crate::v42::multicast::McastReplication;
+    pub use crate::v42::multicast::McastSourceFilter;
+    pub use crate::v42::multicast::MulticastGroupCfg;
 }
 
 pub mod instance {
@@ -130,8 +130,8 @@ pub mod instance {
     pub use crate::v32::instance::ExternalIps;
     pub use crate::v32::instance::ExternalIpv4Config;
     pub use crate::v32::instance::ExternalIpv6Config;
-    pub use crate::v32::instance::InstanceEnsureBody;
-    pub use crate::v32::instance::InstanceSledLocalConfig;
+    pub use crate::v41::instance::InstanceEnsureBody;
+    pub use crate::v41::instance::InstanceSledLocalConfig;
 }
 
 pub mod inventory {

@@ -71,6 +71,7 @@ async fn create_instance_expect_failure(
         auto_restart_policy: Default::default(),
         anti_affinity_groups: Vec::new(),
         multicast_groups: Vec::new(),
+        enable_jumbo_frames: false,
     };
 
     NexusRequest::new(
