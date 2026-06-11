@@ -34,10 +34,7 @@ impl_enum_type!(
 /// Diesel row for the `fm_fact_physical_disk` table.
 ///
 /// The payload columns are populated according to `kind`: a column is `Some`
-/// if it belongs to that `kind`'s payload, and `None` otherwise (by
-/// convention; the per-kind CHECK constraints, e.g.
-/// `zpool_unhealthy_columns_present`, enforce only the "present for the
-/// matching kind" direction so that future kinds may share columns).
+/// if it belongs to that `kind`'s payload, and `None` otherwise.
 #[derive(Queryable, Insertable, Clone, Debug, Selectable)]
 #[diesel(table_name = fm_fact_physical_disk)]
 pub struct FmFactPhysicalDisk {
@@ -68,11 +65,7 @@ pub struct FmFactPhysicalDisk {
 
 impl FmFactPhysicalDisk {
     /// Build a row from a fact's shared metadata (`fact`) and its
-    /// already-dispatched physical-disk payload (`disk_fact`).
-    ///
-    /// Callers route each fact to its engine's table by matching on
-    /// [`fact.payload`](fm::case::Fact::payload) and pass the matched payload
-    /// here, so this never has to interpret another engine's payload.
+    /// physical-disk payload (`disk_fact`).
     pub fn from_sitrep(
         sitrep_id: impl Into<DbTypedUuid<SitrepKind>>,
         case_id: impl Into<DbTypedUuid<CaseKind>>,
@@ -106,10 +99,8 @@ impl FmFactPhysicalDisk {
 
     /// Reconstruct an in-memory fact from a row.
     ///
-    /// The payload columns the database's CHECK constraint guarantees are
-    /// non-NULL for this `kind` are unwrapped; a NULL where one is required
-    /// indicates a corrupt row (e.g. hand-edited) and yields an internal
-    /// error rather than a panic.
+    /// A NULL in a column the CHECK constraint requires for this `kind`
+    /// yields an internal error rather than a panic.
     pub fn into_fact(self) -> Result<fm::case::Fact, Error> {
         let kind = self.kind;
         let payload = match kind {

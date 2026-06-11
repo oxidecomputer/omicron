@@ -5306,6 +5306,12 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_svc_enabled_not_online_parse_error
  *
  * See https://github.com/oxidecomputer/omicron/issues/8253 for more details.
  */
+CREATE TYPE IF NOT EXISTS omicron.public.reconfigurator_disruption_policy AS ENUM (
+    'terminate',
+    'migrate_or_terminate',
+    'migrate_only'
+);
+
 CREATE TABLE IF NOT EXISTS omicron.public.reconfigurator_config (
     -- Monotonically increasing version for all bp_targets
     version INT8 PRIMARY KEY,
@@ -5317,7 +5323,10 @@ CREATE TABLE IF NOT EXISTS omicron.public.reconfigurator_config (
     time_modified TIMESTAMPTZ NOT NULL,
 
     -- Enable the TUF repo pruner background task
-    tuf_repo_pruner_enabled BOOL NOT NULL
+    tuf_repo_pruner_enabled BOOL NOT NULL,
+
+    -- How to disrupt instances during updates.
+    disruption_policy omicron.public.reconfigurator_disruption_policy NOT NULL
 );
 
 /*
@@ -7140,7 +7149,8 @@ CREATE TABLE IF NOT EXISTS omicron.public.alert (
     time_modified TIMESTAMPTZ NOT NULL,
     -- The class of alert that this is.
     alert_class omicron.public.alert_class NOT NULL,
-    -- Actual alert data. The structure of this depends on the alert class.
+    -- Actual alert data. The structure of this depends on the alert class and
+    -- version.
     payload JSONB NOT NULL,
 
     -- Set when dispatch entries have been created for this alert.
@@ -7151,12 +7161,20 @@ CREATE TABLE IF NOT EXISTS omicron.public.alert (
     -- The ID of the fault management case that created this alert, if any.
     case_id UUID,
 
+    -- The version of the alert class' schema that this alert's payload conforms
+    -- to, starting at version 0.
+    alert_version INT8 NOT NULL,
+
     CONSTRAINT time_dispatched_set_if_dispatched CHECK (
         (num_dispatched = 0) OR (time_dispatched IS NOT NULL)
     ),
 
     CONSTRAINT num_dispatched_is_positive CHECK (
         (num_dispatched >= 0)
+    ),
+
+    CONSTRAINT alert_version_is_non_negative CHECK (
+        (alert_version >= 0)
     )
 );
 
@@ -7168,7 +7186,8 @@ INSERT INTO omicron.public.alert (
     alert_class,
     payload,
     time_dispatched,
-    num_dispatched
+    num_dispatched,
+    alert_version
 ) VALUES (
     -- NOTE: this UUID is duplicated in nexus_db_model::alert.
     '001de000-7768-4000-8000-000000000001',
@@ -7179,6 +7198,7 @@ INSERT INTO omicron.public.alert (
     -- Pretend to be dispatched so we won't show up in "list alerts needing
     -- dispatch" queries
     NOW(),
+    0,
     0
 ) ON CONFLICT DO NOTHING;
 
@@ -7907,13 +7927,22 @@ CREATE TABLE IF NOT EXISTS omicron.public.fm_alert_request (
 
     -- The class of alert that was requested
     alert_class omicron.public.alert_class NOT NULL,
-    -- Actual alert data. The structure of this depends on the alert class.
+    -- Actual alert data. The structure of this depends on the alert class and
+    -- version.
     payload JSONB NOT NULL,
     -- A human-readable comment from the diagnosis engine explaining why it
     -- requested this alert.
     comment TEXT NOT NULL,
 
-    PRIMARY KEY (sitrep_id, id)
+    -- The version of the alert class' schema that this alert's payload conforms
+    -- to, starting at version 0.
+    alert_version INT8 NOT NULL,
+
+    PRIMARY KEY (sitrep_id, id),
+
+    CONSTRAINT alert_version_is_non_negative CHECK (
+        (alert_version >= 0)
+    )
 );
 
 CREATE INDEX IF NOT EXISTS
@@ -8815,7 +8844,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '267.0.0', NULL)
+    (TRUE, NOW(), NOW(), '269.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

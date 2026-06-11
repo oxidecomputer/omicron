@@ -2273,6 +2273,7 @@ mod tests {
                 .insert_unique(fm::case::AlertRequest {
                     id: AlertUuid::new_v4(),
                     class: AlertClass::TestFoo,
+                    version: 0,
                     payload: serde_json::json!({}),
                     requested_sitrep_id: sitrep_id,
                     comment: String::new(),
@@ -2282,6 +2283,7 @@ mod tests {
                 .insert_unique(fm::case::AlertRequest {
                     id: AlertUuid::new_v4(),
                     class: AlertClass::TestFooBar,
+                    version: 0,
                     payload: serde_json::json!({}),
                     requested_sitrep_id: sitrep_id,
                     comment: String::new(),
@@ -2434,6 +2436,7 @@ mod tests {
                 .insert_unique(fm::case::AlertRequest {
                     id: AlertUuid::new_v4(),
                     class: AlertClass::TestQuuxBar,
+                    version: 0,
                     payload: serde_json::json!({}),
                     requested_sitrep_id: sitrep_id,
                     comment: String::new(),
@@ -2965,6 +2968,7 @@ mod tests {
                 requested_sitrep_id: ghost_sitrep_id.into(),
                 case_id: ghost_case_id.into(),
                 class: AlertClass::Probe.into(),
+                version: 0u32.into(),
                 payload: serde_json::json!({}),
                 comment: String::new(),
             })

@@ -42,7 +42,6 @@ pub struct Input {
     new_ereports: IdOrdMap<fm::Ereport>,
     open_cases: IdOrdMap<fm::Case>,
     closed_cases_copied_forward: IdOrdMap<fm::Case>,
-    /// All control plane managed disks
     in_service_disks: Arc<IdOrdMap<InServiceDisk>>,
     /// All non-terminal (running/unwinding) sagas, annotated with their
     /// latest node-event time and owning-Nexus state.
@@ -74,8 +73,7 @@ impl Input {
     }
 
     /// All control-plane-managed disks (`physical_disk.disk_policy =
-    /// in_service` in the DB), indexed by `physical_disk_id`. See the
-    /// field-level documentation on `Input::in_service_disks` for semantics.
+    /// in_service` in the DB), indexed by `physical_disk_id`.
     pub fn in_service_disks(&self) -> &IdOrdMap<InServiceDisk> {
         &self.in_service_disks
     }
@@ -296,6 +294,7 @@ mod tests {
     use super::*;
     use crate::builder::SitrepBuilder;
     use crate::test_util::FmTest;
+    use nexus_types::alert::test_alerts;
     use nexus_types::fm;
     use nexus_types::fm::case::CaseEreport;
     use nexus_types::fm::ereport::Reporter;
@@ -648,8 +647,7 @@ mod tests {
             );
             new_case
                 .request_alert(
-                    nexus_types::alert::AlertClass::TestFooBar,
-                    &serde_json::json!({"alert": true}),
+                    &test_alerts::FooBar(serde_json::json!({"alert": true})),
                     "requesting an alert to tell someone about something",
                 )
                 .unwrap();

@@ -5,8 +5,7 @@
 //! Fault management diagnosis engines.
 //!
 //! Each submodule defines one diagnosis engine (DE). `analyze` dispatches to
-//! each engine in turn; engines are deterministic and idempotent per RFD 603,
-//! so the dispatch order does not matter.
+//! each engine in turn; engines are deterministic and idempotent per RFD 603.
 
 use crate::SitrepBuilder;
 

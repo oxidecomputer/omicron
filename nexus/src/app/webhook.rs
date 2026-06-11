@@ -38,7 +38,6 @@ use nexus_db_lookup::LookupPath;
 use nexus_db_lookup::lookup;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
-use nexus_db_queries::db::model::AlertClass;
 use nexus_db_queries::db::model::AlertDeliveryState;
 use nexus_db_queries::db::model::AlertDeliveryTrigger;
 use nexus_db_queries::db::model::AlertReceiver;
@@ -48,6 +47,9 @@ use nexus_db_queries::db::model::WebhookDeliveryAttempt;
 use nexus_db_queries::db::model::WebhookDeliveryAttemptResult;
 use nexus_db_queries::db::model::WebhookReceiverConfig;
 use nexus_db_queries::db::model::WebhookSecret;
+use nexus_types::alert as alert_types;
+use nexus_types::alert::AlertClass;
+use nexus_types::alert::AlertPayload;
 use nexus_types::external_api::alert;
 use nexus_types::identity::Asset;
 use nexus_types::identity::Resource;
@@ -191,12 +193,16 @@ impl Nexus {
         )?;
         let mut delivery = WebhookDelivery::new_probe(&rx_id, &self.id);
 
-        const CLASS: AlertClass = AlertClass::Probe;
-        static DATA: LazyLock<serde_json::Value> =
-            LazyLock::new(|| serde_json::json!({}));
+        const CLASS: AlertClass = <alert_types::Probe as AlertPayload>::CLASS;
+        const VERSION: u32 = <alert_types::Probe as AlertPayload>::VERSION;
+        static DATA: LazyLock<serde_json::Value> = LazyLock::new(|| {
+            serde_json::to_value(&alert_types::Probe {}).expect(
+                "a struct with no fields should always serialize properly",
+            )
+        });
 
         let attempt = match client
-            .send_delivery_request(opctx, &delivery, CLASS, &DATA)
+            .send_delivery_request(opctx, &delivery, CLASS, VERSION, &DATA)
             .await
         {
             Ok(attempt) => attempt,
@@ -375,7 +381,8 @@ impl<'a> ReceiverClient<'a> {
         &mut self,
         opctx: &OpContext,
         delivery: &WebhookDelivery,
-        alert_class: AlertClass,
+        alert_class: impl Into<AlertClass>,
+        alert_version: u32,
         data: &serde_json::Value,
     ) -> Result<WebhookDeliveryAttempt, anyhow::Error> {
         const HDR_DELIVERY_ID: HeaderName =
@@ -386,6 +393,8 @@ impl<'a> ReceiverClient<'a> {
             HeaderName::from_static("x-oxide-alert-id");
         const HDR_ALERT_CLASS: HeaderName =
             HeaderName::from_static("x-oxide-alert-class");
+        const HDR_ALERT_VERSION: HeaderName =
+            HeaderName::from_static("x-oxide-alert-version");
         const HDR_SIG: HeaderName =
             HeaderName::from_static("x-oxide-signature");
         const HDR_TIMESTAMP: HeaderName =
@@ -394,6 +403,7 @@ impl<'a> ReceiverClient<'a> {
         #[derive(serde::Serialize, Debug)]
         struct Payload<'a> {
             alert_class: AlertClass,
+            alert_version: u32,
             alert_id: AlertUuid,
             data: &'a serde_json::Value,
             delivery: DeliveryMetadata<'a>,
@@ -408,10 +418,12 @@ impl<'a> ReceiverClient<'a> {
         }
 
         // okay, actually do the thing...
+        let alert_class = alert_class.into();
         let time_attempted = Utc::now();
         let sent_at = time_attempted.to_rfc3339();
         let payload = Payload {
             alert_class,
+            alert_version,
             alert_id: delivery.alert_id.into(),
             data,
             delivery: DeliveryMetadata {
@@ -461,6 +473,7 @@ impl<'a> ReceiverClient<'a> {
             .header(HDR_DELIVERY_ID, delivery.id.to_string())
             .header(HDR_ALERT_ID, delivery.alert_id.to_string())
             .header(HDR_ALERT_CLASS, alert_class.to_string())
+            .header(HDR_ALERT_VERSION, alert_version.to_string())
             .header(HDR_TIMESTAMP, &sent_at)
             .header(http::header::CONTENT_TYPE, "application/json");
 

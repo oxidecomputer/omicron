@@ -232,11 +232,8 @@ impl FmAnalysis {
         // represented as control plane disks today, so the U.2-only filter
         // on the underlying query matches reality.
         //
-        // This is the executed view from the DB, flipped only after sagas /
-        // cleaners have actually drained resources, not while a planner is
-        // merely proposing changes. A faulty disk a planner proposes to
-        // expunge is still the diagnoser's concern until the control plane
-        // has actually moved on.
+        // See `nexus_types::in_service_disk` for why FM reads the executed
+        // DB view rather than the target blueprint.
         let zpools_and_disks = self
             .datastore
             .zpool_list_all_external_batched(opctx)

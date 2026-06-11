@@ -174,9 +174,6 @@ impl CaseEreport {
 ///
 /// The `payload` is a fully-typed [`FactPayload`] whose variant is owned by
 /// the case's diagnosis engine (see [`Metadata::de`]).
-///
-/// `Eq`/`PartialEq` derive over all fields, including the typed payload.
-/// This is the equality the DB round-trip test needs.
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
 pub struct Fact {
     pub id: FactUuid,
@@ -247,6 +244,7 @@ impl Fact {
 pub struct AlertRequest {
     pub id: AlertUuid,
     pub class: AlertClass,
+    pub version: u32,
     pub payload: serde_json::Value,
     pub requested_sitrep_id: SitrepUuid,
     pub comment: String,
@@ -389,6 +387,7 @@ impl fmt::Display for DisplayCase<'_> {
             for AlertRequest {
                 id,
                 class,
+                version,
                 payload: _,
                 requested_sitrep_id,
                 comment,
@@ -402,7 +401,11 @@ impl fmt::Display for DisplayCase<'_> {
                     const_max_len(&[CLASS, REQUESTED_IN, COMMENT]);
 
                 writeln!(f, "{BULLET:>indent$}alert {id}",)?;
-                writeln!(f, "{:>indent$}{CLASS:<WIDTH$} {class}", "",)?;
+                writeln!(
+                    f,
+                    "{:>indent$}{CLASS:<WIDTH$} {class}, v{version}",
+                    "",
+                )?;
                 writeln!(
                     f,
                     "{:>indent$}{REQUESTED_IN:<WIDTH$} {requested_sitrep_id}{}",
@@ -572,6 +575,7 @@ mod tests {
             .insert_unique(AlertRequest {
                 id: alert1_id,
                 class: AlertClass::TestFoo,
+                version: 0,
                 payload: serde_json::json!({}),
                 requested_sitrep_id: created_sitrep_id,
                 comment: "power shelf rectifier removed".to_string(),
@@ -581,6 +585,7 @@ mod tests {
             .insert_unique(AlertRequest {
                 id: alert2_id,
                 class: AlertClass::TestFooBar,
+                version: 0,
                 payload: serde_json::json!({}),
                 requested_sitrep_id: closed_sitrep_id,
                 comment: String::new(),

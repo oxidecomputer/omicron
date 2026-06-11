@@ -2185,6 +2185,7 @@ Reconfigurator config:
     version: 1
     modified time: <REDACTED_TIMESTAMP>
     tuf repo pruner enabled: true
+    disruption policy: terminate
     planner enabled: false
 ---------------------------------------------
 stderr:
@@ -2265,6 +2266,19 @@ stdout:
 reconfigurator config updated to version 2:
     tuf repo pruner enabled:   true (unchanged)
 *   planner enabled:::::::::   false -> true
+    disruption policy:::::::   terminate (unchanged)
+---------------------------------------------
+stderr:
+note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
+=============================================
+EXECUTING COMMAND: omdb ["-w", "nexus", "reconfigurator-config", "set", "--disruption-policy", "migrate-or-terminate"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+reconfigurator config updated to version 3:
+    tuf repo pruner enabled:   true (unchanged)
+    planner enabled:::::::::   true (unchanged)
+*   disruption policy:::::::   terminate -> live-migrate or terminate
 ---------------------------------------------
 stderr:
 note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
@@ -2274,9 +2288,10 @@ termination: Exited(0)
 ---------------------------------------------
 stdout:
 Reconfigurator config:
-    version: 2
+    version: 3
     modified time: <REDACTED_TIMESTAMP>
     tuf repo pruner enabled: true
+    disruption policy: live-migrate or terminate
     planner enabled: true
 ---------------------------------------------
 stderr:

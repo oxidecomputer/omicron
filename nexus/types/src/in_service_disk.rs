@@ -2,15 +2,15 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! "Currently in-service control-plane disks" — the executed view from
+//! "Currently in-service control-plane disks": the executed view from
 //! the `physical_disk` and `zpool` DB tables.
 //!
 //! This is distinct from the planned view in `BlueprintPhysicalDiskConfig`:
 //! a disk is in this set only after the control plane has actually committed
 //! to managing it (`physical_disk.disk_policy = 'in_service'`), not while a
 //! planner is merely proposing to expunge or adopt it. Consumers that need
-//! the *committed* view of which disks are part of the rack — fault
-//! management diagnosers in particular — should read this rather than the
+//! the *committed* view of which disks are part of the rack (fault
+//! management diagnosers in particular) should read this rather than the
 //! target blueprint.
 
 use crate::external_api::physical_disk::PhysicalDiskKind;

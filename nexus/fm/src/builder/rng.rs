@@ -61,11 +61,6 @@ impl SitrepBuilderRng {
     }
 }
 
-/// Per-case child RNGs. Each `next_*` returns the next deterministic UUID
-/// in its stream; collisions across calls are statistically impossible, but
-/// callers in `builder/case.rs` still guard inserts with a `contains_key`
-/// loop so that a future change here (e.g., reseeding mid-build) can't
-/// silently corrupt a case.
 #[derive(Clone, Debug)]
 pub(super) struct CaseBuilderRng {
     ereport_assignment_rng: TypedUuidRng<CaseEreportKind>,
