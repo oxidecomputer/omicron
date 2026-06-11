@@ -667,10 +667,10 @@ service_name = "propolis-server"
 only_for_targets.image = "standard"
 source.type = "prebuilt"
 source.repo = "propolis"
-source.commit = "6873add79b835f7932d9fe928340886df8e49676"
+source.commit = "75518ad2c26db9278895ab1262c28daf13bfdffd"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/propolis/image/<commit>/propolis-server.sha256.txt
-source.sha256 = "ccac586c3ed1e996d9554fb1db1b1096c0bcd0dd5712c14579924ea85dd16a34"
+source.sha256 = "5dd6af4c615e471cde8df42c0a9152e879e552ad248910d8e74c007b6bc028c7"
 output.type = "zone"
 
 [package.mg-ddm-gz]
@@ -683,10 +683,10 @@ source.repo = "maghemite"
 # `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
 # building `ddm-admin-client` (which will instruct you to update
 # `tools/maghemite_openapi_version`).
-source.commit = "951f759b1d8e61cf65c2a823e61933ff3ea0bdf1"
+source.commit = "5aaa7c9bc2d0e541d29604453dd98cb32676b347"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/mg-ddm-gz.sha256.txt
-source.sha256 = "9f2f0181232b9d776100fb1f95470783f5e19b1e827bb9f92836ecf7790aa879"
+source.sha256 = "e4d20f7f4ff7933e95abff79e7467e4b1a0302066f63be6b14cde739d3899afe"
 output.type = "tarball"
 
 [package.mg-ddm]
@@ -699,10 +699,10 @@ source.repo = "maghemite"
 # `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
 # building `ddm-admin-client` (which will instruct you to update
 # `tools/maghemite_openapi_version`).
-source.commit = "951f759b1d8e61cf65c2a823e61933ff3ea0bdf1"
+source.commit = "5aaa7c9bc2d0e541d29604453dd98cb32676b347"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/mg-ddm.sha256.txt
-source.sha256 = "7680d445cce94bbfa2ea1b952086d2ca7c0410cc3f34f3386befc4a16c38261d"
+source.sha256 = "5e05778f0ec0385b2e097f82bd6776942ba93cdf4118c4f72f54c612636d3372"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -714,10 +714,10 @@ source.repo = "maghemite"
 # `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
 # building `ddm-admin-client` (which will instruct you to update
 # `tools/maghemite_openapi_version`).
-source.commit = "951f759b1d8e61cf65c2a823e61933ff3ea0bdf1"
+source.commit = "5aaa7c9bc2d0e541d29604453dd98cb32676b347"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/mgd.sha256.txt
-source.sha256 = "5a0c407a91c1fb68af5770a33549e9d1695653f476520562a087eb9f42bd9d25"
+source.sha256 = "ae057ecdaed165fbd3eaaa9459c934249d7a366a51bda5c62584fa4bc011be8e"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -765,8 +765,8 @@ only_for_targets.image = "standard"
 # the other `source.*` keys.
 source.type = "prebuilt"
 source.repo = "dendrite"
-source.commit = "cc0c307c617f2988aafdca4e3bd35ea178b64801"
-source.sha256 = "9c1cf3ec68ba2317c5f52b8dad7c6aa8bfe5e657e8510ca22033ec35ceb36ea5"
+source.commit = "eb0ac9553c67a0c45ea72cf13138f0de52519d70"
+source.sha256 = "748228eae92580030aa84eda8e077977ade54a3063927b023bd1827532b40a6b"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -792,8 +792,8 @@ only_for_targets.image = "standard"
 # the other `source.*` keys.
 source.type = "prebuilt"
 source.repo = "dendrite"
-source.commit = "cc0c307c617f2988aafdca4e3bd35ea178b64801"
-source.sha256 = "45883d2b9ab045daf71b8e3566671bdd352058bbe95f7f67bc7d7f52c2ef87de"
+source.commit = "eb0ac9553c67a0c45ea72cf13138f0de52519d70"
+source.sha256 = "ab20401f04eea11c5e79f1f0e1d1e2338a5da2bd384650c1c22dee839d8e62c3"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -812,8 +812,8 @@ only_for_targets.image = "standard"
 # the other `source.*` keys.
 source.type = "prebuilt"
 source.repo = "dendrite"
-source.commit = "cc0c307c617f2988aafdca4e3bd35ea178b64801"
-source.sha256 = "8b31347c6ac55395ed488dbbdb5cec392b536b3ef151c6e28b49c22c1b160def"
+source.commit = "eb0ac9553c67a0c45ea72cf13138f0de52519d70"
+source.sha256 = "916c4474f949427760fb66e32b0bbfc479a756291b67920b57b524eac402b812"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -833,8 +833,8 @@ setup_hint = "Run `cargo xtask download transceiver-control` to download the nec
 service_name = "thundermuffin"
 source.type = "prebuilt"
 source.repo = "thundermuffin"
-source.commit = "a4a6108d7c9aac2464a0b6898e88132a8f701a13"
-source.sha256 = "dc55a2accd33a347df4cbdc0026cbaccea2c004940c3fec8cadcdd633d440dfa"
+source.commit = "fda704ee409c8ed50056f3ad96999951b2bbfa7f"
+source.sha256 = "aa938be76cf2eb2071f0edc0ffc8a125d6c867d0a20da2e1c9178925b8a209a5"
 output.type = "zone"
 output.intermediate_only = true
 

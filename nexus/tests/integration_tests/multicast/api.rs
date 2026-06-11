@@ -40,9 +40,10 @@ use nexus_types::external_api::multicast::{
     InstanceMulticastGroupJoin, MulticastGroup, MulticastGroupIdentifier,
     MulticastGroupJoinSpec, MulticastGroupMember,
 };
+use nexus_types_versions::latest::instance::Instance;
 use omicron_common::address::is_ssm_address;
 use omicron_common::api::external::{
-    ByteCount, IdentityMetadataCreateParams, Instance, InstanceCpuCount,
+    ByteCount, IdentityMetadataCreateParams, InstanceCpuCount,
 };
 
 use super::*;
@@ -84,6 +85,7 @@ async fn test_multicast_api_behavior(cptestctx: &ControlPlaneTestContext) {
         cpu_platform: None,
         auto_restart_policy: Default::default(),
         anti_affinity_groups: Vec::new(),
+        enable_jumbo_frames: false,
     };
 
     let instance_url = format!("/v1/instances?project={project_name}");
@@ -115,6 +117,7 @@ async fn test_multicast_api_behavior(cptestctx: &ControlPlaneTestContext) {
         cpu_platform: None,
         auto_restart_policy: Default::default(),
         anti_affinity_groups: Vec::new(),
+        enable_jumbo_frames: false,
     };
     let instance2: Instance =
         object_create(client, &instance_url, &instance2_params).await;
@@ -197,6 +200,7 @@ async fn test_multicast_api_behavior(cptestctx: &ControlPlaneTestContext) {
         cpu_platform: None,
         auto_restart_policy: Default::default(),
         anti_affinity_groups: Vec::new(),
+        enable_jumbo_frames: false,
     };
 
     let (instance3, group) = ops::join2(
@@ -332,6 +336,7 @@ async fn test_multicast_api_behavior(cptestctx: &ControlPlaneTestContext) {
         cpu_platform: None,
         auto_restart_policy: Default::default(),
         anti_affinity_groups: Vec::new(),
+        enable_jumbo_frames: false,
     };
     let err = object_create_error(
         client,

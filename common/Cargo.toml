@@ -52,7 +52,7 @@ tokio = { workspace = true, features = ["full"] }
 uuid.workspace = true
 parse-display.workspace = true
 progenitor-client.workspace = true
-progenitor-client010.workspace = true
+progenitor-client013.workspace = true
 progenitor-extras.workspace = true
 omicron-workspace-hack.workspace = true
 regress.workspace = true
