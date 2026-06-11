@@ -397,73 +397,74 @@ fn target_missing_from_its_own_file() {
     );
 }
 
-/// Verifies the behavior when two files have different target blueprints that
-/// share the same parent.  Neither target is the parent of the other, so both
-/// look like "latest" candidates.  Expect a warning and a `time_made_target`
-/// tiebreak that's stable regardless of input order.
+/// Verifies the behavior when we're given a sequential history with a gap in
+/// the middle.
+///
+/// The motivating scenario: the system planned three blueprints in sequence
+/// (B1 → B2 → B3) and saved a state file each time it changed the target.
+/// Of those three saves, we only have files 1 and 3 — file 2 is missing.
+/// Now both B1 (the target of file 1) and B3 (the target of file 3) look
+/// like "latest" candidates to the merge, because the merge only inspects
+/// each file's target's *direct* parent: B3's parent is B2 (so B2 gets
+/// marked non-leaf), but nothing in our input set tells the merge that B1
+/// is also a non-leaf.
+///
+/// Expect a warning and a `time_made_target` tiebreak that picks file 3
+/// regardless of the order in which inputs were passed.
 #[test]
 fn multiple_latest_candidates() {
     use omicron_uuid_kinds::BlueprintUuid;
 
     let state = base_state("multi_load_multiple_latest_candidates");
-    let original_target_id = state.target_blueprint.target_id;
-    let original_target_blueprint = state
+
+    // B1 is the planner-generated blueprint from the base state.  It was the
+    // target at the time of file 1's save.
+    let planner_blueprint = state
         .blueprints
         .iter()
-        .find(|b| b.id == original_target_id)
-        .expect("target blueprint present")
+        .find(|b| matches!(b.source, BlueprintSource::Planner(_)))
+        .expect("base_state runs the planner, so a Planner blueprint exists")
         .clone();
-    // Use the original target as the common parent for two synthetic sibling
-    // blueprints.
-    let shared_parent_id = original_target_id;
+    let blueprint_b1_id = planner_blueprint.id;
 
-    // Two new blueprint ids and timestamps.  The later timestamp belongs to
-    // sibling B and should win the tiebreaker.
-    let sibling_a_id = BlueprintUuid::new_v4();
-    let sibling_b_id = BlueprintUuid::new_v4();
+    // Synthesize B2 (child of B1) and B3 (child of B2).  In the realistic
+    // scenario, file 2 would have been saved when B2 was the target, but
+    // that file is missing from our input set.
+    let blueprint_b2_id = BlueprintUuid::new_v4();
+    let blueprint_b3_id = BlueprintUuid::new_v4();
+    let mut blueprint_b2 = planner_blueprint.clone();
+    blueprint_b2.id = blueprint_b2_id;
+    blueprint_b2.parent_blueprint_id = Some(blueprint_b1_id);
+    let mut blueprint_b3 = planner_blueprint.clone();
+    blueprint_b3.id = blueprint_b3_id;
+    blueprint_b3.parent_blueprint_id = Some(blueprint_b2_id);
+
     let now = chrono::Utc::now();
     let t1 = now;
-    let t2 = now + Duration::seconds(10);
+    let t3 = now + Duration::seconds(20);
 
-    // Build state_a: blueprints = original set + sibling_a; target =
-    // sibling_a.
-    let mut state_a = state.clone();
-    let mut sibling_a = original_target_blueprint.clone();
-    sibling_a.id = sibling_a_id;
-    sibling_a.parent_blueprint_id = Some(shared_parent_id);
-    state_a.blueprints.insert_unique(sibling_a).unwrap();
-    state_a.target_blueprint.target_id = sibling_a_id;
-    state_a.target_blueprint.time_made_target = t1;
+    // File 1: blueprints = [...base state..., B1]; target = B1.
+    let mut file_1 = state.clone();
+    file_1.target_blueprint.target_id = blueprint_b1_id;
+    file_1.target_blueprint.time_made_target = t1;
 
-    // Build state_b similarly, with sibling_b and the later timestamp.
-    let mut state_b = state.clone();
-    let mut sibling_b = original_target_blueprint.clone();
-    sibling_b.id = sibling_b_id;
-    sibling_b.parent_blueprint_id = Some(shared_parent_id);
-    state_b.blueprints.insert_unique(sibling_b).unwrap();
-    state_b.target_blueprint.target_id = sibling_b_id;
-    state_b.target_blueprint.time_made_target = t2;
+    // File 3: blueprints = [...base state..., B1, B2, B3]; target = B3.
+    let mut file_3 = state.clone();
+    file_3.blueprints.insert_unique(blueprint_b2).unwrap();
+    file_3.blueprints.insert_unique(blueprint_b3).unwrap();
+    file_3.target_blueprint.target_id = blueprint_b3_id;
+    file_3.target_blueprint.time_made_target = t3;
 
-    let bytes_a = serialize(&state_a);
-    let bytes_b = serialize(&state_b);
+    let bytes_1 = serialize(&file_1);
+    let bytes_3 = serialize(&file_3);
 
-    // Expected merged state: state_b (the tiebreaker winner) supplies
-    // `target_blueprint`, `planning_input`, `silo_names`, and
-    // `external_dns_zone_names`.  Blueprints and collections are merged
-    // across both inputs, so the result also contains sibling_a's blueprint
-    // (sibling_b is already in state_b).
-    let mut expected = state_b.clone();
-    let sibling_a_clone = state_a
-        .blueprints
-        .iter()
-        .find(|b| b.id == sibling_a_id)
-        .expect("sibling_a in state_a")
-        .clone();
-    expected.blueprints.insert_unique(sibling_a_clone).unwrap();
+    // Expected merged state: file 3 wins the tiebreaker, and its blueprint
+    // set is already a superset of file 1's, so the merge is just file 3.
+    let expected = file_3.clone();
 
     for (label, inputs) in [
-        ("a then b", vec![input("a.out", &bytes_a), input("b.out", &bytes_b)]),
-        ("b then a", vec![input("b.out", &bytes_b), input("a.out", &bytes_a)]),
+        ("1 then 3", vec![input("1.out", &bytes_1), input("3.out", &bytes_3)]),
+        ("3 then 1", vec![input("3.out", &bytes_3), input("1.out", &bytes_1)]),
     ] {
         let result = UnstableReconfiguratorState::read_series(inputs)
             .unwrap_or_else(|err| {
@@ -476,7 +477,7 @@ fn multiple_latest_candidates() {
             &warning_text,
             "were not the parent of some other blueprint",
         );
-        assert_eq!(result.latest, "b.out", "case {label}");
+        assert_eq!(result.latest, "3.out", "case {label}");
         assert_eq!(expected, result.state, "case {label}");
     }
 }
