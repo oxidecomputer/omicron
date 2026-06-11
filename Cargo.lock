@@ -8450,7 +8450,6 @@ dependencies = [
  "omicron-workspace-hack",
  "oxnet",
  "parse-display",
- "progenitor-client 0.10.0",
  "progenitor-client 0.14.0",
  "progenitor-extras",
  "proptest",
@@ -11242,21 +11241,6 @@ dependencies = [
  "progenitor-client 0.14.0",
  "progenitor-impl 0.14.0",
  "progenitor-macro 0.14.0",
-]
-
-[[package]]
-name = "progenitor-client"
-version = "0.10.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "296003fd74e64c77aeb2c10eae850eb543211a8557dd3b3de6f4230b5071e44b"
-dependencies = [
- "bytes",
- "futures-core",
- "percent-encoding",
- "reqwest 0.12.28",
- "serde",
- "serde_json",
- "serde_urlencoded",
 ]
 
 [[package]]
