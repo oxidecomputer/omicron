@@ -421,7 +421,9 @@ impl CockroachStarter {
                             Ok(_) => {
                                 // The file hasn't been fully written yet.
                                 // Keep waiting.
-                                return Err(poll::CondCheckError::NotYet);
+                                return Err(poll::CondCheckError::NotYet {
+                                    status: None,
+                                });
                             }
 
                             Err(error)
@@ -430,7 +432,9 @@ impl CockroachStarter {
                             {
                                 // The file doesn't exist yet.
                                 // Keep waiting.
-                                return Err(poll::CondCheckError::NotYet);
+                                return Err(poll::CondCheckError::NotYet {
+                                    status: None,
+                                });
                             }
 
                             Err(error) => {
@@ -459,7 +463,7 @@ impl CockroachStarter {
                         }
                         Ok(None) => {
                             // HTTP address not available yet, keep waiting
-                            Err(poll::CondCheckError::NotYet)
+                            Err(poll::CondCheckError::NotYet { status: None })
                         }
                         Err(source) => {
                             // Error parsing HTTP address
@@ -1380,7 +1384,7 @@ mod test {
         poll::wait_for_condition::<(), std::convert::Infallible, _, _>(
             || async {
                 if process_running(pid) {
-                    Err(poll::CondCheckError::NotYet)
+                    Err(poll::CondCheckError::NotYet { status: None })
                 } else {
                     Ok(())
                 }

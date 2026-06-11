@@ -1111,7 +1111,7 @@ mod tests {
                 // collection details in the task races with the rest of this
                 // test that checks those details.
                 if collection_count.load(Ordering::SeqCst) < 1 {
-                    return Err(CondCheckError::<()>::NotYet);
+                    return Err(CondCheckError::<()>::NotYet { status: None });
                 }
                 let n_collections = collector
                     .producer_details(id)
@@ -1120,7 +1120,7 @@ mod tests {
                 if n_collections > 0 {
                     Ok(())
                 } else {
-                    Err(CondCheckError::NotYet)
+                    Err(CondCheckError::NotYet { status: None })
                 }
             },
             &POLL_INTERVAL,

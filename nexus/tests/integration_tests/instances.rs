@@ -1254,7 +1254,7 @@ async fn test_instance_migrate_target_finishes_first(
             if maybe_record.is_none() {
                 Ok(())
             } else {
-                Err(CondCheckError::<()>::NotYet)
+                Err(CondCheckError::<()>::NotYet { status: None })
             }
         },
         &Duration::from_secs(5),
@@ -7499,7 +7499,7 @@ async fn start_sled_and_wait(
             if items.len() == initial_sled_count + 1 {
                 Ok(())
             } else {
-                Err(CondCheckError::<()>::NotYet)
+                Err(CondCheckError::<()>::NotYet { status: None })
             }
         },
         &Duration::from_secs(5),
@@ -7762,7 +7762,7 @@ async fn test_instance_serial(cptestctx: &ControlPlaneTestContext) {
             if instance_next.runtime.run_state == InstanceState::Running {
                 Ok(instance_next)
             } else {
-                Err(CondCheckError::<()>::NotYet)
+                Err(CondCheckError::<()>::NotYet { status: None })
             }
         },
         &Duration::from_secs(5),
@@ -9124,7 +9124,7 @@ async fn test_instance_v2p_mappings(cptestctx: &ControlPlaneTestContext) {
             if v2p_mappings.is_empty() {
                 Ok(())
             } else {
-                Err(CondCheckError::NotYet::<()>)
+                Err(CondCheckError::<()>::NotYet { status: None })
             }
         };
         wait_for_condition(
@@ -9220,7 +9220,7 @@ pub async fn instance_wait_for_state_as(
                     "instance_id" => %instance.identity.id,
                     "instance_runtime_state" => ?instance.runtime,
                 );
-                Err(CondCheckError::<anyhow::Error>::NotYet)
+                Err(CondCheckError::<anyhow::Error>::NotYet { status: None })
             }
         },
         &Duration::from_secs(1),
@@ -9289,7 +9289,7 @@ pub async fn instance_wait_for_vmm_registration(
                             it will soon...";
                         "instance_id" => %instance_id,
                     );
-                    return Err(CondCheckError::<Error>::NotYet);
+                    return Err(CondCheckError::<Error>::NotYet { status: None });
                 }
             };
 
@@ -9299,7 +9299,7 @@ pub async fn instance_wait_for_vmm_registration(
                     "instance's active VMM is still Creating";
                     "instance_id" => %instance_id,
                 );
-                Err(poll::CondCheckError::<Error>::NotYet)
+                Err(poll::CondCheckError::<Error>::NotYet { status: None })
             } else {
                 info!(
                     log,
@@ -9414,7 +9414,7 @@ async fn assert_sled_v2p_mappings(
         if have_needed_ipv4_mappings && have_needed_ipv6_mappings {
             Ok(())
         } else {
-            Err(CondCheckError::NotYet::<()>)
+            Err(CondCheckError::<()>::NotYet { status: None })
         }
     };
     wait_for_condition(
@@ -9514,7 +9514,7 @@ pub async fn assert_sled_vpc_routes(
                 "custom diff (+): {:?}\n-----",
                 found_custom.routes.difference(&custom_routes)
             );
-            Err(CondCheckError::NotYet::<()>)
+            Err(CondCheckError::<()>::NotYet { status: None })
         }
     };
     wait_for_condition(
@@ -9642,7 +9642,7 @@ async fn instance_wait_for_simulated_transition(
                 );
                 instance_simulate(&cptestctx.server.server_context().nexus, id)
                     .await;
-                Err(CondCheckError::<anyhow::Error>::NotYet)
+                Err(CondCheckError::<anyhow::Error>::NotYet { status: None })
             }
         },
         &Duration::from_secs(1),

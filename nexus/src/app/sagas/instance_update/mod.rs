@@ -2861,7 +2861,9 @@ mod test {
                     // implements `Display`, which is necessary for the
                     // `poll::Error` to be `Display`...even though we never
                     // return a `Permanent` error here. I love types.
-                    poll::CondCheckError::<&'static str>::NotYet
+                    poll::CondCheckError::<&'static str>::NotYet {
+                        status: None,
+                    }
                 })?;
                 let len = data.items.len();
                 if len != n {
@@ -2872,7 +2874,9 @@ mod test {
                         "entries" => ?data.items,
                         "expected_len" => n,
                     );
-                    return Err(poll::CondCheckError::<&'static str>::NotYet);
+                    return Err(poll::CondCheckError::<&'static str>::NotYet {
+                        status: None,
+                    });
                 }
 
                 Ok(())

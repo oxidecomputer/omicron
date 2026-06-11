@@ -344,7 +344,7 @@ mod test {
                     .into_inner();
                 eprintln!("task {} status: {:#?}", task_name, task_status);
                 let LastResult::Completed(completed) = task_status.last else {
-                    return Err(CondCheckError::<()>::NotYet);
+                    return Err(CondCheckError::<()>::NotYet { status: None });
                 };
 
                 let status: T = serde_json::from_value(completed.details)
@@ -352,7 +352,7 @@ mod test {
                 if check(&status) {
                     Ok(())
                 } else {
-                    Err(CondCheckError::NotYet)
+                    Err(CondCheckError::NotYet { status: None })
                 }
             },
             &Duration::from_millis(100),

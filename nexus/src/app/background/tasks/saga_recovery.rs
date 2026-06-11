@@ -870,7 +870,7 @@ mod test {
             || async {
                 let status = driver.task_status(task_name);
                 let LastResult::Completed(completed) = status.last else {
-                    return Err(CondCheckError::<()>::NotYet);
+                    return Err(CondCheckError::<()>::NotYet { status: None });
                 };
                 Ok(completed)
             },
@@ -908,7 +908,7 @@ mod test {
                     panic!("task had completed before; how has it not now?");
                 };
                 if completed.iteration <= first_completed.iteration {
-                    return Err(CondCheckError::<()>::NotYet);
+                    return Err(CondCheckError::<()>::NotYet { status: None });
                 }
                 Ok(completed)
             },
@@ -939,7 +939,7 @@ mod test {
                     return Ok(last_pass_success);
                 }
 
-                Err(CondCheckError::<()>::NotYet)
+                Err(CondCheckError::<()>::NotYet { status: None })
             },
             &std::time::Duration::from_millis(250),
             &std::time::Duration::from_secs(15),
