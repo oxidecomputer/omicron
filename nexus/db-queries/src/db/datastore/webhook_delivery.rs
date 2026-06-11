@@ -12,6 +12,7 @@ use crate::db::model::Alert;
 use crate::db::model::AlertClass;
 use crate::db::model::AlertDeliveryState;
 use crate::db::model::AlertDeliveryTrigger;
+use crate::db::model::SqlU32;
 use crate::db::model::WebhookDelivery;
 use crate::db::model::WebhookDeliveryAttempt;
 use crate::db::model::WebhookDeliveryAttemptResult;
@@ -58,6 +59,7 @@ pub struct DeliveryConfig {
 pub struct DeliveryAndEvent {
     pub delivery: WebhookDelivery,
     pub alert_class: AlertClass,
+    pub alert_version: SqlU32,
     pub event: serde_json::Value,
 }
 
@@ -240,14 +242,20 @@ impl DataStore {
             .select((
                 WebhookDelivery::as_select(),
                 alert_dsl::alert_class,
+                alert_dsl::alert_version,
                 alert_dsl::payload,
             ))
             .load_async(&*conn)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
-        Ok(rows.into_iter().map(|(delivery, alert_class, event)| {
-            DeliveryAndEvent { delivery, alert_class, event }
-        }))
+        Ok(rows.into_iter().map(
+            |(delivery, alert_class, alert_version, event)| DeliveryAndEvent {
+                delivery,
+                alert_class,
+                alert_version,
+                event,
+            },
+        ))
     }
 
     pub async fn webhook_delivery_start_attempt(
@@ -452,6 +460,7 @@ mod test {
     use crate::db::pagination::Paginator;
     use crate::db::pub_test_utils::TestDatabase;
     use crate::db::raw_query_builder::expectorate_query_contents;
+    use nexus_types::alert::test_alerts;
     use nexus_types::external_api::alert;
     use omicron_common::api::external::IdentityMetadataCreateParams;
     use omicron_test_utils::dev;
@@ -488,11 +497,11 @@ mod test {
         let alert_id = AlertUuid::new_v4();
         let alert = model::Alert::new(
             alert_id,
-            model::AlertClass::TestFoo,
-            serde_json::json!({
+            &test_alerts::Foo(serde_json::json!({
                 "answer": 42,
-            }),
-        );
+            })),
+        )
+        .expect("alert payload should serialize");
         datastore
             .alert_create(&opctx, alert)
             .await
