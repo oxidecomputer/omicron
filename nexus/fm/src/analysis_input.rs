@@ -9,9 +9,11 @@ use iddqd::IdOrdMap;
 use nexus_types::fm::analysis_reports::ClosedCaseReport;
 use nexus_types::fm::{self, Sitrep, SitrepVersion};
 use nexus_types::inventory;
+use omicron_uuid_kinds::AlertUuid;
 use omicron_uuid_kinds::CollectionUuid;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
+use std::collections::HashSet;
 use std::sync::Arc;
 
 pub use nexus_types::fm::analysis_reports::InputReport as Report;
@@ -29,7 +31,7 @@ pub use nexus_types::fm::analysis_reports::InputReport as Report;
 ///
 /// This type represents the outputs of the analysis preparation phase. Once it
 /// is constructed, the inputs are immutable and cannot be modified. To
-/// construct a new `Input` as part of a preparaation phase, use
+/// construct a new `Input` as part of a preparation phase, use
 /// [`Input::builder`].
 pub struct Input {
     parent_sitrep: Option<Arc<(SitrepVersion, Sitrep)>>,
@@ -39,6 +41,12 @@ pub struct Input {
     new_ereports: IdOrdMap<fm::Ereport>,
     open_cases: IdOrdMap<fm::Case>,
     closed_cases_copied_forward: IdOrdMap<fm::Case>,
+    /// Indicates whether `Input::Builder::build` dropped any closed case
+    /// from the carry-forward list whose alert request set was non-empty.
+    /// ORed with [`crate::builder::AllCases::alert_set_changed`] in
+    /// [`crate::builder::SitrepBuilder::build`] to decide whether to bump the
+    /// new sitrep's `alert_generation`.
+    alerts_changed: bool,
 }
 
 impl Input {
@@ -63,6 +71,10 @@ impl Input {
 
     pub(crate) fn closed_cases_copied_forward(&self) -> &IdOrdMap<fm::Case> {
         &self.closed_cases_copied_forward
+    }
+
+    pub(crate) fn alerts_changed(&self) -> bool {
+        self.alerts_changed
     }
 
     /// Returns a [`Builder`] for constructing a new `Input` from the provided
@@ -96,6 +108,7 @@ impl Input {
             inv,
             new_ereports: IdOrdMap::default(),
             unmarked_seen_ereports: BTreeSet::default(),
+            existing_alerts: HashSet::new(),
         })
     }
 }
@@ -127,6 +140,13 @@ pub struct Builder {
     /// These must be tracked in order to determine which closed cases must be
     /// copied forwards due to containing unmarked ereports.
     unmarked_seen_ereports: BTreeSet<fm::EreportId>,
+
+    /// The set of parent-sitrep alert request ids that already have a marker
+    /// row in `rendezvous_alert_created` (i.e. have been created by rendezvous).
+    /// An alert request *absent* from this set is outstanding work: alongside
+    /// unmarked ereports, it is one of the signals that forces a closed case to
+    /// be copied forward.
+    existing_alerts: HashSet<AlertUuid>,
 }
 
 impl Builder {
@@ -153,6 +173,18 @@ impl Builder {
 
             Some(ereport)
         }))
+    }
+
+    /// Records the set of alert ids whose `rendezvous_alert_created` marker
+    /// already exists in the database. During [`Self::build`], any closed
+    /// case in the parent sitrep that has an alert request whose id is
+    /// **not** in this set counts as having outstanding work, and therefore
+    /// is carried forward.
+    pub fn add_existing_alerts(
+        &mut self,
+        marker_ids: impl IntoIterator<Item = AlertUuid>,
+    ) {
+        self.existing_alerts.extend(marker_ids);
     }
 
     pub fn num_ereports(&self) -> usize {
@@ -190,9 +222,13 @@ impl Builder {
         // Cases from the parent sitrep should be copied forwards if:
         // - The case is still open
         let mut open_cases = IdOrdMap::new();
-        // - The case has been closed, but it contains an ereport which has not
-        //   yet been marked as "seen" in the database.
+        // - The case has been closed, but still has outstanding work:
+        //   - an ereport which has not yet been marked as "seen" in the
+        //     database, or
+        //   - an alert request whose `rendezvous_alert_created` marker is not
+        //     yet present.
         let mut closed_cases_copied_forward = IdOrdMap::new();
+        let mut alerts_changed = false;
         for case in parent_sitrep.iter().flat_map(|s| s.cases.iter()) {
             if case.is_open() {
                 report.open_cases.insert(case.id, case.metadata.clone());
@@ -213,18 +249,39 @@ impl Builder {
                         }
                     })
                     .collect::<BTreeSet<_>>();
-                if !unmarked_ereports.is_empty() {
+                let unmarked_alert_requests: BTreeSet<AlertUuid> = case
+                    .alerts_requested
+                    .iter()
+                    .map(|r| r.id)
+                    .filter(|id| !self.existing_alerts.contains(id))
+                    .collect();
+                let has_outstanding_work = !unmarked_ereports.is_empty()
+                    || !unmarked_alert_requests.is_empty();
+                if has_outstanding_work {
+                    // The case has ereport work and/or alert work remaining, so
+                    // carry it forward intact. We keep even already-satisfied
+                    // alert requests around: the marker prevents their
+                    // resurrection, and pruning them would force a generation
+                    // bump that buys us only earlier marker GC.
                     report.closed_cases_copied_forward.insert(
                         case.id,
                         ClosedCaseReport {
                             metadata: case.metadata.clone(),
                             unmarked_ereports,
+                            unmarked_alert_requests,
                         },
                     );
-                    closed_cases_copied_forward.insert_unique(case.clone()).expect(
-                        "the case UUID is coming from iterating over another \
-                         `IdOrdMap`, so it must be unique",
-                    );
+                    closed_cases_copied_forward
+                        .insert_unique(case.clone())
+                        .expect(
+                            "the case UUID is coming from iterating over \
+                             another `IdOrdMap`, so it must be unique",
+                        );
+                } else if !case.alerts_requested.is_empty() {
+                    // Case has no outstanding work AND had alert requests:
+                    // dropping it removes those ids from the carry-forward
+                    // set.
+                    alerts_changed = true;
                 }
             }
         }
@@ -234,6 +291,7 @@ impl Builder {
             new_ereports: self.new_ereports,
             open_cases,
             closed_cases_copied_forward,
+            alerts_changed,
         };
 
         (input, report)
@@ -251,6 +309,7 @@ mod tests {
     use nexus_types::fm::ereport::Reporter;
     use nexus_types::fm::{DiagnosisEngineKind, SitrepVersion};
     use nexus_types::inventory::SpType;
+    use omicron_common::api::external::Generation;
     use omicron_uuid_kinds::{
         CaseEreportUuid, CaseUuid, OmicronZoneUuid, SitrepUuid,
     };
@@ -428,7 +487,7 @@ mod tests {
             .collect();
 
             // ereports_by_id must contain all ereports referenced by cases in the
-            // sitrep — add_unmarked_ereports uses this map to detect which ereports
+            // sitrep; add_unmarked_ereports uses this map to detect which ereports
             // have already appeared in the parent sitrep.
             let ereports_by_id = [
                 ereport_in_open_case1.clone(),
@@ -448,6 +507,7 @@ mod tests {
                     comment: "parent sitrep for test".to_string(),
                     time_created: chrono::Utc::now(),
                     next_inv_min_time_started: inv.time_done,
+                    alert_generation: Generation::new(),
                 },
                 cases,
                 ereports_by_id,
@@ -531,6 +591,11 @@ mod tests {
             input.closed_cases_copied_forward().len(),
             1,
             "exactly one closed case should be copied forward"
+        );
+        assert!(
+            !input.alerts_changed(),
+            "the dropped closed case had no alert requests, so dropping it \
+             does not change the carry-forward alert set"
         );
 
         // Check the contents of open cases.
@@ -679,5 +744,149 @@ mod tests {
         );
 
         logctx.cleanup_successful();
+    }
+
+    /// Helper for the closed-case-filter tests below: build a parent sitrep
+    /// containing a single closed `case`, then construct an `Input::Builder`
+    /// pointing at it. The caller can optionally add existing alert markers
+    /// before calling `build()`.
+    fn builder_with_closed_case(case: fm::Case) -> Builder {
+        let parent_sitrep_id = case
+            .metadata
+            .closed_sitrep_id
+            .expect("test helper requires a closed case");
+        let inv =
+            Arc::new(nexus_inventory::CollectionBuilder::new("test").build());
+        let parent = fm::Sitrep {
+            metadata: fm::SitrepMetadata {
+                id: parent_sitrep_id,
+                parent_sitrep_id: None,
+                inv_collection_id: inv.id,
+                next_inv_min_time_started: inv.time_done,
+                creator_id: OmicronZoneUuid::new_v4(),
+                comment: String::new(),
+                time_created: chrono::Utc::now(),
+                alert_generation: Generation::new(),
+            },
+            cases: [case].into_iter().collect(),
+            ereports_by_id: IdOrdMap::new(),
+        };
+        let parent_version = SitrepVersion {
+            id: parent_sitrep_id,
+            version: 1,
+            time_made_current: chrono::Utc::now(),
+        };
+        Input::builder(Some(Arc::new((parent_version, parent))), inv)
+            .expect("collection start time check should always pass")
+    }
+
+    /// All alert requests on a closed case are satisfied and the case has no
+    /// unmarked ereports: the case must be dropped entirely, and
+    /// `alerts_changed` must flip to `true` because the dropped requests are
+    /// leaving the carry-forward set.
+    #[test]
+    fn build_drops_closed_case_when_all_alerts_satisfied() {
+        use nexus_types::alert::AlertClass;
+        use nexus_types::fm::case::AlertRequest;
+
+        let alert_id = AlertUuid::new_v4();
+        let case_id = CaseUuid::new_v4();
+        let parent_sitrep_id = SitrepUuid::new_v4();
+
+        let closed_case = fm::Case {
+            id: case_id,
+            metadata: fm::case::Metadata {
+                created_sitrep_id: parent_sitrep_id,
+                closed_sitrep_id: Some(parent_sitrep_id),
+                de: fm::DiagnosisEngineKind::PowerShelf,
+                comment: String::new(),
+            },
+            ereports: IdOrdMap::new(),
+            alerts_requested: [AlertRequest {
+                id: alert_id,
+                class: AlertClass::TestFoo,
+                version: 0,
+                payload: serde_json::json!({}),
+                requested_sitrep_id: parent_sitrep_id,
+                comment: String::new(),
+            }]
+            .into_iter()
+            .collect(),
+            support_bundles_requested: IdOrdMap::new(),
+        };
+
+        let mut builder = builder_with_closed_case(closed_case);
+        builder.add_existing_alerts([alert_id]);
+        let (input, _) = builder.build();
+
+        assert_eq!(input.closed_cases_copied_forward().len(), 0);
+        assert!(
+            input.alerts_changed(),
+            "dropping a closed case removes ids from the request set, so \
+             alerts_changed must be true"
+        );
+    }
+
+    /// One of two alert requests has a marker; the other does not. An
+    /// outstanding alert request keeps the closed case alive through
+    /// carry-forward until its marker is observed, so the case must be carried
+    /// forward intact (both alert requests still present) and `alerts_changed`
+    /// must remain `false` (satisfied requests are not pruned: the marker
+    /// prevents resurrection).
+    #[test]
+    fn build_keeps_closed_case_intact_when_not_all_alerts_satisfied() {
+        use nexus_types::alert::AlertClass;
+        use nexus_types::fm::case::AlertRequest;
+
+        let satisfied_alert_id = AlertUuid::new_v4();
+        let unsatisfied_alert_id = AlertUuid::new_v4();
+        let case_id = CaseUuid::new_v4();
+        let parent_sitrep_id = SitrepUuid::new_v4();
+
+        let alert_request = |id| AlertRequest {
+            id,
+            class: AlertClass::TestFoo,
+            version: 0,
+            payload: serde_json::json!({}),
+            requested_sitrep_id: parent_sitrep_id,
+            comment: String::new(),
+        };
+        let closed_case = fm::Case {
+            id: case_id,
+            metadata: fm::case::Metadata {
+                created_sitrep_id: parent_sitrep_id,
+                closed_sitrep_id: Some(parent_sitrep_id),
+                de: fm::DiagnosisEngineKind::PowerShelf,
+                comment: String::new(),
+            },
+            ereports: IdOrdMap::new(),
+            alerts_requested: [
+                alert_request(satisfied_alert_id),
+                alert_request(unsatisfied_alert_id),
+            ]
+            .into_iter()
+            .collect(),
+            support_bundles_requested: IdOrdMap::new(),
+        };
+
+        let mut builder = builder_with_closed_case(closed_case);
+        builder.add_existing_alerts([satisfied_alert_id]);
+        let (input, _) = builder.build();
+
+        let carried = input.closed_cases_copied_forward().get(&case_id).expect(
+            "one alert request unsatisfied, so case must be carried forward",
+        );
+        assert_eq!(
+            carried.alerts_requested.len(),
+            2,
+            "satisfied requests are not pruned from the carried-forward case",
+        );
+        assert!(carried.alerts_requested.contains_key(&satisfied_alert_id));
+        assert!(carried.alerts_requested.contains_key(&unsatisfied_alert_id));
+        assert!(
+            !input.alerts_changed(),
+            "case carried forward (not dropped), so alerts_changed must \
+             remain false",
+        );
     }
 }

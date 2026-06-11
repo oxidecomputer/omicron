@@ -730,7 +730,7 @@ task: "fm_rendezvous"
       alerts requested:                0
         requested in this sitrep:      0
         created in this activation:    0
-        already created:               0
+        already existed:               0
         errors:                        0
     creating requested support bundles:
 (i)   note: this operation was not executed
@@ -1421,7 +1421,7 @@ task: "fm_rendezvous"
       alerts requested:                0
         requested in this sitrep:      0
         created in this activation:    0
-        already created:               0
+        already existed:               0
         errors:                        0
     creating requested support bundles:
 (i)   note: this operation was not executed

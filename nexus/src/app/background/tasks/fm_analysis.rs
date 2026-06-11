@@ -17,6 +17,7 @@ use nexus_fm as fm;
 use nexus_types::internal_api::background::FmAnalysisStatus;
 use nexus_types::internal_api::background::fm_analysis as status;
 use nexus_types::inventory;
+use omicron_uuid_kinds::AlertUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use serde_json::json;
@@ -218,11 +219,18 @@ impl FmAnalysis {
         PreparationError,
     > {
         let mut builder =
-            fm::analysis_input::Input::builder(parent_sitrep, inv)?;
+            fm::analysis_input::Input::builder(parent_sitrep.clone(), inv)?;
         let mut errors = Vec::new();
         self.load_new_ereports(opctx, &mut builder, &mut errors)
             .await
             .context("failed to load new ereports")?;
+        self.load_existing_alert_markers(
+            opctx,
+            parent_sitrep.as_ref().map(|s| &s.1),
+            &mut builder,
+        )
+        .await
+        .context("failed to load existing alert markers")?;
 
         let (input, report) = builder.build();
         Ok((input, status::PreparationStatus { errors, report }))
@@ -278,6 +286,34 @@ impl FmAnalysis {
             }
         }
 
+        Ok(())
+    }
+
+    async fn load_existing_alert_markers(
+        &mut self,
+        opctx: &OpContext,
+        parent: Option<&nexus_types::fm::Sitrep>,
+        builder: &mut fm::analysis_input::Builder,
+    ) -> anyhow::Result<()> {
+        let Some(parent) = parent else {
+            // No parent sitrep, so no closed cases, so nothing to look up.
+            return Ok(());
+        };
+        let candidate_ids: Vec<AlertUuid> = parent
+            .cases
+            .iter()
+            .filter(|c| !c.is_open())
+            .flat_map(|c| c.alerts_requested.iter().map(|r| r.id))
+            .collect();
+        if candidate_ids.is_empty() {
+            return Ok(());
+        }
+        let existing = self
+            .datastore
+            .fm_rendezvous_existing_alert_markers(opctx, &candidate_ids)
+            .await
+            .context("failed to look up alert marker existence")?;
+        builder.add_existing_alerts(existing);
         Ok(())
     }
 
@@ -387,6 +423,7 @@ mod tests {
     use nexus_types::fm::Sitrep;
     use nexus_types::fm::SitrepMetadata;
     use nexus_types::fm::SitrepVersion;
+    use omicron_common::api::external::Generation;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::SitrepUuid;
 
@@ -419,6 +456,7 @@ mod tests {
                     creator_id: OmicronZoneUuid::new_v4(),
                     comment: "test sitrep".to_string(),
                     time_created: Utc::now(),
+                    alert_generation: Generation::new(),
                 },
                 cases: Default::default(),
                 ereports_by_id: Default::default(),
