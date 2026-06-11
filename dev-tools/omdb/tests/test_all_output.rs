@@ -11,6 +11,7 @@ use dropshot::Method;
 use expectorate::assert_contents;
 use gateway_client::ClientInfo as _;
 use http::StatusCode;
+use nexus_test_utils::background::activate_background_task;
 use nexus_test_utils::wait_for_producer;
 use nexus_test_utils::{OXIMETER_UUID, PRODUCER_UUID};
 use nexus_test_utils_macros::nexus_test;
@@ -187,11 +188,26 @@ async fn test_omdb_success_cases() {
         .wait_for_at_least_one_inventory_collection(Duration::from_secs(60))
         .await;
 
-    // Wait until `fm_analysis` has committed at least one sitrep, so that the
-    // omdb snapshot for FM tasks is stable. (Otherwise sitrep IDs render as
-    // `None` or `Some(...)` depending on whether the task's natural cadence
-    // had landed by the time we sample it.)
-    cptestctx.wait_for_at_least_one_sitrep(Duration::from_secs(60)).await;
+    // Drive the FM task pipeline to its steady state, so that the omdb
+    // snapshot of each task's last completed activation is deterministic
+    // rather than racing the tasks' watch-channel triggers:
+    //
+    // 1. `fm_analysis` commits the first sitrep (unless its natural cadence
+    //    already has). This run reports "committed new sitrep".
+    // 2. `fm_sitrep_loader` loads that sitrep and publishes it on the sitrep
+    //    watch channel.
+    // 3. `fm_analysis` re-runs with the loaded sitrep as its parent and
+    //    reports "no changes" -- the steady-state output asserted below.
+    //    (No later activation ever commits another sitrep here: this
+    //    environment has no in-service control plane disks and no
+    //    consumable ereports, so every post-load analysis is a no-op.)
+    // 4. `fm_rendezvous` runs against the loaded sitrep, so its status shows
+    //    the executed operations rather than "no FM situation report loaded".
+    let lockstep_client = &cptestctx.lockstep_client;
+    activate_background_task(lockstep_client, "fm_analysis").await;
+    activate_background_task(lockstep_client, "fm_sitrep_loader").await;
+    activate_background_task(lockstep_client, "fm_analysis").await;
+    activate_background_task(lockstep_client, "fm_rendezvous").await;
 
     let mut output = String::new();
 

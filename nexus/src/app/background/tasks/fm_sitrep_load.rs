@@ -10,6 +10,7 @@ use chrono::Utc;
 use futures::future::BoxFuture;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
+use nexus_types::fm::Sitrep;
 use nexus_types::fm::SitrepVersion;
 use nexus_types::internal_api::background::SitrepLoadStatus as Status;
 use serde_json::json;
@@ -22,7 +23,7 @@ pub struct SitrepLoader {
     tx: watch::Sender<Option<CurrentSitrep>>,
 }
 
-pub use nexus_types::fm::CurrentSitrep;
+pub type CurrentSitrep = Arc<(SitrepVersion, Sitrep)>;
 
 impl BackgroundTask for SitrepLoader {
     fn activate<'a>(
@@ -191,7 +192,6 @@ mod test {
     use super::*;
     use crate::app::background::BackgroundTask;
     use nexus_db_queries::db::pub_test_utils::TestDatabase;
-    use nexus_types::fm::Sitrep;
     use nexus_types::fm::SitrepMetadata;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::CollectionUuid;

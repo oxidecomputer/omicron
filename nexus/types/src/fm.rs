@@ -204,10 +204,6 @@ pub struct SitrepVersion {
     pub time_made_current: DateTime<Utc>,
 }
 
-/// The current sitrep paired with its [`SitrepVersion`] metadata, wrapped in an
-/// `Arc` so it can be shared cheaply (e.g., across `watch` channels).
-pub type CurrentSitrep = Arc<(SitrepVersion, Sitrep)>;
-
 #[derive(
     Copy,
     Clone,
