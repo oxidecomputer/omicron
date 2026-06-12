@@ -72,29 +72,31 @@ impl FmFactPhysicalDisk {
         fact: &fm::case::Fact,
         disk_fact: &DiskFact,
     ) -> Self {
-        let base = Self {
+        let mut row = Self {
             id: fact.id.into(),
             sitrep_id: sitrep_id.into(),
             case_id: case_id.into(),
             created_sitrep_id: fact.created_sitrep_id.into(),
             comment: fact.comment.clone(),
             physical_disk_id: disk_fact.physical_disk_id().into(),
-            kind: FmFactPhysicalDiskKind::ZpoolUnhealthy,
+            kind: db_kind(disk_fact),
             zpool_id: None,
             last_seen_health: None,
             observed_in_inv: None,
             time_observed: None,
         };
+        // Each arm populates the columns belonging to its `kind` and leaves
+        // every other payload column `None`. A column missed here is caught
+        // at insert time by the table's per-kind CHECK constraint.
         match disk_fact {
-            DiskFact::ZpoolUnhealthy(p) => Self {
-                kind: FmFactPhysicalDiskKind::ZpoolUnhealthy,
-                zpool_id: Some(p.zpool_id.into()),
-                last_seen_health: Some(p.last_seen_health.into()),
-                observed_in_inv: Some(p.observed_in_inv.into()),
-                time_observed: Some(p.time_observed),
-                ..base
-            },
+            DiskFact::ZpoolUnhealthy(p) => {
+                row.zpool_id = Some(p.zpool_id.into());
+                row.last_seen_health = Some(p.last_seen_health.into());
+                row.observed_in_inv = Some(p.observed_in_inv.into());
+                row.time_observed = Some(p.time_observed);
+            }
         }
+        row
     }
 
     /// Reconstruct an in-memory fact from a row.
@@ -137,6 +139,16 @@ impl FmFactPhysicalDisk {
             payload,
             comment: self.comment,
         })
+    }
+}
+
+/// The `kind` discriminant for a fact's payload. Exhaustive by construction:
+/// adding a `DiskFact` variant will not compile until it is mapped here, so
+/// `from_sitrep` can never write a row whose `kind` was defaulted rather than
+/// derived from the payload.
+fn db_kind(disk_fact: &DiskFact) -> FmFactPhysicalDiskKind {
+    match disk_fact {
+        DiskFact::ZpoolUnhealthy(_) => FmFactPhysicalDiskKind::ZpoolUnhealthy,
     }
 }
 
