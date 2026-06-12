@@ -2962,7 +2962,20 @@ CREATE TABLE IF NOT EXISTS omicron.public.saga (
      */
     time_abandoned TIMESTAMPTZ,
     reason_abandoned omicron.public.saga_reason_abandoned,
-    abandon_information TEXT
+    abandon_information TEXT,
+
+    /*
+     * If a saga has been abandoned, it must record why, when, and any
+     * additional context.
+     */
+    CONSTRAINT abandoned_requires_metadata CHECK (
+        saga_state != 'abandoned'
+        OR (
+            time_abandoned IS NOT NULL
+            AND reason_abandoned IS NOT NULL
+            AND abandon_information IS NOT NULL
+        )
+    )
 );
 
 /*
