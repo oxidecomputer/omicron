@@ -7628,7 +7628,7 @@ WHERE
 
 -- Table tracking the timestamp of the first ereport received from each restart
 -- ID.
-CREATE TABLE IF NOT EXISTS omicron.public.ereport_restart (
+CREATE TABLE IF NOT EXISTS omicron.public.ereporter_restart (
     -- The reporter restart ID.
     --
     -- This corresponds to the `restart_id` column in `omicron.public.ereport`.
@@ -7646,7 +7646,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.ereport_restart (
     -- not known to the system when the ereport was received. If the physical
     -- location of the sled is determined later, subsequent attempts to insert
     -- ereports will update this field.
-    slot_number INT NOT NULL
+    slot INT NOT NULL
 );
 
 /*

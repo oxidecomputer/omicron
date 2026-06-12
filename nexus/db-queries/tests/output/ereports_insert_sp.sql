@@ -27,6 +27,8 @@ WITH
         (restart_id, ena)
       DO
         NOTHING
+      RETURNING
+        ereport.ena
     ),
   inserted_reporter
     AS (
@@ -39,19 +41,10 @@ WITH
         (id)
       DO
         UPDATE SET slot = $28
-    ),
-  latest
-    AS (
-      SELECT
-        ereport.restart_id, ereport.ena
-      FROM
-        ereport
-      WHERE
-        (ereport.slot_type = $29 AND ereport.slot = $30) AND (ereport.time_deleted IS NULL)
-      ORDER BY
-        ereport.time_collected DESC, ereport.ena DESC
-      LIMIT
-        $31
+      RETURNING
+        id
     )
 SELECT
-  (inserted_ereports, latest.*)
+  count(*)
+FROM
+  inserted_ereports

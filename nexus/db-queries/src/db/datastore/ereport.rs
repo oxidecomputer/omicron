@@ -8,7 +8,6 @@ use super::DataStore;
 use crate::authz;
 use crate::context::OpContext;
 use crate::db::datastore::RunnableQuery;
-use crate::db::model::DbTypedUuid;
 use crate::db::model::Ereport;
 use crate::db::model::EreporterType;
 use crate::db::model::SpMgsSlot;
@@ -25,11 +24,9 @@ use chrono::DateTime;
 use chrono::Utc;
 use diesel::AggregateExpressionMethods;
 use diesel::dsl::{count, min};
-use diesel::helper_types::*;
 use diesel::pg::Pg;
 use diesel::prelude::*;
 use diesel::query_builder::*;
-use diesel::query_dsl::methods as query_methods;
 use diesel::sql_types;
 use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::public_error_from_diesel;
@@ -44,7 +41,6 @@ use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
-use omicron_uuid_kinds::EreporterRestartKind;
 use omicron_uuid_kinds::EreporterRestartUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SitrepUuid;
@@ -387,11 +383,14 @@ impl DataStore {
                 // number is filled in; if we do not, do nothing on conflict so a
                 // previously non-NULL slot is not clobbered.
                 if let Some(ref slot) = self.slot {
-                    out.push_sql("UPDATE SET slot = ");
+                    out.push_sql("UPDATE SET \"slot\" = ");
                     out.push_bind_param::<sql_types::Int4, _>(slot)?;
                 } else {
                     out.push_sql("NOTHING");
                 }
+                // We don't actually need this, but `WITH` clauses have to
+                // return something, sooo....
+                out.push_sql(" RETURNING id) ");
 
                 // TODO(eliza): make this part work
                 // out.push_sql("), latest AS (");
@@ -403,7 +402,7 @@ impl DataStore {
                 //         query.walk_ast(out.reborrow())?;
                 //     }
                 // }
-                out.push_sql(") SELECT (inserted_ereports, latest.*)");
+                out.push_sql("SELECT count(*) FROM inserted_ereports");
                 Ok(())
             }
         }
@@ -444,7 +443,8 @@ impl DataStore {
         let insert_ereports = diesel::insert_into(dsl::ereport)
             .values(ereports)
             .on_conflict((dsl::restart_id, dsl::ena))
-            .do_nothing();
+            .do_nothing()
+            .returning(dsl::ena);
         let insert_reporter = diesel::insert_into(
             restart_dsl::ereporter_restart,
         )
@@ -984,28 +984,38 @@ mod tests {
     async fn expectorate_ereports_insert_sp() {
         let restart_id = EreporterRestartUuid::nil();
         let collector_id = OmicronZoneUuid::nil();
+        let reporter =
+            fm::Reporter::Sp { sp_type: SpType::Sled.into(), slot: 16 };
         let query = DataStore::ereports_insert_query(
             restart_id,
             DateTime::<Utc>::MIN_UTC,
-            fm::Reporter::Sp { sp_type: SpType::Sled.into(), slot: 16 },
+            reporter,
             vec![
-                fm::EreportData {
-                    id: fm::EreportId { restart_id, ena: Ena(2) },
+                Ereport {
+                    restart_id: restart_id.into(),
+                    ena: Ena(2).into(),
                     time_collected: DateTime::<Utc>::MIN_UTC,
-                    collector_id,
+                    collector_id: collector_id.into(),
                     part_number: Some("my cool CPN".to_string()),
                     serial_number: Some("my cool serial".to_string()),
                     class: Some("my cool ereport".to_string()),
                     report: serde_json::json!({}),
+                    marked_seen_in: None,
+                    time_deleted: None,
+                    reporter: reporter.into(),
                 },
-                fm::EreportData {
-                    id: fm::EreportId { restart_id, ena: Ena(3) },
+                Ereport {
+                    restart_id: restart_id.into(),
+                    ena: Ena(3).into(),
                     time_collected: DateTime::<Utc>::MIN_UTC,
-                    collector_id,
+                    collector_id: collector_id.into(),
                     part_number: Some("my cool CPN".to_string()),
                     serial_number: Some("my cool serial".to_string()),
                     class: Some("my other ereport".to_string()),
                     report: serde_json::json!({}),
+                    marked_seen_in: None,
+                    time_deleted: None,
+                    reporter: reporter.into(),
                 },
             ],
         );
@@ -1020,28 +1030,38 @@ mod tests {
     async fn expectorate_ereports_insert_host() {
         let restart_id = EreporterRestartUuid::nil();
         let collector_id = OmicronZoneUuid::nil();
+        let reporter =
+            fm::Reporter::HostOs { slot: Some(16), sled: SledUuid::nil() };
         let query = DataStore::ereports_insert_query(
             restart_id,
             DateTime::<Utc>::MIN_UTC,
-            fm::Reporter::HostOs { slot: Some(16), sled: SledUuid::nil() },
+            reporter,
             vec![
-                fm::EreportData {
-                    id: fm::EreportId { restart_id, ena: Ena(2) },
+                Ereport {
+                    restart_id: restart_id.into(),
+                    ena: Ena(2).into(),
                     time_collected: DateTime::<Utc>::MIN_UTC,
-                    collector_id,
+                    collector_id: collector_id.into(),
                     part_number: Some("my cool CPN".to_string()),
                     serial_number: Some("my cool serial".to_string()),
                     class: Some("my cool ereport".to_string()),
                     report: serde_json::json!({}),
+                    marked_seen_in: None,
+                    time_deleted: None,
+                    reporter: reporter.into(),
                 },
-                fm::EreportData {
-                    id: fm::EreportId { restart_id, ena: Ena(3) },
+                Ereport {
+                    restart_id: restart_id.into(),
+                    ena: Ena(3).into(),
                     time_collected: DateTime::<Utc>::MIN_UTC,
-                    collector_id,
+                    collector_id: collector_id.into(),
                     part_number: Some("my cool CPN".to_string()),
                     serial_number: Some("my cool serial".to_string()),
                     class: Some("my other ereport".to_string()),
                     report: serde_json::json!({}),
+                    marked_seen_in: None,
+                    time_deleted: None,
+                    reporter: reporter.into(),
                 },
             ],
         );
@@ -1194,6 +1214,8 @@ mod tests {
         datastore
             .ereports_insert(
                 &opctx,
+                restart_id,
+                Utc::now(),
                 fm::Reporter::Sp {
                     sp_type: nexus_types::inventory::SpType::Sled,
                     slot: 0,
