@@ -20,6 +20,7 @@ use nexus_db_queries::db::model;
 use nexus_types::fm;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::PaginationOrder;
+use omicron_git_version::GitVersion;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SitrepUuid;
 use tabled::Tabled;
@@ -445,13 +446,20 @@ fn print_analysis_reports(
         analysis_report,
     } = report;
 
-    let our_git_commit = env!("VERGEN_GIT_SHA");
+    let our_git_commit = GitVersion::current();
+    let git_commit = GitVersion::from_str(&git_commit).expect("infallible");
     if our_git_commit != git_commit {
         eprintln!(
             "note: these sitrep analysis reports were produced by a Nexus \
              on git commit {git_commit}. this omdb was built from \
              {our_git_commit}."
         );
+        if our_git_commit.is_dirty() || log_git_commit.is_dirty() {
+            eprintln!(
+                "note: dirty repositories (those with uncommitted changes) \
+                 will never be considered equal, even if the SHA is the same."
+            );
+        }
     }
 
     if json {

@@ -37,12 +37,7 @@ impl SitrepAnalysisReport {
         let analysis_report = serde_json::to_value(analysis_report)
             .context("failed to serialize sitrep analysis report")?;
 
-        let git_commit = if env!("VERGEN_GIT_DIRTY") == "true" {
-            concat!(env!("VERGEN_GIT_SHA"), "-dirty")
-        } else {
-            env!("VERGEN_GIT_SHA")
-        }
-        .to_string();
+        let git_commit = omicron_git_version::GitVersion::current().to_string();
 
         Ok(Self { sitrep_id, git_commit, input_report, analysis_report })
     }
