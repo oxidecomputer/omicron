@@ -262,11 +262,7 @@ impl Builder {
                 let has_outstanding_work = !unmarked_ereports.is_empty()
                     || !unmarked_alert_requests.is_empty();
                 if has_outstanding_work {
-                    // The case has ereport work and/or alert work remaining, so
-                    // carry it forward intact. We keep even already-satisfied
-                    // alert requests around: the marker prevents their
-                    // resurrection, and pruning them would force a generation
-                    // bump that buys us only earlier marker GC.
+                    // The case has work remaining, so copy it forward intact.
                     report.closed_cases_copied_forward.insert(
                         case.id,
                         ClosedCaseReport {
