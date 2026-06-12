@@ -246,7 +246,7 @@ pub struct VmmPutStateResponse {
 
 /// Requestable running state of an Instance.
 ///
-/// A subset of [`nexus_types::external_api::instance::InstanceState`].
+/// A subset of [`omicron_common::api::external::InstanceState`].
 #[derive(Copy, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case", tag = "type", content = "value")]
 pub enum VmmStateRequested {
