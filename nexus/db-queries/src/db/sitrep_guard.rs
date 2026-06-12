@@ -633,10 +633,11 @@ mod tests {
 
         assert_matches!(outcome, SitrepGuardedInsertOutcome::AlreadyExists);
         // The resource row was not inserted; the seeded marker is unchanged.
-        // If the marker INSERT were ever flipped to an UPSERT (or lost its
-        // `ON CONFLICT DO NOTHING`), this would read Some(2), breaking the
+        // (The sentinel from `prior_marker_guard` aborts the whole statement
+        // atomically, so `new_marker` never runs here; the generation could
+        // only change if the guard itself regressed. Asserting it pins the
         // invariant that markers record the generation at which the resource
-        // was originally created.
+        // was originally created.)
         assert!(!resource_exists(&conn, resource_id).await);
         assert_eq!(marker_generation(&conn, resource_id).await, Some(1));
 
