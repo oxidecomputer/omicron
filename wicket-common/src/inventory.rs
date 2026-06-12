@@ -50,22 +50,22 @@ pub struct MgsV1Inventory {
     pub sps: Vec<SpInventory>,
 }
 
-// Inventory about sleds derived from MGS inventory and DDM
-#[derive(Default, Clone)]
-pub struct SledInventory {
-    pub sleds: BTreeSet<BootstrapSledDescription>,
-}
-
 impl From<BTreeSet<BootstrapSledDescription>> for SledInventory {
     fn from(sleds: BTreeSet<BootstrapSledDescription>) -> Self {
         SledInventory { sleds }
     }
 }
 
+// Inventory about sleds derived from MGS inventory and DDM
+#[derive(Default, Clone)]
+pub struct SledInventory {
+    pub sleds: BTreeSet<BootstrapSledDescription>,
+}
+
 impl SledInventory {
     pub fn new(
         inventory: &MgsV1Inventory,
-        bootstrap_sleds: &BTreeMap<Baseboard, Ipv6Addr>,
+        ddm_discovered_sleds: &BTreeMap<Baseboard, Ipv6Addr>,
         log: &slog::Logger,
     ) -> Self {
         let sleds = inventory
@@ -89,7 +89,8 @@ impl SledInventory {
                     state.model.clone(),
                     state.revision,
                 );
-                let bootstrap_ip = bootstrap_sleds.get(&baseboard).copied();
+                let bootstrap_ip =
+                    ddm_discovered_sleds.get(&baseboard).copied();
                 Some(BootstrapSledDescription {
                     id: sp.id,
                     baseboard,
@@ -140,7 +141,7 @@ impl SledInventory {
     /// Find all bootstrap sleds in inventory with slots matching
     /// `bootstrap_sled_slots` and return them. If the slot doesn't exist in
     /// inventory, then return an error.
-    pub fn load_bootstrap_sleds(
+    pub fn load_bootstrap_sleds_by_user_chosen_slots(
         &self,
         bootstrap_sled_slots: &BTreeSet<u16>,
     ) -> Result<BTreeSet<BootstrapSledDescription>, String> {

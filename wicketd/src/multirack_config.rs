@@ -6,7 +6,7 @@
 
 use crate::RssOrMultirackJoinConfigCommon;
 use crate::bgp_auth_keys::BgpAuthKeys;
-use crate::bootstrap_addrs::BootstrapPeers;
+use crate::bootstrap_addrs::BootstrapPeersFromDdm;
 use omicron_common::api::external::AllowedSourceIps;
 use sled_hardware_types::Baseboard;
 use wicket_common::inventory::MgsV1Inventory;
@@ -43,7 +43,7 @@ impl CurrentMultirackJoinConfig {
         our_baseboard: Option<&Baseboard>,
         config: MultirackJoinConfigBaseUserInput,
         inventory: &MgsV1Inventory,
-        bootstrap_peers: &BootstrapPeers,
+        bootstrap_peers: &BootstrapPeersFromDdm,
         log: &slog::Logger,
     ) -> Result<Self, String> {
         let bootstrap_sleds = bootstrap_peers.sleds();
@@ -56,8 +56,10 @@ impl CurrentMultirackJoinConfig {
             our_baseboard,
         )?;
 
-        let bootstrap_sleds =
-            sled_inventory.load_bootstrap_sleds(&config.bootstrap_slots)?;
+        let bootstrap_sleds = sled_inventory
+            .load_bootstrap_sleds_by_user_chosen_slots(
+                &config.bootstrap_slots,
+            )?;
 
         let mut bgp_auth_keys = BgpAuthKeys::default();
         let new_bgp_auth_key_ids =

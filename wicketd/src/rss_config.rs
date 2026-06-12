@@ -6,7 +6,7 @@
 
 use crate::RssOrMultirackJoinConfigCommon;
 use crate::bgp_auth_keys::BgpAuthKeys;
-use crate::bootstrap_addrs::BootstrapPeers;
+use crate::bootstrap_addrs::BootstrapPeersFromDdm;
 use anyhow::Context;
 use anyhow::Result;
 use anyhow::anyhow;
@@ -92,7 +92,7 @@ impl CurrentRssConfig {
 
     pub(crate) fn start_rss_request(
         &mut self,
-        bootstrap_peers: &BootstrapPeers,
+        bootstrap_peers: &BootstrapPeersFromDdm,
         log: &slog::Logger,
     ) -> Result<RackInitializeRequest> {
         // Basic "client-side" checks.
@@ -920,7 +920,6 @@ mod tests {
                 assert_eq!(not_found, expected_not_found);
                 assert_eq!(valid_keys, expected_valid_keys);
             }
-            _ => panic!("expected KeyIdsNotFound, got {:?}", err),
         }
     }
 }

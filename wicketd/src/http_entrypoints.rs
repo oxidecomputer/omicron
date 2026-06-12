@@ -98,10 +98,15 @@ impl WicketdApi for WicketdApiImpl {
             .mgs
             .expect("verified by `inventory_or_unavail`")
             .inventory;
-        rss_config.common.update_with_inventory_and_bootstrap_peers(
+
+        let ddm_discovered_sleds = &ctx.bootstrap_peers.sleds();
+        rss_config.common.update_sled_inventory(
             &inventory,
-            &ctx.bootstrap_peers,
+            &ddm_discovered_sleds,
             &ctx.log,
+        );
+        rss_config.common.update_ip_addresses_for_existing_bootstrap_sleds(
+            &ddm_discovered_sleds,
         );
 
         Ok(HttpResponseOk((&*rss_config).into()))
@@ -132,10 +137,14 @@ impl WicketdApi for WicketdApiImpl {
             .expect("verified by `inventory_or_unavail`")
             .inventory;
 
-        join_config.common.update_with_inventory_and_bootstrap_peers(
+        let ddm_discovered_sleds = &ctx.bootstrap_peers.sleds();
+        join_config.common.update_sled_inventory(
             &inventory,
-            &ctx.bootstrap_peers,
+            &ddm_discovered_sleds,
             &ctx.log,
+        );
+        join_config.common.update_ip_addresses_for_existing_bootstrap_sleds(
+            &ddm_discovered_sleds,
         );
 
         Ok(HttpResponseOk((&*join_config).into()))
@@ -161,9 +170,10 @@ impl WicketdApi for WicketdApiImpl {
         // Overwrite any non-rss config
         let rss_config = config.rss_config_mut_or_default();
 
-        rss_config.common.update_with_inventory_and_bootstrap_peers(
+        let ddm_discovered_sleds = &ctx.bootstrap_peers.sleds();
+        rss_config.common.update_sled_inventory(
             &inventory,
-            &ctx.bootstrap_peers,
+            &ddm_discovered_sleds,
             &ctx.log,
         );
         rss_config
@@ -193,9 +203,10 @@ impl WicketdApi for WicketdApiImpl {
         // We don't have a default (empty) version of a `join_config` like we do
         // with an `rss_config` so we have two different paths here.
         if let Some(join_config) = config.multirack_join_config_mut() {
-            join_config.common.update_with_inventory_and_bootstrap_peers(
+            let ddm_discovered_sleds = &ctx.bootstrap_peers.sleds();
+            join_config.common.update_sled_inventory(
                 &inventory,
-                &ctx.bootstrap_peers,
+                &ddm_discovered_sleds,
                 &ctx.log,
             );
             join_config

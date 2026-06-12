@@ -7,7 +7,7 @@
 use crate::MgsHandle;
 use crate::bgp_auth_keys::BgpAuthKeyError;
 use crate::bgp_auth_keys::BgpAuthKeys;
-use crate::bootstrap_addrs::BootstrapPeers;
+use crate::bootstrap_addrs::BootstrapPeersFromDdm;
 use crate::multirack_config::CurrentMultirackJoinConfig;
 use crate::preflight_check::PreflightCheckerHandler;
 use crate::rss_config::CurrentRssConfig;
@@ -67,6 +67,16 @@ impl RssOrMultirackJoinConfigCommon {
         self.bgp_auth_keys.set_key(key_id, key)
     }
 
+    pub(crate) fn update_sled_inventory(
+        &mut self,
+        inventory: &MgsV1Inventory,
+        ddm_discovered_sleds: &BTreeMap<Baseboard, Ipv6Addr>,
+        log: &slog::Logger,
+    ) {
+        self.inventory =
+            SledInventory::new(inventory, &ddm_discovered_sleds, log);
+    }
+
     pub(crate) fn update(
         &mut self,
         bootstrap_slots: &BTreeSet<u16>,
@@ -89,30 +99,28 @@ impl RssOrMultirackJoinConfigCommon {
         )?;
         // Next, confirm the user's list only consists of sleds in our
         // inventory and return those sleds.
-        self.bootstrap_sleds =
-            self.inventory.load_bootstrap_sleds(bootstrap_slots)?;
+        self.bootstrap_sleds = self
+            .inventory
+            .load_bootstrap_sleds_by_user_chosen_slots(bootstrap_slots)?;
 
         self.bgp_auth_keys.sync_keys(new_bgp_auth_key_ids);
 
         Ok(())
     }
-    pub(crate) fn update_with_inventory_and_bootstrap_peers(
-        &mut self,
-        inventory: &MgsV1Inventory,
-        bootstrap_peers: &BootstrapPeers,
-        log: &slog::Logger,
-    ) {
-        let bootstrap_sleds = bootstrap_peers.sleds();
-        self.inventory = SledInventory::new(inventory, &bootstrap_sleds, log);
 
+    pub(crate) fn update_ip_addresses_for_existing_bootstrap_sleds(
+        &mut self,
+        ddm_discovered_sleds: &BTreeMap<Baseboard, Ipv6Addr>,
+    ) {
         // If the user has already uploaded a config specifying bootstrap_sleds,
-        // also update our knowledge of those sleds' bootstrap addresses.
+        // also update our knowledge of those sleds' bootstrap addresses as
+        // learned via DDM.
         let our_bootstrap_sleds = mem::take(&mut self.bootstrap_sleds);
         self.bootstrap_sleds = our_bootstrap_sleds
             .into_iter()
             .map(|mut sled_desc| {
                 sled_desc.bootstrap_ip =
-                    bootstrap_sleds.get(&sled_desc.baseboard).copied();
+                    ddm_discovered_sleds.get(&sled_desc.baseboard).copied();
                 sled_desc
             })
             .collect();
@@ -231,7 +239,7 @@ pub struct ServerContext {
     /// (plugging us into a different switch would require powering off our sled
     /// and physically moving it).
     pub(crate) local_switch_id: OnceLock<SpIdentifier>,
-    pub(crate) bootstrap_peers: BootstrapPeers,
+    pub(crate) bootstrap_peers: BootstrapPeersFromDdm,
     pub(crate) update_tracker: Arc<UpdateTracker>,
     pub(crate) baseboard: Option<Baseboard>,
     pub(crate) rss_or_multirack_join_config: Mutex<RssOrMultirackJoinConfig>,

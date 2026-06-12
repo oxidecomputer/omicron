@@ -23,7 +23,7 @@ use artifacts::{
     WicketdArtifactStore, WicketdInstallinatorApiImpl,
     WicketdInstallinatorContext,
 };
-use bootstrap_addrs::BootstrapPeers;
+use bootstrap_addrs::BootstrapPeersFromDdm;
 pub use config::Config;
 pub(crate) use context::RssOrMultirackJoinConfigCommon;
 pub(crate) use context::ServerContext;
@@ -165,7 +165,7 @@ impl Server {
             ipr_update_tracker.clone(),
         ));
 
-        let bootstrap_peers = BootstrapPeers::new(&log);
+        let bootstrap_peers = BootstrapPeersFromDdm::new(&log);
         let internal_dns_resolver = args
             .rack_subnet
             .map(|addr| {
