@@ -111,9 +111,9 @@ The top-level items in this list are strictly sequential.  Control plane zone up
 
 MGS updates (e.g., SP updates) may be skipped if the new target release specifies the same versions for these components that are already deployed.  This is common in development/test environments, though unexpected in customer environments.  All releases, even development ones, have new versions of the host OS and control plane zones so these are never skipped.
 
-=== Verifying that everything is working okay before the update
+=== Verifying that the system is ready to be updated
 
-Before an update, we expect the response of the system update status endpoint to return `contact_support: false`. If viewing only through the console, there should be no warning asking the user to contact support.
+Before an update, we expect the response of the system update status endpoint to return `contact_support: false`. If viewing only through the console, there should be no warning asking the user to contact support. See <<task-check-for-contact-support-flag>>.
 
 Should the `contact_support` field be true, see <<task-check-cause-of-contact-support-true>>.
 
@@ -137,7 +137,7 @@ After the update:
 
 * no new blueprints should be created
 * all components should be at the new version
-* about 15-20 minutes after the update is finished, check the system update status endpoint, or the console view of "System Update" to see if the response is telling the user they should call support.
+* a few minutes after the update is finished, check the system update status endpoint, or the console view of "System Update" to see if the response is telling the user they should call support. See <<task-check-for-contact-support-flag>>. If contact support is true see <<task-check-cause-of-contact-support-true>>.
 
 See the previous sections for how to observe these.
 
@@ -367,10 +367,43 @@ Safety Options:
 
 |===
 
+[#task-check-for-contact-support-flag]
+=== Task: Check for contact_support flag
+
+NOTE: This field is intended for update purposes only. It flags whether it is safe to start an update, an update has stopped unexpectedly, or whether health checks on a subset of components passed after an update completed. It is NOT a health status API. If used as a health status API, it could show false positives. For example, a newly commissioned sled that hasn't reported a reconciliation result yet would set the contact_support field to true.
+
+Use the `oxide system update status` command to see the status of the contact support field
+
+```
+$ oxide system update status
+{
+  "target_release": {
+    time_requested: "2026-06-11T05:34:02.158806Z",
+    version: "20.0.0-0.ci+git863b79d5cd0"
+  },
+  "components_by_release_version": {
+    "20.0.0-0.ci+git863b79d5cd0": 249
+  },
+  "time_last_step_planned": "2026-04-16T07:08:43.121286Z",
+  "suspended": false,
+  "contact_support": false
+}
+```
+
+If viewing only through the console, the contact support field won't be present. If there is an issue, a warning will appear instead.
+
+image::assets/contact-support-true.png[]
+
 [#task-check-cause-of-contact-support-true]
 === Task: Checking why the contact support field in system update status is true
 
-Every time the system update status endpoint is called and the `contact_support` boolean is true, the results of the failed health checks will be captured in the logs.
+Every time the "system update status" endpoint is called, the system checks for a small set of known issues. If any are found, it reports `contact_support: true`.
+	
+Prior to the update, this flag indicates issues that could prevent an update from proceeding normally.
+During the update, this flag indicates that the update has stopped and requires support intervention to continue.
+After the update, this flag indicates that the update may have resulted in a system that's not fully working.
+	
+The API doesn't say anything else because this isn't customer-actionable. Details are available in the Nexus log that serviced the API request.
 
 This is an example of how the log entry would look in a very unhealthy system:
 
@@ -394,8 +427,8 @@ This is an example of how the log entry would look in a very unhealthy system:
 
 A few things to note:
 
-- If you call the update status endpoint during an update, the health checks won't run and no problems will be reported (unless the system considers an update to be stuck).
-- The health checks will run during a MUPdate so the endpoint may show false positives if an MUPdate is happening.
+- If you call the update status endpoint during an update, the health checks won't run and no problems will be reported unless the system considers an update to be stuck.
+- The health checks will run during a MUPdate so the endpoint may show false positives if a MUPdate is happening.
  
 
 [#task-check-reconfigurator-history]
