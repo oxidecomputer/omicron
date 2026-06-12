@@ -120,13 +120,13 @@ use nexus_db_queries::db::datastore::CrucibleDisk;
 use nexus_db_queries::db::datastore::CrucibleTargets;
 use nexus_db_queries::db::datastore::Disk;
 use nexus_db_queries::db::datastore::InstanceAndActiveVmm;
-use nexus_db_queries::db::datastore::InstanceStateComputer;
 use nexus_db_queries::db::datastore::LocalStorageAllocation;
 use nexus_db_queries::db::datastore::LocalStorageDisk;
 use nexus_db_queries::db::datastore::SQL_BATCH_SIZE;
 use nexus_db_queries::db::datastore::VolumeCookedResult;
 use nexus_db_queries::db::datastore::read_only_resources_associated_with_volume;
 use nexus_db_queries::db::identity::Asset;
+use nexus_db_queries::db::model::InstanceStateComputer;
 use nexus_db_queries::db::model::ServiceKind;
 use nexus_db_queries::db::pagination::Paginator;
 use nexus_db_queries::db::pagination::paginated;
@@ -7881,18 +7881,25 @@ async fn cmd_db_vmm_info(
                     reservoir_ram: ByteCount(reservoir),
                 },
             instance_id: _,
+            state,
         } = resource;
+
         const SLED_ID: &'static str = "sled ID";
         const THREADS: &'static str = "hardware threads";
         const RSS: &'static str = "RSS RAM";
         const RESERVOIR: &'static str = "reservoir RAM";
-        const WIDTH: usize = const_max_len(&[SLED_ID, THREADS, RSS, RESERVOIR]);
+        const STATE: &'static str = "state";
+        const WIDTH: usize =
+            const_max_len(&[SLED_ID, THREADS, RSS, RESERVOIR, STATE]);
+
         if include_sled_id {
             println!("    {SLED_ID:>WIDTH$}: {sled_id}");
         }
+
         println!("    {THREADS:>WIDTH$}: {hardware_threads}");
         println!("    {RSS:>WIDTH$}: {rss}");
         println!("    {RESERVOIR:>WIDTH$}: {reservoir}");
+        println!("    {STATE:>WIDTH$}: {state}");
     }
 
     let reservations = resource_dsl::sled_resource_vmm

@@ -37,8 +37,8 @@ use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
 use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::datastore::InstanceAndActiveVmm;
-use nexus_db_queries::db::datastore::InstanceStateComputer;
 use nexus_db_queries::db::identity::Resource;
+use nexus_db_queries::db::model::InstanceStateComputer;
 use nexus_types::external_api::disk;
 use nexus_types::external_api::external_ip;
 use nexus_types::external_api::instance;
@@ -1396,6 +1396,7 @@ impl super::Nexus {
             &requested,
         )? {
             InstanceStateChangeRequestAction::AlreadyDone => Ok(()),
+
             InstanceStateChangeRequestAction::UpdateRuntime(new_runtime) => {
                 let instance_id =
                     InstanceUuid::from_untyped_uuid(prev_instance_state.id());
@@ -1416,6 +1417,7 @@ impl super::Nexus {
                     Ok(())
                 }
             }
+
             InstanceStateChangeRequestAction::SendToSled {
                 sled_id,
                 propolis_id,

@@ -58,6 +58,7 @@ use nexus_types::external_api::vpc::{Vpc, VpcRouter, VpcSubnet};
 use nexus_types::identity::Resource;
 use nexus_types::internal_api::params as internal_params;
 use nexus_types_versions::latest::instance::Instance;
+use nexus_types_versions::latest::instance::InstanceCpuPlatform;
 use omicron_common::api::external::AffinityPolicy;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Disk;
@@ -67,7 +68,6 @@ use omicron_common::api::external::Generation;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::InstanceAutoRestartPolicy;
 use omicron_common::api::external::InstanceCpuCount;
-use omicron_common::api::external::InstanceCpuPlatform;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::RouteDestination;
@@ -2120,7 +2120,7 @@ impl<'a, N: NexusServer> DiskTest<'a, N> {
                 );
 
                 match result {
-                    Ok(None) => Err(CondCheckError::NotYet),
+                    Ok(None) => Err(CondCheckError::NotYet { status: None }),
                     Ok(Some(c)) => {
                         let all_zpools = c
                             .sled_agents
@@ -2133,11 +2133,11 @@ impl<'a, N: NexusServer> DiskTest<'a, N> {
                         if all_zpools.contains(&zpool.id) {
                             Ok(())
                         } else {
-                            Err(CondCheckError::NotYet)
+                            Err(CondCheckError::NotYet { status: None })
                         }
                     }
                     Err(Error::ServiceUnavailable { .. }) => {
-                        Err(CondCheckError::NotYet)
+                        Err(CondCheckError::NotYet { status: None })
                     }
                     Err(error) => Err(CondCheckError::Failed(error)),
                 }

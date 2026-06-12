@@ -789,16 +789,10 @@ impl CollectionTask {
             }
             #[cfg(test)]
             CollectionMessage::Statistics { reply_tx } => {
-                // Time should be paused when using this retrieval
-                // mechanism. We advance time to cause a panic if this
-                // message were to be sent with time *not* paused.
-                tokio::time::advance(Duration::from_nanos(1)).await;
-                // The collection timer *may* be ready to go in which
-                // case we would do a collection right after
-                // processesing this message, thus changing the actual
-                // data. Instead we reset the timer to prevent
-                // additional collections (i.e. since time is paused).
-                self.collection_timer.reset();
+                // The test is responsible for quiescing collections before
+                // requesting them, by waiting for in-flight collections to
+                // complete and using a collection interval long enough that
+                // the timer cannot fire during the test.
                 debug!(
                     self.log,
                     "received request for current task statistics"

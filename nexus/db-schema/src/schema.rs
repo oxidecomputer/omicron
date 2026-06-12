@@ -1111,6 +1111,7 @@ table! {
         rss_ram -> Int8,
         reservoir_ram -> Int8,
         instance_id -> Nullable<Uuid>,
+        state -> crate::enums::SledResourceVmmStateEnum,
     }
 }
 
@@ -2172,6 +2173,7 @@ table! {
         planner_enabled -> Bool,
         time_modified -> Timestamptz,
         tuf_repo_pruner_enabled -> Bool,
+        disruption_policy -> crate::enums::ReconfiguratorDisruptionPolicyEnum,
     }
 }
 
@@ -2902,6 +2904,7 @@ table! {
         time_dispatched -> Nullable<Timestamptz>,
         num_dispatched -> Int8,
         case_id -> Nullable<Uuid>,
+        alert_version -> Int8,
     }
 }
 
@@ -3287,6 +3290,7 @@ table! {
         alert_class -> crate::enums::AlertClassEnum,
         payload -> Jsonb,
         comment -> Text,
+        alert_version -> Int8,
     }
 }
 

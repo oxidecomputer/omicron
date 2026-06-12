@@ -281,6 +281,26 @@ CREATE INDEX IF NOT EXISTS lookup_sled_by_policy_and_state ON omicron.public.sle
     sled_state
 );
 
+CREATE TYPE IF NOT EXISTS omicron.public.sled_resource_vmm_state AS ENUM (
+    -- The VMM is not currently running the instance, but the propolis process
+    -- may still exist and/or the zone has not been destroyed yet, meaning it
+    -- is still consuming sled resources.
+    'tombstoned',
+
+    -- This VMM either is or will be running the instance.
+    --
+    -- A sled resource reservation is in the active state under
+    -- either of the following conditions:
+    --
+    -- 1. It was reserved in order to start a previously-stopped
+    --    instance.
+    -- 2. A migration into that VMM has completed successfully.
+    'active',
+
+    -- This VMM is a migration destination for the active VMM
+    'target'
+);
+
 -- Accounting for VMMs using resources on a sled
 CREATE TABLE IF NOT EXISTS omicron.public.sled_resource_vmm (
     -- Should match the UUID of the corresponding VMM
@@ -307,7 +327,9 @@ CREATE TABLE IF NOT EXISTS omicron.public.sled_resource_vmm (
     -- If we tried to backfill + make this column non-nullable while that saga
     -- was mid-execution, we would still have some rows in this table with nullable
     -- values that would be more complex to fix.
-    instance_id UUID
+    instance_id UUID,
+
+    state omicron.public.sled_resource_vmm_state NOT NULL
 );
 
 -- Allow looking up all VMM resources which reside on a sled
@@ -315,6 +337,20 @@ CREATE UNIQUE INDEX IF NOT EXISTS lookup_vmm_resource_by_sled ON omicron.public.
     sled_id,
     id
 );
+
+-- Allow a single VMM reservation per instance state
+--
+-- Note: `tombstoned` means that the propolis zone may not have been cleaned up
+-- yet, and should be considered as still consuming sled resources. This should
+-- not block out reserving another active VMM for an instance if the sled
+-- reservation algorithm can find a spot for it, hence why this unique index
+-- does not include the `tombstoned` state.
+CREATE UNIQUE INDEX IF NOT EXISTS
+    single_vmm_reservation_per_state
+ON omicron.public.sled_resource_vmm (
+    instance_id,
+    state
+) WHERE state != 'tombstoned';
 
 -- Allow looking up all resources by instance
 CREATE INDEX IF NOT EXISTS lookup_vmm_resource_by_instance ON omicron.public.sled_resource_vmm (
@@ -1319,7 +1355,8 @@ CREATE TYPE IF NOT EXISTS omicron.public.instance_auto_restart AS ENUM (
 
 CREATE TYPE IF NOT EXISTS omicron.public.instance_cpu_platform AS ENUM (
   'amd_milan',
-  'amd_turin'
+  'amd_turin',
+  'amd_turin_v2'
 );
 
 /*
@@ -5269,6 +5306,12 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_svc_enabled_not_online_parse_error
  *
  * See https://github.com/oxidecomputer/omicron/issues/8253 for more details.
  */
+CREATE TYPE IF NOT EXISTS omicron.public.reconfigurator_disruption_policy AS ENUM (
+    'terminate',
+    'migrate_or_terminate',
+    'migrate_only'
+);
+
 CREATE TABLE IF NOT EXISTS omicron.public.reconfigurator_config (
     -- Monotonically increasing version for all bp_targets
     version INT8 PRIMARY KEY,
@@ -5280,7 +5323,10 @@ CREATE TABLE IF NOT EXISTS omicron.public.reconfigurator_config (
     time_modified TIMESTAMPTZ NOT NULL,
 
     -- Enable the TUF repo pruner background task
-    tuf_repo_pruner_enabled BOOL NOT NULL
+    tuf_repo_pruner_enabled BOOL NOT NULL,
+
+    -- How to disrupt instances during updates.
+    disruption_policy omicron.public.reconfigurator_disruption_policy NOT NULL
 );
 
 /*
@@ -6048,7 +6094,8 @@ CREATE INDEX IF NOT EXISTS lookup_anti_affinity_group_instance_membership_by_ins
 CREATE TYPE IF NOT EXISTS omicron.public.vmm_cpu_platform AS ENUM (
   'sled_default',
   'amd_milan',
-  'amd_turin'
+  'amd_turin',
+  'amd_turin_v2'
 );
 
 /* Describes why a VMM record is in the 'failed' `vmm_state`. */
@@ -7102,7 +7149,8 @@ CREATE TABLE IF NOT EXISTS omicron.public.alert (
     time_modified TIMESTAMPTZ NOT NULL,
     -- The class of alert that this is.
     alert_class omicron.public.alert_class NOT NULL,
-    -- Actual alert data. The structure of this depends on the alert class.
+    -- Actual alert data. The structure of this depends on the alert class and
+    -- version.
     payload JSONB NOT NULL,
 
     -- Set when dispatch entries have been created for this alert.
@@ -7113,12 +7161,20 @@ CREATE TABLE IF NOT EXISTS omicron.public.alert (
     -- The ID of the fault management case that created this alert, if any.
     case_id UUID,
 
+    -- The version of the alert class' schema that this alert's payload conforms
+    -- to, starting at version 0.
+    alert_version INT8 NOT NULL,
+
     CONSTRAINT time_dispatched_set_if_dispatched CHECK (
         (num_dispatched = 0) OR (time_dispatched IS NOT NULL)
     ),
 
     CONSTRAINT num_dispatched_is_positive CHECK (
         (num_dispatched >= 0)
+    ),
+
+    CONSTRAINT alert_version_is_non_negative CHECK (
+        (alert_version >= 0)
     )
 );
 
@@ -7130,7 +7186,8 @@ INSERT INTO omicron.public.alert (
     alert_class,
     payload,
     time_dispatched,
-    num_dispatched
+    num_dispatched,
+    alert_version
 ) VALUES (
     -- NOTE: this UUID is duplicated in nexus_db_model::alert.
     '001de000-7768-4000-8000-000000000001',
@@ -7141,6 +7198,7 @@ INSERT INTO omicron.public.alert (
     -- Pretend to be dispatched so we won't show up in "list alerts needing
     -- dispatch" queries
     NOW(),
+    0,
     0
 ) ON CONFLICT DO NOTHING;
 
@@ -7767,13 +7825,22 @@ CREATE TABLE IF NOT EXISTS omicron.public.fm_alert_request (
 
     -- The class of alert that was requested
     alert_class omicron.public.alert_class NOT NULL,
-    -- Actual alert data. The structure of this depends on the alert class.
+    -- Actual alert data. The structure of this depends on the alert class and
+    -- version.
     payload JSONB NOT NULL,
     -- A human-readable comment from the diagnosis engine explaining why it
     -- requested this alert.
     comment TEXT NOT NULL,
 
-    PRIMARY KEY (sitrep_id, id)
+    -- The version of the alert class' schema that this alert's payload conforms
+    -- to, starting at version 0.
+    alert_version INT8 NOT NULL,
+
+    PRIMARY KEY (sitrep_id, id),
+
+    CONSTRAINT alert_version_is_non_negative CHECK (
+        (alert_version >= 0)
+    )
 );
 
 CREATE INDEX IF NOT EXISTS
@@ -8675,7 +8742,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '264.0.0', NULL)
+    (TRUE, NOW(), NOW(), '268.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;
