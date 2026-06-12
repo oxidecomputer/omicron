@@ -30,6 +30,7 @@ pub struct FmRendezvous {
     sitrep_watcher: watch::Receiver<Option<CurrentSitrep>>,
     alert_dispatcher: Activator,
     support_bundle_collector: Activator,
+    sitrep_loader: Activator,
     nexus_id: OmicronZoneUuid,
 }
 
@@ -60,6 +61,7 @@ impl FmRendezvous {
         rx: watch::Receiver<Option<CurrentSitrep>>,
         alert_dispatcher: Activator,
         support_bundle_collector: Activator,
+        sitrep_loader: Activator,
         nexus_id: OmicronZoneUuid,
     ) -> Self {
         Self {
@@ -67,6 +69,7 @@ impl FmRendezvous {
             sitrep_watcher: rx,
             alert_dispatcher,
             support_bundle_collector,
+            sitrep_loader,
             nexus_id,
         }
     }
@@ -104,12 +107,23 @@ impl FmRendezvous {
             indicating that they were aborted.
         ";
 
-        Status {
+        let status = Status {
             sitrep_id: Some(sitrep.1.id()),
             alerts: alerts.await.expect(TASKS_SHOULDNT_FAIL),
             support_bundles: support_bundles.await.expect(TASKS_SHOULDNT_FAIL),
             ereport_marking: marking.await.expect(TASKS_SHOULDNT_FAIL),
+        };
+
+        // If a guarded-create op observed that our sitrep is stale, the db
+        // already has a newer current sitrep than the one we have loaded. Poke
+        // the sitrep loader so that it picks up the new sitrep promptly, rather
+        // than on its next periodic activation; the loader in turn re-activates
+        // this task with the fresh sitrep.
+        if status.stale_sitrep_detected() {
+            self.sitrep_loader.activate();
         }
+
+        status
     }
 
     fn spawn_op<F>(
@@ -554,16 +568,39 @@ mod tests {
     struct TestActivators {
         alert_dispatcher_activator: Activator,
         support_bundle_collector_activator: Activator,
+        sitrep_loader_activator: Activator,
     }
 
     fn make_activators() -> TestActivators {
         let activators = TestActivators {
             alert_dispatcher_activator: Activator::new(),
             support_bundle_collector_activator: Activator::new(),
+            sitrep_loader_activator: Activator::new(),
         };
         activators.alert_dispatcher_activator.mark_wired_up().unwrap();
         activators.support_bundle_collector_activator.mark_wired_up().unwrap();
+        activators.sitrep_loader_activator.mark_wired_up().unwrap();
         activators
+    }
+
+    /// Asserts that `activator` has been activated, panicking with `msg` if
+    /// it has not.
+    ///
+    /// `Activator::activate()` stores a permit synchronously, so by the time
+    /// a test's activation has completed, the activator is either already
+    /// activated or never will be; a single poll suffices to tell which.
+    #[track_caller]
+    fn assert_activated(activator: &Activator, msg: &str) {
+        let mut activated = tokio_test::task::spawn(activator.activated());
+        tokio_test::assert_ready!(activated.poll(), "{}", msg);
+    }
+
+    /// Asserts that `activator` has not been activated, panicking with `msg`
+    /// if it has. See [`assert_activated`].
+    #[track_caller]
+    fn assert_not_activated(activator: &Activator, msg: &str) {
+        let mut activated = tokio_test::task::spawn(activator.activated());
+        tokio_test::assert_pending!(activated.poll(), "{}", msg);
     }
 
     async fn fetch_alert(
@@ -590,6 +627,7 @@ mod tests {
         let TestActivators {
             alert_dispatcher_activator,
             support_bundle_collector_activator,
+            sitrep_loader_activator,
         } = make_activators();
 
         let mut task = FmRendezvous::new(
@@ -597,6 +635,7 @@ mod tests {
             sitrep_rx,
             alert_dispatcher_activator.clone(),
             support_bundle_collector_activator.clone(),
+            sitrep_loader_activator.clone(),
             OmicronZoneUuid::new_v4(),
         );
 
@@ -816,6 +855,13 @@ mod tests {
             "alert3 should have case_id set to case1"
         );
 
+        // Neither activation saw a stale sitrep, so the sitrep loader should
+        // not have been poked.
+        assert_not_activated(
+            &sitrep_loader_activator,
+            "sitrep loader should not be activated without a stale sitrep",
+        );
+
         // Cleanup
         db.terminate().await;
         logctx.cleanup_successful();
@@ -840,6 +886,7 @@ mod tests {
         let TestActivators {
             alert_dispatcher_activator,
             support_bundle_collector_activator,
+            sitrep_loader_activator,
         } = make_activators();
 
         let mut task = FmRendezvous::new(
@@ -847,6 +894,7 @@ mod tests {
             sitrep_rx,
             alert_dispatcher_activator.clone(),
             support_bundle_collector_activator.clone(),
+            sitrep_loader_activator.clone(),
             OmicronZoneUuid::new_v4(),
         );
 
@@ -980,6 +1028,12 @@ mod tests {
             status.support_bundles.result,
             OpResult::Executed { .. }
         );
+        // Detecting a stale sitrep should poke the sitrep loader so the
+        // newer sitrep is picked up promptly.
+        assert_activated(
+            &sitrep_loader_activator,
+            "sitrep loader should be activated when a stale sitrep is detected",
+        );
 
         db.terminate().await;
         logctx.cleanup_successful();
@@ -1003,6 +1057,7 @@ mod tests {
         let TestActivators {
             alert_dispatcher_activator,
             support_bundle_collector_activator,
+            sitrep_loader_activator,
         } = make_activators();
 
         let mut task = FmRendezvous::new(
@@ -1010,6 +1065,7 @@ mod tests {
             sitrep_rx,
             alert_dispatcher_activator.clone(),
             support_bundle_collector_activator.clone(),
+            sitrep_loader_activator.clone(),
             OmicronZoneUuid::new_v4(),
         );
 
@@ -1144,6 +1200,12 @@ mod tests {
         // Alert processing should still have run: the stale-sitrep outcome
         // aborts only the bundle loop, not the whole activation.
         assert_matches!(status.alerts.result, OpResult::Executed { .. });
+        // Detecting a stale sitrep should poke the sitrep loader so the
+        // newer sitrep is picked up promptly.
+        assert_activated(
+            &sitrep_loader_activator,
+            "sitrep loader should be activated when a stale sitrep is detected",
+        );
 
         db.terminate().await;
         logctx.cleanup_successful();
@@ -1240,6 +1302,7 @@ mod tests {
         let TestActivators {
             alert_dispatcher_activator,
             support_bundle_collector_activator,
+            sitrep_loader_activator,
         } = make_activators();
 
         let mut task = FmRendezvous::new(
@@ -1247,6 +1310,7 @@ mod tests {
             sitrep_rx,
             alert_dispatcher_activator.clone(),
             support_bundle_collector_activator.clone(),
+            sitrep_loader_activator.clone(),
             OmicronZoneUuid::new_v4(),
         );
 
@@ -1475,6 +1539,7 @@ mod tests {
         let TestActivators {
             alert_dispatcher_activator,
             support_bundle_collector_activator,
+            sitrep_loader_activator,
         } = make_activators();
 
         let mut task = FmRendezvous::new(
@@ -1482,6 +1547,7 @@ mod tests {
             sitrep_rx,
             alert_dispatcher_activator.clone(),
             support_bundle_collector_activator.clone(),
+            sitrep_loader_activator.clone(),
             OmicronZoneUuid::new_v4(),
         );
 
@@ -1845,6 +1911,7 @@ mod tests {
         let TestActivators {
             alert_dispatcher_activator,
             support_bundle_collector_activator,
+            sitrep_loader_activator,
         } = make_activators();
 
         let nexus_id = OmicronZoneUuid::new_v4();
@@ -1853,6 +1920,7 @@ mod tests {
             sitrep_rx,
             alert_dispatcher_activator.clone(),
             support_bundle_collector_activator.clone(),
+            sitrep_loader_activator.clone(),
             nexus_id,
         );
 
@@ -1953,14 +2021,9 @@ mod tests {
         );
 
         // The collector should have been activated.
-        assert!(
-            tokio::time::timeout(
-                std::time::Duration::from_millis(1),
-                support_bundle_collector_activator.activated(),
-            )
-            .await
-            .is_ok(),
-            "collector should be activated when bundles are created"
+        assert_activated(
+            &support_bundle_collector_activator,
+            "collector should be activated when bundles are created",
         );
 
         // Build a second sitrep that carries forward the existing bundle
@@ -2054,6 +2117,7 @@ mod tests {
         let TestActivators {
             alert_dispatcher_activator,
             support_bundle_collector_activator,
+            sitrep_loader_activator,
         } = make_activators();
 
         let nexus_id = OmicronZoneUuid::new_v4();
@@ -2062,6 +2126,7 @@ mod tests {
             sitrep_rx,
             alert_dispatcher_activator.clone(),
             support_bundle_collector_activator.clone(),
+            sitrep_loader_activator.clone(),
             nexus_id,
         );
 
@@ -2143,14 +2208,9 @@ mod tests {
         );
 
         // The collector should NOT have been activated (no bundles created).
-        assert!(
-            tokio::time::timeout(
-                std::time::Duration::from_millis(1),
-                support_bundle_collector_activator.activated(),
-            )
-            .await
-            .is_err(),
-            "collector should not be activated when no bundles were created"
+        assert_not_activated(
+            &support_bundle_collector_activator,
+            "collector should not be activated when no bundles were created",
         );
 
         // Cleanup
