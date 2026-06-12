@@ -9,6 +9,7 @@ use crate::authz;
 use crate::context::OpContext;
 use crate::db::datastore::RunnableQuery;
 use crate::db::model::Ereport;
+use crate::db::model::EreporterRestart;
 use crate::db::model::EreporterType;
 use crate::db::model::SpMgsSlot;
 use crate::db::model::SpType;
@@ -157,6 +158,20 @@ impl DataStore {
             .filter(dsl::restart_id.eq(restart_id.into_untyped_uuid()))
             .filter(dsl::time_deleted.is_null())
             .select(Ereport::as_select())
+            .load_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    /// Lists ereporter restarts, paginated by restart ID.
+    pub async fn ereporter_restart_list(
+        &self,
+        opctx: &OpContext,
+        pagparams: &DataPageParams<'_, Uuid>,
+    ) -> ListResultVec<EreporterRestart> {
+        opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
+        paginated(restart_dsl::ereporter_restart, restart_dsl::id, pagparams)
+            .select(EreporterRestart::as_select())
             .load_async(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
