@@ -180,6 +180,9 @@ impl From<Saga> for SagaRow {
             current_sec,
             adopt_generation: _,
             adopt_time: _,
+            abandon_information: _,
+            reason_abandoned: _,
+            time_abandoned: _,
         } = saga;
         Self {
             id: id.0.into(),
@@ -357,6 +360,7 @@ You should only do this if:
     Ok(())
 }
 
+// TODO-K: Add logic to add abandon metadata
 async fn cmd_sagas_abandon(
     omdb: &Omdb,
     opctx: &OpContext,

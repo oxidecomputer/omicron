@@ -151,6 +151,25 @@ where
 }
 
 impl_enum_type!(
+    SagaReasonAbandonedEnum:
+
+    #[derive(
+        Copy,
+        Clone,
+        Debug,
+        PartialEq,
+        AsExpression,
+        FromSqlRow,
+        Serialize,
+        Deserialize,
+    )]
+    pub enum SagaReasonAbandoned;
+
+    Omdb => b"omdb"
+    Unrecoverable => b"unrecoverable"
+);
+
+impl_enum_type!(
     SagaStateEnum:
 
     #[derive(
@@ -204,6 +223,12 @@ pub struct Saga {
     pub current_sec: Option<SecId>,
     pub adopt_generation: super::Generation,
     pub adopt_time: chrono::DateTime<chrono::Utc>,
+
+    /// Abandonment metadata.  These are only set when `saga_state` is
+    /// `Abandoned` and are `None` otherwise.
+    pub time_abandoned: Option<chrono::DateTime<chrono::Utc>>,
+    pub reason_abandoned: Option<SagaReasonAbandoned>,
+    pub abandon_information: Option<String>,
 }
 
 impl Saga {
@@ -228,6 +253,9 @@ impl Saga {
             current_sec: Some(creator),
             adopt_generation: Generation::new().into(),
             adopt_time: now,
+            time_abandoned: None,
+            reason_abandoned: None,
+            abandon_information: None,
         }
     }
 }

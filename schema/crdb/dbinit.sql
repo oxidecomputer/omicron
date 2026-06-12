@@ -2919,6 +2919,16 @@ CREATE TYPE IF NOT EXISTS omicron.public.saga_state AS ENUM (
     'abandoned'
 );
 
+/*
+ * Why a saga was abandoned (only set when `saga_state` is 'abandoned')
+ */
+CREATE TYPE IF NOT EXISTS omicron.public.saga_reason_abandoned AS ENUM (
+    /* an operator explicitly abandoned the saga via omdb */
+    'omdb',
+    /* the saga failed and unwinding also failed, leaving it stuck */
+    'unrecoverable'
+);
+
 
 CREATE TABLE IF NOT EXISTS omicron.public.saga (
     /* immutable fields */
@@ -2944,7 +2954,15 @@ CREATE TABLE IF NOT EXISTS omicron.public.saga (
     saga_state omicron.public.saga_state NOT NULL,
     current_sec UUID,
     adopt_generation INT NOT NULL,
-    adopt_time TIMESTAMPTZ NOT NULL
+    adopt_time TIMESTAMPTZ NOT NULL,
+
+    /*
+     * Abandonment metadata. These are only set when `saga_state` is
+     * 'abandoned' and are NULL otherwise.
+     */
+    time_abandoned TIMESTAMPTZ,
+    reason_abandoned omicron.public.saga_reason_abandoned,
+    abandon_information TEXT
 );
 
 /*
@@ -8693,7 +8711,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '265.0.0', NULL)
+    (TRUE, NOW(), NOW(), '266.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;
