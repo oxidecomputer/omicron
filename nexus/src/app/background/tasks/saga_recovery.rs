@@ -133,6 +133,7 @@ use nexus_types::quiesce::SagaQuiesceHandle;
 use nexus_types::quiesce::SagaRecoveryInProgress;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::InternalContext;
+use steno::UndoActionError;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use steno::SagaId;
@@ -441,12 +442,38 @@ impl<N: MakeSagaContext> SagaRecoveryInner<N> {
         let saga_completion = async move {
             let result = saga_completion.await;
             if let Err(error) = &result.kind {
-                if error.undo_failure.is_some() {
-                    warn!(abandon_log, "recovered saga is stuck; marking abandoned";
-                        "saga_id" => %saga_id,
-                        "error" => ?error,
-                    );
-                    // TODO-K: Actually mark the saga as abandoned here
+                // A `SagaResultErr` will contain both transient and permanent
+                // errors. In this case we ignore transient errors and only mark
+                // a saga as abandoned if we find a permanent error.
+                match &error.undo_failure {
+                    Some((node_name, action_error)) => {
+                        // The saga failed and unwinding failed, so it can
+                        // move neither forward to its goal nor back to its
+                        // initial state. Mark it as abandoned so we stop trying
+                        // to recover it.
+                        match action_error {
+                            UndoActionError::PermanentFailure { source_error } => {
+                                warn!(
+                                    abandon_log,
+                                    "recovered saga is stuck; marking as abandoned";
+                                    "saga_id" => %saga_id,
+                                    // TODO-K: find which one is better to keep
+                                    "error" => ?error,
+                                    "node_name" => ?node_name,
+                                    "source_error" => ?source_error,
+                                );
+                                // TODO-K: perform the idempotent abandonment write here, e.g.
+                                //   datastore.saga_mark_abandoned(&opctx, saga_id).await
+                                // This needs an owned `Arc<DataStore>` (self.datastore
+                                // cloned) and an owned OpContext
+                                // (self.saga_recovery_opctx.child(BTreeMap::new())) moved
+                                // into this future.  On a transient error, log and pass the
+                                // original SagaResult through unchanged: the saga stays
+                                // listed in-progress, so the next pass retries.
+                            }
+                        }
+                    },
+                None => {},
                 }
             }
             result
