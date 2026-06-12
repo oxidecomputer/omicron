@@ -450,7 +450,7 @@ fn print_analysis_reports(
     let git_commit = GitVersion::from_str(&git_commit).expect("infallible");
     if our_git_commit != git_commit {
         eprintln!(
-            "note: these sitrep analysis reports were produced by a Nexus \
+            "note: this sitrep analysis report was produced by a Nexus \
              on git commit {git_commit}. this omdb was built from \
              {our_git_commit}."
         );
@@ -469,7 +469,7 @@ fn print_analysis_reports(
             "analysis_report": analysis_report,
         });
         serde_json::to_writer_pretty(std::io::stdout(), &value)
-            .context("failed to serialize reports")?;
+            .context("failed to serialize analysis report as JSON")?;
         return Ok(());
     }
 

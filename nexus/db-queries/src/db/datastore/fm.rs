@@ -53,6 +53,7 @@ use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SitrepUuid;
 use omicron_uuid_kinds::SupportBundleKind;
 use omicron_uuid_kinds::SupportBundleUuid;
+use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -803,16 +804,22 @@ impl DataStore {
         // metadata row inserted first, and will be cleaned up by the GC if this
         // sitrep ends up orphaned.
         if let Some(analysis_report) = analysis_report {
-            diesel::insert_into(analysis_report_dsl::fm_sitrep_analysis_report)
-                .values(analysis_report)
-                .execute_async(&*conn)
-                .await
-                .map_err(|e| {
-                    public_error_from_diesel(e, ErrorHandler::Server)
-                        .internal_context(
-                            "failed to insert sitrep analysis report",
-                        )
-                })?;
+            let insert_result = diesel::insert_into(
+                analysis_report_dsl::fm_sitrep_analysis_report,
+            )
+            .values(analysis_report)
+            .execute_async(&*conn)
+            .await;
+
+            // If this fails, that's weird and bad, but it should not block the
+            // rest of the sitrep from being inserted.
+            if let Err(e) = insert_result {
+                slog::warn!(&opctx.log,
+                    "failed to insert sitrep analysis report";
+                    "sitrep_id" => %sitrep_id,
+                    "error" => &InlineErrorChain::new(e),
+                );
+            }
         }
 
         Self::fm_support_bundle_requests_insert_on_conn(
