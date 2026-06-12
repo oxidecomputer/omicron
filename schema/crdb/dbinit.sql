@@ -5489,10 +5489,6 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_sled_metadata (
     sled_id UUID NOT NULL,
     sled_state omicron.public.sled_state NOT NULL,
 
-    -- the sled's update disposition
-    update_availability omicron.public.sled_update_availability NOT NULL,
-    update_disruption_policy omicron.public.reconfigurator_disruption_policy,
-
     sled_agent_generation INT8 NOT NULL,
     -- NULL means do not remove any overrides
     remove_mupdate_override UUID,
@@ -5513,6 +5509,10 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_sled_metadata (
 
     -- the measurements for this sled
     measurements omicron.public.bp_sled_measurements NOT NULL,
+
+    -- the sled's update disposition
+    update_availability omicron.public.sled_update_availability NOT NULL,
+    update_disruption_policy omicron.public.reconfigurator_disruption_policy,
 
     -- a disruption policy is recorded iff the sled is evacuating
     CONSTRAINT update_disruption_policy_set_iff_evacuating CHECK (

@@ -248,8 +248,6 @@ pub struct BpSledMetadata {
     pub blueprint_id: DbTypedUuid<BlueprintKind>,
     pub sled_id: DbTypedUuid<SledKind>,
     pub sled_state: SledState,
-    pub update_availability: DbSledUpdateAvailability,
-    pub update_disruption_policy: Option<DbReconfiguratorDisruptionPolicy>,
     pub sled_agent_generation: Generation,
     pub remove_mupdate_override: Option<DbTypedUuid<MupdateOverrideKind>>,
     pub host_phase_2_desired_slot_a: Option<ArtifactHash>,
@@ -259,6 +257,8 @@ pub struct BpSledMetadata {
     pub subnet: IpNetwork,
     pub last_allocated_ip_subnet_offset: SqlU16,
     pub measurements: DbBpSledMeasurements,
+    pub update_availability: DbSledUpdateAvailability,
+    pub update_disruption_policy: Option<DbReconfiguratorDisruptionPolicy>,
 }
 
 impl BpSledMetadata {
