@@ -304,7 +304,9 @@ impl<N: NexusServer> ControlPlaneTestContext<N> {
             || async {
                 match dpd_client.switch_identifiers().await {
                     Ok(_) => Ok(()),
-                    Err(_) => Err(dev::poll::CondCheckError::<()>::NotYet),
+                    Err(_) => Err(dev::poll::CondCheckError::<()>::NotYet {
+                        status: None,
+                    }),
                 }
             },
             &Duration::from_millis(50),

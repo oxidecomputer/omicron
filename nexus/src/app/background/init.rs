@@ -1723,7 +1723,7 @@ pub mod test {
                         if config.generation == generation {
                             Ok(())
                         } else {
-                            Err(poll::CondCheckError::NotYet)
+                            Err(poll::CondCheckError::NotYet { status: None })
                         }
                     }
                 }

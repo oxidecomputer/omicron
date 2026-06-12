@@ -306,7 +306,7 @@ async fn test_nexus_handoff(lc: &LiveTestContext) {
                 );
                 match qq.state {
                     QuiesceState::DrainingSagas { .. } => Ok(()),
-                    _ => Err(CondCheckError::<()>::NotYet),
+                    _ => Err(CondCheckError::<()>::NotYet { status: None }),
                 }
             },
             &Duration::from_secs(1),
@@ -377,7 +377,7 @@ async fn test_nexus_handoff(lc: &LiveTestContext) {
                 );
                 match qq.state {
                     QuiesceState::Quiesced { .. } => Ok(()),
-                    _ => Err(CondCheckError::<()>::NotYet),
+                    _ => Err(CondCheckError::<()>::NotYet { status: None }),
                 }
             },
             &Duration::from_secs(1),
@@ -403,7 +403,9 @@ async fn test_nexus_handoff(lc: &LiveTestContext) {
                         );
                         match qq.state {
                             QuiesceState::Undetermined => {
-                                Err(CondCheckError::<()>::NotYet)
+                                Err(CondCheckError::<()>::NotYet {
+                                    status: None,
+                                })
                             }
                             QuiesceState::Running => Ok(()),
                             _ => panic!("unexpected new Nexus quiesce state"),
@@ -415,7 +417,7 @@ async fn test_nexus_handoff(lc: &LiveTestContext) {
                             "error fetching new Nexus quiesce state";
                             InlineErrorChain::new(&error),
                         );
-                        Err(CondCheckError::NotYet)
+                        Err(CondCheckError::NotYet { status: None })
                     }
                 }
             },
@@ -529,7 +531,7 @@ async fn check_internal_dns(
     let found_nexus_addrs = resolver
         .lookup_all_socket_v6(ServiceName::Nexus)
         .await
-        .map_err(|_| CondCheckError::NotYet)?
+        .map_err(|_| CondCheckError::NotYet { status: None })?
         .into_iter()
         .collect::<BTreeSet<_>>();
     debug!(
@@ -542,7 +544,7 @@ async fn check_internal_dns(
     if expected_nexus_addrs == found_nexus_addrs {
         Ok(())
     } else {
-        Err(CondCheckError::NotYet)
+        Err(CondCheckError::NotYet { status: None })
     }
 }
 
@@ -588,7 +590,7 @@ async fn check_external_dns(
     let config = client
         .dns_config_get()
         .await
-        .map_err(|_| CondCheckError::NotYet)?
+        .map_err(|_| CondCheckError::NotYet { status: None })?
         .into_inner();
 
     let found_nexus_addrs = config
@@ -626,6 +628,6 @@ async fn check_external_dns(
     if expected_nexus_addrs == found_nexus_addrs {
         Ok(())
     } else {
-        Err(CondCheckError::NotYet)
+        Err(CondCheckError::NotYet { status: None })
     }
 }
