@@ -1,6 +1,6 @@
 # Reflector configuration (oxidecompuer/reflector)
 
-# When any of the listeners configured below activate, run .github/workflows/update-maghemite.yml
+# When the listener configured below activates, run .github/workflows/update-maghemite.yml
 # targeting main
 
 workflow = "update-maghemite.yml"
