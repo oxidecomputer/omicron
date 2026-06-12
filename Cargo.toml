@@ -69,6 +69,7 @@ members = [
     "gateway-test-utils",
     "gateway-types",
     "gateway-types/versions",
+    "git-version",
     "illumos-utils",
     "installinator-api",
     "installinator-common",
@@ -258,6 +259,7 @@ default-members = [
     "gateway-test-utils",
     "gateway-types",
     "gateway-types/versions",
+    "git-version",
     "illumos-utils",
     "installinator-api",
     "installinator-common",
@@ -664,6 +666,7 @@ omicron-common = { path = "common" }
 omicron-dev-lib = { path = "dev-tools/omicron-dev-lib" }
 omicron-ledger = { path = "ledger" }
 omicron-gateway = { path = "gateway" }
+omicron-git-version = { path = "git-version" }
 omicron-nexus = { path = "nexus" }
 omicron-ntp-admin = { path = "ntp-admin" }
 omicron-omdb = { path = "dev-tools/omdb" }

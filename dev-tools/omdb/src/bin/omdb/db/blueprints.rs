@@ -160,6 +160,7 @@ async fn cmd_db_blueprint_planner_report_show(
     args: &ShowPlannerReportArgs,
 ) -> anyhow::Result<()> {
     use nexus_db_schema::schema::debug_log_blueprint_planning::dsl;
+    use omicron_git_version::GitVersion;
 
     let blueprint_id = args
         .blueprint_id
@@ -198,20 +199,30 @@ async fn cmd_db_blueprint_planner_report_show(
     // `debug_log`, because we don't want to expose such a thing in Nexus
     // proper. We'll peel out the git commit of the Nexus that produced this
     // report, compare it against our own, then try to parse the report.
-    let Some(log_git_commit) =
-        debug_log.get("git-commit").and_then(|v| v.as_str())
-    else {
+    let Some(log_git_commit) = debug_log.get("git-commit").and_then(|v| {
+        let s = v.as_str()?;
+        s.parse::<GitVersion>()
+            // `GitVersion::from_str` is infallible, so we _could_ expect()
+            // this, but I'd rather not have omdb crash if that ever changes...
+            .ok()
+    }) else {
         dump_raw_blob("missing `git-commit` key");
         return Ok(());
     };
 
-    let our_git_commit = env!("VERGEN_GIT_SHA");
+    let our_git_commit = GitVersion::current();
     if our_git_commit != log_git_commit {
         eprintln!(
             "WARNING: planner report debug log was produced by a Nexus \
              on git commit {log_git_commit}, but omdb was built from \
              {our_git_commit}. We will attempt to parse it anyway."
         );
+        if our_git_commit.is_dirty() || log_git_commit.is_dirty() {
+            eprintln!(
+                "note: dirty repositories (those with uncommitted changes) \
+                 will never be considered equal, even if the SHA is the same."
+            );
+        }
     }
 
     let Some(report_raw) = debug_log.get("report") else {
