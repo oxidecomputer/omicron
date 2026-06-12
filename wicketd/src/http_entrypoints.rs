@@ -198,12 +198,12 @@ impl WicketdApi for WicketdApiImpl {
                 .expect("verified by `inventory_or_unavail`")
                 .inventory;
 
+        let ddm_discovered_sleds = &ctx.bootstrap_peers.sleds();
         let mut config = ctx.rss_or_multirack_join_config.lock().unwrap();
 
         // We don't have a default (empty) version of a `join_config` like we do
         // with an `rss_config` so we have two different paths here.
         if let Some(join_config) = config.multirack_join_config_mut() {
-            let ddm_discovered_sleds = &ctx.bootstrap_peers.sleds();
             join_config.common.update_sled_inventory(
                 &inventory,
                 &ddm_discovered_sleds,
@@ -219,7 +219,7 @@ impl WicketdApi for WicketdApiImpl {
                     ctx.baseboard.as_ref(),
                     body.into_inner(),
                     &inventory,
-                    &ctx.bootstrap_peers,
+                    &ddm_discovered_sleds,
                     &ctx.log,
                 )
                 .map_err(|err| HttpError::for_bad_request(None, err))?,

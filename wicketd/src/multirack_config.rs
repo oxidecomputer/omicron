@@ -6,9 +6,10 @@
 
 use crate::RssOrMultirackJoinConfigCommon;
 use crate::bgp_auth_keys::BgpAuthKeys;
-use crate::bootstrap_addrs::BootstrapPeersFromDdm;
 use omicron_common::api::external::AllowedSourceIps;
 use sled_hardware_types::Baseboard;
+use std::collections::BTreeMap;
+use std::net::Ipv6Addr;
 use wicket_common::inventory::MgsV1Inventory;
 use wicket_common::inventory::SledInventory;
 use wicket_common::multirack_setup::CurrentMultirackJoinUserConfig;
@@ -43,13 +44,11 @@ impl CurrentMultirackJoinConfig {
         our_baseboard: Option<&Baseboard>,
         config: MultirackJoinConfigBaseUserInput,
         inventory: &MgsV1Inventory,
-        bootstrap_peers: &BootstrapPeersFromDdm,
+        ddm_discovered_sleds: &BTreeMap<Baseboard, Ipv6Addr>,
         log: &slog::Logger,
     ) -> Result<Self, String> {
-        let bootstrap_sleds = bootstrap_peers.sleds();
-
         let sled_inventory =
-            SledInventory::new(inventory, &bootstrap_sleds, log);
+            SledInventory::new(inventory, &ddm_discovered_sleds, log);
 
         sled_inventory.verify_our_baseboard_is_in_inventory_slot(
             &config.bootstrap_slots,
