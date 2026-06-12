@@ -570,9 +570,6 @@ enum LatestQuery<LS, LH> {
     Host(LH),
 }
 
-type SelectableSqlType<Q> =
-    <<Q as diesel::Selectable<Pg>>::SelectExpression as Expression>::SqlType;
-
 impl<IE, IR, LS, LH> QueryId for EreportInsertQuery<IE, IR, LS, LH> {
     type QueryId = ();
     const HAS_STATIC_QUERY_ID: bool = false;
@@ -581,8 +578,8 @@ impl<IE, IR, LS, LH> QueryId for EreportInsertQuery<IE, IR, LS, LH> {
 impl<IE, IR, LS, LH> Query for EreportInsertQuery<IE, IR, LS, LH> {
     type SqlType = (
         sql_types::BigInt,
-        Nullable<SelectableSqlType<sql_types::Uuid>>,
-        Nullable<SelectableSqlType<sql_types::BigInt>>,
+        sql_types::Nullable<sql_types::Uuid>,
+        sql_types::Nullable<sql_types::BigInt>,
     );
 }
 

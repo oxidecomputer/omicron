@@ -39,6 +39,19 @@ WITH
         (id)
       DO
         UPDATE SET slot = $30
+    ),
+  latest
+    AS (
+      SELECT
+        ereport.restart_id, ereport.ena
+      FROM
+        ereport
+      WHERE
+        ereport.sled_id = $31 AND (ereport.time_deleted IS NULL)
+      ORDER BY
+        ereport.time_collected DESC, ereport.ena DESC
+      LIMIT
+        $32
     )
 SELECT
-  inserted_ereports
+  (inserted_ereports, latest.*)
