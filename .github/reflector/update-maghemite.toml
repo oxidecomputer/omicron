@@ -10,7 +10,7 @@ branch = "main"
 
 requires_token = true
 
-# Triggers a maghemite update when the job indicating that the commit is read for release completes
+# Triggers a maghemite update when the job indicating that the commit is ready for release completes
 
 [[on]]
 repository = "oxidecomputer/maghemite"
