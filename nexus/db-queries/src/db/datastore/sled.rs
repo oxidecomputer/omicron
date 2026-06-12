@@ -4613,7 +4613,7 @@ pub(in crate::db::datastore) mod test {
                             name: name.parse().unwrap(),
                             description: "It's an instance".into(),
                         },
-                        ncpus: external::InstanceCpuCount(ncpus),
+                        ncpus: instance::InstanceCpuCount(ncpus),
                         memory,
                         hostname: "myhostname".try_into().unwrap(),
                         user_data: Vec::new(),
