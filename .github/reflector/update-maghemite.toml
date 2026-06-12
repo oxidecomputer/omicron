@@ -10,20 +10,10 @@ branch = "main"
 
 requires_token = true
 
-# We require both the image and the linux job to complete before we can succesfully update.
-# Reflector does not have a good way to express this so instead we listen for both events. Whichever
-# event triggers first is likely to fail (expect in the case of near simultaneous triggers). This
-# is not ideal, but it will require additional work in Reflector to support a "wait for multiple
-# checks" trigger.
+# Triggers an maghemite update when the job indicating that the commit is read for release completes
 
 [[on]]
 repository = "oxidecomputer/maghemite"
 event = "check_run"
 action = "completed"
-check = "image"
-
-[[on]]
-repository = "oxidecomputer/maghemite"
-event = "check_run"
-action = "completed"
-check = "linux"
+check = "omicron-merge"
