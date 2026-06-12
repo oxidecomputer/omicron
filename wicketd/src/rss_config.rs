@@ -7,6 +7,7 @@
 use crate::RssOrMultirackJoinConfigCommon;
 use crate::bgp_auth_keys::BgpAuthKeys;
 use crate::bootstrap_addrs::BootstrapPeersFromDdm;
+use crate::context::CommonConfigContainer;
 use anyhow::Context;
 use anyhow::Result;
 use anyhow::anyhow;
@@ -32,8 +33,10 @@ use sled_agent_types::early_networking::SwitchSlot;
 use sled_agent_types::early_networking::UplinkAddress;
 use sled_hardware_types::Baseboard;
 use slog::warn;
+use std::collections::BTreeMap;
 use std::net::IpAddr;
 use std::net::Ipv6Addr;
+use wicket_common::inventory::MgsV1Inventory;
 use wicket_common::rack_setup::BgpAuthKey;
 use wicket_common::rack_setup::CurrentRssUserConfigInsensitive;
 use wicket_common::rack_setup::GetBgpAuthKeyInfoResponse;
@@ -325,11 +328,17 @@ impl CurrentRssConfig {
         &mut self,
         config: PutRssUserConfigInsensitive,
         our_baseboard: Option<&Baseboard>,
+        inventory: &MgsV1Inventory,
+        ddm_discovered_sleds: &BTreeMap<Baseboard, Ipv6Addr>,
+        log: &slog::Logger,
     ) -> Result<(), String> {
         self.common.update(
             &config.bootstrap_sleds,
             config.rack_network_config.get_bgp_auth_key_ids(),
             our_baseboard,
+            inventory,
+            ddm_discovered_sleds,
+            log,
         )?;
         self.ntp_servers = config.ntp_servers;
         self.dns_servers = config.dns_servers;
@@ -341,6 +350,12 @@ impl CurrentRssConfig {
         self.rack_network_config = Some(config.rack_network_config);
 
         Ok(())
+    }
+}
+
+impl CommonConfigContainer for CurrentRssConfig {
+    fn common_mut(&mut self) -> &mut RssOrMultirackJoinConfigCommon {
+        &mut self.common
     }
 }
 
@@ -659,6 +674,7 @@ impl CertificateValidator {
 #[cfg(test)]
 mod tests {
     use crate::bgp_auth_keys::BgpAuthKeyError;
+    use omicron_test_utils::dev;
     use wicket_common::example::ExampleRackSetupData;
     use wicket_common::rack_setup::BgpAuthKeyId;
     use wicket_common::rack_setup::BgpAuthKeyStatus;
@@ -764,18 +780,18 @@ mod tests {
 
     #[test]
     fn test_bgp_auth_key_states() {
+        let logctx = dev::test_setup_log("test_bgp_auth_key_states");
         let example = ExampleRackSetupData::non_empty();
 
         let mut current_config = CurrentRssConfig::default();
-
-        // XXX: This is a hack -- ideally we'd go through the front door of
-        // update_with_inventory_and_bootstrap_peers. But it works for now.
-        current_config.common.inventory = example.inventory.into();
 
         current_config
             .update(
                 example.put_insensitive.clone(),
                 example.our_baseboard.as_ref(),
+                &example.inventory,
+                &example.ddm_discovered_sleds,
+                &logctx.log,
             )
             .expect("update of example data should succeed");
 
@@ -883,6 +899,9 @@ mod tests {
             .update(
                 example_data_2.put_insensitive,
                 example_data_2.our_baseboard.as_ref(),
+                &example_data_2.inventory,
+                &example_data_2.ddm_discovered_sleds,
+                &logctx.log,
             )
             .expect("update of example data 2 should succeed");
 
@@ -897,7 +916,13 @@ mod tests {
 
         // Update the old data again.
         current_config
-            .update(example.put_insensitive, example.our_baseboard.as_ref())
+            .update(
+                example.put_insensitive,
+                example.our_baseboard.as_ref(),
+                &example.inventory,
+                &example.ddm_discovered_sleds,
+                &logctx.log,
+            )
             .expect("update of example data should succeed");
 
         // key1 should stay set, but not key2.

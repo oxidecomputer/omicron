@@ -5,12 +5,11 @@
 // Re-export these types from gateway_client, so that users are oblivious to
 // where these types come from.
 pub use gateway_client::types::{
-    RotState, SpComponentCaboose, SpComponentInfo, SpComponentPresence,
-    SpIdentifier, SpState,
+    SpComponentCaboose, SpComponentInfo, SpComponentPresence, SpIdentifier,
 };
-pub use gateway_types::component::SpType;
+pub use gateway_types::component::{SpState, SpType};
 pub use gateway_types::ignition::{SpIgnition, SpIgnitionSystemType};
-pub use gateway_types::rot::RotSlot;
+pub use gateway_types::rot::{RotSlot, RotState};
 use omicron_common::snake_case_result;
 use omicron_common::snake_case_result::SnakeCaseResult;
 use schemars::JsonSchema;

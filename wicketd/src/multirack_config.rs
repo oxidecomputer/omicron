@@ -6,6 +6,7 @@
 
 use crate::RssOrMultirackJoinConfigCommon;
 use crate::bgp_auth_keys::BgpAuthKeys;
+use crate::context::CommonConfigContainer;
 use omicron_common::api::external::AllowedSourceIps;
 use sled_hardware_types::Baseboard;
 use std::collections::BTreeMap;
@@ -28,11 +29,17 @@ impl CurrentMultirackJoinConfig {
         &mut self,
         config: MultirackJoinConfigBaseUserInput,
         our_baseboard: Option<&Baseboard>,
+        inventory: &MgsV1Inventory,
+        ddm_discovered_sleds: &BTreeMap<Baseboard, Ipv6Addr>,
+        log: &slog::Logger,
     ) -> Result<(), String> {
         self.common.update(
             &config.bootstrap_slots,
             config.rack_network_config.get_bgp_auth_key_ids(),
             our_baseboard,
+            inventory,
+            ddm_discovered_sleds,
+            log,
         )?;
         self.rack_network_config = config.rack_network_config;
         self.allowed_source_ips = config.allowed_source_ips;
@@ -76,6 +83,12 @@ impl CurrentMultirackJoinConfig {
             rack_network_config: config.rack_network_config,
             allowed_source_ips: config.allowed_source_ips,
         })
+    }
+}
+
+impl CommonConfigContainer for CurrentMultirackJoinConfig {
+    fn common_mut(&mut self) -> &mut RssOrMultirackJoinConfigCommon {
+        &mut self.common
     }
 }
 

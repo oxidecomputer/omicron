@@ -5,6 +5,7 @@
 //! HTTP entrypoint functions for wicketd
 
 use crate::SmfConfigValues;
+use crate::context::CommonConfigContainer;
 use crate::context::RssOrMultirackJoinConfig;
 use crate::helpers::SpIdentifierDisplay;
 use crate::helpers::sps_to_string;
@@ -100,16 +101,10 @@ impl WicketdApi for WicketdApiImpl {
             .inventory;
 
         let ddm_discovered_sleds = &ctx.bootstrap_peers.sleds();
-        rss_config.common.update_sled_inventory(
-            &inventory,
-            &ddm_discovered_sleds,
-            &ctx.log,
-        );
-        rss_config.common.update_ip_addresses_for_existing_bootstrap_sleds(
-            &ddm_discovered_sleds,
-        );
+        let config =
+            rss_config.get_latest(&inventory, &ddm_discovered_sleds, &ctx.log);
 
-        Ok(HttpResponseOk((&*rss_config).into()))
+        Ok(HttpResponseOk(config.into()))
     }
 
     async fn get_multirack_join_config(
@@ -138,16 +133,10 @@ impl WicketdApi for WicketdApiImpl {
             .inventory;
 
         let ddm_discovered_sleds = &ctx.bootstrap_peers.sleds();
-        join_config.common.update_sled_inventory(
-            &inventory,
-            &ddm_discovered_sleds,
-            &ctx.log,
-        );
-        join_config.common.update_ip_addresses_for_existing_bootstrap_sleds(
-            &ddm_discovered_sleds,
-        );
+        let config =
+            join_config.get_latest(&inventory, &ddm_discovered_sleds, &ctx.log);
 
-        Ok(HttpResponseOk((&*join_config).into()))
+        Ok(HttpResponseOk(config.into()))
     }
 
     async fn put_rss_config(
@@ -171,13 +160,14 @@ impl WicketdApi for WicketdApiImpl {
         let rss_config = config.rss_config_mut_or_default();
 
         let ddm_discovered_sleds = &ctx.bootstrap_peers.sleds();
-        rss_config.common.update_sled_inventory(
-            &inventory,
-            &ddm_discovered_sleds,
-            &ctx.log,
-        );
         rss_config
-            .update(body.into_inner(), ctx.baseboard.as_ref())
+            .update(
+                body.into_inner(),
+                ctx.baseboard.as_ref(),
+                &inventory,
+                &ddm_discovered_sleds,
+                &ctx.log,
+            )
             .map_err(|err| HttpError::for_bad_request(None, err))?;
 
         Ok(HttpResponseUpdatedNoContent())
@@ -204,13 +194,14 @@ impl WicketdApi for WicketdApiImpl {
         // We don't have a default (empty) version of a `join_config` like we do
         // with an `rss_config` so we have two different paths here.
         if let Some(join_config) = config.multirack_join_config_mut() {
-            join_config.common.update_sled_inventory(
-                &inventory,
-                &ddm_discovered_sleds,
-                &ctx.log,
-            );
             join_config
-                .update(body.into_inner(), ctx.baseboard.as_ref())
+                .update(
+                    body.into_inner(),
+                    ctx.baseboard.as_ref(),
+                    &inventory,
+                    &ddm_discovered_sleds,
+                    &ctx.log,
+                )
                 .map_err(|err| HttpError::for_bad_request(None, err))?;
         } else {
             // Overwrite any non-multirack-join config

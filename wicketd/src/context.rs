@@ -82,7 +82,12 @@ impl RssOrMultirackJoinConfigCommon {
         bootstrap_slots: &BTreeSet<u16>,
         new_bgp_auth_key_ids: impl IntoIterator<Item = BgpAuthKeyId>,
         our_baseboard: Option<&Baseboard>,
+        inventory: &MgsV1Inventory,
+        ddm_discovered_sleds: &BTreeMap<Baseboard, Ipv6Addr>,
+        log: &slog::Logger,
     ) -> Result<(), String> {
+        self.update_sled_inventory(inventory, ddm_discovered_sleds, log);
+
         // Updating can only fail in two ways:
         //
         // 1. If we have a real gimlet baseboard, that baseboard must be present
@@ -124,6 +129,44 @@ impl RssOrMultirackJoinConfigCommon {
                 sled_desc
             })
             .collect();
+    }
+
+    pub(crate) fn get_latest<'a, T: CommonConfigContainer>(
+        config: &'a mut T,
+        inventory: &MgsV1Inventory,
+        ddm_discovered_sleds: &BTreeMap<Baseboard, Ipv6Addr>,
+        log: &slog::Logger,
+    ) -> &'a T {
+        config.common_mut().update_sled_inventory(
+            inventory,
+            ddm_discovered_sleds,
+            log,
+        );
+        config.common_mut().update_ip_addresses_for_existing_bootstrap_sleds(
+            ddm_discovered_sleds,
+        );
+        config
+    }
+}
+
+pub(crate) trait CommonConfigContainer {
+    fn common_mut(&mut self) -> &mut RssOrMultirackJoinConfigCommon;
+
+    fn get_latest(
+        &mut self,
+        inventory: &MgsV1Inventory,
+        ddm_discovered_sleds: &BTreeMap<Baseboard, Ipv6Addr>,
+        log: &slog::Logger,
+    ) -> &Self
+    where
+        Self: Sized,
+    {
+        RssOrMultirackJoinConfigCommon::get_latest(
+            self,
+            inventory,
+            ddm_discovered_sleds,
+            log,
+        )
     }
 }
 

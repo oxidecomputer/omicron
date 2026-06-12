@@ -4,9 +4,10 @@
 
 //! Example data structures for use in tests and documentation.
 
-use std::{collections::BTreeSet, net::Ipv6Addr};
+use std::{collections::BTreeMap, net::Ipv6Addr};
 
-use gateway_types::component::SpType;
+use gateway_types::component::{SpState, SpType};
+use gateway_types::rot::{RotSlot, RotState};
 use maplit::{btreemap, btreeset};
 use omicron_common::{
     address::{IpRange, Ipv4Range},
@@ -20,7 +21,7 @@ use sled_agent_types::early_networking::{
 use sled_hardware_types::Baseboard;
 
 use crate::{
-    inventory::SpIdentifier,
+    inventory::{MgsV1Inventory, SpIdentifier, SpInventory},
     rack_setup::{
         BgpAuthKeyId, BootstrapSledDescription,
         CurrentRssUserConfigInsensitive, ManualPortConfig,
@@ -33,12 +34,13 @@ use crate::{
 
 /// A collection of example data structures.
 pub struct ExampleRackSetupData {
-    pub inventory: BTreeSet<BootstrapSledDescription>,
     /// The example baseboard where wicket/wicketd is presumed to be running.
     pub our_baseboard: Option<Baseboard>,
     pub put_insensitive: PutRssUserConfigInsensitive,
     pub current_insensitive: CurrentRssUserConfigInsensitive,
     pub bgp_auth_keys: Vec<BgpAuthKeyId>,
+    pub inventory: MgsV1Inventory,
+    pub ddm_discovered_sleds: BTreeMap<Baseboard, Ipv6Addr>,
 }
 
 impl ExampleRackSetupData {
@@ -70,11 +72,65 @@ impl ExampleRackSetupData {
             identifier: "serial 1 2 3".into(),
         };
 
-        let inventory = btreeset![
+        let mut inventory = MgsV1Inventory {
+            sps: vec![
+                SpInventory::new(SpIdentifier { slot: 1, type_: SpType::Sled }),
+                SpInventory::new(SpIdentifier { slot: 5, type_: SpType::Sled }),
+            ],
+        };
+
+        inventory.sps[0].state = Some(SpState {
+            serial_number: "serial 1 2 3".into(),
+            model: "model1".into(),
+            revision: 3,
+            hubris_archive_id: "fake".into(),
+            base_mac_address: [0u8; 6],
+            power_state: gateway_types::component::PowerState::A0,
+            rot: RotState::V2 {
+                active: RotSlot::A,
+                persistent_boot_preference: RotSlot::A,
+                pending_persistent_boot_preference: None,
+                transient_boot_preference: None,
+                slot_a_sha3_256_digest: None,
+                slot_b_sha3_256_digest: None,
+            },
+        });
+        inventory.sps[1].state = Some(SpState {
+            serial_number: "serial 4 5 6".into(),
+            model: "model2".into(),
+            revision: 5,
+            hubris_archive_id: "fake".into(),
+            base_mac_address: [0u8; 6],
+            power_state: gateway_types::component::PowerState::A0,
+            rot: RotState::V2 {
+                active: RotSlot::A,
+                persistent_boot_preference: RotSlot::A,
+                pending_persistent_boot_preference: None,
+                transient_boot_preference: None,
+                slot_a_sha3_256_digest: None,
+                slot_b_sha3_256_digest: None,
+            },
+        });
+
+        let ddm_discovered_sleds: BTreeMap<_, _> = [
+            (our_baseboard.clone(), Ipv6Addr::LOCALHOST),
+            (
+                Baseboard::Gimlet {
+                    model: "model2".into(),
+                    revision: 5,
+                    identifier: "serial 4 5 6".into(),
+                },
+                Ipv6Addr::LOCALHOST,
+            ),
+        ]
+        .into_iter()
+        .collect();
+
+        let bootstrap_sleds = btreeset![
             BootstrapSledDescription {
                 id: SpIdentifier { slot: 1, type_: SpType::Sled },
                 baseboard: our_baseboard.clone(),
-                bootstrap_ip: None,
+                bootstrap_ip: Some(Ipv6Addr::LOCALHOST)
             },
             BootstrapSledDescription {
                 id: SpIdentifier { slot: 5, type_: SpType::Sled },
@@ -86,7 +142,6 @@ impl ExampleRackSetupData {
                 bootstrap_ip: Some(Ipv6Addr::LOCALHOST),
             },
         ];
-        let bootstrap_sleds = inventory.clone();
 
         let dns_servers =
             vec!["1.1.1.1".parse().unwrap(), "2.2.2.2".parse().unwrap()];
@@ -309,11 +364,12 @@ impl ExampleRackSetupData {
         };
 
         Self {
-            inventory,
             our_baseboard: Some(our_baseboard),
             current_insensitive,
             put_insensitive,
             bgp_auth_keys: bgp_auth_keys.into_iter().collect(),
+            inventory,
+            ddm_discovered_sleds,
         }
     }
 }
