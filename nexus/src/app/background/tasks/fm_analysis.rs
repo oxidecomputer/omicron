@@ -341,7 +341,7 @@ impl FmAnalysis {
 
         let sitrep_id = sitrep.id();
 
-        // Serialize the human-readable analysis reports so they can be stored
+        // Serialize the human-readable analysis report so they can be stored
         // alongside the sitrep for later inspection via `omdb`. This is purely
         // diagnostic; if serialization somehow fails, we log it and still
         // commit the sitrep rather than blocking fault management on it.

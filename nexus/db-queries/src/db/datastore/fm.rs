@@ -798,7 +798,7 @@ impl DataStore {
                 })?;
         }
 
-        // Store the analysis reports describing how this sitrep was produced,
+        // Store the analysis report describing how this sitrep was produced,
         // if any were provided. Like the other child records above, this is
         // keyed on `sitrep_id`, so it is protected from concurrent GC by the
         // metadata row inserted first, and will be cleaned up by the GC if this
@@ -3027,7 +3027,7 @@ mod tests {
             .values(ghost_analysis_report)
             .execute_async(&*conn)
             .await
-            .expect("inserting deeply orphaned analysis reports");
+            .expect("inserting deeply orphaned analysis report");
 
         // Verify the rows exist.
         let sb_requests_before: i64 =

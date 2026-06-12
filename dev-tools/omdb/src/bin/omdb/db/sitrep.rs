@@ -416,24 +416,24 @@ async fn cmd_db_sitrep_analysis_report(
 
     let ctx = || match sitrep {
         SitrepIdOrCurrent::Current => {
-            "looking up analysis reports for the current fault management \
+            "looking up analysis report for the current fault management \
              sitrep"
                 .to_string()
         }
         SitrepIdOrCurrent::Id(id) => {
             format!(
-                "looking up analysis reports for fault management sitrep {id}"
+                "looking up analysis report for fault management sitrep {id}"
             )
         }
     };
 
     let report = load_analysis_report(datastore, id).await.with_context(ctx)?;
-    print_analysis_reports(&report, opts.json)?;
+    print_analysis_report(&report, opts.json)?;
 
     Ok(())
 }
 
-fn print_analysis_reports(
+fn print_analysis_report(
     report: &model::fm::SitrepAnalysisReport,
     json: bool,
 ) -> anyhow::Result<()> {
