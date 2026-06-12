@@ -332,39 +332,64 @@ impl DataStore {
         time_collected: chrono::DateTime<chrono::Utc>,
         reporter: fm::Reporter,
         ereports: impl IntoIterator<Item = fm::EreportData>,
-    ) -> impl RunnableQuery<i64> {
+    ) -> impl RunnableQuery<(i64, Option<Uuid>, Option<i64>)> {
         let ereports = ereports
             .into_iter()
             .map(|data| Ereport::new(data, reporter))
             .collect::<Vec<_>>();
-        let (reporter, slot_type, slot) = match reporter {
-            fm::Reporter::HostOs { slot, .. } => {
-                (EreporterType::Host, SpType::Sled, slot.map(SpMgsSlot::from))
+        let (reporter, slot_type, slot, latest_query) = match reporter {
+            fm::Reporter::HostOs { slot, sled, .. } => {
+                let latest = dsl::ereport
+                    .filter(dsl::sled_id.eq(sled.into_untyped_uuid()))
+                    .filter(dsl::time_deleted.is_null())
+                    .order_by((dsl::time_collected.desc(), dsl::ena.desc()))
+                    .limit(1)
+                    .select((dsl::restart_id, dsl::ena));
+                (
+                    EreporterType::Host,
+                    SpType::Sled,
+                    slot.map(SqlU16::from),
+                    LatestQuery::Host(latest),
+                )
             }
             fm::Reporter::Sp { sp_type, slot } => {
-                (EreporterType::Sp, sp_type.into(), Some(SpMgsSlot::from(slot)))
+                let sp_type = sp_type.into();
+                let slot = SqlU16::from(slot);
+                let latest = dsl::ereport
+                    .filter(dsl::slot_type.eq(sp_type))
+                    .filter(dsl::slot.eq(Some(slot)))
+                    .filter(dsl::time_deleted.is_null())
+                    .order_by((dsl::time_collected.desc(), dsl::ena.desc()))
+                    .limit(1)
+                    .select((dsl::restart_id, dsl::ena));
+                (
+                    EreporterType::Sp,
+                    sp_type,
+                    Some(slot),
+                    LatestQuery::Sp(latest),
+                )
             }
         };
         let insert_ereports = diesel::insert_into(dsl::ereport)
             .values(ereports)
             .on_conflict((dsl::restart_id, dsl::ena))
             .do_nothing();
-        let insert_reporter =
-            diesel::insert_into(restart_dsl::ereporter_restart)
-                .values(crate::db::model::EreporterRestart {
-                    id: restart_id.into(),
-                    time_first_seen: time_collected,
-                    reporter,
-                    slot_type,
-                    slot,
-                })
-                .on_conflict(restart_dsl::id)
-                .do_update()
-                // TODO(eliza): figure out how to make the `ON CONFLICT DO
-                // UPDATE` not set the slot to NULL when it was previously
-                // non-null
-                .set(restart_dsl::slot.eq(slot));
-        EreportInsertQuery { insert_ereports, insert_reporter }
+        let insert_reporter = diesel::insert_into(
+            restart_dsl::ereporter_restart,
+        )
+        .values(crate::db::model::EreporterRestart {
+            id: restart_id.into(),
+            time_first_seen: time_collected,
+            reporter,
+            slot_type,
+            slot: slot.map(SpMgsSlot::from),
+        });
+        EreportInsertQuery {
+            insert_ereports,
+            insert_reporter,
+            slot,
+            latest_query,
+        }
     }
 
     /// Lists ereports which have not been marked as **definitely seen**
@@ -533,45 +558,73 @@ impl DataStore {
     }
 }
 
-struct EreportInsertQuery<IE, IR /*L*/> {
+struct EreportInsertQuery<IE, IR, LS, LH> {
     insert_ereports: IE,
     insert_reporter: IR,
-    // latest: L,
-    // restart_id: EreporterRestartUuid,
-    // ereports: Vec<Ereport>,
-    // reporter: fm::Reporter,
-    // time_collected: chrono::DateTime<chrono::Utc>,
+    slot: Option<SqlU16>,
+    latest_query: LatestQuery<LS, LH>,
 }
 
-impl<IE, IR /*L*/> QueryId for EreportInsertQuery<IE, IR /*L*/> {
+enum LatestQuery<LS, LH> {
+    Sp(LS),
+    Host(LH),
+}
+
+type SelectableSqlType<Q> =
+    <<Q as diesel::Selectable<Pg>>::SelectExpression as Expression>::SqlType;
+
+impl<IE, IR, LS, LH> QueryId for EreportInsertQuery<IE, IR, LS, LH> {
     type QueryId = ();
     const HAS_STATIC_QUERY_ID: bool = false;
 }
 
-impl<IE, IR /* L*/> Query for EreportInsertQuery<IE, IR /* L*/> {
-    type SqlType = sql_types::BigInt;
+impl<IE, IR, LS, LH> Query for EreportInsertQuery<IE, IR, LS, LH> {
+    type SqlType = (
+        sql_types::BigInt,
+        Nullable<SelectableSqlType<sql_types::Uuid>>,
+        Nullable<SelectableSqlType<sql_types::BigInt>>,
+    );
 }
 
-impl<IE, IR /* L*/> diesel::RunQueryDsl<DbConnection>
-    for EreportInsertQuery<IE, IR /* L*/>
+impl<IE, IR, LS, LH> diesel::RunQueryDsl<DbConnection>
+    for EreportInsertQuery<IE, IR, LS, LH>
 {
 }
 
-impl<IE, IR /*L*/> QueryFragment<Pg> for EreportInsertQuery<IE, IR /*L*/>
+impl<IE, IR, LS, LH> QueryFragment<Pg> for EreportInsertQuery<IE, IR, LS, LH>
 where
     IE: QueryFragment<Pg>,
     IR: QueryFragment<Pg>,
-    // L: QueryFragment<Pg>,
+    LS: QueryFragment<Pg>,
+    LH: QueryFragment<Pg>,
 {
     fn walk_ast<'b>(&'b self, mut out: AstPass<'_, 'b, Pg>) -> QueryResult<()> {
         out.push_sql("WITH inserted_ereports AS ( ");
         self.insert_ereports.walk_ast(out.reborrow())?;
+
         out.push_sql("), inserted_reporter AS (");
         self.insert_reporter.walk_ast(out.reborrow())?;
-        // out.push_sql("), latest AS (");
-        // self.latest.walk_ast(out.reborrow())?;
+        out.push_sql(" ON CONFLICT (id) DO ");
+        // If we have a slot number, update it so that a previously-null slot
+        // number is filled in; if we do not, do nothing on conflict so a
+        // previously non-NULL slot is not clobbered.
+        if let Some(ref slot) = self.slot {
+            out.push_sql("UPDATE SET slot = ");
+            out.push_bind_param::<sql_types::Int4, _>(slot)?;
+        } else {
+            out.push_sql("NOTHING");
+        }
 
-        out.push_sql(") SELECT (inserted_ereports)");
+        out.push_sql("), latest AS (");
+        match self.latest_query {
+            LatestQuery::Sp(ref query) => {
+                query.walk_ast(out.reborrow())?;
+            }
+            LatestQuery::Host(ref query) => {
+                query.walk_ast(out.reborrow())?;
+            }
+        }
+        out.push_sql(") SELECT (inserted_ereports, latest.*)");
         Ok(())
     }
 }
