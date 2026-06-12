@@ -462,14 +462,7 @@ impl<N: MakeSagaContext> SagaRecoveryInner<N> {
                                     "node_name" => ?node_name,
                                     "source_error" => ?source_error,
                                 );
-                                // TODO-K: perform the idempotent abandonment write here, e.g.
-                                //   datastore.saga_mark_abandoned(&opctx, saga_id).await
-                                // This needs an owned `Arc<DataStore>` (self.datastore
-                                // cloned) and an owned OpContext
-                                // (self.saga_recovery_opctx.child(BTreeMap::new())) moved
-                                // into this future.  On a transient error, log and pass the
-                                // original SagaResult through unchanged: the saga stays
-                                // listed in-progress, so the next pass retries.
+                                // TODO-K: saga_update_state to abandoned here
                             }
                         }
                     },

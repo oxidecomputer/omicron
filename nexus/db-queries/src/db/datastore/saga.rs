@@ -114,6 +114,8 @@ impl DataStore {
                 )
             })?;
 
+        // TODO-K: Make sure the abandoned metadata is filled if setting to abandoned
+
         match result.status {
             UpdateStatus::Updated => Ok(()),
             UpdateStatus::NotUpdatedButExists => {
