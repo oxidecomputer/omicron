@@ -8,7 +8,9 @@ use super::DataStore;
 use crate::authz;
 use crate::context::OpContext;
 use crate::db::datastore::RunnableQuery;
+use crate::db::model::DbTypedUuid;
 use crate::db::model::Ereport;
+use crate::db::model::EreporterType;
 use crate::db::model::SpMgsSlot;
 use crate::db::model::SpType;
 use crate::db::model::SqlU16;
@@ -23,12 +25,17 @@ use chrono::DateTime;
 use chrono::Utc;
 use diesel::AggregateExpressionMethods;
 use diesel::dsl::{count, min};
+use diesel::helper_types::*;
+use diesel::pg::Pg;
 use diesel::prelude::*;
+use diesel::query_builder::*;
+use diesel::query_dsl::methods as query_methods;
 use diesel::sql_types;
 use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::public_error_from_diesel;
 use nexus_db_lookup::DbConnection;
 use nexus_db_schema::schema::ereport::dsl;
+use nexus_db_schema::schema::ereporter_restart::dsl as restart_dsl;
 use nexus_types::fm::ereport as fm;
 use nexus_types::fm::ereport::EreportFilters;
 use nexus_types::fm::ereport::EreportId;
@@ -37,6 +44,7 @@ use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
+use omicron_uuid_kinds::EreporterRestartKind;
 use omicron_uuid_kinds::EreporterRestartUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SitrepUuid;
@@ -319,6 +327,46 @@ impl DataStore {
         Ok((created, latest))
     }
 
+    fn ereports_insert_query(
+        restart_id: EreporterRestartUuid,
+        time_collected: chrono::DateTime<chrono::Utc>,
+        reporter: fm::Reporter,
+        ereports: impl IntoIterator<Item = fm::EreportData>,
+    ) -> impl RunnableQuery<i64> {
+        let ereports = ereports
+            .into_iter()
+            .map(|data| Ereport::new(data, reporter))
+            .collect::<Vec<_>>();
+        let (reporter, slot_type, slot) = match reporter {
+            fm::Reporter::HostOs { slot, .. } => {
+                (EreporterType::Host, SpType::Sled, slot.map(SpMgsSlot::from))
+            }
+            fm::Reporter::Sp { sp_type, slot } => {
+                (EreporterType::Sp, sp_type.into(), Some(SpMgsSlot::from(slot)))
+            }
+        };
+        let insert_ereports = diesel::insert_into(dsl::ereport)
+            .values(ereports)
+            .on_conflict((dsl::restart_id, dsl::ena))
+            .do_nothing();
+        let insert_reporter =
+            diesel::insert_into(restart_dsl::ereporter_restart)
+                .values(crate::db::model::EreporterRestart {
+                    id: restart_id.into(),
+                    time_first_seen: time_collected,
+                    reporter,
+                    slot_type,
+                    slot,
+                })
+                .on_conflict(restart_dsl::id)
+                .do_update()
+                // TODO(eliza): figure out how to make the `ON CONFLICT DO
+                // UPDATE` not set the slot to NULL when it was previously
+                // non-null
+                .set(restart_dsl::slot.eq(slot));
+        EreportInsertQuery { insert_ereports, insert_reporter }
+    }
+
     /// Lists ereports which have not been marked as **definitely seen**
     /// (included in a committed sitrep) in the database, restricted to
     /// ereports whose `class` is one of `classes`, paginated by the reporter
@@ -485,6 +533,49 @@ impl DataStore {
     }
 }
 
+struct EreportInsertQuery<IE, IR /*L*/> {
+    insert_ereports: IE,
+    insert_reporter: IR,
+    // latest: L,
+    // restart_id: EreporterRestartUuid,
+    // ereports: Vec<Ereport>,
+    // reporter: fm::Reporter,
+    // time_collected: chrono::DateTime<chrono::Utc>,
+}
+
+impl<IE, IR /*L*/> QueryId for EreportInsertQuery<IE, IR /*L*/> {
+    type QueryId = ();
+    const HAS_STATIC_QUERY_ID: bool = false;
+}
+
+impl<IE, IR /* L*/> Query for EreportInsertQuery<IE, IR /* L*/> {
+    type SqlType = sql_types::BigInt;
+}
+
+impl<IE, IR /* L*/> diesel::RunQueryDsl<DbConnection>
+    for EreportInsertQuery<IE, IR /* L*/>
+{
+}
+
+impl<IE, IR /*L*/> QueryFragment<Pg> for EreportInsertQuery<IE, IR /*L*/>
+where
+    IE: QueryFragment<Pg>,
+    IR: QueryFragment<Pg>,
+    // L: QueryFragment<Pg>,
+{
+    fn walk_ast<'b>(&'b self, mut out: AstPass<'_, 'b, Pg>) -> QueryResult<()> {
+        out.push_sql("WITH inserted_ereports AS ( ");
+        self.insert_ereports.walk_ast(out.reborrow())?;
+        out.push_sql("), inserted_reporter AS (");
+        self.insert_reporter.walk_ast(out.reborrow())?;
+        // out.push_sql("), latest AS (");
+        // self.latest.walk_ast(out.reborrow())?;
+
+        out.push_sql(") SELECT (inserted_ereports)");
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -493,6 +584,7 @@ mod tests {
     use crate::db::pub_test_utils::explain::assert_uses_partial_index_only;
     use crate::db::raw_query_builder::expectorate_query_contents;
     use dropshot::PaginationOrder;
+    use ereport_types::Ena;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::OmicronZoneUuid;
     use std::num::NonZeroU32;
@@ -833,6 +925,78 @@ mod tests {
 
         db.terminate().await;
         logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn expectorate_ereports_insert_sp() {
+        let restart_id = EreporterRestartUuid::nil();
+        let collector_id = OmicronZoneUuid::nil();
+        let query = DataStore::ereports_insert_query(
+            restart_id,
+            DateTime::<Utc>::MIN_UTC,
+            fm::Reporter::Sp { sp_type: SpType::Sled.into(), slot: 16 },
+            vec![
+                fm::EreportData {
+                    id: fm::EreportId { restart_id, ena: Ena(2) },
+                    time_collected: DateTime::<Utc>::MIN_UTC,
+                    collector_id,
+                    part_number: Some("my cool CPN".to_string()),
+                    serial_number: Some("my cool serial".to_string()),
+                    class: Some("my cool ereport".to_string()),
+                    report: serde_json::json!({}),
+                },
+                fm::EreportData {
+                    id: fm::EreportId { restart_id, ena: Ena(3) },
+                    time_collected: DateTime::<Utc>::MIN_UTC,
+                    collector_id,
+                    part_number: Some("my cool CPN".to_string()),
+                    serial_number: Some("my cool serial".to_string()),
+                    class: Some("my other ereport".to_string()),
+                    report: serde_json::json!({}),
+                },
+            ],
+        );
+        expectorate_query_contents(
+            &query,
+            "tests/output/ereports_insert_sp.sql",
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn expectorate_ereports_insert_host() {
+        let restart_id = EreporterRestartUuid::nil();
+        let collector_id = OmicronZoneUuid::nil();
+        let query = DataStore::ereports_insert_query(
+            restart_id,
+            DateTime::<Utc>::MIN_UTC,
+            fm::Reporter::HostOs { slot: Some(16), sled: SledUuid::nil() },
+            vec![
+                fm::EreportData {
+                    id: fm::EreportId { restart_id, ena: Ena(2) },
+                    time_collected: DateTime::<Utc>::MIN_UTC,
+                    collector_id,
+                    part_number: Some("my cool CPN".to_string()),
+                    serial_number: Some("my cool serial".to_string()),
+                    class: Some("my cool ereport".to_string()),
+                    report: serde_json::json!({}),
+                },
+                fm::EreportData {
+                    id: fm::EreportId { restart_id, ena: Ena(3) },
+                    time_collected: DateTime::<Utc>::MIN_UTC,
+                    collector_id,
+                    part_number: Some("my cool CPN".to_string()),
+                    serial_number: Some("my cool serial".to_string()),
+                    class: Some("my other ereport".to_string()),
+                    report: serde_json::json!({}),
+                },
+            ],
+        );
+        expectorate_query_contents(
+            &query,
+            "tests/output/ereports_insert_host.sql",
+        )
+        .await;
     }
 
     // This test tests that the `ereport_fetch_matching` queries succeed with

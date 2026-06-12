@@ -2973,6 +2973,16 @@ table! {
 }
 
 table! {
+    ereporter_restart (id) {
+        id -> Uuid,
+        time_first_seen -> Timestamptz,
+        reporter -> crate::enums::EreporterTypeEnum,
+        slot_type -> crate::enums::SpTypeEnum,
+        slot -> Nullable<Int4>,
+    }
+}
+
+table! {
     user_data_export (id) {
         id -> Uuid,
 
