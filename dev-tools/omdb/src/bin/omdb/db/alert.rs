@@ -26,14 +26,17 @@ use nexus_db_model::Alert;
 use nexus_db_model::AlertClass;
 use nexus_db_model::AlertReceiver;
 use nexus_db_model::WebhookDelivery;
+use nexus_db_model::fm::RendezvousAlertCreated;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
 use nexus_db_queries::db::DataStore;
 use nexus_db_schema::schema::alert::dsl as alert_dsl;
+use nexus_db_schema::schema::rendezvous_alert_created::dsl as rendezvous_created_dsl;
 use nexus_db_schema::schema::webhook_delivery::dsl as delivery_dsl;
 use nexus_db_schema::schema::webhook_delivery_attempt::dsl as attempt_dsl;
 use nexus_types::identity::Resource;
 use omicron_common::api::external::DataPageParams;
+use omicron_common::api::external::Generation;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_uuid_kinds::AlertUuid;
@@ -905,10 +908,19 @@ async fn cmd_db_alert_list(
 
     let conn = datastore.pool_connection_for_tests().await?;
 
+    // Fetch all alerts up to our limit, including any corresponding
+    // `rendezvous_alert_created` markers so we can display the generation at
+    // which the alert was created. Note, all FM-created alerts can be
+    // distinguished by their fm_case_id, but won't necessarily have a creation
+    // marker: GC will clean up markers that are no longer needed.
     let mut query = alert_dsl::alert
+        .left_join(rendezvous_created_dsl::rendezvous_alert_created)
         .limit(fetch_opts.fetch_limit.get().into())
         .order_by(alert_dsl::time_created.asc())
-        .select(Alert::as_select())
+        .select((
+            Alert::as_select(),
+            Option::<RendezvousAlertCreated>::as_select(),
+        ))
         .into_boxed();
 
     if let Some(before) = before {
@@ -940,7 +952,8 @@ async fn cmd_db_alert_list(
     }
 
     let ctx = || "loading alerts";
-    let alerts = query.load_async(&*conn).await.with_context(ctx)?;
+    let alerts: Vec<(Alert, Option<RendezvousAlertCreated>)> =
+        query.load_async(&*conn).await.with_context(ctx)?;
 
     check_limit(&alerts, fetch_opts.fetch_limit, ctx);
 
@@ -956,20 +969,22 @@ async fn cmd_db_alert_list(
         dispatched: i64,
         #[tabled(display_with = "display_option_blank")]
         fm_case_id: Option<Uuid>,
+        #[tabled(display_with = "display_option_blank")]
+        created_at_generation: Option<Generation>,
     }
 
-    impl From<&'_ Alert> for AlertRow {
-        fn from(alert: &'_ Alert) -> Self {
-            Self {
-                id: alert.identity.id.into_untyped_uuid(),
-                class: alert.class,
-                time_created: alert.identity.time_created,
-                time_dispatched: alert.time_dispatched,
-                dispatched: alert.num_dispatched,
-                fm_case_id: alert.case_id.map(GenericUuid::into_untyped_uuid),
-            }
-        }
-    }
+    let make_row =
+        |alert: &Alert, marker: &Option<RendezvousAlertCreated>| AlertRow {
+            id: alert.identity.id.into_untyped_uuid(),
+            class: alert.class,
+            time_created: alert.identity.time_created,
+            time_dispatched: alert.time_dispatched,
+            dispatched: alert.num_dispatched,
+            fm_case_id: alert.case_id.map(GenericUuid::into_untyped_uuid),
+            created_at_generation: marker
+                .as_ref()
+                .map(|marker| marker.created_at_generation.0),
+        };
 
     #[derive(Tabled)]
     #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
@@ -980,7 +995,7 @@ async fn cmd_db_alert_list(
     }
 
     let mut table = if *payload {
-        let rows = alerts.iter().map(|alert| {
+        let rows = alerts.iter().map(|(alert, marker)| {
             let payload = match serde_json::to_string(&alert.payload) {
                 Ok(payload) => payload,
                 Err(e) => {
@@ -991,11 +1006,11 @@ async fn cmd_db_alert_list(
                     "<error>".to_string()
                 }
             };
-            AlertRowWithPayload { row: alert.into(), payload }
+            AlertRowWithPayload { row: make_row(alert, marker), payload }
         });
         tabled::Table::new(rows)
     } else {
-        let rows = alerts.iter().map(AlertRow::from);
+        let rows = alerts.iter().map(|(alert, marker)| make_row(alert, marker));
         tabled::Table::new(rows)
     };
     table
@@ -1014,15 +1029,25 @@ async fn cmd_db_alert_info(
     let AlertInfoArgs { id } = args;
     let conn = datastore.pool_connection_for_tests().await?;
 
-    let alert = alert_dsl::alert
-        .filter(alert_dsl::id.eq(id.into_untyped_uuid()))
-        .select(Alert::as_select())
-        .limit(1)
-        .get_result_async(&*conn)
-        .await
-        .optional()
-        .with_context(|| format!("loading alert {id}"))?
-        .ok_or_else(|| anyhow::anyhow!("no alert {id} exists"))?;
+    // Fetch the requested alert, including any corresponding
+    // `rendezvous_alert_created` marker so we can display the generation at
+    // which the alert was created. Note, all FM-created alerts can be
+    // distinguished by their fm_case_id, but won't necessarily have a creation
+    // marker: GC will clean up markers that are no longer needed.
+    let (alert, rendezvous_created): (Alert, Option<RendezvousAlertCreated>) =
+        alert_dsl::alert
+            .left_join(rendezvous_created_dsl::rendezvous_alert_created)
+            .filter(alert_dsl::id.eq(id.into_untyped_uuid()))
+            .select((
+                Alert::as_select(),
+                Option::<RendezvousAlertCreated>::as_select(),
+            ))
+            .limit(1)
+            .get_result_async(&*conn)
+            .await
+            .optional()
+            .with_context(|| format!("loading alert {id}"))?
+            .ok_or_else(|| anyhow::anyhow!("no alert {id} exists"))?;
 
     let Alert {
         identity: db::model::AlertIdentity { id, time_created, time_modified },
@@ -1038,6 +1063,7 @@ async fn cmd_db_alert_info(
     const TIME_DISPATCHED: &str = "fully dispatched at";
     const NUM_DISPATCHED: &str = "deliveries dispatched";
     const CASE_ID: &str = "requested by FM case";
+    const CREATED_AT_GENERATION: &str = "created at FM generation";
 
     const WIDTH: usize = const_max_len(&[
         ID,
@@ -1047,6 +1073,7 @@ async fn cmd_db_alert_info(
         NUM_DISPATCHED,
         CLASS,
         CASE_ID,
+        CREATED_AT_GENERATION,
     ]);
 
     println!("\n{:=<80}", "== ALERT ");
@@ -1061,6 +1088,12 @@ async fn cmd_db_alert_info(
     }
     if let Some(case_id) = case_id {
         println!("    {CASE_ID:>WIDTH$}: {case_id:?}");
+    }
+    if let Some(marker) = rendezvous_created {
+        println!(
+            "    {CREATED_AT_GENERATION:>WIDTH$}: {}",
+            marker.created_at_generation.0
+        );
     }
 
     println!("\n{:=<80}", "== ALERT PAYLOAD ");

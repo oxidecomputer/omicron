@@ -3342,6 +3342,9 @@ table! {
     }
 }
 
+joinable!(rendezvous_alert_created -> alert (alert_id));
+allow_tables_to_appear_in_same_query!(alert, rendezvous_alert_created);
+
 table! {
     trust_quorum_configuration (rack_id, epoch) {
         rack_id -> Uuid,
