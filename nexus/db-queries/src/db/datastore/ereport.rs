@@ -297,31 +297,33 @@ impl DataStore {
     pub async fn ereports_insert(
         &self,
         opctx: &OpContext,
+        restart_id: EreporterRestartUuid,
+        time_collected: DateTime<Utc>,
         reporter: fm::Reporter,
         ereports: impl IntoIterator<Item = fm::EreportData>,
     ) -> CreateResult<(usize, Option<EreportId>)> {
         opctx.authorize(authz::Action::CreateChild, &authz::FLEET).await?;
         let conn = self.pool_connection_authorized(opctx).await?;
+
         let ereports = ereports
             .into_iter()
             .map(|data| Ereport::new(data, reporter))
             .collect::<Vec<_>>();
-        let created = diesel::insert_into(dsl::ereport)
-            .values(ereports)
-            .on_conflict((dsl::restart_id, dsl::ena))
-            .do_nothing()
-            .execute_async(&*conn)
-            .await
-            .map_err(|e| {
-                public_error_from_diesel(e, ErrorHandler::Server)
-                    .internal_context("failed to insert ereports")
-            })?;
+        let created = Self::ereports_insert_query(
+            restart_id,
+            time_collected,
+            reporter,
+            ereports,
+        )
+        .execute_async(&*conn)
+        .await
+        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
         let latest = self
             .latest_ereport_id_on_conn(&conn, reporter)
             .await
             .map_err(|e| {
                 e.internal_context(format!(
-                    "failed to refresh latest ereport ID for {reporter}"
+                    "failed to refresh latest ereport ID for {reporter}",
                 ))
             })?;
         Ok((created, latest))
@@ -331,44 +333,45 @@ impl DataStore {
         restart_id: EreporterRestartUuid,
         time_collected: chrono::DateTime<chrono::Utc>,
         reporter: fm::Reporter,
-        ereports: impl IntoIterator<Item = fm::EreportData>,
-    ) -> impl RunnableQuery<(i64, Option<Uuid>, Option<i64>)> {
-        struct EreportInsertQuery<IE, IR, LS, LH> {
+        ereports: Vec<Ereport>,
+    ) -> impl RunnableQuery<i64> {
+        struct EreportInsertQuery<IE, IR /*LS, LH*/> {
             insert_ereports: IE,
             insert_reporter: IR,
             slot: Option<SqlU16>,
-            latest_query: LatestQuery<LS, LH>,
+            // latest_query: LatestQuery<LS, LH>,
         }
 
-        enum LatestQuery<LS, LH> {
-            Sp(LS),
-            Host(LH),
-        }
+        // enum LatestQuery<LS, LH> {
+        //     Sp(LS),
+        //     Host(LH),
+        // }
 
-        impl<IE, IR, LS, LH> QueryId for EreportInsertQuery<IE, IR, LS, LH> {
+        impl<IE, IR /*LS, LH*/> QueryId for EreportInsertQuery<IE, IR /*LS, LH*/> {
             type QueryId = ();
             const HAS_STATIC_QUERY_ID: bool = false;
         }
 
-        impl<IE, IR, LS, LH> Query for EreportInsertQuery<IE, IR, LS, LH> {
-            type SqlType = (
-                sql_types::BigInt,
-                sql_types::Nullable<sql_types::Uuid>,
-                sql_types::Nullable<sql_types::BigInt>,
-            );
+        impl<IE, IR /*LS, LH*/> Query for EreportInsertQuery<IE, IR /*LS, LH*/> {
+            // type SqlType = (
+            //     sql_types::BigInt,
+            //     sql_types::Nullable<(sql_types::Uuid, sql_types::BigInt)>,
+            // );
+            type SqlType = sql_types::BigInt;
         }
 
-        impl<IE, IR, LS, LH> diesel::RunQueryDsl<DbConnection>
-            for EreportInsertQuery<IE, IR, LS, LH>
+        impl<IE, IR /*LS, LH*/> diesel::RunQueryDsl<DbConnection>
+            for EreportInsertQuery<IE, IR /*LS, LH*/>
         {
         }
 
-        impl<IE, IR, LS, LH> QueryFragment<Pg> for EreportInsertQuery<IE, IR, LS, LH>
+        impl<IE, IR /*LS, LH*/> QueryFragment<Pg>
+            for EreportInsertQuery<IE, IR /*LS, LH*/>
         where
             IE: QueryFragment<Pg>,
             IR: QueryFragment<Pg>,
-            LS: QueryFragment<Pg>,
-            LH: QueryFragment<Pg>,
+            // LS: QueryFragment<Pg>,
+            // LH: QueryFragment<Pg>,
         {
             fn walk_ast<'b>(
                 &'b self,
@@ -390,54 +393,51 @@ impl DataStore {
                     out.push_sql("NOTHING");
                 }
 
-                out.push_sql("), latest AS (");
-                match self.latest_query {
-                    LatestQuery::Sp(ref query) => {
-                        query.walk_ast(out.reborrow())?;
-                    }
-                    LatestQuery::Host(ref query) => {
-                        query.walk_ast(out.reborrow())?;
-                    }
-                }
+                // TODO(eliza): make this part work
+                // out.push_sql("), latest AS (");
+                // match self.latest_query {
+                //     LatestQuery::Sp(ref query) => {
+                //         query.walk_ast(out.reborrow())?;
+                //     }
+                //     LatestQuery::Host(ref query) => {
+                //         query.walk_ast(out.reborrow())?;
+                //     }
+                // }
                 out.push_sql(") SELECT (inserted_ereports, latest.*)");
                 Ok(())
             }
         }
 
-        let ereports = ereports
-            .into_iter()
-            .map(|data| Ereport::new(data, reporter))
-            .collect::<Vec<_>>();
-        let (reporter, slot_type, slot, latest_query) = match reporter {
-            fm::Reporter::HostOs { slot, sled, .. } => {
-                let latest = dsl::ereport
-                    .filter(dsl::sled_id.eq(sled.into_untyped_uuid()))
-                    .filter(dsl::time_deleted.is_null())
-                    .order_by((dsl::time_collected.desc(), dsl::ena.desc()))
-                    .limit(1)
-                    .select((dsl::restart_id, dsl::ena));
+        let (reporter, slot_type, slot /*latest_query*/) = match reporter {
+            fm::Reporter::HostOs { slot /*sled,*/, .. } => {
+                // let latest = dsl::ereport
+                //     .filter(dsl::sled_id.eq(sled.into_untyped_uuid()))
+                //     .filter(dsl::time_deleted.is_null())
+                //     .order_by((dsl::time_collected.desc(), dsl::ena.desc()))
+                //     .limit(1)
+                //     .select((dsl::restart_id, dsl::ena));
                 (
                     EreporterType::Host,
                     SpType::Sled,
                     slot.map(SqlU16::from),
-                    LatestQuery::Host(latest),
+                    // LatestQuery::Host(latest),
                 )
             }
             fm::Reporter::Sp { sp_type, slot } => {
                 let sp_type = sp_type.into();
                 let slot = SqlU16::from(slot);
-                let latest = dsl::ereport
-                    .filter(dsl::slot_type.eq(sp_type))
-                    .filter(dsl::slot.eq(Some(slot)))
-                    .filter(dsl::time_deleted.is_null())
-                    .order_by((dsl::time_collected.desc(), dsl::ena.desc()))
-                    .limit(1)
-                    .select((dsl::restart_id, dsl::ena));
+                // let latest = dsl::ereport
+                //     .filter(dsl::slot_type.eq(sp_type))
+                //     .filter(dsl::slot.eq(Some(slot)))
+                //     .filter(dsl::time_deleted.is_null())
+                //     .order_by((dsl::time_collected.desc(), dsl::ena.desc()))
+                //     .limit(1)
+                //     .select((dsl::restart_id, dsl::ena));
                 (
                     EreporterType::Sp,
                     sp_type,
                     Some(slot),
-                    LatestQuery::Sp(latest),
+                    // LatestQuery::Sp(latest),
                 )
             }
         };
@@ -459,7 +459,7 @@ impl DataStore {
             insert_ereports,
             insert_reporter,
             slot,
-            latest_query,
+            // latest_query,
         }
     }
 
@@ -1069,13 +1069,12 @@ mod tests {
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
-        let id = fm::EreportId {
-            restart_id: EreporterRestartUuid::new_v4(),
-            ena: ereport_types::Ena(2),
-        };
+        let restart_id = EreporterRestartUuid::new_v4();
+        let id = fm::EreportId { restart_id, ena: ereport_types::Ena(2) };
+        let time_collected = Utc::now();
         let ereport = fm::EreportData {
             id,
-            time_collected: Utc::now(),
+            time_collected,
             collector_id: OmicronZoneUuid::new_v4(),
             part_number: Some("my cool CPN".to_string()),
             serial_number: Some("my cool serial".to_string()),
@@ -1085,6 +1084,8 @@ mod tests {
         datastore
             .ereports_insert(
                 &opctx,
+                restart_id,
+                time_collected,
                 fm::Reporter::Sp {
                     sp_type: nexus_types::inventory::SpType::Sled,
                     slot: 19,
