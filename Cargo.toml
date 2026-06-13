@@ -1137,7 +1137,3 @@ path = "workspace-hack"
 [patch."https://github.com/oxidecomputer/omicron"]
 omicron-uuid-kinds = { path = "uuid-kinds" }
 omicron-common = { path = "common" }
-
-#[patch."https://github.com/oxidecomputer/maghemite"]
-#mg-api-types = { path = "../maghemite/mg-api-types" }
-#mg-admin-client = { path = "../maghemite/mg-admin-client" }
