@@ -2158,7 +2158,7 @@ impl fmt::Display for BlueprintDiffDisplay<'_, '_> {
                     if let Some(error) = error {
                         update_disposition_errors.push((
                             sled_id,
-                            error.reason(
+                            error.full_reason(
                                 &sled.before.update_disposition,
                                 &sled.after.update_disposition,
                             ),
@@ -2328,8 +2328,7 @@ enum UpdateDispositionDiffError {
 }
 
 impl UpdateDispositionDiffError {
-    /// The inline marker appended to the diff's value cell.
-    fn parens(self) -> &'static str {
+    fn short_reason(self) -> &'static str {
         match self {
             UpdateDispositionDiffError::MissingGenerationBump => {
                 UPDATE_DISPOSITION_MISSING_BUMP_PARENS
@@ -2343,8 +2342,9 @@ impl UpdateDispositionDiffError {
         }
     }
 
-    /// A fuller explanation for the `UPDATE DISPOSITION ERRORS` section.
-    fn reason(
+    /// Returns the full explanation for the `UPDATE DISPOSITION ERRORS`
+    /// section.
+    fn full_reason(
         self,
         before: &BlueprintSledUpdateDisposition,
         after: &BlueprintSledUpdateDisposition,
@@ -2380,7 +2380,7 @@ impl UpdateDispositionDiffError {
 /// holds both ways when comparing a child blueprint against its parent. (Note
 /// that the direction that produces MissingGenerationBump holds when comparing a
 /// blueprint to any of its ancestors, but we don't have access to that
-/// information here so we don't try and do a comparison.)
+/// information here so we don't try and do that comparison.)
 fn update_disposition_diff_error(
     before: &BlueprintSledUpdateDisposition,
     after: &BlueprintSledUpdateDisposition,
@@ -2433,7 +2433,7 @@ fn display_modified_update_disposition(
         format!("(generation {})", after.generation)
     };
     match error {
-        Some(error) => format!("{kind} {generation} {}", error.parens()),
+        Some(error) => format!("{kind} {generation} {}", error.short_reason()),
         None => format!("{kind} {generation}"),
     }
 }
