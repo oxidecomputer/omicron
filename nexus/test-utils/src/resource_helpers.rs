@@ -2120,7 +2120,7 @@ impl<'a, N: NexusServer> DiskTest<'a, N> {
                 );
 
                 match result {
-                    Ok(None) => Err(CondCheckError::NotYet),
+                    Ok(None) => Err(CondCheckError::NotYet { status: None }),
                     Ok(Some(c)) => {
                         let all_zpools = c
                             .sled_agents
@@ -2133,11 +2133,11 @@ impl<'a, N: NexusServer> DiskTest<'a, N> {
                         if all_zpools.contains(&zpool.id) {
                             Ok(())
                         } else {
-                            Err(CondCheckError::NotYet)
+                            Err(CondCheckError::NotYet { status: None })
                         }
                     }
                     Err(Error::ServiceUnavailable { .. }) => {
-                        Err(CondCheckError::NotYet)
+                        Err(CondCheckError::NotYet { status: None })
                     }
                     Err(error) => Err(CondCheckError::Failed(error)),
                 }

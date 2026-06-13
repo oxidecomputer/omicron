@@ -1417,8 +1417,8 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
                 sled_id,
                 BlueprintSledConfig {
                     state: SledState::Active,
-                    update_disposition:
-                        BlueprintSledUpdateDisposition::Available,
+                    update_disposition: BlueprintSledUpdateDisposition::initial(
+                    ),
                     subnet: Ipv6Subnet::new(Ipv6Addr::LOCALHOST),
                     last_allocated_ip_subnet_offset:
                         LastAllocatedSubnetIpOffset::initial(),

@@ -946,8 +946,8 @@ impl ServicePlan {
                 sled_description.sled_id,
                 BlueprintSledConfig {
                     state: SledState::Active,
-                    update_disposition:
-                        BlueprintSledUpdateDisposition::Available,
+                    update_disposition: BlueprintSledUpdateDisposition::initial(
+                    ),
                     subnet: sled_description.subnet,
                     last_allocated_ip_subnet_offset: sled_description
                         .last_allocated_ip_subnet_offset,

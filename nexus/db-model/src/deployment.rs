@@ -32,6 +32,7 @@ use nexus_types::deployment::BlueprintMeasurements;
 use nexus_types::deployment::BlueprintPhysicalDiskDisposition;
 use nexus_types::deployment::BlueprintSingleMeasurement;
 use nexus_types::deployment::BlueprintSledUpdateDisposition;
+use nexus_types::deployment::BlueprintSledUpdateDispositionKind;
 use nexus_types::deployment::BlueprintTarget;
 use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::BlueprintZoneDisposition;
@@ -257,6 +258,7 @@ pub struct BpSledMetadata {
     pub subnet: IpNetwork,
     pub last_allocated_ip_subnet_offset: SqlU16,
     pub measurements: DbBpSledMeasurements,
+    pub update_disposition_generation: Generation,
     pub update_availability: DbSledUpdateAvailability,
     pub update_disruption_policy: Option<DbReconfiguratorDisruptionPolicy>,
 }
@@ -274,30 +276,36 @@ impl BpSledMetadata {
         Ok(subnet.into())
     }
 
-    /// Splits a [`BlueprintSledUpdateDisposition`] into the column pair stored
-    /// on `bp_sled_metadata`.
+    /// Splits a [`BlueprintSledUpdateDisposition`] into the columns stored on
+    /// `bp_sled_metadata`.
     ///
     /// See [`BpSledMetadata::update_disposition`] for the inverse.
     pub fn update_disposition_columns(
         update_disposition: BlueprintSledUpdateDisposition,
-    ) -> (DbSledUpdateAvailability, Option<DbReconfiguratorDisruptionPolicy>)
-    {
-        match update_disposition {
-            BlueprintSledUpdateDisposition::Available => {
+    ) -> (
+        Generation,
+        DbSledUpdateAvailability,
+        Option<DbReconfiguratorDisruptionPolicy>,
+    ) {
+        let (availability, policy) = match update_disposition.kind {
+            BlueprintSledUpdateDispositionKind::Available => {
                 (DbSledUpdateAvailability::Available, None)
             }
-            BlueprintSledUpdateDisposition::Evacuating { policy } => {
+            BlueprintSledUpdateDispositionKind::Evacuating { policy } => {
                 (DbSledUpdateAvailability::Evacuating, Some(policy.into()))
             }
-        }
+        };
+        (update_disposition.generation.into(), availability, policy)
     }
 
     /// Reassembles the [`BlueprintSledUpdateDisposition`] from this row's
-    /// `(update_availability, update_disruption_policy)` columns.
+    /// `(update_disposition_generation, update_availability,
+    /// update_disruption_policy)` columns.
     pub fn update_disposition(
         &self,
     ) -> anyhow::Result<BlueprintSledUpdateDisposition> {
         reassemble_update_disposition(
+            self.update_disposition_generation,
             self.update_availability,
             self.update_disruption_policy,
         )
@@ -371,17 +379,18 @@ impl_enum_type!(
 );
 
 fn reassemble_update_disposition(
+    generation: Generation,
     availability: DbSledUpdateAvailability,
     policy: Option<DbReconfiguratorDisruptionPolicy>,
 ) -> anyhow::Result<BlueprintSledUpdateDisposition> {
-    match (availability, policy) {
+    let kind = match (availability, policy) {
         (DbSledUpdateAvailability::Available, None) => {
-            Ok(BlueprintSledUpdateDisposition::Available)
+            BlueprintSledUpdateDispositionKind::Available
         }
         (DbSledUpdateAvailability::Evacuating, Some(policy)) => {
-            Ok(BlueprintSledUpdateDisposition::Evacuating {
+            BlueprintSledUpdateDispositionKind::Evacuating {
                 policy: policy.into(),
-            })
+            }
         }
         // Invalid cases (there's a CHECK constraint to enforce this).
         (DbSledUpdateAvailability::Available, Some(policy)) => bail!(
@@ -392,7 +401,8 @@ fn reassemble_update_disposition(
             "update_availability is 'evacuating' but update_disruption_policy \
              is NULL (expected a policy)"
         ),
-    }
+    };
+    Ok(BlueprintSledUpdateDisposition { generation: *generation, kind })
 }
 
 impl_enum_type!(
@@ -1760,14 +1770,8 @@ impl DebugLogBlueprintPlanning {
         // `debug_blob`, because we don't want anyone to attempt to parse it. It
         // should only be useful to humans, potentially via omdb, and they (and
         // omdb) can duplicate these fields to understand it.
-        let git_commit = if env!("VERGEN_GIT_DIRTY") == "true" {
-            concat!(env!("VERGEN_GIT_SHA"), "-dirty")
-        } else {
-            env!("VERGEN_GIT_SHA")
-        };
-
         let debug_blob = serde_json::json!({
-            "git-commit": git_commit,
+            "git-commit": omicron_git_version::GitVersion::current(),
             "report": report,
         });
 
@@ -1782,30 +1786,44 @@ mod tests {
 
     #[test]
     fn update_disposition_columns_roundtrip() {
-        let mut dispositions = vec![BlueprintSledUpdateDisposition::Available];
+        // Set this to a non-initial generation so that we cover roundtripping
+        // the generation column away from its default value.
+        let evacuating_generation =
+            BlueprintSledUpdateDisposition::initial().generation.next();
+        let mut dispositions = vec![BlueprintSledUpdateDisposition::initial()];
         dispositions.extend(
             ReconfiguratorDisruptionPolicy::ALL_VARIANTS.iter().copied().map(
-                |policy| BlueprintSledUpdateDisposition::Evacuating { policy },
+                |policy| BlueprintSledUpdateDisposition {
+                    generation: evacuating_generation,
+                    kind: BlueprintSledUpdateDispositionKind::Evacuating {
+                        policy,
+                    },
+                },
             ),
         );
 
         for disposition in dispositions {
-            let (availability, policy) =
+            let (generation, availability, policy) =
                 BpSledMetadata::update_disposition_columns(disposition);
-            let reassembled =
-                reassemble_update_disposition(availability, policy).expect(
-                    "columns from update_disposition_columns are consistent",
-                );
+            let reassembled = reassemble_update_disposition(
+                generation,
+                availability,
+                policy,
+            )
+            .expect("columns from update_disposition_columns are consistent");
             assert_eq!(reassembled, disposition, "{disposition:?} roundtrips");
         }
     }
 
     #[test]
     fn reassemble_rejects_inconsistent_columns() {
+        // The generation is not relevant to these consistency checks.
+        let generation = Generation::new();
         // Available must not carry a disruption policy.
         for &policy in ReconfiguratorDisruptionPolicy::ALL_VARIANTS {
             assert!(
                 reassemble_update_disposition(
+                    generation,
                     DbSledUpdateAvailability::Available,
                     Some(policy.into()),
                 )
@@ -1816,6 +1834,7 @@ mod tests {
         // Evacuating must carry a disruption policy.
         assert!(
             reassemble_update_disposition(
+                generation,
                 DbSledUpdateAvailability::Evacuating,
                 None,
             )

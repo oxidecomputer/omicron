@@ -5511,6 +5511,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_sled_metadata (
     measurements omicron.public.bp_sled_measurements NOT NULL,
 
     -- the sled's update disposition
+    update_disposition_generation INT8 NOT NULL,
     update_availability omicron.public.sled_update_availability NOT NULL,
     update_disruption_policy omicron.public.reconfigurator_disruption_policy,
 

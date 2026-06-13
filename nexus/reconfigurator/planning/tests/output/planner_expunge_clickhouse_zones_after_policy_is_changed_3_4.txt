@@ -4,7 +4,7 @@ to:   blueprint 71be0671-4467-45a9-956c-fb5aebb9b455
  MODIFIED SLEDS:
 
   sled 883d9767-021c-4836-81cf-fa02d73fead0 (active, config generation 4 -> 5):
-    update disposition:   available (unchanged)
+    update disposition:   available (generation 1) (unchanged)
 
     measurements:
     ---------------------------
@@ -138,7 +138,7 @@ to:   blueprint 71be0671-4467-45a9-956c-fb5aebb9b455
 
 
   sled aae6114d-956b-4980-9759-b00b1ed893ee (active, config generation 3 -> 4):
-    update disposition:   available (unchanged)
+    update disposition:   available (generation 1) (unchanged)
 
     measurements:
     ---------------------------
@@ -275,7 +275,7 @@ to:   blueprint 71be0671-4467-45a9-956c-fb5aebb9b455
 
 
   sled be4a3b25-dde1-40a4-b909-9fa4379a8510 (active, config generation 3 -> 4):
-    update disposition:   available (unchanged)
+    update disposition:   available (generation 1) (unchanged)
 
     measurements:
     ---------------------------

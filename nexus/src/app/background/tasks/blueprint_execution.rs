@@ -287,7 +287,7 @@ mod test {
                     BlueprintSledConfig {
                         state: SledState::Active,
                         update_disposition:
-                            BlueprintSledUpdateDisposition::Available,
+                            BlueprintSledUpdateDisposition::initial(),
                         subnet: Ipv6Subnet::new(Ipv6Addr::LOCALHOST),
                         last_allocated_ip_subnet_offset:
                             LastAllocatedSubnetIpOffset::initial(),

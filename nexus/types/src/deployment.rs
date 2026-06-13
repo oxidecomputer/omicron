@@ -1678,14 +1678,12 @@ pub struct BlueprintSledConfig {
     pub remove_mupdate_override: Option<MupdateOverrideUuid>,
     pub host_phase_2: BlueprintHostPhase2DesiredSlots,
     pub measurements: BlueprintMeasurements,
-
-    /// Controls this sled's availability for provisioning, and whether its
-    /// migratable instances are evacuated during an update.
     pub update_disposition: BlueprintSledUpdateDisposition,
 }
 
 /// Controls a sled's availability for provisioning and whether its migratable
-/// instances are evacuated during an update.
+/// instances are evacuated during an update, along with a generation number
+/// bumped whenever that disposition changes.
 ///
 /// Stored in [`BlueprintSledConfig::update_disposition`]. See RFD 666.
 #[derive(
@@ -1699,8 +1697,51 @@ pub struct BlueprintSledConfig {
     Deserialize,
     JsonSchema,
 )]
-#[serde(tag = "kind", rename_all = "snake_case")]
-pub enum BlueprintSledUpdateDisposition {
+pub struct BlueprintSledUpdateDisposition {
+    /// A generation number bumped whenever `kind` changes.
+    pub generation: Generation,
+
+    /// The disposition itself.
+    pub kind: BlueprintSledUpdateDispositionKind,
+}
+
+impl BlueprintSledUpdateDisposition {
+    /// The initial disposition for a newly added sled: available, at the
+    /// initial generation.
+    ///
+    /// This is also the disposition that existing `bp_sled_metadata` rows are
+    /// backfilled to by the schema migration that adds this field.
+    pub const fn initial() -> Self {
+        Self {
+            generation: Generation::new(),
+            kind: BlueprintSledUpdateDispositionKind::Available,
+        }
+    }
+}
+
+impl fmt::Display for BlueprintSledUpdateDisposition {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{} (generation {})", self.kind, self.generation)
+    }
+}
+
+/// The content of a sled's update disposition: whether the sled is available
+/// for provisioning, and if being evacuated, which disruption policy applies.
+///
+/// The "kind" half of [`BlueprintSledUpdateDisposition`].
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Diffable,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    JsonSchema,
+)]
+#[serde(tag = "availability", rename_all = "snake_case")]
+pub enum BlueprintSledUpdateDispositionKind {
     /// The sled is available for use for all provisions.
     Available,
 
@@ -1712,11 +1753,13 @@ pub enum BlueprintSledUpdateDisposition {
     // update-related migrations.
 }
 
-impl fmt::Display for BlueprintSledUpdateDisposition {
+impl fmt::Display for BlueprintSledUpdateDispositionKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            BlueprintSledUpdateDisposition::Available => write!(f, "available"),
-            BlueprintSledUpdateDisposition::Evacuating { policy } => {
+            BlueprintSledUpdateDispositionKind::Available => {
+                write!(f, "available")
+            }
+            BlueprintSledUpdateDispositionKind::Evacuating { policy } => {
                 write!(f, "evacuating ({policy})")
             }
         }

@@ -1835,7 +1835,7 @@ parent:    <none>
 
   sled: ..........<REDACTED_UUID>...........
     state::::::::::::::   active
-    update disposition:   available
+    update disposition:   available (generation 1)
     config generation::   2
     subnet:::::::::::::   ::/64
     last allocated IP::   ::2
@@ -1886,7 +1886,7 @@ parent:    <none>
 
   sled: ..........<REDACTED_UUID>...........
     state::::::::::::::   active
-    update disposition:   available
+    update disposition:   available (generation 1)
     config generation::   2
     subnet:::::::::::::   ::/64
     last allocated IP::   ::2
@@ -1984,7 +1984,7 @@ parent:    <none>
 
   sled: ..........<REDACTED_UUID>...........
     state::::::::::::::   active
-    update disposition:   available
+    update disposition:   available (generation 1)
     config generation::   2
     subnet:::::::::::::   ::/64
     last allocated IP::   ::2
@@ -2035,7 +2035,7 @@ parent:    <none>
 
   sled: ..........<REDACTED_UUID>...........
     state::::::::::::::   active
-    update disposition:   available
+    update disposition:   available (generation 1)
     config generation::   2
     subnet:::::::::::::   ::/64
     last allocated IP::   ::2

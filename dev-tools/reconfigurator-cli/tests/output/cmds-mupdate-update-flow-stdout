@@ -695,7 +695,7 @@ to:   blueprint a5a8f242-ffa5-473c-8efd-2acf2dc0b736
  MODIFIED SLEDS:
 
   sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c (active, config generation 4 -> 5):
-    update disposition:   available (unchanged)
+    update disposition:   available (generation 1) (unchanged)
 
     measurements:
     ---------------------------
@@ -756,7 +756,7 @@ to:   blueprint a5a8f242-ffa5-473c-8efd-2acf2dc0b736
 
 
   sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 (active, config generation 5 -> 6):
-    update disposition:::::::::::   available (unchanged)
+    update disposition:::::::::::   available (generation 1) (unchanged)
 +   will remove mupdate override:   (none) -> 6123eac1-ec5b-42ba-b73f-9845105a9971
 
     measurements:
@@ -817,7 +817,7 @@ to:   blueprint a5a8f242-ffa5-473c-8efd-2acf2dc0b736
 
 
   sled d81c6a84-79b8-4958-ae41-ea46c9b19763 (active, config generation 2 -> 3):
-    update disposition:::::::::::   available (unchanged)
+    update disposition:::::::::::   available (generation 1) (unchanged)
 +   will remove mupdate override:   (none) -> 203fa72c-85c1-466a-8ed3-338ee029530d
 
     measurements:
@@ -1174,7 +1174,7 @@ to:   blueprint c1a0d242-9160-40f4-96ae-61f8f40a0b1b
  MODIFIED SLEDS:
 
   sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 (active, config generation 6 -> 7):
-    update disposition:::::::::::   available (unchanged)
+    update disposition:::::::::::   available (generation 1) (unchanged)
 -   will remove mupdate override:   6123eac1-ec5b-42ba-b73f-9845105a9971 -> (none)
 
     measurements:
@@ -1238,7 +1238,7 @@ to:   blueprint c1a0d242-9160-40f4-96ae-61f8f40a0b1b
 
 
   sled d81c6a84-79b8-4958-ae41-ea46c9b19763 (active, config generation 3 -> 4):
-    update disposition:::::::::::   available (unchanged)
+    update disposition:::::::::::   available (generation 1) (unchanged)
 *   will remove mupdate override:   203fa72c-85c1-466a-8ed3-338ee029530d -> 1c0ce176-6dc8-4a90-adea-d4a8000751da
 
     measurements:
@@ -1390,7 +1390,7 @@ parent:    c1a0d242-9160-40f4-96ae-61f8f40a0b1b
 
   sled: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c
     state::::::::::::::   active
-    update disposition:   available
+    update disposition:   available (generation 1)
     config generation::   5
     subnet:::::::::::::   fd00:1122:3344:102::/64
     last allocated IP::   fd00:1122:3344:102::8
@@ -1454,7 +1454,7 @@ parent:    c1a0d242-9160-40f4-96ae-61f8f40a0b1b
 
   sled: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6
     state::::::::::::::   active
-    update disposition:   available
+    update disposition:   available (generation 1)
     config generation::   7
     subnet:::::::::::::   fd00:1122:3344:101::/64
     last allocated IP::   fd00:1122:3344:101::7
@@ -1515,7 +1515,7 @@ parent:    c1a0d242-9160-40f4-96ae-61f8f40a0b1b
 
   sled: d81c6a84-79b8-4958-ae41-ea46c9b19763
     state::::::::::::::   active
-    update disposition:   available
+    update disposition:   available (generation 1)
     config generation::   5
     subnet:::::::::::::   fd00:1122:3344:103::/64
     last allocated IP::   fd00:1122:3344:103::7
@@ -1621,7 +1621,7 @@ to:   blueprint afb09faf-a586-4483-9289-04d4f1d8ba23
  MODIFIED SLEDS:
 
   sled d81c6a84-79b8-4958-ae41-ea46c9b19763 (active, config generation 4 -> 5):
-    update disposition:::::::::::   available (unchanged)
+    update disposition:::::::::::   available (generation 1) (unchanged)
 -   will remove mupdate override:   1c0ce176-6dc8-4a90-adea-d4a8000751da -> (none)
 
     measurements:
@@ -1793,7 +1793,7 @@ parent:    afb09faf-a586-4483-9289-04d4f1d8ba23
 
   sled: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c
     state::::::::::::::   active
-    update disposition:   available
+    update disposition:   available (generation 1)
     config generation::   5
     subnet:::::::::::::   fd00:1122:3344:102::/64
     last allocated IP::   fd00:1122:3344:102::8
@@ -1857,7 +1857,7 @@ parent:    afb09faf-a586-4483-9289-04d4f1d8ba23
 
   sled: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6
     state::::::::::::::   active
-    update disposition:   available
+    update disposition:   available (generation 1)
     config generation::   7
     subnet:::::::::::::   fd00:1122:3344:101::/64
     last allocated IP::   fd00:1122:3344:101::7
@@ -1918,7 +1918,7 @@ parent:    afb09faf-a586-4483-9289-04d4f1d8ba23
 
   sled: d81c6a84-79b8-4958-ae41-ea46c9b19763
     state::::::::::::::   active
-    update disposition:   available
+    update disposition:   available (generation 1)
     config generation::   6
     subnet:::::::::::::   fd00:1122:3344:103::/64
     last allocated IP::   fd00:1122:3344:103::7
@@ -2021,7 +2021,7 @@ to:   blueprint ce365dff-2cdb-4f35-a186-b15e20e1e700
  MODIFIED SLEDS:
 
   sled d81c6a84-79b8-4958-ae41-ea46c9b19763 (active, config generation 5 -> 6):
-    update disposition:   available (unchanged)
+    update disposition:   available (generation 1) (unchanged)
 
     measurements:
     --------------------------------------------------------------------------------
@@ -2213,7 +2213,7 @@ parent:    8f2d1f39-7c88-4701-aa43-56bf281b28c1
 
   sled: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c
     state::::::::::::::   active
-    update disposition:   available
+    update disposition:   available (generation 1)
     config generation::   6
     subnet:::::::::::::   fd00:1122:3344:102::/64
     last allocated IP::   fd00:1122:3344:102::8
@@ -2278,7 +2278,7 @@ parent:    8f2d1f39-7c88-4701-aa43-56bf281b28c1
 
   sled: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6
     state::::::::::::::   active
-    update disposition:   available
+    update disposition:   available (generation 1)
     config generation::   8
     subnet:::::::::::::   fd00:1122:3344:101::/64
     last allocated IP::   fd00:1122:3344:101::7
@@ -2340,7 +2340,7 @@ parent:    8f2d1f39-7c88-4701-aa43-56bf281b28c1
 
   sled: d81c6a84-79b8-4958-ae41-ea46c9b19763
     state::::::::::::::   active
-    update disposition:   available
+    update disposition:   available (generation 1)
     config generation::   7
     subnet:::::::::::::   fd00:1122:3344:103::/64
     last allocated IP::   fd00:1122:3344:103::7
@@ -2438,7 +2438,7 @@ to:   blueprint 12d602a6-5ab4-487a-b94e-eb30cdf30300
  MODIFIED SLEDS:
 
   sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c (active, config generation 5 -> 6):
-    update disposition:   available (unchanged)
+    update disposition:   available (generation 1) (unchanged)
 
     measurements:
     ------------------------------------------------------------------------------------
@@ -2506,7 +2506,7 @@ to:   blueprint 12d602a6-5ab4-487a-b94e-eb30cdf30300
 
 
   sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 (active, config generation 7 -> 8):
-    update disposition:   available (unchanged)
+    update disposition:   available (generation 1) (unchanged)
 
     measurements:
     --------------------------------------------------------------------------------
@@ -2563,7 +2563,7 @@ to:   blueprint 12d602a6-5ab4-487a-b94e-eb30cdf30300
 
 
   sled d81c6a84-79b8-4958-ae41-ea46c9b19763 (active, config generation 6 -> 7):
-    update disposition:   available (unchanged)
+    update disposition:   available (generation 1) (unchanged)
 
     measurements:
     --------------------------------------------------------------------------------
@@ -2689,7 +2689,7 @@ parent:    12d602a6-5ab4-487a-b94e-eb30cdf30300
 
   sled: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c
     state::::::::::::::   active
-    update disposition:   available
+    update disposition:   available (generation 1)
     config generation::   6
     subnet:::::::::::::   fd00:1122:3344:102::/64
     last allocated IP::   fd00:1122:3344:102::8
@@ -2754,7 +2754,7 @@ parent:    12d602a6-5ab4-487a-b94e-eb30cdf30300
 
   sled: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6
     state::::::::::::::   active
-    update disposition:   available
+    update disposition:   available (generation 1)
     config generation::   8
     subnet:::::::::::::   fd00:1122:3344:101::/64
     last allocated IP::   fd00:1122:3344:101::7
@@ -2816,7 +2816,7 @@ parent:    12d602a6-5ab4-487a-b94e-eb30cdf30300
 
   sled: d81c6a84-79b8-4958-ae41-ea46c9b19763
     state::::::::::::::   active
-    update disposition:   available
+    update disposition:   available (generation 1)
     config generation::   7
     subnet:::::::::::::   fd00:1122:3344:103::/64
     last allocated IP::   fd00:1122:3344:103::7
@@ -3046,7 +3046,7 @@ to:   blueprint 27e755bc-dc10-4647-853c-f89bb3a15a2c
  MODIFIED SLEDS:
 
   sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c (active, config generation 6 -> 7):
-    update disposition:   available (unchanged)
+    update disposition:   available (generation 1) (unchanged)
 
     measurements:
     --------------------------------------------------------------------------------
@@ -3107,7 +3107,7 @@ to:   blueprint 27e755bc-dc10-4647-853c-f89bb3a15a2c
 
 
   sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 (active, config generation 8 -> 9):
-    update disposition:   available (unchanged)
+    update disposition:   available (generation 1) (unchanged)
 
     measurements:
     --------------------------------------------------------------------------------
@@ -3168,7 +3168,7 @@ to:   blueprint 27e755bc-dc10-4647-853c-f89bb3a15a2c
 
 
   sled d81c6a84-79b8-4958-ae41-ea46c9b19763 (active, config generation 7 -> 8):
-    update disposition:   available (unchanged)
+    update disposition:   available (generation 1) (unchanged)
 
     measurements:
     --------------------------------------------------------------------------------
@@ -3354,7 +3354,7 @@ to:   blueprint 9f89efdf-a23e-4137-b7cc-79f4a91cbe1f
  MODIFIED SLEDS:
 
   sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 (active, config generation 9 -> 10):
-    update disposition:::::::::::   available (unchanged)
+    update disposition:::::::::::   available (generation 1) (unchanged)
 +   will remove mupdate override:   (none) -> c8fba912-63ae-473a-9115-0495d10fb3bc
 
     measurements:
@@ -3422,7 +3422,7 @@ to:   blueprint 9f89efdf-a23e-4137-b7cc-79f4a91cbe1f
  ADDED SLEDS:
 
   sled c3bc4c6d-fdde-4fc4-8493-89d2a1e5ee6b (active, config generation 1):
-+   update disposition:   available
++   update disposition:   available (generation 1)
 
     measurements:
     ---------------------------

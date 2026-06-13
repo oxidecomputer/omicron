@@ -32,6 +32,7 @@ use nexus_types::deployment::BlueprintPhysicalDiskConfig;
 use nexus_types::deployment::BlueprintPhysicalDiskDisposition;
 use nexus_types::deployment::BlueprintSledConfig;
 use nexus_types::deployment::BlueprintSledUpdateDisposition;
+use nexus_types::deployment::BlueprintSledUpdateDispositionKind;
 use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::BlueprintZoneImageSource;
 use nexus_types::deployment::BlueprintZoneType;
@@ -167,11 +168,12 @@ pub enum EnsureMupdateOverrideError {
 pub struct SledEditor {
     underlay_ip_allocator: SledUnderlayIpAllocator,
     incoming_sled_agent_generation: Generation,
-    // The planner does not currently set the update disposition. Note that this
-    // is purely an internal planner decision and is never part of the
-    // `OmicronSledConfig` sent to sled-agent, so a change to it should not
-    // result in a sled_agent_generation bump.
-    incoming_update_disposition: BlueprintSledUpdateDisposition,
+    // Note that the update disposition is purely an internal planner decision
+    // and is not part of the `OmicronSledConfig` sent to sled-agent, so a
+    // change to it should result in an update_disposition_generation bump but
+    // not a sled_agent_generation bump.
+    incoming_update_disposition_generation: Generation,
+    update_disposition_kind: ScalarEditor<BlueprintSledUpdateDispositionKind>,
     zones: ZonesEditor,
     disks: DisksEditor,
     datasets: DatasetsEditor,
@@ -219,7 +221,12 @@ impl SledEditor {
                 config.last_allocated_ip_subnet_offset,
             ),
             incoming_sled_agent_generation: config.sled_agent_generation,
-            incoming_update_disposition: config.update_disposition,
+            incoming_update_disposition_generation: config
+                .update_disposition
+                .generation,
+            update_disposition_kind: ScalarEditor::new(
+                config.update_disposition.kind,
+            ),
             zones,
             disks: DisksEditor::new(config.sled_agent_generation, config.disks),
             datasets: DatasetsEditor::new(config.datasets)?,
@@ -239,8 +246,10 @@ impl SledEditor {
                 LastAllocatedSubnetIpOffset::initial(),
             ),
             incoming_sled_agent_generation: Generation::new(),
-            incoming_update_disposition:
-                BlueprintSledUpdateDisposition::Available,
+            incoming_update_disposition_generation: Generation::new(),
+            update_disposition_kind: ScalarEditor::new(
+                BlueprintSledUpdateDispositionKind::Available,
+            ),
             zones: ZonesEditor::empty(),
             disks: DisksEditor::empty(),
             datasets: DatasetsEditor::empty(),
@@ -265,12 +274,26 @@ impl SledEditor {
         let mut sled_agent_generation = self.incoming_sled_agent_generation;
         let (measurements, measurement_counts) = self.measurements.finalize();
 
+        let update_disposition_is_modified =
+            self.update_disposition_kind.is_modified();
+        let update_disposition = BlueprintSledUpdateDisposition {
+            generation: if update_disposition_is_modified {
+                self.incoming_update_disposition_generation.next()
+            } else {
+                self.incoming_update_disposition_generation
+            },
+            kind: self.update_disposition_kind.finalize(),
+        };
+
         let scalar_edits = EditedSledScalarEdits {
             debug_force_generation_bump: self.debug_force_generation_bump,
             remove_mupdate_override: remove_mupdate_override_is_modified,
+            update_disposition: update_disposition_is_modified,
         };
 
         // Bump the generation if we made any changes of concern to sled-agent.
+        // Note that the update disposition is deliberately excluded, since it
+        // is never part of the `OmicronSledConfig` sent to sled-agent.
         if self.debug_force_generation_bump
             || disks_counts.has_nonzero_counts()
             || datasets_counts.has_nonzero_counts()
@@ -298,7 +321,7 @@ impl SledEditor {
                     .finalize(),
                 host_phase_2: self.host_phase_2.finalize(),
                 measurements,
-                update_disposition: self.incoming_update_disposition,
+                update_disposition,
             },
             edit_counts: SledEditCounts {
                 disks: disks_counts,
@@ -937,6 +960,14 @@ impl SledEditor {
         self.remove_mupdate_override.set_value(remove_mupdate_override);
     }
 
+    /// Sets this sled's update disposition kind.
+    pub fn set_update_disposition_kind(
+        &mut self,
+        kind: BlueprintSledUpdateDispositionKind,
+    ) {
+        self.update_disposition_kind.set_value(kind);
+    }
+
     /// Debug method to force a sled agent generation number to be bumped, even
     /// if there are no changes to the sled.
     ///
@@ -1011,5 +1042,68 @@ impl ZoneDatasetConfigs {
         if let Some(dataset) = self.durable {
             datasets.ensure_in_service(dataset, rng);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use nexus_types::deployment::ReconfiguratorDisruptionPolicy;
+    use std::net::Ipv6Addr;
+
+    fn new_active_editor() -> SledEditor {
+        SledEditor::for_new_active(Ipv6Subnet::new(Ipv6Addr::LOCALHOST))
+    }
+
+    const EVACUATING: BlueprintSledUpdateDispositionKind =
+        BlueprintSledUpdateDispositionKind::Evacuating {
+            policy: ReconfiguratorDisruptionPolicy::MigrateOrTerminate,
+        };
+
+    #[test]
+    fn update_disposition_kind_is_a_scalar_edit() {
+        // No edits: the disposition passes through untouched at generation 1.
+        let edited = new_active_editor().finalize();
+        assert_eq!(
+            edited.config.update_disposition,
+            BlueprintSledUpdateDisposition::initial(),
+        );
+        assert!(!edited.scalar_edits.update_disposition);
+
+        // Setting the kind several times bumps the generation exactly once.
+        let mut editor = new_active_editor();
+        editor.set_update_disposition_kind(EVACUATING);
+        editor.set_update_disposition_kind(
+            BlueprintSledUpdateDispositionKind::Available,
+        );
+        editor.set_update_disposition_kind(EVACUATING);
+        let edited = editor.finalize();
+        assert_eq!(edited.config.update_disposition.kind, EVACUATING);
+        assert_eq!(
+            edited.config.update_disposition.generation,
+            Generation::new().next(),
+            "generation bumped exactly once despite three `set` calls",
+        );
+        assert!(edited.scalar_edits.update_disposition);
+        assert_eq!(
+            edited.config.sled_agent_generation,
+            Generation::new(),
+            "disposition change must not bump sled_agent_generation",
+        );
+
+        // Setting the kind and then back to the incoming value is a no-op: the
+        // generation is not bumped.
+        let mut editor = new_active_editor();
+        editor.set_update_disposition_kind(EVACUATING);
+        editor.set_update_disposition_kind(
+            BlueprintSledUpdateDispositionKind::Available,
+        );
+        let edited = editor.finalize();
+        assert_eq!(
+            edited.config.update_disposition,
+            BlueprintSledUpdateDisposition::initial(),
+            "edits that cancel out leave the disposition unchanged",
+        );
+        assert!(!edited.scalar_edits.update_disposition);
     }
 }

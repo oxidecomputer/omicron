@@ -678,8 +678,8 @@ mod test {
                 sa.sled_id,
                 BlueprintSledConfig {
                     state: SledState::Active,
-                    update_disposition:
-                        BlueprintSledUpdateDisposition::Available,
+                    update_disposition: BlueprintSledUpdateDisposition::initial(
+                    ),
                     subnet: Ipv6Subnet::new(*sa.sled_agent_address.ip()),
                     last_allocated_ip_subnet_offset:
                         LastAllocatedSubnetIpOffset::initial(),

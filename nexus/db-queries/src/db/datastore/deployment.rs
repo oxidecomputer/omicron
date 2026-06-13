@@ -250,14 +250,18 @@ impl DataStore {
             .sleds
             .iter()
             .map(|(&sled_id, sled)| {
-                let (update_availability, update_disruption_policy) =
-                    BpSledMetadata::update_disposition_columns(
-                        sled.update_disposition,
-                    );
+                let (
+                    update_disposition_generation,
+                    update_availability,
+                    update_disruption_policy,
+                ) = BpSledMetadata::update_disposition_columns(
+                    sled.update_disposition,
+                );
                 BpSledMetadata {
                     blueprint_id: blueprint_id.into(),
                     sled_id: sled_id.into(),
                     sled_state: sled.state.into(),
+                    update_disposition_generation,
                     update_availability,
                     update_disruption_policy,
                     sled_agent_generation: sled.sled_agent_generation.into(),
@@ -3203,6 +3207,7 @@ mod tests {
     use nexus_types::deployment::BlueprintHostPhase2DesiredSlots;
     use nexus_types::deployment::BlueprintPhysicalDiskDisposition;
     use nexus_types::deployment::BlueprintSledUpdateDisposition;
+    use nexus_types::deployment::BlueprintSledUpdateDispositionKind;
     use nexus_types::deployment::BlueprintZoneImageSource;
     use nexus_types::deployment::ExpectedActiveRotSlot;
     use nexus_types::deployment::PendingMgsUpdate;
@@ -3567,17 +3572,21 @@ mod tests {
 
         // The planner does not currently set a non-default
         // `update_disposition`, so flip one sled to `Evacuating` by hand to
-        // ensure we test roundtripping through SQL.
+        // ensure we test roundtripping through SQL. We also bump the generation
+        // away from its initial value so that we exercise roundtripping a
+        // non-initial generation too.
         {
             let sled = blueprint1
                 .sleds
                 .values_mut()
                 .next()
                 .expect("representative blueprint has at least one sled");
-            sled.update_disposition =
-                BlueprintSledUpdateDisposition::Evacuating {
+            sled.update_disposition = BlueprintSledUpdateDisposition {
+                generation: sled.update_disposition.generation.next(),
+                kind: BlueprintSledUpdateDispositionKind::Evacuating {
                     policy: ReconfiguratorDisruptionPolicy::MigrateOrTerminate,
-                };
+                },
+            };
         }
 
         let authz_blueprint1 = authz_blueprint_from_id(blueprint1.id);
@@ -4677,7 +4686,7 @@ mod tests {
                 if target_check_done.load(Ordering::SeqCst) {
                     Ok(())
                 } else {
-                    Err(CondCheckError::<()>::NotYet)
+                    Err(CondCheckError::<()>::NotYet { status: None })
                 }
             },
             &Duration::from_millis(50),

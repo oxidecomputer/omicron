@@ -3,7 +3,7 @@ parent:    2c4d059d-6498-49ca-8052-6e696a675f6e
 
   sled: 2d1cb4f2-cf44-40fc-b118-85036eb732a9
     state::::::::::::::   active
-    update disposition:   available
+    update disposition:   available (generation 1)
     config generation::   2
     subnet:::::::::::::   fd00:1122:3344:105::/64
     last allocated IP::   fd00:1122:3344:105::10
@@ -136,7 +136,7 @@ parent:    2c4d059d-6498-49ca-8052-6e696a675f6e
 
   sled: 48d95fef-bc9f-4f50-9a53-1e075836291d
     state::::::::::::::   decommissioned
-    update disposition:   available
+    update disposition:   available (generation 1)
     config generation::   3
     subnet:::::::::::::   fd00:1122:3344:103::/64
     last allocated IP::   fd00:1122:3344:103::f
@@ -266,7 +266,7 @@ parent:    2c4d059d-6498-49ca-8052-6e696a675f6e
 
   sled: 68d24ac5-f341-49ea-a92a-0381b52ab387
     state::::::::::::::   decommissioned
-    update disposition:   available
+    update disposition:   available (generation 1)
     config generation::   3
     subnet:::::::::::::   fd00:1122:3344:102::/64
     last allocated IP::   fd00:1122:3344:102::f
@@ -396,7 +396,7 @@ parent:    2c4d059d-6498-49ca-8052-6e696a675f6e
 
   sled: 75bc286f-2b4b-482c-9431-59272af529da
     state::::::::::::::   active
-    update disposition:   available
+    update disposition:   available (generation 1)
     config generation::   3
     subnet:::::::::::::   fd00:1122:3344:104::/64
     last allocated IP::   fd00:1122:3344:104::11
@@ -527,7 +527,7 @@ parent:    2c4d059d-6498-49ca-8052-6e696a675f6e
 
   sled: affab35f-600a-4109-8ea0-34a067a4e0bc
     state::::::::::::::   active
-    update disposition:   available
+    update disposition:   available (generation 1)
     config generation::   3
     subnet:::::::::::::   fd00:1122:3344:101::/64
     last allocated IP::   fd00:1122:3344:101::11
