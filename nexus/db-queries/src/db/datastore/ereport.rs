@@ -320,6 +320,7 @@ impl DataStore {
             .into_iter()
             .map(|data| Ereport::new(data, reporter))
             .collect::<Vec<_>>();
+        let n_ereports = ereports.len();
         let created = Self::ereports_insert_query(
             restart_id,
             time_collected,
@@ -328,7 +329,15 @@ impl DataStore {
         )
         .execute_async(&*conn)
         .await
-        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+        .map_err(|e| {
+            public_error_from_diesel(e, ErrorHandler::Server).internal_context(
+                format!(
+                    "failed to insert {n_ereports} ereports from {reporter} \
+                     (restart {restart_id})",
+                ),
+            )
+        })?;
+
         let latest = self
             .latest_ereport_id_on_conn(&conn, reporter)
             .await
@@ -340,49 +349,44 @@ impl DataStore {
         Ok((created, latest))
     }
 
+    /// Returns a query for inserting ereports into the database and updating
+    /// the restart history table if the restart ID of the provided ereports is
+    /// not already present.
+    ///
+    /// This is performed in a single atomic CTE, in order to ensure that the
+    /// earliest `time_collected` timestamp in the `ereports` table for a given
+    /// restart ID will always match the `time_first_seen` timestamp in the
+    /// restart history table, even if Nexus crashes midway through inserting
+    /// ereports.
     fn ereports_insert_query(
         restart_id: EreporterRestartUuid,
         time_collected: chrono::DateTime<chrono::Utc>,
         reporter: fm::Reporter,
         ereports: Vec<Ereport>,
     ) -> impl RunnableQuery<i64> {
-        struct EreportInsertQuery<IE, IR /*LS, LH*/> {
+        /// This is basically just a big pile of ceremony for combining two
+        /// little Diesel queries into a CTE...
+        struct EreportInsertQuery<IE, IR> {
             insert_ereports: IE,
             insert_reporter: IR,
             slot: Option<SqlU16>,
-            // latest_query: LatestQuery<LS, LH>,
         }
 
-        // enum LatestQuery<LS, LH> {
-        //     Sp(LS),
-        //     Host(LH),
-        // }
-
-        impl<IE, IR /*LS, LH*/> QueryId for EreportInsertQuery<IE, IR /*LS, LH*/> {
+        impl<IE, IR> QueryId for EreportInsertQuery<IE, IR> {
             type QueryId = ();
             const HAS_STATIC_QUERY_ID: bool = false;
         }
 
-        impl<IE, IR /*LS, LH*/> Query for EreportInsertQuery<IE, IR /*LS, LH*/> {
-            // type SqlType = (
-            //     sql_types::BigInt,
-            //     sql_types::Nullable<(sql_types::Uuid, sql_types::BigInt)>,
-            // );
+        impl<IE, IR> Query for EreportInsertQuery<IE, IR> {
             type SqlType = sql_types::BigInt;
         }
 
-        impl<IE, IR /*LS, LH*/> diesel::RunQueryDsl<DbConnection>
-            for EreportInsertQuery<IE, IR /*LS, LH*/>
-        {
-        }
+        impl<IE, IR> diesel::RunQueryDsl<DbConnection> for EreportInsertQuery<IE, IR> {}
 
-        impl<IE, IR /*LS, LH*/> QueryFragment<Pg>
-            for EreportInsertQuery<IE, IR /*LS, LH*/>
+        impl<IE, IR> QueryFragment<Pg> for EreportInsertQuery<IE, IR>
         where
             IE: QueryFragment<Pg>,
             IR: QueryFragment<Pg>,
-            // LS: QueryFragment<Pg>,
-            // LH: QueryFragment<Pg>,
         {
             fn walk_ast<'b>(
                 &'b self,
@@ -394,9 +398,9 @@ impl DataStore {
                 out.push_sql("), inserted_reporter AS (");
                 self.insert_reporter.walk_ast(out.reborrow())?;
                 out.push_sql(" ON CONFLICT (id) DO ");
-                // If we have a slot number, update it so that a previously-null slot
-                // number is filled in; if we do not, do nothing on conflict so a
-                // previously non-NULL slot is not clobbered.
+                // If we have a slot number, update it so that a previously-null
+                // slot number is filled in; if we do not, do nothing on
+                // conflict so a previously non-NULL slot is not clobbered.
                 if let Some(ref slot) = self.slot {
                     out.push_sql("UPDATE SET \"slot\" = ");
                     out.push_bind_param::<sql_types::Int4, _>(slot)?;
@@ -406,60 +410,39 @@ impl DataStore {
                 // We don't actually need this, but `WITH` clauses have to
                 // return something, sooo....
                 out.push_sql(" RETURNING id) ");
-
-                // TODO(eliza): make this part work
-                // out.push_sql("), latest AS (");
-                // match self.latest_query {
-                //     LatestQuery::Sp(ref query) => {
-                //         query.walk_ast(out.reborrow())?;
-                //     }
-                //     LatestQuery::Host(ref query) => {
-                //         query.walk_ast(out.reborrow())?;
-                //     }
-                // }
                 out.push_sql("SELECT count(*) FROM inserted_ereports");
                 Ok(())
             }
         }
 
-        let (reporter, slot_type, slot /*latest_query*/) = match reporter {
-            fm::Reporter::HostOs { slot /*sled,*/, .. } => {
-                // let latest = dsl::ereport
-                //     .filter(dsl::sled_id.eq(sled.into_untyped_uuid()))
-                //     .filter(dsl::time_deleted.is_null())
-                //     .order_by((dsl::time_collected.desc(), dsl::ena.desc()))
-                //     .limit(1)
-                //     .select((dsl::restart_id, dsl::ena));
-                (
-                    EreporterType::Host,
-                    SpType::Sled,
-                    slot.map(SqlU16::from),
-                    // LatestQuery::Host(latest),
-                )
+        let (reporter, slot_type, slot) = match reporter {
+            fm::Reporter::HostOs { slot, .. } => {
+                (EreporterType::Host, SpType::Sled, slot.map(SqlU16::from))
             }
             fm::Reporter::Sp { sp_type, slot } => {
                 let sp_type = sp_type.into();
                 let slot = SqlU16::from(slot);
-                // let latest = dsl::ereport
-                //     .filter(dsl::slot_type.eq(sp_type))
-                //     .filter(dsl::slot.eq(Some(slot)))
-                //     .filter(dsl::time_deleted.is_null())
-                //     .order_by((dsl::time_collected.desc(), dsl::ena.desc()))
-                //     .limit(1)
-                //     .select((dsl::restart_id, dsl::ena));
-                (
-                    EreporterType::Sp,
-                    sp_type,
-                    Some(slot),
-                    // LatestQuery::Sp(latest),
-                )
+                (EreporterType::Sp, sp_type, Some(slot))
             }
         };
+
+        // The query fragment to insert ereports into the `ereport` table.
         let insert_ereports = diesel::insert_into(dsl::ereport)
             .values(ereports)
+            // Some or all of the ereports collected in this batch may already
+            // exist in the database because they were ingested by another
+            // Nexus. If the same ENAs exist for this restart ID, that's fine;
+            // don't overwrite them.
             .on_conflict((dsl::restart_id, dsl::ena))
             .do_nothing()
             .returning(dsl::ena);
+        // Query fragment to insert the reporter restart entry into the
+        // ereporter restart table, or update the existing entry's slot column
+        // if one exists and the slot column is null. The null behavior will be
+        // added by the `walk_ast()` method on `EreporterInsertQuery`, because
+        // it depends on whether or not there is a slot number to insert, and I
+        // couldn't figure out how to get diesel to let me type erase an INSERT
+        // statement that may have one of multiple ON CONFLICT clauses...
         let insert_reporter = diesel::insert_into(
             restart_dsl::ereporter_restart,
         )
@@ -470,12 +453,7 @@ impl DataStore {
             slot_type,
             slot: slot.map(SpMgsSlot::from),
         });
-        EreportInsertQuery {
-            insert_ereports,
-            insert_reporter,
-            slot,
-            // latest_query,
-        }
+        EreportInsertQuery { insert_ereports, insert_reporter, slot }
     }
 
     /// Lists ereports which have not been marked as **definitely seen**
