@@ -648,6 +648,7 @@ impl DataStore {
 mod tests {
     use super::*;
     use crate::db::explain::ExplainableAsync;
+    use crate::db::pagination::Paginator;
     use crate::db::pub_test_utils::TestDatabase;
     use crate::db::pub_test_utils::explain::assert_uses_partial_index_only;
     use crate::db::raw_query_builder::expectorate_query_contents;
@@ -655,6 +656,7 @@ mod tests {
     use ereport_types::Ena;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::OmicronZoneUuid;
+    use std::collections::BTreeMap;
     use std::num::NonZeroU32;
     use std::time::Duration;
 
@@ -1288,6 +1290,267 @@ mod tests {
         assert!(
             empty.is_empty(),
             "empty classes list must short-circuit to no results"
+        );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    async fn fetch_restarts(
+        datastore: &DataStore,
+        opctx: &OpContext,
+    ) -> BTreeMap<EreporterRestartUuid, EreporterRestart> {
+        // use a very small batch size in tests so that we are also exercising
+        // pagination.
+        const BATCH_SIZE: NonZeroU32 = match NonZeroU32::new(2) {
+            Some(b) => b,
+            None => panic!("2 is nonzero"),
+        };
+
+        let mut restarts = BTreeMap::new();
+        let mut paginator =
+            Paginator::new(BATCH_SIZE, dropshot::PaginationOrder::Ascending);
+        while let Some(p) = paginator.next() {
+            let batch = datastore
+                .ereporter_restart_list(opctx, &p.current_pagparams())
+                .await
+                .expect("listing ereporter restarts should succeed");
+            paginator =
+                p.found_batch(&batch[..], &|r| r.id.into_untyped_uuid());
+            for r in batch {
+                let id = r.id.into();
+                if let Some(_) = restarts.insert(id, r) {
+                    unreachable!(
+                        "duplicate ereporter restart ID {id}; this should be \
+                         impossible as it is the primary key"
+                    )
+                }
+            }
+        }
+
+        restarts
+    }
+
+    #[tokio::test]
+    async fn test_ereporter_restarts() {
+        fn ereport_data(
+            restart_id: EreporterRestartUuid,
+            ena: u64,
+            time_collected: DateTime<Utc>,
+        ) -> fm::EreportData {
+            fm::EreportData {
+                id: fm::EreportId { restart_id, ena: Ena(ena) },
+                time_collected,
+                collector_id: OmicronZoneUuid::new_v4(),
+                part_number: None,
+                serial_number: None,
+                class: None,
+                report: serde_json::json!({}),
+            }
+        }
+
+        let logctx = dev::test_setup_log("test_ereporter_restarts");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+        let t0 = Utc::now();
+
+        let timestamp = move |secs: usize| -> DateTime<Utc> {
+            let t1 = omicron_common::timestamp_db_precision(t0);
+            let t2 = t1 + Duration::from_secs(secs as u64);
+            let t2 = omicron_common::timestamp_db_precision(t2);
+            assert_ne!(
+                t1, t2,
+                "two timestamps intended to be distinct would be equal after \
+                truncating to database precision (advanced by {secs} seconds)"
+            );
+            t2
+        };
+        // For host OS reporters, the sled's physical location may not be known
+        // immediately, so we may insert ereports with a NULL slot number. We
+        // wish to ensure that, if subsequent ereports are inserted for the same
+        // restart ID with a non-NULL slot number, the previous slot number is
+        // updated to the new value, but the first seen timestamp is not
+        // changed.
+        let host0_restart_id = EreporterRestartUuid::new_v4();
+        let host0_first_seen = timestamp(100);
+        let host0_slot = 7;
+        let sled = SledUuid::new_v4();
+        datastore
+            .ereports_insert(
+                opctx,
+                host0_restart_id,
+                host0_first_seen,
+                fm::Reporter::HostOs { sled, slot: None },
+                vec![ereport_data(host0_restart_id, 1, host0_first_seen)],
+            )
+            .await
+            .unwrap();
+        {
+            let time_collected = timestamp(200);
+            datastore
+                .ereports_insert(
+                    opctx,
+                    host0_restart_id,
+                    time_collected,
+                    fm::Reporter::HostOs { sled, slot: Some(host0_slot) },
+                    vec![
+                        ereport_data(host0_restart_id, 2, time_collected),
+                        ereport_data(host0_restart_id, 3, time_collected),
+                    ],
+                )
+                .await
+                .unwrap();
+        }
+
+        // Let's also test that if we insert ereports from a reporter with a
+        // non-NULL slot number, and then insert ereports from the same reporter
+        // with a NULL slot number, the original slot number is preserved. This
+        // shouldn't happen in practice, but we should make sure the behavior
+        // here is correct anyway.
+        let host1_restart_id = EreporterRestartUuid::new_v4();
+        let host1_first_seen = timestamp(150);
+        let host1_slot = 3;
+        let sled = SledUuid::new_v4();
+        datastore
+            .ereports_insert(
+                opctx,
+                host1_restart_id,
+                host1_first_seen,
+                fm::Reporter::HostOs { sled, slot: Some(host1_slot) },
+                vec![
+                    ereport_data(host1_restart_id, 1, host1_first_seen),
+                    ereport_data(host1_restart_id, 2, host1_first_seen),
+                ],
+            )
+            .await
+            .unwrap();
+        datastore
+            .ereports_insert(
+                opctx,
+                host1_restart_id,
+                timestamp(250),
+                fm::Reporter::HostOs { sled, slot: None },
+                vec![ereport_data(host1_restart_id, 3, timestamp(250))],
+            )
+            .await
+            .unwrap();
+
+        // Finally, let's do some SP ereports. These are mostly uncomplicated,
+        // since the slot number will always be present.
+        let sp0_restart_id0 = EreporterRestartUuid::new_v4();
+        let sp0_first_seen = timestamp(300);
+        let sp0_slot = 1;
+        datastore
+            .ereports_insert(
+                opctx,
+                sp0_restart_id0,
+                sp0_first_seen,
+                fm::Reporter::Sp {
+                    sp_type: SpType::Switch.into(),
+                    slot: sp0_slot,
+                },
+                vec![
+                    ereport_data(sp0_restart_id0, 1, sp0_first_seen),
+                    ereport_data(sp0_restart_id0, 2, sp0_first_seen),
+                ],
+            )
+            .await
+            .unwrap();
+        {
+            let time_collected = timestamp(350);
+            datastore
+                .ereports_insert(
+                    opctx,
+                    sp0_restart_id0,
+                    time_collected,
+                    fm::Reporter::Sp {
+                        sp_type: SpType::Switch.into(),
+                        slot: sp0_slot,
+                    },
+                    vec![ereport_data(sp0_restart_id0, 3, time_collected)],
+                )
+                .await
+                .unwrap();
+        }
+        // And a subsequent restart of the same SP slot.
+        let sp0_restart_id1 = EreporterRestartUuid::new_v4();
+        let sp0_restart1_first_seen = timestamp(360);
+        datastore
+            .ereports_insert(
+                opctx,
+                sp0_restart_id1,
+                sp0_restart1_first_seen,
+                fm::Reporter::Sp {
+                    sp_type: SpType::Switch.into(),
+                    slot: sp0_slot,
+                },
+                vec![
+                    ereport_data(sp0_restart_id1, 1, sp0_restart1_first_seen),
+                    ereport_data(sp0_restart_id1, 2, sp0_restart1_first_seen),
+                ],
+            )
+            .await
+            .unwrap();
+
+        let mut restarts = fetch_restarts(datastore, opctx).await;
+
+        // host 0 restart 0
+        let Some(host0) = restarts.remove(&host0_restart_id) else {
+            panic!(
+                "expected host 0 restart 0 ({host0_restart_id}) to be present"
+            );
+        };
+        assert_eq!(host0.reporter, EreporterType::Host);
+        assert_eq!(host0.slot_type, SpType::Sled);
+        assert_eq!(
+            host0.slot_number(),
+            Some(host0_slot),
+            "a NULL slot should be filled in once it is known",
+        );
+        assert_eq!(
+            host0.time_first_seen, host0_first_seen,
+            "time_first_seen comes from the first insert and is not updated",
+        );
+
+        // host 1 restart 0
+        let Some(host1) = restarts.remove(&host1_restart_id) else {
+            panic!(
+                "expected host 1 restart 0 ({host1_restart_id}) to be present"
+            );
+        };
+        assert_eq!(host1.reporter, EreporterType::Host);
+        assert_eq!(host1.slot_type, SpType::Sled);
+        assert_eq!(
+            host1.slot_number(),
+            Some(host1_slot),
+            "a NULL slot should be filled in once it is known",
+        );
+        assert_eq!(
+            host1.time_first_seen, host1_first_seen,
+            "time_first_seen comes from the first insert and is not updated",
+        );
+
+        // SP 0 restart 0
+        let Some(sp0_restart_0) = restarts.remove(&sp0_restart_id0) else {
+            panic!("expected sp 0 restart 0 ({sp0_restart_id0}) to be present");
+        };
+        assert_eq!(sp0_restart_0.reporter, EreporterType::Sp);
+        assert_eq!(sp0_restart_0.slot_type, SpType::Switch);
+        assert_eq!(sp0_restart_0.slot_number(), Some(sp0_slot));
+        assert_eq!(sp0_restart_0.time_first_seen, sp0_first_seen);
+
+        // SP 0 restart 1
+        let Some(sp0_restart_1) = restarts.remove(&sp0_restart_id1) else {
+            panic!("expected sp 0 restart 1 ({sp0_restart_id1}) to be present");
+        };
+        assert_eq!(sp0_restart_1.reporter, EreporterType::Sp);
+        assert_eq!(sp0_restart_1.slot_type, SpType::Switch);
+        assert_eq!(sp0_restart_1.slot_number(), Some(1));
+        assert_eq!(sp0_restart_1.time_first_seen, sp0_restart1_first_seen);
+
+        assert!(
+            restarts.is_empty(),
+            "unexpected restart entries remaining: {restarts:?}"
         );
 
         db.terminate().await;

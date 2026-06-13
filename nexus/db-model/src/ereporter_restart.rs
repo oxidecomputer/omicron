@@ -20,3 +20,9 @@ pub struct EreporterRestart {
     pub slot_type: SpType,
     pub slot: Option<SpMgsSlot>,
 }
+
+impl EreporterRestart {
+    pub fn slot_number(&self) -> Option<u16> {
+        self.slot.map(|slot| (*slot).0)
+    }
+}

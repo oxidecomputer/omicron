@@ -7646,7 +7646,11 @@ CREATE TABLE IF NOT EXISTS omicron.public.ereporter_restart (
     -- not known to the system when the ereport was received. If the physical
     -- location of the sled is determined later, subsequent attempts to insert
     -- ereports will update this field.
-    slot INT NOT NULL
+    --
+    -- Note: this is `INT4`, not `INT`/`INT8`. In CockroachDB `INT` is a 64-bit
+    -- alias, but the `slot` column (and its `ereport` counterpart) is a 32-bit
+    -- slot number, matching `Nullable<Int4>` in the Diesel schema.
+    slot INT4
 );
 
 /*
