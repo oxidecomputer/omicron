@@ -475,8 +475,9 @@ struct UpdatesRequired {
     new_intent: Option<InstanceIntendedState>,
 
     /// If this is [`Some`], the instance's active VMM with this UUID has
-    /// transitioned to [`VmmState::Destroyed`], and its resources must be
-    /// cleaned up by a [`destroyed`] subsaga.
+    /// transitioned to a terminal state ([`VmmState::Destroyed`] or
+    /// [`VmmState::Failed`]), and its resources must be cleaned up by a
+    /// [`destroyed`] subsaga.
     destroy_active_vmm: Option<PropolisUuid>,
 
     /// If this is [`Some`], then a migration finished successfully, and the
@@ -489,8 +490,9 @@ struct UpdatesRequired {
         Option<MigrateSuccessUpdate>,
 
     /// If this is [`Some`], the instance's migration target VMM with this UUID
-    /// has transitioned to [`VmmState::Destroyed`], and its resources must be
-    /// cleaned up by a [`destroyed`] subsaga.
+    /// has transitioned to a terminal state ([`VmmState::Destroyed`] or
+    /// [`VmmState::Failed`]), and its resources must be cleaned up by a
+    /// [`destroyed`] subsaga.
     destroy_target_vmm: Option<PropolisUuid>,
 
     /// If this is [`Some`], the instance no longer has an active VMM, and its
