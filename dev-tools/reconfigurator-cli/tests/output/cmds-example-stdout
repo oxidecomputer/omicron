@@ -87,10 +87,11 @@ blueprint  ade5749d-bdf3-4fab-a8ae-00bea01b3a5a
 parent:    02697f74-b14a-4418-90f0-c28b2a3a6aa9
 
   sled: 2eb69596-f081-4e2d-9425-9994926e0832
-    state:::::::::::::   active
-    config generation:   2
-    subnet::::::::::::   fd00:1122:3344:102::/64
-    last allocated IP:   fd00:1122:3344:102::11
+    state::::::::::::::   active
+    update disposition:   available (generation 1)
+    config generation::   2
+    subnet:::::::::::::   fd00:1122:3344:102::/64
+    last allocated IP::   fd00:1122:3344:102::11
 
     host phase 2 contents:
     ------------------------
@@ -222,10 +223,11 @@ parent:    02697f74-b14a-4418-90f0-c28b2a3a6aa9
 
 
   sled: 32d8d836-4d8a-4e54-8fa9-f31d79c42646
-    state:::::::::::::   active
-    config generation:   2
-    subnet::::::::::::   fd00:1122:3344:103::/64
-    last allocated IP:   fd00:1122:3344:103::10
+    state::::::::::::::   active
+    update disposition:   available (generation 1)
+    config generation::   2
+    subnet:::::::::::::   fd00:1122:3344:103::/64
+    last allocated IP::   fd00:1122:3344:103::10
 
     host phase 2 contents:
     ------------------------
@@ -354,10 +356,11 @@ parent:    02697f74-b14a-4418-90f0-c28b2a3a6aa9
 
 
   sled: 89d02b1b-478c-401a-8e28-7a26f74fa41b
-    state:::::::::::::   active
-    config generation:   2
-    subnet::::::::::::   fd00:1122:3344:101::/64
-    last allocated IP:   fd00:1122:3344:101::10
+    state::::::::::::::   active
+    update disposition:   available (generation 1)
+    config generation::   2
+    subnet:::::::::::::   fd00:1122:3344:101::/64
+    last allocated IP::   fd00:1122:3344:101::10
 
     host phase 2 contents:
     ------------------------
@@ -566,10 +569,11 @@ blueprint  ade5749d-bdf3-4fab-a8ae-00bea01b3a5a
 parent:    02697f74-b14a-4418-90f0-c28b2a3a6aa9
 
   sled: 89d02b1b-478c-401a-8e28-7a26f74fa41b
-    state:::::::::::::   active
-    config generation:   2
-    subnet::::::::::::   fd00:1122:3344:101::/64
-    last allocated IP:   fd00:1122:3344:101::11
+    state::::::::::::::   active
+    update disposition:   available (generation 1)
+    config generation::   2
+    subnet:::::::::::::   fd00:1122:3344:101::/64
+    last allocated IP::   fd00:1122:3344:101::11
 
     host phase 2 contents:
     ------------------------
@@ -782,6 +786,7 @@ to:   blueprint 86db3308-f817-4626-8838-4085949a6a41
  ADDED SLEDS:
 
   sled 89d02b1b-478c-401a-8e28-7a26f74fa41b (active, config generation 2):
++   update disposition:   available (generation 1)
 
     measurements:
     ---------------------------
@@ -1013,6 +1018,7 @@ to:   blueprint 02697f74-b14a-4418-90f0-c28b2a3a6aa9
  REMOVED SLEDS:
 
   sled 89d02b1b-478c-401a-8e28-7a26f74fa41b (was active, config generation 2):
+-   update disposition:   available (generation 1)
 
     measurements:
     ---------------------------
@@ -1258,10 +1264,11 @@ blueprint  ade5749d-bdf3-4fab-a8ae-00bea01b3a5a
 parent:    02697f74-b14a-4418-90f0-c28b2a3a6aa9
 
   sled: 2eb69596-f081-4e2d-9425-9994926e0832
-    state:::::::::::::   active
-    config generation:   2
-    subnet::::::::::::   fd00:1122:3344:102::/64
-    last allocated IP:   fd00:1122:3344:102::6
+    state::::::::::::::   active
+    update disposition:   available (generation 1)
+    config generation::   2
+    subnet:::::::::::::   fd00:1122:3344:102::/64
+    last allocated IP::   fd00:1122:3344:102::6
 
     host phase 2 contents:
     ------------------------
@@ -1324,10 +1331,11 @@ parent:    02697f74-b14a-4418-90f0-c28b2a3a6aa9
 
 
   sled: 32d8d836-4d8a-4e54-8fa9-f31d79c42646
-    state:::::::::::::   active
-    config generation:   2
-    subnet::::::::::::   fd00:1122:3344:103::/64
-    last allocated IP:   fd00:1122:3344:103::6
+    state::::::::::::::   active
+    update disposition:   available (generation 1)
+    config generation::   2
+    subnet:::::::::::::   fd00:1122:3344:103::/64
+    last allocated IP::   fd00:1122:3344:103::6
 
     host phase 2 contents:
     ------------------------
@@ -1390,10 +1398,11 @@ parent:    02697f74-b14a-4418-90f0-c28b2a3a6aa9
 
 
   sled: 89d02b1b-478c-401a-8e28-7a26f74fa41b
-    state:::::::::::::   active
-    config generation:   2
-    subnet::::::::::::   fd00:1122:3344:101::/64
-    last allocated IP:   fd00:1122:3344:101::10
+    state::::::::::::::   active
+    update disposition:   available (generation 1)
+    config generation::   2
+    subnet:::::::::::::   fd00:1122:3344:101::/64
+    last allocated IP::   fd00:1122:3344:101::10
 
     host phase 2 contents:
     ------------------------
@@ -2187,6 +2196,7 @@ to:   blueprint 86db3308-f817-4626-8838-4085949a6a41
  MODIFIED SLEDS:
 
   sled 32d8d836-4d8a-4e54-8fa9-f31d79c42646 (active -> decommissioned, config generation 2 -> 3):
+    update disposition:   available (generation 1) (unchanged)
 
     measurements:
     ---------------------------

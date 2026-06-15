@@ -2612,6 +2612,9 @@
           "subnet": {
             "$ref": "#/components/schemas/Ipv6Subnet"
           },
+          "update_disposition": {
+            "$ref": "#/components/schemas/BlueprintSledUpdateDisposition"
+          },
           "zones": {
             "title": "IdOrdMap",
             "x-rust-type": {
@@ -2640,7 +2643,73 @@
           "sled_agent_generation",
           "state",
           "subnet",
+          "update_disposition",
           "zones"
+        ]
+      },
+      "BlueprintSledUpdateDisposition": {
+        "description": "Controls a sled's availability for provisioning and whether its migratable instances are evacuated during an update, along with a generation number bumped whenever that disposition changes.\n\nStored in [`BlueprintSledConfig::update_disposition`]. See RFD 666.",
+        "type": "object",
+        "properties": {
+          "generation": {
+            "description": "A generation number bumped whenever `kind` changes.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Generation"
+              }
+            ]
+          },
+          "kind": {
+            "description": "The disposition itself.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/BlueprintSledUpdateDispositionKind"
+              }
+            ]
+          }
+        },
+        "required": [
+          "generation",
+          "kind"
+        ]
+      },
+      "BlueprintSledUpdateDispositionKind": {
+        "description": "The content of a sled's update disposition: whether the sled is available for provisioning, and if being evacuated, which disruption policy applies.\n\nThe \"kind\" half of [`BlueprintSledUpdateDisposition`].",
+        "oneOf": [
+          {
+            "description": "The sled is available for use for all provisions.",
+            "type": "object",
+            "properties": {
+              "availability": {
+                "type": "string",
+                "enum": [
+                  "available"
+                ]
+              }
+            },
+            "required": [
+              "availability"
+            ]
+          },
+          {
+            "description": "The sled is disallowed for all use, and its migratable instances are evacuated according to `policy`.",
+            "type": "object",
+            "properties": {
+              "availability": {
+                "type": "string",
+                "enum": [
+                  "evacuating"
+                ]
+              },
+              "policy": {
+                "$ref": "#/components/schemas/ReconfiguratorDisruptionPolicy"
+              }
+            },
+            "required": [
+              "availability",
+              "policy"
+            ]
+          }
         ]
       },
       "BlueprintSource": {

@@ -133,6 +133,7 @@ to:   blueprint 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1
  MODIFIED SLEDS:
 
   sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 (active, config generation 2 -> 3):
+    update disposition:::::::::::   available (generation 1) (unchanged)
 +   will remove mupdate override:   (none) -> 11111111-1111-1111-1111-111111111111
 
     measurements:
@@ -299,6 +300,7 @@ to:   blueprint 58d5e830-0884-47d8-a7cd-b2b3751adeb4
  MODIFIED SLEDS:
 
   sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 (active, config generation 3 -> 4):
+    update disposition:::::::::::   available (generation 1) (unchanged)
 -   will remove mupdate override:   11111111-1111-1111-1111-111111111111 -> (none)
 
     measurements:

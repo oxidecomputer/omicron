@@ -1,0 +1,39 @@
+# Exercise the per-sled update disposition edit command (RFD 666 plumbing).
+
+load-example --nsleds 3 --ndisks-per-sled 1
+sled-list
+
+# available -> evacuating (live-migrate or terminate): the kind changes and the
+# disposition generation is bumped from 1 to 2.
+blueprint-edit latest set-update-disposition serial0 evacuating migrate-or-terminate
+blueprint-diff latest
+
+# evacuating (migrate-or-terminate) -> evacuating (migrate-only): the policy
+# changes and the generation is bumped again.
+blueprint-edit latest set-update-disposition serial0 evacuating migrate-only
+blueprint-diff latest
+
+# evacuating -> available: back to available, generation bumped once more.
+blueprint-edit latest set-update-disposition serial0 available
+blueprint-diff latest
+
+# Setting available -> available is a no-op: the disposition is unchanged and
+# the generation is not bumped.
+blueprint-edit latest set-update-disposition serial0 available
+blueprint-diff latest
+
+# The final blueprint shows serial0 back at `available` and at generation 4.
+blueprint-show latest
+
+# Demonstrate that the generation-bump invariant is enforced only when comparing
+# a child blueprint against its parent. Create two *sibling* blueprints from the
+# same parent (df06bb57), each setting serial1 to a different evacuating policy.
+# Both end up at generation 2 (since each of them are bumped once from the parent's
+# generation 1).
+blueprint-edit df06bb57-ad42-4431-9206-abff322896c7 set-update-disposition serial1 evacuating migrate-or-terminate
+blueprint-edit df06bb57-ad42-4431-9206-abff322896c7 set-update-disposition serial1 evacuating migrate-only
+
+# Diffing the two siblings shows serial1's kind differing at the *same*
+# generation (2). Because neither sibling is the parent of the other, this is
+# not flagged as a missing generation bump.
+blueprint-diff 7f976e0d-d2a5-4eeb-9e82-c82bc2824aba 9034c710-3e57-45f3-99e5-4316145e87ac

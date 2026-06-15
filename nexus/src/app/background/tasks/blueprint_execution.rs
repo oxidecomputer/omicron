@@ -242,8 +242,8 @@ mod test {
     };
     use nexus_types::deployment::{
         Blueprint, BlueprintHostPhase2DesiredSlots, BlueprintMeasurements,
-        BlueprintSledConfig, BlueprintSource, BlueprintTarget,
-        BlueprintZoneConfig, BlueprintZoneDisposition,
+        BlueprintSledConfig, BlueprintSledUpdateDisposition, BlueprintSource,
+        BlueprintTarget, BlueprintZoneConfig, BlueprintZoneDisposition,
         BlueprintZoneImageSource, BlueprintZoneType,
         CockroachDbPreserveDowngrade, OximeterReadMode, PendingMgsUpdates,
         blueprint_zone_type,
@@ -286,6 +286,8 @@ mod test {
                     sled_id,
                     BlueprintSledConfig {
                         state: SledState::Active,
+                        update_disposition:
+                            BlueprintSledUpdateDisposition::initial(),
                         subnet: Ipv6Subnet::new(Ipv6Addr::LOCALHOST),
                         last_allocated_ip_subnet_offset:
                             LastAllocatedSubnetIpOffset::initial(),

@@ -25,6 +25,7 @@ use crate::db::model::InstanceCpuPlatform;
 use crate::db::model::InstanceIntendedState;
 use crate::db::model::InstanceRuntimeState;
 use crate::db::model::InstanceState;
+use crate::db::model::InstanceStateComputer;
 use crate::db::model::InstanceUpdate;
 use crate::db::model::Migration;
 use crate::db::model::MigrationState;
@@ -70,104 +71,6 @@ use omicron_uuid_kinds::SledUuid;
 use ref_cast::RefCast;
 use std::collections::HashMap;
 use uuid::Uuid;
-
-/// Returns the operator-visible [external API
-/// `InstanceState`](external::InstanceState) for the provided [`Instance`]
-/// and its active [`Vmm`], if one exists.
-pub struct InstanceStateComputer<'s> {
-    instance_state: &'s InstanceState,
-    migration_id: Option<&'s Uuid>,
-    vmm_state: Option<&'s VmmState>,
-}
-
-impl<'s> InstanceStateComputer<'s> {
-    pub fn new(instance: &'s Instance, vmm: Option<&'s Vmm>) -> Self {
-        Self {
-            instance_state: &instance.nexus_state,
-            migration_id: instance.migration_id.as_ref(),
-            vmm_state: vmm.as_ref().map(|vmm| &vmm.state),
-        }
-    }
-
-    pub fn compute_state_from(
-        instance_state: &'s InstanceState,
-        migration_id: Option<&'s Uuid>,
-        vmm_state: Option<&'s VmmState>,
-    ) -> external::InstanceState {
-        Self { instance_state, migration_id, vmm_state }.compute_state()
-    }
-
-    pub fn compute_state(&self) -> external::InstanceState {
-        use crate::db::model::InstanceState;
-        use crate::db::model::VmmState;
-
-        // We want to only report that an instance is `Stopped` when a new
-        // `instance-start` saga is able to proceed. That means that:
-        match (self.instance_state, self.vmm_state) {
-            // - If there's an active migration ID for the instance, *always*
-            //   treat its state as "migration" regardless of the VMM's state.
-            //
-            //   This avoids an issue where an instance whose previous active
-            //   VMM has been destroyed as a result of a successful migration
-            //   out will appear to be "stopping" for the time between when that
-            //   VMM was reported destroyed and when the instance record was
-            //   updated to reflect the migration's completion.
-            //
-            //   Instead, we'll continue to report the instance's state as
-            //   "migrating" until an instance-update saga has resolved the
-            //   outcome of the migration, since only the instance-update saga
-            //   can complete the migration and update the instance record to
-            //   point at its new active VMM. No new instance-migrate,
-            //   instance-stop, or instance-delete saga can be started
-            //   until this occurs.
-            //
-            //   If the instance actually *has* stopped or failed before a
-            //   successful migration out, this is fine, because an
-            //   instance-update saga will come along and remove the active VMM
-            //   and migration IDs.
-            //
-            (InstanceState::Vmm, Some(_)) if self.migration_id.is_some() => {
-                external::InstanceState::Migrating
-            }
-            // - An instance with a "stopped" or "destroyed" VMM needs to be
-            //   recast as a "stopping" instance, as the virtual provisioning
-            //   resources for that instance have not been deallocated until the
-            //   active VMM ID has been unlinked by an update saga.
-            (
-                InstanceState::Vmm,
-                Some(VmmState::Stopped | VmmState::Destroyed),
-            ) => external::InstanceState::Stopping,
-            // - An instance with a "failed" VMM should *not* be counted as
-            //   failed until the VMM is unlinked, because a start saga must be
-            //   able to run for a "failed" instance. Until then, it will
-            //   continue to appear "stopping".
-            (InstanceState::Vmm, Some(VmmState::Failed)) => {
-                external::InstanceState::Stopping
-            }
-            // - An instance with a "saga unwound" VMM, on the other hand, can
-            //   be treated as "failed", since --- unlike an instance with a
-            //   "failed" active VMM --- a new start saga can run at any time by
-            //   just clearing out the old VMM ID.
-            (InstanceState::Vmm, Some(VmmState::SagaUnwound)) => {
-                external::InstanceState::Failed
-            }
-            // - An instance with no VMM is always "stopped" (as long as it's
-            //   not "starting" etc.)
-            (InstanceState::NoVmm, _vmm_state) => {
-                debug_assert_eq!(_vmm_state, None);
-                external::InstanceState::Stopped
-            }
-            // If there's a VMM state, and none of the above rules apply, use
-            // that.
-            (_instance_state, Some(vmm_state)) => {
-                debug_assert_eq!(_instance_state, &InstanceState::Vmm);
-                (*vmm_state).into()
-            }
-            // If there's no VMM state, use the instance's state.
-            (instance_state, None) => (*instance_state).into(),
-        }
-    }
-}
 
 impl<'s> From<&'s InstanceAndActiveVmm> for InstanceStateComputer<'s> {
     fn from(i: &'s InstanceAndActiveVmm) -> Self {

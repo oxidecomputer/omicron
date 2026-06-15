@@ -2256,6 +2256,9 @@ table! {
         subnet -> Inet,
         last_allocated_ip_subnet_offset -> Int4,
         measurements -> crate::enums::BpSledMeasurementsEnum,
+        update_disposition_generation -> Int8,
+        update_availability -> crate::enums::SledUpdateAvailabilityEnum,
+        update_disruption_policy -> Nullable<crate::enums::ReconfiguratorDisruptionPolicyEnum>,
     }
 }
 

@@ -8,7 +8,7 @@ Omicron is a large distributed system, as a result of which it is somewhat susce
 
 == Glossary [[glossary]]
 
-Background task:: A task that runs periodically in the background on a timer. Also known as a _reliable persistent workflow_ or _RPW_.
+Background task:: A task that runs periodically in the background on a timer. Most background tasks implement the _reliable persistent workflow_ or _RPW_ pattern; see https://rfd.shared.oxide.computer/rfd/0373[RFD 373 Reliable Persistent Workflows].
 Nexus test:: A test that uses the Nexus test framework, typically represented as an async function annotated with `#[nexus_test]`. (Some tests may manually set up Nexus.)
 System under test (SUT):: The production code (components or systems) being tested.
 

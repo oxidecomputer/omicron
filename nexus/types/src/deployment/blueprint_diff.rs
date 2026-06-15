@@ -17,7 +17,8 @@ use super::{
     BlueprintHostPhase2TableData, BlueprintMeasurements,
     BlueprintMeasurementsTableData, BlueprintMetadata,
     BlueprintPhysicalDiskConfig, BlueprintPhysicalDiskConfigDiff,
-    BlueprintZoneConfigDiff, BlueprintZoneImageSource, ClickhouseClusterConfig,
+    BlueprintSledUpdateDisposition, BlueprintZoneConfigDiff,
+    BlueprintZoneImageSource, ClickhouseClusterConfig,
     CockroachDbPreserveDowngrade, PendingMgsUpdatesDiff, unwrap_or_none,
     zone_sort_key,
 };
@@ -2084,7 +2085,11 @@ impl fmt::Display for BlueprintDiffDisplay<'_, '_> {
                     sled.state, sled.sled_agent_generation
                 )?;
 
-                let mut rows = Vec::new();
+                let mut rows = vec![KvPair::new(
+                    BpDiffState::Removed,
+                    UPDATE_DISPOSITION,
+                    sled.update_disposition.to_string(),
+                )];
                 if let Some(id) = sled.remove_mupdate_override {
                     rows.push(KvPair::new(
                         BpDiffState::Removed,
@@ -2098,6 +2103,11 @@ impl fmt::Display for BlueprintDiffDisplay<'_, '_> {
                 self.write_tables(f, sled_id)?;
             }
         }
+
+        let after_is_child_of_before =
+            after_metadata.parent_blueprint_id == Some(before_metadata.id);
+
+        let mut update_disposition_errors = Vec::new();
 
         // Write out tables for modified sleds
         let mut modified_iter = summary.diff.sleds.modified().peekable();
@@ -2128,6 +2138,38 @@ impl fmt::Display for BlueprintDiffDisplay<'_, '_> {
                 )?;
 
                 let mut rows = Vec::new();
+                if sled.before.update_disposition
+                    != sled.after.update_disposition
+                {
+                    let error = update_disposition_diff_error(
+                        &sled.before.update_disposition,
+                        &sled.after.update_disposition,
+                        after_is_child_of_before,
+                    );
+                    rows.push(KvPair::new(
+                        BpDiffState::Modified,
+                        UPDATE_DISPOSITION,
+                        display_modified_update_disposition(
+                            &sled.before.update_disposition,
+                            &sled.after.update_disposition,
+                            error,
+                        ),
+                    ));
+                    if let Some(error) = error {
+                        update_disposition_errors.push((
+                            sled_id,
+                            error.full_reason(
+                                &sled.before.update_disposition,
+                                &sled.after.update_disposition,
+                            ),
+                        ));
+                    }
+                } else {
+                    rows.push(KvPair::new_unchanged(
+                        UPDATE_DISPOSITION,
+                        linear_table_unchanged(&sled.after.update_disposition),
+                    ));
+                }
                 // If either before or after is set for remove_mupdate_override,
                 // display it.
                 if sled.before.remove_mupdate_override.is_some()
@@ -2158,7 +2200,11 @@ impl fmt::Display for BlueprintDiffDisplay<'_, '_> {
                     sled.state, sled.sled_agent_generation
                 )?;
 
-                let mut rows = Vec::new();
+                let mut rows = vec![KvPair::new(
+                    BpDiffState::Added,
+                    UPDATE_DISPOSITION,
+                    sled.update_disposition.to_string(),
+                )];
                 if let Some(id) = sled.remove_mupdate_override {
                     rows.push(KvPair::new(
                         BpDiffState::Added,
@@ -2215,6 +2261,16 @@ impl fmt::Display for BlueprintDiffDisplay<'_, '_> {
             }
         }
 
+        // Write out update disposition errors.
+        if !update_disposition_errors.is_empty() {
+            writeln!(f, "UPDATE DISPOSITION ERRORS:")?;
+            for (sled_id, reason) in &update_disposition_errors {
+                writeln!(f, "\n  sled {sled_id}\n")?;
+                writeln!(f, "    update disposition error\n")?;
+                writeln!(f, "      reason: {reason}")?;
+            }
+        }
+
         // Write out metadata diff table
         for table in self.make_metadata_diff_tables() {
             writeln!(f, "{}", table)?;
@@ -2255,5 +2311,280 @@ fn display_optional_preserve_downgrade(
     match value {
         Some(v) => v.to_string(),
         None => INVALID_VALUE_PARENS.to_string(),
+    }
+}
+
+/// An error that occurred if a modified sled's update disposition changed its
+/// kind without bumping its generation or vice versa.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum UpdateDispositionDiffError {
+    /// The kind changed but the generation was not bumped at all.
+    MissingGenerationBump,
+    /// The kind changed but the generation moved by something other than
+    /// exactly one (it jumped ahead, or moved backwards).
+    IncorrectGenerationBump,
+    /// The generation changed but the kind did not.
+    SpuriousGenerationBump,
+}
+
+impl UpdateDispositionDiffError {
+    fn short_reason(self) -> &'static str {
+        match self {
+            UpdateDispositionDiffError::MissingGenerationBump => {
+                UPDATE_DISPOSITION_MISSING_BUMP_PARENS
+            }
+            UpdateDispositionDiffError::IncorrectGenerationBump => {
+                UPDATE_DISPOSITION_INCORRECT_BUMP_PARENS
+            }
+            UpdateDispositionDiffError::SpuriousGenerationBump => {
+                UPDATE_DISPOSITION_SPURIOUS_BUMP_PARENS
+            }
+        }
+    }
+
+    /// Returns the full explanation for the `UPDATE DISPOSITION ERRORS`
+    /// section.
+    fn full_reason(
+        self,
+        before: &BlueprintSledUpdateDisposition,
+        after: &BlueprintSledUpdateDisposition,
+    ) -> String {
+        match self {
+            UpdateDispositionDiffError::MissingGenerationBump => format!(
+                "disposition kind changed ({} {ARROW} {}) but the generation \
+                 was not bumped (still {})",
+                before.kind, after.kind, after.generation,
+            ),
+            UpdateDispositionDiffError::IncorrectGenerationBump => format!(
+                "disposition kind changed ({} {ARROW} {}) but the generation \
+                 did not advance by exactly one ({} {ARROW} {}, expected {})",
+                before.kind,
+                after.kind,
+                before.generation,
+                after.generation,
+                before.generation.next(),
+            ),
+            UpdateDispositionDiffError::SpuriousGenerationBump => format!(
+                "disposition generation changed ({} {ARROW} {}) but the kind \
+                 did not change (still {})",
+                before.generation, after.generation, after.kind,
+            ),
+        }
+    }
+}
+
+/// Classifies the invariant violation, if any, in a modified sled's update
+/// disposition.
+///
+/// The "generation is bumped by exactly one iff the kind changes" invariant only
+/// holds both ways when comparing a child blueprint against its parent. (Note
+/// that the direction that produces MissingGenerationBump holds when comparing a
+/// blueprint to any of its ancestors, but we don't have access to that
+/// information here so we don't try and do that comparison.)
+fn update_disposition_diff_error(
+    before: &BlueprintSledUpdateDisposition,
+    after: &BlueprintSledUpdateDisposition,
+    after_is_child_of_before: bool,
+) -> Option<UpdateDispositionDiffError> {
+    if !after_is_child_of_before {
+        return None;
+    }
+    let kind_changed = before.kind != after.kind;
+    let generation_changed = before.generation != after.generation;
+    match (kind_changed, generation_changed) {
+        // The kind changed without any generation bump.
+        (true, false) => {
+            Some(UpdateDispositionDiffError::MissingGenerationBump)
+        }
+        // The kind changed and the generation moved: a single edit must advance
+        // it by exactly one, so a larger jump or a decrease is a violation too.
+        (true, true) => {
+            if after.generation == before.generation.next() {
+                None
+            } else {
+                Some(UpdateDispositionDiffError::IncorrectGenerationBump)
+            }
+        }
+        // The generation changed but the kind did not.
+        (false, true) => {
+            Some(UpdateDispositionDiffError::SpuriousGenerationBump)
+        }
+        // Neither changed is unreachable here (the dispositions differ).
+        (false, false) => None,
+    }
+}
+
+fn display_modified_update_disposition(
+    before: &BlueprintSledUpdateDisposition,
+    after: &BlueprintSledUpdateDisposition,
+    error: Option<UpdateDispositionDiffError>,
+) -> String {
+    let kind = if before.kind != after.kind {
+        format!("{} {ARROW} {}", before.kind, after.kind)
+    } else {
+        after.kind.to_string()
+    };
+    let generation = if before.generation != after.generation {
+        format!(
+            "(generation {} {ARROW} {})",
+            before.generation, after.generation,
+        )
+    } else {
+        format!("(generation {})", after.generation)
+    };
+    match error {
+        Some(error) => format!("{kind} {generation} {}", error.short_reason()),
+        None => format!("{kind} {generation}"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::deployment::BlueprintSledUpdateDispositionKind;
+    use crate::deployment::ReconfiguratorDisruptionPolicy;
+
+    const EVACUATING: BlueprintSledUpdateDispositionKind =
+        BlueprintSledUpdateDispositionKind::Evacuating {
+            policy: ReconfiguratorDisruptionPolicy::MigrateOrTerminate,
+        };
+
+    // The initial (`available`, generation 1) disposition and its single-step
+    // departures, shared by the rendering and classification tests.
+    const AVAILABLE: BlueprintSledUpdateDisposition =
+        BlueprintSledUpdateDisposition::initial();
+
+    // kind + generation both changed by one: the valid parent→child edit.
+    const BUMPED: BlueprintSledUpdateDisposition =
+        BlueprintSledUpdateDisposition {
+            generation: AVAILABLE.generation.next(),
+            kind: EVACUATING,
+        };
+
+    // kind changed, generation unchanged.
+    const UNBUMPED: BlueprintSledUpdateDisposition =
+        BlueprintSledUpdateDisposition {
+            generation: AVAILABLE.generation,
+            kind: EVACUATING,
+        };
+
+    // kind changed, but generation jumped ahead by two instead of one.
+    const OVER_BUMPED: BlueprintSledUpdateDisposition =
+        BlueprintSledUpdateDisposition {
+            generation: AVAILABLE.generation.next().next(),
+            kind: EVACUATING,
+        };
+
+    // generation changed, kind unchanged.
+    const GEN_ONLY: BlueprintSledUpdateDisposition =
+        BlueprintSledUpdateDisposition {
+            generation: AVAILABLE.generation.next(),
+            kind: AVAILABLE.kind,
+        };
+
+    #[test]
+    fn modified_update_disposition_rendering() {
+        // Kind change with the mandatory generation bump (no error).
+        assert_eq!(
+            display_modified_update_disposition(&AVAILABLE, &BUMPED, None),
+            "available -> evacuating (live-migrate or terminate) \
+             (generation 1 -> 2)",
+        );
+
+        // A kind change without a generation bump (error).
+        assert_eq!(
+            display_modified_update_disposition(
+                &AVAILABLE,
+                &UNBUMPED,
+                Some(UpdateDispositionDiffError::MissingGenerationBump),
+            ),
+            "available -> evacuating (live-migrate or terminate) \
+             (generation 1) \
+             (error: kind changed without a generation bump)",
+        );
+
+        // A kind change with a too-large generation jump, flagged as an error:
+        // the generation still renders as `before -> after`.
+        assert_eq!(
+            display_modified_update_disposition(
+                &AVAILABLE,
+                &OVER_BUMPED,
+                Some(UpdateDispositionDiffError::IncorrectGenerationBump),
+            ),
+            "available -> evacuating (live-migrate or terminate) \
+             (generation 1 -> 3) \
+             (error: kind changed but generation not bumped by exactly one)",
+        );
+
+        // A generation change with no kind change. Along a parent→child edit
+        // this is flagged as a spurious bump...
+        assert_eq!(
+            display_modified_update_disposition(
+                &AVAILABLE,
+                &GEN_ONLY,
+                Some(UpdateDispositionDiffError::SpuriousGenerationBump),
+            ),
+            "available (generation 1 -> 2) \
+             (error: generation bumped without a kind change)",
+        );
+
+        // ...but with no error (e.g. a sibling diff) it renders without a
+        // marker.
+        assert_eq!(
+            display_modified_update_disposition(&AVAILABLE, &GEN_ONLY, None),
+            "available (generation 1 -> 2)",
+        );
+    }
+
+    #[test]
+    fn classifies_update_disposition_diff() {
+        // When comparing a child blueprint to its parent, every direction of
+        // the invariant is enforced.
+        assert_eq!(
+            update_disposition_diff_error(&AVAILABLE, &BUMPED, true),
+            None,
+        );
+        assert_eq!(
+            update_disposition_diff_error(&AVAILABLE, &UNBUMPED, true),
+            Some(UpdateDispositionDiffError::MissingGenerationBump),
+        );
+        assert_eq!(
+            update_disposition_diff_error(&AVAILABLE, &OVER_BUMPED, true),
+            Some(UpdateDispositionDiffError::IncorrectGenerationBump),
+        );
+        assert_eq!(
+            update_disposition_diff_error(&AVAILABLE, &GEN_ONLY, true),
+            Some(UpdateDispositionDiffError::SpuriousGenerationBump),
+        );
+
+        // A kind change with a decreasing generation is an incorrect bump
+        // too.
+        const PARENT_AT_GEN_3: BlueprintSledUpdateDisposition =
+            BlueprintSledUpdateDisposition {
+                generation: AVAILABLE.generation.next().next(),
+                kind: AVAILABLE.kind,
+            };
+        const CHILD_DECREASED: BlueprintSledUpdateDisposition =
+            BlueprintSledUpdateDisposition {
+                generation: AVAILABLE.generation.next(),
+                kind: EVACUATING,
+            };
+        assert_eq!(
+            update_disposition_diff_error(
+                &PARENT_AT_GEN_3,
+                &CHILD_DECREASED,
+                true,
+            ),
+            Some(UpdateDispositionDiffError::IncorrectGenerationBump),
+        );
+
+        // Non-parent-to-child diffs should not be flagged.
+        for after in [BUMPED, UNBUMPED, OVER_BUMPED, GEN_ONLY] {
+            assert_eq!(
+                update_disposition_diff_error(&AVAILABLE, &after, false),
+                None,
+                "{after:?} must not be flagged without a parent relationship",
+            );
+        }
     }
 }
