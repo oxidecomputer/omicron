@@ -20,11 +20,79 @@ use nexus_auth::authz;
 use nexus_auth::context::OpContext;
 use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::public_error_from_diesel;
+use nexus_db_model::SagaReasonAbandoned;
 use nexus_db_model::SagaState;
+use nexus_db_schema::schema::saga;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
 use std::ops::Add;
+
+#[derive(AsChangeset)]
+#[diesel(table_name = saga, treat_none_as_null = true)]
+struct SagaStateUpdate {
+    saga_state: SagaState,
+    reason_abandoned: Option<SagaReasonAbandoned>,
+    abandon_information: Option<String>,
+    time_abandoned: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+// Due to DB CHECK constraint requirements, when a saga is abandoned, we must
+// capture metadata about the transition to that state
+#[derive(Debug, Clone)]
+pub enum SagaStateTransition {
+    Running,
+    Unwinding,
+    Done,
+    Abandoned { reason: SagaReasonAbandoned, information: String },
+}
+
+impl From<SagaStateTransition> for SagaState {
+    fn from(value: SagaStateTransition) -> Self {
+        match value {
+            SagaStateTransition::Running => SagaState::Running,
+            SagaStateTransition::Unwinding => SagaState::Unwinding,
+            SagaStateTransition::Done => SagaState::Done,
+            SagaStateTransition::Abandoned { reason: _, information: _ } => {
+                SagaState::Abandoned
+            }
+        }
+    }
+}
+
+impl From<steno::SagaCachedState> for SagaStateTransition {
+    fn from(value: steno::SagaCachedState) -> Self {
+        match value {
+            steno::SagaCachedState::Running => SagaStateTransition::Running,
+            steno::SagaCachedState::Unwinding => SagaStateTransition::Unwinding,
+            steno::SagaCachedState::Done => SagaStateTransition::Done,
+        }
+    }
+}
+
+impl SagaStateTransition {
+    fn into_update(self) -> SagaStateUpdate {
+        match self {
+            SagaStateTransition::Running
+            | SagaStateTransition::Unwinding
+            | SagaStateTransition::Done => SagaStateUpdate {
+                saga_state: self.into(),
+                reason_abandoned: None,
+                abandon_information: None,
+                time_abandoned: None,
+            },
+            SagaStateTransition::Abandoned { reason, information } => {
+                let now = chrono::Utc::now();
+                SagaStateUpdate {
+                    saga_state: SagaState::Abandoned,
+                    reason_abandoned: Some(reason),
+                    abandon_information: Some(information),
+                    time_abandoned: Some(now),
+                }
+            }
+        }
+    }
+}
 
 impl DataStore {
     pub async fn saga_create(
@@ -91,7 +159,7 @@ impl DataStore {
     pub async fn saga_update_state(
         &self,
         saga_id: steno::SagaId,
-        new_state: SagaState,
+        new_state: SagaStateTransition,
         current_sec: db::saga_types::SecId,
     ) -> Result<(), Error> {
         use nexus_db_schema::schema::saga::dsl;
@@ -100,7 +168,7 @@ impl DataStore {
         let result = diesel::update(dsl::saga)
             .filter(dsl::id.eq(saga_id))
             .filter(dsl::current_sec.eq(current_sec))
-            .set(dsl::saga_state.eq(new_state))
+            .set(new_state.clone().into_update())
             .check_if_exists::<db::saga_types::Saga>(saga_id)
             .execute_and_check(&*self.pool_connection_unauthorized().await?)
             .await
@@ -113,8 +181,6 @@ impl DataStore {
                     ),
                 )
             })?;
-
-        // TODO-K: Make sure the abandoned metadata is filled if setting to abandoned
 
         match result.status {
             UpdateStatus::Updated => Ok(()),
@@ -546,22 +612,32 @@ mod test {
         datastore
             .saga_update_state(
                 node_cx.saga_id,
-                SagaState::Running,
+                SagaStateTransition::Running,
                 node_cx.sec_id,
             )
             .await
             .expect("updating state to Running again");
 
+        // TODO-K: Let's update to abandoned instead
+
         // Update the state to Done.
         datastore
-            .saga_update_state(node_cx.saga_id, SagaState::Done, node_cx.sec_id)
+            .saga_update_state(
+                node_cx.saga_id,
+                SagaStateTransition::Done,
+                node_cx.sec_id,
+            )
             .await
             .expect("updating state to Done");
 
         // Attempt to update its state to Done again, which is a no-op -- this
         // should be idempotent, so expect success.
         datastore
-            .saga_update_state(node_cx.saga_id, SagaState::Done, node_cx.sec_id)
+            .saga_update_state(
+                node_cx.saga_id,
+                SagaStateTransition::Done,
+                node_cx.sec_id,
+            )
             .await
             .expect("updating state to Done again");
 
