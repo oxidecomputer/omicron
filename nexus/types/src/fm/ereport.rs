@@ -20,6 +20,9 @@ pub use ereport_types::{Ena, EreportId};
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Ereport {
     #[serde(flatten)]
+    pub id: EreportId,
+    pub time_collected: DateTime<Utc>,
+    #[serde(flatten)]
     pub data: EreportData,
     #[serde(flatten)]
     pub reporter: Reporter,
@@ -28,12 +31,17 @@ pub struct Ereport {
 }
 
 impl Ereport {
-    pub fn new(data: EreportData, reporter: Reporter) -> Self {
-        Self { data, reporter, marked_seen_in: None }
+    pub fn new(
+        id: EreportId,
+        time_collected: DateTime<Utc>,
+        data: EreportData,
+        reporter: Reporter,
+    ) -> Self {
+        Self { id, time_collected, data, reporter, marked_seen_in: None }
     }
 
     pub fn id(&self) -> &EreportId {
-        &self.data.id
+        &self.id
     }
 }
 
@@ -55,9 +63,6 @@ impl iddqd::IdOrdItem for Ereport {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EreportData {
-    #[serde(flatten)]
-    pub id: EreportId,
-    pub time_collected: DateTime<Utc>,
     pub collector_id: OmicronZoneUuid,
     pub serial_number: Option<String>,
     pub part_number: Option<String>,
@@ -82,9 +87,8 @@ impl EreportData {
         log: &slog::Logger,
         restart_id: EreporterRestartUuid,
         ereport: ereport_types::Ereport,
-        time_collected: DateTime<Utc>,
         collector_id: OmicronZoneUuid,
-    ) -> Self {
+    ) -> (Ena, EreportData) {
         const MISSING_VPD: &str = " (perhaps the SP doesn't know its own VPD?)";
         let part_number = get_sp_metadata_string(
             "baseboard_part_number",
@@ -139,15 +143,16 @@ impl EreportData {
             }
         };
 
-        EreportData {
-            id: EreportId { restart_id, ena },
-            time_collected,
-            collector_id,
-            part_number,
-            serial_number,
-            class,
-            report: serde_json::Value::Object(ereport.data),
-        }
+        (
+            ena,
+            EreportData {
+                collector_id,
+                part_number,
+                serial_number,
+                class,
+                report: serde_json::Value::Object(ereport.data),
+            },
+        )
     }
 }
 

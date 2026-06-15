@@ -285,7 +285,6 @@ impl Ingester {
                     &opctx.log,
                     restart_id,
                     ereport,
-                    time_collected,
                     self.nexus_id,
                 )
             });

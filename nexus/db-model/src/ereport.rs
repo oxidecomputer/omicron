@@ -172,13 +172,13 @@ impl Ereport {
     }
 
     pub fn new(
+        EreportId { ena, restart_id }: EreportId,
+        time_collected: DateTime<Utc>,
         data: types::EreportData,
         reporter: impl Into<Reporter>,
     ) -> Self {
         let types::EreportData {
-            id: EreportId { ena, restart_id },
             collector_id,
-            time_collected,
             serial_number,
             part_number,
             class,
@@ -203,11 +203,11 @@ impl Ereport {
 
 impl From<types::Ereport> for Ereport {
     fn from(
-        types::Ereport { data, reporter, marked_seen_in }: types::Ereport,
+        types::Ereport { id, time_collected, data, reporter, marked_seen_in }: types::Ereport,
     ) -> Self {
         Self {
             marked_seen_in: marked_seen_in.map(Into::into),
-            ..Self::new(data, reporter)
+            ..Self::new(id, time_collected, data, reporter)
         }
     }
 }
@@ -233,9 +233,9 @@ impl TryFrom<Ereport> for types::Ereport {
             ))
         })?;
         Ok(types::Ereport {
+            id,
+            time_collected,
             data: types::EreportData {
-                id,
-                time_collected,
                 collector_id: collector_id.into(),
                 serial_number,
                 part_number,

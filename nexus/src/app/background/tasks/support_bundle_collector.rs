@@ -719,7 +719,7 @@ mod test {
     use nexus_db_queries::db::datastore::SupportBundleProvenance;
     use nexus_test_utils::SLED_AGENT_UUID;
     use nexus_test_utils_macros::nexus_test;
-    use nexus_types::fm::ereport::{EreportData, EreportId, Reporter};
+    use nexus_types::fm::ereport::{EreportData, Reporter};
     use nexus_types::identity::Asset;
     use nexus_types::internal_api::background::SupportBundleCollectionStep;
     use nexus_types::internal_api::background::SupportBundleCollectionStepStatus;
@@ -863,27 +863,21 @@ mod test {
         let sp_restart_id = EreporterRestartUuid::new_v4();
         let time_collected = chrono::Utc::now();
         datastore.ereports_insert(&opctx, sp_restart_id, time_collected, Reporter::Sp { sp_type: SpType::Sled, slot: SLED_SLOT}, vec![
-            EreportData {
-                id: EreportId { restart_id: sp_restart_id, ena: ereport_types::Ena(1) },
-                time_collected,
+            (ereport_types::Ena(1), EreportData {
                 collector_id: OmicronZoneUuid::new_v4(),
                 part_number: Some(GIMLET_PN.to_string()),
                 serial_number: Some(SP_SERIAL.to_string()),
                 class: Some("ereport.fake.whatever".to_string()),
                 report: serde_json::json!({"hello world": true})
-            },
-            EreportData {
-                id: EreportId { restart_id: sp_restart_id, ena: ereport_types::Ena(2) },
-                time_collected,
+            }),
+            (ereport_types::Ena(2), EreportData {
                 collector_id: OmicronZoneUuid::new_v4(),
                 part_number: Some(GIMLET_PN.to_string()),
                 serial_number: Some(SP_SERIAL.to_string()),
                 class: Some("ereport.something.blah".to_string()),
                 report: serde_json::json!({"system_working": "seems to be",})
-            },
-            EreportData {
-                id: EreportId { restart_id: EreporterRestartUuid::new_v4(), ena: ereport_types::Ena(1) },
-                time_collected,
+            }),
+            (ereport_types::Ena(1), EreportData {
                 collector_id: OmicronZoneUuid::new_v4(),
                 // Let's do a silly one! No VPD, to make sure that's also
                 // handled correctly.
@@ -891,7 +885,7 @@ mod test {
                 serial_number: None,
                 class: Some("ereport.fake.whatever".to_string()),
                 report: serde_json::json!({"hello_world": true})
-            },
+            }),
         ]).await.expect("failed to insert fake SP ereports");
         // And one from a different serial. N.B. that I made sure the number of
         // host-OS and SP ereports are different for when we make assertions
@@ -904,18 +898,16 @@ mod test {
                 sp2_restart_id,
                 time_collected,
                 Reporter::Sp { sp_type: SpType::Switch, slot: 1 },
-                vec![EreportData {
-                    id: EreportId {
-                        restart_id: sp2_restart_id,
-                        ena: ereport_types::Ena(1),
+                vec![(
+                    ereport_types::Ena(1),
+                    EreportData {
+                        collector_id: OmicronZoneUuid::new_v4(),
+                        part_number: Some("9130000006".to_string()),
+                        serial_number: Some("BRM41000555".to_string()),
+                        class: Some("ereport.fake.whatever".to_string()),
+                        report: serde_json::json!({"im_a_sidecar": true}),
                     },
-                    time_collected,
-                    collector_id: OmicronZoneUuid::new_v4(),
-                    part_number: Some("9130000006".to_string()),
-                    serial_number: Some("BRM41000555".to_string()),
-                    class: Some("ereport.fake.whatever".to_string()),
-                    report: serde_json::json!({"im_a_sidecar": true}),
-                }],
+                )],
             )
             .await
             .expect("failed to insert another fake SP ereport");
@@ -932,30 +924,28 @@ mod test {
                     slot: Some(SLED_SLOT),
                 },
                 vec![
-                    EreportData {
-                        id: EreportId {
-                            restart_id: sled1_restart_id,
-                            ena: ereport_types::Ena(1),
+                    (
+                        ereport_types::Ena(1),
+                        EreportData {
+                            collector_id: OmicronZoneUuid::new_v4(),
+                            serial_number: Some(HOST_SERIAL.to_string()),
+                            part_number: Some(GIMLET_PN.to_string()),
+                            class: Some("ereport.fake.whatever".to_string()),
+                            report: serde_json::json!({"hello_world": true}),
                         },
-                        time_collected,
-                        collector_id: OmicronZoneUuid::new_v4(),
-                        serial_number: Some(HOST_SERIAL.to_string()),
-                        part_number: Some(GIMLET_PN.to_string()),
-                        class: Some("ereport.fake.whatever".to_string()),
-                        report: serde_json::json!({"hello_world": true}),
-                    },
-                    EreportData {
-                        id: EreportId {
-                            restart_id: sled1_restart_id,
-                            ena: ereport_types::Ena(2),
+                    ),
+                    (
+                        ereport_types::Ena(2),
+                        EreportData {
+                            collector_id: OmicronZoneUuid::new_v4(),
+                            serial_number: Some(HOST_SERIAL.to_string()),
+                            part_number: Some(GIMLET_PN.to_string()),
+                            class: Some(
+                                "ereport.fake.whatever.thingy".to_string(),
+                            ),
+                            report: serde_json::json!({"goodbye_world": false}),
                         },
-                        time_collected,
-                        collector_id: OmicronZoneUuid::new_v4(),
-                        serial_number: Some(HOST_SERIAL.to_string()),
-                        part_number: Some(GIMLET_PN.to_string()),
-                        class: Some("ereport.fake.whatever.thingy".to_string()),
-                        report: serde_json::json!({"goodbye_world": false}),
-                    },
+                    ),
                 ],
             )
             .await
@@ -969,15 +959,13 @@ mod test {
                 time_collected,
                 Reporter::HostOs { sled: SledUuid::new_v4(), slot: Some(SLED_SLOT) },
                 vec![
-                    EreportData {
-                        id: EreportId { restart_id: sled2_restart_id, ena:  ereport_types::Ena(1) },
-                        time_collected,
+                    (ereport_types::Ena(1), EreportData {
                         collector_id: OmicronZoneUuid::new_v4(),
                         serial_number: Some(HOST_SERIAL.to_string()),
                         part_number: Some(GIMLET_PN.to_string()),
                         class: Some("ereport.something.hostos_related".to_string()),
                         report: serde_json::json!({"illumos": "very yes", "whatever": 42}),
-                    },
+                    }),
                 ],
             )
             .await

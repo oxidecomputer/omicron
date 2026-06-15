@@ -2229,9 +2229,9 @@ mod tests {
         let collector_id = OmicronZoneUuid::new_v4();
         let time_collected = Utc::now();
 
+        let ereport1_id =
+            fm::EreportId { restart_id, ena: ereport_types::Ena(2) };
         let ereport1 = EreportData {
-            id: fm::EreportId { restart_id, ena: ereport_types::Ena(2) },
-            time_collected,
             collector_id,
             part_number: Some("930-55555".to_string()),
             serial_number: Some("BRM6900420".to_string()),
@@ -2239,9 +2239,9 @@ mod tests {
             report: serde_json::json!({"severity": "critical"}),
         };
 
+        let ereport2_id =
+            fm::EreportId { restart_id, ena: ereport_types::Ena(3) };
         let ereport2 = EreportData {
-            id: fm::EreportId { restart_id, ena: ereport_types::Ena(3) },
-            time_collected,
             collector_id,
             part_number: Some("930-55555".to_string()),
             serial_number: Some("BRM6900420".to_string()),
@@ -2261,7 +2261,10 @@ mod tests {
                 restart_id,
                 time_collected,
                 reporter,
-                vec![ereport1.clone(), ereport2.clone()],
+                vec![
+                    (ereport1_id.ena, ereport1.clone()),
+                    (ereport2_id.ena, ereport2.clone()),
+                ],
             )
             .await
             .expect("failed to insert ereports");
@@ -2273,7 +2276,12 @@ mod tests {
             ereports
                 .insert_unique(fm::case::CaseEreport {
                     id: omicron_uuid_kinds::CaseEreportUuid::new_v4(),
-                    ereport: Arc::new(fm::Ereport::new(ereport1, reporter)),
+                    ereport: Arc::new(fm::Ereport::new(
+                        ereport1_id,
+                        time_collected,
+                        ereport1,
+                        reporter,
+                    )),
                     assigned_sitrep_id: sitrep_id,
                     comment: "this has something to do with case 1".to_string(),
                 })
@@ -2386,7 +2394,12 @@ mod tests {
             ereports
                 .insert_unique(fm::case::CaseEreport {
                     id: omicron_uuid_kinds::CaseEreportUuid::new_v4(),
-                    ereport: Arc::new(fm::Ereport::new(ereport2, reporter)),
+                    ereport: Arc::new(fm::Ereport::new(
+                        ereport2_id,
+                        time_collected,
+                        ereport2,
+                        reporter,
+                    )),
                     assigned_sitrep_id: sitrep_id,
                     comment: "this has something to do with case 2".to_string(),
                 })
