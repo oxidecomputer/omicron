@@ -25,6 +25,7 @@ use nexus_db_lookup::LookupPath;
 use nexus_db_queries::db::datastore::Disk;
 use nexus_db_queries::db::datastore::LocalStorageAllocation;
 use nexus_db_queries::db::datastore::LocalStorageDisk;
+use nexus_db_queries::db::datastore::sled::SledReservationReason;
 use nexus_db_queries::db::identity::Resource;
 use nexus_db_queries::{authn, authz, db};
 use nexus_types::saga::saga_action_failed;
@@ -148,7 +149,6 @@ declare_saga_actions! {
     ENSURE_RUNNING -> "ensure_running" {
         + sis_ensure_running
     }
-
 }
 
 /// Node name for looking up the VMM record once it has been registered with the
@@ -235,6 +235,7 @@ async fn sis_alloc_server(
         u32::from(hardware_threads.0),
         reservoir_ram,
         constraint_builder.build(),
+        SledReservationReason::Start,
     )
     .await?;
 
@@ -982,36 +983,44 @@ async fn sis_ensure_registered_undo(
         // be a bit of a stretch. See the definition of `instance_unhealthy` for
         // more details.
         match e {
-            InstanceStateChangeError::SledAgent(inner) if inner.vmm_gone() => {
-                error!(osagactx.log(),
-                       "start saga: failing instance after unregister failure";
-                       "instance_id" => %instance_id,
-                       "start_reason" => ?params.reason,
-                       "error" => ?inner);
-
-                if let Err(set_failed_error) = osagactx
-                    .nexus()
-                    .mark_vmm_failed(&opctx, authz_instance, &db_vmm, &inner)
-                    .await
-                {
+            InstanceStateChangeError::SledAgent(inner) => {
+                if let Some(reason) = inner.vmm_failure_reason() {
                     error!(osagactx.log(),
-                           "start saga: failed to mark instance as failed";
+                           "start saga: failing instance after unregister failure";
                            "instance_id" => %instance_id,
                            "start_reason" => ?params.reason,
-                           "error" => ?set_failed_error);
+                           "error" => ?inner,
+                           "reason" => %reason);
 
-                    Err(set_failed_error.into())
+                    if let Err(set_failed_error) = osagactx
+                        .nexus()
+                        .mark_vmm_failed(
+                            &opctx,
+                            authz_instance,
+                            &db_vmm,
+                            &inner,
+                            reason,
+                        )
+                        .await
+                    {
+                        error!(osagactx.log(),
+                               "start saga: failed to mark instance as failed";
+                               "instance_id" => %instance_id,
+                               "start_reason" => ?params.reason,
+                               "error" => ?set_failed_error);
+
+                        Err(set_failed_error.into())
+                    } else {
+                        Err(inner.0.into())
+                    }
                 } else {
-                    Err(inner.0.into())
-                }
-            }
-            InstanceStateChangeError::SledAgent(_) => {
-                info!(osagactx.log(),
-                       "start saga: instance already unregistered from sled";
-                       "instance_id" => %instance_id,
-                       "start_reason" => ?params.reason);
+                    info!(osagactx.log(),
+                           "start saga: instance already unregistered from sled";
+                           "instance_id" => %instance_id,
+                           "start_reason" => ?params.reason);
 
-                Ok(())
+                    Ok(())
+                }
             }
             InstanceStateChangeError::Other(inner) => {
                 error!(osagactx.log(),
@@ -1171,6 +1180,7 @@ mod test {
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::external_api::{instance as instance_types, networking};
     use nexus_types::identity::Resource;
+    use nexus_types_versions::latest;
     use omicron_common::api::external::{
         ByteCount, IdentityMetadataCreateParams, InstanceCpuCount, Name,
     };
@@ -1194,7 +1204,7 @@ mod test {
 
     async fn create_instance(
         client: &ClientTestContext,
-    ) -> omicron_common::api::external::Instance {
+    ) -> latest::instance::Instance {
         let instances_url = format!("/v1/instances?project={}", PROJECT_NAME);
         object_create(
             client,
@@ -1219,6 +1229,7 @@ mod test {
                 auto_restart_policy: Default::default(),
                 anti_affinity_groups: Vec::new(),
                 multicast_groups: Vec::new(),
+                enable_jumbo_frames: false,
             },
         )
         .await
@@ -1475,13 +1486,14 @@ mod test {
                 let result =
                     dpd_client.nat_ipv4_list(&nat_subnet, None, None).await;
 
-                let data =
-                    result.map_err(|_| poll::CondCheckError::<()>::NotYet)?;
+                let data = result.map_err(|_| {
+                    poll::CondCheckError::<()>::NotYet { status: None }
+                })?;
 
                 if data.items.len() == expected_nat_entries {
                     Ok(())
                 } else {
-                    Err(poll::CondCheckError::<()>::NotYet)
+                    Err(poll::CondCheckError::<()>::NotYet { status: None })
                 }
             },
             &poll_interval,
@@ -1530,15 +1542,16 @@ mod test {
 
                 info!(log, "nat_ipv4_list"; "result" => ?result);
 
-                let data =
-                    result.map_err(|_| poll::CondCheckError::<()>::NotYet)?;
+                let data = result.map_err(|_| {
+                    poll::CondCheckError::<()>::NotYet { status: None }
+                })?;
 
                 if data.items.is_empty() {
                     error!(
                         log,
                         "we are expecting nat entries but none were found"
                     );
-                    Err(poll::CondCheckError::<()>::NotYet)
+                    Err(poll::CondCheckError::<()>::NotYet { status: None })
                 } else {
                     Ok(())
                 }

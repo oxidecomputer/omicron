@@ -147,6 +147,9 @@ pub struct PortCreateParams<'a> {
     pub firewall_rules: &'a [ResolvedVpcFirewallRule],
     pub dhcp_config: DhcpCfg,
     pub attached_subnets: Vec<AttachedSubnet>,
+    /// MTU to set on the xde device, in bytes. If `None`, OPTE applies its
+    /// default (1500). Used by jumbo-frame opt-in.
+    pub mtu: Option<u32>,
 }
 
 impl<'a> TryFrom<&PortCreateParams<'a>> for IpCfg {
@@ -371,6 +374,7 @@ impl PortManager {
             firewall_rules,
             dhcp_config,
             attached_subnets: _,
+            mtu,
         } = params;
         let is_service =
             matches!(nic.kind, NetworkInterfaceKind::Service { .. });
@@ -410,7 +414,7 @@ impl PortManager {
         );
         let hdl = {
             let hdl = Handle::new()?;
-            hdl.create_xde(&port_name, vpc_cfg, /* passthru = */ false)?;
+            hdl.create_xde(&port_name, vpc_cfg, mtu)?;
             hdl
         };
         let (port, ticket) = {
@@ -1335,6 +1339,7 @@ mod tests {
                     dns6_servers: Vec::new(),
                 },
                 attached_subnets: vec![],
+                mtu: None,
             })
             .unwrap();
 
@@ -1514,6 +1519,7 @@ mod tests {
                     dns6_servers: Vec::new(),
                 },
                 attached_subnets: vec![],
+                mtu: None,
             })
             .unwrap();
 
@@ -1685,6 +1691,7 @@ mod tests {
                 dns6_servers: vec![],
             },
             attached_subnets: vec![],
+            mtu: None,
         };
         let IpCfg::Ipv4(oxide_vpc::api::Ipv4Cfg {
             vpc_subnet,
@@ -1758,6 +1765,7 @@ mod tests {
                 dns6_servers: vec![],
             },
             attached_subnets: vec![],
+            mtu: None,
         };
         let IpCfg::Ipv6(oxide_vpc::api::Ipv6Cfg {
             vpc_subnet,
@@ -1842,6 +1850,7 @@ mod tests {
                 dns6_servers: vec![],
             },
             attached_subnets: vec![],
+            mtu: None,
         };
         let IpCfg::DualStack { ipv4, ipv6 } = IpCfg::try_from(&prs).unwrap()
         else {
@@ -1932,6 +1941,7 @@ mod tests {
                 dns6_servers: vec![],
             },
             attached_subnets: vec![],
+            mtu: None,
         };
         let _ = IpCfg::try_from(&prs).expect_err(
             "Should fail to convert with public IPv6 and private IPv4",
@@ -1978,6 +1988,7 @@ mod tests {
                 dns6_servers: vec![],
             },
             attached_subnets: vec![],
+            mtu: None,
         };
         let _ = IpCfg::try_from(&prs).expect_err(
             "Should fail to convert with public IPv4 and private IPv6",

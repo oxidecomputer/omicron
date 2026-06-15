@@ -88,6 +88,7 @@ async fn instance_launch() -> Result<()> {
             anti_affinity_groups: Vec::new(),
             cpu_platform: None,
             multicast_groups: Vec::new(),
+            enable_jumbo_frames: false,
         })
         .send()
         .await?;
@@ -128,7 +129,7 @@ async fn instance_launch() -> Result<()> {
                 .run_state;
 
             if instance_state == InstanceState::Starting {
-                return Err(Error::NotYet);
+                return Err(Error::NotYet { status: None });
             }
 
             let data = String::from_utf8_lossy(
@@ -146,7 +147,7 @@ async fn instance_launch() -> Result<()> {
             if data.contains("-----END SSH HOST KEY KEYS-----") {
                 Ok(data)
             } else {
-                Err(Error::NotYet)
+                Err(Error::NotYet { status: None })
             }
         },
         &Duration::from_secs(5),
@@ -229,7 +230,7 @@ async fn instance_launch() -> Result<()> {
                 .run_state;
 
             if instance_state == InstanceState::Starting {
-                return Err(Error::NotYet);
+                return Err(Error::NotYet { status: None });
             }
 
             let data = String::from_utf8_lossy(
@@ -241,14 +242,14 @@ async fn instance_launch() -> Result<()> {
                     .max_bytes(1024 * 1024)
                     .send()
                     .await
-                    .map_err(|_e| Error::NotYet)?
+                    .map_err(|_e| Error::NotYet { status: None })?
                     .data,
             )
             .into_owned();
             if data.contains("-----END SSH HOST KEY KEYS-----") {
                 Ok(data)
             } else {
-                Err(Error::NotYet)
+                Err(Error::NotYet { status: None })
             }
         },
         &Duration::from_secs(5),
@@ -280,7 +281,9 @@ async fn instance_launch() -> Result<()> {
                 .instance(instance.name.clone())
                 .send()
                 .await
-                .map_err(|_| CondCheckError::<oxide_client::Error>::NotYet)
+                .map_err(|_| CondCheckError::<oxide_client::Error>::NotYet {
+                    status: None,
+                })
         },
         &Duration::from_secs(1),
         &Duration::from_secs(60),
@@ -296,7 +299,9 @@ async fn instance_launch() -> Result<()> {
                 .disk(disk_name.clone())
                 .send()
                 .await
-                .map_err(|_| CondCheckError::<oxide_client::Error>::NotYet)
+                .map_err(|_| CondCheckError::<oxide_client::Error>::NotYet {
+                    status: None,
+                })
         },
         &Duration::from_secs(1),
         &Duration::from_secs(60),

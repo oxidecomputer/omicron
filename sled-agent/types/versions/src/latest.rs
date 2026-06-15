@@ -95,7 +95,6 @@ pub mod instance {
     pub use crate::v1::instance::InstanceMigrationTargetParams;
     pub use crate::v1::instance::MigrationRuntimeState;
     pub use crate::v1::instance::MigrationState;
-    pub use crate::v1::instance::Migrations;
     pub use crate::v1::instance::SledVmmState;
     pub use crate::v1::instance::VmmIssueDiskSnapshotRequestBody;
     pub use crate::v1::instance::VmmIssueDiskSnapshotRequestPathParam;
@@ -119,8 +118,8 @@ pub mod instance {
     pub use crate::v32::instance::ExternalIps;
     pub use crate::v32::instance::ExternalIpv4Config;
     pub use crate::v32::instance::ExternalIpv6Config;
-    pub use crate::v32::instance::InstanceEnsureBody;
-    pub use crate::v32::instance::InstanceSledLocalConfig;
+    pub use crate::v41::instance::InstanceEnsureBody;
+    pub use crate::v41::instance::InstanceSledLocalConfig;
 }
 
 pub mod inventory {
@@ -178,11 +177,19 @@ pub mod inventory {
     pub use crate::v34::inventory::SvcState;
     pub use crate::v34::inventory::SvcsError;
 
-    pub use crate::v37::inventory::Inventory;
     pub use crate::v37::inventory::SvcEnabledNotOnline;
     pub use crate::v37::inventory::SvcEnabledNotOnlineState;
     pub use crate::v37::inventory::SvcsEnabledNotOnline;
     pub use crate::v37::inventory::SvcsEnabledNotOnlineResult;
+
+    pub use crate::v40::inventory::FMD_MAX_CASES;
+    pub use crate::v40::inventory::FMD_MAX_RESOURCES;
+    pub use crate::v40::inventory::FmdHostCase;
+    pub use crate::v40::inventory::FmdInventory;
+    pub use crate::v40::inventory::FmdInventoryError;
+    pub use crate::v40::inventory::FmdInventoryErrorKind;
+    pub use crate::v40::inventory::FmdResource;
+    pub use crate::v40::inventory::Inventory;
 
     pub use crate::impls::inventory::ManifestBootInventoryDisplay;
     pub use crate::impls::inventory::ManifestInventoryDisplay;

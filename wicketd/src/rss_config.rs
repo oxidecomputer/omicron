@@ -71,6 +71,7 @@ pub(crate) struct CurrentRssConfig {
     recovery_silo_password_hash: Option<omicron_passwords::NewPasswordHash>,
     rack_network_config: Option<UserSpecifiedRackNetworkConfig>,
     allowed_source_ips: Option<AllowedSourceIps>,
+    external_jumbo_frames_opt_in_enabled: bool,
     // External certificates are uploaded in two separate actions (cert then
     // key, or vice versa). Here we store a partial certificate; once we have
     // both parts, we validate it and promote it to be a member of
@@ -244,6 +245,8 @@ impl CurrentRssConfig {
                 .allowed_source_ips
                 .clone()
                 .unwrap_or(AllowedSourceIps::Any),
+            external_jumbo_frames_opt_in_enabled: self
+                .external_jumbo_frames_opt_in_enabled,
         };
 
         Ok(request)
@@ -348,6 +351,8 @@ impl CurrentRssConfig {
         self.external_dns_zone_name = config.external_dns_zone_name;
         self.allowed_source_ips = Some(config.allowed_source_ips);
         self.rack_network_config = Some(config.rack_network_config);
+        self.external_jumbo_frames_opt_in_enabled =
+            config.external_jumbo_frames_opt_in_enabled;
 
         Ok(())
     }
@@ -390,6 +395,8 @@ impl From<&'_ CurrentRssConfig> for CurrentRssUserConfig {
                 external_dns_zone_name: rss.external_dns_zone_name.clone(),
                 rack_network_config: rss.rack_network_config.clone(),
                 allowed_source_ips: rss.allowed_source_ips.clone(),
+                external_jumbo_frames_opt_in_enabled: rss
+                    .external_jumbo_frames_opt_in_enabled,
             },
         }
     }

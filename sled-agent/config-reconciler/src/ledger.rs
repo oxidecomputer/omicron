@@ -684,7 +684,6 @@ mod tests {
     use omicron_common::disk::DiskIdentity;
     use omicron_common::disk::OmicronPhysicalDiskConfig;
     use omicron_test_utils::dev;
-    use omicron_test_utils::dev::poll::CondCheckError;
     use omicron_test_utils::dev::poll::wait_for_watch_channel_condition;
     use omicron_uuid_kinds::InternalZpoolUuid;
     use omicron_uuid_kinds::MupdateOverrideUuid;
@@ -826,17 +825,15 @@ mod tests {
             // `WaitingForInitialConfig` (if we didn't).
             wait_for_watch_channel_condition(
                 &mut current_config_rx,
-                async |config| match config {
-                    CurrentSledConfig::WaitingForInternalDisks => {
-                        Err(CondCheckError::<()>::NotYet)
-                    }
+                |config| match config {
+                    CurrentSledConfig::WaitingForInternalDisks => false,
                     CurrentSledConfig::WaitingForInitialConfig => {
                         assert!(sled_config.is_none());
-                        Ok(())
+                        true
                     }
                     CurrentSledConfig::Ledgered(_) => {
                         assert!(sled_config.is_some());
-                        Ok(())
+                        true
                     }
                 },
                 Duration::from_secs(30),
@@ -931,11 +928,9 @@ mod tests {
         // `WaitingForInitialConfig`.
         wait_for_watch_channel_condition(
             &mut current_config_rx,
-            async |config| match config {
-                CurrentSledConfig::WaitingForInternalDisks => {
-                    Err(CondCheckError::<()>::NotYet)
-                }
-                CurrentSledConfig::WaitingForInitialConfig => Ok(()),
+            |config| match config {
+                CurrentSledConfig::WaitingForInternalDisks => false,
+                CurrentSledConfig::WaitingForInitialConfig => true,
                 CurrentSledConfig::Ledgered(config) => {
                     panic!("unexpected config found: {config:?}");
                 }

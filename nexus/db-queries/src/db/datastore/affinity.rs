@@ -10,7 +10,6 @@ use crate::authz::ApiResource;
 use crate::db::collection_insert::AsyncInsertError;
 use crate::db::collection_insert::DatastoreCollection;
 use crate::db::column_walker::AllColumnsOf;
-use crate::db::datastore::InstanceStateComputer;
 use crate::db::datastore::OpContext;
 use crate::db::identity::Resource;
 use crate::db::model::AffinityGroup;
@@ -20,6 +19,7 @@ use crate::db::model::AntiAffinityGroup;
 use crate::db::model::AntiAffinityGroupInstanceMembership;
 use crate::db::model::AntiAffinityGroupUpdate;
 use crate::db::model::InstanceState;
+use crate::db::model::InstanceStateComputer;
 use crate::db::model::Name;
 use crate::db::model::Project;
 use crate::db::model::VmmState;
@@ -1228,6 +1228,7 @@ impl DataStore {
 mod tests {
     use super::*;
 
+    use crate::db::datastore::sled::SledReservationReason;
     use crate::db::pub_test_utils::TestDatabase;
     use crate::db::pub_test_utils::helpers::create_project;
     use crate::db::pub_test_utils::helpers::create_stopped_instance_record;
@@ -1314,6 +1315,7 @@ mod tests {
                     ByteCount::from_kibibytes_u32(1).into(),
                     ByteCount::from_kibibytes_u32(1).into(),
                 ),
+                SledReservationReason::Start.into(),
             ))
             .execute_async(
                 &*datastore.pool_connection_for_tests().await.unwrap(),

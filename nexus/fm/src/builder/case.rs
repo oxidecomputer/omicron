@@ -6,7 +6,7 @@ use super::rng;
 use anyhow::Context;
 use fm::analysis_reports;
 use iddqd::id_ord_map::{self, IdOrdMap};
-use nexus_types::alert::AlertClass;
+use nexus_types::alert::AlertPayload;
 use nexus_types::fm;
 use nexus_types::support_bundle::BundleDataSelection;
 use omicron_uuid_kinds::CaseUuid;
@@ -38,7 +38,7 @@ impl AllCases {
         mut rng: rng::SitrepBuilderRng,
     ) -> Self {
         let cases = inputs
-            .cases()
+            .open_cases()
             .iter()
             .map(|case| {
                 let rng = rng::CaseBuilderRng::new(case.id, &mut rng);
@@ -129,12 +129,15 @@ impl CaseBuilder {
         Self { log, case, sitrep_id, rng, report_log: Default::default() }
     }
 
-    pub fn request_alert(
+    pub fn request_alert<A: AlertPayload>(
         &mut self,
-        class: AlertClass,
-        alert: &impl serde::Serialize,
+        alert: &A,
         comment: impl ToString,
     ) -> anyhow::Result<()> {
+        let class = A::CLASS;
+        let version = A::VERSION;
+        let payload_type = std::any::type_name::<A>();
+
         let id = loop {
             let id = self.rng.next_alert();
             if !self.case.alerts_requested.contains_key(&id) {
@@ -144,9 +147,13 @@ impl CaseBuilder {
         let req = fm::case::AlertRequest {
             id,
             class,
+            version,
             requested_sitrep_id: self.sitrep_id,
-            payload: serde_json::to_value(&alert).with_context(|| {
-                format!("failed to serialize payload for {class:?} alert")
+            payload: serde_json::to_value(alert).with_context(|| {
+                format!(
+                    "failed to serialize payload for {class} v{version} alert \
+                     (Rust type {payload_type})",
+                )
             })?,
             comment: comment.to_string(),
         };
@@ -161,12 +168,16 @@ impl CaseBuilder {
             "requested an alert";
             "alert_id" => %id,
             "alert_class" => ?class,
+            "alert_version" => version,
+            "alert_payload_type" => %payload_type,
             "comment" => %comment,
         );
         self.report_log
             .entry("requested alert")
             .kv("alert_id", id)
             .kv("alert_class", &class)
+            .kv("alert_version", version)
+            .kv("alert_payload_type", payload_type)
             .comment(comment);
 
         Ok(())

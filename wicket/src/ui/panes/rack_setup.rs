@@ -692,6 +692,7 @@ fn rss_config_text<'a>(
         external_dns_zone_name,
         rack_network_config,
         allowed_source_ips,
+        external_jumbo_frames_opt_in_enabled,
     } = &config.insensitive;
 
     // Special single-line values, where we convert some kind of condition into
@@ -706,6 +707,10 @@ fn rss_config_text<'a>(
     spans.push(Line::from(vec![
         Span::styled("Recovery password set: ", label_style),
         dyn_span(*recovery_silo_password_set, "Yes", "No"),
+    ]));
+    spans.push(Line::from(vec![
+        Span::styled("External jumbo frames opt-in: ", label_style),
+        dyn_span(*external_jumbo_frames_opt_in_enabled, "Enabled", "Disabled"),
     ]));
 
     // List of single-line values, each of which may or may not be set; if it's

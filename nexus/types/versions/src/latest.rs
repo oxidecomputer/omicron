@@ -142,10 +142,11 @@ pub mod headers {
 
 pub mod image {
     pub use crate::v2025_11_20_00::image::Distribution;
-    pub use crate::v2025_11_20_00::image::Image;
     pub use crate::v2025_11_20_00::image::ImageCreate;
     pub use crate::v2025_11_20_00::image::ImageSelector;
     pub use crate::v2025_11_20_00::image::ImageSource;
+
+    pub use crate::v2026_06_04_00::image::Image;
 }
 
 pub mod instance {
@@ -173,13 +174,15 @@ pub mod instance {
     pub use crate::v2026_01_05_00::instance::EphemeralIpCreate;
     pub use crate::v2026_01_05_00::instance::ExternalIpCreate;
 
-    pub use crate::v2026_01_08_00::instance::InstanceUpdate;
-
     pub use crate::v2026_01_23_00::instance::EphemeralIpDetachSelector;
     pub use crate::v2026_01_23_00::instance::ExternalIpDetach;
 
-    pub use crate::v2026_01_31_00::instance::InstanceCreate;
-    pub use crate::v2026_01_31_00::instance::InstanceDiskAttachment;
+    pub use crate::v2026_06_05_00::instance::InstanceDiskAttachment;
+
+    pub use crate::v2026_06_08_00::instance::Instance;
+    pub use crate::v2026_06_08_00::instance::InstanceCpuPlatform;
+    pub use crate::v2026_06_08_00::instance::InstanceCreate;
+    pub use crate::v2026_06_08_00::instance::InstanceUpdate;
 }
 
 pub mod internet_gateway {
@@ -402,6 +405,11 @@ pub mod system {
     pub use crate::v2025_11_20_00::system::PingStatus;
 }
 
+pub mod system_networking {
+    pub use crate::v2026_06_05_00::system_networking::SystemNetworkingSettings;
+    pub use crate::v2026_06_05_00::system_networking::SystemNetworkingSettingsUpdate;
+}
+
 pub mod timeseries {
     pub use crate::v2025_11_20_00::timeseries::TimeseriesQuery;
 }
@@ -413,10 +421,11 @@ pub mod update {
     pub use crate::v2025_11_20_00::update::TufRepoUpload;
     pub use crate::v2025_11_20_00::update::TufRepoUploadStatus;
     pub use crate::v2025_11_20_00::update::TufSignedRootRole;
-    pub use crate::v2025_11_20_00::update::UpdateStatus;
     pub use crate::v2025_11_20_00::update::UpdatesGetRepositoryParams;
     pub use crate::v2025_11_20_00::update::UpdatesPutRepositoryParams;
     pub use crate::v2025_11_20_00::update::UpdatesTrustRoot;
+
+    pub use crate::v2026_05_20_00::update::UpdateStatus;
 }
 
 pub mod vpc {

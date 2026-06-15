@@ -113,7 +113,7 @@ impl WebhookDelivery {
 
     pub fn to_api_delivery(
         &self,
-        alert_class: AlertClass,
+        alert_class: impl Into<AlertClass>,
         attempts: &[WebhookDeliveryAttempt],
     ) -> alert::AlertDelivery {
         let mut attempts: Vec<_> =
@@ -126,7 +126,7 @@ impl WebhookDelivery {
         alert::AlertDelivery {
             id: self.id.into_untyped_uuid(),
             receiver_id: self.rx_id.into(),
-            alert_class: alert_class.as_str().to_owned(),
+            alert_class: alert_class.into().as_str().to_owned(),
             alert_id: self.alert_id.into(),
             state: self.state.into(),
             trigger: self.triggered_by.into(),
