@@ -7646,12 +7646,31 @@ CREATE TABLE IF NOT EXISTS omicron.public.ereporter_restart (
     -- not known to the system when the ereport was received. If the physical
     -- location of the sled is determined later, subsequent attempts to insert
     -- ereports will update this field.
-    --
-    -- Note: this is `INT4`, not `INT`/`INT8`. In CockroachDB `INT` is a 64-bit
-    -- alias, but the `slot` column (and its `ereport` counterpart) is a 32-bit
-    -- slot number, matching `Nullable<Int4>` in the Diesel schema.
-    slot INT4
+    slot INT4,
+
+    CONSTRAINT reporter_validity CHECK (
+        (
+            -- ereports from SPs must always have a SP type and slot, so we need
+            -- not worry about temporarily accepting NULL slots so that they can
+            -- be back-populated later as we do for host OS reporters.
+            reporter = 'sp'  AND slot IS NOT NULL
+        ) OR (
+            -- ereports from the sled host OS must have the 'sled' slot type (as
+            -- switches and PSCs do not have a host OS)
+            reporter = 'host' AND slot_type = 'sled'
+        )
+    ),
+
 );
+
+CREATE INDEX IF NOT EXISTS lookup_ereporter_restart_by_slot
+ON omicron.public.ereporter_restart (
+    reporter,
+    slot_type,
+    slot
+)
+WHERE
+    slot IS NOT NULL;
 
 /*
     * Fault management situation reports (and accessories)
@@ -8749,7 +8768,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '267.0.0', NULL)
+    (TRUE, NOW(), NOW(), '268.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;
