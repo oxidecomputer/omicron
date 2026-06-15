@@ -80,6 +80,13 @@
       mgVersion = openAPIVersion
         ./tools/maghemite_mg_openapi_version;
 
+      mgDdmdCommit = with pkgs.lib;
+        let
+          file = strings.fileContents ./tools/maghemite_ddm_openapi_version;
+          parts = strings.splitString "\n" file;
+        in
+        extractHash { prefix = "COMMIT"; inherit parts; } 0;
+
       dendriteCommit = with pkgs.lib;
         let
           file = strings.fileContents ./tools/dendrite_version;
@@ -166,23 +173,24 @@
               '';
           };
 
+      maghemiteShas = with pkgs.lib;
+        let
+          file = builtins.readFile
+            ./tools/maghemite_mgd_checksums;
+        in
+        strings.splitString
+          "\n"
+          file;
+
       mgd = with pkgs.lib;
         let
           commit = mgVersion.commit;
           repo = "maghemite";
-          shas =
-            let
-              file = builtins.readFile
-                ./tools/maghemite_mgd_checksums;
-            in
-            strings.splitString
-              "\n"
-              file;
           # get stuff
           tarball = downloadBuildomat
             {
               inherit commit repo;
-              sha = findSha shas "CIDL_SHA256";
+              sha = findSha maghemiteShas "CIDL_SHA256";
               kind = "image";
               file = "mgd.tar.gz";
             };
@@ -190,7 +198,7 @@
             downloadBuildomat
               {
                 inherit commit repo;
-                sha = findSha shas "MGD_LINUX_SHA256";
+                sha = findSha maghemiteShas "MGD_LINUX_SHA256";
                 kind = "linux";
                 file = "mgd";
               };
@@ -224,6 +232,60 @@
 
                 mkdir -p $out/bin
                 ln -s $out/${binPath}/mgd $out/bin/mgd
+              '';
+          };
+
+
+      mgDdmd = with pkgs.lib;
+        let
+          commit = mgDdmdCommit;
+          repo = "maghemite";
+          # get stuff
+          tarball = downloadBuildomat
+            {
+              inherit commit repo;
+              sha = findSha maghemiteShas "MG_DDM_SHA256";
+              kind = "image";
+              file = "mg-ddm.tar.gz";
+            };
+          linuxBin =
+            downloadBuildomat
+              {
+                inherit commit repo;
+                sha = findSha maghemiteShas "DDMD_LINUX_SHA256";
+                kind = "linux";
+                file = "ddmd";
+              };
+        in
+        with pkgs;
+        stdenv.mkDerivation
+          {
+            name = "mg-ddm";
+            src = tarball;
+            version = commit;
+            nativeBuildInputs = [
+              # patch the binary to use the right dynamic library paths.
+              autoPatchelfHook
+            ];
+
+            buildInputs = [
+              glibc
+              gcc-unwrapped
+              openssl.dev
+            ];
+
+            installPhase =
+              let
+                binPath = "root/opt/oxide/mg-ddm/bin";
+              in
+              ''
+                mkdir -p $out/${binPath}
+                cp -r . $out/root
+                cp ${linuxBin} $out/${binPath}/ddmd
+                chmod +x $out/${binPath}/ddmd
+
+                mkdir -p $out/bin
+                ln -s $out/${binPath}/ddmd $out/bin/ddmd
               '';
           };
 
@@ -312,7 +374,7 @@
     in
     {
       packages.x86_64-linux = {
-        inherit dendrite-stub mgd cockroachdb clickhouse;
+        inherit dendrite-stub mgd mgDdmd cockroachdb clickhouse;
       };
 
       checks.x86_64-linux = with pkgs;
@@ -409,6 +471,7 @@
               mkdir -p out/cockroachdb/
 
               ln -s ${mgd.out} -T out/mgd
+              ln -s ${mgDdmd.out} -T out/mg-ddm
               ln -s ${dendrite-stub.out} -T out/dendrite-stub
               ln -s ${clickhouse.out}/bin/clickhouse out/clickhouse/clickhouse
               ln -s ${clickhouse.out}/etc/config.xml out/clickhouse
