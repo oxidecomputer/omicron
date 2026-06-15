@@ -47,9 +47,10 @@ impl IdOrdItem for DiskHealthSnapshot {
     id_upcast!();
 }
 
-/// Per-case summary built from a case's facts. Each Disk case is about a
-/// single physical disk; every fact on the case must reference that disk.
-struct ParentCaseSummary {
+/// A parent-forwarded Disk case, parsed into the form this engine acts on.
+/// Each Disk case is about a single physical disk; every fact on the case
+/// must reference that disk.
+struct ParsedDiskCase {
     /// The physical disk this case is about.
     physical_disk_id: PhysicalDiskUuid,
     /// All `ZpoolUnhealthy` facts on this case. Normally one; pathological
@@ -78,11 +79,9 @@ enum UninterpretableCase {
     NoFacts,
 }
 
-/// Summarize one parent-forwarded Disk case, or explain why it cannot be
-/// interpreted.
-fn summarize_case(
-    case: &fm::Case,
-) -> Result<ParentCaseSummary, UninterpretableCase> {
+/// Parse one parent-forwarded Disk case into a [`ParsedDiskCase`], or explain
+/// why it cannot be interpreted.
+fn parse_case(case: &fm::Case) -> Result<ParsedDiskCase, UninterpretableCase> {
     let mut unhealthy_facts: IdOrdMap<ZpoolUnhealthyFact> = IdOrdMap::new();
     let mut case_disk_id: Option<PhysicalDiskUuid> = None;
     for fact in case.facts.iter() {
@@ -116,7 +115,7 @@ fn summarize_case(
     let Some(physical_disk_id) = case_disk_id else {
         return Err(UninterpretableCase::NoFacts);
     };
-    Ok(ParentCaseSummary { physical_disk_id, unhealthy_facts })
+    Ok(ParsedDiskCase { physical_disk_id, unhealthy_facts })
 }
 
 pub(super) fn analyze(builder: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
@@ -127,7 +126,7 @@ pub(super) fn analyze(builder: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
     // Index every zpool we observed in this inventory, so we can distinguish
     // "saw it, it's Online" from "didn't see it at all" when looking up by
     // an in-service disk's zpool below.
-    let observed_health: BTreeMap<ZpoolUuid, ZpoolHealth> = input
+    let observed_zpool_health: BTreeMap<ZpoolUuid, ZpoolHealth> = input
         .inventory()
         .sled_agents
         .iter()
@@ -145,22 +144,22 @@ pub(super) fn analyze(builder: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
         .map(|d| DiskHealthSnapshot {
             physical_disk_id: d.physical_disk_id,
             zpool_id: d.zpool_id,
-            zpool_health: observed_health.get(&d.zpool_id).copied(),
+            zpool_health: observed_zpool_health.get(&d.zpool_id).copied(),
         })
         .collect();
 
     // Index the Disk cases copied forward from the parent sitrep. Every case
     // is about one physical disk; we derive the disk from its facts.
-    let mut parent_cases = BTreeMap::<CaseUuid, ParentCaseSummary>::new();
+    let mut parent_cases = BTreeMap::<CaseUuid, ParsedDiskCase>::new();
     let mut uninterpretable = Vec::<(CaseUuid, UninterpretableCase)>::new();
     for case in input
         .open_cases()
         .iter()
         .filter(|c| c.metadata.de == DiagnosisEngineKind::PhysicalDisk)
     {
-        match summarize_case(case) {
-            Ok(summary) => {
-                parent_cases.insert(case.id, summary);
+        match parse_case(case) {
+            Ok(parsed_case) => {
+                parent_cases.insert(case.id, parsed_case);
             }
             Err(reason) => {
                 slog::warn!(
@@ -194,22 +193,22 @@ pub(super) fn analyze(builder: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
     // duplicate would otherwise decay into an uninterpretable empty case.)
     let mut case_by_disk: BTreeMap<
         PhysicalDiskUuid,
-        (CaseUuid, &ParentCaseSummary),
+        (CaseUuid, &ParsedDiskCase),
     > = BTreeMap::new();
-    for (case_id, summary) in &parent_cases {
+    for (case_id, parsed_case) in &parent_cases {
         case_by_disk
-            .entry(summary.physical_disk_id)
-            .or_insert((*case_id, summary));
+            .entry(parsed_case.physical_disk_id)
+            .or_insert((*case_id, parsed_case));
     }
-    for (case_id, summary) in &parent_cases {
-        let (kept_case_id, _) = case_by_disk[&summary.physical_disk_id];
+    for (case_id, parsed_case) in &parent_cases {
+        let (kept_case_id, _) = case_by_disk[&parsed_case.physical_disk_id];
         if *case_id != kept_case_id {
             slog::warn!(
                 &builder.log,
                 "closing duplicate Disk case";
                 "case_id" => %case_id,
                 "kept_case_id" => %kept_case_id,
-                "physical_disk_id" => %summary.physical_disk_id,
+                "physical_disk_id" => %parsed_case.physical_disk_id,
             );
             builder
                 .cases
@@ -217,7 +216,7 @@ pub(super) fn analyze(builder: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
                 .expect("case_id came from builder's open cases")
                 .close(format!(
                     "duplicate of case {kept_case_id} for disk {}",
-                    summary.physical_disk_id,
+                    parsed_case.physical_disk_id,
                 ));
         }
     }
@@ -232,16 +231,16 @@ pub(super) fn analyze(builder: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
     //  - disk in service but absent from inventory → leave alone (absence
     //    is NOT a recovery signal: sled could be powered off, or
     //    inventory could be lossy)
-    for &(case_id, summary) in case_by_disk.values() {
+    for &(case_id, parsed_case) in case_by_disk.values() {
         let mut case_mut = builder
             .cases
             .case_mut(&case_id)
             .expect("case_id came from builder's open cases");
-        match in_service_health.get(&summary.physical_disk_id) {
+        match in_service_health.get(&parsed_case.physical_disk_id) {
             None => {
                 case_mut.close(format!(
                     "disk {} no longer in service",
-                    summary.physical_disk_id,
+                    parsed_case.physical_disk_id,
                 ));
             }
             Some(snap) if snap.zpool_health == Some(ZpoolHealth::Online) => {
@@ -252,7 +251,7 @@ pub(super) fn analyze(builder: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
                 let Some(current_health) = snap.zpool_health else {
                     continue;
                 };
-                for fact_ref in summary.unhealthy_facts.iter() {
+                for fact_ref in parsed_case.unhealthy_facts.iter() {
                     if fact_ref.payload.last_seen_health != current_health
                         || fact_ref.payload.zpool_id != snap.zpool_id
                     {
@@ -279,8 +278,8 @@ pub(super) fn analyze(builder: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
 
         let case_id_for_fact = match parent_for_disk {
             // Parent case already has an accurate fact; fully covered.
-            Some((_, summary))
-                if summary.unhealthy_facts.iter().any(|f| {
+            Some((_, parsed_case))
+                if parsed_case.unhealthy_facts.iter().any(|f| {
                     f.payload.last_seen_health == current_health
                         && f.payload.zpool_id == disk.zpool_id
                 }) =>
