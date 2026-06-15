@@ -31,5 +31,5 @@ CREATE TABLE IF NOT EXISTS omicron.public.ereporter_restart (
             -- switches and PSCs do not have a host OS)
             reporter = 'host' AND slot_type = 'sled'
         )
-    ),
+    )
 );

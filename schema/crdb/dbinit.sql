@@ -7659,18 +7659,8 @@ CREATE TABLE IF NOT EXISTS omicron.public.ereporter_restart (
             -- switches and PSCs do not have a host OS)
             reporter = 'host' AND slot_type = 'sled'
         )
-    ),
-
+    )
 );
-
-CREATE INDEX IF NOT EXISTS lookup_ereporter_restart_by_slot
-ON omicron.public.ereporter_restart (
-    reporter,
-    slot_type,
-    slot
-)
-WHERE
-    slot IS NOT NULL;
 
 /*
     * Fault management situation reports (and accessories)
