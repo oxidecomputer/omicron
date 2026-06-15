@@ -751,7 +751,7 @@ async fn test_login_redirect_multiple_silos(
                     eprintln!("wait for nexus update: {:?}", error);
                     if error.is_connect() {
                         // DNS may not have been updated yet.
-                        return Err(CondCheckError::NotYet);
+                        return Err(CondCheckError::NotYet { status: None });
                     }
 
                     return Err(CondCheckError::Failed(error));
@@ -761,7 +761,7 @@ async fn test_login_redirect_multiple_silos(
             eprintln!("wait for nexus update: status {:?}", response.status());
             if response.status() == http::StatusCode::BAD_REQUEST {
                 // Nexus may not have updated its endpoint configuration yet.
-                return Err(CondCheckError::NotYet);
+                return Err(CondCheckError::NotYet { status: None });
             }
 
             // For any other response, we'll proceed.  It may be wrong, but the
@@ -891,7 +891,9 @@ async fn test_login_redirect_multiple_silos(
             )
             .await
             {
-                Redirect::Location(_) => Err(CondCheckError::NotYet),
+                Redirect::Location(_) => {
+                    Err(CondCheckError::NotYet { status: None })
+                }
                 Redirect::Error(message) => Ok(message),
             }
         },

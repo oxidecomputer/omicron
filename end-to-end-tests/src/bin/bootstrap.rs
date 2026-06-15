@@ -29,11 +29,11 @@ async fn run_test() -> Result<()> {
     eprintln!("waiting for nexus to come up...");
     wait_for_condition(
         || async {
-            client
-                .project_list()
-                .send()
-                .await
-                .map_err(|_| CondCheckError::<oxide_client::Error>::NotYet)
+            client.project_list().send().await.map_err(|_| CondCheckError::<
+                oxide_client::Error,
+            >::NotYet {
+                status: None,
+            })
         },
         &Duration::from_secs(1),
         &Duration::from_secs(300),
@@ -143,7 +143,9 @@ async fn run_test() -> Result<()> {
                 })
                 .send()
                 .await
-                .map_err(|_| CondCheckError::<oxide_client::Error>::NotYet)
+                .map_err(|_| CondCheckError::<oxide_client::Error>::NotYet {
+                    status: None,
+                })
         },
         &Duration::from_secs(1),
         &Duration::from_secs(120),

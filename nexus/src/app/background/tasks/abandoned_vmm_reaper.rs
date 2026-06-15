@@ -6,10 +6,10 @@
 //!
 //! A VMM is considered "abandoned" if (and only if):
 //!
-//! - It is in the `Destroyed` state.
+//! - It is in the `Destroyed`, `Failed`, or `SagaUnwound` state.
 //! - It is not currently running an instance, and it is also not the
-//!   migration target of any instance (i.e. it is not pointed to by
-//!   any instance record's `active_propolis_id` and `target_propolis_id`
+//!   migration target of an instance (i.e. it is not pointed to by its
+//!   owning instance's `active_propolis_id` or `target_propolis_id`
 //!   fields).
 //! - It has not been deleted yet.
 //!

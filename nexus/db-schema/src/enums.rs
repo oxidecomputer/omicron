@@ -107,6 +107,7 @@ define_enums! {
     SledResourceVmmStateEnum => "sled_resource_vmm_state",
     SledRoleEnum => "sled_role",
     SledStateEnum => "sled_state",
+    SledUpdateAvailabilityEnum => "sled_update_availability",
     SnapshotStateEnum => "snapshot_state",
     SpTypeEnum => "sp_type",
     SupportBundleStateEnum => "support_bundle_state",

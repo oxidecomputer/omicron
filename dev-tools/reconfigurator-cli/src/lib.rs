@@ -36,8 +36,10 @@ use nexus_reconfigurator_simulation::{SimStateBuilder, SimTufRepoSource};
 use nexus_reconfigurator_simulation::{SimTufRepoDescription, Simulator};
 use nexus_types::deployment::BlueprintHostPhase2DesiredContents;
 use nexus_types::deployment::BlueprintMeasurements;
+use nexus_types::deployment::BlueprintSledUpdateDispositionKind;
 use nexus_types::deployment::CockroachDbSettings;
 use nexus_types::deployment::ExpectedVersion;
+use nexus_types::deployment::ReconfiguratorDisruptionPolicy;
 use nexus_types::deployment::execution::blueprint_external_dns_config;
 use nexus_types::deployment::execution::blueprint_internal_dns_config;
 use nexus_types::deployment::{Blueprint, UnstableReconfiguratorState};
@@ -976,6 +978,15 @@ enum BlueprintEditCommands {
         /// the UUID to set the field to, or "unset"
         value: MupdateOverrideUuidOpt,
     },
+    /// set the update disposition for a sled
+    SetUpdateDisposition {
+        /// sled to set the field on
+        sled_id: SledOpt,
+
+        /// the disposition to set the sled to
+        #[command(subcommand)]
+        command: SledUpdateDispositionTarget,
+    },
     /// set the minimum generation for which target releases are accepted
     ///
     /// At the moment, this just sets the field to the given value. In the
@@ -1040,6 +1051,39 @@ enum SledMeasurementTarget {
     InstallDataset,
     // Unlike Omicron zones we don't have a need for the
     // `Artifact` kind for now
+}
+
+#[derive(Debug, Subcommand)]
+enum SledUpdateDispositionTarget {
+    /// mark the sled available for provisioning
+    Available,
+    /// mark the sled as evacuating, with the given disruption policy
+    Evacuating {
+        /// the disruption policy to apply while the sled is evacuating
+        #[clap(value_enum)]
+        policy: DisruptionPolicyOpt,
+    },
+}
+
+/// A clap-friendly mirror of [`ReconfiguratorDisruptionPolicy`].
+///
+/// We keep this local to the CLI (rather than deriving `ValueEnum` on the type
+/// itself) so the API type stays free of clap.
+#[derive(Clone, Copy, Debug, ValueEnum)]
+enum DisruptionPolicyOpt {
+    Terminate,
+    MigrateOrTerminate,
+    MigrateOnly,
+}
+
+impl From<DisruptionPolicyOpt> for ReconfiguratorDisruptionPolicy {
+    fn from(value: DisruptionPolicyOpt) -> Self {
+        match value {
+            DisruptionPolicyOpt::Terminate => Self::Terminate,
+            DisruptionPolicyOpt::MigrateOrTerminate => Self::MigrateOrTerminate,
+            DisruptionPolicyOpt::MigrateOnly => Self::MigrateOnly,
+        }
+    }
 }
 
 #[derive(Debug, Subcommand)]
@@ -2659,6 +2703,23 @@ fn cmd_blueprint_edit(
                     format!("set remove_mupdate_override to {uuid}")
                 }
             }
+        }
+        BlueprintEditCommands::SetUpdateDisposition { sled_id, command } => {
+            let sled_id = sled_id.to_sled_id(system.description())?;
+            let kind = match command {
+                SledUpdateDispositionTarget::Available => {
+                    BlueprintSledUpdateDispositionKind::Available
+                }
+                SledUpdateDispositionTarget::Evacuating { policy } => {
+                    BlueprintSledUpdateDispositionKind::Evacuating {
+                        policy: policy.into(),
+                    }
+                }
+            };
+            builder
+                .sled_set_update_disposition_kind(sled_id, kind)
+                .context("failed to set update disposition")?;
+            format!("set sled {sled_id} update disposition kind to {kind}")
         }
         BlueprintEditCommands::SetTargetReleaseMinimumGeneration {
             generation,

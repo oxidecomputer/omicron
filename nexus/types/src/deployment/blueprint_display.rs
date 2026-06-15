@@ -53,8 +53,15 @@ pub mod constants {
     pub const NOT_PRESENT_IN_COLLECTION_PARENS: &str =
         "(not present in collection)";
     pub const INVALID_VALUE_PARENS: &str = "(invalid value)";
+    pub const UPDATE_DISPOSITION_MISSING_BUMP_PARENS: &str =
+        "(error: kind changed without a generation bump)";
+    pub const UPDATE_DISPOSITION_INCORRECT_BUMP_PARENS: &str =
+        "(error: kind changed but generation not bumped by exactly one)";
+    pub const UPDATE_DISPOSITION_SPURIOUS_BUMP_PARENS: &str =
+        "(error: generation bumped without a kind change)";
     pub const GENERATION: &str = "generation";
     pub const STATE: &str = "state";
+    pub const UPDATE_DISPOSITION: &str = "update disposition";
     pub const CONFIG_GENERATION: &str = "config generation";
     pub const SUBNET: &str = "subnet";
     pub const LAST_ALLOCATED_IP: &str = "last allocated IP";

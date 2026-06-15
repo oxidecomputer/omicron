@@ -9,7 +9,6 @@ workspace = true
 
 [build-dependencies]
 omicron-rpaths.workspace = true
-vergen-gitcl.workspace = true
 
 [dependencies]
 anyhow.workspace = true
@@ -62,6 +61,7 @@ nexus-saga-recovery.workspace = true
 nexus-types.workspace = true
 ntp-admin-client.workspace = true
 omicron-common.workspace = true
+omicron-git-version.workspace = true
 omicron-nexus.workspace = true
 omicron-uuid-kinds.workspace = true
 omicron-workspace-hack.workspace = true
