@@ -228,6 +228,14 @@ impl FmAnalysis {
         Ok((input, status::PreparationStatus { errors, report }))
     }
 
+    async fn load_ereporter_restarts(
+        &mut self,
+        opctx: &OpContext,
+        builder: &mut fm::analysis_input::Builder,
+    ) -> anyhow::Result<()> {
+        todo!()
+    }
+
     async fn load_new_ereports(
         &mut self,
         opctx: &OpContext,

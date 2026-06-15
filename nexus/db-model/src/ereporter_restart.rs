@@ -10,6 +10,7 @@ use chrono::DateTime;
 use chrono::Utc;
 use nexus_db_schema::schema::ereporter_restart;
 use omicron_uuid_kinds::EreporterRestartKind;
+use omicron_uuid_kinds::EreporterRestartUuid;
 
 #[derive(Clone, Debug, Insertable, Queryable, Selectable)]
 #[diesel(table_name = ereporter_restart)]
@@ -25,4 +26,18 @@ impl EreporterRestart {
     pub fn slot_number(&self) -> Option<u16> {
         self.slot.map(|slot| (*slot).0)
     }
+
+    pub fn id(&self) -> &EreporterRestartUuid {
+        &self.id.0
+    }
+}
+
+impl iddqd::IdOrdItem for EreporterRestart {
+    type Key<'a> = &'a EreporterRestartUuid;
+
+    fn key(&self) -> Self::Key<'_> {
+        self.id()
+    }
+
+    iddqd::id_upcast!();
 }

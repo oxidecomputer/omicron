@@ -6,6 +6,7 @@
 
 use chrono::{DateTime, Utc};
 use iddqd::IdOrdMap;
+use nexus_db_model::EreporterRestart;
 use nexus_types::fm::analysis_reports::ClosedCaseReport;
 use nexus_types::fm::{self, Sitrep, SitrepVersion};
 use nexus_types::inventory;
@@ -39,6 +40,7 @@ pub struct Input {
     new_ereports: IdOrdMap<fm::Ereport>,
     open_cases: IdOrdMap<fm::Case>,
     closed_cases_copied_forward: IdOrdMap<fm::Case>,
+    ereporter_restarts: IdOrdMap<EreporterRestart>,
 }
 
 impl Input {
@@ -59,6 +61,10 @@ impl Input {
     /// `closed_cases_copied_forward` accessor.
     pub fn open_cases(&self) -> &IdOrdMap<fm::Case> {
         &self.open_cases
+    }
+
+    pub fn ereporter_restarts(&self) -> &IdOrdMap<EreporterRestart> {
+        &self.ereporter_restarts
     }
 
     pub(crate) fn closed_cases_copied_forward(&self) -> &IdOrdMap<fm::Case> {
@@ -95,6 +101,7 @@ impl Input {
             parent_sitrep,
             inv,
             new_ereports: IdOrdMap::default(),
+            ereporter_restarts: IdOrdMap::default(),
             unmarked_seen_ereports: BTreeSet::default(),
         })
     }
@@ -127,6 +134,8 @@ pub struct Builder {
     /// These must be tracked in order to determine which closed cases must be
     /// copied forwards due to containing unmarked ereports.
     unmarked_seen_ereports: BTreeSet<fm::EreportId>,
+
+    ereporter_restarts: IdOrdMap<nexus_db_model::EreporterRestart>,
 }
 
 impl Builder {
@@ -153,6 +162,14 @@ impl Builder {
 
             Some(ereport)
         }))
+    }
+
+    /// Adds a set of ereport restart IDs to the input.
+    pub fn add_ereport_restarts(
+        &mut self,
+        restarts: impl IntoIterator<Item = EreporterRestart>,
+    ) {
+        self.ereporter_restarts.extend(restarts)
     }
 
     pub fn num_ereports(&self) -> usize {
@@ -234,6 +251,7 @@ impl Builder {
             new_ereports: self.new_ereports,
             open_cases,
             closed_cases_copied_forward,
+            ereporter_restarts: self.ereporter_restarts,
         };
 
         (input, report)

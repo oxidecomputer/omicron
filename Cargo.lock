@@ -7205,6 +7205,7 @@ dependencies = [
  "chrono",
  "ereport-types",
  "iddqd",
+ "nexus-db-model",
  "nexus-reconfigurator-planning",
  "nexus-types",
  "omicron-test-utils",
