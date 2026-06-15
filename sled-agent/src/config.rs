@@ -35,6 +35,15 @@ pub enum SidecarRevision {
     SoftPropolis(SoftPortConfig),
 }
 
+impl SidecarRevision {
+    pub fn is_physical(&self) -> bool {
+        match self {
+            Self::Physical(_) => true,
+            Self::SoftZone(_) | Self::SoftPropolis(_) => false,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct SoftPortConfig {
     /// Number of front ports
