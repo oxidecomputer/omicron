@@ -151,6 +151,7 @@ impl SledAgent {
                     ports: Vec::new(),
                     bgp: Vec::new(),
                     bfd: Vec::new(),
+                    loopback_addresses: Vec::new(),
                 },
                 // TODO-correctness Can we fill this in for the simulated
                 // sled-agent?

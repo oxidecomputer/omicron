@@ -1480,6 +1480,7 @@ mod tests {
                 ports: Vec::new(),
                 bgp: Vec::new(),
                 bfd: Vec::new(),
+                loopback_addresses: Vec::new(),
             },
             allowed_source_ips: AllowedSourceIps::Any,
             external_jumbo_frames_opt_in_enabled: false,
