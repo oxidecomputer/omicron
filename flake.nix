@@ -182,31 +182,30 @@
           "\n"
           file;
 
-      mgd = with pkgs.lib;
-        let
-          commit = mgVersion.commit;
+      mkMaghemiteThing = { name, binFilename ? name, commit, tarballShaName, linuxBinShaName }:
+        with pkgs.lib; let
           repo = "maghemite";
           # get stuff
           tarball = downloadBuildomat
             {
               inherit commit repo;
-              sha = findSha maghemiteShas "CIDL_SHA256";
+              sha = findSha maghemiteShas tarballShaName;
               kind = "image";
-              file = "mgd.tar.gz";
+              file = "${name}.tar.gz";
             };
           linuxBin =
             downloadBuildomat
               {
                 inherit commit repo;
-                sha = findSha maghemiteShas "MGD_LINUX_SHA256";
+                sha = findSha maghemiteShas linuxBinShaName;
                 kind = "linux";
-                file = "mgd";
+                file = binFilename;
               };
         in
         with pkgs;
         stdenv.mkDerivation
           {
-            name = "mgd";
+            inherit name;
             src = tarball;
             version = commit;
             nativeBuildInputs = [
@@ -222,72 +221,33 @@
 
             installPhase =
               let
-                binPath = "root/opt/oxide/mgd/bin";
+                binPath = "root/opt/oxide/${name}/bin";
               in
               ''
                 mkdir -p $out/${binPath}
                 cp -r . $out/root
-                cp ${linuxBin} $out/${binPath}/mgd
-                chmod +x $out/${binPath}/mgd
+                cp ${linuxBin} $out/${binPath}/${binFilename}
+                chmod +x $out/${binPath}/${binFilename}
 
                 mkdir -p $out/bin
-                ln -s $out/${binPath}/mgd $out/bin/mgd
+                ln -s $out/${binPath}/${binFilename} $out/bin/${binFilename}
               '';
           };
 
+      mgd = mkMaghemiteThing {
+        name = "mgd";
+        commit = mgVersion.commit;
+        tarballShaName = "CIDL_SHA256";
+        linuxBinShaName = "MGD_LINUX_SHA256";
+      };
 
-      mgDdmd = with pkgs.lib;
-        let
-          commit = mgDdmdCommit;
-          repo = "maghemite";
-          # get stuff
-          tarball = downloadBuildomat
-            {
-              inherit commit repo;
-              sha = findSha maghemiteShas "MG_DDM_SHA256";
-              kind = "image";
-              file = "mg-ddm.tar.gz";
-            };
-          linuxBin =
-            downloadBuildomat
-              {
-                inherit commit repo;
-                sha = findSha maghemiteShas "DDMD_LINUX_SHA256";
-                kind = "linux";
-                file = "ddmd";
-              };
-        in
-        with pkgs;
-        stdenv.mkDerivation
-          {
-            name = "mg-ddm";
-            src = tarball;
-            version = commit;
-            nativeBuildInputs = [
-              # patch the binary to use the right dynamic library paths.
-              autoPatchelfHook
-            ];
-
-            buildInputs = [
-              glibc
-              gcc-unwrapped
-              openssl.dev
-            ];
-
-            installPhase =
-              let
-                binPath = "root/opt/oxide/mg-ddm/bin";
-              in
-              ''
-                mkdir -p $out/${binPath}
-                cp -r . $out/root
-                cp ${linuxBin} $out/${binPath}/ddmd
-                chmod +x $out/${binPath}/ddmd
-
-                mkdir -p $out/bin
-                ln -s $out/${binPath}/ddmd $out/bin/ddmd
-              '';
-          };
+      mgDdmd = mkMaghemiteThing {
+        name = "mg-ddm";
+        binFilename = "ddmd";
+        commit = mgDdmdCommit;
+        tarballShaName = "MG_DDM_SHA256";
+        linuxBinShaName = "DDMD_LINUX_SHA256";
+      };
 
       # reads the version for Clickhouse or Cockroachdb from the
       # `tools/clickhouse_version` and `tools/cockroachdb_version` files.
