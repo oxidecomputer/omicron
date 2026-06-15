@@ -8,6 +8,7 @@ Omicron is a large distributed system, as a result of which it is somewhat susce
 
 == Glossary [[glossary]]
 
+Background task:: A task that runs periodically in the background on a timer. Most background tasks implement the _reliable persistent workflow_ or _RPW_ pattern; see https://rfd.shared.oxide.computer/rfd/0373[RFD 373 Reliable Persistent Workflows].
 Nexus test:: A test that uses the Nexus test framework, typically represented as an async function annotated with `#[nexus_test]`. (Some tests may manually set up Nexus.)
 System under test (SUT):: The production code (components or systems) being tested.
 
@@ -112,6 +113,8 @@ It is fine to call `activate_background_task` in a loop since it is synchronous:
 
 // FIXME: replace ZZZZ with the merged commit hash of the test_instance_migrate race-fix PR.
 * https://github.com/oxidecomputer/omicron/commit/ZZZZ[`ZZZZ`] activates the `abandoned_vmm_reaper` task on each poll instead of waiting out its periodic activation interval.
+// FIXME: replace WWWW with the merged commit hash of the dead-switch NAT race-fix PR.
+* https://github.com/oxidecomputer/omicron/commit/WWWW[`WWWW`] makes it so that when checking that a restarted switch zone has received its NAT entries, the test triggers dendrite's NAT reconciliation on each poll rather than waiting for dendrite's own periodic background task poll. Here, the background task lives inside `dpd` rather than Nexus, so it is triggered through the `dpd` client's `nat_trigger_update` rather than the Nexus lockstep API.
 
 === Teardown ordering races [[teardown-ordering-races]]
 
