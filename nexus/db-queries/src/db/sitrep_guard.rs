@@ -501,7 +501,7 @@ mod tests {
             cases: IdOrdMap::new(),
             ereports_by_id: IdOrdMap::new(),
         };
-        datastore.fm_sitrep_insert(opctx, sitrep).await.unwrap();
+        datastore.fm_sitrep_insert(opctx, sitrep, None).await.unwrap();
 
         // `SitrepMetadata` doesn't have a `dummy_generation` field, so we have
         // to update it manually.
