@@ -770,7 +770,7 @@ impl DataStore {
                                 .clone()
                                 .into_sql::<Nullable<diesel::sql_types::Text>>(
                                 ),
-                            rot.slot_a_error.clone()
+                            rot.slot_a_error
                                 .map(RotImageError::from)
                                 .into_sql::<Nullable<RotImageErrorEnum>>(),
                             rot.slot_b_error
