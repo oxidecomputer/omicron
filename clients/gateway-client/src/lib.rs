@@ -78,9 +78,9 @@ progenitor::generate_api!(
     },
 
     replace = {
-        RotImageError = gateway_types::rot::RotImageError,
         RotSlot = gateway_types::rot::RotSlot,
         RotState = gateway_types::rot::RotState,
+        RotImageError = gateway_types::rot::RotImageError,
         Ena = ereport_types::Ena,
         Ereport = ereport_types::Ereport,
         Ereports = ereport_types::Ereports,

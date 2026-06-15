@@ -146,14 +146,14 @@ impl UserSpecifiedRackNetworkConfig {
             UserSpecifiedPortConfig::Manual(cfg) => {
                 Some((SwitchSlot::Switch0, port.as_str(), cfg))
             }
-            UserSpecifiedPortConfig::DdmAutoPortConfig => None,
+            UserSpecifiedPortConfig::DdmAutoPortConfig {} => None,
         });
 
         let iter1 = self.switch1.iter().filter_map(|(port, cfg)| match cfg {
             UserSpecifiedPortConfig::Manual(cfg) => {
                 Some((SwitchSlot::Switch1, port.as_str(), cfg))
             }
-            UserSpecifiedPortConfig::DdmAutoPortConfig => None,
+            UserSpecifiedPortConfig::DdmAutoPortConfig {} => None,
         });
 
         iter0.chain(iter1)
@@ -208,21 +208,21 @@ pub struct ManualPortConfig {
 #[allow(clippy::large_enum_variant)]
 pub enum UserSpecifiedPortConfig {
     Manual(ManualPortConfig),
-    DdmAutoPortConfig,
+    DdmAutoPortConfig {},
 }
 
 impl UserSpecifiedPortConfig {
     pub fn manual(&self) -> Option<&ManualPortConfig> {
         match self {
             Self::Manual(cfg) => Some(cfg),
-            Self::DdmAutoPortConfig => None,
+            Self::DdmAutoPortConfig {} => None,
         }
     }
 
     pub fn manual_mut(&mut self) -> Option<&mut ManualPortConfig> {
         match self {
             Self::Manual(cfg) => Some(cfg),
-            Self::DdmAutoPortConfig => None,
+            Self::DdmAutoPortConfig {} => None,
         }
     }
 }

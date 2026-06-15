@@ -2432,6 +2432,70 @@
           "status"
         ]
       },
+      "ManualPortConfig": {
+        "description": "User-specified version of `PortConfig`.\n\nAll of `PortConfig` is user-specified. But we expect the port name to be a key, rather than a field as in `PortConfig`. So this has all of the fields other than the port name.",
+        "type": "object",
+        "properties": {
+          "addresses": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UserSpecifiedUplinkAddressConfig"
+            }
+          },
+          "autoneg": {
+            "type": "boolean"
+          },
+          "bgp_peers": {
+            "default": [],
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UserSpecifiedBgpPeerConfig"
+            }
+          },
+          "lldp": {
+            "nullable": true,
+            "default": null,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/LldpPortConfig"
+              }
+            ]
+          },
+          "routes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RouteConfig"
+            }
+          },
+          "tx_eq": {
+            "nullable": true,
+            "default": null,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TxEqConfig"
+              }
+            ]
+          },
+          "uplink_port_fec": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/LinkFec"
+              }
+            ]
+          },
+          "uplink_port_speed": {
+            "$ref": "#/components/schemas/LinkSpeed"
+          }
+        },
+        "required": [
+          "addresses",
+          "autoneg",
+          "routes",
+          "uplink_port_speed"
+        ],
+        "additionalProperties": false
+      },
       "MaxPathConfig": {
         "type": "integer",
         "format": "uint8",
@@ -2692,7 +2756,7 @@
             "description": "The actual power state.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/PowerState2"
+                "$ref": "#/components/schemas/PowerState3"
               }
             ]
           }
@@ -2711,6 +2775,15 @@
         ]
       },
       "PowerState2": {
+        "description": "See RFD 81.\n\nThis enum only lists power states the SP is able to control; higher power states are controlled by ignition.",
+        "type": "string",
+        "enum": [
+          "A0",
+          "A1",
+          "A2"
+        ]
+      },
+      "PowerState3": {
         "description": "An allowed power state for the module.",
         "oneOf": [
           {
@@ -3781,7 +3854,6 @@
         ]
       },
       "RotImageError": {
-        "description": "`RotImageError`\n\n<details><summary>JSON schema</summary>\n\n```json { \"type\": \"string\", \"enum\": [ \"unchecked\", \"first_page_erased\", \"partially_programmed\", \"invalid_length\", \"header_not_programmed\", \"bootloader_too_small\", \"bad_magic\", \"header_image_size\", \"unaligned_length\", \"unsupported_type\", \"reset_vector_not_thumb2\", \"reset_vector\", \"signature\" ] } ``` </details>",
         "type": "string",
         "enum": [
           "unchecked",
@@ -3876,7 +3948,6 @@
         ]
       },
       "RotState": {
-        "description": "`RotState`\n\n<details><summary>JSON schema</summary>\n\n```json { \"oneOf\": [ { \"type\": \"object\", \"required\": [ \"active\", \"persistent_boot_preference\", \"state\" ], \"properties\": { \"active\": { \"$ref\": \"#/components/schemas/RotSlot\" }, \"pending_persistent_boot_preference\": { \"oneOf\": [ { \"type\": \"null\" }, { \"allOf\": [ { \"$ref\": \"#/components/schemas/RotSlot\" } ] } ] }, \"persistent_boot_preference\": { \"$ref\": \"#/components/schemas/RotSlot\" }, \"slot_a_sha3_256_digest\": { \"type\": [ \"string\", \"null\" ] }, \"slot_b_sha3_256_digest\": { \"type\": [ \"string\", \"null\" ] }, \"state\": { \"type\": \"string\", \"enum\": [ \"v2\" ] }, \"transient_boot_preference\": { \"oneOf\": [ { \"type\": \"null\" }, { \"allOf\": [ { \"$ref\": \"#/components/schemas/RotSlot\" } ] } ] } } }, { \"type\": \"object\", \"required\": [ \"message\", \"state\" ], \"properties\": { \"message\": { \"type\": \"string\" }, \"state\": { \"type\": \"string\", \"enum\": [ \"communication_failed\" ] } } }, { \"type\": \"object\", \"required\": [ \"active\", \"persistent_boot_preference\", \"slot_a_fwid\", \"slot_b_fwid\", \"stage0_fwid\", \"stage0next_fwid\", \"state\" ], \"properties\": { \"active\": { \"$ref\": \"#/components/schemas/RotSlot\" }, \"pending_persistent_boot_preference\": { \"oneOf\": [ { \"type\": \"null\" }, { \"allOf\": [ { \"$ref\": \"#/components/schemas/RotSlot\" } ] } ] }, \"persistent_boot_preference\": { \"$ref\": \"#/components/schemas/RotSlot\" }, \"slot_a_error\": { \"oneOf\": [ { \"type\": \"null\" }, { \"allOf\": [ { \"$ref\": \"#/components/schemas/RotImageError\" } ] } ] }, \"slot_a_fwid\": { \"type\": \"string\" }, \"slot_b_error\": { \"oneOf\": [ { \"type\": \"null\" }, { \"allOf\": [ { \"$ref\": \"#/components/schemas/RotImageError\" } ] } ] }, \"slot_b_fwid\": { \"type\": \"string\" }, \"stage0_error\": { \"oneOf\": [ { \"type\": \"null\" }, { \"allOf\": [ { \"$ref\": \"#/components/schemas/RotImageError\" } ] } ] }, \"stage0_fwid\": { \"type\": \"string\" }, \"stage0next_error\": { \"oneOf\": [ { \"type\": \"null\" }, { \"allOf\": [ { \"$ref\": \"#/components/schemas/RotImageError\" } ] } ] }, \"stage0next_fwid\": { \"type\": \"string\" }, \"state\": { \"type\": \"string\", \"enum\": [ \"v3\" ] }, \"transient_boot_preference\": { \"oneOf\": [ { \"type\": \"null\" }, { \"allOf\": [ { \"$ref\": \"#/components/schemas/RotSlot\" } ] } ] } } } ] } ``` </details>",
         "oneOf": [
           {
             "type": "object",
@@ -4775,7 +4846,6 @@
         ]
       },
       "SpState": {
-        "description": "`SpState`\n\n<details><summary>JSON schema</summary>\n\n```json { \"type\": \"object\", \"required\": [ \"base_mac_address\", \"hubris_archive_id\", \"model\", \"power_state\", \"revision\", \"rot\", \"serial_number\" ], \"properties\": { \"base_mac_address\": { \"type\": \"array\", \"items\": { \"type\": \"integer\", \"format\": \"uint8\", \"minimum\": 0.0 }, \"maxItems\": 6, \"minItems\": 6 }, \"hubris_archive_id\": { \"type\": \"string\" }, \"model\": { \"type\": \"string\" }, \"power_state\": { \"$ref\": \"#/components/schemas/PowerState\" }, \"revision\": { \"type\": \"integer\", \"format\": \"uint32\", \"minimum\": 0.0 }, \"rot\": { \"$ref\": \"#/components/schemas/RotState\" }, \"serial_number\": { \"type\": \"string\" } } } ``` </details>",
         "type": "object",
         "properties": {
           "base_mac_address": {
@@ -4795,7 +4865,7 @@
             "type": "string"
           },
           "power_state": {
-            "$ref": "#/components/schemas/PowerState"
+            "$ref": "#/components/schemas/PowerState2"
           },
           "revision": {
             "type": "integer",
@@ -7906,90 +7976,12 @@
         }
       },
       "UserSpecifiedPortConfig": {
-        "oneOf": [
+        "anyOf": [
           {
-            "description": "User-specified version of `PortConfig`.\n\nAll of `PortConfig` is user-specified. But we expect the port name to be a key, rather than a field as in `PortConfig`. So this has all of the fields other than the port name.",
-            "type": "object",
-            "properties": {
-              "addresses": {
-                "type": "array",
-                "items": {
-                  "$ref": "#/components/schemas/UserSpecifiedUplinkAddressConfig"
-                }
-              },
-              "autoneg": {
-                "type": "boolean"
-              },
-              "bgp_peers": {
-                "default": [],
-                "type": "array",
-                "items": {
-                  "$ref": "#/components/schemas/UserSpecifiedBgpPeerConfig"
-                }
-              },
-              "lldp": {
-                "nullable": true,
-                "default": null,
-                "allOf": [
-                  {
-                    "$ref": "#/components/schemas/LldpPortConfig"
-                  }
-                ]
-              },
-              "routes": {
-                "type": "array",
-                "items": {
-                  "$ref": "#/components/schemas/RouteConfig"
-                }
-              },
-              "tx_eq": {
-                "nullable": true,
-                "default": null,
-                "allOf": [
-                  {
-                    "$ref": "#/components/schemas/TxEqConfig"
-                  }
-                ]
-              },
-              "type": {
-                "type": "string",
-                "enum": [
-                  "manual"
-                ]
-              },
-              "uplink_port_fec": {
-                "nullable": true,
-                "allOf": [
-                  {
-                    "$ref": "#/components/schemas/LinkFec"
-                  }
-                ]
-              },
-              "uplink_port_speed": {
-                "$ref": "#/components/schemas/LinkSpeed"
-              }
-            },
-            "required": [
-              "addresses",
-              "autoneg",
-              "routes",
-              "type",
-              "uplink_port_speed"
-            ]
+            "$ref": "#/components/schemas/ManualPortConfig"
           },
           {
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "ddm_auto_port_config"
-                ]
-              }
-            },
-            "required": [
-              "type"
-            ]
+            "type": "object"
           }
         ]
       },
