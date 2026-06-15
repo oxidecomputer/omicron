@@ -940,6 +940,8 @@ mod tests {
             Some(&BgpAuthKeyStatus::Set { info: new_key.info() })
         );
         assert_eq!(key_data.get(&key2), Some(&BgpAuthKeyStatus::Unset));
+
+        logctx.cleanup_successful();
     }
 
     fn assert_key_ids_not_found(
