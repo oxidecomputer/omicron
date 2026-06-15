@@ -447,14 +447,14 @@ fn print_analysis_report(
     } = report;
 
     let our_git_commit = GitVersion::current();
-    let git_commit = GitVersion::from_str(&git_commit).expect("infallible");
+    let git_commit = git_commit.parse::<GitVersion>().expect("infallible");
     if our_git_commit != git_commit {
         eprintln!(
             "note: this sitrep analysis report was produced by a Nexus \
              on git commit {git_commit}. this omdb was built from \
              {our_git_commit}."
         );
-        if our_git_commit.is_dirty() || log_git_commit.is_dirty() {
+        if our_git_commit.is_dirty() || git_commit.is_dirty() {
             eprintln!(
                 "note: dirty repositories (those with uncommitted changes) \
                  will never be considered equal, even if the SHA is the same."
