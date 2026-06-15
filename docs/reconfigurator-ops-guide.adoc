@@ -370,7 +370,7 @@ Safety Options:
 [#task-check-for-contact-support-flag]
 === Task: Check for contact_support flag
 
-NOTE: This field is intended for update purposes only. It flags whether it is safe to start an update, an update has stopped unexpectedly, or whether health checks on a subset of components passed after an update completed. It is NOT a health status API. If used as a health status API, it could show false positives. For example, a newly commissioned sled that hasn't reported a reconciliation result yet would set the contact_support field to true.
+NOTE: This field is intended for update purposes only. It flags whether it is safe to start an update, an update has stopped unexpectedly, or whether health checks on a subset of components passed after an update completed. It is NOT a health status API. If used as a health status API, it could show false positives and false negatives. For example, a newly commissioned sled that hasn't reported a reconciliation result yet would set the contact_support field to true. And many potential problems in the system are _not_ checked in computing this flag.
 
 Use the `oxide system update status` command to see the status of the contact support field
 
@@ -428,7 +428,7 @@ This is an example of how the log entry would look in a very unhealthy system:
 A few things to note:
 
 - If you call the update status endpoint during an update, the health checks won't run and no problems will be reported unless the system considers an update to be stuck.
-- The health checks will run during a MUPdate so the endpoint may show false positives if a MUPdate is happening.
+- There are many conditions outside the context of a self-service update that can transiently cause `contact_support: true`, such as when a sled is rebooting or a MUPdate is in progress. This flag should only be used to determine if it's okay to proceed with a self-service update, if a self-service update is stuck, or if a self-service update appears to have introduced a serious problem.
  
 
 [#task-check-reconfigurator-history]
