@@ -817,7 +817,7 @@ impl DataStore {
                 slog::warn!(&opctx.log,
                     "failed to insert sitrep analysis report";
                     "sitrep_id" => %sitrep_id,
-                    "error" => &InlineErrorChain::new(e),
+                    "error" => &InlineErrorChain::new(&e),
                 );
             }
         }
