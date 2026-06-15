@@ -224,16 +224,11 @@ pub(super) fn analyze(builder: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
         }
     }
 
-    // For each disk's surviving parent case, decide what to do based on the
-    // disk's current state:
-    //  - disk no longer in service → close the case (expungement)
-    //  - disk's zpool back to Online → close the case (recovery)
-    //  - disk still unhealthy → drop any facts whose recorded observation
-    //    (zpool + health) no longer matches; the matching loop below will
-    //    re-add a fresh fact
-    //  - disk in service but absent from inventory → leave alone (absence
-    //    is NOT a recovery signal: sled could be powered off, or
-    //    inventory could be lossy)
+    // Close the surviving parent case for any disk that has recovered or left
+    // service. A still-faulty disk's facts are reconciled in the next loop; a
+    // disk in service but absent from this inventory is left alone (absence is
+    // NOT a recovery signal: the sled could be powered off, or the collection
+    // could be lossy).
     for &(case_id, parsed_case) in case_by_disk.values() {
         let mut case_mut = builder
             .cases
@@ -248,27 +243,18 @@ pub(super) fn analyze(builder: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
             }
             Some(snap) if snap.zpool_health == Some(ZpoolHealth::Online) => {
                 case_mut
-                    .close(format!("zpool {} back to Online", snap.zpool_id,));
+                    .close(format!("zpool {} back to Online", snap.zpool_id));
             }
-            Some(snap) => {
-                let Some(current_health) = snap.zpool_health else {
-                    continue;
-                };
-                for fact_ref in parsed_case.unhealthy_facts.iter() {
-                    if fact_ref.payload.last_seen_health != current_health
-                        || fact_ref.payload.zpool_id != snap.zpool_id
-                    {
-                        case_mut.remove_fact(fact_ref.fact_id);
-                    }
-                }
-            }
+            // Faulty or absent from inventory: leave open; the next loop
+            // reconciles the faulty ones and leaves the absent ones untouched.
+            Some(_) => {}
         }
     }
 
-    // For each currently-faulty in-service disk: ensure a case exists
-    // (reusing the parent-forwarded one for this disk if any) and add a
-    // fresh fact if one with this exact observation (zpool + health) isn't
-    // already present.
+    // For each currently-faulty in-service disk, ensure its case carries
+    // exactly one fact matching the current observation: reuse the
+    // parent-forwarded case if any (dropping any stale facts), otherwise open
+    // a fresh case.
     for disk in in_service_health.iter() {
         let Some(current_health) = disk.zpool_health else {
             continue;
@@ -277,41 +263,42 @@ pub(super) fn analyze(builder: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
             continue;
         }
 
-        let parent_for_disk = case_by_disk.get(&disk.physical_disk_id).copied();
-
-        let case_id_for_fact = match parent_for_disk {
-            // Parent case already has an accurate fact; fully covered.
-            Some((_, parsed_case))
-                if parsed_case.unhealthy_facts.iter().any(|f| {
-                    f.payload.last_seen_health == current_health
-                        && f.payload.zpool_id == disk.zpool_id
-                }) =>
-            {
-                continue;
+        let mut case_mut = match case_by_disk.get(&disk.physical_disk_id) {
+            Some(&(case_id, parsed_case)) => {
+                let mut case_mut = builder
+                    .cases
+                    .case_mut(&case_id)
+                    .expect("case_id came from builder's open cases");
+                let mut has_match = false;
+                for fact in parsed_case.unhealthy_facts.iter() {
+                    if fact.payload.zpool_id == disk.zpool_id
+                        && fact.payload.last_seen_health == current_health
+                    {
+                        // An accurate fact is already present; keep it.
+                        has_match = true;
+                    } else {
+                        // Stale observation; drop it.
+                        case_mut.remove_fact(fact.fact_id);
+                    }
+                }
+                if has_match {
+                    continue;
+                }
+                case_mut
             }
-            // Parent case exists; its stale facts were removed above.
-            // Refresh under the same case.
-            Some((case_id, _)) => case_id,
-            // No parent case for this disk; open one.
-            None => {
-                builder.cases.open_case(DiagnosisEngineKind::PhysicalDisk).id
-            }
+            None => builder.cases.open_case(DiagnosisEngineKind::PhysicalDisk),
         };
 
-        builder
-            .cases
-            .case_mut(&case_id_for_fact)
-            .expect("case_id came from this fn")
-            .add_fact(
-                DiskFact::ZpoolUnhealthy(ZpoolUnhealthyFactPayload {
-                    physical_disk_id: disk.physical_disk_id,
-                    zpool_id: disk.zpool_id,
-                    last_seen_health: current_health,
-                    observed_in_inv: inv_collection_id,
-                    time_observed: inv_time_done,
-                }),
-                format!("zpool {} health={current_health}", disk.zpool_id,),
-            );
+        case_mut.add_fact(
+            DiskFact::ZpoolUnhealthy(ZpoolUnhealthyFactPayload {
+                physical_disk_id: disk.physical_disk_id,
+                zpool_id: disk.zpool_id,
+                last_seen_health: current_health,
+                observed_in_inv: inv_collection_id,
+                time_observed: inv_time_done,
+            }),
+            format!("zpool {} health={current_health}", disk.zpool_id),
+        );
     }
 
     Ok(())
