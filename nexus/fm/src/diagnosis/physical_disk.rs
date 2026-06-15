@@ -184,7 +184,7 @@ pub(super) fn analyze(builder: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
         builder
             .cases
             .case_mut(&case_id)
-            .expect("case came from builder.input()'s open cases")
+            .expect("case_id came from builder's open cases")
             .close(format!("cannot interpret case: {reason}"));
     }
 
@@ -214,7 +214,7 @@ pub(super) fn analyze(builder: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
             builder
                 .cases
                 .case_mut(case_id)
-                .expect("case came from builder.input()'s open cases")
+                .expect("case_id came from builder's open cases")
                 .close(format!(
                     "duplicate of case {kept_case_id} for disk {}",
                     summary.physical_disk_id,
@@ -233,10 +233,10 @@ pub(super) fn analyze(builder: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
     //    is NOT a recovery signal: sled could be powered off, or
     //    inventory could be lossy)
     for &(case_id, summary) in case_by_disk.values() {
-        let mut case_mut = builder.cases.case_mut(&case_id).expect(
-            "builder.cases is seeded from the open cases of builder.input(), \
-             which is where this case_id came from",
-        );
+        let mut case_mut = builder
+            .cases
+            .case_mut(&case_id)
+            .expect("case_id came from builder's open cases");
         match in_service_health.get(&summary.physical_disk_id) {
             None => {
                 case_mut.close(format!(
@@ -292,13 +292,7 @@ pub(super) fn analyze(builder: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
             Some((case_id, _)) => case_id,
             // No parent case for this disk; open one.
             None => {
-                let mut new_case =
-                    builder.cases.open_case(DiagnosisEngineKind::PhysicalDisk);
-                new_case.set_comment(format!(
-                    "physical disk {} unhealthy",
-                    disk.physical_disk_id,
-                ));
-                new_case.id
+                builder.cases.open_case(DiagnosisEngineKind::PhysicalDisk).id
             }
         };
 

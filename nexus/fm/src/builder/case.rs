@@ -279,12 +279,6 @@ impl CaseBuilder {
         }
     }
 
-    /// Iterate the facts currently attached to this case (including any that
-    /// were carried forward from the parent sitrep).
-    pub fn facts(&self) -> impl Iterator<Item = &fm::case::Fact> {
-        self.case.facts.iter()
-    }
-
     pub fn add_ereport(
         &mut self,
         report: &Arc<fm::Ereport>,
