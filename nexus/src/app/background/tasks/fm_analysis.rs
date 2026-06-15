@@ -220,6 +220,9 @@ impl FmAnalysis {
         let mut builder =
             fm::analysis_input::Input::builder(parent_sitrep, inv)?;
         let mut errors = Vec::new();
+        self.load_ereporter_restarts(opctx, &mut builder)
+            .await
+            .context("failed to load ereporter restarts")?;
         self.load_new_ereports(opctx, &mut builder, &mut errors)
             .await
             .context("failed to load new ereports")?;
@@ -233,7 +236,28 @@ impl FmAnalysis {
         opctx: &OpContext,
         builder: &mut fm::analysis_input::Builder,
     ) -> anyhow::Result<()> {
-        todo!()
+        let mut nbatches = 0;
+        let mut paginator = Paginator::new(
+            nexus_db_queries::db::datastore::SQL_BATCH_SIZE,
+            dropshot::PaginationOrder::Ascending,
+        );
+        while let Some(p) = paginator.next() {
+            nbatches += 1;
+            let batch = self
+                .datastore
+                .ereporter_restart_list(opctx, &p.current_pagparams())
+                .await?;
+            paginator = p.found_batch(&batch, &|e| e.id().into_untyped_uuid());
+            builder.add_ereporter_restarts(batch);
+        }
+
+        slog::debug!(
+            opctx.log,
+            "loaded {} ereporter restarts (in {nbatches} batches)",
+            builder.num_ereporter_restarts(),
+        );
+
+        Ok(())
     }
 
     async fn load_new_ereports(

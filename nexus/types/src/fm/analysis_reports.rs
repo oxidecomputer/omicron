@@ -227,6 +227,8 @@ pub struct InputReport {
     /// Cases which have closed, but which have been copied forwards as they
     /// contain ereports which have not yet been marked seen.
     pub closed_cases_copied_forward: BTreeMap<CaseUuid, ClosedCaseReport>,
+    /// Number of entries in the ereporter restart table.
+    pub num_ereporter_restarts: usize,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]

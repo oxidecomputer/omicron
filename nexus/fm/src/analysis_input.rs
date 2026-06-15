@@ -164,16 +164,20 @@ impl Builder {
         }))
     }
 
+    pub fn num_ereports(&self) -> usize {
+        self.new_ereports.len()
+    }
+
     /// Adds a set of ereport restart IDs to the input.
-    pub fn add_ereport_restarts(
+    pub fn add_ereporter_restarts(
         &mut self,
         restarts: impl IntoIterator<Item = EreporterRestart>,
     ) {
         self.ereporter_restarts.extend(restarts)
     }
 
-    pub fn num_ereports(&self) -> usize {
-        self.new_ereports.len()
+    pub fn num_ereporter_restarts(&self) -> usize {
+        self.ereporter_restarts.len()
     }
 
     /// Finish constructing the [`Input`] and return it, along with a [`Report`]
@@ -199,6 +203,7 @@ impl Builder {
                 .iter()
                 .map(|e| *e.id())
                 .collect(),
+            num_ereporter_restarts: self.ereporter_restarts.len(),
             open_cases: BTreeMap::new(),
             closed_cases_copied_forward: BTreeMap::new(),
         };
