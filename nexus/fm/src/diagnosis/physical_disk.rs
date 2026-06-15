@@ -12,6 +12,7 @@ use nexus_types::fm::{DiskFact, ZpoolUnhealthyFactPayload};
 use nexus_types::inventory::ZpoolHealth;
 use omicron_uuid_kinds::{CaseUuid, FactUuid, PhysicalDiskUuid, ZpoolUuid};
 use std::collections::BTreeMap;
+use std::collections::btree_map::Entry;
 
 /// A [`DiskFact::ZpoolUnhealthy`] payload paired with the `FactUuid` it
 /// lives under.
@@ -188,36 +189,38 @@ pub(super) fn analyze(builder: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
     }
 
     // Inverse index: which parent case is about which disk. Cases are
-    // per-disk, so a disk with two parent cases is pathological; keep the
-    // lowest case ID and close the rest as duplicates. (A half-maintained
-    // duplicate would otherwise decay into an uninterpretable empty case.)
+    // per-disk, so a disk with two parent cases is pathological. `parent_cases`
+    // iterates ascending by CaseUuid, so the first case we see for a disk is
+    // the lowest-ID one: keep it, and close any later case for the same disk as
+    // a duplicate. (A half-maintained duplicate would otherwise decay into an
+    // uninterpretable empty case.)
     let mut case_by_disk: BTreeMap<
         PhysicalDiskUuid,
         (CaseUuid, &ParsedDiskCase),
     > = BTreeMap::new();
     for (case_id, parsed_case) in &parent_cases {
-        case_by_disk
-            .entry(parsed_case.physical_disk_id)
-            .or_insert((*case_id, parsed_case));
-    }
-    for (case_id, parsed_case) in &parent_cases {
-        let (kept_case_id, _) = case_by_disk[&parsed_case.physical_disk_id];
-        if *case_id != kept_case_id {
-            slog::warn!(
-                &builder.log,
-                "closing duplicate Disk case";
-                "case_id" => %case_id,
-                "kept_case_id" => %kept_case_id,
-                "physical_disk_id" => %parsed_case.physical_disk_id,
-            );
-            builder
-                .cases
-                .case_mut(case_id)
-                .expect("case_id came from builder's open cases")
-                .close(format!(
-                    "duplicate of case {kept_case_id} for disk {}",
-                    parsed_case.physical_disk_id,
-                ));
+        match case_by_disk.entry(parsed_case.physical_disk_id) {
+            Entry::Vacant(slot) => {
+                slot.insert((*case_id, parsed_case));
+            }
+            Entry::Occupied(kept) => {
+                let (kept_case_id, _) = *kept.get();
+                slog::warn!(
+                    &builder.log,
+                    "closing duplicate Disk case";
+                    "case_id" => %case_id,
+                    "kept_case_id" => %kept_case_id,
+                    "physical_disk_id" => %parsed_case.physical_disk_id,
+                );
+                builder
+                    .cases
+                    .case_mut(case_id)
+                    .expect("case_id came from builder's open cases")
+                    .close(format!(
+                        "duplicate of case {kept_case_id} for disk {}",
+                        parsed_case.physical_disk_id,
+                    ));
+            }
         }
     }
 
