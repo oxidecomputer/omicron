@@ -261,10 +261,12 @@ impl CaseBuilder {
             .kv("payload", &payload)
             .comment(comment.clone());
         let fact = fm::case::Fact {
-            id,
-            created_sitrep_id: self.sitrep_id,
+            metadata: fm::case::FactMetadata {
+                id,
+                created_sitrep_id: self.sitrep_id,
+                comment,
+            },
             payload,
-            comment,
         };
         self.case.facts.insert_unique(fact).expect("UUID should be unused");
         id

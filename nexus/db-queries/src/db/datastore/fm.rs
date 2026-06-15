@@ -547,7 +547,7 @@ impl DataStore {
             for row in batch {
                 let case_id: CaseUuid = row.case_id.into();
                 let fact = row.into_fact()?;
-                let id = fact.id;
+                let id = fact.metadata.id;
                 by_case
                     .entry(case_id)
                     .or_default()
@@ -840,7 +840,10 @@ impl DataStore {
                     fm::FactPayload::PhysicalDisk(disk_fact) => {
                         physical_disk_facts.push(
                             model::fm::FmFactPhysicalDisk::from_sitrep(
-                                sitrep_id, case_id, fact, disk_fact,
+                                sitrep_id,
+                                case_id,
+                                &fact.metadata,
+                                disk_fact,
                             ),
                         );
                     }
@@ -2281,8 +2284,11 @@ mod tests {
             let mut facts = iddqd::IdOrdMap::new();
             facts
                 .insert_unique(fm::case::Fact {
-                    id: FactUuid::new_v4(),
-                    created_sitrep_id: sitrep_id,
+                    metadata: fm::case::FactMetadata {
+                        id: FactUuid::new_v4(),
+                        created_sitrep_id: sitrep_id,
+                        comment: "a representative fact for case 1".to_string(),
+                    },
                     payload: fm::FactPayload::PhysicalDisk(
                         fm::DiskFact::ZpoolUnhealthy(
                             fm::ZpoolUnhealthyFactPayload {
@@ -2299,7 +2305,6 @@ mod tests {
                             },
                         ),
                     ),
-                    comment: "a representative fact for case 1".to_string(),
                 })
                 .unwrap();
 

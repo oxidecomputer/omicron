@@ -90,7 +90,7 @@ fn summarize_case(
         // payload; a foreign payload is a data-model violation.
         let Some(disk_fact) = fact.payload.as_physical_disk() else {
             return Err(UninterpretableCase::ForeignFactPayload {
-                fact_id: fact.id,
+                fact_id: fact.metadata.id,
             });
         };
         match disk_fact {
@@ -106,7 +106,7 @@ fn summarize_case(
                 }
                 unhealthy_facts
                     .insert_unique(ZpoolUnhealthyFact {
-                        fact_id: fact.id,
+                        fact_id: fact.metadata.id,
                         payload,
                     })
                     .expect("fact ids are unique within a case");
@@ -454,8 +454,11 @@ mod tests {
         zpool_id: ZpoolUuid,
     ) -> fm::case::Fact {
         fm::case::Fact {
-            id: omicron_uuid_kinds::FactUuid::new_v4(),
-            created_sitrep_id: parent_sitrep_id,
+            metadata: fm::case::FactMetadata {
+                id: omicron_uuid_kinds::FactUuid::new_v4(),
+                created_sitrep_id: parent_sitrep_id,
+                comment: format!("zpool {zpool_id} degraded"),
+            },
             payload: DiskFact::ZpoolUnhealthy(ZpoolUnhealthyFactPayload {
                 physical_disk_id,
                 zpool_id,
@@ -464,7 +467,6 @@ mod tests {
                 time_observed: Utc::now(),
             })
             .into(),
-            comment: format!("zpool {zpool_id} degraded"),
         }
     }
 
@@ -788,7 +790,7 @@ mod tests {
             target_disk_id,
             target,
         );
-        let kept_fact_id = kept_fact.id;
+        let kept_fact_id = kept_fact.metadata.id;
         let dup_fact = make_degraded_fact(
             parent_id,
             collection.id,
@@ -938,6 +940,7 @@ mod tests {
             .iter()
             .next()
             .expect("parent case should have one fact")
+            .metadata
             .id;
 
         let input = build_input(collection, Some(parent), in_service);
@@ -945,7 +948,7 @@ mod tests {
         let open = disk_facts(&sitrep, true);
         assert_eq!(open.len(), 1, "expected exactly one open Disk fact");
         assert_eq!(
-            open[0].1.id, parent_fact_id,
+            open[0].1.metadata.id, parent_fact_id,
             "fact UUID should be stable across sitreps when the \
              observation hasn't changed",
         );
@@ -990,6 +993,7 @@ mod tests {
             .iter()
             .next()
             .expect("parent case should have one fact")
+            .metadata
             .id;
 
         let input = build_input(collection, Some(parent), in_service);
@@ -1001,7 +1005,7 @@ mod tests {
             "expected exactly one open Disk fact (the refreshed one)",
         );
         assert_ne!(
-            open[0].1.id, parent_fact_id,
+            open[0].1.metadata.id, parent_fact_id,
             "fact UUID should rotate because last_seen_health changed",
         );
         match &open[0].2 {
@@ -1053,6 +1057,7 @@ mod tests {
             .iter()
             .next()
             .expect("parent case should have one fact")
+            .metadata
             .id;
 
         let input = build_input(collection, Some(parent), in_service);
@@ -1064,7 +1069,7 @@ mod tests {
             "expected exactly one open Disk fact (the refreshed one)",
         );
         assert_ne!(
-            open[0].1.id, parent_fact_id,
+            open[0].1.metadata.id, parent_fact_id,
             "fact UUID should rotate because the disk's zpool changed",
         );
         match &open[0].2 {

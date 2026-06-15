@@ -6,9 +6,7 @@
 //!
 //! Each physical-disk fact is stored as typed columns in the
 //! `fm_fact_physical_disk` table. The `kind` discriminant selects which payload
-//! columns are populated; a CHECK constraint
-//! (`zpool_unhealthy_columns_present`) enforces that the right columns are
-//! non-NULL for each kind. See [`nexus_types::fm::DiskFact`] for semantics.
+//! columns are populated.
 
 use crate::DbTypedUuid;
 use crate::impl_enum_type;
@@ -16,6 +14,7 @@ use crate::inventory::InvZpoolHealth;
 use chrono::{DateTime, Utc};
 use nexus_db_schema::schema::fm_fact_physical_disk;
 use nexus_types::fm;
+use nexus_types::fm::case::FactMetadata;
 use nexus_types::fm::{DiskFact, FactPayload, ZpoolUnhealthyFactPayload};
 use omicron_common::api::external::Error;
 use omicron_uuid_kinds::{
@@ -51,8 +50,7 @@ pub struct FmFactPhysicalDisk {
     pub created_sitrep_id: DbTypedUuid<SitrepKind>,
     pub comment: String,
 
-    /// The physical disk this fact is about. Common to every `kind`, so it is
-    /// always present (the column is `NOT NULL`).
+    /// The physical disk this fact is about. Common to every `kind`.
     pub physical_disk_id: DbTypedUuid<PhysicalDiskKind>,
     pub kind: FmFactPhysicalDiskKind,
 
@@ -64,20 +62,20 @@ pub struct FmFactPhysicalDisk {
 }
 
 impl FmFactPhysicalDisk {
-    /// Build a row from a fact's shared metadata (`fact`) and its
+    /// Build a row from a fact's shared metadata (`metadata`) and its
     /// physical-disk payload (`disk_fact`).
     pub fn from_sitrep(
         sitrep_id: impl Into<DbTypedUuid<SitrepKind>>,
         case_id: impl Into<DbTypedUuid<CaseKind>>,
-        fact: &fm::case::Fact,
+        metadata: &FactMetadata,
         disk_fact: &DiskFact,
     ) -> Self {
         let mut row = Self {
-            id: fact.id.into(),
+            id: metadata.id.into(),
             sitrep_id: sitrep_id.into(),
             case_id: case_id.into(),
-            created_sitrep_id: fact.created_sitrep_id.into(),
-            comment: fact.comment.clone(),
+            created_sitrep_id: metadata.created_sitrep_id.into(),
+            comment: metadata.comment.clone(),
             physical_disk_id: disk_fact.physical_disk_id().into(),
             kind: db_kind(disk_fact),
             zpool_id: None,
@@ -134,10 +132,12 @@ impl FmFactPhysicalDisk {
             }
         };
         Ok(fm::case::Fact {
-            id: self.id.into(),
-            created_sitrep_id: self.created_sitrep_id.into(),
+            metadata: FactMetadata {
+                id: self.id.into(),
+                created_sitrep_id: self.created_sitrep_id.into(),
+                comment: self.comment,
+            },
             payload,
-            comment: self.comment,
         })
     }
 }
