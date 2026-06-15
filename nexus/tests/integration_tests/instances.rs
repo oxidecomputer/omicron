@@ -752,23 +752,33 @@ async fn test_instance_start_creates_networking_state(
     assert!(checked);
 }
 
-/// Fetch the `sled_resource_vmm` record for `propolis_id`, returning `None` if
-/// no such record exists.
+/// Fetch the source and target VMMs' `sled_resource_vmm` records, returning `None`
+/// if the corresponding record is not found.
+///
+/// To avoid torn reads, this function reads the records in a single query.
 ///
 /// Panics if a database error occurs.
-async fn fetch_sled_resource_vmm_record(
-    propolis_id: PropolisUuid,
+async fn fetch_sled_resource_vmm_records(
+    src_propolis_id: PropolisUuid,
+    dst_propolis_id: PropolisUuid,
     conn: &AsyncConnection,
-) -> Option<SledResourceVmm> {
+) -> (Option<SledResourceVmm>, Option<SledResourceVmm>) {
     use nexus_db_schema::schema::sled_resource_vmm::dsl;
 
-    dsl::sled_resource_vmm
-        .filter(dsl::id.eq(to_db_typed_uuid(propolis_id)))
+    let records: Vec<SledResourceVmm> = dsl::sled_resource_vmm
+        .filter(dsl::id.eq_any([
+            to_db_typed_uuid(src_propolis_id),
+            to_db_typed_uuid(dst_propolis_id),
+        ]))
         .select(SledResourceVmm::as_select())
-        .get_result_async(conn)
+        .get_results_async(conn)
         .await
-        .optional()
-        .expect("querying for sled_resource_vmm record should not fail")
+        .expect("querying for sled_resource_vmm records should not fail");
+
+    let find = |propolis_id: PropolisUuid| {
+        records.iter().find(|record| record.id() == propolis_id).cloned()
+    };
+    (find(src_propolis_id), find(dst_propolis_id))
 }
 
 #[nexus_test(extra_sled_agents = 1)]
@@ -995,38 +1005,48 @@ async fn test_instance_migrate(cptestctx: &ControlPlaneTestContext) {
                 let datastore = apictx.nexus.datastore();
                 let conn = datastore.pool_connection_for_tests().await.unwrap();
 
-                let maybe_source_record =
-                    fetch_sled_resource_vmm_record(src_propolis_id, &conn)
-                        .await;
+                let (maybe_source_record, maybe_target_record) =
+                    fetch_sled_resource_vmm_records(
+                        src_propolis_id,
+                        dst_propolis_id,
+                        &conn,
+                    )
+                    .await;
 
-                let target_record =
-                    fetch_sled_resource_vmm_record(dst_propolis_id, &conn)
-                        .await
-                        .expect(
-                            "sled_resource_vmm record for the migration target \
-                             VMM record should exist: the instance is running \
-                             on that VMM",
-                        );
+                let target_record = maybe_target_record.expect(
+                    "sled_resource_vmm record for the migration target \
+                     VMM record should exist, since the instance is running \
+                     on that VMM",
+                );
 
                 let source_state =
                     maybe_source_record.map(|record| record.state);
                 match (source_state, target_record.state) {
                     (None, SledResourceVmmState::Active) => Ok(()),
 
-                    // Not done yet. Note that `(None, Target)` is a
-                    // legitimate transient state: the instance stops
-                    // referencing the source VMM when the active-VMM swap
-                    // commits, so the reaper may delete the source record
-                    // before the later saga node activates the target
-                    // record.
+                    // Not done yet. The valid transient states are:
+                    //
+                    // * `(Some(Active), Target)`: the swap node has not run
+                    //   yet, so the reservation records still show the
+                    //   pre-swap state even though the instance record
+                    //   already points at the target VMM.
+                    //
+                    // * `(None, Target)`: the instance stops referencing the
+                    //   source VMM at the instance-record commit, which runs
+                    //   before the `sled_resource_vmm` swap, so the reaper
+                    //   may delete the source record before the later swap
+                    //   node activates the target record.
+                    //
+                    // * `(Some(Tombstoned), Active)`: the swap has committed,
+                    //   but the source record has not yet been deleted (by
+                    //   either the destroy-VMM subsaga or the reaper).
                     (
-                        None
-                        | Some(
-                            SledResourceVmmState::Active
-                            | SledResourceVmmState::Tombstoned,
-                        ),
-                        SledResourceVmmState::Active
-                        | SledResourceVmmState::Target,
+                        None | Some(SledResourceVmmState::Active),
+                        SledResourceVmmState::Target,
+                    )
+                    | (
+                        Some(SledResourceVmmState::Tombstoned),
+                        SledResourceVmmState::Active,
                     ) => {
                         let source_record_status = match source_state {
                             Some(state) => format!("still present ({state})"),
@@ -1049,6 +1069,20 @@ async fn test_instance_migrate(cptestctx: &ControlPlaneTestContext) {
                     (_, SledResourceVmmState::Tombstoned) => panic!(
                         "target sled_resource_vmm record should never be \
                          tombstoned: the instance is running on its VMM",
+                    ),
+                    (
+                        Some(SledResourceVmmState::Active),
+                        SledResourceVmmState::Active,
+                    ) => panic!(
+                        "source and target sled_resource_vmm records should \
+                         never both be `active`",
+                    ),
+                    (
+                        Some(SledResourceVmmState::Tombstoned),
+                        SledResourceVmmState::Target,
+                    ) => panic!(
+                        "source sled_resource_vmm record should never be \
+                         `tombstoned` while the target is still `target`",
                     ),
                 }
             },
@@ -1272,23 +1306,24 @@ async fn test_instance_migrate_target_finishes_first(
                 let datastore = apictx.nexus.datastore();
                 let conn = datastore.pool_connection_for_tests().await.unwrap();
 
-                let source_record =
-                    fetch_sled_resource_vmm_record(src_propolis_id, &conn)
-                        .await
-                        .expect(
-                            "source sled_resource_vmm record should exist: \
-                             its VMM is still migrating, so nothing may delete \
-                             it yet",
-                        );
+                let (maybe_source_record, maybe_target_record) =
+                    fetch_sled_resource_vmm_records(
+                        src_propolis_id,
+                        dst_propolis_id,
+                        &conn,
+                    )
+                    .await;
 
-                let target_record =
-                    fetch_sled_resource_vmm_record(dst_propolis_id, &conn)
-                        .await
-                        .expect(
-                            "sled_resource_vmm record for the migration target \
-                             VMM record should exist: the instance is running \
-                             on that VMM",
-                        );
+                let source_record = maybe_source_record.expect(
+                    "source sled_resource_vmm record should exist: \
+                     its VMM is still migrating, so nothing may delete \
+                     it yet",
+                );
+                let target_record = maybe_target_record.expect(
+                    "sled_resource_vmm record for the migration target \
+                     VMM record should exist: the instance is running \
+                     on that VMM",
+                );
 
                 match (source_record.state, target_record.state) {
                     (
@@ -1296,15 +1331,16 @@ async fn test_instance_migrate_target_finishes_first(
                         SledResourceVmmState::Active,
                     ) => Ok(()),
 
-                    // Not done yet. The tombstone-and-activate swap is a
-                    // single transaction, so the expected transient state is
-                    // `(Active, Target)`; the other combinations covered
-                    // here are unexpected but harmless to retry on.
+                    // Not done yet: the swap node has not run yet, so the
+                    // reservation records still show the pre-swap state even
+                    // though the instance record already points at the target
+                    // VMM. The source record cannot be deleted here (its VMM
+                    // is still migrating), and the tombstone-and-activate swap
+                    // is a single transaction, so the only retryable state is
+                    // `(Active, Target)`.
                     (
-                        SledResourceVmmState::Active
-                        | SledResourceVmmState::Tombstoned,
-                        SledResourceVmmState::Active
-                        | SledResourceVmmState::Target,
+                        SledResourceVmmState::Active,
+                        SledResourceVmmState::Target,
                     ) => Err(CondCheckError::<()>::NotYet {
                         status: Some(format!(
                             "source record state: {}, target record state: {}",
@@ -1321,6 +1357,20 @@ async fn test_instance_migrate_target_finishes_first(
                     (_, SledResourceVmmState::Tombstoned) => panic!(
                         "target sled_resource_vmm record should never be \
                          tombstoned: the instance is running on its VMM",
+                    ),
+                    (
+                        SledResourceVmmState::Active,
+                        SledResourceVmmState::Active,
+                    ) => panic!(
+                        "source and target sled_resource_vmm records should \
+                         never both be `active`",
+                    ),
+                    (
+                        SledResourceVmmState::Tombstoned,
+                        SledResourceVmmState::Target,
+                    ) => panic!(
+                        "source sled_resource_vmm record should never be \
+                         `tombstoned` while the target is still `target`",
                     ),
                 }
             },
@@ -1366,10 +1416,16 @@ async fn test_instance_migrate_target_finishes_first(
             let datastore = apictx.nexus.datastore();
             let conn = datastore.pool_connection_for_tests().await.unwrap();
 
-            let maybe_record =
-                fetch_sled_resource_vmm_record(src_propolis_id, &conn).await;
+            // We're just waiting for the source record to be cleaned up, so we
+            // don't care about the target record.
+            let (maybe_source_record, _) = fetch_sled_resource_vmm_records(
+                src_propolis_id,
+                dst_propolis_id,
+                &conn,
+            )
+            .await;
 
-            match maybe_record.map(|record| record.state) {
+            match maybe_source_record.map(|record| record.state) {
                 None => Ok(()),
                 Some(SledResourceVmmState::Tombstoned) => {
                     Err(CondCheckError::<()>::NotYet {
