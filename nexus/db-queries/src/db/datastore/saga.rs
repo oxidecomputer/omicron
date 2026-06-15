@@ -295,6 +295,7 @@ mod test {
     use async_bb8_diesel::AsyncSimpleConnection;
     use chrono::TimeDelta;
     use db::queries::ALLOW_FULL_TABLE_SCAN_SQL;
+    use nexus_db_model::SagaReasonAbandoned;
     use nexus_db_model::SagaState;
     use nexus_db_model::{SagaNodeEvent, SecId};
     use omicron_common::api::external::Generation;
@@ -602,6 +603,10 @@ mod test {
             let mut saga =
                 db::model::saga_types::Saga::new(self.sec_id, params);
             saga.saga_state = SagaState::Abandoned;
+            saga.time_abandoned = Some(saga.adopt_time);
+            saga.abandon_information =
+                Some("fake abandoned saga created".to_string());
+            saga.reason_abandoned = Some(SagaReasonAbandoned::Unrecoverable);
             saga
         }
 
