@@ -48,14 +48,14 @@ use nexus_types::external_api::floating_ip;
 use nexus_types::external_api::floating_ip::FloatingIp;
 use nexus_types::external_api::instance;
 use nexus_types::external_api::instance::{
-    InstanceCpuCount, InstanceNetworkInterfaceAttachment,
+    Instance, InstanceCpuCount, InstanceNetworkInterfaceAttachment,
+    InstanceState,
 };
 use nexus_types::external_api::ip_pool;
 use nexus_types::external_api::policy::SiloRole;
 use nexus_types::external_api::project;
 use nexus_types::external_api::silo;
 use nexus_types::identity::Resource;
-use nexus_types_versions::latest::instance::Instance;
 use omicron_common::address::IpRange;
 use omicron_common::address::IpVersion;
 use omicron_common::address::Ipv4Range;
@@ -802,12 +802,7 @@ async fn test_floating_ip_create_attachment(
     .unwrap();
 
     instance_simulate(nexus, &instance_id).await;
-    instance_wait_for_state(
-        client,
-        instance_id,
-        instance::InstanceState::Stopped,
-    )
-    .await;
+    instance_wait_for_state(client, instance_id, InstanceState::Stopped).await;
 
     NexusRequest::object_delete(
         &client,

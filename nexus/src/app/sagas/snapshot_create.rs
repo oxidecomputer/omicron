@@ -1791,6 +1791,7 @@ mod test {
     use nexus_test_utils::resource_helpers::object_create;
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::external_api::instance as instance_types;
+    use nexus_types::external_api::instance::InstanceCpuCount;
     use nexus_types_versions::latest::instance::Instance;
     use omicron_common::api::external::ByteCount;
     use omicron_common::api::external::IdentityMetadataCreateParams;
@@ -2177,7 +2178,7 @@ mod test {
                     name: INSTANCE_NAME.parse().unwrap(),
                     description: format!("instance {:?}", INSTANCE_NAME),
                 },
-                ncpus: instance_types::InstanceCpuCount(2),
+                ncpus: InstanceCpuCount(2),
                 memory: ByteCount::from_gibibytes_u32(1),
                 hostname: "base-instance".parse().unwrap(),
                 user_data:

@@ -42,6 +42,10 @@ use nexus_db_queries::db::model::InstanceStateComputer;
 use nexus_types::external_api::disk;
 use nexus_types::external_api::external_ip;
 use nexus_types::external_api::instance;
+// We'll use `InstanceState` frequently, and the code that uses it is already
+// subtle enough: break from the pattern of external API types being referenced
+// by `topic::Name` to help legibility and keep line wrapping under control..
+use nexus_types::external_api::instance::InstanceState;
 use nexus_types::external_api::ip_pool;
 use nexus_types::external_api::multicast;
 use nexus_types::external_api::project;
@@ -1233,7 +1237,7 @@ impl super::Nexus {
                 // If there's no active sled because the instance is stopped,
                 // allow requests to stop to succeed silently for idempotency,
                 // but reject requests to do anything else.
-                instance::InstanceState::Stopped => match requested {
+                InstanceState::Stopped => match requested {
                     InstanceStateChangeRequest::Run => {
                         return Err(Error::invalid_request(&format!(
                             "cannot run an instance in state {} with no VMM",
@@ -1262,7 +1266,7 @@ impl super::Nexus {
                 // If the instance is still being created (such that it hasn't
                 // even begun to start yet), no runtime state change is valid.
                 // Return a specific error message explaining the problem.
-                instance::InstanceState::Creating => {
+                InstanceState::Creating => {
                     return Err(Error::invalid_request(
                         "cannot change instance state while it is \
                                 still being created",
@@ -1281,7 +1285,7 @@ impl super::Nexus {
                 // that a Failed instance is definitely not incarnated on a
                 // sled, so all we need to do to "stop" it is to update its
                 // state in the database.
-                instance::InstanceState::Failed
+                InstanceState::Failed
                     if matches!(
                         requested,
                         InstanceStateChangeRequest::Stop
@@ -1314,8 +1318,7 @@ impl super::Nexus {
                 }
                 // If the instance has no sled beacuse it's been destroyed or
                 // has fallen over, reject the state change.
-                instance::InstanceState::Failed
-                | instance::InstanceState::Destroyed => {
+                InstanceState::Failed | InstanceState::Destroyed => {
                     return Err(Error::invalid_request(&format!(
                         "instance state cannot be changed from {}",
                         effective_state
@@ -1345,28 +1348,27 @@ impl super::Nexus {
             InstanceStateChangeRequest::Run
             | InstanceStateChangeRequest::Reboot
             | InstanceStateChangeRequest::Stop => match effective_state {
-                instance::InstanceState::Creating
-                | instance::InstanceState::Starting
-                | instance::InstanceState::Running
-                | instance::InstanceState::Stopping
-                | instance::InstanceState::Stopped
-                | instance::InstanceState::Rebooting
-                | instance::InstanceState::Migrating => true,
-                instance::InstanceState::Repairing
-                | instance::InstanceState::Failed => false,
-                instance::InstanceState::Destroyed => false,
+                InstanceState::Creating
+                | InstanceState::Starting
+                | InstanceState::Running
+                | InstanceState::Stopping
+                | InstanceState::Stopped
+                | InstanceState::Rebooting
+                | InstanceState::Migrating => true,
+                InstanceState::Repairing | InstanceState::Failed => false,
+                InstanceState::Destroyed => false,
             },
             InstanceStateChangeRequest::Migrate(_) => match effective_state {
-                instance::InstanceState::Running
-                | instance::InstanceState::Rebooting
-                | instance::InstanceState::Migrating => true,
-                instance::InstanceState::Creating
-                | instance::InstanceState::Starting
-                | instance::InstanceState::Stopping
-                | instance::InstanceState::Stopped
-                | instance::InstanceState::Repairing
-                | instance::InstanceState::Failed
-                | instance::InstanceState::Destroyed => false,
+                InstanceState::Running
+                | InstanceState::Rebooting
+                | InstanceState::Migrating => true,
+                InstanceState::Creating
+                | InstanceState::Starting
+                | InstanceState::Stopping
+                | InstanceState::Stopped
+                | InstanceState::Repairing
+                | InstanceState::Failed
+                | InstanceState::Destroyed => false,
             },
         };
 
@@ -2949,10 +2951,10 @@ fn instance_start_allowed(
     match state.effective_state() {
         // If the VMM is already starting or is in another "active"
         // state, succeed to make successful start attempts idempotent.
-        s @ instance::InstanceState::Starting
-        | s @ instance::InstanceState::Running
-        | s @ instance::InstanceState::Rebooting
-        | s @ instance::InstanceState::Migrating => {
+        s @ InstanceState::Starting
+        | s @ InstanceState::Running
+        | s @ InstanceState::Rebooting
+        | s @ InstanceState::Migrating => {
             debug!(log, "asked to start an active instance";
                    "instance_id" => %instance.id(),
                    "state" => ?s,
@@ -2960,8 +2962,7 @@ fn instance_start_allowed(
 
             Ok(InstanceStartDisposition::AlreadyStarted)
         }
-        s @ instance::InstanceState::Stopped
-        | s @ instance::InstanceState::Failed => {
+        s @ InstanceState::Stopped | s @ InstanceState::Failed => {
             match vmm.as_ref() {
                 // If a previous start saga failed and left behind a VMM in the
                 // SagaUnwound state, allow a new start saga to try to overwrite
@@ -2997,7 +2998,7 @@ fn instance_start_allowed(
                 None => Ok(InstanceStartDisposition::Start),
             }
         }
-        instance::InstanceState::Stopping => {
+        InstanceState::Stopping => {
             let (propolis_id, propolis_state) = match vmm.as_ref() {
                 Some(vmm) => (Some(vmm.id), Some(vmm.state)),
                 None => (None, None),
@@ -3014,7 +3015,7 @@ fn instance_start_allowed(
         s => {
             return Err(Error::conflict(&format!(
                 "instance is in state {s} but it must be {} to be started",
-                instance::InstanceState::Stopped
+                InstanceState::Stopped
             )));
         }
     }

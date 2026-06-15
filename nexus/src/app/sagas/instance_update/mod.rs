@@ -1688,6 +1688,7 @@ mod test {
         create_default_ip_pools, create_project, object_create,
     };
     use nexus_test_utils_macros::nexus_test;
+    use nexus_types::external_api::instance::InstanceCpuCount;
     use nexus_types::external_api::{
         instance as instance_types, networking as networking_types,
     };
@@ -1752,7 +1753,7 @@ mod test {
                     name: INSTANCE_NAME.parse().unwrap(),
                     description: format!("instance {:?}", INSTANCE_NAME),
                 },
-                ncpus: instance_types::InstanceCpuCount(1),
+                ncpus: InstanceCpuCount(1),
                 memory: ByteCount::from_gibibytes_u32(1),
                 hostname: INSTANCE_NAME.parse().unwrap(),
                 user_data: b"#cloud-config".to_vec(),

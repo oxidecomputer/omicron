@@ -1178,6 +1178,7 @@ mod test {
         object_create,
     };
     use nexus_test_utils_macros::nexus_test;
+    use nexus_types::external_api::instance::InstanceCpuCount;
     use nexus_types::external_api::{instance as instance_types, networking};
     use nexus_types::identity::Resource;
     use nexus_types_versions::latest;
@@ -1214,7 +1215,7 @@ mod test {
                     name: INSTANCE_NAME.parse().unwrap(),
                     description: format!("instance {:?}", INSTANCE_NAME),
                 },
-                ncpus: instance_types::InstanceCpuCount(2),
+                ncpus: InstanceCpuCount(2),
                 memory: ByteCount::from_gibibytes_u32(2),
                 hostname: INSTANCE_NAME.parse().unwrap(),
                 user_data: b"#cloud-config".to_vec(),

@@ -337,6 +337,7 @@ mod test {
     };
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::external_api::instance;
+    use nexus_types::external_api::instance::InstanceAutoRestartPolicy;
     use nexus_types_versions::latest;
     use omicron_common::api::external::ByteCount;
     use omicron_common::api::external::IdentityMetadataCreateParams;
@@ -372,7 +373,7 @@ mod test {
         cptestctx: &ControlPlaneTestContext,
         opctx: &OpContext,
         name: &str,
-        auto_restart: impl Into<Option<instance::InstanceAutoRestartPolicy>>,
+        auto_restart: impl Into<Option<InstanceAutoRestartPolicy>>,
         state: InstanceState,
         intent: InstanceIntendedState,
     ) -> authz::Instance {
@@ -636,7 +637,7 @@ mod test {
             &cptestctx,
             &opctx,
             "my-cool-instance",
-            instance::InstanceAutoRestartPolicy::BestEffort,
+            InstanceAutoRestartPolicy::BestEffort,
             InstanceState::Failed,
             InstanceIntendedState::Running,
         )
@@ -733,7 +734,7 @@ mod test {
                 &cptestctx,
                 &opctx,
                 &format!("sotapanna-{i}"),
-                instance::InstanceAutoRestartPolicy::BestEffort,
+                InstanceAutoRestartPolicy::BestEffort,
                 InstanceState::Failed,
                 InstanceIntendedState::Running,
             )
@@ -749,7 +750,7 @@ mod test {
                 &cptestctx,
                 &opctx,
                 &format!("sadakagami-{i}"),
-                instance::InstanceAutoRestartPolicy::BestEffort,
+                InstanceAutoRestartPolicy::BestEffort,
                 InstanceState::NoVmm,
                 InstanceIntendedState::Running,
             )
@@ -771,7 +772,7 @@ mod test {
                 &cptestctx,
                 &opctx,
                 &format!("arahant-{i}"),
-                instance::InstanceAutoRestartPolicy::Never,
+                InstanceAutoRestartPolicy::Never,
                 InstanceState::Failed,
                 InstanceIntendedState::Running,
             )
@@ -787,7 +788,7 @@ mod test {
                 &cptestctx,
                 &opctx,
                 &format!("arahant-{i}"),
-                instance::InstanceAutoRestartPolicy::Never,
+                InstanceAutoRestartPolicy::Never,
                 InstanceState::NoVmm,
                 InstanceIntendedState::Running,
             )
@@ -808,7 +809,7 @@ mod test {
                 &cptestctx,
                 &opctx,
                 &format!("anagami-{i}"),
-                instance::InstanceAutoRestartPolicy::BestEffort,
+                InstanceAutoRestartPolicy::BestEffort,
                 state,
                 InstanceIntendedState::Running,
             )
@@ -822,7 +823,7 @@ mod test {
             &cptestctx,
             &opctx,
             "anagami-4",
-            instance::InstanceAutoRestartPolicy::BestEffort,
+            InstanceAutoRestartPolicy::BestEffort,
             InstanceState::Failed,
             InstanceIntendedState::Stopped,
         )
@@ -832,7 +833,7 @@ mod test {
             &cptestctx,
             &opctx,
             "anagami-5",
-            instance::InstanceAutoRestartPolicy::BestEffort,
+            InstanceAutoRestartPolicy::BestEffort,
             InstanceState::NoVmm,
             InstanceIntendedState::Stopped,
         )
@@ -909,7 +910,7 @@ mod test {
             &cptestctx,
             &opctx,
             "victor",
-            instance::InstanceAutoRestartPolicy::BestEffort,
+            InstanceAutoRestartPolicy::BestEffort,
             InstanceState::Failed,
             InstanceIntendedState::Running,
         )
@@ -933,7 +934,7 @@ mod test {
             &cptestctx,
             &opctx,
             "frankenstein",
-            instance::InstanceAutoRestartPolicy::BestEffort,
+            InstanceAutoRestartPolicy::BestEffort,
             InstanceState::Vmm,
             InstanceIntendedState::Running,
         )

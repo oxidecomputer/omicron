@@ -74,15 +74,6 @@ impl From<sled_agent::VmmRuntimeState> for VmmRuntimeState {
     }
 }
 
-/*
-impl From<VmmRuntimeState> for sled_agent::VmmRuntimeState {
-    fn from(state: VmmRuntimeState) -> Self {
-        let VmmRuntimeState { state, generation, time_updated } = state;
-        Self { state: state.into(), generation, time_updated }
-    }
-}
-*/
-
 #[derive(Copy, Clone, Debug, Deserialize, Serialize, Eq, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum VmmState {

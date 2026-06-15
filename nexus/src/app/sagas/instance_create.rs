@@ -1489,6 +1489,7 @@ pub mod test {
     use nexus_test_utils::resource_helpers::create_project;
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::external_api::instance as instance_types;
+    use nexus_types::external_api::instance::InstanceCpuCount;
     use nexus_types::external_api::ip_pool::PoolSelector;
     use omicron_common::address::IpVersion;
     use omicron_common::api::external::{
@@ -1523,7 +1524,7 @@ pub mod test {
                     name: INSTANCE_NAME.parse().unwrap(),
                     description: "My instance".to_string(),
                 },
-                ncpus: instance_types::InstanceCpuCount::try_from(2).unwrap(),
+                ncpus: InstanceCpuCount::try_from(2).unwrap(),
                 memory: ByteCount::from_gibibytes_u32(4),
                 hostname: "inst".parse().unwrap(),
                 user_data: vec![],
