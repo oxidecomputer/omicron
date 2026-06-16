@@ -16,6 +16,7 @@ use crate::impl_enum_type;
 use chrono::{DateTime, Utc};
 use nexus_db_schema::schema::fm_fact_saga;
 use nexus_types::fm;
+use nexus_types::fm::case::FactMetadata;
 use nexus_types::fm::{
     FactPayload, SagaAbandonedFactPayload, SagaFact,
     SagaNotProgressingFactPayload, SagaOwnerNotCurrentFactPayload,
@@ -127,20 +128,23 @@ pub struct FmFactSaga {
 }
 
 impl FmFactSaga {
-    /// Build a row from a fact's shared metadata (`fact`) and its
+    /// Build a row from a fact's shared metadata (`metadata`) and its
     /// already-dispatched saga payload (`saga_fact`).
     pub fn from_sitrep(
         sitrep_id: impl Into<DbTypedUuid<SitrepKind>>,
         case_id: impl Into<DbTypedUuid<CaseKind>>,
-        fact: &fm::case::Fact,
+        metadata: &FactMetadata,
         saga_fact: &SagaFact,
     ) -> Self {
+        // Destructure exhaustively: a new `FactMetadata` field will fail to
+        // compile here until it is mapped to a column.
+        let FactMetadata { id, created_sitrep_id, comment } = metadata;
         let base = Self {
-            id: fact.metadata.id.into(),
+            id: (*id).into(),
             sitrep_id: sitrep_id.into(),
             case_id: case_id.into(),
-            created_sitrep_id: fact.metadata.created_sitrep_id.into(),
-            comment: fact.metadata.comment.clone(),
+            created_sitrep_id: (*created_sitrep_id).into(),
+            comment: comment.clone(),
             saga_id: saga_fact.saga_id().0,
             kind: FmFactSagaKind::NotProgressing,
             saga_state: None,

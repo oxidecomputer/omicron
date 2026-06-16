@@ -883,7 +883,10 @@ impl DataStore {
                     }
                     fm::FactPayload::Saga(saga_fact) => {
                         saga_facts.push(model::fm::FmFactSaga::from_sitrep(
-                            sitrep_id, case_id, fact, saga_fact,
+                            sitrep_id,
+                            case_id,
+                            &fact.metadata,
+                            saga_fact,
                         ));
                     }
                 }

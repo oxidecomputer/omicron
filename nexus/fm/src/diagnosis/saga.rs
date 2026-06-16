@@ -36,6 +36,7 @@ use nexus_types::observed_saga::{
 };
 use omicron_uuid_kinds::{CaseUuid, FactUuid};
 use std::collections::BTreeMap;
+use std::collections::btree_map::Entry;
 
 /// A saga is flagged as "not progressing" once it has recorded no node event
 /// for at least this long. This is a wall-clock, cadence-independent quantity
@@ -43,10 +44,10 @@ use std::collections::BTreeMap;
 /// passes.
 const STALE_SAGA_THRESHOLD: TimeDelta = TimeDelta::minutes(30);
 
-/// Per-case view of a parent saga case, built from its facts. Every fact on a
-/// saga case is about the same `saga_id`, and a case carries at most one fact
-/// of each kind.
-struct ParentSagaCase {
+/// A parent-forwarded Saga case, parsed into the form this engine acts on.
+/// Every fact on a saga case is about the same `saga_id`, and a case carries
+/// at most one fact of each kind.
+struct ParsedSagaCase {
     saga_id: steno::SagaId,
     /// The fact to consider when advancing the case: at most one per kind
     /// (the lowest fact UUID wins if a case pathologically carries several).
@@ -76,11 +77,9 @@ enum UninterpretableCase {
     NoFacts,
 }
 
-/// Summarize one parent-forwarded Saga case, or explain why it cannot be
-/// interpreted.
-fn summarize_case(
-    case: &fm::Case,
-) -> Result<ParentSagaCase, UninterpretableCase> {
+/// Parse one parent-forwarded Saga case into a [`ParsedSagaCase`], or explain
+/// why it cannot be interpreted.
+fn parse_case(case: &fm::Case) -> Result<ParsedSagaCase, UninterpretableCase> {
     let mut saga_id: Option<steno::SagaId> = None;
     let mut not_progressing: Option<(FactUuid, SagaNotProgressingFactPayload)> =
         None;
@@ -133,7 +132,7 @@ fn summarize_case(
     let Some(saga_id) = saga_id else {
         return Err(UninterpretableCase::NoFacts);
     };
-    Ok(ParentSagaCase {
+    Ok(ParsedSagaCase {
         saga_id,
         not_progressing,
         owner_not_current,
@@ -149,167 +148,116 @@ pub(super) fn analyze(builder: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
     // and reproducible in tests, matching the physical-disk engine's use of
     // inventory timestamps.
     let reference_time = input.inventory().time_done;
-    let observed = input.observed_sagas();
+    let observed_sagas = input.observed_sagas();
 
-    // Index parent-forwarded Saga cases by case ID, and maintain a saga_id ->
-    // case_id index for the second pass. Every case is about one saga,
-    // derived from its facts.
-    let mut parent_cases: BTreeMap<CaseUuid, ParentSagaCase> = BTreeMap::new();
-    let mut case_for_saga: BTreeMap<steno::SagaId, CaseUuid> = BTreeMap::new();
-    let mut uninterpretable = Vec::<(CaseUuid, UninterpretableCase)>::new();
+    // Parse the Saga cases copied forward from the parent sitrep. Every case
+    // is about one saga, derived from its facts. Cases we cannot interpret are
+    // closed inline, so they don't ride along as open-but-unprocessable in
+    // every future sitrep. This is safe with respect to fault coverage:
+    // detection below is independent of case bookkeeping, so if a closed case
+    // concerned a saga that genuinely needs attention, a fresh, well-formed
+    // case is opened in this same pass.
+    let mut parent_cases: BTreeMap<CaseUuid, ParsedSagaCase> = BTreeMap::new();
     for case in input
         .open_cases()
         .iter()
         .filter(|c| c.metadata.de == DiagnosisEngineKind::Saga)
     {
-        let summary = match summarize_case(case) {
-            Ok(summary) => summary,
+        match parse_case(case) {
+            Ok(parsed_case) => {
+                if !parsed_case.duplicate_facts.is_empty() {
+                    slog::warn!(
+                        &builder.log,
+                        "Saga case has more than one fact of the same kind; \
+                         the duplicates will be removed";
+                        "case_id" => %case.id,
+                        "duplicate_fact_ids" => ?parsed_case.duplicate_facts,
+                    );
+                }
+                parent_cases.insert(case.id, parsed_case);
+            }
             Err(reason) => {
+                builder
+                    .cases
+                    .case_mut(&case.id)
+                    .expect("case_id came from builder's open cases")
+                    .close(format!("cannot interpret case: {reason}"));
+            }
+        }
+    }
+
+    // Inverse index: which parent case is about which saga. Cases are per-saga,
+    // so a saga with two parent cases is already pathological. We keep one and
+    // close the rest as duplicates; which one we keep is arbitrary.
+    // `parent_cases` iterates ascending by CaseUuid, so we deterministically
+    // keep the lowest-ID case, but the ID ordering carries no meaning here.
+    // Closing the duplicate matters: a half-maintained one would otherwise
+    // decay into an uninterpretable empty case.
+    let mut case_for_saga: BTreeMap<steno::SagaId, CaseUuid> = BTreeMap::new();
+    for (case_id, parsed_case) in &parent_cases {
+        match case_for_saga.entry(parsed_case.saga_id) {
+            Entry::Vacant(slot) => {
+                slot.insert(*case_id);
+            }
+            Entry::Occupied(kept) => {
+                let kept_case_id = *kept.get();
                 slog::warn!(
                     &builder.log,
-                    "closing uninterpretable Saga case";
-                    "case_id" => %case.id,
-                    "reason" => %reason,
+                    "closing duplicate Saga case";
+                    "case_id" => %case_id,
+                    "kept_case_id" => %kept_case_id,
+                    "saga_id" => %parsed_case.saga_id,
                 );
-                uninterpretable.push((case.id, reason));
-                continue;
+                builder
+                    .cases
+                    .case_mut(case_id)
+                    .expect("case_id came from builder's open cases")
+                    .close(format!(
+                        "duplicate of case {kept_case_id} for saga {}",
+                        parsed_case.saga_id,
+                    ));
             }
-        };
-        if !summary.duplicate_facts.is_empty() {
-            slog::warn!(
-                &builder.log,
-                "Saga case has more than one fact of the same kind; \
-                 the duplicates will be removed";
-                "case_id" => %case.id,
-                "duplicate_fact_ids" => ?summary.duplicate_facts,
-            );
         }
-        // Cases iterate in UUID order, so the kept case for a saga is
-        // deterministically the one with the lowest case UUID.
-        case_for_saga.entry(summary.saga_id).or_insert(case.id);
-        parent_cases.insert(case.id, summary);
     }
 
-    // Close the cases we couldn't interpret, so they don't ride along as
-    // open-but-unprocessable in every future sitrep. This is safe with
-    // respect to fault coverage: detection below is independent of case
-    // bookkeeping, so if a closed case concerned a saga that genuinely
-    // needs attention, a fresh, well-formed case is opened in this same
-    // pass.
-    for (case_id, reason) in uninterpretable {
-        builder
+    // Close the surviving parent case for any saga that has reached a terminal
+    // state (no longer observed) or has fully recovered (no condition holds
+    // anymore). A still-problematic saga's facts are reconciled in the next
+    // loop, which owns all fact state for the saga.
+    for (saga_id, case_id) in &case_for_saga {
+        let mut case_mut = builder
             .cases
-            .case_mut(&case_id)
-            .expect("case came from builder.input()'s open cases")
-            .close(format!("cannot interpret case: {reason}"));
-    }
-
-    // Close duplicate cases: a saga with two parent cases is pathological;
-    // the lowest case ID is kept and maintained below. (A half-maintained
-    // duplicate would otherwise decay into an uninterpretable empty case.)
-    for (case_id, summary) in &parent_cases {
-        let kept_case_id = case_for_saga[&summary.saga_id];
-        if *case_id != kept_case_id {
-            slog::warn!(
-                &builder.log,
-                "closing duplicate Saga case";
-                "case_id" => %case_id,
-                "kept_case_id" => %kept_case_id,
-                "saga_id" => %summary.saga_id,
-            );
-            builder
-                .cases
-                .case_mut(case_id)
-                .expect("case came from builder.input()'s open cases")
-                .close(format!(
-                    "duplicate of case {kept_case_id} for saga {}",
-                    summary.saga_id,
-                ));
-        }
-    }
-
-    // First pass: for each saga's surviving parent case, close it if its
-    // saga has reached a terminal state (no longer observed) or has fully
-    // recovered (no condition holds anymore), otherwise drop any facts whose
-    // recorded contents no longer match the current observation. The second
-    // pass re-adds a fresh fact if the condition still holds.
-    for case_id in case_for_saga.values() {
-        let summary = &parent_cases[case_id];
-        let mut case_mut = builder.cases.case_mut(case_id).expect(
-            "builder.cases is seeded from the open cases of builder.input(), \
-             which is where this case_id came from",
-        );
-        let Some(obs) = observed.get(&summary.saga_id) else {
-            case_mut.close(format!(
-                "saga {} completed or was removed",
-                summary.saga_id,
-            ));
+            .case_mut(case_id)
+            .expect("case_id came from builder's open cases");
+        let Some(obs) = observed_sagas.get(saga_id) else {
+            case_mut.close(format!("saga {saga_id} completed or was removed"));
             continue;
         };
-        let desired_np = desired_not_progressing(obs, reference_time);
-        let desired_owner = desired_owner_not_current(obs);
-        let desired_abandoned = desired_abandoned(obs);
         // A case is an episode of a problem, not a dossier on the saga: when
-        // no condition holds anymore, the episode is over and the case
-        // closes. Its facts stay attached as the record of why it existed;
-        // they age out with the case once it stops being copied forward. If
-        // the saga becomes a problem again later, a fresh case opens.
+        // no condition holds anymore, the episode is over and the case closes.
+        // Its facts stay attached as the record of why it existed; they age
+        // out with the case once it stops being copied forward. If the saga
+        // becomes a problem again later, a fresh case opens.
         //
         // An abandoned saga never reaches this close: `desired_abandoned`
-        // holds until the saga row itself is removed (the `else` branch
-        // above), keeping the case open while remediation is pending.
-        if desired_np.is_none()
-            && desired_owner.is_none()
-            && desired_abandoned.is_none()
+        // holds until the saga row itself is removed (the `else` branch above),
+        // keeping the case open while remediation is pending.
+        if desired_not_progressing(obs, reference_time).is_none()
+            && desired_owner_not_current(obs).is_none()
+            && desired_abandoned(obs).is_none()
         {
             case_mut.close(format!(
-                "saga {} is progressing under a current owner again",
-                summary.saga_id,
+                "saga {saga_id} is progressing under a current owner again",
             ));
-            continue;
         }
-        // Duplicate facts carry no information the kept facts don't; remove
-        // them regardless of what the observation says.
-        for fact_id in &summary.duplicate_facts {
-            case_mut.remove_fact(
-                *fact_id,
-                "duplicate fact of the same kind on the case",
-            );
-        }
-        if let Some((fact_id, payload)) = &summary.not_progressing {
-            if desired_np.as_ref() != Some(payload) {
-                case_mut.remove_fact(
-                    *fact_id,
-                    "stale NotProgressing observation, superseded by current \
-                     saga state",
-                );
-            }
-        }
-        if let Some((fact_id, payload)) = &summary.owner_not_current {
-            if desired_owner.as_ref() != Some(payload) {
-                case_mut.remove_fact(
-                    *fact_id,
-                    "stale OwnerNotCurrentGeneration observation, superseded \
-                     by current saga state",
-                );
-            }
-        }
-        if let Some((fact_id, payload)) = &summary.abandoned {
-            if desired_abandoned.as_ref() != Some(payload) {
-                case_mut.remove_fact(
-                    *fact_id,
-                    "stale Abandoned observation, superseded by current saga \
-                     state",
-                );
-            }
-        }
+        // Faulty: leave open; the next loop reconciles its facts.
     }
 
-    // Second pass: for each observed saga with a problem, ensure a case exists
-    // (reusing the parent-forwarded one if any) and add a fresh fact for each
-    // condition that isn't already represented by a matching, carried-forward
-    // fact.
-    for obs in observed.iter() {
+    // For each observed saga with a problem, ensure its case carries exactly
+    // the facts matching the current observation: reuse the parent-forwarded
+    // case if any (dropping duplicate and stale facts), otherwise open a fresh
+    // case. This loop owns all fact state for a saga.
+    for obs in observed_sagas.iter() {
         let desired_np = desired_not_progressing(obs, reference_time);
         let desired_owner = desired_owner_not_current(obs);
         let desired_abandoned = desired_abandoned(obs);
@@ -320,31 +268,15 @@ pub(super) fn analyze(builder: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
             continue;
         }
 
-        let parent = case_for_saga.get(&obs.saga_id).and_then(|case_id| {
-            parent_cases.get(case_id).map(|s| (*case_id, s))
-        });
+        let parent = case_for_saga
+            .get(&obs.saga_id)
+            .map(|case_id| (*case_id, &parent_cases[case_id]));
 
-        // A carried-forward fact already covers a condition only if its
-        // recorded payload exactly matches what we'd emit now (otherwise the
-        // first pass removed it).
-        let np_already = matches!(
-            (&desired_np, parent.and_then(|(_, s)| s.not_progressing.as_ref())),
-            (Some(want), Some((_, have))) if want == have
-        );
-        let owner_already = matches!(
-            (
-                &desired_owner,
-                parent.and_then(|(_, s)| s.owner_not_current.as_ref()),
-            ),
-            (Some(want), Some((_, have))) if want == have
-        );
-        let abandoned_already = matches!(
-            (&desired_abandoned, parent.and_then(|(_, s)| s.abandoned.as_ref())),
-            (Some(want), Some((_, have))) if want == have
-        );
-
-        let case_id = match parent {
-            Some((case_id, _)) => case_id,
+        let mut case_mut = match parent {
+            Some((case_id, _)) => builder
+                .cases
+                .case_mut(&case_id)
+                .expect("case_id came from builder's open cases"),
             None => {
                 let mut new_case =
                     builder.cases.open_case(DiagnosisEngineKind::Saga);
@@ -352,43 +284,78 @@ pub(super) fn analyze(builder: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
                     "saga {} ({}) needs attention",
                     obs.saga_id, obs.saga_name,
                 ));
-                new_case.id
+                new_case
             }
         };
 
-        if let Some(payload) = desired_np {
-            if !np_already {
+        // Duplicate facts carry no information the kept fact doesn't; remove
+        // them regardless of what the observation says.
+        if let Some((_, parsed_case)) = parent {
+            for fact_id in &parsed_case.duplicate_facts {
+                case_mut.remove_fact(
+                    *fact_id,
+                    "duplicate fact of the same kind on the case",
+                );
+            }
+        }
+
+        // NotProgressing: keep the carried fact if it already records exactly
+        // what we'd emit now; otherwise drop the stale one (if any) and add a
+        // fresh one.
+        let carried_np = parent.and_then(|(_, p)| p.not_progressing.as_ref());
+        if carried_np.map(|(_, p)| p) != desired_np.as_ref() {
+            if let Some((fact_id, _)) = carried_np {
+                case_mut.remove_fact(
+                    *fact_id,
+                    "NotProgressing fact no longer matches the current saga \
+                     state",
+                );
+            }
+            if let Some(payload) = desired_np {
                 let staleness = reference_time
                     .signed_duration_since(payload.last_event_time);
                 let comment = format!(
                     "no saga node event in {}",
                     omicron_common::format_time_delta(staleness),
                 );
-                builder
-                    .cases
-                    .case_mut(&case_id)
-                    .expect("case_id came from this fn")
-                    .add_fact(SagaFact::NotProgressing(payload), comment);
+                case_mut.add_fact(SagaFact::NotProgressing(payload), comment);
             }
         }
-        if let Some(payload) = desired_owner {
-            if !owner_already {
+
+        // OwnerNotCurrentGeneration: same reconciliation.
+        let carried_owner =
+            parent.and_then(|(_, p)| p.owner_not_current.as_ref());
+        if carried_owner.map(|(_, p)| p) != desired_owner.as_ref() {
+            if let Some((fact_id, _)) = carried_owner {
+                case_mut.remove_fact(
+                    *fact_id,
+                    "OwnerNotCurrentGeneration fact no longer matches the \
+                     current saga state",
+                );
+            }
+            if let Some(payload) = desired_owner {
                 let comment = format!(
                     "owned by non-current Nexus {} ({:?})",
                     payload.current_sec, payload.orphan_reason,
                 );
-                builder
-                    .cases
-                    .case_mut(&case_id)
-                    .expect("case_id came from this fn")
-                    .add_fact(
-                        SagaFact::OwnerNotCurrentGeneration(payload),
-                        comment,
-                    );
+                case_mut.add_fact(
+                    SagaFact::OwnerNotCurrentGeneration(payload),
+                    comment,
+                );
             }
         }
-        if let Some(payload) = desired_abandoned {
-            if !abandoned_already {
+
+        // Abandoned: same reconciliation. The payload is pure identity, so it
+        // only ever drops when the condition clears, never on a value change.
+        let carried_abandoned = parent.and_then(|(_, p)| p.abandoned.as_ref());
+        if carried_abandoned.map(|(_, p)| p) != desired_abandoned.as_ref() {
+            if let Some((fact_id, _)) = carried_abandoned {
+                case_mut.remove_fact(
+                    *fact_id,
+                    "Abandoned fact no longer matches the current saga state",
+                );
+            }
+            if let Some(payload) = desired_abandoned {
                 // The payload is pure identity; the human-readable context
                 // (which a promoted problem would otherwise look up from the
                 // saga row) goes in the comment.
@@ -402,11 +369,7 @@ pub(super) fn analyze(builder: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
                         .map(|t| t.to_string())
                         .unwrap_or_else(|| "<none recorded>".to_string()),
                 );
-                builder
-                    .cases
-                    .case_mut(&case_id)
-                    .expect("case_id came from this fn")
-                    .add_fact(SagaFact::Abandoned(payload), comment);
+                case_mut.add_fact(SagaFact::Abandoned(payload), comment);
             }
         }
     }
@@ -570,11 +533,17 @@ mod tests {
         builder.build(OmicronZoneUuid::new_v4(), Utc::now())
     }
 
-    /// Collect every saga fact in the sitrep, optionally only on open cases.
-    fn saga_facts(
-        sitrep: &Sitrep,
-        open_only: bool,
-    ) -> Vec<(fm::case::Fact, SagaFact)> {
+    /// A saga fact found in a sitrep, paired with its decoded [`SagaFact`]
+    /// payload.
+    #[derive(Debug)]
+    struct SagaFactRef<'a> {
+        fact: &'a fm::case::Fact,
+        saga_fact: SagaFact,
+    }
+
+    /// Collect every saga fact in the sitrep, with its decoded payload.
+    /// Optionally filtered to open cases only.
+    fn saga_facts(sitrep: &Sitrep, open_only: bool) -> Vec<SagaFactRef<'_>> {
         sitrep
             .cases
             .iter()
@@ -582,10 +551,20 @@ mod tests {
             .filter(|c| !open_only || c.is_open())
             .flat_map(|c| {
                 c.facts.iter().filter_map(|f| {
-                    f.payload.as_saga().map(|s| (f.clone(), s.clone()))
+                    f.payload
+                        .as_saga()
+                        .map(|s| SagaFactRef { fact: f, saga_fact: s.clone() })
                 })
             })
             .collect()
+    }
+
+    /// The fact UUID of the one saga fact on the one saga case in `sitrep`.
+    /// Panics unless there is exactly one.
+    fn sole_saga_fact_id(sitrep: &Sitrep) -> FactUuid {
+        let facts = saga_facts(sitrep, false);
+        assert_eq!(facts.len(), 1, "expected exactly one saga fact");
+        facts[0].fact.metadata.id
     }
 
     /// Make a `Fact` carrying the given saga payload.
@@ -703,7 +682,7 @@ mod tests {
 
         let facts = saga_facts(&sitrep, true);
         assert_eq!(facts.len(), 1);
-        match &facts[0].1 {
+        match &facts[0].saga_fact {
             SagaFact::NotProgressing(p) => {
                 assert_eq!(p.saga_id, id);
                 assert_eq!(p.last_event_time, stale);
@@ -745,7 +724,7 @@ mod tests {
 
         let facts = saga_facts(&sitrep, true);
         assert_eq!(facts.len(), 1);
-        match &facts[0].1 {
+        match &facts[0].saga_fact {
             SagaFact::OwnerNotCurrentGeneration(p) => {
                 assert_eq!(p.current_sec, sec);
                 assert_eq!(p.orphan_reason, OrphanedReason::Quiesced);
@@ -816,10 +795,12 @@ mod tests {
             .collect();
         assert_eq!(open_cases.len(), 1);
         assert!(
-            facts.iter().any(|(_, f)| matches!(f, SagaFact::NotProgressing(_)))
+            facts
+                .iter()
+                .any(|fr| matches!(&fr.saga_fact, SagaFact::NotProgressing(_)))
         );
-        assert!(facts.iter().any(|(_, f)| matches!(
-            f,
+        assert!(facts.iter().any(|fr| matches!(
+            &fr.saga_fact,
             SagaFact::OwnerNotCurrentGeneration(p)
                 if p.orphan_reason == OrphanedReason::Expunged
         )));
@@ -875,17 +856,7 @@ mod tests {
             inv_id,
             [SagaFact::NotProgressing(payload.clone())],
         );
-        let parent_fact_id = parent
-            .cases
-            .iter()
-            .next()
-            .unwrap()
-            .facts
-            .iter()
-            .next()
-            .unwrap()
-            .metadata
-            .id;
+        let parent_fact_id = sole_saga_fact_id(&parent);
         // Observed saga matches the parent fact exactly (same last_event_time,
         // same state).
         let observed = observed_map([ObservedSaga {
@@ -903,7 +874,7 @@ mod tests {
         let facts = saga_facts(&sitrep, true);
         assert_eq!(facts.len(), 1);
         assert_eq!(
-            facts[0].0.metadata.id, parent_fact_id,
+            facts[0].fact.metadata.id, parent_fact_id,
             "fact UUID should be stable when the observation is unchanged",
         );
         logctx.cleanup_successful();
@@ -928,17 +899,7 @@ mod tests {
                 last_event_time: old,
             })],
         );
-        let parent_fact_id = parent
-            .cases
-            .iter()
-            .next()
-            .unwrap()
-            .facts
-            .iter()
-            .next()
-            .unwrap()
-            .metadata
-            .id;
+        let parent_fact_id = sole_saga_fact_id(&parent);
         // Still stale, but last_event_time advanced.
         let observed = observed_map([ObservedSaga {
             saga_id: id,
@@ -955,10 +916,10 @@ mod tests {
         let facts = saga_facts(&sitrep, true);
         assert_eq!(facts.len(), 1);
         assert_ne!(
-            facts[0].0.metadata.id, parent_fact_id,
+            facts[0].fact.metadata.id, parent_fact_id,
             "fact UUID should rotate when last_event_time changes",
         );
-        match &facts[0].1 {
+        match &facts[0].saga_fact {
             SagaFact::NotProgressing(p) => {
                 assert_eq!(p.last_event_time, new)
             }
@@ -1116,11 +1077,11 @@ mod tests {
             "only the owner fact should remain on the open case",
         );
         assert_eq!(
-            facts[0].0.metadata.id, parent_owner_fact_id,
+            facts[0].fact.metadata.id, parent_owner_fact_id,
             "the persisting fact carries forward with a stable UUID",
         );
         assert!(matches!(
-            &facts[0].1,
+            &facts[0].saga_fact,
             SagaFact::OwnerNotCurrentGeneration(p) if p.current_sec == sec
         ));
         logctx.cleanup_successful();
@@ -1197,7 +1158,7 @@ mod tests {
         let facts = saga_facts(&sitrep, true);
         assert_eq!(facts.len(), 1, "the duplicate fact should be removed");
         assert_eq!(
-            facts[0].0.metadata.id, kept_id,
+            facts[0].fact.metadata.id, kept_id,
             "the kept fact matches the observation, so its UUID is stable",
         );
         logctx.cleanup_successful();
@@ -1252,14 +1213,14 @@ mod tests {
             "both parent facts should be removed and one fresh fact added",
         );
         assert_ne!(
-            facts[0].0.metadata.id, kept_id,
+            facts[0].fact.metadata.id, kept_id,
             "the stale kept fact was removed"
         );
         assert_ne!(
-            facts[0].0.metadata.id, dup_id,
+            facts[0].fact.metadata.id, dup_id,
             "the duplicate was removed unconditionally",
         );
-        match &facts[0].1 {
+        match &facts[0].saga_fact {
             SagaFact::NotProgressing(p) => {
                 assert_eq!(p.last_event_time, current);
             }
@@ -1310,7 +1271,7 @@ mod tests {
 
         let facts = saga_facts(&sitrep, true);
         assert_eq!(facts.len(), 1);
-        match &facts[0].1 {
+        match &facts[0].saga_fact {
             SagaFact::Abandoned(p) => assert_eq!(p.saga_id, id),
             other => panic!("expected Abandoned, got {other:?}"),
         }
@@ -1353,7 +1314,7 @@ mod tests {
         assert!(case.is_open(), "abandonment must not close the case");
         let facts = saga_facts(&sitrep, true);
         assert_eq!(facts.len(), 1, "the NotProgressing fact is superseded");
-        match &facts[0].1 {
+        match &facts[0].saga_fact {
             SagaFact::Abandoned(p) => assert_eq!(p.saga_id, id),
             other => panic!("expected Abandoned, got {other:?}"),
         }
@@ -1384,7 +1345,7 @@ mod tests {
         let facts = saga_facts(&sitrep, true);
         assert_eq!(facts.len(), 1);
         assert_eq!(
-            facts[0].0.metadata.id, parent_fact_id,
+            facts[0].fact.metadata.id, parent_fact_id,
             "the Abandoned fact UUID is stable across sitreps",
         );
         logctx.cleanup_successful();
@@ -1582,7 +1543,7 @@ mod tests {
             1,
             "expected exactly one open Saga fact (on the replacement case)",
         );
-        match &open[0].1 {
+        match &open[0].saga_fact {
             SagaFact::NotProgressing(p) => {
                 assert_eq!(p.saga_id, stuck_saga);
                 assert_eq!(p.last_event_time, last_event);
