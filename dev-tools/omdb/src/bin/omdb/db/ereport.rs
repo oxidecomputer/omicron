@@ -146,10 +146,10 @@ struct ReportersArgs {
     slot_type: Option<nexus_types::inventory::SpType>,
 
     #[clap(long = "slot", short = 's', requires = "slot_type")]
-    want_slot: Option<u16>,
+    slot: Option<u16>,
 
-    #[clap(long = "serial", short = 'S')]
-    want_serial: Option<String>,
+    #[clap(long = "serial")]
+    serial: Option<String>,
 }
 
 #[derive(
@@ -512,7 +512,7 @@ async fn cmd_db_ereporters(
     datastore: &DataStore,
     args: &ReportersArgs,
 ) -> anyhow::Result<()> {
-    let &ReportersArgs { slot_type, want_slot, ref want_serial } = args;
+    let &ReportersArgs { slot_type, slot, serial: ref want_serial } = args;
     let slot_type = slot_type.map(nexus_db_model::SpType::from);
 
     let conn = datastore.pool_connection_for_tests().await?;
@@ -528,7 +528,7 @@ async fn cmd_db_ereporters(
             if let Some(slot_type) = slot_type {
                 query = query.filter(restart_dsl::slot_type.eq(slot_type));
             }
-            if let Some(slot) = want_slot {
+            if let Some(slot) = slot {
                 query = query
                     .filter(restart_dsl::slot.eq(db::model::SqlU16::new(slot)));
             }

@@ -710,6 +710,7 @@ task: "fm_analysis"
     preparation report:
       parent sitrep:        <none>
       inventory collection: ..........<REDACTED_UUID>...........
+      total known ereport restart IDs: 0
       no new ereports since the parent sitrep
       no cases copied forward
 
@@ -1401,6 +1402,7 @@ task: "fm_analysis"
     preparation report:
       parent sitrep:        <none>
       inventory collection: ..........<REDACTED_UUID>...........
+      total known ereport restart IDs: 0
       no new ereports since the parent sitrep
       no cases copied forward
 
