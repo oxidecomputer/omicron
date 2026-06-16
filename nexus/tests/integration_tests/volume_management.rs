@@ -5232,7 +5232,7 @@ async fn test_double_layer_snapshot_with_read_only_region_delete_2(
                 if state == RegionSnapshotReplacementState::Complete {
                     Ok(())
                 } else {
-                    Err(CondCheckError::<()>::NotYet)
+                    Err(CondCheckError::<()>::NotYet { status: None })
                 }
             }
         },
