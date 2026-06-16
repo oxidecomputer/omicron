@@ -37,7 +37,6 @@ use mg_api_types::bgp::policy::{
     ImportExportPolicy4 as MgImportExportPolicy4,
     ImportExportPolicy6 as MgImportExportPolicy6,
 };
-use mg_api_types::rdb::prefix::{Prefix, Prefix4, Prefix6};
 use mg_api_types::rib::BestpathFanoutRequest;
 use mg_api_types::static_routes::{
     AddStaticRoute4Request, AddStaticRoute6Request, StaticRoute4,
@@ -551,7 +550,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                 let mut switch_bgp_config: HashMap<SwitchSlot, (Uuid, BgpConfig)> = HashMap::new();
 
                 // Prefixes are associated to BgpConfig via the config id
-                let mut bgp_announce_prefixes: HashMap<Uuid, Vec<Prefix>> = HashMap::new();
+                let mut bgp_announce_prefixes: HashMap<Uuid, Vec<IpNet>> = HashMap::new();
 
                 for (switch_slot, port, change) in &changes {
                     let PortSettingsChange::Apply(settings) = change else {
@@ -644,19 +643,13 @@ impl BackgroundTask for SwitchPortSettingsManager {
                                 },
                             };
 
-                            let mut prefixes: Vec<Prefix> = vec![];
+                            let mut prefixes: Vec<IpNet> = vec![];
 
                             for announcement in &announcements {
-                                match announcement.network.ip() {
-                                    IpAddr::V4(value) => {
-                                        let prefix = Prefix4 { value, length: announcement.network.prefix() };
-                                        prefixes.push(Prefix::V4(prefix));
-                                    },
-                                    IpAddr::V6(value) => {
-                                        let prefix = Prefix6 { value, length: announcement.network.prefix() };
-                                        prefixes.push(Prefix::V6(prefix));
-                                    },
-                                };
+                                prefixes.push(IpNet::new_unchecked(
+                                    announcement.network.ip(),
+                                    announcement.network.prefix(),
+                                ));
                             }
                             bgp_announce_prefixes.insert(bgp_config.bgp_announce_set_id, prefixes);
                         }
@@ -718,10 +711,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                                     .filter_map(|x|
                                         match x.prefix {
                                             IpNetwork::V4(p) =>  Some(
-                                                Prefix4{
-                                                    length: p.prefix(),
-                                                    value: p.ip(),
-                                                }
+                                                Ipv4Net::new_unchecked(p.ip(), p.prefix())
                                             ),
                                             IpNetwork::V6(_) =>  None,
                                         }
@@ -740,10 +730,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                                     .filter_map(|x|
                                         match x.prefix {
                                             IpNetwork::V6(p) =>  Some(
-                                                Prefix6{
-                                                    length: p.prefix(),
-                                                    value: p.ip(),
-                                                }
+                                                Ipv6Net::new_unchecked(p.ip(), p.prefix())
                                             ),
                                             IpNetwork::V4(_) =>  None,
                                         }
@@ -786,10 +773,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                                     .filter_map(|x|
                                         match x.prefix {
                                             IpNetwork::V4(p) =>  Some(
-                                                Prefix4{
-                                                    length: p.prefix(),
-                                                    value: p.ip(),
-                                                }
+                                                Ipv4Net::new_unchecked(p.ip(), p.prefix())
                                             ),
                                             IpNetwork::V6(_) => None,
                                         }
@@ -808,10 +792,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                                     .filter_map(|x|
                                         match x.prefix {
                                             IpNetwork::V6(p) =>  Some(
-                                                Prefix6{
-                                                    length: p.prefix(),
-                                                    value: p.ip(),
-                                                }
+                                                Ipv6Net::new_unchecked(p.ip(), p.prefix())
                                             ),
                                             IpNetwork::V4(_) => None,
                                         }
@@ -828,7 +809,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                                 // now that the peer passes the above validations, add it to the list for configuration
                                 let peer_config = BgpPeerConfig {
                                     name: format!("{ip}"),
-                                    host: SocketAddr::new(ip.into(), 179).to_string(),
+                                    host: SocketAddr::new(ip.into(), 179),
                                     hold_time: peer.hold_time.into(),
                                     idle_hold_time: peer.idle_hold_time.into(),
                                     delay_open: peer.delay_open.into(),
@@ -1040,21 +1021,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                     let announcements = bgp_announce_prefixes
                         .get(&config.bgp_announce_set_id)
                         .expect("bgp config is present but announce set is not populated")
-                        .iter()
-                        .map(|prefix| {
-                            match prefix {
-                                Prefix::V4(prefix4) => {
-                                    let net = Ipv4Net::new(prefix4.value, prefix4.length)
-                                        .expect("Prefix4 and Ipv4Net's value types have diverged");
-                                    IpNet::V4(net)
-                                },
-                                Prefix::V6(prefix6) => {
-                                    let net = Ipv6Net::new(prefix6.value, prefix6.length)
-                                        .expect("Prefix6 and Ipv6Net's value types have diverged");
-                                    IpNet::V6(net)
-                                },
-                            }
-                        }).collect();
+                        .clone();
 
                     let max_paths = match MaxPathConfig::new(*config.max_paths)
                     {
@@ -1860,7 +1827,7 @@ fn build_sled_agent_clients(
 #[derive(PartialEq, Eq, Hash, Debug)]
 struct SwitchStaticRouteV4 {
     nexthop: IpAddr,
-    prefix: Prefix4,
+    prefix: Ipv4Net,
     vlan: Option<u16>,
     priority: u8,
 }
@@ -1868,7 +1835,7 @@ struct SwitchStaticRouteV4 {
 #[derive(PartialEq, Eq, Hash, Debug)]
 struct SwitchStaticRouteV6 {
     nexthop: Ipv6Addr,
-    prefix: Prefix6,
+    prefix: Ipv6Net,
     vlan: Option<u16>,
     priority: u8,
 }
@@ -2043,10 +2010,7 @@ fn static_routes_in_db(
                     };
                     routes.insert(SwitchStaticRoute::V4(SwitchStaticRouteV4 {
                         nexthop: IpAddr::V4(nexthop),
-                        prefix: Prefix4 {
-                            value: dst,
-                            length: route.dst.prefix(),
-                        },
+                        prefix: Ipv4Net::new_unchecked(dst, route.dst.prefix()),
                         vlan: route.vid.map(|x| x.0),
                         priority,
                     }));
@@ -2063,10 +2027,7 @@ fn static_routes_in_db(
                     };
                     routes.insert(SwitchStaticRoute::V6(SwitchStaticRouteV6 {
                         nexthop,
-                        prefix: Prefix6 {
-                            value: dst,
-                            length: route.dst.prefix(),
-                        },
+                        prefix: Ipv6Net::new_unchecked(dst, route.dst.prefix()),
                         vlan: route.vid.map(|x| x.0),
                         priority,
                     }));
@@ -2078,10 +2039,7 @@ fn static_routes_in_db(
                     };
                     routes.insert(SwitchStaticRoute::V4(SwitchStaticRouteV4 {
                         nexthop: IpAddr::V6(nexthop),
-                        prefix: Prefix4 {
-                            value: dst,
-                            length: route.dst.prefix(),
-                        },
+                        prefix: Ipv4Net::new_unchecked(dst, route.dst.prefix()),
                         vlan: route.vid.map(|x| x.0),
                         priority,
                     }));
@@ -2325,7 +2283,7 @@ async fn static_routes_on_switch(
                         ));
                     }
                     IpAddr::V6(addr) => {
-                        if let Ok(dst) = destination.parse::<Prefix6>() {
+                        if let Ok(dst) = destination.parse::<Ipv6Net>() {
                             flattened.insert(SwitchStaticRoute::V6(
                                 SwitchStaticRouteV6 {
                                     nexthop: addr,
@@ -2336,7 +2294,7 @@ async fn static_routes_on_switch(
                             ));
                             continue;
                         };
-                        if let Ok(dst) = destination.parse::<Prefix4>() {
+                        if let Ok(dst) = destination.parse::<Ipv4Net>() {
                             flattened.insert(SwitchStaticRoute::V4(
                                 SwitchStaticRouteV4 {
                                     nexthop: IpAddr::V6(addr),

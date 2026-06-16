@@ -153,15 +153,17 @@ async fn test_nexus_boots_before_dendrite() {
     starter.start_dendrite(SwitchSlot::Switch1).await;
     info!(log, "Started Dendrite");
 
-    info!(log, "Starting mgd");
-    starter.start_mgd(SwitchSlot::Switch0).await;
-    starter.start_mgd(SwitchSlot::Switch1).await;
-    info!(log, "Started mgd");
-
+    // ddmd must start before mgd so `start_mgd` can pass `--ddm-addr` and wire
+    // up the mg-lower-mrib DDM sync, matching the default starter sequence.
     info!(log, "Starting ddm");
     starter.start_ddm(SwitchSlot::Switch0).await;
     starter.start_ddm(SwitchSlot::Switch1).await;
     info!(log, "Started ddm");
+
+    info!(log, "Starting mgd");
+    starter.start_mgd(SwitchSlot::Switch0).await;
+    starter.start_mgd(SwitchSlot::Switch1).await;
+    info!(log, "Started mgd");
 
     info!(log, "Populating internal DNS records");
     starter
@@ -200,10 +202,12 @@ async fn nexus_schema_test_setup(
     starter.start_gateway(SwitchSlot::Switch1, None, sp_conf).await;
     starter.start_dendrite(SwitchSlot::Switch0).await;
     starter.start_dendrite(SwitchSlot::Switch1).await;
-    starter.start_mgd(SwitchSlot::Switch0).await;
-    starter.start_mgd(SwitchSlot::Switch1).await;
+    // ddmd must start before mgd so `start_mgd` can pass `--ddm-addr` and wire
+    // up the mg-lower-mrib DDM sync, matching the default starter sequence.
     starter.start_ddm(SwitchSlot::Switch0).await;
     starter.start_ddm(SwitchSlot::Switch1).await;
+    starter.start_mgd(SwitchSlot::Switch0).await;
+    starter.start_mgd(SwitchSlot::Switch1).await;
     starter.populate_internal_dns().await;
 }
 

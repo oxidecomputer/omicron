@@ -4,7 +4,7 @@
 
 //! Mock / dummy versions of the OPTE module, for non-illumos platforms.
 //!
-//! Most methods are either `unimplemented!()` or silent no-ops.
+//! Most methods are either `unimplemented!()` or silent noops.
 //! Multicast subscribe/unsubscribe is an exception, as it maintains real
 //! in-memory state because port manager tests assert on subscription contents.
 
@@ -23,6 +23,7 @@ use oxide_vpc::api::IpCidr;
 use oxide_vpc::api::ListPortsResp;
 use oxide_vpc::api::McastSubscribeReq;
 use oxide_vpc::api::McastUnsubscribeReq;
+use oxide_vpc::api::MulticastUnderlay;
 use oxide_vpc::api::NoResp;
 use oxide_vpc::api::PortInfo;
 use oxide_vpc::api::RouterClass;
@@ -36,6 +37,7 @@ use oxide_vpc::api::SourceFilter;
 use oxide_vpc::api::VpcCfg;
 use sled_agent_types::inventory::NetworkInterfaceKind;
 use slog::Logger;
+use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
 use std::net::IpAddr;
@@ -93,6 +95,12 @@ pub enum Error {
         "address {0} is not within the underlay multicast subnet (ff04::/16)"
     )]
     InvalidMcastUnderlay(std::net::Ipv6Addr),
+
+    #[error(
+        "failed to install NIC multicast MAC filter for underlay {0}, \
+         caller should retry"
+    )]
+    UnderlayMcastJoinFailed(std::net::Ipv6Addr),
 }
 
 pub fn initialize_xde_driver(
@@ -197,6 +205,12 @@ pub(crate) struct PortData {
 pub(crate) struct State {
     pub ports: HashMap<String, PortData>,
     pub underlay_initialized: bool,
+    /// Multicast-to-physical mappings, keyed by group.
+    ///
+    /// Persisted across [`Handle`] lifetimes to simulate xde kernel state
+    /// surviving sled-agent restarts. Mirrors the upsert-by-group
+    /// semantics of xde's `Mcast2Phys`.
+    pub m2p: BTreeMap<oxide_vpc::api::IpAddr, MulticastUnderlay>,
 }
 
 const NO_RESPONSE: NoResp = NoResp { unused: 99 };
@@ -204,7 +218,11 @@ static OPTE_STATE: OnceLock<Mutex<State>> = OnceLock::new();
 
 fn opte_state() -> &'static Mutex<State> {
     OPTE_STATE.get_or_init(|| {
-        Mutex::new(State { ports: HashMap::new(), underlay_initialized: false })
+        Mutex::new(State {
+            ports: HashMap::new(),
+            underlay_initialized: false,
+            m2p: BTreeMap::new(),
+        })
     })
 }
 
@@ -379,15 +397,22 @@ impl Handle {
     }
 
     /// Set a multicast-to-physical mapping.
-    pub fn set_m2p(&self, _: &SetMcast2PhysReq) -> Result<NoResp, OpteError> {
+    pub fn set_m2p(&self, req: &SetMcast2PhysReq) -> Result<NoResp, OpteError> {
+        let mut state = opte_state().lock().unwrap();
+        // Upsert: replaces any existing entry for the same group.
+        state.m2p.insert(req.group, req.underlay);
         Ok(NO_RESPONSE)
     }
 
     /// Clear a multicast-to-physical mapping.
     pub fn clear_m2p(
         &self,
-        _: &ClearMcast2PhysReq,
+        req: &ClearMcast2PhysReq,
     ) -> Result<NoResp, OpteError> {
+        let mut state = opte_state().lock().unwrap();
+        if state.m2p.get(&req.group) == Some(&req.underlay) {
+            state.m2p.remove(&req.group);
+        }
         Ok(NO_RESPONSE)
     }
 
@@ -409,7 +434,20 @@ impl Handle {
 
     /// Dump all multicast-to-physical mappings.
     pub fn dump_m2p(&self) -> Result<DumpMcast2PhysResp, OpteError> {
-        Ok(DumpMcast2PhysResp { ip4: Vec::new(), ip6: Vec::new() })
+        let state = opte_state().lock().unwrap();
+        let mut ip4 = Vec::new();
+        let mut ip6 = Vec::new();
+        for (group, underlay) in &state.m2p {
+            match group {
+                oxide_vpc::api::IpAddr::Ip4(v4) => {
+                    ip4.push((*v4, *underlay));
+                }
+                oxide_vpc::api::IpAddr::Ip6(v6) => {
+                    ip6.push((*v6, *underlay));
+                }
+            }
+        }
+        Ok(DumpMcast2PhysResp { ip4, ip6 })
     }
 
     /// Dump all multicast forwarding entries.

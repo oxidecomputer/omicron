@@ -36,13 +36,24 @@ pub struct MgdInstance {
 }
 
 impl MgdInstance {
+    /// Start an `mgd` process.
+    ///
+    /// `mgs_addr` is the required management-gateway (MGS) endpoint mgd is
+    /// bound to. In the harness it is the switch's gateway instance.
+    ///
+    /// `dendrite_addr` and `ddm_addr` point mgd's lower half (illumos
+    /// only) at a dpd and a DDM admin endpoint respectively. When set,
+    /// the `mg-lower-mrib` thread syncs the local MRIB to the DDM
+    /// endpoint as multicast origination.
     pub async fn start(
         mut port: u16,
         mgs_addr: SocketAddr,
+        dendrite_addr: Option<SocketAddr>,
+        ddm_addr: Option<SocketAddr>,
     ) -> Result<Self, anyhow::Error> {
         let temp_dir = TempDir::new()?;
 
-        let args = vec![
+        let mut args = vec![
             "run".to_string(),
             "--admin-addr".into(),
             "::1".into(),
@@ -58,6 +69,14 @@ impl MgdInstance {
             "--mgs-addr".into(),
             mgs_addr.to_string(),
         ];
+        if let Some(addr) = dendrite_addr {
+            args.push("--dendrite-addr".into());
+            args.push(addr.to_string());
+        }
+        if let Some(addr) = ddm_addr {
+            args.push("--ddm-addr".into());
+            args.push(addr.to_string());
+        }
 
         let child = tokio::process::Command::new("mgd")
             .args(&args)
@@ -198,7 +217,7 @@ impl PortProbe {
         }
     }
 
-    async fn probe(&self) -> Result<Option<u16>, anyhow::Error> {
+    async fn probe(&self) -> Result<Vec<u16>, anyhow::Error> {
         let output = tokio::process::Command::new(self.command)
             .args(&self.args)
             .output()
@@ -207,40 +226,57 @@ impl PortProbe {
         if !output.status.success() {
             // The probe command can transiently fail (process exiting,
             // permissions, etc.); leave it to the caller to retry.
-            return Ok(None);
+            return Ok(Vec::new());
         }
         let text = std::str::from_utf8(&output.stdout)
             .with_context(|| format!("{} output not utf8", self.command))?;
-        Ok(text
+        let mut ports: Vec<u16> = text
             .lines()
             .filter(|line| {
                 self.pid_marker.as_deref().is_none_or(|m| line.contains(m))
             })
-            .find_map(|line| {
+            .filter_map(|line| {
                 self.port_re
                     .captures(line)?
                     .get(1)?
                     .as_str()
                     .parse::<u16>()
                     .ok()
-            }))
+            })
+            .collect();
+        ports.sort_unstable();
+        ports.dedup();
+        Ok(ports)
     }
 }
 
-/// Ask the kernel which TCP port `pid` is listening on. Retries until either
-/// the port is found or [`DDMD_TIMEOUT`] elapses, since `ddmd` may not have
-/// finished binding when we first probe.
-async fn find_listening_port(pid: u32) -> Result<u16, anyhow::Error> {
+/// Ask the kernel which TCP port `pid` is listening on, once it accepts.
+///
+/// `ddmd --api-only` binds a single Dropshot server, the versioned admin API,
+/// but does not log its `local_addr` at the daemon's error-only log level, so
+/// the kernel is the only source for the port. A bare `GET` confirms the
+/// server is accepting connections (any HTTP response, including a 404 for the
+/// unknown path) before the port is returned, since the kernel can report a
+/// socket as listening before Dropshot accepts on it.
+///
+/// Retries until a port responds or [`DDMD_TIMEOUT`] elapses.
+async fn find_ddm_admin_port(pid: u32) -> Result<u16, anyhow::Error> {
     let probe = PortProbe::for_pid(pid);
+    let client = reqwest::Client::new();
     let deadline = Instant::now() + DDMD_TIMEOUT;
     loop {
-        if let Some(port) = probe.probe().await? {
-            return Ok(port);
+        for port in probe.probe().await? {
+            let url = format!("http://[::1]:{port}/");
+            // Any HTTP response means the admin server is up; a connect error
+            // means it is bound but not accepting yet, so retry.
+            if client.get(&url).send().await.is_ok() {
+                return Ok(port);
+            }
         }
         if Instant::now() >= deadline {
             anyhow::bail!(
-                "kernel reports no listening TCP port for pid {pid} after \
-                 {DDMD_TIMEOUT:?}"
+                "kernel reports no responding admin port for pid {pid} \
+                 after {DDMD_TIMEOUT:?}"
             );
         }
         sleep(Duration::from_millis(100)).await;
@@ -288,19 +324,22 @@ const DDMD_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Test fixture that spawns and supervises a legit `ddmd` subprocess.
 ///
-/// Owns a `tokio::process::Child` and a tempdir; discovers the bound admin
-/// port by scraping dropshot's startup `local_addr` records; kills the child
-/// on `cleanup`/`Drop`. Mirrors `MgdInstance`.
+/// Owns a `tokio::process::Child` and a tempdir. Discovers the bound admin
+/// port by asking the kernel which TCP port the pid is listening on (see
+/// [`find_ddm_admin_port`]), and kills the child on `cleanup`/`Drop`. Mirrors
+/// `MgdInstance`.
 ///
 /// `ddmd` runs in sled global zones and switch zones in production. Spawned
-/// here with `--api-only`, which serves only the admin API and skips the
-/// discovery / exchange / routing daemons that need real network interfaces
-/// and illumos-only kernel facilities. Only switch-zone instances
-/// are registered in internal DNS as `ServiceName::Ddm`; sled-global-zone
-/// instances are accessed locally by their own host (RSS, sled-agent's
-/// prefix advertisement, etc.) and don't need DNS publication.
+/// here with `--api-only`, which serves only the admin API: it does not run
+/// DDM peer discovery, the peering handshake, or the transit-routing tail that
+/// programs the underlay dataplane, all of which need real network interfaces
+/// and illumos-only kernel facilities. No rear-port peers form, so the harness
+/// exercises the admin surface alone. Only switch-zone instances are
+/// registered in internal DNS as `ServiceName::Ddm`. Sled-global-zone
+/// instances are accessed locally by their own host (RSS, sled-agent's prefix
+/// advertisement, etc.) and don't need DNS publication.
 pub struct DdmInstance {
-    /// Port number the ddmd instance is listening on.
+    /// Port number the ddmd admin server is listening on.
     pub port: u16,
     /// Arguments provided to the `ddmd` cli command.
     pub args: Vec<String>,
@@ -323,7 +362,8 @@ impl DdmInstance {
     ///
     /// Instead, this fixture asks the kernel directly via `pfiles` (illumos),
     /// `ss` (Linux), or `lsof` (macOS), which reports the listening TCP port
-    /// for `ddmd`'s pid regardless of what `ddmd` chose to log.
+    /// for `ddmd`'s pid regardless of what `ddmd` chose to log (see
+    /// [`find_ddm_admin_port`]).
     ///
     /// Tracked upstream as oxidecomputer/maghemite#740. Once unified logging
     /// levels land, this fixture can revert to the simpler log-scrape pattern
@@ -341,7 +381,7 @@ impl DdmInstance {
             temp_dir.path().display().to_string(),
         ];
 
-        let child = tokio::process::Command::new("ddmd")
+        let mut child = tokio::process::Command::new("ddmd")
             .args(&args)
             .stdin(Stdio::null())
             .stdout(Stdio::from(redirect_file(temp_dir.path(), "ddmd_stdout")?))
@@ -353,16 +393,32 @@ impl DdmInstance {
 
         let pid =
             child.id().context("ddmd child has no pid (already exited?)")?;
+
+        // Discover the listening port before calling `temp_dir.keep()` or
+        // building `DdmInstance`. On this path neither the instance nor its
+        // `Drop` impl for cleanup exists. Reap the child and capture `ddmd`'s
+        // stderr before `temp_dir` drops and removes the scratch directory;
+        // otherwise, a discovery failure would leak a running `ddmd` and its
+        // tempdir.
+        let port = match find_ddm_admin_port(pid).await {
+            Ok(port) => port,
+            Err(e) => {
+                let _ = child.start_kill();
+                let _ = child.wait().await;
+                let stderr = std::fs::read_to_string(
+                    temp_dir.path().join("ddmd_stderr"),
+                )
+                .unwrap_or_default();
+                return Err(e).with_context(|| {
+                    format!(
+                        "failed to discover ddmd listening port for pid \
+                         {pid}; ddmd stderr: {stderr}"
+                    )
+                });
+            }
+        };
+
         let temp_dir = temp_dir.keep();
-
-        let port = find_listening_port(pid).await.with_context(|| {
-            format!(
-                "failed to discover ddmd listening port for pid {pid} \
-                 (see {}/ddmd_stdout, ddmd_stderr)",
-                temp_dir.display()
-            )
-        })?;
-
         Ok(Self { port, args, child: Some(child), data_dir: Some(temp_dir) })
     }
 

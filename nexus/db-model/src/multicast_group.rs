@@ -56,25 +56,29 @@
 //!
 //! ## Member Lifecycle (handled by RPW)
 //!
-//! Multicast group members follow a 3-state lifecycle managed by the
-//! Reliable Persistent Workflow (RPW) reconciler:
+//! Multicast group members follow a 3-state lifecycle managed by the Reliable
+//! Persistent Workflow (RPW) reconciler. Nexus owns the member database
+//! lifecycle, per-sled forwarding propagation, and OPTE subscriptions.
+//! Rear-port underlay membership is not tracked per member. `ddmd` derives it
+//! from DDM peer subscriptions and programs it into the switch dataplane via
+//! mg-lower/DDM.
+//!
 //! - ["Joining"](MulticastGroupMemberState::Joining): Member created, awaiting
-//!   dataplane configuration (via DPD)
-//! - ["Joined"](MulticastGroupMemberState::Joined): Member configuration applied
-//!   in the dataplane, ready to receive multicast traffic
-//! - ["Left"](MulticastGroupMemberState::Left): Member configuration removed from
-//!   the dataplane (e.g., instance stopping/stopped, explicit detach, delete)
+//!   group activation and sled assignment
+//! - ["Joined"](MulticastGroupMemberState::Joined): Member is associated with
+//!   a live VMM. Nexus has propagated sled forwarding state and subscribed
+//!   the VMM's OPTE port to the group
+//! - ["Left"](MulticastGroupMemberState::Left): Member should not receive
+//!   traffic once cleanup converges (e.g., instance stopping/stopped, explicit
+//!   detach, delete)
 //!
-//! Migration note: during instance migration, membership is reconfigured in
-//! place—the reconciler removes configuration from the old sled and applies it
-//! on the new sled without transitioning the member to "Left". In other words,
-//! migration is not considered leaving; the member generally remains "Joined"
-//! while its `sled_id` and dataplane configuration are updated.
-//! - If an instance is deleted, the member will be marked for removal with a
-//!   deleted timestamp, and the reconciler will remove it from the dataplane
+//! Migration and deletion are handled specially:
 //!
-//! The RPW ensures eventual consistency between database state and dataplane
-//! configuration (applied via DPD to switches).
+//! - Migration is not a leave: the reconciler reconfigures the member in place,
+//!   updating the recorded `sled_id`, re-propagating sled forwarding state, and
+//!   subscribing the VMM on the new sled while the member stays "Joined".
+//! - Deletion marks the member for removal with a deleted timestamp, after
+//!   which the reconciler finishes cleanup.
 //!
 //! [`UNDERLAY_MULTICAST_SUBNET`]: omicron_common::address::UNDERLAY_MULTICAST_SUBNET
 
@@ -121,6 +125,16 @@ impl_enum_type!(
     Left => b"left"
 );
 
+impl_enum_type!(
+    MulticastGroupMemberOriginEnum:
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, AsExpression, FromSqlRow, Serialize, Deserialize, JsonSchema)]
+    pub enum MulticastGroupMemberOrigin;
+
+    Static => b"static"
+    IgmpSnooped => b"igmp_snooped"
+);
+
 impl std::fmt::Display for MulticastGroupState {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(match self {
@@ -138,6 +152,15 @@ impl std::fmt::Display for MulticastGroupMemberState {
             MulticastGroupMemberState::Joining => "Joining",
             MulticastGroupMemberState::Joined => "Joined",
             MulticastGroupMemberState::Left => "Left",
+        })
+    }
+}
+
+impl std::fmt::Display for MulticastGroupMemberOrigin {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            MulticastGroupMemberOrigin::Static => "Static",
+            MulticastGroupMemberOrigin::IgmpSnooped => "IgmpSnooped",
         })
     }
 }
@@ -272,6 +295,14 @@ pub struct MulticastGroupMember {
     pub multicast_ip: IpNetwork,
     /// Source IPs for source-filtered multicast (optional for ASM, required for SSM).
     pub source_ips: Vec<IpNetwork>,
+    /// Origin of this membership.
+    ///
+    /// [`Static`](MulticastGroupMemberOrigin::Static) for administratively
+    /// configured (API) membership;
+    /// [`IgmpSnooped`](MulticastGroupMemberOrigin::IgmpSnooped) for dynamic
+    /// soft-state learned from snooped IGMP/MLD reports (RFD 488). Only snooped
+    /// rows are subject to soft-state expiry.
+    pub membership_origin: MulticastGroupMemberOrigin,
 }
 
 // Conversions to external API views
@@ -369,6 +400,7 @@ impl MulticastGroupMember {
             sled_id,
             state: MulticastGroupMemberState::Joining,
             source_ips,
+            membership_origin: MulticastGroupMemberOrigin::Static,
             // Placeholder - will be overwritten by database sequence on insert
             version_added: Generation::new(),
             version_removed: None,
