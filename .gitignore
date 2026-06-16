@@ -19,3 +19,5 @@ tags
 connectivity-report.json
 *.local
 .DS_Store
+# Personal, per-developer Claude Code instructions (team-shared ones are CLAUDE.md)
+CLAUDE.local.md
