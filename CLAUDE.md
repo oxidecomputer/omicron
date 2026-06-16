@@ -1,6 +1,6 @@
 # Omicron
 
-Omicron is the Oxide control plane. It's a large Cargo workspace (~185 crates).
+Omicron is the Oxide control plane. It's a large Cargo workspace.
 
 ## Repo map
 
@@ -40,6 +40,7 @@ A couple of pointers where the right time to read isn't obvious from the name:
 
 - Use `cargo nextest run` for tests, not `cargo test`.
 - Narrow compilation with `-p <crate>` whenever you can.
+- Run clippy with `cargo xtask clippy`.
 
 ## Adding CLAUDE.md files
 
