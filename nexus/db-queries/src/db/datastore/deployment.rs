@@ -249,31 +249,43 @@ impl DataStore {
         let sled_metadatas = blueprint
             .sleds
             .iter()
-            .map(|(&sled_id, sled)| BpSledMetadata {
-                blueprint_id: blueprint_id.into(),
-                sled_id: sled_id.into(),
-                sled_state: sled.state.into(),
-                sled_agent_generation: sled.sled_agent_generation.into(),
-                remove_mupdate_override: sled
-                    .remove_mupdate_override
-                    .map(|id| id.into()),
-                host_phase_2_desired_slot_a: sled
-                    .host_phase_2
-                    .slot_a
-                    .artifact_hash()
-                    .map(ArtifactHash),
-                host_phase_2_desired_slot_b: sled
-                    .host_phase_2
-                    .slot_b
-                    .artifact_hash()
-                    .map(ArtifactHash),
-                subnet: Ipv6Network::from(sled.subnet).into(),
-                last_allocated_ip_subnet_offset: sled
-                    .last_allocated_ip_subnet_offset
-                    .into_u16()
-                    .into(),
+            .map(|(&sled_id, sled)| {
+                let (
+                    update_disposition_generation,
+                    update_availability,
+                    update_disruption_policy,
+                ) = BpSledMetadata::update_disposition_columns(
+                    sled.update_disposition,
+                );
+                BpSledMetadata {
+                    blueprint_id: blueprint_id.into(),
+                    sled_id: sled_id.into(),
+                    sled_state: sled.state.into(),
+                    update_disposition_generation,
+                    update_availability,
+                    update_disruption_policy,
+                    sled_agent_generation: sled.sled_agent_generation.into(),
+                    remove_mupdate_override: sled
+                        .remove_mupdate_override
+                        .map(|id| id.into()),
+                    host_phase_2_desired_slot_a: sled
+                        .host_phase_2
+                        .slot_a
+                        .artifact_hash()
+                        .map(ArtifactHash),
+                    host_phase_2_desired_slot_b: sled
+                        .host_phase_2
+                        .slot_b
+                        .artifact_hash()
+                        .map(ArtifactHash),
+                    subnet: Ipv6Network::from(sled.subnet).into(),
+                    last_allocated_ip_subnet_offset: sled
+                        .last_allocated_ip_subnet_offset
+                        .into_u16()
+                        .into(),
 
-                measurements: (&sled.measurements).into(),
+                    measurements: (&sled.measurements).into(),
+                }
             })
             .collect::<Vec<_>>();
 
@@ -1293,7 +1305,7 @@ impl DataStore {
             BTreeMap::new();
         for (s, slot_a_version, slot_b_version) in raw_sled_metadata {
             let subnet = s.subnet().map_err(|e| {
-                Error::internal_error(&InlineErrorChain::new(&*e).to_string())
+                Error::internal_error(InlineErrorChain::new(&*e).to_string())
             })?;
             let last_allocated_ip_subnet_offset =
                 LastAllocatedSubnetIpOffset::new(
@@ -1335,8 +1347,12 @@ impl DataStore {
                     )));
                 }
             };
+            let update_disposition = s.update_disposition().map_err(|e| {
+                Error::internal_error(InlineErrorChain::new(&*e).to_string())
+            })?;
             let config = BlueprintSledConfig {
                 state: s.sled_state.into(),
+                update_disposition,
                 subnet,
                 sled_agent_generation: *s.sled_agent_generation,
                 last_allocated_ip_subnet_offset,
@@ -3190,10 +3206,13 @@ mod tests {
     use nexus_types::deployment::BlueprintHostPhase2DesiredContents;
     use nexus_types::deployment::BlueprintHostPhase2DesiredSlots;
     use nexus_types::deployment::BlueprintPhysicalDiskDisposition;
+    use nexus_types::deployment::BlueprintSledUpdateDisposition;
+    use nexus_types::deployment::BlueprintSledUpdateDispositionKind;
     use nexus_types::deployment::BlueprintZoneImageSource;
     use nexus_types::deployment::ExpectedActiveRotSlot;
     use nexus_types::deployment::PendingMgsUpdate;
     use nexus_types::deployment::PlanningInput;
+    use nexus_types::deployment::ReconfiguratorDisruptionPolicy;
     use nexus_types::deployment::SledDetails;
     use nexus_types::deployment::SledDisk;
     use nexus_types::deployment::SledFilter;
@@ -3548,8 +3567,28 @@ mod tests {
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
         // Create a cohesive representative collection/policy/blueprint
-        let (collection, planning_input, blueprint1) =
+        let (collection, planning_input, mut blueprint1) =
             representative(&logctx.log, TEST_NAME);
+
+        // The planner does not currently set a non-default
+        // `update_disposition`, so flip one sled to `Evacuating` by hand to
+        // ensure we test roundtripping through SQL. We also bump the generation
+        // away from its initial value so that we exercise roundtripping a
+        // non-initial generation too.
+        {
+            let sled = blueprint1
+                .sleds
+                .values_mut()
+                .next()
+                .expect("representative blueprint has at least one sled");
+            sled.update_disposition = BlueprintSledUpdateDisposition {
+                generation: sled.update_disposition.generation.next(),
+                kind: BlueprintSledUpdateDispositionKind::Evacuating {
+                    policy: ReconfiguratorDisruptionPolicy::MigrateOrTerminate,
+                },
+            };
+        }
+
         let authz_blueprint1 = authz_blueprint_from_id(blueprint1.id);
 
         // Write it to the database and read it back.
