@@ -136,11 +136,11 @@ impl FmFactSaga {
         saga_fact: &SagaFact,
     ) -> Self {
         let base = Self {
-            id: fact.id.into(),
+            id: fact.metadata.id.into(),
             sitrep_id: sitrep_id.into(),
             case_id: case_id.into(),
-            created_sitrep_id: fact.created_sitrep_id.into(),
-            comment: fact.comment.clone(),
+            created_sitrep_id: fact.metadata.created_sitrep_id.into(),
+            comment: fact.metadata.comment.clone(),
             saga_id: saga_fact.saga_id().0,
             kind: FmFactSagaKind::NotProgressing,
             saga_state: None,
@@ -213,10 +213,12 @@ impl FmFactSaga {
             ),
         };
         Ok(fm::case::Fact {
-            id: self.id.into(),
-            created_sitrep_id: self.created_sitrep_id.into(),
+            metadata: fm::case::FactMetadata {
+                id: self.id.into(),
+                created_sitrep_id: self.created_sitrep_id.into(),
+                comment: self.comment,
+            },
             payload,
-            comment: self.comment,
         })
     }
 }

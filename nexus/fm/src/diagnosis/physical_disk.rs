@@ -12,6 +12,7 @@ use nexus_types::fm::{DiskFact, ZpoolUnhealthyFactPayload};
 use nexus_types::inventory::ZpoolHealth;
 use omicron_uuid_kinds::{CaseUuid, FactUuid, PhysicalDiskUuid, ZpoolUuid};
 use std::collections::BTreeMap;
+use std::collections::btree_map::Entry;
 
 /// A [`DiskFact::ZpoolUnhealthy`] payload paired with the `FactUuid` it
 /// lives under.
@@ -47,9 +48,10 @@ impl IdOrdItem for DiskHealthSnapshot {
     id_upcast!();
 }
 
-/// Per-case summary built from a case's facts. Each Disk case is about a
-/// single physical disk; every fact on the case must reference that disk.
-struct ParentCaseSummary {
+/// A parent-forwarded Disk case, parsed into the form this engine acts on.
+/// Each Disk case is about a single physical disk; every fact on the case
+/// must reference that disk.
+struct ParsedDiskCase {
     /// The physical disk this case is about.
     physical_disk_id: PhysicalDiskUuid,
     /// All `ZpoolUnhealthy` facts on this case. Normally one; pathological
@@ -78,11 +80,9 @@ enum UninterpretableCase {
     NoFacts,
 }
 
-/// Summarize one parent-forwarded Disk case, or explain why it cannot be
-/// interpreted.
-fn summarize_case(
-    case: &fm::Case,
-) -> Result<ParentCaseSummary, UninterpretableCase> {
+/// Parse one parent-forwarded Disk case into a [`ParsedDiskCase`], or explain
+/// why it cannot be interpreted.
+fn parse_case(case: &fm::Case) -> Result<ParsedDiskCase, UninterpretableCase> {
     let mut unhealthy_facts: IdOrdMap<ZpoolUnhealthyFact> = IdOrdMap::new();
     let mut case_disk_id: Option<PhysicalDiskUuid> = None;
     for fact in case.facts.iter() {
@@ -90,7 +90,7 @@ fn summarize_case(
         // payload; a foreign payload is a data-model violation.
         let Some(disk_fact) = fact.payload.as_physical_disk() else {
             return Err(UninterpretableCase::ForeignFactPayload {
-                fact_id: fact.id,
+                fact_id: fact.metadata.id,
             });
         };
         match disk_fact {
@@ -106,7 +106,7 @@ fn summarize_case(
                 }
                 unhealthy_facts
                     .insert_unique(ZpoolUnhealthyFact {
-                        fact_id: fact.id,
+                        fact_id: fact.metadata.id,
                         payload,
                     })
                     .expect("fact ids are unique within a case");
@@ -116,7 +116,7 @@ fn summarize_case(
     let Some(physical_disk_id) = case_disk_id else {
         return Err(UninterpretableCase::NoFacts);
     };
-    Ok(ParentCaseSummary { physical_disk_id, unhealthy_facts })
+    Ok(ParsedDiskCase { physical_disk_id, unhealthy_facts })
 }
 
 pub(super) fn analyze(builder: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
@@ -127,7 +127,7 @@ pub(super) fn analyze(builder: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
     // Index every zpool we observed in this inventory, so we can distinguish
     // "saw it, it's Online" from "didn't see it at all" when looking up by
     // an in-service disk's zpool below.
-    let observed_health: BTreeMap<ZpoolUuid, ZpoolHealth> = input
+    let observed_zpool_health: BTreeMap<ZpoolUuid, ZpoolHealth> = input
         .inventory()
         .sled_agents
         .iter()
@@ -145,128 +145,108 @@ pub(super) fn analyze(builder: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
         .map(|d| DiskHealthSnapshot {
             physical_disk_id: d.physical_disk_id,
             zpool_id: d.zpool_id,
-            zpool_health: observed_health.get(&d.zpool_id).copied(),
+            zpool_health: observed_zpool_health.get(&d.zpool_id).copied(),
         })
         .collect();
 
     // Index the Disk cases copied forward from the parent sitrep. Every case
     // is about one physical disk; we derive the disk from its facts.
-    let mut parent_cases = BTreeMap::<CaseUuid, ParentCaseSummary>::new();
-    let mut uninterpretable = Vec::<(CaseUuid, UninterpretableCase)>::new();
+    let mut parent_cases = BTreeMap::<CaseUuid, ParsedDiskCase>::new();
     for case in input
         .open_cases()
         .iter()
         .filter(|c| c.metadata.de == DiagnosisEngineKind::PhysicalDisk)
     {
-        match summarize_case(case) {
-            Ok(summary) => {
-                parent_cases.insert(case.id, summary);
+        match parse_case(case) {
+            Ok(parsed_case) => {
+                parent_cases.insert(case.id, parsed_case);
             }
             Err(reason) => {
-                slog::warn!(
-                    &builder.log,
-                    "closing uninterpretable Disk case";
-                    "case_id" => %case.id,
-                    "reason" => %reason,
-                );
-                uninterpretable.push((case.id, reason));
+                // Close the cases we couldn't interpret, so they don't ride
+                // along as open-but-unprocessable in every future sitrep. This
+                // is safe with respect to fault coverage: detection below is
+                // independent of case bookkeeping, so if a closed case
+                // concerned a disk that is genuinely unhealthy and in service,
+                // a fresh, well-formed case is opened in this same pass.
+                builder
+                    .cases
+                    .case_mut(&case.id)
+                    .expect("case_id came from builder's open cases")
+                    .close(format!("cannot interpret case: {reason}"));
             }
         }
     }
 
-    // Close the cases we couldn't interpret, so they don't ride along as
-    // open-but-unprocessable in every future sitrep. This is safe with
-    // respect to fault coverage: detection below is independent of case
-    // bookkeeping, so if a closed case concerned a disk that is genuinely
-    // unhealthy and in service, a fresh, well-formed case is opened in this
-    // same pass.
-    for (case_id, reason) in uninterpretable {
-        builder
-            .cases
-            .case_mut(&case_id)
-            .expect("case came from builder.input()'s open cases")
-            .close(format!("cannot interpret case: {reason}"));
-    }
-
-    // Inverse index: which parent case is about which disk. Cases are
-    // per-disk, so a disk with two parent cases is pathological; keep the
-    // lowest case ID and close the rest as duplicates. (A half-maintained
-    // duplicate would otherwise decay into an uninterpretable empty case.)
+    // Inverse index: which parent case is about which disk. Cases are per-disk,
+    // so a disk with two parent cases is already pathological. We keep one and
+    // close the rest as duplicates; which one we keep is arbitrary.
+    // `parent_cases` iterates ascending by CaseUuid, so we deterministically
+    // keep the lowest-ID case, but the ID ordering carries no meaning here
+    // (keeping the oldest would be nicer, but that needs sitrep version numbers
+    // we don't thread through here). Closing the duplicate matters: a
+    // half-maintained one would otherwise decay into an uninterpretable empty
+    // case.
     let mut case_by_disk: BTreeMap<
         PhysicalDiskUuid,
-        (CaseUuid, &ParentCaseSummary),
+        (CaseUuid, &ParsedDiskCase),
     > = BTreeMap::new();
-    for (case_id, summary) in &parent_cases {
-        case_by_disk
-            .entry(summary.physical_disk_id)
-            .or_insert((*case_id, summary));
-    }
-    for (case_id, summary) in &parent_cases {
-        let (kept_case_id, _) = case_by_disk[&summary.physical_disk_id];
-        if *case_id != kept_case_id {
-            slog::warn!(
-                &builder.log,
-                "closing duplicate Disk case";
-                "case_id" => %case_id,
-                "kept_case_id" => %kept_case_id,
-                "physical_disk_id" => %summary.physical_disk_id,
-            );
-            builder
-                .cases
-                .case_mut(case_id)
-                .expect("case came from builder.input()'s open cases")
-                .close(format!(
-                    "duplicate of case {kept_case_id} for disk {}",
-                    summary.physical_disk_id,
-                ));
+    for (case_id, parsed_case) in &parent_cases {
+        match case_by_disk.entry(parsed_case.physical_disk_id) {
+            Entry::Vacant(slot) => {
+                slot.insert((*case_id, parsed_case));
+            }
+            Entry::Occupied(kept) => {
+                let (kept_case_id, _) = *kept.get();
+                slog::warn!(
+                    &builder.log,
+                    "closing duplicate Disk case";
+                    "case_id" => %case_id,
+                    "kept_case_id" => %kept_case_id,
+                    "physical_disk_id" => %parsed_case.physical_disk_id,
+                );
+                builder
+                    .cases
+                    .case_mut(case_id)
+                    .expect("case_id came from builder's open cases")
+                    .close(format!(
+                        "duplicate of case {kept_case_id} for disk {}",
+                        parsed_case.physical_disk_id,
+                    ));
+            }
         }
     }
 
-    // For each disk's surviving parent case, decide what to do based on the
-    // disk's current state:
-    //  - disk no longer in service → close the case (expungement)
-    //  - disk's zpool back to Online → close the case (recovery)
-    //  - disk still unhealthy → drop any facts whose recorded observation
-    //    (zpool + health) no longer matches; the matching loop below will
-    //    re-add a fresh fact
-    //  - disk in service but absent from inventory → leave alone (absence
-    //    is NOT a recovery signal: sled could be powered off, or
-    //    inventory could be lossy)
-    for &(case_id, summary) in case_by_disk.values() {
-        let mut case_mut = builder.cases.case_mut(&case_id).expect(
-            "builder.cases is seeded from the open cases of builder.input(), \
-             which is where this case_id came from",
-        );
-        match in_service_health.get(&summary.physical_disk_id) {
+    // Close the surviving parent case for any disk that has recovered or left
+    // service. A still-faulty disk's facts are reconciled in the next loop; a
+    // disk in service but absent from this inventory is left alone (absence is
+    // NOT a recovery signal: the sled could be powered off, or the collection
+    // could be lossy).
+    for &(case_id, parsed_case) in case_by_disk.values() {
+        let mut case_mut = builder
+            .cases
+            .case_mut(&case_id)
+            .expect("case_id came from builder's open cases");
+        match in_service_health.get(&parsed_case.physical_disk_id) {
             None => {
                 case_mut.close(format!(
                     "disk {} no longer in service",
-                    summary.physical_disk_id,
+                    parsed_case.physical_disk_id,
                 ));
             }
             Some(snap) if snap.zpool_health == Some(ZpoolHealth::Online) => {
                 case_mut
-                    .close(format!("zpool {} back to Online", snap.zpool_id,));
+                    .close(format!("zpool {} back to Online", snap.zpool_id));
             }
-            Some(snap) => {
-                let Some(current_health) = snap.zpool_health else {
-                    continue;
-                };
-                for fact_ref in summary.unhealthy_facts.iter() {
-                    if fact_ref.payload.last_seen_health != current_health
-                        || fact_ref.payload.zpool_id != snap.zpool_id
-                    {
-                        case_mut.remove_fact(fact_ref.fact_id);
-                    }
-                }
-            }
+            // Faulty or absent from inventory: leave open; the next loop
+            // reconciles the faulty ones and leaves the absent ones untouched.
+            Some(_) => {}
         }
     }
 
-    // For each currently-faulty in-service disk: ensure a case exists
-    // (reusing the parent-forwarded one for this disk if any) and add a
-    // fresh fact if one with this exact observation (zpool + health) isn't
-    // already present.
+    // For each currently-faulty in-service disk, ensure its case carries
+    // exactly one fact matching the current observation: reuse the
+    // parent-forwarded case if any (dropping any stale facts), otherwise open
+    // a fresh case.
     for disk in in_service_health.iter() {
         let Some(current_health) = disk.zpool_health else {
             continue;
@@ -275,47 +255,46 @@ pub(super) fn analyze(builder: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
             continue;
         }
 
-        let parent_for_disk = case_by_disk.get(&disk.physical_disk_id).copied();
-
-        let case_id_for_fact = match parent_for_disk {
-            // Parent case already has an accurate fact; fully covered.
-            Some((_, summary))
-                if summary.unhealthy_facts.iter().any(|f| {
-                    f.payload.last_seen_health == current_health
-                        && f.payload.zpool_id == disk.zpool_id
-                }) =>
-            {
-                continue;
+        let mut case_mut = match case_by_disk.get(&disk.physical_disk_id) {
+            Some(&(case_id, parsed_case)) => {
+                let mut case_mut = builder
+                    .cases
+                    .case_mut(&case_id)
+                    .expect("case_id came from builder's open cases");
+                let mut has_match = false;
+                for fact in parsed_case.unhealthy_facts.iter() {
+                    if fact.payload.zpool_id == disk.zpool_id
+                        && fact.payload.last_seen_health == current_health
+                    {
+                        // An accurate fact is already present; keep it.
+                        has_match = true;
+                    } else {
+                        // Stale observation; drop it.
+                        case_mut.remove_fact(
+                            fact.fact_id,
+                            "stale zpool observation, superseded by current \
+                             inventory",
+                        );
+                    }
+                }
+                if has_match {
+                    continue;
+                }
+                case_mut
             }
-            // Parent case exists; its stale facts were removed above.
-            // Refresh under the same case.
-            Some((case_id, _)) => case_id,
-            // No parent case for this disk; open one.
-            None => {
-                let mut new_case =
-                    builder.cases.open_case(DiagnosisEngineKind::PhysicalDisk);
-                new_case.set_comment(format!(
-                    "physical disk {} unhealthy",
-                    disk.physical_disk_id,
-                ));
-                new_case.id
-            }
+            None => builder.cases.open_case(DiagnosisEngineKind::PhysicalDisk),
         };
 
-        builder
-            .cases
-            .case_mut(&case_id_for_fact)
-            .expect("case_id came from this fn")
-            .add_fact(
-                DiskFact::ZpoolUnhealthy(ZpoolUnhealthyFactPayload {
-                    physical_disk_id: disk.physical_disk_id,
-                    zpool_id: disk.zpool_id,
-                    last_seen_health: current_health,
-                    observed_in_inv: inv_collection_id,
-                    time_observed: inv_time_done,
-                }),
-                format!("zpool {} health={current_health}", disk.zpool_id,),
-            );
+        case_mut.add_fact(
+            DiskFact::ZpoolUnhealthy(ZpoolUnhealthyFactPayload {
+                physical_disk_id: disk.physical_disk_id,
+                zpool_id: disk.zpool_id,
+                last_seen_health: current_health,
+                observed_in_inv: inv_collection_id,
+                time_observed: inv_time_done,
+            }),
+            format!("zpool {} health={current_health}", disk.zpool_id),
+        );
     }
 
     Ok(())
@@ -340,8 +319,9 @@ mod tests {
     use std::sync::Arc;
 
     /// Make an in-service disk set from a list of zpool IDs. Each zpool gets
-    /// its own fresh `PhysicalDiskUuid` and dummy identity facts; tests in
-    /// this module only care about the zpool dimension.
+    /// its own fresh `PhysicalDiskUuid` and dummy identity fields
+    /// (vendor/serial/model); tests in this module only care about the zpool
+    /// dimension.
     fn mk_in_service(
         zpool_ids: impl IntoIterator<Item = ZpoolUuid>,
     ) -> IdOrdMap<InServiceDisk> {
@@ -464,8 +444,11 @@ mod tests {
         zpool_id: ZpoolUuid,
     ) -> fm::case::Fact {
         fm::case::Fact {
-            id: omicron_uuid_kinds::FactUuid::new_v4(),
-            created_sitrep_id: parent_sitrep_id,
+            metadata: fm::case::FactMetadata {
+                id: omicron_uuid_kinds::FactUuid::new_v4(),
+                created_sitrep_id: parent_sitrep_id,
+                comment: format!("zpool {zpool_id} degraded"),
+            },
             payload: DiskFact::ZpoolUnhealthy(ZpoolUnhealthyFactPayload {
                 physical_disk_id,
                 zpool_id,
@@ -474,7 +457,6 @@ mod tests {
                 time_observed: Utc::now(),
             })
             .into(),
-            comment: format!("zpool {zpool_id} degraded"),
         }
     }
 
@@ -548,13 +530,18 @@ mod tests {
         make_parent_sitrep(parent_sitrep_id, inv_collection_id, [case])
     }
 
-    /// Collect (case, fact, DiskFact) triples for every fact on a
-    /// physical-disk case in a sitrep. Optionally filtered to open cases
-    /// only.
-    fn disk_facts(
-        sitrep: &Sitrep,
-        open_only: bool,
-    ) -> Vec<(&fm::Case, &fm::case::Fact, DiskFact)> {
+    /// A physical-disk fact found in a sitrep, paired with the case it lives
+    /// on and its decoded [`DiskFact`] payload.
+    #[derive(Debug)]
+    struct DiskFactRef<'a> {
+        case: &'a fm::Case,
+        fact: &'a fm::case::Fact,
+        disk_fact: DiskFact,
+    }
+
+    /// Collect every physical-disk fact in a sitrep, with its case and decoded
+    /// payload. Optionally filtered to open cases only.
+    fn disk_facts(sitrep: &Sitrep, open_only: bool) -> Vec<DiskFactRef<'_>> {
         sitrep
             .cases
             .iter()
@@ -562,10 +549,22 @@ mod tests {
             .filter(|c| !open_only || c.is_open())
             .flat_map(|c| {
                 c.facts.iter().filter_map(move |f| {
-                    f.payload.as_physical_disk().map(|d| (c, f, d.clone()))
+                    f.payload.as_physical_disk().map(|d| DiskFactRef {
+                        case: c,
+                        fact: f,
+                        disk_fact: d.clone(),
+                    })
                 })
             })
             .collect()
+    }
+
+    /// The fact UUID of the one physical-disk fact on the one physical-disk
+    /// case in `sitrep`. Panics unless there is exactly one.
+    fn sole_disk_fact_id(sitrep: &Sitrep) -> omicron_uuid_kinds::FactUuid {
+        let facts = disk_facts(sitrep, false);
+        assert_eq!(facts.len(), 1, "expected exactly one physical-disk fact");
+        facts[0].fact.metadata.id
     }
 
     #[test]
@@ -581,7 +580,7 @@ mod tests {
         let (sitrep, _report) = run_analyze(&logctx.log, &input);
         let facts = disk_facts(&sitrep, true);
         assert_eq!(facts.len(), 1);
-        match &facts[0].2 {
+        match &facts[0].disk_fact {
             DiskFact::ZpoolUnhealthy(ZpoolUnhealthyFactPayload {
                 physical_disk_id,
                 zpool_id,
@@ -634,7 +633,7 @@ mod tests {
         let (sitrep, _report) = run_analyze(&logctx.log, &input);
         let open_cases = disk_facts(&sitrep, true);
         assert_eq!(open_cases.len(), 1);
-        match &open_cases[0].2 {
+        match &open_cases[0].disk_fact {
             DiskFact::ZpoolUnhealthy(ZpoolUnhealthyFactPayload {
                 zpool_id,
                 ..
@@ -665,7 +664,7 @@ mod tests {
         let all = disk_facts(&sitrep, false);
         assert_eq!(all.len(), 1);
         assert!(
-            !all[0].0.is_open(),
+            !all[0].case.is_open(),
             "case should be closed when zpool returns to Online",
         );
         let report_str = format!("{}", report.display_multiline(0));
@@ -700,7 +699,7 @@ mod tests {
         let all = disk_facts(&sitrep, false);
         assert_eq!(all.len(), 1);
         assert!(
-            !all[0].0.is_open(),
+            !all[0].case.is_open(),
             "case should be closed when zpool's disk is expunged",
         );
         let report_str = format!("{}", report.display_multiline(0));
@@ -735,7 +734,7 @@ mod tests {
         let all = disk_facts(&sitrep, false);
         assert_eq!(all.len(), 1);
         assert!(
-            all[0].0.is_open(),
+            all[0].case.is_open(),
             "case should remain open when its zpool is absent from the \
              current inventory collection (sled could be down or inventory \
              is lossy)",
@@ -798,7 +797,7 @@ mod tests {
             target_disk_id,
             target,
         );
-        let kept_fact_id = kept_fact.id;
+        let kept_fact_id = kept_fact.metadata.id;
         let dup_fact = make_degraded_fact(
             parent_id,
             collection.id,
@@ -899,8 +898,8 @@ mod tests {
             1,
             "expected exactly one open Disk fact (on the replacement case)",
         );
-        assert_ne!(open[0].0.id, corrupt_case_id);
-        match &open[0].2 {
+        assert_ne!(open[0].case.id, corrupt_case_id);
+        match &open[0].disk_fact {
             DiskFact::ZpoolUnhealthy(ZpoolUnhealthyFactPayload {
                 physical_disk_id,
                 zpool_id,
@@ -939,27 +938,18 @@ mod tests {
             target,
         );
         // Capture the parent's fact UUID for the target zpool.
-        let parent_fact_id = parent
-            .cases
-            .iter()
-            .find(|c| c.metadata.de == DiagnosisEngineKind::PhysicalDisk)
-            .expect("parent should have one Disk case")
-            .facts
-            .iter()
-            .next()
-            .expect("parent case should have one fact")
-            .id;
+        let parent_fact_id = sole_disk_fact_id(&parent);
 
         let input = build_input(collection, Some(parent), in_service);
         let (sitrep, _report) = run_analyze(&logctx.log, &input);
         let open = disk_facts(&sitrep, true);
         assert_eq!(open.len(), 1, "expected exactly one open Disk fact");
         assert_eq!(
-            open[0].1.id, parent_fact_id,
+            open[0].fact.metadata.id, parent_fact_id,
             "fact UUID should be stable across sitreps when the \
              observation hasn't changed",
         );
-        match &open[0].2 {
+        match &open[0].disk_fact {
             DiskFact::ZpoolUnhealthy(ZpoolUnhealthyFactPayload {
                 zpool_id,
                 last_seen_health,
@@ -991,16 +981,7 @@ mod tests {
             target_disk_id,
             target,
         );
-        let parent_fact_id = parent
-            .cases
-            .iter()
-            .find(|c| c.metadata.de == DiagnosisEngineKind::PhysicalDisk)
-            .expect("parent should have one Disk case")
-            .facts
-            .iter()
-            .next()
-            .expect("parent case should have one fact")
-            .id;
+        let parent_fact_id = sole_disk_fact_id(&parent);
 
         let input = build_input(collection, Some(parent), in_service);
         let (sitrep, _report) = run_analyze(&logctx.log, &input);
@@ -1011,10 +992,10 @@ mod tests {
             "expected exactly one open Disk fact (the refreshed one)",
         );
         assert_ne!(
-            open[0].1.id, parent_fact_id,
+            open[0].fact.metadata.id, parent_fact_id,
             "fact UUID should rotate because last_seen_health changed",
         );
-        match &open[0].2 {
+        match &open[0].disk_fact {
             DiskFact::ZpoolUnhealthy(ZpoolUnhealthyFactPayload {
                 zpool_id,
                 last_seen_health,
@@ -1026,7 +1007,7 @@ mod tests {
         }
         // The case itself should still be the same one that was carried
         // forward; only the fact rotated.
-        assert!(open[0].0.is_open());
+        assert!(open[0].case.is_open());
         logctx.cleanup_successful();
     }
 
@@ -1054,16 +1035,7 @@ mod tests {
             target_disk_id,
             old_zpool_id,
         );
-        let parent_fact_id = parent
-            .cases
-            .iter()
-            .find(|c| c.metadata.de == DiagnosisEngineKind::PhysicalDisk)
-            .expect("parent should have one Disk case")
-            .facts
-            .iter()
-            .next()
-            .expect("parent case should have one fact")
-            .id;
+        let parent_fact_id = sole_disk_fact_id(&parent);
 
         let input = build_input(collection, Some(parent), in_service);
         let (sitrep, _report) = run_analyze(&logctx.log, &input);
@@ -1074,10 +1046,10 @@ mod tests {
             "expected exactly one open Disk fact (the refreshed one)",
         );
         assert_ne!(
-            open[0].1.id, parent_fact_id,
+            open[0].fact.metadata.id, parent_fact_id,
             "fact UUID should rotate because the disk's zpool changed",
         );
-        match &open[0].2 {
+        match &open[0].disk_fact {
             DiskFact::ZpoolUnhealthy(ZpoolUnhealthyFactPayload {
                 zpool_id,
                 last_seen_health,
@@ -1090,7 +1062,7 @@ mod tests {
                 assert_eq!(*last_seen_health, ZpoolHealth::Degraded);
             }
         }
-        assert!(open[0].0.is_open());
+        assert!(open[0].case.is_open());
         logctx.cleanup_successful();
     }
 
@@ -1107,14 +1079,16 @@ mod tests {
         let parent_id = SitrepUuid::new_v4();
         let case_id = omicron_uuid_kinds::CaseUuid::new_v4();
         let foreign_fact = fm::case::Fact {
-            id: omicron_uuid_kinds::FactUuid::new_v4(),
-            created_sitrep_id: parent_id,
+            metadata: fm::case::FactMetadata {
+                id: omicron_uuid_kinds::FactUuid::new_v4(),
+                created_sitrep_id: parent_id,
+                comment: "a fact belonging to the saga engine".to_string(),
+            },
             payload: fm::FactPayload::Saga(fm::SagaFact::Abandoned(
                 fm::SagaAbandonedFactPayload {
                     saga_id: steno::SagaId(uuid::Uuid::from_u128(1)),
                 },
             )),
-            comment: "a fact belonging to the saga engine".to_string(),
         };
         let parent = make_parent_sitrep(
             parent_id,

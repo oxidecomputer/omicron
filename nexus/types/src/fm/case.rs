@@ -176,19 +176,28 @@ impl CaseEreport {
 /// the case's diagnosis engine (see [`Metadata::de`]).
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
 pub struct Fact {
+    #[serde(flatten)]
+    pub metadata: FactMetadata,
+    pub payload: FactPayload,
+}
+
+/// The diagnosis-engine-agnostic part of a [`Fact`]: everything that is not
+/// the typed [`payload`](Fact::payload). Every diagnosis engine's facts share
+/// these fields.
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
+pub struct FactMetadata {
     pub id: FactUuid,
     /// The sitrep in which this fact was first added. Preserved
     /// unchanged when the fact is carried forward into a child sitrep.
     /// Debug-only.
     pub created_sitrep_id: SitrepUuid,
-    pub payload: FactPayload,
     pub comment: String,
 }
 
 impl IdOrdItem for Fact {
     type Key<'a> = &'a FactUuid;
     fn key(&self) -> Self::Key<'_> {
-        &self.id
+        &self.metadata.id
     }
     iddqd::id_upcast!();
 }
@@ -213,7 +222,12 @@ impl Fact {
                 const WIDTH: usize = const_max_len(&[ADDED_IN, COMMENT]);
 
                 let &Self {
-                    fact: Fact { id, created_sitrep_id, payload, comment },
+                    fact:
+                        Fact {
+                            metadata:
+                                FactMetadata { id, created_sitrep_id, comment },
+                            payload,
+                        },
                     indent,
                     sitrep_id,
                 } = self;
@@ -619,9 +633,14 @@ mod tests {
         let mut facts = IdOrdMap::new();
         facts
             .insert_unique(Fact {
-                id: FactUuid::from_str("f00f00f0-0f00-4f00-8f00-f00f00f00f00")
+                metadata: FactMetadata {
+                    id: FactUuid::from_str(
+                        "f00f00f0-0f00-4f00-8f00-f00f00f00f00",
+                    )
                     .unwrap(),
-                created_sitrep_id,
+                    created_sitrep_id,
+                    comment: "made-up fact for display test".to_string(),
+                },
                 payload: FactPayload::PhysicalDisk(DiskFact::ZpoolUnhealthy(
                     ZpoolUnhealthyFactPayload {
                         physical_disk_id: PhysicalDiskUuid::from_str(
@@ -640,7 +659,6 @@ mod tests {
                         time_observed: chrono::DateTime::<chrono::Utc>::MIN_UTC,
                     },
                 )),
-                comment: "made-up fact for display test".to_string(),
             })
             .unwrap();
 

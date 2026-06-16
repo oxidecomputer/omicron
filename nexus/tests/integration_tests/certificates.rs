@@ -557,7 +557,7 @@ async fn test_silo_certificates() {
                 Err(oxide_client::Error::CommunicationError(error))
                     if error.is_connect() =>
                 {
-                    Err(CondCheckError::NotYet)
+                    Err(CondCheckError::NotYet { status: None })
                 }
                 Err(e) => Err(CondCheckError::Failed(e)),
             }

@@ -261,28 +261,42 @@ impl CaseBuilder {
             .kv("payload", &payload)
             .comment(comment.clone());
         let fact = fm::case::Fact {
-            id,
-            created_sitrep_id: self.sitrep_id,
+            metadata: fm::case::FactMetadata {
+                id,
+                created_sitrep_id: self.sitrep_id,
+                comment,
+            },
             payload,
-            comment,
         };
         self.case.facts.insert_unique(fact).expect("UUID should be unused");
         id
     }
 
     /// Remove a fact from this case. The fact will not be carried forward
-    /// into the next sitrep.
-    pub fn remove_fact(&mut self, id: FactUuid) {
-        if self.case.facts.remove(&id).is_some() {
-            slog::info!(&self.log, "removed a fact"; "fact_id" => %id);
-            self.report_log.entry("removed fact").kv("fact_id", id);
+    /// into the next sitrep. `comment` records why it was removed.
+    pub fn remove_fact(&mut self, id: FactUuid, comment: impl ToString) {
+        let comment = comment.to_string();
+        if let Some(fact) = self.case.facts.remove(&id) {
+            slog::info!(
+                &self.log,
+                "removed a fact";
+                "fact_id" => %id,
+                "payload" => ?fact.payload,
+                "comment" => %comment,
+            );
+            self.report_log
+                .entry("removed fact")
+                .kv("fact_id", id)
+                .kv("payload", &fact.payload)
+                .comment(comment);
+        } else {
+            slog::warn!(
+                &self.log,
+                "tried to remove a fact that does not exist";
+                "fact_id" => %id,
+                "comment" => %comment,
+            );
         }
-    }
-
-    /// Iterate the facts currently attached to this case (including any that
-    /// were carried forward from the parent sitrep).
-    pub fn facts(&self) -> impl Iterator<Item = &fm::case::Fact> {
-        self.case.facts.iter()
     }
 
     pub fn add_ereport(

@@ -95,7 +95,7 @@ fn summarize_case(
     for fact in case.facts.iter() {
         let Some(saga_fact) = fact.payload.as_saga() else {
             return Err(UninterpretableCase::ForeignFactPayload {
-                fact_id: fact.id,
+                fact_id: fact.metadata.id,
             });
         };
         let this_saga = saga_fact.saga_id();
@@ -109,23 +109,23 @@ fn summarize_case(
         match saga_fact {
             SagaFact::NotProgressing(p) => {
                 if not_progressing.is_none() {
-                    not_progressing = Some((fact.id, p.clone()));
+                    not_progressing = Some((fact.metadata.id, p.clone()));
                 } else {
-                    duplicate_facts.push(fact.id);
+                    duplicate_facts.push(fact.metadata.id);
                 }
             }
             SagaFact::OwnerNotCurrentGeneration(p) => {
                 if owner_not_current.is_none() {
-                    owner_not_current = Some((fact.id, p.clone()));
+                    owner_not_current = Some((fact.metadata.id, p.clone()));
                 } else {
-                    duplicate_facts.push(fact.id);
+                    duplicate_facts.push(fact.metadata.id);
                 }
             }
             SagaFact::Abandoned(p) => {
                 if abandoned.is_none() {
-                    abandoned = Some((fact.id, p.clone()));
+                    abandoned = Some((fact.metadata.id, p.clone()));
                 } else {
-                    duplicate_facts.push(fact.id);
+                    duplicate_facts.push(fact.metadata.id);
                 }
             }
         }
@@ -271,21 +271,36 @@ pub(super) fn analyze(builder: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
         // Duplicate facts carry no information the kept facts don't; remove
         // them regardless of what the observation says.
         for fact_id in &summary.duplicate_facts {
-            case_mut.remove_fact(*fact_id);
+            case_mut.remove_fact(
+                *fact_id,
+                "duplicate fact of the same kind on the case",
+            );
         }
         if let Some((fact_id, payload)) = &summary.not_progressing {
             if desired_np.as_ref() != Some(payload) {
-                case_mut.remove_fact(*fact_id);
+                case_mut.remove_fact(
+                    *fact_id,
+                    "stale NotProgressing observation, superseded by current \
+                     saga state",
+                );
             }
         }
         if let Some((fact_id, payload)) = &summary.owner_not_current {
             if desired_owner.as_ref() != Some(payload) {
-                case_mut.remove_fact(*fact_id);
+                case_mut.remove_fact(
+                    *fact_id,
+                    "stale OwnerNotCurrentGeneration observation, superseded \
+                     by current saga state",
+                );
             }
         }
         if let Some((fact_id, payload)) = &summary.abandoned {
             if desired_abandoned.as_ref() != Some(payload) {
-                case_mut.remove_fact(*fact_id);
+                case_mut.remove_fact(
+                    *fact_id,
+                    "stale Abandoned observation, superseded by current saga \
+                     state",
+                );
             }
         }
     }
@@ -579,10 +594,12 @@ mod tests {
         payload: SagaFact,
     ) -> fm::case::Fact {
         fm::case::Fact {
-            id: omicron_uuid_kinds::FactUuid::new_v4(),
-            created_sitrep_id: parent_sitrep_id,
+            metadata: fm::case::FactMetadata {
+                id: omicron_uuid_kinds::FactUuid::new_v4(),
+                created_sitrep_id: parent_sitrep_id,
+                comment: "parent saga fact".to_string(),
+            },
             payload: payload.into(),
-            comment: "parent saga fact".to_string(),
         }
     }
 
@@ -858,8 +875,17 @@ mod tests {
             inv_id,
             [SagaFact::NotProgressing(payload.clone())],
         );
-        let parent_fact_id =
-            parent.cases.iter().next().unwrap().facts.iter().next().unwrap().id;
+        let parent_fact_id = parent
+            .cases
+            .iter()
+            .next()
+            .unwrap()
+            .facts
+            .iter()
+            .next()
+            .unwrap()
+            .metadata
+            .id;
         // Observed saga matches the parent fact exactly (same last_event_time,
         // same state).
         let observed = observed_map([ObservedSaga {
@@ -877,7 +903,7 @@ mod tests {
         let facts = saga_facts(&sitrep, true);
         assert_eq!(facts.len(), 1);
         assert_eq!(
-            facts[0].0.id, parent_fact_id,
+            facts[0].0.metadata.id, parent_fact_id,
             "fact UUID should be stable when the observation is unchanged",
         );
         logctx.cleanup_successful();
@@ -902,8 +928,17 @@ mod tests {
                 last_event_time: old,
             })],
         );
-        let parent_fact_id =
-            parent.cases.iter().next().unwrap().facts.iter().next().unwrap().id;
+        let parent_fact_id = parent
+            .cases
+            .iter()
+            .next()
+            .unwrap()
+            .facts
+            .iter()
+            .next()
+            .unwrap()
+            .metadata
+            .id;
         // Still stale, but last_event_time advanced.
         let observed = observed_map([ObservedSaga {
             saga_id: id,
@@ -920,7 +955,7 @@ mod tests {
         let facts = saga_facts(&sitrep, true);
         assert_eq!(facts.len(), 1);
         assert_ne!(
-            facts[0].0.id, parent_fact_id,
+            facts[0].0.metadata.id, parent_fact_id,
             "fact UUID should rotate when last_event_time changes",
         );
         match &facts[0].1 {
@@ -1057,7 +1092,9 @@ mod tests {
             .facts
             .iter()
             .find_map(|f| match f.payload.as_saga() {
-                Some(SagaFact::OwnerNotCurrentGeneration(_)) => Some(f.id),
+                Some(SagaFact::OwnerNotCurrentGeneration(_)) => {
+                    Some(f.metadata.id)
+                }
                 _ => None,
             })
             .expect("parent case should have an owner fact");
@@ -1079,7 +1116,7 @@ mod tests {
             "only the owner fact should remain on the open case",
         );
         assert_eq!(
-            facts[0].0.id, parent_owner_fact_id,
+            facts[0].0.metadata.id, parent_owner_fact_id,
             "the persisting fact carries forward with a stable UUID",
         );
         assert!(matches!(
@@ -1101,15 +1138,17 @@ mod tests {
         last_event_time: chrono::DateTime<Utc>,
     ) -> fm::case::Fact {
         fm::case::Fact {
-            id,
-            created_sitrep_id,
+            metadata: fm::case::FactMetadata {
+                id,
+                created_sitrep_id,
+                comment: "parent saga fact".to_string(),
+            },
             payload: SagaFact::NotProgressing(SagaNotProgressingFactPayload {
                 saga_id: saga,
                 saga_state: SagaProgressState::Unwinding,
                 last_event_time,
             })
             .into(),
-            comment: "parent saga fact".to_string(),
         }
     }
 
@@ -1158,7 +1197,7 @@ mod tests {
         let facts = saga_facts(&sitrep, true);
         assert_eq!(facts.len(), 1, "the duplicate fact should be removed");
         assert_eq!(
-            facts[0].0.id, kept_id,
+            facts[0].0.metadata.id, kept_id,
             "the kept fact matches the observation, so its UUID is stable",
         );
         logctx.cleanup_successful();
@@ -1212,9 +1251,12 @@ mod tests {
             1,
             "both parent facts should be removed and one fresh fact added",
         );
-        assert_ne!(facts[0].0.id, kept_id, "the stale kept fact was removed");
         assert_ne!(
-            facts[0].0.id, dup_id,
+            facts[0].0.metadata.id, kept_id,
+            "the stale kept fact was removed"
+        );
+        assert_ne!(
+            facts[0].0.metadata.id, dup_id,
             "the duplicate was removed unconditionally",
         );
         match &facts[0].1 {
@@ -1245,13 +1287,15 @@ mod tests {
         saga: steno::SagaId,
     ) -> fm::case::Fact {
         fm::case::Fact {
-            id,
-            created_sitrep_id,
+            metadata: fm::case::FactMetadata {
+                id,
+                created_sitrep_id,
+                comment: "parent abandoned fact".to_string(),
+            },
             payload: SagaFact::Abandoned(SagaAbandonedFactPayload {
                 saga_id: saga,
             })
             .into(),
-            comment: "parent abandoned fact".to_string(),
         }
     }
 
@@ -1340,7 +1384,7 @@ mod tests {
         let facts = saga_facts(&sitrep, true);
         assert_eq!(facts.len(), 1);
         assert_eq!(
-            facts[0].0.id, parent_fact_id,
+            facts[0].0.metadata.id, parent_fact_id,
             "the Abandoned fact UUID is stable across sitreps",
         );
         logctx.cleanup_successful();
@@ -1433,7 +1477,7 @@ mod tests {
             if id_a < id_b { (id_a, id_b) } else { (id_b, id_a) };
         let kept_fact =
             mk_fact(parent_id, SagaFact::NotProgressing(payload.clone()));
-        let kept_fact_id = kept_fact.id;
+        let kept_fact_id = kept_fact.metadata.id;
         let dup_fact =
             mk_fact(parent_id, SagaFact::NotProgressing(payload.clone()));
         let parent = make_parent_sitrep(
@@ -1563,8 +1607,12 @@ mod tests {
         let parent_id = SitrepUuid::new_v4();
         let case_id = omicron_uuid_kinds::CaseUuid::new_v4();
         let foreign_fact = fm::case::Fact {
-            id: omicron_uuid_kinds::FactUuid::new_v4(),
-            created_sitrep_id: parent_id,
+            metadata: fm::case::FactMetadata {
+                id: omicron_uuid_kinds::FactUuid::new_v4(),
+                created_sitrep_id: parent_id,
+                comment: "a fact belonging to the physical-disk engine"
+                    .to_string(),
+            },
             payload: fm::FactPayload::PhysicalDisk(
                 fm::DiskFact::ZpoolUnhealthy(fm::ZpoolUnhealthyFactPayload {
                     physical_disk_id:
@@ -1576,7 +1624,6 @@ mod tests {
                     time_observed: Utc::now(),
                 }),
             ),
-            comment: "a fact belonging to the physical-disk engine".to_string(),
         };
         let parent = make_parent_sitrep(
             parent_id,

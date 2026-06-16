@@ -372,7 +372,7 @@ async fn instance_poll_state(
                     "instance" => ?db_state.instance(),
                     "active_vmm" => ?db_state.vmm(),
                 );
-                Err(poll::CondCheckError::<Error>::NotYet)
+                Err(poll::CondCheckError::<Error>::NotYet { status: None })
             }
         },
         &Duration::from_secs(1),
@@ -574,7 +574,7 @@ pub async fn wait_for_running_sagas(cptestctx: &ControlPlaneTestContext) {
             } else {
                 info!(log, "still waiting for sagas: {list:?}");
 
-                Err(poll::CondCheckError::<Error>::NotYet)
+                Err(poll::CondCheckError::<Error>::NotYet { status: None })
             }
         },
         &Duration::from_secs(1),

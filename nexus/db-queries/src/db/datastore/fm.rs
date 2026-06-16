@@ -135,7 +135,7 @@ fn insert_fact_for_case(
     case_id: CaseUuid,
     fact: fm::case::Fact,
 ) -> Result<(), Error> {
-    let id = fact.id;
+    let id = fact.metadata.id;
     by_case.entry(case_id).or_default().insert_unique(fact).map_err(|_| {
         let internal_message = format!(
             "encountered multiple case facts for case {case_id} with the same \
@@ -874,7 +874,10 @@ impl DataStore {
                     fm::FactPayload::PhysicalDisk(disk_fact) => {
                         physical_disk_facts.push(
                             model::fm::FmFactPhysicalDisk::from_sitrep(
-                                sitrep_id, case_id, fact, disk_fact,
+                                sitrep_id,
+                                case_id,
+                                &fact.metadata,
+                                disk_fact,
                             ),
                         );
                     }
@@ -2331,8 +2334,11 @@ mod tests {
             let mut facts = iddqd::IdOrdMap::new();
             facts
                 .insert_unique(fm::case::Fact {
-                    id: FactUuid::new_v4(),
-                    created_sitrep_id: sitrep_id,
+                    metadata: fm::case::FactMetadata {
+                        id: FactUuid::new_v4(),
+                        created_sitrep_id: sitrep_id,
+                        comment: "a representative fact for case 1".to_string(),
+                    },
                     payload: fm::FactPayload::PhysicalDisk(
                         fm::DiskFact::ZpoolUnhealthy(
                             fm::ZpoolUnhealthyFactPayload {
@@ -2349,7 +2355,6 @@ mod tests {
                             },
                         ),
                     ),
-                    comment: "a representative fact for case 1".to_string(),
                 })
                 .unwrap();
             // Saga facts (both kinds), to exercise the fm_fact_saga
@@ -2357,8 +2362,12 @@ mod tests {
             // so it's fine that these sit on a physical-disk case.
             facts
                 .insert_unique(fm::case::Fact {
-                    id: FactUuid::new_v4(),
-                    created_sitrep_id: sitrep_id,
+                    metadata: fm::case::FactMetadata {
+                        id: FactUuid::new_v4(),
+                        created_sitrep_id: sitrep_id,
+                        comment: "a representative not-progressing saga fact"
+                            .to_string(),
+                    },
                     payload: fm::FactPayload::Saga(
                         fm::SagaFact::NotProgressing(
                             fm::SagaNotProgressingFactPayload {
@@ -2370,14 +2379,16 @@ mod tests {
                             },
                         ),
                     ),
-                    comment: "a representative not-progressing saga fact"
-                        .to_string(),
                 })
                 .unwrap();
             facts
                 .insert_unique(fm::case::Fact {
-                    id: FactUuid::new_v4(),
-                    created_sitrep_id: sitrep_id,
+                    metadata: fm::case::FactMetadata {
+                        id: FactUuid::new_v4(),
+                        created_sitrep_id: sitrep_id,
+                        comment: "a representative orphaned saga fact"
+                            .to_string(),
+                    },
                     payload: fm::FactPayload::Saga(
                         fm::SagaFact::OwnerNotCurrentGeneration(
                             fm::SagaOwnerNotCurrentFactPayload {
@@ -2389,19 +2400,21 @@ mod tests {
                             },
                         ),
                     ),
-                    comment: "a representative orphaned saga fact".to_string(),
                 })
                 .unwrap();
             facts
                 .insert_unique(fm::case::Fact {
-                    id: FactUuid::new_v4(),
-                    created_sitrep_id: sitrep_id,
+                    metadata: fm::case::FactMetadata {
+                        id: FactUuid::new_v4(),
+                        created_sitrep_id: sitrep_id,
+                        comment: "a representative abandoned saga fact"
+                            .to_string(),
+                    },
                     payload: fm::FactPayload::Saga(fm::SagaFact::Abandoned(
                         fm::SagaAbandonedFactPayload {
                             saga_id: steno::SagaId(uuid::Uuid::new_v4()),
                         },
                     )),
-                    comment: "a representative abandoned saga fact".to_string(),
                 })
                 .unwrap();
 

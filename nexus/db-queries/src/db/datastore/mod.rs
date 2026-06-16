@@ -167,9 +167,7 @@ pub use dns::DnsVersionUpdateBuilder;
 pub use external_ip::FloatingIpAllocation;
 pub use external_subnet::ExternalSubnetBeginOpResult;
 pub use external_subnet::ExternalSubnetCompleteOpResult;
-pub use instance::{
-    InstanceAndActiveVmm, InstanceGestalt, InstanceStateComputer,
-};
+pub use instance::{InstanceAndActiveVmm, InstanceGestalt};
 pub use inventory::DataStoreInventoryTest;
 use nexus_db_model::AllSchemaVersions;
 use nexus_types::internal_api::views::HeldDbClaimInfo;
