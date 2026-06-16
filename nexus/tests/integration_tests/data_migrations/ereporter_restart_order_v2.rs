@@ -233,7 +233,7 @@ fn after<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
         assert_eq!(*slot, Some(4));
         assert_eq!(
             *first_seen,
-            ts(T_180),
+            ts(T_120),
             "time_first_seen should be from the soft-deleted ereport"
         );
 
