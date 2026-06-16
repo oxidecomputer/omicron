@@ -227,7 +227,7 @@ fn after<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
         // All ereports soft-deleted: there should still be an entry for the
         // reporter.
         let (reporter, slot_type, slot, first_seen) =
-            &results[&HOST_SOME_DELETED];
+            &results[&HOST_ONLY_DELETED];
         assert_eq!(reporter, "host",);
         assert_eq!(slot_type, "sled");
         assert_eq!(*slot, Some(4));
