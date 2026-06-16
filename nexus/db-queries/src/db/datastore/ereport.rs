@@ -305,6 +305,9 @@ impl DataStore {
             .select((dsl::restart_id, dsl::ena))
     }
 
+    /// Inserts the provided tranche of `ereports` into the `ereport` table, and
+    /// potentially updates the `ereporter_restart` table if the restart ID of
+    /// the inserted ereports has not been seen before.
     pub async fn ereports_insert(
         &self,
         opctx: &OpContext,
@@ -353,11 +356,22 @@ impl DataStore {
     /// the restart history table if the restart ID of the provided ereports is
     /// not already present.
     ///
-    /// This is performed in a single atomic CTE, in order to ensure that the
-    /// earliest `time_collected` timestamp in the `ereports` table for a given
-    /// restart ID will always match the `time_first_seen` timestamp in the
-    /// restart history table, even if Nexus crashes midway through inserting
-    /// ereports.
+    /// The two operations of inserting the ereports into the `ereport` table
+    /// and inserting an entry into the `ereporter_restart` table for the
+    /// restart ID are performed in a single atomic CTE. It's necessary for
+    /// these two operations to be done atomically, because if they are
+    /// non-atomic, it is possible for a Nexus to die, or go out to lunch for a
+    /// bit, between inserting the ereport records and creating the
+    /// `ereporter_restart` record for a tranche of ereports from a not-yet-seen
+    /// restart ID. If this happens, another Nexus could insert some more
+    /// ereports from that restart ID, and try to put something in the restart
+    /// ID table with a timestamp that is later than the actual first time
+    /// ereports from that ID were observed.
+    ///
+    /// The SQL generated here is output to
+    /// `tests/output/ereports_insert_host.sql` and
+    /// `tests/output/ereports_insert_sp.sql`, for host-OS and SP ereports,
+    /// respectively.
     fn ereports_insert_query(
         restart_id: EreporterRestartUuid,
         time_collected: chrono::DateTime<chrono::Utc>,
@@ -436,6 +450,7 @@ impl DataStore {
             .on_conflict((dsl::restart_id, dsl::ena))
             .do_nothing()
             .returning(dsl::ena);
+
         // Query fragment to insert the reporter restart entry into the
         // ereporter restart table, or update the existing entry's slot column
         // if one exists and the slot column is null. The null behavior will be
