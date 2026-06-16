@@ -3190,6 +3190,17 @@ table! {
 allow_tables_to_appear_in_same_query!(fm_sitrep, fm_sitrep_history);
 
 table! {
+    fm_sitrep_analysis_report (sitrep_id) {
+        sitrep_id -> Uuid,
+        git_commit -> Text,
+        input_report -> Jsonb,
+        analysis_report -> Jsonb,
+    }
+}
+
+allow_tables_to_appear_in_same_query!(fm_sitrep_analysis_report, fm_sitrep);
+
+table! {
     disk_type_local_storage (disk_id) {
         disk_id -> Uuid,
 
