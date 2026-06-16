@@ -18,7 +18,7 @@ pub use fact::{
     SagaNotProgressingFactPayload, SagaOwnerNotCurrentFactPayload,
     ZpoolUnhealthyFactPayload,
 };
-pub(crate) mod json_display;
+pub mod json_display;
 
 use case::AlertRequest;
 use chrono::{DateTime, Utc};
@@ -73,6 +73,12 @@ impl Sitrep {
 
     pub fn parent_id(&self) -> Option<SitrepUuid> {
         self.metadata.parent_sitrep_id
+    }
+
+    /// Returns the inventory collection ID of the collection that was used as
+    /// input to this sitrep.
+    pub fn inv_id(&self) -> CollectionUuid {
+        self.metadata.inv_collection_id
     }
 
     /// Iterate over all the open cases in this sitrep.

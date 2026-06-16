@@ -707,22 +707,20 @@ task: "fm_analysis"
     =================================
     no changes from the current situation report (Some(..........<REDACTED_UUID>........... (sitrep)))
 
-    fault management analysis inputs
-    --------------------------------
-    parent sitrep:        ..........<REDACTED_UUID>...........
-    inventory collection: ..........<REDACTED_UUID>...........
-    <FM_INPUT_INV_COMPARISON_REDACTED>
-    no new ereports since the parent sitrep
-    no cases copied forward
+    preparation report:
+      parent sitrep:        ..........<REDACTED_UUID>...........
+      inventory collection: ..........<REDACTED_UUID>...........
+      <FM_INPUT_INV_COMPARISON_REDACTED>
+      no new ereports since the parent sitrep
+      no cases copied forward
 
-    no in-service control plane disks
+      no in-service control plane disks
 
-    no non-terminal sagas observed
+      no non-terminal sagas observed
 
-    fault management analysis report
-    --------------------------------
-    sitrep ID: ..........<REDACTED_UUID>...........
-    no cases changed in this analysis step
+    analysis report:
+      sitrep ID: ..........<REDACTED_UUID>...........
+      no cases changed in this analysis step
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
 
 task: "fm_rendezvous"
@@ -770,6 +768,8 @@ task: "fm_sitrep_gc"
     orphaned fm_fact_physical_disk rows deleted:                                 0
       batches:                                                                   1
     orphaned fm_fact_saga rows deleted:                                          0
+      batches:                                                                   1
+    orphaned fm_sitrep_analysis_report rows deleted:                             0
       batches:                                                                   1
     orphaned fm_support_bundle_request rows deleted:                             0
       batches:                                                                   1
@@ -1409,22 +1409,20 @@ task: "fm_analysis"
     =================================
     no changes from the current situation report (Some(..........<REDACTED_UUID>........... (sitrep)))
 
-    fault management analysis inputs
-    --------------------------------
-    parent sitrep:        ..........<REDACTED_UUID>...........
-    inventory collection: ..........<REDACTED_UUID>...........
-    <FM_INPUT_INV_COMPARISON_REDACTED>
-    no new ereports since the parent sitrep
-    no cases copied forward
+    preparation report:
+      parent sitrep:        ..........<REDACTED_UUID>...........
+      inventory collection: ..........<REDACTED_UUID>...........
+      <FM_INPUT_INV_COMPARISON_REDACTED>
+      no new ereports since the parent sitrep
+      no cases copied forward
 
-    no in-service control plane disks
+      no in-service control plane disks
 
-    no non-terminal sagas observed
+      no non-terminal sagas observed
 
-    fault management analysis report
-    --------------------------------
-    sitrep ID: ..........<REDACTED_UUID>...........
-    no cases changed in this analysis step
+    analysis report:
+      sitrep ID: ..........<REDACTED_UUID>...........
+      no cases changed in this analysis step
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
 
 task: "fm_rendezvous"
@@ -1472,6 +1470,8 @@ task: "fm_sitrep_gc"
     orphaned fm_fact_physical_disk rows deleted:                                 0
       batches:                                                                   1
     orphaned fm_fact_saga rows deleted:                                          0
+      batches:                                                                   1
+    orphaned fm_sitrep_analysis_report rows deleted:                             0
       batches:                                                                   1
     orphaned fm_support_bundle_request rows deleted:                             0
       batches:                                                                   1

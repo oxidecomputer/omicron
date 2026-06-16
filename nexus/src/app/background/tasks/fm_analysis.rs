@@ -75,6 +75,7 @@ impl BackgroundTask for FmAnalysis {
                     inv_collection_id: None,
                     known_classes,
                     outcome: status::Outcome::Disabled,
+                    warnings: Vec::new(),
                 }
             };
             match serde_json::to_value(status) {
@@ -114,6 +115,12 @@ impl FmAnalysis {
         &mut self,
         opctx: &OpContext,
     ) -> FmAnalysisStatus {
+        // We shall collect a list of non-fatal errors to report in the
+        // activation status, in addition to the outcome. These are errors which
+        // did *not* prevent the analysis step from succeeding, but which should
+        // be surfaced in the activation status.
+        let mut warnings = Vec::new();
+
         // Snapshot the static known-classes set once, up front, so it's
         // reported in the activation status regardless of which outcome
         // variant fires.
@@ -134,6 +141,7 @@ impl FmAnalysis {
                 inv_collection_id: None,
                 known_classes,
                 outcome: status::Outcome::WaitingForInventory,
+                warnings,
             };
         };
         let inv_collection_id = inv.id;
@@ -172,6 +180,7 @@ impl FmAnalysis {
                     outcome: status::Outcome::PreparationError(
                         error.to_string(),
                     ),
+                    warnings,
                 };
             }
             Err(PreparationError::InvalidInputs(
@@ -199,12 +208,15 @@ impl FmAnalysis {
                         next_inv_min_time_started,
                         input_inv_time_started,
                     },
+                    warnings,
                 };
             }
         };
 
         // Okay, actually run analysis and generate a new sitrep.
-        let outcome = self.analyze(&opctx, inputs).await;
+        let outcome = self
+            .analyze(&opctx, inputs, &prep_status.report, &mut warnings)
+            .await;
 
         FmAnalysisStatus {
             parent_sitrep_id,
@@ -214,6 +226,7 @@ impl FmAnalysis {
                 prep_status,
                 analysis_status: outcome,
             },
+            warnings,
         }
     }
 
@@ -281,13 +294,13 @@ impl FmAnalysis {
             in_service_disks,
             observed_sagas,
         )?;
-        let mut errors = Vec::new();
-        self.load_new_ereports(opctx, &mut builder, &mut errors)
+        let mut warnings = Vec::new();
+        self.load_new_ereports(opctx, &mut builder, &mut warnings)
             .await
             .context("failed to load new ereports")?;
 
         let (input, report) = builder.build();
-        Ok((input, status::PreparationStatus { errors, report }))
+        Ok((input, status::PreparationStatus { warnings, report }))
     }
 
     /// Build the saga diagnosis engine's input: every non-terminal saga,
@@ -388,7 +401,7 @@ impl FmAnalysis {
         &mut self,
         opctx: &OpContext,
         builder: &mut fm::analysis_input::Builder,
-        errors: &mut Vec<String>,
+        warnings: &mut Vec<String>,
     ) -> anyhow::Result<()> {
         // Only surface ereports a diagnosis engine will consume.
         let classes = fm::diagnosis::known_ereport_classes();
@@ -413,7 +426,7 @@ impl FmAnalysis {
                         Ok(ereport) => ereport,
                         Err(e) => {
                             invalid += 1;
-                            errors.push(e.to_string());
+                            warnings.push(e.to_string());
                             return None;
                         }
                     };
@@ -441,6 +454,8 @@ impl FmAnalysis {
         &mut self,
         opctx: &OpContext,
         inputs: fm::analysis_input::Input,
+        input_report: &nexus_types::fm::analysis_reports::InputReport,
+        warnings: &mut Vec<String>,
     ) -> status::AnalysisStatus {
         let start_time = Utc::now();
         let mut sitrep_builder = fm::SitrepBuilder::new(&opctx.log, &inputs);
@@ -450,8 +465,12 @@ impl FmAnalysis {
 
         // Did it work?
         if let Err(e) = result {
-            let err = InlineErrorChain::new(&*e);
-            slog::error!(&opctx.log, "fault management analysis failed"; "err" => %err);
+            let error = InlineErrorChain::new(&*e);
+            slog::error!(
+                &opctx.log,
+                "fault management analysis failed";
+                &error,
+            );
             return status::AnalysisStatus {
                 start_time,
                 end_time,
@@ -477,7 +496,36 @@ impl FmAnalysis {
         }
 
         let sitrep_id = sitrep.id();
-        match self.datastore.fm_sitrep_insert(opctx, sitrep).await {
+
+        // Serialize the human-readable analysis report so they can be stored
+        // alongside the sitrep for later inspection via `omdb`. This is purely
+        // diagnostic; if serialization somehow fails, we log it and still
+        // commit the sitrep rather than blocking fault management on it.
+        let analysis_report =
+            match nexus_db_model::fm::SitrepAnalysisReport::new(
+                input_report,
+                &report,
+            ) {
+                Ok(analysis_report) => Some(analysis_report),
+                Err(e) => {
+                    const MESSAGE: &str = "analysis report could not be \
+                        serialized, the sitrep will be committed without it";
+                    let error = InlineErrorChain::new(&*e);
+                    slog::warn!(
+                        &opctx.log,
+                        "{MESSAGE}";
+                        &error,
+                    );
+                    warnings.push(format!("{MESSAGE}: {error}"));
+                    None
+                }
+            };
+
+        match self
+            .datastore
+            .fm_sitrep_insert(opctx, sitrep, analysis_report)
+            .await
+        {
             Ok(()) => {
                 slog::info!(&opctx.log, "updated the current sitrep!");
                 // If we committed a new sitrep, we ought to go ahead and load it
@@ -511,8 +559,12 @@ impl FmAnalysis {
                 }
             }
             Err(datastore::fm::InsertSitrepError::Other(e)) => {
-                let err = InlineErrorChain::new(&e);
-                slog::error!(&opctx.log, "failed to insert sitrep"; "err" => %err);
+                let error = InlineErrorChain::new(&e);
+                slog::error!(
+                    &opctx.log,
+                    "failed to insert sitrep";
+                    &error,
+                );
                 status::AnalysisStatus {
                     start_time,
                     end_time,
