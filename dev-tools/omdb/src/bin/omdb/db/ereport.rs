@@ -518,6 +518,8 @@ async fn cmd_db_ereporters(
     let conn = datastore.pool_connection_for_tests().await?;
     let (restarts, ereport_info) = (*conn)
         .transaction_async(async move |conn| {
+            conn.batch_execute_async(ALLOW_FULL_TABLE_SCAN_SQL).await?;
+
             // The canonical list of reporter restarts comes from the
             // `ereporter_restart` table.
             let mut query = restart_dsl::ereporter_restart
@@ -542,7 +544,6 @@ async fn cmd_db_ereporters(
             // a given restart ID; the VPD identity may start out NULL and be
             // filled in later, so we take its `MAX` (ignoring NULLs) as we do
             // for the slot number. This may require a full table scan.
-            conn.batch_execute_async(ALLOW_FULL_TABLE_SCAN_SQL).await?;
             let ereport_info = dsl::ereport
                 .group_by((dsl::restart_id, dsl::sled_id))
                 .select((
