@@ -163,7 +163,7 @@ impl CurrentRssConfig {
 
         let known_bootstrap_sleds = bootstrap_peers.sleds();
         let mut bootstrap_ips = Vec::new();
-        for sled in &self.bootstrap_sleds {
+        for sled in &self.common.bootstrap_sleds {
             let Some(ip) =
                 known_bootstrap_sleds.get(&sled.baseboard_id).copied()
             else {
@@ -183,7 +183,7 @@ impl CurrentRssConfig {
         // https://github.com/oxidecomputer/omicron/issues/3690
         const TRUST_QUORUM_MIN_SIZE: usize = 3;
         let trust_quorum_peers: Option<Vec<BaseboardId>> =
-            if self.bootstrap_sleds.len() >= TRUST_QUORUM_MIN_SIZE {
+            if self.common.bootstrap_sleds.len() >= TRUST_QUORUM_MIN_SIZE {
                 Some(
                     self.common
                         .bootstrap_sleds
@@ -333,7 +333,7 @@ impl CurrentRssConfig {
         config: PutRssUserConfigInsensitive,
         our_baseboard: &BaseboardId,
         inventory: &MgsV1Inventory,
-        ddm_discovered_sleds: &BTreeMap<Baseboard, Ipv6Addr>,
+        ddm_discovered_sleds: &BTreeMap<BaseboardId, Ipv6Addr>,
         log: &slog::Logger,
     ) -> Result<(), String> {
         self.common.update(

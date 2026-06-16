@@ -1205,7 +1205,7 @@ impl SystemDescription {
                 policy: sled.policy,
                 state: sled.state,
                 resources: sled.resources.clone(),
-                baseboard_id: sled.inventory_sled_agent.baseboard.clone(),
+                baseboard_id: sled.inventory_sled_agent.baseboard_id.clone(),
             };
             builder.add_sled(sled.sled_id, sled_details)?;
         }
@@ -1428,7 +1428,7 @@ impl Sled {
         };
 
         let inventory_sled_agent = {
-            let baseboard = match hardware {
+            let baseboard_id = match hardware {
                 SledHardware::Gimlet | SledHardware::Pc => BaseboardId {
                     part_number: model.clone(),
                     serial_number: serial.clone(),
@@ -1440,7 +1440,7 @@ impl Sled {
             };
             let sled_agent_address = get_sled_address(sled_subnet);
             Inventory {
-                baseboard,
+                baseboard_id,
                 reservoir_size: ByteCount::from(1024),
                 sled_role,
                 sled_agent_address,
@@ -1542,7 +1542,7 @@ impl Sled {
         // the fake `sled_agent_client` types, again so that we can later pass
         // them to the inventory builder so that it can construct the same
         // inventory types again.  This is a little goofy.
-        let baseboard = inventory_sp
+        let baseboard_id = inventory_sp
             .as_ref()
             .map(|sledhw| BaseboardId {
                 part_number: sledhw.baseboard_id.part_number.clone(),
@@ -1656,7 +1656,7 @@ impl Sled {
         });
 
         let inventory_sled_agent = Inventory {
-            baseboard,
+            baseboard_id,
             reservoir_size: inv_sled_agent.reservoir_size,
             sled_role: inv_sled_agent.sled_role,
             sled_agent_address: inv_sled_agent.sled_agent_address,

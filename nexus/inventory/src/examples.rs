@@ -1027,7 +1027,7 @@ pub fn file_source_resolver(
 #[expect(clippy::too_many_arguments)]
 pub fn sled_agent(
     sled_id: SledUuid,
-    baseboard: BaseboardId,
+    baseboard_id: BaseboardId,
     sled_role: SledRole,
     disks: Vec<InventoryDisk>,
     zpools: Vec<InventoryZpool>,
@@ -1092,7 +1092,7 @@ pub fn sled_agent(
     });
 
     Inventory {
-        baseboard,
+        baseboard_id,
         reservoir_size: ByteCount::from(1024),
         sled_role,
         sled_agent_address: "[::1]:56792".parse().unwrap(),

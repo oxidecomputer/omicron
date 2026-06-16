@@ -359,7 +359,7 @@ mod api_impl {
                 sled_id: ctx.id,
                 sled_agent_address,
                 sled_role: ctx.role,
-                baseboard: ctx.baseboard.clone(),
+                baseboard_id: ctx.baseboard.clone(),
                 usable_hardware_threads: 64,
                 usable_physical_ram: (1 << 30).into(),
                 reservoir_size: (1 << 29).into(),

@@ -915,7 +915,7 @@ impl SledAgent {
             sled_id: self.id,
             sled_agent_address,
             sled_role: SledRole::Scrimlet,
-            baseboard: self.config.hardware.baseboard.clone().into(),
+            baseboard_id: self.config.hardware.baseboard.clone().into(),
             usable_hardware_threads: self.config.hardware.hardware_threads,
             usable_physical_ram: ByteCount::try_from(
                 self.config.hardware.physical_ram,

@@ -28,9 +28,9 @@ impl CurrentMultirackJoinConfig {
     pub(crate) fn update(
         &mut self,
         config: MultirackJoinConfigBaseUserInput,
-        our_baseboard: Option<&Baseboard>,
+        our_baseboard: &BaseboardId,
         inventory: &MgsV1Inventory,
-        ddm_discovered_sleds: &BTreeMap<Baseboard, Ipv6Addr>,
+        ddm_discovered_sleds: &BTreeMap<BaseboardId, Ipv6Addr>,
         log: &slog::Logger,
     ) -> Result<(), String> {
         self.common.update(
@@ -51,7 +51,7 @@ impl CurrentMultirackJoinConfig {
         our_baseboard: &BaseboardId,
         config: MultirackJoinConfigBaseUserInput,
         inventory: &MgsV1Inventory,
-        ddm_discovered_sleds: &BTreeMap<Baseboard, Ipv6Addr>,
+        ddm_discovered_sleds: &BTreeMap<BaseboardId, Ipv6Addr>,
         log: &slog::Logger,
     ) -> Result<Self, String> {
         let sled_inventory =

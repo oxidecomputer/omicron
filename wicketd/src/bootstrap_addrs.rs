@@ -5,11 +5,7 @@
 //! A mechanism for for discovering peer sleds on the bootstrap network via DDM
 //! and the bootstrap agent.
 
-use futures::stream::FuturesUnordered;
-use omicron_ddm_admin_client::Client as DdmAdminClient;
-use sled_hardware_types::Baseboard;
 use sled_hardware_types::BaseboardId;
-use sled_hardware_types::underlay::BootstrapInterface;
 use slog::Logger;
 use slog::warn;
 use std::collections::BTreeMap;

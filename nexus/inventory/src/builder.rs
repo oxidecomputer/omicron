@@ -622,9 +622,10 @@ impl CollectionBuilder {
     ) -> Result<(), anyhow::Error> {
         let sled_id = inventory.sled_id;
 
-        let baseboard_id = Some(
-            Self::normalize_item(&mut self.baseboards, inventory.baseboard),
-        );
+        let baseboard_id = Some(Self::normalize_item(
+            &mut self.baseboards,
+            inventory.baseboard_id,
+        ));
 
         // Socket addresses come through the OpenAPI spec as strings, which
         // means they don't get validated when everything else does.  This
@@ -857,11 +858,9 @@ mod test {
         // no RoT information.
         assert_eq!(
             collection.errors.iter().map(|e| e.to_string()).collect::<Vec<_>>(),
-            [
-                "MGS \"fake MGS 1\": reading RoT state for BaseboardId \
+            ["MGS \"fake MGS 1\": reading RoT state for BaseboardId \
                 { part_number: \"model1\", serial_number: \"s2\" }: test suite \
-                injected error",
-            ]
+                injected error",]
         );
 
         // Verify the baseboard ids found.

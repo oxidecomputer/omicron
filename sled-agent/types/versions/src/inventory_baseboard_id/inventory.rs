@@ -4,6 +4,8 @@
 
 use iddqd::IdOrdMap;
 use omicron_common::api::external::ByteCount;
+use omicron_common::snake_case_result;
+use omicron_common::snake_case_result::SnakeCaseResult;
 use omicron_uuid_kinds::SledUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -20,8 +22,9 @@ use crate::v14::inventory::OmicronSledConfig;
 use crate::v16::inventory::ConfigReconcilerInventory;
 use crate::v16::inventory::SingleMeasurementInventory;
 use crate::v24::inventory::InventoryZpool;
-use crate::v37;
 use crate::v37::inventory::SvcsEnabledNotOnlineResult;
+use crate::v40;
+use crate::v40::inventory::{FmdInventory, FmdInventoryError};
 
 /// Identity and basic status information about this sled agent
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
@@ -29,7 +32,7 @@ pub struct Inventory {
     pub sled_id: SledUuid,
     pub sled_agent_address: SocketAddrV6,
     pub sled_role: SledRole,
-    pub baseboard: BaseboardId,
+    pub baseboard_id: BaseboardId,
     pub usable_hardware_threads: u32,
     pub usable_physical_ram: ByteCount,
     pub cpu_family: SledCpuFamily,
@@ -43,15 +46,20 @@ pub struct Inventory {
     pub file_source_resolver: OmicronFileSourceResolverInventory,
     pub smf_services_enabled_not_online: SvcsEnabledNotOnlineResult,
     pub reference_measurements: IdOrdMap<SingleMeasurementInventory>,
+    #[serde(with = "snake_case_result")]
+    #[schemars(
+        schema_with = "SnakeCaseResult::<FmdInventory, FmdInventoryError>::json_schema"
+    )]
+    pub fmd: Result<FmdInventory, FmdInventoryError>,
 }
 
-impl From<Inventory> for v37::inventory::Inventory {
+impl From<Inventory> for v40::inventory::Inventory {
     fn from(value: Inventory) -> Self {
         let Inventory {
             sled_id,
             sled_agent_address,
             sled_role,
-            baseboard,
+            baseboard_id,
             usable_hardware_threads,
             usable_physical_ram,
             cpu_family,
@@ -65,6 +73,7 @@ impl From<Inventory> for v37::inventory::Inventory {
             file_source_resolver,
             smf_services_enabled_not_online,
             reference_measurements,
+            fmd,
         } = value;
         Self {
             sled_id,
@@ -76,8 +85,8 @@ impl From<Inventory> for v37::inventory::Inventory {
             // revision is unrecoverable and set to 0; consumers speaking these
             // older versions discard it.
             baseboard: Baseboard::Gimlet {
-                identifier: baseboard.serial_number,
-                model: baseboard.part_number,
+                identifier: baseboard_id.serial_number,
+                model: baseboard_id.part_number,
                 revision: 0,
             },
             usable_hardware_threads,
@@ -93,6 +102,7 @@ impl From<Inventory> for v37::inventory::Inventory {
             file_source_resolver,
             smf_services_enabled_not_online,
             reference_measurements,
+            fmd,
         }
     }
 }

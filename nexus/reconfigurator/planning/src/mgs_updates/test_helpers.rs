@@ -1340,7 +1340,7 @@ impl<'a> TestBoardCollectionBuilder<'a> {
                         Inventory {
                             // fields we care about
                             sled_id,
-                            baseboard: BaseboardId {
+                            baseboard_id: BaseboardId {
                                 part_number: sp_state.model.clone(),
                                 serial_number: sp_state.serial_number.clone(),
                             },

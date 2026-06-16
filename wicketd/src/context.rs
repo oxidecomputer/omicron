@@ -14,8 +14,6 @@ use crate::rss_config::CurrentRssConfig;
 use crate::transceivers::Handle as TransceiverHandle;
 use crate::update_tracker::UpdateTracker;
 use anyhow::Result;
-use anyhow::anyhow;
-use anyhow::bail;
 use dropshot::ClientErrorStatusCode;
 use dropshot::HttpError;
 use internal_dns_resolver::Resolver;
@@ -69,7 +67,7 @@ impl RssOrMultirackJoinConfigCommon {
     pub(crate) fn update_sled_inventory(
         &mut self,
         inventory: &MgsV1Inventory,
-        ddm_discovered_sleds: &BTreeMap<Baseboard, Ipv6Addr>,
+        ddm_discovered_sleds: &BTreeMap<BaseboardId, Ipv6Addr>,
         log: &slog::Logger,
     ) {
         self.inventory =
@@ -80,9 +78,9 @@ impl RssOrMultirackJoinConfigCommon {
         &mut self,
         bootstrap_slots: &BTreeSet<u16>,
         new_bgp_auth_key_ids: impl IntoIterator<Item = BgpAuthKeyId>,
-        our_baseboard: Option<&Baseboard>,
+        our_baseboard: &BaseboardId,
         inventory: &MgsV1Inventory,
-        ddm_discovered_sleds: &BTreeMap<Baseboard, Ipv6Addr>,
+        ddm_discovered_sleds: &BTreeMap<BaseboardId, Ipv6Addr>,
         log: &slog::Logger,
     ) -> Result<(), String> {
         self.update_sled_inventory(inventory, ddm_discovered_sleds, log);
@@ -114,7 +112,7 @@ impl RssOrMultirackJoinConfigCommon {
 
     pub(crate) fn update_ip_addresses_for_existing_bootstrap_sleds(
         &mut self,
-        ddm_discovered_sleds: &BTreeMap<Baseboard, Ipv6Addr>,
+        ddm_discovered_sleds: &BTreeMap<BaseboardId, Ipv6Addr>,
     ) {
         // If the user has already uploaded a config specifying bootstrap_sleds,
         // also update our knowledge of those sleds' bootstrap addresses as
@@ -124,7 +122,7 @@ impl RssOrMultirackJoinConfigCommon {
             .into_iter()
             .map(|mut sled_desc| {
                 sled_desc.bootstrap_ip =
-                    ddm_discovered_sleds.get(&sled_desc.baseboard).copied();
+                    ddm_discovered_sleds.get(&sled_desc.baseboard_id).copied();
                 sled_desc
             })
             .collect();
@@ -133,7 +131,7 @@ impl RssOrMultirackJoinConfigCommon {
     pub(crate) fn get_latest<'a, T: CommonConfigContainer>(
         config: &'a mut T,
         inventory: &MgsV1Inventory,
-        ddm_discovered_sleds: &BTreeMap<Baseboard, Ipv6Addr>,
+        ddm_discovered_sleds: &BTreeMap<BaseboardId, Ipv6Addr>,
         log: &slog::Logger,
     ) -> &'a T {
         config.common_mut().update_sled_inventory(
@@ -154,7 +152,7 @@ pub(crate) trait CommonConfigContainer {
     fn get_latest(
         &mut self,
         inventory: &MgsV1Inventory,
-        ddm_discovered_sleds: &BTreeMap<Baseboard, Ipv6Addr>,
+        ddm_discovered_sleds: &BTreeMap<BaseboardId, Ipv6Addr>,
         log: &slog::Logger,
     ) -> &Self
     where

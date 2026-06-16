@@ -40,7 +40,7 @@ pub struct ExampleRackSetupData {
     pub current_insensitive: CurrentRssUserConfigInsensitive,
     pub bgp_auth_keys: Vec<BgpAuthKeyId>,
     pub inventory: MgsV1Inventory,
-    pub ddm_discovered_sleds: BTreeMap<Baseboard, Ipv6Addr>,
+    pub ddm_discovered_sleds: BTreeMap<BaseboardId, Ipv6Addr>,
 }
 
 impl ExampleRackSetupData {
@@ -114,10 +114,9 @@ impl ExampleRackSetupData {
         let ddm_discovered_sleds: BTreeMap<_, _> = [
             (our_baseboard.clone(), Ipv6Addr::LOCALHOST),
             (
-                Baseboard::Gimlet {
-                    model: "model2".into(),
-                    revision: 5,
-                    identifier: "serial 4 5 6".into(),
+                BaseboardId {
+                    part_number: "model2".into(),
+                    serial_number: "serial 4 5 6".into(),
                 },
                 Ipv6Addr::LOCALHOST,
             ),

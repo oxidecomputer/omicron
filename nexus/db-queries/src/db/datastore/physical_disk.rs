@@ -773,7 +773,7 @@ mod test {
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::ZpoolUuid;
     use sled_agent_types::inventory::{
-        Baseboard, ConfigReconcilerInventoryStatus, FmdInventory, Inventory,
+        ConfigReconcilerInventoryStatus, FmdInventory, Inventory,
         InventoryDisk, OmicronFileSourceResolverInventory, SledCpuFamily,
         SledRole, SvcsEnabledNotOnlineResult,
     };
@@ -1114,7 +1114,7 @@ mod test {
             .found_sled_inventory(
                 "fake sled agent",
                 Inventory {
-                    baseboard: BaseboardId {
+                    baseboard_id: BaseboardId {
                         part_number: sled.part_number().to_string(),
                         serial_number: sled.serial_number().to_string(),
                     },

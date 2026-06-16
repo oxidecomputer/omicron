@@ -1820,10 +1820,9 @@ mod test {
     use sled_agent_types::{
         early_networking::RackNetworkConfig,
         inventory::{
-            Baseboard, ConfigReconcilerInventoryStatus, FmdInventory,
-            Inventory, InventoryDisk, OmicronFileSourceResolverInventory,
-            OmicronZoneType, SledCpuFamily, SledRole,
-            SvcsEnabledNotOnlineResult,
+            ConfigReconcilerInventoryStatus, FmdInventory, Inventory,
+            InventoryDisk, OmicronFileSourceResolverInventory, OmicronZoneType,
+            SledCpuFamily, SledRole, SvcsEnabledNotOnlineResult,
         },
     };
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
@@ -1853,7 +1852,7 @@ mod test {
                 sled_id,
                 sled_agent_address,
                 sled_role: SledRole::Scrimlet,
-                baseboard: BaseboardId {
+                baseboard_id: BaseboardId {
                     part_number: "test".to_string(),
                     serial_number: "test".to_string(),
                 },

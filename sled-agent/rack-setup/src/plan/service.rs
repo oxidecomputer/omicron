@@ -1523,7 +1523,7 @@ mod tests {
                 sled_id,
                 sled_agent_address: sled_address,
                 sled_role: SledRole::Scrimlet,
-                baseboard: BaseboardId {
+                baseboard_id: BaseboardId {
                     part_number: "test".to_string(),
                     serial_number: "test".to_string(),
                 },

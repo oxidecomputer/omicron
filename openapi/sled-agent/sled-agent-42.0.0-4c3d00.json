@@ -7,11 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-<<<<<<<< HEAD:openapi/sled-agent/sled-agent-41.0.0-d909db.json
-    "version": "41.0.0"
-========
-    "version": "40.0.0"
->>>>>>>> 09d5962b1 (Remove `Baseboard::Unknown` variant):openapi/sled-agent/sled-agent-40.0.0-7aa799.json
+    "version": "42.0.0"
   },
   "paths": {
     "/artifacts": {
@@ -6201,7 +6197,7 @@
         "description": "Identity and basic status information about this sled agent",
         "type": "object",
         "properties": {
-          "baseboard": {
+          "baseboard_id": {
             "$ref": "#/components/schemas/BaseboardId"
           },
           "cpu_family": {
@@ -6329,7 +6325,7 @@
           }
         },
         "required": [
-          "baseboard",
+          "baseboard_id",
           "cpu_family",
           "datasets",
           "disks",
