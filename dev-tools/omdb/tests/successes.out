@@ -707,17 +707,15 @@ task: "fm_analysis"
     =================================
 /!\ analysis failed: FM analysis is not yet implemented
 
-    fault management analysis inputs
-    --------------------------------
-    parent sitrep:        <none>
-    inventory collection: ..........<REDACTED_UUID>...........
-    no new ereports since the parent sitrep
-    no cases copied forward
+    preparation report:
+      parent sitrep:        <none>
+      inventory collection: ..........<REDACTED_UUID>...........
+      no new ereports since the parent sitrep
+      no cases copied forward
 
-    fault management analysis report
-    --------------------------------
-    sitrep ID: ..........<REDACTED_UUID>...........
-    no cases changed in this analysis step
+    analysis report:
+      sitrep ID: ..........<REDACTED_UUID>...........
+      no cases changed in this analysis step
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
 
 task: "fm_rendezvous"
@@ -761,6 +759,8 @@ task: "fm_sitrep_gc"
     orphaned fm_case rows deleted:                                               0
       batches:                                                                   1
     orphaned fm_ereport_in_case rows deleted:                                    0
+      batches:                                                                   1
+    orphaned fm_sitrep_analysis_report rows deleted:                             0
       batches:                                                                   1
     orphaned fm_support_bundle_request rows deleted:                             0
       batches:                                                                   1
@@ -1398,17 +1398,15 @@ task: "fm_analysis"
     =================================
 /!\ analysis failed: FM analysis is not yet implemented
 
-    fault management analysis inputs
-    --------------------------------
-    parent sitrep:        <none>
-    inventory collection: ..........<REDACTED_UUID>...........
-    no new ereports since the parent sitrep
-    no cases copied forward
+    preparation report:
+      parent sitrep:        <none>
+      inventory collection: ..........<REDACTED_UUID>...........
+      no new ereports since the parent sitrep
+      no cases copied forward
 
-    fault management analysis report
-    --------------------------------
-    sitrep ID: ..........<REDACTED_UUID>...........
-    no cases changed in this analysis step
+    analysis report:
+      sitrep ID: ..........<REDACTED_UUID>...........
+      no cases changed in this analysis step
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
 
 task: "fm_rendezvous"
@@ -1452,6 +1450,8 @@ task: "fm_sitrep_gc"
     orphaned fm_case rows deleted:                                               0
       batches:                                                                   1
     orphaned fm_ereport_in_case rows deleted:                                    0
+      batches:                                                                   1
+    orphaned fm_sitrep_analysis_report rows deleted:                             0
       batches:                                                                   1
     orphaned fm_support_bundle_request rows deleted:                             0
       batches:                                                                   1
