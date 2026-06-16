@@ -389,6 +389,19 @@ async fn test_omdb_success_cases() {
         r" --> (same collection as parent sitrep|different from parent sitrep \(collection [-a-f0-9]+\))",
     );
 
+    // The `fm_sitrep_gc` task's orphan counts are racy. When two `fm_analysis`
+    // activations overlap (e.g. the boot-time activation and the explicit drive
+    // above), both can insert a first sitrep before either is made current; the
+    // loser's sitrep and its stashed analysis report are inserted but orphaned
+    // (see `DataStore::fm_sitrep_insert`'s `ParentNotCurrent` path), and a
+    // later GC pass deletes them. Whether that race happened before this
+    // snapshot is timing-dependent, so redact both counts. Other child tables
+    // stay zero: with no faults, orphaned sitreps carry no cases, facts,
+    // ereports, or bundles.
+    redactor
+        .field("orphaned sitreps deleted:", r"\d+")
+        .field("orphaned fm_sitrep_analysis_report rows deleted:", r"\d+");
+
     // The `sp_ereport_ingester` task's output depends on how many simulated
     // sled agents ahppen to register with Nexus before its first execution.
     // These redactions work around the issue described in
