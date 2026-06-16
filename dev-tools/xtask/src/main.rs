@@ -20,6 +20,7 @@ mod common;
 #[cfg_attr(not(target_os = "illumos"), allow(dead_code))]
 mod external;
 mod live_tests;
+mod setup_agents;
 mod usdt;
 
 #[cfg(target_os = "illumos")]
@@ -111,6 +112,9 @@ enum Cmds {
 
     /// Schema management utilities
     Schema(external::External),
+
+    /// Create per-directory CLAUDE.md/AGENTS.md symlinks pointing at READMEs
+    SetupAgents(setup_agents::Args),
 }
 
 fn main() -> Result<()> {
@@ -159,6 +163,7 @@ fn main() -> Result<()> {
         }
         Cmds::Probes { filter } => usdt::print_probes(filter),
         Cmds::Schema(external) => external.exec_bin("schema"),
+        Cmds::SetupAgents(args) => setup_agents::run_cmd(args),
     }
 }
 
