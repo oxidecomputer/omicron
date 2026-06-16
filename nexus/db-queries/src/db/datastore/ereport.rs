@@ -14,8 +14,6 @@ use crate::db::model::EreporterType;
 use crate::db::model::SpMgsSlot;
 use crate::db::model::SpType;
 use crate::db::model::SqlU16;
-use crate::db::model::SqlU32;
-use crate::db::model::ereport as model;
 use crate::db::model::ereport::DbEna;
 use crate::db::pagination::{paginated, paginated_multicolumn};
 use crate::db::raw_query_builder::QueryBuilder;
@@ -23,8 +21,6 @@ use crate::db::raw_query_builder::TypedSqlQuery;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::DateTime;
 use chrono::Utc;
-use diesel::AggregateExpressionMethods;
-use diesel::dsl::{count, min};
 use diesel::pg::Pg;
 use diesel::prelude::*;
 use diesel::query_builder::*;
@@ -49,14 +45,6 @@ use omicron_uuid_kinds::SledUuid;
 use uuid::Uuid;
 
 type EreportIdTuple = (Uuid, DbEna);
-
-#[derive(Clone, Debug)]
-pub struct EreporterRestartBySerial {
-    pub id: EreporterRestartUuid,
-    pub first_seen_at: DateTime<Utc>,
-    pub reporter_kind: fm::Reporter,
-    pub ereports: u32,
-}
 
 impl DataStore {
     /// Fetch an ereport by its restart ID and ENA.
@@ -175,62 +163,6 @@ impl DataStore {
             .load_async(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
-    }
-
-    /// List unique ereporter restarts for the given serial number.
-    pub async fn ereporter_restart_list_by_serial(
-        &self,
-        opctx: &OpContext,
-        serial: String,
-    ) -> ListResultVec<EreporterRestartBySerial> {
-        opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
-
-        let conn = &*self.pool_connection_authorized(opctx).await?;
-        let rows = Self::restart_list_by_serial_query(serial.clone())
-            .load_async::<(Uuid, model::Reporter, Option<DateTime<Utc>>, SqlU32)>(
-                conn,
-            )
-            .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
-
-        let restarts = rows.into_iter().map(|(restart_id, reporter, first_seen, ereports)| {
-            let first_seen_at = first_seen.expect(
-                "`min(time_collected)` should never  return `NULL`, since the \
-                 `time_collected` column is not nullable, and the `SELECT` clause \
-                  should return nothing if the result set is empty"
-            );
-            EreporterRestartBySerial {
-                id: EreporterRestartUuid::from_untyped_uuid(restart_id),
-                reporter_kind: reporter.try_into().unwrap(),
-                first_seen_at,
-                ereports: ereports.into(),
-            }
-        }).collect();
-
-        Ok(restarts)
-    }
-
-    fn restart_list_by_serial_query(
-        serial: String,
-    ) -> impl RunnableQuery<(Uuid, model::Reporter, Option<DateTime<Utc>>, SqlU32)>
-    {
-        dsl::ereport
-            .filter(dsl::serial_number.eq(serial.clone()))
-            .filter(dsl::time_deleted.is_null())
-            .group_by((
-                dsl::restart_id,
-                dsl::reporter,
-                dsl::slot_type,
-                dsl::slot,
-                dsl::sled_id,
-            ))
-            .select((
-                dsl::restart_id,
-                model::Reporter::as_select(),
-                min(dsl::time_collected),
-                count(dsl::ena).aggregate_distinct(),
-            ))
-            .order_by(dsl::restart_id)
     }
 
     pub async fn latest_ereport_id(
@@ -689,31 +621,6 @@ mod tests {
         let conn = pool.claim().await.unwrap();
 
         let query = DataStore::host_latest_ereport_id_query(SledUuid::nil());
-        let explanation = query
-            .explain_async(&conn)
-            .await
-            .expect("Failed to explain query - is it valid SQL?");
-
-        eprintln!("{explanation}");
-
-        assert!(
-            !explanation.contains("FULL SCAN"),
-            "Found an unexpected FULL SCAN: {}",
-            explanation
-        );
-
-        db.terminate().await;
-        logctx.cleanup_successful();
-    }
-
-    #[tokio::test]
-    async fn explain_restart_list_by_serial() {
-        let logctx = dev::test_setup_log("explain_restart_list_by_serial");
-        let db = TestDatabase::new_with_pool(&logctx.log).await;
-        let pool = db.pool();
-        let conn = pool.claim().await.unwrap();
-
-        let query = DataStore::restart_list_by_serial_query(String::new());
         let explanation = query
             .explain_async(&conn)
             .await
