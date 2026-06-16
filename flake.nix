@@ -182,57 +182,76 @@
           "\n"
           file;
 
-      mkMaghemiteThing = { name, binFilename ? name, commit, tarballShaName, linuxBinShaName }:
-        with pkgs.lib; let
-          repo = "maghemite";
-          # get stuff
-          tarball = downloadBuildomat
-            {
-              inherit commit repo;
-              sha = findSha maghemiteShas tarballShaName;
-              kind = "image";
-              file = "${name}.tar.gz";
-            };
-          linuxBin =
-            downloadBuildomat
+      # downloads a maghemite thing from buildomat, and produces a derivation
+      # with the maghemite thing's binary symlinked into its outputs.
+      mkMaghemiteThing =
+        {
+          # name of the maghemite thing to download. this is the filename stem
+          # for the tarball to fetch, and the name of the directory for the
+          # maghemite thing's outputs (nested under `opt/oxide/`) tarball and
+          # binary to symlink into the outputs.
+          name
+          # name of the Linux binary to download and symlink into the outputs.
+          #
+          # this defaults to `name` if not specified explicitly
+        , binFilename ? name
+          # Git SHA of the maghemite repo commit to fetch.
+        , commit
+          # name of the tarball SHA variable in `maghemite_mgd_checksums`
+        , tarballShaName
+          # name of the Linux binary SHA variable in `maghemite_mgd_checksums`
+        , linuxBinShaName
+        }:
+          with pkgs.lib; let
+            repo = "maghemite";
+            # get stuff
+            tarball = downloadBuildomat
               {
                 inherit commit repo;
-                sha = findSha maghemiteShas linuxBinShaName;
-                kind = "linux";
-                file = binFilename;
+                sha = findSha maghemiteShas tarballShaName;
+                kind = "image";
+                file = "${name}.tar.gz";
               };
-        in
-        with pkgs;
-        stdenv.mkDerivation
-          {
-            inherit name;
-            src = tarball;
-            version = commit;
-            nativeBuildInputs = [
-              # patch the binary to use the right dynamic library paths.
-              autoPatchelfHook
-            ];
+            linuxBin =
+              downloadBuildomat
+                {
+                  inherit commit repo;
+                  sha = findSha maghemiteShas linuxBinShaName;
+                  kind = "linux";
+                  file = binFilename;
+                };
+          in
+          with pkgs;
+          stdenv.mkDerivation
+            {
+              inherit name;
+              src = tarball;
+              version = commit;
+              nativeBuildInputs = [
+                # patch the binary to use the right dynamic library paths.
+                autoPatchelfHook
+              ];
 
-            buildInputs = [
-              glibc
-              gcc-unwrapped
-              openssl.dev
-            ];
+              buildInputs = [
+                glibc
+                gcc-unwrapped
+                openssl.dev
+              ];
 
-            installPhase =
-              let
-                binPath = "root/opt/oxide/${name}/bin";
-              in
-              ''
-                mkdir -p $out/${binPath}
-                cp -r . $out/root
-                cp ${linuxBin} $out/${binPath}/${binFilename}
-                chmod +x $out/${binPath}/${binFilename}
+              installPhase =
+                let
+                  binPath = "root/opt/oxide/${name}/bin";
+                in
+                ''
+                  mkdir -p $out/${binPath}
+                  cp -r . $out/root
+                  cp ${linuxBin} $out/${binPath}/${binFilename}
+                  chmod +x $out/${binPath}/${binFilename}
 
-                mkdir -p $out/bin
-                ln -s $out/${binPath}/${binFilename} $out/bin/${binFilename}
-              '';
-          };
+                  mkdir -p $out/bin
+                  ln -s $out/${binPath}/${binFilename} $out/bin/${binFilename}
+                '';
+            };
 
       mgd = mkMaghemiteThing {
         name = "mgd";
