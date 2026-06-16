@@ -273,11 +273,29 @@ impl CaseBuilder {
     }
 
     /// Remove a fact from this case. The fact will not be carried forward
-    /// into the next sitrep.
-    pub fn remove_fact(&mut self, id: FactUuid) {
-        if self.case.facts.remove(&id).is_some() {
-            slog::info!(&self.log, "removed a fact"; "fact_id" => %id);
-            self.report_log.entry("removed fact").kv("fact_id", id);
+    /// into the next sitrep. `comment` records why it was removed.
+    pub fn remove_fact(&mut self, id: FactUuid, comment: impl ToString) {
+        let comment = comment.to_string();
+        if let Some(fact) = self.case.facts.remove(&id) {
+            slog::info!(
+                &self.log,
+                "removed a fact";
+                "fact_id" => %id,
+                "payload" => ?fact.payload,
+                "comment" => %comment,
+            );
+            self.report_log
+                .entry("removed fact")
+                .kv("fact_id", id)
+                .kv("payload", &fact.payload)
+                .comment(comment);
+        } else {
+            slog::warn!(
+                &self.log,
+                "tried to remove a fact that does not exist";
+                "fact_id" => %id,
+                "comment" => %comment,
+            );
         }
     }
 

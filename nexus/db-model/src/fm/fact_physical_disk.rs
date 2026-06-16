@@ -70,12 +70,15 @@ impl FmFactPhysicalDisk {
         metadata: &FactMetadata,
         disk_fact: &DiskFact,
     ) -> Self {
+        // Destructure exhaustively: a new `FactMetadata` field will fail to
+        // compile here until it is mapped to a column.
+        let FactMetadata { id, created_sitrep_id, comment } = metadata;
         let mut row = Self {
-            id: metadata.id.into(),
+            id: (*id).into(),
             sitrep_id: sitrep_id.into(),
             case_id: case_id.into(),
-            created_sitrep_id: metadata.created_sitrep_id.into(),
-            comment: metadata.comment.clone(),
+            created_sitrep_id: (*created_sitrep_id).into(),
+            comment: comment.clone(),
             physical_disk_id: disk_fact.physical_disk_id().into(),
             kind: db_kind(disk_fact),
             zpool_id: None,

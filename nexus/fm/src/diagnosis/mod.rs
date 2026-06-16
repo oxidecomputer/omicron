@@ -19,9 +19,6 @@ pub fn analyze(builder: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
 /// Ereport classes that any diagnosis engine in this build of Nexus knows
 /// how to consume. The background task uses this to filter loaded ereports.
 ///
-/// Empty today: Grow this list alongside FM analysis as new classes gain
-/// ereport support.
-///
 /// **NULL-class ereports are intentionally excluded by the loader's SQL
 /// filter** (`class = ANY(...)` never matches NULL). If FM analysis ever
 /// needs to handle the "couldn't extract a class" or "reporter doesn't know

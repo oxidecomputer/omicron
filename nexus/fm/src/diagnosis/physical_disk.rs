@@ -152,7 +152,6 @@ pub(super) fn analyze(builder: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
     // Index the Disk cases copied forward from the parent sitrep. Every case
     // is about one physical disk; we derive the disk from its facts.
     let mut parent_cases = BTreeMap::<CaseUuid, ParsedDiskCase>::new();
-    let mut uninterpretable = Vec::<(CaseUuid, UninterpretableCase)>::new();
     for case in input
         .open_cases()
         .iter()
@@ -163,37 +162,30 @@ pub(super) fn analyze(builder: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
                 parent_cases.insert(case.id, parsed_case);
             }
             Err(reason) => {
-                slog::warn!(
-                    &builder.log,
-                    "closing uninterpretable Disk case";
-                    "case_id" => %case.id,
-                    "reason" => %reason,
-                );
-                uninterpretable.push((case.id, reason));
+                // Close the cases we couldn't interpret, so they don't ride
+                // along as open-but-unprocessable in every future sitrep. This
+                // is safe with respect to fault coverage: detection below is
+                // independent of case bookkeeping, so if a closed case
+                // concerned a disk that is genuinely unhealthy and in service,
+                // a fresh, well-formed case is opened in this same pass.
+                builder
+                    .cases
+                    .case_mut(&case.id)
+                    .expect("case_id came from builder's open cases")
+                    .close(format!("cannot interpret case: {reason}"));
             }
         }
     }
 
-    // Close the cases we couldn't interpret, so they don't ride along as
-    // open-but-unprocessable in every future sitrep. This is safe with
-    // respect to fault coverage: detection below is independent of case
-    // bookkeeping, so if a closed case concerned a disk that is genuinely
-    // unhealthy and in service, a fresh, well-formed case is opened in this
-    // same pass.
-    for (case_id, reason) in uninterpretable {
-        builder
-            .cases
-            .case_mut(&case_id)
-            .expect("case_id came from builder's open cases")
-            .close(format!("cannot interpret case: {reason}"));
-    }
-
-    // Inverse index: which parent case is about which disk. Cases are
-    // per-disk, so a disk with two parent cases is pathological. `parent_cases`
-    // iterates ascending by CaseUuid, so the first case we see for a disk is
-    // the lowest-ID one: keep it, and close any later case for the same disk as
-    // a duplicate. (A half-maintained duplicate would otherwise decay into an
-    // uninterpretable empty case.)
+    // Inverse index: which parent case is about which disk. Cases are per-disk,
+    // so a disk with two parent cases is already pathological. We keep one and
+    // close the rest as duplicates; which one we keep is arbitrary.
+    // `parent_cases` iterates ascending by CaseUuid, so we deterministically
+    // keep the lowest-ID case, but the ID ordering carries no meaning here
+    // (keeping the oldest would be nicer, but that needs sitrep version numbers
+    // we don't thread through here). Closing the duplicate matters: a
+    // half-maintained one would otherwise decay into an uninterpretable empty
+    // case.
     let mut case_by_disk: BTreeMap<
         PhysicalDiskUuid,
         (CaseUuid, &ParsedDiskCase),
@@ -278,7 +270,11 @@ pub(super) fn analyze(builder: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
                         has_match = true;
                     } else {
                         // Stale observation; drop it.
-                        case_mut.remove_fact(fact.fact_id);
+                        case_mut.remove_fact(
+                            fact.fact_id,
+                            "stale zpool observation, superseded by current \
+                             inventory",
+                        );
                     }
                 }
                 if has_match {
