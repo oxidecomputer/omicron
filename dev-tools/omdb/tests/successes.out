@@ -757,7 +757,7 @@ task: "fm_sitrep_gc"
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     batch size:                                                               1000
-    orphaned sitreps deleted:                                                    0
+    orphaned sitreps deleted:                                                    <ORPHANED_SITREPS_DELETED_REDACTED>
       batches:                                                                   1
     orphaned fm_alert_request rows deleted:                                      0
       batches:                                                                   1
@@ -769,7 +769,7 @@ task: "fm_sitrep_gc"
       batches:                                                                   1
     orphaned fm_fact_saga rows deleted:                                          0
       batches:                                                                   1
-    orphaned fm_sitrep_analysis_report rows deleted:                             0
+    orphaned fm_sitrep_analysis_report rows deleted:                             <ORPHANED_FMSITREPANALYSISREPORT_ROWS_DELETED_REDACTED>
       batches:                                                                   1
     orphaned fm_support_bundle_request rows deleted:                             0
       batches:                                                                   1
@@ -1459,7 +1459,7 @@ task: "fm_sitrep_gc"
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     batch size:                                                               1000
-    orphaned sitreps deleted:                                                    0
+    orphaned sitreps deleted:                                                    <ORPHANED_SITREPS_DELETED_REDACTED>
       batches:                                                                   1
     orphaned fm_alert_request rows deleted:                                      0
       batches:                                                                   1
@@ -1471,7 +1471,7 @@ task: "fm_sitrep_gc"
       batches:                                                                   1
     orphaned fm_fact_saga rows deleted:                                          0
       batches:                                                                   1
-    orphaned fm_sitrep_analysis_report rows deleted:                             0
+    orphaned fm_sitrep_analysis_report rows deleted:                             <ORPHANED_FMSITREPANALYSISREPORT_ROWS_DELETED_REDACTED>
       batches:                                                                   1
     orphaned fm_support_bundle_request rows deleted:                             0
       batches:                                                                   1
