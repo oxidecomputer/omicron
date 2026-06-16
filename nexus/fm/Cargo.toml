@@ -13,6 +13,9 @@ testing = [
     "ereport-types",
 ]
 
+[build-dependencies]
+omicron-rpaths.workspace = true
+
 [dependencies]
 anyhow.workspace = true
 chrono.workspace = true
