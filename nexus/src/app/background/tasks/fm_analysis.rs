@@ -267,7 +267,7 @@ impl FmAnalysis {
         slog::debug!(
             opctx.log,
             "loaded {} ereporter restarts (in {nbatches} batches)",
-            builder.num_ereporter_restarts(),
+            builder.ereporter_restarts().len(),
         );
 
         Ok(())
@@ -295,21 +295,31 @@ impl FmAnalysis {
                 (e.restart_id.into_untyped_uuid(), e.ena)
             });
             let loaded = batch.len();
-            let mut invalid = 0;
-            builder.add_unmarked_ereports(batch.into_iter().filter_map(
-                |ereport| {
-                    let ereport = match fm::Ereport::try_from(ereport) {
-                        Ok(ereport) => ereport,
-                        Err(e) => {
-                            invalid += 1;
-                            warnings.push(e.to_string());
-                            return None;
-                        }
-                    };
 
-                    Some(ereport)
-                },
-            ));
+            let mut invalid = 0;
+            for ereport in batch {
+                let ereport = match fm::Ereport::try_from(ereport) {
+                    Ok(ereport) => ereport,
+                    Err(e) => {
+                        invalid += 1;
+                        warnings.push(e.to_string());
+                        continue;
+                    }
+                };
+
+                // Check if this is a reporter we know about, and issue a
+                // warning if it is not.
+                let id = ereport.id();
+                if !builder.ereporter_restarts().contains_key(&id.restart_id) {
+                    let msg = format!(
+                        "ereport {id} has a restart ID not contained in the \
+                         `ereporter_restart` table"
+                    );
+                    slog::warn!(&opctx.log, "{msg}");
+                    warnings.push(msg);
+                }
+                builder.add_unmarked_ereports(std::iter::once(ereport));
+            }
 
             let total = builder.num_ereports();
             let new = total - prev_total;

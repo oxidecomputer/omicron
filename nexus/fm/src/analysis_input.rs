@@ -176,8 +176,9 @@ impl Builder {
         self.ereporter_restarts.extend(restarts)
     }
 
-    pub fn num_ereporter_restarts(&self) -> usize {
-        self.ereporter_restarts.len()
+    /// Borrows the map of known ereport reporter restart IDs.
+    pub fn ereporter_restarts(&self) -> &IdOrdMap<EreporterRestart> {
+        &self.ereporter_restarts
     }
 
     /// Finish constructing the [`Input`] and return it, along with a [`Report`]
