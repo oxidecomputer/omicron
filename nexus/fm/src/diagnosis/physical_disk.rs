@@ -323,8 +323,9 @@ mod tests {
     use std::sync::Arc;
 
     /// Make an in-service disk set from a list of zpool IDs. Each zpool gets
-    /// its own fresh `PhysicalDiskUuid` and dummy identity facts; tests in
-    /// this module only care about the zpool dimension.
+    /// its own fresh `PhysicalDiskUuid` and dummy identity fields
+    /// (vendor/serial/model); tests in this module only care about the zpool
+    /// dimension.
     fn mk_in_service(
         zpool_ids: impl IntoIterator<Item = ZpoolUuid>,
     ) -> IdOrdMap<InServiceDisk> {
@@ -529,13 +530,18 @@ mod tests {
         make_parent_sitrep(parent_sitrep_id, inv_collection_id, [case])
     }
 
-    /// Collect (case, fact, DiskFact) triples for every fact on a
-    /// physical-disk case in a sitrep. Optionally filtered to open cases
-    /// only.
-    fn disk_facts(
-        sitrep: &Sitrep,
-        open_only: bool,
-    ) -> Vec<(&fm::Case, &fm::case::Fact, DiskFact)> {
+    /// A physical-disk fact found in a sitrep, paired with the case it lives
+    /// on and its decoded [`DiskFact`] payload.
+    #[derive(Debug)]
+    struct DiskFactRef<'a> {
+        case: &'a fm::Case,
+        fact: &'a fm::case::Fact,
+        disk_fact: DiskFact,
+    }
+
+    /// Collect every physical-disk fact in a sitrep, with its case and decoded
+    /// payload. Optionally filtered to open cases only.
+    fn disk_facts(sitrep: &Sitrep, open_only: bool) -> Vec<DiskFactRef<'_>> {
         sitrep
             .cases
             .iter()
@@ -543,10 +549,22 @@ mod tests {
             .filter(|c| !open_only || c.is_open())
             .flat_map(|c| {
                 c.facts.iter().filter_map(move |f| {
-                    f.payload.as_physical_disk().map(|d| (c, f, d.clone()))
+                    f.payload.as_physical_disk().map(|d| DiskFactRef {
+                        case: c,
+                        fact: f,
+                        disk_fact: d.clone(),
+                    })
                 })
             })
             .collect()
+    }
+
+    /// The fact UUID of the one physical-disk fact on the one physical-disk
+    /// case in `sitrep`. Panics unless there is exactly one.
+    fn sole_disk_fact_id(sitrep: &Sitrep) -> omicron_uuid_kinds::FactUuid {
+        let facts = disk_facts(sitrep, false);
+        assert_eq!(facts.len(), 1, "expected exactly one physical-disk fact");
+        facts[0].fact.metadata.id
     }
 
     #[test]
@@ -562,7 +580,7 @@ mod tests {
         let (sitrep, _report) = run_analyze(&logctx.log, &input);
         let facts = disk_facts(&sitrep, true);
         assert_eq!(facts.len(), 1);
-        match &facts[0].2 {
+        match &facts[0].disk_fact {
             DiskFact::ZpoolUnhealthy(ZpoolUnhealthyFactPayload {
                 physical_disk_id,
                 zpool_id,
@@ -615,7 +633,7 @@ mod tests {
         let (sitrep, _report) = run_analyze(&logctx.log, &input);
         let open_cases = disk_facts(&sitrep, true);
         assert_eq!(open_cases.len(), 1);
-        match &open_cases[0].2 {
+        match &open_cases[0].disk_fact {
             DiskFact::ZpoolUnhealthy(ZpoolUnhealthyFactPayload {
                 zpool_id,
                 ..
@@ -646,7 +664,7 @@ mod tests {
         let all = disk_facts(&sitrep, false);
         assert_eq!(all.len(), 1);
         assert!(
-            !all[0].0.is_open(),
+            !all[0].case.is_open(),
             "case should be closed when zpool returns to Online",
         );
         let report_str = format!("{}", report.display_multiline(0));
@@ -681,7 +699,7 @@ mod tests {
         let all = disk_facts(&sitrep, false);
         assert_eq!(all.len(), 1);
         assert!(
-            !all[0].0.is_open(),
+            !all[0].case.is_open(),
             "case should be closed when zpool's disk is expunged",
         );
         let report_str = format!("{}", report.display_multiline(0));
@@ -716,7 +734,7 @@ mod tests {
         let all = disk_facts(&sitrep, false);
         assert_eq!(all.len(), 1);
         assert!(
-            all[0].0.is_open(),
+            all[0].case.is_open(),
             "case should remain open when its zpool is absent from the \
              current inventory collection (sled could be down or inventory \
              is lossy)",
@@ -880,8 +898,8 @@ mod tests {
             1,
             "expected exactly one open Disk fact (on the replacement case)",
         );
-        assert_ne!(open[0].0.id, corrupt_case_id);
-        match &open[0].2 {
+        assert_ne!(open[0].case.id, corrupt_case_id);
+        match &open[0].disk_fact {
             DiskFact::ZpoolUnhealthy(ZpoolUnhealthyFactPayload {
                 physical_disk_id,
                 zpool_id,
@@ -920,28 +938,18 @@ mod tests {
             target,
         );
         // Capture the parent's fact UUID for the target zpool.
-        let parent_fact_id = parent
-            .cases
-            .iter()
-            .find(|c| c.metadata.de == DiagnosisEngineKind::PhysicalDisk)
-            .expect("parent should have one Disk case")
-            .facts
-            .iter()
-            .next()
-            .expect("parent case should have one fact")
-            .metadata
-            .id;
+        let parent_fact_id = sole_disk_fact_id(&parent);
 
         let input = build_input(collection, Some(parent), in_service);
         let (sitrep, _report) = run_analyze(&logctx.log, &input);
         let open = disk_facts(&sitrep, true);
         assert_eq!(open.len(), 1, "expected exactly one open Disk fact");
         assert_eq!(
-            open[0].1.metadata.id, parent_fact_id,
+            open[0].fact.metadata.id, parent_fact_id,
             "fact UUID should be stable across sitreps when the \
              observation hasn't changed",
         );
-        match &open[0].2 {
+        match &open[0].disk_fact {
             DiskFact::ZpoolUnhealthy(ZpoolUnhealthyFactPayload {
                 zpool_id,
                 last_seen_health,
@@ -973,17 +981,7 @@ mod tests {
             target_disk_id,
             target,
         );
-        let parent_fact_id = parent
-            .cases
-            .iter()
-            .find(|c| c.metadata.de == DiagnosisEngineKind::PhysicalDisk)
-            .expect("parent should have one Disk case")
-            .facts
-            .iter()
-            .next()
-            .expect("parent case should have one fact")
-            .metadata
-            .id;
+        let parent_fact_id = sole_disk_fact_id(&parent);
 
         let input = build_input(collection, Some(parent), in_service);
         let (sitrep, _report) = run_analyze(&logctx.log, &input);
@@ -994,10 +992,10 @@ mod tests {
             "expected exactly one open Disk fact (the refreshed one)",
         );
         assert_ne!(
-            open[0].1.metadata.id, parent_fact_id,
+            open[0].fact.metadata.id, parent_fact_id,
             "fact UUID should rotate because last_seen_health changed",
         );
-        match &open[0].2 {
+        match &open[0].disk_fact {
             DiskFact::ZpoolUnhealthy(ZpoolUnhealthyFactPayload {
                 zpool_id,
                 last_seen_health,
@@ -1009,7 +1007,7 @@ mod tests {
         }
         // The case itself should still be the same one that was carried
         // forward; only the fact rotated.
-        assert!(open[0].0.is_open());
+        assert!(open[0].case.is_open());
         logctx.cleanup_successful();
     }
 
@@ -1037,17 +1035,7 @@ mod tests {
             target_disk_id,
             old_zpool_id,
         );
-        let parent_fact_id = parent
-            .cases
-            .iter()
-            .find(|c| c.metadata.de == DiagnosisEngineKind::PhysicalDisk)
-            .expect("parent should have one Disk case")
-            .facts
-            .iter()
-            .next()
-            .expect("parent case should have one fact")
-            .metadata
-            .id;
+        let parent_fact_id = sole_disk_fact_id(&parent);
 
         let input = build_input(collection, Some(parent), in_service);
         let (sitrep, _report) = run_analyze(&logctx.log, &input);
@@ -1058,10 +1046,10 @@ mod tests {
             "expected exactly one open Disk fact (the refreshed one)",
         );
         assert_ne!(
-            open[0].1.metadata.id, parent_fact_id,
+            open[0].fact.metadata.id, parent_fact_id,
             "fact UUID should rotate because the disk's zpool changed",
         );
-        match &open[0].2 {
+        match &open[0].disk_fact {
             DiskFact::ZpoolUnhealthy(ZpoolUnhealthyFactPayload {
                 zpool_id,
                 last_seen_health,
@@ -1074,7 +1062,7 @@ mod tests {
                 assert_eq!(*last_seen_health, ZpoolHealth::Degraded);
             }
         }
-        assert!(open[0].0.is_open());
+        assert!(open[0].case.is_open());
         logctx.cleanup_successful();
     }
 }
