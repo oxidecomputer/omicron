@@ -2399,6 +2399,7 @@ mod tests {
         let input_report = InputReport {
             parent_sitrep_id: sitrep.parent_id(),
             parent_inv_id: None,
+            num_ereporter_restarts: 0,
             inv_id: sitrep.inv_id(),
             new_ereport_ids: Default::default(),
             open_cases: Default::default(),
@@ -3014,6 +3015,7 @@ mod tests {
                 new_ereport_ids: Default::default(),
                 open_cases: Default::default(),
                 closed_cases_copied_forward: Default::default(),
+                num_ereporter_restarts: 0,
             };
             let analysis_report = AnalysisReport {
                 sitrep_id: ghost_sitrep_id,
