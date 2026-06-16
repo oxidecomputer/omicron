@@ -7213,6 +7213,7 @@ dependencies = [
  "omicron-test-utils",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
+ "pq-sys",
  "rand 0.9.2",
  "serde",
  "serde_json",
