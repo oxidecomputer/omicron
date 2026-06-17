@@ -31,6 +31,7 @@ use serde_json::json;
 use slog::debug;
 use slog::info;
 use slog::warn;
+use slog_error_chain::InlineErrorChain;
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 
@@ -231,7 +232,7 @@ impl BundleCollection {
                     warn!(
                         self.log,
                         "Failed to write trace file";
-                        "error" => ?err
+                        InlineErrorChain::new(err.as_ref())
                     );
                 }
                 if let Err(err) = self.write_report_file(output, &report).await
@@ -239,7 +240,7 @@ impl BundleCollection {
                     warn!(
                         self.log,
                         "Failed to write report file";
-                        "error" => ?err
+                        InlineErrorChain::new(err.as_ref())
                     );
                 }
                 return report;
@@ -343,15 +344,15 @@ impl BundleCollection {
     ) -> anyhow::Result<()> {
         let meta_dir = output.path().join("meta");
         tokio::fs::create_dir_all(&meta_dir).await.with_context(|| {
-            format!("Failed to create meta directory {meta_dir}")
+            format!("failed to create meta directory {meta_dir}")
         })?;
 
         let report_path = meta_dir.join("report.json");
         let report_content = serde_json::to_string_pretty(report)
-            .context("Failed to serialize collection report")?;
+            .context("failed to serialize collection report")?;
 
         tokio::fs::write(&report_path, report_content).await.with_context(
-            || format!("Failed to write report file to {report_path}"),
+            || format!("failed to write report file to {report_path}"),
         )?;
 
         info!(

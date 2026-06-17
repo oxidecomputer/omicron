@@ -2937,11 +2937,9 @@ fn print_task_support_bundle_collector(details: &serde_json::Value) {
                 for step in &steps {
                     if let Some(details) = &step.details {
                         println!("      {} details:", step.name);
-                        println!(
-                            "{}",
-                            erebor::Displayer::new(details)
-                                .with_initial_indent_spaces(8)
-                        );
+                        let pretty = serde_json::to_string_pretty(details)
+                            .unwrap_or_else(|_| details.to_string());
+                        println!("{}", textwrap::indent(&pretty, "        "));
                     }
                 }
                 println!(

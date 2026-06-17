@@ -212,11 +212,9 @@ impl CollectArgs {
                 step.name,
             );
             if let Some(details) = &step.details {
-                eprintln!(
-                    "{}",
-                    erebor::Displayer::new(details)
-                        .with_initial_indent_spaces(6)
-                );
+                let pretty = serde_json::to_string_pretty(details)
+                    .unwrap_or_else(|_| details.to_string());
+                eprintln!("{}", textwrap::indent(&pretty, "      "));
             }
         }
         Ok(())
