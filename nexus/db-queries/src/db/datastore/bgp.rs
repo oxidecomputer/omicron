@@ -1568,6 +1568,8 @@ mod tests {
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
         let config_name: Name = "config-name".parse().unwrap();
+        let description = String::from("a test config");
+        let asn = 47;
 
         let announce_id = datastore
             .bgp_create_announce_set(
@@ -1592,9 +1594,9 @@ mod tests {
                 &networking::BgpConfigCreate {
                     identity: IdentityMetadataCreateParams {
                         name: config_name.clone(),
-                        description: String::from("a test config"),
+                        description: description.clone(),
                     },
-                    asn: 47,
+                    asn,
                     bgp_announce_set_id: NameOrId::Id(announce_id),
                     vrf: None,
                     shaper: None,
@@ -1605,18 +1607,32 @@ mod tests {
             .await
             .expect("create bgp config");
 
-        datastore
+        let bgp_config = datastore
             .bgp_config_get(&opctx, &NameOrId::Name(config_name.clone()))
             .await
             .expect("get bgp config by name");
 
+        assert_eq!(bgp_config.identity.name.0, config_name);
+        assert_eq!(bgp_config.identity.description, description);
+        assert_eq!(bgp_config.asn.0, asn);
+        assert_eq!(bgp_config.bgp_announce_set_id, announce_id);
+
         datastore
             .bgp_config_delete(
                 &opctx,
-                &BgpConfigSelector { name_or_id: NameOrId::Name(config_name) },
+                &BgpConfigSelector {
+                    name_or_id: NameOrId::Name(config_name.clone()),
+                },
             )
             .await
             .expect("delete bgp config by name");
+
+        assert!(
+            datastore
+                .bgp_config_get(&opctx, &NameOrId::Name(config_name))
+                .await
+                .is_err()
+        );
 
         db.terminate().await;
         logctx.cleanup_successful();
