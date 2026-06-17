@@ -429,7 +429,7 @@ async fn main() -> Result<()> {
     // lags the API on main, so a mismatch is only fatal on release branches
     // (identified by the presence of a helios pin in tools/pins.toml); on
     // other branches it is logged as a warning.
-    if let Err(err) = check_console_api_version(&logger, &client).await {
+    if let Err(err) = check_console_api_version(&logger).await {
         if pins.helios.is_some() {
             error!(logger, "console API version check failed: {err:#}");
             preflight_ok = false;
@@ -1034,10 +1034,7 @@ async fn host_add_root_profile(host_proto_root: Utf8PathBuf) -> Result<()> {
 
 /// Check that the API version the pinned console's generated client was built
 /// against matches the current nexus external API version.
-async fn check_console_api_version(
-    logger: &Logger,
-    client: &reqwest::Client,
-) -> Result<()> {
+async fn check_console_api_version(logger: &Logger) -> Result<()> {
     // The current API version is the `info.version` field of the spec
     // `nexus-latest.json` points to.
     let spec_path = WORKSPACE_DIR.join("openapi/nexus/nexus-latest.json");
@@ -1051,27 +1048,15 @@ async fn check_console_api_version(
             format!("failed to read info.version from {spec_path}")
         })?;
 
-    // The console records the API version its generated client was built
-    // against in a standalone file; fetch it at the pinned commit.
-    let console_version_path = WORKSPACE_DIR.join("tools/console_version");
-    let contents = fs::read_to_string(&console_version_path).await?;
-    let commit = contents
-        .lines()
-        .find_map(|line| line.strip_prefix("COMMIT=\"")?.strip_suffix('"'))
-        .with_context(|| {
-            format!("failed to parse COMMIT from {console_version_path}")
-        })?;
-    let url = format!(
-        "https://raw.githubusercontent.com/oxidecomputer/console/\
-        {commit}/app/api/__generated__/API_VERSION"
-    );
-    let response = client
-        .get(&url)
-        .send()
+    // The console records its API version in a top-level `API_VERSION` file in
+    // its asset tarball, which `cargo xtask download console` has already
+    // unpacked into `out/console-assets`.
+    let version_path = WORKSPACE_DIR.join("out/console-assets/API_VERSION");
+    let console_version = fs::read_to_string(&version_path)
         .await
-        .and_then(reqwest::Response::error_for_status)
-        .with_context(|| format!("failed to fetch {url}"))?;
-    let console_version = response.text().await?.trim().to_owned();
+        .with_context(|| format!("failed to read {version_path}"))?
+        .trim()
+        .to_owned();
 
     if console_version == nexus_version {
         info!(
