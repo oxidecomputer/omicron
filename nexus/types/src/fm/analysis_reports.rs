@@ -386,7 +386,8 @@ mod tests {
     use super::*;
     use ereport_types::{Ena, EreportId};
     use omicron_uuid_kinds::{
-        CaseUuid, CollectionUuid, EreporterRestartUuid, SitrepUuid,
+        CaseUuid, CollectionUuid, EreporterRestartUuid, PhysicalDiskUuid,
+        SitrepUuid,
     };
     use std::str::FromStr;
 
@@ -452,6 +453,16 @@ mod tests {
             },
         );
 
+        let mut in_service_disks = BTreeSet::new();
+        in_service_disks.insert(
+            PhysicalDiskUuid::from_str("11111111-1111-1111-1111-111111111111")
+                .unwrap(),
+        );
+        in_service_disks.insert(
+            PhysicalDiskUuid::from_str("22222222-2222-2222-2222-222222222222")
+                .unwrap(),
+        );
+
         InputReport {
             parent_sitrep_id: Some(parent_sitrep_id),
             parent_inv_id: Some(parent_inv_id),
@@ -459,7 +470,7 @@ mod tests {
             new_ereport_ids,
             open_cases,
             closed_cases_copied_forward,
-            in_service_disks: BTreeSet::new(),
+            in_service_disks,
         }
     }
 

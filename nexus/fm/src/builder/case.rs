@@ -233,8 +233,9 @@ impl CaseBuilder {
         self.case.metadata.comment = comment.to_string();
     }
 
-    /// Emit a new fact under this case. The fact's UUID is freshly
-    /// allocated from the case's deterministic RNG.
+    /// Emit a new fact under this case.
+    ///
+    /// Returns the newly generated fact UUID.
     pub fn add_fact(
         &mut self,
         payload: impl Into<fm::FactPayload>,

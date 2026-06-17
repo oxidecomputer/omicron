@@ -217,9 +217,6 @@ impl Fact {
         impl fmt::Display for DisplayFact<'_> {
             fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
                 const BULLET: &str = "* ";
-                const ADDED_IN: &str = "added in:";
-                const COMMENT: &str = "comment:";
-                const WIDTH: usize = const_max_len(&[ADDED_IN, COMMENT]);
 
                 let &Self {
                     fact:
@@ -236,13 +233,15 @@ impl Fact {
                 };
 
                 writeln!(f, "{BULLET:>indent$}fact {id}")?;
+                if !comment.is_empty() {
+                    writeln!(f, "{:>indent$}// {comment}", "")?;
+                }
                 writeln!(
                     f,
-                    "{:>indent$}{ADDED_IN:<WIDTH$} {created_sitrep_id}{}",
+                    "{:>indent$}added in: {created_sitrep_id}{}",
                     "",
                     this_sitrep(*created_sitrep_id),
                 )?;
-                writeln!(f, "{:>indent$}{COMMENT:<WIDTH$} {comment}", "")?;
                 let payload = serde_json::to_value(payload)
                     .unwrap_or(serde_json::Value::Null);
                 fmt_json_value(f, "payload", &payload, indent)?;

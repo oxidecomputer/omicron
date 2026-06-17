@@ -234,6 +234,31 @@ impl FmAnalysis {
         (fm::analysis_input::Input, status::PreparationStatus),
         PreparationError,
     > {
+        let mut warnings = Vec::new();
+
+        let in_service_disks =
+            Arc::new(self.load_in_service_disks(opctx, &mut warnings).await?);
+
+        let mut builder = fm::analysis_input::Input::builder(
+            parent_sitrep,
+            inv,
+            in_service_disks,
+        )?;
+        self.load_new_ereports(opctx, &mut builder, &mut warnings)
+            .await
+            .context("failed to load new ereports")?;
+
+        let (input, report) = builder.build();
+        Ok((input, status::PreparationStatus { warnings, report }))
+    }
+
+    /// Load all in-service control plane disks, projected down to FM's
+    /// [`InServiceDisk`] view.
+    async fn load_in_service_disks(
+        &self,
+        opctx: &OpContext,
+        warnings: &mut Vec<String>,
+    ) -> anyhow::Result<IdOrdMap<InServiceDisk>> {
         // Load all external (U.2) zpools and project them down to FM's
         // `InServiceDisk` view, filtering on `disk_policy = in_service` and a
         // live (non-soft-deleted) physical_disk row. M.2 disks are not
@@ -247,7 +272,7 @@ impl FmAnalysis {
             .zpool_list_all_external_batched(opctx)
             .await
             .context("failed to load in-service control plane disks")?;
-        let mut in_service_disks_map = IdOrdMap::new();
+        let mut in_service_disks = IdOrdMap::new();
         for (zpool, disk) in zpools_and_disks {
             if disk.time_deleted().is_some()
                 || disk.disk_policy != PhysicalDiskPolicy::InService
@@ -256,7 +281,7 @@ impl FmAnalysis {
             }
             let physical_disk_id = disk.id();
             let zpool_id = zpool.id();
-            if in_service_disks_map
+            if in_service_disks
                 .insert_unique(InServiceDisk {
                     physical_disk_id,
                     zpool_id,
@@ -278,21 +303,14 @@ impl FmAnalysis {
                     "physical_disk_id" => %physical_disk_id,
                     "zpool_id" => %zpool_id,
                 );
+                warnings.push(format!(
+                    "multiple live zpools reference physical disk \
+                     {physical_disk_id} (kept first seen, ignored zpool \
+                     {zpool_id})"
+                ));
             }
         }
-        let in_service_disks = Arc::new(in_service_disks_map);
-        let mut builder = fm::analysis_input::Input::builder(
-            parent_sitrep,
-            inv,
-            in_service_disks,
-        )?;
-        let mut warnings = Vec::new();
-        self.load_new_ereports(opctx, &mut builder, &mut warnings)
-            .await
-            .context("failed to load new ereports")?;
-
-        let (input, report) = builder.build();
-        Ok((input, status::PreparationStatus { warnings, report }))
+        Ok(in_service_disks)
     }
 
     async fn load_new_ereports(

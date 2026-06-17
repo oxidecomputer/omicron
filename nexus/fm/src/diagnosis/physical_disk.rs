@@ -5,14 +5,13 @@
 //! Disk diagnosis engine.
 
 use crate::SitrepBuilder;
-use iddqd::{IdOrdItem, IdOrdMap, id_upcast};
+use iddqd::{BiHashItem, BiHashMap, IdOrdItem, IdOrdMap, bi_upcast, id_upcast};
 use nexus_types::fm;
 use nexus_types::fm::DiagnosisEngineKind;
 use nexus_types::fm::{DiskFact, ZpoolUnhealthyFactPayload};
 use nexus_types::inventory::ZpoolHealth;
 use omicron_uuid_kinds::{CaseUuid, FactUuid, PhysicalDiskUuid, ZpoolUuid};
 use std::collections::BTreeMap;
-use std::collections::btree_map::Entry;
 
 /// A [`DiskFact::ZpoolUnhealthy`] payload paired with the `FactUuid` it
 /// lives under.
@@ -52,12 +51,30 @@ impl IdOrdItem for DiskHealthSnapshot {
 /// Each Disk case is about a single physical disk; every fact on the case
 /// must reference that disk.
 struct ParsedDiskCase {
+    /// The case this was parsed from.
+    case_id: CaseUuid,
     /// The physical disk this case is about.
     physical_disk_id: PhysicalDiskUuid,
     /// All `ZpoolUnhealthy` facts on this case. Normally one; pathological
     /// cases may have multiple. Regardless, the diagnosis engine keeps all of
     /// them.
     unhealthy_facts: IdOrdMap<ZpoolUnhealthyFact>,
+}
+
+/// A `ParsedDiskCase` is indexed by both the case it came from and the disk it
+/// concerns. Keying on `physical_disk_id` makes "at most one case per disk" an
+/// invariant of the map itself: inserting a second case for a disk already
+/// present fails (see [`analyze`]).
+impl BiHashItem for ParsedDiskCase {
+    type K1<'a> = CaseUuid;
+    type K2<'a> = PhysicalDiskUuid;
+    fn key1(&self) -> Self::K1<'_> {
+        self.case_id
+    }
+    fn key2(&self) -> Self::K2<'_> {
+        self.physical_disk_id
+    }
+    bi_upcast!();
 }
 
 /// Why a parent-forwarded Disk case could not be interpreted.
@@ -116,7 +133,7 @@ fn parse_case(case: &fm::Case) -> Result<ParsedDiskCase, UninterpretableCase> {
     let Some(physical_disk_id) = case_disk_id else {
         return Err(UninterpretableCase::NoFacts);
     };
-    Ok(ParsedDiskCase { physical_disk_id, unhealthy_facts })
+    Ok(ParsedDiskCase { case_id: case.id, physical_disk_id, unhealthy_facts })
 }
 
 pub(super) fn analyze(builder: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
@@ -149,70 +166,49 @@ pub(super) fn analyze(builder: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
         })
         .collect();
 
-    // Index the Disk cases copied forward from the parent sitrep. Every case
-    // is about one physical disk; we derive the disk from its facts.
-    let mut parent_cases = BTreeMap::<CaseUuid, ParsedDiskCase>::new();
+    // Index the Disk cases from the parent sitrep, keyed by both the case id
+    // and the physical disk the case concerns.
+    //
+    // Keying on the disk makes "at most one case per disk" an invariant of the
+    // map: `insert_unique` rejects a second case for a disk already present.
+    // A disk with two parent cases is pathological; we keep the first one
+    // inserted and close the rest as duplicates.
+    let mut cases = BiHashMap::<ParsedDiskCase>::new();
     for case in input
         .open_cases()
         .iter()
         .filter(|c| c.metadata.de == DiagnosisEngineKind::PhysicalDisk)
     {
-        match parse_case(case) {
-            Ok(parsed_case) => {
-                parent_cases.insert(case.id, parsed_case);
-            }
+        let parsed_case = match parse_case(case) {
+            Ok(parsed_case) => parsed_case,
             Err(reason) => {
                 // Close the cases we couldn't interpret, so they don't ride
-                // along as open-but-unprocessable in every future sitrep. This
-                // is safe with respect to fault coverage: detection below is
-                // independent of case bookkeeping, so if a closed case
-                // concerned a disk that is genuinely unhealthy and in service,
-                // a fresh, well-formed case is opened in this same pass.
+                // along as open-but-unprocessable in every future sitrep.
                 builder
                     .cases
                     .case_mut(&case.id)
                     .expect("case_id came from builder's open cases")
                     .close(format!("cannot interpret case: {reason}"));
+                continue;
             }
-        }
-    }
+        };
 
-    // Inverse index: which parent case is about which disk. Cases are per-disk,
-    // so a disk with two parent cases is already pathological. We keep one and
-    // close the rest as duplicates; which one we keep is arbitrary.
-    // `parent_cases` iterates ascending by CaseUuid, so we deterministically
-    // keep the lowest-ID case, but the ID ordering carries no meaning here
-    // (keeping the oldest would be nicer, but that needs sitrep version numbers
-    // we don't thread through here). Closing the duplicate matters: a
-    // half-maintained one would otherwise decay into an uninterpretable empty
-    // case.
-    let mut case_by_disk: BTreeMap<
-        PhysicalDiskUuid,
-        (CaseUuid, &ParsedDiskCase),
-    > = BTreeMap::new();
-    for (case_id, parsed_case) in &parent_cases {
-        match case_by_disk.entry(parsed_case.physical_disk_id) {
-            Entry::Vacant(slot) => {
-                slot.insert((*case_id, parsed_case));
-            }
-            Entry::Occupied(kept) => {
-                let (kept_case_id, _) = *kept.get();
-                slog::warn!(
-                    &builder.log,
-                    "closing duplicate Disk case";
-                    "case_id" => %case_id,
-                    "kept_case_id" => %kept_case_id,
-                    "physical_disk_id" => %parsed_case.physical_disk_id,
-                );
-                builder
-                    .cases
-                    .case_mut(case_id)
-                    .expect("case_id came from builder's open cases")
-                    .close(format!(
-                        "duplicate of case {kept_case_id} for disk {}",
-                        parsed_case.physical_disk_id,
-                    ));
-            }
+        let disk_id = parsed_case.physical_disk_id;
+        if cases.insert_unique(parsed_case).is_err() {
+            // A case for this disk is already present; keep it and close this
+            // one. The disk id is the only key that can collide here, since
+            // case ids are unique across `open_cases()`.
+            let kept_case_id = cases
+                .get2(&disk_id)
+                .expect("insert_unique failed, so a case for this disk exists")
+                .case_id;
+            builder
+                .cases
+                .case_mut(&case.id)
+                .expect("case_id came from builder's open cases")
+                .close(format!(
+                    "duplicate of case {kept_case_id} for disk {disk_id}",
+                ));
         }
     }
 
@@ -221,10 +217,10 @@ pub(super) fn analyze(builder: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
     // disk in service but absent from this inventory is left alone (absence is
     // NOT a recovery signal: the sled could be powered off, or the collection
     // could be lossy).
-    for &(case_id, parsed_case) in case_by_disk.values() {
+    for parsed_case in cases.iter() {
         let mut case_mut = builder
             .cases
-            .case_mut(&case_id)
+            .case_mut(&parsed_case.case_id)
             .expect("case_id came from builder's open cases");
         match in_service_health.get(&parsed_case.physical_disk_id) {
             None => {
@@ -248,6 +244,11 @@ pub(super) fn analyze(builder: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
     // parent-forwarded case if any (dropping any stale facts), otherwise open
     // a fresh case.
     for disk in in_service_health.iter() {
+        // Only modify "facts" for disk cases where the zpool health is known,
+        // and it's not "Online" already.
+        //
+        // For all other cases, the zpool is healthy, so we don't have
+        // a case anymore.
         let Some(current_health) = disk.zpool_health else {
             continue;
         };
@@ -255,13 +256,17 @@ pub(super) fn analyze(builder: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
             continue;
         }
 
-        let mut case_mut = match case_by_disk.get(&disk.physical_disk_id) {
-            Some(&(case_id, parsed_case)) => {
+        let mut case_mut = match cases.get2(&disk.physical_disk_id) {
+            Some(parsed_case) => {
                 let mut case_mut = builder
                     .cases
-                    .case_mut(&case_id)
+                    .case_mut(&parsed_case.case_id)
                     .expect("case_id came from builder's open cases");
                 let mut has_match = false;
+                // Although we currently expect only one unhealthy fact for
+                // each case, the schema does allow for more than one.
+                // We iterate over all facts of these type to invalidate
+                // all the facts which are out-of-date.
                 for fact in parsed_case.unhealthy_facts.iter() {
                     if fact.payload.zpool_id == disk.zpool_id
                         && fact.payload.last_seen_health == current_health
@@ -771,9 +776,10 @@ mod tests {
     }
 
     /// Two open parent cases about the same disk: the engine keeps and
-    /// maintains the one with the lowest case ID, and closes the other as a
-    /// duplicate. (A half-maintained duplicate would otherwise decay into
-    /// an uninterpretable empty case.)
+    /// maintains the first one it encounters and closes the other as a
+    /// duplicate. Because `open_cases()` is ordered by case id, the survivor is
+    /// deterministically the lowest-ID case. (A half-maintained duplicate would
+    /// otherwise decay into an uninterpretable empty case.)
     #[test]
     fn duplicate_case_is_closed() {
         let (logctx, mut collection, zpools) = setup("disk_duplicate_closed");
