@@ -11,9 +11,8 @@ use omicron_common::{
     address::Ipv6Subnet,
     cmd::{CmdError, fatal},
 };
-use sled_hardware_types::{Baseboard, BaseboardId};
+use sled_hardware_types::BaseboardId;
 use std::net::{Ipv6Addr, SocketAddrV6};
-use std::path::PathBuf;
 use wicketd::{Config, Server, SmfConfigValues};
 
 #[derive(Debug, Parser)]

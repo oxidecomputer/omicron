@@ -5,9 +5,7 @@
 //! CLI to set up zone configuration
 
 use anyhow::{Context, anyhow, bail};
-use clap::builder::{
-    NonEmptyStringValueParser, StringValueParser, TypedValueParser,
-};
+use clap::builder::NonEmptyStringValueParser;
 use clap::{ArgAction, Args, Parser, Subcommand};
 use illumos_utils::ExecutionError;
 use illumos_utils::addrobj::{AddrObject, IPV6_LINK_LOCAL_ADDROBJ_NAME};

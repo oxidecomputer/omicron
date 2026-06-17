@@ -178,22 +178,6 @@
           "serial_number"
         ]
       },
-      "BaseboardIdAndIpv6Addr": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "$ref": "#/components/schemas/BaseboardId"
-          },
-          "ip": {
-            "type": "string",
-            "format": "ipv6"
-          }
-        },
-        "required": [
-          "id",
-          "ip"
-        ]
-      },
       "BaseboardIds": {
         "description": "All `BaseboardId`s that can be found by sprockets connections on the bootstrap network.",
         "type": "object",
@@ -201,7 +185,7 @@
           "data": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/BaseboardIdAndIpv6Addr"
+              "$ref": "#/components/schemas/BootstrapIpOfBaseboardId"
             }
           }
         },
@@ -484,6 +468,22 @@
               "type"
             ]
           }
+        ]
+      },
+      "BootstrapIpOfBaseboardId": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/BaseboardId"
+          },
+          "ip": {
+            "type": "string",
+            "format": "ipv6"
+          }
+        },
+        "required": [
+          "id",
+          "ip"
         ]
       },
       "Certificate": {
