@@ -2701,10 +2701,11 @@ impl ServiceManager {
                     .add_property(
                         "bootstrap-agent-lockstep-address",
                         "astring",
-                        &format!(
-                            "[{}]:{BOOTSTRAP_AGENT_LOCKSTEP_PORT}",
-                            self.inner.global_zone_bootstrap_ip
-                        ),
+                        &SocketAddr::new(
+                            IpAddr::V6(self.inner.global_zone_bootstrap_ip),
+                            BOOTSTRAP_AGENT_LOCKSTEP_PORT,
+                        )
+                        .to_string(),
                     )
                     // We intentionally bind `nexus-proxy-address` to
                     // `::` so wicketd will serve this on all

@@ -505,12 +505,7 @@ fn learn_baseboard(log: &Logger) -> Result<Baseboard, Error> {
 
     let properties = find_properties(
         &root,
-        [
-            "baseboard-identifier",
-            "baseboard-model",
-            "baseboard-revision",
-            "boot-storage-unit",
-        ],
+        ["baseboard-identifier", "baseboard-model", "baseboard-revision"],
     )?;
 
     let baseboard = Baseboard::new_oxide_sled(

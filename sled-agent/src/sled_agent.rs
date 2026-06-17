@@ -1734,21 +1734,40 @@ async fn find_sprockets_stream(
 
     let mut found = None;
     while let Some(res) = set.join_next().await {
-        if let Ok((ip, Ok(stream))) = res {
-            // Safety: We guarantee the format of the platform id at manufacturing time.
-            let baseboard_id =
-                platform_id_to_baseboard_id(stream.peer_platform_id().as_str());
-
-            if baseboard_id == sled_id {
-                // We found the stream for our new client.
-                let log = log.new(o!("BootstrapAgentClient" => ip.to_string()));
-                info!(
-                    log,
-                    "Found bootstrap IP for sled";
-                    "baseboard_id" => %baseboard_id
+        match res {
+            Ok((ip, Ok(stream))) => {
+                // Safety: We guarantee the format of the platform id at manufacturing time.
+                let baseboard_id = platform_id_to_baseboard_id(
+                    stream.peer_platform_id().as_str(),
                 );
-                found = Some((ip, stream));
-                break;
+
+                if baseboard_id == sled_id {
+                    // We found the stream for our new client.
+                    let log =
+                        log.new(o!("BootstrapAgentClient" => ip.to_string()));
+                    info!(
+                        log,
+                        "Found bootstrap IP for sled";
+                        "baseboard_id" => %baseboard_id
+                    );
+                    found = Some((ip, stream));
+
+                    // This aborts the rest of the tasks in `set`, which is what
+                    // we want in this case. They are only trying to establish
+                    // connections and so cancellation is fine.
+                    break;
+                }
+            }
+            Ok((ip, Err(err))) => {
+                let log = log.new(o!("BootstrapAgentClient" => ip.to_string()));
+                warn!(log, "Failed to get baseboard for {ip}"; "err" => #%err);
+            }
+            Err(err) => {
+                warn!(
+                    log,
+                    "Failed to join sprockets connection task";
+                    "err" => #%err
+                );
             }
         }
     }

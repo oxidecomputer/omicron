@@ -16,8 +16,8 @@ use bootstore::NetworkConfig;
 use bootstore::schemes::v0 as bootstore;
 use bootstrap_agent_lockstep_api::BootstrapAgentLockstepApi;
 use bootstrap_agent_lockstep_api::bootstrap_agent_lockstep_api_mod;
-use bootstrap_agent_lockstep_types::BaseboardIdAndIpv6Addr;
 use bootstrap_agent_lockstep_types::BaseboardIds;
+use bootstrap_agent_lockstep_types::BootstrapIpOfBaseboardId;
 use bootstrap_agent_lockstep_types::RackInitializeRequest;
 use bootstrap_agent_lockstep_types::RackOperationStatus;
 use bootstrap_agent_lockstep_types::ReplicatedNetworkConfig;
@@ -135,7 +135,7 @@ impl BootstrapAgentLockstepApi for BootstrapAgentLockstepImpl {
         let data = status
             .connected_peers()
             .into_iter()
-            .map(|(id, ip)| BaseboardIdAndIpv6Addr { id, ip })
+            .map(|(id, ip)| BootstrapIpOfBaseboardId { id, ip })
             .collect();
 
         Ok(HttpResponseOk(BaseboardIds { data }))

@@ -121,14 +121,14 @@ impl SledInventory {
             .ok_or_else(|| {
                 format!(
                     "Inventory is missing the scrimlet where wicketd is \
-                         running ({our_baseboard:?})",
+                     running ({our_baseboard:?})",
                 )
             })?;
         if !bootstrap_sled_slots.contains(&our_slot) {
             return Err(format!(
                 "Cannot remove the scrimlet where wicketd is running \
-                     (sled {our_slot}: {our_baseboard:?}) \
-                     from bootstrap_sleds"
+                (sled {our_slot}: {our_baseboard:?}) \
+                from bootstrap_sleds"
             ));
         }
 

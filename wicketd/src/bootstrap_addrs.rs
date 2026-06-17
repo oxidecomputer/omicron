@@ -67,33 +67,37 @@ async fn scan_for_peers(
     loop {
         // Query the local bootstrap agent for all known peers
         let client = bootstrap_agent_lockstep_client::Client::new(
-            &format!("http://[{bootstrap_agent_lockstep_address}]"),
+            &format!("http://{bootstrap_agent_lockstep_address}"),
             log.clone(),
         );
 
-        let all_sleds: BTreeMap<BaseboardId, Ipv6Addr> =
-            match client.baseboard_ids().await {
-                Ok(baseboard_ids) => baseboard_ids
+        match client.baseboard_ids().await {
+            Ok(baseboard_ids) => {
+                let all_sleds: BTreeMap<BaseboardId, Ipv6Addr> = baseboard_ids
                     .into_inner()
                     .data
                     .into_iter()
                     .map(|id_and_ip| (id_and_ip.id, id_and_ip.ip))
-                    .collect(),
-                Err(err) => {
-                    warn!(
-                        log, "Failed to get baseboard IDs";
-                        "err" => #%err,
-                    );
-                    continue;
-                }
-            };
+                    .collect();
 
-        // Did our set of peers change? If so, update both `sleds` (shared with
-        // our parent `BootstrapPeers`) and `prev_sleds` (our local cache).
-        if Some(&all_sleds) != prev_sleds.as_ref() {
-            *sleds.lock().unwrap() = all_sleds.clone();
-            prev_sleds = Some(all_sleds);
-        }
+                // Did our set of peers change? If so, update both `sleds`
+                // (shared with our parent `BootstrapPeers`) and `prev_sleds`
+                // (our local cache).
+                if Some(&all_sleds) != prev_sleds.as_ref() {
+                    *sleds.lock().unwrap() = all_sleds.clone();
+                    prev_sleds = Some(all_sleds);
+                }
+            }
+            Err(err) => {
+                // We don't update our set of peers here, because we don't know
+                // what has changed. We don't want to report an empty set in the
+                // case of a transient failure.
+                warn!(
+                    log, "Failed to get baseboard IDs";
+                    "err" => #%err,
+                );
+            }
+        };
 
         tokio::time::sleep(SLEEP_BETWEEN_REFRESH).await;
     }

@@ -346,7 +346,7 @@ pub struct ReplicatedNetworkConfigContents {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-pub struct BaseboardIdAndIpv6Addr {
+pub struct BootstrapIpOfBaseboardId {
     pub id: BaseboardId,
     pub ip: Ipv6Addr,
 }
@@ -355,5 +355,5 @@ pub struct BaseboardIdAndIpv6Addr {
 /// bootstrap network.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct BaseboardIds {
-    pub data: Vec<BaseboardIdAndIpv6Addr>,
+    pub data: Vec<BootstrapIpOfBaseboardId>,
 }

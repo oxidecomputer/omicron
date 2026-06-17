@@ -210,9 +210,6 @@ pub enum SetupServiceError {
     )]
     DatasetInitialization { errors: Vec<String> },
 
-    #[error("Error resetting sled: {0}")]
-    SledReset(String),
-
     #[error("Error making HTTP request to Sled Agent")]
     SledApi(#[from] SledAgentError<SledAgentTypes::Error>),
 
