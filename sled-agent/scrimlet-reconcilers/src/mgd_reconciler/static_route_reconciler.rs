@@ -430,13 +430,16 @@ impl TryFrom<&'_ RouteConfig> for DiffableStaticRoute {
             (IpAddr::V4(nexthop), IpNet::V4(prefix)) => {
                 DiffableStaticRouteDescription::V4 { nexthop, prefix }
             }
+            (IpAddr::V6(nexthop), IpNet::V4(prefix)) => {
+                DiffableStaticRouteDescription::V4OverV6 { nexthop, prefix }
+            }
             (IpAddr::V6(nexthop), IpNet::V6(prefix)) => {
                 DiffableStaticRouteDescription::V6 { nexthop, prefix }
             }
-            (nexthop, prefix) => {
+            (IpAddr::V4(nexthop), IpNet::V6(prefix)) => {
                 return Err(format!(
-                    "rack network config route has mixed IP families \
-                     for nexthop and prefix: {nexthop}, {prefix}"
+                    "rack network config route has unsuppored mix: \
+                     ipv4 nexthop {nexthop} for ipv6 prefix {prefix}"
                 ));
             }
         };
@@ -481,6 +484,17 @@ impl DiffableStaticRoute {
                     vlan_id: self.vlan_id,
                 })
             }
+            DiffableStaticRouteDescription::V4OverV6 { nexthop, prefix } => {
+                MgdStaticRoute::V4(MgdStaticRoute4 {
+                    nexthop: nexthop.into(),
+                    prefix: MgdPrefix4 {
+                        value: prefix.addr(),
+                        length: prefix.width(),
+                    },
+                    rib_priority: self.priority,
+                    vlan_id: self.vlan_id,
+                })
+            }
             DiffableStaticRouteDescription::V6 { nexthop, prefix } => {
                 MgdStaticRoute::V6(MgdStaticRoute6 {
                     nexthop,
@@ -509,19 +523,14 @@ impl DiffableStaticRoute {
         };
 
         Either::Right(paths.into_iter().map(move |path| {
-            let nexthop = match path.nexthop {
-                IpAddr::V4(ip) => ip,
-                IpAddr::V6(ip) => {
-                    return Err(BadMgdRoute::BadNexthopFamily {
-                        family: "ipv4",
-                        prefix: prefix.to_string(),
-                        nexthop: ip.to_string(),
-                    });
+            let description = match path.nexthop {
+                IpAddr::V4(nexthop) => {
+                    DiffableStaticRouteDescription::V4 { nexthop, prefix }
+                }
+                IpAddr::V6(nexthop) => {
+                    DiffableStaticRouteDescription::V4OverV6 { nexthop, prefix }
                 }
             };
-
-            let description =
-                DiffableStaticRouteDescription::V4 { nexthop, prefix };
 
             Ok(Self {
                 description,
@@ -578,6 +587,7 @@ enum MgdStaticRoute {
 )]
 enum DiffableStaticRouteDescription {
     V4 { nexthop: Ipv4Addr, prefix: Ipv4Net },
+    V4OverV6 { nexthop: Ipv6Addr, prefix: Ipv4Net },
     V6 { nexthop: Ipv6Addr, prefix: Ipv6Net },
 }
 
