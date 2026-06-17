@@ -32,6 +32,28 @@ use omicron_uuid_kinds::{AlertUuid, CaseUuid, GenericUuid};
 use std::collections::HashSet;
 use uuid::Uuid;
 
+/// Error returned by [`DataStore::fm_rendezvous_alert_create`].
+///
+/// Note that the non-FM [`DataStore::alert_create`] just returns an external
+/// [`Error`] as it's intended to be called from the API and doesn't have or
+/// need any of FM's sitrep-guarded insert machinery. In contrast, this error
+/// type signals what fm_rendezvous needs for its control flow and metrics.
+#[derive(Debug, thiserror::Error)]
+pub enum FmRendezvousAlertCreateError {
+    /// An alert with this id was already created by an earlier rendezvous
+    /// activation; the `rendezvous_alert_created` marker short-circuited the
+    /// insert.
+    #[error("alert was already created by a previous rendezvous activation")]
+    AlreadyCreated,
+    /// The sitrep being executed is stale: its `alert_generation` is behind the
+    /// current sitrep in the database, so no alert was created.
+    #[error("cannot create alert for a stale sitrep")]
+    StaleSitrep,
+    /// An error occurred while accessing the database.
+    #[error(transparent)]
+    Database(#[from] Error),
+}
+
 impl DataStore {
     fn alert_insert_query(
         alert: Alert,
@@ -91,20 +113,20 @@ impl DataStore {
     /// so a deleted alert is not resurrected by a later rendezvous pass, and
     /// it is gated on the executing sitrep still being current. If the latest
     /// sitrep's `alert_generation` has advanced past `expected_alert_generation`,
-    /// the sitrep being executed is stale and this returns [`Error::Conflict`].
+    /// the sitrep being executed is stale and this returns
+    /// [`FmRendezvousAlertCreateError::StaleSitrep`].
     pub async fn fm_rendezvous_alert_create(
         &self,
         opctx: &OpContext,
         request: &AlertRequest,
         case_id: CaseUuid,
         expected_alert_generation: Generation,
-    ) -> CreateResult<Alert> {
+    ) -> Result<Alert, FmRendezvousAlertCreateError> {
         let conn = self.pool_connection_authorized(opctx).await?;
         let alert = Alert::for_fm_alert_request(request, case_id);
-        let alert_id = alert.id();
 
         let guarded = SitrepGuardedInsert::<Alert, _>::new(
-            alert_id.into_untyped_uuid(),
+            alert.id().into_untyped_uuid(),
             expected_alert_generation.into(),
             Self::alert_insert_query(alert),
         );
@@ -115,17 +137,10 @@ impl DataStore {
             })? {
                 SitrepGuardedInsertOutcome::Created(row) => row,
                 SitrepGuardedInsertOutcome::AlreadyExists => {
-                    return Err(Error::ObjectAlreadyExists {
-                        type_name: ResourceType::Alert,
-                        object_name: alert_id.to_string(),
-                    });
+                    return Err(FmRendezvousAlertCreateError::AlreadyCreated);
                 }
                 SitrepGuardedInsertOutcome::StaleSitrep => {
-                    // We signal stale sitrep to the caller as a `Conflict` error.
-                    // This is unambiguous; no other path produces `Conflict`.
-                    return Err(Error::conflict(
-                        "cannot create alert for stale sitrep",
-                    ));
+                    return Err(FmRendezvousAlertCreateError::StaleSitrep);
                 }
             };
 
@@ -382,7 +397,7 @@ mod tests {
             )
             .await
             .unwrap_err();
-        assert_matches!(err, Error::ObjectAlreadyExists { .. });
+        assert_matches!(err, FmRendezvousAlertCreateError::AlreadyCreated);
 
         // No marker may have been written: the `new_marker` CTE is gated
         // by `WHERE EXISTS (SELECT 1 FROM new_resource)`.
@@ -420,11 +435,7 @@ mod tests {
             )
             .await
             .unwrap_err();
-        assert_matches!(
-            err,
-            Error::Conflict { ref message }
-                if message.external_message().contains("stale sitrep")
-        );
+        assert_matches!(err, FmRendezvousAlertCreateError::StaleSitrep);
 
         db.terminate().await;
         logctx.cleanup_successful();

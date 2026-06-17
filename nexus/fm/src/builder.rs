@@ -26,9 +26,6 @@ pub struct SitrepBuilder<'a> {
     pub sitrep_id: SitrepUuid,
     pub cases: case::AllCases,
     closed_cases_copied_forward: &'a IdOrdMap<fm::Case>,
-    /// Plumbed from [`analysis_input::Input::alerts_changed`]; ORed with
-    /// [`case::AllCases::alert_set_changed`] in [`Self::build`] to drive
-    /// `alert_generation` bumps.
     alerts_changed: bool,
     comment: String,
 }
@@ -287,10 +284,10 @@ mod tests {
         logctx.cleanup_successful();
     }
 
+    /// Verifies that the bump is relative to the parent sitrep's generation,
+    /// not restarted from a fixed initial value.
     #[test]
     fn child_sitrep_with_new_alert_bumps_alert_generation() {
-        // Verifies that the bump is relative to the parent sitrep's generation,
-        // not restarted from a fixed initial value.
         let logctx = dev::test_setup_log(
             "child_sitrep_with_new_alert_bumps_alert_generation",
         );
@@ -309,11 +306,11 @@ mod tests {
         logctx.cleanup_successful();
     }
 
+    /// A closed case with an outstanding alert request becomes "satisfied" via
+    /// marker presence, carry-forward drops it, and alert_generation bumps even
+    /// though no open-case builder mutations happened.
     #[test]
     fn carry_forward_drop_bumps_alert_generation() {
-        // A closed case with an outstanding alert request becomes "satisfied"
-        // via marker presence, carry-forward drops it, alert_generation bumps
-        // even though no open-case builder mutations happened.
         use nexus_types::alert::AlertClass;
         use nexus_types::fm::case::AlertRequest;
         use omicron_uuid_kinds::AlertUuid;
@@ -379,7 +376,8 @@ mod tests {
         assert_eq!(
             sitrep.metadata.alert_generation,
             Generation::new().next(),
-            "carry-forward drop must bump alert_generation past the parent's"
+            "dropping a case with alerts from the set of closed cases being \
+             carried forwards must bump alert_generation past the parent's"
         );
         logctx.cleanup_successful();
     }

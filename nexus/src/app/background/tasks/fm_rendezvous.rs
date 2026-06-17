@@ -11,6 +11,7 @@ use futures::future::BoxFuture;
 use nexus_background_task_interface::Activator;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
+use nexus_db_queries::db::datastore::FmRendezvousAlertCreateError;
 use nexus_db_queries::db::datastore::SupportBundleCreateParams;
 use nexus_db_queries::db::datastore::SupportBundleProvenance;
 use nexus_types::fm;
@@ -179,16 +180,14 @@ impl FmRendezvous {
                 Ok(_) => {
                     status.alerts_created += 1;
                 }
-                Err(Error::ObjectAlreadyExists { .. }) => {
-                    // A prior activation already created this alert. The marker
-                    // row in `rendezvous_alert_created` prevents resurrection.
+                Err(FmRendezvousAlertCreateError::AlreadyCreated) => {
                     status.alerts_already_existed += 1;
                 }
-                Err(Error::Conflict { .. }) => {
+                Err(FmRendezvousAlertCreateError::StaleSitrep) => {
                     // The current sitrep in the database has moved past ours.
                     // Abort the rest of this activation; a fresher one will
                     // pick up where we left off.
-                    slog::warn!(
+                    slog::info!(
                         opctx.log,
                         "aborting alert rendezvous: sitrep is stale";
                         "case_id" => %case_id,
@@ -199,7 +198,7 @@ impl FmRendezvous {
                     status.stale_sitrep = true;
                     break;
                 }
-                Err(e) => {
+                Err(FmRendezvousAlertCreateError::Database(e)) => {
                     slog::warn!(
                         opctx.log,
                         "failed to create requested alert";
@@ -217,7 +216,7 @@ impl FmRendezvous {
 
         let n_errors = status.errors.len();
         if status.stale_sitrep {
-            slog::warn!(
+            slog::info!(
                 opctx.log,
                 "alert rendezvous aborted: sitrep stale relative to current";
                 "sitrep_id" => %sitrep.id(),
@@ -891,10 +890,10 @@ mod tests {
             .await
             .expect("inserted current sitrep");
 
-        // Hand the stale sitrep to the rendezvous task. Its first alert
-        // request should trip the sitrep-guard combinator and surface as a
-        // `Conflict`, which the task translates into `stale_sitrep = true` and
-        // breaks out of the alert loop before the second request is attempted.
+        // Hand the stale sitrep to the rendezvous task. Attempting to insert
+        // the first alert should result in an error because the sitrep is out
+        // of date, and rendezvous execution should be aborted before
+        // attempting to insert the other alert.
         sitrep_tx
             .send(Some(Arc::new((
                 fm::SitrepVersion {
