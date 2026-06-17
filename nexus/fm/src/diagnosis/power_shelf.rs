@@ -23,6 +23,8 @@ use strum::VariantArray;
 pub const PSU_REMOVE_EREPORT: &str = "hw.remove.psu";
 pub const PSU_INSERT_EREPORT: &str = "hw.insert.psu";
 
+const KNOWN_EREPORTS: &[&str] = &[PSU_INSERT_EREPORT, PSU_REMOVE_EREPORT];
+
 pub fn analyze(
     builder: &mut SitrepBuilder<'_>,
 ) -> anyhow::Result<()> {
@@ -105,14 +107,66 @@ pub fn analyze(
         }
     }
 
+    // For each ereport that we haven't already seen before:
     for ereport in input.new_ereports().iter() {
-        // for each ereport that we haven't already seen before:
-        // if it is a PSU insert or PSU remove event:
-        // - see if there is an open case for the PSC and PSU slot named in that
-        //   ereport
-        //  - if so, assign the ereport to the case
-        //  - if not, create a new case for the PSC and PSU slot named in that
-        // ereport
+        let Some(class) = ereport.class.as_deref() else {
+            // if there's no class, nothing we can do with this.
+            continue;
+        };
+        if !KNOWN_EREPORTS.contains(&class) {
+            // if it's not something we know what to do with, skip it.
+            continue;
+        }
+
+        let psu_ereport = match PsuEreport::parse(&ereport) {
+            Ok(psu_ereport) => psu_ereport,
+            Err(e) => {
+                slog::warn!(
+                    &log,
+                    "skipping a new ereport that isn't an interpretable PSU \
+                     insert/remove event";
+                    "ereport_id" => %ereport.id(),
+                    "ereport_class" => ?ereport.class,
+                    "error" => InlineErrorChain::new(&*e),
+                );
+                continue;
+            }
+        };
+        let location = psu_ereport.location;
+        let verbed = match psu_ereport.kind {
+            PsuEreportKind::Insert => "inserted",
+            PsuEreportKind::Remove => "removed",
+        };
+        // See if there is an open case for the PSC and PSU slot named in the
+        // ereport. `cases_by_psu` models multiple cases per PSU for the future,
+        // but at present a PSU is impacted by at most one case, so we assign to
+        // whichever case the index already knows about.
+        let case_id = cases_by_psu
+            .get(&location)
+            .and_then(|case_ids| case_ids.iter().copied().next());
+        let mut case_builder = match case_id {
+            Some(id) => builder.cases.case_mut(&id).expect(
+                "an open case from the parent sitrep should be in the builder",
+            ),
+            None => {
+                let mut c =
+                    builder.cases.open_case(DiagnosisEngineKind::PowerShelf);
+                // we sure verbed that location!
+                *c.comment_mut() = format!("{location} {verbed}");
+                cases_by_psu
+                    .entry(location)
+                    .or_insert_with(HashSet::new)
+                    .insert(c.id);
+                c
+            }
+        };
+
+        case_builder.add_ereport(&ereport, format!("{location} {verbed}"));
+        cases_by_id
+            .get_mut(&case_builder.id)
+            .expect("the case must be present in the by-id index")
+            .insert_ereport(psu_ereport)
+            .expect("distinct new ereports have distinct IDs");
     }
 
     // for each case:
