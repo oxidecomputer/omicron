@@ -4,20 +4,18 @@
 
 use crate::SitrepBuilder;
 use crate::analysis_input::Input;
-use crate::case::CaseEreport;
 use crate::ereport;
 use crate::ereport::Ereport;
 use anyhow::Context;
-use iddqd::{
-    BiHashItem, BiHashMap, IdHashItem, IdHashMap, IdOrdItem, IdOrdMap,
-    bi_hash_map, bi_upcast, id_upcast,
-};
+use iddqd::{IdHashItem, IdHashMap, IdOrdItem, IdOrdMap, id_upcast};
 use nexus_types::fm::DiagnosisEngineKind;
 use nexus_types::inventory;
 use omicron_uuid_kinds::CaseUuid;
 use omicron_uuid_kinds::EreporterRestartUuid;
 use serde::Deserialize;
 use slog_error_chain::InlineErrorChain;
+use std::collections::BTreeMap;
+use std::collections::HashSet;
 use std::fmt;
 use std::sync::Arc;
 use strum::VariantArray;
@@ -44,11 +42,15 @@ pub fn analyze(
         .filter(|c| c.metadata.de == DiagnosisEngineKind::PowerShelf);
 
     let mut cases_by_id = IdOrdMap::new();
+    let mut cases_by_psu = BTreeMap::new();
     'cases: for case in parent_cases {
         // Reconstruct the case by looking at its ereports:
         // - the ereports should all be associated with a single PSC at this
         //   point.
         // - put them in a map by PSC location
+        let mut psc_case = cases_by_id
+            .entry(&case.id)
+            .or_insert_with(|| PscCase::new(case.id));
         for case_ereport in case.ereports.iter() {
             let ereport = &case_ereport.ereport;
             let ereport = match PsuEreport::parse(&ereport) {
@@ -80,17 +82,26 @@ pub fn analyze(
                         .case_mut(&case.id)
                         .expect("open case in parent sitrep should be present")
                         .close(comment);
+                    drop(psc_case);
+                    cases_by_id.remove(&case.id);
                     continue 'cases;
                 }
             };
-            cases_by_id
-                .entry(&case.id)
-                .or_insert_with(|| PscCase::new(case.id))
-                .insert_ereport(ereport)
-                .expect(
-                    "ereport can't possibly be a duplicate because it came \
-                     from the case's existing ereport set",
-                );
+            psc_case.insert_ereport(ereport).expect(
+                "ereport can't possibly be a duplicate because it came \
+                 from the case's existing ereport set",
+            );
+        }
+
+        // Now, add the case to the index of cases by PSU.
+        for location in psc_case.impacted_psus() {
+            // N.B. that this allows us to model multiple cases impacting the
+            // same PSU. At present we will not do this, but it will become
+            // important later.
+            cases_by_psu
+                .entry(location)
+                .or_insert_with(HashSet::new)
+                .insert(case.id);
         }
     }
 
@@ -127,6 +138,8 @@ pub fn analyze(
     Clone,
     Eq,
     PartialEq,
+    Ord,
+    PartialOrd,
     Hash,
     Debug,
     strum::VariantArray,
@@ -224,6 +237,14 @@ impl PscCase {
         self.impacted[location.shelf as usize].insert(location.slot);
         Ok(())
     }
+
+    /// Iterates over the `PsuLocation` of every PSU impacted by this case.
+    fn impacted_psus(&self) -> impl Iterator<Item = PsuLocation> + '_ {
+        self.impacted.iter().enumerate().flat_map(|(shelf, slots)| {
+            let shelf = shelf as u8;
+            slots.iter().map(move |slot| PsuLocation { shelf, slot })
+        })
+    }
 }
 
 #[derive(Debug)]
@@ -304,7 +325,7 @@ struct PsuEreportData {
     refdes: String,
 }
 
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
 struct PsuLocation {
     shelf: u8,
     slot: PsuSlot,
