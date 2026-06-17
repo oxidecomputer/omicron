@@ -7,7 +7,6 @@
 use crate::RssOrMultirackJoinConfigCommon;
 use crate::bgp_auth_keys::BgpAuthKeys;
 use crate::context::CommonConfigContainer;
-use omicron_common::api::external::AllowedSourceIps;
 use sled_hardware_types::Baseboard;
 use std::collections::BTreeMap;
 use std::net::Ipv6Addr;
@@ -21,7 +20,6 @@ use wicket_common::rack_setup::UserSpecifiedRackNetworkConfig;
 pub(crate) struct CurrentMultirackJoinConfig {
     pub common: RssOrMultirackJoinConfigCommon,
     rack_network_config: UserSpecifiedRackNetworkConfig,
-    allowed_source_ips: AllowedSourceIps,
 }
 
 impl CurrentMultirackJoinConfig {
@@ -42,7 +40,6 @@ impl CurrentMultirackJoinConfig {
             log,
         )?;
         self.rack_network_config = config.rack_network_config;
-        self.allowed_source_ips = config.allowed_source_ips;
 
         Ok(())
     }
@@ -78,11 +75,7 @@ impl CurrentMultirackJoinConfig {
             bgp_auth_keys,
         };
 
-        Ok(Self {
-            common,
-            rack_network_config: config.rack_network_config,
-            allowed_source_ips: config.allowed_source_ips,
-        })
+        Ok(Self { common, rack_network_config: config.rack_network_config })
     }
 }
 
@@ -105,7 +98,6 @@ impl From<&'_ CurrentMultirackJoinConfig> for CurrentMultirackJoinUserConfig {
         CurrentMultirackJoinUserConfig {
             bootstrap_sleds,
             rack_network_config: config.rack_network_config.clone(),
-            allowed_source_ips: config.allowed_source_ips.clone(),
             bgp_auth_keys: GetBgpAuthKeyInfoResponse {
                 data: config.common.get_bgp_auth_key_data(),
             },
