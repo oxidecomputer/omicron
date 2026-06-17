@@ -4,9 +4,16 @@
 
 use crate::SitrepBuilder;
 use crate::analysis_input::Input;
+use crate::ereport;
+use crate::ereport::Ereport;
+use anyhow::Context;
 use iddqd::{BiHashItem, BiHashMap};
+use nexus_types::fm;
 use nexus_types::fm::DiagnosisEngineKind;
+use nexus_types::inventory;
 use omicron_uuid_kinds::CaseUuid;
+use serde::Deserialize;
+use std::sync::Arc;
 
 pub const PSU_REMOVE_EREPORT: &str = "hw.remove.psu";
 pub const PSU_INSERT_EREPORT: &str = "hw.insert.psu";
@@ -63,21 +70,85 @@ pub fn analyze(
     Ok(())
 }
 
-pub struct PsuCase {
+struct PsuCase {
     case_id: CaseUuid,
     location: PsuLocation,
 }
 
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Debug)]
+struct PsuEreport {
+    location: PsuLocation,
+    ereport: Arc<Ereport>,
+    kind: PsuEreportKind,
+    data: PsuEreportData,
+}
+
+impl PsuEreport {
+    fn parse(ereport: &Arc<ereport::Ereport>) -> anyhow::Result<Self> {
+        let kind = match ereport.data.class.as_deref() {
+            Some(k) if k == PSU_INSERT_EREPORT => PsuEreportKind::Insert,
+            Some(k) if k == PSU_REMOVE_EREPORT => PsuEreportKind::Remove,
+            k => anyhow::bail!("unknown ereport class: {k:?}"),
+        };
+        let shelf = match ereport.reporter {
+            ereport::Reporter::Sp {
+                sp_type: inventory::SpType::Power,
+                slot,
+            } => u8::try_from(slot).with_context(|| {
+                format!("power shelf slot number {slot} is way too big")
+            })?,
+            reporter => anyhow::bail!(
+                "invalid reporter type for what seems to be a PSC ereport: \
+                 {reporter:?}"
+            ),
+        };
+        let data: PsuEreportData =
+            serde_json::from_value(ereport.data.report.clone())
+                .context("invalid data for a PSC ereport")?;
+        let location = PsuLocation { shelf, slot: data.slot };
+        Ok(Self { kind, data, location, ereport: ereport.clone() })
+    }
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+enum PsuEreportKind {
+    Insert,
+    Remove,
+}
+
+#[derive(Debug, Eq, PartialEq, serde::Deserialize)]
+struct PsuEreportData {
+    fruid: Option<PsuFruid>,
+    rail: String,
+    slot: u8,
+    refdes: String,
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
 struct PsuLocation {
     shelf: u8,
     slot: u8,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+struct PsuFruid {
+    fw_rev: String,
+    mfr: String,
+    mpn: String,
+    serial: String,
+}
+
 #[cfg(test)]
 mod tests {
+    use super::*;
+    use crate::test_util::FmTest;
+    use chrono::Utc;
+    use nexus_types::inventory::SpType;
+
     // These are real life ereports I copied from the dogfood rack.
     mod ereports {
+        use super::*;
+
         pub(super) const PSU_REMOVE_JSON: &str = r#"{
             "baseboard_part_number": "913-0000003",
             "baseboard_rev": 8,
@@ -183,5 +254,61 @@ mod tests {
             "slot": 4,
             "v": 0
         }"#;
+    }
+
+    fn test_dogfood_ereport_parses(
+        test_name: &str,
+        expected_class: PsuEreportKind,
+        json: &str,
+    ) {
+        const SHELF: u16 = 0;
+        let (mut fmtest, logctx) = FmTest::new_with_logctx(test_name);
+        let mut reporter = fmtest.reporters.reporter(ereport::Reporter::Sp {
+            sp_type: SpType::Power,
+            slot: SHELF,
+        });
+        let ereport = dbg!(Arc::new(reporter.parse_ereport(Utc::now(), json)));
+        let parsed = dbg!(PsuEreport::parse(&ereport))
+            .expect("dogfood ereport should parse as a PsuEreport");
+
+        // The payload fields shared by every dogfood ereport above; all of them
+        // describe PSU4 on rail V54_PSU4.
+        let expected_data = PsuEreportData {
+            fruid: Some(PsuFruid {
+                fw_rev: "0701".to_string(),
+                mfr: "Murata-PS".to_string(),
+                mpn: "MWOCP68-3600-D-RM".to_string(),
+                serial: "LL2216RB003Z".to_string(),
+            }),
+            rail: "V54_PSU4".to_string(),
+            slot: 4,
+            refdes: "PSU4".to_string(),
+        };
+
+        assert_eq!(parsed.kind, expected_class);
+        assert_eq!(
+            parsed.location,
+            PsuLocation { shelf: SHELF as u8, slot: 4 }
+        );
+        assert_eq!(parsed.data, expected_data);
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn test_psu_remove_json_parses() {
+        test_dogfood_ereport_parses(
+            "test_psu_remove_json_parses",
+            PsuEreportKind::Remove,
+            ereports::PSU_REMOVE_JSON,
+        );
+    }
+
+    #[test]
+    fn test_psu_insert_json_parses() {
+        test_dogfood_ereport_parses(
+            "test_psu_insert_json_parses",
+            PsuEreportKind::Insert,
+            ereports::PSU_INSERT_JSON,
+        );
     }
 }
