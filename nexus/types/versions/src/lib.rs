@@ -93,3 +93,5 @@ pub mod v2026_06_04_00;
 pub mod v2026_06_05_00;
 #[path = "instance_cpu_type_turin_v2/mod.rs"]
 pub mod v2026_06_08_00;
+#[path = "probe_multicast/mod.rs"]
+pub mod v2026_06_16_00;

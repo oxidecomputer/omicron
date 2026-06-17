@@ -419,6 +419,7 @@ enum DbCommands {
     #[clap(alias = "migration")]
     Migrations(MigrationsArgs),
     /// Print information about multicast groups
+    #[clap(alias = "mcast")]
     Multicast(multicast::MulticastArgs),
     /// Print information about snapshots
     Snapshots(SnapshotArgs),

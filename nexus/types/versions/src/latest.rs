@@ -231,11 +231,13 @@ pub mod multicast {
     pub use crate::v2026_01_08_00::multicast::InstanceMulticastGroupPath;
     pub use crate::v2026_01_08_00::multicast::MulticastGroupIdentifier;
     pub use crate::v2026_01_08_00::multicast::MulticastGroupJoinSpec;
-    pub use crate::v2026_01_08_00::multicast::MulticastGroupMember;
     pub use crate::v2026_01_08_00::multicast::MulticastGroupMemberAdd;
     pub use crate::v2026_01_08_00::multicast::MulticastGroupMemberPath;
     pub use crate::v2026_01_08_00::multicast::MulticastGroupPath;
     pub use crate::v2026_01_08_00::multicast::MulticastGroupSelector;
+
+    pub use crate::v2026_06_16_00::multicast::MulticastGroupMember;
+    pub use crate::v2026_06_16_00::multicast::MulticastGroupMemberParentKind;
 
     pub use crate::v2026_03_14_00::multicast::MulticastGroup;
     pub use crate::v2026_03_14_00::multicast::MulticastGroupCreate;
@@ -335,7 +337,7 @@ pub mod probe {
 
     pub use crate::v2026_01_03_00::probe::ProbeInfo;
 
-    pub use crate::v2026_01_05_00::probe::ProbeCreate;
+    pub use crate::v2026_06_16_00::probe::ProbeCreate;
 }
 
 pub mod project {

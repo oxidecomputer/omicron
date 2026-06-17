@@ -84,7 +84,7 @@ async fn test_pool_selection_ssm_asm(cptestctx: &ControlPlaneTestContext) {
     .await;
 
     // Verify member was created
-    assert_eq!(member1.instance_id, instance.identity.id);
+    assert_eq!(member1.parent_id, instance.identity.id);
 
     // Activate reconciler to process the new group ("Creating" -> "Active")
     wait_for_multicast_reconciler(&cptestctx.lockstep_client).await;
@@ -279,7 +279,7 @@ async fn test_ip_version_disambiguation(cptestctx: &ControlPlaneTestContext) {
     )
     .await;
 
-    assert_eq!(v4_member.instance_id, instance.identity.id);
+    assert_eq!(v4_member.parent_id, instance.identity.id);
 
     wait_for_multicast_reconciler(&cptestctx.lockstep_client).await;
     let v4_group = wait_for_group_active(client, "ipv4-group").await;
@@ -316,7 +316,7 @@ async fn test_ip_version_disambiguation(cptestctx: &ControlPlaneTestContext) {
     )
     .await;
 
-    assert_eq!(v6_member.instance_id, instance.identity.id);
+    assert_eq!(v6_member.parent_id, instance.identity.id);
 
     wait_for_multicast_reconciler(&cptestctx.lockstep_client).await;
     let v6_group = wait_for_group_active(client, "ipv6-group").await;

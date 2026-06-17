@@ -42,6 +42,7 @@ api_versions!([
     // |  example for the next person.
     // v
     // (next_int, IDENT),
+    (43, PROBE_MULTICAST_GROUPS),
     (42, MCAST_M2P_FORWARDING),
     (41, ADD_INSTANCE_PRIMARY_NIC_MTU),
     (40, ADD_FMD_TO_INVENTORY),
@@ -1585,7 +1586,7 @@ pub trait SledAgentApi {
     #[endpoint {
         method = PUT,
         path = "/probes",
-        versions = VERSION_ADD_DUAL_STACK_SHARED_NETWORK_INTERFACES..,
+        versions = VERSION_PROBE_MULTICAST_GROUPS..,
     }]
     async fn probes_put(
         request_context: RequestContext<Self::Context>,
@@ -1602,14 +1603,30 @@ pub trait SledAgentApi {
         method = PUT,
         path = "/probes",
         versions =
+            VERSION_ADD_DUAL_STACK_SHARED_NETWORK_INTERFACES..VERSION_PROBE_MULTICAST_GROUPS,
+    }]
+    async fn probes_put_v10(
+        request_context: RequestContext<Self::Context>,
+        body: TypedBody<v10::probes::ProbeSet>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let body = body.map(latest::probes::ProbeSet::from);
+        Self::probes_put(request_context, body).await
+    }
+
+    /// Update the entire set of probe zones on this sled.
+    #[endpoint {
+        operation_id = "probes_put",
+        method = PUT,
+        path = "/probes",
+        versions =
             VERSION_ADD_PROBE_PUT_ENDPOINT..VERSION_ADD_DUAL_STACK_SHARED_NETWORK_INTERFACES,
     }]
     async fn probes_put_v6(
         request_context: RequestContext<Self::Context>,
         body: TypedBody<v6::probes::ProbeSet>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        let body = body.try_map(latest::probes::ProbeSet::try_from)?;
-        Self::probes_put(request_context, body).await
+        let body = body.try_map(v10::probes::ProbeSet::try_from)?;
+        Self::probes_put_v10(request_context, body).await
     }
 
     /// Create a local storage dataset
