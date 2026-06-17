@@ -617,7 +617,7 @@ mod tests {
         // generation matches the current one. Insert the sitrep so it shows up
         // in the DB before activating.
         datastore
-            .fm_sitrep_insert(opctx, sitrep1.clone())
+            .fm_sitrep_insert(opctx, sitrep1.clone(), None)
             .await
             .expect("inserted sitrep1");
 
@@ -718,7 +718,7 @@ mod tests {
         };
 
         datastore
-            .fm_sitrep_insert(opctx, sitrep2.clone())
+            .fm_sitrep_insert(opctx, sitrep2.clone(), None)
             .await
             .expect("inserted sitrep2");
 
@@ -864,7 +864,7 @@ mod tests {
             }
         };
         datastore
-            .fm_sitrep_insert(opctx, stale_sitrep.clone())
+            .fm_sitrep_insert(opctx, stale_sitrep.clone(), None)
             .await
             .expect("inserted stale sitrep");
 
@@ -887,7 +887,7 @@ mod tests {
             ereports_by_id: Default::default(),
         };
         datastore
-            .fm_sitrep_insert(opctx, current_sitrep)
+            .fm_sitrep_insert(opctx, current_sitrep, None)
             .await
             .expect("inserted current sitrep");
 

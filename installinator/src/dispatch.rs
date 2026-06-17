@@ -30,6 +30,7 @@ use crate::{
     peers::{DiscoveryMechanism, LastKnownPeer},
     reporter::{HttpProgressBackend, ProgressReporter, ReportProgressBackend},
 };
+use sled_hardware::{DataLinks, is_oxide_sled};
 
 /// Installinator app.
 #[derive(Debug, Parser)]
@@ -190,7 +191,16 @@ struct InstallOpts {
 impl InstallOpts {
     async fn exec(self, log: &slog::Logger) -> Result<()> {
         if self.bootstrap_sled {
-            let data_links = [self.data_link0.clone(), self.data_link1.clone()];
+            let data_links = if is_oxide_sled()? {
+                DataLinks::Physical
+            } else {
+                DataLinks::Virtual {
+                    devices: vec![
+                        self.data_link0.clone(),
+                        self.data_link1.clone(),
+                    ],
+                }
+            };
             crate::bootstrap::bootstrap_sled(&data_links, log.clone()).await?;
         }
 

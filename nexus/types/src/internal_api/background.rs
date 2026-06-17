@@ -926,6 +926,9 @@ pub struct FmAnalysisStatus {
     /// nothing matched.
     pub known_classes: Vec<String>,
     pub outcome: fm_analysis::Outcome,
+    /// Errors encountered during analysis which did *not* prevent the analysis
+    /// step from completing.
+    pub warnings: Vec<String>,
 }
 
 pub mod fm_analysis {
@@ -934,7 +937,9 @@ pub mod fm_analysis {
 
     #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
     pub struct PreparationStatus {
-        pub errors: Vec<String>,
+        /// Errors encountered during the preparation step which did *not*
+        /// prevent the analysis step from completing.
+        pub warnings: Vec<String>,
         pub report: analysis_reports::InputReport,
     }
 

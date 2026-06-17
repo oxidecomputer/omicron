@@ -316,7 +316,7 @@ mod tests {
         let conn = datastore.pool_connection_for_tests().await.unwrap();
 
         datastore
-            .fm_sitrep_insert(opctx, make_sitrep(Generation::from_u32(1)))
+            .fm_sitrep_insert(opctx, make_sitrep(Generation::from_u32(1)), None)
             .await
             .unwrap();
 
@@ -359,7 +359,7 @@ mod tests {
         let conn = datastore.pool_connection_for_tests().await.unwrap();
 
         datastore
-            .fm_sitrep_insert(opctx, make_sitrep(Generation::from_u32(1)))
+            .fm_sitrep_insert(opctx, make_sitrep(Generation::from_u32(1)), None)
             .await
             .unwrap();
 
@@ -407,7 +407,7 @@ mod tests {
 
         // Latest sitrep is at generation 5; the rendezvous task expects 1.
         datastore
-            .fm_sitrep_insert(opctx, make_sitrep(Generation::from_u32(5)))
+            .fm_sitrep_insert(opctx, make_sitrep(Generation::from_u32(5)), None)
             .await
             .unwrap();
 
