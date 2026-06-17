@@ -25,6 +25,7 @@ use nexus_db_lookup::LookupPath;
 use nexus_db_queries::db::datastore::Disk;
 use nexus_db_queries::db::datastore::LocalStorageAllocation;
 use nexus_db_queries::db::datastore::LocalStorageDisk;
+use nexus_db_queries::db::datastore::sled::SledReservationReason;
 use nexus_db_queries::db::identity::Resource;
 use nexus_db_queries::{authn, authz, db};
 use nexus_types::saga::saga_action_failed;
@@ -148,7 +149,6 @@ declare_saga_actions! {
     ENSURE_RUNNING -> "ensure_running" {
         + sis_ensure_running
     }
-
 }
 
 /// Node name for looking up the VMM record once it has been registered with the
@@ -235,6 +235,7 @@ async fn sis_alloc_server(
         u32::from(hardware_threads.0),
         reservoir_ram,
         constraint_builder.build(),
+        SledReservationReason::Start,
     )
     .await?;
 
@@ -1177,10 +1178,12 @@ mod test {
         object_create,
     };
     use nexus_test_utils_macros::nexus_test;
+    use nexus_types::external_api::instance::InstanceCpuCount;
     use nexus_types::external_api::{instance as instance_types, networking};
     use nexus_types::identity::Resource;
+    use nexus_types_versions::latest;
     use omicron_common::api::external::{
-        ByteCount, IdentityMetadataCreateParams, InstanceCpuCount, Name,
+        ByteCount, IdentityMetadataCreateParams, Name,
     };
     use omicron_test_utils::dev::poll;
     use sled_agent_types::early_networking::SwitchSlot;
@@ -1202,7 +1205,7 @@ mod test {
 
     async fn create_instance(
         client: &ClientTestContext,
-    ) -> omicron_common::api::external::Instance {
+    ) -> latest::instance::Instance {
         let instances_url = format!("/v1/instances?project={}", PROJECT_NAME);
         object_create(
             client,
@@ -1227,6 +1230,7 @@ mod test {
                 auto_restart_policy: Default::default(),
                 anti_affinity_groups: Vec::new(),
                 multicast_groups: Vec::new(),
+                enable_jumbo_frames: false,
             },
         )
         .await
@@ -1483,13 +1487,14 @@ mod test {
                 let result =
                     dpd_client.nat_ipv4_list(&nat_subnet, None, None).await;
 
-                let data =
-                    result.map_err(|_| poll::CondCheckError::<()>::NotYet)?;
+                let data = result.map_err(|_| {
+                    poll::CondCheckError::<()>::NotYet { status: None }
+                })?;
 
                 if data.items.len() == expected_nat_entries {
                     Ok(())
                 } else {
-                    Err(poll::CondCheckError::<()>::NotYet)
+                    Err(poll::CondCheckError::<()>::NotYet { status: None })
                 }
             },
             &poll_interval,
@@ -1538,15 +1543,16 @@ mod test {
 
                 info!(log, "nat_ipv4_list"; "result" => ?result);
 
-                let data =
-                    result.map_err(|_| poll::CondCheckError::<()>::NotYet)?;
+                let data = result.map_err(|_| {
+                    poll::CondCheckError::<()>::NotYet { status: None }
+                })?;
 
                 if data.items.is_empty() {
                     error!(
                         log,
                         "we are expecting nat entries but none were found"
                     );
-                    Err(poll::CondCheckError::<()>::NotYet)
+                    Err(poll::CondCheckError::<()>::NotYet { status: None })
                 } else {
                     Ok(())
                 }

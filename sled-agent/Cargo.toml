@@ -30,15 +30,13 @@ cfg-if.workspace = true
 chrono.workspace = true
 clap.workspace = true
 clickhouse-admin-types.workspace = true
-# Only used by the simulated sled agent.
-crucible-agent-client.workspace = true
 derive_more.workspace = true
 dice-verifier = { workspace = true, features = ["ipcc", "mock"] }
 display-error-chain.workspace = true
 # XXX NOTE this is due to https://github.com/oxidecomputer/omicron/issues/9704
-# This is the R17 dpd client
+# This is the R20 dpd client
 # dpd-client.workspace = true
-dpd-client = { git = "https://github.com/oxidecomputer/dendrite", rev = "cc8e02a0800034c431c8cf96b889ea638da3d194" }
+dpd-client = { git = "https://github.com/oxidecomputer/dendrite", rev = "cc0c307c617f2988aafdca4e3bd35ea178b64801" }
 dropshot.workspace = true
 flate2.workspace = true
 flume.workspace = true
@@ -83,7 +81,6 @@ range-requests.workspace = true
 repo-depot-api.workspace = true
 repo-depot-client.workspace = true
 reqwest = { workspace = true, features = ["rustls", "stream"] }
-reqwest012 = { workspace = true }
 schemars = { workspace = true, features = ["chrono", "uuid1"] }
 serde.workspace = true
 serde_json = { workspace = true, features = ["raw_value"] }
@@ -134,6 +131,10 @@ x509-cert.workspace = true
 zeroize.workspace = true
 zip.workspace = true
 zone.workspace = true
+
+# Only used by the simulated sled agent.
+crucible-agent-client.workspace = true
+crucible-client-types.workspace = true
 
 [target.'cfg(target_os = "illumos")'.dependencies]
 fmd-adm.workspace = true

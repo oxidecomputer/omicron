@@ -30,13 +30,24 @@ use dpd_client::{Client as DpdClient, types as DpdTypes};
 use futures::FutureExt;
 use futures::future::BoxFuture;
 use mg_admin_client::types::{
-    AddStaticRoute4Request, AddStaticRoute6Request, ApplyRequest,
-    BestpathFanoutRequest, BgpPeerConfig, CheckerSource,
-    DeleteStaticRoute4Request, DeleteStaticRoute6Request,
+    ApplyRequest, BgpPeerConfig,
+    UnnumberedBgpPeerConfig as MgUnnumberedBgpPeerConfig,
+};
+use mg_api_types::bgp::policy::{
     ImportExportPolicy4 as MgImportExportPolicy4,
-    ImportExportPolicy6 as MgImportExportPolicy6, Ipv4UnicastConfig,
-    Ipv6UnicastConfig, JitterRange, ShaperSource, StaticRoute4,
-    StaticRoute4List, StaticRoute6, StaticRoute6List, UnnumberedBgpPeerConfig,
+    ImportExportPolicy6 as MgImportExportPolicy6,
+};
+use mg_api_types::rib::BestpathFanoutRequest;
+use mg_api_types::static_routes::{
+    AddStaticRoute4Request, AddStaticRoute6Request, StaticRoute4,
+    StaticRoute4List, StaticRoute6, StaticRoute6List,
+};
+use mg_api_types::{
+    bgp::config::{
+        CheckerSource, Ipv4UnicastConfig, Ipv6UnicastConfig, JitterRange,
+        ShaperSource,
+    },
+    static_routes::{DeleteStaticRoute4Request, DeleteStaticRoute6Request},
 };
 use nexus_db_queries::{
     context::OpContext,
@@ -49,7 +60,6 @@ use omicron_common::{
     address::{Ipv6Subnet, get_sled_address},
     api::external::{DataPageParams, Name},
 };
-use rdb_types::{Prefix, Prefix4, Prefix6};
 use serde_json::json;
 use sled_agent_client::types::HostPortConfig;
 use sled_agent_types::early_networking::BgpConfig as SledBgpConfig;
@@ -78,7 +88,7 @@ use slog_error_chain::InlineErrorChain;
 use std::{
     collections::{HashMap, HashSet, hash_map::Entry},
     hash::Hash,
-    net::{IpAddr, Ipv4Addr, Ipv6Addr},
+    net::{IpAddr, SocketAddr},
     str::FromStr,
     sync::{Arc, LazyLock},
 };
@@ -540,7 +550,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                 let mut switch_bgp_config: HashMap<SwitchSlot, (Uuid, BgpConfig)> = HashMap::new();
 
                 // Prefixes are associated to BgpConfig via the config id
-                let mut bgp_announce_prefixes: HashMap<Uuid, Vec<Prefix>> = HashMap::new();
+                let mut bgp_announce_prefixes: HashMap<Uuid, Vec<IpNet>> = HashMap::new();
 
                 for (switch_slot, port, change) in &changes {
                     let PortSettingsChange::Apply(settings) = change else {
@@ -549,7 +559,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
 
                     // desired peer configurations for a given switch port
                     let mut peers: HashMap<String, Vec<BgpPeerConfig>> = HashMap::new();
-                    let mut unnumbered_peers: HashMap<String, Vec<UnnumberedBgpPeerConfig>> = HashMap::new();
+                    let mut unnumbered_peers: HashMap<String, Vec<MgUnnumberedBgpPeerConfig>> = HashMap::new();
 
                     for peer in &settings.bgp_peers {
                         let bgp_config_id = peer.bgp_config_id();
@@ -633,17 +643,17 @@ impl BackgroundTask for SwitchPortSettingsManager {
                                 },
                             };
 
-                            let mut prefixes: Vec<Prefix> = vec![];
+                            let mut prefixes: Vec<IpNet> = vec![];
 
                             for announcement in &announcements {
                                 match announcement.network.ip() {
                                     IpAddr::V4(value) => {
-                                        let prefix = Prefix4 { value, length: announcement.network.prefix() };
-                                        prefixes.push(Prefix::V4(prefix));
+                                        let ipnet = Ipv4Net::new(value, announcement.network.prefix()).unwrap();
+                                        prefixes.push(IpNet::V4(ipnet));
                                     },
                                     IpAddr::V6(value) => {
-                                        let prefix = Prefix6 { value, length: announcement.network.prefix() };
-                                        prefixes.push(Prefix::V6(prefix));
+                                        let ipnet = Ipv6Net::new(value,     announcement.network.prefix()).unwrap();
+                                        prefixes.push(IpNet::V6(ipnet));
                                     },
                                 };
                             }
@@ -706,13 +716,8 @@ impl BackgroundTask for SwitchPortSettingsManager {
                                     .into_iter()
                                     .filter_map(|x|
                                         match x.prefix {
-                                            IpNetwork::V4(p) =>  Some(
-                                                Prefix4{
-                                                    length: p.prefix(),
-                                                    value: p.ip(),
-                                                }
-                                            ),
-                                            IpNetwork::V6(_) =>  None,
+                                            IpNetwork::V4(p) => Some(p.into()),
+                                            IpNetwork::V6(_) => None,
                                         }
                                     )
                                     .collect()
@@ -728,13 +733,8 @@ impl BackgroundTask for SwitchPortSettingsManager {
                                     .into_iter()
                                     .filter_map(|x|
                                         match x.prefix {
-                                            IpNetwork::V6(p) =>  Some(
-                                                Prefix6{
-                                                    length: p.prefix(),
-                                                    value: p.ip(),
-                                                }
-                                            ),
-                                            IpNetwork::V4(_) =>  None,
+                                            IpNetwork::V6(p) => Some(p.into()),
+                                            IpNetwork::V4(_) => None,
                                         }
                                     )
                                     .collect()
@@ -774,12 +774,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                                     .into_iter()
                                     .filter_map(|x|
                                         match x.prefix {
-                                            IpNetwork::V4(p) =>  Some(
-                                                Prefix4{
-                                                    length: p.prefix(),
-                                                    value: p.ip(),
-                                                }
-                                            ),
+                                            IpNetwork::V4(p) => Some(p.into()),
                                             IpNetwork::V6(_) => None,
                                         }
                                     )
@@ -796,12 +791,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                                     .into_iter()
                                     .filter_map(|x|
                                         match x.prefix {
-                                            IpNetwork::V6(p) =>  Some(
-                                                Prefix6{
-                                                    length: p.prefix(),
-                                                    value: p.ip(),
-                                                }
-                                            ),
+                                            IpNetwork::V6(p) => Some(p.into()),
                                             IpNetwork::V4(_) => None,
                                         }
                                     )
@@ -817,7 +807,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                                 // now that the peer passes the above validations, add it to the list for configuration
                                 let peer_config = BgpPeerConfig {
                                     name: format!("{ip}"),
-                                    host: format!("{ip}:179"),
+                                    host: SocketAddr::new(ip.into(), 179),
                                     hold_time: peer.hold_time.into(),
                                     idle_hold_time: peer.idle_hold_time.into(),
                                     delay_open: peer.delay_open.into(),
@@ -866,9 +856,10 @@ impl BackgroundTask for SwitchPortSettingsManager {
                             }
                             // Unnumbered peer - identified by interface
                             RouterPeerType::Unnumbered { router_lifetime } => {
-                                let peer_config = UnnumberedBgpPeerConfig {
+                                let peer_config = MgUnnumberedBgpPeerConfig {
                                     name: format!("unnumbered-{}", port.port_name),
                                     interface: format!("tfport{}_0", port.port_name),
+                                    router_lifetime: router_lifetime.as_u16(),
                                     hold_time: peer.hold_time.into(),
                                     idle_hold_time: peer.idle_hold_time.into(),
                                     delay_open: peer.delay_open.into(),
@@ -900,7 +891,6 @@ impl BackgroundTask for SwitchPortSettingsManager {
                                     }),
                                     deterministic_collision_resolution: false,
                                     idle_hold_jitter: None,
-                                    router_lifetime: router_lifetime.as_u16(),
                                     src_port: None,
                                     src_addr: None,
                                 };
@@ -998,7 +988,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                         "switch_slot" => ?switch_slot,
                         "config" => ?config,
                     );
-                    if let Err(e) = client.bgp_apply_v2(config).await {
+                    if let Err(e) = client.bgp_apply(config).await {
                         error!(log, "error while applying bgp configuration"; "error" => ?e);
                     }
 
@@ -1028,22 +1018,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                 let mut bgp: Vec<SledBgpConfig> = switch_bgp_config.iter().filter_map(|(_location, (_id, config))| {
                     let announcements = bgp_announce_prefixes
                         .get(&config.bgp_announce_set_id)
-                        .expect("bgp config is present but announce set is not populated")
-                        .iter()
-                        .map(|prefix| {
-                            match prefix {
-                                Prefix::V4(prefix4) => {
-                                    let net = Ipv4Net::new(prefix4.value, prefix4.length)
-                                        .expect("Prefix4 and Ipv4Net's value types have diverged");
-                                    IpNet::V4(net)
-                                },
-                                Prefix::V6(prefix6) => {
-                                    let net = Ipv6Net::new(prefix6.value, prefix6.length)
-                                        .expect("Prefix6 and Ipv6Net's value types have diverged");
-                                    IpNet::V6(net)
-                                },
-                            }
-                        }).collect();
+                        .expect("bgp config is present but announce set is not populated");
 
                     let max_paths = match MaxPathConfig::new(*config.max_paths)
                     {
@@ -1062,7 +1037,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
 
                     Some(SledBgpConfig {
                         asn: config.asn.0,
-                        originate: announcements,
+                        originate: announcements.clone(),
                         checker: config.checker.clone(),
                         shaper: config.shaper.clone(),
                         max_paths,
@@ -1239,7 +1214,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                         };
 
                         peer.allowed_import = match allow_import {
-                            Some(list) =>  ImportExportPolicy::Allow(
+                            Some(list) => ImportExportPolicy::Allow(
                                 list.clone().into_iter().map(|x| x.prefix.into()).collect()
                             ),
                             None => ImportExportPolicy::NoFiltering,
@@ -1263,7 +1238,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                         };
 
                         peer.allowed_export = match allow_export {
-                            Some(list) =>  ImportExportPolicy::Allow(
+                            Some(list) => ImportExportPolicy::Allow(
                                 list.clone().into_iter().map(|x| x.prefix.into()).collect()
                             ),
                             None => ImportExportPolicy::NoFiltering,
@@ -1847,25 +1822,9 @@ fn build_sled_agent_clients(
 }
 
 #[derive(PartialEq, Eq, Hash, Debug)]
-struct SwitchStaticRouteV4 {
-    nexthop: Ipv4Addr,
-    prefix: Prefix4,
-    vlan: Option<u16>,
-    priority: u8,
-}
-
-#[derive(PartialEq, Eq, Hash, Debug)]
-struct SwitchStaticRouteV6 {
-    nexthop: Ipv6Addr,
-    prefix: Prefix6,
-    vlan: Option<u16>,
-    priority: u8,
-}
-
-#[derive(PartialEq, Eq, Hash, Debug)]
 enum SwitchStaticRoute {
-    V4(SwitchStaticRouteV4),
-    V6(SwitchStaticRouteV6),
+    V4(StaticRoute4),
+    V6(StaticRoute6),
 }
 
 type SwitchStaticRoutes = HashSet<SwitchStaticRoute>;
@@ -1874,71 +1833,36 @@ fn static_routes_to_del(
     current_static_routes: HashMap<SwitchSlot, SwitchStaticRoutes>,
     desired_static_routes: HashMap<SwitchSlot, SwitchStaticRoutes>,
 ) -> HashMap<SwitchSlot, DeleteStaticRouteRequest> {
-    let mut routes_to_del: HashMap<SwitchSlot, DeleteStaticRouteRequest> =
-        HashMap::new();
+    let mut routes_to_del = HashMap::new();
 
     // find routes to remove
     for (switch_slot, routes_on_switch) in &current_static_routes {
-        if let Some(routes_wanted) = desired_static_routes.get(switch_slot) {
-            let mut result = DeleteStaticRouteRequest::default();
-            // if it's on the switch but not desired (in our db), it should be removed
-            let stale_routes = routes_on_switch.difference(routes_wanted);
-            for r in stale_routes.into_iter() {
-                match r {
-                    SwitchStaticRoute::V4(x) => {
-                        result.v4.routes.list.push(StaticRoute4 {
-                            nexthop: x.nexthop,
-                            prefix: x.prefix,
-                            vlan_id: x.vlan,
-                            rib_priority: x.priority,
-                        })
-                    }
-                    SwitchStaticRoute::V6(x) => {
-                        result.v6.routes.list.push(StaticRoute6 {
-                            nexthop: x.nexthop,
-                            prefix: x.prefix,
-                            vlan_id: x.vlan,
-                            rib_priority: x.priority,
-                        })
-                    }
-                }
+        let mut result = DeleteStaticRouteRequest::default();
+
+        let delete = |r: &SwitchStaticRoute| match r {
+            SwitchStaticRoute::V4(x) => {
+                result.v4.routes.list.push(x.clone());
             }
-            routes_to_del.insert(*switch_slot, result);
+            SwitchStaticRoute::V6(x) => {
+                result.v6.routes.list.push(x.clone());
+            }
+        };
+
+        if let Some(routes_wanted) = desired_static_routes.get(switch_slot) {
+            // if it's on the switch but not desired (in our db), it should be removed
+            routes_on_switch.difference(routes_wanted).for_each(delete);
         } else {
             // if no desired routes are present, all routes on this switch should be deleted
-            let mut result = DeleteStaticRouteRequest::default();
-            for r in routes_on_switch {
-                match r {
-                    SwitchStaticRoute::V4(x) => {
-                        result.v4.routes.list.push(StaticRoute4 {
-                            nexthop: x.nexthop,
-                            prefix: x.prefix,
-                            vlan_id: x.vlan,
-                            rib_priority: x.priority,
-                        })
-                    }
-                    SwitchStaticRoute::V6(x) => {
-                        result.v6.routes.list.push(StaticRoute6 {
-                            nexthop: x.nexthop,
-                            prefix: x.prefix,
-                            vlan_id: x.vlan,
-                            rib_priority: x.priority,
-                        })
-                    }
-                }
-            }
-            routes_to_del.insert(*switch_slot, result);
+            routes_on_switch.into_iter().for_each(delete);
         };
-    }
 
-    // filter out switches with no routes to remove
-    let routes_to_del = routes_to_del
-        .into_iter()
-        .filter(|(_location, request)| {
-            !(request.v4.routes.list.is_empty()
-                && request.v6.routes.list.is_empty())
-        })
-        .collect();
+        // Only insert if there are routes to delete
+        if !result.v4.routes.list.is_empty()
+            || !result.v6.routes.list.is_empty()
+        {
+            routes_to_del.insert(*switch_slot, result);
+        }
+    }
 
     routes_to_del
 }
@@ -1970,20 +1894,10 @@ fn static_routes_to_add(
         for r in missing_routes.into_iter() {
             match r {
                 SwitchStaticRoute::V4(x) => {
-                    result.v4.routes.list.push(StaticRoute4 {
-                        nexthop: x.nexthop,
-                        prefix: x.prefix,
-                        vlan_id: x.vlan,
-                        rib_priority: x.priority,
-                    })
+                    result.v4.routes.list.push(x.clone());
                 }
                 SwitchStaticRoute::V6(x) => {
-                    result.v6.routes.list.push(StaticRoute6 {
-                        nexthop: x.nexthop,
-                        prefix: x.prefix,
-                        vlan_id: x.vlan,
-                        rib_priority: x.priority,
-                    })
+                    result.v6.routes.list.push(x.clone());
                 }
             }
         }
@@ -2019,49 +1933,37 @@ fn static_routes_in_db(
         for route in &settings.routes {
             // convert to appropriate types for comparison and insertion
 
-            match (route.gw.ip(), route.dst.ip()) {
-                (IpAddr::V4(nexthop), IpAddr::V4(dst)) => {
-                    // TODO: https://github.com/oxidecomputer/omicron/issues/9801
-                    // This is a workaround until we have bootstore type versioning.
-                    // We want to stop using `None` as a sentinel value for DEFAULT,
-                    // and instead want to use an enum to more accurately represent what
-                    // is happening.
-                    let priority = match route.rib_priority {
-                        Some(v) => v.0,
-                        None => DEFAULT_RIB_PRIORITY_STATIC,
-                    };
-                    routes.insert(SwitchStaticRoute::V4(SwitchStaticRouteV4 {
+            // TODO: https://github.com/oxidecomputer/omicron/issues/9801
+            // This is a workaround until we have bootstore type versioning.
+            // We want to stop using `None` as a sentinel value for DEFAULT,
+            // and instead want to use an enum to more accurately represent what
+            // is happening.
+            let rib_priority = match route.rib_priority {
+                Some(v) => v.0,
+                None => DEFAULT_RIB_PRIORITY_STATIC,
+            };
+            let vlan_id = route.vid.map(|x| x.0);
+
+            match (route.gw.ip(), route.dst) {
+                (nexthop, IpNetwork::V4(dst)) => {
+                    routes.insert(SwitchStaticRoute::V4(StaticRoute4 {
                         nexthop,
-                        prefix: Prefix4 {
-                            value: dst,
-                            length: route.dst.prefix(),
-                        },
-                        vlan: route.vid.map(|x| x.0),
-                        priority,
+                        prefix: dst.into(),
+                        vlan_id,
+                        rib_priority,
                     }));
                 }
-                (IpAddr::V6(nexthop), IpAddr::V6(dst)) => {
-                    // TODO: https://github.com/oxidecomputer/omicron/issues/9801
-                    // This is a workaround until we have bootstore type versioning.
-                    // We want to stop using `None` as a sentinel value for DEFAULT,
-                    // and instead want to use an enum to more accurately represent what
-                    // is happening.
-                    let priority = match route.rib_priority {
-                        Some(v) => v.0,
-                        None => DEFAULT_RIB_PRIORITY_STATIC,
-                    };
-                    routes.insert(SwitchStaticRoute::V6(SwitchStaticRouteV6 {
+                (IpAddr::V6(nexthop), IpNetwork::V6(dst)) => {
+                    routes.insert(SwitchStaticRoute::V6(StaticRoute6 {
                         nexthop,
-                        prefix: Prefix6 {
-                            value: dst,
-                            length: route.dst.prefix(),
-                        },
-                        vlan: route.vid.map(|x| x.0),
-                        priority,
+                        prefix: dst.into(),
+                        vlan_id,
+                        rib_priority,
                     }));
                 }
-                (nexthop, dst) => {
-                    error!(log, "encountered route with ip version mismatch";
+                (nexthop @ IpAddr::V4(_), dst @ IpNetwork::V6(_)) => {
+                    error!(log,
+                        "v6 destination over v4 nexthop not supported";
                         "nexthop" => nexthop.to_string(),
                         "destination" => dst.to_string(),
                     );
@@ -2279,44 +2181,34 @@ async fn static_routes_on_switch(
         let mut flattened = HashSet::new();
         for (destination, paths) in &routes {
             for p in paths.iter() {
-                match p.nexthop {
-                    IpAddr::V4(addr) => {
-                        let Ok(dst) = destination.parse() else {
-                            error!(
-                                log,
-                                "failed to parse static route destination: \
-                                 {destination}"
-                            );
-                            continue;
-                        };
-                        flattened.insert(SwitchStaticRoute::V4(
-                            SwitchStaticRouteV4 {
-                                nexthop: addr,
-                                prefix: dst,
-                                vlan: p.vlan_id,
-                                priority: p.rib_priority,
-                            },
-                        ));
-                    }
-                    IpAddr::V6(addr) => {
-                        let Ok(dst) = destination.parse() else {
-                            error!(
-                                log,
-                                "failed to parse static route destination: \
-                                 {destination}"
-                            );
-                            continue;
-                        };
-                        flattened.insert(SwitchStaticRoute::V6(
-                            SwitchStaticRouteV6 {
-                                nexthop: addr,
-                                prefix: dst,
-                                vlan: p.vlan_id,
-                                priority: p.rib_priority,
-                            },
-                        ));
-                    }
-                };
+                if let Ok(prefix) = destination.parse() {
+                    flattened.insert(SwitchStaticRoute::V4(StaticRoute4 {
+                        prefix,
+                        nexthop: p.nexthop,
+                        vlan_id: p.vlan_id,
+                        rib_priority: p.rib_priority,
+                    }));
+                } else if let Ok(prefix) = destination.parse::<Ipv6Net>() {
+                    let IpAddr::V6(nexthop) = p.nexthop else {
+                        error!(log,
+                            "v6 destination over v4 nexthop not supported";
+                            "nexthop" => p.nexthop.to_string(),
+                            "destination" => prefix.to_string(),
+                        );
+                        continue;
+                    };
+                    flattened.insert(SwitchStaticRoute::V6(StaticRoute6 {
+                        nexthop,
+                        prefix,
+                        vlan_id: p.vlan_id,
+                        rib_priority: p.rib_priority,
+                    }));
+                } else {
+                    error!(
+                        log,
+                        "failed to parse static route destination: {destination}"
+                    );
+                }
             }
         }
         routes_on_switch.insert(*switch_slot, flattened);

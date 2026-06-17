@@ -149,6 +149,62 @@ This tool basically works as follows:
 . Then, it loads and validates the developer-maintained metadata (`api-manifest.toml`).
 . Then, it applies whatever filter has been selected and prints out whatever information was asked for.
 
+=== Deployment units
+
+The upgrade DAG's nodes are _deployment units_: sets of Rust packages that are always shipped and updated together.  For example, Sled Agent, Propolis, and the switch-zone components all update as one unit (the host OS image), so they form a single deployment unit.
+
+Deployment units and their packages are declared in `api-manifest.toml`:
+
+```toml
+[[deployment_units]]
+name = "Host OS"
+packages = [
+    "omicron-sled-agent",
+    "propolis-server",
+    # ...switch zone components...
+]
+```
+
+Each entry in `packages` is a _top-level package_: a Rust binary shipped in that deployment unit.  ls-apis walks each top-level package's Cargo dependencies to discover the APIs it produces and consumes.
+
+==== Embedded components
+
+Sometimes one binary contains a body of code whose API dependencies are best tracked separately from the rest of it.  The motivating case is the Rack Setup Service (RSS): it lives in the `sled-agent-rack-setup` library crate, which is linked into the `omicron-sled-agent` binary, but it runs only once (at rack initialization) and has different semantics from the rest of the Sled Agent.
+
+An _embedded component_ is such a library, tracked as an API consumer in its own right:
+
+```toml
+[[deployment_units]]
+name = "Host OS"
+packages = [ "omicron-sled-agent", ... ]
+embedded_components = [
+    { name = "sled-agent-rack-setup", inside = "omicron-sled-agent", lifecycle = "rack-init" },
+]
+```
+
+`inside` names the top-level package (in the same deployment unit) that links the embedded component.  When ls-apis walks that package's dependencies, the embedded component's own crate is skipped, so any API dependency reachable only through the embedded component is attributed to the embedded component instead of to the containing binary.  (A dependency the binary also reaches by another path is attributed to both.)  The embedded component is then walked separately, as its own consumer.
+
+An embedded component is assumed not to host any Dropshot APIs of its own, so embedded components are not walked as API producers.
+
+==== Lifecycle
+
+A component's `lifecycle` describes when its code runs:
+
+[cols="1,3",options="header"]
+|===
+|Lifecycle
+|Meaning
+
+|`steady-state`
+|The component runs during normal operation.  Its API dependencies are part of the upgrade DAG.  This is the default.
+
+|`rack-init`
+|The component runs only at rack initialization, when the whole rack is at a single consistent version.  It therefore cannot experience version skew during an online upgrade, so its API dependencies are excluded from the upgrade DAG and from cycle checks.
+
+|===
+
+`lifecycle` may currently be set only on an embedded component; every top-level package is treated as `steady-state`.
+
 The filtering is a little complicated but very important!
 
 === The purpose of filtering

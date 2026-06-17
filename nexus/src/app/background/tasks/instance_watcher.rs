@@ -10,6 +10,7 @@ use crate::app::saga::StartSaga;
 use futures::{FutureExt, future::BoxFuture};
 use gateway_client::types::PowerState;
 use nexus_db_model::Instance;
+use nexus_db_model::InstanceStateComputer;
 use nexus_db_model::Project;
 use nexus_db_model::Sled;
 use nexus_db_model::Vmm;
@@ -17,6 +18,7 @@ use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::pagination::Paginator;
 use nexus_networking::GatewayClient;
+use nexus_types::external_api::instance::InstanceState;
 use nexus_types::external_api::sled::SledPolicy;
 use nexus_types::identity::Asset;
 use nexus_types::identity::Resource;
@@ -25,7 +27,6 @@ use nexus_types::instance::VmmFailureReason;
 use nexus_types::instance::VmmState;
 use nexus_types::inventory;
 use omicron_common::api::external::Error;
-use omicron_common::api::external::InstanceState;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::PropolisUuid;
@@ -93,12 +94,14 @@ impl InstanceWatcher {
         Self { datastore, sagas, metrics, id, resolver, inv_rx }
     }
 
+    #[allow(clippy::too_many_arguments)] // i also don't love it, buddy...
     fn check_instance(
         &self,
         opctx: &OpContext,
         gateways: &Arc<[GatewayClient]>,
         client: SledAgentClient,
         target: VirtualMachine,
+        instance: Instance,
         vmm: Vmm,
         sled: Sled,
     ) -> impl Future<Output = Check> + Send + 'static + use<> {
@@ -136,7 +139,7 @@ impl InstanceWatcher {
             };
 
             let Some(state) = check
-                .run(&opctx, inv_rx, &sled, &vmm, &gateways, &client)
+                .run(&opctx, inv_rx, &instance, &vmm, &sled, &gateways, &client)
                 .await
             else {
                 // Check did not result in an updated state, nothing else to
@@ -194,12 +197,14 @@ impl InstanceWatcher {
 }
 
 impl Check {
+    #[allow(clippy::too_many_arguments)] // i also don't love it, buddy...
     async fn run(
         &mut self,
         opctx: &OpContext,
         inv_rx: watch::Receiver<Option<Arc<inventory::Collection>>>,
-        sled: &Sled,
+        instance: &Instance,
         vmm: &Vmm,
+        sled: &Sled,
         gateways: &[GatewayClient],
         client: &SledAgentClient,
     ) -> Option<SledVmmState> {
@@ -240,10 +245,18 @@ impl Check {
             // Note that this does not always mean that the *VMM* is healthy,
             // but only that we successfully got its state from the sled-agent.
             Ok(rsp) => {
-                let state = SledVmmState::from(rsp.into_inner());
-                self.outcome =
-                    CheckOutcome::Success(state.vmm_state.state.into());
-                Some(state)
+                let vmm_state = SledVmmState::from(rsp.into_inner());
+                let instance_state = {
+                    // let state = state.state.state.into()! wow!!
+                    let db_vmm_state = vmm_state.vmm_state.state.into();
+                    InstanceStateComputer::compute_state_from(
+                        &instance.nexus_state,
+                        instance.migration_id.as_ref(),
+                        Some(&db_vmm_state),
+                    )
+                };
+                self.outcome = CheckOutcome::Success(instance_state);
+                Some(vmm_state)
             }
             // Oh, this error indicates that the VMM should transition to
             // `Failed`. Let's synthesize a `SledInstanceState` that does
@@ -684,7 +697,7 @@ impl BackgroundTask for InstanceWatcher {
                     };
 
                     let target = VirtualMachine::new(self.id, &sled, &instance, &vmm, &project);
-                    tasks.spawn(self.check_instance(opctx, &gateways, client, target, vmm, sled)).await
+                    tasks.spawn(self.check_instance(opctx, &gateways, client, target, instance, vmm, sled)).await
                 } else {
                     // If there are no remaining instances to check, wait for
                     // all previously spawned check to complete.

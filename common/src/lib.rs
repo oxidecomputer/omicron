@@ -24,7 +24,6 @@ pub mod backoff;
 pub mod cmd;
 pub mod disk;
 pub mod policy;
-pub mod progenitor_operation_retry;
 pub mod resolvable_files;
 pub mod snake_case_result;
 pub mod update;
@@ -67,6 +66,25 @@ pub fn now_db_precision() -> chrono::DateTime<chrono::Utc> {
     let micros = ts.timestamp_subsec_micros();
     let only_nanos = nanosecs - micros * 1000;
     ts - std::time::Duration::from_nanos(u64::from(only_nanos))
+}
+
+/// Format a [`std::time::Duration`] as a human-readable string
+/// (e.g. `"1h 5m 23ms"`), truncated to millisecond precision.
+pub fn format_duration_ms(duration: std::time::Duration) -> String {
+    // Ignore units smaller than a millisecond.
+    let elapsed = std::time::Duration::from_millis(
+        u64::try_from(duration.as_millis()).unwrap_or(u64::MAX),
+    );
+    humantime::format_duration(elapsed).to_string()
+}
+
+/// Format a [`chrono::TimeDelta`] as a human-readable string (see
+/// [`format_duration_ms`]).
+pub fn format_time_delta(time_delta: chrono::TimeDelta) -> String {
+    match time_delta.to_std() {
+        Ok(d) => format_duration_ms(d),
+        Err(_) => String::from("<time delta out of range>"),
+    }
 }
 
 pub const OMICRON_DPD_TAG: &str = "omicron";

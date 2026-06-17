@@ -66,7 +66,7 @@ pub(crate) mod background;
 mod bfd;
 mod bgp;
 mod certificate;
-mod crucible;
+pub mod crucible;
 mod deployment;
 mod device_auth;
 mod disk;
@@ -105,6 +105,7 @@ pub(crate) mod support_bundles;
 mod switch;
 mod switch_interface;
 mod switch_port;
+mod system_networking;
 pub mod test_interfaces;
 mod trust_quorum;
 mod update;
@@ -224,17 +225,7 @@ pub struct Nexus {
     ///
     /// (This does not need to be in an `Arc` because `reqwest::Client` uses
     /// `Arc` internally.)
-    ///
-    /// Currently unused because all `new_with_client` call sites use
-    /// `reqwest012_client` for cross-repo dependencies that are still on
-    /// reqwest 0.12. This field will be used again once rev pins are updated.
-    #[allow(dead_code)]
     reqwest_client: reqwest::Client,
-
-    /// `reqwest012::Client` for cross-repo dependencies where the rev-pinned
-    /// dependency is still on reqwest 0.12. Remove once all rev pins are
-    /// updated.
-    reqwest012_client: reqwest012::Client,
 
     /// Client to the timeseries database.
     timeseries_client: oximeter_db::Client,
@@ -437,14 +428,6 @@ impl Nexus {
             .build()
             .map_err(|e| InlineErrorChain::new(&e).to_string())?;
 
-        // reqwest 0.12 client for cross-repo dependencies still on reqwest
-        // 0.12. Remove once all rev pins are updated.
-        let reqwest012_client = reqwest012::ClientBuilder::new()
-            .connect_timeout(std::time::Duration::from_secs(15))
-            .timeout(std::time::Duration::from_secs(15))
-            .build()
-            .map_err(|e| InlineErrorChain::new(&e).to_string())?;
-
         // Client to the ClickHouse database.
         let timeseries_client = match &config.pkg.timeseries_db.address {
             None => {
@@ -549,7 +532,6 @@ impl Nexus {
             producer_server: std::sync::Mutex::new(None),
             populate_status,
             reqwest_client,
-            reqwest012_client,
             timeseries_client,
             webhook_delivery_client,
             tunables: config.pkg.tunables.clone(),

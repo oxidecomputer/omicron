@@ -109,7 +109,7 @@ async fn wait_for_producer_impl(
             {
                 Ok(())
             } else {
-                Err(CondCheckError::<()>::NotYet)
+                Err(CondCheckError::<()>::NotYet { status: None })
             }
         },
         &Duration::from_secs(1),

@@ -155,9 +155,7 @@ pub fn blueprint_internal_dns_config(
         dns_builder.host_zone_switch(
             scrimlet.id(),
             switch_zone_ip,
-            overrides.dendrite_port(scrimlet.id()),
-            overrides.mgs_port(scrimlet.id()),
-            overrides.mgd_port(scrimlet.id()),
+            overrides.host_switch_zone_ports(scrimlet.id()),
         )?;
     }
 

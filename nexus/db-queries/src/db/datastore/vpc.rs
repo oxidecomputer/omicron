@@ -4008,7 +4008,7 @@ mod tests {
                             name: inst_name.clone(),
                             description: "An instance...".into(),
                         },
-                        ncpus: external::InstanceCpuCount(1),
+                        ncpus: instance_types::InstanceCpuCount(1),
                         memory: 10.into(),
                         hostname: "insty".parse().unwrap(),
                         user_data: vec![],
@@ -4023,6 +4023,7 @@ mod tests {
                         auto_restart_policy: Default::default(),
                         anti_affinity_groups: Vec::new(),
                         multicast_groups: Vec::new(),
+                        enable_jumbo_frames: false,
                     },
                 ),
             )

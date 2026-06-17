@@ -11,14 +11,18 @@
 pub mod affinity {
     pub use crate::v2025_11_20_00::affinity::AffinityGroup;
     pub use crate::v2025_11_20_00::affinity::AffinityGroupCreate;
+    pub use crate::v2025_11_20_00::affinity::AffinityGroupMember;
     pub use crate::v2025_11_20_00::affinity::AffinityGroupSelector;
     pub use crate::v2025_11_20_00::affinity::AffinityGroupUpdate;
     pub use crate::v2025_11_20_00::affinity::AffinityInstanceGroupMemberPath;
+    pub use crate::v2025_11_20_00::affinity::AffinityPolicy;
     pub use crate::v2025_11_20_00::affinity::AntiAffinityGroup;
     pub use crate::v2025_11_20_00::affinity::AntiAffinityGroupCreate;
+    pub use crate::v2025_11_20_00::affinity::AntiAffinityGroupMember;
     pub use crate::v2025_11_20_00::affinity::AntiAffinityGroupSelector;
     pub use crate::v2025_11_20_00::affinity::AntiAffinityGroupUpdate;
     pub use crate::v2025_11_20_00::affinity::AntiAffinityInstanceGroupMemberPath;
+    pub use crate::v2025_11_20_00::affinity::FailureDomain;
 }
 
 pub mod alert {
@@ -142,20 +146,26 @@ pub mod headers {
 
 pub mod image {
     pub use crate::v2025_11_20_00::image::Distribution;
-    pub use crate::v2025_11_20_00::image::Image;
     pub use crate::v2025_11_20_00::image::ImageCreate;
     pub use crate::v2025_11_20_00::image::ImageSelector;
     pub use crate::v2025_11_20_00::image::ImageSource;
+
+    pub use crate::v2026_06_04_00::image::Image;
 }
 
 pub mod instance {
+    pub use crate::v2025_11_20_00::instance::InstanceAutoRestartPolicy;
+    pub use crate::v2025_11_20_00::instance::InstanceAutoRestartStatus;
+    pub use crate::v2025_11_20_00::instance::InstanceCpuCount;
     pub use crate::v2025_11_20_00::instance::InstanceDiskAttach;
     pub use crate::v2025_11_20_00::instance::InstanceNetworkInterfaceSelector;
     pub use crate::v2025_11_20_00::instance::InstanceNetworkInterfaceUpdate;
+    pub use crate::v2025_11_20_00::instance::InstanceRuntimeState;
     pub use crate::v2025_11_20_00::instance::InstanceSelector;
     pub use crate::v2025_11_20_00::instance::InstanceSerialConsoleData;
     pub use crate::v2025_11_20_00::instance::InstanceSerialConsoleRequest;
     pub use crate::v2025_11_20_00::instance::InstanceSerialConsoleStreamRequest;
+    pub use crate::v2025_11_20_00::instance::InstanceState;
     pub use crate::v2025_11_20_00::instance::MAX_USER_DATA_BYTES;
     pub use crate::v2025_11_20_00::instance::OptionalInstanceSelector;
     pub use crate::v2025_11_20_00::instance::UserData;
@@ -173,13 +183,15 @@ pub mod instance {
     pub use crate::v2026_01_05_00::instance::EphemeralIpCreate;
     pub use crate::v2026_01_05_00::instance::ExternalIpCreate;
 
-    pub use crate::v2026_01_08_00::instance::InstanceUpdate;
-
     pub use crate::v2026_01_23_00::instance::EphemeralIpDetachSelector;
     pub use crate::v2026_01_23_00::instance::ExternalIpDetach;
 
-    pub use crate::v2026_01_31_00::instance::InstanceCreate;
-    pub use crate::v2026_01_31_00::instance::InstanceDiskAttachment;
+    pub use crate::v2026_06_05_00::instance::InstanceDiskAttachment;
+
+    pub use crate::v2026_06_08_00::instance::Instance;
+    pub use crate::v2026_06_08_00::instance::InstanceCpuPlatform;
+    pub use crate::v2026_06_08_00::instance::InstanceCreate;
+    pub use crate::v2026_06_08_00::instance::InstanceUpdate;
 }
 
 pub mod internet_gateway {
@@ -402,6 +414,11 @@ pub mod system {
     pub use crate::v2025_11_20_00::system::PingStatus;
 }
 
+pub mod system_networking {
+    pub use crate::v2026_06_05_00::system_networking::SystemNetworkingSettings;
+    pub use crate::v2026_06_05_00::system_networking::SystemNetworkingSettingsUpdate;
+}
+
 pub mod timeseries {
     pub use crate::v2025_11_20_00::timeseries::TimeseriesQuery;
 }
@@ -413,10 +430,11 @@ pub mod update {
     pub use crate::v2025_11_20_00::update::TufRepoUpload;
     pub use crate::v2025_11_20_00::update::TufRepoUploadStatus;
     pub use crate::v2025_11_20_00::update::TufSignedRootRole;
-    pub use crate::v2025_11_20_00::update::UpdateStatus;
     pub use crate::v2025_11_20_00::update::UpdatesGetRepositoryParams;
     pub use crate::v2025_11_20_00::update::UpdatesPutRepositoryParams;
     pub use crate::v2025_11_20_00::update::UpdatesTrustRoot;
+
+    pub use crate::v2026_05_20_00::update::UpdateStatus;
 }
 
 pub mod vpc {

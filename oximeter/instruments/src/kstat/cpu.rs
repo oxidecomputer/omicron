@@ -9,6 +9,7 @@ use crate::kstat::Error;
 use crate::kstat::KstatList;
 use crate::kstat::KstatTarget;
 use crate::kstat::hrtime_to_utc;
+use crate::kstat::n_processors;
 use kstat_rs::Data;
 use kstat_rs::Kstat;
 use kstat_rs::Named;
@@ -29,6 +30,11 @@ const CPU_NSEC_PREFIX: &str = "cpu_nsec_";
 ///
 /// These correspond to the `cpu_nsec_*` fields in the `cpu::sys` kstat.
 const CPU_MICROSTATES: &[&str] = &["idle", "user", "kernel", "dtrace", "intr"];
+
+/// The maximum cardinality of the data we produce, per sampling interval.
+pub fn max_cardinality() -> usize {
+    CPU_MICROSTATES.len() * n_processors().unwrap_or(1024)
+}
 
 /// CPU metrics for a sled, tracking microstate statistics across all cores.
 #[derive(Clone, Debug)]
@@ -244,7 +250,7 @@ mod tests {
             sled_revision: SLED_REVISION,
         };
         let cpu = SledCpu::new(target, true);
-        let details = CollectionDetails::never(Duration::from_secs(1));
+        let details = CollectionDetails::never(Duration::from_secs(1), 512);
         let id = sampler.add_target(cpu, details).await.unwrap();
         let samples: Vec<_> = sampler.produce().unwrap().collect();
         assert!(samples.is_empty());
