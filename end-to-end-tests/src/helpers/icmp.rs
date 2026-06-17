@@ -374,6 +374,35 @@ pub fn mcast_ping4_test_run(
     McastReport { group, members }
 }
 
+/// Set `IP_MULTICAST_TTL` on a raw IPv4 socket.
+///
+/// illumos requires this option to be a single byte (`uchar_t`); socket2's
+/// [`Socket::set_multicast_ttl_v4`] passes a four-byte `c_int`, which the kernel
+/// rejects with `EINVAL`. There the option is set directly as a `u8`. Other
+/// platforms accept the `c_int` form, so the socket2 path is used unchanged.
+#[cfg(target_os = "illumos")]
+fn set_multicast_ttl_v4(sock: &Socket, ttl: u32) {
+    use std::os::fd::AsRawFd;
+    let ttl = ttl as u8;
+    let ret = unsafe {
+        libc::setsockopt(
+            sock.as_raw_fd(),
+            libc::IPPROTO_IP,
+            libc::IP_MULTICAST_TTL,
+            std::ptr::from_ref(&ttl).cast(),
+            std::mem::size_of::<u8>() as libc::socklen_t,
+        )
+    };
+    if ret != 0 {
+        panic!("set IP_MULTICAST_TTL: {}", std::io::Error::last_os_error());
+    }
+}
+
+#[cfg(not(target_os = "illumos"))]
+fn set_multicast_ttl_v4(sock: &Socket, ttl: u32) {
+    sock.set_multicast_ttl_v4(ttl).unwrap();
+}
+
 struct McastPinger4 {
     sock: Socket,
     /// ICMP id stamped on every request and matched on replies.
@@ -391,7 +420,7 @@ impl McastPinger4 {
         sock.set_ttl(ttl).unwrap();
         // Multicast egress is governed by IP_MULTICAST_TTL (default 1). Raise
         // it so requests traverse the rack underlay to remote members.
-        sock.set_multicast_ttl_v4(ttl).unwrap();
+        set_multicast_ttl_v4(&sock, ttl);
         // IP_MULTICAST_LOOP is left at its default. As with a real multicast
         // sender, correctness comes from `classify_mcast_reply` discarding
         // anything that is not an echo reply for our stream, not from

@@ -3729,6 +3729,7 @@ dependencies = [
  "internal-dns-types",
  "internet-checksum",
  "ispf",
+ "libc",
  "macaddr",
  "nexus-lockstep-client",
  "omicron-rpaths",

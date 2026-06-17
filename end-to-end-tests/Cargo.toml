@@ -57,3 +57,6 @@ uuid.workspace = true
 [target.'cfg(target_os = "illumos")'.dependencies]
 # See omicron-rpaths for more about the "fmd-adm-sys" dependency.
 fmd-adm-sys.workspace = true
+# IP_MULTICAST_TTL must be set as a one-byte uchar on illumos; socket2 passes a
+# four-byte c_int, so the multicast pinger sets the option directly via libc.
+libc.workspace = true
