@@ -483,7 +483,7 @@ fn plan_rejects_bad_mgd_prefix() {
 #[test]
 fn plan_rejects_ipv6_prefix_with_ipv4_nexthop_in_config() {
     let logctx = dev::test_setup_log(
-        "plan_rejects_ipv6_prefix_with_ipv4_nextho_in_config",
+        "plan_rejects_ipv6_prefix_with_ipv4_nexthop_in_config",
     );
     let log = &logctx.log;
 
