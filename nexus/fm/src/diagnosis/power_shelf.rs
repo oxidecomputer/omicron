@@ -151,8 +151,10 @@ pub fn analyze(
             None => {
                 let mut c =
                     builder.cases.open_case(DiagnosisEngineKind::PowerShelf);
-                // we sure verbed that location!
-                *c.comment_mut() = format!("{location} {verbed}");
+                *c.comment_mut() = format!(
+                    "opened because {location} was {verbed} (in ereport {})",
+                    ereport.id
+                );
                 cases_by_psu
                     .entry(location)
                     .or_insert_with(HashSet::new)
@@ -161,6 +163,7 @@ pub fn analyze(
             }
         };
 
+        // that location sure got verbed!
         case_builder.add_ereport(&ereport, format!("{location} {verbed}"));
         cases_by_id
             .get_mut(&case_builder.id)
