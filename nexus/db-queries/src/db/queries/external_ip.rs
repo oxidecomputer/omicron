@@ -907,6 +907,7 @@ mod tests {
     use nexus_types::deployment::OmicronZoneExternalFloatingIp;
     use nexus_types::deployment::OmicronZoneExternalIp;
     use nexus_types::deployment::OmicronZoneExternalSnatIp;
+    use nexus_types::external_api::instance;
     use nexus_types::external_api::instance::InstanceCreate;
     use nexus_types::external_api::instance::InstanceNetworkInterfaceAttachment;
     use omicron_common::address::IpRange;
@@ -1030,7 +1031,7 @@ mod tests {
                     name: String::from(name).parse().unwrap(),
                     description: format!("instance {}", name)
                 },
-                ncpus: InstanceCpuCount(omicron_common::api::external::InstanceCpuCount(1)).into(),
+                ncpus: InstanceCpuCount(instance::InstanceCpuCount(1)).into(),
                 memory: ByteCount(omicron_common::api::external::ByteCount::from_gibibytes_u32(1)).into(),
                 hostname: "test".parse().unwrap(),
                 ssh_public_keys: None,
@@ -2413,7 +2414,7 @@ mod tests {
                 name: String::from("inst").parse().unwrap(),
                 description: String::from("test instance"),
             },
-            ncpus: InstanceCpuCount(omicron_common::api::external::InstanceCpuCount(1)).into(),
+            ncpus: InstanceCpuCount(instance::InstanceCpuCount(1)).into(),
             memory: ByteCount(omicron_common::api::external::ByteCount::from_gibibytes_u32(1)).into(),
             hostname: "test".parse().unwrap(),
             ssh_public_keys: None,

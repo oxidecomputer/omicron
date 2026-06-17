@@ -78,8 +78,6 @@ use omicron_common::api::external::AddressLot;
 use omicron_common::api::external::AddressLotBlock;
 use omicron_common::api::external::AddressLotCreateResponse;
 use omicron_common::api::external::AddressLotViewResponse;
-use omicron_common::api::external::AffinityGroupMember;
-use omicron_common::api::external::AntiAffinityGroupMember;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Disk;
 use omicron_common::api::external::Error;
@@ -3298,8 +3296,10 @@ impl NexusExternalApi for NexusExternalApiImpl {
             PaginatedByNameOrId<project::OptionalProjectSelector>,
         >,
         path_params: Path<path_params::AffinityGroupPath>,
-    ) -> Result<HttpResponseOk<ResultsPage<AffinityGroupMember>>, HttpError>
-    {
+    ) -> Result<
+        HttpResponseOk<ResultsPage<affinity::AffinityGroupMember>>,
+        HttpError,
+    > {
         let apictx = rqctx.context();
         let handler = async {
             let opctx =
@@ -3341,7 +3341,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
         rqctx: RequestContext<ApiContext>,
         query_params: Query<project::OptionalProjectSelector>,
         path_params: Path<affinity::AffinityInstanceGroupMemberPath>,
-    ) -> Result<HttpResponseOk<AffinityGroupMember>, HttpError> {
+    ) -> Result<HttpResponseOk<affinity::AffinityGroupMember>, HttpError> {
         let apictx = rqctx.context();
         let handler = async {
             let nexus = &apictx.context.nexus;
@@ -3387,7 +3387,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
         rqctx: RequestContext<ApiContext>,
         query_params: Query<project::OptionalProjectSelector>,
         path_params: Path<affinity::AffinityInstanceGroupMemberPath>,
-    ) -> Result<HttpResponseCreated<AffinityGroupMember>, HttpError> {
+    ) -> Result<HttpResponseCreated<affinity::AffinityGroupMember>, HttpError>
+    {
         audit_and_time(&rqctx, |opctx, nexus| async move {
             let path = path_params.into_inner();
             let query = query_params.into_inner();
@@ -3591,8 +3592,10 @@ impl NexusExternalApi for NexusExternalApiImpl {
             PaginatedByNameOrId<project::OptionalProjectSelector>,
         >,
         path_params: Path<path_params::AntiAffinityGroupPath>,
-    ) -> Result<HttpResponseOk<ResultsPage<AntiAffinityGroupMember>>, HttpError>
-    {
+    ) -> Result<
+        HttpResponseOk<ResultsPage<affinity::AntiAffinityGroupMember>>,
+        HttpError,
+    > {
         let apictx = rqctx.context();
         let handler = async {
             let opctx =
@@ -3634,7 +3637,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
         rqctx: RequestContext<ApiContext>,
         query_params: Query<project::OptionalProjectSelector>,
         path_params: Path<affinity::AntiAffinityInstanceGroupMemberPath>,
-    ) -> Result<HttpResponseOk<AntiAffinityGroupMember>, HttpError> {
+    ) -> Result<HttpResponseOk<affinity::AntiAffinityGroupMember>, HttpError>
+    {
         let apictx = rqctx.context();
         let handler = async {
             let nexus = &apictx.context.nexus;
@@ -3680,7 +3684,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
         rqctx: RequestContext<ApiContext>,
         query_params: Query<project::OptionalProjectSelector>,
         path_params: Path<affinity::AntiAffinityInstanceGroupMemberPath>,
-    ) -> Result<HttpResponseCreated<AntiAffinityGroupMember>, HttpError> {
+    ) -> Result<HttpResponseCreated<affinity::AntiAffinityGroupMember>, HttpError>
+    {
         audit_and_time(&rqctx, |opctx, nexus| async move {
             let path = path_params.into_inner();
             let query = query_params.into_inner();
