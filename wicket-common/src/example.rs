@@ -139,7 +139,7 @@ impl ExampleRackSetupData {
                     revision: 5,
                     identifier: "serial 4 5 6".into(),
                 },
-                bootstrap_ip: Some(Ipv6Addr::LOCALHOST),
+                bootstrap_ip: None
             },
         ];
 
