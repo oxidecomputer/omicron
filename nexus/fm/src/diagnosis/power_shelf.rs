@@ -122,8 +122,6 @@ pub fn analyze(
     Ok(())
 }
 
-const NUM_PSUS: usize = 6;
-
 #[derive(
     Copy,
     Clone,
