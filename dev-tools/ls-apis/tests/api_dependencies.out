@@ -1,7 +1,3 @@
-Bootstrap Agent (client: bootstrap-agent-client)
-    consumed by: omicron-sled-agent (omicron/sled-agent) via 1 path
-    consumed by: wicketd (omicron/wicketd) via 1 path
-
 Bootstrap Agent Lockstep API (client: bootstrap-agent-lockstep-client)
     consumed by: wicketd (omicron/wicketd) via 2 paths
 
