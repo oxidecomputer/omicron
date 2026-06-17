@@ -193,21 +193,19 @@ pub(super) fn analyze(builder: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
             }
         };
 
-        let disk_id = parsed_case.physical_disk_id;
-        if cases.insert_unique(parsed_case).is_err() {
+        if let Err(dup) = cases.insert_unique(parsed_case) {
             // A case for this disk is already present; keep it and close this
             // one. The disk id is the only key that can collide here, since
-            // case ids are unique across `open_cases()`.
-            let kept_case_id = cases
-                .get2(&disk_id)
-                .expect("insert_unique failed, so a case for this disk exists")
-                .case_id;
+            // case ids are unique across `open_cases()`, so there is exactly
+            // one duplicate.
+            let kept = dup.duplicates()[0];
             builder
                 .cases
                 .case_mut(&case.id)
                 .expect("case_id came from builder's open cases")
                 .close(format!(
-                    "duplicate of case {kept_case_id} for disk {disk_id}",
+                    "duplicate of case {} for disk {}",
+                    kept.case_id, kept.physical_disk_id,
                 ));
         }
     }
