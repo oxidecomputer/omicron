@@ -11,7 +11,7 @@ use omicron_common::{
     address::Ipv6Subnet,
     cmd::{CmdError, fatal},
 };
-use sled_hardware_types::Baseboard;
+use sled_hardware_types::{Baseboard, BaseboardId};
 use std::net::{Ipv6Addr, SocketAddrV6};
 use std::path::PathBuf;
 use wicketd::{Config, Server, SmfConfigValues};
@@ -41,9 +41,13 @@ enum Args {
         #[clap(long, action)]
         nexus_proxy_address: SocketAddrV6,
 
-        /// Path to a file containing our baseboard information
+        /// The part number of our baseboard
         #[clap(long)]
-        baseboard_file: Option<PathBuf>,
+        baseboard_part: String,
+
+        /// The serial number of our baseboard
+        #[clap(long)]
+        baseboard_serial: String,
 
         /// The address of the bootstrap agent lockstep server
         #[clap(long, action)]
@@ -90,29 +94,16 @@ async fn do_run() -> Result<(), CmdError> {
             artifact_address,
             mgs_address,
             nexus_proxy_address,
-            baseboard_file,
+            baseboard_part,
+            baseboard_serial,
             read_smf_config,
             rack_subnet,
             bootstrap_agent_lockstep_address,
         } => {
-            // A baseboard is a strict requirement for the switch zone to work.
-            let baseboard = if let Some(baseboard_file) = baseboard_file {
-                let baseboard_file = std::fs::read_to_string(baseboard_file)
-                    .map_err(|e| CmdError::Failure(anyhow!(e)))?;
-                let baseboard: Baseboard =
-                    serde_json::from_str(&baseboard_file)
-                        .map_err(|e| CmdError::Failure(anyhow!(e)))?;
-                baseboard
-            } else {
-                return Err(CmdError::Failure(anyhow!(
-                    "Missing baseboard file in switch zone"
-                )));
+            let baseboard_id = BaseboardId {
+                part_number: baseboard_part,
+                serial_number: baseboard_serial,
             };
-
-            // It was a mistake to use `Baseboard` all throughout
-            // wicket/wicketd. We convert to `BaseboardId` for better
-            // compatibility with the rest of the stack going forward.
-            let baseboard_id = baseboard.into();
 
             let config = Config::from_file(&config_file_path)
                 .with_context(|| format!("failed to parse {config_file_path}"))

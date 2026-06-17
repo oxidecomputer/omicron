@@ -97,7 +97,6 @@ use sled_agent_types::inventory::{
 use sled_agent_types::resolvable_files::{
     MupdateOverrideReadError, PreparedOmicronZone,
 };
-use sled_agent_types::sled::SWITCH_ZONE_BASEBOARD_FILE;
 use sled_agent_types::sled::ThisSledSwitchZoneUnderlayIpAddr;
 use sled_agent_types::system_networking::SystemNetworkingConfig;
 use sled_agent_types::uplink::HostPortConfig;
@@ -2689,9 +2688,14 @@ impl ServiceManager {
                         ),
                     )
                     .add_property(
-                        "baseboard-file",
+                        "baseboard-part",
                         "astring",
-                        SWITCH_ZONE_BASEBOARD_FILE,
+                        baseboard.model(),
+                    )
+                    .add_property(
+                        "baseboard-serial",
+                        "astring",
+                        baseboard.identifier(),
                     )
                     .add_property(
                         "mgs-address",
