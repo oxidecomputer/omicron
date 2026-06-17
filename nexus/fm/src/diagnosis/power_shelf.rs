@@ -20,6 +20,7 @@ use serde::Deserialize;
 use slog_error_chain::InlineErrorChain;
 use std::fmt;
 use std::sync::Arc;
+use strum::VariantArray;
 
 pub const PSU_REMOVE_EREPORT: &str = "hw.remove.psu";
 pub const PSU_INSERT_EREPORT: &str = "hw.insert.psu";
@@ -41,7 +42,8 @@ pub fn analyze(
         .open_cases()
         .iter()
         .filter(|c| c.metadata.de == DiagnosisEngineKind::PowerShelf);
-    let mut cases = BiHashMap::<PsuCase>::new();
+
+    let mut cases_by_id = IdOrdMap::new();
     'cases: for case in parent_cases {
         // Reconstruct the case by looking at its ereports:
         // - the ereports should all be associated with a single PSC at this
@@ -81,17 +83,14 @@ pub fn analyze(
                     continue 'cases;
                 }
             };
-            match cases.entry(&case.id, &ereport.location) {
-                bi_hash_map::Entry::Occupied(entry) => {
-                    todo!()
-                }
-                bi_hash_map::Entry::Vacant(entry) => {
-                    let mut case = PsuCase::new(case.id, ereport.location);
-                    case.insert_ereport(ereport)
-                        .expect("case was created with this location");
-                    entry.insert(case);
-                }
-            }
+            cases_by_id
+                .entry(&case.id)
+                .or_insert_with(|| PscCase::new(case.id))
+                .insert_ereport(ereport)
+                .expect(
+                    "ereport can't possibly be a duplicate because it came \
+                     from the case's existing ereport set",
+                );
         }
     }
 
@@ -123,44 +122,94 @@ pub fn analyze(
     Ok(())
 }
 
+const NUM_PSUS: usize = 6;
+
+#[derive(
+    Copy,
+    Clone,
+    Eq,
+    PartialEq,
+    Hash,
+    Debug,
+    strum::VariantArray,
+    strum::FromRepr,
+)]
+#[repr(u8)]
+enum PsuSlot {
+    Psu0 = 0,
+    Psu1 = 1,
+    Psu2 = 2,
+    Psu3 = 3,
+    Psu4 = 4,
+    Psu5 = 5,
+}
+
+impl fmt::Display for PsuSlot {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Display::fmt(&(*self as u8), f)
+    }
+}
+
+#[derive(Copy, Clone, Eq, PartialEq, Hash, Default)]
+struct PsuSet(u8);
+
+impl PsuSet {
+    fn contains(&self, slot: PsuSlot) -> bool {
+        (self.0 & PsuSet::bit(slot)) != 0
+    }
+
+    fn insert(&mut self, slot: PsuSlot) {
+        self.0 |= PsuSet::bit(slot);
+    }
+
+    fn remove(&mut self, slot: PsuSlot) {
+        self.0 &= !PsuSet::bit(slot);
+    }
+
+    fn bit(slot: PsuSlot) -> u8 {
+        1 << slot as u8
+    }
+
+    fn iter(&self) -> impl Iterator<Item = PsuSlot> + '_ {
+        PsuSlot::VARIANTS.iter().copied().filter(|slot| self.contains(*slot))
+    }
+}
+impl fmt::Debug for PsuSet {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_set().entries(self.iter()).finish()
+    }
+}
+
 #[derive(Debug)]
-struct PsuCase {
+struct PscCase {
     case_id: CaseUuid,
-    location: PsuLocation,
+    impacted: [PsuSet; 2],
     restarts: IdHashMap<Restart>,
 }
 
-impl BiHashItem for PsuCase {
-    type K1<'a> = &'a CaseUuid;
-    type K2<'a> = &'a PsuLocation;
+impl IdOrdItem for PscCase {
+    type Key<'a> = &'a CaseUuid;
 
-    fn key1(&self) -> Self::K1<'_> {
+    fn key(&self) -> Self::Key<'_> {
         &self.case_id
     }
 
-    fn key2(&self) -> Self::K2<'_> {
-        &self.location
-    }
-
-    bi_upcast!();
+    id_upcast!();
 }
 
-impl PsuCase {
-    fn new(case_id: CaseUuid, location: PsuLocation) -> Self {
-        Self { case_id, location, restarts: IdHashMap::default() }
+impl PscCase {
+    fn new(case_id: CaseUuid) -> Self {
+        Self {
+            case_id,
+            impacted: [PsuSet::default(), PsuSet::default()],
+            restarts: IdHashMap::default(),
+        }
     }
 
     fn insert_ereport(&mut self, ereport: PsuEreport) -> anyhow::Result<()> {
         let ereport_id = ereport.ereport.id;
-        anyhow::ensure!(
-            ereport.location == self.location,
-            "ereport {ereport_id} does not belong in case {}: it refers to {} \
-             but this case is about {}",
-            self.case_id,
-            ereport.location,
-            self.location,
-        );
         let restart_id = ereport_id.restart_id;
+        let location = ereport.location;
         self.restarts
             .entry(&restart_id)
             .or_insert_with(|| Restart {
@@ -174,6 +223,7 @@ impl PsuCase {
                     "an ereport with id {ereport_id} already exists: {e}"
                 )
             })?;
+        self.impacted[location.shelf as usize].insert(location.slot);
         Ok(())
     }
 }
@@ -234,7 +284,10 @@ impl PsuEreport {
         let data: PsuEreportData =
             serde_json::from_value(ereport.data.report.clone())
                 .context("invalid data for a PSC ereport")?;
-        let location = PsuLocation { shelf, slot: data.slot };
+        let slot = PsuSlot::from_repr(data.slot).ok_or_else(|| {
+            anyhow::anyhow!("PSU slot {} out of range (must be 0-5)", data.slot)
+        })?;
+        let location = PsuLocation { shelf, slot };
         Ok(Self { kind, data, location, ereport: ereport.clone() })
     }
 }
@@ -256,7 +309,7 @@ struct PsuEreportData {
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 struct PsuLocation {
     shelf: u8,
-    slot: u8,
+    slot: PsuSlot,
 }
 
 impl fmt::Display for PsuLocation {
@@ -424,7 +477,7 @@ mod tests {
         assert_eq!(parsed.kind, expected_class);
         assert_eq!(
             parsed.location,
-            PsuLocation { shelf: SHELF as u8, slot: 4 }
+            PsuLocation { shelf: SHELF as u8, slot: PsuSlot::Psu4 }
         );
         assert_eq!(parsed.data, expected_data);
         logctx.cleanup_successful();
