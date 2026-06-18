@@ -7716,7 +7716,15 @@ CREATE TABLE IF NOT EXISTS omicron.public.fm_sitrep (
     -- The earliest time at which an inventory collection may have started if
     -- it is to be considered newer than the inventory collection that was used
     -- to produce this sitrep.
-    next_inv_min_time_started TIMESTAMPTZ NOT NULL
+    next_inv_min_time_started TIMESTAMPTZ NOT NULL,
+
+    -- Generation counter for alerts: `SitrepBuilder` increments this each time
+    -- it builds a sitrep whose alert request set differs from its parent's.
+    -- Alert creation compares it against the latest sitrep's value, rejecting
+    -- inserts from a rendezvous task working from a stale sitrep. (It is the
+    -- `rendezvous_alert_created` marker, not this generation, that prevents a
+    -- deleted alert from being resurrected.)
+    alert_generation INT8 NOT NULL
 );
 
 -- Index for looking up all potential children of a given parent sitrep.
@@ -7766,7 +7774,8 @@ CREATE TABLE IF NOT EXISTS omicron.public.fm_sitrep_analysis_report (
 
 
 CREATE TYPE IF NOT EXISTS omicron.public.diagnosis_engine AS ENUM (
-    'power_shelf'
+    'power_shelf',
+    'physical_disk'
 );
 
 CREATE TABLE IF NOT EXISTS omicron.public.fm_case (
@@ -7792,6 +7801,59 @@ CREATE TABLE IF NOT EXISTS omicron.public.fm_case (
 CREATE INDEX IF NOT EXISTS
     lookup_fm_cases_for_sitrep
 ON omicron.public.fm_case (sitrep_id);
+
+-- Per-engine "facts" attached to a case. Each diagnosis engine persists its
+-- facts in its own table (one table per engine), with a fact's content
+-- represented as typed columns. The `fm_fact_physical_disk` table below holds
+-- the physical-disk engine's facts.
+CREATE TYPE IF NOT EXISTS omicron.public.fm_fact_physical_disk_kind AS ENUM (
+    'zpool_unhealthy'
+);
+
+CREATE TABLE IF NOT EXISTS omicron.public.fm_fact_physical_disk (
+    -- Stable UUID for this fact across sitreps.
+    id UUID NOT NULL,
+    -- Sitrep this row belongs to.
+    sitrep_id UUID NOT NULL,
+    -- UUID of the case this fact attaches to.
+    case_id UUID NOT NULL,
+    -- UUID of the sitrep in which this fact was first added. Preserved
+    -- unchanged when the fact is carried forward into a child sitrep, so
+    -- this can be used to tell at a glance how long a fact has been
+    -- attached to its case. Debug-only.
+    created_sitrep_id UUID NOT NULL,
+    -- Free-form, debug-only comment.
+    comment TEXT NOT NULL,
+
+    -- The physical disk this fact is about. Common to every kind of
+    -- physical-disk fact (the case is keyed by it), so it is always present
+    -- regardless of `kind`.
+    physical_disk_id UUID NOT NULL,
+
+    -- Which physical-disk fact this row represents. The columns below are
+    -- populated according to this discriminant (see the CHECK constraint).
+    kind omicron.public.fm_fact_physical_disk_kind NOT NULL,
+
+    -- Columns for a 'zpool_unhealthy' fact. NULL for any other kind.
+    zpool_id UUID,
+    last_seen_health omicron.public.inv_zpool_health,
+    observed_in_inv UUID,
+    time_observed TIMESTAMPTZ,
+
+    PRIMARY KEY (sitrep_id, id),
+
+    -- Each variant validates that the columns it expects are present.
+    -- Future variants should add their own constraint like this one,
+    -- leaving existing constraints untouched.
+    CONSTRAINT zpool_unhealthy_columns_present CHECK (
+        kind != 'zpool_unhealthy' OR (
+            zpool_id IS NOT NULL
+            AND last_seen_health IS NOT NULL
+            AND observed_in_inv IS NOT NULL
+            AND time_observed IS NOT NULL
+        )
+    )
+);
 
 CREATE TABLE IF NOT EXISTS omicron.public.fm_ereport_in_case (
     -- ID of this association. When an ereport is assigned to a case, that
@@ -7946,6 +8008,25 @@ CREATE TABLE IF NOT EXISTS omicron.public.fm_support_bundle_request_data_selecti
 
     PRIMARY KEY (sitrep_id, request_id),
     CHECK (start_time IS NULL OR end_time IS NULL OR start_time <= end_time)
+);
+
+-- Marker written by `SitrepGuardedInsert` atomically with a corresponding
+-- alert row when FM rendezvous successfully creates an alert. This serves as
+-- a guard against resurrection: if the alert is deleted after its initial
+-- creation, but an executing sitrep still contains an fm_alert_request for the
+-- same alert, this marker prevents `SitrepGuardedInsert` from re-creating
+-- the alert.
+--
+-- A marker can be GC'ed in FM rendezvous when:
+--   * its alert_id is not present in any fm_alert_request in the executing
+--     sitrep,
+--   * its created_at_generation is less than that of the alert_generation on
+--     the sitrep being executed.
+-- Taken together, these two conditions ensure that no sitrep will ever attempt
+-- to resurrect a deleted alert, meaning the marker is no longer needed.
+CREATE TABLE IF NOT EXISTS omicron.public.rendezvous_alert_created (
+    alert_id UUID PRIMARY KEY,
+    created_at_generation INT8 NOT NULL
 );
 
 /*
@@ -8778,7 +8859,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '269.0.0', NULL)
+    (TRUE, NOW(), NOW(), '271.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;
