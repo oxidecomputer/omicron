@@ -1178,11 +1178,12 @@ mod test {
         object_create,
     };
     use nexus_test_utils_macros::nexus_test;
+    use nexus_types::external_api::instance::InstanceCpuCount;
     use nexus_types::external_api::{instance as instance_types, networking};
     use nexus_types::identity::Resource;
     use nexus_types_versions::latest;
     use omicron_common::api::external::{
-        ByteCount, IdentityMetadataCreateParams, InstanceCpuCount, Name,
+        ByteCount, IdentityMetadataCreateParams, Name,
     };
     use omicron_test_utils::dev::poll;
     use sled_agent_types::early_networking::SwitchSlot;

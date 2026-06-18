@@ -31,6 +31,7 @@ use serde_json::json;
 use slog::debug;
 use slog::info;
 use slog::warn;
+use slog_error_chain::InlineErrorChain;
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 
@@ -226,12 +227,20 @@ impl BundleCollection {
             // Only finish if we've exhausted all possible steps and joined
             // all spawned work.
             if steps.is_empty() {
-                // Write trace file before returning
+                // Write trace and report files before returning.
                 if let Err(err) = self.write_trace_file(output, &report).await {
                     warn!(
                         self.log,
                         "Failed to write trace file";
-                        "error" => ?err
+                        InlineErrorChain::new(err.as_ref())
+                    );
+                }
+                if let Err(err) = self.write_report_file(output, &report).await
+                {
+                    warn!(
+                        self.log,
+                        "Failed to write report file";
+                        InlineErrorChain::new(err.as_ref())
                     );
                 }
                 return report;
@@ -320,6 +329,37 @@ impl BundleCollection {
             "Wrote trace file";
             "path" => %trace_path,
             "num_events" => trace.trace_events.len()
+        );
+
+        Ok(())
+    }
+
+    // Write the collection report as JSON into the bundle so anyone who
+    // unzips it later can see what was collected, including any per-step
+    // partial-success details.
+    async fn write_report_file(
+        &self,
+        output: &Utf8TempDir,
+        report: &SupportBundleCollectionReport,
+    ) -> anyhow::Result<()> {
+        let meta_dir = output.path().join("meta");
+        tokio::fs::create_dir_all(&meta_dir).await.with_context(|| {
+            format!("failed to create meta directory {meta_dir}")
+        })?;
+
+        let report_path = meta_dir.join("report.json");
+        let report_content = serde_json::to_string_pretty(report)
+            .context("failed to serialize collection report")?;
+
+        tokio::fs::write(&report_path, report_content).await.with_context(
+            || format!("failed to write report file to {report_path}"),
+        )?;
+
+        info!(
+            self.log,
+            "Wrote report file";
+            "path" => %report_path,
+            "num_steps" => report.steps.len(),
         );
 
         Ok(())

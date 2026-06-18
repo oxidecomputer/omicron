@@ -38,6 +38,7 @@ omicron-workspace-hack.workspace = true
 
 [dev-dependencies]
 omicron-test-utils.workspace = true
+nexus-inventory.workspace = true
 nexus-reconfigurator-planning.workspace = true
 ereport-types.workspace = true
 uuid.workspace = true

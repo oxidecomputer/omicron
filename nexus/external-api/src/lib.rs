@@ -4696,7 +4696,10 @@ pub trait NexusExternalApi {
             PaginatedByNameOrId<latest::project::OptionalProjectSelector>,
         >,
         path_params: Path<latest::path_params::AffinityGroupPath>,
-    ) -> Result<HttpResponseOk<ResultsPage<AffinityGroupMember>>, HttpError>;
+    ) -> Result<
+        HttpResponseOk<ResultsPage<latest::affinity::AffinityGroupMember>>,
+        HttpError,
+    >;
 
     /// Fetch affinity group member
     #[endpoint {
@@ -4708,7 +4711,7 @@ pub trait NexusExternalApi {
         rqctx: RequestContext<Self::Context>,
         query_params: Query<latest::project::OptionalProjectSelector>,
         path_params: Path<latest::affinity::AffinityInstanceGroupMemberPath>,
-    ) -> Result<HttpResponseOk<AffinityGroupMember>, HttpError>;
+    ) -> Result<HttpResponseOk<latest::affinity::AffinityGroupMember>, HttpError>;
 
     /// Add member to affinity group
     #[endpoint {
@@ -4720,7 +4723,10 @@ pub trait NexusExternalApi {
         rqctx: RequestContext<Self::Context>,
         query_params: Query<latest::project::OptionalProjectSelector>,
         path_params: Path<latest::affinity::AffinityInstanceGroupMemberPath>,
-    ) -> Result<HttpResponseCreated<AffinityGroupMember>, HttpError>;
+    ) -> Result<
+        HttpResponseCreated<latest::affinity::AffinityGroupMember>,
+        HttpError,
+    >;
 
     /// Remove member from affinity group
     #[endpoint {
@@ -4813,7 +4819,10 @@ pub trait NexusExternalApi {
             PaginatedByNameOrId<latest::project::OptionalProjectSelector>,
         >,
         path_params: Path<latest::path_params::AntiAffinityGroupPath>,
-    ) -> Result<HttpResponseOk<ResultsPage<AntiAffinityGroupMember>>, HttpError>;
+    ) -> Result<
+        HttpResponseOk<ResultsPage<latest::affinity::AntiAffinityGroupMember>>,
+        HttpError,
+    >;
 
     /// Fetch anti-affinity group member
     #[endpoint {
@@ -4827,7 +4836,10 @@ pub trait NexusExternalApi {
         path_params: Path<
             latest::affinity::AntiAffinityInstanceGroupMemberPath,
         >,
-    ) -> Result<HttpResponseOk<AntiAffinityGroupMember>, HttpError>;
+    ) -> Result<
+        HttpResponseOk<latest::affinity::AntiAffinityGroupMember>,
+        HttpError,
+    >;
 
     /// Add member to anti-affinity group
     #[endpoint {
@@ -4841,7 +4853,10 @@ pub trait NexusExternalApi {
         path_params: Path<
             latest::affinity::AntiAffinityInstanceGroupMemberPath,
         >,
-    ) -> Result<HttpResponseCreated<AntiAffinityGroupMember>, HttpError>;
+    ) -> Result<
+        HttpResponseCreated<latest::affinity::AntiAffinityGroupMember>,
+        HttpError,
+    >;
 
     /// Remove member from anti-affinity group
     #[endpoint {

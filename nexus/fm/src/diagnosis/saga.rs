@@ -632,6 +632,8 @@ mod tests {
                 time_created: Utc::now(),
                 next_inv_min_time_started: Utc::now(),
                 comment: String::new(),
+                alert_generation:
+                    omicron_common::api::external::Generation::new(),
             },
             cases: case_map,
             ereports_by_id: Default::default(),

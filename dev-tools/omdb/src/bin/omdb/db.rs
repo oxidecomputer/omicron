@@ -139,6 +139,7 @@ use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::DiskFilter;
 use nexus_types::deployment::SledFilter;
 use nexus_types::external_api::disk::BlockSize;
+use nexus_types::external_api::instance::InstanceState;
 use nexus_types::external_api::physical_disk::{
     PhysicalDiskPolicy, PhysicalDiskState,
 };
@@ -151,7 +152,6 @@ use nexus_types::inventory::CollectionDisplayCliFilter;
 use omicron_common::api::external;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Generation;
-use omicron_common::api::external::InstanceState;
 use omicron_common::api::external::MacAddr;
 use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::DatasetUuid;
