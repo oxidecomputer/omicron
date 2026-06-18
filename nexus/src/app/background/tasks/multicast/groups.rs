@@ -761,53 +761,74 @@ impl MulticastGroupReconciler {
         let source_filter =
             filter_state_map.get(&group.id()).cloned().unwrap_or_default();
 
-        // Check if DPD state matches DB state (read-before-write for drift detection)
-        let needs_update = match dataplane_client
-            .fetch_external_group_for_drift_check(group.multicast_ip.ip())
+        // Fetch the underlay group up front. The drift check verifies its
+        // replication entry on every switch, and the update path below reuses
+        // the same record.
+        let underlay_group = self
+            .datastore
+            .underlay_multicast_group_fetch(opctx, underlay_group_id)
+            .await
+            .context("failed to fetch underlay group for drift check")?;
+
+        // Check if DPD state matches DB state (read-before-write for drift
+        // detection). The check also reports which switch currently owns the
+        // entry, threaded into the update below so it elects the same switch.
+        let (needs_update, incumbent_switch) = match dataplane_client
+            .fetch_external_group_for_drift_check(
+                group_id,
+                group.multicast_ip.ip(),
+                underlay_group.multicast_ip.ip(),
+            )
             .await
         {
-            Ok(Some(dpd_group)) => {
-                let tag_matches = dpd_state_matches_tag(&dpd_group, group);
-                let sources_match = dpd_state_matches_sources(
-                    &dpd_group,
-                    &source_filter,
-                    group,
-                );
+            Ok(check) => {
+                let needs_update = match &check.elected_config {
+                    Some(dpd_group) => {
+                        let tag_matches =
+                            dpd_state_matches_tag(dpd_group, group);
+                        let sources_match = dpd_state_matches_sources(
+                            dpd_group,
+                            &source_filter,
+                            group,
+                        );
 
-                let needs_update = !tag_matches || !sources_match;
+                        let needs_update = !tag_matches || !sources_match;
 
-                if needs_update {
-                    debug!(
-                        opctx.log,
-                        "detected DPD state mismatch for active group";
-                        "group_id" => %group.id(),
-                        "tag_matches" => tag_matches,
-                        "sources_match" => sources_match
-                    );
-                }
+                        if needs_update {
+                            debug!(
+                                opctx.log,
+                                "detected DPD state mismatch for active group";
+                                "group_id" => %group.id(),
+                                "tag_matches" => tag_matches,
+                                "sources_match" => sources_match
+                            );
+                        }
 
-                needs_update
-            }
-            Ok(None) => {
-                // Either no switch has the group, or the switches do not agree
-                // on it. Both cases are resolved by rewriting the group on
-                // every switch.
-                debug!(
-                    opctx.log,
-                    "active group absent from DPD or inconsistent across switches, will update";
-                    "group_id" => %group.id()
-                );
-                true
+                        needs_update
+                    }
+                    None => {
+                        // Absent or misplaced in DPD, so re-issue the update.
+                        debug!(
+                            opctx.log,
+                            "active group not correctly placed in DPD, will update";
+                            "group_id" => %group.id()
+                        );
+                        true
+                    }
+                };
+
+                (needs_update, check.incumbent_switch)
             }
             Err(e) => {
-                // Error fetching from DPD -> log and retry
+                // Error fetching from DPD -> log and retry. Without an
+                // observed owner the update falls back to the hash election.
                 warn!(
                     opctx.log,
                     "error fetching active group from DPD, will retry update";
                     "group_id" => %group.id(),
                     "error" => %e
                 );
-                true
+                (true, None)
             }
         };
 
@@ -826,15 +847,6 @@ impl MulticastGroupReconciler {
                 "multicast_ip" => %group.multicast_ip
             );
 
-            // Fetch underlay group for the update
-            let underlay_group = self
-                .datastore
-                .underlay_multicast_group_fetch(opctx, underlay_group_id)
-                .await
-                .context(
-                    "failed to fetch underlay group for drift correction",
-                )?;
-
             // Direct dataplane call for drift correction
             // If update fails, we leave existing state and retry on next RPW cycle.
             match dataplane_client
@@ -843,10 +855,11 @@ impl MulticastGroupReconciler {
                     underlay_group: &underlay_group,
                     new_name: group.name().as_str(),
                     source_filter: &source_filter,
+                    incumbent_switch,
                 })
                 .await
             {
-                Ok(_) => {
+                Ok((_, _, elected_switch)) => {
                     info!(
                         opctx.log,
                         "drift correction completed for active group";
@@ -857,9 +870,15 @@ impl MulticastGroupReconciler {
                     dpd_synced = true;
 
                     // Propagate M2P/forwarding to member sleds after DPD
-                    // sync to ensure OPTE state is also consistent.
+                    // sync to ensure OPTE state is also consistent. Pass the
+                    // switch that now owns the external entry so the egress
+                    // next hop co-locates with it.
                     if let Err(e) = sled_client
-                        .propagate_m2p_and_forwarding(opctx, group)
+                        .propagate_m2p_and_forwarding(
+                            opctx,
+                            group,
+                            Some(elected_switch),
+                        )
                         .await
                     {
                         warn!(
@@ -889,9 +908,12 @@ impl MulticastGroupReconciler {
             dpd_synced = true;
 
             // Even when DPD is in sync, propagate M2P/forwarding to
-            // member sleds to correct any sled-level drift.
-            if let Err(e) =
-                sled_client.propagate_m2p_and_forwarding(opctx, group).await
+            // member sleds to correct any sled-level drift. The entry is
+            // correctly placed, so the observed owner is the elected switch,
+            // and the egress next hop co-locates with it.
+            if let Err(e) = sled_client
+                .propagate_m2p_and_forwarding(opctx, group, incumbent_switch)
+                .await
             {
                 warn!(
                     opctx.log,

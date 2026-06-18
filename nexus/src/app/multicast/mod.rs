@@ -48,10 +48,13 @@
 //!
 //! [`UNDERLAY_MULTICAST_SUBNET`]: omicron_common::address::UNDERLAY_MULTICAST_SUBNET
 
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 use std::net::{IpAddr, Ipv6Addr};
 use std::sync::Arc;
 
 use ref_cast::RefCast;
+use sled_agent_types::early_networking::SwitchSlot;
 use slog::{debug, error};
 
 use super::MAX_MULTICAST_GROUPS_PER_INSTANCE;
@@ -1386,10 +1389,73 @@ pub(crate) fn map_external_to_underlay_ip_impl(
     IpAddr::V6(Ipv6Addr::from(underlay.to_be_bytes()))
 }
 
+/// Elect a single switch to own a multicast group's ingress and forwarding.
+///
+/// A multicast packet for a group is replicated by exactly one switch so each
+/// member sled receives a single copy. The external NAT ingress
+/// (external-sourced delivery, programmed in [`dataplane`]) and the sled
+/// forwarding next hop (guest-sourced egress, programmed in [`sled`]) each
+/// elect through this helper. Co-location of the two on the same switch is not
+/// required for correctness, since the underlay output interface list is
+/// programmed on every switch and only the NAT ingress entry is gated to one,
+/// but both sites prefer their respective incumbent so a stable topology keeps
+/// them together.
+///
+/// The switch is chosen by hashing the group UUID over the slot-ordered
+/// candidate set. Ordering by slot keeps the choice deterministic across
+/// reconciliation passes and Nexus instances. The candidate set is the live
+/// switches, so losing one re-elects the remaining switch on the next pass, a
+/// failover without steady-state duplication.
+///
+/// The candidate set tracks switch liveness, so a switch rebooting and
+/// rejoining would otherwise re-hash and move ownership even though nothing
+/// about the group changed. To avoid that needless churn, `incumbent_switch`
+/// carries the switch that currently owns the entry, observed from the
+/// dataplane and never persisted. When that switch is still in the candidate
+/// set it is kept, so ownership moves only when the incumbent actually leaves.
+/// Callers pass `None` when there is no single current owner (initial creation,
+/// failover with the owner gone, or an ambiguous split where more than one
+/// switch holds the entry), which falls back to the hash.
+///
+/// # Returns
+///
+/// `None` when no switches are available.
+///
+/// [`dataplane`]: dataplane
+/// [`sled`]: sled
+pub(crate) fn select_switch_slot(
+    group_id: MulticastGroupUuid,
+    available: &[SwitchSlot],
+    incumbent_switch: Option<SwitchSlot>,
+) -> Option<SwitchSlot> {
+    if available.is_empty() {
+        return None;
+    }
+
+    if let Some(incumbent_switch) = incumbent_switch {
+        if available.contains(&incumbent_switch) {
+            return Some(incumbent_switch);
+        }
+    }
+
+    let mut ordered = available.to_vec();
+    ordered.sort_unstable();
+
+    let mut hasher = DefaultHasher::new();
+    group_id.hash(&mut hasher);
+    let idx = (hasher.finish() as usize) % ordered.len();
+    Some(ordered[idx])
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::net::{Ipv4Addr, Ipv6Addr};
+
+    // Distinct random groups sampled per election test. Group UUIDs are
+    // uniform, so a modest sample exercises the hash across inputs rather than
+    // a single fixed outcome.
+    const HASH_SAMPLES: usize = 32;
 
     #[test]
     fn test_is_ssm_address() {
@@ -1464,5 +1530,99 @@ mod tests {
             generate_group_name_from_ip(v6_ssm).unwrap().as_str(),
             "mcast-ff3e-0-0-0-0-0-0-abcd"
         );
+    }
+
+    #[test]
+    fn select_switch_slot_failover_re_elects_remaining() {
+        // When the elected switch leaves the candidate set, the remaining
+        // switch is elected so a group fails over without operator action.
+        let both = [SwitchSlot::Switch0, SwitchSlot::Switch1];
+        for _ in 0..HASH_SAMPLES {
+            let group_id =
+                MulticastGroupUuid::from_untyped_uuid(uuid::Uuid::new_v4());
+            let elected = select_switch_slot(group_id, &both, None).unwrap();
+            let remaining_switches: Vec<SwitchSlot> =
+                both.iter().copied().filter(|s| *s != elected).collect();
+            assert_eq!(
+                select_switch_slot(group_id, &remaining_switches, None),
+                remaining_switches.first().copied()
+            );
+        }
+    }
+
+    #[test]
+    fn select_switch_slot_keeps_reachable_incumbent() {
+        // A switch rejoining the candidate set must not move ownership: when
+        // the incumbent is still reachable it is kept regardless of the hash.
+        let both = [SwitchSlot::Switch0, SwitchSlot::Switch1];
+        for _ in 0..HASH_SAMPLES {
+            let group_id =
+                MulticastGroupUuid::from_untyped_uuid(uuid::Uuid::new_v4());
+            let hashed = select_switch_slot(group_id, &both, None).unwrap();
+            let other = *both.iter().find(|s| **s != hashed).unwrap();
+            // The non-hashed switch, named as incumbent, is preferred over the
+            // hash result.
+            assert_eq!(
+                select_switch_slot(group_id, &both, Some(other)),
+                Some(other)
+            );
+            // A reachable incumbent that already matches the hash is kept.
+            assert_eq!(
+                select_switch_slot(group_id, &both, Some(hashed)),
+                Some(hashed)
+            );
+        }
+    }
+
+    #[test]
+    fn select_switch_slot_drops_unreachable_incumbent() {
+        // When the incumbent has left the candidate set, election falls back
+        // to the hash so the group fails over to a reachable switch.
+        let only = [SwitchSlot::Switch1];
+        for _ in 0..HASH_SAMPLES {
+            let group_id =
+                MulticastGroupUuid::from_untyped_uuid(uuid::Uuid::new_v4());
+            assert_eq!(
+                select_switch_slot(group_id, &only, Some(SwitchSlot::Switch0)),
+                Some(SwitchSlot::Switch1)
+            );
+        }
+    }
+
+    #[test]
+    fn select_switch_slot_rejoin_keeps_failover_owner() {
+        // Drive the full failover sequence, feeding each step the owner the
+        // previous step observed. A switch rebooting and rejoining must not
+        // move ownership back: the group stays on the switch that took over.
+        let both = [SwitchSlot::Switch0, SwitchSlot::Switch1];
+        for _ in 0..HASH_SAMPLES {
+            let group_id =
+                MulticastGroupUuid::from_untyped_uuid(uuid::Uuid::new_v4());
+
+            // Initial placement with no prior owner.
+            let initial = select_switch_slot(group_id, &both, None).unwrap();
+
+            // The owner reboots and leaves the candidate set. With the stale
+            // owner unreachable, the election falls back to the remaining
+            // switch.
+            let remaining_switches: Vec<SwitchSlot> =
+                both.iter().copied().filter(|s| *s != initial).collect();
+            let failover = select_switch_slot(
+                group_id,
+                &remaining_switches,
+                Some(initial),
+            )
+            .unwrap();
+            assert_eq!(Some(failover), remaining_switches.first().copied());
+            assert_ne!(failover, initial);
+
+            // The original switch rejoins. The failover owner is still the
+            // observed owner and remains reachable, so it is kept rather
+            // than re-hashed back to the original.
+            assert_eq!(
+                select_switch_slot(group_id, &both, Some(failover)),
+                Some(failover)
+            );
+        }
     }
 }

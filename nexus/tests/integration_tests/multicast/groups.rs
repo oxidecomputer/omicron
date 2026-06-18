@@ -50,6 +50,7 @@ use nexus_types::external_api::multicast::{
     MulticastGroupMember,
 };
 use nexus_types::external_api::probe::ProbeCreate;
+use omicron_common::address::MAX_SOURCE_IPS_PER_MEMBER;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::{Name, Probe};
 use omicron_uuid_kinds::InstanceUuid;
@@ -1968,5 +1969,72 @@ async fn enroll_probe_in_group(
     assert!(
         members.iter().any(|m| m.parent_id == probe_id),
         "expected probe {probe_id} in group {group_name} members. Received {actual:?}",
+    );
+}
+
+/// Probe create rejects a membership spec whose source IP list exceeds the
+/// per-member cap. The count check runs before group resolution and before
+/// the probe row insert, so no probe or group state is left behind.
+#[nexus_test]
+async fn test_probe_multicast_member_source_cap(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    let project_name = "probe-mcast-source-cap";
+    create_project(client, project_name).await;
+    let (v4_default_pool, _v6_default_pool) =
+        create_default_ip_pools(client).await;
+
+    // One more source than the cap allows. The check fires before group
+    // resolution, so the named group does not need to exist.
+    let source_ips: Vec<IpAddr> = (0..=MAX_SOURCE_IPS_PER_MEMBER as u8)
+        .map(|i| IpAddr::V4(Ipv4Addr::new(10, 0, 1, i)))
+        .collect();
+    assert_eq!(source_ips.len(), MAX_SOURCE_IPS_PER_MEMBER + 1);
+
+    let probe_body = ProbeCreate {
+        identity: IdentityMetadataCreateParams {
+            name: "probe-source-cap".parse().unwrap(),
+            description: "per-member source cap rejection".to_owned(),
+        },
+        sled: SLED_AGENT_UUID.parse().unwrap(),
+        pool_selector: PoolSelector::Explicit {
+            pool: v4_default_pool.identity.name.clone().into(),
+        },
+        multicast_groups: vec![MulticastGroupJoinSpec {
+            group: "no-such-group".parse::<Name>().unwrap().into(),
+            source_ips: Some(source_ips),
+            ip_version: None,
+        }],
+    };
+    let error = object_create_error(
+        client,
+        &format!("/experimental/v1/probes?project={project_name}"),
+        &probe_body,
+        StatusCode::BAD_REQUEST,
+    )
+    .await;
+    assert!(
+        error.message.contains("exceeds per-member limit"),
+        "Received unexpected error message: {}",
+        error.message
+    );
+
+    // The rejected request must not leave a probe row behind.
+    let probes: ResultsPage<nexus_types_versions::latest::probe::ProbeInfo> =
+        NexusRequest::object_get(
+            client,
+            &format!("/experimental/v1/probes?project={project_name}"),
+        )
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .unwrap()
+        .parsed_body()
+        .unwrap();
+    assert!(
+        probes.items.is_empty(),
+        "expected no probes after rejected create. Received {:?}",
+        probes.items,
     );
 }

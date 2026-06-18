@@ -810,11 +810,27 @@ async fn test_multicast_migration_scenarios(
     )
     .await;
 
+    // Designated-forwarder election gates the external NAT-ingress entry to a
+    // single elected switch, while the underlay group stays on every switch
+    // for warm failover. The external group must therefore exist on exactly
+    // one switch, not both.
+    let mut external_switches = Vec::new();
     for (slot, dpd) in nexus_test_utils::dpd_clients_by_switch(cptestctx) {
-        dpd.multicast_group_get(&multicast_ip).await.unwrap_or_else(|e| {
-            panic!("{slot:?}: group should exist in DPD before migration: {e}")
-        });
+        match dpd.multicast_group_get(&multicast_ip).await {
+            Ok(_) => external_switches.push(slot),
+            Err(e) if e.status() == Some(StatusCode::NOT_FOUND) => {}
+            Err(e) => panic!(
+                "unexpected DPD error querying external group \
+                 {multicast_ip} on {slot:?}: {e}"
+            ),
+        }
     }
+    assert_eq!(
+        external_switches.len(),
+        1,
+        "external group should exist on exactly one elected switch before \
+         migration, found on {external_switches:?}"
+    );
 
     // Migrate instance
     let source_sled = nexus
@@ -874,12 +890,25 @@ async fn test_multicast_migration_scenarios(
 
     // Group-level DPD state is all Nexus owns. The rear-port move to the
     // target sled is owned by `ddmd`, derived from DDM peer subscriptions, and
-    // is not asserted here.
+    // is not asserted here. Migration does not change the designated forwarder,
+    // so the external group still exists on exactly one elected switch.
+    let mut external_switches = Vec::new();
     for (slot, dpd) in nexus_test_utils::dpd_clients_by_switch(cptestctx) {
-        dpd.multicast_group_get(&multicast_ip).await.unwrap_or_else(|e| {
-            panic!("{slot:?}: group should exist in DPD after migration: {e}")
-        });
+        match dpd.multicast_group_get(&multicast_ip).await {
+            Ok(_) => external_switches.push(slot),
+            Err(e) if e.status() == Some(StatusCode::NOT_FOUND) => {}
+            Err(e) => panic!(
+                "unexpected DPD error querying external group \
+                 {multicast_ip} on {slot:?}: {e}"
+            ),
+        }
     }
+    assert_eq!(
+        external_switches.len(),
+        1,
+        "external group should exist on exactly one elected switch after \
+         migration, found on {external_switches:?}"
+    );
 
     // Verify sled-agent state after migration: the target sled should
     // have the VMM subscription and M2P mapping. The source sled should

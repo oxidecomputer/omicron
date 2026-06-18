@@ -592,6 +592,12 @@ impl SledAgent {
             &underlay_nics,
         );
 
+        // Wire the PortManager into the DDM reconciler so it can originate this
+        // sled's multicast group subscriptions (read from live OPTE state) to
+        // the local ddmd. The reconciler is created during bootstrap, before
+        // the PortManager exists, so this late binding is required.
+        services.ddm_reconciler().set_port_manager(port_manager.clone());
+
         // The VMM reservoir is configured with respect to what's left after
         // accounting for relatively fixed and predictable uses.
         // We expect certain amounts of memory to be set aside for kernel,

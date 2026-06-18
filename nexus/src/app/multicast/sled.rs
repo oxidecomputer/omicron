@@ -19,8 +19,6 @@
 
 use std::collections::BTreeSet;
 use std::collections::HashMap;
-use std::collections::hash_map::DefaultHasher;
-use std::hash::{Hash, Hasher};
 use std::net::{IpAddr, Ipv6Addr};
 use std::sync::Arc;
 
@@ -276,6 +274,7 @@ impl MulticastSledClient {
         &self,
         opctx: &OpContext,
         group: &MulticastGroup,
+        incumbent_switch: Option<SwitchSlot>,
     ) -> Result<(), anyhow::Error> {
         let underlay_ip = self
             .resolve_underlay_ip(opctx, group)
@@ -334,17 +333,34 @@ impl MulticastSledClient {
         // replicates to member sled ports via DPD multicast group membership.
         // ECMP over both switches is the more correct longer-term answer,
         // but OPTE and mgd lack the tooling to express that today.
-        let switch_zone_addrs = crate::app::switch_zone_address_mappings(
-            &self.resolver,
-            &opctx.log,
-        )
-        .await
-        .map_err(|e| anyhow::anyhow!(e))
-        .context("failed to resolve switch zone addresses")?;
+        //
+        // The next hop should land on the switch that owns this group's
+        // external entry in `dataplane`, since that single DPD object carries
+        // both ingress NAT and egress forwarding. The reconciler observes that
+        // owner during its drift check and threads it in as `incumbent_switch`,
+        // so this election prefers the same switch and the two sites co-locate.
+        // When no owner is supplied (the member-churn paths have none in scope),
+        // the election falls back to the shared hash, which agrees with ingress
+        // in steady state and self-corrects on the next group reconciler pass.
+        //
+        // The address comes from the same switch discovery that defines the
+        // candidate set (Dendrite zones in DNS, kept only when their DPD
+        // reports a slot), so an elected switch is always addressable. The
+        // MGS-derived switch-zone map is deliberately not used here: a second
+        // resolver could elect a switch this path cannot address, black-holing
+        // guest egress.
+        let switch_addrs =
+            crate::app::dpd_switch_underlay_addrs(&self.resolver, &opctx.log)
+                .await
+                .map_err(|e| anyhow::anyhow!(e))
+                .context("failed to resolve Dendrite switch addresses")?;
 
-        let switch_ip =
-            select_forwarding_switch_ip(group_id, &switch_zone_addrs)
-                .context("no switch zone found for forwarding next hop")?;
+        let switch_ip = select_forwarding_switch_ip(
+            group_id,
+            &switch_addrs,
+            incumbent_switch,
+        )
+        .context("no reachable switch for forwarding next hop")?;
 
         let convergence_params = GroupConvergenceParams {
             group_ip,
@@ -467,7 +483,9 @@ impl MulticastSledClient {
         opctx: &OpContext,
         group: &MulticastGroup,
     ) -> Result<(), anyhow::Error> {
-        self.propagate_m2p_and_forwarding(opctx, group).await
+        // Clearing tears down forwarding on every sled, so there is no next
+        // hop to elect and no owner to prefer.
+        self.propagate_m2p_and_forwarding(opctx, group, None).await
     }
 }
 
@@ -627,28 +645,16 @@ async fn converge_forwarding(
 
 fn select_forwarding_switch_ip(
     group_id: MulticastGroupUuid,
-    switch_zone_addrs: &HashMap<SwitchSlot, Ipv6Addr>,
+    switch_addrs: &HashMap<SwitchSlot, Ipv6Addr>,
+    incumbent_switch: Option<SwitchSlot>,
 ) -> Option<Ipv6Addr> {
-    let mut ordered_switches: Vec<_> = switch_zone_addrs.iter().collect();
-    ordered_switches.sort_by_key(|(slot, _)| **slot);
-
-    if ordered_switches.is_empty() {
-        return None;
-    }
-
-    // Hash the group UUID to distribute switch selection across both
-    // switches. Ordering by slot keeps the selection stable across
-    // reconciliation passes and Nexus instances.
-    let mut hasher = DefaultHasher::new();
-    group_id.hash(&mut hasher);
-    let idx = (hasher.finish() as usize) % ordered_switches.len();
-    Some(*ordered_switches[idx].1)
+    let slots: Vec<SwitchSlot> = switch_addrs.keys().copied().collect();
+    super::select_switch_slot(group_id, &slots, incumbent_switch)
+        .and_then(|slot| switch_addrs.get(&slot).copied())
 }
 
 #[cfg(test)]
 mod tests {
-    use super::select_forwarding_switch_ip;
-
     use std::collections::HashMap;
     use std::net::Ipv6Addr;
 
@@ -656,19 +662,27 @@ mod tests {
     use sled_agent_types::early_networking::SwitchSlot;
     use uuid::Uuid;
 
+    use super::select_forwarding_switch_ip;
+    use crate::app::multicast::select_switch_slot;
+
+    // Distinct random groups sampled per election test. Group UUIDs are
+    // uniform, so a modest sample exercises the hash across inputs rather than
+    // a single fixed outcome.
+    const HASH_SAMPLES: usize = 32;
+
     #[test]
     fn select_forwarding_switch_ip_returns_none_when_empty() {
         let group_id = MulticastGroupUuid::from_untyped_uuid(Uuid::new_v4());
         let switch_zone_addrs = HashMap::new();
 
         assert_eq!(
-            select_forwarding_switch_ip(group_id, &switch_zone_addrs),
+            select_forwarding_switch_ip(group_id, &switch_zone_addrs, None),
             None
         );
     }
 
     #[test]
-    fn select_forwarding_switch_ip_is_stable_across_map_order() {
+    fn select_forwarding_switch_ip_is_stable_across_map_ordering() {
         let group_id = MulticastGroupUuid::from_untyped_uuid(Uuid::new_v4());
         let switch0 = Ipv6Addr::LOCALHOST;
         let switch1 = Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 2);
@@ -682,8 +696,50 @@ mod tests {
         second.insert(SwitchSlot::Switch0, switch0);
 
         assert_eq!(
-            select_forwarding_switch_ip(group_id, &first),
-            select_forwarding_switch_ip(group_id, &second)
+            select_forwarding_switch_ip(group_id, &first, None),
+            select_forwarding_switch_ip(group_id, &second, None)
         );
+
+        // A supplied incumbent is honored regardless of map ordering.
+        assert_eq!(
+            select_forwarding_switch_ip(
+                group_id,
+                &first,
+                Some(SwitchSlot::Switch1)
+            ),
+            Some(switch1)
+        );
+    }
+
+    /// Egress must resolve to the same switch the ingress election picks for a
+    /// shared `group_id`, candidate set, and incumbent. This is the
+    /// co-location invariant: the guest-sourced forwarding next hop lands on
+    /// the switch that owns the group's external entry.
+    #[test]
+    fn select_forwarding_switch_ip_matches_ingress_election() {
+        let switch0 = Ipv6Addr::LOCALHOST;
+        let switch1 = Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 2);
+        let mut switch_addrs = HashMap::new();
+        switch_addrs.insert(SwitchSlot::Switch0, switch0);
+        switch_addrs.insert(SwitchSlot::Switch1, switch1);
+        let slots = [SwitchSlot::Switch0, SwitchSlot::Switch1];
+
+        for _ in 0..HASH_SAMPLES {
+            let group_id =
+                MulticastGroupUuid::from_untyped_uuid(Uuid::new_v4());
+            for incumbent in
+                [None, Some(SwitchSlot::Switch0), Some(SwitchSlot::Switch1)]
+            {
+                let ingress =
+                    select_switch_slot(group_id, &slots, incumbent).unwrap();
+                let egress = select_forwarding_switch_ip(
+                    group_id,
+                    &switch_addrs,
+                    incumbent,
+                )
+                .unwrap();
+                assert_eq!(switch_addrs[&ingress], egress);
+            }
+        }
     }
 }

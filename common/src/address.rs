@@ -121,7 +121,7 @@ pub fn ipv6_ssm_allocatable_range(subnet: &Ipv6Net) -> Ipv6Range {
 /// using `INCLUDE`-mode filtering. The cap reflects `(S,G)` fanout cost,
 /// which is identical regardless of group-address semantics.
 ///
-/// Oxide policy bound. [RFC 3376] §4.2.1 (IGMPv3) and [RFC 3810] §5.2.1
+/// Oxide policy bound. [RFC 3376] §4.2.7 (IGMPv3) and [RFC 3810] §5.2.7
 /// (MLDv2) leave per-group source-list size implementation-defined, MTU-bound
 /// at 16-bit max. For comparison: Linux defaults to 10 (`igmp_max_msf`),
 /// FreeBSD to 128 (`maxsocksrc`). 32 was chosen to cover realistic workloads
@@ -209,8 +209,9 @@ pub const IPV6_ADMIN_SCOPED_MULTICAST_PREFIX: u16 = 0xff04;
 /// Fixed underlay admin-local IPv6 multicast subnet (ff04::/64) used for
 /// internal multicast group allocation and external→underlay mapping.
 ///
-/// Admin-local scope (4) is defined in [RFC 7346] as "the smallest scope that
-/// must be administratively configured."
+/// Admin-local scope (4) is defined in [RFC 4291 §2.7] as "the smallest scope
+/// that must be administratively configured" (RFC 7346 later restated the
+/// scope boundaries more generally).
 ///
 /// Static for consistency across racks. The XOR-fold algorithm maps external
 /// multicast IPs into this /64 with an 8-bit salt, guaranteeing 256 unique
@@ -221,7 +222,7 @@ pub const IPV6_ADMIN_SCOPED_MULTICAST_PREFIX: u16 = 0xff04;
 /// outside this range or other administratively configured scopes
 /// (e.g., site-local `ff05::/16`).
 ///
-/// [RFC 7346]: https://www.rfc-editor.org/rfc/rfc7346
+/// [RFC 4291 §2.7]: https://www.rfc-editor.org/rfc/rfc4291#section-2.7
 // TODO: Expose this subnet via rack API (e.g., in `Rack` view or a dedicated
 // networking info endpoint) so operators can see reserved address ranges.
 pub const UNDERLAY_MULTICAST_SUBNET: Ipv6Net = Ipv6Net::new_unchecked(

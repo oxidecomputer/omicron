@@ -879,9 +879,12 @@ impl MulticastGroupReconciler {
 
         // Propagate updated M2P/forwarding to all sleds so the
         // dataplane reflects the member's departure. Best-effort since
-        // group reconciliation will converge if this fails.
+        // group reconciliation will converge if this fails. The observed
+        // switch owner is not available on this path, so the next hop falls
+        // back to the shared hash and the group reconciler co-locates it on
+        // its next pass.
         if let Err(e) =
-            sled_client.propagate_m2p_and_forwarding(opctx, group).await
+            sled_client.propagate_m2p_and_forwarding(opctx, group, None).await
         {
             warn!(
                 opctx.log,
@@ -1577,9 +1580,13 @@ impl MulticastGroupReconciler {
         // re-converge all sleds on the next cycle. Subscribe failures
         // below are treated as hard errors because the VMM cannot
         // receive traffic without an OPTE port subscription.
+        //
+        // The observed switch owner is not available on this path, so the
+        // next hop falls back to the shared hash and the group reconciler
+        // co-locates it on its next pass.
         if let Err(e) = ctx
             .sled_client
-            .propagate_m2p_and_forwarding(ctx.opctx, ctx.group)
+            .propagate_m2p_and_forwarding(ctx.opctx, ctx.group, None)
             .await
         {
             warn!(
@@ -1821,5 +1828,137 @@ impl MulticastGroupReconciler {
             .context(
                 "failed to list multicast groups for member reconciliation",
             )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use std::net::SocketAddr;
+    use std::num::NonZeroUsize;
+
+    use internal_dns_resolver::Resolver;
+    use omicron_test_utils::dev;
+
+    use crate::app::background::init::test::NoopStartSaga;
+    use nexus_db_queries::db::pub_test_utils::{TestDatabase, multicast};
+
+    /// Build a reconciler over a real datastore with a chosen orphan grace
+    /// period. The resolver and saga starter are inert: `cleanup_empty_groups`
+    /// touches neither, so a bogus DNS address and a `NoopStartSaga` suffice.
+    fn reconciler_with_grace(
+        log: &slog::Logger,
+        datastore: Arc<nexus_db_queries::db::DataStore>,
+        orphan_grace_period: chrono::TimeDelta,
+    ) -> MulticastGroupReconciler {
+        let resolver = Resolver::new_from_addrs(
+            log.clone(),
+            &["[::1]:53".parse::<SocketAddr>().unwrap()],
+        )
+        .expect("Should build resolver");
+
+        let one = NonZeroUsize::new(1).unwrap();
+
+        MulticastGroupReconciler::new(
+            datastore,
+            resolver,
+            Arc::new(NoopStartSaga::new()),
+            true, // enabled
+            one,  // group_concurrency_limit
+            one,  // member_concurrency_limit
+            orphan_grace_period,
+        )
+    }
+
+    // The datastore test in `db-queries` exercises the NOT EXISTS guard
+    // directly. This test guards the reconciler wiring instead: that
+    // `cleanup_empty_groups` shields groups younger than the configured
+    // `orphan_grace_period` via `grace_period_elapsed`. A sign error there
+    // would reap a fresh "Creating" orphan immediately, which the
+    // datastore-only test cannot catch because it never applies the grace.
+    // `TestDatabase` runs no background tasks, so no live reconciler races
+    // the fixture.
+    #[tokio::test]
+    async fn test_cleanup_empty_groups_respects_orphan_grace() {
+        let logctx = dev::test_setup_log(
+            "test_cleanup_empty_groups_respects_orphan_grace",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        multicast::create_test_setup(
+            &opctx,
+            &datastore,
+            "orphan-sweep-pool",
+            "orphan-sweep-project",
+        )
+        .await;
+
+        let orphan = multicast::create_test_group(
+            &opctx,
+            &datastore,
+            "sweep-orphan",
+            "224.10.1.70",
+        )
+        .await;
+        let orphan_id = MulticastGroupUuid::from_untyped_uuid(orphan.id());
+
+        // A generous grace window shields a just-created orphan. With a
+        // sign-flip the window would already be treated as elapsed and the
+        // orphan would be reaped.
+        let reconciler = reconciler_with_grace(
+            &logctx.log,
+            datastore.clone(),
+            chrono::TimeDelta::hours(1),
+        );
+        let marked = reconciler
+            .cleanup_empty_groups(&opctx)
+            .await
+            .expect("Should sweep empty groups");
+        assert_eq!(
+            marked, 0,
+            "Fresh Creating orphan must survive a live grace window"
+        );
+        let fetched = datastore
+            .multicast_group_fetch(&opctx, orphan_id)
+            .await
+            .expect("Should fetch group");
+        assert_eq!(
+            fetched.state,
+            MulticastGroupState::Creating,
+            "Shielded orphan should remain Creating"
+        );
+
+        // A zero grace window elapses immediately, so the same orphan is now
+        // reaped and the returned count reflects it.
+        let reconciler = reconciler_with_grace(
+            &logctx.log,
+            datastore.clone(),
+            chrono::TimeDelta::zero(),
+        );
+        let marked = reconciler
+            .cleanup_empty_groups(&opctx)
+            .await
+            .expect("Should sweep empty groups");
+        assert_eq!(
+            marked, 1,
+            "Orphan past the grace window should be reaped by the sweep"
+        );
+        let deleting = datastore
+            .multicast_groups_list_by_state(
+                &opctx,
+                MulticastGroupState::Deleting,
+                &DataPageParams::max_page(),
+            )
+            .await
+            .expect("Should list deleting groups");
+        assert!(
+            deleting.iter().any(|g| g.id() == orphan.id()),
+            "Reaped orphan should be marked Deleting"
+        );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
     }
 }
