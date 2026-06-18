@@ -2227,10 +2227,11 @@ mod tests {
         // we'll make those here first.
         let restart_id = omicron_uuid_kinds::EreporterRestartUuid::new_v4();
         let collector_id = OmicronZoneUuid::new_v4();
+        let time_collected = Utc::now();
 
         let ereport1 = EreportData {
             id: fm::EreportId { restart_id, ena: ereport_types::Ena(2) },
-            time_collected: Utc::now(),
+            time_collected,
             collector_id,
             part_number: Some("930-55555".to_string()),
             serial_number: Some("BRM6900420".to_string()),
@@ -2240,7 +2241,7 @@ mod tests {
 
         let ereport2 = EreportData {
             id: fm::EreportId { restart_id, ena: ereport_types::Ena(3) },
-            time_collected: Utc::now(),
+            time_collected,
             collector_id,
             part_number: Some("930-55555".to_string()),
             serial_number: Some("BRM6900420".to_string()),
@@ -2257,6 +2258,8 @@ mod tests {
         datastore
             .ereports_insert(
                 &opctx,
+                restart_id,
+                time_collected,
                 reporter,
                 vec![ereport1.clone(), ereport2.clone()],
             )
@@ -2459,6 +2462,7 @@ mod tests {
         let input_report = InputReport {
             parent_sitrep_id: sitrep.parent_id(),
             parent_inv_id: None,
+            num_ereporter_restarts: 0,
             inv_id: sitrep.inv_id(),
             new_ereport_ids: Default::default(),
             open_cases: Default::default(),
@@ -3080,6 +3084,7 @@ mod tests {
                 new_ereport_ids: Default::default(),
                 open_cases: Default::default(),
                 closed_cases_copied_forward: Default::default(),
+                num_ereporter_restarts: 0,
                 in_service_disks: Default::default(),
             };
             let analysis_report = AnalysisReport {

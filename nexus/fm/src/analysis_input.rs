@@ -6,6 +6,7 @@
 
 use chrono::{DateTime, Utc};
 use iddqd::IdOrdMap;
+use nexus_db_model::EreporterRestart;
 use nexus_types::fm::analysis_reports::ClosedCaseReport;
 use nexus_types::fm::{self, Sitrep, SitrepVersion};
 use nexus_types::in_service_disk::InServiceDisk;
@@ -43,6 +44,7 @@ pub struct Input {
     new_ereports: IdOrdMap<fm::Ereport>,
     open_cases: IdOrdMap<fm::Case>,
     closed_cases_copied_forward: IdOrdMap<fm::Case>,
+    ereporter_restarts: IdOrdMap<EreporterRestart>,
     /// Indicates whether `Builder::build` dropped any closed case
     /// from the carry-forward list whose alert request set was non-empty.
     /// ORed with [`crate::builder::AllCases::alert_set_changed`] in
@@ -70,6 +72,10 @@ impl Input {
     /// `closed_cases_copied_forward` accessor.
     pub fn open_cases(&self) -> &IdOrdMap<fm::Case> {
         &self.open_cases
+    }
+
+    pub fn ereporter_restarts(&self) -> &IdOrdMap<EreporterRestart> {
+        &self.ereporter_restarts
     }
 
     pub(crate) fn closed_cases_copied_forward(&self) -> &IdOrdMap<fm::Case> {
@@ -118,6 +124,7 @@ impl Input {
             inv,
             in_service_disks,
             new_ereports: IdOrdMap::default(),
+            ereporter_restarts: IdOrdMap::default(),
             unmarked_seen_ereports: BTreeSet::default(),
             marked_alert_requests: HashSet::new(),
         })
@@ -153,6 +160,7 @@ pub struct Builder {
     /// copied forwards due to containing unmarked ereports.
     unmarked_seen_ereports: BTreeSet<fm::EreportId>,
 
+    ereporter_restarts: IdOrdMap<nexus_db_model::EreporterRestart>,
     /// The IDs of alert requests on the parent sitrep's closed cases that
     /// already have a marker row in `rendezvous_alert_created`. A closed-case
     /// request absent from this set is outstanding work, and (like an unmarked
@@ -207,6 +215,19 @@ impl Builder {
         self.new_ereports.len()
     }
 
+    /// Adds a set of ereport restart IDs to the input.
+    pub fn add_ereporter_restarts(
+        &mut self,
+        restarts: impl IntoIterator<Item = EreporterRestart>,
+    ) {
+        self.ereporter_restarts.extend(restarts)
+    }
+
+    /// Borrows the map of known ereport reporter restart IDs.
+    pub fn ereporter_restarts(&self) -> &IdOrdMap<EreporterRestart> {
+        &self.ereporter_restarts
+    }
+
     /// Finish constructing the [`Input`] and return it, along with a [`Report`]
     /// that provides a human-readable summary of how the inputs were
     /// constructed.
@@ -230,6 +251,7 @@ impl Builder {
                 .iter()
                 .map(|e| *e.id())
                 .collect(),
+            num_ereporter_restarts: self.ereporter_restarts.len(),
             open_cases: BTreeMap::new(),
             closed_cases_copied_forward: BTreeMap::new(),
             in_service_disks: self
@@ -308,6 +330,7 @@ impl Builder {
             new_ereports: self.new_ereports,
             open_cases,
             closed_cases_copied_forward,
+            ereporter_restarts: self.ereporter_restarts,
             alerts_changed,
             in_service_disks: self.in_service_disks,
         };

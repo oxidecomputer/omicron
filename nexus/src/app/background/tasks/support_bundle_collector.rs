@@ -861,10 +861,11 @@ mod test {
         const GIMLET_PN: &str = "9130000019";
         // Make some SP ereports...
         let sp_restart_id = EreporterRestartUuid::new_v4();
-        datastore.ereports_insert(&opctx, Reporter::Sp { sp_type: SpType::Sled, slot: SLED_SLOT}, vec![
+        let time_collected = chrono::Utc::now();
+        datastore.ereports_insert(&opctx, sp_restart_id, time_collected, Reporter::Sp { sp_type: SpType::Sled, slot: SLED_SLOT}, vec![
             EreportData {
                 id: EreportId { restart_id: sp_restart_id, ena: ereport_types::Ena(1) },
-                time_collected: chrono::Utc::now(),
+                time_collected,
                 collector_id: OmicronZoneUuid::new_v4(),
                 part_number: Some(GIMLET_PN.to_string()),
                 serial_number: Some(SP_SERIAL.to_string()),
@@ -873,7 +874,7 @@ mod test {
             },
             EreportData {
                 id: EreportId { restart_id: sp_restart_id, ena: ereport_types::Ena(2) },
-                time_collected: chrono::Utc::now(),
+                time_collected,
                 collector_id: OmicronZoneUuid::new_v4(),
                 part_number: Some(GIMLET_PN.to_string()),
                 serial_number: Some(SP_SERIAL.to_string()),
@@ -882,7 +883,7 @@ mod test {
             },
             EreportData {
                 id: EreportId { restart_id: EreporterRestartUuid::new_v4(), ena: ereport_types::Ena(1) },
-                time_collected: chrono::Utc::now(),
+                time_collected,
                 collector_id: OmicronZoneUuid::new_v4(),
                 // Let's do a silly one! No VPD, to make sure that's also
                 // handled correctly.
@@ -895,16 +896,20 @@ mod test {
         // And one from a different serial. N.B. that I made sure the number of
         // host-OS and SP ereports are different for when we make assertions
         // about the bundle report.
+        let sp2_restart_id = EreporterRestartUuid::new_v4();
+        let time_collected = chrono::Utc::now();
         datastore
             .ereports_insert(
                 &opctx,
+                sp2_restart_id,
+                time_collected,
                 Reporter::Sp { sp_type: SpType::Switch, slot: 1 },
                 vec![EreportData {
                     id: EreportId {
-                        restart_id: EreporterRestartUuid::new_v4(),
+                        restart_id: sp2_restart_id,
                         ena: ereport_types::Ena(1),
                     },
-                    time_collected: chrono::Utc::now(),
+                    time_collected,
                     collector_id: OmicronZoneUuid::new_v4(),
                     part_number: Some("9130000006".to_string()),
                     serial_number: Some("BRM41000555".to_string()),
@@ -915,10 +920,13 @@ mod test {
             .await
             .expect("failed to insert another fake SP ereport");
         // And some host OS ones...
-        let restart_id = EreporterRestartUuid::new_v4();
+        let sled1_restart_id = EreporterRestartUuid::new_v4();
+        let time_collected = chrono::Utc::now();
         datastore
             .ereports_insert(
                 &opctx,
+                sled1_restart_id,
+                time_collected,
                 Reporter::HostOs {
                     sled: SledUuid::new_v4(),
                     slot: Some(SLED_SLOT),
@@ -926,10 +934,10 @@ mod test {
                 vec![
                     EreportData {
                         id: EreportId {
-                            restart_id,
+                            restart_id: sled1_restart_id,
                             ena: ereport_types::Ena(1),
                         },
-                        time_collected: chrono::Utc::now(),
+                        time_collected,
                         collector_id: OmicronZoneUuid::new_v4(),
                         serial_number: Some(HOST_SERIAL.to_string()),
                         part_number: Some(GIMLET_PN.to_string()),
@@ -938,10 +946,10 @@ mod test {
                     },
                     EreportData {
                         id: EreportId {
-                            restart_id,
+                            restart_id: sled1_restart_id,
                             ena: ereport_types::Ena(2),
                         },
-                        time_collected: chrono::Utc::now(),
+                        time_collected,
                         collector_id: OmicronZoneUuid::new_v4(),
                         serial_number: Some(HOST_SERIAL.to_string()),
                         part_number: Some(GIMLET_PN.to_string()),
@@ -952,14 +960,18 @@ mod test {
             )
             .await
             .expect("failed to insert fake host OS ereports");
+        let sled2_restart_id = EreporterRestartUuid::new_v4();
+        let time_collected = chrono::Utc::now();
         datastore
             .ereports_insert(
                 &opctx,
+                sled2_restart_id,
+                time_collected,
                 Reporter::HostOs { sled: SledUuid::new_v4(), slot: Some(SLED_SLOT) },
                 vec![
                     EreportData {
-                        id: EreportId { restart_id: EreporterRestartUuid::new_v4(), ena:  ereport_types::Ena(1) },
-                        time_collected: chrono::Utc::now(),
+                        id: EreportId { restart_id: sled2_restart_id, ena:  ereport_types::Ena(1) },
+                        time_collected,
                         collector_id: OmicronZoneUuid::new_v4(),
                         serial_number: Some(HOST_SERIAL.to_string()),
                         part_number: Some(GIMLET_PN.to_string()),

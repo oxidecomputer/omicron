@@ -245,6 +245,9 @@ impl FmAnalysis {
             inv,
             in_service_disks,
         )?;
+        self.load_ereporter_restarts(opctx, &mut builder)
+            .await
+            .context("failed to load ereporter restarts")?;
         self.load_new_ereports(opctx, &mut builder, &mut warnings)
             .await
             .context("failed to load new ereports")?;
@@ -321,6 +324,35 @@ impl FmAnalysis {
         Ok(in_service_disks)
     }
 
+    async fn load_ereporter_restarts(
+        &mut self,
+        opctx: &OpContext,
+        builder: &mut fm::analysis_input::Builder,
+    ) -> anyhow::Result<()> {
+        let mut nbatches = 0;
+        let mut paginator = Paginator::new(
+            nexus_db_queries::db::datastore::SQL_BATCH_SIZE,
+            dropshot::PaginationOrder::Ascending,
+        );
+        while let Some(p) = paginator.next() {
+            nbatches += 1;
+            let batch = self
+                .datastore
+                .ereporter_restart_list(opctx, &p.current_pagparams())
+                .await?;
+            paginator = p.found_batch(&batch, &|e| e.id().into_untyped_uuid());
+            builder.add_ereporter_restarts(batch);
+        }
+
+        slog::debug!(
+            opctx.log,
+            "loaded {} ereporter restarts (in {nbatches} batches)",
+            builder.ereporter_restarts().len(),
+        );
+
+        Ok(())
+    }
+
     async fn load_new_ereports(
         &mut self,
         opctx: &OpContext,
@@ -343,21 +375,31 @@ impl FmAnalysis {
                 (e.restart_id.into_untyped_uuid(), e.ena)
             });
             let loaded = batch.len();
-            let mut invalid = 0;
-            builder.add_unmarked_ereports(batch.into_iter().filter_map(
-                |ereport| {
-                    let ereport = match fm::Ereport::try_from(ereport) {
-                        Ok(ereport) => ereport,
-                        Err(e) => {
-                            invalid += 1;
-                            warnings.push(e.to_string());
-                            return None;
-                        }
-                    };
 
-                    Some(ereport)
-                },
-            ));
+            let mut invalid = 0;
+            for ereport in batch {
+                let ereport = match fm::Ereport::try_from(ereport) {
+                    Ok(ereport) => ereport,
+                    Err(e) => {
+                        invalid += 1;
+                        warnings.push(e.to_string());
+                        continue;
+                    }
+                };
+
+                // Check if this is a reporter we know about, and issue a
+                // warning if it is not.
+                let id = ereport.id();
+                if !builder.ereporter_restarts().contains_key(&id.restart_id) {
+                    let msg = format!(
+                        "ereport {id} has a restart ID not contained in the \
+                         `ereporter_restart` table"
+                    );
+                    slog::warn!(&opctx.log, "{msg}");
+                    warnings.push(msg);
+                }
+                builder.add_unmarked_ereports(std::iter::once(ereport));
+            }
 
             let total = builder.num_ereports();
             let new = total - prev_total;
