@@ -3732,6 +3732,7 @@ dependencies = [
  "libc",
  "macaddr",
  "nexus-lockstep-client",
+ "omicron-common",
  "omicron-rpaths",
  "omicron-sled-agent",
  "omicron-test-utils",
