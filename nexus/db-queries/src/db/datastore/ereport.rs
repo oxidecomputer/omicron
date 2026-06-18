@@ -240,6 +240,21 @@ impl DataStore {
     /// Inserts the provided tranche of `ereports` into the `ereport` table, and
     /// potentially updates the `ereporter_restart` table if the restart ID of
     /// the inserted ereports has not been seen before.
+    ///
+    /// # Returns
+    ///
+    /// This function returns a tuple containing the number of new `ereport`
+    /// rows that were created, along with the newest [`EreportId`] for the same
+    /// reporter index as the inserted ereports.
+    ///
+    /// The returned ereport ID is intended to provide the caller with the
+    /// latest ENA to use in a subsequent request to ingest ereports from the
+    /// same reporter. In some cases, it may:
+    ///
+    /// - be a newer ENA than the highest ENA in the inserted ereports, if
+    ///   additional ereports were inserted concurrently
+    /// - have a different restart ID than the one provided, if ereports from
+    ///   a newer restart of that reporter were inserted concurrently
     pub async fn ereports_insert(
         &self,
         opctx: &OpContext,
