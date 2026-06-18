@@ -47,7 +47,7 @@ use sled_agent_types_versions::latest::inventory::SingleMeasurementInventory;
 use sled_agent_types_versions::latest::inventory::SledCpuFamily;
 use sled_agent_types_versions::latest::inventory::SledRole;
 use sled_agent_types_versions::latest::inventory::SvcsEnabledNotOnlineResult;
-use sled_agent_types_versions::latest::inventory::ZpoolHealth;
+pub use sled_agent_types_versions::latest::inventory::ZpoolHealth;
 use sled_hardware_types::BaseboardId;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;

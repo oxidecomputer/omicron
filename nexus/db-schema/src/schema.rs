@@ -3197,6 +3197,7 @@ table! {
         creator_id -> Uuid,
         comment -> Text,
         next_inv_min_time_started -> Timestamptz,
+        alert_generation -> Int8,
     }
 }
 
@@ -3299,6 +3300,22 @@ table! {
 }
 
 table! {
+    fm_fact_physical_disk (sitrep_id, id) {
+        id -> Uuid,
+        sitrep_id -> Uuid,
+        case_id -> Uuid,
+        created_sitrep_id -> Uuid,
+        comment -> Text,
+        physical_disk_id -> Uuid,
+        kind -> crate::enums::FmFactPhysicalDiskKindEnum,
+        zpool_id -> Nullable<Uuid>,
+        last_seen_health -> Nullable<crate::enums::InvZpoolHealthEnum>,
+        observed_in_inv -> Nullable<Uuid>,
+        time_observed -> Nullable<Timestamptz>,
+    }
+}
+
+table! {
     fm_ereport_in_case (sitrep_id, id) {
         id -> Uuid,
         restart_id -> Uuid,
@@ -3313,6 +3330,8 @@ table! {
 
 allow_tables_to_appear_in_same_query!(fm_ereport_in_case, ereport);
 allow_tables_to_appear_in_same_query!(fm_sitrep, fm_case);
+allow_tables_to_appear_in_same_query!(fm_sitrep, fm_fact_physical_disk);
+allow_tables_to_appear_in_same_query!(fm_case, fm_fact_physical_disk);
 
 table! {
     fm_alert_request (sitrep_id, id) {
@@ -3377,6 +3396,16 @@ allow_tables_to_appear_in_same_query!(
     fm_support_bundle_request_data_selection_host_info,
     fm_support_bundle_request_data_selection_ereports,
 );
+
+table! {
+    rendezvous_alert_created (alert_id) {
+        alert_id -> Uuid,
+        created_at_generation -> Int8,
+    }
+}
+
+joinable!(rendezvous_alert_created -> alert (alert_id));
+allow_tables_to_appear_in_same_query!(alert, rendezvous_alert_created);
 
 table! {
     trust_quorum_configuration (rack_id, epoch) {
