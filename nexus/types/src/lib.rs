@@ -40,6 +40,7 @@ pub mod instance;
 pub mod internal_api;
 pub mod inventory;
 pub mod multicast;
+pub mod observed_saga;
 pub mod quiesce;
 pub mod saga;
 pub mod silo;

@@ -13,7 +13,11 @@ pub use ereport::{Ereport, EreportId};
 pub mod case;
 pub use case::Case;
 pub mod fact;
-pub use fact::{DiskFact, FactPayload, ZpoolUnhealthyFactPayload};
+pub use fact::{
+    DiskFact, FactPayload, SagaAbandonedFactPayload, SagaFact,
+    SagaNotProgressingFactPayload, SagaOwnerNotCurrentFactPayload,
+    ZpoolUnhealthyFactPayload,
+};
 pub mod json_display;
 
 use case::AlertRequest;
@@ -233,4 +237,5 @@ pub struct SitrepVersion {
 pub enum DiagnosisEngineKind {
     PowerShelf,
     PhysicalDisk,
+    Saga,
 }

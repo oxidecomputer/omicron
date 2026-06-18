@@ -7172,8 +7172,10 @@ dependencies = [
  "serde_json",
  "slog",
  "slog-error-chain",
+ "steno",
  "thiserror 2.0.18",
  "typed-rng",
+ "uuid",
 ]
 
 [[package]]

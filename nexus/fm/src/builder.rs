@@ -215,10 +215,14 @@ mod tests {
 
     /// Build a minimal `Input` with no parent sitrep and an empty inventory.
     fn make_input() -> Input {
-        let (input, _) =
-            Input::builder(None, make_collection(), Arc::new(IdOrdMap::new()))
-                .expect("no parent sitrep, so builder should succeed")
-                .build();
+        let (input, _) = Input::builder(
+            None,
+            make_collection(),
+            Arc::new(IdOrdMap::new()),
+            Arc::new(IdOrdMap::new()),
+        )
+        .expect("no parent sitrep, so builder should succeed")
+        .build();
         input
     }
 
@@ -251,6 +255,7 @@ mod tests {
         let (input, _) = Input::builder(
             Some(Arc::new((parent_version, parent))),
             inv,
+            Arc::new(IdOrdMap::new()),
             Arc::new(IdOrdMap::new()),
         )
         .expect("parent and child share an inventory")
@@ -383,6 +388,7 @@ mod tests {
         let mut builder_inputs = crate::analysis_input::Input::builder(
             Some(Arc::new((parent_version, parent))),
             inv,
+            Arc::new(IdOrdMap::new()),
             Arc::new(IdOrdMap::new()),
         )
         .unwrap();

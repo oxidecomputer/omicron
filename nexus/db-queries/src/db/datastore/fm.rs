@@ -35,6 +35,7 @@ use nexus_db_schema::schema::fm_alert_request::dsl as alert_req_dsl;
 use nexus_db_schema::schema::fm_case::dsl as case_dsl;
 use nexus_db_schema::schema::fm_ereport_in_case::dsl as case_ereport_dsl;
 use nexus_db_schema::schema::fm_fact_physical_disk::dsl as fact_pd_dsl;
+use nexus_db_schema::schema::fm_fact_saga::dsl as fact_saga_dsl;
 use nexus_db_schema::schema::fm_sitrep::dsl as sitrep_dsl;
 use nexus_db_schema::schema::fm_sitrep_analysis_report::dsl as analysis_report_dsl;
 use nexus_db_schema::schema::fm_sitrep_history::dsl as history_dsl;
@@ -126,7 +127,26 @@ sitrep_child_tables! {
     SupportBundleRequest => { table: "fm_support_bundle_request" },
     Case => { table: "fm_case" },
     FmFactPhysicalDisk => { table: "fm_fact_physical_disk" },
+    FmFactSaga => { table: "fm_fact_saga" },
     AnalysisReport => { table: "fm_sitrep_analysis_report" },
+}
+
+/// Insert a reconstructed fact into the per-case map, erroring if two facts
+/// share a UUID (impossible, as the fact UUID is a primary key).
+fn insert_fact_for_case(
+    by_case: &mut HashMap<CaseUuid, iddqd::IdOrdMap<fm::case::Fact>>,
+    case_id: CaseUuid,
+    fact: fm::case::Fact,
+) -> Result<(), Error> {
+    let id = fact.metadata.id;
+    by_case.entry(case_id).or_default().insert_unique(fact).map_err(|_| {
+        let internal_message = format!(
+            "encountered multiple case facts for case {case_id} with the same \
+             fact UUID {id}. this should really not be possible, as the fact \
+             UUID is a primary key!",
+        );
+        Error::InternalError { internal_message }
+    })
 }
 
 /// Per-child-table statistics from a single GC pass.
@@ -550,20 +570,33 @@ impl DataStore {
             for row in batch {
                 let case_id: CaseUuid = row.case_id.into();
                 let fact = row.into_fact()?;
-                let id = fact.metadata.id;
-                by_case
-                    .entry(case_id)
-                    .or_default()
-                    .insert_unique(fact)
-                    .map_err(|_| {
-                        let internal_message = format!(
-                            "encountered multiple case facts for case \
-                             {case_id} with the same fact UUID {id}. this \
-                             should really not be possible, as the fact \
-                             UUID is a primary key!",
-                        );
-                        Error::InternalError { internal_message }
-                    })?;
+                insert_fact_for_case(&mut by_case, case_id, fact)?;
+            }
+        }
+
+        // --- saga diagnosis engine facts ---
+        let mut paginator: Paginator<DbTypedUuid<FactKind>> =
+            Paginator::new(SQL_BATCH_SIZE, PaginationOrder::Descending);
+        while let Some(p) = paginator.next() {
+            let batch = paginated(
+                fact_saga_dsl::fm_fact_saga,
+                fact_saga_dsl::id,
+                &p.current_pagparams(),
+            )
+            .filter(fact_saga_dsl::sitrep_id.eq(id.into_untyped_uuid()))
+            .select(model::fm::FmFactSaga::as_select())
+            .load_async(conn)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel(e, ErrorHandler::Server)
+                    .internal_context("failed to load saga case facts")
+            })?;
+
+            paginator = p.found_batch(&batch, &|f| f.id);
+            for row in batch {
+                let case_id: CaseUuid = row.case_id.into();
+                let fact = row.into_fact()?;
+                insert_fact_for_case(&mut by_case, case_id, fact)?;
             }
         }
 
@@ -820,6 +853,7 @@ impl DataStore {
         let mut bundle_data_selections_requested = Vec::new();
         let mut case_ereports = Vec::new();
         let mut physical_disk_facts = Vec::new();
+        let mut saga_facts = Vec::new();
         for case in sitrep.cases {
             let case_id = case.id;
             cases.push(model::fm::CaseMetadata::from_sitrep(sitrep_id, &case));
@@ -855,6 +889,14 @@ impl DataStore {
                                 disk_fact,
                             ),
                         );
+                    }
+                    fm::FactPayload::Saga(saga_fact) => {
+                        saga_facts.push(model::fm::FmFactSaga::from_sitrep(
+                            sitrep_id,
+                            case_id,
+                            &fact.metadata,
+                            saga_fact,
+                        ));
                     }
                 }
             }
@@ -926,6 +968,17 @@ impl DataStore {
                         .internal_context(
                             "failed to insert physical-disk case facts",
                         )
+                })?;
+        }
+
+        if !saga_facts.is_empty() {
+            diesel::insert_into(fact_saga_dsl::fm_fact_saga)
+                .values(saga_facts)
+                .execute_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                        .internal_context("failed to insert saga case facts")
                 })?;
         }
 
@@ -2362,6 +2415,66 @@ mod tests {
                     ),
                 })
                 .unwrap();
+            // Saga facts (both kinds), to exercise the fm_fact_saga
+            // read/write/GC paths. Storage fidelity is what's under test here,
+            // so it's fine that these sit on a physical-disk case.
+            facts
+                .insert_unique(fm::case::Fact {
+                    metadata: fm::case::FactMetadata {
+                        id: FactUuid::new_v4(),
+                        created_sitrep_id: sitrep_id,
+                        comment: "a representative not-progressing saga fact"
+                            .to_string(),
+                    },
+                    payload: fm::FactPayload::Saga(
+                        fm::SagaFact::NotProgressing(
+                            fm::SagaNotProgressingFactPayload {
+                                saga_id: steno::SagaId(uuid::Uuid::new_v4()),
+                                saga_state:
+                                    nexus_types::observed_saga::SagaProgressState::Unwinding,
+                                last_event_time:
+                                    omicron_common::now_db_precision(),
+                            },
+                        ),
+                    ),
+                })
+                .unwrap();
+            facts
+                .insert_unique(fm::case::Fact {
+                    metadata: fm::case::FactMetadata {
+                        id: FactUuid::new_v4(),
+                        created_sitrep_id: sitrep_id,
+                        comment: "a representative orphaned saga fact"
+                            .to_string(),
+                    },
+                    payload: fm::FactPayload::Saga(
+                        fm::SagaFact::OwnerNotCurrentGeneration(
+                            fm::SagaOwnerNotCurrentFactPayload {
+                                saga_id: steno::SagaId(uuid::Uuid::new_v4()),
+                                current_sec:
+                                    omicron_uuid_kinds::OmicronZoneUuid::new_v4(),
+                                orphan_reason:
+                                    nexus_types::observed_saga::OrphanedReason::Quiesced,
+                            },
+                        ),
+                    ),
+                })
+                .unwrap();
+            facts
+                .insert_unique(fm::case::Fact {
+                    metadata: fm::case::FactMetadata {
+                        id: FactUuid::new_v4(),
+                        created_sitrep_id: sitrep_id,
+                        comment: "a representative abandoned saga fact"
+                            .to_string(),
+                    },
+                    payload: fm::FactPayload::Saga(fm::SagaFact::Abandoned(
+                        fm::SagaAbandonedFactPayload {
+                            saga_id: steno::SagaId(uuid::Uuid::new_v4()),
+                        },
+                    )),
+                })
+                .unwrap();
 
             fm::Case {
                 id: omicron_uuid_kinds::CaseUuid::new_v4(),
@@ -2464,6 +2577,7 @@ mod tests {
             open_cases: Default::default(),
             closed_cases_copied_forward: Default::default(),
             in_service_disks: Default::default(),
+            observed_sagas: Default::default(),
         };
         let analysis_report = AnalysisReport {
             sitrep_id: sitrep.id(),
@@ -3081,6 +3195,7 @@ mod tests {
                 open_cases: Default::default(),
                 closed_cases_copied_forward: Default::default(),
                 in_service_disks: Default::default(),
+                observed_sagas: Default::default(),
             };
             let analysis_report = AnalysisReport {
                 sitrep_id: ghost_sitrep_id,

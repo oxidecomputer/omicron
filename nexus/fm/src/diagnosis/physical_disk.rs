@@ -413,9 +413,13 @@ mod tests {
                 s,
             ))
         });
-        let builder =
-            Input::builder(parent, Arc::new(collection), Arc::new(in_service))
-                .expect("input builder should accept fresh inventory");
+        let builder = Input::builder(
+            parent,
+            Arc::new(collection),
+            Arc::new(in_service),
+            Arc::new(IdOrdMap::new()),
+        )
+        .expect("input builder should accept fresh inventory");
         let (input, _report) = builder.build();
         input
     }
@@ -1065,6 +1069,56 @@ mod tests {
             }
         }
         assert!(open[0].case.is_open());
+        logctx.cleanup_successful();
+    }
+
+    /// A Disk case carrying a saga fact payload is a data-model violation;
+    /// the engine closes it as uninterpretable. (This exercises the
+    /// `ForeignFactPayload` path, which only became constructible once a
+    /// second diagnosis engine's payload variant existed.)
+    #[test]
+    fn foreign_payload_case_is_closed() {
+        let (logctx, collection, _zpools) =
+            setup("disk_foreign_payload_closed");
+        let inv_id = collection.id;
+        let in_service = mk_in_service(std::iter::empty());
+        let parent_id = SitrepUuid::new_v4();
+        let case_id = omicron_uuid_kinds::CaseUuid::new_v4();
+        let foreign_fact = fm::case::Fact {
+            metadata: fm::case::FactMetadata {
+                id: omicron_uuid_kinds::FactUuid::new_v4(),
+                created_sitrep_id: parent_id,
+                comment: "a fact belonging to the saga engine".to_string(),
+            },
+            payload: fm::FactPayload::Saga(fm::SagaFact::Abandoned(
+                fm::SagaAbandonedFactPayload {
+                    saga_id: steno::SagaId(uuid::Uuid::from_u128(1)),
+                },
+            )),
+        };
+        let parent = make_parent_sitrep(
+            parent_id,
+            inv_id,
+            [make_disk_case(case_id, parent_id, [foreign_fact])],
+        );
+
+        let input = build_input(collection, Some(parent), in_service);
+        let (sitrep, report) = run_analyze(&logctx.log, &input);
+
+        let case = sitrep
+            .cases
+            .get(&case_id)
+            .expect("case should still be in the output sitrep");
+        assert!(
+            !case.is_open(),
+            "case with a foreign fact payload should be closed",
+        );
+        let report_str = format!("{}", report.display_multiline(0));
+        assert!(
+            report_str.contains("cannot interpret case"),
+            "close comment should say the case was uninterpretable, got: \
+             {report_str}",
+        );
         logctx.cleanup_successful();
     }
 }
