@@ -678,6 +678,7 @@ impl CollectionBuilder {
             smf_services_enabled_not_online: inventory
                 .smf_services_enabled_not_online,
             reference_measurements: inventory.reference_measurements,
+            fmd: inventory.fmd,
         };
 
         self.sleds

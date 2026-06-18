@@ -5297,6 +5297,76 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_svc_enabled_not_online_parse_error
     PRIMARY KEY (inv_collection_id, sled_id, id)
 );
 
+CREATE TYPE IF NOT EXISTS omicron.public.fmd_inventory_error_kind AS ENUM (
+    -- Catch-all for FMD-side failures: daemon unreachable, listing cases
+    -- or resources failed, or the platform doesn't have FMD at all. The
+    -- accompanying `error_message` carries specifics.
+    'fmd_error',
+    -- Number of FMD cases reported by the sled exceeded the producer's
+    -- limit; no partial data is recorded.
+    'too_many_cases',
+    -- Number of FMD resources reported by the sled exceeded the limit;
+    -- no partial data is recorded.
+    'too_many_resources'
+);
+
+CREATE TABLE IF NOT EXISTS omicron.public.inv_fmd_status (
+    -- (foreign key into `inv_collection` table)
+    inv_collection_id UUID NOT NULL,
+    -- guaranteed to match a row in this collection's `inv_sled_agent`
+    sled_id UUID NOT NULL,
+    -- Classifies the failure mode when FMD inventory collection failed.
+    -- NULL iff `error_message` is NULL (FMD was successfully collected).
+    error_kind omicron.public.fmd_inventory_error_kind,
+    -- Display() of the original error; informational only, do not parse.
+    -- The `error_kind` discriminator is the structured signal.
+    -- NULL iff `error_kind` is NULL.
+    error_message TEXT,
+
+    CONSTRAINT error_kind_and_message_together CHECK (
+        (error_kind IS NULL) = (error_message IS NULL)
+    ),
+
+    PRIMARY KEY (inv_collection_id, sled_id)
+);
+
+CREATE TABLE IF NOT EXISTS omicron.public.inv_fmd_host_case (
+    -- (foreign key into `inv_collection` table)
+    inv_collection_id UUID NOT NULL,
+    -- guaranteed to match a row in this collection's `inv_sled_agent`
+    sled_id UUID NOT NULL,
+    case_id UUID NOT NULL,
+    code TEXT NOT NULL,
+    url TEXT NOT NULL,
+    -- The full FMD fault event payload as JSON, if present. Stored as
+    -- JSONB without parsing — Nexus does not interpret the FMD event
+    -- schema. JSONB normalizes whitespace and key order, so the value is
+    -- preserved structurally (not byte-for-byte) for downstream tooling
+    -- (e.g. omdb).
+    event JSONB,
+
+    PRIMARY KEY (inv_collection_id, sled_id, case_id)
+);
+
+CREATE TABLE IF NOT EXISTS omicron.public.inv_fmd_resource (
+    -- (foreign key into `inv_collection` table)
+    inv_collection_id UUID NOT NULL,
+    -- guaranteed to match a row in this collection's `inv_sled_agent`
+    sled_id UUID NOT NULL,
+    resource_id UUID NOT NULL,
+    -- Fault Management Resource Identifier
+    -- (e.g. "dev:////pci@af,0/pci1022,1483@3,5").
+    fmri TEXT NOT NULL,
+    -- (foreign key into `inv_fmd_host_case`, with the same
+    -- (inv_collection_id, sled_id))
+    case_id UUID NOT NULL,
+    faulty BOOL NOT NULL,
+    unusable BOOL NOT NULL,
+    invisible BOOL NOT NULL,
+
+    PRIMARY KEY (inv_collection_id, sled_id, resource_id)
+);
+
 /*
  * Various runtime configuration switches for reconfigurator
  *
@@ -8823,7 +8893,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '270.0.0', NULL)
+    (TRUE, NOW(), NOW(), '271.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;
