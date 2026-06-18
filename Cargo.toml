@@ -458,7 +458,7 @@ cfg-if = "1.0"
 chrono = { version = "0.4", features = [ "serde" ] }
 chrono-tz = { version = "0.10.4", features = [ "serde" ] }
 ciborium = "0.2.2"
-clap = { version = "4.5", features = ["cargo", "derive", "env", "wrap_help"] }
+clap = { version = "4.6", features = ["cargo", "derive", "env", "wrap_help"] }
 clickana = { path = "dev-tools/clickana" }
 clickhouse-admin-api = { path = "clickhouse-admin/api" }
 clickhouse-admin-keeper-client = { path = "clients/clickhouse-admin-keeper-client" }
@@ -730,7 +730,6 @@ proc-macro2 = "1.0"
 progenitor = "0.14.0"
 progenitor-client = "0.14.0"
 progenitor-extras = "0.2.0"
-progenitor-client010 = { package = "progenitor-client", version = "0.10.0" }
 # NOTE: if you change the pinned revision of the `bhyve_api` and propolis
 # dependencies, you must also update the references in package-manifest.toml to
 # match the new revision.

@@ -1031,6 +1031,7 @@ async fn cmd_db_alert_info(
         payload,
         num_dispatched,
         case_id,
+        version,
     } = alert;
 
     const CLASS: &str = "class";
@@ -1050,7 +1051,7 @@ async fn cmd_db_alert_info(
 
     println!("\n{:=<80}", "== ALERT ");
     println!("    {ID:>WIDTH$}: {id:?}");
-    println!("    {CLASS:>WIDTH$}: {class}");
+    println!("    {CLASS:>WIDTH$}: {class}, v{}", u32::from(version));
     println!("    {TIME_CREATED:>WIDTH$}: {time_created}");
     println!("    {TIME_MODIFIED:>WIDTH$}: {time_modified}");
     println!();

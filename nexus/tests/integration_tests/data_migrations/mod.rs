@@ -44,6 +44,7 @@ mod populate_db_metadata_nexus;
 mod positive_quotas;
 mod rename_default_igw_ip_pool;
 mod route_config_rib_priority;
+mod sled_resource_vmm_state;
 mod vpc_firewall_icmp;
 mod zone_image_resolver_inventory;
 
@@ -92,6 +93,7 @@ pub(crate) fn get_migration_checks() -> BTreeMap<Version, DataMigrationFns> {
     register!(drop_uninitialized_svc_enabled_not_online_state);
     register!(bgp_unnumbered_peer_cleanup);
     register!(ereport_trim_serial_trailing_nulls);
+    register!(sled_resource_vmm_state);
 
     map
 }
