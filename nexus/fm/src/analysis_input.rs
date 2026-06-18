@@ -333,12 +333,12 @@ impl Builder {
                         }
                     })
                     .collect::<BTreeSet<_>>();
-                let unmarked_alert_requests: BTreeSet<AlertUuid> = case
+                let unmarked_alert_requests = case
                     .alerts_requested
                     .iter()
                     .map(|r| r.id)
                     .filter(|id| !self.marked_alert_requests.contains(id))
-                    .collect();
+                    .collect::<BTreeSet<_>>();
                 let unmarked_support_bundle_requests = case
                     .support_bundles_requested
                     .iter()
