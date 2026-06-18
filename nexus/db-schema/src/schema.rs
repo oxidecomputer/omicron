@@ -3181,6 +3181,17 @@ table! {
 allow_tables_to_appear_in_same_query!(fm_sitrep, fm_sitrep_history);
 
 table! {
+    fm_sitrep_analysis_report (sitrep_id) {
+        sitrep_id -> Uuid,
+        git_commit -> Text,
+        input_report -> Jsonb,
+        analysis_report -> Jsonb,
+    }
+}
+
+allow_tables_to_appear_in_same_query!(fm_sitrep_analysis_report, fm_sitrep);
+
+table! {
     disk_type_local_storage (disk_id) {
         disk_id -> Uuid,
 
@@ -3256,6 +3267,22 @@ table! {
 }
 
 table! {
+    fm_fact_physical_disk (sitrep_id, id) {
+        id -> Uuid,
+        sitrep_id -> Uuid,
+        case_id -> Uuid,
+        created_sitrep_id -> Uuid,
+        comment -> Text,
+        physical_disk_id -> Uuid,
+        kind -> crate::enums::FmFactPhysicalDiskKindEnum,
+        zpool_id -> Nullable<Uuid>,
+        last_seen_health -> Nullable<crate::enums::InvZpoolHealthEnum>,
+        observed_in_inv -> Nullable<Uuid>,
+        time_observed -> Nullable<Timestamptz>,
+    }
+}
+
+table! {
     fm_ereport_in_case (sitrep_id, id) {
         id -> Uuid,
         restart_id -> Uuid,
@@ -3270,6 +3297,8 @@ table! {
 
 allow_tables_to_appear_in_same_query!(fm_ereport_in_case, ereport);
 allow_tables_to_appear_in_same_query!(fm_sitrep, fm_case);
+allow_tables_to_appear_in_same_query!(fm_sitrep, fm_fact_physical_disk);
+allow_tables_to_appear_in_same_query!(fm_case, fm_fact_physical_disk);
 
 table! {
     fm_alert_request (sitrep_id, id) {

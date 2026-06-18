@@ -11,6 +11,7 @@ use futures::future::BoxFuture;
 use nexus_background_task_interface::Activator;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
+use nexus_db_queries::db::datastore::FmRendezvousAlertCreateError;
 use nexus_db_queries::db::datastore::SupportBundleCreateParams;
 use nexus_db_queries::db::datastore::SupportBundleProvenance;
 use nexus_types::fm;
@@ -179,16 +180,14 @@ impl FmRendezvous {
                 Ok(_) => {
                     status.alerts_created += 1;
                 }
-                Err(Error::ObjectAlreadyExists { .. }) => {
-                    // A prior activation already created this alert. The marker
-                    // row in `rendezvous_alert_created` prevents resurrection.
+                Err(FmRendezvousAlertCreateError::AlreadyCreated) => {
                     status.alerts_already_existed += 1;
                 }
-                Err(Error::Conflict { .. }) => {
+                Err(FmRendezvousAlertCreateError::StaleSitrep) => {
                     // The current sitrep in the database has moved past ours.
                     // Abort the rest of this activation; a fresher one will
                     // pick up where we left off.
-                    slog::warn!(
+                    slog::info!(
                         opctx.log,
                         "aborting alert rendezvous: sitrep is stale";
                         "case_id" => %case_id,
@@ -199,7 +198,7 @@ impl FmRendezvous {
                     status.stale_sitrep = true;
                     break;
                 }
-                Err(e) => {
+                Err(FmRendezvousAlertCreateError::Database(e)) => {
                     slog::warn!(
                         opctx.log,
                         "failed to create requested alert";
@@ -217,7 +216,7 @@ impl FmRendezvous {
 
         let n_errors = status.errors.len();
         if status.stale_sitrep {
-            slog::warn!(
+            slog::info!(
                 opctx.log,
                 "alert rendezvous aborted: sitrep stale relative to current";
                 "sitrep_id" => %sitrep.id(),
@@ -581,6 +580,7 @@ mod tests {
             alerts_requested: iddqd::IdOrdMap::new(),
             ereports: iddqd::IdOrdMap::new(),
             support_bundles_requested: iddqd::IdOrdMap::new(),
+            facts: iddqd::IdOrdMap::new(),
         };
         case1
             .alerts_requested
@@ -617,7 +617,7 @@ mod tests {
         // generation matches the current one. Insert the sitrep so it shows up
         // in the DB before activating.
         datastore
-            .fm_sitrep_insert(opctx, sitrep1.clone())
+            .fm_sitrep_insert(opctx, sitrep1.clone(), None)
             .await
             .expect("inserted sitrep1");
 
@@ -673,6 +673,7 @@ mod tests {
             alerts_requested: iddqd::IdOrdMap::new(),
             ereports: iddqd::IdOrdMap::new(),
             support_bundles_requested: iddqd::IdOrdMap::new(),
+            facts: iddqd::IdOrdMap::new(),
         };
         case2
             .alerts_requested
@@ -718,7 +719,7 @@ mod tests {
         };
 
         datastore
-            .fm_sitrep_insert(opctx, sitrep2.clone())
+            .fm_sitrep_insert(opctx, sitrep2.clone(), None)
             .await
             .expect("inserted sitrep2");
 
@@ -781,13 +782,11 @@ mod tests {
         logctx.cleanup_successful();
     }
 
-    /// A stale activation (one whose sitrep's `alert_generation` is
-    /// behind the latest sitrep in `fm_sitrep_history`) should be rejected by
-    /// `SitrepGuardedInsert` inside `fm_rendezvous_alert_create`. The
-    /// rendezvous task is responsible for translating that `Conflict` into
-    /// `stale_sitrep = true`,
-    /// breaking out of the alert loop without inserting any rows, and still
-    /// running the support bundle op.
+    /// A stale activation (one whose sitrep's `alert_generation` is behind the
+    /// latest sitrep in `fm_sitrep_history`) should be rejected in
+    /// `fm_rendezvous_alert_create`. The rendezvous task is responsible for
+    /// translating that `Conflict` into `stale_sitrep = true`, breaking out of
+    /// the alert loop without interrupting anything else.
     #[tokio::test]
     async fn test_alert_requests_aborted_when_sitrep_is_stale() {
         let logctx = dev::test_setup_log(
@@ -810,10 +809,11 @@ mod tests {
             OmicronZoneUuid::new_v4(),
         );
 
-        // The stale activation's sitrep: carries two alert requests and
-        // stamps `alert_generation = 1`. Two requests (rather than one) pin
-        // the totals' semantics: they count the sitrep's full request set,
-        // not how far the loop got before aborting on the first insert.
+        // The stale activation's sitrep carries two alert requests and stamps
+        // `alert_generation = 1`. Using two requests (rather than one) lets the
+        // test confirm that the reported totals count every request in the
+        // sitrep, not just how far the loop got before it aborted on the first
+        // insert.
         let stale_sitrep_id = SitrepUuid::new_v4();
         let stale_alert_id = AlertUuid::new_v4();
         let stale_alert2_id = AlertUuid::new_v4();
@@ -830,6 +830,7 @@ mod tests {
                 alerts_requested: iddqd::IdOrdMap::new(),
                 ereports: iddqd::IdOrdMap::new(),
                 support_bundles_requested: iddqd::IdOrdMap::new(),
+                facts: iddqd::IdOrdMap::new(),
             };
             for id in [stale_alert_id, stale_alert2_id] {
                 c.alerts_requested
@@ -864,7 +865,7 @@ mod tests {
             }
         };
         datastore
-            .fm_sitrep_insert(opctx, stale_sitrep.clone())
+            .fm_sitrep_insert(opctx, stale_sitrep.clone(), None)
             .await
             .expect("inserted stale sitrep");
 
@@ -887,14 +888,14 @@ mod tests {
             ereports_by_id: Default::default(),
         };
         datastore
-            .fm_sitrep_insert(opctx, current_sitrep)
+            .fm_sitrep_insert(opctx, current_sitrep, None)
             .await
             .expect("inserted current sitrep");
 
-        // Hand the stale sitrep to the rendezvous task. Its first alert
-        // request should trip the sitrep-guard combinator and surface as a
-        // `Conflict`, which the task translates into `stale_sitrep = true` and
-        // breaks out of the alert loop before the second request is attempted.
+        // Hand the stale sitrep to the rendezvous task. Attempting to insert
+        // the first alert should result in an error because the sitrep is out
+        // of date, and rendezvous execution should be aborted before
+        // attempting to insert the other alert.
         sitrep_tx
             .send(Some(Arc::new((
                 fm::SitrepVersion {
@@ -1146,6 +1147,7 @@ mod tests {
                 ereports,
                 alerts_requested: iddqd::IdOrdMap::new(),
                 support_bundles_requested: iddqd::IdOrdMap::new(),
+                facts: iddqd::IdOrdMap::new(),
             }
         };
 
@@ -1359,6 +1361,7 @@ mod tests {
                 ereports,
                 alerts_requested: iddqd::IdOrdMap::new(),
                 support_bundles_requested: iddqd::IdOrdMap::new(),
+                facts: iddqd::IdOrdMap::new(),
             }
         };
 
@@ -1469,6 +1472,7 @@ mod tests {
                 ereports,
                 alerts_requested: iddqd::IdOrdMap::new(),
                 support_bundles_requested: iddqd::IdOrdMap::new(),
+                facts: iddqd::IdOrdMap::new(),
             }
         };
 
@@ -1665,6 +1669,7 @@ mod tests {
             alerts_requested: iddqd::IdOrdMap::new(),
             ereports: iddqd::IdOrdMap::new(),
             support_bundles_requested: iddqd::IdOrdMap::new(),
+            facts: iddqd::IdOrdMap::new(),
         };
         case1
             .support_bundles_requested
@@ -1843,6 +1848,7 @@ mod tests {
             alerts_requested: iddqd::IdOrdMap::new(),
             ereports: iddqd::IdOrdMap::new(),
             support_bundles_requested: iddqd::IdOrdMap::new(),
+            facts: iddqd::IdOrdMap::new(),
         };
         case.support_bundles_requested
             .insert_unique(fm::case::SupportBundleRequest {

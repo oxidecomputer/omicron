@@ -8,6 +8,7 @@ use chrono::{DateTime, Utc};
 use iddqd::IdOrdMap;
 use nexus_types::fm::analysis_reports::ClosedCaseReport;
 use nexus_types::fm::{self, Sitrep, SitrepVersion};
+use nexus_types::in_service_disk::InServiceDisk;
 use nexus_types::inventory;
 use omicron_uuid_kinds::AlertUuid;
 use omicron_uuid_kinds::CollectionUuid;
@@ -33,6 +34,7 @@ pub use nexus_types::fm::analysis_reports::InputReport as Report;
 /// is constructed, the inputs are immutable and cannot be modified. To
 /// construct a new `Input` as part of a preparation phase, use
 /// [`Input::builder`].
+#[derive(Debug)]
 pub struct Input {
     parent_sitrep: Option<Arc<(SitrepVersion, Sitrep)>>,
     inv: Arc<inventory::Collection>,
@@ -47,6 +49,7 @@ pub struct Input {
     /// [`crate::builder::SitrepBuilder::build`] to decide whether to bump the
     /// new sitrep's `alert_generation`.
     alerts_changed: bool,
+    in_service_disks: Arc<IdOrdMap<InServiceDisk>>,
 }
 
 impl Input {
@@ -77,11 +80,18 @@ impl Input {
         self.alerts_changed
     }
 
+    /// All control-plane-managed disks (`physical_disk.disk_policy =
+    /// in_service` in the DB), indexed by `physical_disk_id`.
+    pub fn in_service_disks(&self) -> &IdOrdMap<InServiceDisk> {
+        &self.in_service_disks
+    }
+
     /// Returns a [`Builder`] for constructing a new `Input` from the provided
-    /// `parent_sitrep` and inventory collection.
+    /// `parent_sitrep`, inventory collection, and in-service disks.
     pub fn builder(
         parent_sitrep: Option<Arc<(SitrepVersion, Sitrep)>>,
         inv: Arc<inventory::Collection>,
+        in_service_disks: Arc<IdOrdMap<InServiceDisk>>,
     ) -> Result<Builder, InvalidInputs> {
         // Before preparing analysis inputs, check that the proposed input
         // inventory collection is at least as new as the parent sitrep's
@@ -106,6 +116,7 @@ impl Input {
         Ok(Builder {
             parent_sitrep,
             inv,
+            in_service_disks,
             new_ereports: IdOrdMap::default(),
             unmarked_seen_ereports: BTreeSet::default(),
             marked_alert_requests: HashSet::new(),
@@ -130,6 +141,7 @@ pub enum InvalidInputs {
 pub struct Builder {
     parent_sitrep: Option<Arc<(SitrepVersion, Sitrep)>>,
     inv: Arc<inventory::Collection>,
+    in_service_disks: Arc<IdOrdMap<InServiceDisk>>,
     /// Ereports which are new and should be input to analysis in the next
     /// sitrep.
     new_ereports: IdOrdMap<fm::Ereport>,
@@ -220,6 +232,11 @@ impl Builder {
                 .collect(),
             open_cases: BTreeMap::new(),
             closed_cases_copied_forward: BTreeMap::new(),
+            in_service_disks: self
+                .in_service_disks
+                .iter()
+                .map(|d| d.physical_disk_id)
+                .collect(),
         };
 
         // Determine which cases must be copied forwards into the next sitrep.
@@ -262,11 +279,7 @@ impl Builder {
                 let has_outstanding_work = !unmarked_ereports.is_empty()
                     || !unmarked_alert_requests.is_empty();
                 if has_outstanding_work {
-                    // The case has ereport work and/or alert work remaining, so
-                    // carry it forward intact. We keep even already-satisfied
-                    // alert requests around: the marker prevents their
-                    // resurrection, and pruning them would force a generation
-                    // bump that buys us only earlier marker GC.
+                    // The case has work remaining, so copy it forward intact.
                     report.closed_cases_copied_forward.insert(
                         case.id,
                         ClosedCaseReport {
@@ -296,6 +309,7 @@ impl Builder {
             open_cases,
             closed_cases_copied_forward,
             alerts_changed,
+            in_service_disks: self.in_service_disks,
         };
 
         (input, report)
@@ -410,6 +424,7 @@ mod tests {
                     .collect(),
                     alerts_requested: Default::default(),
                     support_bundles_requested: Default::default(),
+                    facts: Default::default(),
                 }
             };
             let open_case2 = {
@@ -430,6 +445,7 @@ mod tests {
                     .collect(),
                     alerts_requested: Default::default(),
                     support_bundles_requested: Default::default(),
+                    facts: Default::default(),
                 }
             };
             let closed_case_with_unmarked = {
@@ -457,6 +473,7 @@ mod tests {
                     .collect(),
                     alerts_requested: Default::default(),
                     support_bundles_requested: Default::default(),
+                    facts: Default::default(),
                 }
             };
             let closed_case_without_unmarked = {
@@ -478,6 +495,7 @@ mod tests {
                     .collect(),
                     alerts_requested: Default::default(),
                     support_bundles_requested: Default::default(),
+                    facts: Default::default(),
                 }
             };
 
@@ -528,8 +546,12 @@ mod tests {
 
         // Build analysis input
         let (input, report) = {
-            let mut builder = Input::builder(Some(parent_sitrep), inv)
-                .expect("collection start time check should always pass");
+            let mut builder = Input::builder(
+                Some(parent_sitrep),
+                inv,
+                Arc::new(IdOrdMap::new()),
+            )
+            .expect("collection start time check should always pass");
             // Pass in four ereports:
             //  - two that are in the open cases of the parent sitrep
             //  - one that is in the (to-be-copied-forward) closed case
@@ -780,8 +802,12 @@ mod tests {
             version: 1,
             time_made_current: chrono::Utc::now(),
         };
-        Input::builder(Some(Arc::new((parent_version, parent))), inv)
-            .expect("collection start time check should always pass")
+        Input::builder(
+            Some(Arc::new((parent_version, parent))),
+            inv,
+            Arc::new(IdOrdMap::new()),
+        )
+        .expect("collection start time check should always pass")
     }
 
     /// All alert requests on a closed case are satisfied and the case has no
@@ -817,6 +843,7 @@ mod tests {
             .into_iter()
             .collect(),
             support_bundles_requested: IdOrdMap::new(),
+            facts: IdOrdMap::new(),
         };
 
         let mut builder = builder_with_closed_case(closed_case);
@@ -871,6 +898,7 @@ mod tests {
             .into_iter()
             .collect(),
             support_bundles_requested: IdOrdMap::new(),
+            facts: IdOrdMap::new(),
         };
 
         let mut builder = builder_with_closed_case(closed_case);

@@ -475,8 +475,9 @@ struct UpdatesRequired {
     new_intent: Option<InstanceIntendedState>,
 
     /// If this is [`Some`], the instance's active VMM with this UUID has
-    /// transitioned to [`VmmState::Destroyed`], and its resources must be
-    /// cleaned up by a [`destroyed`] subsaga.
+    /// transitioned to a terminal state ([`VmmState::Destroyed`] or
+    /// [`VmmState::Failed`]), and its resources must be cleaned up by a
+    /// [`destroyed`] subsaga.
     destroy_active_vmm: Option<PropolisUuid>,
 
     /// If this is [`Some`], then a migration finished successfully, and the
@@ -489,8 +490,9 @@ struct UpdatesRequired {
         Option<MigrateSuccessUpdate>,
 
     /// If this is [`Some`], the instance's migration target VMM with this UUID
-    /// has transitioned to [`VmmState::Destroyed`], and its resources must be
-    /// cleaned up by a [`destroyed`] subsaga.
+    /// has transitioned to a terminal state ([`VmmState::Destroyed`] or
+    /// [`VmmState::Failed`]), and its resources must be cleaned up by a
+    /// [`destroyed`] subsaga.
     destroy_target_vmm: Option<PropolisUuid>,
 
     /// If this is [`Some`], the instance no longer has an active VMM, and its
@@ -1688,6 +1690,7 @@ mod test {
         create_default_ip_pools, create_project, object_create,
     };
     use nexus_test_utils_macros::nexus_test;
+    use nexus_types::external_api::instance::InstanceCpuCount;
     use nexus_types::external_api::{
         instance as instance_types, networking as networking_types,
     };
@@ -1696,14 +1699,14 @@ mod test {
     use nexus_types::instance::VmmState as NexusVmmState;
     use nexus_types::internal_api::params::InstanceMigrateRequest;
     use omicron_common::api::external::{
-        ByteCount, DataPageParams, IdentityMetadataCreateParams,
-        InstanceCpuCount, Name,
+        ByteCount, DataPageParams, IdentityMetadataCreateParams, Name,
     };
     use omicron_test_utils::dev::poll;
     use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::PropolisUuid;
     use sled_agent_types::early_networking::SwitchSlot;
     use sled_agent_types::instance::{MigrationRuntimeState, MigrationState};
+    use slog_error_chain::InlineErrorChain;
     use std::sync::Arc;
     use std::sync::Mutex;
     use std::time::Duration;
@@ -2847,6 +2850,24 @@ mod test {
 
         poll::wait_for_condition(
             async || {
+                // Force dendrite's NAT to reconcile against Nexus now. (See
+                // "Relying on periodic background-task activation" in
+                // docs/flake-patterns.adoc.)
+                //
+                // (Triggering reconciliation is idempotent, so it is safe to do
+                // on every iteration.)
+                if let Err(error) = client.nat_trigger_update().await {
+                    slog::info!(
+                        log,
+                        "failed to trigger NAT reconciliation, will retry";
+                        "switch" => ?switch,
+                        InlineErrorChain::new(&error),
+                    );
+                    return Err(poll::CondCheckError::<&'static str>::NotYet {
+                        status: None,
+                    });
+                }
+
                 let result =
                     client.nat_ipv4_list(&NAT_SUBNET, None, None).await;
 

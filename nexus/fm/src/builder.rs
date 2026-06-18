@@ -25,10 +25,10 @@ pub struct SitrepBuilder<'a> {
     pub parent_sitrep: Option<&'a fm::Sitrep>,
     pub sitrep_id: SitrepUuid,
     pub cases: case::AllCases,
+    /// The analysis input this builder was constructed from; `cases` is
+    /// seeded from its open cases.
+    input: &'a analysis_input::Input,
     closed_cases_copied_forward: &'a IdOrdMap<fm::Case>,
-    /// Plumbed from [`analysis_input::Input::alerts_changed`]; ORed with
-    /// [`case::AllCases::alert_set_changed`] in [`Self::build`] to drive
-    /// `alert_generation` bumps.
     alerts_changed: bool,
     comment: String,
 }
@@ -86,10 +86,19 @@ impl<'a> SitrepBuilder<'a> {
             inventory,
             parent_sitrep,
             comment: String::new(),
+            input: inputs,
             closed_cases_copied_forward,
             alerts_changed: inputs.alerts_changed(),
             cases,
         }
+    }
+
+    /// The analysis input this builder was constructed from.
+    ///
+    /// The returned reference borrows the input (lifetime `'a`), not the
+    /// builder, so callers may hold it while mutating the builder.
+    pub fn input(&self) -> &'a analysis_input::Input {
+        self.input
     }
 
     pub fn comment(&self) -> &str {
@@ -206,9 +215,10 @@ mod tests {
 
     /// Build a minimal `Input` with no parent sitrep and an empty inventory.
     fn make_input() -> Input {
-        let (input, _) = Input::builder(None, make_collection())
-            .expect("no parent sitrep, so builder should succeed")
-            .build();
+        let (input, _) =
+            Input::builder(None, make_collection(), Arc::new(IdOrdMap::new()))
+                .expect("no parent sitrep, so builder should succeed")
+                .build();
         input
     }
 
@@ -238,10 +248,13 @@ mod tests {
             version: 1,
             time_made_current: chrono::Utc::now(),
         };
-        let (input, _) =
-            Input::builder(Some(Arc::new((parent_version, parent))), inv)
-                .expect("parent and child share an inventory")
-                .build();
+        let (input, _) = Input::builder(
+            Some(Arc::new((parent_version, parent))),
+            inv,
+            Arc::new(IdOrdMap::new()),
+        )
+        .expect("parent and child share an inventory")
+        .build();
         input
     }
 
@@ -287,10 +300,10 @@ mod tests {
         logctx.cleanup_successful();
     }
 
+    /// Verifies that the bump is relative to the parent sitrep's generation,
+    /// not restarted from a fixed initial value.
     #[test]
     fn child_sitrep_with_new_alert_bumps_alert_generation() {
-        // Verifies that the bump is relative to the parent sitrep's generation,
-        // not restarted from a fixed initial value.
         let logctx = dev::test_setup_log(
             "child_sitrep_with_new_alert_bumps_alert_generation",
         );
@@ -309,11 +322,11 @@ mod tests {
         logctx.cleanup_successful();
     }
 
+    /// A closed case with an outstanding alert request becomes "satisfied" via
+    /// marker presence, carry-forward drops it, and alert_generation bumps even
+    /// though no open-case builder mutations happened.
     #[test]
     fn carry_forward_drop_bumps_alert_generation() {
-        // A closed case with an outstanding alert request becomes "satisfied"
-        // via marker presence, carry-forward drops it, alert_generation bumps
-        // even though no open-case builder mutations happened.
         use nexus_types::alert::AlertClass;
         use nexus_types::fm::case::AlertRequest;
         use omicron_uuid_kinds::AlertUuid;
@@ -345,6 +358,7 @@ mod tests {
             .into_iter()
             .collect(),
             support_bundles_requested: IdOrdMap::new(),
+            facts: IdOrdMap::new(),
         };
 
         let parent = fm::Sitrep {
@@ -369,6 +383,7 @@ mod tests {
         let mut builder_inputs = crate::analysis_input::Input::builder(
             Some(Arc::new((parent_version, parent))),
             inv,
+            Arc::new(IdOrdMap::new()),
         )
         .unwrap();
         // Marker exists, so carry-forward will drop the case.
@@ -379,7 +394,8 @@ mod tests {
         assert_eq!(
             sitrep.metadata.alert_generation,
             Generation::new().next(),
-            "carry-forward drop must bump alert_generation past the parent's"
+            "dropping a case with alerts from the set of closed cases being \
+             carried forwards must bump alert_generation past the parent's"
         );
         logctx.cleanup_successful();
     }

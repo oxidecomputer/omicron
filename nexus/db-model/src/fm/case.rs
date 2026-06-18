@@ -64,6 +64,7 @@ impl CaseMetadata {
             alerts_requested: _,
             support_bundles_requested: _,
             ereports: _,
+            facts: _,
         } = case;
         Self {
             sitrep_id: sitrep_id.into(),
