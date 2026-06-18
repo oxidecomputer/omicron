@@ -8,7 +8,7 @@ use crate::app::background::BackgroundTask;
 use crate::app::instance::SledAgentInstanceError;
 use crate::app::saga::StartSaga;
 use futures::{FutureExt, future::BoxFuture};
-use gateway_client::types::PowerState;
+use gateway_types::component::PowerState;
 use nexus_db_model::Instance;
 use nexus_db_model::InstanceStateComputer;
 use nexus_db_model::Project;
