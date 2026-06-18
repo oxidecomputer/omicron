@@ -1461,8 +1461,9 @@ impl DiffableBgpConfig {
         for (port_name, peer_config) in our_bgp_peers {
             let BgpPeerConfig {
                 asn,
-                // TODO-correctness What does this field contain? We already
-                // have the port name from iterating over the parent map.
+                // TODO-cleanup We expect this field to contain the same value
+                // as `port_name` from the parent map; we should restructure the
+                // port config to make this relationship more precise.
                 port: _,
                 addr,
                 hold_time,
@@ -1518,17 +1519,20 @@ impl DiffableBgpConfig {
                 }
                 max_paths = Some(*this_config_max_paths);
 
-                // TODO-correctness The Nexus code we've replaced was using the
-                // `bgp_apply` API, which only specified a router's ASN.
-                // Internally, mgd used these values, so we replicate that
-                // behavior, but that leaves some open questions:
+                // TODO-correctness The values here should come from Nexus, but
+                // aren't currently available in the config, so we have to pick
+                // reasonable defaults.
                 //
-                // 1. Should the Nexus config specify these values? (If not,
-                //    should they be in the mgd API at all?)
-                // 2. Why do we specify both an ASN and an id if they're the
-                //    same?
-                // 3. `listen` should be a `SocketAddr`, not a `String`:
-                //    https://github.com/oxidecomputer/maghemite/issues/767
+                // The ID and the ASN are supposed to be able to be different
+                // values, we just don't expose that yet. In BGP, Router IDs are
+                // distinct values from the ASN and both are required for BGP
+                // peering. Since we only support eBGP, the ASNs on each switch
+                // is different, but in iBGP the ASNs would be the same, and
+                // thus the Router ID would be a value that can be used to
+                // distinguish between two BGP routers in the same ASN. I think
+                // some vendor implementations default to using the interface IP
+                // Address or the highest IP Address configured to a loopback
+                // interface for the Router ID.
                 entry.insert(DiffableBgpRouterConfig {
                     id: *asn,
                     graceful_shutdown: false,
