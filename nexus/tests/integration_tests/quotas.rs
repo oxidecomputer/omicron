@@ -17,6 +17,7 @@ use nexus_test_utils::resource_helpers::test_params;
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::disk;
 use nexus_types::external_api::instance;
+use nexus_types::external_api::instance::InstanceCpuCount;
 use nexus_types::external_api::policy::SiloRole;
 use nexus_types::external_api::project;
 use nexus_types::external_api::silo::{
@@ -25,7 +26,6 @@ use nexus_types::external_api::silo::{
 };
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::IdentityMetadataCreateParams;
-use omicron_common::api::external::InstanceCpuCount;
 use serde_json::json;
 
 type ControlPlaneTestContext =

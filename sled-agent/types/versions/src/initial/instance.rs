@@ -244,6 +244,18 @@ pub struct VmmPutStateResponse {
     pub updated_runtime: Option<SledVmmState>,
 }
 
+// Hi! The doc link here broke by moving `InstanceState` out of omicron-common
+// well after the initial version of sled-agent types. `VmmStateRequested` is
+// still used in the latest version of the sled-agent API, so changing docs is
+// rejected as an incompatible change. Our options are to either add a new
+// sled-agent API version just to change this doc string, or allow the broken
+// link.
+//
+// Adding a new sled-agent API version (and version of this enum) just to change
+// a doc link seems pretty confusing for later readers, so allow the doc link.
+// We should probably not have doc links in API types to types outside the same
+// API version, to avoid this problem in the future..
+#[allow(rustdoc::broken_intra_doc_links)]
 /// Requestable running state of an Instance.
 ///
 /// A subset of [`omicron_common::api::external::InstanceState`].
