@@ -357,11 +357,11 @@ mod tests {
         logctx.cleanup_successful();
     }
 
+    /// Verifies that the alert bump is relative to the parent sitrep's
+    /// generation (not restarted from a fixed initial value), and that the
+    /// support bundle generation is left untouched.
     #[test]
     fn child_sitrep_with_new_alert_bumps_alert_generation_only() {
-        // Verifies that the alert bump is relative to the parent sitrep's
-        // generation (not restarted from a fixed initial value), and that
-        // the support bundle generation is left untouched.
         let logctx = dev::test_setup_log(
             "child_sitrep_with_new_alert_bumps_alert_generation_only",
         );
@@ -409,10 +409,10 @@ mod tests {
         logctx.cleanup_successful();
     }
 
+    /// Verifies that the bump is relative to the parent sitrep's generation,
+    /// not restarted from a fixed initial value.
     #[test]
     fn child_sitrep_with_both_new_requests_bumps_both_generations() {
-        // Verifies that the bump is relative to the parent sitrep's generation,
-        // not restarted from a fixed initial value.
         let logctx = dev::test_setup_log(
             "child_sitrep_with_both_new_requests_bumps_both_generations",
         );
@@ -437,11 +437,11 @@ mod tests {
         logctx.cleanup_successful();
     }
 
+    /// A closed case with an outstanding alert request becomes "satisfied" via
+    /// marker presence, carry-forward drops it, and alert_generation bumps even
+    /// though no open-case builder mutations happened.
     #[test]
     fn carry_forward_drop_bumps_alert_generation() {
-        // A closed case with an outstanding alert request becomes "satisfied"
-        // via marker presence, carry-forward drops it, alert_generation bumps
-        // even though no open-case builder mutations happened.
         use nexus_types::alert::AlertClass;
         use nexus_types::fm::case::AlertRequest;
         use omicron_uuid_kinds::AlertUuid;
@@ -510,7 +510,8 @@ mod tests {
         assert_eq!(
             sitrep.metadata.alert_generation,
             Generation::new().next(),
-            "carry-forward drop must bump alert_generation past the parent's"
+            "dropping a case with alerts from the set of closed cases being \
+             carried forwards must bump alert_generation past the parent's"
         );
         logctx.cleanup_successful();
     }
@@ -588,8 +589,9 @@ mod tests {
         assert_eq!(
             sitrep.metadata.support_bundle_generation,
             Generation::new().next(),
-            "carry-forward drop must bump support_bundle_generation past the \
-             parent's"
+            "dropping a case with support bundle requests from the set of \
+             closed cases being carried forwards must bump \
+             support_bundle_generation past the parent's"
         );
         logctx.cleanup_successful();
     }

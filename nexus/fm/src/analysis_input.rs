@@ -339,16 +339,14 @@ impl Builder {
                     .map(|r| r.id)
                     .filter(|id| !self.marked_alert_requests.contains(id))
                     .collect();
-                let unmarked_support_bundle_requests: BTreeSet<
-                    SupportBundleUuid,
-                > = case
+                let unmarked_support_bundle_requests = case
                     .support_bundles_requested
                     .iter()
                     .map(|r| r.id)
                     .filter(|id| {
                         !self.marked_support_bundle_requests.contains(id)
                     })
-                    .collect();
+                    .collect::<BTreeSet<_>>();
                 let has_outstanding_work = !unmarked_ereports.is_empty()
                     || !unmarked_alert_requests.is_empty()
                     || !unmarked_support_bundle_requests.is_empty();
