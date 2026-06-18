@@ -10,8 +10,8 @@ use crate::app::background::tasks::fm_sitrep_load::CurrentSitrep;
 use futures::future::BoxFuture;
 use nexus_background_task_interface::Activator;
 use nexus_db_queries::context::OpContext;
-use nexus_db_queries::db;
 use nexus_db_queries::db::DataStore;
+use nexus_db_queries::db::datastore::FmRendezvousAlertCreateError;
 use nexus_db_queries::db::datastore::SupportBundleCreateParams;
 use nexus_db_queries::db::datastore::SupportBundleProvenance;
 use nexus_types::fm;
@@ -150,41 +150,55 @@ impl FmRendezvous {
     ) -> AlertCreationStatus {
         let (_, ref sitrep) = *sitrep;
         let mut status = AlertCreationStatus::default();
+        let expected_alert_generation = sitrep.metadata.alert_generation;
+
+        // Count the request set up front, so the totals describe the sitrep
+        // itself even if the loop below aborts partway through on a stale
+        // sitrep.
+        status.total_alerts_requested = sitrep.alerts_requested().count();
+        status.current_sitrep_alerts_requested = sitrep
+            .alerts_requested()
+            .filter(|(_, req)| req.requested_sitrep_id == sitrep.id())
+            .count();
 
         // XXX(eliza): is it better to allocate all of these into a big array
         // and do a single `INSERT INTO` query, or iterate over them one by one
         // (not allocating) but insert one at a time? Note that a batched insert
-        // would need to use `ON CONFLICT DO NOTHING` rather than checking for
-        // `Conflict` errors from individual inserts, since multiple Nexus
-        // instances may run this task concurrently.
-        //
-        // TODO(#9592) Currently, these `alert_create` calls have no guard
-        // against a stale Nexus inserting alerts from an outdated sitrep. This
-        // is fine for now because alert requests are carried forward into newer
-        // sitreps, so a stale insert is redundant rather than incorrect.
-        // However, if alerts are ever hard-deleted (e.g. when a case is
-        // closed), a lagging Nexus could re-create "zombie" alert records after
-        // deletion. At that point, the INSERT should be guarded by a CTE that
-        // checks the sitrep generation matches the current one.
+        // would require changes to `SitrepGuardedInsert`.
         for (case_id, req) in sitrep.alerts_requested() {
-            let &AlertRequest { id, class, requested_sitrep_id, .. } = req;
-            status.total_alerts_requested += 1;
-            if requested_sitrep_id == sitrep.id() {
-                status.current_sitrep_alerts_requested += 1;
-            }
+            let &AlertRequest { id, class, .. } = req;
             match self
                 .datastore
-                .alert_create(
+                .fm_rendezvous_alert_create(
                     &opctx,
-                    db::model::Alert::for_fm_alert_request(req, case_id),
+                    req,
+                    case_id,
+                    expected_alert_generation,
                 )
                 .await
             {
-                // Alert already exists --- this is expected, since multiple
-                // Nexus instances may run this task concurrently for the same
-                // sitrep, or a previous activation may have partially completed.
-                Err(Error::Conflict { .. }) => {}
-                Err(e) => {
+                Ok(_) => {
+                    status.alerts_created += 1;
+                }
+                Err(FmRendezvousAlertCreateError::AlreadyCreated) => {
+                    status.alerts_already_existed += 1;
+                }
+                Err(FmRendezvousAlertCreateError::StaleSitrep) => {
+                    // The current sitrep in the database has moved past ours.
+                    // Abort the rest of this activation; a fresher one will
+                    // pick up where we left off.
+                    slog::info!(
+                        opctx.log,
+                        "aborting alert rendezvous: sitrep is stale";
+                        "case_id" => %case_id,
+                        "alert_id" => %id,
+                        "alert_class" => %class,
+                        "expected_alert_generation" => expected_alert_generation,
+                    );
+                    status.stale_sitrep = true;
+                    break;
+                }
+                Err(FmRendezvousAlertCreateError::Database(e)) => {
                     slog::warn!(
                         opctx.log,
                         "failed to create requested alert";
@@ -197,12 +211,21 @@ impl FmRendezvous {
                         .errors
                         .push(format!("alert {id} (class: {class}): {e}"));
                 }
-                Ok(_) => status.alerts_created += 1,
             }
         }
 
         let n_errors = status.errors.len();
-        if n_errors > 0 {
+        if status.stale_sitrep {
+            slog::info!(
+                opctx.log,
+                "alert rendezvous aborted: sitrep stale relative to current";
+                "sitrep_id" => %sitrep.id(),
+                "expected_alert_generation" => expected_alert_generation,
+                "alerts_created" => status.alerts_created,
+                "alerts_already_existed" => status.alerts_already_existed,
+                "errors" => n_errors,
+            );
+        } else if n_errors > 0 {
             slog::warn!(
                 opctx.log,
                 "created {} alerts requested by the current sitrep, but \
@@ -211,6 +234,7 @@ impl FmRendezvous {
                 "sitrep_id" => %sitrep.id(),
                 "total_alerts_requested" => status.total_alerts_requested,
                 "alerts_created" => status.alerts_created,
+                "alerts_already_existed" => status.alerts_already_existed,
                 "errors" => n_errors,
             );
         } else if status.alerts_created > 0 {
@@ -221,6 +245,7 @@ impl FmRendezvous {
                 "sitrep_id" => %sitrep.id(),
                 "total_alerts_requested" => status.total_alerts_requested,
                 "alerts_created" => status.alerts_created,
+                "alerts_already_existed" => status.alerts_already_existed,
             );
         } else if status.total_alerts_requested > 0 {
             slog::debug!(
@@ -229,6 +254,7 @@ impl FmRendezvous {
                 "sitrep_id" => %sitrep.id(),
                 "total_alerts_requested" => status.total_alerts_requested,
                 "alerts_created" => status.alerts_created,
+                "alerts_already_existed" => status.alerts_already_existed,
             );
         } else {
             slog::debug!(
@@ -461,6 +487,7 @@ impl FmRendezvous {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use assert_matches::assert_matches;
     use async_bb8_diesel::AsyncRunQueryDsl;
     use chrono::Utc;
     use diesel::prelude::*;
@@ -472,6 +499,7 @@ mod tests {
     use nexus_types::fm::ereport::EreportData;
     use nexus_types::fm::ereport::Reporter;
     use nexus_types::support_bundle::BundleDataSelection;
+    use omicron_common::api::external::Generation;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::AlertUuid;
     use omicron_uuid_kinds::CaseEreportUuid;
@@ -577,11 +605,21 @@ mod tests {
                     comment: "test sitrep 1".to_string(),
                     time_created: Utc::now(),
                     next_inv_min_time_started: Utc::now(),
+                    alert_generation: Generation::new(),
                 },
                 cases,
                 ereports_by_id: Default::default(),
             }
         };
+
+        // The sitrep-guard combinator in `fm_rendezvous_alert_create` consults
+        // `fm_sitrep_history` to check that the rendezvous task's expected
+        // generation matches the current one. Insert the sitrep so it shows up
+        // in the DB before activating.
+        datastore
+            .fm_sitrep_insert(opctx, sitrep1.clone(), None)
+            .await
+            .expect("inserted sitrep1");
 
         sitrep_tx
             .send(Some(Arc::new((
@@ -603,7 +641,9 @@ mod tests {
                 total_alerts_requested: 1,
                 current_sitrep_alerts_requested: 1,
                 alerts_created: 1,
-                errors: Vec::new()
+                alerts_already_existed: 0,
+                stale_sitrep: false,
+                errors: Vec::new(),
             }
         );
         let db_alert1 = fetch_alert(&datastore, alert1_id)
@@ -671,11 +711,17 @@ mod tests {
                     comment: "test sitrep 2".to_string(),
                     time_created: Utc::now(),
                     next_inv_min_time_started: Utc::now(),
+                    alert_generation: Generation::new(),
                 },
                 cases,
                 ereports_by_id: Default::default(),
             }
         };
+
+        datastore
+            .fm_sitrep_insert(opctx, sitrep2.clone(), None)
+            .await
+            .expect("inserted sitrep2");
 
         sitrep_tx
             .send(Some(Arc::new((
@@ -697,7 +743,9 @@ mod tests {
                 total_alerts_requested: 3,
                 current_sitrep_alerts_requested: 2,
                 alerts_created: 2,
-                errors: Vec::new()
+                alerts_already_existed: 1,
+                stale_sitrep: false,
+                errors: Vec::new(),
             }
         );
 
@@ -730,6 +778,167 @@ mod tests {
         );
 
         // Cleanup
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    /// A stale activation (one whose sitrep's `alert_generation` is behind the
+    /// latest sitrep in `fm_sitrep_history`) should be rejected in
+    /// `fm_rendezvous_alert_create`. The rendezvous task is responsible for
+    /// translating that `Conflict` into `stale_sitrep = true`, breaking out of
+    /// the alert loop without interrupting anything else.
+    #[tokio::test]
+    async fn test_alert_requests_aborted_when_sitrep_is_stale() {
+        let logctx = dev::test_setup_log(
+            "test_alert_requests_aborted_when_sitrep_is_stale",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let (sitrep_tx, sitrep_rx) = watch::channel(None);
+        let TestActivators {
+            alert_dispatcher_activator,
+            support_bundle_collector_activator,
+        } = make_activators();
+
+        let mut task = FmRendezvous::new(
+            datastore.clone(),
+            sitrep_rx,
+            alert_dispatcher_activator.clone(),
+            support_bundle_collector_activator.clone(),
+            OmicronZoneUuid::new_v4(),
+        );
+
+        // The stale activation's sitrep carries two alert requests and stamps
+        // `alert_generation = 1`. Using two requests (rather than one) lets the
+        // test confirm that the reported totals count every request in the
+        // sitrep, not just how far the loop got before it aborted on the first
+        // insert.
+        let stale_sitrep_id = SitrepUuid::new_v4();
+        let stale_alert_id = AlertUuid::new_v4();
+        let stale_alert2_id = AlertUuid::new_v4();
+        let stale_case_id = CaseUuid::new_v4();
+        let stale_case = {
+            let mut c = fm::Case {
+                id: stale_case_id,
+                metadata: fm::case::Metadata {
+                    created_sitrep_id: stale_sitrep_id,
+                    closed_sitrep_id: None,
+                    de: fm::DiagnosisEngineKind::PowerShelf,
+                    comment: "stale case".to_string(),
+                },
+                alerts_requested: iddqd::IdOrdMap::new(),
+                ereports: iddqd::IdOrdMap::new(),
+                support_bundles_requested: iddqd::IdOrdMap::new(),
+                facts: iddqd::IdOrdMap::new(),
+            };
+            for id in [stale_alert_id, stale_alert2_id] {
+                c.alerts_requested
+                    .insert_unique(fm::case::AlertRequest {
+                        id,
+                        class: AlertClass::TestFoo,
+                        version: 0,
+                        requested_sitrep_id: stale_sitrep_id,
+                        payload: serde_json::json!({}),
+                        comment: String::new(),
+                    })
+                    .unwrap();
+            }
+            c
+        };
+        let stale_sitrep = {
+            let mut cases = iddqd::IdOrdMap::new();
+            cases.insert_unique(stale_case).unwrap();
+            fm::Sitrep {
+                metadata: fm::SitrepMetadata {
+                    id: stale_sitrep_id,
+                    inv_collection_id: CollectionUuid::new_v4(),
+                    parent_sitrep_id: None,
+                    creator_id: OmicronZoneUuid::new_v4(),
+                    comment: "stale sitrep".to_string(),
+                    time_created: Utc::now(),
+                    next_inv_min_time_started: Utc::now(),
+                    alert_generation: Generation::from_u32(1),
+                },
+                cases,
+                ereports_by_id: Default::default(),
+            }
+        };
+        datastore
+            .fm_sitrep_insert(opctx, stale_sitrep.clone(), None)
+            .await
+            .expect("inserted stale sitrep");
+
+        // A newer sitrep whose alert generation is ahead. Once it lands in
+        // `fm_sitrep_history`, the database considers the stale activation's
+        // sitrep out of date.
+        let current_sitrep_id = SitrepUuid::new_v4();
+        let current_sitrep = fm::Sitrep {
+            metadata: fm::SitrepMetadata {
+                id: current_sitrep_id,
+                inv_collection_id: CollectionUuid::new_v4(),
+                parent_sitrep_id: Some(stale_sitrep_id),
+                creator_id: OmicronZoneUuid::new_v4(),
+                comment: "current sitrep".to_string(),
+                time_created: Utc::now(),
+                next_inv_min_time_started: Utc::now(),
+                alert_generation: Generation::from_u32(2),
+            },
+            cases: iddqd::IdOrdMap::new(),
+            ereports_by_id: Default::default(),
+        };
+        datastore
+            .fm_sitrep_insert(opctx, current_sitrep, None)
+            .await
+            .expect("inserted current sitrep");
+
+        // Hand the stale sitrep to the rendezvous task. Attempting to insert
+        // the first alert should result in an error because the sitrep is out
+        // of date, and rendezvous execution should be aborted before
+        // attempting to insert the other alert.
+        sitrep_tx
+            .send(Some(Arc::new((
+                fm::SitrepVersion {
+                    id: stale_sitrep_id,
+                    version: 1,
+                    time_made_current: Utc::now(),
+                },
+                stale_sitrep,
+            ))))
+            .unwrap();
+
+        let status = dbg!(task.actually_activate(opctx).await);
+        assert_eq!(status.sitrep_id, Some(stale_sitrep_id));
+        assert_eq!(
+            status.alerts.details,
+            AlertCreationStatus {
+                // The totals count the sitrep's request set, not loop
+                // progress: both requests are reported even though the loop
+                // aborted on the first.
+                total_alerts_requested: 2,
+                current_sitrep_alerts_requested: 2,
+                alerts_created: 0,
+                alerts_already_existed: 0,
+                stale_sitrep: true,
+                errors: Vec::new(),
+            }
+        );
+        // Neither alert row may have been inserted: the sitrep-guard fired
+        // before the first request's inner INSERT could run, and the abort
+        // skipped the second request entirely.
+        for id in [stale_alert_id, stale_alert2_id] {
+            assert_matches!(
+                fetch_alert(&datastore, id).await,
+                Err(diesel::result::Error::NotFound)
+            );
+        }
+        // Support bundle processing should still have run: the stale-sitrep
+        // outcome aborts only the alert loop, not the whole activation.
+        assert_matches!(
+            status.support_bundles.result,
+            OpResult::Executed { .. }
+        );
+
         db.terminate().await;
         logctx.cleanup_successful();
     }
@@ -959,6 +1168,7 @@ mod tests {
                     comment: "sitrep with ereports 1 and 2".to_string(),
                     time_created: Utc::now(),
                     next_inv_min_time_started: Utc::now(),
+                    alert_generation: Generation::new(),
                 },
                 cases,
                 ereports_by_id,
@@ -1172,6 +1382,7 @@ mod tests {
                     comment: "sitrep 1: only ereport 1".to_string(),
                     time_created: Utc::now(),
                     next_inv_min_time_started: Utc::now(),
+                    alert_generation: Generation::new(),
                 },
                 cases,
                 ereports_by_id,
@@ -1282,6 +1493,7 @@ mod tests {
                     comment: "sitrep 2: all three ereports".to_string(),
                     time_created: Utc::now(),
                     next_inv_min_time_started: Utc::now(),
+                    alert_generation: Generation::new(),
                 },
                 cases,
                 ereports_by_id,
@@ -1481,6 +1693,7 @@ mod tests {
                     comment: "test sitrep 1".to_string(),
                     time_created: Utc::now(),
                     next_inv_min_time_started: Utc::now(),
+                    alert_generation: Generation::new(),
                 },
                 cases,
                 ereports_by_id: Default::default(),
@@ -1557,6 +1770,7 @@ mod tests {
                     comment: "test sitrep 2".to_string(),
                     time_created: Utc::now(),
                     next_inv_min_time_started: Utc::now(),
+                    alert_generation: Generation::new(),
                 },
                 cases,
                 ereports_by_id: Default::default(),
@@ -1657,6 +1871,7 @@ mod tests {
                     creator_id: OmicronZoneUuid::new_v4(),
                     comment: "test sitrep no capacity".to_string(),
                     time_created: Utc::now(),
+                    alert_generation: Generation::new(),
                 },
                 cases,
                 ereports_by_id: Default::default(),

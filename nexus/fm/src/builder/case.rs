@@ -21,6 +21,12 @@ pub struct CaseBuilder {
     sitrep_id: SitrepUuid,
     rng: rng::CaseBuilderRng,
     report_log: analysis_reports::DebugLog,
+    /// Set to `true` if this case requested at least one new alert during the
+    /// current analysis run. This means the new sitrep's alert request set will
+    /// differ from its parent's, so its alert generation must be bumped. Set by
+    /// [`Self::request_alert`], read by [`super::SitrepBuilder::build`] via
+    /// [`AllCases::alert_set_changed`].
+    pub(super) new_alerts_requested: bool,
 }
 
 #[derive(Debug)]
@@ -114,6 +120,10 @@ impl AllCases {
     pub fn is_empty(&self) -> bool {
         self.cases.is_empty()
     }
+
+    pub(super) fn alert_set_changed(&self) -> bool {
+        self.cases.iter().any(|c| c.new_alerts_requested)
+    }
 }
 
 impl CaseBuilder {
@@ -128,7 +138,14 @@ impl CaseBuilder {
             "de" => case.metadata.de.to_string(),
             "created_sitrep_id" => case.metadata.created_sitrep_id.to_string(),
         ));
-        Self { log, case, sitrep_id, rng, report_log: Default::default() }
+        Self {
+            log,
+            case,
+            sitrep_id,
+            rng,
+            report_log: Default::default(),
+            new_alerts_requested: false,
+        }
     }
 
     pub fn request_alert<A: AlertPayload>(
@@ -181,7 +198,7 @@ impl CaseBuilder {
             .kv("alert_version", version)
             .kv("alert_payload_type", payload_type)
             .comment(comment);
-
+        self.new_alerts_requested = true;
         Ok(())
     }
 
@@ -388,4 +405,47 @@ impl iddqd::IdOrdItem for CaseBuilder {
     }
 
     iddqd::id_upcast!();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use nexus_types::alert::test_alerts;
+    use omicron_test_utils::dev;
+
+    fn make_all_cases(log: &slog::Logger) -> AllCases {
+        AllCases {
+            log: log.clone(),
+            sitrep_id: SitrepUuid::new_v4(),
+            cases: IdOrdMap::new(),
+            rng: rng::SitrepBuilderRng::from_seed("make_all_cases"),
+        }
+    }
+
+    #[test]
+    fn dirty_bit_default_false() {
+        let logctx = dev::test_setup_log("dirty_bit_default_false");
+        let mut all_cases = make_all_cases(&logctx.log);
+        let case = all_cases.open_case(fm::DiagnosisEngineKind::PowerShelf);
+        assert!(!case.new_alerts_requested);
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn request_alert_flips_alert_state() {
+        let logctx = dev::test_setup_log("request_alert_flips_alert_state");
+        let mut all_cases = make_all_cases(&logctx.log);
+        assert!(!all_cases.alert_set_changed());
+
+        {
+            let mut case =
+                all_cases.open_case(fm::DiagnosisEngineKind::PowerShelf);
+            case.request_alert(&test_alerts::Foo(serde_json::json!({})), "")
+                .unwrap();
+            assert!(case.new_alerts_requested);
+        }
+
+        assert!(all_cases.alert_set_changed());
+        logctx.cleanup_successful();
+    }
 }

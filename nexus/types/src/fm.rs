@@ -19,6 +19,7 @@ pub mod json_display;
 use case::AlertRequest;
 use chrono::{DateTime, Utc};
 use iddqd::IdOrdMap;
+use omicron_common::api::external::Generation;
 use omicron_uuid_kinds::{
     CaseUuid, CollectionUuid, OmicronZoneUuid, SitrepUuid,
 };
@@ -167,6 +168,12 @@ pub struct SitrepMetadata {
 
     /// The time at which this sitrep was created.
     pub time_created: DateTime<Utc>,
+
+    /// `SitrepBuilder` increments this each time it builds a sitrep whose alert
+    /// request set differs from its parent's. Alert creation is guarded on this
+    /// value: a rendezvous task working from a sitrep whose generation no
+    /// longer matches the current sitrep's has its inserts rejected as stale.
+    pub alert_generation: Generation,
 }
 
 pub struct SitrepStateComparison<'sitrep> {

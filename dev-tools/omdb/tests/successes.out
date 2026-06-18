@@ -731,7 +731,7 @@ task: "fm_rendezvous"
       alerts requested:                0
         requested in this sitrep:      0
         created in this activation:    0
-        already created:               0
+        already existed:               0
         errors:                        0
     creating requested support bundles:
       started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
@@ -1429,7 +1429,7 @@ task: "fm_rendezvous"
       alerts requested:                0
         requested in this sitrep:      0
         created in this activation:    0
-        already created:               0
+        already existed:               0
         errors:                        0
     creating requested support bundles:
       started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms

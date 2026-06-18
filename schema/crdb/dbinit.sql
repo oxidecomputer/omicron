@@ -7680,7 +7680,15 @@ CREATE TABLE IF NOT EXISTS omicron.public.fm_sitrep (
     -- The earliest time at which an inventory collection may have started if
     -- it is to be considered newer than the inventory collection that was used
     -- to produce this sitrep.
-    next_inv_min_time_started TIMESTAMPTZ NOT NULL
+    next_inv_min_time_started TIMESTAMPTZ NOT NULL,
+
+    -- Generation counter for alerts: `SitrepBuilder` increments this each time
+    -- it builds a sitrep whose alert request set differs from its parent's.
+    -- Alert creation compares it against the latest sitrep's value, rejecting
+    -- inserts from a rendezvous task working from a stale sitrep. (It is the
+    -- `rendezvous_alert_created` marker, not this generation, that prevents a
+    -- deleted alert from being resurrected.)
+    alert_generation INT8 NOT NULL
 );
 
 -- Index for looking up all potential children of a given parent sitrep.
@@ -7964,6 +7972,25 @@ CREATE TABLE IF NOT EXISTS omicron.public.fm_support_bundle_request_data_selecti
 
     PRIMARY KEY (sitrep_id, request_id),
     CHECK (start_time IS NULL OR end_time IS NULL OR start_time <= end_time)
+);
+
+-- Marker written by `SitrepGuardedInsert` atomically with a corresponding
+-- alert row when FM rendezvous successfully creates an alert. This serves as
+-- a guard against resurrection: if the alert is deleted after its initial
+-- creation, but an executing sitrep still contains an fm_alert_request for the
+-- same alert, this marker prevents `SitrepGuardedInsert` from re-creating
+-- the alert.
+--
+-- A marker can be GC'ed in FM rendezvous when:
+--   * its alert_id is not present in any fm_alert_request in the executing
+--     sitrep,
+--   * its created_at_generation is less than that of the alert_generation on
+--     the sitrep being executed.
+-- Taken together, these two conditions ensure that no sitrep will ever attempt
+-- to resurrect a deleted alert, meaning the marker is no longer needed.
+CREATE TABLE IF NOT EXISTS omicron.public.rendezvous_alert_created (
+    alert_id UUID PRIMARY KEY,
+    created_at_generation INT8 NOT NULL
 );
 
 /*
@@ -8796,7 +8823,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '269.0.0', NULL)
+    (TRUE, NOW(), NOW(), '270.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

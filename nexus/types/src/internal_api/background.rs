@@ -1053,6 +1053,16 @@ pub mod fm_rendezvous {
         pub current_sitrep_alerts_requested: usize,
         /// The number of alerts created by this activation.
         pub alerts_created: usize,
+        /// The number of alerts that were already created by an earlier
+        /// activation (the `SitrepGuardedInsert` short-circuited on the
+        /// `rendezvous_alert_created` marker).
+        pub alerts_already_existed: usize,
+        /// If `true`, the activation aborted early because the
+        /// `SitrepGuardedInsert` guard detected that the rendezvous task's
+        /// sitrep is older than the current sitrep in the database. The
+        /// remaining alert requests for this activation were skipped; a
+        /// fresher activation will retry them.
+        pub stale_sitrep: bool,
         /// Errors that occurred during this activation.
         pub errors: Vec<String>,
     }

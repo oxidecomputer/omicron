@@ -10,7 +10,7 @@ use super::ereport::EreportId;
 use super::json_display::fmt_json_value;
 use iddqd::IdOrdMap;
 use omicron_uuid_kinds::{
-    CaseUuid, CollectionUuid, PhysicalDiskUuid, SitrepUuid,
+    AlertUuid, CaseUuid, CollectionUuid, PhysicalDiskUuid, SitrepUuid,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -237,6 +237,7 @@ pub struct InputReport {
 pub struct ClosedCaseReport {
     pub metadata: case::Metadata,
     pub unmarked_ereports: BTreeSet<EreportId>,
+    pub unmarked_alert_requests: BTreeSet<AlertUuid>,
 }
 
 impl InputReport {
@@ -339,20 +340,58 @@ impl fmt::Display for InputReportMultilineDisplay<'_> {
                 let indent = indent + 2;
                 for (
                     case_id,
-                    ClosedCaseReport { metadata, unmarked_ereports },
+                    ClosedCaseReport {
+                        metadata,
+                        unmarked_ereports,
+                        unmarked_alert_requests,
+                    },
                 ) in closed_cases_copied_forward
                 {
                     writeln!(f, "{:indent$}* case {case_id}", "")?;
                     let indent = indent + 2;
                     metadata.display_multiline(indent, None).fmt(f)?;
-                    writeln!(
-                        f,
-                        "{:indent$}copied forwards because these ereports \
-                         haven't been marked seen yet:",
-                        ""
-                    )?;
-                    for ereport_id in unmarked_ereports {
-                        writeln!(f, "{:indent$}* ereport {ereport_id}", "")?;
+                    // A closed case is only carried forward when it has
+                    // outstanding work, so spell out why. If we don't seem to
+                    // have any outstanding work but the closed case was carried
+                    // forward anyway, that's weird and worth a warning.
+                    if unmarked_ereports.is_empty()
+                        && unmarked_alert_requests.is_empty()
+                    {
+                        writeln!(
+                            f,
+                            "{:indent$}/!\\ WEIRD: this case has no recorded \
+                             reason for being copied forwards!",
+                            ""
+                        )?;
+                        continue;
+                    }
+                    writeln!(f, "{:indent$}copied forwards due to:", "")?;
+                    let indent = indent + 2;
+                    if !unmarked_ereports.is_empty() {
+                        writeln!(
+                            f,
+                            "{:indent$}ereports not yet marked seen:",
+                            ""
+                        )?;
+                        let indent = indent + 2;
+                        for ereport_id in unmarked_ereports {
+                            writeln!(
+                                f,
+                                "{:indent$}* ereport {ereport_id}",
+                                ""
+                            )?;
+                        }
+                    }
+                    if !unmarked_alert_requests.is_empty() {
+                        writeln!(
+                            f,
+                            "{:indent$}alert requests not yet satisfied:",
+                            ""
+                        )?;
+                        let indent = indent + 2;
+                        for alert_id in unmarked_alert_requests {
+                            writeln!(f, "{:indent$}* alert {alert_id}", "")?;
+                        }
                     }
                 }
             }
@@ -421,6 +460,9 @@ mod tests {
             SitrepUuid::from_str("55555555-5555-5555-5555-555555555555")
                 .unwrap();
 
+        let case3_id =
+            CaseUuid::from_str("77777777-7777-7777-7777-777777777777").unwrap();
+
         let mut open_cases = BTreeMap::new();
         open_cases.insert(
             case1_id,
@@ -440,6 +482,11 @@ mod tests {
         let mut unmarked_ereports = BTreeSet::new();
         unmarked_ereports
             .insert(EreportId { restart_id, ena: Ena::from(2u64) });
+        let mut unmarked_alert_requests = BTreeSet::new();
+        unmarked_alert_requests.insert(
+            AlertUuid::from_str("66666666-6666-6666-6666-666666666666")
+                .unwrap(),
+        );
         closed_cases_copied_forward.insert(
             case2_id,
             ClosedCaseReport {
@@ -450,6 +497,23 @@ mod tests {
                     comment: "PSU 1 replaced".to_string(),
                 },
                 unmarked_ereports,
+                unmarked_alert_requests,
+            },
+        );
+        // A closed case with no recorded reason for being copied forwards. The
+        // real input builder never produces this; the display code prints a
+        // warning instead of an empty reason list.
+        closed_cases_copied_forward.insert(
+            case3_id,
+            ClosedCaseReport {
+                metadata: case::Metadata {
+                    created_sitrep_id: case2_created_sitrep,
+                    closed_sitrep_id: Some(case2_closed_sitrep),
+                    de: DiagnosisEngineKind::PowerShelf,
+                    comment: "PSU 2 replaced".to_string(),
+                },
+                unmarked_ereports: BTreeSet::new(),
+                unmarked_alert_requests: BTreeSet::new(),
             },
         );
 
