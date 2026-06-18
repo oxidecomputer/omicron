@@ -650,15 +650,13 @@ termination: Exited(0)
 stdout:
 List ereport reporters
 
-Usage: omdb db ereport reporters [OPTIONS] [SERIAL]
-
-Arguments:
-  [SERIAL]  
+Usage: omdb db ereport reporters [OPTIONS]
 
 Options:
       --log-level <LOG_LEVEL>  log level filter [env: LOG_LEVEL=] [default: warn]
   -t, --type <SLOT_TYPE>       
   -s, --slot <SLOT>            
+      --serial <SERIAL>        
       --color <COLOR>          Color output [default: auto] [possible values: auto, always, never]
   -h, --help                   Print help
 

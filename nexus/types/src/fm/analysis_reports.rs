@@ -229,6 +229,8 @@ pub struct InputReport {
     /// Cases which have closed, but which have been copied forwards as they
     /// contain ereports which have not yet been marked seen.
     pub closed_cases_copied_forward: BTreeMap<CaseUuid, ClosedCaseReport>,
+    /// Number of entries in the ereporter restart table.
+    pub num_ereporter_restarts: usize,
     /// All control-plane-managed physical disks visible to the diagnosis
     /// engines for this analysis pass.
     pub in_service_disks: BTreeSet<PhysicalDiskUuid>,
@@ -264,6 +266,7 @@ impl fmt::Display for InputReportMultilineDisplay<'_> {
                     new_ereport_ids,
                     open_cases,
                     closed_cases_copied_forward,
+                    num_ereporter_restarts,
                     in_service_disks,
                 },
             indent,
@@ -286,6 +289,13 @@ impl fmt::Display for InputReportMultilineDisplay<'_> {
                 "",
             )?;
         }
+
+        writeln!(
+            f,
+            "{:indent$}total known ereport restart IDs: \
+                {num_ereporter_restarts}",
+            "",
+        )?;
 
         if !new_ereport_ids.is_empty() {
             writeln!(
@@ -558,6 +568,7 @@ mod tests {
             parent_sitrep_id: Some(parent_sitrep_id),
             parent_inv_id: Some(parent_inv_id),
             inv_id,
+            num_ereporter_restarts: 420,
             new_ereport_ids,
             open_cases,
             closed_cases_copied_forward,
@@ -574,6 +585,7 @@ mod tests {
             parent_sitrep_id: None,
             parent_inv_id: None,
             inv_id,
+            num_ereporter_restarts: 0,
             new_ereport_ids: BTreeSet::new(),
             open_cases: BTreeMap::new(),
             closed_cases_copied_forward: BTreeMap::new(),
@@ -593,6 +605,7 @@ mod tests {
             parent_sitrep_id: Some(parent_sitrep_id),
             parent_inv_id: Some(inv_id),
             inv_id,
+            num_ereporter_restarts: 420,
             new_ereport_ids: BTreeSet::new(),
             open_cases: BTreeMap::new(),
             closed_cases_copied_forward: BTreeMap::new(),

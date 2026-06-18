@@ -1,6 +1,7 @@
 parent sitrep:        aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa
 inventory collection: bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb
  --> different from parent sitrep (collection cccccccc-cccc-cccc-cccc-cccccccccccc)
+total known ereport restart IDs: 420
 
 new ereports (2 total):
   * ereport dddddddd-dddd-dddd-dddd-dddddddddddd:3

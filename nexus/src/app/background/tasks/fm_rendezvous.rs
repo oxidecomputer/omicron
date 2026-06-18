@@ -1252,6 +1252,7 @@ mod tests {
 
         let restart_id = EreporterRestartUuid::new_v4();
         let collector_id = OmicronZoneUuid::new_v4();
+        let time_collected = Utc::now();
         let reporter = Reporter::Sp {
             sp_type: nexus_types::inventory::SpType::Sled,
             slot: 0,
@@ -1262,7 +1263,7 @@ mod tests {
                 restart_id,
                 ena: ereport_types::Ena(2),
             },
-            time_collected: Utc::now(),
+            time_collected,
             collector_id,
             part_number: Some("9130000019".to_string()),
             serial_number: Some("BRM420069".to_string()),
@@ -1274,7 +1275,7 @@ mod tests {
                 restart_id,
                 ena: ereport_types::Ena(3),
             },
-            time_collected: Utc::now(),
+            time_collected,
             collector_id,
             part_number: Some("9130000019".to_string()),
             serial_number: Some("BRM420069".to_string()),
@@ -1286,7 +1287,7 @@ mod tests {
                 restart_id,
                 ena: ereport_types::Ena(4),
             },
-            time_collected: Utc::now(),
+            time_collected,
             collector_id,
             part_number: Some("9130000019".to_string()),
             serial_number: Some("BRM420069".to_string()),
@@ -1295,7 +1296,9 @@ mod tests {
         };
         datastore
             .ereports_insert(
-                opctx,
+                &opctx,
+                restart_id,
+                time_collected,
                 reporter,
                 vec![
                     ereport1_data.clone(),
@@ -1492,13 +1495,13 @@ mod tests {
             sp_type: nexus_types::inventory::SpType::Sled,
             slot: 1,
         };
-
+        let time_collected = Utc::now();
         let ereport1_data = EreportData {
             id: ereport_types::EreportId {
                 restart_id,
                 ena: ereport_types::Ena(2),
             },
-            time_collected: Utc::now(),
+            time_collected,
             collector_id,
             part_number: Some("9130000019".to_string()),
             serial_number: Some("BRM420069".to_string()),
@@ -1510,7 +1513,7 @@ mod tests {
                 restart_id,
                 ena: ereport_types::Ena(3),
             },
-            time_collected: Utc::now(),
+            time_collected,
             collector_id,
             part_number: Some("9130000019".to_string()),
             serial_number: Some("BRM420069".to_string()),
@@ -1522,7 +1525,7 @@ mod tests {
                 restart_id,
                 ena: ereport_types::Ena(4),
             },
-            time_collected: Utc::now(),
+            time_collected,
             collector_id,
             part_number: Some("9130000019".to_string()),
             serial_number: Some("BRM420069".to_string()),
@@ -1532,6 +1535,8 @@ mod tests {
         datastore
             .ereports_insert(
                 opctx,
+                restart_id,
+                time_collected,
                 reporter,
                 vec![
                     ereport1_data.clone(),
