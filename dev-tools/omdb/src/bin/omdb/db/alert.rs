@@ -970,7 +970,7 @@ async fn cmd_db_alert_list(
         #[tabled(display_with = "display_option_blank")]
         fm_case_id: Option<Uuid>,
         #[tabled(display_with = "display_option_blank")]
-        created_at_generation: Option<Generation>,
+        fm_gen: Option<Generation>,
     }
 
     let make_row =
@@ -981,7 +981,7 @@ async fn cmd_db_alert_list(
             time_dispatched: alert.time_dispatched,
             dispatched: alert.num_dispatched,
             fm_case_id: alert.case_id.map(GenericUuid::into_untyped_uuid),
-            created_at_generation: marker
+            fm_gen: marker
                 .as_ref()
                 .map(|marker| marker.created_at_generation.0),
         };
@@ -1063,7 +1063,8 @@ async fn cmd_db_alert_info(
     const TIME_DISPATCHED: &str = "fully dispatched at";
     const NUM_DISPATCHED: &str = "deliveries dispatched";
     const CASE_ID: &str = "requested by FM case";
-    const CREATED_AT_GENERATION: &str = "created at FM generation";
+    const PROVENANCE: &str = "provenance";
+    const FM_GENERATION: &str = "created at FM generation";
 
     const WIDTH: usize = const_max_len(&[
         ID,
@@ -1073,7 +1074,8 @@ async fn cmd_db_alert_info(
         NUM_DISPATCHED,
         CLASS,
         CASE_ID,
-        CREATED_AT_GENERATION,
+        PROVENANCE,
+        FM_GENERATION,
     ]);
 
     println!("\n{:=<80}", "== ALERT ");
@@ -1086,14 +1088,40 @@ async fn cmd_db_alert_info(
     if let Some(t) = time_dispatched {
         println!("    {TIME_DISPATCHED:>WIDTH$}: {t}")
     }
-    if let Some(case_id) = case_id {
-        println!("    {CASE_ID:>WIDTH$}: {case_id:?}");
-    }
-    if let Some(marker) = rendezvous_created {
-        println!(
-            "    {CREATED_AT_GENERATION:>WIDTH$}: {}",
-            marker.created_at_generation.0
-        );
+    // We have two indicators that an alert was created by fault management:
+    //   - The `fm_case_id` field, referencing the FM case.
+    //   - The `rendezvous_alert_created` marker row referencing the alert,
+    //     which also carries the generation at which it was created.
+    // An FM-created alert will always have an `fm_case_id`, but may not have a
+    // `rendezvous_alert_created` marker (these are GC'ed periodically when
+    // they're no longer needed). It would be a bug, though, to have a marker
+    // for an alert that's missing a `fm_case_id`.
+    match (case_id, rendezvous_created) {
+        (Some(case_id), marker) => {
+            println!("    {PROVENANCE:>WIDTH$}: created by fault management");
+            println!("    {CASE_ID:>WIDTH$}: {case_id:?}");
+            if let Some(marker) = marker {
+                println!(
+                    "    {FM_GENERATION:>WIDTH$}: {}",
+                    marker.created_at_generation.0
+                );
+            }
+        }
+        (None, None) => {
+            println!(
+                "    {PROVENANCE:>WIDTH$}: not created by fault management"
+            );
+        }
+        (None, Some(marker)) => {
+            println!(
+                "    {PROVENANCE:>WIDTH$}: /!\\ WEIRD: creation marker present \
+                 but no FM case (possible bug)"
+            );
+            println!(
+                "    {FM_GENERATION:>WIDTH$}: {}",
+                marker.created_at_generation.0
+            );
+        }
     }
 
     println!("\n{:=<80}", "== ALERT PAYLOAD ");
