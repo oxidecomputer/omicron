@@ -782,13 +782,11 @@ mod tests {
         logctx.cleanup_successful();
     }
 
-    /// A stale activation (one whose sitrep's `alert_generation` is
-    /// behind the latest sitrep in `fm_sitrep_history`) should be rejected by
-    /// `SitrepGuardedInsert` inside `fm_rendezvous_alert_create`. The
-    /// rendezvous task is responsible for translating that `Conflict` into
-    /// `stale_sitrep = true`,
-    /// breaking out of the alert loop without inserting any rows, and still
-    /// running the support bundle op.
+    /// A stale activation (one whose sitrep's `alert_generation` is behind the
+    /// latest sitrep in `fm_sitrep_history`) should be rejected in
+    /// `fm_rendezvous_alert_create`. The rendezvous task is responsible for
+    /// translating that `Conflict` into `stale_sitrep = true`, breaking out of
+    /// the alert loop without interrupting anything else.
     #[tokio::test]
     async fn test_alert_requests_aborted_when_sitrep_is_stale() {
         let logctx = dev::test_setup_log(
@@ -811,10 +809,11 @@ mod tests {
             OmicronZoneUuid::new_v4(),
         );
 
-        // The stale activation's sitrep: carries two alert requests and
-        // stamps `alert_generation = 1`. Two requests (rather than one) pin
-        // the totals' semantics: they count the sitrep's full request set,
-        // not how far the loop got before aborting on the first insert.
+        // The stale activation's sitrep carries two alert requests and stamps
+        // `alert_generation = 1`. Using two requests (rather than one) lets the
+        // test confirm that the reported totals count every request in the
+        // sitrep, not just how far the loop got before it aborted on the first
+        // insert.
         let stale_sitrep_id = SitrepUuid::new_v4();
         let stale_alert_id = AlertUuid::new_v4();
         let stale_alert2_id = AlertUuid::new_v4();

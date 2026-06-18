@@ -55,17 +55,6 @@ pub enum FmRendezvousAlertCreateError {
 }
 
 impl DataStore {
-    fn alert_insert_query(
-        alert: Alert,
-    ) -> impl RunnableQuery<Alert> + Query<SqlType = SqlTypeOf<AsSelect<Alert, Pg>>>
-    {
-        diesel::insert_into(alert_dsl::alert)
-            .values(alert)
-            .on_conflict(alert_dsl::id)
-            .do_nothing()
-            .returning(Alert::as_returning())
-    }
-
     /// Insert an alert row, returning the inserted alert on success.
     ///
     /// If a row with this alert's id already exists, returns
@@ -154,6 +143,17 @@ impl DataStore {
         );
 
         Ok(alert)
+    }
+
+    fn alert_insert_query(
+        alert: Alert,
+    ) -> impl RunnableQuery<Alert> + Query<SqlType = SqlTypeOf<AsSelect<Alert, Pg>>>
+    {
+        diesel::insert_into(alert_dsl::alert)
+            .values(alert)
+            .on_conflict(alert_dsl::id)
+            .do_nothing()
+            .returning(Alert::as_returning())
     }
 
     pub async fn alert_select_next_for_dispatch(
