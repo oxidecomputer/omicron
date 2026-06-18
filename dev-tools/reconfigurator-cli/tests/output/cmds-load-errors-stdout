@@ -1,0 +1,37 @@
+using provided RNG seed: reconfigurator-cli-test
+> # Error cases for `load`.
+
+> # `load` with no globs.  inputs is empty, so read_series fails with
+> # "found no inputs containing a valid target blueprint id".
+> load
+error: loading 0 inputs: found no inputs containing a valid target blueprint id
+
+
+> # A literal path that doesn't exist.  glob expansion yields zero matches, so
+> # again `inputs` ends up empty.
+> load no-such-file.out
+error: loading 0 inputs: found no inputs containing a valid target blueprint id
+
+
+> # A glob in a missing directory.  Same outcome: zero matches.
+> load nowhere/*.out
+error: loading 0 inputs: found no inputs containing a valid target blueprint id
+
+
+> # An existing file that's not JSON.
+> load /dev/null
+error: loading 1 input: parse "/dev/null": EOF while parsing a value at line 1 column 0
+
+
+> # Loading into a non-empty system without wiping first.
+> load-example --nsleds 3 --ndisks-per-sled 3
+loaded example system with:
+- collection: f45ba181-4b56-42cc-a762-874d90184a43
+- blueprint: dbcbd3d6-41ff-48ae-ac0b-1becc9b2fd21
+
+> save fresh.out
+saved planning input, collections, and blueprints to "fresh.out"
+
+> load fresh.out
+error: changes made to simulated system: run `wipe system` before loading
+

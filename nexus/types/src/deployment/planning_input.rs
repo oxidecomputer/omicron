@@ -100,7 +100,7 @@ const MGS_UPDATE_SETTLE_TIMEOUT: TimeDelta = TimeDelta::minutes(5);
 /// - Each Omicron zone has at most one external IP and at most one vNIC.
 /// - A given external IP or vNIC is only associated with a single Omicron
 ///   zone.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PlanningInput {
     /// current target blueprint, used as the parent in the next planning run
     parent_blueprint: Arc<Blueprint>,
@@ -719,7 +719,7 @@ impl From<CockroachDbClusterVersion> for CockroachDbPreserveDowngrade {
 }
 
 /// Describes a single disk already managed by the sled.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SledDisk {
     pub disk_identity: DiskIdentity,
     pub disk_id: PhysicalDiskUuid,
@@ -835,7 +835,7 @@ impl ZpoolFilter {
 }
 
 /// Describes the resources available on each sled for the planner
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SledResources {
     /// zpools (and their backing disks) on this sled
     ///
@@ -1100,7 +1100,7 @@ impl SledFilter {
 /// supposed to be part of the system and their individual [`SledPolicy`]s;
 /// however, those are tracked as a separate part of [`PlanningInput`] as each
 /// sled additionally has non-policy [`SledResources`] needed for planning.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Policy {
     /// description of IP addresses for externally-visible control plane
     /// services (e.g., external DNS, Nexus, boundary NTP)
@@ -1188,7 +1188,7 @@ pub struct Policy {
 // NOTE: The fields of the struct are private and we manually implement
 // `Deserialize` to maintain invariants (e.g., that every `external_dns_ip` is
 // contained in one of the service pool ranges).
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ExternalIpPolicy {
     service_pool_ipv4_ranges: Vec<Ipv4Range>,
     service_pool_ipv6_ranges: Vec<Ipv6Range>,
@@ -1463,7 +1463,7 @@ pub enum ExternalIpPolicyError {
     ExternalDnsOutsideServiceIpPools(IpAddr),
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct OximeterReadPolicy {
     // We set the version as `u32` instead of `Generation` because we later need
     // to convert to `SqlU32` and the value of `Generation` is u64.
@@ -1610,7 +1610,7 @@ impl OximeterReadMode {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ClickhousePolicy {
     pub version: u32,
     pub mode: ClickhouseMode,
@@ -1618,7 +1618,7 @@ pub struct ClickhousePolicy {
 }
 
 /// How to deploy clickhouse nodes
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case", tag = "type", content = "value")]
 pub enum ClickhouseMode {
     SingleNodeOnly,
@@ -1665,7 +1665,7 @@ impl ClickhouseMode {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SledDetails {
     /// current sled policy
     pub policy: SledPolicy,

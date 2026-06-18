@@ -1,0 +1,108 @@
+using provided RNG seed: reconfigurator-cli-test
+> # Test how `load` picks the representative inventory collection.
+> #
+> # The loader picks the collection with the largest `time_started` when no
+> # `--collection-id` is given; otherwise it uses the one specified.  An id that
+> # isn't in the file is an error.
+
+> # Build a system with three inventory collections.  load-example creates one;
+> # we add two more.  Each inventory-generate happens at a slightly later time,
+> # so the third one is the "latest by time_started".
+> load-example --nsleds 3 --ndisks-per-sled 3
+loaded example system with:
+- collection: f45ba181-4b56-42cc-a762-874d90184a43
+- blueprint: dbcbd3d6-41ff-48ae-ac0b-1becc9b2fd21
+
+> inventory-generate
+generated inventory collection eb0796d5-ab8a-4f7b-a884-b4aeacb8ab51 from configured sleds
+
+> inventory-generate
+generated inventory collection 61f451b3-2121-4ed6-91c7-a550054f6c21 from configured sleds
+
+> inventory-list
+ID                                   NERRORS TIME_DONE                
+f45ba181-4b56-42cc-a762-874d90184a43 0       <REDACTED_TIMESTAMP> 
+eb0796d5-ab8a-4f7b-a884-b4aeacb8ab51 0       <REDACTED_TIMESTAMP> 
+61f451b3-2121-4ed6-91c7-a550054f6c21 0       <REDACTED_TIMESTAMP> 
+
+
+> save saved.out
+saved planning input, collections, and blueprints to "saved.out"
+
+
+> # Case 1: no --collection-id.  Should pick the most recently generated
+> # collection (the third one created above).
+> wipe system
+wiped system
+
+> load saved.out
+loaded data from "saved.out"
+result:
+  system:
+    using collection 61f451b3-2121-4ed6-91c7-a550054f6c21 as source of sled inventory data
+    loaded sleds: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, d81c6a84-79b8-4958-ae41-ea46c9b19763
+    loaded collections: 61f451b3-2121-4ed6-91c7-a550054f6c21, eb0796d5-ab8a-4f7b-a884-b4aeacb8ab51, f45ba181-4b56-42cc-a762-874d90184a43
+    loaded blueprints: 184f10b3-61cb-41ef-9b93-3489b2bac559, dbcbd3d6-41ff-48ae-ac0b-1becc9b2fd21
+    loaded external IP policy: ExternalIpPolicy { service_pool_ipv4_ranges: [Ipv4Range { first: 192.0.2.2, last: 192.0.2.20 }, Ipv4Range { first: 198.51.100.1, last: 198.51.100.30 }], service_pool_ipv6_ranges: [], external_dns_ips: {198.51.100.1, 198.51.100.2, 198.51.100.3} }
+    loaded cockroachdb settings: fingerprint = (none), version = (none), preserve downgrade = (not set)
+    loaded internal DNS generations: (none)
+    loaded external DNS generations: (none)
+  config:
+    configured external DNS zone name: oxide.example
+    configured silo names: example-silo
+    active Nexus generation: 1
+
+
+
+> # Case 2: explicit --collection-id pointing at one of the earlier collections.
+> # This proves the explicit argument overrides the "latest" picker.  We use
+> # the first collection (created by load-example), whose id is deterministic
+> # because the test harness fixes the RNG seed.
+> wipe system
+wiped system
+
+> load saved.out --collection-id f45ba181-4b56-42cc-a762-874d90184a43
+loaded data from "saved.out"
+result:
+  system:
+    using collection f45ba181-4b56-42cc-a762-874d90184a43 as source of sled inventory data
+    loaded sleds: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, d81c6a84-79b8-4958-ae41-ea46c9b19763
+    loaded collections: 61f451b3-2121-4ed6-91c7-a550054f6c21, eb0796d5-ab8a-4f7b-a884-b4aeacb8ab51, f45ba181-4b56-42cc-a762-874d90184a43
+    loaded blueprints: 184f10b3-61cb-41ef-9b93-3489b2bac559, dbcbd3d6-41ff-48ae-ac0b-1becc9b2fd21
+    loaded external IP policy: ExternalIpPolicy { service_pool_ipv4_ranges: [Ipv4Range { first: 192.0.2.2, last: 192.0.2.20 }, Ipv4Range { first: 198.51.100.1, last: 198.51.100.30 }], service_pool_ipv6_ranges: [], external_dns_ips: {198.51.100.1, 198.51.100.2, 198.51.100.3} }
+    loaded cockroachdb settings: fingerprint = (none), version = (none), preserve downgrade = (not set)
+    loaded internal DNS generations: (none)
+    loaded external DNS generations: (none)
+  config:
+    configured external DNS zone name: oxide.example
+    configured silo names: example-silo
+    active Nexus generation: 1
+
+
+
+> # Case 3: --collection-id that isn't present.  Expect an error and an
+> # unchanged (empty) simulator state.
+> wipe system
+wiped system
+
+> load saved.out --collection-id 00000000-0000-0000-0000-000000000000
+error: inventory collection 00000000-0000-0000-0000-000000000000 not found in data
+
+> show
+configured external DNS zone name: oxide.example
+configured silo names: example-silo
+internal DNS generations: 
+external DNS generations: 
+target number of Nexus instances: default
+target release (generation 1): unset
+active nexus zone generation: 1
+active nexus zones: inferred from generation
+not-yet nexus zones: inferred from generation
+cockroachdb settings:
+    state fingerprint::   (none)
+    version::::::::::::   (none)
+    preserve downgrade:   (not set)
+planner config:
+    (no current planner configs)
+
+
