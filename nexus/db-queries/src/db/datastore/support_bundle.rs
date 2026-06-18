@@ -2159,6 +2159,7 @@ mod test {
             .fm_sitrep_insert(
                 opctx,
                 make_fm_sitrep(external::Generation::from_u32(3)),
+                None,
             )
             .await
             .unwrap();
@@ -2227,6 +2228,7 @@ mod test {
             .fm_sitrep_insert(
                 opctx,
                 make_fm_sitrep(external::Generation::new()),
+                None,
             )
             .await
             .unwrap();
@@ -2303,6 +2305,7 @@ mod test {
             .fm_sitrep_insert(
                 opctx,
                 make_fm_sitrep(external::Generation::from_u32(5)),
+                None,
             )
             .await
             .unwrap();

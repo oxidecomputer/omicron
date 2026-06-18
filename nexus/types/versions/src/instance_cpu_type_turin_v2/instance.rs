@@ -5,15 +5,17 @@
 use api_identity::ObjectIdentity;
 use omicron_common::api::external::{
     ByteCount, Hostname, IdentityMetadata, IdentityMetadataCreateParams,
-    InstanceAutoRestartPolicy, InstanceAutoRestartStatus, InstanceCpuCount,
-    InstanceRuntimeState, NameOrId, Nullable, ObjectIdentity,
+    NameOrId, Nullable, ObjectIdentity,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::v2025_11_20_00;
-use crate::v2025_11_20_00::instance::{UserData, bool_true};
+use crate::v2025_11_20_00::instance::{
+    InstanceAutoRestartPolicy, InstanceAutoRestartStatus, InstanceCpuCount,
+    InstanceRuntimeState, UserData, bool_true,
+};
 use crate::v2026_01_03_00::instance::InstanceNetworkInterfaceAttachment;
 use crate::v2026_01_05_00::instance::ExternalIpCreate;
 use crate::v2026_01_08_00::multicast::MulticastGroupJoinSpec;

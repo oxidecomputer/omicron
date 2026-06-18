@@ -232,7 +232,7 @@ mod test {
             ereports_by_id: Default::default(),
         };
         datastore
-            .fm_sitrep_insert(&opctx, sitrep1.clone())
+            .fm_sitrep_insert(&opctx, sitrep1.clone(), None)
             .await
             .expect("sitrep should be inserted successfully");
 
@@ -301,7 +301,7 @@ mod test {
             ereports_by_id: Default::default(),
         };
         datastore
-            .fm_sitrep_insert(&opctx, sitrep2.clone())
+            .fm_sitrep_insert(&opctx, sitrep2.clone(), None)
             .await
             .expect("sitrep2 should be inserted successfully");
 

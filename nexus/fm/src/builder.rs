@@ -25,6 +25,9 @@ pub struct SitrepBuilder<'a> {
     pub parent_sitrep: Option<&'a fm::Sitrep>,
     pub sitrep_id: SitrepUuid,
     pub cases: case::AllCases,
+    /// The analysis input this builder was constructed from; `cases` is
+    /// seeded from its open cases.
+    input: &'a analysis_input::Input,
     closed_cases_copied_forward: &'a IdOrdMap<fm::Case>,
     /// Plumbed from [`analysis_input::Input::alerts_changed`]; ORed with
     /// [`case::AllCases::alert_set_changed`] in [`Self::build`] to drive
@@ -94,11 +97,20 @@ impl<'a> SitrepBuilder<'a> {
             inventory,
             parent_sitrep,
             comment: String::new(),
+            input: inputs,
             closed_cases_copied_forward,
             alerts_changed: inputs.alerts_changed(),
             support_bundles_changed: inputs.support_bundles_changed(),
             cases,
         }
+    }
+
+    /// The analysis input this builder was constructed from.
+    ///
+    /// The returned reference borrows the input (lifetime `'a`), not the
+    /// builder, so callers may hold it while mutating the builder.
+    pub fn input(&self) -> &'a analysis_input::Input {
+        self.input
     }
 
     pub fn comment(&self) -> &str {
@@ -225,9 +237,10 @@ mod tests {
 
     /// Build a minimal `Input` with no parent sitrep and an empty inventory.
     fn make_input() -> Input {
-        let (input, _) = Input::builder(None, make_collection())
-            .expect("no parent sitrep, so builder should succeed")
-            .build();
+        let (input, _) =
+            Input::builder(None, make_collection(), Arc::new(IdOrdMap::new()))
+                .expect("no parent sitrep, so builder should succeed")
+                .build();
         input
     }
 
@@ -258,10 +271,13 @@ mod tests {
             version: 1,
             time_made_current: chrono::Utc::now(),
         };
-        let (input, _) =
-            Input::builder(Some(Arc::new((parent_version, parent))), inv)
-                .expect("parent and child share an inventory")
-                .build();
+        let (input, _) = Input::builder(
+            Some(Arc::new((parent_version, parent))),
+            inv,
+            Arc::new(IdOrdMap::new()),
+        )
+        .expect("parent and child share an inventory")
+        .build();
         input
     }
 
@@ -457,6 +473,7 @@ mod tests {
             .into_iter()
             .collect(),
             support_bundles_requested: IdOrdMap::new(),
+            facts: IdOrdMap::new(),
         };
 
         let parent = fm::Sitrep {
@@ -482,6 +499,7 @@ mod tests {
         let mut builder_inputs = crate::analysis_input::Input::builder(
             Some(Arc::new((parent_version, parent))),
             inv,
+            Arc::new(IdOrdMap::new()),
         )
         .unwrap();
         // Marker exists, so carry-forward will drop the case.
@@ -533,6 +551,7 @@ mod tests {
             }]
             .into_iter()
             .collect(),
+            facts: IdOrdMap::new(),
         };
 
         let parent = fm::Sitrep {
@@ -558,6 +577,7 @@ mod tests {
         let mut builder_inputs = crate::analysis_input::Input::builder(
             Some(Arc::new((parent_version, parent))),
             inv,
+            Arc::new(IdOrdMap::new()),
         )
         .unwrap();
         // Marker exists, so carry-forward will drop the case.

@@ -11,14 +11,18 @@
 pub mod affinity {
     pub use crate::v2025_11_20_00::affinity::AffinityGroup;
     pub use crate::v2025_11_20_00::affinity::AffinityGroupCreate;
+    pub use crate::v2025_11_20_00::affinity::AffinityGroupMember;
     pub use crate::v2025_11_20_00::affinity::AffinityGroupSelector;
     pub use crate::v2025_11_20_00::affinity::AffinityGroupUpdate;
     pub use crate::v2025_11_20_00::affinity::AffinityInstanceGroupMemberPath;
+    pub use crate::v2025_11_20_00::affinity::AffinityPolicy;
     pub use crate::v2025_11_20_00::affinity::AntiAffinityGroup;
     pub use crate::v2025_11_20_00::affinity::AntiAffinityGroupCreate;
+    pub use crate::v2025_11_20_00::affinity::AntiAffinityGroupMember;
     pub use crate::v2025_11_20_00::affinity::AntiAffinityGroupSelector;
     pub use crate::v2025_11_20_00::affinity::AntiAffinityGroupUpdate;
     pub use crate::v2025_11_20_00::affinity::AntiAffinityInstanceGroupMemberPath;
+    pub use crate::v2025_11_20_00::affinity::FailureDomain;
 }
 
 pub mod alert {
@@ -150,13 +154,18 @@ pub mod image {
 }
 
 pub mod instance {
+    pub use crate::v2025_11_20_00::instance::InstanceAutoRestartPolicy;
+    pub use crate::v2025_11_20_00::instance::InstanceAutoRestartStatus;
+    pub use crate::v2025_11_20_00::instance::InstanceCpuCount;
     pub use crate::v2025_11_20_00::instance::InstanceDiskAttach;
     pub use crate::v2025_11_20_00::instance::InstanceNetworkInterfaceSelector;
     pub use crate::v2025_11_20_00::instance::InstanceNetworkInterfaceUpdate;
+    pub use crate::v2025_11_20_00::instance::InstanceRuntimeState;
     pub use crate::v2025_11_20_00::instance::InstanceSelector;
     pub use crate::v2025_11_20_00::instance::InstanceSerialConsoleData;
     pub use crate::v2025_11_20_00::instance::InstanceSerialConsoleRequest;
     pub use crate::v2025_11_20_00::instance::InstanceSerialConsoleStreamRequest;
+    pub use crate::v2025_11_20_00::instance::InstanceState;
     pub use crate::v2025_11_20_00::instance::MAX_USER_DATA_BYTES;
     pub use crate::v2025_11_20_00::instance::OptionalInstanceSelector;
     pub use crate::v2025_11_20_00::instance::UserData;

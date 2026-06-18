@@ -21,9 +21,10 @@ use nexus_test_utils::http_testing::RequestBuilder;
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::support_bundle::SupportBundleInfo;
 use nexus_types::external_api::support_bundle::SupportBundleState;
+use nexus_types::internal_api::background::SupportBundleActivationReport;
 use nexus_types::internal_api::background::SupportBundleCleanupReport;
-use nexus_types::internal_api::background::SupportBundleCollectionReport;
 use nexus_types::internal_api::background::SupportBundleCollectionStep;
+use nexus_types::internal_api::background::SupportBundleCollectionStepStatus;
 use nexus_types::internal_api::background::SupportBundleEreportStatus;
 use omicron_common::api::external::Generation;
 use omicron_common::api::external::LookupType;
@@ -336,7 +337,7 @@ struct TaskOutput {
     cleanup_err: Option<String>,
     collection_err: Option<String>,
     cleanup_report: Option<SupportBundleCleanupReport>,
-    collection_report: Option<SupportBundleCollectionReport>,
+    collection_report: Option<SupportBundleActivationReport>,
 }
 
 async fn activate_bundle_collection_background_task(
@@ -356,6 +357,23 @@ async fn activate_bundle_collection_background_task(
     serde_json::from_value(result.details).expect(
         "Should have been able to deserialize TaskOutput from background task",
     )
+}
+
+fn assert_ereport_details_eq(
+    collection: &nexus_types::internal_api::background::SupportBundleCollectionReport,
+    expected: SupportBundleEreportStatus,
+) {
+    let step = collection
+        .steps
+        .iter()
+        .find(|s| s.name == SupportBundleCollectionStep::STEP_EREPORTS)
+        .expect("should have ereports step");
+    assert_eq!(step.status, SupportBundleCollectionStepStatus::Ok);
+    let details: SupportBundleEreportStatus = serde_json::from_value(
+        step.details.clone().expect("ereports step should have details"),
+    )
+    .expect("ereports step details should deserialize");
+    assert_eq!(details, expected);
 }
 
 // Test accessing support bundle interfaces when the bundle does not exist,
@@ -495,25 +513,28 @@ async fn test_support_bundle_lifecycle(cptestctx: &ControlPlaneTestContext) {
     );
 
     let report = output.collection_report.as_ref().expect("Missing report");
-    assert_eq!(report.bundle, bundle.id);
+    assert_eq!(report.collection.bundle, bundle.id);
     assert!(report.activated_in_db_ok);
     // This assertion expects 0 ereports in the database. This depends on
     // the sp_ereport_ingester background task being disabled in the test
     // config (config.test.toml). If that task runs before bundle collection,
     // it will ingest ereports from the simulated SPs into the database,
     // causing this assertion to fail nondeterministically.
-    assert_eq!(
-        report.ereports,
-        Some(SupportBundleEreportStatus {
+    assert_ereport_details_eq(
+        &report.collection,
+        SupportBundleEreportStatus {
             n_collected: 0,
             n_found: 0,
-            errors: Vec::new()
-        })
+            errors: Vec::new(),
+        },
     );
 
     // Verify that steps were recorded with reasonable timing data
-    assert!(!report.steps.is_empty(), "Should have recorded some steps");
-    for step in &report.steps {
+    assert!(
+        !report.collection.steps.is_empty(),
+        "Should have recorded some steps"
+    );
+    for step in &report.collection.steps {
         assert!(
             step.end >= step.start,
             "Step '{}' end time should be >= start time",
@@ -523,7 +544,7 @@ async fn test_support_bundle_lifecycle(cptestctx: &ControlPlaneTestContext) {
 
     // Verify that we successfully spawned steps to query sleds and SPs
     let step_names: Vec<_> =
-        report.steps.iter().map(|s| s.name.as_str()).collect();
+        report.collection.steps.iter().map(|s| s.name.as_str()).collect();
     assert!(
         step_names.contains(&SupportBundleCollectionStep::STEP_SPAWN_SLEDS),
         "Should have attempted to list in-service sleds"
@@ -543,6 +564,7 @@ async fn test_support_bundle_lifecycle(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(names.next(), Some("bundle_id.txt"));
     assert_eq!(names.next(), Some("meta/"));
     assert_eq!(names.next(), Some("meta/reason_for_creation.txt"));
+    assert_eq!(names.next(), Some("meta/report.json"));
     assert_eq!(names.next(), Some("meta/trace.json"));
     assert_eq!(names.next(), Some("rack/"));
     assert!(names.any(|n| n == "sp_task_dumps/"));
@@ -625,22 +647,25 @@ async fn test_support_bundle_range_requests(
     let output = activate_bundle_collection_background_task(&cptestctx).await;
     assert_eq!(output.collection_err, None);
     let report = output.collection_report.as_ref().expect("Missing report");
-    assert_eq!(report.bundle, bundle.id);
+    assert_eq!(report.collection.bundle, bundle.id);
     assert!(report.activated_in_db_ok);
     // See comment above — this depends on sp_ereport_ingester being disabled
     // in config.test.toml.
-    assert_eq!(
-        report.ereports,
-        Some(SupportBundleEreportStatus {
+    assert_ereport_details_eq(
+        &report.collection,
+        SupportBundleEreportStatus {
             n_collected: 0,
             n_found: 0,
-            errors: Vec::new()
-        })
+            errors: Vec::new(),
+        },
     );
 
     // Verify that steps were recorded with reasonable timing data
-    assert!(!report.steps.is_empty(), "Should have recorded some steps");
-    for step in &report.steps {
+    assert!(
+        !report.collection.steps.is_empty(),
+        "Should have recorded some steps"
+    );
+    for step in &report.collection.steps {
         assert!(
             step.end >= step.start,
             "Step '{}' end time should be >= start time",
@@ -650,7 +675,7 @@ async fn test_support_bundle_range_requests(
 
     // Verify that we successfully spawned steps to query sleds and SPs
     let step_names: Vec<_> =
-        report.steps.iter().map(|s| s.name.as_str()).collect();
+        report.collection.steps.iter().map(|s| s.name.as_str()).collect();
     assert!(
         step_names.contains(&SupportBundleCollectionStep::STEP_SPAWN_SLEDS),
         "Should have attempted to list in-service sleds"
@@ -989,7 +1014,7 @@ async fn test_support_bundle_fm_case_id(cptestctx: &ControlPlaneTestContext) {
         cases: Default::default(),
         ereports_by_id: Default::default(),
     };
-    datastore.fm_sitrep_insert(&opctx, sitrep).await.unwrap();
+    datastore.fm_sitrep_insert(&opctx, sitrep, None).await.unwrap();
 
     // Create an FM bundle directly through the datastore.
     let case_id = CaseUuid::new_v4();
