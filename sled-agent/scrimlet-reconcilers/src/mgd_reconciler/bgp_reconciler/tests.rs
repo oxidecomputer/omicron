@@ -160,6 +160,7 @@ fn proptest_valid_input(input: TestInput) {
     match DiffableBgpConfig::from_desired_config(
         &input.rack_network_config(),
         ThisSledSwitchSlot::TEST_FAKE,
+        &logctx.log,
     ) {
         Ok(_) => (),
         Err(err) => panic!("invalid config: {err:#}"),
@@ -528,6 +529,7 @@ async fn run_one_proptest_input(
     let desired_config = DiffableBgpConfig::from_desired_config(
         &rack_network_config,
         ThisSledSwitchSlot::TEST_FAKE,
+        log,
     )
     .unwrap();
     let ReconciliationPlan {

@@ -231,6 +231,7 @@ pub(super) async fn reconcile(
     let desired_config = match DiffableBgpConfig::from_desired_config(
         &desired_config,
         our_switch_slot,
+        log,
     ) {
         Ok(config) => config,
         Err(err) => {
@@ -1437,6 +1438,7 @@ impl DiffableBgpConfig {
     fn from_desired_config(
         config: &RackNetworkConfig,
         our_switch_slot: ThisSledSwitchSlot,
+        log: &Logger,
     ) -> anyhow::Result<Self> {
         // Filter down to just the peers of the ports matching our switch slot.
         let our_bgp_peers = config
@@ -1447,7 +1449,7 @@ impl DiffableBgpConfig {
                 port.bgp_peers.iter().map(|peer| (&port.port, peer))
             });
 
-        let mut max_paths = None;
+        let mut max_paths: Option<MaxPathConfig> = None;
         let mut routers = BTreeMap::new();
         let mut originate4 = BTreeMap::new();
         let mut originate6 = BTreeMap::new();
@@ -1503,6 +1505,17 @@ impl DiffableBgpConfig {
                 // really have a way of handling multiple configs with different
                 // max_paths settings anyway, so just take the last one we find
                 // in this loop.
+                if let Some(prev_max_paths) = max_paths
+                    && prev_max_paths != *this_config_max_paths
+                {
+                    warn!(
+                        log,
+                        "found multiple BGP configs with different max_paths, \
+                         but can only choose one";
+                        "max-paths-ignored" => prev_max_paths.as_u8(),
+                        "max-paths-chosen" => this_config_max_paths.as_u8(),
+                    );
+                }
                 max_paths = Some(*this_config_max_paths);
 
                 // TODO-correctness The Nexus code we've replaced was using the
