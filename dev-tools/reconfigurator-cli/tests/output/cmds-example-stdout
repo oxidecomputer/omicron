@@ -1742,6 +1742,8 @@ LEDGERED SLED CONFIG
     reconciler task status: idle (finished at <REDACTED_TIMESTAMP> after running for <REDACTED_DURATION>s)
     reference measurements:
         (measurement set is empty)
+    fmd:
+        no faults reported
 
 SMF SERVICES STATUS
     no data on SMF services has been collected
@@ -1893,6 +1895,8 @@ LEDGERED SLED CONFIG
     reconciler task status: idle (finished at <REDACTED_TIMESTAMP> after running for <REDACTED_DURATION>s)
     reference measurements:
         (measurement set is empty)
+    fmd:
+        no faults reported
 
 SMF SERVICES STATUS
     no data on SMF services has been collected
@@ -2137,6 +2141,8 @@ LEDGERED SLED CONFIG
     reconciler task status: idle (finished at <REDACTED_TIMESTAMP> after running for <REDACTED_DURATION>s)
     reference measurements:
         (measurement set is empty)
+    fmd:
+        no faults reported
 
 SMF SERVICES STATUS
     no data on SMF services has been collected

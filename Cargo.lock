@@ -13656,6 +13656,7 @@ dependencies = [
  "camino",
  "chrono",
  "daft",
+ "expectorate",
  "iddqd",
  "indent_write",
  "ipnetwork",
