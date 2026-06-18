@@ -12,6 +12,8 @@ pub mod ereport;
 pub use ereport::{Ereport, EreportId};
 pub mod case;
 pub use case::Case;
+pub mod fact;
+pub use fact::{DiskFact, FactPayload, ZpoolUnhealthyFactPayload};
 pub mod json_display;
 
 use case::AlertRequest;
@@ -230,4 +232,5 @@ pub struct SitrepVersion {
 #[strum(serialize_all = "snake_case")]
 pub enum DiagnosisEngineKind {
     PowerShelf,
+    PhysicalDisk,
 }

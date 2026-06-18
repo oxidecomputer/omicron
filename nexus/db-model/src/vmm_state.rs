@@ -6,7 +6,7 @@ use super::impl_enum_type;
 use crate::Instance;
 use crate::InstanceState;
 use crate::Vmm;
-use omicron_common::api::external;
+use nexus_types::external_api::instance;
 use serde::Deserialize;
 use serde::Serialize;
 use std::fmt;
@@ -181,7 +181,7 @@ impl fmt::Display for VmmStateParseError {
 impl std::error::Error for VmmStateParseError {}
 
 /// Returns the operator-visible [external API
-/// `InstanceState`](external::InstanceState) for the provided [`Instance`]
+/// `InstanceState`](instance::InstanceState) for the provided [`Instance`]
 /// and its active [`Vmm`], if one exists.
 pub struct InstanceStateComputer<'s> {
     instance_state: InstanceState,
@@ -211,7 +211,7 @@ impl<'s> InstanceStateComputer<'s> {
         }
     }
 
-    /// Determine the [`external::InstanceState`] to report for the instance,
+    /// Determine the [`instance::InstanceState`] to report for the instance,
     /// based on the provided `instance_state`, `vmm_state`, and `migration_id`.
     ///
     /// Note that these fields *must* all come from the the same instance record
@@ -237,12 +237,12 @@ impl<'s> InstanceStateComputer<'s> {
         instance_state: &'s InstanceState,
         migration_id: Option<&'s Uuid>,
         vmm_state: Option<&'s VmmState>,
-    ) -> external::InstanceState {
+    ) -> instance::InstanceState {
         Self { instance_state: *instance_state, migration_id, vmm_state }
             .compute_state()
     }
 
-    /// Determine the [`external::InstanceState`] to report for the instance,
+    /// Determine the [`instance::InstanceState`] to report for the instance,
     /// based on the state of the instance record and its active VMM record (if
     /// one exists).
     ///
@@ -262,7 +262,7 @@ impl<'s> InstanceStateComputer<'s> {
     /// they've made a mistake. If we are not running in debug mode, we instead
     /// produce a state based on the `InstanceState` so that Nexus does not
     /// crash upon encountering an invalid situation.
-    pub fn compute_state(&self) -> external::InstanceState {
+    pub fn compute_state(&self) -> instance::InstanceState {
         // We want to only report that an instance is `Stopped` when a new
         // `instance-start` saga is able to proceed. That means that:
         match (self.instance_state, self.vmm_state) {
@@ -289,7 +289,7 @@ impl<'s> InstanceStateComputer<'s> {
             //   and migration IDs.
             //
             (InstanceState::Vmm, Some(_)) if self.migration_id.is_some() => {
-                external::InstanceState::Migrating
+                instance::InstanceState::Migrating
             }
             // - An instance with a "stopped" or "destroyed" VMM needs to be
             //   recast as a "stopping" instance, as the virtual provisioning
@@ -298,20 +298,20 @@ impl<'s> InstanceStateComputer<'s> {
             (
                 InstanceState::Vmm,
                 Some(VmmState::Stopped | VmmState::Destroyed),
-            ) => external::InstanceState::Stopping,
+            ) => instance::InstanceState::Stopping,
             // - An instance with a "failed" VMM should *not* be counted as
             //   failed until the VMM is unlinked, because a start saga must be
             //   able to run for a "failed" instance. Until then, it will
             //   continue to appear "stopping".
             (InstanceState::Vmm, Some(VmmState::Failed)) => {
-                external::InstanceState::Stopping
+                instance::InstanceState::Stopping
             }
             // - An instance with a "saga unwound" VMM, on the other hand, can
             //   be treated as "failed", since --- unlike an instance with a
             //   "failed" active VMM --- a new start saga can run at any time by
             //   just clearing out the old VMM ID.
             (InstanceState::Vmm, Some(VmmState::SagaUnwound)) => {
-                external::InstanceState::Failed
+                instance::InstanceState::Failed
             }
             // - If the instance has a VMM but the VMM is "creating", return
             //   `InstanceState::Starting`, rather than
@@ -322,22 +322,22 @@ impl<'s> InstanceStateComputer<'s> {
             (
                 InstanceState::Vmm,
                 Some(VmmState::Creating | VmmState::Starting),
-            ) => external::InstanceState::Starting,
+            ) => instance::InstanceState::Starting,
             (InstanceState::Vmm, Some(VmmState::Running)) => {
-                external::InstanceState::Running
+                instance::InstanceState::Running
             }
             (InstanceState::Vmm, Some(VmmState::Stopping)) => {
-                external::InstanceState::Stopping
+                instance::InstanceState::Stopping
             }
             (InstanceState::Vmm, Some(VmmState::Rebooting)) => {
-                external::InstanceState::Rebooting
+                instance::InstanceState::Rebooting
             }
             (InstanceState::Vmm, Some(VmmState::Migrating)) => {
-                external::InstanceState::Migrating
+                instance::InstanceState::Migrating
             }
             // - An instance with no VMM is always "stopped" (as long as it's
             //   not "starting" etc.)
-            (InstanceState::NoVmm, None) => external::InstanceState::Stopped,
+            (InstanceState::NoVmm, None) => instance::InstanceState::Stopped,
             // - The instance should not be in `InstanceState::Vmm` if there is
             //   no active VMM record, this is probably a bug, but return
             //   `InstanceState::Stopped`, because that's basically true
@@ -348,7 +348,7 @@ impl<'s> InstanceStateComputer<'s> {
                     "if the instance state is `InstanceState::Vmm`, there \
                      should be a VMM state"
                 );
-                external::InstanceState::Stopped
+                instance::InstanceState::Stopped
             }
             (InstanceState::NoVmm, _vmm_state) => {
                 debug_assert_eq!(
@@ -356,7 +356,7 @@ impl<'s> InstanceStateComputer<'s> {
                     "if the instance is in `InstanceState::NoVmm`, there \
                      should be no VMM state"
                 );
-                external::InstanceState::Stopped
+                instance::InstanceState::Stopped
             }
             // - If there's no VMM state, use the instance's state.
             (instance_state, None) => instance_state.into(),

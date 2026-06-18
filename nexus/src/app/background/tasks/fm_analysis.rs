@@ -9,11 +9,15 @@ use anyhow::Context;
 use chrono::Utc;
 use fm::analysis_input::InvalidInputs;
 use futures::future::BoxFuture;
+use iddqd::IdOrdMap;
+use nexus_db_model::PhysicalDiskPolicy;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::datastore;
+use nexus_db_queries::db::identity::Asset;
 use nexus_db_queries::db::pagination::Paginator;
 use nexus_fm as fm;
+use nexus_types::in_service_disk::InServiceDisk;
 use nexus_types::internal_api::background::FmAnalysisStatus;
 use nexus_types::internal_api::background::fm_analysis as status;
 use nexus_types::inventory;
@@ -231,9 +235,16 @@ impl FmAnalysis {
         (fm::analysis_input::Input, status::PreparationStatus),
         PreparationError,
     > {
-        let mut builder =
-            fm::analysis_input::Input::builder(parent_sitrep.clone(), inv)?;
         let mut warnings = Vec::new();
+
+        let in_service_disks =
+            Arc::new(self.load_in_service_disks(opctx, &mut warnings).await?);
+
+        let mut builder = fm::analysis_input::Input::builder(
+            parent_sitrep.clone(),
+            inv,
+            in_service_disks,
+        )?;
         self.load_new_ereports(opctx, &mut builder, &mut warnings)
             .await
             .context("failed to load new ereports")?;
@@ -247,6 +258,67 @@ impl FmAnalysis {
 
         let (input, report) = builder.build();
         Ok((input, status::PreparationStatus { warnings, report }))
+    }
+
+    /// Load all in-service control plane disks, projected down to FM's
+    /// [`InServiceDisk`] view.
+    async fn load_in_service_disks(
+        &self,
+        opctx: &OpContext,
+        warnings: &mut Vec<String>,
+    ) -> anyhow::Result<IdOrdMap<InServiceDisk>> {
+        // Load all external (U.2) zpools and project them down to FM's
+        // `InServiceDisk` view, filtering on `disk_policy = in_service` and a
+        // live (non-soft-deleted) physical_disk row. M.2 disks are not
+        // represented as control plane disks today, so the U.2-only filter
+        // on the underlying query matches reality.
+        //
+        // See `nexus_types::in_service_disk` for why FM reads the executed
+        // DB view rather than the target blueprint.
+        let zpools_and_disks = self
+            .datastore
+            .zpool_list_all_external_batched(opctx)
+            .await
+            .context("failed to load in-service control plane disks")?;
+        let mut in_service_disks = IdOrdMap::new();
+        for (zpool, disk) in zpools_and_disks {
+            if disk.time_deleted().is_some()
+                || disk.disk_policy != PhysicalDiskPolicy::InService
+            {
+                continue;
+            }
+            let physical_disk_id = disk.id();
+            let zpool_id = zpool.id();
+            if in_service_disks
+                .insert_unique(InServiceDisk {
+                    physical_disk_id,
+                    zpool_id,
+                    sled_id: disk.sled_id.into(),
+                    vendor: disk.vendor,
+                    serial: disk.serial,
+                    model: disk.model,
+                    variant: disk.variant.into(),
+                })
+                .is_err()
+            {
+                // One live zpool per disk is a code-maintained invariant,
+                // not a schema constraint. Tolerate a violation rather than
+                // panicking the analysis task: keep the first zpool seen
+                // for the disk.
+                slog::warn!(
+                    &opctx.log,
+                    "multiple live zpools reference the same physical disk";
+                    "physical_disk_id" => %physical_disk_id,
+                    "zpool_id" => %zpool_id,
+                );
+                warnings.push(format!(
+                    "multiple live zpools reference physical disk \
+                     {physical_disk_id} (kept first seen, ignored zpool \
+                     {zpool_id})"
+                ));
+            }
+        }
+        Ok(in_service_disks)
     }
 
     async fn load_new_ereports(
@@ -339,7 +411,7 @@ impl FmAnalysis {
     ) -> status::AnalysisStatus {
         let start_time = Utc::now();
         let mut sitrep_builder = fm::SitrepBuilder::new(&opctx.log, &inputs);
-        let result = fm::diagnosis::analyze(&inputs, &mut sitrep_builder);
+        let result = fm::diagnosis::analyze(&mut sitrep_builder);
         let end_time = Utc::now();
         let (sitrep, report) = sitrep_builder.build(self.nexus_id, end_time);
 
@@ -776,6 +848,7 @@ mod tests {
                     ereports: iddqd::IdOrdMap::new(),
                     alerts_requested,
                     support_bundles_requested: iddqd::IdOrdMap::new(),
+                    facts: iddqd::IdOrdMap::new(),
                 }
             };
 

@@ -29,6 +29,8 @@ mod diagnosis_engine;
 pub use diagnosis_engine::*;
 mod rendezvous_created;
 pub use rendezvous_created::*;
+mod fact_physical_disk;
+pub use fact_physical_disk::*;
 mod support_bundle_request;
 pub use support_bundle_request::*;
 mod sitrep_analysis_report;

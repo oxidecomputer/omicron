@@ -34,6 +34,7 @@ use nexus_db_schema::schema::ereport::dsl as ereport_dsl;
 use nexus_db_schema::schema::fm_alert_request::dsl as alert_req_dsl;
 use nexus_db_schema::schema::fm_case::dsl as case_dsl;
 use nexus_db_schema::schema::fm_ereport_in_case::dsl as case_ereport_dsl;
+use nexus_db_schema::schema::fm_fact_physical_disk::dsl as fact_pd_dsl;
 use nexus_db_schema::schema::fm_sitrep::dsl as sitrep_dsl;
 use nexus_db_schema::schema::fm_sitrep_analysis_report::dsl as analysis_report_dsl;
 use nexus_db_schema::schema::fm_sitrep_history::dsl as history_dsl;
@@ -49,6 +50,7 @@ use omicron_uuid_kinds::AlertUuid;
 use omicron_uuid_kinds::CaseEreportKind;
 use omicron_uuid_kinds::CaseKind;
 use omicron_uuid_kinds::CaseUuid;
+use omicron_uuid_kinds::FactKind;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SitrepUuid;
 use omicron_uuid_kinds::SupportBundleKind;
@@ -123,6 +125,7 @@ sitrep_child_tables! {
     SupportBundleRequestDataSelectionEreports => { table: "fm_support_bundle_request_data_selection_ereports" },
     SupportBundleRequest => { table: "fm_support_bundle_request" },
     Case => { table: "fm_case" },
+    FmFactPhysicalDisk => { table: "fm_fact_physical_disk" },
     AnalysisReport => { table: "fm_sitrep_analysis_report" },
 }
 
@@ -369,6 +372,8 @@ impl DataStore {
         let mut support_bundle_requests =
             self.support_bundle_requests_read_on_conn(id, conn).await?;
 
+        let mut case_facts = self.fm_facts_read_on_conn(id, conn).await?;
+
         // Next, load the case metadata entries and marry them to the sets of
         // ereports, alert requests, and support bundle requests for those
         // cases that we loaded in the previous steps.
@@ -411,6 +416,7 @@ impl DataStore {
                         alert_requests.remove(&id).unwrap_or_default();
                     let support_bundles_requested =
                         support_bundle_requests.remove(&id).unwrap_or_default();
+                    let facts = case_facts.remove(&id).unwrap_or_default();
                     fm::Case {
                         id,
                         metadata: fm::case::Metadata {
@@ -422,6 +428,7 @@ impl DataStore {
                         alerts_requested,
                         ereports,
                         support_bundles_requested,
+                        facts,
                     }
                 }));
             }
@@ -491,6 +498,69 @@ impl DataStore {
                              {case_id} with the same alert UUID {id}. \
                              this should really not be possible, as the \
                              alert UUID is a primary key!",
+                        );
+                        Error::InternalError { internal_message }
+                    })?;
+            }
+        }
+
+        Ok(by_case)
+    }
+
+    /// Fetch all case facts belonging to cases in the given sitrep, grouped
+    /// by `case_id`.
+    ///
+    /// Each diagnosis engine stores its facts in its own typed table, read by
+    /// its own paginated loop here and unioned into the same `by_case` map. A
+    /// case belongs to exactly one engine, so keys never collide across tables.
+    async fn fm_facts_read_on_conn(
+        &self,
+        id: SitrepUuid,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+    ) -> Result<HashMap<CaseUuid, iddqd::IdOrdMap<fm::case::Fact>>, Error> {
+        let mut by_case =
+            HashMap::<CaseUuid, iddqd::IdOrdMap<fm::case::Fact>>::new();
+
+        // NOTE: Each per-DE set of facts belongs to a distinct table.
+        // This would be a reasonable spot to insert parallel_task_set
+        // and do some concurrent queries.
+        //
+        // (... gonna punt on that until we actually have a couple different
+        // tables to query from).
+
+        // --- physical-disk diagnosis engine facts ---
+        let mut paginator: Paginator<DbTypedUuid<FactKind>> =
+            Paginator::new(SQL_BATCH_SIZE, PaginationOrder::Descending);
+        while let Some(p) = paginator.next() {
+            let batch = paginated(
+                fact_pd_dsl::fm_fact_physical_disk,
+                fact_pd_dsl::id,
+                &p.current_pagparams(),
+            )
+            .filter(fact_pd_dsl::sitrep_id.eq(id.into_untyped_uuid()))
+            .select(model::fm::FmFactPhysicalDisk::as_select())
+            .load_async(conn)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel(e, ErrorHandler::Server)
+                    .internal_context("failed to load physical-disk case facts")
+            })?;
+
+            paginator = p.found_batch(&batch, &|f| f.id);
+            for row in batch {
+                let case_id: CaseUuid = row.case_id.into();
+                let fact = row.into_fact()?;
+                let id = fact.metadata.id;
+                by_case
+                    .entry(case_id)
+                    .or_default()
+                    .insert_unique(fact)
+                    .map_err(|_| {
+                        let internal_message = format!(
+                            "encountered multiple case facts for case \
+                             {case_id} with the same fact UUID {id}. this \
+                             should really not be possible, as the fact \
+                             UUID is a primary key!",
                         );
                         Error::InternalError { internal_message }
                     })?;
@@ -749,6 +819,7 @@ impl DataStore {
         let mut support_bundles_requested = Vec::new();
         let mut bundle_data_selections_requested = Vec::new();
         let mut case_ereports = Vec::new();
+        let mut physical_disk_facts = Vec::new();
         for case in sitrep.cases {
             let case_id = case.id;
             cases.push(model::fm::CaseMetadata::from_sitrep(sitrep_id, &case));
@@ -771,6 +842,21 @@ impl DataStore {
                     ),
                 );
                 bundle_data_selections_requested.push((req_id, data_selection));
+            }
+            for fact in case.facts.iter() {
+                // Dispatch each fact to its diagnosis engine's typed table.
+                match &fact.payload {
+                    fm::FactPayload::PhysicalDisk(disk_fact) => {
+                        physical_disk_facts.push(
+                            model::fm::FmFactPhysicalDisk::from_sitrep(
+                                sitrep_id,
+                                case_id,
+                                &fact.metadata,
+                                disk_fact,
+                            ),
+                        );
+                    }
+                }
             }
         }
 
@@ -829,6 +915,19 @@ impl DataStore {
             bundle_data_selections_requested,
         )
         .await?;
+
+        if !physical_disk_facts.is_empty() {
+            diesel::insert_into(fact_pd_dsl::fm_fact_physical_disk)
+                .values(physical_disk_facts)
+                .execute_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                        .internal_context(
+                            "failed to insert physical-disk case facts",
+                        )
+                })?;
+        }
 
         if !cases.is_empty() {
             diesel::insert_into(case_dsl::fm_case)
@@ -1165,24 +1264,8 @@ impl DataStore {
             .map(|id| id.into_untyped_uuid())
             .collect::<Vec<_>>();
 
-        struct SitrepDeleteResult {
-            sitreps_deleted: usize,
-            case_ereports_deleted: usize,
-            alert_requests_deleted: usize,
-            support_bundle_requests_deleted: usize,
-            cases_deleted: usize,
-            analysis_reports_deleted: usize,
-        }
-
         let err = OptionalError::new();
-        let SitrepDeleteResult {
-            sitreps_deleted,
-            case_ereports_deleted,
-            alert_requests_deleted,
-            support_bundle_requests_deleted,
-            cases_deleted,
-            analysis_reports_deleted,
-        } = self
+        let (sitreps_deleted, child_rows_deleted) = self
             // Sitrep deletion is transactional to prevent a sitrep from being
             // left in a partially-deleted state should the Nexus instance
             // attempting the delete operation die suddenly.
@@ -1203,47 +1286,33 @@ impl DataStore {
                         }
                     }
 
-                    // Delete case ereport assignments
-                    let case_ereports_deleted = diesel::delete(
-                        case_ereport_dsl::fm_ereport_in_case.filter(
-                            case_ereport_dsl::sitrep_id.eq_any(ids.clone()),
-                        ),
-                    )
-                    .execute_async(&conn)
-                    .await?;
+                    // Delete every child row by sitrep_id. Driving this off
+                    // SitrepChildTable::ALL keeps it in lockstep with the
+                    // orphan GC: a child table registered in the
+                    // `sitrep_child_tables!` macro is deleted here
+                    // automatically. There are no foreign keys between these
+                    // tables, so deletion order doesn't matter.
+                    let mut child_rows_deleted =
+                        BTreeMap::<SitrepChildTable, usize>::new();
+                    for &table in SitrepChildTable::ALL {
+                        let mut builder = QueryBuilder::new();
+                        builder.sql("DELETE FROM omicron.public.");
+                        builder.sql(table.table_name());
+                        builder.sql(" WHERE ");
+                        builder.sql(table.sitrep_id_column());
+                        builder.sql(" = ANY(");
+                        builder
+                            .param()
+                            .bind::<sql_types::Array<sql_types::Uuid>, _>(
+                                ids.clone(),
+                            );
+                        builder.sql(")");
+                        let deleted =
+                            builder.query::<()>().execute_async(&conn).await?;
+                        child_rows_deleted.insert(table, deleted);
+                    }
 
-                    // Delete case alert requests.
-                    let alert_requests_deleted = diesel::delete(
-                        alert_req_dsl::fm_alert_request.filter(alert_req_dsl::sitrep_id.eq_any(ids.clone()))
-                    )
-                    .execute_async(&conn)
-                    .await?;
-
-                    // Delete support bundle request child data selection rows,
-                    // then the requests themselves.
-                    let support_bundle_requests_deleted =
-                        Self::support_bundle_requests_delete_on_conn(&conn, ids.clone())
-                            .await?;
-
-                    // Delete case metadata records.
-                    let cases_deleted = diesel::delete(
-                        case_dsl::fm_case
-                            .filter(case_dsl::sitrep_id.eq_any(ids.clone())),
-                    )
-                    .execute_async(&conn)
-                    .await?;
-
-                    // Delete sitrep analysis report records.
-                    let analysis_reports_deleted = diesel::delete(
-                        analysis_report_dsl::fm_sitrep_analysis_report.filter(
-                            analysis_report_dsl::sitrep_id
-                                .eq_any(ids.clone()),
-                        ),
-                    )
-                    .execute_async(&conn)
-                    .await?;
-
-                    // Delete sitrep metadata records.
+                    // Delete sitrep metadata records last.
                     let sitreps_deleted = diesel::delete(
                         sitrep_dsl::fm_sitrep
                             .filter(sitrep_dsl::id.eq_any(ids.clone())),
@@ -1251,14 +1320,7 @@ impl DataStore {
                     .execute_async(&conn)
                     .await?;
 
-                    Ok(SitrepDeleteResult {
-                        sitreps_deleted,
-                        cases_deleted,
-                        alert_requests_deleted,
-                        support_bundle_requests_deleted,
-                        case_ereports_deleted,
-                        analysis_reports_deleted,
-                    })
+                    Ok((sitreps_deleted, child_rows_deleted))
                 }
             })
             .await
@@ -1272,11 +1334,7 @@ impl DataStore {
             "deleted {sitreps_deleted} of {} sitreps", ids.len();
             "ids" => ?ids,
             "sitreps_deleted" => sitreps_deleted,
-            "cases_deleted" => cases_deleted,
-            "case_ereports_deleted" => case_ereports_deleted,
-            "alert_requests_deleted" => alert_requests_deleted,
-            "support_bundle_requests_deleted" => support_bundle_requests_deleted,
-            "analysis_reports_deleted" => analysis_reports_deleted,
+            "child_rows_deleted" => ?child_rows_deleted,
         );
 
         Ok(sitreps_deleted)
@@ -1521,43 +1579,6 @@ impl DataStore {
         builder.query()
     }
 
-    /// Delete child data selection rows for support bundle requests, then the
-    /// support bundle request rows themselves.
-    #[cfg(test)]
-    async fn support_bundle_requests_delete_on_conn(
-        conn: &async_bb8_diesel::Connection<DbConnection>,
-        sitrep_ids: Vec<uuid::Uuid>,
-    ) -> Result<usize, DieselError> {
-        use nexus_db_schema::schema::fm_support_bundle_request_data_selection_ereports::dsl as ereports_dsl;
-        use nexus_db_schema::schema::fm_support_bundle_request_data_selection_flags::dsl as flags_dsl;
-        use nexus_db_schema::schema::fm_support_bundle_request_data_selection_host_info::dsl as host_info_dsl;
-
-        diesel::delete(
-            flags_dsl::fm_support_bundle_request_data_selection_flags
-                .filter(flags_dsl::sitrep_id.eq_any(sitrep_ids.clone())),
-        )
-        .execute_async(conn)
-        .await?;
-        diesel::delete(
-            host_info_dsl::fm_support_bundle_request_data_selection_host_info
-                .filter(host_info_dsl::sitrep_id.eq_any(sitrep_ids.clone())),
-        )
-        .execute_async(conn)
-        .await?;
-        diesel::delete(
-            ereports_dsl::fm_support_bundle_request_data_selection_ereports
-                .filter(ereports_dsl::sitrep_id.eq_any(sitrep_ids.clone())),
-        )
-        .execute_async(conn)
-        .await?;
-        diesel::delete(
-            support_bundle_req_dsl::fm_support_bundle_request
-                .filter(support_bundle_req_dsl::sitrep_id.eq_any(sitrep_ids)),
-        )
-        .execute_async(conn)
-        .await
-    }
-
     pub async fn fm_sitrep_version_list(
         &self,
         opctx: &OpContext,
@@ -1617,6 +1638,7 @@ mod tests {
     use omicron_common::api::external::Generation;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::CollectionUuid;
+    use omicron_uuid_kinds::FactUuid;
     use omicron_uuid_kinds::OmicronZoneUuid;
     use omicron_uuid_kinds::SupportBundleUuid;
     use std::collections::BTreeMap;
@@ -2106,6 +2128,7 @@ mod tests {
                 ereports,
                 alerts_requested,
                 support_bundles_requested,
+                facts,
             } = case;
             let case_id = id;
             let Some(expected) = this.cases.get(&case_id) else {
@@ -2137,6 +2160,7 @@ mod tests {
                 &expected.metadata.de, de,
                 "while checking case {case_id}"
             );
+            assert_eq!(&expected.facts, facts, "while checking case {case_id}");
 
             // Now, check that all the ereports are present in both cases.
             assert_eq!(ereports.len(), expected.ereports.len());
@@ -2312,17 +2336,45 @@ mod tests {
                     .unwrap();
             }
 
+            let mut facts = iddqd::IdOrdMap::new();
+            facts
+                .insert_unique(fm::case::Fact {
+                    metadata: fm::case::FactMetadata {
+                        id: FactUuid::new_v4(),
+                        created_sitrep_id: sitrep_id,
+                        comment: "a representative fact for case 1".to_string(),
+                    },
+                    payload: fm::FactPayload::PhysicalDisk(
+                        fm::DiskFact::ZpoolUnhealthy(
+                            fm::ZpoolUnhealthyFactPayload {
+                                physical_disk_id:
+                                    omicron_uuid_kinds::PhysicalDiskUuid::new_v4(
+                                    ),
+                                zpool_id:
+                                    omicron_uuid_kinds::ZpoolUuid::new_v4(),
+                                last_seen_health:
+                                    nexus_types::inventory::ZpoolHealth::Degraded,
+                                observed_in_inv: CollectionUuid::new_v4(),
+                                time_observed: omicron_common::now_db_precision(
+                                ),
+                            },
+                        ),
+                    ),
+                })
+                .unwrap();
+
             fm::Case {
                 id: omicron_uuid_kinds::CaseUuid::new_v4(),
                 metadata: fm::case::Metadata {
                     created_sitrep_id: sitrep_id,
                     closed_sitrep_id: None,
-                    de: fm::DiagnosisEngineKind::PowerShelf,
+                    de: fm::DiagnosisEngineKind::PhysicalDisk,
                     comment: "my cool case".to_string(),
                 },
                 ereports,
                 alerts_requested,
                 support_bundles_requested,
+                facts,
             }
         };
 
@@ -2360,6 +2412,7 @@ mod tests {
                 ereports,
                 alerts_requested,
                 support_bundles_requested: iddqd::IdOrdMap::new(),
+                facts: iddqd::IdOrdMap::new(),
             }
         };
 
@@ -2410,6 +2463,7 @@ mod tests {
             new_ereport_ids: Default::default(),
             open_cases: Default::default(),
             closed_cases_copied_forward: Default::default(),
+            in_service_disks: Default::default(),
         };
         let analysis_report = AnalysisReport {
             sitrep_id: sitrep.id(),
@@ -2554,6 +2608,7 @@ mod tests {
             ereports: iddqd::IdOrdMap::new(),
             alerts_requested: iddqd::IdOrdMap::new(),
             support_bundles_requested,
+            facts: iddqd::IdOrdMap::new(),
         };
 
         let mut cases = iddqd::IdOrdMap::new();
@@ -3025,6 +3080,7 @@ mod tests {
                 new_ereport_ids: Default::default(),
                 open_cases: Default::default(),
                 closed_cases_copied_forward: Default::default(),
+                in_service_disks: Default::default(),
             };
             let analysis_report = AnalysisReport {
                 sitrep_id: ghost_sitrep_id,
