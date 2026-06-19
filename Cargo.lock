@@ -6827,6 +6827,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "nexus-bootstore-config"
+version = "0.1.0"
+dependencies = [
+ "ipnetwork",
+ "nexus-db-model",
+ "nexus-db-queries",
+ "omicron-common",
+ "omicron-rpaths",
+ "omicron-workspace-hack",
+ "oxnet",
+ "pq-sys",
+ "sled-agent-types",
+ "slog",
+ "slog-error-chain",
+ "uuid",
+]
+
+[[package]]
 name = "nexus-client"
 version = "0.1.0"
 dependencies = [
@@ -8748,6 +8766,7 @@ dependencies = [
  "mg-api-types",
  "nexus-auth",
  "nexus-background-task-interface",
+ "nexus-bootstore-config",
  "nexus-client",
  "nexus-config",
  "nexus-db-lookup",
