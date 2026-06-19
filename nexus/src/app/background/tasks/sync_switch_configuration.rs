@@ -58,14 +58,13 @@ use nexus_types::identity::{Asset, Resource};
 use omicron_common::OMICRON_DPD_TAG;
 use omicron_common::{
     address::{Ipv6Subnet, get_sled_address},
-    api::external::{DataPageParams, Name},
+    api::external::DataPageParams,
 };
 use serde_json::json;
 use sled_agent_client::types::HostPortConfig;
 use sled_agent_types::early_networking::BgpConfig as SledBgpConfig;
 use sled_agent_types::early_networking::BgpPeerConfig as SledBgpPeerConfig;
 use sled_agent_types::early_networking::EarlyNetworkConfigEnvelope;
-use sled_agent_types::early_networking::ImportExportPolicy;
 use sled_agent_types::early_networking::InvalidIpAddrError;
 use sled_agent_types::early_networking::LldpAdminStatus;
 use sled_agent_types::early_networking::LldpPortConfig;
@@ -90,12 +89,10 @@ use std::{
     hash::Hash,
     net::{IpAddr, SocketAddr},
     str::FromStr,
-    sync::{Arc, LazyLock},
+    sync::Arc,
 };
 
 const DPD_TAG: Option<&'static str> = Some(OMICRON_DPD_TAG);
-static PHY0: LazyLock<Name> =
-    LazyLock::new(|| "phy0".parse().expect("phy0 is a valid Name"));
 
 // This is more of an implementation detail of the BGP implementation. It
 // defines the maximum time the peering engine will wait for external messages
@@ -1053,20 +1050,6 @@ impl BackgroundTask for SwitchPortSettingsManager {
                         continue;
                     };
 
-                    let peer_configs = match self.datastore.bgp_peer_configs(opctx, *switch_slot, port.port_name.to_string()).await {
-                        Ok(v) => v,
-                        Err(e) => {
-                            error!(
-                                log,
-                                "failed to fetch bgp peer config for switch port";
-                                "switch_slot" => ?switch_slot,
-                                "port" => &port.port_name.to_string(),
-                                "error" => %DisplayErrorChain::new(&e)
-                            );
-                            continue;
-                        },
-                    };
-
                     // TODO https://github.com/oxidecomputer/omicron/issues/3062
                     let tx_eq = if let Some(c) = info.tx_eq.get(0) {
                         Some(TxEqConfig {
@@ -1080,23 +1063,69 @@ impl BackgroundTask for SwitchPortSettingsManager {
                         None
                     };
 
-                    let bgp_peers = match peer_configs
-                        .into_iter()
-                        .map(SledBgpPeerConfig::try_from)
-                        .collect::<Result<_, _>>()
+                    // Build the bootstore BGP peers from the switch port
+                    // settings we already fetched. `info.bgp_peers` includes
+                    // each peer's communities and import/export policies,
+                    // though not the ASN.
+                    //
+                    // NOTE: the mgd-apply path below re-reads this same per-peer
+                    // data via `communities_for_peer` / `allow_*_for_peer`. That
+                    // redundancy could be removed too, but is left for now.
+                    let bgp_peers: Vec<SledBgpPeerConfig> = if info
+                        .bgp_peers
+                        .is_empty()
                     {
-                        Ok(bgp_peers) => bgp_peers,
-                        Err(err) => {
-                            error!(
-                                log,
-                                "failed to convert database peer configs to \
-                                 API peer configs";
-                                "switch_slot" => ?switch_slot,
-                                "port" => &port.port_name.to_string(),
-                                InlineErrorChain::new(&err),
-                            );
-                            continue;
-                        }
+                        Vec::new()
+                    } else {
+                        // The peer ASN comes from the switch's BGP config.
+                        let asn = match switch_bgp_config.get(switch_slot) {
+                            Some((_id, config)) => config.asn.0,
+                            None => {
+                                // XXX: The port has BGP peers but no ASN
+                                // configured. This is an error, but we skip it
+                                // for now. We should error out here instead.
+                                info!(
+                                    log,
+                                    "no bgp config for switch; skipping port \
+                                     for bootstore";
+                                    "switch_slot" => ?switch_slot,
+                                    "port" => &port.port_name.to_string(),
+                                );
+                                continue;
+                            }
+                        };
+                        info
+                            .bgp_peers
+                            .iter()
+                            .map(|peer| {
+                                let peer = peer.as_bgp_peer();
+                                SledBgpPeerConfig {
+                                    asn,
+                                    port: port.port_name.to_string(),
+                                    addr: peer.addr,
+                                    hold_time: Some(peer.hold_time.into()),
+                                    idle_hold_time: Some(
+                                        peer.idle_hold_time.into(),
+                                    ),
+                                    delay_open: Some(peer.delay_open.into()),
+                                    connect_retry: Some(
+                                        peer.connect_retry.into(),
+                                    ),
+                                    keepalive: Some(peer.keepalive.into()),
+                                    remote_asn: peer.remote_asn,
+                                    min_ttl: peer.min_ttl,
+                                    md5_auth_key: peer.md5_auth_key.clone(),
+                                    multi_exit_discriminator: peer
+                                        .multi_exit_discriminator,
+                                    communities: peer.communities.clone(),
+                                    local_pref: peer.local_pref,
+                                    enforce_first_as: peer.enforce_first_as,
+                                    allowed_import: peer.allowed_import.clone(),
+                                    allowed_export: peer.allowed_export.clone(),
+                                    vlan_id: peer.vlan_id,
+                                }
+                            })
+                            .collect()
                     };
 
                     let addresses = match info
@@ -1125,7 +1154,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                         }
                     };
 
-                    let mut port_config = PortConfig {
+                    let port_config = PortConfig {
                         addresses,
                         autoneg: info
                             .links
@@ -1175,75 +1204,6 @@ impl BackgroundTask for SwitchPortSettingsManager {
 		    }
                     ;
 
-                    for peer in port_config.bgp_peers.iter_mut() {
-                        peer.communities = match self
-                            .datastore
-                            .communities_for_peer(
-                                opctx,
-                                port.port_settings_id.unwrap(),
-                                &PHY0, //TODO https://github.com/oxidecomputer/omicron/issues/3062
-                                peer.addr,
-                            ).await {
-                                Ok(cs) => cs.iter().map(|c| c.community.0).collect(),
-                                Err(e) => {
-                                    error!(log,
-                                        "failed to get communities for peer";
-                                        "peer" => ?peer,
-                                        "error" => %DisplayErrorChain::new(&e)
-                                    );
-                                    continue;
-                                }
-                            };
-
-                        //TODO consider awaiting in parallel and joining
-                        let allow_import = match self.datastore.allow_import_for_peer(
-                            opctx,
-                            port.port_settings_id.unwrap(),
-                            &PHY0, //TODO https://github.com/oxidecomputer/omicron/issues/3062
-                            peer.addr,
-                        ).await {
-                            Ok(cs) => cs,
-                            Err(e) => {
-                                error!(log,
-                                    "failed to get peer allowed imports";
-                                    "peer" => ?peer,
-                                    "error" => %DisplayErrorChain::new(&e)
-                                );
-                                continue;
-                            }
-                        };
-
-                        peer.allowed_import = match allow_import {
-                            Some(list) => ImportExportPolicy::Allow(
-                                list.clone().into_iter().map(|x| x.prefix.into()).collect()
-                            ),
-                            None => ImportExportPolicy::NoFiltering,
-                        };
-
-                        let allow_export = match self.datastore.allow_export_for_peer(
-                            opctx,
-                            port.port_settings_id.unwrap(),
-                            &PHY0, //TODO https://github.com/oxidecomputer/omicron/issues/3062
-                            peer.addr,
-                        ).await {
-                            Ok(cs) => cs,
-                            Err(e) => {
-                                error!(log,
-                                    "failed to get peer allowed exports";
-                                    "peer" => ?peer,
-                                    "error" => %DisplayErrorChain::new(&e)
-                                );
-                                continue;
-                            }
-                        };
-
-                        peer.allowed_export = match allow_export {
-                            Some(list) => ImportExportPolicy::Allow(
-                                list.clone().into_iter().map(|x| x.prefix.into()).collect()
-                            ),
-                            None => ImportExportPolicy::NoFiltering,
-                        };
-                    }
                     ports.push(port_config);
                 }
 
