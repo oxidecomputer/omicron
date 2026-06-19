@@ -657,6 +657,12 @@ impl BackgroundTask for SwitchPortSettingsManager {
                             bgp_announce_prefixes.insert(bgp_config.bgp_announce_set_id, prefixes);
                         }
 
+                        // NOTE: this mgd-apply path re-reads each peer's
+                        // communities and import/export policies via
+                        // `communities_for_peer` / `allow_*_for_peer`, even
+                        // though `switch_port_settings_get` already loaded
+                        // them. That redundancy could be removed too, but is
+                        // left for now.
                         //TODO consider awaiting in parallel and joining
                         let communities = match self.datastore.communities_for_peer(
                             opctx,
@@ -1067,10 +1073,6 @@ impl BackgroundTask for SwitchPortSettingsManager {
                     // settings we already fetched. `info.bgp_peers` includes
                     // each peer's communities and import/export policies,
                     // though not the ASN.
-                    //
-                    // NOTE: the mgd-apply path below re-reads this same per-peer
-                    // data via `communities_for_peer` / `allow_*_for_peer`. That
-                    // redundancy could be removed too, but is left for now.
                     let bgp_peers: Vec<SledBgpPeerConfig> = if info
                         .bgp_peers
                         .is_empty()
