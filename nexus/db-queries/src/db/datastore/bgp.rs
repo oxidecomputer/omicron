@@ -15,14 +15,14 @@ use ipnetwork::IpNetwork;
 use nexus_db_errors::OptionalError;
 use nexus_db_errors::{ErrorHandler, public_error_from_diesel};
 use nexus_db_model::{
-    BgpPeerView, DbSwitchSlot, RouterPeerTypeDbRepresentation,
+    BgpPeerView, DbSwitchSlot, RouterPeerTypeDbRepresentation, SqlU8,
     SwitchPortBgpPeerConfigAllowExport, SwitchPortBgpPeerConfigAllowImport,
     SwitchPortBgpPeerConfigCommunity,
 };
 use nexus_types::external_api::networking;
 use nexus_types::identity::Resource;
-use omicron_common::api::external;
 use omicron_common::api::external::http_pagination::PaginatedBy;
+use omicron_common::api::external::{self, IdentityMetadataUpdateParams};
 use omicron_common::api::external::{
     CreateResult, DeleteResult, Error, ListResultVec, LookupResult, NameOrId,
     ResourceType, UpdateResult,
@@ -273,8 +273,18 @@ impl DataStore {
                 .await
                 .map_err(|e| lookup_err(e, not_found_err, msg))?;
 
+            let networking::BgpConfigUpdate {
+                identity:
+                    IdentityMetadataUpdateParams {
+                        name: update_name,
+                        description: update_description,
+                    },
+                bgp_announce_set_id: update_bgp_announce_set_id,
+                max_paths: update_max_paths,
+            } = update;
+
             // Resolve bgp_announce_set_id if an update was requested
-            let new_bgp_announce_set_id = match &update.bgp_announce_set_id {
+            let new_bgp_announce_set_id = match &update_bgp_announce_set_id {
                 None => existing.bgp_announce_set_id,
                 Some(name_or_id) => {
                     let (query, not_found_err, msg) = match name_or_id {
@@ -311,20 +321,14 @@ impl DataStore {
                 }
             };
 
-            let new_name = update
-                .identity
-                .name
-                .as_ref()
-                .unwrap_or(existing.name())
-                .to_string();
-            let new_description = update
-                .identity
-                .description
+            let new_name =
+                update_name.as_ref().unwrap_or(existing.name()).to_string();
+            let new_description = update_description
                 .as_deref()
                 .unwrap_or(existing.description())
                 .to_string();
             let new_max_paths =
-                update.max_paths.map_or(*existing.max_paths, |m| m.as_u8());
+                update_max_paths.map_or(*existing.max_paths, |m| m.as_u8());
 
             diesel::update(bgp_config_dsl::bgp_config)
                 .filter(bgp_config_dsl::id.eq(existing.id()))
@@ -334,7 +338,7 @@ impl DataStore {
                     bgp_config_dsl::description.eq(new_description),
                     bgp_config_dsl::bgp_announce_set_id
                         .eq(new_bgp_announce_set_id),
-                    bgp_config_dsl::max_paths.eq(i16::from(new_max_paths)),
+                    bgp_config_dsl::max_paths.eq(SqlU8(new_max_paths)),
                 ))
                 .returning(BgpConfig::as_returning())
                 .get_result_async(&conn)

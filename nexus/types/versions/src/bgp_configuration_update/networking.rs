@@ -15,11 +15,9 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sled_agent_types_versions::v20::early_networking::MaxPathConfig;
 
-/// Parameters for updating a BGP configuration.
+/// Parameters for updating a BGP configuration
 ///
-/// The `asn` field is intentionally not updatable; changing the autonomous
-/// system number requires creating a new BGP configuration object, since many
-/// things are keyed off the ASN.
+/// If a value is not specified, it will remain unchanged.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct BgpConfigUpdate {
     #[serde(flatten)]

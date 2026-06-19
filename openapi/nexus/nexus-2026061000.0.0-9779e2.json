@@ -10679,8 +10679,8 @@
         "tags": [
           "system/networking"
         ],
-        "summary": "Update BGP configuration",
-        "description": "Update the mutable fields of an existing BGP configuration. The `asn` field is intentionally not updatable; changing the autonomous system number requires creating a new BGP configuration object, since many things are keyed off the ASN.",
+        "summary": "Update the mutable fields of an existing BGP configuration",
+        "description": "The asn field is not updatable; to change the autonomous system number, create a new BGP configuration object.",
         "operationId": "networking_bgp_config_update",
         "parameters": [
           {
@@ -17581,7 +17581,7 @@
         ]
       },
       "BgpConfigUpdate": {
-        "description": "Parameters for updating a BGP configuration.\n\nThe `asn` field is intentionally not updatable; changing the autonomous system number requires creating a new BGP configuration object, since many things are keyed off the ASN.",
+        "description": "Parameters for updating a BGP configuration\n\nIf a value is not specified, it will remain unchanged.",
         "type": "object",
         "properties": {
           "bgp_announce_set_id": {

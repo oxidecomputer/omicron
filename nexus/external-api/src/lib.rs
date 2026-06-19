@@ -5848,12 +5848,10 @@ pub trait NexusExternalApi {
         sel: Query<latest::networking::BgpConfigSelector>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
-    /// Update BGP configuration
+    /// Update the mutable fields of an existing BGP configuration
     ///
-    /// Update the mutable fields of an existing BGP configuration. The `asn`
-    /// field is intentionally not updatable; changing the autonomous system
-    /// number requires creating a new BGP configuration object, since many
-    /// things are keyed off the ASN.
+    /// The asn field is not updatable; to change the autonomous system number,
+    /// create a new BGP configuration object.
     #[endpoint {
         method = PUT,
         path = "/v1/system/networking/bgp",
