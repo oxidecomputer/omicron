@@ -2216,6 +2216,7 @@ impl InstanceRunner {
         state: VmmStateRequested,
     ) -> Result<SledVmmState, Error> {
         use propolis_client::types::InstanceStateRequested as PropolisRequest;
+
         let (propolis_request, next_published) = match state {
             VmmStateRequested::MigrationTarget(migration_params) => {
                 if let Err(e) =
@@ -2268,6 +2269,7 @@ impl InstanceRunner {
                 if self.running_state.is_none() {
                     return Err(Error::VmNotRunning(self.propolis_id));
                 }
+
                 (
                     Some(PropolisRequest::Reboot),
                     Some(PublishedVmmState::Rebooting),
@@ -2275,18 +2277,15 @@ impl InstanceRunner {
             }
         };
 
-        // All the arms above should either create a Propolis zone on success or
-        // check that one already exists. Note that the calls that create the
-        // zone also send a VM creation request to the new Propolis process, but
-        // this is trickier to assert without actually calling the Propolis API.
-        assert!(
-            self.running_state.is_some(),
-            "should have an active Propolis zone by now"
-        );
+        // If `propolis_request` is Some leaving the above match group, there
+        // must be a Some `self.running_state`, i.e. if there is a request to
+        // send to the propolis process, there must be a propolis process.
+        // `propolis_state_put` unwraps `self.running_state` and will panic the
+        // sled agent if this is not true.
 
-        // Since there's an active Propolis zone with an extant VM, it's
-        // possible to ask Propolis to drive the VM state machine.
         if let Some(p) = propolis_request {
+            // Since there's an active Propolis zone with an extant VM, it's
+            // possible to ask Propolis to drive the VM state machine.
             if let Err(e) = self.propolis_state_put(p).await {
                 match propolis_error_code(&self.log, &e) {
                     Some(
@@ -2317,9 +2316,11 @@ impl InstanceRunner {
                 }
             }
         }
+
         if let Some(s) = next_published {
             self.state.transition_vmm(s, Utc::now());
         }
+
         Ok(self.state.sled_instance_state())
     }
 
