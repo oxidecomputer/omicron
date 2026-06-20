@@ -49,13 +49,13 @@ use mg_api_types::{
     },
     static_routes::{DeleteStaticRoute4Request, DeleteStaticRoute6Request},
 };
-use nexus_switch_config::{
-    AddressInput, BgpConfigInput, LinkInput, LldpInput, PortInput,
-    RackNetworkConfigInput, RouteInput, TxEqInput,
-};
 use nexus_db_queries::{
     context::OpContext,
     db::{DataStore, datastore::SwitchPortSettingsCombinedResult},
+};
+use nexus_switch_config::{
+    AddressInput, BgpConfigInput, LinkInput, LldpInput, PortInput,
+    RackNetworkConfigInput, RouteInput, TxEqInput,
 };
 use nexus_types::external_api::networking;
 use nexus_types::identity::{Asset, Resource};
