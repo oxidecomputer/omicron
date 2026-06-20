@@ -49,7 +49,7 @@ use mg_api_types::{
     },
     static_routes::{DeleteStaticRoute4Request, DeleteStaticRoute6Request},
 };
-use nexus_bootstore_config::{
+use nexus_switch_config::{
     AddressInput, BgpConfigInput, LinkInput, LldpInput, PortInput,
     RackNetworkConfigInput, RouteInput, TxEqInput,
 };
@@ -1039,7 +1039,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                     };
 
                 let rack_network_config =
-                    match nexus_bootstore_config::build_rack_network_config(
+                    match nexus_switch_config::build_rack_network_config(
                         &log,
                         RackNetworkConfigInput {
                             rack_subnet: rack.rack_subnet,
