@@ -1016,9 +1016,9 @@ impl BackgroundTask for SwitchPortSettingsManager {
                     };
 
                 let rack_network_config =
-                    match nexus_bootstore_config::build_rack_network_config(
+                    match nexus_switch_config::build_rack_network_config(
                         &log,
-                        nexus_bootstore_config::RackNetworkConfigInput {
+                        nexus_switch_config::RackNetworkConfigInput {
                             rack,
                             applied_ports: &applied_ports,
                             switch_bgp_config: &switch_bgp_config,
