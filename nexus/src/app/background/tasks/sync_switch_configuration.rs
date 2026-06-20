@@ -53,6 +53,10 @@ use nexus_db_queries::{
     context::OpContext,
     db::{DataStore, datastore::SwitchPortSettingsCombinedResult},
 };
+use nexus_switch_config::{
+    AddressInput, BgpConfigInput, LinkInput, LldpInput, PortInput,
+    RackNetworkConfigInput, RouteInput, TxEqInput,
+};
 use nexus_types::external_api::networking;
 use nexus_types::identity::{Asset, Resource};
 use omicron_common::OMICRON_DPD_TAG;
