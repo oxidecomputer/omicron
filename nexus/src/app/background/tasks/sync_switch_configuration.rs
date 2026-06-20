@@ -976,7 +976,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                     .collect();
 
                 let rack_network_config =
-                    match nexus_bootstore_config::build_rack_network_config(
+                    match nexus_switch_config::build_rack_network_config(
                         opctx,
                         &self.datastore,
                         &log,
