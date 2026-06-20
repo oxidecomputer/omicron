@@ -1016,7 +1016,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                         }
                     };
 
-                let input = nexus_bootstore_config_preparation::assemble(
+                let input = nexus_switch_config_preparation::assemble(
                     rack.rack_subnet,
                     &applied_ports,
                     &switch_bgp_config,
@@ -1027,7 +1027,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                 );
 
                 let rack_network_config =
-                    match nexus_bootstore_config::build_rack_network_config(
+                    match nexus_switch_config::build_rack_network_config(
                         &log, input,
                     ) {
                         Some(rack_network_config) => rack_network_config,

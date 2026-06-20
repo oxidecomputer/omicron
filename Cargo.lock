@@ -6827,7 +6827,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "nexus-bootstore-config"
+name = "nexus-switch-config"
 version = "0.1.0"
 dependencies = [
  "ipnetwork",
@@ -6840,11 +6840,11 @@ dependencies = [
 ]
 
 [[package]]
-name = "nexus-bootstore-config-preparation"
+name = "nexus-switch-config-preparation"
 version = "0.1.0"
 dependencies = [
  "ipnetwork",
- "nexus-bootstore-config",
+ "nexus-switch-config",
  "nexus-db-model",
  "nexus-db-queries",
  "omicron-rpaths",
@@ -8777,8 +8777,8 @@ dependencies = [
  "mg-api-types",
  "nexus-auth",
  "nexus-background-task-interface",
- "nexus-bootstore-config",
- "nexus-bootstore-config-preparation",
+ "nexus-switch-config",
+ "nexus-switch-config-preparation",
  "nexus-client",
  "nexus-config",
  "nexus-db-lookup",

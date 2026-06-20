@@ -5,13 +5,13 @@
 //! Assembly of the bootstore config builder's inputs from database records.
 
 use ipnetwork::IpNetwork;
-use nexus_bootstore_config::{
-    AddressInput, BgpConfigInput, LinkInput, LldpInput, PortInput,
-    RackNetworkConfigInput, RouteInput, TxEqInput,
-};
 use nexus_db_model::BgpConfig;
 use nexus_db_model::SwitchPort;
 use nexus_db_queries::db::datastore::SwitchPortSettingsCombinedResult;
+use nexus_switch_config::{
+    AddressInput, BgpConfigInput, LinkInput, LldpInput, PortInput,
+    RackNetworkConfigInput, RouteInput, TxEqInput,
+};
 use oxnet::IpNet;
 use sled_agent_types::early_networking::BfdPeerConfig;
 use sled_agent_types::early_networking::SwitchSlot;
