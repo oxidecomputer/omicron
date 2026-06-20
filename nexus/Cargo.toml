@@ -65,6 +65,8 @@ macaddr.workspace = true
 maplit.workspace = true
 mg-api-types.workspace = true
 nexus-background-task-interface.workspace = true
+nexus-bootstore-config.workspace = true
+nexus-bootstore-config-preparation.workspace = true
 # Not under "dev-dependencies"; these also need to be implemented for
 # integration tests.
 nexus-config.workspace = true

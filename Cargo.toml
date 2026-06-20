@@ -90,6 +90,8 @@ members = [
     "nexus/authz-macros",
     "nexus/auth",
     "nexus/background-task-interface",
+    "nexus/bootstore-config",
+    "nexus/bootstore-config/preparation",
     "nexus/db-errors",
     "nexus/db-fixed-data",
     "nexus/db-lookup",
@@ -280,6 +282,8 @@ default-members = [
     "nexus/authz-macros",
     "nexus/auth",
     "nexus/background-task-interface",
+    "nexus/bootstore-config",
+    "nexus/bootstore-config/preparation",
     "nexus/db-errors",
     "nexus/db-fixed-data",
     "nexus/db-lookup",
@@ -622,6 +626,8 @@ ddm-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "
 multimap = "0.10.1"
 nexus-auth = { path = "nexus/auth" }
 nexus-background-task-interface = { path = "nexus/background-task-interface" }
+nexus-bootstore-config = { path = "nexus/bootstore-config" }
+nexus-bootstore-config-preparation = { path = "nexus/bootstore-config/preparation" }
 nexus-client = { path = "clients/nexus-client" }
 nexus-config = { path = "nexus-config" }
 nexus-db-errors = { path = "nexus/db-errors" }
