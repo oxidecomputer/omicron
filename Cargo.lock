@@ -6827,35 +6827,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "nexus-switch-config"
-version = "0.1.0"
-dependencies = [
- "ipnetwork",
- "nexus-types",
- "omicron-workspace-hack",
- "oxnet",
- "sled-agent-types",
- "slog",
- "slog-error-chain",
-]
-
-[[package]]
-name = "nexus-switch-config-preparation"
-version = "0.1.0"
-dependencies = [
- "ipnetwork",
- "nexus-switch-config",
- "nexus-db-model",
- "nexus-db-queries",
- "omicron-rpaths",
- "omicron-workspace-hack",
- "oxnet",
- "pq-sys",
- "sled-agent-types",
- "uuid",
-]
-
-[[package]]
 name = "nexus-client"
 version = "0.1.0"
 dependencies = [
@@ -7703,6 +7674,35 @@ dependencies = [
  "slog-error-chain",
  "steno",
  "tokio",
+ "uuid",
+]
+
+[[package]]
+name = "nexus-switch-config"
+version = "0.1.0"
+dependencies = [
+ "ipnetwork",
+ "nexus-types",
+ "omicron-workspace-hack",
+ "oxnet",
+ "sled-agent-types",
+ "slog",
+ "slog-error-chain",
+]
+
+[[package]]
+name = "nexus-switch-config-preparation"
+version = "0.1.0"
+dependencies = [
+ "ipnetwork",
+ "nexus-db-model",
+ "nexus-db-queries",
+ "nexus-switch-config",
+ "omicron-rpaths",
+ "omicron-workspace-hack",
+ "oxnet",
+ "pq-sys",
+ "sled-agent-types",
  "uuid",
 ]
 
@@ -8777,8 +8777,6 @@ dependencies = [
  "mg-api-types",
  "nexus-auth",
  "nexus-background-task-interface",
- "nexus-switch-config",
- "nexus-switch-config-preparation",
  "nexus-client",
  "nexus-config",
  "nexus-db-lookup",
@@ -8800,6 +8798,8 @@ dependencies = [
  "nexus-reconfigurator-preparation",
  "nexus-reconfigurator-rendezvous",
  "nexus-saga-recovery",
+ "nexus-switch-config",
+ "nexus-switch-config-preparation",
  "nexus-test-interface",
  "nexus-test-utils",
  "nexus-test-utils-macros",
