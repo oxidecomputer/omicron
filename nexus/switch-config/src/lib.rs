@@ -1,0 +1,770 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+//! Computation of the desired bootstore rack network configuration.
+//!
+//! This crate holds the logic that the `sync_switch_configuration` Nexus
+//! background task uses to build the [`RackNetworkConfig`] that is written to
+//! the bootstore. The computation is a pure, in-memory function: all database
+//! reads happen in the caller, which passes the results in via
+//! [`RackNetworkConfigInput`].
+
+use ipnetwork::IpNetwork;
+use nexus_types::external_api::networking;
+use oxnet::IpNet;
+use sled_agent_types::early_networking::BfdPeerConfig;
+use sled_agent_types::early_networking::BgpConfig as SledBgpConfig;
+use sled_agent_types::early_networking::BgpPeerConfig as SledBgpPeerConfig;
+use sled_agent_types::early_networking::InvalidIpAddrError;
+use sled_agent_types::early_networking::LinkFec;
+use sled_agent_types::early_networking::LinkSpeed;
+use sled_agent_types::early_networking::LldpAdminStatus;
+use sled_agent_types::early_networking::LldpPortConfig;
+use sled_agent_types::early_networking::MaxPathConfig;
+use sled_agent_types::early_networking::PortConfig;
+use sled_agent_types::early_networking::RackNetworkConfig;
+use sled_agent_types::early_networking::RouteConfig as SledRouteConfig;
+use sled_agent_types::early_networking::SwitchSlot;
+use sled_agent_types::early_networking::TxEqConfig;
+use sled_agent_types::early_networking::UplinkAddress;
+use sled_agent_types::early_networking::UplinkAddressConfig;
+use std::collections::BTreeMap;
+use std::fmt;
+use std::net::IpAddr;
+
+/// Inputs to [`build_rack_network_config`].
+pub struct RackNetworkConfigInput {
+    /// The rack's subnet. Must be set and IPv6; the builder bails otherwise.
+    pub rack_subnet: Option<IpNetwork>,
+    /// The BGP configuration for each switch.
+    pub bgp_configs: BTreeMap<SwitchSlot, BgpConfigInput>,
+    /// The ports whose applied settings feed the bootstore config.
+    pub ports: Vec<PortInput>,
+    /// First address of the infrastructure IP range.
+    pub infra_ip_first: IpAddr,
+    /// Last address of the infrastructure IP range.
+    pub infra_ip_last: IpAddr,
+    /// The BFD sessions to configure.
+    pub bfd: Vec<BfdPeerConfig>,
+}
+
+/// Per-switch BGP configuration.
+pub struct BgpConfigInput {
+    /// The local autonomous system number.
+    pub asn: u32,
+    /// The prefixes this switch originates, resolved from its announce set.
+    pub originate: Vec<IpNet>,
+    /// The optional checker program source.
+    pub checker: Option<String>,
+    /// The optional shaper program source.
+    pub shaper: Option<String>,
+    /// The maximum number of equal-cost paths (validated by the builder).
+    pub max_paths: u8,
+}
+
+/// A switch port's applied settings.
+pub struct PortInput {
+    /// The switch this port belongs to.
+    pub switch: SwitchSlot,
+    /// The name of the port (e.g. `qsfp0`).
+    pub port_name: String,
+    /// The BGP peers configured on this port.
+    pub bgp_peers: Vec<networking::BgpPeer>,
+    /// The IP addresses assigned to this port.
+    pub addresses: Vec<AddressInput>,
+    /// The port's links. Only the first is used today (no breakout support).
+    pub links: Vec<LinkInput>,
+    /// The static routes configured on this port.
+    pub routes: Vec<RouteInput>,
+    /// The port's LLDP settings. Only the first entry is used today.
+    pub lldp: Vec<LldpInput>,
+    /// The port's TX-EQ overrides. Only the first entry is used today.
+    pub tx_eq: Vec<TxEqInput>,
+}
+
+/// An IP address assigned to a port.
+pub struct AddressInput {
+    pub address: IpNet,
+    pub vlan_id: Option<u16>,
+}
+
+/// A port's link-level settings. The caller has already translated the FEC and
+/// speed into the sled-agent enums.
+pub struct LinkInput {
+    pub autoneg: bool,
+    pub fec: Option<LinkFec>,
+    pub speed: LinkSpeed,
+}
+
+/// A static route configured on a port.
+pub struct RouteInput {
+    pub destination: IpNet,
+    pub nexthop: IpAddr,
+    pub vlan_id: Option<u16>,
+    pub rib_priority: Option<u8>,
+}
+
+/// A port's LLDP settings.
+pub struct LldpInput {
+    pub enabled: bool,
+    pub link_name: Option<String>,
+    pub link_description: Option<String>,
+    pub chassis_id: Option<String>,
+    pub system_name: Option<String>,
+    pub system_description: Option<String>,
+    pub management_ip: Option<IpAddr>,
+}
+
+/// A port's TX-EQ overrides.
+pub struct TxEqInput {
+    pub pre1: Option<i32>,
+    pub pre2: Option<i32>,
+    pub main: Option<i32>,
+    pub post2: Option<i32>,
+    pub post1: Option<i32>,
+}
+
+/// A single reason the bootstore config could not be built completely.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Problem {
+    /// The rack's subnet was not set.
+    RackSubnetMissing,
+    /// The rack's subnet was set but is not IPv6.
+    RackSubnetNotIpv6 { subnet: IpNetwork },
+    /// A switch's BGP config has a `max_paths` value our types reject. This
+    /// should be impossible given the database constraints.
+    IllegalMaxPaths { switch: SwitchSlot, value: u8 },
+    /// A port is on a switch that has no BGP config, so its peers' ASN is
+    /// unknown.
+    MissingBgpConfigForSwitch { switch: SwitchSlot, port: String },
+    /// A port has an address that can't be converted to an uplink address.
+    MalformedUplinkAddress {
+        switch: SwitchSlot,
+        port: String,
+        error: InvalidIpAddrError,
+    },
+}
+
+impl fmt::Display for Problem {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Problem::RackSubnetMissing => write!(f, "rack subnet is not set"),
+            Problem::RackSubnetNotIpv6 { subnet } => {
+                write!(f, "rack subnet {subnet} must be ipv6")
+            }
+            Problem::IllegalMaxPaths { switch, value } => write!(
+                f,
+                "bgp config for switch {switch:?} has illegal max_paths \
+                 value {value}",
+            ),
+            Problem::MissingBgpConfigForSwitch { switch, port } => write!(
+                f,
+                "port {port} is on switch {switch:?}, which has no bgp config",
+            ),
+            Problem::MalformedUplinkAddress { switch, port, error } => write!(
+                f,
+                "port {port} on switch {switch:?} has a malformed uplink \
+                 address: {error}",
+            ),
+        }
+    }
+}
+
+/// The error returned when bootstore rack network config could not be built.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IncompleteBootstoreConfig {
+    /// The list of problems encountered while building the config.
+    pub problems: Vec<Problem>,
+}
+
+impl fmt::Display for IncompleteBootstoreConfig {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "could not build a complete bootstore rack network config \
+             ({} problem(s)):",
+            self.problems.len(),
+        )?;
+        for problem in &self.problems {
+            write!(f, "\n  - {problem}")?;
+        }
+        Ok(())
+    }
+}
+
+impl std::error::Error for IncompleteBootstoreConfig {}
+
+/// Build the desired [`RackNetworkConfig`] for the bootstore.
+///
+/// This is a pure, in-memory computation: all database reads happen while
+/// creating the [`RackNetworkConfigInput`].
+///
+/// Returns an [`IncompleteBootstoreConfig`] listing the [`Problem`]s found if a
+/// complete config cannot be built for this rack.
+pub fn build_rack_network_config(
+    input: RackNetworkConfigInput,
+) -> Result<RackNetworkConfig, IncompleteBootstoreConfig> {
+    let RackNetworkConfigInput {
+        rack_subnet,
+        bgp_configs,
+        ports: port_inputs,
+        infra_ip_first,
+        infra_ip_last,
+        bfd,
+    } = input;
+
+    let mut problems = Vec::new();
+
+    // The rack subnet must be set and IPv6. Record the problem, but keep going
+    // so we report everything else that's wrong too.
+    let subnet = match rack_subnet {
+        Some(IpNetwork::V6(subnet)) => Some(subnet.into()),
+        Some(other) => {
+            problems.push(Problem::RackSubnetNotIpv6 { subnet: other });
+            None
+        }
+        None => {
+            problems.push(Problem::RackSubnetMissing);
+            None
+        }
+    };
+
+    // TODO: is this correct? Do we place the BgpConfig for both switches in a single Vec to send to the bootstore?
+    let mut bgp: Vec<SledBgpConfig> = Vec::new();
+    for (switch, config) in &bgp_configs {
+        let max_paths = match MaxPathConfig::new(config.max_paths) {
+            Ok(max_paths) => max_paths,
+            Err(_) => {
+                problems.push(Problem::IllegalMaxPaths {
+                    switch: *switch,
+                    value: config.max_paths,
+                });
+                continue;
+            }
+        };
+
+        bgp.push(SledBgpConfig {
+            asn: config.asn,
+            originate: config.originate.clone(),
+            checker: config.checker.clone(),
+            shaper: config.shaper.clone(),
+            max_paths,
+        });
+    }
+
+    bgp.dedup();
+
+    let mut ports: Vec<PortConfig> = vec![];
+
+    for port in port_inputs {
+        // TODO https://github.com/oxidecomputer/omicron/issues/3062
+        let tx_eq = if let Some(c) = port.tx_eq.get(0) {
+            Some(TxEqConfig {
+                pre1: c.pre1,
+                pre2: c.pre2,
+                main: c.main,
+                post2: c.post2,
+                post1: c.post1,
+            })
+        } else {
+            None
+        };
+
+        // Build the bootstore BGP peers from the port's peers, which include
+        // each peer's communities and import/export policies, though not the
+        // ASN.
+        let bgp_peers: Vec<SledBgpPeerConfig> = if port.bgp_peers.is_empty() {
+            Vec::new()
+        } else {
+            // The peer ASN comes from the switch's BGP config.
+            let asn = match bgp_configs.get(&port.switch) {
+                Some(config) => config.asn,
+                None => {
+                    problems.push(Problem::MissingBgpConfigForSwitch {
+                        switch: port.switch,
+                        port: port.port_name.clone(),
+                    });
+                    continue;
+                }
+            };
+            port.bgp_peers
+                .iter()
+                .map(|peer| SledBgpPeerConfig {
+                    asn,
+                    port: port.port_name.clone(),
+                    addr: peer.addr,
+                    hold_time: Some(peer.hold_time.into()),
+                    idle_hold_time: Some(peer.idle_hold_time.into()),
+                    delay_open: Some(peer.delay_open.into()),
+                    connect_retry: Some(peer.connect_retry.into()),
+                    keepalive: Some(peer.keepalive.into()),
+                    remote_asn: peer.remote_asn,
+                    min_ttl: peer.min_ttl,
+                    md5_auth_key: peer.md5_auth_key.clone(),
+                    multi_exit_discriminator: peer.multi_exit_discriminator,
+                    communities: peer.communities.clone(),
+                    local_pref: peer.local_pref,
+                    enforce_first_as: peer.enforce_first_as,
+                    allowed_import: peer.allowed_import.clone(),
+                    allowed_export: peer.allowed_export.clone(),
+                    vlan_id: peer.vlan_id,
+                })
+                .collect()
+        };
+
+        let addresses = match port
+            .addresses
+            .iter()
+            .map(|a| {
+                 let address = UplinkAddress::try_from_ip_net_treating_unspecified_as_addrconf(a.address)?;
+                 Ok(UplinkAddressConfig {
+                     address,
+                     vlan_id: a.vlan_id
+                 })
+            })
+            .collect::<Result<_, InvalidIpAddrError>>()
+        {
+            Ok(addresses) => addresses,
+            Err(err) => {
+                problems.push(Problem::MalformedUplinkAddress {
+                    switch: port.switch,
+                    port: port.port_name.clone(),
+                    error: err,
+                });
+                continue;
+            }
+        };
+
+        let port_config = PortConfig {
+            addresses,
+            autoneg: port
+                .links
+                .get(0) //TODO breakout support
+                .map(|l| l.autoneg)
+                .unwrap_or(false),
+            bgp_peers,
+            port: port.port_name.clone(),
+            routes: port
+                .routes
+                .iter()
+                .map(|r| SledRouteConfig {
+                    destination: r.destination,
+                    nexthop: r.nexthop,
+                    vlan_id: r.vlan_id,
+                    rib_priority: r.rib_priority,
+                })
+                .collect(),
+            switch: port.switch,
+            uplink_port_fec: port
+                .links
+                .get(0) //TODO https://github.com/oxidecomputer/omicron/issues/3062
+                .map(|l| l.fec)
+                .unwrap_or(None),
+            uplink_port_speed: port
+                .links
+                .get(0) //TODO https://github.com/oxidecomputer/omicron/issues/3062
+                .map(|l| l.speed)
+                .unwrap_or(LinkSpeed::Speed100G),
+            lldp: port
+                .lldp
+                .get(0) //TODO https://github.com/oxidecomputer/omicron/issues/3062
+                .map(|c| LldpPortConfig {
+                    status: match c.enabled {
+                        true => LldpAdminStatus::Enabled,
+                        false => LldpAdminStatus::Disabled,
+                    },
+                    port_id: c.link_name.clone(),
+                    port_description: c.link_description.clone(),
+                    chassis_id: c.chassis_id.clone(),
+                    system_name: c.system_name.clone(),
+                    system_description: c.system_description.clone(),
+                    management_addrs: c.management_ip.map(|ip| vec![ip]),
+                }),
+            tx_eq,
+        };
+
+        ports.push(port_config);
+    }
+
+    if !problems.is_empty() {
+        return Err(IncompleteBootstoreConfig { problems });
+    }
+
+    Ok(RackNetworkConfig {
+        rack_subnet: subnet
+            .expect("rack subnet is set when there are no problems"),
+        infra_ip_first,
+        infra_ip_last,
+        ports,
+        bgp,
+        bfd,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use omicron_common::api::external::NameOrId;
+    use proptest::prelude::*;
+    use sled_agent_types::early_networking::ImportExportPolicy;
+    use sled_agent_types::early_networking::RouterPeerIpAddr;
+    use sled_agent_types::early_networking::RouterPeerType;
+    use test_strategy::proptest;
+
+    fn valid_bgp_config() -> BgpConfigInput {
+        BgpConfigInput {
+            asn: 65000,
+            originate: vec![],
+            checker: None,
+            shaper: None,
+            max_paths: 1,
+        }
+    }
+
+    fn input_with(
+        bgp_configs: BTreeMap<SwitchSlot, BgpConfigInput>,
+        ports: Vec<PortInput>,
+    ) -> RackNetworkConfigInput {
+        RackNetworkConfigInput {
+            rack_subnet: Some("fd00:1122:3344:1::/64".parse().unwrap()),
+            bgp_configs,
+            ports,
+            infra_ip_first: "fd00:1122:3344:1::1".parse().unwrap(),
+            infra_ip_last: "fd00:1122:3344:1::2".parse().unwrap(),
+            bfd: vec![],
+        }
+    }
+
+    fn bare_port(switch: SwitchSlot, name: &str) -> PortInput {
+        PortInput {
+            switch,
+            port_name: name.to_string(),
+            bgp_peers: vec![],
+            addresses: vec![],
+            links: vec![],
+            routes: vec![],
+            lldp: vec![],
+            tx_eq: vec![],
+        }
+    }
+
+    /// A minimal BGP peer for tests.
+    ///
+    /// The builder doesn't validate the values so they're all quite arbitrary.
+    fn peer() -> networking::BgpPeer {
+        networking::BgpPeer {
+            // This is arbitrary, since configs are matched by switch slot and
+            // not this name.
+            bgp_config: NameOrId::Name("test-bgp".parse().unwrap()),
+            addr: RouterPeerType::Numbered {
+                ip: RouterPeerIpAddr::try_from(
+                    "192.0.2.1".parse::<IpAddr>().unwrap(),
+                )
+                .expect("192.0.2.1 is a valid router peer ip"),
+            },
+            hold_time: 6,
+            idle_hold_time: 3,
+            delay_open: 0,
+            connect_retry: 3,
+            keepalive: 2,
+            remote_asn: None,
+            min_ttl: None,
+            md5_auth_key: None,
+            multi_exit_discriminator: None,
+            communities: vec![],
+            local_pref: None,
+            enforce_first_as: false,
+            allowed_import: ImportExportPolicy::NoFiltering,
+            allowed_export: ImportExportPolicy::NoFiltering,
+            vlan_id: None,
+        }
+    }
+
+    /// A port that has a single BGP peer (and so needs its switch's BGP config).
+    fn port_with_peer(switch: SwitchSlot, name: &str) -> PortInput {
+        PortInput { bgp_peers: vec![peer()], ..bare_port(switch, name) }
+    }
+
+    #[test]
+    fn peerless_port_needs_no_switch_bgp_config() {
+        // A port without BGP peers (e.g. a static-routing-only uplink) does not
+        // need its switch to have a BGP config.
+        let config = build_rack_network_config(input_with(
+            // No switch has a BGP config.
+            BTreeMap::new(),
+            // A single peerless port.
+            vec![bare_port(SwitchSlot::Switch0, "qsfp0")],
+        ))
+        .expect("a peerless port needs no switch bgp config");
+        assert_eq!(
+            config.ports.len(),
+            1,
+            "the peerless port must be included, not dropped",
+        );
+    }
+
+    #[test]
+    fn peered_port_requires_switch_bgp_config() {
+        // A port that *does* have peers needs its switch's BGP config.
+        let err = build_rack_network_config(input_with(
+            BTreeMap::new(),
+            vec![port_with_peer(SwitchSlot::Switch0, "qsfp0")],
+        ))
+        .unwrap_err();
+        assert_eq!(
+            err.problems,
+            vec![Problem::MissingBgpConfigForSwitch {
+                switch: SwitchSlot::Switch0,
+                port: "qsfp0".to_string(),
+            }],
+        );
+    }
+
+    #[test]
+    fn missing_rack_subnet_is_reported() {
+        let input = RackNetworkConfigInput {
+            rack_subnet: None,
+            ..input_with(BTreeMap::new(), vec![])
+        };
+        let err = build_rack_network_config(input).unwrap_err();
+        assert_eq!(err.problems, vec![Problem::RackSubnetMissing]);
+    }
+
+    #[test]
+    fn non_ipv6_rack_subnet_is_reported() {
+        let v4: IpNetwork = "10.0.0.0/24".parse().unwrap();
+        let input = RackNetworkConfigInput {
+            rack_subnet: Some(v4),
+            ..input_with(BTreeMap::new(), vec![])
+        };
+        let err = build_rack_network_config(input).unwrap_err();
+        assert_eq!(
+            err.problems,
+            vec![Problem::RackSubnetNotIpv6 { subnet: v4 }],
+        );
+    }
+
+    #[test]
+    fn all_problems_are_accumulated() {
+        let v4: IpNetwork = "10.0.0.0/24".parse().unwrap();
+        let input = RackNetworkConfigInput {
+            rack_subnet: Some(v4),
+            ..input_with(
+                BTreeMap::new(),
+                vec![port_with_peer(SwitchSlot::Switch0, "qsfp0")],
+            )
+        };
+        let err = build_rack_network_config(input).unwrap_err();
+        assert_eq!(
+            err.problems,
+            // This order is fixed.
+            vec![
+                Problem::RackSubnetNotIpv6 { subnet: v4 },
+                Problem::MissingBgpConfigForSwitch {
+                    switch: SwitchSlot::Switch0,
+                    port: "qsfp0".to_string(),
+                },
+            ],
+        );
+    }
+
+    #[test]
+    fn peered_port_switch_asn() {
+        // A peered port needs its switch's BGP config to source the peer ASN.
+        // Use two switches with distinct ASNs to ensure that the matching up
+        // occurs properly.
+        let mut bgp_configs = BTreeMap::new();
+        bgp_configs.insert(
+            SwitchSlot::Switch0,
+            BgpConfigInput { asn: 64999, ..valid_bgp_config() },
+        );
+        bgp_configs.insert(
+            SwitchSlot::Switch1,
+            BgpConfigInput { asn: 65111, ..valid_bgp_config() },
+        );
+
+        let config = build_rack_network_config(input_with(
+            bgp_configs,
+            vec![
+                port_with_peer(SwitchSlot::Switch0, "qsfp0"),
+                port_with_peer(SwitchSlot::Switch1, "qsfp1"),
+            ],
+        ))
+        .expect("both peered ports' switches have a bgp config");
+
+        let p0 = config
+            .ports
+            .iter()
+            .find(|p| p.port == "qsfp0")
+            .expect("qsfp0 is in the built config");
+        assert_eq!(p0.bgp_peers.len(), 1);
+        assert_eq!(
+            p0.bgp_peers[0].asn, 64999,
+            "the peer ASN must come from switch 0's bgp config",
+        );
+
+        let p1 = config
+            .ports
+            .iter()
+            .find(|p| p.port == "qsfp1")
+            .expect("qsfp1 is in the built config");
+        assert_eq!(p1.bgp_peers.len(), 1);
+        assert_eq!(
+            p1.bgp_peers[0].asn, 65111,
+            "the peer ASN must come from switch 1's bgp config",
+        );
+    }
+
+    #[test]
+    fn malformed_uplink_address_is_reported() {
+        // A loopback address can't be converted to an uplink address, so a port
+        // carrying one must be reported, not silently dropped from the config.
+        let loopback: IpNet = "127.0.0.1/8".parse().unwrap();
+        let port = PortInput {
+            addresses: vec![AddressInput { address: loopback, vlan_id: None }],
+            ..bare_port(SwitchSlot::Switch0, "qsfp0")
+        };
+        let err =
+            build_rack_network_config(input_with(BTreeMap::new(), vec![port]))
+                .unwrap_err();
+        assert_eq!(
+            err.problems,
+            vec![Problem::MalformedUplinkAddress {
+                switch: SwitchSlot::Switch0,
+                port: "qsfp0".to_string(),
+                error: InvalidIpAddrError::LoopbackAddress,
+            }],
+        );
+    }
+
+    #[test]
+    fn unspecified_address_becomes_addrconf_not_a_problem() {
+        // An unspecified address is a sentinel value that's converted to
+        // `UplinkAddress::AddrConf`.
+        let unspecified: IpNet = "0.0.0.0/0".parse().unwrap();
+        let port = PortInput {
+            addresses: vec![AddressInput {
+                address: unspecified,
+                vlan_id: None,
+            }],
+            ..bare_port(SwitchSlot::Switch0, "qsfp0")
+        };
+        let config =
+            build_rack_network_config(input_with(BTreeMap::new(), vec![port]))
+                .expect("built network config successfully");
+        assert_eq!(config.ports.len(), 1);
+        assert_eq!(config.ports[0].addresses.len(), 1);
+        assert_eq!(
+            config.ports[0].addresses[0].address,
+            UplinkAddress::AddrConf,
+        );
+    }
+
+    #[test]
+    fn illegal_max_paths_is_reported() {
+        // The builder consumes an unvalidated `max_paths`, so an out-of-range
+        // value must surface as a problem.
+        let mut bgp_configs = BTreeMap::new();
+        bgp_configs.insert(
+            SwitchSlot::Switch0,
+            BgpConfigInput { max_paths: 0, ..valid_bgp_config() },
+        );
+        let err = build_rack_network_config(input_with(bgp_configs, vec![]))
+            .unwrap_err();
+        assert_eq!(
+            err.problems,
+            vec![Problem::IllegalMaxPaths {
+                switch: SwitchSlot::Switch0,
+                value: 0,
+            }],
+        );
+    }
+
+    /// The builder must never silently drop a port (see #10640).
+    #[proptest]
+    fn no_silent_port_drops(
+        switch0_has_bgp: bool,
+        switch1_has_bgp: bool,
+        // Each port is (switch, has_peer).
+        #[strategy(prop::collection::vec(
+            (
+                prop_oneof![
+                    Just(SwitchSlot::Switch0),
+                    Just(SwitchSlot::Switch1),
+                ],
+                any::<bool>(),
+            ),
+            0..8,
+        ))]
+        ports_spec: Vec<(SwitchSlot, bool)>,
+    ) {
+        let mut bgp_configs = BTreeMap::new();
+        if switch0_has_bgp {
+            bgp_configs.insert(SwitchSlot::Switch0, valid_bgp_config());
+        }
+        if switch1_has_bgp {
+            bgp_configs.insert(SwitchSlot::Switch1, valid_bgp_config());
+        }
+
+        let ports: Vec<PortInput> = ports_spec
+            .iter()
+            .enumerate()
+            .map(|(i, &(switch, has_peer))| {
+                let name = format!("qsfp{i}");
+                if has_peer {
+                    port_with_peer(switch, &name)
+                } else {
+                    bare_port(switch, &name)
+                }
+            })
+            .collect();
+
+        // The names we fed in. On a successful build the output ports must be
+        // exactly these.
+        let mut input_names: Vec<String> =
+            (0..ports.len()).map(|i| format!("qsfp{i}")).collect();
+        input_names.sort();
+
+        // A port needs its switch's BGP config only if it has peers.
+        let switch_has_bgp = |switch: SwitchSlot| match switch {
+            SwitchSlot::Switch0 => switch0_has_bgp,
+            SwitchSlot::Switch1 => switch1_has_bgp,
+        };
+        let all_peered_have_bgp = ports_spec
+            .iter()
+            .all(|&(switch, has_peer)| !has_peer || switch_has_bgp(switch));
+
+        let result = build_rack_network_config(input_with(bgp_configs, ports));
+
+        if all_peered_have_bgp {
+            let config = result.expect(
+                "every peered port's switch has a bgp config, so it builds",
+            );
+            let mut got_names: Vec<String> =
+                config.ports.iter().map(|p| p.port.clone()).collect();
+            got_names.sort();
+            prop_assert_eq!(got_names, input_names);
+        } else {
+            let err = result.expect_err(
+                "a peered port whose switch has no bgp config must bail",
+            );
+            // This mirrors the implementation, which generally isn't great in a
+            // PBT, but it's hard to describe this in a way that doesn't weaken
+            // the test.
+            let expected: Vec<Problem> = ports_spec
+                .iter()
+                .enumerate()
+                .filter_map(|(i, &(switch, has_peer))| {
+                    (has_peer && !switch_has_bgp(switch)).then(|| {
+                        Problem::MissingBgpConfigForSwitch {
+                            switch,
+                            port: format!("qsfp{i}"),
+                        }
+                    })
+                })
+                .collect();
+            prop_assert_eq!(err.problems, expected);
+        }
+    }
+}
