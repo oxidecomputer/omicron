@@ -5,4 +5,5 @@
 //! Version `NON_EMPTY_UPLINK_PORTS` of the Sled Agent API.
 
 pub mod early_networking;
+pub mod sled;
 pub mod system_networking;

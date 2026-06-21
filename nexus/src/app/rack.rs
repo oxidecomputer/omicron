@@ -39,6 +39,8 @@ use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::ResourceType;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::RackUuid;
 use omicron_uuid_kinds::SledUuid;
 use oxnet::IpNet;
 use sled_agent_client::types::AddSledRequest;
@@ -829,7 +831,7 @@ impl super::Nexus {
                 schema_version: 1,
                 body: StartSledAgentRequestBody {
                     id: allocation.sled_id.into(),
-                    rack_id: allocation.rack_id,
+                    rack_id: RackUuid::from_untyped_uuid(allocation.rack_id),
                     use_trust_quorum: true,
                     is_lrtq_learner: true,
                     subnet: sled_agent_client::types::Ipv6Subnet {

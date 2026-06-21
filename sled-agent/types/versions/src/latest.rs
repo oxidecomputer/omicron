@@ -230,9 +230,9 @@ pub mod rot {
 }
 
 pub mod sled {
-    pub use crate::v1::sled::AddSledRequest;
-    pub use crate::v1::sled::StartSledAgentRequest;
-    pub use crate::v1::sled::StartSledAgentRequestBody;
+    pub use crate::v42::sled::AddSledRequest;
+    pub use crate::v42::sled::StartSledAgentRequest;
+    pub use crate::v42::sled::StartSledAgentRequestBody;
 }
 
 pub mod support_bundle {

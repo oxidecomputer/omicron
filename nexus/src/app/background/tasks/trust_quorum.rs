@@ -633,7 +633,7 @@ async fn send_start_sled_agent_requests(
                 schema_version: 1,
                 body: StartSledAgentRequestBody {
                     id: allocation.sled_id.into(),
-                    rack_id: allocation.rack_id,
+                    rack_id: RackUuid::from_untyped_uuid(allocation.rack_id),
                     use_trust_quorum: true,
                     is_lrtq_learner: false,
                     subnet: sled_agent_client::types::Ipv6Subnet {

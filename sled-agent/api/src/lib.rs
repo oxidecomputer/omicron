@@ -1056,12 +1056,26 @@ pub trait SledAgentApi {
     /// Add a sled to a rack that was already initialized via RSS
     #[endpoint {
         method = PUT,
-        path = "/sleds"
+        path = "/sleds",
+        versions = VERSION_NON_EMPTY_UPLINK_PORTS..,
     }]
     async fn sled_add(
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<latest::sled::AddSledRequest>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    #[endpoint {
+        operation_id = "sled_add",
+        method = PUT,
+        path = "/sleds",
+        versions = ..VERSION_NON_EMPTY_UPLINK_PORTS,
+    }]
+    async fn sled_add_v1(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<v1::sled::AddSledRequest>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        Self::sled_add(rqctx, body.map(Into::into)).await
+    }
 
     /// Fetch basic information about this sled
     #[endpoint {

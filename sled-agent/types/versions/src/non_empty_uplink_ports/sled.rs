@@ -3,13 +3,18 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 //! Sled-related types for the Sled Agent API.
+//!
+//! In this version, `StartSledAgentRequestBody::rack_id` became a typed
+//! `RackUuid` rather than an untyped `Uuid`.
 
+use crate::v1;
 use omicron_common::address::{Ipv6Subnet, SLED_PREFIX};
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::RackUuid;
 use omicron_uuid_kinds::SledUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sled_hardware_types::BaseboardId;
-use uuid::Uuid;
 
 /// A request to Add a given sled after rack initialization has occurred
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, JsonSchema)]
@@ -49,7 +54,7 @@ pub struct StartSledAgentRequestBody {
     pub id: SledUuid,
 
     /// Uuid of the rack to which this sled agent belongs.
-    pub rack_id: Uuid,
+    pub rack_id: RackUuid,
 
     /// Use trust quorum for key generation
     pub use_trust_quorum: bool,
@@ -62,4 +67,35 @@ pub struct StartSledAgentRequestBody {
 
     /// Portion of the IP space to be managed by the Sled Agent.
     pub subnet: Ipv6Subnet<SLED_PREFIX>,
+}
+
+impl From<v1::sled::AddSledRequest> for AddSledRequest {
+    fn from(old: v1::sled::AddSledRequest) -> Self {
+        AddSledRequest {
+            sled_id: old.sled_id,
+            start_request: old.start_request.into(),
+        }
+    }
+}
+
+impl From<v1::sled::StartSledAgentRequest> for StartSledAgentRequest {
+    fn from(old: v1::sled::StartSledAgentRequest) -> Self {
+        StartSledAgentRequest {
+            generation: old.generation,
+            schema_version: old.schema_version,
+            body: old.body.into(),
+        }
+    }
+}
+
+impl From<v1::sled::StartSledAgentRequestBody> for StartSledAgentRequestBody {
+    fn from(old: v1::sled::StartSledAgentRequestBody) -> Self {
+        StartSledAgentRequestBody {
+            id: old.id,
+            rack_id: RackUuid::from_untyped_uuid(old.rack_id),
+            use_trust_quorum: old.use_trust_quorum,
+            is_lrtq_learner: old.is_lrtq_learner,
+            subnet: old.subnet,
+        }
+    }
 }
