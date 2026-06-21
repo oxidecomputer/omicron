@@ -48,8 +48,8 @@ use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use omicron_common::api::external::Error;
 use omicron_common::backoff;
+use omicron_uuid_kinds::RackUuid;
 use std::sync::Arc;
-use uuid::Uuid;
 
 #[derive(Clone, Debug)]
 pub(crate) enum PopulateStatus {
@@ -60,11 +60,11 @@ pub(crate) enum PopulateStatus {
 
 /// Auxiliary data necessary to populate the database.
 pub(crate) struct PopulateArgs {
-    rack_id: Uuid,
+    rack_id: RackUuid,
 }
 
 impl PopulateArgs {
-    pub(crate) fn new(rack_id: Uuid) -> Self {
+    pub(crate) fn new(rack_id: RackUuid) -> Self {
         Self { rack_id }
     }
 }
@@ -343,8 +343,8 @@ mod test {
     use nexus_db_queries::db::pub_test_utils::TestDatabase;
     use omicron_common::api::external::Error;
     use omicron_test_utils::dev;
+    use omicron_uuid_kinds::RackUuid;
     use std::sync::Arc;
-    use uuid::Uuid;
 
     #[tokio::test]
     async fn test_populators() {
@@ -382,7 +382,7 @@ mod test {
         );
         let log = &logctx.log;
 
-        let args = PopulateArgs::new(Uuid::new_v4());
+        let args = PopulateArgs::new(RackUuid::new_v4());
 
         // Satisfy any prerequisites by running the previous populators.
         for p in prev {
