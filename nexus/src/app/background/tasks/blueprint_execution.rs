@@ -256,6 +256,7 @@ mod test {
     use omicron_uuid_kinds::BlueprintUuid;
     use omicron_uuid_kinds::OmicronZoneUuid;
     use omicron_uuid_kinds::PhysicalDiskUuid;
+    use omicron_uuid_kinds::RackUuid;
     use omicron_uuid_kinds::SledUuid;
     use omicron_uuid_kinds::ZpoolUuid;
     use serde_json::json;
@@ -266,7 +267,6 @@ mod test {
     use std::sync::Arc;
     use tokio::sync::watch;
     use update_engine::{CompletionReason, NestedError, TerminalKind};
-    use uuid::Uuid;
 
     type ControlPlaneTestContext =
         nexus_test_utils::ControlPlaneTestContext<crate::Server>;
@@ -396,7 +396,7 @@ mod test {
 
         let sled_id1 = SledUuid::new_v4();
         let sled_id2 = SledUuid::new_v4();
-        let rack_id = Uuid::new_v4();
+        let rack_id = RackUuid::new_v4();
         for (i, (sled_id, server)) in
             [(sled_id1, &s1), (sled_id2, &s2)].iter().enumerate()
         {
