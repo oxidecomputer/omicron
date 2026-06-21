@@ -25,17 +25,12 @@ use nexus_db_queries::db::pub_test_utils::helpers::small_resource_request;
 use omicron_uuid_kinds::InstanceUuid;
 use omicron_uuid_kinds::PropolisUuid;
 use omicron_uuid_kinds::RackUuid;
-use uuid::Uuid;
-
-pub fn rack_id() -> RackUuid {
-    nexus_test_utils::RACK_UUID
-}
 
 const USABLE_HARDWARE_THREADS: u32 = 32;
 
 pub fn test_new_sled_update() -> SledUpdate {
     let mut sled = SledUpdateBuilder::new();
-    sled.rack_id(rack_id())
+    sled.rack_id(nexus_test_utils::RACK_UUID)
         .hardware()
         .usable_hardware_threads(USABLE_HARDWARE_THREADS);
     sled.build()
