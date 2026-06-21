@@ -275,6 +275,7 @@ mod api_impl {
     use sled_agent_types_versions::v30;
     use sled_agent_types_versions::v33;
     use sled_agent_types_versions::v39;
+    use sled_agent_types_versions::v42;
     use sled_diagnostics::SledDiagnosticsQueryOutput;
     use std::collections::BTreeMap;
     use std::collections::BTreeSet;
@@ -773,6 +774,13 @@ mod api_impl {
             HttpResponseOk<v20::early_networking::EarlyNetworkConfig>,
             HttpError,
         > {
+            unimplemented!()
+        }
+
+        async fn write_network_bootstore_config_v42(
+            _rqctx: RequestContext<Self::Context>,
+            _body: TypedBody<v42::system_networking::WriteNetworkConfigRequest>,
+        ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
             unimplemented!()
         }
 

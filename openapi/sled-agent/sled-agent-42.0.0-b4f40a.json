@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "41.0.0"
+    "version": "42.0.0"
   },
   "paths": {
     "/artifacts": {
@@ -8750,10 +8750,11 @@
           },
           "ports": {
             "description": "Uplinks for connecting the rack to external networks",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/PortConfig"
-            }
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/UplinkPorts"
+              }
+            ]
           },
           "rack_subnet": {
             "$ref": "#/components/schemas/Ipv6Net"
@@ -10229,6 +10230,13 @@
         "required": [
           "address"
         ]
+      },
+      "UplinkPorts": {
+        "type": "array",
+        "items": {
+          "$ref": "#/components/schemas/PortConfig"
+        },
+        "minItems": 1
       },
       "VirtioDisk": {
         "description": "A disk that presents a virtio-block interface to the guest.",
