@@ -79,7 +79,7 @@ use trust_quorum_types::messages::{
 use trust_quorum_types::status::{CommitStatus, CoordinatorStatus, NodeStatus};
 
 // Fixed identifiers for prior versions only
-use sled_agent_types_versions::{v1, v20, v25, v26, v30, v33, v39};
+use sled_agent_types_versions::{v1, v20, v25, v26, v30, v33, v39, v42};
 use sled_diagnostics::{
     SledDiagnosticsCommandHttpOutput, SledDiagnosticsQueryOutput,
 };
@@ -963,6 +963,7 @@ impl SledAgentApi for SledAgentImpl {
         use v26::early_networking::EarlyNetworkConfigBody as BodyV26;
         use v30::early_networking::EarlyNetworkConfigBody as BodyV30;
         use v33::system_networking::SystemNetworkingConfig as BodyV33;
+        use v39::system_networking::SystemNetworkingConfig as BodyV39;
         type LatestEnvelope = EarlyNetworkConfigEnvelope;
 
         let sa = rqctx.context();
@@ -990,7 +991,7 @@ impl SledAgentApi for SledAgentImpl {
                                     ))
                                 })?;
                         let body = BodyV20::from(BodyV26::from(BodyV30::from(
-                            BodyV33::from(latest_version_body),
+                            BodyV33::from(BodyV39::from(latest_version_body)),
                         )));
                         v20::early_networking::EarlyNetworkConfig {
                             generation: config.generation,
@@ -1009,6 +1010,26 @@ impl SledAgentApi for SledAgentImpl {
                 Ok(HttpResponseOk(config))
             })
             .await
+    }
+
+    async fn write_network_bootstore_config_v42(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<v42::system_networking::WriteNetworkConfigRequest>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let sa = rqctx.context();
+        let bs = sa.bootstore();
+        let body = body.into_inner();
+        let config = EarlyNetworkConfigEnvelope::from(&body.body)
+            .serialize_to_bootstore_with_generation(body.generation);
+
+        bs.update_network_config(config).await.map_err(|e| {
+            HttpError::for_internal_error(format!(
+                "failed to write updated config to boot store: {}",
+                InlineErrorChain::new(&e),
+            ))
+        })?;
+
+        Ok(HttpResponseUpdatedNoContent())
     }
 
     async fn write_network_bootstore_config_v39(

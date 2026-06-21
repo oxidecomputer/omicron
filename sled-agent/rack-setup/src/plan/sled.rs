@@ -6,6 +6,8 @@
 
 use bootstrap_agent_lockstep_types::RackInitializeRequest as Config;
 use omicron_common::address::BOOTSTRAP_AGENT_RACK_INIT_PORT;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::RackUuid;
 use omicron_uuid_kinds::SledUuid;
 use sled_agent_types::sled::StartSledAgentRequest;
 use sled_agent_types::sled::StartSledAgentRequestBody;
@@ -55,7 +57,7 @@ impl SledPlan {
                         subnet,
                         use_trust_quorum,
                         is_lrtq_learner: false,
-                        rack_id,
+                        rack_id: RackUuid::from_untyped_uuid(rack_id),
                     },
                 },
             )

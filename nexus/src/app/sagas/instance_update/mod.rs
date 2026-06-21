@@ -1694,6 +1694,7 @@ mod test {
     use nexus_types::external_api::{
         instance as instance_types, networking as networking_types,
     };
+    use nexus_types::identity::Asset as _;
     use nexus_types::instance::Migrations;
     use nexus_types::instance::VmmFailureReason;
     use nexus_types::instance::VmmState as NexusVmmState;
@@ -2767,8 +2768,7 @@ mod test {
             .unwrap()
             .pop()
             .unwrap()
-            .identity
-            .id;
+            .id();
 
         let uplink0 = datastore
             .switch_port_get_id(
