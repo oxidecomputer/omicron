@@ -24,10 +24,11 @@ use nexus_db_queries::db::pub_test_utils::helpers::SledUpdateBuilder;
 use nexus_db_queries::db::pub_test_utils::helpers::small_resource_request;
 use omicron_uuid_kinds::InstanceUuid;
 use omicron_uuid_kinds::PropolisUuid;
+use omicron_uuid_kinds::RackUuid;
 use uuid::Uuid;
 
-pub fn rack_id() -> Uuid {
-    Uuid::parse_str(nexus_test_utils::RACK_UUID).unwrap()
+pub fn rack_id() -> RackUuid {
+    nexus_test_utils::RACK_UUID
 }
 
 const USABLE_HARDWARE_THREADS: u32 = 32;

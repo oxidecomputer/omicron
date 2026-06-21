@@ -267,7 +267,7 @@ impl<'a> LookupPath<'a> {
     }
 
     /// Select a resource of type Rack, identified by its id
-    pub fn rack_id(self, id: Uuid) -> Rack<'a> {
+    pub fn rack_id(self, id: RackUuid) -> Rack<'a> {
         Rack::PrimaryKey(Root { lookup_root: self }, id)
     }
 
@@ -354,7 +354,7 @@ impl<'a> LookupPath<'a> {
 
     pub fn loopback_address(
         self,
-        rack_id: Uuid,
+        rack_id: RackUuid,
         switch_slot: DbSwitchSlot,
         address: IpNetwork,
     ) -> LoopbackAddress<'a> {
@@ -771,7 +771,7 @@ lookup_resource! {
     ancestors = [],
     lookup_by_name = false,
     soft_deletes = false,
-    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
+    primary_key_columns = [ { column_name = "id", uuid_kind = RackKind } ]
 }
 
 lookup_resource! {
@@ -879,7 +879,7 @@ lookup_resource! {
     soft_deletes = false,
     primary_key_columns = [
         { column_name = "address", rust_type = IpNetwork },
-        { column_name = "rack_id", rust_type = Uuid },
+        { column_name = "rack_id", uuid_kind = RackKind },
         { column_name = "switch_slot", rust_type = DbSwitchSlot }
     ]
 }
