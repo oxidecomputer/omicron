@@ -497,14 +497,28 @@ async fn apply_plan(
     }
 
     // Perform all creations.
+    //
+    // Keep track of routers we fail to create to avoid spuriously trying to
+    // create child entities related to routers we couldn't create.
+    let mut routers_that_failed_to_create = BTreeSet::new();
     for (asn, config) in routers_to_create {
+        let prev_created = status_builder.counts.routers_created;
         record_count!(
             client.create_router(&config.to_mgd_router(*asn)).await,
             routers_created,
             format!("failed to create router with asn {asn}"),
         );
+
+        // If we _didn't_ successfully create the router, add it to
+        // `routers_that_failed_to_create` and skip all related creates.
+        if status_builder.counts.routers_created == prev_created {
+            routers_that_failed_to_create.insert(*asn);
+        }
     }
     for (asn, prefixes) in originate4_to_create {
+        if routers_that_failed_to_create.contains(asn) {
+            continue;
+        }
         record_count!(
             client
                 .create_origin4(&MgdOrigin4 {
@@ -521,6 +535,9 @@ async fn apply_plan(
         );
     }
     for (asn, prefixes) in originate6_to_create {
+        if routers_that_failed_to_create.contains(asn) {
+            continue;
+        }
         record_count!(
             client
                 .create_origin6(&MgdOrigin6 {
@@ -537,6 +554,9 @@ async fn apply_plan(
         );
     }
     for (asn, shaper) in shapers_to_create {
+        if routers_that_failed_to_create.contains(asn) {
+            continue;
+        }
         record_count!(
             client
                 .create_shaper(&MgdShaperSource {
@@ -549,6 +569,9 @@ async fn apply_plan(
         );
     }
     for (asn, checker) in checkers_to_create {
+        if routers_that_failed_to_create.contains(asn) {
+            continue;
+        }
         record_count!(
             client
                 .create_checker(&MgdCheckerSource {
@@ -561,6 +584,9 @@ async fn apply_plan(
         );
     }
     for (addr, config) in numbered_peers_to_create {
+        if routers_that_failed_to_create.contains(&config.asn) {
+            continue;
+        }
         record_count!(
             client
                 .create_neighbor(&config.to_mgd_numbered_neighbor(*addr))
