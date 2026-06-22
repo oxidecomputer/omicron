@@ -29,7 +29,6 @@ use omicron_uuid_kinds::InstanceUuid;
 use omicron_uuid_kinds::PhysicalDiskAdoptionRequestUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::PropolisUuid;
-use omicron_uuid_kinds::RackUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use sled_agent_client::Client as SledAgentClient;
@@ -115,7 +114,7 @@ impl super::Nexus {
         let (authz_sled, sled) =
             sled_lookup.fetch_for(authz::Action::Modify).await?;
 
-        let rack_id = RackUuid::from_untyped_uuid(sled.rack_id);
+        let rack_id = sled.rack_id();
         let authz_tq = authz::TrustQuorumConfig::for_rack_id(rack_id);
 
         // If the sled still exists in the latest committed trust quorum

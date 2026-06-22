@@ -16,6 +16,7 @@ use ipnetwork::IpNetwork;
 use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::public_error_from_diesel;
 use nexus_db_model::DbSwitchSlot;
+use nexus_db_model::to_db_typed_uuid;
 use nexus_types::external_api::networking as networking_types;
 use omicron_common::api::external;
 use omicron_common::api::external::Error;
@@ -23,6 +24,7 @@ use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
+use omicron_uuid_kinds::RackUuid;
 use sled_agent_types::early_networking::SwitchSlot;
 use uuid::Uuid;
 
@@ -48,7 +50,7 @@ impl DataStore {
     async fn lldp_config_id_get(
         &self,
         opctx: &OpContext,
-        rack_id: Uuid,
+        rack_id: RackUuid,
         switch_slot: SwitchSlot,
         port_name: Name,
     ) -> LookupResult<Uuid> {
@@ -61,7 +63,7 @@ impl DataStore {
 
         let switch_slot = DbSwitchSlot::from(switch_slot);
         let port_settings_id: Uuid = switch_port_dsl::switch_port
-            .filter(switch_port::rack_id.eq(rack_id))
+            .filter(switch_port::rack_id.eq(to_db_typed_uuid(rack_id)))
             .filter(switch_port::switch_slot.eq(switch_slot))
             .filter(switch_port::port_name.eq(port_name.to_string()))
             .select(switch_port::port_settings_id)
@@ -103,7 +105,7 @@ impl DataStore {
     pub async fn lldp_config_get(
         &self,
         opctx: &OpContext,
-        rack_id: Uuid,
+        rack_id: RackUuid,
         switch_slot: SwitchSlot,
         port_name: Name,
     ) -> LookupResult<networking_types::LldpLinkConfig> {
@@ -143,7 +145,7 @@ impl DataStore {
     pub async fn lldp_config_update(
         &self,
         opctx: &OpContext,
-        rack_id: Uuid,
+        rack_id: RackUuid,
         switch_slot: SwitchSlot,
         port_name: Name,
         config: networking_types::LldpLinkConfig,
