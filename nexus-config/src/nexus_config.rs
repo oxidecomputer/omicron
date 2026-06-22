@@ -17,6 +17,7 @@ use omicron_common::address::NEXUS_TECHPORT_EXTERNAL_PORT;
 pub use omicron_common::address::NUM_INITIAL_RESERVED_IP_ADDRESSES;
 use omicron_common::address::RACK_PREFIX;
 use omicron_uuid_kinds::OmicronZoneUuid;
+use omicron_uuid_kinds::RackUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_with::DisplayFromStr;
@@ -29,7 +30,6 @@ use std::net::IpAddr;
 use std::net::SocketAddr;
 use std::num::NonZeroU32;
 use std::time::Duration;
-use uuid::Uuid;
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct NexusConfig {
@@ -155,7 +155,7 @@ pub struct DeploymentConfig {
     /// Uuid of the Nexus instance
     pub id: OmicronZoneUuid,
     /// Uuid of the Rack where Nexus is executing.
-    pub rack_id: Uuid,
+    pub rack_id: RackUuid,
     /// Port on which the "techport external" dropshot server should listen.
     /// This dropshot server copies _most_ of its config from
     /// `dropshot_external` (so that it matches TLS, etc.), but builds its

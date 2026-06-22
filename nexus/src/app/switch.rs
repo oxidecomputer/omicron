@@ -10,6 +10,8 @@ use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::RackUuid;
 use uuid::Uuid;
 
 impl super::Nexus {
@@ -35,7 +37,7 @@ impl super::Nexus {
             request.baseboard.serial,
             request.baseboard.part,
             request.baseboard.revision,
-            request.rack_id,
+            RackUuid::from_untyped_uuid(request.rack_id),
         );
         self.db_datastore.switch_upsert(switch).await
     }
