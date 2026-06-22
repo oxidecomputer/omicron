@@ -1690,6 +1690,7 @@ mod test {
         create_default_ip_pools, create_project, object_create,
     };
     use nexus_test_utils_macros::nexus_test;
+    use nexus_types::external_api::instance::InstanceCpuCount;
     use nexus_types::external_api::{
         instance as instance_types, networking as networking_types,
     };
@@ -1698,8 +1699,7 @@ mod test {
     use nexus_types::instance::VmmState as NexusVmmState;
     use nexus_types::internal_api::params::InstanceMigrateRequest;
     use omicron_common::api::external::{
-        ByteCount, DataPageParams, IdentityMetadataCreateParams,
-        InstanceCpuCount, Name,
+        ByteCount, DataPageParams, IdentityMetadataCreateParams, Name,
     };
     use omicron_test_utils::dev::poll;
     use omicron_uuid_kinds::GenericUuid;

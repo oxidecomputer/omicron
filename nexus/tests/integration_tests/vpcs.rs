@@ -465,7 +465,7 @@ async fn test_limited_collaborator_can_create_instance(
                 description: "test instance created by limited-collaborator"
                     .to_string(),
             },
-            ncpus: omicron_common::api::external::InstanceCpuCount(2),
+            ncpus: instance::InstanceCpuCount(2),
             memory:
                 omicron_common::api::external::ByteCount::from_gibibytes_u32(4),
             hostname: "test-instance".parse().unwrap(),

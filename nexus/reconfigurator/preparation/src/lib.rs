@@ -544,7 +544,7 @@ pub async fn reconfigurator_state_load(
         paginator = p.found_batch(&blueprint_ids, &|b: &BlueprintMetadata| {
             b.id.into_untyped_uuid()
         });
-        blueprint_ids.extend(batch.into_iter());
+        blueprint_ids.extend(batch);
     }
 
     // We'll only grab the most recent blueprints that fit within the limit that

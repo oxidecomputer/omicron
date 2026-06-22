@@ -2376,10 +2376,10 @@ mod test {
         // decommission that sled, and confirm we get a new octet, five times in
         // a loop (to emulate the same sled being added and decommissioned
         // multiple times).
-        let mut next_expected_octet = *expected.last().unwrap() + 1;
         let mut prior_allocation = allocations.last().unwrap().clone();
         let target_hw_baseboard_id = *hw_baseboard_ids.last().unwrap();
-        for _ in 0..5 {
+        for next_expected_octet in (*expected.last().unwrap()..).skip(1).take(5)
+        {
             // Commission the sled.
             let sled =
                 create_test_sled(&datastore, prior_allocation.sled_id.into())
@@ -2458,9 +2458,6 @@ mod test {
                     panic!("unexpected allocation {existing:?}");
                 }
             }
-
-            // Bump our expectations for the next iteration.
-            next_expected_octet += 1;
         }
 
         db.terminate().await;

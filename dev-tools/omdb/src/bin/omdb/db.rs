@@ -139,6 +139,7 @@ use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::DiskFilter;
 use nexus_types::deployment::SledFilter;
 use nexus_types::external_api::disk::BlockSize;
+use nexus_types::external_api::instance::InstanceState;
 use nexus_types::external_api::physical_disk::{
     PhysicalDiskPolicy, PhysicalDiskState,
 };
@@ -151,7 +152,6 @@ use nexus_types::inventory::CollectionDisplayCliFilter;
 use omicron_common::api::external;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Generation;
-use omicron_common::api::external::InstanceState;
 use omicron_common::api::external::MacAddr;
 use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::DatasetUuid;
@@ -4080,7 +4080,7 @@ async fn cmd_db_region_used_by(
 
     let rows: Vec<_> = regions
         .into_iter()
-        .zip(volumes_used_by.into_iter())
+        .zip(volumes_used_by)
         .map(|(region, volume_used_by)| RegionRow {
             id: region.id(),
             volume_id: volume_used_by.volume_id,
@@ -4799,7 +4799,7 @@ async fn cmd_db_sled_instances(
     // Step 2: Sort sleds by slot number so that Sled 2 comes
     // before Sled 10.
     let mut sorted_sleds: Vec<_> = sled_info.iter().collect();
-    sorted_sleds.sort_by(|(_, a), (_, b)| a.sp_slot.cmp(&b.sp_slot));
+    sorted_sleds.sort_by_key(|(_, a)| a.sp_slot);
 
     // Step 3: For each sled, query for instances running on it
     // and print the results.
@@ -5921,7 +5921,7 @@ async fn cmd_db_eips(
         rows.push(row);
     }
 
-    rows.sort_by(|a, b| a.ip.cmp(&b.ip));
+    rows.sort_by_key(|a| a.ip);
     let table = tabled::Table::new(rows)
         .with(tabled::settings::Style::empty())
         .to_string();
