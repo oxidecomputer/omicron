@@ -29,13 +29,7 @@ pub struct SitrepBuilder<'a> {
     /// seeded from its open cases.
     input: &'a analysis_input::Input,
     closed_cases_copied_forward: &'a IdOrdMap<fm::Case>,
-    /// Plumbed from [`analysis_input::Input::alerts_changed`]; ORed with
-    /// [`case::AllCases::alert_set_changed`] in [`Self::build`] to drive
-    /// `alert_generation` bumps.
     alerts_changed: bool,
-    /// Plumbed from [`analysis_input::Input::support_bundles_changed`]; ORed
-    /// with [`case::AllCases::support_bundle_set_changed`] in [`Self::build`]
-    /// to drive `support_bundle_generation` bumps.
     support_bundles_changed: bool,
     comment: String,
 }
