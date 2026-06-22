@@ -7681,11 +7681,13 @@ dependencies = [
 name = "nexus-switch-config"
 version = "0.1.0"
 dependencies = [
+ "iddqd",
  "ipnetwork",
  "nexus-db-model",
  "nexus-db-queries",
  "nexus-types",
  "omicron-common",
+ "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "oxnet",
  "proptest",
