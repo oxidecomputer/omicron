@@ -160,13 +160,13 @@ use nexus_types::deployment::PendingMgsUpdates;
 
 use nexus_types::inventory::Collection;
 use omicron_uuid_kinds::OmicronZoneUuid;
+use omicron_uuid_kinds::RackUuid;
 use oximeter::types::ProducerRegistry;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio::sync::watch;
 use update_common::artifacts::ArtifactsWithPlan;
-use uuid::Uuid;
 
 /// Internal state for communication between Nexus and background tasks.
 ///
@@ -1315,7 +1315,7 @@ pub struct BackgroundTasksData {
     /// whether multicast functionality is enabled (or not)
     pub multicast_enabled: bool,
     /// rack identifier
-    pub rack_id: Uuid,
+    pub rack_id: RackUuid,
     /// nexus identifier
     pub nexus_id: OmicronZoneUuid,
     /// internal DNS DNS resolver, used when tasks need to contact other

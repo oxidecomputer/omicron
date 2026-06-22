@@ -1164,6 +1164,7 @@ async fn sis_ensure_running(
 #[cfg(test)]
 mod test {
     use core::time::Duration;
+    use nexus_types::identity::Asset as _;
     use std::net::SocketAddrV6;
 
     use crate::app::sagas::disk_delete::test::ExpungeTestHarness;
@@ -1351,8 +1352,7 @@ mod test {
             .unwrap()
             .pop()
             .unwrap()
-            .identity
-            .id;
+            .id();
 
         let uplink0 = datastore
             .switch_port_get_id(
