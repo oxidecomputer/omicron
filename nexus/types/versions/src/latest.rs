@@ -330,6 +330,15 @@ pub mod networking {
     pub use crate::v2026_05_07_00::networking::SwitchPortSettings;
 
     pub use crate::v2026_06_10_00::networking::BgpConfigUpdate;
+
+    pub use crate::v2026_06_25_00::networking::DiscoveredRouter;
+    pub use crate::v2026_06_25_00::networking::PendingUnnumberedInterface;
+    pub use crate::v2026_06_25_00::networking::RouterDiscoveryRuntimeState;
+    pub use crate::v2026_06_25_00::networking::SwitchUnnumberedInterface;
+    pub use crate::v2026_06_25_00::networking::SwitchUnnumberedManagerState;
+    pub use crate::v2026_06_25_00::networking::UnnumberedInterface;
+    pub use crate::v2026_06_25_00::networking::UnnumberedInterfacePath;
+    pub use crate::v2026_06_25_00::networking::UnnumberedManagerState;
 }
 
 pub mod oxql {
