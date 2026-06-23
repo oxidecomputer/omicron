@@ -12,13 +12,12 @@ use nexus_background_task_interface::Activator;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::datastore::FmRendezvousAlertCreateError;
+use nexus_db_queries::db::datastore::FmSupportBundleCreateError;
 use nexus_db_queries::db::datastore::SupportBundleCreateParams;
-use nexus_db_queries::db::datastore::SupportBundleProvenance;
 use nexus_types::fm;
 use nexus_types::fm::case::AlertRequest;
 use nexus_types::internal_api::background::FmRendezvousStatus as Status;
 use nexus_types::internal_api::background::fm_rendezvous::*;
-use omicron_common::api::external::Error;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use serde_json::json;
 use slog_error_chain::InlineErrorChain;
@@ -403,14 +402,12 @@ impl FmRendezvous {
             };
             match self
                 .datastore
-                .support_bundle_create(
+                .fm_rendezvous_support_bundle_create(
                     &opctx,
+                    bundle_id,
+                    case_id,
+                    expected_support_bundle_generation,
                     SupportBundleCreateParams {
-                        provenance: SupportBundleProvenance::Fm {
-                            id: bundle_id,
-                            case_id,
-                            expected_support_bundle_generation,
-                        },
                         reason: &reason,
                         nexus_id: self.nexus_id,
                         user_comment: None,
@@ -422,13 +419,13 @@ impl FmRendezvous {
                 Ok(_) => {
                     status.bundles_created += 1;
                 }
-                Err(Error::ObjectAlreadyExists { .. }) => {
+                Err(FmSupportBundleCreateError::AlreadyCreated) => {
                     // A prior activation already created this support bundle.
                     // The marker row in `rendezvous_support_bundle_created`
                     // prevents resurrection.
                     status.bundles_already_existed += 1;
                 }
-                Err(Error::Conflict { .. }) => {
+                Err(FmSupportBundleCreateError::StaleSitrep) => {
                     // The current sitrep in the database has moved past ours.
                     // Abort the rest of this activation; a fresher one will
                     // pick up where we left off.
@@ -443,7 +440,10 @@ impl FmRendezvous {
                     status.stale_sitrep = true;
                     break;
                 }
-                Err(e) => {
+                Err(
+                    e @ (FmSupportBundleCreateError::TooManyBundles
+                    | FmSupportBundleCreateError::Other(_)),
+                ) => {
                     slog::warn!(
                         opctx.log,
                         "failed to create requested support bundle";
@@ -987,10 +987,10 @@ mod tests {
 
     /// A stale activation whose sitrep's `support_bundle_generation`
     /// is behind the latest sitrep should be rejected by the sitrep-guard
-    /// combinator inside `support_bundle_create`. The rendezvous task
-    /// translates that `Conflict` into `stale_sitrep = true`, breaks out of
-    /// the bundle loop without inserting any rows, and still runs the alert
-    /// op.
+    /// combinator inside `fm_rendezvous_support_bundle_create`. The rendezvous
+    /// task translates that `StaleSitrep` error into `stale_sitrep = true`,
+    /// breaks out of the bundle loop without inserting any rows, and still
+    /// runs the alert op.
     #[tokio::test]
     async fn test_bundle_requests_aborted_when_sitrep_is_stale() {
         let logctx = dev::test_setup_log(
@@ -1013,9 +1013,10 @@ mod tests {
             OmicronZoneUuid::new_v4(),
         );
 
-        // Provision a free dataset so `support_bundle_create` reaches the
-        // sitrep-guard (the free-dataset lookup precedes the guarded insert;
-        // without one we'd hit a capacity error before the staleness check).
+        // Provision a free dataset so `fm_rendezvous_support_bundle_create`
+        // reaches the sitrep-guard (the free-dataset lookup precedes the
+        // guarded insert; without one we'd hit a capacity error before the
+        // staleness check).
         create_sled_with_zpools(&datastore, &opctx, 1).await;
 
         // The stale activation's sitrep: carries two support bundle requests
@@ -1915,9 +1916,9 @@ mod tests {
             }
         };
 
-        // The sitrep-guard combinator in `support_bundle_create` (FM
-        // provenance) consults `fm_sitrep_history` to check that the
-        // rendezvous task's expected generation matches the current one.
+        // The sitrep-guard combinator in `fm_rendezvous_support_bundle_create`
+        // consults `fm_sitrep_history` to check that the rendezvous task's
+        // expected generation matches the current one.
         // Insert the sitrep so it shows up in the DB before activating.
         datastore
             .fm_sitrep_insert(opctx, sitrep1.clone(), None)
