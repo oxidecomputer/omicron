@@ -5054,10 +5054,10 @@ async fn cmd_db_instance_info(
                 "    {KARMIC_STATUS:>WIDTH$}: nirvāṇa (reincarnation disabled)"
             );
         }
-        Reincarnatability::CoolingDown(remaining) => {
+        Reincarnatability::CoolingDown { until } => {
             println!(
                 "/!\\ {KARMIC_STATUS:>WIDTH$}: cooling down \
-                 ({remaining:?} remaining)"
+                 (until {until})"
             );
         }
     }
