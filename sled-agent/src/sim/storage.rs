@@ -2090,7 +2090,7 @@ fn generate_new_volume_info(
                 blocks_per_extent: _,
                 extent_count: _,
                 opts:
-                    crucible_client_types::CrucibleOpts {
+                    propolis_client::CrucibleOpts {
                         id,
                         target,
                         lossy: _,
