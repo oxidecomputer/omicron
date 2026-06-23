@@ -13,7 +13,6 @@ use nexus_db_schema::schema::network_interface;
 use nexus_db_schema::schema::vpc_subnet;
 use nexus_types::external_api::vpc;
 use nexus_types::identity::Resource;
-use nexus_types_versions::v2025_11_20_00::vpc as vpc_v2025_11_20_00;
 use omicron_common::api::external;
 use serde::Deserialize;
 use serde::Serialize;
@@ -128,19 +127,6 @@ impl From<vpc::VpcSubnetUpdate> for VpcSubnetUpdate {
         Self {
             name: Some(Name(params.name)),
             description: Some(params.description),
-            time_modified: Utc::now(),
-            custom_router_id: None,
-        }
-    }
-}
-
-// The prior (lenient) wire type omits absent fields as `None`, which
-// `AsChangeset` skips, preserving the existing value.
-impl From<vpc_v2025_11_20_00::VpcSubnetUpdate> for VpcSubnetUpdate {
-    fn from(params: vpc_v2025_11_20_00::VpcSubnetUpdate) -> Self {
-        Self {
-            name: params.identity.name.map(Name),
-            description: params.identity.description,
             time_modified: Utc::now(),
             custom_router_id: None,
         }

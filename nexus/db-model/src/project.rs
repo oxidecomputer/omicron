@@ -16,7 +16,6 @@ use nexus_db_schema::schema::{
 };
 use nexus_types::external_api::project as project_types;
 use nexus_types::identity::Resource;
-use nexus_types_versions::v2025_11_20_00::project as project_types_v2025_11_20_00;
 use serde::Deserialize;
 use serde::Serialize;
 use uuid::Uuid;
@@ -133,18 +132,6 @@ impl From<project_types::ProjectUpdate> for ProjectUpdate {
         Self {
             name: Some(Name(params.name)),
             description: Some(params.description),
-            time_modified: Utc::now(),
-        }
-    }
-}
-
-// The prior (lenient) wire type omits absent fields as `None`, which
-// `AsChangeset` skips, preserving the existing value.
-impl From<project_types_v2025_11_20_00::ProjectUpdate> for ProjectUpdate {
-    fn from(params: project_types_v2025_11_20_00::ProjectUpdate) -> Self {
-        Self {
-            name: params.identity.name.map(Name),
-            description: params.identity.description,
             time_modified: Utc::now(),
         }
     }

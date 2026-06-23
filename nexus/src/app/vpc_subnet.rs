@@ -14,6 +14,7 @@ use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
 use nexus_db_queries::db::model::VpcSubnet;
 use nexus_types::external_api::vpc;
+use nexus_types_versions::v2025_11_20_00;
 use omicron_common::api::external;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DeleteResult;
@@ -220,6 +221,26 @@ impl super::Nexus {
         self.vpc_needed_notify_sleds();
 
         Ok(out)
+    }
+
+    /// Update a VPC subnet from a prior-version (lenient) request body, where
+    /// omitted fields are left unchanged. Keeping the version-specific merge
+    /// here lets db-model stay unaware of older wire versions.
+    pub(crate) async fn vpc_update_subnet_v2025_11_20_00(
+        &self,
+        opctx: &OpContext,
+        vpc_subnet_lookup: &lookup::VpcSubnet<'_>,
+        params: v2025_11_20_00::vpc::VpcSubnetUpdate,
+    ) -> UpdateResult<VpcSubnet> {
+        let custom_router = params.custom_router;
+        let update = db::model::VpcSubnetUpdate {
+            name: params.identity.name.map(db::model::Name),
+            description: params.identity.description,
+            time_modified: chrono::Utc::now(),
+            custom_router_id: None,
+        };
+        self.vpc_update_subnet(opctx, vpc_subnet_lookup, update, custom_router)
+            .await
     }
 
     pub(crate) async fn vpc_delete_subnet(

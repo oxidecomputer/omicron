@@ -470,7 +470,11 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let new_quota = new_quota.into_inner();
             let silo_lookup = nexus.silo_lookup(&opctx, path.silo)?;
             let quota = nexus
-                .silo_update_quota(&opctx, &silo_lookup, new_quota.into())
+                .silo_update_quota_v2025_11_20_00(
+                    &opctx,
+                    &silo_lookup,
+                    new_quota,
+                )
                 .await?;
             Ok(HttpResponseOk(quota.into()))
         })
@@ -1244,7 +1248,11 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let project_lookup =
                 nexus.project_lookup(&opctx, project_selector)?;
             let project = nexus
-                .project_update(&opctx, &project_lookup, updated_project.into())
+                .project_update_v2025_11_20_00(
+                    &opctx,
+                    &project_lookup,
+                    updated_project,
+                )
                 .await?;
             Ok(HttpResponseOk(project.into()))
         })
@@ -5797,13 +5805,11 @@ impl NexusExternalApi for NexusExternalApiImpl {
             };
             let subnet_lookup =
                 nexus.vpc_subnet_lookup(&opctx, subnet_selector)?;
-            let custom_router = subnet_params.custom_router.clone();
             let subnet = nexus
-                .vpc_update_subnet(
+                .vpc_update_subnet_v2025_11_20_00(
                     &opctx,
                     &subnet_lookup,
-                    subnet_params.into(),
-                    custom_router,
+                    subnet_params,
                 )
                 .await?;
             Ok(HttpResponseOk(subnet.into()))
