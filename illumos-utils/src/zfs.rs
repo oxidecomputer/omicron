@@ -1720,14 +1720,6 @@ impl Zfs {
     /// Like [Self::set_values], but first reads the dataset's currently-
     /// persisted properties and only sets the ones that differ. If every
     /// property already matches, no `zfs set` is issued at all.
-    ///
-    /// This keeps property application idempotent. In particular, re-applying a
-    /// `quota` that is already persisted will not fail when the dataset's
-    /// `used` space has crept slightly above the quota: ZFS permits `used` to
-    /// exceed `quota` by up to one transaction's allocation (the "one free hit"
-    /// in `dsl_dir_tempreserve_impl`), but then refuses to *set* a quota below
-    /// current usage. By not re-issuing the unchanged set, we avoid tripping
-    /// over that on cold boot.
     async fn set_values_if_changed(
         filesystem_name: &str,
         size_details: Option<SizeDetails>,
@@ -1735,8 +1727,7 @@ impl Zfs {
     ) -> Result<(), SetValueError> {
         // Read the current properties so we can skip re-setting unchanged
         // values. If we can't read them (dataset not found, read failure), fall
-        // back to setting everything: never worse than the prior unconditional
-        // behavior.
+        // back to setting everything.
         let to_set = match Self::get_dataset_properties(
             &[filesystem_name.to_string()],
             WhichDatasets::SelfOnly,
