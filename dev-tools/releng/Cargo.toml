@@ -6,6 +6,7 @@ license = "MPL-2.0"
 
 [dependencies]
 anyhow.workspace = true
+blake3 = "1.8.5"
 camino.workspace = true
 camino-tempfile.workspace = true
 cargo_metadata.workspace = true
