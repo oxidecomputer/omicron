@@ -150,6 +150,9 @@ enum EnsureDatasetErrorRaw {
     #[error("Dataset does not exist")]
     DoesNotExist,
 
+    #[error("Failed to read current properties")]
+    ReadProperties(#[source] anyhow::Error),
+
     #[error("Failed to mount filesystem")]
     MountFsFailed(#[source] crate::ExecutionError),
 
@@ -169,6 +172,10 @@ impl From<SetValueErrorRaw> for EnsureDatasetErrorRaw {
         match e {
             SetValueErrorRaw::DatasetNotFound => {
                 EnsureDatasetErrorRaw::DoesNotExist
+            }
+
+            SetValueErrorRaw::ReadProperties(err) => {
+                EnsureDatasetErrorRaw::ReadProperties(err)
             }
 
             SetValueErrorRaw::Execution(err) => {
@@ -191,6 +198,9 @@ pub struct EnsureDatasetError {
 enum SetValueErrorRaw {
     #[error("Dataset not found")]
     DatasetNotFound,
+
+    #[error("Failed to read current properties")]
+    ReadProperties(#[source] anyhow::Error),
 
     #[error(transparent)]
     Execution(#[from] crate::ExecutionError),
@@ -795,10 +805,14 @@ pub enum WhichDatasets {
 }
 
 /// Renders an optional size as the string ZFS expects: the byte count, or
-/// `"none"` when unset.
+/// `"none"` when unset. ZFS treats a size of 0 as "none" and reports it back
+/// that way, so we render 0 as "none" too; otherwise a desired "0" would never
+/// compare equal to the persisted "none" and we'd re-set it every reconcile.
 fn render_size(size: Option<ByteCount>) -> String {
-    size.map(|s| s.to_bytes().to_string())
-        .unwrap_or_else(|| String::from("none"))
+    match size {
+        Some(s) if s.to_bytes() != 0 => s.to_bytes().to_string(),
+        _ => String::from("none"),
+    }
 }
 
 /// The ZFS properties `ensure_dataset` keeps in sync, in the string form ZFS
@@ -1726,26 +1740,32 @@ impl Zfs {
         dataset_id: Option<DatasetUuid>,
     ) -> Result<(), SetValueError> {
         // Read the current properties so we can skip re-setting unchanged
-        // values. If we can't read them (dataset not found, read failure), fall
-        // back to setting everything.
-        let to_set = match Self::get_dataset_properties(
+        // values. A failed read is surfaced rather than papered over: falling
+        // back to setting everything would re-apply `quota`, which can itself
+        // fail once `used` has crept past it (the very failure this avoids; see
+        // https://github.com/oxidecomputer/omicron/issues/10662).
+        let make_err = |err| SetValueError {
+            filesystem: filesystem_name.to_string(),
+            values: build_zfs_set_key_value_pairs(size_details, dataset_id)
+                .iter()
+                .map(|(k, v)| format!("{k}={v}"))
+                .join(","),
+            err,
+        };
+
+        let props = Self::get_dataset_properties(
             &[filesystem_name.to_string()],
             WhichDatasets::SelfOnly,
         )
         .await
-        {
-            Ok(props) => props
-                .into_iter()
-                .find(|p| p.name == filesystem_name)
-                .map(|current| {
-                    props_needing_update(&current, size_details, dataset_id)
-                }),
-            Err(_) => None,
-        };
+        .map_err(|err| make_err(SetValueErrorRaw::ReadProperties(err)))?;
 
-        let to_set = to_set.unwrap_or_else(|| {
-            build_zfs_set_key_value_pairs(size_details, dataset_id)
-        });
+        let current = props
+            .into_iter()
+            .find(|p| p.name == filesystem_name)
+            .ok_or_else(|| make_err(SetValueErrorRaw::DatasetNotFound))?;
+
+        let to_set = props_needing_update(&current, size_details, dataset_id);
         Self::set_values(filesystem_name, to_set.as_slice()).await
     }
 
@@ -2889,6 +2909,20 @@ mod test {
         let size = Some(SizeDetails {
             quota: None,
             reservation: None,
+            compression: CompressionAlgorithm::Off,
+        });
+        assert!(props_needing_update(&current, size, None).is_empty());
+    }
+
+    #[test]
+    fn props_needing_update_zero_size_matches_unset() {
+        // ZFS treats quota/reservation of 0 as "none", so a desired 0 must
+        // compare equal to a persisted-unset value; otherwise we'd re-set it
+        // every reconcile and never converge.
+        let current = props_with(None, None, None, "off", 10);
+        let size = Some(SizeDetails {
+            quota: Some(ByteCount::try_from(0u64).unwrap()),
+            reservation: Some(ByteCount::try_from(0u64).unwrap()),
             compression: CompressionAlgorithm::Off,
         });
         assert!(props_needing_update(&current, size, None).is_empty());
