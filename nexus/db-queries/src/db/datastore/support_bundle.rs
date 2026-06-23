@@ -17,6 +17,7 @@ use crate::db::sitrep_guard::SitrepGuardedInsertOutcome;
 use crate::db::update_and_check::{UpdateAndCheck, UpdateStatus};
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::prelude::*;
+use diesel::result::Error as DbError;
 use futures::FutureExt;
 use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::OptionalError;
@@ -40,6 +41,7 @@ use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::SupportBundleUuid;
 use std::collections::HashSet;
+use std::pin::Pin;
 use uuid::Uuid;
 
 const CANNOT_ALLOCATE_ERR_MSG: &'static str = "Current policy limits support bundle creation to 'one per external disk', and \
@@ -161,21 +163,23 @@ impl DataStore {
         self.support_bundle_create_real(
             &conn,
             data_selection,
-            move |dataset, conn| async {
-                let bundle = SupportBundle::new(
-                    id,
-                    reason,
-                    dataset.pool_id(),
-                    dataset.id(),
-                    nexus_id,
-                    user_comment,
-                    None,
-                );
-                diesel::insert_into(support_bundle_dsl::support_bundle)
-                    .values(bundle.clone())
-                    .execute_async(&*conn)
-                    .await?;
-                Ok(bundle)
+            move |dataset, conn| {
+                Box::pin(async move {
+                    let bundle = SupportBundle::new(
+                        id,
+                        reason,
+                        dataset.pool_id(),
+                        dataset.id(),
+                        nexus_id,
+                        user_comment,
+                        None,
+                    );
+                    diesel::insert_into(support_bundle_dsl::support_bundle)
+                        .values(bundle.clone())
+                        .execute_async(conn)
+                        .await?;
+                    Ok(bundle)
+                })
             },
         )
         .await
@@ -231,7 +235,7 @@ impl DataStore {
             user_comment,
             data_selection,
         } = params;
-        self.support_bundle_create_real(&*conn, data_selection, {
+        self.support_bundle_create_real(&conn, data_selection, {
             let err = err.clone();
             let user_comment = user_comment.clone();
             let reason = reason.to_string();
@@ -245,7 +249,7 @@ impl DataStore {
                     user_comment,
                     Some(case_id),
                 );
-                async move {
+                Box::pin(async move {
                     let insert =
                         diesel::insert_into(support_bundle_dsl::support_bundle)
                             .values(bundle)
@@ -275,7 +279,7 @@ impl DataStore {
                                 .bail(FmSupportBundleCreateError::StaleSitrep))
                         }
                     }
-                }
+                })
             }
         })
         .await
@@ -313,19 +317,22 @@ impl DataStore {
     /// [`Error::insufficient_capacity`] rather than [`Error::Conflict`].
     /// This only affects status reporting and log noise: the guard still
     /// prevents a stale activation from inserting anything.
-    async fn support_bundle_create_real<I, F>(
+    async fn support_bundle_create_real<I>(
         &self,
         conn: &async_bb8_diesel::Connection<DbConnection>,
         data_selection: BundleDataSelection,
         insert: I,
     ) -> Result<SupportBundle, CreateError>
     where
-        I: FnOnce(
+        I: for<'a> FnOnce(
             RendezvousDebugDataset,
-            &async_bb8_diesel::Connection<DbConnection>,
-        ) -> F,
+            &'a async_bb8_diesel::Connection<DbConnection>,
+        ) -> Pin<
+            Box<
+                dyn Future<Output = Result<SupportBundle, DbError>> + Send + 'a,
+            >,
+        >,
         I: Clone + Send + Sync,
-        F: Future<Output = Result<SupportBundle, diesel::result::Error>> + Send,
     {
         let err = OptionalError::new();
         self.transaction_retry_wrapper("support_bundle_create")
@@ -780,7 +787,7 @@ impl DataStore {
         conn: &async_bb8_diesel::Connection<DbConnection>,
         bundle_id: SupportBundleUuid,
         data_selection: BundleDataSelection,
-    ) -> Result<(), diesel::result::Error> {
+    ) -> Result<(), DbError> {
         use crate::db::model::{DataSelectionFlags, Ereports, HostInfo};
         use nexus_db_schema::schema::support_bundle_data_selection_ereports::dsl as ereports_dsl;
         use nexus_db_schema::schema::support_bundle_data_selection_flags::dsl as flags_dsl;
