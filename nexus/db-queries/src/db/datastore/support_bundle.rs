@@ -23,6 +23,7 @@ use nexus_db_errors::OptionalError;
 use nexus_db_errors::public_error_from_diesel;
 use nexus_db_lookup::DbConnection;
 use nexus_db_lookup::LookupPath;
+use nexus_db_schema::schema::support_bundle::dsl as support_bundle_dsl;
 use nexus_types::deployment::BlueprintDatasetDisposition;
 use nexus_types::deployment::BlueprintExpungedZoneAccessReason;
 use nexus_types::support_bundle::BundleData;
@@ -84,23 +85,11 @@ pub enum SupportBundleProvenance {
     /// marker alone, so subsequent collection failure, expiration, or user
     /// deletion of the bundle does not retrigger creation. Collecting another
     /// bundle requires a new request with a new bundle id.
-    Fm {
-        /// Bundle id requested by the sitrep. The FM path is idempotent on
-        /// this id: repeated activations for the same sitrep will do nothing.
-        id: SupportBundleUuid,
-        /// FM case that requested this bundle.
-        case_id: CaseUuid,
-        /// Generation counter the FM rendezvous task expects to see in
-        /// the latest sitrep's `support_bundle_generation` column. Used by
-        /// the [`SitrepGuardedInsert::<SupportBundle>`] generation guard.
-        expected_support_bundle_generation: Generation,
-    },
+    Fm {},
 }
 
 /// Parameters for creating a support bundle.
 pub struct SupportBundleCreateParams<'a> {
-    /// Who is requesting this bundle's creation.
-    pub provenance: SupportBundleProvenance,
     /// Why this bundle is being created.
     pub reason: &'a str,
     /// The Nexus instance responsible for collection.
@@ -109,6 +98,35 @@ pub struct SupportBundleCreateParams<'a> {
     pub user_comment: Option<String>,
     /// What data to include in the bundle.
     pub data_selection: nexus_types::support_bundle::BundleDataSelection,
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum FmSupportBundleCreateError {
+    /// No free debug dataset was available to hold the bundle.
+    #[error("insufficient capacity to allocate a support bundle")]
+    TooManyBundles,
+    /// A bundle with this id was already created by an earlier rendezvous
+    /// activation; the `rendezvous_support_bundle_created` marker
+    /// short-circuited the insert.
+    #[error(
+        "support bundle was already created by a previous rendezvous activation"
+    )]
+    AlreadyCreated,
+    /// The sitrep being executed is stale: its `support_bundle_generation` is
+    /// behind the current sitrep in the database, so no bundle was created.
+    #[error("cannot create support bundle for a stale sitrep")]
+    StaleSitrep,
+    /// An error occurred while accessing the database.
+    #[error(transparent)]
+    Other(#[from] Error),
+}
+
+#[derive(Debug, thiserror::Error)]
+enum CreateError {
+    #[error("insufficient capacity to allocate a support bundle")]
+    TooManyBundles,
+    #[error(transparent)]
+    Database(#[from] diesel::result::Error),
 }
 
 impl DataStore {
@@ -124,6 +142,160 @@ impl DataStore {
     /// Finds a free debug dataset, creates a `SupportBundle` in `Collecting`
     /// state, and inserts it. If no free dataset is available, returns
     /// [`Error::insufficient_capacity`].
+    pub async fn support_bundle_create(
+        &self,
+        opctx: &OpContext,
+        params: SupportBundleCreateParams<'_>,
+    ) -> CreateResult<SupportBundle> {
+        let SupportBundleCreateParams {
+            reason,
+            nexus_id,
+            user_comment,
+            data_selection,
+        } = params;
+        let id = SupportBundleUuid::new_v4();
+        let reason = reason.to_string();
+
+        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
+        let conn = self.pool_connection_authorized(opctx).await?;
+        self.support_bundle_create_real(
+            &conn,
+            data_selection,
+            move |dataset, conn| async {
+                let bundle = SupportBundle::new(
+                    id,
+                    reason,
+                    dataset.pool_id(),
+                    dataset.id(),
+                    nexus_id,
+                    user_comment,
+                    None,
+                );
+                diesel::insert_into(support_bundle_dsl::support_bundle)
+                    .values(bundle.clone())
+                    .execute_async(&*conn)
+                    .await?;
+                Ok(bundle)
+            },
+        )
+        .await
+        .map_err(|e| match e {
+            CreateError::TooManyBundles => {
+                external::Error::insufficient_capacity(
+                    CANNOT_ALLOCATE_ERR_MSG,
+                    "Support Bundle storage exhausted",
+                )
+            }
+            CreateError::Database(e) => {
+                public_error_from_diesel(e, ErrorHandler::Server)
+            }
+        })
+    }
+
+    /// Creates a new support bundle (fault management rendezvous version)
+    ///
+    /// Requires that the UUID of the calling Nexus be supplied as input -
+    /// this particular Zone is responsible for the collection process.
+    ///
+    /// Note that really any functioning Nexus would work as the "assignee",
+    /// but it's clear that our instance will work, because we're currently
+    /// running.
+    ///
+    /// Finds a free debug dataset, creates a `SupportBundle` in `Collecting`
+    /// state, and inserts it. If no free dataset is available, returns
+    /// [`FmSupportBundleCreateError::TooManyBundles`].
+    ///
+    /// # Arguments
+    ///
+    /// - `id`: Bundle id requested by the sitrep. The FM path is idempotent on
+    ///   this id: repeated activations for the same sitrep will do nothing.
+    /// - `case_id`: FM case that requested this bundle.
+    /// - `expected_generation`: Generation counter the FM rendezvous task
+    ///   expects to see in the latest sitrep's `support_bundle_generation`
+    ///   column. Used by the [`SitrepGuardedInsert::<SupportBundle>`]
+    ///   generation guard.
+    pub async fn fm_rendezvous_support_bundle_create(
+        &self,
+        opctx: &OpContext,
+        id: SupportBundleUuid,
+        case_id: CaseUuid,
+        expected_generation: Generation,
+        params: SupportBundleCreateParams<'_>,
+    ) -> Result<SupportBundle, FmSupportBundleCreateError> {
+        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
+        let conn = self.pool_connection_authorized(opctx).await?;
+        let err = OptionalError::new();
+        let SupportBundleCreateParams {
+            reason,
+            nexus_id,
+            user_comment,
+            data_selection,
+        } = params;
+        self.support_bundle_create_real(&*conn, data_selection, {
+            let err = err.clone();
+            let user_comment = user_comment.clone();
+            let reason = reason.to_string();
+            move |dataset, conn| {
+                let bundle = SupportBundle::new(
+                    id,
+                    reason,
+                    dataset.pool_id(),
+                    dataset.id(),
+                    nexus_id,
+                    user_comment,
+                    Some(case_id),
+                );
+                async move {
+                    let insert =
+                        diesel::insert_into(support_bundle_dsl::support_bundle)
+                            .values(bundle)
+                            // Target the conflict at the primary key:
+                            // "this exact bundle id already exists" is
+                            // the only conflict this query is prepared
+                            // to swallow. In particular, a conflict on
+                            // `one_bundle_per_dataset` must not be
+                            // misreported as the bundle already
+                            // existing (it can't happen anyway: the
+                            // free-dataset query above runs in the same
+                            // serializable transaction).
+                            .on_conflict(support_bundle_dsl::id)
+                            .do_nothing()
+                            .returning(SupportBundle::as_returning());
+                    let guarded = SitrepGuardedInsert::<SupportBundle, _>::new(
+                        id.into_untyped_uuid(),
+                        expected_generation.into(),
+                        insert,
+                    );
+                    match guarded.execute_async(&conn).await? {
+                        SitrepGuardedInsertOutcome::Created(row) => Ok(row),
+                        SitrepGuardedInsertOutcome::AlreadyExists => Err(err
+                            .bail(FmSupportBundleCreateError::AlreadyCreated)),
+                        SitrepGuardedInsertOutcome::StaleSitrep => {
+                            Err(err
+                                .bail(FmSupportBundleCreateError::StaleSitrep))
+                        }
+                    }
+                }
+            }
+        })
+        .await
+        .map_err(|e| {
+            if let Some(err) = err.take() {
+                return err;
+            };
+            match e {
+                CreateError::TooManyBundles => {
+                    FmSupportBundleCreateError::TooManyBundles
+                }
+                CreateError::Database(err) => {
+                    let err =
+                        public_error_from_diesel(err, ErrorHandler::Server);
+                    FmSupportBundleCreateError::Other(err)
+                }
+            }
+        })
+    }
+
     ///
     /// For [`SupportBundleProvenance::Fm`] the bundle INSERT is gated by
     /// [`SitrepGuardedInsert`], which also writes the
@@ -141,51 +313,29 @@ impl DataStore {
     /// [`Error::insufficient_capacity`] rather than [`Error::Conflict`].
     /// This only affects status reporting and log noise: the guard still
     /// prevents a stale activation from inserting anything.
-    pub async fn support_bundle_create(
+    async fn support_bundle_create_real<I, F>(
         &self,
-        opctx: &OpContext,
-        params: SupportBundleCreateParams<'_>,
-    ) -> CreateResult<SupportBundle> {
-        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
-        let conn = self.pool_connection_authorized(opctx).await?;
-
-        #[derive(Debug)]
-        enum SupportBundleError {
-            TooManyBundles,
-            AlreadyExists,
-            StaleSitrep,
-        }
-
-        let SupportBundleCreateParams {
-            provenance,
-            reason,
-            nexus_id,
-            user_comment,
-            data_selection,
-        } = params;
-
-        let (bundle_id, fm_case_id, fm_expected_generation) = match provenance {
-            SupportBundleProvenance::User => {
-                (SupportBundleUuid::new_v4(), None, None)
-            }
-            SupportBundleProvenance::Fm {
-                id,
-                case_id,
-                expected_support_bundle_generation,
-            } => (id, Some(case_id), Some(expected_support_bundle_generation)),
-        };
-
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        data_selection: BundleDataSelection,
+        insert: I,
+    ) -> Result<SupportBundle, CreateError>
+    where
+        I: FnOnce(
+            RendezvousDebugDataset,
+            &async_bb8_diesel::Connection<DbConnection>,
+        ) -> F,
+        I: Clone + Send + Sync,
+        F: Future<Output = Result<SupportBundle, diesel::result::Error>> + Send,
+    {
         let err = OptionalError::new();
         self.transaction_retry_wrapper("support_bundle_create")
             .transaction(&conn, |conn| {
                 let err = err.clone();
-                let reason = reason.to_string();
-                let user_comment = user_comment.clone();
                 let data_selection = data_selection.clone();
+                let insert = insert.clone();
 
                 async move {
                     use nexus_db_schema::schema::rendezvous_debug_dataset::dsl as dataset_dsl;
-                    use nexus_db_schema::schema::support_bundle::dsl as support_bundle_dsl;
 
                     // Observe all "non-deleted, debug datasets".
                     //
@@ -204,7 +354,7 @@ impl DataStore {
 
                     let Some(dataset) = free_dataset else {
                         return Err(
-                            err.bail(SupportBundleError::TooManyBundles)
+                            err.bail(CreateError::TooManyBundles)
                         );
                     };
 
@@ -217,74 +367,7 @@ impl DataStore {
                     // case of "clean up a bundle which is managed by an
                     // expunged Nexus" anyway.
 
-                    let bundle = SupportBundle::new(
-                        bundle_id,
-                        reason,
-                        dataset.pool_id(),
-                        dataset.id(),
-                        nexus_id,
-                        user_comment,
-                        fm_case_id,
-                    );
-
-                    let inserted: Option<SupportBundle> =
-                        match fm_expected_generation {
-                            None => {
-                                diesel::insert_into(
-                                    support_bundle_dsl::support_bundle,
-                                )
-                                .values(bundle.clone())
-                                .execute_async(&conn)
-                                .await?;
-                                Some(bundle)
-                            }
-                            Some(expected_generation) => {
-                                let insert = diesel::insert_into(
-                                    support_bundle_dsl::support_bundle,
-                                )
-                                .values(bundle)
-                                // Target the conflict at the primary key:
-                                // "this exact bundle id already exists" is
-                                // the only conflict this query is prepared
-                                // to swallow. In particular, a conflict on
-                                // `one_bundle_per_dataset` must not be
-                                // misreported as the bundle already
-                                // existing (it can't happen anyway: the
-                                // free-dataset query above runs in the same
-                                // serializable transaction).
-                                .on_conflict(support_bundle_dsl::id)
-                                .do_nothing()
-                                .returning(SupportBundle::as_returning());
-                                let guarded = SitrepGuardedInsert::<
-                                    SupportBundle,
-                                    _,
-                                >::new(
-                                    bundle_id.into_untyped_uuid(),
-                                    expected_generation.into(),
-                                    insert,
-                                );
-                                match guarded.execute_async(&conn).await? {
-                                    SitrepGuardedInsertOutcome::Created(row) => {
-                                        Some(row)
-                                    }
-                                    SitrepGuardedInsertOutcome::AlreadyExists => {
-                                        None
-                                    }
-                                    SitrepGuardedInsertOutcome::StaleSitrep => {
-                                        return Err(err.bail(
-                                            SupportBundleError::StaleSitrep,
-                                        ));
-                                    }
-                                }
-                            }
-                        };
-
-                    let Some(inserted) = inserted else {
-                        return Err(
-                            err.bail(SupportBundleError::AlreadyExists)
-                        );
-                    };
-
+                    let inserted = insert(dataset, &conn).await?;
                     Self::support_bundle_data_selection_insert_on_conn(
                         &conn,
                         inserted.id.into(),
@@ -296,32 +379,7 @@ impl DataStore {
                 }
             })
             .await
-            .map_err(|e| {
-                if let Some(err) = err.take() {
-                    match err {
-                        SupportBundleError::TooManyBundles => {
-                            return external::Error::insufficient_capacity(
-                                CANNOT_ALLOCATE_ERR_MSG,
-                                "Support Bundle storage exhausted",
-                            );
-                        }
-                        SupportBundleError::AlreadyExists => {
-                            return external::Error::ObjectAlreadyExists {
-                                type_name:
-                                    external::ResourceType::SupportBundle,
-                                object_name: bundle_id.to_string(),
-                            };
-                        }
-                        SupportBundleError::StaleSitrep => {
-                            return external::Error::conflict(
-                                "cannot create FM-originated support \
-                                 bundle for stale sitrep",
-                            );
-                        }
-                    }
-                }
-                public_error_from_diesel(e, ErrorHandler::Server)
-            })
+            .map_err(|e| err.take().unwrap_or(CreateError::Database(e)))
     }
 
     /// Returns the [`BundleDataSelection`] for a support bundle.
