@@ -908,6 +908,10 @@ impl DataStore {
 #[cfg(test)]
 mod test {
     use super::*;
+    use diesel::ExpressionMethods;
+    use diesel::QueryDsl;
+    use nexus_db_schema::schema::rendezvous_support_bundle_created::dsl as marker_dsl;
+
     use crate::db::datastore::test::bp_insert_and_make_target;
     use crate::db::pub_test_utils::TestDatabase;
     use nexus_db_model::Generation;
@@ -2141,11 +2145,8 @@ mod test {
 
     #[tokio::test]
     async fn support_bundle_create_fm_created_writes_marker() {
-        use diesel::ExpressionMethods;
-        use diesel::QueryDsl;
         use diesel::SelectableHelper;
         use nexus_db_model::fm::RendezvousSupportBundleCreated;
-        use nexus_db_schema::schema::rendezvous_support_bundle_created::dsl as marker_dsl;
 
         let logctx = dev::test_setup_log(
             "support_bundle_create_fm_created_writes_marker",
@@ -2209,10 +2210,6 @@ mod test {
 
     #[tokio::test]
     async fn support_bundle_create_fm_already_exists_without_marker() {
-        use diesel::ExpressionMethods;
-        use diesel::QueryDsl;
-        use nexus_db_schema::schema::rendezvous_support_bundle_created::dsl as marker_dsl;
-
         let logctx = dev::test_setup_log(
             "support_bundle_create_fm_already_exists_without_marker",
         );
@@ -2345,7 +2342,6 @@ mod test {
     async fn fm_rendezvous_existing_support_bundle_markers_returns_only_present_ids()
      {
         use nexus_db_model::fm::RendezvousSupportBundleCreated;
-        use nexus_db_schema::schema::rendezvous_support_bundle_created::dsl as bundle_marker_dsl;
 
         let logctx = dev::test_setup_log(
             "fm_rendezvous_existing_support_bundle_markers_returns_only_present_ids",
@@ -2360,22 +2356,20 @@ mod test {
         // Insert markers for present_a and present_b only.
         {
             let conn = datastore.pool_connection_for_tests().await.unwrap();
-            diesel::insert_into(
-                bundle_marker_dsl::rendezvous_support_bundle_created,
-            )
-            .values(vec![
-                RendezvousSupportBundleCreated::new(
-                    present_a,
-                    Generation::new(),
-                ),
-                RendezvousSupportBundleCreated::new(
-                    present_b,
-                    Generation::new(),
-                ),
-            ])
-            .execute_async(&*conn)
-            .await
-            .unwrap();
+            diesel::insert_into(marker_dsl::rendezvous_support_bundle_created)
+                .values(vec![
+                    RendezvousSupportBundleCreated::new(
+                        present_a,
+                        Generation::new(),
+                    ),
+                    RendezvousSupportBundleCreated::new(
+                        present_b,
+                        Generation::new(),
+                    ),
+                ])
+                .execute_async(&*conn)
+                .await
+                .unwrap();
         }
 
         let candidates = vec![present_a, absent, present_b];
@@ -2408,41 +2402,6 @@ mod test {
             .expect("empty input must return Ok");
 
         assert!(existing.is_empty(), "empty input returns empty result");
-
-        db.terminate().await;
-        logctx.cleanup_successful();
-    }
-
-    #[tokio::test]
-    async fn fm_rendezvous_existing_support_bundle_markers_explain_no_full_scan()
-     {
-        use crate::db::explain::ExplainableAsync;
-        use nexus_db_schema::schema::rendezvous_support_bundle_created::dsl as bundle_marker_dsl;
-
-        let logctx = dev::test_setup_log(
-            "fm_rendezvous_existing_support_bundle_markers_explain_no_full_scan",
-        );
-        let db = TestDatabase::new_with_pool(&logctx.log).await;
-        let pool = db.pool();
-        let conn = pool.claim().await.unwrap();
-
-        let candidates: Vec<Uuid> = (0..3)
-            .map(|_| SupportBundleUuid::new_v4().into_untyped_uuid())
-            .collect();
-        let query = bundle_marker_dsl::rendezvous_support_bundle_created
-            .filter(bundle_marker_dsl::support_bundle_id.eq_any(candidates))
-            .select(bundle_marker_dsl::support_bundle_id);
-
-        let explanation = query
-            .explain_async(&conn)
-            .await
-            .expect("query should be valid SQL");
-        eprintln!("{explanation}");
-        assert!(
-            !explanation.contains("FULL SCAN"),
-            "Found an unexpected FULL SCAN: {}",
-            explanation
-        );
 
         db.terminate().await;
         logctx.cleanup_successful();

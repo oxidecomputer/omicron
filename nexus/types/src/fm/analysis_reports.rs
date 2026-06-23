@@ -491,7 +491,7 @@ mod tests {
                 .unwrap();
 
         let case3_id =
-            CaseUuid::from_str("88888888-8888-8888-8888-888888888888").unwrap();
+            CaseUuid::from_str("77777777-7777-7777-7777-777777777777").unwrap();
 
         let mut open_cases = BTreeMap::new();
         open_cases.insert(
@@ -519,7 +519,7 @@ mod tests {
         );
         let mut unmarked_support_bundle_requests = BTreeSet::new();
         unmarked_support_bundle_requests.insert(
-            SupportBundleUuid::from_str("77777777-7777-7777-7777-777777777777")
+            SupportBundleUuid::from_str("88888888-8888-8888-8888-888888888888")
                 .unwrap(),
         );
         closed_cases_copied_forward.insert(

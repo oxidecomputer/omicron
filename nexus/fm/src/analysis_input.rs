@@ -405,12 +405,16 @@ mod tests {
     use super::*;
     use crate::builder::SitrepBuilder;
     use crate::test_util::FmTest;
+    use nexus_types::alert::AlertClass;
     use nexus_types::alert::test_alerts;
     use nexus_types::fm;
+    use nexus_types::fm::case::AlertRequest;
     use nexus_types::fm::case::CaseEreport;
+    use nexus_types::fm::case::SupportBundleRequest;
     use nexus_types::fm::ereport::Reporter;
     use nexus_types::fm::{DiagnosisEngineKind, SitrepVersion};
     use nexus_types::inventory::SpType;
+    use nexus_types::support_bundle::BundleDataSelection;
     use omicron_common::api::external::Generation;
     use omicron_uuid_kinds::{
         CaseEreportUuid, CaseUuid, OmicronZoneUuid, SitrepUuid,
@@ -902,9 +906,6 @@ mod tests {
     /// leaving the carry-forward set.
     #[test]
     fn build_drops_closed_case_when_all_alerts_satisfied() {
-        use nexus_types::alert::AlertClass;
-        use nexus_types::fm::case::AlertRequest;
-
         let alert_id = AlertUuid::new_v4();
         let case_id = CaseUuid::new_v4();
         let parent_sitrep_id = SitrepUuid::new_v4();
@@ -952,9 +953,6 @@ mod tests {
     /// prevents resurrection).
     #[test]
     fn build_keeps_closed_case_intact_when_not_all_alerts_satisfied() {
-        use nexus_types::alert::AlertClass;
-        use nexus_types::fm::case::AlertRequest;
-
         let satisfied_alert_id = AlertUuid::new_v4();
         let unsatisfied_alert_id = AlertUuid::new_v4();
         let case_id = CaseUuid::new_v4();
@@ -1014,9 +1012,6 @@ mod tests {
     /// dropped requests are leaving the carry-forward set.
     #[test]
     fn build_drops_closed_case_when_all_bundles_satisfied() {
-        use nexus_types::fm::case::SupportBundleRequest;
-        use nexus_types::support_bundle::BundleDataSelection;
-
         let bundle_id = SupportBundleUuid::new_v4();
         let case_id = CaseUuid::new_v4();
         let parent_sitrep_id = SitrepUuid::new_v4();
@@ -1060,9 +1055,6 @@ mod tests {
     /// Satisfied requests are not pruned; the marker prevents resurrection.
     #[test]
     fn build_keeps_closed_case_intact_when_not_all_bundles_satisfied() {
-        use nexus_types::fm::case::SupportBundleRequest;
-        use nexus_types::support_bundle::BundleDataSelection;
-
         let satisfied_bundle_id = SupportBundleUuid::new_v4();
         let unsatisfied_bundle_id = SupportBundleUuid::new_v4();
         let case_id = CaseUuid::new_v4();

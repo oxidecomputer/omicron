@@ -207,12 +207,18 @@ mod tests {
     use super::*;
     use crate::analysis_input::Input;
     use nexus_inventory::CollectionBuilder;
+    use nexus_types::alert::AlertClass;
     use nexus_types::alert::test_alerts;
     use nexus_types::fm;
     use nexus_types::fm::SitrepVersion;
+    use nexus_types::fm::case::AlertRequest;
+    use nexus_types::fm::case::SupportBundleRequest;
     use nexus_types::inventory;
+    use nexus_types::support_bundle::BundleDataSelection;
     use omicron_test_utils::dev;
+    use omicron_uuid_kinds::AlertUuid;
     use omicron_uuid_kinds::OmicronZoneUuid;
+    use omicron_uuid_kinds::SupportBundleUuid;
     use std::sync::Arc;
 
     /// Build an empty inventory `Collection`. The id is irrelevant to these
@@ -436,10 +442,6 @@ mod tests {
     /// though no open-case builder mutations happened.
     #[test]
     fn carry_forward_drop_bumps_alert_generation() {
-        use nexus_types::alert::AlertClass;
-        use nexus_types::fm::case::AlertRequest;
-        use omicron_uuid_kinds::AlertUuid;
-
         let logctx =
             dev::test_setup_log("carry_forward_drop_bumps_alert_generation");
         let inv = make_collection();
@@ -510,16 +512,12 @@ mod tests {
         logctx.cleanup_successful();
     }
 
+    /// A closed case with an outstanding support-bundle request becomes
+    /// "satisfied" via marker presence, carry-forward drops it, and
+    /// support_bundle_generation bumps even though no open-case builder
+    /// mutations happened.
     #[test]
     fn carry_forward_drop_bumps_support_bundle_generation() {
-        // A closed case with an outstanding support-bundle request becomes
-        // "satisfied" via marker presence, carry-forward drops it, and
-        // support_bundle_generation bumps even though no open-case builder
-        // mutations happened.
-        use nexus_types::fm::case::SupportBundleRequest;
-        use nexus_types::support_bundle::BundleDataSelection;
-        use omicron_uuid_kinds::SupportBundleUuid;
-
         let logctx = dev::test_setup_log(
             "carry_forward_drop_bumps_support_bundle_generation",
         );
