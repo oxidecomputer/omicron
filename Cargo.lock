@@ -155,7 +155,7 @@ version = "1.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "40c48f72fd53cd289104fc64099abca73db4166ad86ea0b4341abe65af83dadc"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -166,7 +166,7 @@ checksum = "291e6a250ff86cd4a820112fb8898808a366d8f9f58ce16d1f538353ad55747d"
 dependencies = [
  "anstyle",
  "once_cell_polyfill",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -1576,7 +1576,7 @@ dependencies = [
 [[package]]
 name = "client-common"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=dc84a6ce494a9d004568b67e22add2285a04d887#dc84a6ce494a9d004568b67e22add2285a04d887"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=0d06cd1533cb8c376ac4ac30a278815c02e2f0e1#0d06cd1533cb8c376ac4ac30a278815c02e2f0e1"
 
 [[package]]
 name = "clipboard-win"
@@ -2528,7 +2528,7 @@ dependencies = [
 [[package]]
 name = "ddm-admin-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=dc84a6ce494a9d004568b67e22add2285a04d887#dc84a6ce494a9d004568b67e22add2285a04d887"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=0d06cd1533cb8c376ac4ac30a278815c02e2f0e1#0d06cd1533cb8c376ac4ac30a278815c02e2f0e1"
 dependencies = [
  "ddm-api-types-versions",
  "oxnet",
@@ -2542,7 +2542,7 @@ dependencies = [
 [[package]]
 name = "ddm-api-types-versions"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=dc84a6ce494a9d004568b67e22add2285a04d887#dc84a6ce494a9d004568b67e22add2285a04d887"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=0d06cd1533cb8c376ac4ac30a278815c02e2f0e1#0d06cd1533cb8c376ac4ac30a278815c02e2f0e1"
 dependencies = [
  "ddm-protocol",
  "oxnet",
@@ -2555,7 +2555,7 @@ dependencies = [
 [[package]]
 name = "ddm-protocol"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=dc84a6ce494a9d004568b67e22add2285a04d887#dc84a6ce494a9d004568b67e22add2285a04d887"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=0d06cd1533cb8c376ac4ac30a278815c02e2f0e1#0d06cd1533cb8c376ac4ac30a278815c02e2f0e1"
 dependencies = [
  "oxnet",
  "schemars 0.8.22",
@@ -6508,7 +6508,7 @@ dependencies = [
 [[package]]
 name = "mg-admin-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=dc84a6ce494a9d004568b67e22add2285a04d887#dc84a6ce494a9d004568b67e22add2285a04d887"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=0d06cd1533cb8c376ac4ac30a278815c02e2f0e1#0d06cd1533cb8c376ac4ac30a278815c02e2f0e1"
 dependencies = [
  "chrono",
  "client-common",
@@ -6528,7 +6528,7 @@ dependencies = [
 [[package]]
 name = "mg-api-types"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=dc84a6ce494a9d004568b67e22add2285a04d887#dc84a6ce494a9d004568b67e22add2285a04d887"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=0d06cd1533cb8c376ac4ac30a278815c02e2f0e1#0d06cd1533cb8c376ac4ac30a278815c02e2f0e1"
 dependencies = [
  "mg-api-types-versions",
 ]
@@ -6536,7 +6536,7 @@ dependencies = [
 [[package]]
 name = "mg-api-types-versions"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=dc84a6ce494a9d004568b67e22add2285a04d887#dc84a6ce494a9d004568b67e22add2285a04d887"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=0d06cd1533cb8c376ac4ac30a278815c02e2f0e1#0d06cd1533cb8c376ac4ac30a278815c02e2f0e1"
 dependencies = [
  "chrono",
  "nom 8.0.0",
@@ -8213,7 +8213,7 @@ version = "0.7.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "680998035259dcfcafe653688bf2aa6d3e2dc05e98be6ab46afb089dc84f1df8"
 dependencies = [
- "proc-macro-crate 3.4.0",
+ "proc-macro-crate 1.3.1",
  "proc-macro2",
  "quote",
  "syn 2.0.117",
@@ -13963,7 +13963,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3a766e1110788c36f4fa1c2b71b387a7815aa65f88ce0229841826633d93723e"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
