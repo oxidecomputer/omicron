@@ -12,13 +12,12 @@ use nexus_background_task_interface::Activator;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::datastore::FmRendezvousAlertCreateError;
+use nexus_db_queries::db::datastore::FmRendezvousSupportBundleCreateError;
 use nexus_db_queries::db::datastore::SupportBundleCreateParams;
-use nexus_db_queries::db::datastore::SupportBundleProvenance;
 use nexus_types::fm;
 use nexus_types::fm::case::AlertRequest;
 use nexus_types::internal_api::background::FmRendezvousStatus as Status;
 use nexus_types::internal_api::background::fm_rendezvous::*;
-use omicron_common::api::external::Error;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use serde_json::json;
 use slog_error_chain::InlineErrorChain;
@@ -403,32 +402,30 @@ impl FmRendezvous {
             };
             match self
                 .datastore
-                .support_bundle_create(
+                .fm_rendezvous_support_bundle_create(
                     &opctx,
                     SupportBundleCreateParams {
-                        provenance: SupportBundleProvenance::Fm {
-                            id: bundle_id,
-                            case_id,
-                            expected_support_bundle_generation,
-                        },
                         reason: &reason,
                         nexus_id: self.nexus_id,
                         user_comment: None,
                         data_selection: data_selection.clone(),
                     },
+                    bundle_id,
+                    case_id,
+                    expected_support_bundle_generation,
                 )
                 .await
             {
                 Ok(_) => {
                     status.bundles_created += 1;
                 }
-                Err(Error::ObjectAlreadyExists { .. }) => {
+                Err(FmRendezvousSupportBundleCreateError::AlreadyCreated) => {
                     // A prior activation already created this support bundle.
                     // The marker row in `rendezvous_support_bundle_created`
                     // prevents resurrection.
                     status.bundles_already_existed += 1;
                 }
-                Err(Error::Conflict { .. }) => {
+                Err(FmRendezvousSupportBundleCreateError::StaleSitrep) => {
                     // The current sitrep in the database has moved past ours.
                     // Abort the rest of this activation; a fresher one will
                     // pick up where we left off.
@@ -443,7 +440,10 @@ impl FmRendezvous {
                     status.stale_sitrep = true;
                     break;
                 }
-                Err(e) => {
+                Err(
+                    e @ (FmRendezvousSupportBundleCreateError::InsufficientCapacity
+                    | FmRendezvousSupportBundleCreateError::Database(_)),
+                ) => {
                     slog::warn!(
                         opctx.log,
                         "failed to create requested support bundle";
