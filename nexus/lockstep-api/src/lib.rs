@@ -43,6 +43,7 @@ use nexus_types::internal_api::views::UpdateStatus;
 use nexus_types::trust_quorum::TrustQuorumConfig;
 use nexus_types_versions::latest::headers::RangeRequest;
 use nexus_types_versions::latest::instance::Instance;
+use nexus_types_versions::v2025_11_20_00;
 use omicron_common::api::external::http_pagination::PaginatedById;
 use omicron_common::api::external::http_pagination::PaginatedByTimeAndId;
 use omicron_uuid_kinds::*;
@@ -484,7 +485,10 @@ pub trait NexusLockstepApi {
     async fn support_bundle_update(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<support_bundle::SupportBundlePath>,
-        body: TypedBody<support_bundle::SupportBundleUpdate>,
+        // The lockstep (internal) API is unversioned, so it stays on the
+        // lenient `SupportBundleUpdate` body rather than tracking the external
+        // API's value-semantics change.
+        body: TypedBody<v2025_11_20_00::support_bundle::SupportBundleUpdate>,
     ) -> Result<HttpResponseOk<SupportBundleInfo>, HttpError>;
 
     /// Get the current clickhouse policy

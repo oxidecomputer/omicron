@@ -452,7 +452,25 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let new_quota = new_quota.into_inner();
             let silo_lookup = nexus.silo_lookup(&opctx, path.silo)?;
             let quota = nexus
-                .silo_update_quota(&opctx, &silo_lookup, &new_quota)
+                .silo_update_quota(&opctx, &silo_lookup, new_quota.into())
+                .await?;
+            Ok(HttpResponseOk(quota.into()))
+        })
+        .await
+    }
+
+    async fn silo_quotas_update_v2025_11_20_00(
+        rqctx: RequestContext<ApiContext>,
+        path_params: Path<v2025_11_20_00::path_params::SiloPath>,
+        new_quota: TypedBody<v2025_11_20_00::silo::SiloQuotasUpdate>,
+    ) -> Result<HttpResponseOk<v2025_11_20_00::silo::SiloQuotas>, HttpError>
+    {
+        audit_and_time(&rqctx, |opctx, nexus| async move {
+            let path = path_params.into_inner();
+            let new_quota = new_quota.into_inner();
+            let silo_lookup = nexus.silo_lookup(&opctx, path.silo)?;
+            let quota = nexus
+                .silo_update_quota(&opctx, &silo_lookup, new_quota.into())
                 .await?;
             Ok(HttpResponseOk(quota.into()))
         })
@@ -1205,7 +1223,28 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let project_lookup =
                 nexus.project_lookup(&opctx, project_selector)?;
             let project = nexus
-                .project_update(&opctx, &project_lookup, &updated_project)
+                .project_update(&opctx, &project_lookup, updated_project.into())
+                .await?;
+            Ok(HttpResponseOk(project.into()))
+        })
+        .await
+    }
+
+    async fn project_update_v2025_11_20_00(
+        rqctx: RequestContext<ApiContext>,
+        path_params: Path<v2025_11_20_00::path_params::ProjectPath>,
+        updated_project: TypedBody<v2025_11_20_00::project::ProjectUpdate>,
+    ) -> Result<HttpResponseOk<v2025_11_20_00::project::Project>, HttpError>
+    {
+        audit_and_time(&rqctx, |opctx, nexus| async move {
+            let path = path_params.into_inner();
+            let updated_project = updated_project.into_inner();
+            let project_selector =
+                project::ProjectSelector { project: path.project };
+            let project_lookup =
+                nexus.project_lookup(&opctx, project_selector)?;
+            let project = nexus
+                .project_update(&opctx, &project_lookup, updated_project.into())
                 .await?;
             Ok(HttpResponseOk(project.into()))
         })
@@ -5724,8 +5763,48 @@ impl NexusExternalApi for NexusExternalApiImpl {
             };
             let subnet_lookup =
                 nexus.vpc_subnet_lookup(&opctx, subnet_selector)?;
+            // `custom_router` is `Nullable`: always present, possibly null. The
+            // inner `Option` directly expresses attach (`Some`) vs. detach
+            // (`None`).
+            let custom_router = subnet_params.custom_router.0.clone();
             let subnet = nexus
-                .vpc_update_subnet(&opctx, &subnet_lookup, &subnet_params)
+                .vpc_update_subnet(
+                    &opctx,
+                    &subnet_lookup,
+                    subnet_params.into(),
+                    custom_router,
+                )
+                .await?;
+            Ok(HttpResponseOk(subnet.into()))
+        })
+        .await
+    }
+
+    async fn vpc_subnet_update_v2025_11_20_00(
+        rqctx: RequestContext<ApiContext>,
+        path_params: Path<v2025_11_20_00::path_params::SubnetPath>,
+        query_params: Query<v2025_11_20_00::vpc::OptionalVpcSelector>,
+        subnet_params: TypedBody<v2025_11_20_00::vpc::VpcSubnetUpdate>,
+    ) -> Result<HttpResponseOk<v2025_11_20_00::vpc::VpcSubnet>, HttpError> {
+        audit_and_time(&rqctx, |opctx, nexus| async move {
+            let path = path_params.into_inner();
+            let query = query_params.into_inner();
+            let subnet_params = subnet_params.into_inner();
+            let subnet_selector = vpc::SubnetSelector {
+                project: query.project,
+                vpc: query.vpc,
+                subnet: path.subnet,
+            };
+            let subnet_lookup =
+                nexus.vpc_subnet_lookup(&opctx, subnet_selector)?;
+            let custom_router = subnet_params.custom_router.clone();
+            let subnet = nexus
+                .vpc_update_subnet(
+                    &opctx,
+                    &subnet_lookup,
+                    subnet_params.into(),
+                    custom_router,
+                )
                 .await?;
             Ok(HttpResponseOk(subnet.into()))
         })
@@ -8181,6 +8260,29 @@ impl NexusExternalApi for NexusExternalApiImpl {
         body: TypedBody<support_bundle::SupportBundleUpdate>,
     ) -> Result<HttpResponseOk<support_bundle::SupportBundleInfo>, HttpError>
     {
+        audit_and_time(&rqctx, |opctx, nexus| async move {
+            let path = path_params.into_inner();
+            let update = body.into_inner();
+            let bundle = nexus
+                .support_bundle_update_user_comment(
+                    &opctx,
+                    SupportBundleUuid::from_untyped_uuid(path.bundle_id),
+                    update.user_comment.0,
+                )
+                .await?;
+            Ok(HttpResponseOk(bundle.into()))
+        })
+        .await
+    }
+
+    async fn support_bundle_update_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<v2025_11_20_00::support_bundle::SupportBundlePath>,
+        body: TypedBody<v2025_11_20_00::support_bundle::SupportBundleUpdate>,
+    ) -> Result<
+        HttpResponseOk<v2025_11_20_00::support_bundle::SupportBundleInfo>,
+        HttpError,
+    > {
         audit_and_time(&rqctx, |opctx, nexus| async move {
             let path = path_params.into_inner();
             let update = body.into_inner();

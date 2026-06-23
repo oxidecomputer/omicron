@@ -39,7 +39,6 @@ use nexus_types::external_api::rack::RackMembershipConfigPathParams;
 use nexus_types::external_api::sled::{SledPolicy, SledSelector};
 use nexus_types::external_api::support_bundle::{
     SupportBundleCreate, SupportBundleFilePath, SupportBundlePath,
-    SupportBundleUpdate,
 };
 use nexus_types::internal_api::params::InstanceMigrateRequest;
 use nexus_types::internal_api::params::RackInitializationRequest;
@@ -54,6 +53,7 @@ use nexus_types::internal_api::views::to_list;
 use nexus_types::trust_quorum::TrustQuorumConfig;
 use nexus_types_versions::latest::headers::RangeRequest;
 use nexus_types_versions::latest::instance::Instance;
+use nexus_types_versions::v2025_11_20_00::support_bundle::SupportBundleUpdate;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::http_pagination::PaginatedById;
 use omicron_common::api::external::http_pagination::PaginatedByTimeAndId;

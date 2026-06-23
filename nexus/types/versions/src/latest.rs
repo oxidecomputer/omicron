@@ -352,7 +352,8 @@ pub mod project {
     pub use crate::v2025_11_20_00::project::Project;
     pub use crate::v2025_11_20_00::project::ProjectCreate;
     pub use crate::v2025_11_20_00::project::ProjectSelector;
-    pub use crate::v2025_11_20_00::project::ProjectUpdate;
+
+    pub use crate::v2026_06_23_00::project::ProjectUpdate;
 }
 
 pub mod saml {
@@ -378,12 +379,13 @@ pub mod silo {
     pub use crate::v2025_11_20_00::silo::SiloIdentityMode;
     pub use crate::v2025_11_20_00::silo::SiloQuotas;
     pub use crate::v2025_11_20_00::silo::SiloQuotasCreate;
-    pub use crate::v2025_11_20_00::silo::SiloQuotasUpdate;
     pub use crate::v2025_11_20_00::silo::SiloSelector;
     pub use crate::v2025_11_20_00::silo::SiloUtilization;
     pub use crate::v2025_11_20_00::silo::UserProvisionType;
     pub use crate::v2025_11_20_00::silo::Utilization;
     pub use crate::v2025_11_20_00::silo::VirtualResourceCounts;
+
+    pub use crate::v2026_06_23_00::silo::SiloQuotasUpdate;
 }
 
 pub mod snapshot {
@@ -399,7 +401,8 @@ pub mod support_bundle {
     pub use crate::v2025_11_20_00::support_bundle::SupportBundleInfo;
     pub use crate::v2025_11_20_00::support_bundle::SupportBundlePath;
     pub use crate::v2025_11_20_00::support_bundle::SupportBundleState;
-    pub use crate::v2025_11_20_00::support_bundle::SupportBundleUpdate;
+
+    pub use crate::v2026_06_23_00::support_bundle::SupportBundleUpdate;
 }
 
 pub mod switch {
@@ -454,8 +457,9 @@ pub mod vpc {
     pub use crate::v2025_11_20_00::vpc::VpcSelector;
     pub use crate::v2025_11_20_00::vpc::VpcSubnet;
     pub use crate::v2025_11_20_00::vpc::VpcSubnetCreate;
-    pub use crate::v2025_11_20_00::vpc::VpcSubnetUpdate;
     pub use crate::v2025_11_20_00::vpc::VpcUpdate;
+
+    pub use crate::v2026_06_23_00::vpc::VpcSubnetUpdate;
 }
 
 pub mod asset {

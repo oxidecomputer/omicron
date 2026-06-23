@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "2026060800.0.0"
+    "version": "2026062300.0.0"
   },
   "paths": {
     "/device/auth": {
@@ -12146,7 +12146,6 @@
           "system/silos"
         ],
         "summary": "Update resource quotas for silo",
-        "description": "If a quota value is not specified, it will remain unchanged.",
         "operationId": "silo_quotas_update",
         "parameters": [
           {
@@ -26375,22 +26374,20 @@
         ]
       },
       "ProjectUpdate": {
-        "description": "Updateable properties of a `Project`",
+        "description": "Updateable properties of a `Project`\n\nA `PUT` replaces the resource, so every field is required: `name` and `description` must both be present.",
         "type": "object",
         "properties": {
           "description": {
-            "nullable": true,
             "type": "string"
           },
           "name": {
-            "nullable": true,
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Name"
-              }
-            ]
+            "$ref": "#/components/schemas/Name"
           }
-        }
+        },
+        "required": [
+          "description",
+          "name"
+        ]
       },
       "Quantile": {
         "description": "Structure for estimating the p-quantile of a population.\n\nThis is based on the P² algorithm for estimating quantiles using constant space.\n\nThe algorithm consists of maintaining five markers: the minimum, the p/2-, p-, and (1 + p)/2 quantiles, and the maximum.",
@@ -27682,17 +27679,15 @@
         ]
       },
       "SiloQuotasUpdate": {
-        "description": "Updateable properties of a Silo's resource limits. If a value is omitted it will not be updated.",
+        "description": "Updateable properties of a Silo's resource limits.\n\nA `PUT` replaces the resource, so every quota value is required.",
         "type": "object",
         "properties": {
           "cpus": {
-            "nullable": true,
             "description": "The amount of virtual CPUs available for running instances in the Silo",
             "type": "integer",
             "format": "int64"
           },
           "memory": {
-            "nullable": true,
             "description": "The amount of RAM (in bytes) available for running instances in the Silo",
             "allOf": [
               {
@@ -27701,7 +27696,6 @@
             ]
           },
           "storage": {
-            "nullable": true,
             "description": "The amount of storage (in bytes) available for disks or snapshots",
             "allOf": [
               {
@@ -27709,7 +27703,12 @@
               }
             ]
           }
-        }
+        },
+        "required": [
+          "cpus",
+          "memory",
+          "storage"
+        ]
       },
       "SiloResultsPage": {
         "description": "A single page of results",
@@ -28853,10 +28852,13 @@
         "properties": {
           "user_comment": {
             "nullable": true,
-            "description": "User comment for the support bundle",
+            "description": "User comment for the support bundle\n\nMust be present, but may be explicit `null` to clear the comment. The prior version treats an omitted comment as a request to clear it; value semantics requires the client to be explicit.",
             "type": "string"
           }
-        }
+        },
+        "required": [
+          "user_comment"
+        ]
       },
       "Switch": {
         "description": "An operator's view of a Switch.",
@@ -31533,7 +31535,7 @@
         ]
       },
       "VpcSubnetUpdate": {
-        "description": "Updateable properties of a `VpcSubnet`",
+        "description": "Updateable properties of a `VpcSubnet`\n\nA `PUT` replaces the resource, so `name` and `description` are required. `custom_router` is clearable: it must be present, but may be explicit `null` to detach any custom router.",
         "type": "object",
         "properties": {
           "custom_router": {
@@ -31546,18 +31548,17 @@
             ]
           },
           "description": {
-            "nullable": true,
             "type": "string"
           },
           "name": {
-            "nullable": true,
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Name"
-              }
-            ]
+            "$ref": "#/components/schemas/Name"
           }
-        }
+        },
+        "required": [
+          "custom_router",
+          "description",
+          "name"
+        ]
       },
       "VpcUpdate": {
         "description": "Updateable properties of a `Vpc`",

@@ -6955,6 +6955,7 @@ dependencies = [
  "nexus-db-schema",
  "nexus-defaults",
  "nexus-types",
+ "nexus-types-versions",
  "omicron-certificates",
  "omicron-cockroach-metrics",
  "omicron-common",

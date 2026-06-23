@@ -184,12 +184,13 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         vpc_subnet_lookup: &lookup::VpcSubnet<'_>,
-        params: &vpc::VpcSubnetUpdate,
+        update: db::model::VpcSubnetUpdate,
+        custom_router: Option<NameOrId>,
     ) -> UpdateResult<VpcSubnet> {
         let (.., authz_vpc, authz_subnet) =
             vpc_subnet_lookup.lookup_for(authz::Action::Modify).await?;
 
-        let custom_router = match &params.custom_router {
+        let custom_router = match &custom_router {
             Some(k) => Some(
                 self.vpc_router_lookup_for_attach(opctx, k, &authz_vpc).await?,
             ),
@@ -201,7 +202,7 @@ impl super::Nexus {
             authz_vpc,
             authz_subnet,
             custom_router,
-            update: params.clone().into(),
+            update,
         };
 
         let saga_outputs = self

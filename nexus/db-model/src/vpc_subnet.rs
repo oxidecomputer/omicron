@@ -13,6 +13,7 @@ use nexus_db_schema::schema::network_interface;
 use nexus_db_schema::schema::vpc_subnet;
 use nexus_types::external_api::vpc;
 use nexus_types::identity::Resource;
+use nexus_types_versions::v2025_11_20_00::vpc as vpc_v2025_11_20_00;
 use omicron_common::api::external;
 use serde::Deserialize;
 use serde::Serialize;
@@ -117,8 +118,26 @@ pub struct VpcSubnetUpdate {
     pub custom_router_id: Option<Option<Uuid>>,
 }
 
+// `vpc` resolves to the latest (strict, value-semantics) wire type, so `name`
+// and `description` are present. `custom_router_id` is left `None` here: the
+// custom router attachment is resolved and applied separately (see
+// `vpc_update_subnet` in the datastore), driven by the wire `custom_router`
+// field rather than this changeset.
 impl From<vpc::VpcSubnetUpdate> for VpcSubnetUpdate {
     fn from(params: vpc::VpcSubnetUpdate) -> Self {
+        Self {
+            name: Some(Name(params.name)),
+            description: Some(params.description),
+            time_modified: Utc::now(),
+            custom_router_id: None,
+        }
+    }
+}
+
+// The prior (lenient) wire type omits absent fields as `None`, which
+// `AsChangeset` skips, preserving the existing value.
+impl From<vpc_v2025_11_20_00::VpcSubnetUpdate> for VpcSubnetUpdate {
+    fn from(params: vpc_v2025_11_20_00::VpcSubnetUpdate) -> Self {
         Self {
             name: params.identity.name.map(Name),
             description: params.identity.description,

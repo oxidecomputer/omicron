@@ -85,13 +85,11 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         project_lookup: &lookup::Project<'_>,
-        new_params: &project::ProjectUpdate,
+        updates: db::model::ProjectUpdate,
     ) -> UpdateResult<db::model::Project> {
         let (.., authz_project) =
             project_lookup.lookup_for(authz::Action::Modify).await?;
-        self.db_datastore
-            .project_update(opctx, &authz_project, new_params.clone().into())
-            .await
+        self.db_datastore.project_update(opctx, &authz_project, updates).await
     }
 
     pub(crate) async fn project_delete(

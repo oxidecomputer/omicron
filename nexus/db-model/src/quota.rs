@@ -2,6 +2,7 @@ use super::ByteCount;
 use chrono::{DateTime, Utc};
 use nexus_db_schema::schema::silo_quotas;
 use nexus_types::external_api::silo;
+use nexus_types_versions::v2025_11_20_00::silo as silo_v2025_11_20_00;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -86,8 +87,23 @@ pub struct SiloQuotasUpdate {
     pub time_modified: DateTime<Utc>,
 }
 
+// `silo` resolves to the latest (strict, value-semantics) wire type, so every
+// field is present.
 impl From<silo::SiloQuotasUpdate> for SiloQuotasUpdate {
     fn from(params: silo::SiloQuotasUpdate) -> Self {
+        Self {
+            cpus: Some(params.cpus),
+            memory: Some(params.memory.into()),
+            storage: Some(params.storage.into()),
+            time_modified: Utc::now(),
+        }
+    }
+}
+
+// The prior (lenient) wire type omits absent fields as `None`, which
+// `AsChangeset` skips, preserving the existing value.
+impl From<silo_v2025_11_20_00::SiloQuotasUpdate> for SiloQuotasUpdate {
+    fn from(params: silo_v2025_11_20_00::SiloQuotasUpdate) -> Self {
         Self {
             cpus: params.cpus,
             memory: params.memory.map(|f| f.into()),
