@@ -153,6 +153,85 @@ Each exercises a distinct part of the recipe:
   new PUT bodies to `endpoints.rs` as needed.
 - OpenAPI + TS client regen produce the expected `required` arrays.
 
+## Lessons from the PoC implementation (2026-06-24)
+
+The PoC (4 endpoints, one `UPDATE_VALUE_SEMANTICS` version) compiles, passes all
+touched integration tests (43/43), and validated all four conversion shapes. The
+architecture (shape B, nexus-side conversion) held up — nothing surfaced that
+argues for revisiting it. Findings worth carrying into the sweep:
+
+- **Hand-written cost per endpoint is small and mechanical.** The PoC was ~410
+  hand-written Rust insertions across 20 files, but a chunk is one-time version
+  scaffolding (`update_value_semantics/mod.rs`, `lib.rs`, `latest.rs`
+  re-exports). Marginal per-endpoint ≈ strict type (~20 LOC) + trait def (~17) +
+  handler (~25) + nexus `*_vN` method (~18) + db-model `From` tweak (~5), plus
+  regen. ~14 of the ~15 remaining are the identity-flatten pattern (near-copies
+  of `project_update`). Full sweep ≈ 4× the hand-written Rust (~1.2–1.5k LOC).
+
+- **Test blast radius was the underestimated part, not the Rust.** The flip to
+  value semantics forces every test helper that did a *partial* update to switch
+  to read-modify-write (e.g., `set_custom_router` now GETs the subnet first to
+  resend name/description). Tests that asserted "omit field ⇒ unchanged" had to
+  resend the unchanged value. Promote "test + helper fallout" to a first-class
+  line item in the recipe.
+
+- **The generated client breaks `end-to-end-tests` — not just nexus tests.**
+  `clients/oxide-client` runs `progenitor::generate_api!` against
+  `openapi/nexus/nexus-latest.json`, so tightening the spec makes the generated
+  `SiloQuotasUpdate` etc. lose their `Option`s; `end-to-end-tests/src/bin/
+  bootstrap.rs` needed updating. Any consumer of the generated external client is
+  in scope. (The TS console client is the other one.)
+
+- **`db-model`'s `From<latest>` now `Some`-wraps every field.** The changeset
+  type keeps `Option` fields (for `AsChangeset` None-skipping), but latest is now
+  strict, so the conversion wraps each field in `Some(...)`. Consequence: reading
+  db-model, the changeset *looks* lenient even though the latest wire contract is
+  strict. Comments paper over it. Acceptable, but it's a wart that recurs 15×; an
+  alternative is splitting the changeset (a strict "from latest" + the Option
+  merge type) — probably not worth it, but note it.
+
+- **The conversion is split across crates, asymmetrically.** Strict→changeset
+  goes through db-model `From<latest>`; lenient→changeset is a hand-written nexus
+  `*_vN` method. Reading one endpoint you bounce between db-model and the nexus
+  app layer. This was the deliberate price of keeping db-model version-clean.
+
+- **No integration test exercised any *old* API version before this PoC.** The
+  only version-header test (`test_request_without_api_version` in `updates.rs`)
+  checks header *absence*. So every older-version shim handler in the external
+  API was untested end-to-end — a standing gap, broader than this change. The PoC
+  adds the first one: `test_project_update_prior_version_partial` (in `basic.rs`)
+  pins `api-version` to the prior version, omits `name`, and asserts it's
+  preserved, plus that the latest version rejects the same partial body. **Make a
+  prior-version regression test part of the standard recipe**, and consider a
+  separate effort to backfill old-version coverage generally.
+
+- **Every `Nullable` field in the PoC is clear-on-omit in the old version — the
+  audit's "preserve-on-omit" bucketing was incomplete.** Both fields that became
+  `Nullable<T>` clear on omit in the prior version: `support_bundle.user_comment`
+  (the known latent bug) and `vpc_subnet.custom_router`, which *detaches* on omit
+  because the datastore maps an absent router to `custom_router_id = Some(None)`
+  (explicit NULL), not a skipped AsChangeset column. The audit bucketed
+  `vpc_subnet` as preserve-on-omit, but that only holds for its name/description
+  columns. Confirmed by `test_vpc_subnet_update_prior_version_clears_custom_router`
+  (in `vpc_routers.rs`). Consequence for the sweep: don't assume a field that
+  becomes `Nullable` was preserve-on-omit before — audit each field's *actual*
+  datastore path. The clean case the regression test ideally wants (old-omit
+  *preserves* a nullable column, new version requires it explicitly) does **not**
+  occur in the PoC; it'll appear for genuinely nullable AsChangeset columns
+  elsewhere in the sweep, and that's where a preserve-on-omit regression test
+  earns its keep. For the two PoC `Nullable` fields, the right regression test
+  pins the (pre-existing, arguably buggy) clear-on-omit behavior instead.
+
+- **Lockstep / internal-API twins are a wrinkle.** `support_bundle_update` exists
+  in both the external API and the (unversioned) lockstep API. The PoC pins the
+  lockstep body to the `v2025_11_20_00` lenient type. **Open: we'll probably want
+  to make the value-semantics change in the lockstep API too** — internal APIs
+  are unversioned so there's no back-compat constraint, and doing it there may
+  *remove* redundant code (the lockstep handler could share the strict shape
+  rather than carrying a pinned older type). Worth checking how many converted
+  endpoints have internal twins and whether converting them nets a code
+  reduction.
+
 ## Rollout after PoC
 
 - Land the PoC; review the recipe and the diff-per-endpoint cost.
@@ -249,3 +328,10 @@ David, leaning no.
   value-shaped, exclude from the sweep.
 - BGP config update hasn't shipped yet — it can simply be made strict now with
   no compat version, independent of this sweep.
+- Lockstep / internal API: should the value-semantics change also apply to the
+  internal (unversioned) twins (e.g., `support_bundle_update`)? Likely yes — no
+  back-compat constraint there, and it may remove redundant code rather than
+  pinning the older lenient type. See the PoC lessons section. (David, 2026-06-24)
+- Make a prior-version regression test (partial body via `api-version` header)
+  part of the standard recipe? PoC adds the first one for `project_update`;
+  no other integration test exercises an old API version at all.
