@@ -29,6 +29,7 @@ use nexus_types::external_api::vpc;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::IdentityMetadataUpdateParams;
 use omicron_common::api::external::NameOrId;
+use omicron_common::api::external::Nullable;
 use omicron_common::api::external::SimpleIdentityOrName;
 use omicron_common::api::internal::shared::ResolvedVpcRoute;
 use omicron_common::api::internal::shared::RouterTarget;
@@ -336,11 +337,9 @@ async fn test_vpc_routers_attach_to_subnet(
             "/v1/vpc-subnets/{subnet_name}?project={PROJECT_NAME}&vpc={VPC_NAME}"
         ),
         &vpc::VpcSubnetUpdate {
-            identity: IdentityMetadataUpdateParams {
-                name: None,
-                description: None,
-            },
-            custom_router: Some(routers[0].identity.id.into()),
+            name: subnet_name.parse().unwrap(),
+            description: "".to_string(),
+            custom_router: Nullable(Some(routers[0].identity.id.into())),
         },
         StatusCode::BAD_REQUEST,
     )
@@ -400,11 +399,9 @@ async fn test_vpc_routers_attach_to_subnet(
         client,
         &format!("/v1/vpc-subnets/default?project={PROJECT_NAME}&vpc=vpc1"),
         &vpc::VpcSubnetUpdate {
-            identity: IdentityMetadataUpdateParams {
-                name: None,
-                description: None,
-            },
-            custom_router: Some(router.identity.id.into()),
+            name: "default".parse().unwrap(),
+            description: "".to_string(),
+            custom_router: Nullable(Some(router.identity.id.into())),
         },
         StatusCode::BAD_REQUEST,
     )
@@ -693,17 +690,26 @@ async fn set_custom_router(
     vpc_name: &str,
     custom_router: Option<NameOrId>,
 ) -> vpc::VpcSubnet {
+    let url = format!(
+        "/v1/vpc-subnets/{subnet_name}?project={PROJECT_NAME}&vpc={vpc_name}"
+    );
+    // The update body now has value semantics, so it must carry the full
+    // representation. Read the current subnet to preserve its name and
+    // description while changing only the custom router attachment.
+    let current: vpc::VpcSubnet = NexusRequest::object_get(client, &url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .unwrap()
+        .parsed_body()
+        .unwrap();
     object_put(
         client,
-        &format!(
-            "/v1/vpc-subnets/{subnet_name}?project={PROJECT_NAME}&vpc={vpc_name}"
-        ),
+        &url,
         &vpc::VpcSubnetUpdate {
-            identity: IdentityMetadataUpdateParams {
-                name: None,
-                description: None,
-            },
-            custom_router,
+            name: current.identity.name.clone(),
+            description: current.identity.description.clone(),
+            custom_router: Nullable(custom_router),
         },
     )
     .await

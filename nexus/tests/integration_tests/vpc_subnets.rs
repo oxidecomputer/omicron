@@ -23,8 +23,8 @@ use nexus_types::external_api::vpc::{
     VpcSubnet, VpcSubnetCreate, VpcSubnetUpdate,
 };
 use omicron_common::api::external::IdentityMetadataCreateParams;
-use omicron_common::api::external::IdentityMetadataUpdateParams;
 use omicron_common::api::external::Ipv6NetExt;
+use omicron_common::api::external::Nullable;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
 use oxnet::Ipv6Net;
@@ -334,11 +334,9 @@ async fn test_vpc_subnets(cptestctx: &ControlPlaneTestContext) {
 
     // update first subnet
     let update_params = VpcSubnetUpdate {
-        identity: IdentityMetadataUpdateParams {
-            name: Some("new-name".parse().unwrap()),
-            description: Some("another description".to_string()),
-        },
-        custom_router: None,
+        name: "new-name".parse().unwrap(),
+        description: "another description".to_string(),
+        custom_router: Nullable(None),
     };
     NexusRequest::object_put(client, &subnet_url, Some(&update_params))
         .authn_as(AuthnMode::PrivilegedUser)

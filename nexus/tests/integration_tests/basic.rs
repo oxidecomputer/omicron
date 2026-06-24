@@ -14,7 +14,6 @@ use nexus_types::external_api::project;
 use nexus_types::external_api::project::Project;
 use nexus_types::external_api::system;
 use omicron_common::api::external::IdentityMetadataCreateParams;
-use omicron_common::api::external::IdentityMetadataUpdateParams;
 use omicron_common::api::external::Name;
 use serde::Serialize;
 use uuid::Uuid;
@@ -260,10 +259,8 @@ async fn test_projects_basic(cptestctx: &ControlPlaneTestContext) {
     NexusRequest::new(
         RequestBuilder::new(client, Method::PUT, "/v1/projects/simproject2")
             .body(Some(&project::ProjectUpdate {
-                identity: IdentityMetadataUpdateParams {
-                    name: None,
-                    description: None,
-                },
+                name: "simproject2".parse().unwrap(),
+                description: "".to_string(),
             }))
             .expect_status(Some(StatusCode::NOT_FOUND)),
     )
@@ -300,11 +297,10 @@ async fn test_projects_basic(cptestctx: &ControlPlaneTestContext) {
 
     // Update "simproject3".  We'll make sure that's reflected in the other
     // requests.
+    // `name` is unchanged ("simproject3"); value semantics requires resending it.
     let project_update = project::ProjectUpdate {
-        identity: IdentityMetadataUpdateParams {
-            name: None,
-            description: Some("Li'l lightnin'".to_string()),
-        },
+        name: "simproject3".parse().unwrap(),
+        description: "Li'l lightnin'".to_string(),
     };
     let project = NexusRequest::object_put(
         client,
@@ -331,10 +327,8 @@ async fn test_projects_basic(cptestctx: &ControlPlaneTestContext) {
     // operation under the hood.  This case also exercises changes to multiple
     // fields in one request.
     let project_update = project::ProjectUpdate {
-        identity: IdentityMetadataUpdateParams {
-            name: Some("lil-lightnin".parse().unwrap()),
-            description: Some("little lightning".to_string()),
-        },
+        name: "lil-lightnin".parse().unwrap(),
+        description: "little lightning".to_string(),
     };
     let project = NexusRequest::object_put(
         client,
