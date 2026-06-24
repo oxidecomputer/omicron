@@ -61,7 +61,7 @@ enum InstallMethod {
 }
 
 /// Packages to install or bundle in the host OS image.
-const HOST_IMAGE_PACKAGES: [(&PackageName, InstallMethod); 8] = [
+const HOST_IMAGE_PACKAGES: [(&PackageName, InstallMethod); 9] = [
     (&PackageName::new_const("mg-ddm-gz"), InstallMethod::Install),
     (&PackageName::new_const("omicron-sled-agent"), InstallMethod::Install),
     (&PackageName::new_const("overlay"), InstallMethod::Bundle),
@@ -70,6 +70,7 @@ const HOST_IMAGE_PACKAGES: [(&PackageName, InstallMethod); 8] = [
     (&PackageName::new_const("pumpkind-gz"), InstallMethod::Install),
     (&PackageName::new_const("crucible-utils"), InstallMethod::Install),
     (&PackageName::new_const("switch-asic"), InstallMethod::Bundle),
+    (&PackageName::new_const("overwatch"), InstallMethod::Install),
 ];
 /// Packages to install or bundle in the recovery (trampoline) OS image.
 const RECOVERY_IMAGE_PACKAGES: [(&PackageName, InstallMethod); 2] = [
