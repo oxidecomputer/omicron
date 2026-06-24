@@ -135,7 +135,7 @@ async fn test_vpc_routers_crud_operations(cptestctx: &ControlPlaneTestContext) {
                     description: String::from("this is not a router"),
                 },
             }))
-            .expect_status(Some(StatusCode::BAD_REQUEST)),
+            .expect_status(Some(StatusCode::CONFLICT)),
     )
     .authn_as(AuthnMode::PrivilegedUser)
     .execute()

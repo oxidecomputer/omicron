@@ -71,7 +71,7 @@ async fn test_ssh_keys(cptestctx: &ControlPlaneTestContext) {
     let error: dropshot::HttpErrorResponseBody =
         NexusRequest::expect_failure_with_body(
             client,
-            http::StatusCode::BAD_REQUEST,
+            http::StatusCode::CONFLICT,
             http::Method::POST,
             "/v1/me/ssh-keys",
             &SshKeyCreate {

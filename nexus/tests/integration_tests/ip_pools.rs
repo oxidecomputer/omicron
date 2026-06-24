@@ -134,7 +134,7 @@ async fn test_ip_pool_basic_crud(cptestctx: &ControlPlaneTestContext) {
             },
             IpVersion::V4,
         ),
-        StatusCode::BAD_REQUEST,
+        StatusCode::CONFLICT,
     )
     .await;
 
@@ -508,7 +508,7 @@ async fn test_ip_pool_silo_link(cptestctx: &ControlPlaneTestContext) {
         client,
         "/v1/system/ip-pools/p0/silos",
         &params,
-        StatusCode::BAD_REQUEST,
+        StatusCode::CONFLICT,
     )
     .await;
     assert_eq!(error.error_code.unwrap(), "ObjectAlreadyExists");
@@ -560,13 +560,9 @@ async fn test_ip_pool_silo_link(cptestctx: &ControlPlaneTestContext) {
     // creating a third pool and trying to link it as default: true should fail
     create_ipv4_pool(client, "p2").await;
     let url = "/v1/system/ip-pools/p2/silos";
-    let error = object_create_error(
-        client,
-        &url,
-        &link_params,
-        StatusCode::BAD_REQUEST,
-    )
-    .await;
+    let error =
+        object_create_error(client, &url, &link_params, StatusCode::CONFLICT)
+            .await;
     assert_eq!(error.error_code.unwrap(), "ObjectAlreadyExists");
 
     // unlink p1 from silo (doesn't matter that it's a default)

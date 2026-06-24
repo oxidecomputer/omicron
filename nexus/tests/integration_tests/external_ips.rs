@@ -616,7 +616,7 @@ async fn test_floating_ip_create_name_in_use(
                 },
             },
         }))
-        .expect_status(Some(StatusCode::BAD_REQUEST)),
+        .expect_status(Some(StatusCode::CONFLICT)),
     )
     .authn_as(AuthnMode::PrivilegedUser)
     .execute()

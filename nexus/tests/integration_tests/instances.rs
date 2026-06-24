@@ -395,7 +395,7 @@ async fn test_instances_create_reboot_halt(
                 multicast_groups: Vec::new(),
                 enable_jumbo_frames: false,
             }))
-            .expect_status(Some(StatusCode::BAD_REQUEST)),
+            .expect_status(Some(StatusCode::CONFLICT)),
     )
     .authn_as(AuthnMode::PrivilegedUser)
     .execute()

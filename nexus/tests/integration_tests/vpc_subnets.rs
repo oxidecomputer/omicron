@@ -268,7 +268,7 @@ async fn test_vpc_subnets(cptestctx: &ControlPlaneTestContext) {
     };
     let error: dropshot::HttpErrorResponseBody = NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &subnets_url)
-            .expect_status(Some(StatusCode::BAD_REQUEST))
+            .expect_status(Some(StatusCode::CONFLICT))
             .body(Some(&new_subnet)),
     )
     .authn_as(AuthnMode::PrivilegedUser)
