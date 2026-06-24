@@ -22,7 +22,7 @@ use nexus_db_model::{
 use nexus_types::external_api::networking;
 use nexus_types::identity::Resource;
 use omicron_common::api::external::http_pagination::PaginatedBy;
-use omicron_common::api::external::{self, IdentityMetadataUpdateParams};
+use omicron_common::api::external::{self};
 use omicron_common::api::external::{
     CreateResult, DeleteResult, Error, ListResultVec, LookupResult, NameOrId,
     ResourceType, UpdateResult,
@@ -274,71 +274,58 @@ impl DataStore {
                 .map_err(|e| lookup_err(e, not_found_err, msg))?;
 
             let networking::BgpConfigUpdate {
-                identity:
-                    IdentityMetadataUpdateParams {
-                        name: update_name,
-                        description: update_description,
-                    },
-                bgp_announce_set_id: update_bgp_announce_set_id,
-                max_paths: update_max_paths,
+                name: new_name,
+                description: new_description,
+                asn,
+                bgp_announce_set_id: new_bgp_announce_set_id,
+                max_paths: new_max_paths,
             } = update;
 
+            // Check that asn hasn't changed
+            if *existing.asn != *asn {
+                return Err(
+                    err.bail(Error::invalid_request("asn cannot be updated"))
+                );
+            }
+
             // Resolve bgp_announce_set_id if an update was requested
-            let new_bgp_announce_set_id = match &update_bgp_announce_set_id {
-                None => existing.bgp_announce_set_id,
-                Some(name_or_id) => {
-                    let (query, not_found_err, msg) = match name_or_id {
-                        NameOrId::Id(id) => (
-                            announce_set_dsl::bgp_announce_set
-                                .filter(bgp_announce_set::id.eq(*id))
-                                .into_boxed(),
-                            Error::not_found_by_id(
-                                ResourceType::BgpAnnounceSet,
-                                id,
-                            ),
-                            "failed to lookup announce set by id",
-                        ),
-                        NameOrId::Name(name) => (
-                            announce_set_dsl::bgp_announce_set
-                                .filter(
-                                    bgp_announce_set::name.eq(name.to_string()),
-                                )
-                                .into_boxed(),
-                            Error::not_found_by_name(
-                                ResourceType::BgpAnnounceSet,
-                                name,
-                            ),
-                            "failed to lookup announce set by name",
-                        ),
-                    };
-                    query
-                        .filter(bgp_announce_set::time_deleted.is_null())
-                        .select(bgp_announce_set::id)
-                        .limit(1)
-                        .first_async::<Uuid>(&conn)
-                        .await
-                        .map_err(|e| lookup_err(e, not_found_err, msg))?
-                }
+            let (query, not_found_err, msg) = match &new_bgp_announce_set_id {
+                NameOrId::Id(id) => (
+                    announce_set_dsl::bgp_announce_set
+                        .filter(bgp_announce_set::id.eq(*id))
+                        .into_boxed(),
+                    Error::not_found_by_id(ResourceType::BgpAnnounceSet, id),
+                    "failed to lookup announce set by id",
+                ),
+                NameOrId::Name(name) => (
+                    announce_set_dsl::bgp_announce_set
+                        .filter(bgp_announce_set::name.eq(name.to_string()))
+                        .into_boxed(),
+                    Error::not_found_by_name(
+                        ResourceType::BgpAnnounceSet,
+                        name,
+                    ),
+                    "failed to lookup announce set by name",
+                ),
             };
 
-            let new_name =
-                update_name.as_ref().unwrap_or(existing.name()).to_string();
-            let new_description = update_description
-                .as_deref()
-                .unwrap_or(existing.description())
-                .to_string();
-            let new_max_paths =
-                update_max_paths.map_or(*existing.max_paths, |m| m.as_u8());
+            let new_bgp_announce_set_id = query
+                .filter(bgp_announce_set::time_deleted.is_null())
+                .select(bgp_announce_set::id)
+                .limit(1)
+                .first_async::<Uuid>(&conn)
+                .await
+                .map_err(|e| lookup_err(e, not_found_err, msg))?;
 
             diesel::update(bgp_config_dsl::bgp_config)
                 .filter(bgp_config_dsl::id.eq(existing.id()))
                 .set((
                     bgp_config_dsl::time_modified.eq(Utc::now()),
-                    bgp_config_dsl::name.eq(new_name),
-                    bgp_config_dsl::description.eq(new_description),
+                    bgp_config_dsl::name.eq(new_name.to_string()),
+                    bgp_config_dsl::description.eq(new_description.to_string()),
                     bgp_config_dsl::bgp_announce_set_id
                         .eq(new_bgp_announce_set_id),
-                    bgp_config_dsl::max_paths.eq(SqlU8(new_max_paths)),
+                    bgp_config_dsl::max_paths.eq(SqlU8(new_max_paths.as_u8())),
                 ))
                 .returning(BgpConfig::as_returning())
                 .get_result_async(&conn)
@@ -1190,7 +1177,6 @@ mod tests {
     use nexus_db_model::SwitchPortBgpPeerConfig;
     use nexus_types::external_api::networking::BgpPeer;
     use omicron_common::api::external::IdentityMetadataCreateParams;
-    use omicron_common::api::external::IdentityMetadataUpdateParams;
     use omicron_common::api::external::Name;
     use omicron_test_utils::dev;
     use oxnet::IpNet;
@@ -1207,13 +1193,14 @@ mod tests {
 
         let config_name: Name = "config-name".parse().unwrap();
         let announce_name: Name = "announce-name".parse().unwrap();
+        let asn = 47;
 
         let config = networking::BgpConfigCreate {
             identity: IdentityMetadataCreateParams {
                 name: config_name.clone(),
                 description: String::from("a test config"),
             },
-            asn: 47,
+            asn,
             bgp_announce_set_id: NameOrId::Name(announce_name.clone()),
             vrf: None,
             shaper: None,
@@ -1227,14 +1214,11 @@ mod tests {
         let new_description = String::from("updated description");
 
         let update = networking::BgpConfigUpdate {
-            identity: IdentityMetadataUpdateParams {
-                name: Some(new_config_name.clone()),
-                description: Some(new_description.clone()),
-            },
-            bgp_announce_set_id: Some(NameOrId::Name(
-                new_announce_name.clone(),
-            )),
-            max_paths: Some(new_max_paths),
+            name: new_config_name.clone(),
+            description: new_description.clone(),
+            asn,
+            bgp_announce_set_id: NameOrId::Name(new_announce_name.clone()),
+            max_paths: new_max_paths,
         };
 
         // Make sure the announces exist
@@ -1288,6 +1272,18 @@ mod tests {
             .expect("create bgp config")
             .identity
             .id;
+
+        // Try and fail to update the asn
+        let res = datastore
+            .bgp_config_update(
+                &opctx,
+                &networking::BgpConfigSelector {
+                    name_or_id: NameOrId::Name(config_name.clone()),
+                },
+                &networking::BgpConfigUpdate { asn: asn + 1, ..update.clone() },
+            )
+            .await;
+        assert!(res.is_err());
 
         // Update the BGP config
         datastore
