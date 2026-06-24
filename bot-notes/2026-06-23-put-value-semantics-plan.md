@@ -222,6 +222,26 @@ argues for revisiting it. Findings worth carrying into the sweep:
   earns its keep. For the two PoC `Nullable` fields, the right regression test
   pins the (pre-existing, arguably buggy) clear-on-omit behavior instead.
 
+- **"Nullable field that preserves-on-omit" can't exist in a lenient body — so
+  there's no test for it, and converting more endpoints won't create one.** A
+  lenient `Option<T>` body can't distinguish absent from explicit `null` (both
+  deserialize to `None`), so a *clearable* field is forced into clear-on-omit,
+  while every *preserve-on-omit* field is non-nullable (→ becomes required, can't
+  clear). A scan of all update changesets confirms it: the only user-facing
+  clearable update fields are `vpc_subnet.custom_router` and
+  `support_bundle.user_comment` (both clear-on-omit) and
+  `silo_auth_settings.device_token_max_ttl_seconds` (already `Nullable` from the
+  `initial` version — the team reached for `Nullable` exactly when it needed
+  clearable-and-unambiguous). Everything else is `name`/`description` and a few
+  non-nullable operationals (nic `primary`, webhook `endpoint`, quotas). So the
+  two regression-test shapes are exhaustive: required-field-preserves-on-omit
+  (`test_project_update_prior_version_partial`) and clearable-field-clears-on-omit
+  (`test_vpc_subnet_update_prior_version_clears_custom_router`). The only way to
+  get a nullable-field-preserves-on-omit case is to take a currently-required
+  field and make it *newly clearable* — i.e., the parked "option B" nullable
+  `description` (migrate `"" → NULL`), a behavior addition, not a back-compat
+  conversion. Decision: do not convert extra endpoints to chase this test.
+
 - **Lockstep / internal-API twins are a wrinkle.** `support_bundle_update` exists
   in both the external API and the (unversioned) lockstep API. The PoC pins the
   lockstep body to the `v2025_11_20_00` lenient type. **Open: we'll probably want
