@@ -80,12 +80,13 @@ impl TryFrom<WebhookReceiverConfig> for alert::WebhookReceiver {
 pub struct AlertReceiver {
     #[diesel(embed)]
     pub identity: AlertReceiverIdentity,
-    pub endpoint: String,
 
     /// child resource generation number for secrets, per RFD 192
     pub secret_gen: Generation,
     /// child resource generation number for event subscriptions, per RFD 192
     pub subscription_gen: Generation,
+
+    pub endpoint: String,
 }
 
 impl DatastoreCollectionConfig<WebhookSecret> for AlertReceiver {
