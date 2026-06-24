@@ -4,7 +4,7 @@
 
 //! Project types for version UPDATE_VALUE_SEMANTICS.
 
-use omicron_common::api::external::Name;
+use omicron_common::api::external::{IdentityMetadataUpdateParams, Name};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -16,4 +16,19 @@ use serde::{Deserialize, Serialize};
 pub struct ProjectUpdate {
     pub name: Name,
     pub description: String,
+}
+
+// Convert the newer body into the older one, which is the type the Nexus app
+// layer takes. Each required field just becomes a present `Option`. This only
+// works in this direction: the older body can leave out a field that the newer
+// one requires, so there's no way to convert back.
+impl From<ProjectUpdate> for crate::v2025_11_20_00::project::ProjectUpdate {
+    fn from(new: ProjectUpdate) -> Self {
+        Self {
+            identity: IdentityMetadataUpdateParams {
+                name: Some(new.name),
+                description: Some(new.description),
+            },
+        }
+    }
 }

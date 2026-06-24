@@ -124,15 +124,3 @@ pub struct ProjectUpdate {
     pub description: Option<String>,
     pub time_modified: DateTime<Utc>,
 }
-
-// `project_types` resolves to the latest (strict, value-semantics) wire type,
-// so every field is present.
-impl From<project_types::ProjectUpdate> for ProjectUpdate {
-    fn from(params: project_types::ProjectUpdate) -> Self {
-        Self {
-            name: Some(Name(params.name)),
-            description: Some(params.description),
-            time_modified: Utc::now(),
-        }
-    }
-}

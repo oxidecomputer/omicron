@@ -85,16 +85,3 @@ pub struct SiloQuotasUpdate {
     pub storage: Option<ByteCount>,
     pub time_modified: DateTime<Utc>,
 }
-
-// `silo` resolves to the latest (strict, value-semantics) wire type, so every
-// field is present.
-impl From<silo::SiloQuotasUpdate> for SiloQuotasUpdate {
-    fn from(params: silo::SiloQuotasUpdate) -> Self {
-        Self {
-            cpus: Some(params.cpus),
-            memory: Some(params.memory.into()),
-            storage: Some(params.storage.into()),
-            time_modified: Utc::now(),
-        }
-    }
-}

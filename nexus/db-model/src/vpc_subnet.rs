@@ -117,22 +117,6 @@ pub struct VpcSubnetUpdate {
     pub custom_router_id: Option<Option<Uuid>>,
 }
 
-// `vpc` resolves to the latest (strict, value-semantics) wire type, so `name`
-// and `description` are present. `custom_router_id` is left `None` here: the
-// custom router attachment is resolved and applied separately (see
-// `vpc_update_subnet` in the datastore), driven by the wire `custom_router`
-// field rather than this changeset.
-impl From<vpc::VpcSubnetUpdate> for VpcSubnetUpdate {
-    fn from(params: vpc::VpcSubnetUpdate) -> Self {
-        Self {
-            name: Some(Name(params.name)),
-            description: Some(params.description),
-            time_modified: Utc::now(),
-            custom_router_id: None,
-        }
-    }
-}
-
 impl DatastoreCollectionConfig<NetworkInterface> for VpcSubnet {
     type CollectionId = Uuid;
     type GenerationNumberColumn = vpc_subnet::dsl::rcgen;

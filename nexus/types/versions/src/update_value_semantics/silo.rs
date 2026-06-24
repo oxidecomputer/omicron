@@ -20,3 +20,15 @@ pub struct SiloQuotasUpdate {
     /// The amount of storage (in bytes) available for disks or snapshots
     pub storage: ByteCount,
 }
+
+// Convert the newer body into the older one (see the note on `ProjectUpdate`'s
+// conversion). Each required quota just becomes a present `Option`.
+impl From<SiloQuotasUpdate> for crate::v2025_11_20_00::silo::SiloQuotasUpdate {
+    fn from(new: SiloQuotasUpdate) -> Self {
+        Self {
+            cpus: Some(new.cpus),
+            memory: Some(new.memory),
+            storage: Some(new.storage),
+        }
+    }
+}

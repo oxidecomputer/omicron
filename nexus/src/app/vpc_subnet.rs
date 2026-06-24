@@ -14,7 +14,8 @@ use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
 use nexus_db_queries::db::model::VpcSubnet;
 use nexus_types::external_api::vpc;
-use nexus_types_versions::v2025_11_20_00;
+// Oldest API version whose update bodies still allow omitting fields.
+use nexus_types_versions::v2025_11_20_00 as update_compat;
 use omicron_common::api::external;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DeleteResult;
@@ -181,21 +182,35 @@ impl super::Nexus {
         self.db_datastore.vpc_subnet_list(opctx, &authz_vpc, pagparams).await
     }
 
+    /// Update a VPC subnet. Both API versions of this endpoint pass through
+    /// here. The newer body is strict — `name` and `description` are required —
+    /// while the older (`update_compat`) one is lax: either may be omitted,
+    /// leaving it unchanged. We take the lax type because it can hold a body
+    /// from either version. A strict body converts into it by wrapping each
+    /// field in `Some`; the reverse is impossible, since there's no value to
+    /// supply for a field the lax body omitted. `custom_router` is applied
+    /// separately, by the saga, because attaching one needs a lookup.
     pub(crate) async fn vpc_update_subnet(
         &self,
         opctx: &OpContext,
         vpc_subnet_lookup: &lookup::VpcSubnet<'_>,
-        update: db::model::VpcSubnetUpdate,
-        custom_router: Option<NameOrId>,
+        params: update_compat::vpc::VpcSubnetUpdate,
     ) -> UpdateResult<VpcSubnet> {
         let (.., authz_vpc, authz_subnet) =
             vpc_subnet_lookup.lookup_for(authz::Action::Modify).await?;
 
-        let custom_router = match &custom_router {
+        let custom_router = match &params.custom_router {
             Some(k) => Some(
                 self.vpc_router_lookup_for_attach(opctx, k, &authz_vpc).await?,
             ),
             None => None,
+        };
+
+        let update = db::model::VpcSubnetUpdate {
+            name: params.identity.name.map(db::model::Name),
+            description: params.identity.description,
+            time_modified: chrono::Utc::now(),
+            custom_router_id: None,
         };
 
         let saga_params = sagas::vpc_subnet_update::Params {
@@ -221,26 +236,6 @@ impl super::Nexus {
         self.vpc_needed_notify_sleds();
 
         Ok(out)
-    }
-
-    /// Update a VPC subnet from a prior-version (lenient) request body, where
-    /// omitted fields are left unchanged. Keeping the version-specific merge
-    /// here lets db-model stay unaware of older wire versions.
-    pub(crate) async fn vpc_update_subnet_v2025_11_20_00(
-        &self,
-        opctx: &OpContext,
-        vpc_subnet_lookup: &lookup::VpcSubnet<'_>,
-        params: v2025_11_20_00::vpc::VpcSubnetUpdate,
-    ) -> UpdateResult<VpcSubnet> {
-        let custom_router = params.custom_router;
-        let update = db::model::VpcSubnetUpdate {
-            name: params.identity.name.map(db::model::Name),
-            description: params.identity.description,
-            time_modified: chrono::Utc::now(),
-            custom_router_id: None,
-        };
-        self.vpc_update_subnet(opctx, vpc_subnet_lookup, update, custom_router)
-            .await
     }
 
     pub(crate) async fn vpc_delete_subnet(

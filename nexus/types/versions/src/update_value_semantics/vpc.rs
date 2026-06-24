@@ -4,7 +4,9 @@
 
 //! VPC types for version UPDATE_VALUE_SEMANTICS.
 
-use omicron_common::api::external::{Name, NameOrId, Nullable};
+use omicron_common::api::external::{
+    IdentityMetadataUpdateParams, Name, NameOrId, Nullable,
+};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -21,4 +23,20 @@ pub struct VpcSubnetUpdate {
     /// An optional router, used to direct packets sent from hosts in this subnet
     /// to any destination address.
     pub custom_router: Nullable<NameOrId>,
+}
+
+// Convert the newer body into the older one (see the note on `ProjectUpdate`'s
+// conversion). `name` and `description` become present `Option`s.
+// `Nullable<NameOrId>` is an `Option<NameOrId>` underneath, and it carries the
+// same meaning here: `Some` attaches a router, `None` clears it.
+impl From<VpcSubnetUpdate> for crate::v2025_11_20_00::vpc::VpcSubnetUpdate {
+    fn from(new: VpcSubnetUpdate) -> Self {
+        Self {
+            identity: IdentityMetadataUpdateParams {
+                name: Some(new.name),
+                description: Some(new.description),
+            },
+            custom_router: new.custom_router.0,
+        }
+    }
 }

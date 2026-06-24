@@ -355,3 +355,53 @@ David, leaning no.
 - Make a prior-version regression test (partial body via `api-version` header)
   part of the standard recipe? PoC adds the first one for `project_update`;
   no other integration test exercises an old API version at all.
+
+## Update (2026-06-24): conversion no longer split; supersedes the asymmetry decision
+
+The "Decision (2026-06-23): nexus-side is the standard" section above, and the
+"conversion is split across crates, asymmetrically" lessons bullet, describe a
+tradeoff that this refactor removes. They are left in place as the record of how
+we got here; this note is the current state.
+
+**What changed.** Both the strict (latest) and lenient (prior) handlers now call
+a *single* un-suffixed nexus app method that owns the only wire→changeset
+conversion and takes the **lenient** wire type. The strict body down-converts to
+the lenient one first via `From<latest> for v2025_11_20_00`, a trivial all-`Some`
+(plus `Nullable<T> → Option<T>`) impl co-located with the new type in
+`nexus/types/versions/src/update_value_semantics/{project,silo,vpc}.rs`, where
+every other cross-version down-conversion in that crate already lives.
+
+**Why it's better than the chosen approach.**
+
+- No asymmetry: there is no longer a "strict via db-model `From<latest>`, lenient
+  via nexus `*_vN`" split. One conversion, one place. Reading an endpoint no
+  longer bounces between db-model and nexus.
+- No per-version app method: `project_update_v2025_11_20_00` and friends are
+  gone. The app layer goes back to version-agnostic; the only version-aware code
+  is the `From` in the versions crate plus the datastore's existing `None`-skip.
+- Restores the house convention. On trunk, `project_update` already took a params
+  object (`&project::ProjectUpdate`); the first PoC pass regressed it to take
+  `db::model::ProjectUpdate`. A survey of ~28 `_create`/`_update` app methods
+  found params objects are the rule and the only three taking a `db::model` type
+  were the three PoC endpoints. This refactor puts all three back.
+- Goes further than the 2026-06-23 principle. That decision kept `From<latest>`
+  in db-model ("db-model always knew latest"). This removes even that: the
+  `*Update` changesets in db-model now have **zero** wire-type `From` impls. (The
+  create/view `From`s in db-model are unaffected and out of scope — they were
+  never part of the update-body asymmetry.)
+
+**Direction matters, by necessity.** The app method takes the lenient type
+because strict→lenient is the only lossless direction — you can't synthesize a
+required `name` from an absent one. Each `From` carries a comment to that effect
+so nobody "fixes" it to point the other way.
+
+**Cost / open item.** The app method's canonical parameter is now a dated type
+(`v2025_11_20_00::…::*Update`), which will feel odd and stays pinned to the
+oldest lenient version as newer ones are added. Accepted for the PoC to avoid a
+third type; the durable alternative is an undated lenient params struct in
+`nexus-types` with a `From` per wire version. Revisit if it grates during the
+sweep.
+
+**Recipe delta for the remaining ~15 endpoints:** drop the db-model
+`From<wire>` step entirely; add one `From<latest> for <prior>` next to the new
+type; have the single app method take the prior type and build the changeset.
