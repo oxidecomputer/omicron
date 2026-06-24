@@ -11,6 +11,7 @@ use crate::SitrepBuilder;
 
 mod physical_disk;
 mod power_shelf;
+use crate::SitrepBuilder;
 
 pub fn analyze(builder: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
     physical_disk::analyze(builder)?;
