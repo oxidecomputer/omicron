@@ -15,6 +15,7 @@ omicron-workspace-hack.workspace = true
 [dev-dependencies]
 anyhow.workspace = true
 assert_matches.workspace = true
+chrono.workspace = true
 dns-service-client.workspace = true
 dropshot.workspace = true
 futures.workspace = true
@@ -35,10 +36,13 @@ omicron-test-utils.workspace = true
 omicron-uuid-kinds.workspace = true
 reqwest.workspace = true
 serde.workspace = true
+serde_json.workspace = true
 slog.workspace = true
 slog-error-chain.workspace = true
+strum.workspace = true
 textwrap.workspace = true
 tokio.workspace = true
+update-engine.workspace = true
 uuid.workspace = true
 
 [lints]
