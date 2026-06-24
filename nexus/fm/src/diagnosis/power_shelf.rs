@@ -3,7 +3,6 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::SitrepBuilder;
-use crate::analysis_input::Input;
 use crate::ereport;
 use crate::ereport::Ereport;
 use anyhow::Context;
