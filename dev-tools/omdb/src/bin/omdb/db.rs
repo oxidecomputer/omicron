@@ -5056,13 +5056,27 @@ async fn cmd_db_instance_info(
         }
         Reincarnatability::CoolingDown { until } => {
             println!(
-                "/!\\ {KARMIC_STATUS:>WIDTH$}: cooling down \
+                "    {KARMIC_STATUS:>WIDTH$}: cooling down \
                  (until {until})"
             );
+
+            if let Some(last) = time_last_auto_restarted {
+                let icon = if needs_reincarnation { "/!\\" } else { "(i)" };
+                println!("{icon}  this instance last restarted at {last}.");
+                if needs_reincarnation {
+                    println!(
+                        "     it will not be permitted to restart until {until}"
+                    );
+                } else {
+                    println!(
+                        "     if it fails, it will not be permitted to \
+                        restart again until {until}"
+                    );
+                }
+            }
         }
     }
     println!("    {LAST_AUTO_RESTART:>WIDTH$}: {time_last_auto_restarted:?}");
-
     println!("    {ACTIVE_VMM:>WIDTH$}: {propolis_id:?}");
     println!("    {TARGET_VMM:>WIDTH$}: {dst_propolis_id:?}");
 
