@@ -1085,8 +1085,10 @@ mod test {
     use nexus_types::deployment::BlueprintSource;
     use nexus_types::deployment::CockroachDbPreserveDowngrade;
     use nexus_types::deployment::ExternalIpPolicy;
+    use nexus_types::deployment::OperatorNexusConfig;
     use nexus_types::deployment::PendingMgsUpdates;
     use nexus_types::deployment::SledFilter;
+    use nexus_types::deployment::UpstreamNtpConfig;
     use nexus_types::deployment::{BlueprintZoneImageSource, OximeterReadMode};
     use nexus_types::external_api::silo::SiloIdentityMode;
     use nexus_types::identity::Asset;
@@ -1480,13 +1482,15 @@ mod test {
             )
             .expect("added zone");
         builder
-            .sled_add_zone_nexus_with_config(
+            .sled_add_zone_nexus(
                 sled2.id(),
-                false,
-                Vec::new(),
                 BlueprintZoneImageSource::InstallDataset,
                 nexus_networking,
                 *Generation::new(),
+                &OperatorNexusConfig {
+                    external_tls: false,
+                    external_dns_servers: &[],
+                },
             )
             .expect("added zone");
 
@@ -1494,13 +1498,15 @@ mod test {
             [(sled1.id(), ntp1_networking), (sled2.id(), ntp2_networking)]
         {
             builder
-                .sled_add_zone_boundary_ntp_with_config(
+                .sled_add_zone_boundary_ntp(
                     sled_id,
-                    Vec::new(),
-                    Vec::new(),
-                    None,
                     BlueprintZoneImageSource::InstallDataset,
                     external_ip,
+                    &UpstreamNtpConfig {
+                        ntp_servers: &[],
+                        dns_servers: &[],
+                        domain: None,
+                    },
                 )
                 .expect("added boundary NTP");
         }
@@ -1705,15 +1711,17 @@ mod test {
             .expect("constructed allocator");
         for _ in 0..2 {
             builder
-                .sled_add_zone_nexus_with_config(
+                .sled_add_zone_nexus(
                     sled.id(),
-                    false,
-                    Vec::new(),
                     BlueprintZoneImageSource::InstallDataset,
                     external_networking_alloc
                         .for_new_nexus()
                         .expect("got Nexus IP"),
                     *Generation::new(),
+                    &OperatorNexusConfig {
+                        external_tls: false,
+                        external_dns_servers: &[],
+                    },
                 )
                 .expect("added Nexus");
         }
@@ -1898,15 +1906,17 @@ mod test {
             )
             .expect("constructed allocator");
         builder
-            .sled_add_zone_nexus_with_config(
+            .sled_add_zone_nexus(
                 sled.id(),
-                false,
-                Vec::new(),
                 BlueprintZoneImageSource::InstallDataset,
                 external_networking_alloc
                     .for_new_nexus()
                     .expect("got Nexus IP"),
                 *Generation::new(),
+                &OperatorNexusConfig {
+                    external_tls: false,
+                    external_dns_servers: &[],
+                },
             )
             .expect("added Nexus");
         let mut blueprint = builder.build(BlueprintSource::Test);
@@ -2074,10 +2084,8 @@ mod test {
                 .unwrap();
         let mut macs = MacAddr::iter_system();
         builder
-            .sled_add_zone_nexus_with_config(
+            .sled_add_zone_nexus(
                 sled.id(),
-                false,
-                Vec::new(),
                 BlueprintZoneImageSource::InstallDataset,
                 ExternalNetworkingChoice {
                     external_ip: nexus_ip,
@@ -2085,6 +2093,10 @@ mod test {
                     nic_mac: macs.next().unwrap(),
                 },
                 *Generation::new(),
+                &OperatorNexusConfig {
+                    external_tls: false,
+                    external_dns_servers: &[],
+                },
             )
             .expect("added Nexus");
 
@@ -2148,13 +2160,15 @@ mod test {
             external_networking_alloc.for_new_nexus().expect("got Nexus IP");
         for _ in 0..2 {
             builder
-                .sled_add_zone_nexus_with_config(
+                .sled_add_zone_nexus(
                     sled.id(),
-                    false,
-                    Vec::new(),
                     BlueprintZoneImageSource::InstallDataset,
                     nexus_external_ip.clone(),
                     *Generation::new(),
+                    &OperatorNexusConfig {
+                        external_tls: false,
+                        external_dns_servers: &[],
+                    },
                 )
                 .expect("added Nexus");
         }

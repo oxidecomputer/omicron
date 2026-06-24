@@ -159,6 +159,7 @@ pub use alert::FmRendezvousAlertCreateError;
 pub use db_metadata::DatastoreSetupAction;
 pub use db_metadata::ValidatedDatastoreSetupAction;
 pub use deployment::BlueprintLimitReachedOutput;
+pub use deployment::ExternalServiceNetworkingConfig;
 pub use disk::CrucibleDisk;
 pub use disk::Disk;
 pub use disk::LocalStorageAllocation;
