@@ -181,6 +181,17 @@ impl DataStore {
 
     /// Creates a new support bundle (fault management rendezvous version)
     ///
+    /// This method is intended to be used when creating a support bundle
+    /// requested by a case in the fault management sitrep. Unlike the
+    /// [`DataStore::support_bundle_create`] method, this method takes as
+    /// arguments the [`SupportBundleUuid`] of the support bundle to create,
+    /// the [`CaseUuid`] of the case requesting the bundle, and the expected
+    /// support bundle generation of the current sitrep. A support bundle is
+    /// not created if the requested bundle already exists, or if the current
+    /// sitrep is out of date (indicated by the generation counter advancing).
+    /// Creating a support bundle for an external API request should use
+    /// [`DataStore::support_bundle_create`] instead.
+    ///
     /// Requires that the UUID of the calling Nexus be supplied as input -
     /// this particular Zone is responsible for the collection process.
     ///
@@ -194,13 +205,16 @@ impl DataStore {
     ///
     /// # Arguments
     ///
-    /// - `id`: Bundle id requested by the sitrep. The FM path is idempotent on
-    ///   this id: repeated activations for the same sitrep will do nothing.
+    /// - `id`: The ID of the requested support bundle. If a support bundle with
+    ///   this ID already exists, this function returns
+    ///   [`FmSupportBundleCreateError::AlreadyCreated`].
     /// - `case_id`: FM case that requested this bundle.
     /// - `expected_generation`: Generation counter the FM rendezvous task
     ///   expects to see in the latest sitrep's `support_bundle_generation`
-    ///   column. Used by the [`SitrepGuardedInsert::<SupportBundle>`]
-    ///   generation guard.
+    ///   column. If the generation of the current sitrep in the database has
+    ///   advanced past this generation, this function returns
+    ///   [`FmSupportBundleCreateError::StaleSitrep`], and the support bundle
+    ///   is not created.
     pub async fn fm_rendezvous_support_bundle_create(
         &self,
         opctx: &OpContext,
@@ -2262,7 +2276,7 @@ mod test {
             .expect("user-path create should succeed");
         let bundle_id = SupportBundleUuid::from(planted.id);
 
-        let err = datastore
+        let result = datastore
             .fm_rendezvous_support_bundle_create(
                 &opctx,
                 bundle_id,
@@ -2275,11 +2289,10 @@ mod test {
                     data_selection: BundleDataSelection::all(),
                 },
             )
-            .await
-            .expect_err("pre-existing row should surface AlreadyCreated");
+            .await;
         assert!(
-            matches!(err, FmSupportBundleCreateError::AlreadyCreated),
-            "expected AlreadyCreated, got {err:?}"
+            matches!(result, Err(FmSupportBundleCreateError::AlreadyCreated)),
+            "expected Err(AlreadyCreated), got {result:?}"
         );
 
         // No marker may have been written: the `new_marker` CTE is gated by
@@ -2317,7 +2330,7 @@ mod test {
             .await
             .unwrap();
 
-        let err = datastore
+        let result = datastore
             .fm_rendezvous_support_bundle_create(
                 &opctx,
                 SupportBundleUuid::new_v4(),
@@ -2330,11 +2343,10 @@ mod test {
                     data_selection: BundleDataSelection::all(),
                 },
             )
-            .await
-            .expect_err("stale activation should surface StaleSitrep");
+            .await;
         assert!(
-            matches!(err, FmSupportBundleCreateError::StaleSitrep),
-            "expected StaleSitrep, got {err:?}"
+            matches!(result, Err(FmSupportBundleCreateError::StaleSitrep)),
+            "expected Err(StaleSitrep), got {result:?}"
         );
 
         db.terminate().await;
