@@ -18,7 +18,7 @@ use nexus_test_utils::resource_helpers::object_put_error;
 use nexus_test_utils::resource_helpers::objects_list_page_authz;
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::vpc::{
-    IdentityMetadataUpdateParamsStrict, RouterRouteCreate, RouterRouteUpdate,
+    IdentityMetadataUpdateParams, RouterRouteCreate, RouterRouteUpdate,
 };
 use omicron_common::api::external::SimpleIdentityOrName;
 use omicron_common::api::external::{
@@ -217,7 +217,7 @@ async fn test_router_routes_crud_operations(
         client,
         route_url.as_str(),
         Some(&RouterRouteUpdate {
-            identity: IdentityMetadataUpdateParamsStrict {
+            identity: IdentityMetadataUpdateParams {
                 name: route_name.parse().unwrap(),
                 description: route.identity.description.clone(),
             },
@@ -382,7 +382,7 @@ async fn test_router_routes_modify_system_routes(
         &get_route_url(VPC_NAME, "system", subnet_route.name().as_str())
             .as_str(),
         &RouterRouteUpdate {
-            identity: IdentityMetadataUpdateParamsStrict {
+            identity: IdentityMetadataUpdateParams {
                 name: subnet_route.identity.name.clone(),
                 description: subnet_route.identity.description.clone(),
             },
@@ -402,7 +402,7 @@ async fn test_router_routes_modify_system_routes(
         client,
         &get_route_url(VPC_NAME, "system", v4_route.name().as_str()).as_str(),
         &RouterRouteUpdate {
-            identity: IdentityMetadataUpdateParamsStrict {
+            identity: IdentityMetadataUpdateParams {
                 name: v4_route.identity.name.clone(),
                 description: v4_route.identity.description.clone(),
             },
@@ -417,7 +417,7 @@ async fn test_router_routes_modify_system_routes(
         client,
         &get_route_url(VPC_NAME, "system", v6_route.name().as_str()).as_str(),
         &RouterRouteUpdate {
-            identity: IdentityMetadataUpdateParamsStrict {
+            identity: IdentityMetadataUpdateParams {
                 name: v6_route.identity.name.clone(),
                 description: v6_route.identity.description.clone(),
             },
@@ -433,7 +433,7 @@ async fn test_router_routes_modify_system_routes(
         client,
         &get_route_url(VPC_NAME, "system", v4_route.name().as_str()).as_str(),
         &RouterRouteUpdate {
-            identity: IdentityMetadataUpdateParamsStrict {
+            identity: IdentityMetadataUpdateParams {
                 name: v4_route.identity.name.clone(),
                 description: v4_route.identity.description.clone(),
             },
@@ -576,7 +576,7 @@ pub async fn update_route_with_error(
             .as_str(),
         )
         .body(Some(&RouterRouteUpdate {
-            identity: IdentityMetadataUpdateParamsStrict {
+            identity: IdentityMetadataUpdateParams {
                 name: route_name.parse().unwrap(),
                 description: String::from("test route"),
             },

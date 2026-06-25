@@ -1104,9 +1104,14 @@ pub struct IdentityMetadataCreateParams {
     pub description: String,
 }
 
-/// Updateable identity-related parameters
+/// Updateable identity-related parameters (legacy "PATCH-via-PUT" shape)
+///
+/// Both fields are optional: an omitted field leaves the existing value
+/// unchanged. This is the lenient shape used by API versions before
+/// `VERSION_STRICT_PUT_BODIES`. New PUT bodies should flatten the strict
+/// `IdentityMetadataUpdateParams` instead, which requires both fields.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct IdentityMetadataUpdateParams {
+pub struct IdentityMetadataUpdateParamsLax {
     pub name: Option<Name>,
     pub description: Option<String>,
 }

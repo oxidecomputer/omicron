@@ -75,7 +75,7 @@ async fn basic_subnet_pool_crud(cptestctx: &ControlPlaneTestContext) {
     let new_name = "granite".parse::<Name>().unwrap();
     let new_description = String::from("an updated pool");
     let updates = SubnetPoolUpdate {
-        identity: subnet_pool::IdentityMetadataUpdateParamsStrict {
+        identity: subnet_pool::IdentityMetadataUpdateParams {
             name: new_name.clone(),
             description: new_description.clone(),
         },

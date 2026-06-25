@@ -376,7 +376,7 @@ impl AffinityGroupish for AffinityType {
 
     fn make_update_params(new_name: &str) -> Self::UpdateParams {
         affinity::AffinityGroupUpdate {
-            identity: affinity::IdentityMetadataUpdateParamsStrict {
+            identity: affinity::IdentityMetadataUpdateParams {
                 name: new_name.parse().unwrap(),
                 description: NEW_DESCRIPTION.to_string(),
             },
@@ -408,7 +408,7 @@ impl AffinityGroupish for AntiAffinityType {
 
     fn make_update_params(new_name: &str) -> Self::UpdateParams {
         affinity::AntiAffinityGroupUpdate {
-            identity: affinity::IdentityMetadataUpdateParamsStrict {
+            identity: affinity::IdentityMetadataUpdateParams {
                 name: new_name.parse().unwrap(),
                 description: NEW_DESCRIPTION.to_string(),
             },

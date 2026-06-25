@@ -4,8 +4,8 @@
 
 //! Floating IP types for version STRICT_PUT_BODIES.
 
-use crate::v2026_06_23_00::identity::IdentityMetadataUpdateParamsStrict;
-use omicron_common::api::external::IdentityMetadataUpdateParams;
+use crate::v2026_06_23_00::identity::IdentityMetadataUpdateParams;
+use omicron_common::api::external::IdentityMetadataUpdateParamsLax;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -16,7 +16,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct FloatingIpUpdate {
     #[serde(flatten)]
-    pub identity: IdentityMetadataUpdateParamsStrict,
+    pub identity: IdentityMetadataUpdateParams,
 }
 
 // Convert the newer body into the older one, which is the type the Nexus app
@@ -28,7 +28,7 @@ impl From<FloatingIpUpdate>
 {
     fn from(new: FloatingIpUpdate) -> Self {
         Self {
-            identity: IdentityMetadataUpdateParams {
+            identity: IdentityMetadataUpdateParamsLax {
                 name: Some(new.identity.name),
                 description: Some(new.identity.description),
             },

@@ -4,9 +4,9 @@
 
 //! VPC types for version STRICT_PUT_BODIES.
 
-use crate::v2026_06_23_00::identity::IdentityMetadataUpdateParamsStrict;
+use crate::v2026_06_23_00::identity::IdentityMetadataUpdateParams;
 use omicron_common::api::external::{
-    IdentityMetadataUpdateParams, Name, NameOrId, Nullable, RouteDestination,
+    IdentityMetadataUpdateParamsLax, Name, NameOrId, Nullable, RouteDestination,
     RouteTarget,
 };
 use schemars::JsonSchema;
@@ -20,7 +20,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct VpcSubnetUpdate {
     #[serde(flatten)]
-    pub identity: IdentityMetadataUpdateParamsStrict,
+    pub identity: IdentityMetadataUpdateParams,
 
     /// An optional router, used to direct packets sent from hosts in this subnet
     /// to any destination address.
@@ -34,7 +34,7 @@ pub struct VpcSubnetUpdate {
 impl From<VpcSubnetUpdate> for crate::v2025_11_20_00::vpc::VpcSubnetUpdate {
     fn from(new: VpcSubnetUpdate) -> Self {
         Self {
-            identity: IdentityMetadataUpdateParams {
+            identity: IdentityMetadataUpdateParamsLax {
                 name: Some(new.identity.name),
                 description: Some(new.identity.description),
             },
@@ -50,7 +50,7 @@ impl From<VpcSubnetUpdate> for crate::v2025_11_20_00::vpc::VpcSubnetUpdate {
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct VpcUpdate {
     #[serde(flatten)]
-    pub identity: IdentityMetadataUpdateParamsStrict,
+    pub identity: IdentityMetadataUpdateParams,
 
     pub dns_name: Name,
 }
@@ -60,7 +60,7 @@ pub struct VpcUpdate {
 impl From<VpcUpdate> for crate::v2025_11_20_00::vpc::VpcUpdate {
     fn from(new: VpcUpdate) -> Self {
         Self {
-            identity: IdentityMetadataUpdateParams {
+            identity: IdentityMetadataUpdateParamsLax {
                 name: Some(new.identity.name),
                 description: Some(new.identity.description),
             },
@@ -76,7 +76,7 @@ impl From<VpcUpdate> for crate::v2025_11_20_00::vpc::VpcUpdate {
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct VpcRouterUpdate {
     #[serde(flatten)]
-    pub identity: IdentityMetadataUpdateParamsStrict,
+    pub identity: IdentityMetadataUpdateParams,
 }
 
 // Convert the newer body into the older one (see the note on `ProjectUpdate`'s
@@ -84,7 +84,7 @@ pub struct VpcRouterUpdate {
 impl From<VpcRouterUpdate> for crate::v2025_11_20_00::vpc::VpcRouterUpdate {
     fn from(new: VpcRouterUpdate) -> Self {
         Self {
-            identity: IdentityMetadataUpdateParams {
+            identity: IdentityMetadataUpdateParamsLax {
                 name: Some(new.identity.name),
                 description: Some(new.identity.description),
             },
@@ -99,7 +99,7 @@ impl From<VpcRouterUpdate> for crate::v2025_11_20_00::vpc::VpcRouterUpdate {
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct RouterRouteUpdate {
     #[serde(flatten)]
-    pub identity: IdentityMetadataUpdateParamsStrict,
+    pub identity: IdentityMetadataUpdateParams,
 
     /// The location that matched packets should be forwarded to.
     pub target: RouteTarget,
@@ -112,7 +112,7 @@ pub struct RouterRouteUpdate {
 impl From<RouterRouteUpdate> for crate::v2025_11_20_00::vpc::RouterRouteUpdate {
     fn from(new: RouterRouteUpdate) -> Self {
         Self {
-            identity: IdentityMetadataUpdateParams {
+            identity: IdentityMetadataUpdateParamsLax {
                 name: Some(new.identity.name),
                 description: Some(new.identity.description),
             },

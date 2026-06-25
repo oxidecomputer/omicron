@@ -341,7 +341,7 @@ pub struct InstanceNetworkInterfaceSelector {
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct InstanceNetworkInterfaceUpdate {
     #[serde(flatten)]
-    pub identity: omicron_common::api::external::IdentityMetadataUpdateParams,
+    pub identity: omicron_common::api::external::IdentityMetadataUpdateParamsLax,
 
     /// Make a secondary interface the instance's primary interface.
     ///

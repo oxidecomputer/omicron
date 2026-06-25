@@ -342,7 +342,7 @@ pub struct AlertProbeResult {
 // ALERT PARAMS
 
 use omicron_common::api::external::{
-    IdentityMetadataCreateParams, IdentityMetadataUpdateParams, NameOrId,
+    IdentityMetadataCreateParams, IdentityMetadataUpdateParamsLax, NameOrId,
 };
 
 /// Query params for listing alert classes.
@@ -405,7 +405,7 @@ pub struct WebhookCreate {
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct WebhookReceiverUpdate {
     #[serde(flatten)]
-    pub identity: IdentityMetadataUpdateParams,
+    pub identity: IdentityMetadataUpdateParamsLax,
 
     /// The URL that webhook notification requests should be sent to
     pub endpoint: Option<Url>,

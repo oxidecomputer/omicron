@@ -662,7 +662,7 @@ async fn test_floating_ip_update(cptestctx: &ControlPlaneTestContext) {
     let new_fip_desc: &str = "updated description";
     let updates: floating_ip::FloatingIpUpdate =
         floating_ip::FloatingIpUpdate {
-            identity: floating_ip::IdentityMetadataUpdateParamsStrict {
+            identity: floating_ip::IdentityMetadataUpdateParams {
                 name: String::from(new_fip_name).parse().unwrap(),
                 description: String::from(new_fip_desc).parse().unwrap(),
             },

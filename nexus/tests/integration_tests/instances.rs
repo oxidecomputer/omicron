@@ -4080,7 +4080,7 @@ async fn test_instance_update_network_interfaces(
     let new_name = Name::try_from(String::from("new-if0")).unwrap();
     let new_description = String::from("new description");
     let updates = instance::InstanceNetworkInterfaceUpdate {
-        identity: instance::IdentityMetadataUpdateParamsStrict {
+        identity: instance::IdentityMetadataUpdateParams {
             name: new_name.clone(),
             description: new_description.clone(),
         },
@@ -4167,7 +4167,7 @@ async fn test_instance_update_network_interfaces(
     // Try with the same request again, but this time only changing
     // `primary`. This should have no effect.
     let updates = instance::InstanceNetworkInterfaceUpdate {
-        identity: instance::IdentityMetadataUpdateParamsStrict {
+        identity: instance::IdentityMetadataUpdateParams {
             name: updated_primary_iface.identity.name.clone(),
             description: updated_primary_iface.identity.description.clone(),
         },
@@ -4265,7 +4265,7 @@ async fn test_instance_update_network_interfaces(
     // Verify that we can set the secondary as the new primary, and that nothing
     // else changes about the NICs.
     let updates = instance::InstanceNetworkInterfaceUpdate {
-        identity: instance::IdentityMetadataUpdateParamsStrict {
+        identity: instance::IdentityMetadataUpdateParams {
             name: secondary_iface.identity.name.clone(),
             description: secondary_iface.identity.description.clone(),
         },
@@ -4478,7 +4478,7 @@ async fn cannot_make_new_primary_nic_lacking_ip_stack_for_external_addresses(
     // This should fail, because the instance has an external IPv4 address, but
     // this NIC has only an IPv6 address.
     let updates = instance::InstanceNetworkInterfaceUpdate {
-        identity: instance::IdentityMetadataUpdateParamsStrict {
+        identity: instance::IdentityMetadataUpdateParams {
             name: secondary_iface.identity.name.clone(),
             description: secondary_iface.identity.description.clone(),
         },
@@ -4531,7 +4531,7 @@ async fn test_instance_update_network_interface_transit_ips(
     );
 
     let base_update = instance::InstanceNetworkInterfaceUpdate {
-        identity: instance::IdentityMetadataUpdateParamsStrict {
+        identity: instance::IdentityMetadataUpdateParams {
             name: nic_name.parse().unwrap(),
             description: String::from("test interface"),
         },

@@ -150,7 +150,7 @@ async fn test_vpcs(cptestctx: &ControlPlaneTestContext) {
 
     // Update the VPC
     let update_params = vpc::VpcUpdate {
-        identity: vpc::IdentityMetadataUpdateParamsStrict {
+        identity: vpc::IdentityMetadataUpdateParams {
             name: "new-name".parse().unwrap(),
             description: "another description".to_string(),
         },
@@ -796,7 +796,7 @@ async fn test_limited_collaborator_can_manage_floating_ips_and_nics(
         client,
         &fip_url,
         Some(&floating_ip::FloatingIpUpdate {
-            identity: floating_ip::IdentityMetadataUpdateParamsStrict {
+            identity: floating_ip::IdentityMetadataUpdateParams {
                 name: fip_name.parse().unwrap(),
                 description: "updated description".to_string(),
             },

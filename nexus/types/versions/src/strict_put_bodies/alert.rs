@@ -4,8 +4,8 @@
 
 //! Alert types for version STRICT_PUT_BODIES.
 
-use crate::v2026_06_23_00::identity::IdentityMetadataUpdateParamsStrict;
-use omicron_common::api::external::IdentityMetadataUpdateParams;
+use crate::v2026_06_23_00::identity::IdentityMetadataUpdateParams;
+use omicron_common::api::external::IdentityMetadataUpdateParamsLax;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use url::Url;
@@ -17,7 +17,7 @@ use url::Url;
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct WebhookReceiverUpdate {
     #[serde(flatten)]
-    pub identity: IdentityMetadataUpdateParamsStrict,
+    pub identity: IdentityMetadataUpdateParams,
 
     /// The URL that webhook notification requests should be sent to
     pub endpoint: Url,
@@ -30,7 +30,7 @@ impl From<WebhookReceiverUpdate>
 {
     fn from(new: WebhookReceiverUpdate) -> Self {
         Self {
-            identity: IdentityMetadataUpdateParams {
+            identity: IdentityMetadataUpdateParamsLax {
                 name: Some(new.identity.name),
                 description: Some(new.identity.description),
             },

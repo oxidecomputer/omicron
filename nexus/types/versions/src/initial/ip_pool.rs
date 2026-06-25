@@ -9,7 +9,7 @@ use chrono::{DateTime, Utc};
 use omicron_common::address::IpRange;
 use omicron_common::api::external::{
     IdentityMetadata, IdentityMetadataCreateParams,
-    IdentityMetadataUpdateParams, IpVersion, NameOrId, ObjectIdentity,
+    IdentityMetadataUpdateParamsLax, IpVersion, NameOrId, ObjectIdentity,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -137,7 +137,7 @@ impl IpPoolCreate {
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct IpPoolUpdate {
     #[serde(flatten)]
-    pub identity: IdentityMetadataUpdateParams,
+    pub identity: IdentityMetadataUpdateParamsLax,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]

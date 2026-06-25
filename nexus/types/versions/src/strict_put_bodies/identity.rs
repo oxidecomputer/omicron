@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 
 /// Update-time identity-related parameters for strict PUT bodies.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct IdentityMetadataUpdateParamsStrict {
+pub struct IdentityMetadataUpdateParams {
     pub name: Name,
     pub description: String,
 }

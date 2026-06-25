@@ -151,7 +151,7 @@ async fn external_subnet_basic_crud(cptestctx: &ControlPlaneTestContext) {
     // Update the metadata
     let new_name = "quartzite".parse::<Name>().unwrap();
     let updates = external_subnet_types::ExternalSubnetUpdate {
-        identity: external_subnet_types::IdentityMetadataUpdateParamsStrict {
+        identity: external_subnet_types::IdentityMetadataUpdateParams {
             name: new_name.clone(),
             description: external_subnet.identity.description.clone(),
         },
@@ -1035,7 +1035,7 @@ async fn test_limited_collaborator_external_subnet_lifecycle(
 
     // Update the external subnet.
     let updates = external_subnet_types::ExternalSubnetUpdate {
-        identity: external_subnet_types::IdentityMetadataUpdateParamsStrict {
+        identity: external_subnet_types::IdentityMetadataUpdateParams {
             name: EXTERNAL_SUBNET_NAME.parse().unwrap(),
             description: String::from("updated description"),
         },

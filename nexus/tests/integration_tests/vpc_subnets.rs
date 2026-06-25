@@ -20,7 +20,7 @@ use nexus_test_utils::resource_helpers::{
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::instance::InstanceState;
 use nexus_types::external_api::vpc::{
-    IdentityMetadataUpdateParamsStrict, VpcSubnet, VpcSubnetCreate,
+    IdentityMetadataUpdateParams, VpcSubnet, VpcSubnetCreate,
     VpcSubnetUpdate,
 };
 use omicron_common::api::external::IdentityMetadataCreateParams;
@@ -335,7 +335,7 @@ async fn test_vpc_subnets(cptestctx: &ControlPlaneTestContext) {
 
     // update first subnet
     let update_params = VpcSubnetUpdate {
-        identity: IdentityMetadataUpdateParamsStrict {
+        identity: IdentityMetadataUpdateParams {
             name: "new-name".parse().unwrap(),
             description: "another description".to_string(),
         },

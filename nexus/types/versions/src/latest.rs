@@ -24,7 +24,7 @@ pub mod affinity {
 
     pub use crate::v2026_06_23_00::affinity::AffinityGroupUpdate;
     pub use crate::v2026_06_23_00::affinity::AntiAffinityGroupUpdate;
-    pub use crate::v2026_06_23_00::identity::IdentityMetadataUpdateParamsStrict;
+    pub use crate::v2026_06_23_00::identity::IdentityMetadataUpdateParams;
 }
 
 pub mod alert {
@@ -59,7 +59,7 @@ pub mod alert {
     pub use crate::v2025_11_20_00::alert::WebhookSecrets;
 
     pub use crate::v2026_06_23_00::alert::WebhookReceiverUpdate;
-    pub use crate::v2026_06_23_00::identity::IdentityMetadataUpdateParamsStrict;
+    pub use crate::v2026_06_23_00::identity::IdentityMetadataUpdateParams;
 }
 
 pub mod audit {
@@ -133,7 +133,7 @@ pub mod floating_ip {
     pub use crate::v2025_11_20_00::floating_ip::FloatingIpSelector;
 
     pub use crate::v2026_06_23_00::floating_ip::FloatingIpUpdate;
-    pub use crate::v2026_06_23_00::identity::IdentityMetadataUpdateParamsStrict;
+    pub use crate::v2026_06_23_00::identity::IdentityMetadataUpdateParams;
 
     pub use crate::v2026_01_22_00::floating_ip::AddressAllocator;
     pub use crate::v2026_01_22_00::floating_ip::FloatingIpCreate;
@@ -198,7 +198,7 @@ pub mod instance {
     pub use crate::v2026_06_08_00::instance::InstanceCreate;
     pub use crate::v2026_06_08_00::instance::InstanceUpdate;
 
-    pub use crate::v2026_06_23_00::identity::IdentityMetadataUpdateParamsStrict;
+    pub use crate::v2026_06_23_00::identity::IdentityMetadataUpdateParams;
     pub use crate::v2026_06_23_00::instance::InstanceNetworkInterfaceUpdate;
 }
 
@@ -232,7 +232,7 @@ pub mod ip_pool {
     pub use crate::v2026_01_05_00::ip_pool::IpPoolSiloUpdate;
     pub use crate::v2026_01_05_00::ip_pool::PoolSelector;
 
-    pub use crate::v2026_06_23_00::identity::IdentityMetadataUpdateParamsStrict;
+    pub use crate::v2026_06_23_00::identity::IdentityMetadataUpdateParams;
     pub use crate::v2026_06_23_00::ip_pool::IpPoolUpdate;
 }
 
@@ -363,7 +363,7 @@ pub mod project {
     pub use crate::v2025_11_20_00::project::ProjectCreate;
     pub use crate::v2025_11_20_00::project::ProjectSelector;
 
-    pub use crate::v2026_06_23_00::identity::IdentityMetadataUpdateParamsStrict;
+    pub use crate::v2026_06_23_00::identity::IdentityMetadataUpdateParams;
     pub use crate::v2026_06_23_00::project::ProjectUpdate;
 }
 
@@ -468,7 +468,7 @@ pub mod vpc {
     pub use crate::v2025_11_20_00::vpc::VpcSubnet;
     pub use crate::v2025_11_20_00::vpc::VpcSubnetCreate;
 
-    pub use crate::v2026_06_23_00::identity::IdentityMetadataUpdateParamsStrict;
+    pub use crate::v2026_06_23_00::identity::IdentityMetadataUpdateParams;
     pub use crate::v2026_06_23_00::vpc::RouterRouteUpdate;
     pub use crate::v2026_06_23_00::vpc::VpcRouterUpdate;
     pub use crate::v2026_06_23_00::vpc::VpcSubnetUpdate;
@@ -532,7 +532,7 @@ pub mod subnet_pool {
     pub use crate::v2026_01_22_00::subnet_pool::SubnetPoolCreate;
     pub use crate::v2026_01_22_00::subnet_pool::SubnetPoolMemberAdd;
 
-    pub use crate::v2026_06_23_00::identity::IdentityMetadataUpdateParamsStrict;
+    pub use crate::v2026_06_23_00::identity::IdentityMetadataUpdateParams;
     pub use crate::v2026_06_23_00::subnet_pool::SubnetPoolUpdate;
 }
 
@@ -548,7 +548,7 @@ pub mod external_subnet {
     pub use crate::v2026_03_23_00::external_subnet::ExternalSubnetCreate;
 
     pub use crate::v2026_06_23_00::external_subnet::ExternalSubnetUpdate;
-    pub use crate::v2026_06_23_00::identity::IdentityMetadataUpdateParamsStrict;
+    pub use crate::v2026_06_23_00::identity::IdentityMetadataUpdateParams;
 }
 
 pub mod sled {

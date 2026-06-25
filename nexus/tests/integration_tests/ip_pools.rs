@@ -172,7 +172,7 @@ async fn test_ip_pool_basic_crud(cptestctx: &ControlPlaneTestContext) {
     let new_ip_pool_rem_range_url =
         format!("{}/ranges/remove", new_ip_pool_url);
     let updates = IpPoolUpdate {
-        identity: ip_pool::IdentityMetadataUpdateParamsStrict {
+        identity: ip_pool::IdentityMetadataUpdateParams {
             name: String::from(new_pool_name).parse().unwrap(),
             description: created_pool.identity.description.clone(),
         },
@@ -379,7 +379,7 @@ async fn test_ip_pool_service_no_cud(cptestctx: &ControlPlaneTestContext) {
 
     // Update not allowed
     let put_body = ip_pool::IpPoolUpdate {
-        identity: ip_pool::IdentityMetadataUpdateParamsStrict {
+        identity: ip_pool::IdentityMetadataUpdateParams {
             name: "test".parse().unwrap(),
             description: "test".to_string(),
         },

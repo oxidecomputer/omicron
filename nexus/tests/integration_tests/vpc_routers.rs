@@ -189,7 +189,7 @@ async fn test_vpc_routers_crud_operations(cptestctx: &ControlPlaneTestContext) {
 
     // update first router
     let update_params = vpc::VpcRouterUpdate {
-        identity: vpc::IdentityMetadataUpdateParamsStrict {
+        identity: vpc::IdentityMetadataUpdateParams {
             name: "new-name".parse().unwrap(),
             description: "another description".to_string(),
         },
@@ -335,7 +335,7 @@ async fn test_vpc_routers_attach_to_subnet(
             "/v1/vpc-subnets/{subnet_name}?project={PROJECT_NAME}&vpc={VPC_NAME}"
         ),
         &vpc::VpcSubnetUpdate {
-            identity: vpc::IdentityMetadataUpdateParamsStrict {
+            identity: vpc::IdentityMetadataUpdateParams {
                 name: subnet_name.parse().unwrap(),
                 description: "".to_string(),
             },
@@ -399,7 +399,7 @@ async fn test_vpc_routers_attach_to_subnet(
         client,
         &format!("/v1/vpc-subnets/default?project={PROJECT_NAME}&vpc=vpc1"),
         &vpc::VpcSubnetUpdate {
-            identity: vpc::IdentityMetadataUpdateParamsStrict {
+            identity: vpc::IdentityMetadataUpdateParams {
                 name: "default".parse().unwrap(),
                 description: "".to_string(),
             },
@@ -778,7 +778,7 @@ async fn set_custom_router(
         client,
         &url,
         &vpc::VpcSubnetUpdate {
-            identity: vpc::IdentityMetadataUpdateParamsStrict {
+            identity: vpc::IdentityMetadataUpdateParams {
                 name: current.identity.name.clone(),
                 description: current.identity.description.clone(),
             },
