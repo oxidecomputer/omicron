@@ -2,11 +2,20 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use crate::CaseBuilder;
+use crate::EreportId;
 use crate::SitrepBuilder;
 use crate::ereport;
 use crate::ereport::Ereport;
 use anyhow::Context;
+use chrono::DateTime;
+use chrono::Utc;
 use iddqd::{IdHashItem, IdHashMap, IdOrdItem, IdOrdMap, id_upcast};
+use nexus_db_model::EreporterRestart;
+use nexus_types::alert::power_shelf::{
+    PowerShelf, Psu, PsuIdentity, PsuInsertedV0, PsuRemovedV0,
+};
+use nexus_types::external_api;
 use nexus_types::fm::DiagnosisEngineKind;
 use nexus_types::inventory;
 use omicron_uuid_kinds::CaseUuid;
@@ -54,7 +63,11 @@ pub fn analyze(
             .or_insert_with(|| PscCase::new(case.id));
         for case_ereport in case.ereports.iter() {
             let ereport = &case_ereport.ereport;
-            let ereport = match PsuEreport::parse(&ereport) {
+            // These ereports were assigned to the case in an earlier sitrep,
+            // so they are not new in this run and have already had their
+            // alerts requested.
+            let ereport = match PsuEreport::parse(&ereport, Provenance::Parent)
+            {
                 Ok(ereport) => ereport,
                 Err(e) => {
                     // This is weird: a case in the parent sitrep created by
@@ -117,7 +130,12 @@ pub fn analyze(
             continue;
         }
 
-        let psu_ereport = match PsuEreport::parse(&ereport) {
+        // This ereport is new in this run, so it'll have an alert requested
+        // for it once it's assigned to a case below.
+        let psu_ereport = match PsuEreport::parse(
+            &ereport,
+            Provenance::ThisSitrep,
+        ) {
             Ok(psu_ereport) => psu_ereport,
             Err(e) => {
                 slog::warn!(
@@ -158,6 +176,12 @@ pub fn analyze(
                     .entry(location)
                     .or_insert_with(HashSet::new)
                     .insert(c.id);
+                // Track the freshly-opened case in the by-id index too, so
+                // the loop below can reconstruct its ereport sequence
+                // alongside the cases carried forward from the parent sitrep.
+                cases_by_id
+                    .insert_unique(PscCase::new(c.id))
+                    .expect("a freshly-opened case has a unique id");
                 c
             }
         };
@@ -171,21 +195,60 @@ pub fn analyze(
             .expect("distinct new ereports have distinct IDs");
     }
 
-    // for each case:
-    // - looking at the sequence of ereports based on their ENAs and timestamps,
-    //   determine if the PSU is present or not.
-    //   - if the PSU is present (i.e., the most recent ereport is an insert),
-    //     close the case
-    //   - if the PSU is not present (i.e., the most recent ereport is a_
-    //     remove), leave the case open
-    //
-    // - generate an alert for each PSU insert/remove ereport in the case that
-    //   does not already have an alert for that event.
-    //
-    // We don't actually *need* to leave the case open, and *could* get away
-    // with just making a case for every ereport and requesting an alert, but
-    // doing it like this sets us up for being able to produce a "rectifier
-    // missing" active problem for the open cases later.
+    // Now that every case's ereport history has been assembled, decide each
+    // case's fate and emit the alerts that its new ereports call for.
+    for psc_case in cases_by_id.iter() {
+        let mut case_builder = builder
+            .cases
+            .case_mut(&psc_case.case_id)
+            .expect("every case in the by-id index is open in the builder");
+        case_builder.comment_mut().clear();
+
+        // replay all the ereports in the case, tracking changes in PSU presence
+        // and happiness
+        // TODO(eliza): also track happiness
+        let mut psus_absent = [PsuSet::default(), PsuSet::default()];
+        for ereport in psc_case.ereports_in_order(input.ereporter_restarts()) {
+            let PsuLocation { shelf, slot } = ereport.location;
+            match ereport.kind {
+                PsuEreportKind::Insert => {
+                    // hello!
+                    psus_absent[shelf as usize].remove(slot);
+                    if ereport.provenance == Provenance::ThisSitrep {
+                        // TODO(eliza): request alert
+                    }
+                }
+                PsuEreportKind::Remove => {
+                    // goodbye!
+                    psus_absent[shelf as usize].insert(slot);
+                    if ereport.provenance == Provenance::ThisSitrep {
+                        // TODO(eliza): request alert
+                    }
+                }
+            }
+        }
+
+        let mut any_absent = false;
+        for (shelf, psu) in psus_absent
+            .iter()
+            .enumerate()
+            .flat_map(|(shelf, psus)| psus.iter().map(move |psu| (shelf, psu)))
+        {
+            use std::fmt::Write;
+
+            any_absent |= true;
+            writeln!(
+                case_builder.comment_mut(),
+                "* shelf {shelf} PSU {psu} absent"
+            )
+            .expect("writing to a string is infallible")
+        }
+
+        if !any_absent {
+            case_builder.close("every PSU is now present");
+        }
+    }
+
     Ok(())
 }
 
@@ -301,6 +364,29 @@ impl PscCase {
             slots.iter().map(move |slot| PsuLocation { shelf, slot })
         })
     }
+
+    /// Returns all ereports assigned to this case, in the order in which their
+    /// events occurred (see [`PsuEreport::event_order`]).
+    ///
+    /// `known_restarts` is the analysis input's map of reporter restarts, used
+    /// to order events that span more than one restart.
+    fn ereports_in_order(
+        &self,
+        known_restarts: &IdOrdMap<EreporterRestart>,
+    ) -> Vec<&PsuEreport> {
+        let mut ereports = self
+            .restarts
+            .iter()
+            .flat_map(|restart| restart.ereports.iter())
+            .collect::<Vec<_>>();
+        ereports.sort_by_key(|ereport| {
+            let EreportId { restart_id, ena } = ereport.id();
+            let time_first_seen =
+                known_restarts.get(restart_id).map(|r| r.time_first_seen);
+            (time_first_seen, ena)
+        });
+        ereports
+    }
 }
 
 #[derive(Debug)]
@@ -319,12 +405,21 @@ impl IdHashItem for Restart {
     id_upcast!();
 }
 
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+enum Provenance {
+    /// The ereport was first observed in this sitrep.
+    ThisSitrep,
+    /// The ereport was assigned to a case in the parent sitrep.
+    Parent,
+}
+
 #[derive(Debug)]
 struct PsuEreport {
     location: PsuLocation,
     ereport: Arc<Ereport>,
     kind: PsuEreportKind,
     data: PsuEreportData,
+    provenance: Provenance,
 }
 
 impl IdOrdItem for PsuEreport {
@@ -338,7 +433,14 @@ impl IdOrdItem for PsuEreport {
 }
 
 impl PsuEreport {
-    fn parse(ereport: &Arc<ereport::Ereport>) -> anyhow::Result<Self> {
+    fn id(&self) -> &ereport::EreportId {
+        &self.ereport.id
+    }
+
+    fn parse(
+        ereport: &Arc<ereport::Ereport>,
+        provenance: Provenance,
+    ) -> anyhow::Result<Self> {
         let kind = match ereport.data.class.as_deref() {
             Some(k) if k == PSU_INSERT_EREPORT => PsuEreportKind::Insert,
             Some(k) if k == PSU_REMOVE_EREPORT => PsuEreportKind::Remove,
@@ -363,7 +465,25 @@ impl PsuEreport {
             anyhow::anyhow!("PSU slot {} out of range (must be 0-5)", data.slot)
         })?;
         let location = PsuLocation { shelf, slot };
-        Ok(Self { kind, data, location, ereport: ereport.clone() })
+        Ok(Self { kind, data, location, ereport: ereport.clone(), provenance })
+    }
+
+    fn psc_baseboard(
+        &self,
+    ) -> anyhow::Result<external_api::hardware::Baseboard> {
+        Ok(external_api::hardware::Baseboard {
+            serial: self.ereport.serial_number.clone().ok_or_else(|| {
+                anyhow::anyhow!("ereport has no serial number")
+            })?,
+            part: self
+                .ereport
+                .part_number
+                .clone()
+                .ok_or_else(|| anyhow::anyhow!("ereport has no part number"))?,
+            revision: self.data.baseboard_rev.ok_or_else(|| {
+                anyhow::anyhow!("ereport has no baseboard revision")
+            })?,
+        })
     }
 }
 
@@ -379,6 +499,7 @@ struct PsuEreportData {
     rail: String,
     slot: u8,
     refdes: String,
+    baseboard_rev: Option<u32>,
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
@@ -405,9 +526,20 @@ struct PsuFruid {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::analysis_input::Input;
+    use crate::builder::SitrepBuilderRng;
     use crate::test_util::FmTest;
-    use chrono::Utc;
+    use chrono::{Duration, Utc};
+    use nexus_types::alert::{AlertClass, AlertPayload};
+    use nexus_types::fm::case::{AlertRequest, CaseEreport};
+    use nexus_types::fm::{self, Sitrep, SitrepVersion};
     use nexus_types::inventory::SpType;
+    use omicron_common::api::external::Generation;
+    use omicron_test_utils::dev;
+    use omicron_uuid_kinds::{
+        AlertUuid, CaseEreportUuid, CaseUuid, CollectionUuid, OmicronZoneUuid,
+        SitrepUuid,
+    };
 
     // These are real life ereports I copied from the dogfood rack.
     mod ereports {
@@ -454,6 +586,31 @@ mod tests {
             "rail": "V54_PSU4",
             "refdes": "PSU4",
             "slot": 4,
+            "v": 0
+        }"#;
+
+        // Like `PSU_REMOVE_JSON`, but for a different rectifier (PSU2 on rail
+        // V54_PSU2) in the same shelf, so that tests can confirm distinct PSU
+        // slots are tracked as distinct cases.
+        pub(super) const PSU_REMOVE_SLOT2_JSON: &str = r#"{
+            "baseboard_part_number": "913-0000003",
+            "baseboard_rev": 8,
+            "baseboard_serial_number": "BRM45220004",
+            "ereport_message_version": 0,
+            "fruid": {
+                "fw_rev": "0701",
+                "mfr": "Murata-PS",
+                "mpn": "MWOCP68-3600-D-RM",
+                "serial": "LL2216RB0042"
+            },
+            "hubris_archive_id": "qSm4IUtvQe0",
+            "hubris_task_gen": 0,
+            "hubris_task_name": "sequencer",
+            "hubris_uptime_ms": 1197337481,
+            "k": "hw.remove.psu",
+            "rail": "V54_PSU2",
+            "refdes": "PSU2",
+            "slot": 2,
             "v": 0
         }"#;
 
@@ -532,12 +689,13 @@ mod tests {
             slot: SHELF,
         });
         let ereport = dbg!(Arc::new(reporter.parse_ereport(Utc::now(), json)));
-        let parsed = dbg!(PsuEreport::parse(&ereport))
+        let parsed = dbg!(PsuEreport::parse(&ereport, Provenance::ThisSitrep))
             .expect("dogfood ereport should parse as a PsuEreport");
 
         // The payload fields shared by every dogfood ereport above; all of them
         // describe PSU4 on rail V54_PSU4.
         let expected_data = PsuEreportData {
+            baseboard_rev: Some(8),
             fruid: Some(PsuFruid {
                 fw_rev: "0701".to_string(),
                 mfr: "Murata-PS".to_string(),
@@ -574,5 +732,455 @@ mod tests {
             PsuEreportKind::Insert,
             ereports::PSU_INSERT_JSON,
         );
+    }
+
+    /// The shelf slot (i.e. `Reporter::Sp { sp_type: Power, slot }`) used by
+    /// every dogfood fixture above.
+    const SHELF: u16 = 0;
+
+    /// Builds the example system and returns the test harness, its log
+    /// context, and an inventory collection to feed analysis.
+    fn setup(test_name: &'static str) -> (FmTest, dev::LogContext) {
+        let (fmtest, logctx) = FmTest::new_with_logctx(test_name);
+        (fmtest, logctx)
+    }
+
+    /// Builds a reporter-restart entry. Only the restart id and first-seen
+    /// time matter to analysis ordering; the remaining fields are fixed to
+    /// plausible power-shelf values.
+    fn mk_restart(
+        restart_id: EreporterRestartUuid,
+        time_first_seen: DateTime<Utc>,
+    ) -> EreporterRestart {
+        EreporterRestart {
+            id: restart_id.into(),
+            time_first_seen,
+            reporter: nexus_db_model::EreporterType::Sp,
+            slot_type: nexus_db_model::SpType::Power,
+            slot: Some(nexus_db_model::SpMgsSlot::from(SHELF)),
+        }
+    }
+
+    /// Constructs an analysis [`Input`] from an inventory collection, an
+    /// optional parent sitrep, and a set of brand-new ereports.
+    ///
+    /// The input's reporter-restart map is derived from the ereports in play
+    /// (new ones plus any in the parent sitrep): each restart's first-seen
+    /// time is the earliest collection time among its ereports, mirroring how
+    /// Nexus first learns of a restart in production.
+    fn build_input(
+        collection: inventory::Collection,
+        parent_sitrep: Option<Sitrep>,
+        new_ereports: impl IntoIterator<Item = Ereport>,
+    ) -> Input {
+        let new_ereports: Vec<Ereport> = new_ereports.into_iter().collect();
+
+        let mut first_seen: BTreeMap<EreporterRestartUuid, DateTime<Utc>> =
+            BTreeMap::new();
+        let parent_ereports = parent_sitrep
+            .iter()
+            .flat_map(|s| s.ereports_by_id.iter().map(|e| (**e).clone()));
+        for ereport in new_ereports.iter().cloned().chain(parent_ereports) {
+            let restart_id = ereport.id().restart_id;
+            let entry =
+                first_seen.entry(restart_id).or_insert(ereport.time_collected);
+            *entry = (*entry).min(ereport.time_collected);
+        }
+        let restarts = first_seen
+            .into_iter()
+            .map(|(restart_id, time)| mk_restart(restart_id, time));
+
+        let parent = parent_sitrep.map(|s| {
+            Arc::new((
+                SitrepVersion {
+                    id: s.id(),
+                    version: 0,
+                    time_made_current: Utc::now(),
+                },
+                s,
+            ))
+        });
+        let mut builder = Input::builder(
+            parent,
+            Arc::new(collection),
+            Arc::new(IdOrdMap::new()),
+        )
+        .expect("input builder should accept fresh inventory");
+        builder.add_ereporter_restarts(restarts);
+        builder.add_unmarked_ereports(new_ereports);
+        builder.build().0
+    }
+
+    /// Runs the power shelf diagnosis engine over `input` and returns the
+    /// resulting sitrep.
+    fn run_analyze(log: &slog::Logger, input: &Input) -> Sitrep {
+        let mut builder = SitrepBuilder::new_with_rng(
+            log,
+            input,
+            SitrepBuilderRng::from_seed("power-shelf-analyze"),
+        );
+        analyze(&mut builder).expect("power shelf analysis should succeed");
+        let (sitrep, report) =
+            builder.build(OmicronZoneUuid::new_v4(), Utc::now());
+        eprintln!("\n--- analysis report ---\n{}", report.display_multiline(0));
+        sitrep
+    }
+
+    /// Wraps an ereport in a `CaseEreport` assigned in `sitrep_id`, for
+    /// seeding a parent sitrep's case.
+    fn case_ereport(
+        ereport: &Arc<Ereport>,
+        sitrep_id: SitrepUuid,
+    ) -> CaseEreport {
+        CaseEreport {
+            id: CaseEreportUuid::new_v4(),
+            ereport: ereport.clone(),
+            assigned_sitrep_id: sitrep_id,
+            comment: "seeded by test".to_string(),
+        }
+    }
+
+    /// Builds a parent sitrep with a single open power shelf case containing
+    /// `ereports` (and any `alerts` already requested for them).
+    fn parent_with_open_case(
+        inv_collection_id: CollectionUuid,
+        ereports: impl IntoIterator<Item = Arc<Ereport>>,
+        alerts: impl IntoIterator<Item = AlertRequest>,
+    ) -> Sitrep {
+        let parent_sitrep_id = SitrepUuid::new_v4();
+        let ereports: Vec<_> = ereports.into_iter().collect();
+        let case = fm::Case {
+            id: CaseUuid::new_v4(),
+            metadata: fm::case::Metadata {
+                created_sitrep_id: parent_sitrep_id,
+                closed_sitrep_id: None,
+                de: DiagnosisEngineKind::PowerShelf,
+                comment: "seeded open case".to_string(),
+            },
+            ereports: ereports
+                .iter()
+                .map(|e| case_ereport(e, parent_sitrep_id))
+                .collect(),
+            alerts_requested: alerts.into_iter().collect(),
+            support_bundles_requested: Default::default(),
+            facts: Default::default(),
+        };
+        let mut cases = IdOrdMap::new();
+        cases.insert_unique(case).unwrap();
+        Sitrep {
+            metadata: fm::SitrepMetadata {
+                id: parent_sitrep_id,
+                inv_collection_id,
+                creator_id: OmicronZoneUuid::new_v4(),
+                parent_sitrep_id: None,
+                time_created: Utc::now(),
+                next_inv_min_time_started: Utc::now(),
+                comment: "parent sitrep for test".to_string(),
+                alert_generation: Generation::new(),
+            },
+            cases,
+            ereports_by_id: ereports.into_iter().collect(),
+        }
+    }
+
+    /// Collects the single case from a sitrep, panicking unless exactly one is
+    /// present.
+    fn sole_case(sitrep: &Sitrep) -> &fm::Case {
+        assert_eq!(
+            sitrep.cases.len(),
+            1,
+            "expected exactly one case in the sitrep"
+        );
+        sitrep.cases.iter().next().unwrap()
+    }
+
+    /// A single rectifier insert opens a case, immediately closes it (the PSU
+    /// is present again), and requests one `PsuInserted` alert carrying the
+    /// inserted PSU's identity.
+    #[test]
+    fn single_insert_closes_case_with_inserted_alert() {
+        let (mut fmtest, logctx) =
+            setup("single_insert_closes_case_with_inserted_alert");
+        let (example, _bp) = fmtest.system_builder.build();
+        let mut reporter = fmtest.reporters.reporter(ereport::Reporter::Sp {
+            sp_type: SpType::Power,
+            slot: SHELF,
+        });
+        let insert =
+            reporter.parse_ereport(Utc::now(), ereports::PSU_INSERT_JSON);
+
+        let input = build_input(example.collection, None, [insert]);
+        let sitrep = run_analyze(&logctx.log, &input);
+
+        let case = sole_case(&sitrep);
+        assert!(
+            !case.is_open(),
+            "an inserted PSU is present, so its case should be closed"
+        );
+        assert_eq!(
+            case.alerts_requested.len(),
+            1,
+            "a single insert should request exactly one alert"
+        );
+        let alert = case.alerts_requested.iter().next().unwrap();
+        assert_eq!(alert.class, AlertClass::PsuInserted);
+        assert_eq!(alert.payload["power_shelf"]["slot"].as_u64(), Some(0));
+        assert_eq!(alert.payload["psu"]["slot"].as_u64(), Some(4));
+        assert_eq!(
+            alert.payload["psu"]["identity"]["serial_number"].as_str(),
+            Some("LL2216RB003Z"),
+        );
+
+        logctx.cleanup_successful();
+    }
+
+    /// A single rectifier remove opens a case and leaves it open (the PSU is
+    /// still missing), requesting one `PsuRemoved` alert.
+    #[test]
+    fn single_remove_opens_case_with_removed_alert() {
+        let (mut fmtest, logctx) =
+            setup("single_remove_opens_case_with_removed_alert");
+        let (example, _bp) = fmtest.system_builder.build();
+        let mut reporter = fmtest.reporters.reporter(ereport::Reporter::Sp {
+            sp_type: SpType::Power,
+            slot: SHELF,
+        });
+        let remove =
+            reporter.parse_ereport(Utc::now(), ereports::PSU_REMOVE_JSON);
+
+        let input = build_input(example.collection, None, [remove]);
+        let sitrep = run_analyze(&logctx.log, &input);
+
+        let case = sole_case(&sitrep);
+        assert!(
+            case.is_open(),
+            "a removed PSU is still missing, so its case should stay open"
+        );
+        assert_eq!(case.alerts_requested.len(), 1);
+        let alert = case.alerts_requested.iter().next().unwrap();
+        assert_eq!(alert.class, AlertClass::PsuRemoved);
+        assert_eq!(alert.payload["psu"]["slot"].as_u64(), Some(4));
+
+        logctx.cleanup_successful();
+    }
+
+    /// A remove followed by an insert within a single analysis run collapses
+    /// into one case: it ends up closed (the PSU is present after the insert),
+    /// but still requests one alert for each event.
+    #[test]
+    fn remove_then_insert_in_one_sitrep_closes_with_both_alerts() {
+        let (mut fmtest, logctx) =
+            setup("remove_then_insert_in_one_sitrep_closes_with_both_alerts");
+        let (example, _bp) = fmtest.system_builder.build();
+        let mut reporter = fmtest.reporters.reporter(ereport::Reporter::Sp {
+            sp_type: SpType::Power,
+            slot: SHELF,
+        });
+        // Same reporter restart, so the insert gets the greater ENA and is
+        // recognized as the more recent event.
+        let remove =
+            reporter.parse_ereport(Utc::now(), ereports::PSU_REMOVE_JSON);
+        let insert =
+            reporter.parse_ereport(Utc::now(), ereports::PSU_INSERT_JSON);
+
+        let input = build_input(example.collection, None, [remove, insert]);
+        let sitrep = run_analyze(&logctx.log, &input);
+
+        let case = sole_case(&sitrep);
+        assert!(
+            !case.is_open(),
+            "the most recent event was an insert, so the case should close"
+        );
+        assert_eq!(
+            case.alerts_requested.len(),
+            2,
+            "both the remove and the insert should each request an alert"
+        );
+        let has_class =
+            |class| case.alerts_requested.iter().any(|a| a.class == class);
+        assert!(has_class(AlertClass::PsuRemoved));
+        assert!(has_class(AlertClass::PsuInserted));
+
+        logctx.cleanup_successful();
+    }
+
+    /// Removes of two different rectifiers in the same shelf open two distinct
+    /// cases, since each case concerns a single PSU location.
+    #[test]
+    fn distinct_slots_get_distinct_cases() {
+        let (mut fmtest, logctx) = setup("distinct_slots_get_distinct_cases");
+        let (example, _bp) = fmtest.system_builder.build();
+        let mut reporter = fmtest.reporters.reporter(ereport::Reporter::Sp {
+            sp_type: SpType::Power,
+            slot: SHELF,
+        });
+        let remove_psu4 =
+            reporter.parse_ereport(Utc::now(), ereports::PSU_REMOVE_JSON);
+        let remove_psu2 =
+            reporter.parse_ereport(Utc::now(), ereports::PSU_REMOVE_SLOT2_JSON);
+
+        let input =
+            build_input(example.collection, None, [remove_psu4, remove_psu2]);
+        let sitrep = run_analyze(&logctx.log, &input);
+
+        assert_eq!(
+            sitrep.cases.len(),
+            2,
+            "each rectifier slot should get its own case"
+        );
+        for case in sitrep.cases.iter() {
+            assert!(case.is_open(), "both removed PSUs should stay open");
+            assert_eq!(case.alerts_requested.len(), 1);
+        }
+
+        logctx.cleanup_successful();
+    }
+
+    /// Ereports whose classes the engine doesn't recognize (here, a power-good
+    /// transition) are ignored: no case is opened.
+    #[test]
+    fn unknown_ereports_are_ignored() {
+        let (mut fmtest, logctx) = setup("unknown_ereports_are_ignored");
+        let (example, _bp) = fmtest.system_builder.build();
+        let mut reporter = fmtest.reporters.reporter(ereport::Reporter::Sp {
+            sp_type: SpType::Power,
+            slot: SHELF,
+        });
+        let pwr_bad =
+            reporter.parse_ereport(Utc::now(), ereports::PSU_PWR_BAD_JSON);
+        let pwr_good =
+            reporter.parse_ereport(Utc::now(), ereports::PSU_PWR_GOOD_JSON);
+
+        let input = build_input(example.collection, None, [pwr_bad, pwr_good]);
+        let sitrep = run_analyze(&logctx.log, &input);
+
+        assert!(
+            sitrep.cases.is_empty(),
+            "power-good transitions are not insert/remove events"
+        );
+
+        logctx.cleanup_successful();
+    }
+
+    /// A case carried forward from the parent sitrep for a removed PSU (with a
+    /// `PsuRemoved` alert already requested) closes when a fresh insert
+    /// arrives, and requests exactly one new alert (the insert) without
+    /// re-requesting the carried-forward remove.
+    #[test]
+    fn carried_forward_remove_then_insert_closes_without_duplicate_alert() {
+        let (mut fmtest, logctx) = setup(
+            "carried_forward_remove_then_insert_closes_without_duplicate_alert",
+        );
+        let (example, _bp) = fmtest.system_builder.build();
+        let inv_collection_id = example.collection.id;
+        let mut reporter = fmtest.reporters.reporter(ereport::Reporter::Sp {
+            sp_type: SpType::Power,
+            slot: SHELF,
+        });
+
+        // The parent sitrep already saw the remove and requested its alert.
+        let remove = Arc::new(
+            reporter.parse_ereport(Utc::now(), ereports::PSU_REMOVE_JSON),
+        );
+        let remove_alert = AlertRequest {
+            id: AlertUuid::new_v4(),
+            class: AlertClass::PsuRemoved,
+            version: PsuRemovedV0::VERSION,
+            payload: serde_json::json!({}),
+            requested_sitrep_id: SitrepUuid::new_v4(),
+            comment: "removed earlier".to_string(),
+        };
+        let parent =
+            parent_with_open_case(inv_collection_id, [remove], [remove_alert]);
+
+        // Now a fresh insert arrives.
+        let insert =
+            reporter.parse_ereport(Utc::now(), ereports::PSU_INSERT_JSON);
+        let input = build_input(example.collection, Some(parent), [insert]);
+        let sitrep = run_analyze(&logctx.log, &input);
+
+        let case = sole_case(&sitrep);
+        assert!(
+            !case.is_open(),
+            "the insert means the PSU is present again, so the case closes"
+        );
+        assert_eq!(
+            case.alerts_requested.len(),
+            2,
+            "the carried-forward remove alert plus exactly one new insert alert"
+        );
+        let inserted = case
+            .alerts_requested
+            .iter()
+            .filter(|a| a.class == AlertClass::PsuInserted)
+            .count();
+        let removed = case
+            .alerts_requested
+            .iter()
+            .filter(|a| a.class == AlertClass::PsuRemoved)
+            .count();
+        assert_eq!(inserted, 1, "exactly one new insert alert");
+        assert_eq!(removed, 1, "the remove alert must not be duplicated");
+
+        logctx.cleanup_successful();
+    }
+
+    /// Across reporter restarts, the most recent event is the one in the
+    /// restart that was first seen *latest*, not the one with the greatest ENA
+    /// or the latest collection time.
+    ///
+    /// The scenario is constructed so those bases disagree: restart A (seen
+    /// first) sees a remove and then an insert, and that insert is both the
+    /// highest-ENA ereport and the latest-collected one (Nexus ingested it
+    /// after a collection lag). Restart B, which began later, sees only a
+    /// remove, with a lower ENA. Because restart B is the later reporter
+    /// session, its remove is the most recent *event*, so the PSU is absent
+    /// and the case must stay open.
+    #[test]
+    fn most_recent_event_follows_restart_first_seen() {
+        let (mut fmtest, logctx) =
+            setup("most_recent_event_follows_restart_first_seen");
+        let (example, _bp) = fmtest.system_builder.build();
+        let mut reporter = fmtest.reporters.reporter(ereport::Reporter::Sp {
+            sp_type: SpType::Power,
+            slot: SHELF,
+        });
+
+        let t0 = Utc::now();
+        // Restart A: remove, then a later-collected insert with a higher ENA.
+        let remove_a = reporter.parse_ereport(t0, ereports::PSU_REMOVE_JSON);
+        let insert_a = reporter.parse_ereport(
+            t0 + Duration::seconds(10),
+            ereports::PSU_INSERT_JSON,
+        );
+
+        // The reporter restarts (ENAs reset), and restart B is first seen
+        // after restart A but before A's insert was collected.
+        reporter.restart();
+        let remove_b = reporter.parse_ereport(
+            t0 + Duration::seconds(5),
+            ereports::PSU_REMOVE_JSON,
+        );
+
+        let input = build_input(
+            example.collection,
+            None,
+            [remove_a, insert_a, remove_b],
+        );
+        let sitrep = run_analyze(&logctx.log, &input);
+
+        let case = sole_case(&sitrep);
+        assert!(
+            case.is_open(),
+            "the latest reporter restart saw a remove, so the PSU is absent \
+             and its case must stay open"
+        );
+        assert_eq!(
+            case.alerts_requested.len(),
+            3,
+            "each of the three events should request its own alert"
+        );
+
+        logctx.cleanup_successful();
     }
 }
