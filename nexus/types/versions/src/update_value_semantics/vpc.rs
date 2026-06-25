@@ -4,8 +4,9 @@
 
 //! VPC types for version UPDATE_VALUE_SEMANTICS.
 
+use crate::v2026_06_23_00::identity::IdentityMetadataUpdateParamsStrict;
 use omicron_common::api::external::{
-    IdentityMetadataUpdateParams, Name, NameOrId, Nullable,
+    IdentityMetadataUpdateParams, NameOrId, Nullable,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -17,8 +18,8 @@ use serde::{Deserialize, Serialize};
 /// `null` to detach any custom router.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct VpcSubnetUpdate {
-    pub name: Name,
-    pub description: String,
+    #[serde(flatten)]
+    pub identity: IdentityMetadataUpdateParamsStrict,
 
     /// An optional router, used to direct packets sent from hosts in this subnet
     /// to any destination address.
@@ -33,8 +34,8 @@ impl From<VpcSubnetUpdate> for crate::v2025_11_20_00::vpc::VpcSubnetUpdate {
     fn from(new: VpcSubnetUpdate) -> Self {
         Self {
             identity: IdentityMetadataUpdateParams {
-                name: Some(new.name),
-                description: Some(new.description),
+                name: Some(new.identity.name),
+                description: Some(new.identity.description),
             },
             custom_router: new.custom_router.0,
         }

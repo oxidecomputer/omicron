@@ -11,6 +11,7 @@
 //! `ProjectUpdate`, `VpcSubnetUpdate`, `SiloQuotasUpdate`, and
 //! `SupportBundleUpdate`.
 
+pub mod identity;
 pub mod project;
 pub mod silo;
 pub mod support_bundle;

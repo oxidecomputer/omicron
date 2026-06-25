@@ -353,6 +353,7 @@ pub mod project {
     pub use crate::v2025_11_20_00::project::ProjectCreate;
     pub use crate::v2025_11_20_00::project::ProjectSelector;
 
+    pub use crate::v2026_06_23_00::identity::IdentityMetadataUpdateParamsStrict;
     pub use crate::v2026_06_23_00::project::ProjectUpdate;
 }
 
@@ -459,6 +460,7 @@ pub mod vpc {
     pub use crate::v2025_11_20_00::vpc::VpcSubnetCreate;
     pub use crate::v2025_11_20_00::vpc::VpcUpdate;
 
+    pub use crate::v2026_06_23_00::identity::IdentityMetadataUpdateParamsStrict;
     pub use crate::v2026_06_23_00::vpc::VpcSubnetUpdate;
 }
 

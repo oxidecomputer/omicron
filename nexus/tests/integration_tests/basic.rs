@@ -262,8 +262,10 @@ async fn test_projects_basic(cptestctx: &ControlPlaneTestContext) {
     NexusRequest::new(
         RequestBuilder::new(client, Method::PUT, "/v1/projects/simproject2")
             .body(Some(&project::ProjectUpdate {
-                name: "simproject2".parse().unwrap(),
-                description: "".to_string(),
+                identity: project::IdentityMetadataUpdateParamsStrict {
+                    name: "simproject2".parse().unwrap(),
+                    description: "".to_string(),
+                },
             }))
             .expect_status(Some(StatusCode::NOT_FOUND)),
     )
@@ -302,8 +304,10 @@ async fn test_projects_basic(cptestctx: &ControlPlaneTestContext) {
     // requests.
     // `name` is unchanged ("simproject3"); value semantics requires resending it.
     let project_update = project::ProjectUpdate {
-        name: "simproject3".parse().unwrap(),
-        description: "Li'l lightnin'".to_string(),
+        identity: project::IdentityMetadataUpdateParamsStrict {
+            name: "simproject3".parse().unwrap(),
+            description: "Li'l lightnin'".to_string(),
+        },
     };
     let project = NexusRequest::object_put(
         client,
@@ -330,8 +334,10 @@ async fn test_projects_basic(cptestctx: &ControlPlaneTestContext) {
     // operation under the hood.  This case also exercises changes to multiple
     // fields in one request.
     let project_update = project::ProjectUpdate {
-        name: "lil-lightnin".parse().unwrap(),
-        description: "little lightning".to_string(),
+        identity: project::IdentityMetadataUpdateParamsStrict {
+            name: "lil-lightnin".parse().unwrap(),
+            description: "little lightning".to_string(),
+        },
     };
     let project = NexusRequest::object_put(
         client,

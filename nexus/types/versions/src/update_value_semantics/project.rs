@@ -4,7 +4,8 @@
 
 //! Project types for version UPDATE_VALUE_SEMANTICS.
 
-use omicron_common::api::external::{IdentityMetadataUpdateParams, Name};
+use crate::v2026_06_23_00::identity::IdentityMetadataUpdateParamsStrict;
+use omicron_common::api::external::IdentityMetadataUpdateParams;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -14,8 +15,8 @@ use serde::{Deserialize, Serialize};
 /// `description` must both be present.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct ProjectUpdate {
-    pub name: Name,
-    pub description: String,
+    #[serde(flatten)]
+    pub identity: IdentityMetadataUpdateParamsStrict,
 }
 
 // Convert the newer body into the older one, which is the type the Nexus app
@@ -26,8 +27,8 @@ impl From<ProjectUpdate> for crate::v2025_11_20_00::project::ProjectUpdate {
     fn from(new: ProjectUpdate) -> Self {
         Self {
             identity: IdentityMetadataUpdateParams {
-                name: Some(new.name),
-                description: Some(new.description),
+                name: Some(new.identity.name),
+                description: Some(new.identity.description),
             },
         }
     }

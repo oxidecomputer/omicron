@@ -339,8 +339,10 @@ async fn test_vpc_routers_attach_to_subnet(
             "/v1/vpc-subnets/{subnet_name}?project={PROJECT_NAME}&vpc={VPC_NAME}"
         ),
         &vpc::VpcSubnetUpdate {
-            name: subnet_name.parse().unwrap(),
-            description: "".to_string(),
+            identity: vpc::IdentityMetadataUpdateParamsStrict {
+                name: subnet_name.parse().unwrap(),
+                description: "".to_string(),
+            },
             custom_router: Nullable(Some(routers[0].identity.id.into())),
         },
         StatusCode::BAD_REQUEST,
@@ -401,8 +403,10 @@ async fn test_vpc_routers_attach_to_subnet(
         client,
         &format!("/v1/vpc-subnets/default?project={PROJECT_NAME}&vpc=vpc1"),
         &vpc::VpcSubnetUpdate {
-            name: "default".parse().unwrap(),
-            description: "".to_string(),
+            identity: vpc::IdentityMetadataUpdateParamsStrict {
+                name: "default".parse().unwrap(),
+                description: "".to_string(),
+            },
             custom_router: Nullable(Some(router.identity.id.into())),
         },
         StatusCode::BAD_REQUEST,
@@ -778,8 +782,10 @@ async fn set_custom_router(
         client,
         &url,
         &vpc::VpcSubnetUpdate {
-            name: current.identity.name.clone(),
-            description: current.identity.description.clone(),
+            identity: vpc::IdentityMetadataUpdateParamsStrict {
+                name: current.identity.name.clone(),
+                description: current.identity.description.clone(),
+            },
             custom_router: Nullable(custom_router),
         },
     )

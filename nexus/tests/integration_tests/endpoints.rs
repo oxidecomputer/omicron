@@ -2323,8 +2323,11 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
                     AllowedMethod::Delete,
                     AllowedMethod::Put(
                         serde_json::to_value(project::ProjectUpdate {
-                            name: DEMO_PROJECT_NAME.clone(),
-                            description: "different".to_string(),
+                            identity:
+                                project::IdentityMetadataUpdateParamsStrict {
+                                    name: DEMO_PROJECT_NAME.clone(),
+                                    description: "different".to_string(),
+                                },
                         })
                         .unwrap(),
                     ),
@@ -2412,8 +2415,10 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
                     AllowedMethod::Get,
                     AllowedMethod::Put(
                         serde_json::to_value(&vpc::VpcSubnetUpdate {
-                            name: DEMO_VPC_SUBNET_NAME.clone(),
-                            description: "different".to_string(),
+                            identity: vpc::IdentityMetadataUpdateParamsStrict {
+                                name: DEMO_VPC_SUBNET_NAME.clone(),
+                                description: "different".to_string(),
+                            },
                             custom_router: Nullable(None),
                         })
                         .unwrap(),
