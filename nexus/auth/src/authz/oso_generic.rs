@@ -157,6 +157,8 @@ pub fn make_omicron_oso(log: &slog::Logger) -> Result<OsoInit, anyhow::Error> {
         SiloImage::init(),
         // Fleet-level resources
         AddressLot::init(),
+        BgpConfig::init(),
+        BgpAnnounceSet::init(),
         Blueprint::init(),
         LoopbackAddress::init(),
         Certificate::init(),

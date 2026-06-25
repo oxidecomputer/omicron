@@ -3,6 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use super::DataStore;
+use crate::authz;
 use crate::context::OpContext;
 use crate::db::model::{BgpAnnounceSet, BgpAnnouncement, BgpConfig, Name};
 use crate::db::pagination::paginated;
@@ -228,128 +229,39 @@ impl DataStore {
     pub async fn bgp_config_update(
         &self,
         opctx: &OpContext,
-        sel: &networking::BgpConfigSelector,
+        authz_bgp_config: &authz::BgpConfig,
+        bgp_announce_set_id: Uuid,
         update: &networking::BgpConfigUpdate,
     ) -> UpdateResult<BgpConfig> {
-        use nexus_db_schema::schema::bgp_config;
-        use nexus_db_schema::schema::bgp_config::dsl as bgp_config_dsl;
-        use nexus_db_schema::schema::{
-            bgp_announce_set, bgp_announce_set::dsl as announce_set_dsl,
-        };
+        use nexus_db_schema::schema::bgp_config::dsl;
 
-        let err = OptionalError::new();
-        let transaction = async |conn| {
-            // Look up the existing config
-            let (query, not_found_err, msg) = match &sel.name_or_id {
-                NameOrId::Id(id) => (
-                    bgp_config_dsl::bgp_config
-                        .filter(bgp_config::id.eq(*id))
-                        .into_boxed(),
-                    Error::not_found_by_id(ResourceType::BgpConfig, id),
-                    "failed to lookup bgp config by id",
-                ),
-                NameOrId::Name(name) => (
-                    bgp_config_dsl::bgp_config
-                        .filter(bgp_config::name.eq(name.to_string()))
-                        .into_boxed(),
-                    Error::not_found_by_name(ResourceType::BgpConfig, name),
-                    "failed to lookup bgp config by name",
-                ),
-            };
+        opctx.authorize(authz::Action::Modify, authz_bgp_config).await?;
 
-            let lookup_err = |e, not_found_err, msg| {
-                error!(opctx.log, "{msg}"; "error" => ?e);
-                match e {
-                    diesel::result::Error::NotFound => err.bail(not_found_err),
-                    _ => err.bail(Error::internal_error(msg)),
-                }
-            };
+        // The `asn` field is immutable and was already checked.
+        let networking::BgpConfigUpdate {
+            name: new_name,
+            description: new_description,
+            asn: _,
+            bgp_announce_set_id: _,
+            max_paths: new_max_paths,
+        } = update;
 
-            let existing: BgpConfig = query
-                .filter(bgp_config::time_deleted.is_null())
-                .select(BgpConfig::as_select())
-                .limit(1)
-                .first_async::<BgpConfig>(&conn)
-                .await
-                .map_err(|e| lookup_err(e, not_found_err, msg))?;
-
-            let networking::BgpConfigUpdate {
-                name: new_name,
-                description: new_description,
-                asn,
-                bgp_announce_set_id: new_bgp_announce_set_id,
-                max_paths: new_max_paths,
-            } = update;
-
-            // Check that asn hasn't changed
-            if *existing.asn != *asn {
-                return Err(
-                    err.bail(Error::invalid_request("asn cannot be updated"))
-                );
-            }
-
-            // Resolve bgp_announce_set_id if an update was requested
-            let (query, not_found_err, msg) = match &new_bgp_announce_set_id {
-                NameOrId::Id(id) => (
-                    announce_set_dsl::bgp_announce_set
-                        .filter(bgp_announce_set::id.eq(*id))
-                        .into_boxed(),
-                    Error::not_found_by_id(ResourceType::BgpAnnounceSet, id),
-                    "failed to lookup announce set by id",
-                ),
-                NameOrId::Name(name) => (
-                    announce_set_dsl::bgp_announce_set
-                        .filter(bgp_announce_set::name.eq(name.to_string()))
-                        .into_boxed(),
-                    Error::not_found_by_name(
-                        ResourceType::BgpAnnounceSet,
-                        name,
-                    ),
-                    "failed to lookup announce set by name",
-                ),
-            };
-
-            let new_bgp_announce_set_id = query
-                .filter(bgp_announce_set::time_deleted.is_null())
-                .select(bgp_announce_set::id)
-                .limit(1)
-                .first_async::<Uuid>(&conn)
-                .await
-                .map_err(|e| lookup_err(e, not_found_err, msg))?;
-
-            diesel::update(bgp_config_dsl::bgp_config)
-                .filter(bgp_config_dsl::id.eq(existing.id()))
-                .set((
-                    bgp_config_dsl::time_modified.eq(Utc::now()),
-                    bgp_config_dsl::name.eq(new_name.to_string()),
-                    bgp_config_dsl::description.eq(new_description.to_string()),
-                    bgp_config_dsl::bgp_announce_set_id
-                        .eq(new_bgp_announce_set_id),
-                    bgp_config_dsl::max_paths.eq(SqlU8(new_max_paths.as_u8())),
-                ))
-                .returning(BgpConfig::as_returning())
-                .get_result_async(&conn)
-                .await
-                .map_err(|e| {
-                    let msg = "bgp_config_update failed";
-                    error!(opctx.log, "{msg}"; "error" => ?e);
-                    err.bail(public_error_from_diesel(e, ErrorHandler::Server))
-                })
-        };
-
-        let conn = self.pool_connection_authorized(opctx).await?;
-        self.transaction_retry_wrapper("bgp_config_update")
-            .transaction(&conn, transaction)
+        diesel::update(dsl::bgp_config)
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::id.eq(authz_bgp_config.id()))
+            .set((
+                dsl::time_modified.eq(Utc::now()),
+                dsl::name.eq(new_name.to_string()),
+                dsl::description.eq(new_description.to_string()),
+                dsl::bgp_announce_set_id.eq(bgp_announce_set_id),
+                dsl::max_paths.eq(SqlU8(new_max_paths.as_u8())),
+            ))
+            .returning(BgpConfig::as_returning())
+            .get_result_async(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| {
-                let msg = "bgp_config_update failed";
-                if let Some(err) = err.take() {
-                    error!(opctx.log, "{msg}"; "error" => ?err);
-                    err
-                } else {
-                    error!(opctx.log, "{msg}"; "error" => ?e);
-                    public_error_from_diesel(e, ErrorHandler::Server)
-                }
+                error!(opctx.log, "bgp_config_update failed"; "error" => ?e);
+                public_error_from_diesel(e, ErrorHandler::Server)
             })
     }
 
@@ -1174,6 +1086,7 @@ impl DataStore {
 mod tests {
     use super::*;
     use crate::db::pub_test_utils::TestDatabase;
+    use nexus_db_lookup::LookupPath;
     use nexus_db_model::SwitchPortBgpPeerConfig;
     use nexus_types::external_api::networking::BgpPeer;
     use omicron_common::api::external::IdentityMetadataCreateParams;
@@ -1253,18 +1166,6 @@ mod tests {
             .identity
             .id;
 
-        // Try to update an inexistent BGP config
-        let res = datastore
-            .bgp_config_update(
-                &opctx,
-                &networking::BgpConfigSelector {
-                    name_or_id: NameOrId::Name(config_name.clone()),
-                },
-                &update,
-            )
-            .await;
-        assert!(res.is_err());
-
         // Create the BGP config
         let config_id = datastore
             .bgp_config_create(&opctx, &config)
@@ -1273,25 +1174,18 @@ mod tests {
             .identity
             .id;
 
-        // Try and fail to update the asn
-        let res = datastore
-            .bgp_config_update(
-                &opctx,
-                &networking::BgpConfigSelector {
-                    name_or_id: NameOrId::Name(config_name.clone()),
-                },
-                &networking::BgpConfigUpdate { asn: asn + 1, ..update.clone() },
-            )
-            .await;
-        assert!(res.is_err());
+        let (.., authz_bgp_config) = LookupPath::new(&opctx, datastore)
+            .bgp_config_id(config_id)
+            .lookup_for(authz::Action::Modify)
+            .await
+            .expect("lookup bgp config");
 
         // Update the BGP config
         datastore
             .bgp_config_update(
                 &opctx,
-                &networking::BgpConfigSelector {
-                    name_or_id: NameOrId::Name(config_name.clone()),
-                },
+                &authz_bgp_config,
+                new_announce_id,
                 &update,
             )
             .await
