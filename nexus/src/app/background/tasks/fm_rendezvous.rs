@@ -582,26 +582,6 @@ mod tests {
         activators
     }
 
-    /// Asserts that `activator` has been activated, panicking with `msg` if
-    /// it has not.
-    ///
-    /// `Activator::activate()` stores a permit synchronously, so by the time
-    /// a test's activation has completed, the activator is either already
-    /// activated or never will be; a single poll suffices to tell which.
-    #[track_caller]
-    fn assert_activated(activator: &Activator, msg: &str) {
-        let mut activated = tokio_test::task::spawn(activator.activated());
-        tokio_test::assert_ready!(activated.poll(), "{}", msg);
-    }
-
-    /// Asserts that `activator` has not been activated, panicking with `msg`
-    /// if it has. See [`assert_activated`].
-    #[track_caller]
-    fn assert_not_activated(activator: &Activator, msg: &str) {
-        let mut activated = tokio_test::task::spawn(activator.activated());
-        tokio_test::assert_pending!(activated.poll(), "{}", msg);
-    }
-
     async fn fetch_alert(
         datastore: &DataStore,
         alert: AlertUuid,
@@ -858,8 +838,7 @@ mod tests {
 
         // Neither activation saw a stale sitrep, so the sitrep loader should
         // not have been poked.
-        assert_not_activated(
-            &sitrep_loader_activator,
+        sitrep_loader_activator.assert_not_activated(
             "sitrep loader should not be activated without a stale sitrep",
         );
 
@@ -1030,8 +1009,7 @@ mod tests {
         );
         // Detecting a stale sitrep should poke the sitrep loader so the
         // newer sitrep is picked up promptly.
-        assert_activated(
-            &sitrep_loader_activator,
+        sitrep_loader_activator.assert_activated(
             "sitrep loader should be activated when a stale sitrep is detected",
         );
 
@@ -1204,8 +1182,7 @@ mod tests {
         assert_matches!(status.alerts.result, OpResult::Executed { .. });
         // Detecting a stale sitrep should poke the sitrep loader so the
         // newer sitrep is picked up promptly.
-        assert_activated(
-            &sitrep_loader_activator,
+        sitrep_loader_activator.assert_activated(
             "sitrep loader should be activated when a stale sitrep is detected",
         );
 
@@ -2031,8 +2008,7 @@ mod tests {
         );
 
         // The collector should have been activated.
-        assert_activated(
-            &support_bundle_collector_activator,
+        support_bundle_collector_activator.assert_activated(
             "collector should be activated when bundles are created",
         );
 
@@ -2219,8 +2195,7 @@ mod tests {
         );
 
         // The collector should NOT have been activated (no bundles created).
-        assert_not_activated(
-            &support_bundle_collector_activator,
+        support_bundle_collector_activator.assert_not_activated(
             "collector should not be activated when no bundles were created",
         );
 

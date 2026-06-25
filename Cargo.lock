@@ -6824,6 +6824,7 @@ dependencies = [
  "omicron-workspace-hack",
  "thiserror 2.0.18",
  "tokio",
+ "tokio-test",
 ]
 
 [[package]]
@@ -8851,7 +8852,6 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tokio-postgres",
- "tokio-test",
  "tokio-util",
  "tough",
  "trust-quorum-types",

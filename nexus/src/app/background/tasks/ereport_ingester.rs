@@ -449,8 +449,6 @@ mod tests {
             false,
         );
 
-        let mut analysis_activated =
-            tokio_test::task::spawn(fm_analysis_activator.activated());
         let activation1 = ingester.actually_activate(&opctx).await;
         assert!(
             activation1.errors.is_empty(),
@@ -465,10 +463,8 @@ mod tests {
             activation1.sps,
         );
         assert_eq!(activation1.sps_found, 4);
-        tokio_test::assert_ready!(
-            analysis_activated.poll(),
-            "fm analysis task should be activated"
-        );
+        fm_analysis_activator
+            .assert_activated("fm analysis task should be activated");
 
         for SpEreporterStatus { sp_type, slot, status, ignition_type: _ } in
             &activation1.sps
@@ -656,8 +652,6 @@ mod tests {
 
         // Activate the task again and assert that no new ereports were
         // ingested.
-        let mut analysis_activated =
-            tokio_test::task::spawn(fm_analysis_activator.activated());
         let activation2 = ingester.actually_activate(&opctx).await;
         assert!(
             activation2.errors.is_empty(),
@@ -665,10 +659,9 @@ mod tests {
             activation2.errors
         );
         dbg!(&activation2);
-        tokio_test::assert_pending!(
-            analysis_activated.poll(),
+        fm_analysis_activator.assert_not_activated(
             "fm analysis task should not be activated when no new ereports \
-             have been ingested"
+             have been ingested",
         );
         assert_eq!(
             activation2.sps_found, 4,
