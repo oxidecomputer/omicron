@@ -347,10 +347,7 @@ impl<'a> LookupPath<'a> {
         BgpAnnounceSet::PrimaryKey(Root { lookup_root: self }, id)
     }
 
-    pub fn bgp_announce_set_name_owned(
-        self,
-        name: Name,
-    ) -> BgpAnnounceSet<'a> {
+    pub fn bgp_announce_set_name_owned(self, name: Name) -> BgpAnnounceSet<'a> {
         BgpAnnounceSet::OwnedName(Root { lookup_root: self }, name)
     }
 
