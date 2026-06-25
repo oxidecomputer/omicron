@@ -54,10 +54,6 @@ impl Ereport {
             marked_seen_in: None,
         }
     }
-
-    pub fn id(&self) -> &EreportId {
-        &self.id
-    }
 }
 
 impl core::ops::Deref for Ereport {
@@ -70,7 +66,7 @@ impl core::ops::Deref for Ereport {
 impl iddqd::IdOrdItem for Ereport {
     type Key<'a> = &'a EreportId;
     fn key(&self) -> Self::Key<'_> {
-        self.id()
+        &self.id
     }
 
     iddqd::id_upcast!();

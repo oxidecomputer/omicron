@@ -333,8 +333,8 @@ impl CaseBuilder {
             Ok(_) => {
                 slog::info!(
                     self.log,
-                    "assigned ereport {} to case", report.id();
-                    "ereport_id" => %report.id(),
+                    "assigned ereport {} to case", report.id;
+                    "ereport_id" => %report.id,
                     "ereport_class" => ?report.class,
                     "assignment_id" => %assignment_id,
                     "comment" => %comment,
@@ -343,7 +343,7 @@ impl CaseBuilder {
                 self.report_log
                     .entry("assigned ereport to case")
                     .comment(comment)
-                    .kv("ereport_id", &format_args!("{}", report.id()))
+                    .kv("ereport_id", &format_args!("{}", report.id))
                     .kv(
                         "ereport_class",
                         &report.class.as_deref().unwrap_or("<none>"),
@@ -353,8 +353,8 @@ impl CaseBuilder {
             Err(_) => {
                 slog::warn!(
                     self.log,
-                    "ereport {} already assigned to case", report.id();
-                    "ereport_id" => %report.id(),
+                    "ereport {} already assigned to case", report.id;
+                    "ereport_id" => %report.id,
                     "ereport_class" => ?report.class,
                 );
             }

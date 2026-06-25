@@ -161,7 +161,7 @@ impl IdOrdItem for CaseEreport {
 
 impl CaseEreport {
     pub fn ereport_id(&self) -> &EreportId {
-        self.ereport.id()
+        &self.ereport.id
     }
 }
 
@@ -359,7 +359,7 @@ impl fmt::Display for DisplayCase<'_> {
                 let pn = ereport.part_number.as_deref().unwrap_or("<UNKNOWN>");
                 let sn =
                     ereport.serial_number.as_deref().unwrap_or("<UNKNOWN>");
-                writeln!(f, "{BULLET:>indent$}ereport {}", ereport.id())?;
+                writeln!(f, "{BULLET:>indent$}ereport {}", ereport.id)?;
                 writeln!(
                     f,
                     "{:>indent$}{CLASS:<WIDTH$} {}",

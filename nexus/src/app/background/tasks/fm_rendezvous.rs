@@ -303,7 +303,7 @@ impl FmRendezvous {
             .cloned()
             .filter_map(|ereport| {
                 if ereport.marked_seen_in.is_none() {
-                    Some(*ereport.id())
+                    Some(ereport.id)
                 } else {
                     None
                 }
