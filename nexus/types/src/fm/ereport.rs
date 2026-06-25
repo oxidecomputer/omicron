@@ -17,6 +17,12 @@ use std::fmt;
 
 pub use ereport_types::{Ena, EreportId};
 
+/// A complete representation of an ereport that has been ingested by the
+/// control plane.
+///
+/// This type includes the [`data`](EreportData) payload of the ereport, its
+/// [ID](EreportId), the [`reporter`](Reporter) from which it was collected, and
+/// metadata describing its collection.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Ereport {
     #[serde(flatten)]
@@ -70,6 +76,8 @@ impl iddqd::IdOrdItem for Ereport {
     iddqd::id_upcast!();
 }
 
+/// Per-ereport data, including the VPD identity of the reporter, the ereport's
+/// class, and the actual JSON body of the ereport.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EreportData {
     pub serial_number: Option<String>,
