@@ -82,6 +82,7 @@ impl super::Nexus {
         sel: &networking::BgpConfigSelector,
         update: &networking::BgpConfigUpdate,
     ) -> UpdateResult<BgpConfig> {
+        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
         let (.., authz_bgp_config, db_bgp_config) = self
             .bgp_config_lookup(opctx, sel.name_or_id.clone())?
             .fetch_for(authz::Action::Modify)

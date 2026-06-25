@@ -235,8 +235,6 @@ impl DataStore {
     ) -> UpdateResult<BgpConfig> {
         use nexus_db_schema::schema::bgp_config::dsl;
 
-        opctx.authorize(authz::Action::Modify, authz_bgp_config).await?;
-
         // The `asn` field is immutable and was already checked.
         let networking::BgpConfigUpdate {
             name: new_name,
