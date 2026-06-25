@@ -10,7 +10,8 @@ use super::ereport::EreportId;
 use super::json_display::fmt_json_value;
 use iddqd::IdOrdMap;
 use omicron_uuid_kinds::{
-    AlertUuid, CaseUuid, CollectionUuid, SitrepUuid, SupportBundleUuid,
+    AlertUuid, CaseUuid, CollectionUuid, PhysicalDiskUuid, SitrepUuid,
+    SupportBundleUuid,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -82,8 +83,7 @@ impl AnalysisReport {
                     report: AnalysisReport { cases, sitrep_id, comment },
                     indent,
                 } = self;
-                writeln!(f, "{:indent$}fault management analysis report", "")?;
-                writeln!(f, "{:indent$}--------------------------------", "")?;
+
                 if !comment.is_empty() {
                     writeln!(f, "{:indent$}// {comment}", "")?;
                 }
@@ -229,6 +229,11 @@ pub struct InputReport {
     /// Cases which have closed, but which have been copied forwards as they
     /// contain ereports which have not yet been marked seen.
     pub closed_cases_copied_forward: BTreeMap<CaseUuid, ClosedCaseReport>,
+    /// Number of entries in the ereporter restart table.
+    pub num_ereporter_restarts: usize,
+    /// All control-plane-managed physical disks visible to the diagnosis
+    /// engines for this analysis pass.
+    pub in_service_disks: BTreeSet<PhysicalDiskUuid>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -261,12 +266,12 @@ impl fmt::Display for InputReportMultilineDisplay<'_> {
                     new_ereport_ids,
                     open_cases,
                     closed_cases_copied_forward,
+                    num_ereporter_restarts,
+                    in_service_disks,
                 },
             indent,
         } = self;
 
-        writeln!(f, "{:indent$}fault management analysis inputs", "")?;
-        writeln!(f, "{:indent$}--------------------------------", "")?;
         if let Some(id) = parent_sitrep_id {
             writeln!(f, "{:indent$}parent sitrep:        {id}", "",)?;
         } else {
@@ -284,6 +289,13 @@ impl fmt::Display for InputReportMultilineDisplay<'_> {
                 "",
             )?;
         }
+
+        writeln!(
+            f,
+            "{:indent$}total known ereport restart IDs: \
+                {num_ereporter_restarts}",
+            "",
+        )?;
 
         if !new_ereport_ids.is_empty() {
             writeln!(
@@ -417,6 +429,21 @@ impl fmt::Display for InputReportMultilineDisplay<'_> {
             writeln!(f, "{:indent$}no cases copied forward", "")?;
         }
 
+        if in_service_disks.is_empty() {
+            writeln!(f, "\n{:indent$}no in-service control plane disks", "")?;
+        } else {
+            writeln!(
+                f,
+                "\n{:indent$}in-service control plane disks ({} total):",
+                "",
+                in_service_disks.len()
+            )?;
+            let indent = indent + 2;
+            for disk_id in in_service_disks {
+                writeln!(f, "{:indent$}* disk {disk_id}", "")?;
+            }
+        }
+
         Ok(())
     }
 }
@@ -428,7 +455,8 @@ mod tests {
     use super::*;
     use ereport_types::{Ena, EreportId};
     use omicron_uuid_kinds::{
-        CaseUuid, CollectionUuid, EreporterRestartUuid, SitrepUuid,
+        CaseUuid, CollectionUuid, EreporterRestartUuid, PhysicalDiskUuid,
+        SitrepUuid,
     };
     use std::str::FromStr;
 
@@ -463,7 +491,7 @@ mod tests {
                 .unwrap();
 
         let case3_id =
-            CaseUuid::from_str("88888888-8888-8888-8888-888888888888").unwrap();
+            CaseUuid::from_str("77777777-7777-7777-7777-777777777777").unwrap();
 
         let mut open_cases = BTreeMap::new();
         open_cases.insert(
@@ -491,7 +519,7 @@ mod tests {
         );
         let mut unmarked_support_bundle_requests = BTreeSet::new();
         unmarked_support_bundle_requests.insert(
-            SupportBundleUuid::from_str("77777777-7777-7777-7777-777777777777")
+            SupportBundleUuid::from_str("88888888-8888-8888-8888-888888888888")
                 .unwrap(),
         );
         closed_cases_copied_forward.insert(
@@ -526,13 +554,25 @@ mod tests {
             },
         );
 
+        let mut in_service_disks = BTreeSet::new();
+        in_service_disks.insert(
+            PhysicalDiskUuid::from_str("11111111-1111-1111-1111-111111111111")
+                .unwrap(),
+        );
+        in_service_disks.insert(
+            PhysicalDiskUuid::from_str("22222222-2222-2222-2222-222222222222")
+                .unwrap(),
+        );
+
         InputReport {
             parent_sitrep_id: Some(parent_sitrep_id),
             parent_inv_id: Some(parent_inv_id),
             inv_id,
+            num_ereporter_restarts: 420,
             new_ereport_ids,
             open_cases,
             closed_cases_copied_forward,
+            in_service_disks,
         }
     }
 
@@ -545,9 +585,11 @@ mod tests {
             parent_sitrep_id: None,
             parent_inv_id: None,
             inv_id,
+            num_ereporter_restarts: 0,
             new_ereport_ids: BTreeSet::new(),
             open_cases: BTreeMap::new(),
             closed_cases_copied_forward: BTreeMap::new(),
+            in_service_disks: BTreeSet::new(),
         }
     }
 
@@ -563,9 +605,11 @@ mod tests {
             parent_sitrep_id: Some(parent_sitrep_id),
             parent_inv_id: Some(inv_id),
             inv_id,
+            num_ereporter_restarts: 420,
             new_ereport_ids: BTreeSet::new(),
             open_cases: BTreeMap::new(),
             closed_cases_copied_forward: BTreeMap::new(),
+            in_service_disks: BTreeSet::new(),
         }
     }
 

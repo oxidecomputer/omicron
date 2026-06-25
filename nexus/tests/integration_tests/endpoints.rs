@@ -52,13 +52,10 @@ use nexus_types::external_api::update;
 use nexus_types::external_api::vpc;
 use omicron_common::address::{IpRange, IpVersion, Ipv4Range};
 use omicron_common::api::external::AddressLotKind;
-use omicron_common::api::external::AffinityPolicy;
 use omicron_common::api::external::AllowedSourceIps;
 use omicron_common::api::external::ByteCount;
-use omicron_common::api::external::FailureDomain;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::IdentityMetadataUpdateParams;
-use omicron_common::api::external::InstanceCpuCount;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::Nullable;
@@ -607,8 +604,8 @@ pub static DEMO_AFFINITY_GROUP_CREATE: LazyLock<affinity::AffinityGroupCreate> =
             name: DEMO_AFFINITY_GROUP_NAME.clone(),
             description: String::from(""),
         },
-        policy: AffinityPolicy::Allow,
-        failure_domain: FailureDomain::Sled,
+        policy: affinity::AffinityPolicy::Allow,
+        failure_domain: affinity::FailureDomain::Sled,
     });
 pub static DEMO_AFFINITY_GROUP_UPDATE: LazyLock<affinity::AffinityGroupUpdate> =
     LazyLock::new(|| affinity::AffinityGroupUpdate {
@@ -654,8 +651,8 @@ pub static DEMO_ANTI_AFFINITY_GROUP_CREATE: LazyLock<
         name: DEMO_ANTI_AFFINITY_GROUP_NAME.clone(),
         description: String::from(""),
     },
-    policy: AffinityPolicy::Allow,
-    failure_domain: FailureDomain::Sled,
+    policy: affinity::AffinityPolicy::Allow,
+    failure_domain: affinity::FailureDomain::Sled,
 });
 pub static DEMO_ANTI_AFFINITY_GROUP_UPDATE: LazyLock<
     affinity::AntiAffinityGroupUpdate,
@@ -778,7 +775,7 @@ pub static DEMO_INSTANCE_CREATE: LazyLock<instance::InstanceCreate> =
             name: DEMO_INSTANCE_NAME.clone(),
             description: String::from(""),
         },
-        ncpus: InstanceCpuCount(1),
+        ncpus: instance::InstanceCpuCount(1),
         memory: ByteCount::from_gibibytes_u32(16),
         hostname: "demo-instance".parse().unwrap(),
         user_data: vec![],
@@ -805,7 +802,7 @@ pub static DEMO_STOPPED_INSTANCE_CREATE: LazyLock<instance::InstanceCreate> =
             name: DEMO_STOPPED_INSTANCE_NAME.clone(),
             description: String::from(""),
         },
-        ncpus: InstanceCpuCount(1),
+        ncpus: instance::InstanceCpuCount(1),
         memory: ByteCount::from_gibibytes_u32(16),
         hostname: "demo-instance".parse().unwrap(),
         user_data: vec![],
@@ -831,7 +828,7 @@ pub static DEMO_INSTANCE_UPDATE: LazyLock<instance::InstanceUpdate> =
         boot_disk: Nullable(None),
         cpu_platform: Nullable(None),
         auto_restart_policy: Nullable(None),
-        ncpus: InstanceCpuCount(1),
+        ncpus: instance::InstanceCpuCount(1),
         memory: ByteCount::from_gibibytes_u32(16),
         multicast_groups: None,
         enable_jumbo_frames: false,

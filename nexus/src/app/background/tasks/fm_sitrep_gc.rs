@@ -126,7 +126,7 @@ mod tests {
             ereports_by_id: Default::default(),
         };
         datastore
-            .fm_sitrep_insert(&opctx, sitrep1.clone())
+            .fm_sitrep_insert(&opctx, sitrep1.clone(), None)
             .await
             .expect("inserting initial sitrep should succeed");
 
@@ -153,7 +153,7 @@ mod tests {
             ereports_by_id: Default::default(),
         };
         datastore
-            .fm_sitrep_insert(&opctx, sitrep2.clone())
+            .fm_sitrep_insert(&opctx, sitrep2.clone(), None)
             .await
             .expect("inserting child sitrep should succeed");
 
@@ -253,7 +253,7 @@ mod tests {
             cases: Default::default(),
             ereports_by_id: Default::default(),
         };
-        match datastore.fm_sitrep_insert(&opctx, sitrep).await {
+        match datastore.fm_sitrep_insert(&opctx, sitrep, None).await {
             Ok(_) => {
                 panic!("inserting sitrep v{v} orphan {i} should not succeed")
             }

@@ -17,8 +17,8 @@ use nexus_db_model::SupportBundleState;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
+use nexus_types::internal_api::background::SupportBundleActivationReport;
 use nexus_types::internal_api::background::SupportBundleCleanupReport;
-use nexus_types::internal_api::background::SupportBundleCollectionReport;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::LookupType;
@@ -345,7 +345,7 @@ impl SupportBundleCollector {
     async fn collect_bundle(
         &self,
         opctx: &OpContext,
-    ) -> anyhow::Result<Option<SupportBundleCollectionReport>> {
+    ) -> anyhow::Result<Option<SupportBundleActivationReport>> {
         let pagparams = DataPageParams::max_page();
         let result = self
             .datastore
@@ -440,9 +440,9 @@ impl SupportBundleCollector {
         cancel_task.abort();
         let _ = cancel_task.await;
 
-        let mut report = collect_result?;
+        let collection = collect_result?;
         self.store_bundle_on_sled(&bundle_log, opctx, &bundle, dir).await?;
-        if let Err(err) = self
+        let activated_in_db_ok = match self
             .datastore
             .support_bundle_update(
                 &opctx,
@@ -451,15 +451,17 @@ impl SupportBundleCollector {
             )
             .await
         {
-            if matches!(err, Error::InvalidRequest { .. }) {
+            Ok(()) => true,
+            Err(err) if matches!(err, Error::InvalidRequest { .. }) => {
                 info!(
                     &opctx.log,
                     "SupportBundleCollector: Concurrent state change activating bundle";
                     "bundle" => %bundle.id,
                     "err" => ?err,
                 );
-                return Ok(Some(report));
-            } else {
+                false
+            }
+            Err(err) => {
                 warn!(
                     &opctx.log,
                     "SupportBundleCollector: Unexpected error activating bundle";
@@ -468,9 +470,11 @@ impl SupportBundleCollector {
                 );
                 anyhow::bail!("failed to activate bundle: {:#}", err);
             }
-        }
-        report.activated_in_db_ok = true;
-        Ok(Some(report))
+        };
+        Ok(Some(SupportBundleActivationReport {
+            collection,
+            activated_in_db_ok,
+        }))
     }
 
     // Zip the collected bundle directory and stream it to the sled-agent
@@ -712,12 +716,12 @@ mod test {
     use nexus_db_model::RendezvousDebugDataset;
     use nexus_db_model::Zpool;
     use nexus_db_queries::db::datastore::SupportBundleCreateParams;
-    use nexus_db_queries::db::datastore::SupportBundleProvenance;
     use nexus_test_utils::SLED_AGENT_UUID;
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::fm::ereport::{EreportData, EreportId, Reporter};
     use nexus_types::identity::Asset;
     use nexus_types::internal_api::background::SupportBundleCollectionStep;
+    use nexus_types::internal_api::background::SupportBundleCollectionStepStatus;
     use nexus_types::internal_api::background::SupportBundleEreportStatus;
     use nexus_types::inventory::SpType;
     use nexus_types::support_bundle::BundleDataSelection;
@@ -856,10 +860,11 @@ mod test {
         const GIMLET_PN: &str = "9130000019";
         // Make some SP ereports...
         let sp_restart_id = EreporterRestartUuid::new_v4();
-        datastore.ereports_insert(&opctx, Reporter::Sp { sp_type: SpType::Sled, slot: SLED_SLOT}, vec![
+        let time_collected = chrono::Utc::now();
+        datastore.ereports_insert(&opctx, sp_restart_id, time_collected, Reporter::Sp { sp_type: SpType::Sled, slot: SLED_SLOT}, vec![
             EreportData {
                 id: EreportId { restart_id: sp_restart_id, ena: ereport_types::Ena(1) },
-                time_collected: chrono::Utc::now(),
+                time_collected,
                 collector_id: OmicronZoneUuid::new_v4(),
                 part_number: Some(GIMLET_PN.to_string()),
                 serial_number: Some(SP_SERIAL.to_string()),
@@ -868,7 +873,7 @@ mod test {
             },
             EreportData {
                 id: EreportId { restart_id: sp_restart_id, ena: ereport_types::Ena(2) },
-                time_collected: chrono::Utc::now(),
+                time_collected,
                 collector_id: OmicronZoneUuid::new_v4(),
                 part_number: Some(GIMLET_PN.to_string()),
                 serial_number: Some(SP_SERIAL.to_string()),
@@ -877,7 +882,7 @@ mod test {
             },
             EreportData {
                 id: EreportId { restart_id: EreporterRestartUuid::new_v4(), ena: ereport_types::Ena(1) },
-                time_collected: chrono::Utc::now(),
+                time_collected,
                 collector_id: OmicronZoneUuid::new_v4(),
                 // Let's do a silly one! No VPD, to make sure that's also
                 // handled correctly.
@@ -890,16 +895,20 @@ mod test {
         // And one from a different serial. N.B. that I made sure the number of
         // host-OS and SP ereports are different for when we make assertions
         // about the bundle report.
+        let sp2_restart_id = EreporterRestartUuid::new_v4();
+        let time_collected = chrono::Utc::now();
         datastore
             .ereports_insert(
                 &opctx,
+                sp2_restart_id,
+                time_collected,
                 Reporter::Sp { sp_type: SpType::Switch, slot: 1 },
                 vec![EreportData {
                     id: EreportId {
-                        restart_id: EreporterRestartUuid::new_v4(),
+                        restart_id: sp2_restart_id,
                         ena: ereport_types::Ena(1),
                     },
-                    time_collected: chrono::Utc::now(),
+                    time_collected,
                     collector_id: OmicronZoneUuid::new_v4(),
                     part_number: Some("9130000006".to_string()),
                     serial_number: Some("BRM41000555".to_string()),
@@ -910,10 +919,13 @@ mod test {
             .await
             .expect("failed to insert another fake SP ereport");
         // And some host OS ones...
-        let restart_id = EreporterRestartUuid::new_v4();
+        let sled1_restart_id = EreporterRestartUuid::new_v4();
+        let time_collected = chrono::Utc::now();
         datastore
             .ereports_insert(
                 &opctx,
+                sled1_restart_id,
+                time_collected,
                 Reporter::HostOs {
                     sled: SledUuid::new_v4(),
                     slot: Some(SLED_SLOT),
@@ -921,10 +933,10 @@ mod test {
                 vec![
                     EreportData {
                         id: EreportId {
-                            restart_id,
+                            restart_id: sled1_restart_id,
                             ena: ereport_types::Ena(1),
                         },
-                        time_collected: chrono::Utc::now(),
+                        time_collected,
                         collector_id: OmicronZoneUuid::new_v4(),
                         serial_number: Some(HOST_SERIAL.to_string()),
                         part_number: Some(GIMLET_PN.to_string()),
@@ -933,10 +945,10 @@ mod test {
                     },
                     EreportData {
                         id: EreportId {
-                            restart_id,
+                            restart_id: sled1_restart_id,
                             ena: ereport_types::Ena(2),
                         },
-                        time_collected: chrono::Utc::now(),
+                        time_collected,
                         collector_id: OmicronZoneUuid::new_v4(),
                         serial_number: Some(HOST_SERIAL.to_string()),
                         part_number: Some(GIMLET_PN.to_string()),
@@ -947,14 +959,18 @@ mod test {
             )
             .await
             .expect("failed to insert fake host OS ereports");
+        let sled2_restart_id = EreporterRestartUuid::new_v4();
+        let time_collected = chrono::Utc::now();
         datastore
             .ereports_insert(
                 &opctx,
+                sled2_restart_id,
+                time_collected,
                 Reporter::HostOs { sled: SledUuid::new_v4(), slot: Some(SLED_SLOT) },
                 vec![
                     EreportData {
-                        id: EreportId { restart_id: EreporterRestartUuid::new_v4(), ena:  ereport_types::Ena(1) },
-                        time_collected: chrono::Utc::now(),
+                        id: EreportId { restart_id: sled2_restart_id, ena:  ereport_types::Ena(1) },
+                        time_collected,
                         collector_id: OmicronZoneUuid::new_v4(),
                         serial_number: Some(HOST_SERIAL.to_string()),
                         part_number: Some(GIMLET_PN.to_string()),
@@ -1082,7 +1098,6 @@ mod test {
             .support_bundle_create(
                 &opctx,
                 SupportBundleCreateParams {
-                    provenance: SupportBundleProvenance::User,
                     reason: "For collection testing",
                     nexus_id: nexus.id(),
                     user_comment: None,
@@ -1110,10 +1125,10 @@ mod test {
             .await
             .expect("Collection should have succeeded under test")
             .expect("Collecting the bundle should have generated a report");
-        assert_eq!(report.bundle, bundle.id.into());
+        assert_eq!(report.collection.bundle, bundle.id.into());
         // Verify that we spawned steps to query sleds and SPs
         let step_names: Vec<_> =
-            report.steps.iter().map(|s| s.name.as_str()).collect();
+            report.collection.steps.iter().map(|s| s.name.as_str()).collect();
         assert!(
             step_names.contains(&SupportBundleCollectionStep::STEP_SPAWN_SLEDS)
         );
@@ -1122,13 +1137,28 @@ mod test {
                 .contains(&SupportBundleCollectionStep::STEP_SPAWN_SP_DUMPS)
         );
         assert!(report.activated_in_db_ok);
+        let ereport_step = report
+            .collection
+            .steps
+            .iter()
+            .find(|s| s.name == SupportBundleCollectionStep::STEP_EREPORTS)
+            .expect("should have ereports step");
+        assert_eq!(ereport_step.status, SupportBundleCollectionStepStatus::Ok);
+        let ereport_details: SupportBundleEreportStatus =
+            serde_json::from_value(
+                ereport_step
+                    .details
+                    .clone()
+                    .expect("ereports step should have details"),
+            )
+            .expect("ereports step details should deserialize");
         assert_eq!(
-            report.ereports,
-            Some(SupportBundleEreportStatus {
+            ereport_details,
+            SupportBundleEreportStatus {
                 n_collected: 7,
                 n_found: 7,
-                errors: Vec::new()
-            })
+                errors: Vec::new(),
+            }
         );
 
         let observed_bundle = datastore
@@ -1166,7 +1196,6 @@ mod test {
             .support_bundle_create(
                 &opctx,
                 SupportBundleCreateParams {
-                    provenance: SupportBundleProvenance::User,
                     reason: "For trace file testing",
                     nexus_id: nexus.id(),
                     user_comment: None,
@@ -1245,7 +1274,7 @@ mod test {
         // Verify we have the same number of events as steps in the report
         assert_eq!(
             trace.trace_events.len(),
-            report.steps.len(),
+            report.collection.steps.len(),
             "Number of events should match number of steps"
         );
 
@@ -1253,7 +1282,7 @@ mod test {
         let trace_names: std::collections::HashSet<_> =
             trace.trace_events.iter().map(|e| e.name.as_str()).collect();
         let report_names: std::collections::HashSet<_> =
-            report.steps.iter().map(|s| s.name.as_str()).collect();
+            report.collection.steps.iter().map(|s| s.name.as_str()).collect();
         assert_eq!(
             trace_names, report_names,
             "Trace event names should match report step names"
@@ -1279,7 +1308,6 @@ mod test {
             .support_bundle_create(
                 &opctx,
                 SupportBundleCreateParams {
-                    provenance: SupportBundleProvenance::User,
                     reason: "For collection testing",
                     nexus_id: nexus.id(),
                     user_comment: None,
@@ -1308,10 +1336,10 @@ mod test {
             .await
             .expect("Collection should have succeeded under test")
             .expect("Collecting the bundle should have generated a report");
-        assert_eq!(report.bundle, bundle.id.into());
+        assert_eq!(report.collection.bundle, bundle.id.into());
         // Verify that we spawned steps to query sleds and SPs
         let step_names: Vec<_> =
-            report.steps.iter().map(|s| s.name.as_str()).collect();
+            report.collection.steps.iter().map(|s| s.name.as_str()).collect();
         assert!(
             step_names.contains(&SupportBundleCollectionStep::STEP_SPAWN_SLEDS)
         );
@@ -1373,7 +1401,6 @@ mod test {
             .support_bundle_create(
                 &opctx,
                 SupportBundleCreateParams {
-                    provenance: SupportBundleProvenance::User,
                     reason: "For collection testing",
                     nexus_id: nexus.id(),
                     user_comment: None,
@@ -1387,7 +1414,6 @@ mod test {
             .support_bundle_create(
                 &opctx,
                 SupportBundleCreateParams {
-                    provenance: SupportBundleProvenance::User,
                     reason: "For collection testing",
                     nexus_id: nexus.id(),
                     user_comment: None,
@@ -1411,10 +1437,10 @@ mod test {
             .await
             .expect("Collection should have succeeded under test")
             .expect("Collecting the bundle should have generated a report");
-        assert_eq!(report.bundle, bundle1.id.into());
+        assert_eq!(report.collection.bundle, bundle1.id.into());
         // Verify that we spawned steps to query sleds and SPs
         let step_names: Vec<_> =
-            report.steps.iter().map(|s| s.name.as_str()).collect();
+            report.collection.steps.iter().map(|s| s.name.as_str()).collect();
         assert!(
             step_names.contains(&SupportBundleCollectionStep::STEP_SPAWN_SLEDS)
         );
@@ -1442,10 +1468,10 @@ mod test {
             .await
             .expect("Collection should have succeeded under test")
             .expect("Collecting the bundle should have generated a report");
-        assert_eq!(report.bundle, bundle2.id.into());
+        assert_eq!(report.collection.bundle, bundle2.id.into());
         // Verify that we spawned steps to query sleds and SPs
         let step_names: Vec<_> =
-            report.steps.iter().map(|s| s.name.as_str()).collect();
+            report.collection.steps.iter().map(|s| s.name.as_str()).collect();
         assert!(
             step_names.contains(&SupportBundleCollectionStep::STEP_SPAWN_SLEDS)
         );
@@ -1492,7 +1518,6 @@ mod test {
             .support_bundle_create(
                 &opctx,
                 SupportBundleCreateParams {
-                    provenance: SupportBundleProvenance::User,
                     reason: "For collection testing",
                     nexus_id: nexus.id(),
                     user_comment: None,
@@ -1560,7 +1585,6 @@ mod test {
             .support_bundle_create(
                 &opctx,
                 SupportBundleCreateParams {
-                    provenance: SupportBundleProvenance::User,
                     reason: "For collection testing",
                     nexus_id: nexus.id(),
                     user_comment: None,
@@ -1583,10 +1607,10 @@ mod test {
             .await
             .expect("Collection should have succeeded under test")
             .expect("Collecting the bundle should have generated a report");
-        assert_eq!(report.bundle, bundle.id.into());
+        assert_eq!(report.collection.bundle, bundle.id.into());
         // Verify that we spawned steps to query sleds and SPs
         let step_names: Vec<_> =
-            report.steps.iter().map(|s| s.name.as_str()).collect();
+            report.collection.steps.iter().map(|s| s.name.as_str()).collect();
         assert!(
             step_names.contains(&SupportBundleCollectionStep::STEP_SPAWN_SLEDS)
         );
@@ -1649,7 +1673,6 @@ mod test {
             .support_bundle_create(
                 &opctx,
                 SupportBundleCreateParams {
-                    provenance: SupportBundleProvenance::User,
                     reason: "For collection testing",
                     nexus_id: nexus.id(),
                     user_comment: None,
@@ -1722,7 +1745,6 @@ mod test {
             .support_bundle_create(
                 &opctx,
                 SupportBundleCreateParams {
-                    provenance: SupportBundleProvenance::User,
                     reason: "For collection testing",
                     nexus_id: nexus.id(),
                     user_comment: None,
@@ -1745,7 +1767,7 @@ mod test {
             .await
             .expect("Collection should have succeeded under test")
             .expect("Collecting the bundle should have generated a report");
-        assert_eq!(report.bundle, bundle.id.into());
+        assert_eq!(report.collection.bundle, bundle.id.into());
 
         // Mark the bundle as "failing" - this should be triggered
         // automatically by the blueprint executor if the corresponding
@@ -1810,7 +1832,6 @@ mod test {
             .support_bundle_create(
                 &opctx,
                 SupportBundleCreateParams {
-                    provenance: SupportBundleProvenance::User,
                     reason: "For collection testing",
                     nexus_id: nexus.id(),
                     user_comment: None,
@@ -1833,7 +1854,7 @@ mod test {
             .await
             .expect("Collection should have succeeded under test")
             .expect("Collecting the bundle should have generated a report");
-        assert_eq!(report.bundle, bundle.id.into());
+        assert_eq!(report.collection.bundle, bundle.id.into());
 
         // Mark the bundle as "failing" - this should be triggered
         // automatically by the blueprint executor if the corresponding
@@ -1897,7 +1918,6 @@ mod test {
             .support_bundle_create(
                 &opctx,
                 SupportBundleCreateParams {
-                    provenance: SupportBundleProvenance::User,
                     reason: "Testing reconfigurator state collection",
                     nexus_id: nexus.id(),
                     user_comment: None,
@@ -1922,7 +1942,7 @@ mod test {
             .await
             .expect("Collection should have succeeded under test")
             .expect("Collecting the bundle should have generated a report");
-        assert_eq!(report.bundle, bundle.id.into());
+        assert_eq!(report.collection.bundle, bundle.id.into());
 
         // Verify bundle is active
         let observed_bundle = datastore
@@ -1984,8 +2004,6 @@ mod test {
     async fn test_per_bundle_data_selection(
         cptestctx: &ControlPlaneTestContext,
     ) {
-        use nexus_types::internal_api::background::SupportBundleCollectionStepStatus;
-
         let nexus = &cptestctx.server.server_context().nexus;
         let datastore = nexus.datastore();
         let resolver = nexus.resolver();
@@ -2003,7 +2021,6 @@ mod test {
             .support_bundle_create(
                 &opctx,
                 SupportBundleCreateParams {
-                    provenance: SupportBundleProvenance::User,
                     reason: "Testing per-bundle data selection",
                     nexus_id: nexus.id(),
                     user_comment: None,
@@ -2027,11 +2044,12 @@ mod test {
             .await
             .expect("Collection should have succeeded")
             .expect("Should have generated a report");
-        assert_eq!(report.bundle, bundle.id.into());
+        assert_eq!(report.collection.bundle, bundle.id.into());
         assert!(report.activated_in_db_ok);
 
         // Reconfigurator state should have run successfully.
         let reconfig_step = report
+            .collection
             .steps
             .iter()
             .find(|s| {
@@ -2042,6 +2060,7 @@ mod test {
 
         // Ereports should be skipped since we didn't request them.
         let ereport_step = report
+            .collection
             .steps
             .iter()
             .find(|s| s.name == SupportBundleCollectionStep::STEP_EREPORTS)
@@ -2053,6 +2072,7 @@ mod test {
 
         // Sled cubby info should be skipped.
         let cubby_step = report
+            .collection
             .steps
             .iter()
             .find(|s| {
@@ -2066,6 +2086,7 @@ mod test {
 
         // SP dumps should be skipped.
         let sp_step = report
+            .collection
             .steps
             .iter()
             .find(|s| {
@@ -2076,6 +2097,7 @@ mod test {
 
         // Sled queries should be skipped.
         let sled_step = report
+            .collection
             .steps
             .iter()
             .find(|s| s.name == SupportBundleCollectionStep::STEP_SPAWN_SLEDS)

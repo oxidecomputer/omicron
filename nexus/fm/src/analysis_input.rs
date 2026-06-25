@@ -6,8 +6,10 @@
 
 use chrono::{DateTime, Utc};
 use iddqd::IdOrdMap;
+use nexus_db_model::EreporterRestart;
 use nexus_types::fm::analysis_reports::ClosedCaseReport;
 use nexus_types::fm::{self, Sitrep, SitrepVersion};
+use nexus_types::in_service_disk::InServiceDisk;
 use nexus_types::inventory;
 use omicron_uuid_kinds::AlertUuid;
 use omicron_uuid_kinds::CollectionUuid;
@@ -34,6 +36,7 @@ pub use nexus_types::fm::analysis_reports::InputReport as Report;
 /// is constructed, the inputs are immutable and cannot be modified. To
 /// construct a new `Input` as part of a preparation phase, use
 /// [`Input::builder`].
+#[derive(Debug)]
 pub struct Input {
     parent_sitrep: Option<Arc<(SitrepVersion, Sitrep)>>,
     inv: Arc<inventory::Collection>,
@@ -42,6 +45,7 @@ pub struct Input {
     new_ereports: IdOrdMap<fm::Ereport>,
     open_cases: IdOrdMap<fm::Case>,
     closed_cases_copied_forward: IdOrdMap<fm::Case>,
+    ereporter_restarts: IdOrdMap<EreporterRestart>,
     /// Indicates whether `Builder::build` dropped any closed case
     /// from the carry-forward list whose alert request set was non-empty.
     /// ORed with [`crate::builder::AllCases::alert_set_changed`] in
@@ -55,6 +59,7 @@ pub struct Input {
     /// [`crate::builder::SitrepBuilder::build`] to decide whether to bump the
     /// new sitrep's `support_bundle_generation`.
     support_bundles_changed: bool,
+    in_service_disks: Arc<IdOrdMap<InServiceDisk>>,
 }
 
 impl Input {
@@ -77,6 +82,10 @@ impl Input {
         &self.open_cases
     }
 
+    pub fn ereporter_restarts(&self) -> &IdOrdMap<EreporterRestart> {
+        &self.ereporter_restarts
+    }
+
     pub(crate) fn closed_cases_copied_forward(&self) -> &IdOrdMap<fm::Case> {
         &self.closed_cases_copied_forward
     }
@@ -89,11 +98,18 @@ impl Input {
         self.support_bundles_changed
     }
 
+    /// All control-plane-managed disks (`physical_disk.disk_policy =
+    /// in_service` in the DB), indexed by `physical_disk_id`.
+    pub fn in_service_disks(&self) -> &IdOrdMap<InServiceDisk> {
+        &self.in_service_disks
+    }
+
     /// Returns a [`Builder`] for constructing a new `Input` from the provided
-    /// `parent_sitrep` and inventory collection.
+    /// `parent_sitrep`, inventory collection, and in-service disks.
     pub fn builder(
         parent_sitrep: Option<Arc<(SitrepVersion, Sitrep)>>,
         inv: Arc<inventory::Collection>,
+        in_service_disks: Arc<IdOrdMap<InServiceDisk>>,
     ) -> Result<Builder, InvalidInputs> {
         // Before preparing analysis inputs, check that the proposed input
         // inventory collection is at least as new as the parent sitrep's
@@ -118,7 +134,9 @@ impl Input {
         Ok(Builder {
             parent_sitrep,
             inv,
+            in_service_disks,
             new_ereports: IdOrdMap::default(),
+            ereporter_restarts: IdOrdMap::default(),
             unmarked_seen_ereports: BTreeSet::default(),
             marked_alert_requests: HashSet::new(),
             marked_support_bundle_requests: HashSet::new(),
@@ -143,6 +161,7 @@ pub enum InvalidInputs {
 pub struct Builder {
     parent_sitrep: Option<Arc<(SitrepVersion, Sitrep)>>,
     inv: Arc<inventory::Collection>,
+    in_service_disks: Arc<IdOrdMap<InServiceDisk>>,
     /// Ereports which are new and should be input to analysis in the next
     /// sitrep.
     new_ereports: IdOrdMap<fm::Ereport>,
@@ -154,6 +173,7 @@ pub struct Builder {
     /// copied forwards due to containing unmarked ereports.
     unmarked_seen_ereports: BTreeSet<fm::EreportId>,
 
+    ereporter_restarts: IdOrdMap<nexus_db_model::EreporterRestart>,
     /// The IDs of alert requests on the parent sitrep's closed cases that
     /// already have a marker row in `rendezvous_alert_created`. A closed-case
     /// request absent from this set is outstanding work, and (like an unmarked
@@ -233,6 +253,19 @@ impl Builder {
         self.new_ereports.len()
     }
 
+    /// Adds a set of ereport restart IDs to the input.
+    pub fn add_ereporter_restarts(
+        &mut self,
+        restarts: impl IntoIterator<Item = EreporterRestart>,
+    ) {
+        self.ereporter_restarts.extend(restarts)
+    }
+
+    /// Borrows the map of known ereport reporter restart IDs.
+    pub fn ereporter_restarts(&self) -> &IdOrdMap<EreporterRestart> {
+        &self.ereporter_restarts
+    }
+
     /// Finish constructing the [`Input`] and return it, along with a [`Report`]
     /// that provides a human-readable summary of how the inputs were
     /// constructed.
@@ -256,8 +289,14 @@ impl Builder {
                 .iter()
                 .map(|e| *e.id())
                 .collect(),
+            num_ereporter_restarts: self.ereporter_restarts.len(),
             open_cases: BTreeMap::new(),
             closed_cases_copied_forward: BTreeMap::new(),
+            in_service_disks: self
+                .in_service_disks
+                .iter()
+                .map(|d| d.physical_disk_id)
+                .collect(),
         };
 
         // Determine which cases must be copied forwards into the next sitrep.
@@ -294,22 +333,20 @@ impl Builder {
                         }
                     })
                     .collect::<BTreeSet<_>>();
-                let unmarked_alert_requests: BTreeSet<AlertUuid> = case
+                let unmarked_alert_requests = case
                     .alerts_requested
                     .iter()
                     .map(|r| r.id)
                     .filter(|id| !self.marked_alert_requests.contains(id))
-                    .collect();
-                let unmarked_support_bundle_requests: BTreeSet<
-                    SupportBundleUuid,
-                > = case
+                    .collect::<BTreeSet<_>>();
+                let unmarked_support_bundle_requests = case
                     .support_bundles_requested
                     .iter()
                     .map(|r| r.id)
                     .filter(|id| {
                         !self.marked_support_bundle_requests.contains(id)
                     })
-                    .collect();
+                    .collect::<BTreeSet<_>>();
                 let has_outstanding_work = !unmarked_ereports.is_empty()
                     || !unmarked_alert_requests.is_empty()
                     || !unmarked_support_bundle_requests.is_empty();
@@ -353,8 +390,10 @@ impl Builder {
             new_ereports: self.new_ereports,
             open_cases,
             closed_cases_copied_forward,
+            ereporter_restarts: self.ereporter_restarts,
             alerts_changed,
             support_bundles_changed,
+            in_service_disks: self.in_service_disks,
         };
 
         (input, report)
@@ -366,12 +405,16 @@ mod tests {
     use super::*;
     use crate::builder::SitrepBuilder;
     use crate::test_util::FmTest;
+    use nexus_types::alert::AlertClass;
     use nexus_types::alert::test_alerts;
     use nexus_types::fm;
+    use nexus_types::fm::case::AlertRequest;
     use nexus_types::fm::case::CaseEreport;
+    use nexus_types::fm::case::SupportBundleRequest;
     use nexus_types::fm::ereport::Reporter;
     use nexus_types::fm::{DiagnosisEngineKind, SitrepVersion};
     use nexus_types::inventory::SpType;
+    use nexus_types::support_bundle::BundleDataSelection;
     use omicron_common::api::external::Generation;
     use omicron_uuid_kinds::{
         CaseEreportUuid, CaseUuid, OmicronZoneUuid, SitrepUuid,
@@ -469,6 +512,7 @@ mod tests {
                     .collect(),
                     alerts_requested: Default::default(),
                     support_bundles_requested: Default::default(),
+                    facts: Default::default(),
                 }
             };
             let open_case2 = {
@@ -489,6 +533,7 @@ mod tests {
                     .collect(),
                     alerts_requested: Default::default(),
                     support_bundles_requested: Default::default(),
+                    facts: Default::default(),
                 }
             };
             let closed_case_with_unmarked = {
@@ -516,6 +561,7 @@ mod tests {
                     .collect(),
                     alerts_requested: Default::default(),
                     support_bundles_requested: Default::default(),
+                    facts: Default::default(),
                 }
             };
             let closed_case_without_unmarked = {
@@ -537,6 +583,7 @@ mod tests {
                     .collect(),
                     alerts_requested: Default::default(),
                     support_bundles_requested: Default::default(),
+                    facts: Default::default(),
                 }
             };
 
@@ -588,8 +635,12 @@ mod tests {
 
         // Build analysis input
         let (input, report) = {
-            let mut builder = Input::builder(Some(parent_sitrep), inv)
-                .expect("collection start time check should always pass");
+            let mut builder = Input::builder(
+                Some(parent_sitrep),
+                inv,
+                Arc::new(IdOrdMap::new()),
+            )
+            .expect("collection start time check should always pass");
             // Pass in four ereports:
             //  - two that are in the open cases of the parent sitrep
             //  - one that is in the (to-be-copied-forward) closed case
@@ -841,8 +892,12 @@ mod tests {
             version: 1,
             time_made_current: chrono::Utc::now(),
         };
-        Input::builder(Some(Arc::new((parent_version, parent))), inv)
-            .expect("collection start time check should always pass")
+        Input::builder(
+            Some(Arc::new((parent_version, parent))),
+            inv,
+            Arc::new(IdOrdMap::new()),
+        )
+        .expect("collection start time check should always pass")
     }
 
     /// All alert requests on a closed case are satisfied and the case has no
@@ -851,9 +906,6 @@ mod tests {
     /// leaving the carry-forward set.
     #[test]
     fn build_drops_closed_case_when_all_alerts_satisfied() {
-        use nexus_types::alert::AlertClass;
-        use nexus_types::fm::case::AlertRequest;
-
         let alert_id = AlertUuid::new_v4();
         let case_id = CaseUuid::new_v4();
         let parent_sitrep_id = SitrepUuid::new_v4();
@@ -878,6 +930,7 @@ mod tests {
             .into_iter()
             .collect(),
             support_bundles_requested: IdOrdMap::new(),
+            facts: IdOrdMap::new(),
         };
 
         let mut builder = builder_with_closed_case(closed_case);
@@ -900,9 +953,6 @@ mod tests {
     /// prevents resurrection).
     #[test]
     fn build_keeps_closed_case_intact_when_not_all_alerts_satisfied() {
-        use nexus_types::alert::AlertClass;
-        use nexus_types::fm::case::AlertRequest;
-
         let satisfied_alert_id = AlertUuid::new_v4();
         let unsatisfied_alert_id = AlertUuid::new_v4();
         let case_id = CaseUuid::new_v4();
@@ -932,6 +982,7 @@ mod tests {
             .into_iter()
             .collect(),
             support_bundles_requested: IdOrdMap::new(),
+            facts: IdOrdMap::new(),
         };
 
         let mut builder = builder_with_closed_case(closed_case);
@@ -961,9 +1012,6 @@ mod tests {
     /// dropped requests are leaving the carry-forward set.
     #[test]
     fn build_drops_closed_case_when_all_bundles_satisfied() {
-        use nexus_types::fm::case::SupportBundleRequest;
-        use nexus_types::support_bundle::BundleDataSelection;
-
         let bundle_id = SupportBundleUuid::new_v4();
         let case_id = CaseUuid::new_v4();
         let parent_sitrep_id = SitrepUuid::new_v4();
@@ -986,6 +1034,7 @@ mod tests {
             }]
             .into_iter()
             .collect(),
+            facts: IdOrdMap::new(),
         };
 
         let mut builder = builder_with_closed_case(closed_case);
@@ -1006,9 +1055,6 @@ mod tests {
     /// Satisfied requests are not pruned; the marker prevents resurrection.
     #[test]
     fn build_keeps_closed_case_intact_when_not_all_bundles_satisfied() {
-        use nexus_types::fm::case::SupportBundleRequest;
-        use nexus_types::support_bundle::BundleDataSelection;
-
         let satisfied_bundle_id = SupportBundleUuid::new_v4();
         let unsatisfied_bundle_id = SupportBundleUuid::new_v4();
         let case_id = CaseUuid::new_v4();
@@ -1036,6 +1082,7 @@ mod tests {
             ]
             .into_iter()
             .collect(),
+            facts: IdOrdMap::new(),
         };
 
         let mut builder = builder_with_closed_case(closed_case);

@@ -25,14 +25,11 @@ pub struct SitrepBuilder<'a> {
     pub parent_sitrep: Option<&'a fm::Sitrep>,
     pub sitrep_id: SitrepUuid,
     pub cases: case::AllCases,
+    /// The analysis input this builder was constructed from; `cases` is
+    /// seeded from its open cases.
+    input: &'a analysis_input::Input,
     closed_cases_copied_forward: &'a IdOrdMap<fm::Case>,
-    /// Plumbed from [`analysis_input::Input::alerts_changed`]; ORed with
-    /// [`case::AllCases::alert_set_changed`] in [`Self::build`] to drive
-    /// `alert_generation` bumps.
     alerts_changed: bool,
-    /// Plumbed from [`analysis_input::Input::support_bundles_changed`]; ORed
-    /// with [`case::AllCases::support_bundle_set_changed`] in [`Self::build`]
-    /// to drive `support_bundle_generation` bumps.
     support_bundles_changed: bool,
     comment: String,
 }
@@ -94,11 +91,20 @@ impl<'a> SitrepBuilder<'a> {
             inventory,
             parent_sitrep,
             comment: String::new(),
+            input: inputs,
             closed_cases_copied_forward,
             alerts_changed: inputs.alerts_changed(),
             support_bundles_changed: inputs.support_bundles_changed(),
             cases,
         }
+    }
+
+    /// The analysis input this builder was constructed from.
+    ///
+    /// The returned reference borrows the input (lifetime `'a`), not the
+    /// builder, so callers may hold it while mutating the builder.
+    pub fn input(&self) -> &'a analysis_input::Input {
+        self.input
     }
 
     pub fn comment(&self) -> &str {
@@ -201,12 +207,18 @@ mod tests {
     use super::*;
     use crate::analysis_input::Input;
     use nexus_inventory::CollectionBuilder;
+    use nexus_types::alert::AlertClass;
     use nexus_types::alert::test_alerts;
     use nexus_types::fm;
     use nexus_types::fm::SitrepVersion;
+    use nexus_types::fm::case::AlertRequest;
+    use nexus_types::fm::case::SupportBundleRequest;
     use nexus_types::inventory;
+    use nexus_types::support_bundle::BundleDataSelection;
     use omicron_test_utils::dev;
+    use omicron_uuid_kinds::AlertUuid;
     use omicron_uuid_kinds::OmicronZoneUuid;
+    use omicron_uuid_kinds::SupportBundleUuid;
     use std::sync::Arc;
 
     /// Build an empty inventory `Collection`. The id is irrelevant to these
@@ -225,9 +237,10 @@ mod tests {
 
     /// Build a minimal `Input` with no parent sitrep and an empty inventory.
     fn make_input() -> Input {
-        let (input, _) = Input::builder(None, make_collection())
-            .expect("no parent sitrep, so builder should succeed")
-            .build();
+        let (input, _) =
+            Input::builder(None, make_collection(), Arc::new(IdOrdMap::new()))
+                .expect("no parent sitrep, so builder should succeed")
+                .build();
         input
     }
 
@@ -258,10 +271,13 @@ mod tests {
             version: 1,
             time_made_current: chrono::Utc::now(),
         };
-        let (input, _) =
-            Input::builder(Some(Arc::new((parent_version, parent))), inv)
-                .expect("parent and child share an inventory")
-                .build();
+        let (input, _) = Input::builder(
+            Some(Arc::new((parent_version, parent))),
+            inv,
+            Arc::new(IdOrdMap::new()),
+        )
+        .expect("parent and child share an inventory")
+        .build();
         input
     }
 
@@ -341,11 +357,11 @@ mod tests {
         logctx.cleanup_successful();
     }
 
+    /// Verifies that the alert bump is relative to the parent sitrep's
+    /// generation (not restarted from a fixed initial value), and that the
+    /// support bundle generation is left untouched.
     #[test]
     fn child_sitrep_with_new_alert_bumps_alert_generation_only() {
-        // Verifies that the alert bump is relative to the parent sitrep's
-        // generation (not restarted from a fixed initial value), and that
-        // the support bundle generation is left untouched.
         let logctx = dev::test_setup_log(
             "child_sitrep_with_new_alert_bumps_alert_generation_only",
         );
@@ -393,10 +409,10 @@ mod tests {
         logctx.cleanup_successful();
     }
 
+    /// Verifies that the bump is relative to the parent sitrep's generation,
+    /// not restarted from a fixed initial value.
     #[test]
     fn child_sitrep_with_both_new_requests_bumps_both_generations() {
-        // Verifies that the bump is relative to the parent sitrep's generation,
-        // not restarted from a fixed initial value.
         let logctx = dev::test_setup_log(
             "child_sitrep_with_both_new_requests_bumps_both_generations",
         );
@@ -421,15 +437,11 @@ mod tests {
         logctx.cleanup_successful();
     }
 
+    /// A closed case with an outstanding alert request becomes "satisfied" via
+    /// marker presence, carry-forward drops it, and alert_generation bumps even
+    /// though no open-case builder mutations happened.
     #[test]
     fn carry_forward_drop_bumps_alert_generation() {
-        // A closed case with an outstanding alert request becomes "satisfied"
-        // via marker presence, carry-forward drops it, alert_generation bumps
-        // even though no open-case builder mutations happened.
-        use nexus_types::alert::AlertClass;
-        use nexus_types::fm::case::AlertRequest;
-        use omicron_uuid_kinds::AlertUuid;
-
         let logctx =
             dev::test_setup_log("carry_forward_drop_bumps_alert_generation");
         let inv = make_collection();
@@ -457,6 +469,7 @@ mod tests {
             .into_iter()
             .collect(),
             support_bundles_requested: IdOrdMap::new(),
+            facts: IdOrdMap::new(),
         };
 
         let parent = fm::Sitrep {
@@ -482,6 +495,7 @@ mod tests {
         let mut builder_inputs = crate::analysis_input::Input::builder(
             Some(Arc::new((parent_version, parent))),
             inv,
+            Arc::new(IdOrdMap::new()),
         )
         .unwrap();
         // Marker exists, so carry-forward will drop the case.
@@ -492,21 +506,18 @@ mod tests {
         assert_eq!(
             sitrep.metadata.alert_generation,
             Generation::new().next(),
-            "carry-forward drop must bump alert_generation past the parent's"
+            "dropping a case with alerts from the set of closed cases being \
+             carried forwards must bump alert_generation past the parent's"
         );
         logctx.cleanup_successful();
     }
 
+    /// A closed case with an outstanding support-bundle request becomes
+    /// "satisfied" via marker presence, carry-forward drops it, and
+    /// support_bundle_generation bumps even though no open-case builder
+    /// mutations happened.
     #[test]
     fn carry_forward_drop_bumps_support_bundle_generation() {
-        // A closed case with an outstanding support-bundle request becomes
-        // "satisfied" via marker presence, carry-forward drops it, and
-        // support_bundle_generation bumps even though no open-case builder
-        // mutations happened.
-        use nexus_types::fm::case::SupportBundleRequest;
-        use nexus_types::support_bundle::BundleDataSelection;
-        use omicron_uuid_kinds::SupportBundleUuid;
-
         let logctx = dev::test_setup_log(
             "carry_forward_drop_bumps_support_bundle_generation",
         );
@@ -533,6 +544,7 @@ mod tests {
             }]
             .into_iter()
             .collect(),
+            facts: IdOrdMap::new(),
         };
 
         let parent = fm::Sitrep {
@@ -558,6 +570,7 @@ mod tests {
         let mut builder_inputs = crate::analysis_input::Input::builder(
             Some(Arc::new((parent_version, parent))),
             inv,
+            Arc::new(IdOrdMap::new()),
         )
         .unwrap();
         // Marker exists, so carry-forward will drop the case.
@@ -568,8 +581,9 @@ mod tests {
         assert_eq!(
             sitrep.metadata.support_bundle_generation,
             Generation::new().next(),
-            "carry-forward drop must bump support_bundle_generation past the \
-             parent's"
+            "dropping a case with support bundle requests from the set of \
+             closed cases being carried forwards must bump \
+             support_bundle_generation past the parent's"
         );
         logctx.cleanup_successful();
     }

@@ -9,11 +9,15 @@ use anyhow::Context;
 use chrono::Utc;
 use fm::analysis_input::InvalidInputs;
 use futures::future::BoxFuture;
+use iddqd::IdOrdMap;
+use nexus_db_model::PhysicalDiskPolicy;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::datastore;
+use nexus_db_queries::db::identity::Asset;
 use nexus_db_queries::db::pagination::Paginator;
 use nexus_fm as fm;
+use nexus_types::in_service_disk::InServiceDisk;
 use nexus_types::internal_api::background::FmAnalysisStatus;
 use nexus_types::internal_api::background::fm_analysis as status;
 use nexus_types::inventory;
@@ -68,6 +72,7 @@ impl BackgroundTask for FmAnalysis {
                     inv_collection_id: None,
                     known_classes,
                     outcome: status::Outcome::Disabled,
+                    warnings: Vec::new(),
                 }
             };
             match serde_json::to_value(status) {
@@ -107,6 +112,12 @@ impl FmAnalysis {
         &mut self,
         opctx: &OpContext,
     ) -> FmAnalysisStatus {
+        // We shall collect a list of non-fatal errors to report in the
+        // activation status, in addition to the outcome. These are errors which
+        // did *not* prevent the analysis step from succeeding, but which should
+        // be surfaced in the activation status.
+        let mut warnings = Vec::new();
+
         // Snapshot the static known-classes set once, up front, so it's
         // reported in the activation status regardless of which outcome
         // variant fires.
@@ -127,6 +138,7 @@ impl FmAnalysis {
                 inv_collection_id: None,
                 known_classes,
                 outcome: status::Outcome::WaitingForInventory,
+                warnings,
             };
         };
         let inv_collection_id = inv.id;
@@ -165,6 +177,7 @@ impl FmAnalysis {
                     outcome: status::Outcome::PreparationError(
                         error.to_string(),
                     ),
+                    warnings,
                 };
             }
             Err(PreparationError::InvalidInputs(
@@ -192,12 +205,15 @@ impl FmAnalysis {
                         next_inv_min_time_started,
                         input_inv_time_started,
                     },
+                    warnings,
                 };
             }
         };
 
         // Okay, actually run analysis and generate a new sitrep.
-        let outcome = self.analyze(&opctx, inputs).await;
+        let outcome = self
+            .analyze(&opctx, inputs, &prep_status.report, &mut warnings)
+            .await;
 
         FmAnalysisStatus {
             parent_sitrep_id,
@@ -207,6 +223,7 @@ impl FmAnalysis {
                 prep_status,
                 analysis_status: outcome,
             },
+            warnings,
         }
     }
 
@@ -219,10 +236,20 @@ impl FmAnalysis {
         (fm::analysis_input::Input, status::PreparationStatus),
         PreparationError,
     > {
-        let mut builder =
-            fm::analysis_input::Input::builder(parent_sitrep.clone(), inv)?;
-        let mut errors = Vec::new();
-        self.load_new_ereports(opctx, &mut builder, &mut errors)
+        let mut warnings = Vec::new();
+
+        let in_service_disks =
+            Arc::new(self.load_in_service_disks(opctx, &mut warnings).await?);
+
+        let mut builder = fm::analysis_input::Input::builder(
+            parent_sitrep.clone(),
+            inv,
+            in_service_disks,
+        )?;
+        self.load_ereporter_restarts(opctx, &mut builder)
+            .await
+            .context("failed to load ereporter restarts")?;
+        self.load_new_ereports(opctx, &mut builder, &mut warnings)
             .await
             .context("failed to load new ereports")?;
         self.load_existing_alert_markers(
@@ -241,14 +268,104 @@ impl FmAnalysis {
         .context("failed to load existing support bundle markers")?;
 
         let (input, report) = builder.build();
-        Ok((input, status::PreparationStatus { errors, report }))
+        Ok((input, status::PreparationStatus { warnings, report }))
+    }
+
+    /// Load all in-service control plane disks, projected down to FM's
+    /// [`InServiceDisk`] view.
+    async fn load_in_service_disks(
+        &self,
+        opctx: &OpContext,
+        warnings: &mut Vec<String>,
+    ) -> anyhow::Result<IdOrdMap<InServiceDisk>> {
+        // Load all external (U.2) zpools and project them down to FM's
+        // `InServiceDisk` view, filtering on `disk_policy = in_service` and a
+        // live (non-soft-deleted) physical_disk row. M.2 disks are not
+        // represented as control plane disks today, so the U.2-only filter
+        // on the underlying query matches reality.
+        //
+        // See `nexus_types::in_service_disk` for why FM reads the executed
+        // DB view rather than the target blueprint.
+        let zpools_and_disks = self
+            .datastore
+            .zpool_list_all_external_batched(opctx)
+            .await
+            .context("failed to load in-service control plane disks")?;
+        let mut in_service_disks = IdOrdMap::new();
+        for (zpool, disk) in zpools_and_disks {
+            if disk.time_deleted().is_some()
+                || disk.disk_policy != PhysicalDiskPolicy::InService
+            {
+                continue;
+            }
+            let physical_disk_id = disk.id();
+            let zpool_id = zpool.id();
+            if in_service_disks
+                .insert_unique(InServiceDisk {
+                    physical_disk_id,
+                    zpool_id,
+                    sled_id: disk.sled_id.into(),
+                    vendor: disk.vendor,
+                    serial: disk.serial,
+                    model: disk.model,
+                    variant: disk.variant.into(),
+                })
+                .is_err()
+            {
+                // One live zpool per disk is a code-maintained invariant,
+                // not a schema constraint. Tolerate a violation rather than
+                // panicking the analysis task: keep the first zpool seen
+                // for the disk.
+                slog::warn!(
+                    &opctx.log,
+                    "multiple live zpools reference the same physical disk";
+                    "physical_disk_id" => %physical_disk_id,
+                    "zpool_id" => %zpool_id,
+                );
+                warnings.push(format!(
+                    "multiple live zpools reference physical disk \
+                     {physical_disk_id} (kept first seen, ignored zpool \
+                     {zpool_id})"
+                ));
+            }
+        }
+        Ok(in_service_disks)
+    }
+
+    async fn load_ereporter_restarts(
+        &mut self,
+        opctx: &OpContext,
+        builder: &mut fm::analysis_input::Builder,
+    ) -> anyhow::Result<()> {
+        let mut nbatches = 0;
+        let mut paginator = Paginator::new(
+            nexus_db_queries::db::datastore::SQL_BATCH_SIZE,
+            dropshot::PaginationOrder::Ascending,
+        );
+        while let Some(p) = paginator.next() {
+            nbatches += 1;
+            let batch = self
+                .datastore
+                .ereporter_restart_list(opctx, &p.current_pagparams())
+                .await?;
+            paginator = p.found_batch(&batch, &|e| e.id().into_untyped_uuid());
+            builder.add_ereporter_restarts(batch);
+        }
+
+        slog::debug!(
+            opctx.log,
+            "loaded {} ereporter restarts (in {nbatches} batches)",
+            builder.ereporter_restarts().len(),
+        );
+
+        Ok(())
     }
 
     async fn load_new_ereports(
         &mut self,
         opctx: &OpContext,
         builder: &mut fm::analysis_input::Builder,
-        errors: &mut Vec<String>,
+        warnings: &mut Vec<String>,
     ) -> anyhow::Result<()> {
         // Only surface ereports a diagnosis engine will consume.
         let classes = fm::diagnosis::known_ereport_classes();
@@ -266,21 +383,31 @@ impl FmAnalysis {
                 (e.restart_id.into_untyped_uuid(), e.ena)
             });
             let loaded = batch.len();
-            let mut invalid = 0;
-            builder.add_unmarked_ereports(batch.into_iter().filter_map(
-                |ereport| {
-                    let ereport = match fm::Ereport::try_from(ereport) {
-                        Ok(ereport) => ereport,
-                        Err(e) => {
-                            invalid += 1;
-                            errors.push(e.to_string());
-                            return None;
-                        }
-                    };
 
-                    Some(ereport)
-                },
-            ));
+            let mut invalid = 0;
+            for ereport in batch {
+                let ereport = match fm::Ereport::try_from(ereport) {
+                    Ok(ereport) => ereport,
+                    Err(e) => {
+                        invalid += 1;
+                        warnings.push(e.to_string());
+                        continue;
+                    }
+                };
+
+                // Check if this is a reporter we know about, and issue a
+                // warning if it is not.
+                let id = ereport.id();
+                if !builder.ereporter_restarts().contains_key(&id.restart_id) {
+                    let msg = format!(
+                        "ereport {id} has a restart ID not contained in the \
+                         `ereporter_restart` table"
+                    );
+                    slog::warn!(&opctx.log, "{msg}");
+                    warnings.push(msg);
+                }
+                builder.add_unmarked_ereports(std::iter::once(ereport));
+            }
 
             let total = builder.num_ereports();
             let new = total - prev_total;
@@ -360,17 +487,23 @@ impl FmAnalysis {
         &mut self,
         opctx: &OpContext,
         inputs: fm::analysis_input::Input,
+        input_report: &nexus_types::fm::analysis_reports::InputReport,
+        warnings: &mut Vec<String>,
     ) -> status::AnalysisStatus {
         let start_time = Utc::now();
         let mut sitrep_builder = fm::SitrepBuilder::new(&opctx.log, &inputs);
-        let result = fm::diagnosis::analyze(&inputs, &mut sitrep_builder);
+        let result = fm::diagnosis::analyze(&mut sitrep_builder);
         let end_time = Utc::now();
         let (sitrep, report) = sitrep_builder.build(self.nexus_id, end_time);
 
         // Did it work?
         if let Err(e) = result {
-            let err = InlineErrorChain::new(&*e);
-            slog::error!(&opctx.log, "fault management analysis failed"; "err" => %err);
+            let error = InlineErrorChain::new(&*e);
+            slog::error!(
+                &opctx.log,
+                "fault management analysis failed";
+                &error,
+            );
             return status::AnalysisStatus {
                 start_time,
                 end_time,
@@ -396,7 +529,36 @@ impl FmAnalysis {
         }
 
         let sitrep_id = sitrep.id();
-        match self.datastore.fm_sitrep_insert(opctx, sitrep).await {
+
+        // Serialize the human-readable analysis report so they can be stored
+        // alongside the sitrep for later inspection via `omdb`. This is purely
+        // diagnostic; if serialization somehow fails, we log it and still
+        // commit the sitrep rather than blocking fault management on it.
+        let analysis_report =
+            match nexus_db_model::fm::SitrepAnalysisReport::new(
+                input_report,
+                &report,
+            ) {
+                Ok(analysis_report) => Some(analysis_report),
+                Err(e) => {
+                    const MESSAGE: &str = "analysis report could not be \
+                        serialized, the sitrep will be committed without it";
+                    let error = InlineErrorChain::new(&*e);
+                    slog::warn!(
+                        &opctx.log,
+                        "{MESSAGE}";
+                        &error,
+                    );
+                    warnings.push(format!("{MESSAGE}: {error}"));
+                    None
+                }
+            };
+
+        match self
+            .datastore
+            .fm_sitrep_insert(opctx, sitrep, analysis_report)
+            .await
+        {
             Ok(()) => {
                 slog::info!(&opctx.log, "updated the current sitrep!");
                 // If we committed a new sitrep, we ought to go ahead and load it
@@ -430,8 +592,12 @@ impl FmAnalysis {
                 }
             }
             Err(datastore::fm::InsertSitrepError::Other(e)) => {
-                let err = InlineErrorChain::new(&e);
-                slog::error!(&opctx.log, "failed to insert sitrep"; "err" => %err);
+                let error = InlineErrorChain::new(&e);
+                slog::error!(
+                    &opctx.log,
+                    "failed to insert sitrep";
+                    &error,
+                );
                 status::AnalysisStatus {
                     start_time,
                     end_time,
@@ -764,6 +930,7 @@ mod tests {
                     ereports: iddqd::IdOrdMap::new(),
                     alerts_requested,
                     support_bundles_requested: iddqd::IdOrdMap::new(),
+                    facts: iddqd::IdOrdMap::new(),
                 }
             };
 
@@ -805,7 +972,7 @@ mod tests {
         // `rendezvous_alert_created` marker that input preparation must
         // observe.
         datastore
-            .fm_sitrep_insert(opctx, sitrep.clone())
+            .fm_sitrep_insert(opctx, sitrep.clone(), None)
             .await
             .expect("inserted parent sitrep");
         datastore
@@ -843,9 +1010,9 @@ mod tests {
             .await
             .expect("input preparation should succeed");
         assert!(
-            prep.errors.is_empty(),
-            "unexpected preparation errors: {:?}",
-            prep.errors,
+            prep.warnings.is_empty(),
+            "unexpected preparation warnings: {:?}",
+            prep.warnings,
         );
 
         // The open case is copied forward as open.

@@ -11,13 +11,13 @@ use futures::future::BoxFuture;
 use nexus_background_task_interface::Activator;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
+use nexus_db_queries::db::datastore::FmRendezvousAlertCreateError;
+use nexus_db_queries::db::datastore::FmSupportBundleCreateError;
 use nexus_db_queries::db::datastore::SupportBundleCreateParams;
-use nexus_db_queries::db::datastore::SupportBundleProvenance;
 use nexus_types::fm;
 use nexus_types::fm::case::AlertRequest;
 use nexus_types::internal_api::background::FmRendezvousStatus as Status;
 use nexus_types::internal_api::background::fm_rendezvous::*;
-use omicron_common::api::external::Error;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use serde_json::json;
 use slog_error_chain::InlineErrorChain;
@@ -193,16 +193,14 @@ impl FmRendezvous {
                 Ok(_) => {
                     status.alerts_created += 1;
                 }
-                Err(Error::ObjectAlreadyExists { .. }) => {
-                    // A prior activation already created this alert. The marker
-                    // row in `rendezvous_alert_created` prevents resurrection.
+                Err(FmRendezvousAlertCreateError::AlreadyCreated) => {
                     status.alerts_already_existed += 1;
                 }
-                Err(Error::Conflict { .. }) => {
+                Err(FmRendezvousAlertCreateError::StaleSitrep) => {
                     // The current sitrep in the database has moved past ours.
                     // Abort the rest of this activation; a fresher one will
                     // pick up where we left off.
-                    slog::warn!(
+                    slog::info!(
                         opctx.log,
                         "aborting alert rendezvous: sitrep is stale";
                         "case_id" => %case_id,
@@ -213,7 +211,7 @@ impl FmRendezvous {
                     status.stale_sitrep = true;
                     break;
                 }
-                Err(e) => {
+                Err(FmRendezvousAlertCreateError::Database(e)) => {
                     slog::warn!(
                         opctx.log,
                         "failed to create requested alert";
@@ -231,7 +229,7 @@ impl FmRendezvous {
 
         let n_errors = status.errors.len();
         if status.stale_sitrep {
-            slog::warn!(
+            slog::info!(
                 opctx.log,
                 "alert rendezvous aborted: sitrep stale relative to current";
                 "sitrep_id" => %sitrep.id(),
@@ -418,14 +416,12 @@ impl FmRendezvous {
             };
             match self
                 .datastore
-                .support_bundle_create(
+                .fm_rendezvous_support_bundle_create(
                     &opctx,
+                    bundle_id,
+                    case_id,
+                    expected_support_bundle_generation,
                     SupportBundleCreateParams {
-                        provenance: SupportBundleProvenance::Fm {
-                            id: bundle_id,
-                            case_id,
-                            expected_support_bundle_generation,
-                        },
                         reason: &reason,
                         nexus_id: self.nexus_id,
                         user_comment: None,
@@ -437,13 +433,13 @@ impl FmRendezvous {
                 Ok(_) => {
                     status.bundles_created += 1;
                 }
-                Err(Error::ObjectAlreadyExists { .. }) => {
+                Err(FmSupportBundleCreateError::AlreadyCreated) => {
                     // A prior activation already created this support bundle.
                     // The marker row in `rendezvous_support_bundle_created`
                     // prevents resurrection.
                     status.bundles_already_existed += 1;
                 }
-                Err(Error::Conflict { .. }) => {
+                Err(FmSupportBundleCreateError::StaleSitrep) => {
                     // The current sitrep in the database has moved past ours.
                     // Abort the rest of this activation; a fresher one will
                     // pick up where we left off.
@@ -458,7 +454,10 @@ impl FmRendezvous {
                     status.stale_sitrep = true;
                     break;
                 }
-                Err(e) => {
+                Err(
+                    e @ (FmSupportBundleCreateError::TooManyBundles
+                    | FmSupportBundleCreateError::Other(_)),
+                ) => {
                     slog::warn!(
                         opctx.log,
                         "failed to create requested support bundle";
@@ -658,6 +657,7 @@ mod tests {
             alerts_requested: iddqd::IdOrdMap::new(),
             ereports: iddqd::IdOrdMap::new(),
             support_bundles_requested: iddqd::IdOrdMap::new(),
+            facts: iddqd::IdOrdMap::new(),
         };
         case1
             .alerts_requested
@@ -695,7 +695,7 @@ mod tests {
         // generation matches the current one. Insert the sitrep so it shows up
         // in the DB before activating.
         datastore
-            .fm_sitrep_insert(opctx, sitrep1.clone())
+            .fm_sitrep_insert(opctx, sitrep1.clone(), None)
             .await
             .expect("inserted sitrep1");
 
@@ -751,6 +751,7 @@ mod tests {
             alerts_requested: iddqd::IdOrdMap::new(),
             ereports: iddqd::IdOrdMap::new(),
             support_bundles_requested: iddqd::IdOrdMap::new(),
+            facts: iddqd::IdOrdMap::new(),
         };
         case2
             .alerts_requested
@@ -797,7 +798,7 @@ mod tests {
         };
 
         datastore
-            .fm_sitrep_insert(opctx, sitrep2.clone())
+            .fm_sitrep_insert(opctx, sitrep2.clone(), None)
             .await
             .expect("inserted sitrep2");
 
@@ -867,13 +868,11 @@ mod tests {
         logctx.cleanup_successful();
     }
 
-    /// A stale activation (one whose sitrep's `alert_generation` is
-    /// behind the latest sitrep in `fm_sitrep_history`) should be rejected by
-    /// `SitrepGuardedInsert` inside `fm_rendezvous_alert_create`. The
-    /// rendezvous task is responsible for translating that `Conflict` into
-    /// `stale_sitrep = true`,
-    /// breaking out of the alert loop without inserting any rows, and still
-    /// running the support bundle op.
+    /// A stale activation (one whose sitrep's `alert_generation` is behind the
+    /// latest sitrep in `fm_sitrep_history`) should be rejected in
+    /// `fm_rendezvous_alert_create`. The rendezvous task is responsible for
+    /// translating that `Conflict` into `stale_sitrep = true`, breaking out of
+    /// the alert loop without interrupting anything else.
     #[tokio::test]
     async fn test_alert_requests_aborted_when_sitrep_is_stale() {
         let logctx = dev::test_setup_log(
@@ -898,10 +897,10 @@ mod tests {
             OmicronZoneUuid::new_v4(),
         );
 
-        // The stale activation's sitrep: carries two alert requests and
-        // stamps the initial `alert_generation`. Two requests (rather than
-        // one) pin the totals' semantics: they count the sitrep's full
-        // request set, not how far the loop got before aborting on the first
+        // The stale activation's sitrep carries two alert requests and stamps
+        // `alert_generation = 1`. Using two requests (rather than one) lets the
+        // test confirm that the reported totals count every request in the
+        // sitrep, not just how far the loop got before it aborted on the first
         // insert.
         let stale_sitrep_id = SitrepUuid::new_v4();
         let stale_alert_id = AlertUuid::new_v4();
@@ -919,6 +918,7 @@ mod tests {
                 alerts_requested: iddqd::IdOrdMap::new(),
                 ereports: iddqd::IdOrdMap::new(),
                 support_bundles_requested: iddqd::IdOrdMap::new(),
+                facts: iddqd::IdOrdMap::new(),
             };
             for id in [stale_alert_id, stale_alert2_id] {
                 c.alerts_requested
@@ -946,7 +946,7 @@ mod tests {
                     comment: "stale sitrep".to_string(),
                     time_created: Utc::now(),
                     next_inv_min_time_started: Utc::now(),
-                    alert_generation: Generation::new(),
+                    alert_generation: Generation::from_u32(1),
                     support_bundle_generation: Generation::new(),
                 },
                 cases,
@@ -954,7 +954,7 @@ mod tests {
             }
         };
         datastore
-            .fm_sitrep_insert(opctx, stale_sitrep.clone())
+            .fm_sitrep_insert(opctx, stale_sitrep.clone(), None)
             .await
             .expect("inserted stale sitrep");
 
@@ -971,21 +971,21 @@ mod tests {
                 comment: "current sitrep".to_string(),
                 time_created: Utc::now(),
                 next_inv_min_time_started: Utc::now(),
-                alert_generation: Generation::new().next(),
+                alert_generation: Generation::from_u32(2),
                 support_bundle_generation: Generation::new(),
             },
             cases: iddqd::IdOrdMap::new(),
             ereports_by_id: Default::default(),
         };
         datastore
-            .fm_sitrep_insert(opctx, current_sitrep)
+            .fm_sitrep_insert(opctx, current_sitrep, None)
             .await
             .expect("inserted current sitrep");
 
-        // Hand the stale sitrep to the rendezvous task. Its first alert
-        // request should trip the sitrep-guard combinator and surface as a
-        // `Conflict`, which the task translates into `stale_sitrep = true` and
-        // breaks out of the alert loop before the second request is attempted.
+        // Hand the stale sitrep to the rendezvous task. Attempting to insert
+        // the first alert should result in an error because the sitrep is out
+        // of date, and rendezvous execution should be aborted before
+        // attempting to insert the other alert.
         sitrep_tx
             .send(Some(Arc::new((
                 fm::SitrepVersion {
@@ -1041,10 +1041,10 @@ mod tests {
 
     /// A stale activation whose sitrep's `support_bundle_generation`
     /// is behind the latest sitrep should be rejected by the sitrep-guard
-    /// combinator inside `support_bundle_create`. The rendezvous task
-    /// translates that `Conflict` into `stale_sitrep = true`, breaks out of
-    /// the bundle loop without inserting any rows, and still runs the alert
-    /// op.
+    /// combinator inside `fm_rendezvous_support_bundle_create`. The rendezvous
+    /// task translates that `StaleSitrep` error into `stale_sitrep = true`,
+    /// breaks out of the bundle loop without inserting any rows, and still
+    /// runs the alert op.
     #[tokio::test]
     async fn test_bundle_requests_aborted_when_sitrep_is_stale() {
         let logctx = dev::test_setup_log(
@@ -1069,9 +1069,10 @@ mod tests {
             OmicronZoneUuid::new_v4(),
         );
 
-        // Provision a free dataset so `support_bundle_create` reaches the
-        // sitrep-guard (the free-dataset lookup precedes the guarded insert;
-        // without one we'd hit a capacity error before the staleness check).
+        // Provision a free dataset so `fm_rendezvous_support_bundle_create`
+        // reaches the sitrep-guard (the free-dataset lookup precedes the
+        // guarded insert; without one we'd hit a capacity error before the
+        // staleness check).
         create_sled_with_zpools(&datastore, &opctx, 1).await;
 
         // The stale activation's sitrep: carries two support bundle requests
@@ -1095,6 +1096,7 @@ mod tests {
                 alerts_requested: iddqd::IdOrdMap::new(),
                 ereports: iddqd::IdOrdMap::new(),
                 support_bundles_requested: iddqd::IdOrdMap::new(),
+                facts: iddqd::IdOrdMap::new(),
             };
             for id in [stale_bundle_id, stale_bundle2_id] {
                 c.support_bundles_requested
@@ -1128,7 +1130,7 @@ mod tests {
             }
         };
         datastore
-            .fm_sitrep_insert(opctx, stale_sitrep.clone())
+            .fm_sitrep_insert(opctx, stale_sitrep.clone(), None)
             .await
             .expect("inserted stale sitrep");
 
@@ -1152,7 +1154,7 @@ mod tests {
             ereports_by_id: Default::default(),
         };
         datastore
-            .fm_sitrep_insert(opctx, current_sitrep)
+            .fm_sitrep_insert(opctx, current_sitrep, None)
             .await
             .expect("inserted current sitrep");
 
@@ -1210,7 +1212,6 @@ mod tests {
         db.terminate().await;
         logctx.cleanup_successful();
     }
-
     /// Paginate through all unseen ereports, collecting every row.
     ///
     /// This bypasses the production `ereports_list_unmarked` (which filters
@@ -1316,6 +1317,7 @@ mod tests {
 
         let restart_id = EreporterRestartUuid::new_v4();
         let collector_id = OmicronZoneUuid::new_v4();
+        let time_collected = Utc::now();
         let reporter = Reporter::Sp {
             sp_type: nexus_types::inventory::SpType::Sled,
             slot: 0,
@@ -1326,7 +1328,7 @@ mod tests {
                 restart_id,
                 ena: ereport_types::Ena(2),
             },
-            time_collected: Utc::now(),
+            time_collected,
             collector_id,
             part_number: Some("9130000019".to_string()),
             serial_number: Some("BRM420069".to_string()),
@@ -1338,7 +1340,7 @@ mod tests {
                 restart_id,
                 ena: ereport_types::Ena(3),
             },
-            time_collected: Utc::now(),
+            time_collected,
             collector_id,
             part_number: Some("9130000019".to_string()),
             serial_number: Some("BRM420069".to_string()),
@@ -1350,7 +1352,7 @@ mod tests {
                 restart_id,
                 ena: ereport_types::Ena(4),
             },
-            time_collected: Utc::now(),
+            time_collected,
             collector_id,
             part_number: Some("9130000019".to_string()),
             serial_number: Some("BRM420069".to_string()),
@@ -1359,7 +1361,9 @@ mod tests {
         };
         datastore
             .ereports_insert(
-                opctx,
+                &opctx,
+                restart_id,
+                time_collected,
                 reporter,
                 vec![
                     ereport1_data.clone(),
@@ -1417,6 +1421,7 @@ mod tests {
                 ereports,
                 alerts_requested: iddqd::IdOrdMap::new(),
                 support_bundles_requested: iddqd::IdOrdMap::new(),
+                facts: iddqd::IdOrdMap::new(),
             }
         };
 
@@ -1557,13 +1562,13 @@ mod tests {
             sp_type: nexus_types::inventory::SpType::Sled,
             slot: 1,
         };
-
+        let time_collected = Utc::now();
         let ereport1_data = EreportData {
             id: ereport_types::EreportId {
                 restart_id,
                 ena: ereport_types::Ena(2),
             },
-            time_collected: Utc::now(),
+            time_collected,
             collector_id,
             part_number: Some("9130000019".to_string()),
             serial_number: Some("BRM420069".to_string()),
@@ -1575,7 +1580,7 @@ mod tests {
                 restart_id,
                 ena: ereport_types::Ena(3),
             },
-            time_collected: Utc::now(),
+            time_collected,
             collector_id,
             part_number: Some("9130000019".to_string()),
             serial_number: Some("BRM420069".to_string()),
@@ -1587,7 +1592,7 @@ mod tests {
                 restart_id,
                 ena: ereport_types::Ena(4),
             },
-            time_collected: Utc::now(),
+            time_collected,
             collector_id,
             part_number: Some("9130000019".to_string()),
             serial_number: Some("BRM420069".to_string()),
@@ -1597,6 +1602,8 @@ mod tests {
         datastore
             .ereports_insert(
                 opctx,
+                restart_id,
+                time_collected,
                 reporter,
                 vec![
                     ereport1_data.clone(),
@@ -1633,6 +1640,7 @@ mod tests {
                 ereports,
                 alerts_requested: iddqd::IdOrdMap::new(),
                 support_bundles_requested: iddqd::IdOrdMap::new(),
+                facts: iddqd::IdOrdMap::new(),
             }
         };
 
@@ -1744,6 +1752,7 @@ mod tests {
                 ereports,
                 alerts_requested: iddqd::IdOrdMap::new(),
                 support_bundles_requested: iddqd::IdOrdMap::new(),
+                facts: iddqd::IdOrdMap::new(),
             }
         };
 
@@ -1943,6 +1952,7 @@ mod tests {
             alerts_requested: iddqd::IdOrdMap::new(),
             ereports: iddqd::IdOrdMap::new(),
             support_bundles_requested: iddqd::IdOrdMap::new(),
+            facts: iddqd::IdOrdMap::new(),
         };
         case1
             .support_bundles_requested
@@ -1974,12 +1984,12 @@ mod tests {
             }
         };
 
-        // The sitrep-guard combinator in `support_bundle_create` (FM
-        // provenance) consults `fm_sitrep_history` to check that the
-        // rendezvous task's expected generation matches the current one.
+        // The sitrep-guard combinator in `fm_rendezvous_support_bundle_create`
+        // consults `fm_sitrep_history` to check that the rendezvous task's
+        // expected generation matches the current one.
         // Insert the sitrep so it shows up in the DB before activating.
         datastore
-            .fm_sitrep_insert(opctx, sitrep1.clone())
+            .fm_sitrep_insert(opctx, sitrep1.clone(), None)
             .await
             .expect("inserted sitrep1");
 
@@ -2063,7 +2073,7 @@ mod tests {
         };
 
         datastore
-            .fm_sitrep_insert(opctx, sitrep2.clone())
+            .fm_sitrep_insert(opctx, sitrep2.clone(), None)
             .await
             .expect("inserted sitrep2");
 
@@ -2148,6 +2158,7 @@ mod tests {
             alerts_requested: iddqd::IdOrdMap::new(),
             ereports: iddqd::IdOrdMap::new(),
             support_bundles_requested: iddqd::IdOrdMap::new(),
+            facts: iddqd::IdOrdMap::new(),
         };
         case.support_bundles_requested
             .insert_unique(fm::case::SupportBundleRequest {
@@ -2179,7 +2190,7 @@ mod tests {
         };
 
         datastore
-            .fm_sitrep_insert(opctx, sitrep.clone())
+            .fm_sitrep_insert(opctx, sitrep.clone(), None)
             .await
             .expect("inserted sitrep");
 

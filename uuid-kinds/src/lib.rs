@@ -60,6 +60,7 @@ impl_typed_uuid_kinds! {
         ExternalIp = {},
         ExternalSubnet = {},
         ExternalZpool = {},
+        Fact = {},
         FmdHostCase = {},
         FmdResource = {},
         Instance = {},

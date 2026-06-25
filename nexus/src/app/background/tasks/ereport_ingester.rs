@@ -291,7 +291,13 @@ impl Ingester {
             });
             let created = match self
                 .datastore
-                .ereports_insert(&opctx, reporter, db_ereports)
+                .ereports_insert(
+                    &opctx,
+                    restart_id,
+                    time_collected,
+                    reporter,
+                    db_ereports,
+                )
                 .await
             {
                 Ok((created, latest)) => {
