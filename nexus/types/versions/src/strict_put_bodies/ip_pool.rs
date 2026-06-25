@@ -10,9 +10,6 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 /// Updateable properties of an `IpPool`
-///
-/// A `PUT` replaces the resource, so `name` and `description` must both be
-/// present.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct IpPoolUpdate {
     #[serde(flatten)]

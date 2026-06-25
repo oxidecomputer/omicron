@@ -16077,7 +16077,7 @@
         ]
       },
       "AffinityGroupUpdate": {
-        "description": "Updateable properties of an `AffinityGroup`\n\nA `PUT` replaces the resource, so `name` and `description` must both be present.",
+        "description": "Updateable properties of an `AffinityGroup`",
         "type": "object",
         "properties": {
           "description": {
@@ -16759,7 +16759,7 @@
         ]
       },
       "AntiAffinityGroupUpdate": {
-        "description": "Updateable properties of an `AntiAffinityGroup`\n\nA `PUT` replaces the resource, so `name` and `description` must both be present.",
+        "description": "Updateable properties of an `AntiAffinityGroup`",
         "type": "object",
         "properties": {
           "description": {
@@ -20895,7 +20895,7 @@
         ]
       },
       "ExternalSubnetUpdate": {
-        "description": "Updateable properties of an `ExternalSubnet`\n\nA `PUT` replaces the resource, so `name` and `description` must both be present.",
+        "description": "Updateable properties of an `ExternalSubnet`",
         "type": "object",
         "properties": {
           "description": {
@@ -21417,7 +21417,7 @@
         ]
       },
       "FloatingIpUpdate": {
-        "description": "Updateable properties of a `FloatingIp`\n\nA `PUT` replaces the resource, so `name` and `description` must both be present.",
+        "description": "Updateable properties of a `FloatingIp`",
         "type": "object",
         "properties": {
           "description": {
@@ -23325,7 +23325,7 @@
         ]
       },
       "InstanceNetworkInterfaceUpdate": {
-        "description": "Parameters for updating an `InstanceNetworkInterface`\n\nA `PUT` replaces the resource, so `name` and `description` must both be present. `primary` and `transit_ips` are always present as well.\n\nNote that modifying IP addresses for an interface is not yet supported, a new interface must be created instead.",
+        "description": "Parameters for updating an `InstanceNetworkInterface`\n\nNote that modifying IP addresses for an interface is not yet supported, a new interface must be created instead.",
         "type": "object",
         "properties": {
           "description": {
@@ -24137,7 +24137,7 @@
         ]
       },
       "IpPoolUpdate": {
-        "description": "Updateable properties of an `IpPool`\n\nA `PUT` replaces the resource, so `name` and `description` must both be present.",
+        "description": "Updateable properties of an `IpPool`",
         "type": "object",
         "properties": {
           "description": {
@@ -26362,7 +26362,7 @@
         ]
       },
       "ProjectUpdate": {
-        "description": "Updateable properties of a `Project`\n\nA `PUT` replaces the resource, so every field is required: `name` and `description` must both be present.",
+        "description": "Updateable properties of a `Project`",
         "type": "object",
         "properties": {
           "description": {
@@ -27036,7 +27036,7 @@
         ]
       },
       "RouterRouteUpdate": {
-        "description": "Updateable properties of a `RouterRoute`\n\nA `PUT` replaces the resource, so `name`, `description`, `target`, and `destination` must all be present.",
+        "description": "Updateable properties of a `RouterRoute`",
         "type": "object",
         "properties": {
           "description": {
@@ -27663,7 +27663,7 @@
         ]
       },
       "SiloQuotasUpdate": {
-        "description": "Updateable properties of a Silo's resource limits.\n\nA `PUT` replaces the resource, so every quota value is required.",
+        "description": "Updateable properties of a Silo's resource limits.",
         "type": "object",
         "properties": {
           "cpus": {
@@ -28698,7 +28698,7 @@
         ]
       },
       "SubnetPoolUpdate": {
-        "description": "Updateable properties of a `SubnetPool`\n\nA `PUT` replaces the resource, so `name` and `description` must both be present.",
+        "description": "Updateable properties of a `SubnetPool`",
         "type": "object",
         "properties": {
           "description": {
@@ -28834,7 +28834,7 @@
         "properties": {
           "user_comment": {
             "nullable": true,
-            "description": "User comment for the support bundle\n\nMust be present, but may be explicit `null` to clear the comment. The prior version treats an omitted comment as a request to clear it; value semantics requires the client to be explicit.",
+            "description": "User comment for the support bundle",
             "type": "string"
           }
         },
@@ -29665,7 +29665,7 @@
         ]
       },
       "SystemNetworkingSettingsUpdate": {
-        "description": "Parameters for updating the fleet-wide networking settings.\n\nA `PUT` replaces the settings, so the opt-in toggle must be present.",
+        "description": "Parameters for updating the fleet-wide networking settings.",
         "type": "object",
         "properties": {
           "external_jumbo_frames_opt_in_enabled": {
@@ -31369,7 +31369,7 @@
         ]
       },
       "VpcRouterUpdate": {
-        "description": "Updateable properties of a `VpcRouter`\n\nA `PUT` replaces the resource, so `name` and `description` must both be present.",
+        "description": "Updateable properties of a `VpcRouter`",
         "type": "object",
         "properties": {
           "description": {
@@ -31519,7 +31519,7 @@
         ]
       },
       "VpcSubnetUpdate": {
-        "description": "Updateable properties of a `VpcSubnet`\n\nA `PUT` replaces the resource, so `name` and `description` are required. `custom_router` is clearable: it must be present, but may be explicit `null` to detach any custom router.",
+        "description": "Updateable properties of a `VpcSubnet`",
         "type": "object",
         "properties": {
           "custom_router": {
@@ -31545,7 +31545,7 @@
         ]
       },
       "VpcUpdate": {
-        "description": "Updateable properties of a `Vpc`\n\nA `PUT` replaces the resource, so `name`, `description`, and `dns_name` must all be present.",
+        "description": "Updateable properties of a `Vpc`",
         "type": "object",
         "properties": {
           "description": {
@@ -31757,7 +31757,7 @@
         ]
       },
       "WebhookReceiverUpdate": {
-        "description": "Parameters to update a webhook configuration.\n\nA `PUT` replaces the resource, so `name`, `description`, and `endpoint` must all be present.",
+        "description": "Parameters to update a webhook configuration.",
         "type": "object",
         "properties": {
           "description": {

@@ -8,8 +8,6 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 /// Parameters for updating the fleet-wide networking settings.
-///
-/// A `PUT` replaces the settings, so the opt-in toggle must be present.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
 pub struct SystemNetworkingSettingsUpdate {
     /// Toggle the fleet-wide external jumbo-frames opt-in.

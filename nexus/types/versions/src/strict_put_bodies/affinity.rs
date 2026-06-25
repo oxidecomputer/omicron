@@ -10,9 +10,6 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 /// Updateable properties of an `AffinityGroup`
-///
-/// A `PUT` replaces the resource, so `name` and `description` must both be
-/// present.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct AffinityGroupUpdate {
     #[serde(flatten)]
@@ -35,9 +32,6 @@ impl From<AffinityGroupUpdate>
 }
 
 /// Updateable properties of an `AntiAffinityGroup`
-///
-/// A `PUT` replaces the resource, so `name` and `description` must both be
-/// present.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct AntiAffinityGroupUpdate {
     #[serde(flatten)]

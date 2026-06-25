@@ -11,9 +11,6 @@ use serde::{Deserialize, Serialize};
 use url::Url;
 
 /// Parameters to update a webhook configuration.
-///
-/// A `PUT` replaces the resource, so `name`, `description`, and `endpoint` must
-/// all be present.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct WebhookReceiverUpdate {
     #[serde(flatten)]

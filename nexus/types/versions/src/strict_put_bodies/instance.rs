@@ -12,9 +12,6 @@ use serde::{Deserialize, Serialize};
 
 /// Parameters for updating an `InstanceNetworkInterface`
 ///
-/// A `PUT` replaces the resource, so `name` and `description` must both be
-/// present. `primary` and `transit_ips` are always present as well.
-///
 /// Note that modifying IP addresses for an interface is not yet supported, a
 /// new interface must be created instead.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]

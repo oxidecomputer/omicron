@@ -6,17 +6,13 @@
 
 use crate::v2026_06_23_00::identity::IdentityMetadataUpdateParams;
 use omicron_common::api::external::{
-    IdentityMetadataUpdateParamsLax, Name, NameOrId, Nullable, RouteDestination,
-    RouteTarget,
+    IdentityMetadataUpdateParamsLax, Name, NameOrId, Nullable,
+    RouteDestination, RouteTarget,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 /// Updateable properties of a `VpcSubnet`
-///
-/// A `PUT` replaces the resource, so `name` and `description` are required.
-/// `custom_router` is clearable: it must be present, but may be explicit
-/// `null` to detach any custom router.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct VpcSubnetUpdate {
     #[serde(flatten)]
@@ -44,9 +40,6 @@ impl From<VpcSubnetUpdate> for crate::v2025_11_20_00::vpc::VpcSubnetUpdate {
 }
 
 /// Updateable properties of a `Vpc`
-///
-/// A `PUT` replaces the resource, so `name`, `description`, and `dns_name` must
-/// all be present.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct VpcUpdate {
     #[serde(flatten)]
@@ -70,9 +63,6 @@ impl From<VpcUpdate> for crate::v2025_11_20_00::vpc::VpcUpdate {
 }
 
 /// Updateable properties of a `VpcRouter`
-///
-/// A `PUT` replaces the resource, so `name` and `description` must both be
-/// present.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct VpcRouterUpdate {
     #[serde(flatten)]
@@ -93,9 +83,6 @@ impl From<VpcRouterUpdate> for crate::v2025_11_20_00::vpc::VpcRouterUpdate {
 }
 
 /// Updateable properties of a `RouterRoute`
-///
-/// A `PUT` replaces the resource, so `name`, `description`, `target`, and
-/// `destination` must all be present.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct RouterRouteUpdate {
     #[serde(flatten)]

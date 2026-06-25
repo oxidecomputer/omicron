@@ -20,8 +20,7 @@ use nexus_test_utils::resource_helpers::{
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::instance::InstanceState;
 use nexus_types::external_api::vpc::{
-    IdentityMetadataUpdateParams, VpcSubnet, VpcSubnetCreate,
-    VpcSubnetUpdate,
+    IdentityMetadataUpdateParams, VpcSubnet, VpcSubnetCreate, VpcSubnetUpdate,
 };
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::Ipv6NetExt;

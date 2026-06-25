@@ -10,9 +10,6 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 /// Updateable properties of a `Project`
-///
-/// A `PUT` replaces the resource, so every field is required: `name` and
-/// `description` must both be present.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct ProjectUpdate {
     #[serde(flatten)]

@@ -11,9 +11,5 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct SupportBundleUpdate {
     /// User comment for the support bundle
-    ///
-    /// Must be present, but may be explicit `null` to clear the comment. The
-    /// prior version treats an omitted comment as a request to clear it; value
-    /// semantics requires the client to be explicit.
     pub user_comment: Nullable<String>,
 }

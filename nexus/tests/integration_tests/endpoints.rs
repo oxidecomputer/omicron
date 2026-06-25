@@ -2322,11 +2322,10 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
                     AllowedMethod::Delete,
                     AllowedMethod::Put(
                         serde_json::to_value(project::ProjectUpdate {
-                            identity:
-                                project::IdentityMetadataUpdateParams {
-                                    name: DEMO_PROJECT_NAME.clone(),
-                                    description: "different".to_string(),
-                                },
+                            identity: project::IdentityMetadataUpdateParams {
+                                name: DEMO_PROJECT_NAME.clone(),
+                                description: "different".to_string(),
+                            },
                         })
                         .unwrap(),
                     ),
