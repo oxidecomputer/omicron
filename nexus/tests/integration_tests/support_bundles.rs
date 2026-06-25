@@ -312,7 +312,7 @@ async fn bundle_update_comment(
     use nexus_types::external_api::support_bundle::SupportBundleUpdate;
 
     let url = format!("{BUNDLES_URL}/{id}");
-    // Value semantics: a `None` comment is sent as an explicit `null` (clear),
+    // Strict PUT body: a `None` comment is sent as an explicit `null` (clear),
     // not omitted.
     let update = SupportBundleUpdate { user_comment: Nullable(comment) };
 

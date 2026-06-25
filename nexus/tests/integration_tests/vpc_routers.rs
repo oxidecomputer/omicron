@@ -465,7 +465,7 @@ async fn test_vpc_routers_attach_to_subnet(
 }
 
 /// Documents the prior-version back-compat behavior of `custom_router` on
-/// `vpc_subnet_update`, which the value-semantics change addresses.
+/// `vpc_subnet_update`, which strict PUT bodies address.
 ///
 /// `custom_router` went from a lenient `Option<NameOrId>` to a required
 /// `Nullable<NameOrId>`. One might expect that, like `name`/`description`,
@@ -475,7 +475,7 @@ async fn test_vpc_routers_attach_to_subnet(
 /// that omits `custom_router` *clears* any attached router. This is a latent
 /// clear-on-omit hazard (cf. `support_bundle.user_comment`) — the audit had
 /// bucketed `vpc_subnet` as preserve-on-omit, but that only holds for its
-/// AsChangeset columns, not `custom_router`. Value semantics resolves the
+/// AsChangeset columns, not `custom_router`. Strict PUT bodies resolve the
 /// ambiguity for new clients by requiring the field. This test pins the
 /// behavior so we notice if it changes.
 #[nexus_test]
@@ -502,7 +502,7 @@ async fn test_vpc_subnet_update_prior_version_clears_custom_router(
     assert_eq!(subnet.custom_router_id, Some(router.identity.id));
 
     // Send an old-version update that omits `custom_router` (changing only the
-    // description). The prior version, before value semantics.
+    // description). The prior version, before strict PUT bodies.
     const PRIOR_VERSION: &str = "2025112000.0.0";
     let test_cx = ClientTestContext::new(
         cptestctx.server.get_http_server_external_address(),
@@ -768,7 +768,7 @@ async fn set_custom_router(
     let url = format!(
         "/v1/vpc-subnets/{subnet_name}?project={PROJECT_NAME}&vpc={vpc_name}"
     );
-    // The update body now has value semantics, so it must carry the full
+    // The update body is now strict, so it must carry the full
     // representation. Read the current subnet to preserve its name and
     // description while changing only the custom router attachment.
     let current: vpc::VpcSubnet = NexusRequest::object_get(client, &url)

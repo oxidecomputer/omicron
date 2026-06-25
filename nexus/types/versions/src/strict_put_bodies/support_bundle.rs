@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Support bundle types for version UPDATE_VALUE_SEMANTICS.
+//! Support bundle types for version STRICT_PUT_BODIES.
 
 use omicron_common::api::external::Nullable;
 use schemars::JsonSchema;

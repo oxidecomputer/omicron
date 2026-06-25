@@ -86,7 +86,7 @@ api_versions!([
     // |  date-based version should be at the top of the list.
     // v
     // (next_yyyy_mm_dd_nn, IDENT),
-    (2026_06_23_00, UPDATE_VALUE_SEMANTICS),
+    (2026_06_23_00, STRICT_PUT_BODIES),
     (2026_06_08_00, INSTANCE_CPU_TYPE_TURIN_V2),
     (2026_06_05_00, EXTERNAL_JUMBO_FRAMES),
     (2026_06_04_00, IMAGE_BLOCK_SIZE_TYPE),
@@ -587,7 +587,7 @@ pub trait NexusExternalApi {
         method = PUT,
         path = "/v1/system/silos/{silo}/quotas",
         tags = ["system/silos"],
-        versions = VERSION_UPDATE_VALUE_SEMANTICS..,
+        versions = VERSION_STRICT_PUT_BODIES..,
     }]
     async fn silo_quotas_update(
         rqctx: RequestContext<Self::Context>,
@@ -603,7 +603,7 @@ pub trait NexusExternalApi {
         method = PUT,
         path = "/v1/system/silos/{silo}/quotas",
         tags = ["system/silos"],
-        versions = ..VERSION_UPDATE_VALUE_SEMANTICS,
+        versions = ..VERSION_STRICT_PUT_BODIES,
     }]
     async fn silo_quotas_update_v2025_11_20_00(
         rqctx: RequestContext<Self::Context>,
@@ -1197,7 +1197,7 @@ pub trait NexusExternalApi {
         method = PUT,
         path = "/v1/projects/{project}",
         tags = ["projects"],
-        versions = VERSION_UPDATE_VALUE_SEMANTICS..,
+        versions = VERSION_STRICT_PUT_BODIES..,
     }]
     async fn project_update(
         rqctx: RequestContext<Self::Context>,
@@ -1211,7 +1211,7 @@ pub trait NexusExternalApi {
         method = PUT,
         path = "/v1/projects/{project}",
         tags = ["projects"],
-        versions = ..VERSION_UPDATE_VALUE_SEMANTICS,
+        versions = ..VERSION_STRICT_PUT_BODIES,
     }]
     async fn project_update_v2025_11_20_00(
         rqctx: RequestContext<Self::Context>,
@@ -6891,7 +6891,7 @@ pub trait NexusExternalApi {
         method = PUT,
         path = "/v1/vpc-subnets/{subnet}",
         tags = ["vpcs"],
-        versions = VERSION_UPDATE_VALUE_SEMANTICS..,
+        versions = VERSION_STRICT_PUT_BODIES..,
     }]
     async fn vpc_subnet_update(
         rqctx: RequestContext<Self::Context>,
@@ -6906,7 +6906,7 @@ pub trait NexusExternalApi {
         method = PUT,
         path = "/v1/vpc-subnets/{subnet}",
         tags = ["vpcs"],
-        versions = ..VERSION_UPDATE_VALUE_SEMANTICS,
+        versions = ..VERSION_STRICT_PUT_BODIES,
     }]
     async fn vpc_subnet_update_v2025_11_20_00(
         rqctx: RequestContext<Self::Context>,
@@ -8433,7 +8433,7 @@ pub trait NexusExternalApi {
         method = PUT,
         path = "/experimental/v1/system/support-bundles/{bundle_id}",
         tags = ["experimental"], // system/support-bundles: only one tag is allowed
-        versions = VERSION_UPDATE_VALUE_SEMANTICS..,
+        versions = VERSION_STRICT_PUT_BODIES..,
     }]
     async fn support_bundle_update(
         rqctx: RequestContext<Self::Context>,
@@ -8450,7 +8450,7 @@ pub trait NexusExternalApi {
         method = PUT,
         path = "/experimental/v1/system/support-bundles/{bundle_id}",
         tags = ["experimental"], // system/support-bundles: only one tag is allowed
-        versions = ..VERSION_UPDATE_VALUE_SEMANTICS,
+        versions = ..VERSION_STRICT_PUT_BODIES,
     }]
     async fn support_bundle_update_v2025_11_20_00(
         rqctx: RequestContext<Self::Context>,

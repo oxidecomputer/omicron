@@ -302,7 +302,8 @@ async fn test_projects_basic(cptestctx: &ControlPlaneTestContext) {
 
     // Update "simproject3".  We'll make sure that's reflected in the other
     // requests.
-    // `name` is unchanged ("simproject3"); value semantics requires resending it.
+    // `name` is unchanged ("simproject3"); strict PUT bodies require
+    // resending it.
     let project_update = project::ProjectUpdate {
         identity: project::IdentityMetadataUpdateParamsStrict {
             name: "simproject3".parse().unwrap(),
@@ -446,10 +447,10 @@ async fn test_projects_basic(cptestctx: &ControlPlaneTestContext) {
     assert!(!projects[2].identity.description.is_empty());
 }
 
-/// Regression test for the value-semantics conversion of `project_update`.
+/// Regression test for the strict PUT body conversion of `project_update`.
 ///
-/// The latest version of the body has value semantics (every field required),
-/// but clients pinned to an earlier API version still send the lenient
+/// The latest version of the body is strict (every field required), but clients
+/// pinned to an earlier API version still send the lenient
 /// "PATCH-via-PUT" body where omitted fields are left unchanged. This test
 /// confirms that contract: a request pinned to the prior version (via the
 /// `api-version` header) may omit `name`, and the project's existing name is
@@ -463,8 +464,8 @@ async fn test_project_update_prior_version_partial(
     // `create_project` sets description to "a pier".
     create_project(client, "prior-version-proj").await;
 
-    // The prior API version, before value semantics. Anything in
-    // `[INITIAL, UPDATE_VALUE_SEMANTICS)` routes to the lenient handler.
+    // The prior API version, before strict PUT bodies. Anything in
+    // `[INITIAL, STRICT_PUT_BODIES)` routes to the lenient handler.
     const PRIOR_VERSION: &str = "2025112000.0.0";
 
     // The default `external_client` does not set the api-version header, which

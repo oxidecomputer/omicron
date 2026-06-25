@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Project types for version UPDATE_VALUE_SEMANTICS.
+//! Project types for version STRICT_PUT_BODIES.
 
 use crate::v2026_06_23_00::identity::IdentityMetadataUpdateParamsStrict;
 use omicron_common::api::external::IdentityMetadataUpdateParams;
