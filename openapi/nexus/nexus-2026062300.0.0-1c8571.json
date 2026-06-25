@@ -16077,22 +16077,20 @@
         ]
       },
       "AffinityGroupUpdate": {
-        "description": "Updateable properties of an `AffinityGroup`",
+        "description": "Updateable properties of an `AffinityGroup`\n\nA `PUT` replaces the resource, so `name` and `description` must both be present.",
         "type": "object",
         "properties": {
           "description": {
-            "nullable": true,
             "type": "string"
           },
           "name": {
-            "nullable": true,
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Name"
-              }
-            ]
+            "$ref": "#/components/schemas/Name"
           }
-        }
+        },
+        "required": [
+          "description",
+          "name"
+        ]
       },
       "AffinityPolicy": {
         "description": "Affinity policy used to describe \"what to do when a request cannot be satisfied\"\n\nUsed for both Affinity and Anti-Affinity Groups",
@@ -16761,22 +16759,20 @@
         ]
       },
       "AntiAffinityGroupUpdate": {
-        "description": "Updateable properties of an `AntiAffinityGroup`",
+        "description": "Updateable properties of an `AntiAffinityGroup`\n\nA `PUT` replaces the resource, so `name` and `description` must both be present.",
         "type": "object",
         "properties": {
           "description": {
-            "nullable": true,
             "type": "string"
           },
           "name": {
-            "nullable": true,
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Name"
-              }
-            ]
+            "$ref": "#/components/schemas/Name"
           }
-        }
+        },
+        "required": [
+          "description",
+          "name"
+        ]
       },
       "AuditLogEntry": {
         "description": "Audit log entry",
@@ -20899,22 +20895,20 @@
         ]
       },
       "ExternalSubnetUpdate": {
-        "description": "Update an external subnet",
+        "description": "Updateable properties of an `ExternalSubnet`\n\nA `PUT` replaces the resource, so `name` and `description` must both be present.",
         "type": "object",
         "properties": {
           "description": {
-            "nullable": true,
             "type": "string"
           },
           "name": {
-            "nullable": true,
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Name"
-              }
-            ]
+            "$ref": "#/components/schemas/Name"
           }
-        }
+        },
+        "required": [
+          "description",
+          "name"
+        ]
       },
       "FailureDomain": {
         "description": "Describes the scope of affinity for the purposes of co-location.",
@@ -24145,22 +24139,20 @@
         ]
       },
       "IpPoolUpdate": {
-        "description": "Parameters for updating an IP Pool",
+        "description": "Updateable properties of an `IpPool`\n\nA `PUT` replaces the resource, so `name` and `description` must both be present.",
         "type": "object",
         "properties": {
           "description": {
-            "nullable": true,
             "type": "string"
           },
           "name": {
-            "nullable": true,
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Name"
-              }
-            ]
+            "$ref": "#/components/schemas/Name"
           }
-        }
+        },
+        "required": [
+          "description",
+          "name"
+        ]
       },
       "IpPoolUtilization": {
         "description": "The utilization of IP addresses in a pool.\n\nNote that both the count of remaining addresses and the total capacity are integers, reported as floating point numbers. This accommodates allocations larger than a 64-bit integer, which is common with IPv6 address spaces. With very large IP Pools (> 2**53 addresses), integer precision will be lost, in exchange for representing the entire range. In such a case the pool still has many available addresses.",

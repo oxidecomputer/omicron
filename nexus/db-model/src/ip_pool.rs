@@ -250,16 +250,6 @@ pub struct IpPoolUpdate {
     pub time_modified: DateTime<Utc>,
 }
 
-impl From<ip_pool_types::IpPoolUpdate> for IpPoolUpdate {
-    fn from(params: ip_pool_types::IpPoolUpdate) -> Self {
-        Self {
-            name: params.identity.name.map(|n| n.into()),
-            description: params.identity.description,
-            time_modified: Utc::now(),
-        }
-    }
-}
-
 impl_enum_type!(
     IpPoolResourceTypeEnum:
 

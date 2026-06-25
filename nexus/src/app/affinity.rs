@@ -14,6 +14,8 @@ use nexus_types::external_api::affinity;
 use nexus_types::external_api::instance;
 use nexus_types::external_api::project;
 use nexus_types::identity::Resource;
+// Oldest API version whose update bodies still allow omitting fields.
+use nexus_types_versions::v2025_11_20_00 as update_compat;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
@@ -179,34 +181,49 @@ impl super::Nexus {
             .map(Into::into)
     }
 
+    /// Update an affinity group. Both API versions of this endpoint pass
+    /// through here. The newer body is strict — `name` and `description` are
+    /// required — while the older (`update_compat`) one is lax: either may be
+    /// omitted, leaving it unchanged. We take the lax type because it can hold
+    /// a body from either version. A strict body converts into it by wrapping
+    /// each field in `Some`; the reverse is impossible, since there's no value
+    /// to supply for a field the lax body omitted.
     pub(crate) async fn affinity_group_update(
         &self,
         opctx: &OpContext,
         group_lookup: &lookup::AffinityGroup<'_>,
-        updates: &affinity::AffinityGroupUpdate,
+        updates: update_compat::affinity::AffinityGroupUpdate,
     ) -> UpdateResult<affinity::AffinityGroup> {
         let (.., authz_group) =
             group_lookup.lookup_for(authz::Action::Modify).await?;
+        let updates = nexus_db_model::AffinityGroupUpdate {
+            name: updates.identity.name.map(nexus_db_model::Name),
+            description: updates.identity.description,
+            time_modified: chrono::Utc::now(),
+        };
         self.db_datastore
-            .affinity_group_update(opctx, &authz_group, updates.clone().into())
+            .affinity_group_update(opctx, &authz_group, updates)
             .await
             .map(Into::into)
     }
 
+    /// Update an anti-affinity group. See [`Self::affinity_group_update`] for
+    /// why this takes the older (lax) body type.
     pub(crate) async fn anti_affinity_group_update(
         &self,
         opctx: &OpContext,
         group_lookup: &lookup::AntiAffinityGroup<'_>,
-        updates: &affinity::AntiAffinityGroupUpdate,
+        updates: update_compat::affinity::AntiAffinityGroupUpdate,
     ) -> UpdateResult<affinity::AntiAffinityGroup> {
         let (.., authz_group) =
             group_lookup.lookup_for(authz::Action::Modify).await?;
+        let updates = nexus_db_model::AntiAffinityGroupUpdate {
+            name: updates.identity.name.map(nexus_db_model::Name),
+            description: updates.identity.description,
+            time_modified: chrono::Utc::now(),
+        };
         self.db_datastore
-            .anti_affinity_group_update(
-                opctx,
-                &authz_group,
-                updates.clone().into(),
-            )
+            .anti_affinity_group_update(opctx, &authz_group, updates)
             .await
             .map(Into::into)
     }

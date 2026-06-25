@@ -13,16 +13,18 @@ pub mod affinity {
     pub use crate::v2025_11_20_00::affinity::AffinityGroupCreate;
     pub use crate::v2025_11_20_00::affinity::AffinityGroupMember;
     pub use crate::v2025_11_20_00::affinity::AffinityGroupSelector;
-    pub use crate::v2025_11_20_00::affinity::AffinityGroupUpdate;
     pub use crate::v2025_11_20_00::affinity::AffinityInstanceGroupMemberPath;
     pub use crate::v2025_11_20_00::affinity::AffinityPolicy;
     pub use crate::v2025_11_20_00::affinity::AntiAffinityGroup;
     pub use crate::v2025_11_20_00::affinity::AntiAffinityGroupCreate;
     pub use crate::v2025_11_20_00::affinity::AntiAffinityGroupMember;
     pub use crate::v2025_11_20_00::affinity::AntiAffinityGroupSelector;
-    pub use crate::v2025_11_20_00::affinity::AntiAffinityGroupUpdate;
     pub use crate::v2025_11_20_00::affinity::AntiAffinityInstanceGroupMemberPath;
     pub use crate::v2025_11_20_00::affinity::FailureDomain;
+
+    pub use crate::v2026_06_23_00::affinity::AffinityGroupUpdate;
+    pub use crate::v2026_06_23_00::affinity::AntiAffinityGroupUpdate;
+    pub use crate::v2026_06_23_00::identity::IdentityMetadataUpdateParamsStrict;
 }
 
 pub mod alert {
@@ -220,7 +222,6 @@ pub mod ip_pool {
     pub use crate::v2025_11_20_00::ip_pool::IpPoolSiloLink;
     pub use crate::v2025_11_20_00::ip_pool::IpPoolSiloPath;
     pub use crate::v2025_11_20_00::ip_pool::IpPoolType;
-    pub use crate::v2025_11_20_00::ip_pool::IpPoolUpdate;
     pub use crate::v2025_11_20_00::ip_pool::IpPoolUtilization;
 
     pub use crate::v2026_01_01_00::ip_pool::SiloIpPool;
@@ -228,6 +229,9 @@ pub mod ip_pool {
     pub use crate::v2026_01_05_00::ip_pool::IpPoolLinkSilo;
     pub use crate::v2026_01_05_00::ip_pool::IpPoolSiloUpdate;
     pub use crate::v2026_01_05_00::ip_pool::PoolSelector;
+
+    pub use crate::v2026_06_23_00::identity::IdentityMetadataUpdateParamsStrict;
+    pub use crate::v2026_06_23_00::ip_pool::IpPoolUpdate;
 }
 
 pub mod metrics {
@@ -533,11 +537,13 @@ pub mod external_subnet {
     pub use crate::v2026_01_16_01::external_subnet::ExternalSubnetAttach;
     pub use crate::v2026_01_16_01::external_subnet::ExternalSubnetPath;
     pub use crate::v2026_01_16_01::external_subnet::ExternalSubnetSelector;
-    pub use crate::v2026_01_16_01::external_subnet::ExternalSubnetUpdate;
 
     // Create types from RENAME_PREFIX_LEN (prefix_len -> prefix_length).
     pub use crate::v2026_03_23_00::external_subnet::ExternalSubnetAllocator;
     pub use crate::v2026_03_23_00::external_subnet::ExternalSubnetCreate;
+
+    pub use crate::v2026_06_23_00::external_subnet::ExternalSubnetUpdate;
+    pub use crate::v2026_06_23_00::identity::IdentityMetadataUpdateParamsStrict;
 }
 
 pub mod sled {

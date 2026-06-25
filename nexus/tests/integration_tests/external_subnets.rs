@@ -39,7 +39,6 @@ use nexus_types::external_api::silo;
 use nexus_types::identity::Resource as _;
 use omicron_common::address::IpVersion;
 use omicron_common::api::external::IdentityMetadataCreateParams;
-use omicron_common::api::external::IdentityMetadataUpdateParams;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::NameOrId;
 use omicron_uuid_kinds::GenericUuid as _;
@@ -152,9 +151,9 @@ async fn external_subnet_basic_crud(cptestctx: &ControlPlaneTestContext) {
     // Update the metadata
     let new_name = "quartzite".parse::<Name>().unwrap();
     let updates = external_subnet_types::ExternalSubnetUpdate {
-        identity: IdentityMetadataUpdateParams {
-            name: Some(new_name.clone()),
-            description: None,
+        identity: external_subnet_types::IdentityMetadataUpdateParamsStrict {
+            name: new_name.clone(),
+            description: external_subnet.identity.description.clone(),
         },
     };
     let updated = NexusRequest::object_put(
@@ -1036,9 +1035,9 @@ async fn test_limited_collaborator_external_subnet_lifecycle(
 
     // Update the external subnet.
     let updates = external_subnet_types::ExternalSubnetUpdate {
-        identity: IdentityMetadataUpdateParams {
-            name: None,
-            description: Some(String::from("updated description")),
+        identity: external_subnet_types::IdentityMetadataUpdateParamsStrict {
+            name: EXTERNAL_SUBNET_NAME.parse().unwrap(),
+            description: String::from("updated description"),
         },
     };
     let updated = NexusRequest::object_put(

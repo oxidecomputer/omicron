@@ -9,12 +9,16 @@
 //! become required, and clearable fields become `Nullable<T>` (present on the
 //! wire, possibly explicit `null`). The affected bodies are `ProjectUpdate`,
 //! `VpcSubnetUpdate`, `SiloQuotasUpdate`, `SupportBundleUpdate`,
-//! `FloatingIpUpdate`, `VpcUpdate`, `VpcRouterUpdate`, and
-//! `WebhookReceiverUpdate`.
+//! `FloatingIpUpdate`, `VpcUpdate`, `VpcRouterUpdate`,
+//! `WebhookReceiverUpdate`, `AffinityGroupUpdate`, `AntiAffinityGroupUpdate`,
+//! `ExternalSubnetUpdate`, and `IpPoolUpdate`.
 
+pub mod affinity;
 pub mod alert;
+pub mod external_subnet;
 pub mod floating_ip;
 pub mod identity;
+pub mod ip_pool;
 pub mod project;
 pub mod silo;
 pub mod support_bundle;

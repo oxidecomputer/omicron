@@ -18,6 +18,8 @@ use nexus_db_queries::context::OpContext;
 use nexus_types::external_api::external_subnet as external_subnet_types;
 use nexus_types::external_api::instance as instance_types;
 use nexus_types::external_api::project as project_types;
+// Oldest API version whose update bodies still allow omitting fields.
+use nexus_types_versions::v2026_01_16_01 as update_compat;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::InternalContext as _;
@@ -110,18 +112,30 @@ impl super::Nexus {
         Ok(db_subnet.into())
     }
 
+    /// Update an external subnet. Both API versions of this endpoint pass
+    /// through here. The newer body is strict — `name` and `description` are
+    /// required — while the older (`update_compat`) one is lax: either may be
+    /// omitted, leaving it unchanged. We take the lax type because it can hold
+    /// a body from either version. A strict body converts into it by wrapping
+    /// each field in `Some`; the reverse is impossible, since there's no value
+    /// to supply for a field the lax body omitted.
     pub(crate) async fn external_subnet_update(
         &self,
         opctx: &OpContext,
         selector: external_subnet_types::ExternalSubnetSelector,
-        params: external_subnet_types::ExternalSubnetUpdate,
+        params: update_compat::external_subnet::ExternalSubnetUpdate,
     ) -> UpdateResult<external_subnet_types::ExternalSubnet> {
         let (.., authz_subnet, _db_subnet) = self
             .external_subnet_lookup(opctx, selector)?
             .fetch_for(authz::Action::Modify)
             .await?;
+        let updates = nexus_db_model::ExternalSubnetUpdate {
+            name: params.identity.name.map(Into::into),
+            description: params.identity.description,
+            time_modified: chrono::Utc::now(),
+        };
         self.datastore()
-            .update_external_subnet(opctx, &authz_subnet, params.into())
+            .update_external_subnet(opctx, &authz_subnet, updates)
             .await
             .map(Into::into)
     }

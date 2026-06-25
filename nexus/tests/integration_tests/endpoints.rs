@@ -609,9 +609,9 @@ pub static DEMO_AFFINITY_GROUP_CREATE: LazyLock<affinity::AffinityGroupCreate> =
     });
 pub static DEMO_AFFINITY_GROUP_UPDATE: LazyLock<affinity::AffinityGroupUpdate> =
     LazyLock::new(|| affinity::AffinityGroupUpdate {
-        identity: IdentityMetadataUpdateParams {
-            name: None,
-            description: Some(String::from("an updated description")),
+        identity: affinity::IdentityMetadataUpdateParamsStrict {
+            name: DEMO_AFFINITY_GROUP_NAME.clone(),
+            description: String::from("an updated description"),
         },
     });
 
@@ -657,9 +657,9 @@ pub static DEMO_ANTI_AFFINITY_GROUP_CREATE: LazyLock<
 pub static DEMO_ANTI_AFFINITY_GROUP_UPDATE: LazyLock<
     affinity::AntiAffinityGroupUpdate,
 > = LazyLock::new(|| affinity::AntiAffinityGroupUpdate {
-    identity: IdentityMetadataUpdateParams {
-        name: None,
-        description: Some(String::from("an updated description")),
+    identity: affinity::IdentityMetadataUpdateParamsStrict {
+        name: DEMO_ANTI_AFFINITY_GROUP_NAME.clone(),
+        description: String::from("an updated description"),
     },
 });
 
@@ -1124,9 +1124,9 @@ pub static DEMO_IP_POOL_UTILIZATION_URL: LazyLock<String> =
     LazyLock::new(|| format!("{}/utilization", *DEMO_IP_POOL_URL));
 pub static DEMO_IP_POOL_UPDATE: LazyLock<ip_pool::IpPoolUpdate> =
     LazyLock::new(|| ip_pool::IpPoolUpdate {
-        identity: IdentityMetadataUpdateParams {
-            name: None,
-            description: Some(String::from("a new IP pool")),
+        identity: ip_pool::IdentityMetadataUpdateParamsStrict {
+            name: DEMO_IP_POOL_NAME.clone(),
+            description: String::from("a new IP pool"),
         },
     });
 
@@ -1297,9 +1297,9 @@ pub static DEMO_EXTERNAL_SUBNET_URL: LazyLock<String> = LazyLock::new(|| {
 pub static DEMO_EXTERNAL_SUBNET_UPDATE: LazyLock<
     external_subnet::ExternalSubnetUpdate,
 > = LazyLock::new(|| external_subnet::ExternalSubnetUpdate {
-    identity: IdentityMetadataUpdateParams {
-        name: None,
-        description: Some(String::from("an updated external subnet")),
+    identity: external_subnet::IdentityMetadataUpdateParamsStrict {
+        name: DEMO_EXTERNAL_SUBNET_NAME.clone(),
+        description: String::from("an updated external subnet"),
     },
 });
 pub static DEMO_EXTERNAL_SUBNET_ATTACH_URL: LazyLock<String> =

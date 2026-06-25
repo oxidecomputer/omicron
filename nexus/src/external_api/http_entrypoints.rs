@@ -73,6 +73,7 @@ use nexus_types::external_api::user::{Group, User, UserBuiltin};
 use nexus_types::external_api::vpc::{Vpc, VpcRouter, VpcSubnet};
 use nexus_types_versions::latest::headers::RangeRequest;
 use nexus_types_versions::v2025_11_20_00;
+use nexus_types_versions::v2026_01_16_01;
 use omicron_common::address::IpRange;
 use omicron_common::api::external::AddressLot;
 use omicron_common::api::external::AddressLotBlock;
@@ -1453,8 +1454,26 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let path = path_params.into_inner();
             let updates = updates.into_inner();
             let pool_lookup = nexus.ip_pool_lookup(&opctx, &path.pool)?;
+            let pool = nexus
+                .ip_pool_update(&opctx, &pool_lookup, updates.into())
+                .await?;
+            Ok(HttpResponseOk(pool.into()))
+        })
+        .await
+    }
+
+    async fn system_ip_pool_update_v2026_02_09_00(
+        rqctx: RequestContext<ApiContext>,
+        path_params: Path<v2025_11_20_00::path_params::IpPoolPath>,
+        updates: TypedBody<v2025_11_20_00::ip_pool::IpPoolUpdate>,
+    ) -> Result<HttpResponseOk<v2025_11_20_00::ip_pool::IpPool>, HttpError>
+    {
+        audit_and_time(&rqctx, |opctx, nexus| async move {
+            let path = path_params.into_inner();
+            let updates = updates.into_inner();
+            let pool_lookup = nexus.ip_pool_lookup(&opctx, &path.pool)?;
             let pool =
-                nexus.ip_pool_update(&opctx, &pool_lookup, &updates).await?;
+                nexus.ip_pool_update(&opctx, &pool_lookup, updates).await?;
             Ok(HttpResponseOk(pool.into()))
         })
         .await
@@ -2210,6 +2229,33 @@ impl NexusExternalApi for NexusExternalApiImpl {
         subnet_params: TypedBody<external_subnet::ExternalSubnetUpdate>,
     ) -> Result<HttpResponseOk<external_subnet::ExternalSubnet>, HttpError>
     {
+        audit_and_time(&rqctx, |opctx, nexus| async move {
+            let path = path_params.into_inner();
+            let query = query_params.into_inner();
+            let params = subnet_params.into_inner();
+            let selector = external_subnet::ExternalSubnetSelector {
+                external_subnet: path.external_subnet,
+                project: query.project,
+            };
+            let subnet = nexus
+                .external_subnet_update(&opctx, selector, params.into())
+                .await?;
+            Ok(HttpResponseOk(subnet))
+        })
+        .await
+    }
+
+    async fn external_subnet_update_v2026_01_16_01(
+        rqctx: RequestContext<ApiContext>,
+        path_params: Path<v2026_01_16_01::external_subnet::ExternalSubnetPath>,
+        query_params: Query<v2025_11_20_00::project::OptionalProjectSelector>,
+        subnet_params: TypedBody<
+            v2026_01_16_01::external_subnet::ExternalSubnetUpdate,
+        >,
+    ) -> Result<
+        HttpResponseOk<v2026_01_16_01::external_subnet::ExternalSubnet>,
+        HttpError,
+    > {
         audit_and_time(&rqctx, |opctx, nexus| async move {
             let path = path_params.into_inner();
             let query = query_params.into_inner();
@@ -3561,7 +3607,34 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let group_lookup =
                 nexus.affinity_group_lookup(&opctx, group_selector)?;
             let affinity_group = nexus
-                .affinity_group_update(&opctx, &group_lookup, &updates)
+                .affinity_group_update(&opctx, &group_lookup, updates.into())
+                .await?;
+            Ok(HttpResponseOk(affinity_group))
+        })
+        .await
+    }
+
+    async fn affinity_group_update_v2025_11_20_00(
+        rqctx: RequestContext<ApiContext>,
+        query_params: Query<v2025_11_20_00::project::OptionalProjectSelector>,
+        path_params: Path<v2025_11_20_00::path_params::AffinityGroupPath>,
+        updated_group: TypedBody<v2025_11_20_00::affinity::AffinityGroupUpdate>,
+    ) -> Result<
+        HttpResponseOk<v2025_11_20_00::affinity::AffinityGroup>,
+        HttpError,
+    > {
+        audit_and_time(&rqctx, |opctx, nexus| async move {
+            let path = path_params.into_inner();
+            let query = query_params.into_inner();
+            let updates = updated_group.into_inner();
+            let group_selector = affinity::AffinityGroupSelector {
+                project: query.project,
+                affinity_group: path.affinity_group,
+            };
+            let group_lookup =
+                nexus.affinity_group_lookup(&opctx, group_selector)?;
+            let affinity_group = nexus
+                .affinity_group_update(&opctx, &group_lookup, updates)
                 .await?;
             Ok(HttpResponseOk(affinity_group))
         })
@@ -3863,7 +3936,40 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let group_lookup =
                 nexus.anti_affinity_group_lookup(&opctx, group_selector)?;
             let anti_affinity_group = nexus
-                .anti_affinity_group_update(&opctx, &group_lookup, &updates)
+                .anti_affinity_group_update(
+                    &opctx,
+                    &group_lookup,
+                    updates.into(),
+                )
+                .await?;
+            Ok(HttpResponseOk(anti_affinity_group))
+        })
+        .await
+    }
+
+    async fn anti_affinity_group_update_v2025_11_20_00(
+        rqctx: RequestContext<ApiContext>,
+        query_params: Query<v2025_11_20_00::project::OptionalProjectSelector>,
+        path_params: Path<v2025_11_20_00::path_params::AntiAffinityGroupPath>,
+        updated_group: TypedBody<
+            v2025_11_20_00::affinity::AntiAffinityGroupUpdate,
+        >,
+    ) -> Result<
+        HttpResponseOk<v2025_11_20_00::affinity::AntiAffinityGroup>,
+        HttpError,
+    > {
+        audit_and_time(&rqctx, |opctx, nexus| async move {
+            let path = path_params.into_inner();
+            let query = query_params.into_inner();
+            let updates = updated_group.into_inner();
+            let group_selector = affinity::AntiAffinityGroupSelector {
+                project: query.project,
+                anti_affinity_group: path.anti_affinity_group,
+            };
+            let group_lookup =
+                nexus.anti_affinity_group_lookup(&opctx, group_selector)?;
+            let anti_affinity_group = nexus
+                .anti_affinity_group_update(&opctx, &group_lookup, updates)
                 .await?;
             Ok(HttpResponseOk(anti_affinity_group))
         })
