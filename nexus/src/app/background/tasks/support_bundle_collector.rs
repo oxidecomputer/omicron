@@ -863,16 +863,14 @@ mod test {
         let sp_restart_id = EreporterRestartUuid::new_v4();
         let time_collected = chrono::Utc::now();
         let collector_id = OmicronZoneUuid::new_v4();
-        datastore.ereports_insert(&opctx, sp_restart_id, time_collected, Reporter::Sp { sp_type: SpType::Sled, slot: SLED_SLOT}, vec![
+        datastore.ereports_insert(&opctx, sp_restart_id, time_collected, collector_id, Reporter::Sp { sp_type: SpType::Sled, slot: SLED_SLOT}, vec![
             (ereport_types::Ena(1), EreportData {
-                collector_id,
                 part_number: Some(GIMLET_PN.to_string()),
                 serial_number: Some(SP_SERIAL.to_string()),
                 class: Some("ereport.fake.whatever".to_string()),
                 report: serde_json::json!({"hello world": true})
             }),
             (ereport_types::Ena(2), EreportData {
-                collector_id,
                 part_number: Some(GIMLET_PN.to_string()),
                 serial_number: Some(SP_SERIAL.to_string()),
                 class: Some("ereport.something.blah".to_string()),
@@ -889,11 +887,11 @@ mod test {
                 &opctx,
                 sp_restart_id2,
                 time_collected,
+                collector_id,
                 Reporter::Sp { sp_type: SpType::Sled, slot: SLED_SLOT },
                 vec![(
                     ereport_types::Ena(1),
                     EreportData {
-                        collector_id,
                         part_number: None,
                         serial_number: None,
                         class: Some("ereport.fake.whatever".to_string()),
@@ -914,11 +912,11 @@ mod test {
                 &opctx,
                 sp2_restart_id,
                 time_collected,
+                OmicronZoneUuid::new_v4(),
                 Reporter::Sp { sp_type: SpType::Switch, slot: 1 },
                 vec![(
                     ereport_types::Ena(1),
                     EreportData {
-                        collector_id: OmicronZoneUuid::new_v4(),
                         part_number: Some("9130000006".to_string()),
                         serial_number: Some("BRM41000555".to_string()),
                         class: Some("ereport.fake.whatever".to_string()),
@@ -937,6 +935,7 @@ mod test {
                 &opctx,
                 sled1_restart_id,
                 time_collected,
+                collector_id,
                 Reporter::HostOs {
                     sled: SledUuid::new_v4(),
                     slot: Some(SLED_SLOT),
@@ -945,7 +944,6 @@ mod test {
                     (
                         ereport_types::Ena(1),
                         EreportData {
-                            collector_id,
                             serial_number: Some(HOST_SERIAL.to_string()),
                             part_number: Some(GIMLET_PN.to_string()),
                             class: Some("ereport.fake.whatever".to_string()),
@@ -955,7 +953,6 @@ mod test {
                     (
                         ereport_types::Ena(2),
                         EreportData {
-                            collector_id,
                             serial_number: Some(HOST_SERIAL.to_string()),
                             part_number: Some(GIMLET_PN.to_string()),
                             class: Some(
@@ -975,10 +972,10 @@ mod test {
                 &opctx,
                 sled2_restart_id,
                 time_collected,
+                OmicronZoneUuid::new_v4(),
                 Reporter::HostOs { sled: SledUuid::new_v4(), slot: Some(SLED_SLOT) },
                 vec![
                     (ereport_types::Ena(1), EreportData {
-                        collector_id: OmicronZoneUuid::new_v4(),
                         serial_number: Some(HOST_SERIAL.to_string()),
                         part_number: Some(GIMLET_PN.to_string()),
                         class: Some("ereport.something.hostos_related".to_string()),

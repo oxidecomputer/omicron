@@ -22,6 +22,7 @@ pub struct Ereport {
     #[serde(flatten)]
     pub id: EreportId,
     pub time_collected: DateTime<Utc>,
+    pub collector_id: OmicronZoneUuid,
     #[serde(flatten)]
     pub data: EreportData,
     #[serde(flatten)]
@@ -34,10 +35,18 @@ impl Ereport {
     pub fn new(
         id: EreportId,
         time_collected: DateTime<Utc>,
+        collector_id: OmicronZoneUuid,
         data: EreportData,
         reporter: Reporter,
     ) -> Self {
-        Self { id, time_collected, data, reporter, marked_seen_in: None }
+        Self {
+            id,
+            time_collected,
+            collector_id,
+            data,
+            reporter,
+            marked_seen_in: None,
+        }
     }
 
     pub fn id(&self) -> &EreportId {
@@ -63,7 +72,6 @@ impl iddqd::IdOrdItem for Ereport {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EreportData {
-    pub collector_id: OmicronZoneUuid,
     pub serial_number: Option<String>,
     pub part_number: Option<String>,
     pub class: Option<String>,
@@ -87,7 +95,6 @@ impl EreportData {
         log: &slog::Logger,
         restart_id: EreporterRestartUuid,
         ereport: ereport_types::Ereport,
-        collector_id: OmicronZoneUuid,
     ) -> (Ena, EreportData) {
         const MISSING_VPD: &str = " (perhaps the SP doesn't know its own VPD?)";
         let part_number = get_sp_metadata_string(
@@ -146,7 +153,6 @@ impl EreportData {
         (
             ena,
             EreportData {
-                collector_id,
                 part_number,
                 serial_number,
                 class,

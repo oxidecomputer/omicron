@@ -281,12 +281,7 @@ impl Ingester {
             status.ereports_received += received;
 
             let db_ereports = reports.items.into_iter().map(|ereport| {
-                EreportData::from_sp_ereport(
-                    &opctx.log,
-                    restart_id,
-                    ereport,
-                    self.nexus_id,
-                )
+                EreportData::from_sp_ereport(&opctx.log, restart_id, ereport)
             });
             let created = match self
                 .datastore
@@ -294,6 +289,7 @@ impl Ingester {
                     &opctx,
                     restart_id,
                     time_collected,
+                    self.nexus_id,
                     reporter,
                     db_ereports,
                 )

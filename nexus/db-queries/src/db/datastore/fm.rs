@@ -2232,7 +2232,6 @@ mod tests {
         let ereport1_id =
             fm::EreportId { restart_id, ena: ereport_types::Ena(2) };
         let ereport1 = EreportData {
-            collector_id,
             part_number: Some("930-55555".to_string()),
             serial_number: Some("BRM6900420".to_string()),
             class: Some("ereport.my_cool_ereport.wow".to_string()),
@@ -2242,7 +2241,6 @@ mod tests {
         let ereport2_id =
             fm::EreportId { restart_id, ena: ereport_types::Ena(3) };
         let ereport2 = EreportData {
-            collector_id,
             part_number: Some("930-55555".to_string()),
             serial_number: Some("BRM6900420".to_string()),
             class: Some("ereport.gov.nasa.apollo".to_string()),
@@ -2260,6 +2258,7 @@ mod tests {
                 &opctx,
                 restart_id,
                 time_collected,
+                collector_id,
                 reporter,
                 vec![
                     (ereport1_id.ena, ereport1.clone()),
@@ -2279,6 +2278,7 @@ mod tests {
                     ereport: Arc::new(fm::Ereport::new(
                         ereport1_id,
                         time_collected,
+                        collector_id,
                         ereport1,
                         reporter,
                     )),
@@ -2397,6 +2397,7 @@ mod tests {
                     ereport: Arc::new(fm::Ereport::new(
                         ereport2_id,
                         time_collected,
+                        collector_id,
                         ereport2,
                         reporter,
                     )),

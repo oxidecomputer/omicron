@@ -138,7 +138,7 @@ pub fn mk_ereport(
     let (_ena, data) = match reporter {
         Reporter::Sp { .. } => {
             let raw = ereport_types::Ereport { ena: id.ena, data: json };
-            EreportData::from_sp_ereport(log, id.restart_id, raw, collector_id)
+            EreportData::from_sp_ereport(log, id.restart_id, raw)
         }
         Reporter::HostOs { .. } => {
             todo!(
@@ -156,5 +156,5 @@ pub fn mk_ereport(
         "serial_number" => ?data.serial_number,
         "part_number" => ?data.part_number,
     );
-    Ereport::new(id, time_collected, data, reporter)
+    Ereport::new(id, time_collected, collector_id, data, reporter)
 }

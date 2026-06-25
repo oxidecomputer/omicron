@@ -1055,7 +1055,6 @@ mod tests {
         let ereport1_id =
             ereport_types::EreportId { restart_id, ena: ereport_types::Ena(2) };
         let ereport1_data = EreportData {
-            collector_id,
             part_number: Some("9130000019".to_string()),
             serial_number: Some("BRM420069".to_string()),
             class: Some("ereport.test.one".to_string()),
@@ -1064,7 +1063,6 @@ mod tests {
         let ereport2_id =
             ereport_types::EreportId { restart_id, ena: ereport_types::Ena(3) };
         let ereport2_data = EreportData {
-            collector_id,
             part_number: Some("9130000019".to_string()),
             serial_number: Some("BRM420069".to_string()),
             class: Some("ereport.test.two".to_string()),
@@ -1073,7 +1071,6 @@ mod tests {
         let ereport3_id =
             ereport_types::EreportId { restart_id, ena: ereport_types::Ena(4) };
         let ereport3_data = EreportData {
-            collector_id,
             part_number: Some("9130000019".to_string()),
             serial_number: Some("BRM420069".to_string()),
             class: Some("ereport.test.three".to_string()),
@@ -1084,6 +1081,7 @@ mod tests {
                 &opctx,
                 restart_id,
                 time_collected,
+                collector_id,
                 reporter,
                 vec![
                     (ereport1_id.ena, ereport1_data.clone()),
@@ -1114,6 +1112,7 @@ mod tests {
                     ereport: Arc::new(fm::ereport::Ereport::new(
                         ereport1_id,
                         time_collected,
+                        collector_id,
                         ereport1_data.clone(),
                         reporter,
                     )),
@@ -1127,6 +1126,7 @@ mod tests {
                     ereport: Arc::new(fm::ereport::Ereport::new(
                         ereport2_id,
                         time_collected,
+                        collector_id,
                         ereport2_data.clone(),
                         reporter,
                     )),
@@ -1287,7 +1287,6 @@ mod tests {
         let ereport1_id =
             ereport_types::EreportId { restart_id, ena: ereport_types::Ena(2) };
         let ereport1_data = EreportData {
-            collector_id,
             part_number: Some("9130000019".to_string()),
             serial_number: Some("BRM420069".to_string()),
             class: Some("ereport.test.one".to_string()),
@@ -1296,7 +1295,6 @@ mod tests {
         let ereport2_id =
             ereport_types::EreportId { restart_id, ena: ereport_types::Ena(3) };
         let ereport2_data = EreportData {
-            collector_id,
             part_number: Some("9130000019".to_string()),
             serial_number: Some("BRM420069".to_string()),
             class: Some("ereport.test.two".to_string()),
@@ -1305,7 +1303,6 @@ mod tests {
         let ereport3_id =
             ereport_types::EreportId { restart_id, ena: ereport_types::Ena(4) };
         let ereport3_data = EreportData {
-            collector_id,
             part_number: Some("9130000019".to_string()),
             serial_number: Some("BRM420069".to_string()),
             class: Some("ereport.test.three".to_string()),
@@ -1316,6 +1313,7 @@ mod tests {
                 opctx,
                 restart_id,
                 time_collected,
+                collector_id,
                 reporter,
                 vec![
                     (ereport1_id.ena, ereport1_data.clone()),
@@ -1336,6 +1334,7 @@ mod tests {
                     ereport: Arc::new(fm::ereport::Ereport::new(
                         ereport1_id,
                         time_collected,
+                        collector_id,
                         ereport1_data.clone(),
                         reporter,
                     )),
@@ -1410,6 +1409,7 @@ mod tests {
         let ereport1_seen = fm::ereport::Ereport {
             id: ereport1_id,
             time_collected,
+            collector_id,
             data: ereport1_data.clone(),
             reporter,
             marked_seen_in: Some(sitrep1_id),
@@ -1431,6 +1431,7 @@ mod tests {
                     ereport: Arc::new(fm::ereport::Ereport::new(
                         ereport2_id,
                         time_collected,
+                        collector_id,
                         ereport2_data.clone(),
                         reporter,
                     )),
@@ -1444,6 +1445,7 @@ mod tests {
                     ereport: Arc::new(fm::ereport::Ereport::new(
                         ereport3_id,
                         time_collected,
+                        collector_id,
                         ereport3_data.clone(),
                         reporter,
                     )),

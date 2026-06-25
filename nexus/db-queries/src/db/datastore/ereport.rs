@@ -40,6 +40,7 @@ use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_uuid_kinds::EreporterRestartUuid;
 use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::SitrepUuid;
 use omicron_uuid_kinds::SledUuid;
 use uuid::Uuid;
@@ -260,6 +261,7 @@ impl DataStore {
         opctx: &OpContext,
         restart_id: EreporterRestartUuid,
         time_collected: DateTime<Utc>,
+        collector_id: OmicronZoneUuid,
         reporter: fm::Reporter,
         ereports: impl IntoIterator<Item = (fm::Ena, fm::EreportData)>,
     ) -> CreateResult<(usize, Option<EreportId>)> {
@@ -270,7 +272,7 @@ impl DataStore {
             .into_iter()
             .map(|(ena, data)| {
                 let id = EreportId { restart_id, ena };
-                Ereport::new(id, time_collected, data, reporter)
+                Ereport::new(id, time_collected, collector_id, data, reporter)
             })
             .collect::<Vec<_>>();
         let n_ereports = ereports.len();
@@ -1027,8 +1029,8 @@ mod tests {
         let restart_id = EreporterRestartUuid::new_v4();
         let id = fm::EreportId { restart_id, ena: ereport_types::Ena(2) };
         let time_collected = Utc::now();
+        let collector_id = OmicronZoneUuid::new_v4();
         let ereport = fm::EreportData {
-            collector_id: OmicronZoneUuid::new_v4(),
             part_number: Some("my cool CPN".to_string()),
             serial_number: Some("my cool serial".to_string()),
             class: Some("my cool ereport".to_string()),
@@ -1039,6 +1041,7 @@ mod tests {
                 &opctx,
                 restart_id,
                 time_collected,
+                collector_id,
                 fm::Reporter::Sp {
                     sp_type: nexus_types::inventory::SpType::Sled,
                     slot: 19,
@@ -1052,14 +1055,12 @@ mod tests {
         fn check_results(
             found_ereports: Vec<Ereport>,
             expected_id: &fm::EreportId,
+            collector_id: OmicronZoneUuid,
             expected: &fm::EreportData,
         ) {
             assert_eq!(found_ereports.len(), 1);
             assert_eq!(&found_ereports[0].id(), expected_id);
-            assert_eq!(
-                found_ereports[0].collector_id,
-                expected.collector_id.into()
-            );
+            assert_eq!(found_ereports[0].collector_id, collector_id.into());
             assert_eq!(&found_ereports[0].part_number, &expected.part_number);
             assert_eq!(
                 &found_ereports[0].serial_number,
@@ -1079,7 +1080,7 @@ mod tests {
             .ereport_fetch_matching(opctx, &Default::default(), &pagparams)
             .await
             .expect("fetch matching with default filters should succeed");
-        check_results(dbg!(found_default), &id, &ereport);
+        check_results(dbg!(found_default), &id, collector_id, &ereport);
 
         let found_by_time_range = datastore
             .ereport_fetch_matching(
@@ -1091,7 +1092,7 @@ mod tests {
             )
             .await
             .expect("fetch matching with time range filters should succeed");
-        check_results(dbg!(found_by_time_range), &id, &ereport);
+        check_results(dbg!(found_by_time_range), &id, collector_id, &ereport);
 
         let found_by_serial = datastore
             .ereport_fetch_matching(
@@ -1101,7 +1102,7 @@ mod tests {
             )
             .await
             .expect("fetch matching with serial number filters should succeed");
-        check_results(dbg!(found_by_serial), &id, &ereport);
+        check_results(dbg!(found_by_serial), &id, collector_id, &ereport);
 
         let found_by_class = datastore
             .ereport_fetch_matching(
@@ -1111,7 +1112,7 @@ mod tests {
             )
             .await
             .expect("fetch matching with class filters should succeed");
-        check_results(dbg!(found_by_class), &id, &ereport);
+        check_results(dbg!(found_by_class), &id, collector_id, &ereport);
 
         db.terminate().await;
         logctx.cleanup_successful();
@@ -1137,7 +1138,6 @@ mod tests {
             (
                 ereport_types::Ena(ena),
                 fm::EreportData {
-                    collector_id,
                     part_number: Some("CPN".to_string()),
                     serial_number: Some("SN".to_string()),
                     class: class.map(str::to_string),
@@ -1150,6 +1150,7 @@ mod tests {
                 &opctx,
                 restart_id,
                 Utc::now(),
+                collector_id,
                 fm::Reporter::Sp {
                     sp_type: nexus_types::inventory::SpType::Sled,
                     slot: 0,
@@ -1254,7 +1255,6 @@ mod tests {
             (
                 Ena(ena),
                 fm::EreportData {
-                    collector_id: OmicronZoneUuid::new_v4(),
                     part_number: None,
                     serial_number: None,
                     class: None,
@@ -1266,6 +1266,7 @@ mod tests {
         let logctx = dev::test_setup_log("test_ereporter_restarts");
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
+        let collector_id = OmicronZoneUuid::new_v4();
         let t0 = Utc::now();
 
         let timestamp = move |secs: usize| -> DateTime<Utc> {
@@ -1294,6 +1295,7 @@ mod tests {
                 opctx,
                 host0_restart_id,
                 host0_first_seen,
+                collector_id,
                 fm::Reporter::HostOs { sled, slot: None },
                 vec![mk_ereport(1)],
             )
@@ -1306,6 +1308,7 @@ mod tests {
                     opctx,
                     host0_restart_id,
                     time_collected,
+                    collector_id,
                     fm::Reporter::HostOs { sled, slot: Some(host0_slot) },
                     vec![mk_ereport(2), mk_ereport(3)],
                 )
@@ -1327,6 +1330,7 @@ mod tests {
                 opctx,
                 host1_restart_id,
                 host1_first_seen,
+                collector_id,
                 fm::Reporter::HostOs { sled, slot: Some(host1_slot) },
                 vec![mk_ereport(1), mk_ereport(2)],
             )
@@ -1337,6 +1341,7 @@ mod tests {
                 opctx,
                 host1_restart_id,
                 timestamp(250),
+                collector_id,
                 fm::Reporter::HostOs { sled, slot: None },
                 vec![mk_ereport(3)],
             )
@@ -1353,6 +1358,7 @@ mod tests {
                 opctx,
                 sp0_restart_id0,
                 sp0_first_seen,
+                collector_id,
                 fm::Reporter::Sp {
                     sp_type: SpType::Switch.into(),
                     slot: sp0_slot,
@@ -1368,6 +1374,7 @@ mod tests {
                     opctx,
                     sp0_restart_id0,
                     time_collected,
+                    collector_id,
                     fm::Reporter::Sp {
                         sp_type: SpType::Switch.into(),
                         slot: sp0_slot,
@@ -1385,6 +1392,7 @@ mod tests {
                 opctx,
                 sp0_restart_id1,
                 sp0_restart1_first_seen,
+                collector_id,
                 fm::Reporter::Sp {
                     sp_type: SpType::Switch.into(),
                     slot: sp0_slot,

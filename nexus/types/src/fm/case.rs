@@ -539,8 +539,8 @@ mod tests {
             ereport: Arc::new(Ereport {
                 id: EreportId { restart_id, ena: Ena::from(2u64) },
                 time_collected,
+                collector_id,
                 data: crate::fm::ereport::EreportData {
-                    collector_id,
                     serial_number: Some("BRM6900420".to_string()),
                     part_number: Some("913-0000037".to_string()),
                     class: Some("hw.pwr.remove.psu".to_string()),
@@ -565,8 +565,8 @@ mod tests {
             ereport: Arc::new(Ereport {
                 id: EreportId { restart_id, ena: Ena::from(3u64) },
                 time_collected,
+                collector_id,
                 data: crate::fm::ereport::EreportData {
-                    collector_id,
                     serial_number: Some("BRM6900420".to_string()),
                     part_number: Some("913-0000037".to_string()),
                     class: Some("hw.pwr.insert.psu".to_string()),
