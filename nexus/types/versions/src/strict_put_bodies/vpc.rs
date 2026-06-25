@@ -6,7 +6,7 @@
 
 use crate::v2026_06_23_00::identity::IdentityMetadataUpdateParamsStrict;
 use omicron_common::api::external::{
-    IdentityMetadataUpdateParams, NameOrId, Nullable,
+    IdentityMetadataUpdateParams, Name, NameOrId, Nullable,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -38,6 +38,55 @@ impl From<VpcSubnetUpdate> for crate::v2025_11_20_00::vpc::VpcSubnetUpdate {
                 description: Some(new.identity.description),
             },
             custom_router: new.custom_router.0,
+        }
+    }
+}
+
+/// Updateable properties of a `Vpc`
+///
+/// A `PUT` replaces the resource, so `name`, `description`, and `dns_name` must
+/// all be present.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct VpcUpdate {
+    #[serde(flatten)]
+    pub identity: IdentityMetadataUpdateParamsStrict,
+
+    pub dns_name: Name,
+}
+
+// Convert the newer body into the older one (see the note on `ProjectUpdate`'s
+// conversion).
+impl From<VpcUpdate> for crate::v2025_11_20_00::vpc::VpcUpdate {
+    fn from(new: VpcUpdate) -> Self {
+        Self {
+            identity: IdentityMetadataUpdateParams {
+                name: Some(new.identity.name),
+                description: Some(new.identity.description),
+            },
+            dns_name: Some(new.dns_name),
+        }
+    }
+}
+
+/// Updateable properties of a `VpcRouter`
+///
+/// A `PUT` replaces the resource, so `name` and `description` must both be
+/// present.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct VpcRouterUpdate {
+    #[serde(flatten)]
+    pub identity: IdentityMetadataUpdateParamsStrict,
+}
+
+// Convert the newer body into the older one (see the note on `ProjectUpdate`'s
+// conversion).
+impl From<VpcRouterUpdate> for crate::v2025_11_20_00::vpc::VpcRouterUpdate {
+    fn from(new: VpcRouterUpdate) -> Self {
+        Self {
+            identity: IdentityMetadataUpdateParams {
+                name: Some(new.identity.name),
+                description: Some(new.identity.description),
+            },
         }
     }
 }

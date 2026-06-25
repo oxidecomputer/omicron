@@ -27,7 +27,6 @@ use nexus_types::external_api::vpc;
 use nexus_types::identity::{Asset, Resource};
 use nexus_types_versions::latest::instance::Instance;
 use omicron_common::api::external::IdentityMetadataCreateParams;
-use omicron_common::api::external::IdentityMetadataUpdateParams;
 use omicron_common::api::external::{
     RouteDestination, RouteTarget, VpcFirewallRuleAction,
     VpcFirewallRuleDirection, VpcFirewallRuleFilter, VpcFirewallRulePriority,
@@ -151,11 +150,11 @@ async fn test_vpcs(cptestctx: &ControlPlaneTestContext) {
 
     // Update the VPC
     let update_params = vpc::VpcUpdate {
-        identity: IdentityMetadataUpdateParams {
-            name: Some("new-name".parse().unwrap()),
-            description: Some("another description".to_string()),
+        identity: vpc::IdentityMetadataUpdateParamsStrict {
+            name: "new-name".parse().unwrap(),
+            description: "another description".to_string(),
         },
-        dns_name: Some("def".parse().unwrap()),
+        dns_name: "def".parse().unwrap(),
     };
     let updated_vpc = vpc_put(&client, &vpc_url, update_params).await;
     assert_eq!(updated_vpc.identity.name, "new-name");
@@ -797,9 +796,9 @@ async fn test_limited_collaborator_can_manage_floating_ips_and_nics(
         client,
         &fip_url,
         Some(&floating_ip::FloatingIpUpdate {
-            identity: IdentityMetadataUpdateParams {
-                name: Some(fip_name.parse().unwrap()),
-                description: Some("updated description".to_string()),
+            identity: floating_ip::IdentityMetadataUpdateParamsStrict {
+                name: fip_name.parse().unwrap(),
+                description: "updated description".to_string(),
             },
         }),
     )

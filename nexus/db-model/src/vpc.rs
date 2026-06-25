@@ -132,14 +132,3 @@ pub struct VpcUpdate {
     pub time_modified: DateTime<Utc>,
     pub dns_name: Option<Name>,
 }
-
-impl From<vpc_types::VpcUpdate> for VpcUpdate {
-    fn from(params: vpc_types::VpcUpdate) -> Self {
-        Self {
-            name: params.identity.name.map(Name),
-            description: params.identity.description,
-            time_modified: Utc::now(),
-            dns_name: params.dns_name.map(Name),
-        }
-    }
-}

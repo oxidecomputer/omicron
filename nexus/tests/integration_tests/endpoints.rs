@@ -1397,9 +1397,9 @@ pub static DEMO_FLOAT_IP_CREATE: LazyLock<floating_ip::FloatingIpCreate> =
 
 pub static DEMO_FLOAT_IP_UPDATE: LazyLock<floating_ip::FloatingIpUpdate> =
     LazyLock::new(|| floating_ip::FloatingIpUpdate {
-        identity: IdentityMetadataUpdateParams {
-            name: None,
-            description: Some(String::from("an updated Floating IP")),
+        identity: floating_ip::IdentityMetadataUpdateParamsStrict {
+            name: DEMO_FLOAT_IP_NAME.clone(),
+            description: String::from("an updated Floating IP"),
         },
     });
 
@@ -1528,11 +1528,11 @@ pub static DEMO_WEBHOOK_RECEIVER_CREATE: LazyLock<alert::WebhookCreate> =
 pub static DEMO_WEBHOOK_RECEIVER_UPDATE: LazyLock<
     alert::WebhookReceiverUpdate,
 > = LazyLock::new(|| alert::WebhookReceiverUpdate {
-    identity: IdentityMetadataUpdateParams {
-        name: None,
-        description: Some("webhooked on phonics".to_string()),
+    identity: alert::IdentityMetadataUpdateParamsStrict {
+        name: DEMO_WEBHOOK_RECEIVER_NAME.clone(),
+        description: "webhooked on phonics".to_string(),
     },
-    endpoint: Some("https://example.com/my-cool-webhook".parse().unwrap()),
+    endpoint: "https://example.com/my-cool-webhook".parse().unwrap(),
 });
 
 pub static DEMO_ALERT_RECEIVER_URL: LazyLock<String> = LazyLock::new(|| {
@@ -2369,11 +2369,11 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
                     AllowedMethod::Get,
                     AllowedMethod::Put(
                         serde_json::to_value(&vpc::VpcUpdate {
-                            identity: IdentityMetadataUpdateParams {
-                                name: None,
-                                description: Some("different".to_string()),
+                            identity: vpc::IdentityMetadataUpdateParamsStrict {
+                                name: DEMO_VPC_NAME.clone(),
+                                description: "different".to_string(),
                             },
-                            dns_name: None,
+                            dns_name: DEMO_VPC_NAME.clone(),
                         })
                         .unwrap(),
                     ),
@@ -2452,9 +2452,9 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
                     AllowedMethod::Get,
                     AllowedMethod::Put(
                         serde_json::to_value(&vpc::VpcRouterUpdate {
-                            identity: IdentityMetadataUpdateParams {
-                                name: None,
-                                description: Some("different".to_string()),
+                            identity: vpc::IdentityMetadataUpdateParamsStrict {
+                                name: DEMO_VPC_ROUTER_NAME.clone(),
+                                description: "different".to_string(),
                             },
                         })
                         .unwrap(),

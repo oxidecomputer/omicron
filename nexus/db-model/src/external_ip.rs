@@ -627,16 +627,6 @@ pub struct FloatingIpUpdate {
     pub time_modified: DateTime<Utc>,
 }
 
-impl From<floating_ip_types::FloatingIpUpdate> for FloatingIpUpdate {
-    fn from(params: floating_ip_types::FloatingIpUpdate) -> Self {
-        Self {
-            name: params.identity.name.map(Name),
-            description: params.identity.description,
-            time_modified: Utc::now(),
-        }
-    }
-}
-
 impl TryFrom<ExternalIp> for InstanceExternalIpBody {
     type Error = Error;
 

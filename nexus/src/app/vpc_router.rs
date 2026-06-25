@@ -13,6 +13,8 @@ use nexus_db_queries::db::model::RouterRoute;
 use nexus_db_queries::db::model::VpcRouter;
 use nexus_db_queries::db::model::VpcRouterKind;
 use nexus_types::external_api::vpc;
+// Oldest API version whose update bodies still allow omitting fields.
+use nexus_types_versions::v2025_11_20_00 as update_compat;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
@@ -147,17 +149,27 @@ impl super::Nexus {
         Ok(routers)
     }
 
+    /// Update a VPC router. Both API versions of this endpoint pass through
+    /// here. The newer body is strict — `name` and `description` are required —
+    /// while the older (`update_compat`) one is lax: either may be omitted,
+    /// leaving it unchanged. We take the lax type because it can hold a body
+    /// from either version. A strict body converts into it by wrapping each
+    /// field in `Some`; the reverse is impossible, since there's no value to
+    /// supply for a field the lax body omitted.
     pub(crate) async fn vpc_update_router(
         &self,
         opctx: &OpContext,
         vpc_router_lookup: &lookup::VpcRouter<'_>,
-        params: &vpc::VpcRouterUpdate,
+        params: update_compat::vpc::VpcRouterUpdate,
     ) -> UpdateResult<VpcRouter> {
         let (.., authz_router) =
             vpc_router_lookup.lookup_for(authz::Action::Modify).await?;
-        self.db_datastore
-            .vpc_update_router(opctx, &authz_router, params.clone().into())
-            .await
+        let updates = db::model::VpcRouterUpdate {
+            name: params.identity.name.map(db::model::Name),
+            description: params.identity.description,
+            time_modified: chrono::Utc::now(),
+        };
+        self.db_datastore.vpc_update_router(opctx, &authz_router, updates).await
     }
 
     pub(crate) async fn vpc_delete_router(

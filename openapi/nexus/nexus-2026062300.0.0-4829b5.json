@@ -21423,22 +21423,20 @@
         ]
       },
       "FloatingIpUpdate": {
-        "description": "Updateable identity-related parameters",
+        "description": "Updateable properties of a `FloatingIp`\n\nA `PUT` replaces the resource, so `name` and `description` must both be present.",
         "type": "object",
         "properties": {
           "description": {
-            "nullable": true,
             "type": "string"
           },
           "name": {
-            "nullable": true,
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Name"
-              }
-            ]
+            "$ref": "#/components/schemas/Name"
           }
-        }
+        },
+        "required": [
+          "description",
+          "name"
+        ]
       },
       "Group": {
         "description": "View of a Group",
@@ -31383,22 +31381,20 @@
         ]
       },
       "VpcRouterUpdate": {
-        "description": "Updateable properties of a `VpcRouter`",
+        "description": "Updateable properties of a `VpcRouter`\n\nA `PUT` replaces the resource, so `name` and `description` must both be present.",
         "type": "object",
         "properties": {
           "description": {
-            "nullable": true,
             "type": "string"
           },
           "name": {
-            "nullable": true,
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Name"
-              }
-            ]
+            "$ref": "#/components/schemas/Name"
           }
-        }
+        },
+        "required": [
+          "description",
+          "name"
+        ]
       },
       "VpcSubnet": {
         "description": "A VPC subnet represents a logical grouping for instances that allows network traffic between them, within an IPv4 subnetwork or optionally an IPv6 subnetwork.",
@@ -31561,30 +31557,24 @@
         ]
       },
       "VpcUpdate": {
-        "description": "Updateable properties of a `Vpc`",
+        "description": "Updateable properties of a `Vpc`\n\nA `PUT` replaces the resource, so `name`, `description`, and `dns_name` must all be present.",
         "type": "object",
         "properties": {
           "description": {
-            "nullable": true,
             "type": "string"
           },
           "dns_name": {
-            "nullable": true,
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Name"
-              }
-            ]
+            "$ref": "#/components/schemas/Name"
           },
           "name": {
-            "nullable": true,
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Name"
-              }
-            ]
+            "$ref": "#/components/schemas/Name"
           }
-        }
+        },
+        "required": [
+          "description",
+          "dns_name",
+          "name"
+        ]
       },
       "WebhookCreate": {
         "description": "Create-time identity-related parameters",
@@ -31779,28 +31769,26 @@
         ]
       },
       "WebhookReceiverUpdate": {
-        "description": "Parameters to update a webhook configuration.",
+        "description": "Parameters to update a webhook configuration.\n\nA `PUT` replaces the resource, so `name`, `description`, and `endpoint` must all be present.",
         "type": "object",
         "properties": {
           "description": {
-            "nullable": true,
             "type": "string"
           },
           "endpoint": {
-            "nullable": true,
             "description": "The URL that webhook notification requests should be sent to",
             "type": "string",
             "format": "uri"
           },
           "name": {
-            "nullable": true,
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Name"
-              }
-            ]
+            "$ref": "#/components/schemas/Name"
           }
-        }
+        },
+        "required": [
+          "description",
+          "endpoint",
+          "name"
+        ]
       },
       "WebhookSecret": {
         "description": "A view of a shared secret key assigned to a webhook receiver.\n\nOnce a secret is created, the value of the secret is not available in the API, as it must remain secret. Instead, secrets are referenced by their unique IDs assigned when they are created.",

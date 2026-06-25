@@ -29,7 +29,6 @@ use nexus_types::external_api::instance::PrivateIpStackCreate;
 use nexus_types::external_api::vpc;
 use omicron_common::api::VERSION_HEADER;
 use omicron_common::api::external::IdentityMetadataCreateParams;
-use omicron_common::api::external::IdentityMetadataUpdateParams;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::Nullable;
 use omicron_common::api::external::SimpleIdentityOrName;
@@ -190,9 +189,9 @@ async fn test_vpc_routers_crud_operations(cptestctx: &ControlPlaneTestContext) {
 
     // update first router
     let update_params = vpc::VpcRouterUpdate {
-        identity: IdentityMetadataUpdateParams {
-            name: Some("new-name".parse().unwrap()),
-            description: Some("another description".to_string()),
+        identity: vpc::IdentityMetadataUpdateParamsStrict {
+            name: "new-name".parse().unwrap(),
+            description: "another description".to_string(),
         },
     };
     let update: vpc::VpcRouter =
@@ -204,11 +203,8 @@ async fn test_vpc_routers_crud_operations(cptestctx: &ControlPlaneTestContext) {
             .parsed_body()
             .unwrap();
     assert_eq!(update.identity.id, router.identity.id);
-    assert_eq!(update.identity.name, update_params.identity.name.unwrap());
-    assert_eq!(
-        update.identity.description,
-        update_params.identity.description.unwrap()
-    );
+    assert_eq!(update.identity.name, update_params.identity.name);
+    assert_eq!(update.identity.description, update_params.identity.description);
 
     // fetching by old name 404s
     let error: dropshot::HttpErrorResponseBody = NexusRequest::expect_failure(

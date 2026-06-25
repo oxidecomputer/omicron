@@ -51,11 +51,13 @@ pub mod alert {
     pub use crate::v2025_11_20_00::alert::WebhookDeliveryResponse;
     pub use crate::v2025_11_20_00::alert::WebhookReceiver;
     pub use crate::v2025_11_20_00::alert::WebhookReceiverConfig;
-    pub use crate::v2025_11_20_00::alert::WebhookReceiverUpdate;
     pub use crate::v2025_11_20_00::alert::WebhookSecret;
     pub use crate::v2025_11_20_00::alert::WebhookSecretCreate;
     pub use crate::v2025_11_20_00::alert::WebhookSecretSelector;
     pub use crate::v2025_11_20_00::alert::WebhookSecrets;
+
+    pub use crate::v2026_06_23_00::alert::WebhookReceiverUpdate;
+    pub use crate::v2026_06_23_00::identity::IdentityMetadataUpdateParamsStrict;
 }
 
 pub mod audit {
@@ -127,7 +129,9 @@ pub mod floating_ip {
     pub use crate::v2025_11_20_00::floating_ip::FloatingIpAttach;
     pub use crate::v2025_11_20_00::floating_ip::FloatingIpParentKind;
     pub use crate::v2025_11_20_00::floating_ip::FloatingIpSelector;
-    pub use crate::v2025_11_20_00::floating_ip::FloatingIpUpdate;
+
+    pub use crate::v2026_06_23_00::floating_ip::FloatingIpUpdate;
+    pub use crate::v2026_06_23_00::identity::IdentityMetadataUpdateParamsStrict;
 
     pub use crate::v2026_01_22_00::floating_ip::AddressAllocator;
     pub use crate::v2026_01_22_00::floating_ip::FloatingIpCreate;
@@ -454,14 +458,14 @@ pub mod vpc {
     pub use crate::v2025_11_20_00::vpc::VpcRouter;
     pub use crate::v2025_11_20_00::vpc::VpcRouterCreate;
     pub use crate::v2025_11_20_00::vpc::VpcRouterKind;
-    pub use crate::v2025_11_20_00::vpc::VpcRouterUpdate;
     pub use crate::v2025_11_20_00::vpc::VpcSelector;
     pub use crate::v2025_11_20_00::vpc::VpcSubnet;
     pub use crate::v2025_11_20_00::vpc::VpcSubnetCreate;
-    pub use crate::v2025_11_20_00::vpc::VpcUpdate;
 
     pub use crate::v2026_06_23_00::identity::IdentityMetadataUpdateParamsStrict;
+    pub use crate::v2026_06_23_00::vpc::VpcRouterUpdate;
     pub use crate::v2026_06_23_00::vpc::VpcSubnetUpdate;
+    pub use crate::v2026_06_23_00::vpc::VpcUpdate;
 }
 
 pub mod asset {

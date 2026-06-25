@@ -8,8 +8,12 @@
 //! "PATCH-via-PUT" pattern to strict PUT bodies: non-nullable resource fields
 //! become required, and clearable fields become `Nullable<T>` (present on the
 //! wire, possibly explicit `null`). The affected bodies are `ProjectUpdate`,
-//! `VpcSubnetUpdate`, `SiloQuotasUpdate`, and `SupportBundleUpdate`.
+//! `VpcSubnetUpdate`, `SiloQuotasUpdate`, `SupportBundleUpdate`,
+//! `FloatingIpUpdate`, `VpcUpdate`, `VpcRouterUpdate`, and
+//! `WebhookReceiverUpdate`.
 
+pub mod alert;
+pub mod floating_ip;
 pub mod identity;
 pub mod project;
 pub mod silo;

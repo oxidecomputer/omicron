@@ -16,6 +16,8 @@ use nexus_defaults as defaults;
 use nexus_networking::FirewallRulesError;
 use nexus_types::external_api::project;
 use nexus_types::external_api::vpc;
+// Oldest API version whose update bodies still allow omitting fields.
+use nexus_types_versions::v2025_11_20_00 as update_compat;
 use omicron_common::api::external;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DeleteResult;
@@ -113,17 +115,28 @@ impl super::Nexus {
         self.db_datastore.vpc_list(&opctx, &authz_project, pagparams).await
     }
 
+    /// Update a VPC. Both API versions of this endpoint pass through here.
+    /// The newer body is strict — `name`, `description`, and `dns_name` are
+    /// required — while the older (`update_compat`) one is lax: any may be
+    /// omitted, leaving it unchanged. We take the lax type because it can hold
+    /// a body from either version. A strict body converts into it by wrapping
+    /// each field in `Some`; the reverse is impossible, since there's no value
+    /// to supply for a field the lax body omitted.
     pub(crate) async fn project_update_vpc(
         &self,
         opctx: &OpContext,
         vpc_lookup: &lookup::Vpc<'_>,
-        params: &vpc::VpcUpdate,
+        params: update_compat::vpc::VpcUpdate,
     ) -> UpdateResult<db::model::Vpc> {
         let (.., authz_vpc) =
             vpc_lookup.lookup_for(authz::Action::Modify).await?;
-        self.db_datastore
-            .project_update_vpc(opctx, &authz_vpc, params.clone().into())
-            .await
+        let updates = db::model::VpcUpdate {
+            name: params.identity.name.map(Name),
+            description: params.identity.description,
+            time_modified: chrono::Utc::now(),
+            dns_name: params.dns_name.map(Name),
+        };
+        self.db_datastore.project_update_vpc(opctx, &authz_vpc, updates).await
     }
 
     pub(crate) async fn project_delete_vpc(

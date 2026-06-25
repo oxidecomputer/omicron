@@ -63,7 +63,6 @@ use omicron_common::address::Ipv6Range;
 use omicron_common::address::NUM_SOURCE_NAT_PORTS;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::IdentityMetadataCreateParams;
-use omicron_common::api::external::IdentityMetadataUpdateParams;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::PrivateIpStack;
@@ -663,9 +662,9 @@ async fn test_floating_ip_update(cptestctx: &ControlPlaneTestContext) {
     let new_fip_desc: &str = "updated description";
     let updates: floating_ip::FloatingIpUpdate =
         floating_ip::FloatingIpUpdate {
-            identity: IdentityMetadataUpdateParams {
-                name: Some(String::from(new_fip_name).parse().unwrap()),
-                description: Some(String::from(new_fip_desc).parse().unwrap()),
+            identity: floating_ip::IdentityMetadataUpdateParamsStrict {
+                name: String::from(new_fip_name).parse().unwrap(),
+                description: String::from(new_fip_desc).parse().unwrap(),
             },
         };
 

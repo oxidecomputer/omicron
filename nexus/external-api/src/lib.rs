@@ -2963,6 +2963,7 @@ pub trait NexusExternalApi {
         method = PUT,
         path = "/v1/floating-ips/{floating_ip}",
         tags = ["floating-ips"],
+        versions = VERSION_STRICT_PUT_BODIES..,
     }]
     async fn floating_ip_update(
         rqctx: RequestContext<Self::Context>,
@@ -2970,6 +2971,26 @@ pub trait NexusExternalApi {
         query_params: Query<latest::project::OptionalProjectSelector>,
         updated_floating_ip: TypedBody<latest::floating_ip::FloatingIpUpdate>,
     ) -> Result<HttpResponseOk<latest::floating_ip::FloatingIp>, HttpError>;
+
+    /// Update floating IP
+    #[endpoint {
+        operation_id = "floating_ip_update",
+        method = PUT,
+        path = "/v1/floating-ips/{floating_ip}",
+        tags = ["floating-ips"],
+        versions = ..VERSION_STRICT_PUT_BODIES,
+    }]
+    async fn floating_ip_update_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<v2025_11_20_00::path_params::FloatingIpPath>,
+        query_params: Query<v2025_11_20_00::project::OptionalProjectSelector>,
+        updated_floating_ip: TypedBody<
+            v2025_11_20_00::floating_ip::FloatingIpUpdate,
+        >,
+    ) -> Result<
+        HttpResponseOk<v2025_11_20_00::floating_ip::FloatingIp>,
+        HttpError,
+    >;
 
     /// Delete floating IP
     #[endpoint {
@@ -6819,6 +6840,7 @@ pub trait NexusExternalApi {
         method = PUT,
         path = "/v1/vpcs/{vpc}",
         tags = ["vpcs"],
+        versions = VERSION_STRICT_PUT_BODIES..,
     }]
     async fn vpc_update(
         rqctx: RequestContext<Self::Context>,
@@ -6826,6 +6848,21 @@ pub trait NexusExternalApi {
         query_params: Query<latest::project::OptionalProjectSelector>,
         updated_vpc: TypedBody<latest::vpc::VpcUpdate>,
     ) -> Result<HttpResponseOk<latest::vpc::Vpc>, HttpError>;
+
+    /// Update VPC
+    #[endpoint {
+        operation_id = "vpc_update",
+        method = PUT,
+        path = "/v1/vpcs/{vpc}",
+        tags = ["vpcs"],
+        versions = ..VERSION_STRICT_PUT_BODIES,
+    }]
+    async fn vpc_update_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<v2025_11_20_00::path_params::VpcPath>,
+        query_params: Query<v2025_11_20_00::project::OptionalProjectSelector>,
+        updated_vpc: TypedBody<v2025_11_20_00::vpc::VpcUpdate>,
+    ) -> Result<HttpResponseOk<v2025_11_20_00::vpc::Vpc>, HttpError>;
 
     /// Delete VPC
     #[endpoint {
@@ -7106,6 +7143,7 @@ pub trait NexusExternalApi {
         method = PUT,
         path = "/v1/vpc-routers/{router}",
         tags = ["vpcs"],
+        versions = VERSION_STRICT_PUT_BODIES..,
     }]
     async fn vpc_router_update(
         rqctx: RequestContext<Self::Context>,
@@ -7113,6 +7151,21 @@ pub trait NexusExternalApi {
         query_params: Query<latest::vpc::OptionalVpcSelector>,
         router_params: TypedBody<latest::vpc::VpcRouterUpdate>,
     ) -> Result<HttpResponseOk<latest::vpc::VpcRouter>, HttpError>;
+
+    /// Update router
+    #[endpoint {
+        operation_id = "vpc_router_update",
+        method = PUT,
+        path = "/v1/vpc-routers/{router}",
+        tags = ["vpcs"],
+        versions = ..VERSION_STRICT_PUT_BODIES,
+    }]
+    async fn vpc_router_update_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<v2025_11_20_00::path_params::RouterPath>,
+        query_params: Query<v2025_11_20_00::vpc::OptionalVpcSelector>,
+        router_params: TypedBody<v2025_11_20_00::vpc::VpcRouterUpdate>,
+    ) -> Result<HttpResponseOk<v2025_11_20_00::vpc::VpcRouter>, HttpError>;
 
     /// List routes
     ///
@@ -9106,11 +9159,26 @@ pub trait NexusExternalApi {
         method = PUT,
         path = "/v1/webhook-receivers/{receiver}",
         tags = ["system/alerts"],
+        versions = VERSION_STRICT_PUT_BODIES..,
     }]
     async fn webhook_receiver_update(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<latest::alert::AlertReceiverSelector>,
         params: TypedBody<latest::alert::WebhookReceiverUpdate>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    /// Update webhook receiver
+    #[endpoint {
+        operation_id = "webhook_receiver_update",
+        method = PUT,
+        path = "/v1/webhook-receivers/{receiver}",
+        tags = ["system/alerts"],
+        versions = ..VERSION_STRICT_PUT_BODIES,
+    }]
+    async fn webhook_receiver_update_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<v2025_11_20_00::alert::AlertReceiverSelector>,
+        params: TypedBody<v2025_11_20_00::alert::WebhookReceiverUpdate>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
     /// List webhook receiver secret IDs
