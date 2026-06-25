@@ -12,7 +12,7 @@
 use api_identity::ObjectIdentity;
 use omicron_common::api::external::{
     IdentityMetadata, IdentityMetadataCreateParams,
-    IdentityMetadataUpdateParams, NameOrId, ObjectIdentity,
+    IdentityMetadataUpdateParamsLax, NameOrId, ObjectIdentity,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -76,7 +76,7 @@ pub struct MulticastGroupCreate {
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct MulticastGroupUpdate {
     #[serde(flatten)]
-    pub identity: IdentityMetadataUpdateParams,
+    pub identity: IdentityMetadataUpdateParamsLax,
     #[serde(
         default,
         deserialize_with = "validate_source_ips_param",

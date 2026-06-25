@@ -29,7 +29,6 @@ use nexus_types::external_api::instance::PrivateIpStackCreate;
 use nexus_types::external_api::vpc;
 use omicron_common::api::VERSION_HEADER;
 use omicron_common::api::external::IdentityMetadataCreateParams;
-use omicron_common::api::external::IdentityMetadataUpdateParams;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::Nullable;
 use omicron_common::api::external::SimpleIdentityOrName;
@@ -190,9 +189,9 @@ async fn test_vpc_routers_crud_operations(cptestctx: &ControlPlaneTestContext) {
 
     // update first router
     let update_params = vpc::VpcRouterUpdate {
-        identity: IdentityMetadataUpdateParams {
-            name: Some("new-name".parse().unwrap()),
-            description: Some("another description".to_string()),
+        identity: vpc::IdentityMetadataUpdateParams {
+            name: "new-name".parse().unwrap(),
+            description: "another description".to_string(),
         },
     };
     let update: vpc::VpcRouter =
@@ -204,11 +203,8 @@ async fn test_vpc_routers_crud_operations(cptestctx: &ControlPlaneTestContext) {
             .parsed_body()
             .unwrap();
     assert_eq!(update.identity.id, router.identity.id);
-    assert_eq!(update.identity.name, update_params.identity.name.unwrap());
-    assert_eq!(
-        update.identity.description,
-        update_params.identity.description.unwrap()
-    );
+    assert_eq!(update.identity.name, update_params.identity.name);
+    assert_eq!(update.identity.description, update_params.identity.description);
 
     // fetching by old name 404s
     let error: dropshot::HttpErrorResponseBody = NexusRequest::expect_failure(
@@ -339,7 +335,7 @@ async fn test_vpc_routers_attach_to_subnet(
             "/v1/vpc-subnets/{subnet_name}?project={PROJECT_NAME}&vpc={VPC_NAME}"
         ),
         &vpc::VpcSubnetUpdate {
-            identity: vpc::IdentityMetadataUpdateParamsStrict {
+            identity: vpc::IdentityMetadataUpdateParams {
                 name: subnet_name.parse().unwrap(),
                 description: "".to_string(),
             },
@@ -403,7 +399,7 @@ async fn test_vpc_routers_attach_to_subnet(
         client,
         &format!("/v1/vpc-subnets/default?project={PROJECT_NAME}&vpc=vpc1"),
         &vpc::VpcSubnetUpdate {
-            identity: vpc::IdentityMetadataUpdateParamsStrict {
+            identity: vpc::IdentityMetadataUpdateParams {
                 name: "default".parse().unwrap(),
                 description: "".to_string(),
             },
@@ -782,7 +778,7 @@ async fn set_custom_router(
         client,
         &url,
         &vpc::VpcSubnetUpdate {
-            identity: vpc::IdentityMetadataUpdateParamsStrict {
+            identity: vpc::IdentityMetadataUpdateParams {
                 name: current.identity.name.clone(),
                 description: current.identity.description.clone(),
             },

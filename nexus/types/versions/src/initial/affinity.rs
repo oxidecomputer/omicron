@@ -9,7 +9,7 @@ use super::instance::InstanceState;
 use api_identity::ObjectIdentity;
 use omicron_common::api::external::{
     IdentityMetadata, IdentityMetadataCreateParams,
-    IdentityMetadataUpdateParams, Name, NameOrId, ObjectIdentity,
+    IdentityMetadataUpdateParamsLax, Name, NameOrId, ObjectIdentity,
 };
 use omicron_uuid_kinds::InstanceUuid;
 use schemars::JsonSchema;
@@ -50,7 +50,7 @@ pub struct AffinityGroupCreate {
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct AffinityGroupUpdate {
     #[serde(flatten)]
-    pub identity: IdentityMetadataUpdateParams,
+    pub identity: IdentityMetadataUpdateParamsLax,
 }
 
 /// Create-time parameters for an `AntiAffinityGroup`
@@ -67,7 +67,7 @@ pub struct AntiAffinityGroupCreate {
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct AntiAffinityGroupUpdate {
     #[serde(flatten)]
-    pub identity: IdentityMetadataUpdateParams,
+    pub identity: IdentityMetadataUpdateParamsLax,
 }
 
 #[derive(Deserialize, JsonSchema, Clone)]

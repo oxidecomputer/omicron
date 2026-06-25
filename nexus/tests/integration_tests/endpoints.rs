@@ -55,7 +55,6 @@ use omicron_common::api::external::AddressLotKind;
 use omicron_common::api::external::AllowedSourceIps;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::IdentityMetadataCreateParams;
-use omicron_common::api::external::IdentityMetadataUpdateParams;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::Nullable;
@@ -609,9 +608,9 @@ pub static DEMO_AFFINITY_GROUP_CREATE: LazyLock<affinity::AffinityGroupCreate> =
     });
 pub static DEMO_AFFINITY_GROUP_UPDATE: LazyLock<affinity::AffinityGroupUpdate> =
     LazyLock::new(|| affinity::AffinityGroupUpdate {
-        identity: IdentityMetadataUpdateParams {
-            name: None,
-            description: Some(String::from("an updated description")),
+        identity: affinity::IdentityMetadataUpdateParams {
+            name: DEMO_AFFINITY_GROUP_NAME.clone(),
+            description: String::from("an updated description"),
         },
     });
 
@@ -657,9 +656,9 @@ pub static DEMO_ANTI_AFFINITY_GROUP_CREATE: LazyLock<
 pub static DEMO_ANTI_AFFINITY_GROUP_UPDATE: LazyLock<
     affinity::AntiAffinityGroupUpdate,
 > = LazyLock::new(|| affinity::AntiAffinityGroupUpdate {
-    identity: IdentityMetadataUpdateParams {
-        name: None,
-        description: Some(String::from("an updated description")),
+    identity: affinity::IdentityMetadataUpdateParams {
+        name: DEMO_ANTI_AFFINITY_GROUP_NAME.clone(),
+        description: String::from("an updated description"),
     },
 });
 
@@ -857,9 +856,9 @@ pub static DEMO_INSTANCE_NIC_CREATE: LazyLock<
 pub static DEMO_INSTANCE_NIC_PUT: LazyLock<
     instance::InstanceNetworkInterfaceUpdate,
 > = LazyLock::new(|| instance::InstanceNetworkInterfaceUpdate {
-    identity: IdentityMetadataUpdateParams {
-        name: None,
-        description: Some(String::from("an updated description")),
+    identity: instance::IdentityMetadataUpdateParams {
+        name: DEMO_INSTANCE_NIC_NAME.clone(),
+        description: String::from("an updated description"),
     },
     primary: false,
     transit_ips: vec![],
@@ -1124,9 +1123,9 @@ pub static DEMO_IP_POOL_UTILIZATION_URL: LazyLock<String> =
     LazyLock::new(|| format!("{}/utilization", *DEMO_IP_POOL_URL));
 pub static DEMO_IP_POOL_UPDATE: LazyLock<ip_pool::IpPoolUpdate> =
     LazyLock::new(|| ip_pool::IpPoolUpdate {
-        identity: IdentityMetadataUpdateParams {
-            name: None,
-            description: Some(String::from("a new IP pool")),
+        identity: ip_pool::IdentityMetadataUpdateParams {
+            name: DEMO_IP_POOL_NAME.clone(),
+            description: String::from("a new IP pool"),
         },
     });
 
@@ -1225,9 +1224,9 @@ pub static DEMO_SUBNET_POOL_URL: LazyLock<String> = LazyLock::new(|| {
 });
 pub static DEMO_SUBNET_POOL_UPDATE: LazyLock<subnet_pool::SubnetPoolUpdate> =
     LazyLock::new(|| subnet_pool::SubnetPoolUpdate {
-        identity: IdentityMetadataUpdateParams {
-            name: None,
-            description: Some(String::from("an updated subnet pool")),
+        identity: subnet_pool::IdentityMetadataUpdateParams {
+            name: DEMO_SUBNET_POOL_NAME.clone(),
+            description: String::from("an updated subnet pool"),
         },
     });
 pub static DEMO_SUBNET_POOL_MEMBERS_URL: LazyLock<String> =
@@ -1297,9 +1296,9 @@ pub static DEMO_EXTERNAL_SUBNET_URL: LazyLock<String> = LazyLock::new(|| {
 pub static DEMO_EXTERNAL_SUBNET_UPDATE: LazyLock<
     external_subnet::ExternalSubnetUpdate,
 > = LazyLock::new(|| external_subnet::ExternalSubnetUpdate {
-    identity: IdentityMetadataUpdateParams {
-        name: None,
-        description: Some(String::from("an updated external subnet")),
+    identity: external_subnet::IdentityMetadataUpdateParams {
+        name: DEMO_EXTERNAL_SUBNET_NAME.clone(),
+        description: String::from("an updated external subnet"),
     },
 });
 pub static DEMO_EXTERNAL_SUBNET_ATTACH_URL: LazyLock<String> =
@@ -1397,9 +1396,9 @@ pub static DEMO_FLOAT_IP_CREATE: LazyLock<floating_ip::FloatingIpCreate> =
 
 pub static DEMO_FLOAT_IP_UPDATE: LazyLock<floating_ip::FloatingIpUpdate> =
     LazyLock::new(|| floating_ip::FloatingIpUpdate {
-        identity: IdentityMetadataUpdateParams {
-            name: None,
-            description: Some(String::from("an updated Floating IP")),
+        identity: floating_ip::IdentityMetadataUpdateParams {
+            name: DEMO_FLOAT_IP_NAME.clone(),
+            description: String::from("an updated Floating IP"),
         },
     });
 
@@ -1528,11 +1527,11 @@ pub static DEMO_WEBHOOK_RECEIVER_CREATE: LazyLock<alert::WebhookCreate> =
 pub static DEMO_WEBHOOK_RECEIVER_UPDATE: LazyLock<
     alert::WebhookReceiverUpdate,
 > = LazyLock::new(|| alert::WebhookReceiverUpdate {
-    identity: IdentityMetadataUpdateParams {
-        name: None,
-        description: Some("webhooked on phonics".to_string()),
+    identity: alert::IdentityMetadataUpdateParams {
+        name: DEMO_WEBHOOK_RECEIVER_NAME.clone(),
+        description: "webhooked on phonics".to_string(),
     },
-    endpoint: Some("https://example.com/my-cool-webhook".parse().unwrap()),
+    endpoint: "https://example.com/my-cool-webhook".parse().unwrap(),
 });
 
 pub static DEMO_ALERT_RECEIVER_URL: LazyLock<String> = LazyLock::new(|| {
@@ -2323,11 +2322,10 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
                     AllowedMethod::Delete,
                     AllowedMethod::Put(
                         serde_json::to_value(project::ProjectUpdate {
-                            identity:
-                                project::IdentityMetadataUpdateParamsStrict {
-                                    name: DEMO_PROJECT_NAME.clone(),
-                                    description: "different".to_string(),
-                                },
+                            identity: project::IdentityMetadataUpdateParams {
+                                name: DEMO_PROJECT_NAME.clone(),
+                                description: "different".to_string(),
+                            },
                         })
                         .unwrap(),
                     ),
@@ -2369,11 +2367,11 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
                     AllowedMethod::Get,
                     AllowedMethod::Put(
                         serde_json::to_value(&vpc::VpcUpdate {
-                            identity: IdentityMetadataUpdateParams {
-                                name: None,
-                                description: Some("different".to_string()),
+                            identity: vpc::IdentityMetadataUpdateParams {
+                                name: DEMO_VPC_NAME.clone(),
+                                description: "different".to_string(),
                             },
-                            dns_name: None,
+                            dns_name: DEMO_VPC_NAME.clone(),
                         })
                         .unwrap(),
                     ),
@@ -2415,7 +2413,7 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
                     AllowedMethod::Get,
                     AllowedMethod::Put(
                         serde_json::to_value(&vpc::VpcSubnetUpdate {
-                            identity: vpc::IdentityMetadataUpdateParamsStrict {
+                            identity: vpc::IdentityMetadataUpdateParams {
                                 name: DEMO_VPC_SUBNET_NAME.clone(),
                                 description: "different".to_string(),
                             },
@@ -2452,9 +2450,9 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
                     AllowedMethod::Get,
                     AllowedMethod::Put(
                         serde_json::to_value(&vpc::VpcRouterUpdate {
-                            identity: IdentityMetadataUpdateParams {
-                                name: None,
-                                description: Some("different".to_string()),
+                            identity: vpc::IdentityMetadataUpdateParams {
+                                name: DEMO_VPC_ROUTER_NAME.clone(),
+                                description: "different".to_string(),
                             },
                         })
                         .unwrap(),
@@ -2483,9 +2481,9 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
                     AllowedMethod::Get,
                     AllowedMethod::Put(
                         serde_json::to_value(&vpc::RouterRouteUpdate {
-                            identity: IdentityMetadataUpdateParams {
-                                name: None,
-                                description: Some("different".to_string()),
+                            identity: vpc::IdentityMetadataUpdateParams {
+                                name: DEMO_ROUTER_ROUTE_NAME.clone(),
+                                description: "different".to_string(),
                             },
                             target: RouteTarget::Ip(IpAddr::from(
                                 Ipv4Addr::new(127, 0, 0, 1),

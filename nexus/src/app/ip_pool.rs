@@ -19,6 +19,8 @@ use nexus_db_queries::db;
 use nexus_db_queries::db::model::Name;
 use nexus_types::external_api::ip_pool;
 use nexus_types::identity::Resource;
+// Oldest API version whose update bodies still allow omitting fields.
+use nexus_types_versions::v2025_11_20_00 as update_compat;
 use omicron_common::address::{
     IPV4_LINK_LOCAL_MULTICAST_SUBNET, IPV4_SSM_SUBNET,
     IPV6_INTERFACE_LOCAL_MULTICAST_LAST, IPV6_INTERFACE_LOCAL_MULTICAST_SUBNET,
@@ -422,11 +424,18 @@ impl super::Nexus {
         self.db_datastore.ip_pool_delete(opctx, &authz_pool, &db_pool).await
     }
 
+    /// Update an IP pool. Both API versions of this endpoint pass through here.
+    /// The newer body is strict — `name` and `description` are required — while
+    /// the older (`update_compat`) one is lax: either may be omitted, leaving
+    /// it unchanged. We take the lax type because it can hold a body from
+    /// either version. A strict body converts into it by wrapping each field in
+    /// `Some`; the reverse is impossible, since there's no value to supply for a
+    /// field the lax body omitted.
     pub(crate) async fn ip_pool_update(
         &self,
         opctx: &OpContext,
         pool_lookup: &lookup::IpPool<'_>,
-        updates: &ip_pool::IpPoolUpdate,
+        updates: update_compat::ip_pool::IpPoolUpdate,
     ) -> UpdateResult<db::model::IpPool> {
         let (.., authz_pool) =
             pool_lookup.lookup_for(authz::Action::Modify).await?;
@@ -439,7 +448,11 @@ impl super::Nexus {
             return Err(not_found_from_lookup(pool_lookup));
         }
 
-        let updates_db = IpPoolUpdate::from(updates.clone());
+        let updates_db = IpPoolUpdate {
+            name: updates.identity.name.map(Name),
+            description: updates.identity.description,
+            time_modified: chrono::Utc::now(),
+        };
 
         self.db_datastore.ip_pool_update(opctx, &authz_pool, updates_db).await
     }

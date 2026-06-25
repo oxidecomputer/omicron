@@ -21,7 +21,7 @@ use api_identity::ObjectIdentity;
 use omicron_common::address::IpVersion;
 use omicron_common::api::external::{
     IdentityMetadata, IdentityMetadataCreateParams,
-    IdentityMetadataUpdateParams, NameOrId, ObjectIdentity,
+    IdentityMetadataUpdateParamsLax, NameOrId, ObjectIdentity,
 };
 use oxnet::IpNet;
 use schemars::JsonSchema;
@@ -70,7 +70,7 @@ pub struct SubnetPoolCreate {
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct SubnetPoolUpdate {
     #[serde(flatten)]
-    pub identity: IdentityMetadataUpdateParams,
+    pub identity: IdentityMetadataUpdateParamsLax,
 }
 
 /// Add a member (subnet) to a subnet pool

@@ -138,16 +138,6 @@ pub struct AffinityGroupUpdate {
     pub time_modified: DateTime<Utc>,
 }
 
-impl From<affinity::AffinityGroupUpdate> for AffinityGroupUpdate {
-    fn from(params: affinity::AffinityGroupUpdate) -> Self {
-        Self {
-            name: params.identity.name.map(Name),
-            description: params.identity.description,
-            time_modified: Utc::now(),
-        }
-    }
-}
-
 #[derive(
     Queryable, Insertable, Clone, Debug, Resource, Selectable, PartialEq,
 )]
@@ -202,16 +192,6 @@ pub struct AntiAffinityGroupUpdate {
     pub name: Option<Name>,
     pub description: Option<String>,
     pub time_modified: DateTime<Utc>,
-}
-
-impl From<affinity::AntiAffinityGroupUpdate> for AntiAffinityGroupUpdate {
-    fn from(params: affinity::AntiAffinityGroupUpdate) -> Self {
-        Self {
-            name: params.identity.name.map(Name),
-            description: params.identity.description,
-            time_modified: Utc::now(),
-        }
-    }
 }
 
 #[derive(Queryable, Insertable, Clone, Debug, Selectable)]

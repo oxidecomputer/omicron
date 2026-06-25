@@ -10,6 +10,8 @@ use nexus_db_model::SubnetPool;
 use nexus_db_model::SubnetPoolSiloLink;
 use nexus_db_queries::context::OpContext;
 use nexus_types::external_api::subnet_pool as subnet_pool_types;
+// Oldest API version whose update bodies still allow omitting fields.
+use nexus_types_versions::v2026_01_16_01 as update_compat;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
@@ -67,19 +69,31 @@ impl super::Nexus {
             .map(|(_authz_pool, db_pool)| db_pool.into())
     }
 
+    /// Update a subnet pool. Both API versions of this endpoint pass through
+    /// here. The newer body is strict — `name` and `description` are required —
+    /// while the older (`update_compat`) one is lax: either may be omitted,
+    /// leaving it unchanged. We take the lax type because it can hold a body
+    /// from either version. A strict body converts into it by wrapping each
+    /// field in `Some`; the reverse is impossible, since there's no value to
+    /// supply for a field the lax body omitted.
     pub(crate) async fn subnet_pool_update(
         &self,
         opctx: &OpContext,
         pool: &NameOrId,
-        params: subnet_pool_types::SubnetPoolUpdate,
+        params: update_compat::subnet_pool::SubnetPoolUpdate,
     ) -> UpdateResult<subnet_pool_types::SubnetPool> {
         let (authz_pool, _db_pool) = self
             .datastore()
             .lookup_subnet_pool(opctx, pool)
             .fetch_for(authz::Action::Modify)
             .await?;
+        let updates = nexus_db_model::SubnetPoolUpdate {
+            name: params.identity.name.map(nexus_db_model::Name),
+            description: params.identity.description,
+            time_modified: chrono::Utc::now(),
+        };
         self.datastore()
-            .update_subnet_pool(opctx, &authz_pool, params.into())
+            .update_subnet_pool(opctx, &authz_pool, updates)
             .await
             .map(Into::into)
     }

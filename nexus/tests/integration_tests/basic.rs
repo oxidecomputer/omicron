@@ -262,7 +262,7 @@ async fn test_projects_basic(cptestctx: &ControlPlaneTestContext) {
     NexusRequest::new(
         RequestBuilder::new(client, Method::PUT, "/v1/projects/simproject2")
             .body(Some(&project::ProjectUpdate {
-                identity: project::IdentityMetadataUpdateParamsStrict {
+                identity: project::IdentityMetadataUpdateParams {
                     name: "simproject2".parse().unwrap(),
                     description: "".to_string(),
                 },
@@ -305,7 +305,7 @@ async fn test_projects_basic(cptestctx: &ControlPlaneTestContext) {
     // `name` is unchanged ("simproject3"); strict PUT bodies require
     // resending it.
     let project_update = project::ProjectUpdate {
-        identity: project::IdentityMetadataUpdateParamsStrict {
+        identity: project::IdentityMetadataUpdateParams {
             name: "simproject3".parse().unwrap(),
             description: "Li'l lightnin'".to_string(),
         },
@@ -335,7 +335,7 @@ async fn test_projects_basic(cptestctx: &ControlPlaneTestContext) {
     // operation under the hood.  This case also exercises changes to multiple
     // fields in one request.
     let project_update = project::ProjectUpdate {
-        identity: project::IdentityMetadataUpdateParamsStrict {
+        identity: project::IdentityMetadataUpdateParams {
             name: "lil-lightnin".parse().unwrap(),
             description: "little lightning".to_string(),
         },

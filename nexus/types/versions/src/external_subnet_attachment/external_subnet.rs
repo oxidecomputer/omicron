@@ -17,7 +17,7 @@
 use api_identity::ObjectIdentity;
 use omicron_common::api::external::{
     IdentityMetadata, IdentityMetadataCreateParams,
-    IdentityMetadataUpdateParams, NameOrId, ObjectIdentity,
+    IdentityMetadataUpdateParamsLax, NameOrId, ObjectIdentity,
 };
 use oxnet::IpNet;
 use schemars::JsonSchema;
@@ -89,7 +89,7 @@ pub struct ExternalSubnetCreate {
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct ExternalSubnetUpdate {
     #[serde(flatten)]
-    pub identity: IdentityMetadataUpdateParams,
+    pub identity: IdentityMetadataUpdateParamsLax,
 }
 
 /// Attach an external subnet to an instance

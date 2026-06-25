@@ -37,7 +37,6 @@ use nexus_types::external_api::subnet_pool::SubnetPoolSiloLink;
 use nexus_types::external_api::subnet_pool::SubnetPoolUpdate;
 use nexus_types::silo::DEFAULT_SILO_ID;
 use omicron_common::address::IpVersion;
-use omicron_common::api::external::IdentityMetadataUpdateParams;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::SimpleIdentityOrName as _;
 use std::collections::BTreeSet;
@@ -76,9 +75,9 @@ async fn basic_subnet_pool_crud(cptestctx: &ControlPlaneTestContext) {
     let new_name = "granite".parse::<Name>().unwrap();
     let new_description = String::from("an updated pool");
     let updates = SubnetPoolUpdate {
-        identity: IdentityMetadataUpdateParams {
-            name: Some(new_name.clone()),
-            description: Some(new_description.clone()),
+        identity: subnet_pool::IdentityMetadataUpdateParams {
+            name: new_name.clone(),
+            description: new_description.clone(),
         },
     };
     let new_pool: SubnetPool = object_put(client, &pool_url, &updates).await;

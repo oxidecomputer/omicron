@@ -129,19 +129,23 @@ impl<T: AffinityGroupish> ProjectScopedApiHelper<'_, T> {
         object_get_error(&self.client, &url, status).await
     }
 
-    async fn group_update(&self, group: &str) -> T::Group {
+    // `group` selects the group to update (name or UUID); `new_name` is the
+    // name to send in the (value-semantics) body. They differ when selecting
+    // by UUID, where the body must still carry the group's real name.
+    async fn group_update(&self, group: &str, new_name: &str) -> T::Group {
         let url = group_url(T::URL_COMPONENT, self.project, group);
-        let params = T::make_update_params();
+        let params = T::make_update_params(new_name);
         object_put(&self.client, &url, &params).await
     }
 
     async fn group_update_expect_error(
         &self,
         group: &str,
+        new_name: &str,
         status: StatusCode,
     ) -> HttpErrorResponseBody {
         let url = group_url(T::URL_COMPONENT, self.project, group);
-        let params = T::make_update_params();
+        let params = T::make_update_params(new_name);
         object_put_error(&self.client, &url, &params, status).await
     }
 
@@ -342,7 +346,7 @@ trait AffinityGroupish {
     const RESOURCE_NAME: &'static str;
 
     fn make_create_params(group_name: &str) -> Self::CreateParams;
-    fn make_update_params() -> Self::UpdateParams;
+    fn make_update_params(new_name: &str) -> Self::UpdateParams;
 }
 
 // Arbitrary text used to validate PUT calls to groups
@@ -370,11 +374,11 @@ impl AffinityGroupish for AffinityType {
         }
     }
 
-    fn make_update_params() -> Self::UpdateParams {
+    fn make_update_params(new_name: &str) -> Self::UpdateParams {
         affinity::AffinityGroupUpdate {
-            identity: external::IdentityMetadataUpdateParams {
-                name: None,
-                description: Some(NEW_DESCRIPTION.to_string()),
+            identity: affinity::IdentityMetadataUpdateParams {
+                name: new_name.parse().unwrap(),
+                description: NEW_DESCRIPTION.to_string(),
             },
         }
     }
@@ -402,11 +406,11 @@ impl AffinityGroupish for AntiAffinityType {
         }
     }
 
-    fn make_update_params() -> Self::UpdateParams {
+    fn make_update_params(new_name: &str) -> Self::UpdateParams {
         affinity::AntiAffinityGroupUpdate {
-            identity: external::IdentityMetadataUpdateParams {
-                name: None,
-                description: Some(NEW_DESCRIPTION.to_string()),
+            identity: affinity::IdentityMetadataUpdateParams {
+                name: new_name.parse().unwrap(),
+                description: NEW_DESCRIPTION.to_string(),
             },
         }
     }
@@ -713,7 +717,7 @@ async fn test_group_crud<T: AffinityGroupish>(client: &ClientTestContext) {
     );
 
     // We can modify the group itself
-    let group = project_api.group_update(GROUP_NAME).await;
+    let group = project_api.group_update(GROUP_NAME, GROUP_NAME).await;
     assert_eq!(group.identity().description, NEW_DESCRIPTION);
 
     // List all members of the affinity group (expect nothing)
@@ -891,13 +895,21 @@ async fn test_group_project_selector<T: AffinityGroupish>(
         .await;
 
     // Same for updating the group
-    project_api.group_update(GROUP_NAME).await;
-    no_project_api.group_update(&group_id).await;
+    project_api.group_update(GROUP_NAME, GROUP_NAME).await;
+    no_project_api.group_update(&group_id, GROUP_NAME).await;
     project_api
-        .group_update_expect_error(&group_id, StatusCode::BAD_REQUEST)
+        .group_update_expect_error(
+            &group_id,
+            GROUP_NAME,
+            StatusCode::BAD_REQUEST,
+        )
         .await;
     no_project_api
-        .group_update_expect_error(GROUP_NAME, StatusCode::BAD_REQUEST)
+        .group_update_expect_error(
+            GROUP_NAME,
+            GROUP_NAME,
+            StatusCode::BAD_REQUEST,
+        )
         .await;
 
     // Group Members can be added by name or UUID

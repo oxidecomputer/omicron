@@ -89,16 +89,6 @@ pub struct SubnetPoolUpdate {
     pub time_modified: DateTime<Utc>,
 }
 
-impl From<subnet_pool_types::SubnetPoolUpdate> for SubnetPoolUpdate {
-    fn from(value: subnet_pool_types::SubnetPoolUpdate) -> Self {
-        Self {
-            name: value.identity.name.map(Into::into),
-            description: value.identity.description,
-            time_modified: Utc::now(),
-        }
-    }
-}
-
 /// A member of a Subnet Pool.
 #[derive(
     Clone, Debug, Deserialize, PartialEq, Selectable, Serialize, Queryable,
@@ -257,18 +247,6 @@ pub struct ExternalSubnetUpdate {
     pub name: Option<Name>,
     pub description: Option<String>,
     pub time_modified: DateTime<Utc>,
-}
-
-impl From<external_subnet_types::ExternalSubnetUpdate>
-    for ExternalSubnetUpdate
-{
-    fn from(value: external_subnet_types::ExternalSubnetUpdate) -> Self {
-        Self {
-            name: value.identity.name.map(Into::into),
-            description: value.identity.description,
-            time_modified: Utc::now(),
-        }
-    }
 }
 
 #[derive(

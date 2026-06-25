@@ -12,12 +12,15 @@ use nexus_db_model::IpAttachState;
 use nexus_db_model::IpVersion;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db;
 use nexus_db_queries::db::datastore::FloatingIpAllocation;
 use nexus_types::external_api::external_ip;
 use nexus_types::external_api::floating_ip;
 use nexus_types::external_api::instance;
 use nexus_types::external_api::ip_pool;
 use nexus_types::external_api::project;
+// Oldest API version whose update bodies still allow omitting fields.
+use nexus_types_versions::v2025_11_20_00 as update_compat;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
@@ -163,17 +166,29 @@ impl super::Nexus {
             .unwrap())
     }
 
+    /// Update a floating IP. Both API versions of this endpoint pass through
+    /// here. The newer body is strict — `name` and `description` are required —
+    /// while the older (`update_compat`) one is lax: either may be omitted,
+    /// leaving it unchanged. We take the lax type because it can hold a body
+    /// from either version. A strict body converts into it by wrapping each
+    /// field in `Some`; the reverse is impossible, since there's no value to
+    /// supply for a field the lax body omitted.
     pub(crate) async fn floating_ip_update(
         &self,
         opctx: &OpContext,
         ip_lookup: lookup::FloatingIp<'_>,
-        params: floating_ip::FloatingIpUpdate,
+        params: update_compat::floating_ip::FloatingIpUpdate,
     ) -> UpdateResult<floating_ip::FloatingIp> {
         let (.., authz_fip) =
             ip_lookup.lookup_for(authz::Action::Modify).await?;
+        let updates = db::model::FloatingIpUpdate {
+            name: params.identity.name.map(db::model::Name),
+            description: params.identity.description,
+            time_modified: chrono::Utc::now(),
+        };
         Ok(self
             .db_datastore
-            .floating_ip_update(opctx, &authz_fip, params.clone().into())
+            .floating_ip_update(opctx, &authz_fip, updates)
             .await?
             .try_into()
             .unwrap())

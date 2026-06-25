@@ -8,10 +8,23 @@
 //! "PATCH-via-PUT" pattern to strict PUT bodies: non-nullable resource fields
 //! become required, and clearable fields become `Nullable<T>` (present on the
 //! wire, possibly explicit `null`). The affected bodies are `ProjectUpdate`,
-//! `VpcSubnetUpdate`, `SiloQuotasUpdate`, and `SupportBundleUpdate`.
+//! `VpcSubnetUpdate`, `SiloQuotasUpdate`, `SupportBundleUpdate`,
+//! `FloatingIpUpdate`, `VpcUpdate`, `VpcRouterUpdate`, `RouterRouteUpdate`,
+//! `WebhookReceiverUpdate`, `AffinityGroupUpdate`, `AntiAffinityGroupUpdate`,
+//! `ExternalSubnetUpdate`, `IpPoolUpdate`, `SubnetPoolUpdate`,
+//! `InstanceNetworkInterfaceUpdate`, `SystemNetworkingSettingsUpdate`, and
+//! `VpcFirewallRuleUpdateParams`.
 
+pub mod affinity;
+pub mod alert;
+pub mod external_subnet;
+pub mod floating_ip;
 pub mod identity;
+pub mod instance;
+pub mod ip_pool;
 pub mod project;
 pub mod silo;
+pub mod subnet_pool;
 pub mod support_bundle;
+pub mod system_networking;
 pub mod vpc;

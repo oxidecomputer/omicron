@@ -7,7 +7,7 @@
 use api_identity::ObjectIdentity;
 use omicron_common::api::external::{
     IdentityMetadata, IdentityMetadataCreateParams,
-    IdentityMetadataUpdateParams, Name, NameOrId, ObjectIdentity,
+    IdentityMetadataUpdateParamsLax, Name, NameOrId, ObjectIdentity,
     RouteDestination, RouteTarget,
 };
 use oxnet::{Ipv4Net, Ipv6Net};
@@ -155,7 +155,7 @@ pub struct VpcCreate {
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct VpcUpdate {
     #[serde(flatten)]
-    pub identity: IdentityMetadataUpdateParams,
+    pub identity: IdentityMetadataUpdateParamsLax,
     pub dns_name: Option<Name>,
 }
 
@@ -192,7 +192,7 @@ pub struct VpcSubnetCreate {
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct VpcSubnetUpdate {
     #[serde(flatten)]
-    pub identity: IdentityMetadataUpdateParams,
+    pub identity: IdentityMetadataUpdateParamsLax,
 
     /// An optional router, used to direct packets sent from hosts in this subnet
     /// to any destination address.
@@ -210,7 +210,7 @@ pub struct VpcRouterCreate {
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct VpcRouterUpdate {
     #[serde(flatten)]
-    pub identity: IdentityMetadataUpdateParams,
+    pub identity: IdentityMetadataUpdateParamsLax,
 }
 
 /// Create-time parameters for a `RouterRoute`
@@ -228,7 +228,7 @@ pub struct RouterRouteCreate {
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct RouterRouteUpdate {
     #[serde(flatten)]
-    pub identity: IdentityMetadataUpdateParams,
+    pub identity: IdentityMetadataUpdateParamsLax,
     /// The location that matched packets should be forwarded to.
     pub target: RouteTarget,
     /// Selects which traffic this routing rule will apply to.

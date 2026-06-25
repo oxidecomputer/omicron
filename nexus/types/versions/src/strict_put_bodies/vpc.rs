@@ -4,22 +4,19 @@
 
 //! VPC types for version STRICT_PUT_BODIES.
 
-use crate::v2026_06_23_00::identity::IdentityMetadataUpdateParamsStrict;
+use crate::v2026_06_23_00::identity::IdentityMetadataUpdateParams;
 use omicron_common::api::external::{
-    IdentityMetadataUpdateParams, NameOrId, Nullable,
+    IdentityMetadataUpdateParamsLax, Name, NameOrId, Nullable,
+    RouteDestination, RouteTarget,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 /// Updateable properties of a `VpcSubnet`
-///
-/// A `PUT` replaces the resource, so `name` and `description` are required.
-/// `custom_router` is clearable: it must be present, but may be explicit
-/// `null` to detach any custom router.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct VpcSubnetUpdate {
     #[serde(flatten)]
-    pub identity: IdentityMetadataUpdateParamsStrict,
+    pub identity: IdentityMetadataUpdateParams,
 
     /// An optional router, used to direct packets sent from hosts in this subnet
     /// to any destination address.
@@ -33,11 +30,81 @@ pub struct VpcSubnetUpdate {
 impl From<VpcSubnetUpdate> for crate::v2025_11_20_00::vpc::VpcSubnetUpdate {
     fn from(new: VpcSubnetUpdate) -> Self {
         Self {
-            identity: IdentityMetadataUpdateParams {
+            identity: IdentityMetadataUpdateParamsLax {
                 name: Some(new.identity.name),
                 description: Some(new.identity.description),
             },
             custom_router: new.custom_router.0,
+        }
+    }
+}
+
+/// Updateable properties of a `Vpc`
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct VpcUpdate {
+    #[serde(flatten)]
+    pub identity: IdentityMetadataUpdateParams,
+
+    pub dns_name: Name,
+}
+
+// Convert the newer body into the older one (see the note on `ProjectUpdate`'s
+// conversion).
+impl From<VpcUpdate> for crate::v2025_11_20_00::vpc::VpcUpdate {
+    fn from(new: VpcUpdate) -> Self {
+        Self {
+            identity: IdentityMetadataUpdateParamsLax {
+                name: Some(new.identity.name),
+                description: Some(new.identity.description),
+            },
+            dns_name: Some(new.dns_name),
+        }
+    }
+}
+
+/// Updateable properties of a `VpcRouter`
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct VpcRouterUpdate {
+    #[serde(flatten)]
+    pub identity: IdentityMetadataUpdateParams,
+}
+
+// Convert the newer body into the older one (see the note on `ProjectUpdate`'s
+// conversion).
+impl From<VpcRouterUpdate> for crate::v2025_11_20_00::vpc::VpcRouterUpdate {
+    fn from(new: VpcRouterUpdate) -> Self {
+        Self {
+            identity: IdentityMetadataUpdateParamsLax {
+                name: Some(new.identity.name),
+                description: Some(new.identity.description),
+            },
+        }
+    }
+}
+
+/// Updateable properties of a `RouterRoute`
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct RouterRouteUpdate {
+    #[serde(flatten)]
+    pub identity: IdentityMetadataUpdateParams,
+
+    /// The location that matched packets should be forwarded to.
+    pub target: RouteTarget,
+    /// Selects which traffic this routing rule will apply to.
+    pub destination: RouteDestination,
+}
+
+// Convert the newer body into the older one (see the note on `ProjectUpdate`'s
+// conversion).
+impl From<RouterRouteUpdate> for crate::v2025_11_20_00::vpc::RouterRouteUpdate {
+    fn from(new: RouterRouteUpdate) -> Self {
+        Self {
+            identity: IdentityMetadataUpdateParamsLax {
+                name: Some(new.identity.name),
+                description: Some(new.identity.description),
+            },
+            target: new.target,
+            destination: new.destination,
         }
     }
 }

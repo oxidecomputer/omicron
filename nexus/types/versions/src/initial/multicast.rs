@@ -57,7 +57,7 @@ pub struct MulticastGroupSelector {
 }
 
 use omicron_common::api::external::{
-    IdentityMetadataCreateParams, IdentityMetadataUpdateParams, Nullable,
+    IdentityMetadataCreateParams, IdentityMetadataUpdateParamsLax, Nullable,
 };
 use serde::de;
 
@@ -100,7 +100,7 @@ pub struct MulticastGroupCreate {
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct MulticastGroupUpdate {
     #[serde(flatten)]
-    pub identity: IdentityMetadataUpdateParams,
+    pub identity: IdentityMetadataUpdateParamsLax,
     #[serde(
         default,
         deserialize_with = "validate_source_ips_param",

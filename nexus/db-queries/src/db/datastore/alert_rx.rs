@@ -338,18 +338,12 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         authz_rx: &authz::AlertReceiver,
-        params: alert::WebhookReceiverUpdate,
+        update: db::model::WebhookReceiverUpdate,
     ) -> UpdateResult<AlertReceiver> {
         opctx.authorize(authz::Action::Modify, authz_rx).await?;
         let conn = self.pool_connection_authorized(opctx).await?;
 
         let rx_id = authz_rx.id().into_untyped_uuid();
-        let update = db::model::WebhookReceiverUpdate {
-            name: params.identity.name.map(db::model::Name),
-            description: params.identity.description,
-            endpoint: params.endpoint.as_ref().map(ToString::to_string),
-            time_modified: chrono::Utc::now(),
-        };
         let updated = diesel::update(rx_dsl::alert_receiver)
             .filter(rx_dsl::id.eq(rx_id))
             .filter(rx_dsl::time_deleted.is_null())

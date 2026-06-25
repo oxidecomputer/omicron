@@ -51,8 +51,10 @@ use nexus_types::alert as alert_types;
 use nexus_types::alert::AlertClass;
 use nexus_types::alert::AlertPayload;
 use nexus_types::external_api::alert;
+// Oldest API version whose update bodies still allow omitting fields.
 use nexus_types::identity::Asset;
 use nexus_types::identity::Resource;
+use nexus_types_versions::v2025_11_20_00 as update_compat;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
@@ -93,16 +95,29 @@ impl Nexus {
         self.datastore().webhook_rx_create(&opctx, params).await
     }
 
+    /// Update a webhook receiver. Both API versions of this endpoint pass
+    /// through here. The newer body is strict — `name`, `description`, and
+    /// `endpoint` are required — while the older (`update_compat`) one is lax:
+    /// any may be omitted, leaving it unchanged. We take the lax type because
+    /// it can hold a body from either version. A strict body converts into it
+    /// by wrapping each field in `Some`; the reverse is impossible, since
+    /// there's no value to supply for a field the lax body omitted.
     pub async fn webhook_receiver_update(
         &self,
         opctx: &OpContext,
         rx: lookup::AlertReceiver<'_>,
-        params: alert::WebhookReceiverUpdate,
+        params: update_compat::alert::WebhookReceiverUpdate,
     ) -> UpdateResult<()> {
         let (authz_rx,) = rx.lookup_for(authz::Action::Modify).await?;
+        let update = nexus_db_model::WebhookReceiverUpdate {
+            name: params.identity.name.map(nexus_db_model::Name),
+            description: params.identity.description,
+            endpoint: params.endpoint.as_ref().map(ToString::to_string),
+            time_modified: chrono::Utc::now(),
+        };
         let _ = self
             .datastore()
-            .webhook_rx_update(opctx, &authz_rx, params)
+            .webhook_rx_update(opctx, &authz_rx, update)
             .await?;
         Ok(())
     }

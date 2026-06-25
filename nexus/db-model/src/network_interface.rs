@@ -12,12 +12,9 @@ use chrono::DateTime;
 use chrono::Utc;
 use db_macros::Resource;
 use diesel::AsChangeset;
-use itertools::Either;
-use itertools::Itertools;
 use nexus_db_schema::schema::instance_network_interface;
 use nexus_db_schema::schema::network_interface;
 use nexus_db_schema::schema::service_network_interface;
-use nexus_types::external_api::instance::InstanceNetworkInterfaceUpdate;
 use nexus_types::external_api::instance::PrivateIpStackCreate;
 use nexus_types::identity::Resource;
 use omicron_common::api::external;
@@ -32,7 +29,6 @@ use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::VnicUuid;
-use oxnet::IpNet;
 use sled_agent_types::inventory::ZoneKind;
 use std::net::IpAddr;
 use uuid::Uuid;
@@ -625,24 +621,5 @@ impl TryFrom<InstanceNetworkInterface> for external::InstanceNetworkInterface {
             mac: *iface.mac,
             primary: iface.primary,
         })
-    }
-}
-
-impl From<InstanceNetworkInterfaceUpdate> for NetworkInterfaceUpdate {
-    fn from(params: InstanceNetworkInterfaceUpdate) -> Self {
-        let primary = if params.primary { Some(true) } else { None };
-        let (transit_ips_v4, transit_ips_v6): (Vec<_>, Vec<_>) =
-            params.transit_ips.into_iter().partition_map(|net| match net {
-                IpNet::V4(v4) => Either::Left(crate::Ipv4Net::from(v4)),
-                IpNet::V6(v6) => Either::Right(crate::Ipv6Net::from(v6)),
-            });
-        Self {
-            name: params.identity.name.map(|n| n.into()),
-            description: params.identity.description,
-            time_modified: Utc::now(),
-            primary,
-            transit_ips_v4,
-            transit_ips_v6,
-        }
     }
 }

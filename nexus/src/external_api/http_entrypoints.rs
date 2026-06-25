@@ -73,6 +73,7 @@ use nexus_types::external_api::user::{Group, User, UserBuiltin};
 use nexus_types::external_api::vpc::{Vpc, VpcRouter, VpcSubnet};
 use nexus_types_versions::latest::headers::RangeRequest;
 use nexus_types_versions::v2025_11_20_00;
+use nexus_types_versions::v2026_01_16_01;
 use omicron_common::address::IpRange;
 use omicron_common::api::external::AddressLot;
 use omicron_common::api::external::AddressLotBlock;
@@ -1453,8 +1454,26 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let path = path_params.into_inner();
             let updates = updates.into_inner();
             let pool_lookup = nexus.ip_pool_lookup(&opctx, &path.pool)?;
+            let pool = nexus
+                .ip_pool_update(&opctx, &pool_lookup, updates.into())
+                .await?;
+            Ok(HttpResponseOk(pool.into()))
+        })
+        .await
+    }
+
+    async fn system_ip_pool_update_v2026_02_09_00(
+        rqctx: RequestContext<ApiContext>,
+        path_params: Path<v2025_11_20_00::path_params::IpPoolPath>,
+        updates: TypedBody<v2025_11_20_00::ip_pool::IpPoolUpdate>,
+    ) -> Result<HttpResponseOk<v2025_11_20_00::ip_pool::IpPool>, HttpError>
+    {
+        audit_and_time(&rqctx, |opctx, nexus| async move {
+            let path = path_params.into_inner();
+            let updates = updates.into_inner();
+            let pool_lookup = nexus.ip_pool_lookup(&opctx, &path.pool)?;
             let pool =
-                nexus.ip_pool_update(&opctx, &pool_lookup, &updates).await?;
+                nexus.ip_pool_update(&opctx, &pool_lookup, updates).await?;
             Ok(HttpResponseOk(pool.into()))
         })
         .await
@@ -1810,6 +1829,22 @@ impl NexusExternalApi for NexusExternalApiImpl {
         rqctx: RequestContext<ApiContext>,
         path_params: Path<subnet_pool::SubnetPoolPath>,
         updates: TypedBody<subnet_pool::SubnetPoolUpdate>,
+    ) -> Result<HttpResponseOk<subnet_pool::SubnetPool>, HttpError> {
+        audit_and_time(&rqctx, |opctx, nexus| async move {
+            let path = path_params.into_inner();
+            let updates = updates.into_inner();
+            let pool = nexus
+                .subnet_pool_update(&opctx, &path.pool, updates.into())
+                .await?;
+            Ok(HttpResponseOk(pool))
+        })
+        .await
+    }
+
+    async fn system_subnet_pool_update_v2026_02_09_00(
+        rqctx: RequestContext<ApiContext>,
+        path_params: Path<v2026_01_16_01::subnet_pool::SubnetPoolPath>,
+        updates: TypedBody<v2026_01_16_01::subnet_pool::SubnetPoolUpdate>,
     ) -> Result<HttpResponseOk<subnet_pool::SubnetPool>, HttpError> {
         audit_and_time(&rqctx, |opctx, nexus| async move {
             let path = path_params.into_inner();
@@ -2218,6 +2253,33 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 external_subnet: path.external_subnet,
                 project: query.project,
             };
+            let subnet = nexus
+                .external_subnet_update(&opctx, selector, params.into())
+                .await?;
+            Ok(HttpResponseOk(subnet))
+        })
+        .await
+    }
+
+    async fn external_subnet_update_v2026_01_16_01(
+        rqctx: RequestContext<ApiContext>,
+        path_params: Path<v2026_01_16_01::external_subnet::ExternalSubnetPath>,
+        query_params: Query<v2025_11_20_00::project::OptionalProjectSelector>,
+        subnet_params: TypedBody<
+            v2026_01_16_01::external_subnet::ExternalSubnetUpdate,
+        >,
+    ) -> Result<
+        HttpResponseOk<v2026_01_16_01::external_subnet::ExternalSubnet>,
+        HttpError,
+    > {
+        audit_and_time(&rqctx, |opctx, nexus| async move {
+            let path = path_params.into_inner();
+            let query = query_params.into_inner();
+            let params = subnet_params.into_inner();
+            let selector = external_subnet::ExternalSubnetSelector {
+                external_subnet: path.external_subnet,
+                project: query.project,
+            };
             let subnet =
                 nexus.external_subnet_update(&opctx, selector, params).await?;
             Ok(HttpResponseOk(subnet))
@@ -2342,6 +2404,39 @@ impl NexusExternalApi for NexusExternalApiImpl {
         query_params: Query<project::OptionalProjectSelector>,
         updated_floating_ip: TypedBody<floating_ip::FloatingIpUpdate>,
     ) -> Result<HttpResponseOk<FloatingIp>, HttpError> {
+        audit_and_time(&rqctx, |opctx, nexus| async move {
+            let path = path_params.into_inner();
+            let query = query_params.into_inner();
+            let updated_floating_ip_params = updated_floating_ip.into_inner();
+            let floating_ip_selector = floating_ip::FloatingIpSelector {
+                project: query.project,
+                floating_ip: path.floating_ip,
+            };
+            let floating_ip_lookup =
+                nexus.floating_ip_lookup(&opctx, floating_ip_selector)?;
+            let floating_ip = nexus
+                .floating_ip_update(
+                    &opctx,
+                    floating_ip_lookup,
+                    updated_floating_ip_params.into(),
+                )
+                .await?;
+            Ok(HttpResponseOk(floating_ip))
+        })
+        .await
+    }
+
+    async fn floating_ip_update_v2025_11_20_00(
+        rqctx: RequestContext<ApiContext>,
+        path_params: Path<v2025_11_20_00::path_params::FloatingIpPath>,
+        query_params: Query<v2025_11_20_00::project::OptionalProjectSelector>,
+        updated_floating_ip: TypedBody<
+            v2025_11_20_00::floating_ip::FloatingIpUpdate,
+        >,
+    ) -> Result<
+        HttpResponseOk<v2025_11_20_00::floating_ip::FloatingIp>,
+        HttpError,
+    > {
         audit_and_time(&rqctx, |opctx, nexus| async move {
             let path = path_params.into_inner();
             let query = query_params.into_inner();
@@ -3528,7 +3623,34 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let group_lookup =
                 nexus.affinity_group_lookup(&opctx, group_selector)?;
             let affinity_group = nexus
-                .affinity_group_update(&opctx, &group_lookup, &updates)
+                .affinity_group_update(&opctx, &group_lookup, updates.into())
+                .await?;
+            Ok(HttpResponseOk(affinity_group))
+        })
+        .await
+    }
+
+    async fn affinity_group_update_v2025_11_20_00(
+        rqctx: RequestContext<ApiContext>,
+        query_params: Query<v2025_11_20_00::project::OptionalProjectSelector>,
+        path_params: Path<v2025_11_20_00::path_params::AffinityGroupPath>,
+        updated_group: TypedBody<v2025_11_20_00::affinity::AffinityGroupUpdate>,
+    ) -> Result<
+        HttpResponseOk<v2025_11_20_00::affinity::AffinityGroup>,
+        HttpError,
+    > {
+        audit_and_time(&rqctx, |opctx, nexus| async move {
+            let path = path_params.into_inner();
+            let query = query_params.into_inner();
+            let updates = updated_group.into_inner();
+            let group_selector = affinity::AffinityGroupSelector {
+                project: query.project,
+                affinity_group: path.affinity_group,
+            };
+            let group_lookup =
+                nexus.affinity_group_lookup(&opctx, group_selector)?;
+            let affinity_group = nexus
+                .affinity_group_update(&opctx, &group_lookup, updates)
                 .await?;
             Ok(HttpResponseOk(affinity_group))
         })
@@ -3830,7 +3952,40 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let group_lookup =
                 nexus.anti_affinity_group_lookup(&opctx, group_selector)?;
             let anti_affinity_group = nexus
-                .anti_affinity_group_update(&opctx, &group_lookup, &updates)
+                .anti_affinity_group_update(
+                    &opctx,
+                    &group_lookup,
+                    updates.into(),
+                )
+                .await?;
+            Ok(HttpResponseOk(anti_affinity_group))
+        })
+        .await
+    }
+
+    async fn anti_affinity_group_update_v2025_11_20_00(
+        rqctx: RequestContext<ApiContext>,
+        query_params: Query<v2025_11_20_00::project::OptionalProjectSelector>,
+        path_params: Path<v2025_11_20_00::path_params::AntiAffinityGroupPath>,
+        updated_group: TypedBody<
+            v2025_11_20_00::affinity::AntiAffinityGroupUpdate,
+        >,
+    ) -> Result<
+        HttpResponseOk<v2025_11_20_00::affinity::AntiAffinityGroup>,
+        HttpError,
+    > {
+        audit_and_time(&rqctx, |opctx, nexus| async move {
+            let path = path_params.into_inner();
+            let query = query_params.into_inner();
+            let updates = updated_group.into_inner();
+            let group_selector = affinity::AntiAffinityGroupSelector {
+                project: query.project,
+                anti_affinity_group: path.anti_affinity_group,
+            };
+            let group_lookup =
+                nexus.anti_affinity_group_lookup(&opctx, group_selector)?;
+            let anti_affinity_group = nexus
+                .anti_affinity_group_update(&opctx, &group_lookup, updates)
                 .await?;
             Ok(HttpResponseOk(anti_affinity_group))
         })
@@ -5104,6 +5259,41 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 .instance_network_interface_update(
                     &opctx,
                     &network_interface_lookup,
+                    updated_iface.into(),
+                )
+                .await?;
+            interface.try_into().map(HttpResponseOk).map_err(HttpError::from)
+        })
+        .await
+    }
+
+    async fn instance_network_interface_update_v2026_01_03_00(
+        rqctx: RequestContext<ApiContext>,
+        path_params: Path<path_params::NetworkInterfacePath>,
+        query_params: Query<instance::OptionalInstanceSelector>,
+        updated_iface: TypedBody<
+            v2025_11_20_00::instance::InstanceNetworkInterfaceUpdate,
+        >,
+    ) -> Result<HttpResponseOk<InstanceNetworkInterface>, HttpError> {
+        audit_and_time(&rqctx, |opctx, nexus| async move {
+            let path = path_params.into_inner();
+            let query = query_params.into_inner();
+            let updated_iface = updated_iface.into_inner();
+            let network_interface_selector =
+                instance::InstanceNetworkInterfaceSelector {
+                    project: query.project,
+                    instance: query.instance,
+                    network_interface: path.interface,
+                };
+            let network_interface_lookup = nexus
+                .instance_network_interface_lookup(
+                    &opctx,
+                    network_interface_selector,
+                )?;
+            let interface = nexus
+                .instance_network_interface_update(
+                    &opctx,
+                    &network_interface_lookup,
                     updated_iface,
                 )
                 .await?;
@@ -5621,7 +5811,32 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 vpc::VpcSelector { project: query.project, vpc: path.vpc };
             let vpc_lookup = nexus.vpc_lookup(&opctx, vpc_selector)?;
             let vpc = nexus
-                .project_update_vpc(&opctx, &vpc_lookup, &updated_vpc_params)
+                .project_update_vpc(
+                    &opctx,
+                    &vpc_lookup,
+                    updated_vpc_params.into(),
+                )
+                .await?;
+            Ok(HttpResponseOk(vpc.into()))
+        })
+        .await
+    }
+
+    async fn vpc_update_v2025_11_20_00(
+        rqctx: RequestContext<ApiContext>,
+        path_params: Path<v2025_11_20_00::path_params::VpcPath>,
+        query_params: Query<v2025_11_20_00::project::OptionalProjectSelector>,
+        updated_vpc: TypedBody<v2025_11_20_00::vpc::VpcUpdate>,
+    ) -> Result<HttpResponseOk<v2025_11_20_00::vpc::Vpc>, HttpError> {
+        audit_and_time(&rqctx, |opctx, nexus| async move {
+            let path = path_params.into_inner();
+            let query = query_params.into_inner();
+            let updated_vpc_params = updated_vpc.into_inner();
+            let vpc_selector =
+                vpc::VpcSelector { project: query.project, vpc: path.vpc };
+            let vpc_lookup = nexus.vpc_lookup(&opctx, vpc_selector)?;
+            let vpc = nexus
+                .project_update_vpc(&opctx, &vpc_lookup, updated_vpc_params)
                 .await?;
             Ok(HttpResponseOk(vpc.into()))
         })
@@ -6026,7 +6241,32 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let router_lookup =
                 nexus.vpc_router_lookup(&opctx, router_selector)?;
             let router = nexus
-                .vpc_update_router(&opctx, &router_lookup, &router_params)
+                .vpc_update_router(&opctx, &router_lookup, router_params.into())
+                .await?;
+            Ok(HttpResponseOk(router.into()))
+        })
+        .await
+    }
+
+    async fn vpc_router_update_v2025_11_20_00(
+        rqctx: RequestContext<ApiContext>,
+        path_params: Path<v2025_11_20_00::path_params::RouterPath>,
+        query_params: Query<v2025_11_20_00::vpc::OptionalVpcSelector>,
+        router_params: TypedBody<v2025_11_20_00::vpc::VpcRouterUpdate>,
+    ) -> Result<HttpResponseOk<v2025_11_20_00::vpc::VpcRouter>, HttpError> {
+        audit_and_time(&rqctx, |opctx, nexus| async move {
+            let path = path_params.into_inner();
+            let query = query_params.into_inner();
+            let router_params = router_params.into_inner();
+            let router_selector = vpc::RouterSelector {
+                project: query.project,
+                vpc: query.vpc,
+                router: path.router,
+            };
+            let router_lookup =
+                nexus.vpc_router_lookup(&opctx, router_selector)?;
+            let router = nexus
+                .vpc_update_router(&opctx, &router_lookup, router_params)
                 .await?;
             Ok(HttpResponseOk(router.into()))
         })
@@ -6163,7 +6403,37 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let route_lookup =
                 nexus.vpc_router_route_lookup(&opctx, route_selector)?;
             let route = nexus
-                .router_update_route(&opctx, &route_lookup, &router_params)
+                .router_update_route(
+                    &opctx,
+                    &route_lookup,
+                    router_params.into(),
+                )
+                .await?;
+            Ok(HttpResponseOk(route.into()))
+        })
+        .await
+    }
+
+    async fn vpc_router_route_update_v2025_11_20_00(
+        rqctx: RequestContext<ApiContext>,
+        path_params: Path<path_params::RoutePath>,
+        query_params: Query<vpc::OptionalRouterSelector>,
+        router_params: TypedBody<v2025_11_20_00::vpc::RouterRouteUpdate>,
+    ) -> Result<HttpResponseOk<RouterRoute>, HttpError> {
+        audit_and_time(&rqctx, |opctx, nexus| async move {
+            let path = path_params.into_inner();
+            let query = query_params.into_inner();
+            let router_params = router_params.into_inner();
+            let route_selector = vpc::RouteSelector {
+                project: query.project,
+                vpc: query.vpc,
+                router: query.router,
+                route: path.route,
+            };
+            let route_lookup =
+                nexus.vpc_router_route_lookup(&opctx, route_selector)?;
+            let route = nexus
+                .router_update_route(&opctx, &route_lookup, router_params)
                 .await?;
             Ok(HttpResponseOk(route.into()))
         })
@@ -8993,6 +9263,21 @@ impl NexusExternalApi for NexusExternalApiImpl {
         rqctx: RequestContext<Self::Context>,
         path_params: Path<alert::AlertReceiverSelector>,
         params: TypedBody<alert::WebhookReceiverUpdate>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        audit_and_time(&rqctx, |opctx, nexus| async move {
+            let webhook_selector = path_params.into_inner();
+            let params = params.into_inner();
+            let rx = nexus.alert_receiver_lookup(&opctx, webhook_selector)?;
+            nexus.webhook_receiver_update(&opctx, rx, params.into()).await?;
+            Ok(HttpResponseUpdatedNoContent())
+        })
+        .await
+    }
+
+    async fn webhook_receiver_update_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<v2025_11_20_00::alert::AlertReceiverSelector>,
+        params: TypedBody<v2025_11_20_00::alert::WebhookReceiverUpdate>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         audit_and_time(&rqctx, |opctx, nexus| async move {
             let webhook_selector = path_params.into_inner();

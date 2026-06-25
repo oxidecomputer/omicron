@@ -9,8 +9,6 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 /// Updateable properties of a Silo's resource limits.
-///
-/// A `PUT` replaces the resource, so every quota value is required.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct SiloQuotasUpdate {
     /// The amount of virtual CPUs available for running instances in the Silo

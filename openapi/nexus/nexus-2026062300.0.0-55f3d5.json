@@ -16081,18 +16081,16 @@
         "type": "object",
         "properties": {
           "description": {
-            "nullable": true,
             "type": "string"
           },
           "name": {
-            "nullable": true,
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Name"
-              }
-            ]
+            "$ref": "#/components/schemas/Name"
           }
-        }
+        },
+        "required": [
+          "description",
+          "name"
+        ]
       },
       "AffinityPolicy": {
         "description": "Affinity policy used to describe \"what to do when a request cannot be satisfied\"\n\nUsed for both Affinity and Anti-Affinity Groups",
@@ -16765,18 +16763,16 @@
         "type": "object",
         "properties": {
           "description": {
-            "nullable": true,
             "type": "string"
           },
           "name": {
-            "nullable": true,
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Name"
-              }
-            ]
+            "$ref": "#/components/schemas/Name"
           }
-        }
+        },
+        "required": [
+          "description",
+          "name"
+        ]
       },
       "AuditLogEntry": {
         "description": "Audit log entry",
@@ -20899,22 +20895,20 @@
         ]
       },
       "ExternalSubnetUpdate": {
-        "description": "Update an external subnet",
+        "description": "Updateable properties of an `ExternalSubnet`",
         "type": "object",
         "properties": {
           "description": {
-            "nullable": true,
             "type": "string"
           },
           "name": {
-            "nullable": true,
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Name"
-              }
-            ]
+            "$ref": "#/components/schemas/Name"
           }
-        }
+        },
+        "required": [
+          "description",
+          "name"
+        ]
       },
       "FailureDomain": {
         "description": "Describes the scope of affinity for the purposes of co-location.",
@@ -21423,22 +21417,20 @@
         ]
       },
       "FloatingIpUpdate": {
-        "description": "Updateable identity-related parameters",
+        "description": "Updateable properties of a `FloatingIp`",
         "type": "object",
         "properties": {
           "description": {
-            "nullable": true,
             "type": "string"
           },
           "name": {
-            "nullable": true,
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Name"
-              }
-            ]
+            "$ref": "#/components/schemas/Name"
           }
-        }
+        },
+        "required": [
+          "description",
+          "name"
+        ]
       },
       "Group": {
         "description": "View of a Group",
@@ -23337,31 +23329,29 @@
         "type": "object",
         "properties": {
           "description": {
-            "nullable": true,
             "type": "string"
           },
           "name": {
-            "nullable": true,
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Name"
-              }
-            ]
+            "$ref": "#/components/schemas/Name"
           },
           "primary": {
             "description": "Make a secondary interface the instance's primary interface.\n\nIf applied to a secondary interface, that interface will become the primary on the next reboot of the instance. Note that this may have implications for routing between instances, as the new primary interface will be on a distinct subnet from the previous primary interface.\n\nNote that this can only be used to select a new primary interface for an instance. Requests to change the primary interface into a secondary will return an error.",
-            "default": false,
             "type": "boolean"
           },
           "transit_ips": {
             "description": "A set of additional networks that this interface may send and receive traffic on",
-            "default": [],
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/IpNet"
             }
           }
-        }
+        },
+        "required": [
+          "description",
+          "name",
+          "primary",
+          "transit_ips"
+        ]
       },
       "InstanceResultsPage": {
         "description": "A single page of results",
@@ -24147,22 +24137,20 @@
         ]
       },
       "IpPoolUpdate": {
-        "description": "Parameters for updating an IP Pool",
+        "description": "Updateable properties of an `IpPool`",
         "type": "object",
         "properties": {
           "description": {
-            "nullable": true,
             "type": "string"
           },
           "name": {
-            "nullable": true,
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Name"
-              }
-            ]
+            "$ref": "#/components/schemas/Name"
           }
-        }
+        },
+        "required": [
+          "description",
+          "name"
+        ]
       },
       "IpPoolUtilization": {
         "description": "The utilization of IP addresses in a pool.\n\nNote that both the count of remaining addresses and the total capacity are integers, reported as floating point numbers. This accommodates allocations larger than a 64-bit integer, which is common with IPv6 address spaces. With very large IP Pools (> 2**53 addresses), integer precision will be lost, in exchange for representing the entire range. In such a case the pool still has many available addresses.",
@@ -26374,7 +26362,7 @@
         ]
       },
       "ProjectUpdate": {
-        "description": "Updateable properties of a `Project`\n\nA `PUT` replaces the resource, so every field is required: `name` and `description` must both be present.",
+        "description": "Updateable properties of a `Project`",
         "type": "object",
         "properties": {
           "description": {
@@ -27052,7 +27040,6 @@
         "type": "object",
         "properties": {
           "description": {
-            "nullable": true,
             "type": "string"
           },
           "destination": {
@@ -27064,12 +27051,7 @@
             ]
           },
           "name": {
-            "nullable": true,
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Name"
-              }
-            ]
+            "$ref": "#/components/schemas/Name"
           },
           "target": {
             "description": "The location that matched packets should be forwarded to.",
@@ -27081,7 +27063,9 @@
           }
         },
         "required": [
+          "description",
           "destination",
+          "name",
           "target"
         ]
       },
@@ -27679,7 +27663,7 @@
         ]
       },
       "SiloQuotasUpdate": {
-        "description": "Updateable properties of a Silo's resource limits.\n\nA `PUT` replaces the resource, so every quota value is required.",
+        "description": "Updateable properties of a Silo's resource limits.",
         "type": "object",
         "properties": {
           "cpus": {
@@ -28714,22 +28698,20 @@
         ]
       },
       "SubnetPoolUpdate": {
-        "description": "Update a subnet pool",
+        "description": "Updateable properties of a `SubnetPool`",
         "type": "object",
         "properties": {
           "description": {
-            "nullable": true,
             "type": "string"
           },
           "name": {
-            "nullable": true,
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Name"
-              }
-            ]
+            "$ref": "#/components/schemas/Name"
           }
-        }
+        },
+        "required": [
+          "description",
+          "name"
+        ]
       },
       "SubnetPoolUtilization": {
         "description": "Utilization of addresses in a subnet pool.\n\nNote that both the count of remaining addresses and the total capacity are integers, reported as floating point numbers. This accommodates allocations larger than a 64-bit integer, which is common with IPv6 address spaces. With very large subnet pools (> 2**53 addresses), integer precision will be lost, in exchange for representing the entire range. In such a case the pool still has many available addresses.",
@@ -28852,7 +28834,7 @@
         "properties": {
           "user_comment": {
             "nullable": true,
-            "description": "User comment for the support bundle\n\nMust be present, but may be explicit `null` to clear the comment. The prior version treats an omitted comment as a request to clear it; value semantics requires the client to be explicit.",
+            "description": "User comment for the support bundle",
             "type": "string"
           }
         },
@@ -29688,10 +29670,12 @@
         "properties": {
           "external_jumbo_frames_opt_in_enabled": {
             "description": "Toggle the fleet-wide external jumbo-frames opt-in.",
-            "default": false,
             "type": "boolean"
           }
-        }
+        },
+        "required": [
+          "external_jumbo_frames_opt_in_enabled"
+        ]
       },
       "TargetRelease": {
         "description": "View of a system software target release",
@@ -31243,14 +31227,16 @@
         "type": "object",
         "properties": {
           "rules": {
-            "default": [],
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/VpcFirewallRuleUpdate"
             },
             "maxItems": 1024
           }
-        }
+        },
+        "required": [
+          "rules"
+        ]
       },
       "VpcFirewallRules": {
         "description": "Collection of a Vpc's firewall rules",
@@ -31387,18 +31373,16 @@
         "type": "object",
         "properties": {
           "description": {
-            "nullable": true,
             "type": "string"
           },
           "name": {
-            "nullable": true,
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Name"
-              }
-            ]
+            "$ref": "#/components/schemas/Name"
           }
-        }
+        },
+        "required": [
+          "description",
+          "name"
+        ]
       },
       "VpcSubnet": {
         "description": "A VPC subnet represents a logical grouping for instances that allows network traffic between them, within an IPv4 subnetwork or optionally an IPv6 subnetwork.",
@@ -31535,7 +31519,7 @@
         ]
       },
       "VpcSubnetUpdate": {
-        "description": "Updateable properties of a `VpcSubnet`\n\nA `PUT` replaces the resource, so `name` and `description` are required. `custom_router` is clearable: it must be present, but may be explicit `null` to detach any custom router.",
+        "description": "Updateable properties of a `VpcSubnet`",
         "type": "object",
         "properties": {
           "custom_router": {
@@ -31565,26 +31549,20 @@
         "type": "object",
         "properties": {
           "description": {
-            "nullable": true,
             "type": "string"
           },
           "dns_name": {
-            "nullable": true,
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Name"
-              }
-            ]
+            "$ref": "#/components/schemas/Name"
           },
           "name": {
-            "nullable": true,
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Name"
-              }
-            ]
+            "$ref": "#/components/schemas/Name"
           }
-        }
+        },
+        "required": [
+          "description",
+          "dns_name",
+          "name"
+        ]
       },
       "WebhookCreate": {
         "description": "Create-time identity-related parameters",
@@ -31783,24 +31761,22 @@
         "type": "object",
         "properties": {
           "description": {
-            "nullable": true,
             "type": "string"
           },
           "endpoint": {
-            "nullable": true,
             "description": "The URL that webhook notification requests should be sent to",
             "type": "string",
             "format": "uri"
           },
           "name": {
-            "nullable": true,
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Name"
-              }
-            ]
+            "$ref": "#/components/schemas/Name"
           }
-        }
+        },
+        "required": [
+          "description",
+          "endpoint",
+          "name"
+        ]
       },
       "WebhookSecret": {
         "description": "A view of a shared secret key assigned to a webhook receiver.\n\nOnce a secret is created, the value of the secret is not available in the API, as it must remain secret. Instead, secrets are referenced by their unique IDs assigned when they are created.",

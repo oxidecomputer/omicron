@@ -59,7 +59,6 @@ use nexus_types::external_api::silo::SiloIdentityMode;
 use nexus_types::identity::Resource;
 use nexus_types::silo::INTERNAL_SILO_ID;
 use omicron_common::address::Ipv6Range;
-use omicron_common::api::external::IdentityMetadataUpdateParams;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::SimpleIdentityOrName;
 use omicron_common::api::external::{IdentityMetadataCreateParams, Name};
@@ -173,9 +172,9 @@ async fn test_ip_pool_basic_crud(cptestctx: &ControlPlaneTestContext) {
     let new_ip_pool_rem_range_url =
         format!("{}/ranges/remove", new_ip_pool_url);
     let updates = IpPoolUpdate {
-        identity: IdentityMetadataUpdateParams {
-            name: Some(String::from(new_pool_name).parse().unwrap()),
-            description: None,
+        identity: ip_pool::IdentityMetadataUpdateParams {
+            name: String::from(new_pool_name).parse().unwrap(),
+            description: created_pool.identity.description.clone(),
         },
     };
     let modified_pool: IpPool =
@@ -380,9 +379,9 @@ async fn test_ip_pool_service_no_cud(cptestctx: &ControlPlaneTestContext) {
 
     // Update not allowed
     let put_body = ip_pool::IpPoolUpdate {
-        identity: IdentityMetadataUpdateParams {
-            name: Some("test".parse().unwrap()),
-            description: Some("test".to_string()),
+        identity: ip_pool::IdentityMetadataUpdateParams {
+            name: "test".parse().unwrap(),
+            description: "test".to_string(),
         },
     };
     let error = object_put_error(

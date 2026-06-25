@@ -87,16 +87,6 @@ pub struct VpcRouterUpdate {
     pub time_modified: DateTime<Utc>,
 }
 
-impl From<vpc::VpcRouterUpdate> for VpcRouterUpdate {
-    fn from(params: vpc::VpcRouterUpdate) -> Self {
-        Self {
-            name: params.identity.name.map(Name),
-            description: params.identity.description,
-            time_modified: Utc::now(),
-        }
-    }
-}
-
 impl DatastoreAttachTargetConfig<VpcSubnet> for VpcRouter {
     type Id = Uuid;
 
