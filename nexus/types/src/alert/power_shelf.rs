@@ -5,8 +5,10 @@
 //! Power shelf alert types.
 
 use super::*;
+use crate::external_api::hardware::Baseboard;
 use chrono::DateTime;
 use chrono::Utc;
+use uuid::Uuid;
 
 #[derive(Debug, Clone, Serialize, JsonSchema)]
 pub struct PsuInsertedV0 {
@@ -34,8 +36,10 @@ impl AlertPayload for PsuRemovedV0 {
 
 #[derive(Debug, Clone, Serialize, JsonSchema)]
 pub struct PowerShelf {
-    pub slot: u8,
-    pub identity: Option<OxideVpdIdentity>,
+    pub id: Uuid,
+    // pub rack_id: Uuid,
+    pub shelf: u8,
+    pub baseboard: Option<Baseboard>,
 }
 
 #[derive(Debug, Clone, Serialize, JsonSchema)]
@@ -50,11 +54,4 @@ pub struct PsuIdentity {
     pub part_number: Option<String>,
     pub firmware_revision: Option<String>,
     pub serial_number: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, JsonSchema)]
-pub struct OxideVpdIdentity {
-    pub part_number: String,
-    pub revision: u32,
-    pub serial_number: String,
 }
