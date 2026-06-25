@@ -185,6 +185,7 @@ httpmock.workspace = true
 httptest.workspace = true
 hubtools.workspace = true
 hyper-rustls.workspace = true
+nexus-background-task-interface = { workspace = true, features = ["testing"] }
 nexus-client.workspace = true
 nexus-db-queries = { workspace = true, features = ["testing"] }
 nexus-fm = { workspace = true, features = ["testing"] }
@@ -209,7 +210,6 @@ sp-sim.workspace = true
 strum.workspace = true
 subprocess.workspace = true
 term.workspace = true
-tokio-test.workspace = true
 tufaceous.workspace = true
 tufaceous-artifact.workspace = true
 tufaceous-lib.workspace = true
