@@ -80,8 +80,9 @@ pub struct EreportData {
 }
 
 impl EreportData {
-    /// Interpret a service processor ereport from a raw JSON blobule, plus the
-    /// restart ID and collection metadata.
+    /// Interpret a service processor ereport from a raw JSON blobule and
+    /// restart ID, returning a tuple of the [`Ena`] and [`EreportData`]
+    /// suitable for insertion into the database.
     ///
     /// This conversion is lossy; if some information is not present in the raw
     /// ereport JSON, such as the SP's VPD identity, we log a warning, rather
