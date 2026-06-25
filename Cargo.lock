@@ -647,7 +647,7 @@ dependencies = [
 [[package]]
 name = "bhyve_api"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=2fe83dba74296d9950f7b3fc898fed29ca0fe42d#2fe83dba74296d9950f7b3fc898fed29ca0fe42d"
+source = "git+https://github.com/oxidecomputer/propolis?rev=979b72896bc39a876c98fb32fe706da37a4fc408#979b72896bc39a876c98fb32fe706da37a4fc408"
 dependencies = [
  "bhyve_api_sys",
  "libc",
@@ -657,7 +657,7 @@ dependencies = [
 [[package]]
 name = "bhyve_api_sys"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=2fe83dba74296d9950f7b3fc898fed29ca0fe42d#2fe83dba74296d9950f7b3fc898fed29ca0fe42d"
+source = "git+https://github.com/oxidecomputer/propolis?rev=979b72896bc39a876c98fb32fe706da37a4fc408#979b72896bc39a876c98fb32fe706da37a4fc408"
 dependencies = [
  "libc",
  "strum 0.26.3",
@@ -2149,7 +2149,7 @@ dependencies = [
 [[package]]
 name = "crucible-agent-client"
 version = "0.0.1"
-source = "git+https://github.com/oxidecomputer/crucible?rev=2a9e74d86987b46fa6ff155237b9f99a16e7fb80#2a9e74d86987b46fa6ff155237b9f99a16e7fb80"
+source = "git+https://github.com/oxidecomputer/crucible?rev=2bfe090eb5318ec8c467157018db2429d4df535b#2bfe090eb5318ec8c467157018db2429d4df535b"
 dependencies = [
  "anyhow",
  "chrono",
@@ -2165,7 +2165,7 @@ dependencies = [
 [[package]]
 name = "crucible-client-types"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/crucible?rev=2a9e74d86987b46fa6ff155237b9f99a16e7fb80#2a9e74d86987b46fa6ff155237b9f99a16e7fb80"
+source = "git+https://github.com/oxidecomputer/crucible?rev=2bfe090eb5318ec8c467157018db2429d4df535b#2bfe090eb5318ec8c467157018db2429d4df535b"
 dependencies = [
  "base64 0.22.1",
  "crucible-workspace-hack",
@@ -2178,7 +2178,7 @@ dependencies = [
 [[package]]
 name = "crucible-common"
 version = "0.0.1"
-source = "git+https://github.com/oxidecomputer/crucible?rev=2a9e74d86987b46fa6ff155237b9f99a16e7fb80#2a9e74d86987b46fa6ff155237b9f99a16e7fb80"
+source = "git+https://github.com/oxidecomputer/crucible?rev=2bfe090eb5318ec8c467157018db2429d4df535b#2bfe090eb5318ec8c467157018db2429d4df535b"
 dependencies = [
  "anyhow",
  "atty",
@@ -2208,7 +2208,7 @@ dependencies = [
 [[package]]
 name = "crucible-pantry-client"
 version = "0.0.1"
-source = "git+https://github.com/oxidecomputer/crucible?rev=2a9e74d86987b46fa6ff155237b9f99a16e7fb80#2a9e74d86987b46fa6ff155237b9f99a16e7fb80"
+source = "git+https://github.com/oxidecomputer/crucible?rev=2bfe090eb5318ec8c467157018db2429d4df535b#2bfe090eb5318ec8c467157018db2429d4df535b"
 dependencies = [
  "anyhow",
  "chrono",
@@ -2225,7 +2225,7 @@ dependencies = [
 [[package]]
 name = "crucible-smf"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/crucible?rev=2a9e74d86987b46fa6ff155237b9f99a16e7fb80#2a9e74d86987b46fa6ff155237b9f99a16e7fb80"
+source = "git+https://github.com/oxidecomputer/crucible?rev=2bfe090eb5318ec8c467157018db2429d4df535b#2bfe090eb5318ec8c467157018db2429d4df535b"
 dependencies = [
  "crucible-workspace-hack",
  "libc",
@@ -11263,7 +11263,7 @@ dependencies = [
 [[package]]
 name = "propolis-api-types-versions"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=2fe83dba74296d9950f7b3fc898fed29ca0fe42d#2fe83dba74296d9950f7b3fc898fed29ca0fe42d"
+source = "git+https://github.com/oxidecomputer/propolis?rev=979b72896bc39a876c98fb32fe706da37a4fc408#979b72896bc39a876c98fb32fe706da37a4fc408"
 dependencies = [
  "crucible-client-types",
  "propolis_types",
@@ -11276,7 +11276,7 @@ dependencies = [
 [[package]]
 name = "propolis-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=2fe83dba74296d9950f7b3fc898fed29ca0fe42d#2fe83dba74296d9950f7b3fc898fed29ca0fe42d"
+source = "git+https://github.com/oxidecomputer/propolis?rev=979b72896bc39a876c98fb32fe706da37a4fc408#979b72896bc39a876c98fb32fe706da37a4fc408"
 dependencies = [
  "async-trait",
  "base64 0.21.7",
@@ -11300,7 +11300,7 @@ dependencies = [
 [[package]]
 name = "propolis-mock-server"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=2fe83dba74296d9950f7b3fc898fed29ca0fe42d#2fe83dba74296d9950f7b3fc898fed29ca0fe42d"
+source = "git+https://github.com/oxidecomputer/propolis?rev=979b72896bc39a876c98fb32fe706da37a4fc408#979b72896bc39a876c98fb32fe706da37a4fc408"
 dependencies = [
  "anyhow",
  "atty",
@@ -11333,7 +11333,7 @@ dependencies = [
 [[package]]
 name = "propolis_api_types"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=2fe83dba74296d9950f7b3fc898fed29ca0fe42d#2fe83dba74296d9950f7b3fc898fed29ca0fe42d"
+source = "git+https://github.com/oxidecomputer/propolis?rev=979b72896bc39a876c98fb32fe706da37a4fc408#979b72896bc39a876c98fb32fe706da37a4fc408"
 dependencies = [
  "crucible-client-types",
  "propolis-api-types-versions",
@@ -11342,7 +11342,7 @@ dependencies = [
 [[package]]
 name = "propolis_types"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=2fe83dba74296d9950f7b3fc898fed29ca0fe42d#2fe83dba74296d9950f7b3fc898fed29ca0fe42d"
+source = "git+https://github.com/oxidecomputer/propolis?rev=979b72896bc39a876c98fb32fe706da37a4fc408#979b72896bc39a876c98fb32fe706da37a4fc408"
 dependencies = [
  "schemars 0.8.22",
  "serde",

@@ -481,11 +481,11 @@ crossterm = { version = "0.29.0", features = ["event-stream"] }
 # NOTE: if you change the pinned revision of the `crucible` dependencies, you
 # must also update the references in package-manifest.toml to match the new
 # revision.
-crucible-agent-client = { git = "https://github.com/oxidecomputer/crucible", rev = "2a9e74d86987b46fa6ff155237b9f99a16e7fb80" }
-crucible-pantry-client = { git = "https://github.com/oxidecomputer/crucible", rev = "2a9e74d86987b46fa6ff155237b9f99a16e7fb80" }
-crucible-smf = { git = "https://github.com/oxidecomputer/crucible", rev = "2a9e74d86987b46fa6ff155237b9f99a16e7fb80" }
-crucible-common = { git = "https://github.com/oxidecomputer/crucible", rev = "2a9e74d86987b46fa6ff155237b9f99a16e7fb80" }
-crucible-client-types = { git = "https://github.com/oxidecomputer/crucible", rev = "2a9e74d86987b46fa6ff155237b9f99a16e7fb80" }
+crucible-agent-client = { git = "https://github.com/oxidecomputer/crucible", rev = "2bfe090eb5318ec8c467157018db2429d4df535b" }
+crucible-pantry-client = { git = "https://github.com/oxidecomputer/crucible", rev = "2bfe090eb5318ec8c467157018db2429d4df535b" }
+crucible-smf = { git = "https://github.com/oxidecomputer/crucible", rev = "2bfe090eb5318ec8c467157018db2429d4df535b" }
+crucible-common = { git = "https://github.com/oxidecomputer/crucible", rev = "2bfe090eb5318ec8c467157018db2429d4df535b" }
+crucible-client-types = { git = "https://github.com/oxidecomputer/crucible", rev = "2bfe090eb5318ec8c467157018db2429d4df535b" }
 # NOTE: See above!
 csv = "1.3.1"
 curve25519-dalek = "4"
@@ -734,11 +734,11 @@ progenitor-extras = "0.2.0"
 # NOTE: if you change the pinned revision of the `bhyve_api` and propolis
 # dependencies, you must also update the references in package-manifest.toml to
 # match the new revision.
-bhyve_api = { git = "https://github.com/oxidecomputer/propolis", rev = "2fe83dba74296d9950f7b3fc898fed29ca0fe42d" }
-propolis-api-types-versions = { git = "https://github.com/oxidecomputer/propolis", rev = "2fe83dba74296d9950f7b3fc898fed29ca0fe42d" }
-propolis_api_types = { git = "https://github.com/oxidecomputer/propolis", rev = "2fe83dba74296d9950f7b3fc898fed29ca0fe42d" }
-propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "2fe83dba74296d9950f7b3fc898fed29ca0fe42d" }
-propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", rev = "2fe83dba74296d9950f7b3fc898fed29ca0fe42d" }
+bhyve_api = { git = "https://github.com/oxidecomputer/propolis", rev = "979b72896bc39a876c98fb32fe706da37a4fc408" }
+propolis-api-types-versions = { git = "https://github.com/oxidecomputer/propolis", rev = "979b72896bc39a876c98fb32fe706da37a4fc408" }
+propolis_api_types = { git = "https://github.com/oxidecomputer/propolis", rev = "979b72896bc39a876c98fb32fe706da37a4fc408" }
+propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "979b72896bc39a876c98fb32fe706da37a4fc408" }
+propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", rev = "979b72896bc39a876c98fb32fe706da37a4fc408" }
 # NOTE: see above!
 proptest = "1.7.0"
 qorb = "0.4.1"
