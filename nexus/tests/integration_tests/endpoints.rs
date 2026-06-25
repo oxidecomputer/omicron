@@ -55,7 +55,6 @@ use omicron_common::api::external::AddressLotKind;
 use omicron_common::api::external::AllowedSourceIps;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::IdentityMetadataCreateParams;
-use omicron_common::api::external::IdentityMetadataUpdateParams;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::Nullable;
@@ -857,9 +856,9 @@ pub static DEMO_INSTANCE_NIC_CREATE: LazyLock<
 pub static DEMO_INSTANCE_NIC_PUT: LazyLock<
     instance::InstanceNetworkInterfaceUpdate,
 > = LazyLock::new(|| instance::InstanceNetworkInterfaceUpdate {
-    identity: IdentityMetadataUpdateParams {
-        name: None,
-        description: Some(String::from("an updated description")),
+    identity: instance::IdentityMetadataUpdateParamsStrict {
+        name: DEMO_INSTANCE_NIC_NAME.clone(),
+        description: String::from("an updated description"),
     },
     primary: false,
     transit_ips: vec![],
@@ -1225,9 +1224,9 @@ pub static DEMO_SUBNET_POOL_URL: LazyLock<String> = LazyLock::new(|| {
 });
 pub static DEMO_SUBNET_POOL_UPDATE: LazyLock<subnet_pool::SubnetPoolUpdate> =
     LazyLock::new(|| subnet_pool::SubnetPoolUpdate {
-        identity: IdentityMetadataUpdateParams {
-            name: None,
-            description: Some(String::from("an updated subnet pool")),
+        identity: subnet_pool::IdentityMetadataUpdateParamsStrict {
+            name: DEMO_SUBNET_POOL_NAME.clone(),
+            description: String::from("an updated subnet pool"),
         },
     });
 pub static DEMO_SUBNET_POOL_MEMBERS_URL: LazyLock<String> =
@@ -2483,9 +2482,9 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
                     AllowedMethod::Get,
                     AllowedMethod::Put(
                         serde_json::to_value(&vpc::RouterRouteUpdate {
-                            identity: IdentityMetadataUpdateParams {
-                                name: None,
-                                description: Some("different".to_string()),
+                            identity: vpc::IdentityMetadataUpdateParamsStrict {
+                                name: DEMO_ROUTER_ROUTE_NAME.clone(),
+                                description: "different".to_string(),
                             },
                             target: RouteTarget::Ip(IpAddr::from(
                                 Ipv4Addr::new(127, 0, 0, 1),

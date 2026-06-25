@@ -9,6 +9,8 @@ use nexus_db_queries::authz::ApiResource;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::queries::network_interface;
 use nexus_types::external_api::instance;
+// Oldest API version whose update bodies still allow omitting fields.
+use nexus_types_versions::v2025_11_20_00 as update_compat;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
@@ -22,6 +24,8 @@ use omicron_uuid_kinds::InstanceUuid;
 use oxnet::IpNet;
 use uuid::Uuid;
 
+use itertools::Either;
+use itertools::Itertools;
 use nexus_db_lookup::{self, LookupPath};
 use nexus_db_queries::authz;
 use nexus_db_queries::db;
@@ -145,22 +149,44 @@ impl super::Nexus {
             .await
     }
 
-    /// Update a network interface for the given instance.
+    /// Update a network interface for the given instance. Both API versions of
+    /// this endpoint pass through here. The newer body is strict — `name`,
+    /// `description`, `primary`, and `transit_ips` are all required — while the
+    /// older (`update_compat`) one is lax: `name`/`description` may be omitted
+    /// (leaving them unchanged), and `primary`/`transit_ips` default. We take
+    /// the lax type because it can hold a body from either version. A strict
+    /// body converts into it by wrapping `name`/`description` in `Some`; the
+    /// reverse is impossible, since there's no value to supply for a field the
+    /// lax body omitted.
     pub(crate) async fn instance_network_interface_update(
         &self,
         opctx: &OpContext,
         network_interface_lookup: &lookup::InstanceNetworkInterface<'_>,
-        updates: instance::InstanceNetworkInterfaceUpdate,
+        updates: update_compat::instance::InstanceNetworkInterfaceUpdate,
     ) -> UpdateResult<db::model::InstanceNetworkInterface> {
         let (.., authz_instance, authz_interface) =
             network_interface_lookup.lookup_for(authz::Action::Modify).await?;
         validate_transit_ips(updates.transit_ips.as_slice())?;
+        let primary = if updates.primary { Some(true) } else { None };
+        let (transit_ips_v4, transit_ips_v6): (Vec<_>, Vec<_>) =
+            updates.transit_ips.into_iter().partition_map(|net| match net {
+                IpNet::V4(v4) => Either::Left(db::model::Ipv4Net::from(v4)),
+                IpNet::V6(v6) => Either::Right(db::model::Ipv6Net::from(v6)),
+            });
+        let update = db::model::NetworkInterfaceUpdate {
+            name: updates.identity.name.map(db::model::Name),
+            description: updates.identity.description,
+            time_modified: chrono::Utc::now(),
+            primary,
+            transit_ips_v4,
+            transit_ips_v6,
+        };
         self.db_datastore
             .instance_update_network_interface(
                 opctx,
                 &authz_instance,
                 &authz_interface,
-                db::model::NetworkInterfaceUpdate::from(updates),
+                update,
             )
             .await
     }

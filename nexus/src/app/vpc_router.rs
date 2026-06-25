@@ -13,6 +13,7 @@ use nexus_db_queries::db::model::RouterRoute;
 use nexus_db_queries::db::model::VpcRouter;
 use nexus_db_queries::db::model::VpcRouterKind;
 use nexus_types::external_api::vpc;
+use nexus_types::identity::Resource;
 // Oldest API version whose update bodies still allow omitting fields.
 use nexus_types_versions::v2025_11_20_00 as update_compat;
 use omicron_common::api::external::CreateResult;
@@ -289,21 +290,43 @@ impl super::Nexus {
             .await
     }
 
+    /// Update a VPC router route. Both API versions of this endpoint pass
+    /// through here. The newer body is strict — `name`, `description`,
+    /// `target`, and `destination` are all required — while the older
+    /// (`update_compat`) one is lax: `name`/`description` may be omitted
+    /// (leaving them unchanged). We take the lax type because it can hold a
+    /// body from either version. A strict body converts into it by wrapping
+    /// `name`/`description` in `Some`; the reverse is impossible, since there's
+    /// no value to supply for a field the lax body omitted.
     pub(crate) async fn router_update_route(
         &self,
         opctx: &OpContext,
         route_lookup: &lookup::RouterRoute<'_>,
-        params: &vpc::RouterRouteUpdate,
+        params: update_compat::vpc::RouterRouteUpdate,
     ) -> UpdateResult<RouterRoute> {
         let (.., authz_router, authz_route, db_route) =
             route_lookup.fetch_for(authz::Action::Modify).await?;
 
+        // Default routes allow a constrained form of modification: only the
+        // target may change. Under strict bodies `name`/`description` are
+        // always present, so compare against the existing values rather than
+        // checking for presence. An omitted field (lax body) resolves to the
+        // existing value, so this is a no-op for callers who leave it unchanged.
+        let new_name = params
+            .identity
+            .name
+            .clone()
+            .unwrap_or_else(|| db_route.name().clone());
+        let new_description = params
+            .identity
+            .description
+            .clone()
+            .unwrap_or_else(|| db_route.description().to_string());
+
         match db_route.kind.0 {
-            // Default routes allow a constrained form of modification:
-            // only the target may change.
             RouterRouteKind::Default
-                if params.identity.name.is_some()
-                    || params.identity.description.is_some()
+                if new_name != *db_route.name()
+                    || new_description.as_str() != db_route.description()
                     || params.destination != db_route.destination.0 =>
             {
                 return Err(Error::invalid_request(
@@ -328,9 +351,16 @@ impl super::Nexus {
             db_route.kind.0,
         )?;
 
+        let update = db::model::RouterRouteUpdate {
+            name: params.identity.name.map(db::model::Name),
+            description: params.identity.description,
+            time_modified: chrono::Utc::now(),
+            target: db::model::RouteTarget(params.target),
+            destination: db::model::RouteDestination::new(params.destination),
+        };
         let out = self
             .db_datastore
-            .router_update_route(&opctx, &authz_route, params.clone().into())
+            .router_update_route(&opctx, &authz_route, update)
             .await?;
 
         self.vpc_router_increment_rpw_version(opctx, &authz_router).await?;

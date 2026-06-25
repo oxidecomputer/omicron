@@ -165,7 +165,6 @@ pub mod instance {
     pub use crate::v2025_11_20_00::instance::InstanceCpuCount;
     pub use crate::v2025_11_20_00::instance::InstanceDiskAttach;
     pub use crate::v2025_11_20_00::instance::InstanceNetworkInterfaceSelector;
-    pub use crate::v2025_11_20_00::instance::InstanceNetworkInterfaceUpdate;
     pub use crate::v2025_11_20_00::instance::InstanceRuntimeState;
     pub use crate::v2025_11_20_00::instance::InstanceSelector;
     pub use crate::v2025_11_20_00::instance::InstanceSerialConsoleData;
@@ -198,6 +197,9 @@ pub mod instance {
     pub use crate::v2026_06_08_00::instance::InstanceCpuPlatform;
     pub use crate::v2026_06_08_00::instance::InstanceCreate;
     pub use crate::v2026_06_08_00::instance::InstanceUpdate;
+
+    pub use crate::v2026_06_23_00::identity::IdentityMetadataUpdateParamsStrict;
+    pub use crate::v2026_06_23_00::instance::InstanceNetworkInterfaceUpdate;
 }
 
 pub mod internet_gateway {
@@ -454,7 +456,6 @@ pub mod vpc {
     pub use crate::v2025_11_20_00::vpc::OptionalVpcSelector;
     pub use crate::v2025_11_20_00::vpc::RouteSelector;
     pub use crate::v2025_11_20_00::vpc::RouterRouteCreate;
-    pub use crate::v2025_11_20_00::vpc::RouterRouteUpdate;
     pub use crate::v2025_11_20_00::vpc::RouterSelector;
     pub use crate::v2025_11_20_00::vpc::SubnetSelector;
     pub use crate::v2025_11_20_00::vpc::Vpc;
@@ -467,6 +468,7 @@ pub mod vpc {
     pub use crate::v2025_11_20_00::vpc::VpcSubnetCreate;
 
     pub use crate::v2026_06_23_00::identity::IdentityMetadataUpdateParamsStrict;
+    pub use crate::v2026_06_23_00::vpc::RouterRouteUpdate;
     pub use crate::v2026_06_23_00::vpc::VpcRouterUpdate;
     pub use crate::v2026_06_23_00::vpc::VpcSubnetUpdate;
     pub use crate::v2026_06_23_00::vpc::VpcUpdate;
@@ -518,7 +520,6 @@ pub mod subnet_pool {
     pub use crate::v2026_01_16_01::subnet_pool::SubnetPoolSiloLink;
     pub use crate::v2026_01_16_01::subnet_pool::SubnetPoolSiloPath;
     pub use crate::v2026_01_16_01::subnet_pool::SubnetPoolSiloUpdate;
-    pub use crate::v2026_01_16_01::subnet_pool::SubnetPoolUpdate;
     // Utilization type from SUBNET_POOL_UTILIZATION_REMAINING.
     pub use crate::v2026_03_25_00::subnet_pool::SubnetPoolUtilization;
 
@@ -529,6 +530,9 @@ pub mod subnet_pool {
     // Create/update types from FLOATING_IP_ALLOCATOR_UPDATE.
     pub use crate::v2026_01_22_00::subnet_pool::SubnetPoolCreate;
     pub use crate::v2026_01_22_00::subnet_pool::SubnetPoolMemberAdd;
+
+    pub use crate::v2026_06_23_00::identity::IdentityMetadataUpdateParamsStrict;
+    pub use crate::v2026_06_23_00::subnet_pool::SubnetPoolUpdate;
 }
 
 pub mod external_subnet {

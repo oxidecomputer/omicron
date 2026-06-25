@@ -2135,12 +2135,26 @@ pub trait NexusExternalApi {
         method = PUT,
         path = "/v1/system/subnet-pools/{pool}",
         tags = ["system/subnet-pools"],
-        versions = VERSION_RENAME_POOL_ENDPOINTS..,
+        versions = VERSION_STRICT_PUT_BODIES..,
     }]
     async fn system_subnet_pool_update(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<latest::subnet_pool::SubnetPoolPath>,
         updates: TypedBody<latest::subnet_pool::SubnetPoolUpdate>,
+    ) -> Result<HttpResponseOk<latest::subnet_pool::SubnetPool>, HttpError>;
+
+    /// Update subnet pool
+    #[endpoint {
+        operation_id = "system_subnet_pool_update",
+        method = PUT,
+        path = "/v1/system/subnet-pools/{pool}",
+        tags = ["system/subnet-pools"],
+        versions = VERSION_RENAME_POOL_ENDPOINTS..VERSION_STRICT_PUT_BODIES,
+    }]
+    async fn system_subnet_pool_update_v2026_02_09_00(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<v2026_01_16_01::subnet_pool::SubnetPoolPath>,
+        updates: TypedBody<v2026_01_16_01::subnet_pool::SubnetPoolUpdate>,
     ) -> Result<HttpResponseOk<latest::subnet_pool::SubnetPool>, HttpError>;
 
     /// Update subnet pool
@@ -2159,7 +2173,12 @@ pub trait NexusExternalApi {
         HttpResponseOk<v2026_01_22_00::subnet_pool::SubnetPool>,
         HttpError,
     > {
-        Self::system_subnet_pool_update(rqctx, path_params, updates).await
+        Self::system_subnet_pool_update_v2026_02_09_00(
+            rqctx,
+            path_params,
+            updates,
+        )
+        .await
     }
 
     /// Update subnet pool
@@ -2180,8 +2199,12 @@ pub trait NexusExternalApi {
         HttpError,
     > {
         let HttpResponseOk(pool) =
-            Self::system_subnet_pool_update(rqctx, path_params, updates)
-                .await?;
+            Self::system_subnet_pool_update_v2026_02_09_00(
+                rqctx,
+                path_params,
+                updates,
+            )
+            .await?;
         Ok(HttpResponseOk(pool.into()))
     }
 
@@ -6493,7 +6516,7 @@ pub trait NexusExternalApi {
         method = PUT,
         path = "/v1/network-interfaces/{interface}",
         tags = ["instances"],
-        versions = VERSION_DUAL_STACK_NICS..,
+        versions = VERSION_STRICT_PUT_BODIES..,
     }]
     async fn instance_network_interface_update(
         rqctx: RequestContext<Self::Context>,
@@ -6501,6 +6524,23 @@ pub trait NexusExternalApi {
         query_params: Query<latest::instance::OptionalInstanceSelector>,
         updated_iface: TypedBody<
             latest::instance::InstanceNetworkInterfaceUpdate,
+        >,
+    ) -> Result<HttpResponseOk<InstanceNetworkInterface>, HttpError>;
+
+    /// Update network interface
+    #[endpoint {
+        operation_id = "instance_network_interface_update",
+        method = PUT,
+        path = "/v1/network-interfaces/{interface}",
+        tags = ["instances"],
+        versions = VERSION_DUAL_STACK_NICS..VERSION_STRICT_PUT_BODIES,
+    }]
+    async fn instance_network_interface_update_v2026_01_03_00(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::NetworkInterfacePath>,
+        query_params: Query<latest::instance::OptionalInstanceSelector>,
+        updated_iface: TypedBody<
+            v2025_11_20_00::instance::InstanceNetworkInterfaceUpdate,
         >,
     ) -> Result<HttpResponseOk<InstanceNetworkInterface>, HttpError>;
 
@@ -6523,13 +6563,14 @@ pub trait NexusExternalApi {
         HttpResponseOk<v2026_01_01_00_local::InstanceNetworkInterface>,
         HttpError,
     > {
-        let HttpResponseOk(nic) = Self::instance_network_interface_update(
-            rqctx,
-            path_params,
-            query_params,
-            updated_iface,
-        )
-        .await?;
+        let HttpResponseOk(nic) =
+            Self::instance_network_interface_update_v2026_01_03_00(
+                rqctx,
+                path_params,
+                query_params,
+                updated_iface,
+            )
+            .await?;
         nic.try_into().map(HttpResponseOk).map_err(HttpError::from)
     }
 
@@ -7298,12 +7339,28 @@ pub trait NexusExternalApi {
         method = PUT,
         path = "/v1/vpc-router-routes/{route}",
         tags = ["vpcs"],
+        versions = VERSION_STRICT_PUT_BODIES..,
     }]
     async fn vpc_router_route_update(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<latest::path_params::RoutePath>,
         query_params: Query<latest::vpc::OptionalRouterSelector>,
         router_params: TypedBody<latest::vpc::RouterRouteUpdate>,
+    ) -> Result<HttpResponseOk<RouterRoute>, HttpError>;
+
+    /// Update route
+    #[endpoint {
+        operation_id = "vpc_router_route_update",
+        method = PUT,
+        path = "/v1/vpc-router-routes/{route}",
+        tags = ["vpcs"],
+        versions = ..VERSION_STRICT_PUT_BODIES,
+    }]
+    async fn vpc_router_route_update_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::RoutePath>,
+        query_params: Query<latest::vpc::OptionalRouterSelector>,
+        router_params: TypedBody<v2025_11_20_00::vpc::RouterRouteUpdate>,
     ) -> Result<HttpResponseOk<RouterRoute>, HttpError>;
 
     // Internet gateways

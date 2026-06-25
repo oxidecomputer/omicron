@@ -23325,35 +23325,33 @@
         ]
       },
       "InstanceNetworkInterfaceUpdate": {
-        "description": "Parameters for updating an `InstanceNetworkInterface`\n\nNote that modifying IP addresses for an interface is not yet supported, a new interface must be created instead.",
+        "description": "Parameters for updating an `InstanceNetworkInterface`\n\nA `PUT` replaces the resource, so `name` and `description` must both be present. `primary` and `transit_ips` are always present as well.\n\nNote that modifying IP addresses for an interface is not yet supported, a new interface must be created instead.",
         "type": "object",
         "properties": {
           "description": {
-            "nullable": true,
             "type": "string"
           },
           "name": {
-            "nullable": true,
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Name"
-              }
-            ]
+            "$ref": "#/components/schemas/Name"
           },
           "primary": {
             "description": "Make a secondary interface the instance's primary interface.\n\nIf applied to a secondary interface, that interface will become the primary on the next reboot of the instance. Note that this may have implications for routing between instances, as the new primary interface will be on a distinct subnet from the previous primary interface.\n\nNote that this can only be used to select a new primary interface for an instance. Requests to change the primary interface into a secondary will return an error.",
-            "default": false,
             "type": "boolean"
           },
           "transit_ips": {
             "description": "A set of additional networks that this interface may send and receive traffic on",
-            "default": [],
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/IpNet"
             }
           }
-        }
+        },
+        "required": [
+          "description",
+          "name",
+          "primary",
+          "transit_ips"
+        ]
       },
       "InstanceResultsPage": {
         "description": "A single page of results",
@@ -27038,11 +27036,10 @@
         ]
       },
       "RouterRouteUpdate": {
-        "description": "Updateable properties of a `RouterRoute`",
+        "description": "Updateable properties of a `RouterRoute`\n\nA `PUT` replaces the resource, so `name`, `description`, `target`, and `destination` must all be present.",
         "type": "object",
         "properties": {
           "description": {
-            "nullable": true,
             "type": "string"
           },
           "destination": {
@@ -27054,12 +27051,7 @@
             ]
           },
           "name": {
-            "nullable": true,
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Name"
-              }
-            ]
+            "$ref": "#/components/schemas/Name"
           },
           "target": {
             "description": "The location that matched packets should be forwarded to.",
@@ -27071,7 +27063,9 @@
           }
         },
         "required": [
+          "description",
           "destination",
+          "name",
           "target"
         ]
       },
@@ -28704,22 +28698,20 @@
         ]
       },
       "SubnetPoolUpdate": {
-        "description": "Update a subnet pool",
+        "description": "Updateable properties of a `SubnetPool`\n\nA `PUT` replaces the resource, so `name` and `description` must both be present.",
         "type": "object",
         "properties": {
           "description": {
-            "nullable": true,
             "type": "string"
           },
           "name": {
-            "nullable": true,
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Name"
-              }
-            ]
+            "$ref": "#/components/schemas/Name"
           }
-        }
+        },
+        "required": [
+          "description",
+          "name"
+        ]
       },
       "SubnetPoolUtilization": {
         "description": "Utilization of addresses in a subnet pool.\n\nNote that both the count of remaining addresses and the total capacity are integers, reported as floating point numbers. This accommodates allocations larger than a 64-bit integer, which is common with IPv6 address spaces. With very large subnet pools (> 2**53 addresses), integer precision will be lost, in exchange for representing the entire range. In such a case the pool still has many available addresses.",

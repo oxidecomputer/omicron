@@ -1833,6 +1833,22 @@ impl NexusExternalApi for NexusExternalApiImpl {
         audit_and_time(&rqctx, |opctx, nexus| async move {
             let path = path_params.into_inner();
             let updates = updates.into_inner();
+            let pool = nexus
+                .subnet_pool_update(&opctx, &path.pool, updates.into())
+                .await?;
+            Ok(HttpResponseOk(pool))
+        })
+        .await
+    }
+
+    async fn system_subnet_pool_update_v2026_02_09_00(
+        rqctx: RequestContext<ApiContext>,
+        path_params: Path<v2026_01_16_01::subnet_pool::SubnetPoolPath>,
+        updates: TypedBody<v2026_01_16_01::subnet_pool::SubnetPoolUpdate>,
+    ) -> Result<HttpResponseOk<subnet_pool::SubnetPool>, HttpError> {
+        audit_and_time(&rqctx, |opctx, nexus| async move {
+            let path = path_params.into_inner();
+            let updates = updates.into_inner();
             let pool =
                 nexus.subnet_pool_update(&opctx, &path.pool, updates).await?;
             Ok(HttpResponseOk(pool))
@@ -5243,6 +5259,41 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 .instance_network_interface_update(
                     &opctx,
                     &network_interface_lookup,
+                    updated_iface.into(),
+                )
+                .await?;
+            interface.try_into().map(HttpResponseOk).map_err(HttpError::from)
+        })
+        .await
+    }
+
+    async fn instance_network_interface_update_v2026_01_03_00(
+        rqctx: RequestContext<ApiContext>,
+        path_params: Path<path_params::NetworkInterfacePath>,
+        query_params: Query<instance::OptionalInstanceSelector>,
+        updated_iface: TypedBody<
+            v2025_11_20_00::instance::InstanceNetworkInterfaceUpdate,
+        >,
+    ) -> Result<HttpResponseOk<InstanceNetworkInterface>, HttpError> {
+        audit_and_time(&rqctx, |opctx, nexus| async move {
+            let path = path_params.into_inner();
+            let query = query_params.into_inner();
+            let updated_iface = updated_iface.into_inner();
+            let network_interface_selector =
+                instance::InstanceNetworkInterfaceSelector {
+                    project: query.project,
+                    instance: query.instance,
+                    network_interface: path.interface,
+                };
+            let network_interface_lookup = nexus
+                .instance_network_interface_lookup(
+                    &opctx,
+                    network_interface_selector,
+                )?;
+            let interface = nexus
+                .instance_network_interface_update(
+                    &opctx,
+                    &network_interface_lookup,
                     updated_iface,
                 )
                 .await?;
@@ -6352,7 +6403,37 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let route_lookup =
                 nexus.vpc_router_route_lookup(&opctx, route_selector)?;
             let route = nexus
-                .router_update_route(&opctx, &route_lookup, &router_params)
+                .router_update_route(
+                    &opctx,
+                    &route_lookup,
+                    router_params.into(),
+                )
+                .await?;
+            Ok(HttpResponseOk(route.into()))
+        })
+        .await
+    }
+
+    async fn vpc_router_route_update_v2025_11_20_00(
+        rqctx: RequestContext<ApiContext>,
+        path_params: Path<path_params::RoutePath>,
+        query_params: Query<vpc::OptionalRouterSelector>,
+        router_params: TypedBody<v2025_11_20_00::vpc::RouterRouteUpdate>,
+    ) -> Result<HttpResponseOk<RouterRoute>, HttpError> {
+        audit_and_time(&rqctx, |opctx, nexus| async move {
+            let path = path_params.into_inner();
+            let query = query_params.into_inner();
+            let router_params = router_params.into_inner();
+            let route_selector = vpc::RouteSelector {
+                project: query.project,
+                vpc: query.vpc,
+                router: query.router,
+                route: path.route,
+            };
+            let route_lookup =
+                nexus.vpc_router_route_lookup(&opctx, route_selector)?;
+            let route = nexus
+                .router_update_route(&opctx, &route_lookup, router_params)
                 .await?;
             Ok(HttpResponseOk(route.into()))
         })

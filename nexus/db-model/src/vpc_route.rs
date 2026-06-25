@@ -216,15 +216,3 @@ impl RouterRouteUpdate {
         }
     }
 }
-
-impl From<vpc::RouterRouteUpdate> for RouterRouteUpdate {
-    fn from(params: vpc::RouterRouteUpdate) -> Self {
-        Self {
-            name: params.identity.name.map(Name),
-            description: params.identity.description,
-            time_modified: Utc::now(),
-            target: RouteTarget(params.target),
-            destination: RouteDestination::new(params.destination),
-        }
-    }
-}

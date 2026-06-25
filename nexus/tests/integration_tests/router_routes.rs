@@ -17,11 +17,13 @@ use nexus_test_utils::resource_helpers::object_put;
 use nexus_test_utils::resource_helpers::object_put_error;
 use nexus_test_utils::resource_helpers::objects_list_page_authz;
 use nexus_test_utils_macros::nexus_test;
-use nexus_types::external_api::vpc::{RouterRouteCreate, RouterRouteUpdate};
+use nexus_types::external_api::vpc::{
+    IdentityMetadataUpdateParamsStrict, RouterRouteCreate, RouterRouteUpdate,
+};
 use omicron_common::api::external::SimpleIdentityOrName;
 use omicron_common::api::external::{
-    IdentityMetadataCreateParams, IdentityMetadataUpdateParams,
-    RouteDestination, RouteTarget, RouterRoute, RouterRouteKind,
+    IdentityMetadataCreateParams, RouteDestination, RouteTarget, RouterRoute,
+    RouterRouteKind,
 };
 use oxnet::IpNet;
 use std::net::IpAddr;
@@ -215,9 +217,9 @@ async fn test_router_routes_crud_operations(
         client,
         route_url.as_str(),
         Some(&RouterRouteUpdate {
-            identity: IdentityMetadataUpdateParams {
-                name: Some(route_name.parse().unwrap()),
-                description: None,
+            identity: IdentityMetadataUpdateParamsStrict {
+                name: route_name.parse().unwrap(),
+                description: route.identity.description.clone(),
             },
             target: RouteTarget::Ip(IpAddr::from(Ipv4Addr::new(
                 192, 168, 1, 1,
@@ -380,9 +382,9 @@ async fn test_router_routes_modify_system_routes(
         &get_route_url(VPC_NAME, "system", subnet_route.name().as_str())
             .as_str(),
         &RouterRouteUpdate {
-            identity: IdentityMetadataUpdateParams {
-                name: None,
-                description: None,
+            identity: IdentityMetadataUpdateParamsStrict {
+                name: subnet_route.identity.name.clone(),
+                description: subnet_route.identity.description.clone(),
             },
             target: "drop".parse().unwrap(),
             destination: "subnet:default".parse().unwrap(),
@@ -400,9 +402,9 @@ async fn test_router_routes_modify_system_routes(
         client,
         &get_route_url(VPC_NAME, "system", v4_route.name().as_str()).as_str(),
         &RouterRouteUpdate {
-            identity: IdentityMetadataUpdateParams {
-                name: None,
-                description: None,
+            identity: IdentityMetadataUpdateParamsStrict {
+                name: v4_route.identity.name.clone(),
+                description: v4_route.identity.description.clone(),
             },
             destination: v4_route.destination,
             target: "drop".parse().unwrap(),
@@ -415,9 +417,9 @@ async fn test_router_routes_modify_system_routes(
         client,
         &get_route_url(VPC_NAME, "system", v6_route.name().as_str()).as_str(),
         &RouterRouteUpdate {
-            identity: IdentityMetadataUpdateParams {
-                name: None,
-                description: None,
+            identity: IdentityMetadataUpdateParamsStrict {
+                name: v6_route.identity.name.clone(),
+                description: v6_route.identity.description.clone(),
             },
             destination: v6_route.destination,
             target: "drop".parse().unwrap(),
@@ -431,9 +433,9 @@ async fn test_router_routes_modify_system_routes(
         client,
         &get_route_url(VPC_NAME, "system", v4_route.name().as_str()).as_str(),
         &RouterRouteUpdate {
-            identity: IdentityMetadataUpdateParams {
-                name: None,
-                description: None,
+            identity: IdentityMetadataUpdateParamsStrict {
+                name: v4_route.identity.name.clone(),
+                description: v4_route.identity.description.clone(),
             },
             destination: "ipnet:10.0.0.0/8".parse().unwrap(),
             target: "drop".parse().unwrap(),
@@ -574,9 +576,9 @@ pub async fn update_route_with_error(
             .as_str(),
         )
         .body(Some(&RouterRouteUpdate {
-            identity: IdentityMetadataUpdateParams {
-                name: None,
-                description: None,
+            identity: IdentityMetadataUpdateParamsStrict {
+                name: route_name.parse().unwrap(),
+                description: String::from("test route"),
             },
             target,
             destination,
