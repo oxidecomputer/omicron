@@ -316,7 +316,7 @@ impl FmRendezvous {
             .cloned()
             .filter_map(|ereport| {
                 if ereport.marked_seen_in.is_none() {
-                    Some(*ereport.id())
+                    Some(ereport.id)
                 } else {
                     None
                 }
@@ -1300,37 +1300,25 @@ mod tests {
             slot: 0,
         };
 
+        let ereport1_id =
+            ereport_types::EreportId { restart_id, ena: ereport_types::Ena(2) };
         let ereport1_data = EreportData {
-            id: ereport_types::EreportId {
-                restart_id,
-                ena: ereport_types::Ena(2),
-            },
-            time_collected,
-            collector_id,
             part_number: Some("9130000019".to_string()),
             serial_number: Some("BRM420069".to_string()),
             class: Some("ereport.test.one".to_string()),
             report: serde_json::json!({"info": "first ereport"}),
         };
+        let ereport2_id =
+            ereport_types::EreportId { restart_id, ena: ereport_types::Ena(3) };
         let ereport2_data = EreportData {
-            id: ereport_types::EreportId {
-                restart_id,
-                ena: ereport_types::Ena(3),
-            },
-            time_collected,
-            collector_id,
             part_number: Some("9130000019".to_string()),
             serial_number: Some("BRM420069".to_string()),
             class: Some("ereport.test.two".to_string()),
             report: serde_json::json!({"info": "second ereport"}),
         };
+        let ereport3_id =
+            ereport_types::EreportId { restart_id, ena: ereport_types::Ena(4) };
         let ereport3_data = EreportData {
-            id: ereport_types::EreportId {
-                restart_id,
-                ena: ereport_types::Ena(4),
-            },
-            time_collected,
-            collector_id,
             part_number: Some("9130000019".to_string()),
             serial_number: Some("BRM420069".to_string()),
             class: Some("ereport.test.three".to_string()),
@@ -1341,11 +1329,12 @@ mod tests {
                 &opctx,
                 restart_id,
                 time_collected,
+                collector_id,
                 reporter,
                 vec![
-                    ereport1_data.clone(),
-                    ereport2_data.clone(),
-                    ereport3_data.clone(),
+                    (ereport1_id.ena, ereport1_data.clone()),
+                    (ereport2_id.ena, ereport2_data.clone()),
+                    (ereport3_id.ena, ereport3_data.clone()),
                 ],
             )
             .await
@@ -1355,7 +1344,7 @@ mod tests {
         assert_ereports_unseen(
             &datastore,
             opctx,
-            &[ereport1_data.id, ereport2_data.id, ereport3_data.id],
+            &[ereport1_id, ereport2_id, ereport3_id],
         )
         .await;
 
@@ -1369,6 +1358,9 @@ mod tests {
                 .insert_unique(fm::case::CaseEreport {
                     id: CaseEreportUuid::new_v4(),
                     ereport: Arc::new(fm::ereport::Ereport::new(
+                        ereport1_id,
+                        time_collected,
+                        collector_id,
                         ereport1_data.clone(),
                         reporter,
                     )),
@@ -1380,6 +1372,9 @@ mod tests {
                 .insert_unique(fm::case::CaseEreport {
                     id: CaseEreportUuid::new_v4(),
                     ereport: Arc::new(fm::ereport::Ereport::new(
+                        ereport2_id,
+                        time_collected,
+                        collector_id,
                         ereport2_data.clone(),
                         reporter,
                     )),
@@ -1462,11 +1457,11 @@ mod tests {
         assert_ereports_seen_in(
             &datastore,
             opctx,
-            &[ereport1_data.id, ereport2_data.id],
+            &[ereport1_id, ereport2_id],
             sitrep1_id,
         )
         .await;
-        assert_ereports_unseen(&datastore, opctx, &[ereport3_data.id]).await;
+        assert_ereports_unseen(&datastore, opctx, &[ereport3_id]).await;
 
         // Second activation: ereport1 and ereport2 are already marked
         // seen in the sitrep, so they should NOT be marked again
@@ -1495,11 +1490,11 @@ mod tests {
         assert_ereports_seen_in(
             &datastore,
             opctx,
-            &[ereport1_data.id, ereport2_data.id],
+            &[ereport1_id, ereport2_id],
             sitrep1_id,
         )
         .await;
-        assert_ereports_unseen(&datastore, opctx, &[ereport3_data.id]).await;
+        assert_ereports_unseen(&datastore, opctx, &[ereport3_id]).await;
 
         // Cleanup
         db.terminate().await;
@@ -1540,37 +1535,25 @@ mod tests {
             slot: 1,
         };
         let time_collected = Utc::now();
+        let ereport1_id =
+            ereport_types::EreportId { restart_id, ena: ereport_types::Ena(2) };
         let ereport1_data = EreportData {
-            id: ereport_types::EreportId {
-                restart_id,
-                ena: ereport_types::Ena(2),
-            },
-            time_collected,
-            collector_id,
             part_number: Some("9130000019".to_string()),
             serial_number: Some("BRM420069".to_string()),
             class: Some("ereport.test.one".to_string()),
             report: serde_json::json!({"info": "first ereport"}),
         };
+        let ereport2_id =
+            ereport_types::EreportId { restart_id, ena: ereport_types::Ena(3) };
         let ereport2_data = EreportData {
-            id: ereport_types::EreportId {
-                restart_id,
-                ena: ereport_types::Ena(3),
-            },
-            time_collected,
-            collector_id,
             part_number: Some("9130000019".to_string()),
             serial_number: Some("BRM420069".to_string()),
             class: Some("ereport.test.two".to_string()),
             report: serde_json::json!({"info": "second ereport"}),
         };
+        let ereport3_id =
+            ereport_types::EreportId { restart_id, ena: ereport_types::Ena(4) };
         let ereport3_data = EreportData {
-            id: ereport_types::EreportId {
-                restart_id,
-                ena: ereport_types::Ena(4),
-            },
-            time_collected,
-            collector_id,
             part_number: Some("9130000019".to_string()),
             serial_number: Some("BRM420069".to_string()),
             class: Some("ereport.test.three".to_string()),
@@ -1581,11 +1564,12 @@ mod tests {
                 opctx,
                 restart_id,
                 time_collected,
+                collector_id,
                 reporter,
                 vec![
-                    ereport1_data.clone(),
-                    ereport2_data.clone(),
-                    ereport3_data.clone(),
+                    (ereport1_id.ena, ereport1_data.clone()),
+                    (ereport2_id.ena, ereport2_data.clone()),
+                    (ereport3_id.ena, ereport3_data.clone()),
                 ],
             )
             .await
@@ -1599,6 +1583,9 @@ mod tests {
                 .insert_unique(fm::case::CaseEreport {
                     id: CaseEreportUuid::new_v4(),
                     ereport: Arc::new(fm::ereport::Ereport::new(
+                        ereport1_id,
+                        time_collected,
+                        collector_id,
                         ereport1_data.clone(),
                         reporter,
                     )),
@@ -1663,24 +1650,18 @@ mod tests {
         assert_eq!(ereport_marking.details.ereports_marked_seen, 1);
 
         // Verify DB state after sitrep 1.
-        assert_ereports_seen_in(
-            &datastore,
-            opctx,
-            &[ereport1_data.id],
-            sitrep1_id,
-        )
-        .await;
-        assert_ereports_unseen(
-            &datastore,
-            opctx,
-            &[ereport2_data.id, ereport3_data.id],
-        )
-        .await;
+        assert_ereports_seen_in(&datastore, opctx, &[ereport1_id], sitrep1_id)
+            .await;
+        assert_ereports_unseen(&datastore, opctx, &[ereport2_id, ereport3_id])
+            .await;
 
         // Sitrep 2: carries forward ereport1 AND adds ereport2 and
         // ereport3
         let sitrep2_id = SitrepUuid::new_v4();
         let ereport1_seen = fm::ereport::Ereport {
+            id: ereport1_id,
+            time_collected,
+            collector_id,
             data: ereport1_data.clone(),
             reporter,
             marked_seen_in: Some(sitrep1_id),
@@ -1700,6 +1681,9 @@ mod tests {
                 .insert_unique(fm::case::CaseEreport {
                     id: CaseEreportUuid::new_v4(),
                     ereport: Arc::new(fm::ereport::Ereport::new(
+                        ereport2_id,
+                        time_collected,
+                        collector_id,
                         ereport2_data.clone(),
                         reporter,
                     )),
@@ -1711,6 +1695,9 @@ mod tests {
                 .insert_unique(fm::case::CaseEreport {
                     id: CaseEreportUuid::new_v4(),
                     ereport: Arc::new(fm::ereport::Ereport::new(
+                        ereport3_id,
+                        time_collected,
+                        collector_id,
                         ereport3_data.clone(),
                         reporter,
                     )),
@@ -1783,17 +1770,12 @@ mod tests {
             "only ereport2 and ereport3 should be newly marked"
         );
         assert!(ereport_marking.details.errors.is_empty());
+        assert_ereports_seen_in(&datastore, opctx, &[ereport1_id], sitrep1_id)
+            .await;
         assert_ereports_seen_in(
             &datastore,
             opctx,
-            &[ereport1_data.id],
-            sitrep1_id,
-        )
-        .await;
-        assert_ereports_seen_in(
-            &datastore,
-            opctx,
-            &[ereport2_data.id, ereport3_data.id],
+            &[ereport2_id, ereport3_id],
             sitrep2_id,
         )
         .await;
