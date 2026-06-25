@@ -1514,7 +1514,6 @@ pub struct VpcFirewallRuleUpdate {
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct VpcFirewallRuleUpdateParams {
     #[schemars(length(max = 1024))]
-    #[serde(default)]
     pub rules: Vec<VpcFirewallRuleUpdate>,
 }
 

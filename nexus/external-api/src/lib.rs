@@ -56,6 +56,7 @@ mod v2026_01_01_00_local;
 mod v2026_01_30_00_local;
 mod v2026_03_24_00_local;
 mod v2026_05_20_00_local;
+mod v2026_06_23_00_local;
 
 api_versions!([
     // API versions are in the format YYYY_MM_DD_NN.0.0, defined below as
@@ -465,7 +466,7 @@ pub trait NexusExternalApi {
         method = PUT,
         path = "/v1/system/networking/settings",
         tags = ["system/networking"],
-        versions = VERSION_EXTERNAL_JUMBO_FRAMES..,
+        versions = VERSION_STRICT_PUT_BODIES..,
     }]
     async fn system_networking_settings_update(
         rqctx: RequestContext<Self::Context>,
@@ -476,6 +477,32 @@ pub trait NexusExternalApi {
         HttpResponseOk<latest::system_networking::SystemNetworkingSettings>,
         HttpError,
     >;
+
+    /// Update fleet-wide networking settings
+    #[endpoint {
+        operation_id = "system_networking_settings_update",
+        method = PUT,
+        path = "/v1/system/networking/settings",
+        tags = ["system/networking"],
+        versions = VERSION_EXTERNAL_JUMBO_FRAMES..VERSION_STRICT_PUT_BODIES,
+    }]
+    async fn system_networking_settings_update_v2026_06_05_00(
+        rqctx: RequestContext<Self::Context>,
+        new_settings: TypedBody<
+            v2026_06_05_00::system_networking::SystemNetworkingSettingsUpdate,
+        >,
+    ) -> Result<
+        HttpResponseOk<
+            v2026_06_05_00::system_networking::SystemNetworkingSettings,
+        >,
+        HttpError,
+    > {
+        Self::system_networking_settings_update(
+            rqctx,
+            new_settings.map(Into::into),
+        )
+        .await
+    }
 
     /// Fetch current silo's IAM policy
     #[endpoint {
@@ -7175,13 +7202,34 @@ pub trait NexusExternalApi {
         method = PUT,
         path = "/v1/vpc-firewall-rules",
         tags = ["vpcs"],
-        versions = VERSION_ADD_ICMPV6_FIREWALL_SUPPORT..,
+        versions = VERSION_STRICT_PUT_BODIES..,
     }]
     async fn vpc_firewall_rules_update(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<latest::vpc::VpcSelector>,
         update: TypedBody<VpcFirewallRuleUpdateParams>,
     ) -> Result<HttpResponseOk<VpcFirewallRules>, HttpError>;
+
+    /// Replace firewall rules
+    #[endpoint {
+        operation_id = "vpc_firewall_rules_update",
+        method = PUT,
+        path = "/v1/vpc-firewall-rules",
+        tags = ["vpcs"],
+        versions = VERSION_ADD_ICMPV6_FIREWALL_SUPPORT..VERSION_STRICT_PUT_BODIES,
+    }]
+    async fn vpc_firewall_rules_update_v2026_06_23_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<latest::vpc::VpcSelector>,
+        update: TypedBody<v2026_06_23_00_local::VpcFirewallRuleUpdateParams>,
+    ) -> Result<HttpResponseOk<VpcFirewallRules>, HttpError> {
+        Self::vpc_firewall_rules_update(
+            rqctx,
+            query_params,
+            update.map(Into::into),
+        )
+        .await
+    }
 
     /// Replace firewall rules
     #[endpoint {

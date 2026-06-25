@@ -430,7 +430,8 @@ pub mod system {
 
 pub mod system_networking {
     pub use crate::v2026_06_05_00::system_networking::SystemNetworkingSettings;
-    pub use crate::v2026_06_05_00::system_networking::SystemNetworkingSettingsUpdate;
+
+    pub use crate::v2026_06_23_00::system_networking::SystemNetworkingSettingsUpdate;
 }
 
 pub mod timeseries {

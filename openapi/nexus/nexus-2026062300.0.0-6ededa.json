@@ -29665,15 +29665,17 @@
         ]
       },
       "SystemNetworkingSettingsUpdate": {
-        "description": "Parameters for updating the fleet-wide networking settings.",
+        "description": "Parameters for updating the fleet-wide networking settings.\n\nA `PUT` replaces the settings, so the opt-in toggle must be present.",
         "type": "object",
         "properties": {
           "external_jumbo_frames_opt_in_enabled": {
             "description": "Toggle the fleet-wide external jumbo-frames opt-in.",
-            "default": false,
             "type": "boolean"
           }
-        }
+        },
+        "required": [
+          "external_jumbo_frames_opt_in_enabled"
+        ]
       },
       "TargetRelease": {
         "description": "View of a system software target release",
@@ -31225,14 +31227,16 @@
         "type": "object",
         "properties": {
           "rules": {
-            "default": [],
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/VpcFirewallRuleUpdate"
             },
             "maxItems": 1024
           }
-        }
+        },
+        "required": [
+          "rules"
+        ]
       },
       "VpcFirewallRules": {
         "description": "Collection of a Vpc's firewall rules",

@@ -11,8 +11,9 @@
 //! `VpcSubnetUpdate`, `SiloQuotasUpdate`, `SupportBundleUpdate`,
 //! `FloatingIpUpdate`, `VpcUpdate`, `VpcRouterUpdate`, `RouterRouteUpdate`,
 //! `WebhookReceiverUpdate`, `AffinityGroupUpdate`, `AntiAffinityGroupUpdate`,
-//! `ExternalSubnetUpdate`, `IpPoolUpdate`, `SubnetPoolUpdate`, and
-//! `InstanceNetworkInterfaceUpdate`.
+//! `ExternalSubnetUpdate`, `IpPoolUpdate`, `SubnetPoolUpdate`,
+//! `InstanceNetworkInterfaceUpdate`, `SystemNetworkingSettingsUpdate`, and
+//! `VpcFirewallRuleUpdateParams`.
 
 pub mod affinity;
 pub mod alert;
@@ -25,4 +26,5 @@ pub mod project;
 pub mod silo;
 pub mod subnet_pool;
 pub mod support_bundle;
+pub mod system_networking;
 pub mod vpc;
