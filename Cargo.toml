@@ -868,6 +868,8 @@ tufaceous = { git = "https://github.com/oxidecomputer/tufaceous", branch = "main
 tufaceous-artifact = { git = "https://github.com/oxidecomputer/tufaceous", branch = "main", features = ["proptest", "schemars"] }
 tufaceous-brand-metadata = { git = "https://github.com/oxidecomputer/tufaceous", branch = "main" }
 tufaceous-lib = { git = "https://github.com/oxidecomputer/tufaceous", branch = "main" }
+tufaceous-v2 = { git = "https://github.com/oxidecomputer/tufaceous", branch = "iliana/rfd621", package = "tufaceous" }
+tufaceous-artifact-v2 = { git = "https://github.com/oxidecomputer/tufaceous", branch = "iliana/rfd621", package = "tufaceous-artifact" }
 tui-tree-widget = "0.23.1"
 typed-rng = { path = "typed-rng" }
 typify = "0.3.0"
