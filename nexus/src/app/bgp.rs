@@ -105,7 +105,7 @@ impl super::Nexus {
             .bgp_config_update(
                 opctx,
                 &authz_bgp_config,
-                authz_announce_set.id(),
+                authz_announce_set,
                 update,
             )
             .await?;

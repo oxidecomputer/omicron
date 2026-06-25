@@ -230,7 +230,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         authz_bgp_config: &authz::BgpConfig,
-        bgp_announce_set_id: Uuid,
+        bgp_announce_set_id: authz::BgpAnnounceSet,
         update: &networking::BgpConfigUpdate,
     ) -> UpdateResult<BgpConfig> {
         use nexus_db_schema::schema::bgp_config::dsl;
@@ -253,7 +253,7 @@ impl DataStore {
                 dsl::time_modified.eq(Utc::now()),
                 dsl::name.eq(new_name.to_string()),
                 dsl::description.eq(new_description.to_string()),
-                dsl::bgp_announce_set_id.eq(bgp_announce_set_id),
+                dsl::bgp_announce_set_id.eq(bgp_announce_set_id.id()),
                 dsl::max_paths.eq(SqlU8(new_max_paths.as_u8())),
             ))
             .returning(BgpConfig::as_returning())
@@ -1180,12 +1180,18 @@ mod tests {
             .await
             .expect("lookup bgp config");
 
+        let (.., authz_announce_set) = LookupPath::new(&opctx, datastore)
+            .bgp_announce_set_id(new_announce_id)
+            .lookup_for(authz::Action::Read)
+            .await
+            .expect("lookup bgp announce set");
+
         // Update the BGP config
         datastore
             .bgp_config_update(
                 &opctx,
                 &authz_bgp_config,
-                new_announce_id,
+                authz_announce_set,
                 &update,
             )
             .await
