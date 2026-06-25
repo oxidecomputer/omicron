@@ -862,31 +862,48 @@ mod test {
         // Make some SP ereports...
         let sp_restart_id = EreporterRestartUuid::new_v4();
         let time_collected = chrono::Utc::now();
+        let collector_id = OmicronZoneUuid::new_v4();
         datastore.ereports_insert(&opctx, sp_restart_id, time_collected, Reporter::Sp { sp_type: SpType::Sled, slot: SLED_SLOT}, vec![
             (ereport_types::Ena(1), EreportData {
-                collector_id: OmicronZoneUuid::new_v4(),
+                collector_id,
                 part_number: Some(GIMLET_PN.to_string()),
                 serial_number: Some(SP_SERIAL.to_string()),
                 class: Some("ereport.fake.whatever".to_string()),
                 report: serde_json::json!({"hello world": true})
             }),
             (ereport_types::Ena(2), EreportData {
-                collector_id: OmicronZoneUuid::new_v4(),
+                collector_id,
                 part_number: Some(GIMLET_PN.to_string()),
                 serial_number: Some(SP_SERIAL.to_string()),
                 class: Some("ereport.something.blah".to_string()),
                 report: serde_json::json!({"system_working": "seems to be",})
             }),
-            (ereport_types::Ena(1), EreportData {
-                collector_id: OmicronZoneUuid::new_v4(),
-                // Let's do a silly one! No VPD, to make sure that's also
-                // handled correctly.
-                part_number: None,
-                serial_number: None,
-                class: Some("ereport.fake.whatever".to_string()),
-                report: serde_json::json!({"hello_world": true})
-            }),
         ]).await.expect("failed to insert fake SP ereports");
+
+        // Let's do a silly one! No VPD, to make sure that's also
+        // handled correctly.
+        let sp_restart_id2 = EreporterRestartUuid::new_v4();
+        let time_collected = chrono::Utc::now();
+        datastore
+            .ereports_insert(
+                &opctx,
+                sp_restart_id2,
+                time_collected,
+                Reporter::Sp { sp_type: SpType::Sled, slot: SLED_SLOT },
+                vec![(
+                    ereport_types::Ena(1),
+                    EreportData {
+                        collector_id,
+                        part_number: None,
+                        serial_number: None,
+                        class: Some("ereport.fake.whatever".to_string()),
+                        report: serde_json::json!({"hello_world": true}),
+                    },
+                )],
+            )
+            .await
+            .expect("failed to insert another fake SP ereport");
+
         // And one from a different serial. N.B. that I made sure the number of
         // host-OS and SP ereports are different for when we make assertions
         // about the bundle report.
@@ -914,6 +931,7 @@ mod test {
         // And some host OS ones...
         let sled1_restart_id = EreporterRestartUuid::new_v4();
         let time_collected = chrono::Utc::now();
+        let collector_id = OmicronZoneUuid::new_v4();
         datastore
             .ereports_insert(
                 &opctx,
@@ -927,7 +945,7 @@ mod test {
                     (
                         ereport_types::Ena(1),
                         EreportData {
-                            collector_id: OmicronZoneUuid::new_v4(),
+                            collector_id,
                             serial_number: Some(HOST_SERIAL.to_string()),
                             part_number: Some(GIMLET_PN.to_string()),
                             class: Some("ereport.fake.whatever".to_string()),
@@ -937,7 +955,7 @@ mod test {
                     (
                         ereport_types::Ena(2),
                         EreportData {
-                            collector_id: OmicronZoneUuid::new_v4(),
+                            collector_id,
                             serial_number: Some(HOST_SERIAL.to_string()),
                             part_number: Some(GIMLET_PN.to_string()),
                             class: Some(
