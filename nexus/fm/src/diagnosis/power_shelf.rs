@@ -12,9 +12,7 @@ use chrono::DateTime;
 use chrono::Utc;
 use iddqd::{IdHashItem, IdHashMap, IdOrdItem, IdOrdMap, id_upcast};
 use nexus_db_model::EreporterRestart;
-use nexus_types::alert::power_shelf::{
-    PowerShelf, Psu, PsuIdentity, PsuInsertedV0, PsuRemovedV0,
-};
+use nexus_types::alert::power_shelf as alert_types;
 use nexus_types::external_api;
 use nexus_types::fm::DiagnosisEngineKind;
 use nexus_types::inventory;
@@ -209,15 +207,49 @@ pub fn analyze(
         // TODO(eliza): also track happiness
         let mut psus_absent = [PsuSet::default(), PsuSet::default()];
         for ereport in psc_case.ereports_in_order(input.ereporter_restarts()) {
+            let PsuLocation { shelf, slot } = ereport.location;
+
             // TODO(eliza): some kind of debouncing if two ereports of the same
             // type are seen close together.
-            let PsuLocation { shelf, slot } = ereport.location;
             match ereport.kind {
                 PsuEreportKind::Insert => {
                     // hello!
                     psus_absent[shelf as usize].remove(slot);
                     if ereport.provenance == Provenance::ThisSitrep {
-                        // TODO(eliza): request alert
+                        let baseboard = match ereport.psc_baseboard() {
+                            Ok(baseboard) => Some(baseboard),
+                            Err(err) => {
+                                let err = InlineErrorChain::new(&*err);
+                                slog::warn!(
+                                    &log,
+                                    "couldn't determine PSC baseboard identity \
+                                     for alert";
+                                    "ereport" => %ereport.id(),
+                                    &err,
+                                );
+                                None
+                            }
+                        };
+                        let requested = case_builder.request_alert(
+                            &alert_types::PsuInsertedV0 {
+                                psu: ereport.alert_psu(),
+                                power_shelf: alert_types::PowerShelf {
+                                    shelf,
+                                    baseboard,
+                                    rack_id: todo!("eliza: figure out how to get the rack id"),
+                                },
+                                time: ereport.ereport.time_collected,
+                            },
+                            format!("requested for ereport {}", ereport.id()),
+                        );
+                        if let Err(err) = requested {
+                            slog::error!(
+                                &log,
+                                "failed to request alert for ereport {}: {}",
+                                ereport.id(),
+                                &err
+                            );
+                        }
                     }
                 }
                 PsuEreportKind::Remove => {
@@ -483,10 +515,24 @@ impl PsuEreport {
                 .part_number
                 .clone()
                 .ok_or_else(|| anyhow::anyhow!("ereport has no part number"))?,
+            // TODO(eliza): if this is missing we should be able to get it from
+            // inventory?
             revision: self.data.baseboard_rev.ok_or_else(|| {
                 anyhow::anyhow!("ereport has no baseboard revision")
             })?,
         })
+    }
+
+    fn alert_psu(&self) -> alert_types::Psu {
+        alert_types::Psu {
+            identity: self
+                .data
+                .fruid
+                .as_ref()
+                .cloned()
+                .map(alert_types::PsuIdentity::from),
+            slot: self.location.slot as u8,
+        }
     }
 }
 
@@ -524,6 +570,13 @@ struct PsuFruid {
     mfr: String,
     mpn: String,
     serial: String,
+}
+
+impl From<PsuFruid> for alert_types::PsuIdentity {
+    fn from(fruid: PsuFruid) -> Self {
+        let PsuFruid { mfr, mpn, fw_rev, serial } = fruid;
+        Self { manufacturer: mfr, part: mpn, firmware_revision: fw_rev, serial }
+    }
 }
 
 #[cfg(test)]
