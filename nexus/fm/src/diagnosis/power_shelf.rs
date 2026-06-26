@@ -209,6 +209,8 @@ pub fn analyze(
         // TODO(eliza): also track happiness
         let mut psus_absent = [PsuSet::default(), PsuSet::default()];
         for ereport in psc_case.ereports_in_order(input.ereporter_restarts()) {
+            // TODO(eliza): some kind of debouncing if two ereports of the same
+            // type are seen close together.
             let PsuLocation { shelf, slot } = ereport.location;
             match ereport.kind {
                 PsuEreportKind::Insert => {
@@ -304,6 +306,7 @@ impl PsuSet {
         PsuSlot::VARIANTS.iter().copied().filter(|slot| self.contains(*slot))
     }
 }
+
 impl fmt::Debug for PsuSet {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_set().entries(self.iter()).finish()
