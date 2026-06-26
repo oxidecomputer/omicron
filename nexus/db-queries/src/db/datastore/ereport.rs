@@ -257,6 +257,13 @@ impl DataStore {
     ///   additional ereports were inserted concurrently
     /// - have a different restart ID than the one provided, if ereports from
     ///   a newer restart of that reporter were inserted concurrently
+    // Since all the arguments to this function are newtypes with pretty clear
+    // meanings (e.g. `rack_id`, `restart_id`, and `collector_id` are all
+    // different typed UUIDs), I'm not convinced that factoring stuff out into a
+    // struct like `EreportTrancheMetadata` or whatever would actually make this
+    // any clearer --- it feels like justadding noise to me. So ignore the
+    // warning.
+    #[allow(clippy::too_many_arguments)]
     pub async fn ereports_insert(
         &self,
         opctx: &OpContext,
