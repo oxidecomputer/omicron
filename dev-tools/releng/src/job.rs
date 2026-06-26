@@ -63,7 +63,7 @@ struct Job {
 
 pub(crate) struct Selector<'a> {
     jobs: &'a mut Jobs,
-    name: String,
+    pub(crate) name: String,
 }
 
 impl Jobs {
