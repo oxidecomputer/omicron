@@ -51,8 +51,8 @@ pub struct Psu {
 
 #[derive(Debug, Clone, Serialize, JsonSchema)]
 pub struct PsuIdentity {
-    pub manufacturer: Option<String>,
-    pub part_number: Option<String>,
-    pub firmware_revision: Option<String>,
-    pub serial_number: Option<String>,
+    pub manufacturer: String,
+    pub part: String,
+    pub firmware_revision: String,
+    pub serial: String,
 }
