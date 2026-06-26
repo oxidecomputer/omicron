@@ -215,9 +215,9 @@ impl Builder {
         let parent_sitrep = self.parent_sitrep.as_ref().map(|s| &s.1);
         self.new_ereports.extend(ereports.into_iter().filter_map(|ereport| {
             if let Some(sitrep) = parent_sitrep {
-                let id = ereport.id();
+                let id = ereport.id;
                 if sitrep.ereports_by_id.contains_key(&id) {
-                    self.unmarked_seen_ereports.insert(*id);
+                    self.unmarked_seen_ereports.insert(id);
                     return None;
                 }
             }
@@ -284,11 +284,7 @@ impl Builder {
             parent_sitrep_id,
             parent_inv_id,
             inv_id: self.inv.id,
-            new_ereport_ids: self
-                .new_ereports
-                .iter()
-                .map(|e| *e.id())
-                .collect(),
+            new_ereport_ids: self.new_ereports.iter().map(|e| e.id).collect(),
             num_ereporter_restarts: self.ereporter_restarts.len(),
             open_cases: BTreeMap::new(),
             closed_cases_copied_forward: BTreeMap::new(),
@@ -660,22 +656,22 @@ mod tests {
 
         // Check the "new ereports" in the constructed input.
         assert!(
-            input.new_ereports().contains_key(ereport_new.id()),
+            input.new_ereports().contains_key(&ereport_new.id),
             "ereport_new should be in new_ereports (it was not in the parent \
              sitrep)"
         );
         assert!(
-            !input.new_ereports().contains_key(ereport_in_open_case1.id()),
+            !input.new_ereports().contains_key(&ereport_in_open_case1.id),
             "ereport_in_open_case1 should NOT be in new_ereports (it is \
              already associated with an open case in the parent sitrep)"
         );
         assert!(
-            !input.new_ereports().contains_key(ereport_in_open_case2.id()),
+            !input.new_ereports().contains_key(&ereport_in_open_case2.id),
             "ereport_in_open_case2 should NOT be in new_ereports (it is \
              already associated with an open case in the parent sitrep)"
         );
         assert!(
-            !input.new_ereports().contains_key(ereport_in_closed_unmarked.id()),
+            !input.new_ereports().contains_key(&ereport_in_closed_unmarked.id),
             "ereport_in_closed_unmarked should NOT be in new_ereports (it is \
              already associated with a closed case in the parent sitrep)"
         );
