@@ -24,6 +24,7 @@ use nexus_types::internal_api::background::SpEreportIngesterStatus;
 use nexus_types::internal_api::background::SpEreporterStatus;
 use omicron_uuid_kinds::EreporterRestartUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
+use omicron_uuid_kinds::RackUuid;
 use parallel_task_set::ParallelTaskSet;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
@@ -40,6 +41,7 @@ pub struct SpEreportIngester {
 struct Ingester {
     datastore: Arc<DataStore>,
     nexus_id: OmicronZoneUuid,
+    rack_id: RackUuid,
 }
 
 impl BackgroundTask for SpEreportIngester {
@@ -60,12 +62,13 @@ impl SpEreportIngester {
         datastore: Arc<DataStore>,
         resolver: internal_dns_resolver::Resolver,
         nexus_id: OmicronZoneUuid,
+        rack_id: RackUuid,
         fm_analysis: Activator,
         disabled: bool,
     ) -> Self {
         Self {
             resolver,
-            inner: Ingester { datastore, nexus_id },
+            inner: Ingester { datastore, nexus_id, rack_id },
             fm_analysis,
             disabled,
         }

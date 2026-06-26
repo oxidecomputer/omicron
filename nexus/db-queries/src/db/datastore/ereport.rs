@@ -262,6 +262,7 @@ impl DataStore {
         restart_id: EreporterRestartUuid,
         time_collected: DateTime<Utc>,
         collector_id: OmicronZoneUuid,
+        rack_id: RackUuid,
         reporter: fm::Reporter,
         ereports: impl IntoIterator<Item = (fm::Ena, fm::EreportData)>,
     ) -> CreateResult<(usize, Option<EreportId>)> {
@@ -279,6 +280,7 @@ impl DataStore {
         let created = Self::ereports_insert_query(
             restart_id,
             time_collected,
+            rack_id,
             reporter,
             ereports,
         )
@@ -327,6 +329,7 @@ impl DataStore {
     fn ereports_insert_query(
         restart_id: EreporterRestartUuid,
         time_collected: chrono::DateTime<chrono::Utc>,
+        rack_id: RackUuid,
         reporter: fm::Reporter,
         ereports: Vec<Ereport>,
     ) -> impl RunnableQuery<i64> {
@@ -419,6 +422,7 @@ impl DataStore {
             reporter,
             slot_type,
             slot: slot.map(SpMgsSlot::from),
+            rack_id: rack_id.into(),
         });
         EreportInsertQuery { insert_ereports, insert_reporter, slot }
     }
