@@ -36,8 +36,9 @@ impl AlertPayload for PsuRemovedV0 {
 
 #[derive(Debug, Clone, Serialize, JsonSchema)]
 pub struct PowerShelf {
-    pub id: Uuid,
-    // pub rack_id: Uuid,
+    // TODO(eliza): the PSC should probably have a UUID, but AFAICT, they don't
+    // currently...
+    pub rack_id: Uuid,
     pub shelf: u8,
     pub baseboard: Option<Baseboard>,
 }
