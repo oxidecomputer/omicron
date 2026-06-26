@@ -159,7 +159,9 @@ use nexus_db_queries::db::DataStore;
 use nexus_types::deployment::PendingMgsUpdates;
 
 use nexus_types::inventory::Collection;
+use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
+use omicron_uuid_kinds::RackUuid;
 use oximeter::types::ProducerRegistry;
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -1118,6 +1120,7 @@ impl BackgroundTasksInitializer {
                 datastore.clone(),
                 resolver.clone(),
                 nexus_id,
+                RackUuid::from_untyped_uuid(rack_id),
                 task_fm_analysis.clone(),
                 config.sp_ereport_ingester.disable,
             )),

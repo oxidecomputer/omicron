@@ -560,6 +560,7 @@ mod tests {
     use omicron_uuid_kinds::EreporterRestartUuid;
     use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::OmicronZoneUuid;
+    use omicron_uuid_kinds::RackUuid;
     use omicron_uuid_kinds::SitrepUuid;
     use omicron_uuid_kinds::SupportBundleUuid;
 
@@ -1294,6 +1295,7 @@ mod tests {
 
         let restart_id = EreporterRestartUuid::new_v4();
         let collector_id = OmicronZoneUuid::new_v4();
+        let rack_id = RackUuid::new_v4();
         let time_collected = Utc::now();
         let reporter = Reporter::Sp {
             sp_type: nexus_types::inventory::SpType::Sled,
@@ -1330,6 +1332,7 @@ mod tests {
                 restart_id,
                 time_collected,
                 collector_id,
+                rack_id,
                 reporter,
                 vec![
                     (ereport1_id.ena, ereport1_data.clone()),
@@ -1530,6 +1533,7 @@ mod tests {
 
         let restart_id = EreporterRestartUuid::new_v4();
         let collector_id = OmicronZoneUuid::new_v4();
+        let rack_id = RackUuid::new_v4();
         let reporter = Reporter::Sp {
             sp_type: nexus_types::inventory::SpType::Sled,
             slot: 1,
@@ -1565,6 +1569,7 @@ mod tests {
                 restart_id,
                 time_collected,
                 collector_id,
+                rack_id,
                 reporter,
                 vec![
                     (ereport1_id.ena, ereport1_data.clone()),

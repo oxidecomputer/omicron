@@ -41,6 +41,7 @@ use omicron_common::api::external::LookupResult;
 use omicron_uuid_kinds::EreporterRestartUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
+use omicron_uuid_kinds::RackUuid;
 use omicron_uuid_kinds::SitrepUuid;
 use omicron_uuid_kinds::SledUuid;
 use uuid::Uuid;
@@ -605,6 +606,7 @@ mod tests {
     use ereport_types::Ena;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::OmicronZoneUuid;
+    use omicron_uuid_kinds::RackUuid;
     use std::collections::BTreeMap;
     use std::num::NonZeroU32;
     use std::time::Duration;
@@ -925,11 +927,13 @@ mod tests {
     async fn expectorate_ereports_insert_sp() {
         let restart_id = EreporterRestartUuid::nil();
         let collector_id = OmicronZoneUuid::nil();
+        let rack_id = RackUuid::nil();
         let reporter =
             fm::Reporter::Sp { sp_type: SpType::Sled.into(), slot: 16 };
         let query = DataStore::ereports_insert_query(
             restart_id,
             DateTime::<Utc>::MIN_UTC,
+            rack_id,
             reporter,
             vec![
                 Ereport {
@@ -971,11 +975,13 @@ mod tests {
     async fn expectorate_ereports_insert_host() {
         let restart_id = EreporterRestartUuid::nil();
         let collector_id = OmicronZoneUuid::nil();
+        let rack_id = RackUuid::nil();
         let reporter =
             fm::Reporter::HostOs { slot: Some(16), sled: SledUuid::nil() };
         let query = DataStore::ereports_insert_query(
             restart_id,
             DateTime::<Utc>::MIN_UTC,
+            rack_id,
             reporter,
             vec![
                 Ereport {
@@ -1034,6 +1040,7 @@ mod tests {
         let id = fm::EreportId { restart_id, ena: ereport_types::Ena(2) };
         let time_collected = Utc::now();
         let collector_id = OmicronZoneUuid::new_v4();
+        let rack_id = RackUuid::new_v4();
         let ereport = fm::EreportData {
             part_number: Some("my cool CPN".to_string()),
             serial_number: Some("my cool serial".to_string()),
@@ -1046,6 +1053,7 @@ mod tests {
                 restart_id,
                 time_collected,
                 collector_id,
+                rack_id,
                 fm::Reporter::Sp {
                     sp_type: nexus_types::inventory::SpType::Sled,
                     slot: 19,
@@ -1138,6 +1146,7 @@ mod tests {
         // and NULL.
         let restart_id = EreporterRestartUuid::new_v4();
         let collector_id = OmicronZoneUuid::new_v4();
+        let rack_id = RackUuid::new_v4();
         let make = |ena: u64, class: Option<&str>| {
             (
                 ereport_types::Ena(ena),
@@ -1155,6 +1164,7 @@ mod tests {
                 restart_id,
                 Utc::now(),
                 collector_id,
+                rack_id,
                 fm::Reporter::Sp {
                     sp_type: nexus_types::inventory::SpType::Sled,
                     slot: 0,
@@ -1271,6 +1281,7 @@ mod tests {
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
         let collector_id = OmicronZoneUuid::new_v4();
+        let rack_id = RackUuid::new_v4();
         let t0 = Utc::now();
 
         let timestamp = move |secs: usize| -> DateTime<Utc> {
@@ -1300,6 +1311,7 @@ mod tests {
                 host0_restart_id,
                 host0_first_seen,
                 collector_id,
+                rack_id,
                 fm::Reporter::HostOs { sled, slot: None },
                 vec![mk_ereport(1)],
             )
@@ -1313,6 +1325,7 @@ mod tests {
                     host0_restart_id,
                     time_collected,
                     collector_id,
+                    rack_id,
                     fm::Reporter::HostOs { sled, slot: Some(host0_slot) },
                     vec![mk_ereport(2), mk_ereport(3)],
                 )
@@ -1335,6 +1348,7 @@ mod tests {
                 host1_restart_id,
                 host1_first_seen,
                 collector_id,
+                rack_id,
                 fm::Reporter::HostOs { sled, slot: Some(host1_slot) },
                 vec![mk_ereport(1), mk_ereport(2)],
             )
@@ -1346,6 +1360,7 @@ mod tests {
                 host1_restart_id,
                 timestamp(250),
                 collector_id,
+                rack_id,
                 fm::Reporter::HostOs { sled, slot: None },
                 vec![mk_ereport(3)],
             )
@@ -1363,6 +1378,7 @@ mod tests {
                 sp0_restart_id0,
                 sp0_first_seen,
                 collector_id,
+                rack_id,
                 fm::Reporter::Sp {
                     sp_type: SpType::Switch.into(),
                     slot: sp0_slot,
@@ -1379,6 +1395,7 @@ mod tests {
                     sp0_restart_id0,
                     time_collected,
                     collector_id,
+                    rack_id,
                     fm::Reporter::Sp {
                         sp_type: SpType::Switch.into(),
                         slot: sp0_slot,
@@ -1397,6 +1414,7 @@ mod tests {
                 sp0_restart_id1,
                 sp0_restart1_first_seen,
                 collector_id,
+                rack_id,
                 fm::Reporter::Sp {
                     sp_type: SpType::Switch.into(),
                     slot: sp0_slot,

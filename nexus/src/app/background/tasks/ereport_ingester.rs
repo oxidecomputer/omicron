@@ -293,6 +293,20 @@ impl Ingester {
                     restart_id,
                     time_collected,
                     self.nexus_id,
+                    // TODO-multirack: this argument to `ereports_insert` is
+                    // used to determine the rack ID of the SP that generated
+                    // this batch of ereports. Currently, using `self.rack_id`
+                    // (the rack ID of the Nexus instance ingesting the
+                    // ereports) is always correct, since this Nexus is only
+                    // ingesting ereports from SPs in its own rack. This will
+                    // not be the case if we begin ingesting ereports from SPs
+                    // in other racks.
+                    //
+                    // If this code changes to ingest ereports from the
+                    // management gateways in multiple racks, we'll need to
+                    // change this to pass the rack ID of the target rack, not
+                    // the one this Nexus lives in.
+                    self.rack_id,
                     reporter,
                     db_ereports,
                 )
@@ -443,6 +457,7 @@ mod tests {
             datastore.clone(),
             nexus.internal_resolver.clone(),
             nexus.id(),
+            RackUuid::from_untyped_uuid(nexus.rack_id()),
             fm_analysis_activator.clone(),
             false,
         );
