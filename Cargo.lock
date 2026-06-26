@@ -2193,7 +2193,7 @@ dependencies = [
 [[package]]
 name = "crucible-pantry-client"
 version = "0.0.1"
-source = "git+https://github.com/oxidecomputer/crucible?rev=bd9a0e2abe6b6b89aec8c85f4ee57474144ed150#bd9a0e2abe6b6b89aec8c85f4ee57474144ed150"
+source = "git+https://github.com/oxidecomputer/crucible?rev=2bfe090eb5318ec8c467157018db2429d4df535b#2bfe090eb5318ec8c467157018db2429d4df535b"
 dependencies = [
  "anyhow",
  "chrono",
