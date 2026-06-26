@@ -2979,6 +2979,7 @@ mod tests {
     use nexus_types::deployment::BlueprintZoneConfig;
     use nexus_types::deployment::BlueprintZoneDisposition;
     use nexus_types::deployment::BlueprintZoneImageSource;
+    use nexus_types::deployment::OperatorNexusConfig;
     use nexus_types::external_api::instance as instance_types;
     use nexus_types::external_api::instance::PrivateIpStackCreate;
     use nexus_types::external_api::project;
@@ -3352,13 +3353,15 @@ mod tests {
             .for_new_nexus()
             .expect("found external IP for Nexus");
             builder
-                .sled_add_zone_nexus_with_config(
+                .sled_add_zone_nexus(
                     sled_ids[2],
-                    false,
-                    Vec::new(),
                     BlueprintZoneImageSource::InstallDataset,
                     external_ip,
                     bp0.nexus_generation,
+                    &OperatorNexusConfig {
+                        external_tls: false,
+                        external_dns_servers: &[],
+                    },
                 )
                 .expect("added nexus to third sled");
             builder.build(BlueprintSource::Test)
@@ -3442,13 +3445,15 @@ mod tests {
                     .for_new_nexus()
                     .expect("found external IP for Nexus");
                 builder
-                    .sled_add_zone_nexus_with_config(
+                    .sled_add_zone_nexus(
                         sled_id,
-                        false,
-                        Vec::new(),
                         BlueprintZoneImageSource::InstallDataset,
                         external_ip,
                         bp2.nexus_generation,
+                        &OperatorNexusConfig {
+                            external_tls: false,
+                            external_dns_servers: &[],
+                        },
                     )
                     .expect("added nexus to third sled");
             }
@@ -4008,7 +4013,7 @@ mod tests {
                             name: inst_name.clone(),
                             description: "An instance...".into(),
                         },
-                        ncpus: external::InstanceCpuCount(1),
+                        ncpus: instance_types::InstanceCpuCount(1),
                         memory: 10.into(),
                         hostname: "insty".parse().unwrap(),
                         user_data: vec![],
@@ -4023,6 +4028,7 @@ mod tests {
                         auto_restart_policy: Default::default(),
                         anti_affinity_groups: Vec::new(),
                         multicast_groups: Vec::new(),
+                        enable_jumbo_frames: false,
                     },
                 ),
             )

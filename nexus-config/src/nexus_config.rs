@@ -442,6 +442,8 @@ pub struct BackgroundTaskConfig {
     pub audit_log_timeout_incomplete: AuditLogTimeoutIncompleteConfig,
     /// configuration for audit log cleanup (retention) task
     pub audit_log_cleanup: AuditLogCleanupConfig,
+    /// configuration for populate switch ports task
+    pub populate_switch_ports: PopulateSwitchPortsConfig,
 }
 
 #[serde_as]
@@ -486,6 +488,15 @@ pub struct AuditLogCleanupConfig {
 
     /// maximum rows hard-deleted per activation
     pub max_deleted_per_activation: u32,
+}
+
+#[serde_as]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct PopulateSwitchPortsConfig {
+    /// period (in seconds) for periodic activations of the background task that
+    /// attempts to populate the `switch_port` table.
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub period_secs: Duration,
 }
 
 #[serde_as]
@@ -970,8 +981,7 @@ impl Default for MulticastGroupReconcilerConfig {
 
 /// Default for [`FmTasksConfig::analysis_enabled`].
 fn default_fm_analysis_enabled() -> bool {
-    // TODO(#10349): Flip to true
-    false
+    true
 }
 
 #[serde_as]
@@ -1126,6 +1136,7 @@ mod test {
     use super::*;
 
     use nexus_types::deployment::PlannerConfig;
+    use nexus_types::deployment::ReconfiguratorDisruptionPolicy;
     use omicron_common::address::{
         CLICKHOUSE_TCP_PORT, Ipv6Subnet, RACK_PREFIX,
     };
@@ -1265,8 +1276,8 @@ mod test {
             address = "[::1]:4676"
             [initial_reconfigurator_config]
             planner_enabled = true
-            planner_config.add_zones_with_mupdate_override = true
             tuf_repo_pruner_enabled = false
+            disruption_policy = "terminate"
             [background_tasks]
             dns_internal.period_secs_config = 1
             dns_internal.period_secs_servers = 2
@@ -1339,6 +1350,7 @@ mod test {
             audit_log_cleanup.period_secs = 600
             audit_log_cleanup.retention_days = 90
             audit_log_cleanup.max_deleted_per_activation = 10000
+            populate_switch_ports.period_secs = 31
             [default_region_allocation_strategy]
             type = "random"
             seed = 0
@@ -1437,10 +1449,9 @@ mod test {
                     )]),
                     initial_reconfigurator_config: Some(ReconfiguratorConfig {
                         planner_enabled: true,
-                        planner_config: PlannerConfig {
-                            add_zones_with_mupdate_override: true,
-                        },
+                        planner_config: PlannerConfig::default(),
                         tuf_repo_pruner_enabled: false,
+                        disruption_policy: ReconfiguratorDisruptionPolicy::Terminate,
                     }),
                     background_tasks: BackgroundTaskConfig {
                         dns_internal: DnsTasksConfig {
@@ -1620,6 +1631,9 @@ mod test {
                             retention_days: NonZeroU32::new(90).unwrap(),
                             max_deleted_per_activation: 10_000,
                         },
+                        populate_switch_ports: PopulateSwitchPortsConfig {
+                            period_secs: Duration::from_secs(31),
+                        },
                     },
                     multicast: MulticastConfig { enabled: false },
                     default_region_allocation_strategy:
@@ -1735,6 +1749,7 @@ mod test {
             audit_log_cleanup.period_secs = 600
             audit_log_cleanup.retention_days = 90
             audit_log_cleanup.max_deleted_per_activation = 10000
+            populate_switch_ports.period_secs = 31
 
             [default_region_allocation_strategy]
             type = "random"

@@ -527,7 +527,7 @@ async fn do_unpack(
 
     // Extract all global zone services.
     let global_zone_service_names =
-        packages.into_iter().filter_map(|(_, p)| match p.output {
+        packages.into_values().filter_map(|p| match p.output {
             PackageOutput::Zone { .. } => None,
             PackageOutput::Tarball => Some(&p.service_name),
         });

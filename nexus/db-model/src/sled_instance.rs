@@ -26,13 +26,16 @@ pub struct SledInstance {
 
 impl From<SledInstance> for sled::SledInstance {
     fn from(sled_instance: SledInstance) -> Self {
+        let state =
+            crate::InstanceStateComputer::from_sled_instance(&sled_instance)
+                .compute_state();
         Self {
             identity: nexus_types::identity::Asset::identity(&sled_instance),
             name: sled_instance.name.into(),
             active_sled_id: sled_instance.active_sled_id,
             silo_name: sled_instance.silo_name.into(),
             project_name: sled_instance.project_name.into(),
-            state: sled_instance.state.into(),
+            state,
             migration_id: sled_instance.migration_id,
             ncpus: sled_instance.ncpus,
             memory: sled_instance.memory,

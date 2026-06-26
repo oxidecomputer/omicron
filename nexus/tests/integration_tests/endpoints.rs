@@ -14,6 +14,7 @@ use internal_dns_types::names::DNS_ZONE_EXTERNAL_TESTING;
 use nexus_db_queries::authn;
 use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO;
 use nexus_db_queries::db::identity::Resource;
+use nexus_test_utils::PHYSICAL_DISK_ADOPTION_REQ_UUID;
 use nexus_test_utils::PHYSICAL_DISK_UUID;
 use nexus_test_utils::RACK_UUID;
 use nexus_test_utils::SLED_AGENT_UUID;
@@ -34,6 +35,7 @@ use nexus_types::external_api::ip_pool;
 use nexus_types::external_api::multicast;
 use nexus_types::external_api::networking;
 use nexus_types::external_api::path_params;
+use nexus_types::external_api::physical_disk;
 use nexus_types::external_api::policy;
 use nexus_types::external_api::project;
 use nexus_types::external_api::rack;
@@ -44,18 +46,16 @@ use nexus_types::external_api::ssh_key;
 use nexus_types::external_api::subnet_pool;
 use nexus_types::external_api::support_bundle;
 use nexus_types::external_api::system;
+use nexus_types::external_api::system_networking;
 use nexus_types::external_api::timeseries;
 use nexus_types::external_api::update;
 use nexus_types::external_api::vpc;
 use omicron_common::address::{IpRange, IpVersion, Ipv4Range};
 use omicron_common::api::external::AddressLotKind;
-use omicron_common::api::external::AffinityPolicy;
 use omicron_common::api::external::AllowedSourceIps;
 use omicron_common::api::external::ByteCount;
-use omicron_common::api::external::FailureDomain;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::IdentityMetadataUpdateParams;
-use omicron_common::api::external::InstanceCpuCount;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::Nullable;
@@ -120,6 +120,28 @@ pub static DEMO_SLED_PROVISION_POLICY: LazyLock<
 
 pub static HARDWARE_SWITCH_URL: LazyLock<String> =
     LazyLock::new(|| format!("/v1/system/hardware/switches/{}", SWITCH_UUID));
+
+pub static DEMO_HARDWARE_PHYSICAL_DISK_ID: LazyLock<
+    physical_disk::PhysicalDiskManufacturerIdentity,
+> = LazyLock::new(|| physical_disk::PhysicalDiskManufacturerIdentity {
+    vendor: "test".into(),
+    serial: "test".into(),
+    model: "test".into(),
+});
+
+pub static HARDWARE_DISK_ADOPTION_REQUESTS_URL: &'static str =
+    "/v1/system/hardware/disk-adoption-requests";
+pub static HARDWARE_DISK_ADOPTION_REQUEST_URL: &'static str =
+    "/v1/system/hardware/disk-adoption-request";
+pub static HARDWARE_DISK_ADOPTION_REQUEST_DELETE_URL: LazyLock<String> =
+    LazyLock::new(|| {
+        format!(
+            "/v1/system/hardware/disk-adoption-request/{PHYSICAL_DISK_ADOPTION_REQ_UUID}"
+        )
+    });
+pub static HARDWARE_DISKS_UNADOPTED_URL: &'static str =
+    "/v1/system/hardware/disks-unadopted";
+
 pub const HARDWARE_DISKS_URL: &'static str = "/v1/system/hardware/disks";
 pub static HARDWARE_DISK_URL: LazyLock<String> = LazyLock::new(|| {
     format!("/v1/system/hardware/disks/{}", PHYSICAL_DISK_UUID)
@@ -191,6 +213,8 @@ pub const DEMO_ACCESS_TOKEN_DELETE_URL: &str =
 
 // Global policy
 pub const SYSTEM_POLICY_URL: &'static str = "/v1/system/policy";
+pub const SYSTEM_NETWORKING_SETTINGS_URL: &'static str =
+    "/v1/system/networking/settings";
 
 // Silo used for testing
 pub static DEMO_SILO_NAME: LazyLock<Name> =
@@ -580,8 +604,8 @@ pub static DEMO_AFFINITY_GROUP_CREATE: LazyLock<affinity::AffinityGroupCreate> =
             name: DEMO_AFFINITY_GROUP_NAME.clone(),
             description: String::from(""),
         },
-        policy: AffinityPolicy::Allow,
-        failure_domain: FailureDomain::Sled,
+        policy: affinity::AffinityPolicy::Allow,
+        failure_domain: affinity::FailureDomain::Sled,
     });
 pub static DEMO_AFFINITY_GROUP_UPDATE: LazyLock<affinity::AffinityGroupUpdate> =
     LazyLock::new(|| affinity::AffinityGroupUpdate {
@@ -627,8 +651,8 @@ pub static DEMO_ANTI_AFFINITY_GROUP_CREATE: LazyLock<
         name: DEMO_ANTI_AFFINITY_GROUP_NAME.clone(),
         description: String::from(""),
     },
-    policy: AffinityPolicy::Allow,
-    failure_domain: FailureDomain::Sled,
+    policy: affinity::AffinityPolicy::Allow,
+    failure_domain: affinity::FailureDomain::Sled,
 });
 pub static DEMO_ANTI_AFFINITY_GROUP_UPDATE: LazyLock<
     affinity::AntiAffinityGroupUpdate,
@@ -751,7 +775,7 @@ pub static DEMO_INSTANCE_CREATE: LazyLock<instance::InstanceCreate> =
             name: DEMO_INSTANCE_NAME.clone(),
             description: String::from(""),
         },
-        ncpus: InstanceCpuCount(1),
+        ncpus: instance::InstanceCpuCount(1),
         memory: ByteCount::from_gibibytes_u32(16),
         hostname: "demo-instance".parse().unwrap(),
         user_data: vec![],
@@ -770,6 +794,7 @@ pub static DEMO_INSTANCE_CREATE: LazyLock<instance::InstanceCreate> =
         auto_restart_policy: Default::default(),
         anti_affinity_groups: Vec::new(),
         multicast_groups: Vec::new(),
+        enable_jumbo_frames: false,
     });
 pub static DEMO_STOPPED_INSTANCE_CREATE: LazyLock<instance::InstanceCreate> =
     LazyLock::new(|| instance::InstanceCreate {
@@ -777,7 +802,7 @@ pub static DEMO_STOPPED_INSTANCE_CREATE: LazyLock<instance::InstanceCreate> =
             name: DEMO_STOPPED_INSTANCE_NAME.clone(),
             description: String::from(""),
         },
-        ncpus: InstanceCpuCount(1),
+        ncpus: instance::InstanceCpuCount(1),
         memory: ByteCount::from_gibibytes_u32(16),
         hostname: "demo-instance".parse().unwrap(),
         user_data: vec![],
@@ -796,15 +821,17 @@ pub static DEMO_STOPPED_INSTANCE_CREATE: LazyLock<instance::InstanceCreate> =
         auto_restart_policy: Default::default(),
         anti_affinity_groups: Vec::new(),
         multicast_groups: Vec::new(),
+        enable_jumbo_frames: false,
     });
 pub static DEMO_INSTANCE_UPDATE: LazyLock<instance::InstanceUpdate> =
     LazyLock::new(|| instance::InstanceUpdate {
         boot_disk: Nullable(None),
         cpu_platform: Nullable(None),
         auto_restart_policy: Nullable(None),
-        ncpus: InstanceCpuCount(1),
+        ncpus: instance::InstanceCpuCount(1),
         memory: ByteCount::from_gibibytes_u32(16),
         multicast_groups: None,
+        enable_jumbo_frames: false,
     });
 
 // The instance needs a network interface, too.
@@ -1782,6 +1809,23 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
                         > {
                             role_assignments: vec![],
                         })
+                        .unwrap(),
+                    ),
+                ],
+            },
+            // Fleet-wide networking settings
+            VerifyEndpoint {
+                url: &SYSTEM_NETWORKING_SETTINGS_URL,
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![
+                    AllowedMethod::Get,
+                    AllowedMethod::Put(
+                        serde_json::to_value(
+                            &system_networking::SystemNetworkingSettingsUpdate {
+                                external_jumbo_frames_opt_in_enabled:  false,
+                            },
+                        )
                         .unwrap(),
                     ),
                 ],
@@ -2990,6 +3034,33 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
             VerifyEndpoint {
                 url: &HARDWARE_DISK_URL,
                 visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::Get],
+            },
+            VerifyEndpoint {
+                url: &HARDWARE_DISKS_UNADOPTED_URL,
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::Get],
+            },
+            VerifyEndpoint {
+                url: &HARDWARE_DISK_ADOPTION_REQUEST_URL,
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::Put(
+                    serde_json::to_value(&*DEMO_HARDWARE_PHYSICAL_DISK_ID)
+                        .unwrap(),
+                )],
+            },
+            VerifyEndpoint {
+                url: &HARDWARE_DISK_ADOPTION_REQUEST_DELETE_URL,
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::Delete],
+            },
+            VerifyEndpoint {
+                url: &HARDWARE_DISK_ADOPTION_REQUESTS_URL,
+                visibility: Visibility::Public,
                 unprivileged_access: UnprivilegedAccess::None,
                 allowed_methods: vec![AllowedMethod::Get],
             },

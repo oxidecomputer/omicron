@@ -35,6 +35,8 @@ pub mod deployment;
 pub mod external_api;
 pub mod fm;
 pub mod identity;
+pub mod in_service_disk;
+pub mod instance;
 pub mod internal_api;
 pub mod inventory;
 pub mod multicast;

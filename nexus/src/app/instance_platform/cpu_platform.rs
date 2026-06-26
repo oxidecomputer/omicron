@@ -12,6 +12,17 @@ use raw_cpuid::{
     Vendor, VendorInfo,
 };
 use sled_agent_client::types::CpuidEntry;
+use thiserror::Error;
+
+/// Some kind of error while instantiating a CPU platform.
+#[derive(Error, Debug)]
+pub enum CpuPlatformError {
+    #[error(
+        "\"{param}\" resulted in an out-of-range value \
+         for leaf {leaf:08x} field {field}"
+    )]
+    OutOfRange { leaf: u32, field: &'static str, param: &'static str },
+}
 
 /// Check if `target` describes a processor that agrees with `base` on
 /// architectural behaviors defined in CPUID leaves.
@@ -797,6 +808,154 @@ pub fn turin_v1() -> CpuIdDump {
     source
 }
 
+pub fn turin_v2(vcpu_count: u16) -> Result<CpuIdDump, CpuPlatformError> {
+    // Turin V2 is a result of discovering that some guest software does depend
+    // on cache size information in AMD CPUID leaf 8000_0006. See
+    // https://github.com/oxidecomputer/propolis/issues/1152 for at least one
+    // known case.
+    //
+    // We want to minimize the amount these reported values differ from the
+    // actual hardware a guest is placed on. We *must not* try to populate this
+    // based on an actual sled selection: this would either limit migration to
+    // same-or-better caches *or* make migration liable to having CPUID lie
+    // w.r.t actual hardware. Instead, we'll assume that future caches are at
+    // least "as good as" Turin - thankfully Turin and Turin Dense have the same
+    // L1/L2 shapes. Then we can just use Turin's L1 and L2 shapes here, accept
+    // that Turin VMs will be too pessimistic about caches on future hardware,
+    // and ... we only have the problem of describing L3 left.
+    //
+    // How do we describe L3? The amount of L3 "actually" available to a guest
+    // is just the whole unified L3 of the physical processor. On actual Turin
+    // hardware to date that is 32 MiB of L3 per CCD, times the number of dies
+    // in the package. This is just in contention with everyone else's use (or
+    // not!) of L3. And the number of CPUs does not predict the number of CCDs -
+    // Turin Dense, for example, has twice as many CPUs and threads per CCD!
+    //
+    // Since, as seen so far, guest software uses L3 size to tune when to choose
+    // non-temporal accesses so as to not churn cache, we can *kind of* reflect
+    // that into guests by sizing the reported L3 as a function of the vCPU
+    // count. A VM encompassing a whole 256-thread sled would be told it has the
+    // whole L3 to work with, whereas a sled full of 2-vCPU VMs would "fail
+    // safe" in that if all VMs were in memcpy() they would decide the copy is
+    // churning cache if each were churning their ~1/128th slice of the
+    // universe.
+    //
+    // This is still only a proxy for the pessimal case, because it's plenty
+    // possible for VMs to be stepping on each others' cache lines all day. A
+    // true partitioning mechanism would use L3 QoS, which we may do in the
+    // future! That mitigates noisy neighbors, but doesn't help us size L3
+    // correctly given different CPU-per-CCD parts, and further variance on
+    // future hardware.
+    //
+    // For the sake of doing *something*, we go with a more common form of
+    // Turin: assume 8 cores/16 threads per CCD, that each CCD has 32 MiB of
+    // memory, and that we can size a VM's "L3" as "32M / 16 * vCPUs". This
+    // under-reports available L3 for parts with more vCPU-per-L3 ("high cache"
+    // and some higher-frequency SKUs), and over-reports available L3 on parts
+    // with more vCPU-per-L3 (particularly Turin Dense).
+    //
+    // The above hopefully informs you, dear reader, about why we'd really
+    // rather not populate this leaf in the general case. glibc considered the
+    // misbehavior that has us here to be a bug, which was fixed in glibc 2.39
+    // and backported to 2.38 as well as 2.37. This was *not* backported to
+    // 2.35, which is in Ubuntu 22.04, which has LTS extending another year or
+    // so. So while this is a (fixed!) guest software bug, we'll not try being
+    // clever about 8000_0006 for a while longer.
+    let mut cpuid = CpuId::with_cpuid_reader(turin_v1());
+
+    // Set up L1 cache+TLB info (leaf 8000_0005h)
+    let mut leaf = L1CacheTlbInfo::empty();
+
+    leaf.set_itlb_2m_4m_size(0x40);
+    leaf.set_itlb_2m_4m_associativity(0xff);
+    leaf.set_dtlb_2m_4m_size(0x60);
+    leaf.set_dtlb_2m_4m_associativity(0xff);
+
+    leaf.set_itlb_4k_size(0x40);
+    leaf.set_itlb_4k_associativity(0xff);
+    leaf.set_dtlb_4k_size(0x60);
+    leaf.set_dtlb_4k_associativity(0xff);
+
+    leaf.set_dcache_line_size(0x40);
+    leaf.set_dcache_lines_per_tag(0x01);
+    leaf.set_dcache_associativity(0x0c);
+    leaf.set_dcache_size(0x30);
+
+    leaf.set_icache_line_size(0x40);
+    leaf.set_icache_lines_per_tag(0x01);
+    leaf.set_icache_associativity(0x08);
+    leaf.set_icache_size(0x20);
+
+    cpuid
+        .set_l1_cache_and_tlb_info(Some(leaf))
+        .expect("can set leaf 8000_0005h");
+
+    // Set up L2 and L3 cache+TLB info (leaf 8000_0006h)
+    let mut leaf = L2And3CacheTlbInfo::empty();
+
+    // Set up leaf 8000_0006h EAX
+    //
+    // Gee, it sure is curious that these sizes are *lower* than Milan, huh?
+    // The AMD APM as of 3.37 (2025-07-02) describes the {I,D}TLB sizes as "The
+    // value returned is for the number of entries available for the 2 MB page
+    // size", but Zen 5 hardware reports 0x40 and 0x80, below. Surely the TLB
+    // sizes are not actually 64/128 entries? Correct! AMD marketing material
+    // describes the L2 TLB as having 2048 entries. That means the hardware
+    // values are scaled by 32 on Zen 5. (And PPRs agree with this.)
+    leaf.set_itlb_2m_4m_size(0x040);
+    leaf.set_itlb_2m_4m_associativity(0x2);
+    leaf.set_dtlb_2m_4m_size(0x080);
+    leaf.set_dtlb_2m_4m_associativity(0x4);
+
+    // Set up leaf 8000_0006h EBX
+    //
+    // On Zen 5, L2 4k TLB sizes are scaled in the same way as for 2m/4m above.
+    leaf.set_itlb_4k_size(0x040);
+    leaf.set_itlb_4k_associativity(0x4);
+    leaf.set_dtlb_4k_size(0x080);
+    leaf.set_dtlb_4k_associativity(0x6);
+
+    // Set up leaf 8000_0006h ECX
+    //
+    // This generally the same shape as Milan, but larger.
+    leaf.set_l2cache_line_size(0x40);
+    leaf.set_l2cache_lines_per_tag(0x1);
+    leaf.set_l2cache_associativity(0x6);
+    leaf.set_l2cache_size(0x0400);
+
+    // Set up leaf 8000_0006h EDX
+    //
+    // L3 size is the really tricky one. The big comment at the top of this
+    // function talks about why *this* math.
+    const L3_KB_PER_CCD: u32 = 32 * 1024;
+    const VCPU_PER_CCD: u32 = 16;
+    const L3_KB_PER_VCPU: u32 = L3_KB_PER_CCD / VCPU_PER_CCD;
+    // There are less than 2**21 vCPUs.
+    let vm_l3_share_kb = L3_KB_PER_VCPU * u32::from(vcpu_count);
+    leaf.set_l3cache_line_size(0x40);
+    leaf.set_l3cache_lines_per_tag(0x1);
+    leaf.set_l3cache_associativity(0x9);
+    // then, L3 is recorded in units of 512KiB. L3_PER_VCPU is 2MiB, so this
+    // will divide evenly (i.e. not round down!) for all vCPU counts.
+    let leaf_edx_l3_size_scaled = vm_l3_share_kb / 512;
+    // This field in edx is 14 bits, so check the computed value fits. This is
+    // effectively a limit of 4096 vCPUs.
+    if leaf_edx_l3_size_scaled >= (1 << 14) {
+        return Err(CpuPlatformError::OutOfRange {
+            leaf: 8000_0006,
+            field: "L3 cache size",
+            param: "ncpu",
+        });
+    }
+    leaf.set_l3cache_size(leaf_edx_l3_size_scaled);
+
+    cpuid
+        .set_l2_l3_cache_and_tlb_info(Some(leaf))
+        .expect("can set leaf 8000_0006h");
+
+    Ok(cpuid.into_source())
+}
+
 pub fn milan_rfd314() -> CpuIdDump {
     // This is the Milan we'd "want" to expose, absent any other constraints.
     let baseline = milan_ideal();
@@ -1002,7 +1161,7 @@ pub fn dump_to_cpuid_entries(dump: CpuIdDump) -> Vec<CpuidEntry> {
 #[cfg(test)]
 mod test {
     use crate::app::instance_platform::cpu_platform::{
-        dump_to_cpuid_entries, milan_rfd314, turin_v1,
+        dump_to_cpuid_entries, milan_rfd314, turin_v1, turin_v2,
     };
     use raw_cpuid::{
         CpuId, CpuIdReader, CpuIdResult, CpuIdWriter, L1CacheTlbInfo,
@@ -1145,6 +1304,78 @@ mod test {
         cpuid_leaf!(0x8000001F, 0x00000000, 0x00000000, 0x00000000, 0x00000000),
         cpuid_leaf!(0x80000021, 0x411D8C47, 0x00000000, 0x00000000, 0x00000000),
     ];
+
+    // The expected Turin V2 CPUID leaves given a 4-vCPU guest. Unlike earlier
+    // platforms, the constructed profile is a function of VM shape.
+    const TURIN_V2_CPUID: [CpuidEntry; 27] = [
+        cpuid_leaf!(0x0, 0x0000000D, 0x68747541, 0x444D4163, 0x69746E65),
+        cpuid_leaf!(0x1, 0x00B00F21, 0x00000800, 0xF6D83203, 0x078BFBFF),
+        cpuid_leaf!(0x5, 0x00000000, 0x00000000, 0x00000000, 0x00000000),
+        cpuid_leaf!(0x6, 0x00000004, 0x00000000, 0x00000000, 0x00000000),
+        cpuid_subleaf!(
+            0x7, 0x0, 0x00000001, 0xF1BB03A9, 0x18005F42, 0x00000110
+        ),
+        cpuid_subleaf!(
+            0x7, 0x1, 0x00000030, 0x00000000, 0x00000000, 0x00000000
+        ),
+        cpuid_subleaf!(
+            0xD, 0x0, 0x000000E7, 0x00000980, 0x00000980, 0x00000000
+        ),
+        cpuid_subleaf!(
+            0xD, 0x1, 0x00000007, 0x00000980, 0x00000000, 0x00000000
+        ),
+        cpuid_subleaf!(
+            0xD, 0x2, 0x00000100, 0x00000240, 0x00000000, 0x00000000
+        ),
+        /*
+         * subleaves 3 and 4 are all-zero
+         */
+        cpuid_subleaf!(
+            0xD, 0x5, 0x00000040, 0x00000340, 0x00000000, 0x00000000
+        ),
+        cpuid_subleaf!(
+            0xD, 0x6, 0x00000200, 0x00000380, 0x00000000, 0x00000000
+        ),
+        cpuid_subleaf!(
+            0xD, 0x7, 0x00000400, 0x00000580, 0x00000000, 0x00000000
+        ),
+        cpuid_leaf!(0x80000000, 0x80000021, 0x68747541, 0x444D4163, 0x69746E65),
+        cpuid_leaf!(0x80000001, 0x00B00F21, 0x40000000, 0x440001F1, 0x25D3FBFF),
+        cpuid_leaf!(0x80000002, 0x6469784F, 0x69562065, 0x61757472, 0x7554206C),
+        cpuid_leaf!(0x80000003, 0x2D6E6972, 0x656B696C, 0x6F725020, 0x73736563),
+        cpuid_leaf!(0x80000004, 0x2020726F, 0x20202020, 0x20202020, 0x00202020),
+        cpuid_leaf!(0x80000005, 0xFF60FF40, 0xFF60FF40, 0x300C0140, 0x20080140),
+        cpuid_leaf!(0x80000006, 0x40802040, 0x60804040, 0x04006140, 0x00409140),
+        cpuid_leaf!(0x80000007, 0x00000000, 0x00000000, 0x00000000, 0x00000100),
+        cpuid_leaf!(0x80000008, 0x00003030, 0x20000005, 0x00000000, 0x00000000),
+        cpuid_leaf!(0x8000000A, 0x00000000, 0x00000000, 0x00000000, 0x00000000),
+        cpuid_leaf!(0x8000001A, 0x0000000A, 0x00000000, 0x00000000, 0x00000000),
+        cpuid_leaf!(0x8000001B, 0x00000000, 0x00000000, 0x00000000, 0x00000000),
+        cpuid_leaf!(0x8000001C, 0x00000000, 0x00000000, 0x00000000, 0x00000000),
+        cpuid_leaf!(0x8000001F, 0x00000000, 0x00000000, 0x00000000, 0x00000000),
+        cpuid_leaf!(0x80000021, 0x411D8C47, 0x00000000, 0x00000000, 0x00000000),
+    ];
+
+    // Test that Turin V2 matches the predetermined CPUID leaves written above
+    // (e.g. that the collection of builders behind `turin_v2` produce this
+    // profile as used for testing and elsewhere).
+    //
+    // This platform is Turin V1, but with the addition of leaves 8000_0005 and
+    // 8000_0006 for cache information it turns out some guest software needs
+    // for now. `turin_v2()` discusses the difference in more depth.
+    #[test]
+    fn turin_v2_is_as_described() {
+        let computed = dump_to_cpuid_entries(turin_v2(4).expect("valid cpus"));
+
+        for (l, r) in TURIN_V2_CPUID.iter().zip(computed.as_slice().iter()) {
+            eprintln!("comparing {:#08x}.{:?}", l.leaf, l.subleaf);
+            assert_eq!(
+                l, r,
+                "leaf 0x{:08x} (subleaf? {:?}) did not match",
+                l.leaf, l.subleaf
+            );
+        }
+    }
 
     // Test that Turin V1 matches the predetermined CPUID leaves written above
     // (e.g. that the collection of builders behind `turin_v1` produce this

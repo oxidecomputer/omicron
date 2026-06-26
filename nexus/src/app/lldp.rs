@@ -10,8 +10,8 @@ use lldpd_client::types::ChassisId;
 use lldpd_client::types::Neighbor;
 use lldpd_client::types::PortId;
 use nexus_db_queries::context::OpContext;
+use nexus_types::external_api::networking::LldpLinkConfig;
 use omicron_common::api::external::Error;
-use omicron_common::api::external::LldpLinkConfig;
 use omicron_common::api::external::LldpNeighbor;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::Name;
@@ -85,12 +85,16 @@ impl super::Nexus {
             .get_neighbors_stream(&format!("{port}/0"), None)
             .try_collect()
             .await
-            .map_err(|e| {
-                Error::internal_error(&format!(
+            .map_err(|e| match e.status() {
+                Some(http::StatusCode::NOT_FOUND) => Error::not_found_by_name(
+                    omicron_common::api::external::ResourceType::SwitchPort,
+                    port,
+                ),
+                _ => Error::internal_error(&format!(
                     "failed to get neighbor list for \
                      {switch_slot:?}/{port}: {}",
                     InlineErrorChain::new(&e),
-                ))
+                )),
             })?;
 
         // Strip out any neighbors seen on previous pages prior to sorting the

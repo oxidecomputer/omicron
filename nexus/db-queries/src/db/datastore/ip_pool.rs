@@ -17,8 +17,8 @@ use crate::db::identity::Resource;
 use crate::db::model::IncompleteIpPoolResource;
 use crate::db::model::IpKind;
 use crate::db::model::IpPool;
+use crate::db::model::IpPoolAssignment;
 use crate::db::model::IpPoolRange;
-use crate::db::model::IpPoolReservationType;
 use crate::db::model::IpPoolResource;
 use crate::db::model::IpPoolResourceType;
 use crate::db::model::IpPoolType;
@@ -50,7 +50,7 @@ use nexus_db_model::IpVersion;
 use nexus_db_model::Project;
 use nexus_db_model::Vpc;
 use nexus_db_schema::enums::IpKindEnum;
-use nexus_db_schema::enums::IpPoolReservationTypeEnum;
+use nexus_db_schema::enums::IpPoolAssignmentEnum;
 use nexus_types::silo::INTERNAL_SILO_ID;
 use omicron_common::address::IpRange;
 use omicron_common::address::{IPV4_SSM_SUBNET, IPV6_SSM_SUBNET};
@@ -108,21 +108,28 @@ pub struct DefaultIpPools {
     pub v6: Option<(authz::IpPool, IpPool)>,
 }
 
-// Error message emitted when a user attempts to link an IP Pool and internal
-// Silo, but the pool is already reserved for internal use, or vice versa.
-const BAD_SILO_LINK_ERROR: &str = "IP Pools cannot be both linked to external \
-    Silos and reserved for internal Oxide usage.";
+// Error message emitted when a user attempts to link an IP Pool and a Silo,
+// but the pool is assigned for system services use, or vice versa.
+const BAD_SILO_LINK_ERROR: &str = "IP Pools cannot be both linked to Silos \
+    and assigned for system services use.";
 
 // Error message emitted when a user attempts to unlink an IP Pool from a Silo
-// while the pool has external IP addresses allocated from it.
+// while the pool has external IP addresses or multicast groups allocated
+// from it.
 const POOL_HAS_IPS_ERROR: &str =
     "IP addresses from this pool are in use in the linked silo";
 
-// Error message emitted when a user attempts to unlink an IP Pool from the
-// Oxide internal Silo, without at least one other IP Pool linked to it.
-const LAST_POOL_ERROR: &str = "Cannot delete the last IP Pool reserved for \
-    Oxide internal usage. Create and reserve at least one more IP Pool \
-    before deleting this one.";
+// Error message emitted when a user attempts to reassign the last IP Pool
+// assigned for system services use.
+const REASSIGN_LAST_POOL_ERROR: &str = "Cannot reassign the last IP Pool \
+    assigned for system services use. Create and assign at least one more \
+    IP Pool before reassigning this one.";
+
+// Error message emitted when a user attempts to delete the last IP Pool
+// assigned for system services use.
+const DELETE_LAST_POOL_ERROR: &str = "Cannot delete the last IP Pool \
+    assigned for system services use. Create and assign at least one more \
+    IP Pool before deleting this one.";
 
 /// Check if pool selection has an IP version conflict.
 ///
@@ -146,11 +153,11 @@ fn check_ip_version_conflict(
 }
 
 impl DataStore {
-    /// List IP Pools by their reservation type, IP version, and pool type.
+    /// List IP Pools by their assignment, IP version, and pool type.
     pub async fn ip_pools_list_paginated(
         &self,
         opctx: &OpContext,
-        reservation_type: IpPoolReservationType,
+        assignment: IpPoolAssignment,
         version: Option<IpVersion>,
         pool_type: Option<IpPoolType>,
         pagparams: &PaginatedBy<'_>,
@@ -179,7 +186,7 @@ impl DataStore {
         };
         query
             .filter(ip_pool::time_deleted.is_null())
-            .filter(ip_pool::reservation_type.eq(reservation_type))
+            .filter(ip_pool::assignment.eq(assignment))
             .select(IpPool::as_select())
             .get_results_async(&*self.pool_connection_authorized(opctx).await?)
             .await
@@ -196,7 +203,7 @@ impl DataStore {
     ) -> ListResultVec<IpPool> {
         self.ip_pools_list_paginated(
             opctx,
-            IpPoolReservationType::ExternalSilos,
+            IpPoolAssignment::Silos,
             None,
             None,
             pagparams,
@@ -212,7 +219,7 @@ impl DataStore {
     ) -> ListResultVec<IpPool> {
         self.ip_pools_list_paginated(
             opctx,
-            IpPoolReservationType::ExternalSilos,
+            IpPoolAssignment::Silos,
             None,
             Some(IpPoolType::Multicast),
             pagparams,
@@ -228,7 +235,7 @@ impl DataStore {
     ) -> ListResultVec<IpPool> {
         self.ip_pools_list_paginated(
             opctx,
-            IpPoolReservationType::ExternalSilos,
+            IpPoolAssignment::Silos,
             None,
             Some(IpPoolType::Unicast),
             pagparams,
@@ -440,7 +447,7 @@ impl DataStore {
         }
     }
 
-    /// Look up internal service IP Pools for both IP versions.
+    /// Look up system services IP Pools for both IP versions.
     ///
     /// This is useful when you need to handle resources like external IPs where
     /// the actual address might be from either IP version.
@@ -671,7 +678,7 @@ impl DataStore {
         Ok(authz_pool)
     }
 
-    /// Look up IP pool intended for internal services by its well-known name.
+    /// Look up system services IP pool by its well-known name.
     ///
     /// This method may require an index by Availability Zone in the future.
     //
@@ -721,7 +728,7 @@ impl DataStore {
     /// Delete an IP Pool, and any links between it an any Silos.
     ///
     /// This fails if there are still IP Ranges in the pool, or if we're
-    /// deleting the last pool reserved for Oxide use.
+    /// deleting the last pool assigned for system services use.
     pub async fn ip_pool_delete(
         &self,
         opctx: &OpContext,
@@ -752,18 +759,16 @@ impl DataStore {
         }
 
         // Add a small subquery, if needed, to ensure that we don't delete this
-        // IP Pool if it's the last reserved pool. There has to always be at
+        // IP Pool if it's the last system-services pool. There has to always be at
         // least one of these.
-        let enough_reserved_pools = if matches!(
-            db_pool.reservation_type,
-            IpPoolReservationType::ExternalSilos
-        ) {
-            diesel::dsl::sql::<sql_types::Bool>("TRUE")
-        } else {
-            diesel::dsl::sql::<sql_types::Bool>(&count_reserved_pools_subquery(
-                db_pool.reservation_type,
-            ))
-        };
+        let enough_system_services_pools =
+            if matches!(db_pool.assignment, IpPoolAssignment::Silos) {
+                diesel::dsl::sql::<sql_types::Bool>("TRUE")
+            } else {
+                diesel::dsl::sql::<sql_types::Bool>(
+                    &count_system_services_pools_subquery(db_pool.assignment),
+                )
+            };
 
         // Delete the pool, conditional on the rcgen not having changed. This
         // protects the delete from occuring if clients created a new IP range
@@ -773,7 +778,7 @@ impl DataStore {
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::id.eq(authz_pool.id()))
             .filter(dsl::rcgen.eq(db_pool.rcgen))
-            .filter(enough_reserved_pools)
+            .filter(enough_system_services_pools)
             .set(dsl::time_deleted.eq(now))
             .execute_async(&*conn)
             .await
@@ -782,7 +787,7 @@ impl DataStore {
                     DatabaseErrorKind::Unknown,
                     ref info,
                 ) if info.message().ends_with("invalid bool value") => {
-                    Error::invalid_request(LAST_POOL_ERROR)
+                    Error::invalid_request(DELETE_LAST_POOL_ERROR)
                 }
                 _ => public_error_from_diesel(
                     e,
@@ -810,15 +815,14 @@ impl DataStore {
         Ok(())
     }
 
-    /// Check whether the pool is internal by checking that it exists and is
-    /// associated with the internal silo
+    /// Check whether the pool is assigned for system services.
     //
-    // TODO-remove: This should go away when we let operators reserve any IP
-    // Pools for internal Oxide usage. The pool belongs to them even in that
-    // case, and so we should show it to them.
+    // TODO-remove: This should go away when we let operators reassign any IP
+    // Pool. The pool belongs to them even in that case, and so we should show
+    // it to them.
     //
     // See https://github.com/oxidecomputer/omicron/issues/8947.
-    pub async fn ip_pool_is_internal(
+    pub async fn ip_pool_is_assigned_to_system_services(
         &self,
         opctx: &OpContext,
         authz_pool: &authz::IpPool,
@@ -827,10 +831,7 @@ impl DataStore {
         ip_pool::table
             .find(authz_pool.id())
             .filter(ip_pool::time_deleted.is_null())
-            .select(
-                ip_pool::reservation_type
-                    .eq(IpPoolReservationType::OxideInternal),
-            )
+            .select(ip_pool::assignment.eq(IpPoolAssignment::SystemServices))
             .first_async::<bool>(
                 &*self.pool_connection_authorized(opctx).await?,
             )
@@ -865,20 +866,20 @@ impl DataStore {
     }
 
     /// Reserve an IP Pool for a specific use.
-    pub async fn ip_pool_reserve(
+    pub async fn ip_pool_assign(
         &self,
         opctx: &OpContext,
         authz_pool: &authz::IpPool,
         db_pool: &IpPool,
-        reservation_type: IpPoolReservationType,
+        assignment: IpPoolAssignment,
     ) -> UpdateResult<()> {
-        if db_pool.reservation_type == reservation_type {
+        if db_pool.assignment == assignment {
             return Err(Error::invalid_request(format!(
-                "IP Pool already has reservation type '{}'",
-                reservation_type,
+                "IP Pool already has assignment '{}'",
+                assignment,
             )));
         }
-        let n_rows = reserve_ip_pool_query(db_pool, reservation_type)
+        let n_rows = assign_ip_pool_query(db_pool, assignment)
             .execute_async(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| match e {
@@ -894,7 +895,7 @@ impl DataStore {
                     } else if message.starts_with("could not parse")
                         && message.contains("as type int")
                     {
-                        Error::invalid_request(LAST_POOL_ERROR)
+                        Error::invalid_request(REASSIGN_LAST_POOL_ERROR)
                     } else {
                         public_error_from_diesel(e, ErrorHandler::Server)
                     }
@@ -1109,7 +1110,7 @@ impl DataStore {
         if ip_pool_resource.resource_id == INTERNAL_SILO_ID {
             return Err(Error::invalid_request(
                 "IP Pools should not be linked to the internal Oxide silo. \
-                    Reserve the Pool for `oxide_internal` use instead.",
+                    Assign the Pool for system services use instead.",
             ));
         }
         opctx
@@ -1488,8 +1489,8 @@ impl DataStore {
 
         if authz_silo.id() == INTERNAL_SILO_ID {
             return Err(Error::internal_error(
-                "Cannot unlink an internally-reserved IP Pool. \
-                    Use the `reservation_type` column instead.",
+                "Cannot unlink an IP Pool assigned for system services. \
+                    Use the `assignment` column instead.",
             ));
         }
 
@@ -2097,9 +2098,9 @@ impl DataStore {
     }
 }
 
-// Sentinel we try to cast as a UUID in the database, when linking an IP Pool to
-// a Silo of the wrong "type" -- i.e., linking to an external Silo if the Pool
-// is already linked to our internal Silo, or vice versa.
+// Sentinel we try to cast as a UUID in the database, when linking a
+// system-services pool to a silo, or trying to assign a silo-linked pool for
+// system services use.
 const BAD_SILO_LINK_SENTINEL: &str = "bad-link-type";
 
 // Sentinel we try to cast as a UUID in the database when the IP Pool is
@@ -2110,8 +2111,8 @@ const IP_POOL_DELETED_SENTINEL: &str = "ip-pool-deleted";
 // between selecting it and trying to insert the link.
 const SILO_DELETED_SENTINEL: &str = "silo-deleted";
 
-// Sentinel we try to cast as an integer when removing the reservation on the
-// last internal pool of a given type.
+// Sentinel we try to cast as an integer when trying to reassign the last
+// system-services pool of a given type.
 const LAST_POOL_SENTINEL: &str = "last-pool";
 
 /// Extract the sentinel string from a UUID cast error message.
@@ -2127,9 +2128,9 @@ fn extract_uuid_cast_sentinel(msg: &str) -> Option<&str> {
 // Query to conditionally link an IP Pool to an external customer Silo.
 //
 // This method returns a SQL query to conditionally insert a link between an IP
-// Pool and a Silo. It maintains the invariant that a pool can be reserved for
-// Oxide internal usage XOR linked to customer silos. It also checks that the
-// pool and silo still exist when the query is run.
+// Pool and a Silo. It maintains the invariant that a pool is assigned for
+// system services XOR linked to customer silos. It also checks that the pool
+// and silo still exist when the query is run.
 //
 // See `tests/output/ip_pool_external_silo_link.sql` for the full generated SQL.
 fn link_ip_pool_to_external_silo_query(
@@ -2138,15 +2139,13 @@ fn link_ip_pool_to_external_silo_query(
     let mut builder = QueryBuilder::new();
     // `ip_pool` CTE: select the pool by ID, ensuring it still exists.
     // Fail with a 'bad-link-type' sentinel (via CAST-to-UUID trick) if
-    // the pool is reserved for Oxide rather than external silos.
+    // the pool is assigned for system services rather than silos.
     // Also selects pool_type and ip_version for denormalization into
     // ip_pool_resource (needed for a partial index constraint on defaults).
     builder
-        .sql("WITH ip_pool AS (SELECT CAST(IF(reservation_type != ")
+        .sql("WITH ip_pool AS (SELECT CAST(IF(assignment != ")
         .param()
-        .bind::<IpPoolReservationTypeEnum, _>(
-            IpPoolReservationType::ExternalSilos,
-        )
+        .bind::<IpPoolAssignmentEnum, _>(IpPoolAssignment::Silos)
         .sql(", '")
         .sql(BAD_SILO_LINK_SENTINEL)
         .sql("', ")
@@ -2202,14 +2201,18 @@ fn link_ip_pool_to_external_silo_query(
 
 // Query to conditionally unlink an IP Pool from an external / customer Silo.
 //
-// This deletes the link iff there are no outstanding instance external IPs or
-// floating IPs allocated out of the pool, to objects in the Silo.
+// This deletes the link iff there are no remaining instance external IPs or
+// floating IPs in the Silo. Multicast groups aren't silo-scoped at the row
+// level (they're explicitly cross-silo), so we additionally block unlinking
+// while any remain (groups in the deleting state still hold their pool IP),
+// mirroring `ip_pool_delete_range`. A group allocated from this pool by any
+// silo blocks unlinking from every silo linked to the pool.
 //
 // The full query is:
 //
 // ```
 // -- This CTE returns one row if there are any external IPs attached to
-// -- instances, in any projects in the Silo.
+// -- instances in any projects in the Silo.
 // WITH instance_ips AS (
 //   SELECT 1
 //   FROM external_ip
@@ -2240,20 +2243,33 @@ fn link_ip_pool_to_external_silo_query(
 //       project.silo_id = $4 AND
 //       project.time_deleted IS NULL
 //   LIMIT 1
+// ),
+// -- This CTE returns one row if any multicast groups are allocated out of
+// -- the pool. Groups are cross-silo by design, so the existence check is
+// -- not silo-scoped.
+// multicast_groups AS (
+//   SELECT 1
+//   FROM multicast_group
+//   WHERE
+//       multicast_group.time_deleted IS NULL AND
+//       multicast_group.ip_pool_id = $5
+//   LIMIT 1
 // )
 // -- Delete the requested link by primary key, but conditionally.
 // DELETE FROM ip_pool_resource
 // WHERE
-//   ip_pool_id = $7 AND
+//   ip_pool_id = $6 AND
 //   resource_type = 'silo' AND
-//   resource_id = $8 AND
-//   -- If there are any external IPs, this generates an error casting 'eips' to
-//   -- a boolean, which we detect and handle.
+//   resource_id = $7 AND
+//   -- If there are any allocations, this generates an error casting
+//   -- 'has-allocs' to a boolean, which we detect and handle.
 //   CAST(IF(EXISTS(
 //      SELECT 1 FROM instance_ips
 //      UNION ALL
 //      SELECT 1 FROM floating_ips
-//  ), 'eips', 'true') AS BOOL)
+//      UNION ALL
+//      SELECT 1 FROM multicast_groups
+//  ), 'has-allocs', 'true') AS BOOL)
 // ```
 fn unlink_ip_pool_from_external_silo_query(
     ip_pool_id: Uuid,
@@ -2301,7 +2317,18 @@ fn unlink_ip_pool_from_external_silo_query(
         .param()
         .bind::<sql_types::Uuid, _>(silo_id)
         .sql(
-            " AND project.time_deleted IS NULL LIMIT 1) \
+            " AND project.time_deleted IS NULL LIMIT 1), \
+            multicast_groups AS (\
+        SELECT 1 \
+        FROM multicast_group \
+        WHERE \
+            multicast_group.time_deleted IS NULL AND \
+            multicast_group.ip_pool_id = ",
+        )
+        .param()
+        .bind::<sql_types::Uuid, _>(ip_pool_id)
+        .sql(
+            " LIMIT 1) \
             DELETE FROM ip_pool_resource \
             WHERE ip_pool_id = ",
         )
@@ -2321,9 +2348,11 @@ fn unlink_ip_pool_from_external_silo_query(
                 EXISTS(\
                     SELECT 1 FROM instance_ips \
                     UNION ALL \
-                    SELECT 1 FROM floating_ips\
+                    SELECT 1 FROM floating_ips \
+                    UNION ALL \
+                    SELECT 1 FROM multicast_groups\
                 ), \
-                'has-eips', \
+                'has-allocs', \
                 'true'\
             ) AS BOOL)",
         );
@@ -2331,64 +2360,64 @@ fn unlink_ip_pool_from_external_silo_query(
 }
 
 // Generate a small helper subquery which fails with a bool-cast error if there
-// are fewer than 2 IP Pools reserved for the provided use. It must be internal.
-fn count_reserved_pools_subquery(
-    reservation_type: IpPoolReservationType,
+// are fewer than 2 IP Pools with the given assignment. It must be for system services.
+fn count_system_services_pools_subquery(
+    assignment: IpPoolAssignment,
 ) -> String {
-    assert!(!matches!(reservation_type, IpPoolReservationType::ExternalSilos));
+    assert!(!matches!(assignment, IpPoolAssignment::Silos));
     format!(
         "CAST(IF(\
         (SELECT COUNT(1) \
              FROM ip_pool \
-             WHERE time_deleted IS NULL AND reservation_type = '{}' LIMIT 2\
+             WHERE time_deleted IS NULL AND assignment = '{}' LIMIT 2\
         ) >= 2, \
         'true', \
         '{}') \
         AS BOOL)",
-        reservation_type, LAST_POOL_SENTINEL,
+        assignment, LAST_POOL_SENTINEL,
     )
 }
 
-// Conditionally reserve an IP Pool for a specific use.
+// Conditionally reassign an IP Pool.
 //
 // # Panics
 //
-// Panics if the current and new reservation type are the same.
-fn reserve_ip_pool_query(
+// Panics if the current and new assignment are the same.
+fn assign_ip_pool_query(
     pool: &IpPool,
-    reservation_type: IpPoolReservationType,
+    assignment: IpPoolAssignment,
 ) -> TypedSqlQuery<()> {
-    assert_ne!(pool.reservation_type, reservation_type);
-    match pool.reservation_type {
-        IpPoolReservationType::ExternalSilos => {
-            reserve_external_ip_pool_query(pool, reservation_type)
+    assert_ne!(pool.assignment, assignment);
+    match pool.assignment {
+        IpPoolAssignment::Silos => {
+            assign_ip_pool_to_silos_query(pool, assignment)
         }
-        IpPoolReservationType::OxideInternal => {
-            reserve_internal_ip_pool_query(pool, reservation_type)
+        IpPoolAssignment::SystemServices => {
+            assign_ip_pool_to_system_services_query(pool, assignment)
         }
     }
 }
 
-// Query to conditionally reserve an IP Pool that is currently reserved for
-// external silo use.
+// Query to conditionally reassign an IP Pool that is currently assigned for
+// silo use.
 //
 // Checks that the pool is not currently linked to any silos first. Note that
 // this means there cannot be any silo-specific resources using the pool.
-fn reserve_external_ip_pool_query(
+fn assign_ip_pool_to_silos_query(
     ip_pool: &IpPool,
-    new_reservation_type: IpPoolReservationType,
+    new_assignment: IpPoolAssignment,
 ) -> TypedSqlQuery<()> {
     let mut builder = QueryBuilder::new();
     builder
-        .sql("UPDATE ip_pool SET reservation_type = ")
+        .sql("UPDATE ip_pool SET assignment = ")
         .param()
-        .bind::<IpPoolReservationTypeEnum, _>(new_reservation_type)
+        .bind::<IpPoolAssignmentEnum, _>(new_assignment)
         .sql(", time_modified = NOW() WHERE id = ")
         .param()
         .bind::<sql_types::Uuid, _>(ip_pool.id())
-        .sql(" AND time_deleted IS NULL AND reservation_type = ")
+        .sql(" AND time_deleted IS NULL AND assignment = ")
         .param()
-        .bind::<IpPoolReservationTypeEnum, _>(ip_pool.reservation_type)
+        .bind::<IpPoolAssignmentEnum, _>(ip_pool.assignment)
         .sql(
             " AND CAST(IF(EXISTS(\
                 SELECT 1 \
@@ -2403,28 +2432,28 @@ fn reserve_external_ip_pool_query(
     builder.query()
 }
 
-// Query to conditionally reserve an IP Pool that is currently reserved for Oxide
-// internal use.
+// Query to conditionally reassign an IP Pool that is currently assigned for
+// system services use.
 //
 // Checks that:
 //
 // - There are no external IPs in use by Oxide resources.
-// - There is at least one other internal pool of the same reservation type.
-fn reserve_internal_ip_pool_query(
+// - There is at least one other system-services pool of the same assignment.
+fn assign_ip_pool_to_system_services_query(
     ip_pool: &IpPool,
-    new_reservation_type: IpPoolReservationType,
+    new_assignment: IpPoolAssignment,
 ) -> TypedSqlQuery<()> {
     let mut builder = QueryBuilder::new();
     builder
-        .sql("UPDATE ip_pool SET reservation_type = ")
+        .sql("UPDATE ip_pool SET assignment = ")
         .param()
-        .bind::<IpPoolReservationTypeEnum, _>(new_reservation_type)
+        .bind::<IpPoolAssignmentEnum, _>(new_assignment)
         .sql(", time_modified = NOW() WHERE id = ")
         .param()
         .bind::<sql_types::Uuid, _>(ip_pool.id())
-        .sql(" AND time_deleted IS NULL AND reservation_type = ")
+        .sql(" AND time_deleted IS NULL AND assignment = ")
         .param()
-        .bind::<IpPoolReservationTypeEnum, _>(ip_pool.reservation_type)
+        .bind::<IpPoolAssignmentEnum, _>(ip_pool.assignment)
         // Generate div-by-zero error if there are IPs
         .sql(
             " AND (\
@@ -2442,17 +2471,16 @@ fn reserve_internal_ip_pool_query(
             LIMIT 1\
         ), 1/0, 1) AS BOOL))",
         )
-        // Generate int-cast error if this is the last pool of this reservation
-        // type.
+        // Generate int-cast error if this is the last pool of this assignment.
         .sql(
             " AND CAST(IF(\
                 (SELECT COUNT(1) \
                     FROM ip_pool \
                     WHERE time_deleted IS NULL \
-                    AND reservation_type = ",
+                    AND assignment = ",
         )
         .param()
-        .bind::<IpPoolReservationTypeEnum, _>(ip_pool.reservation_type)
+        .bind::<IpPoolAssignmentEnum, _>(ip_pool.assignment)
         .sql(
             " \
                 LIMIT 2\
@@ -2473,8 +2501,9 @@ mod test {
     use crate::authz;
     use crate::db::datastore::external_ip::FloatingIpAllocation;
     use crate::db::datastore::ip_pool::{
-        BAD_SILO_LINK_ERROR, LAST_POOL_ERROR, POOL_HAS_IPS_ERROR,
-        link_ip_pool_to_external_silo_query, reserve_ip_pool_query,
+        BAD_SILO_LINK_ERROR, DELETE_LAST_POOL_ERROR, POOL_HAS_IPS_ERROR,
+        REASSIGN_LAST_POOL_ERROR, assign_ip_pool_query,
+        link_ip_pool_to_external_silo_query,
         unlink_ip_pool_from_external_silo_query,
     };
     use crate::db::explain::ExplainableAsync as _;
@@ -2492,8 +2521,8 @@ mod test {
     };
     use nexus_db_lookup::LookupPath;
     use nexus_db_model::{
-        InternetGatewayIpPool, IpPoolIdentity, IpPoolReservationType,
-        IpPoolType, IpVersion,
+        InternetGatewayIpPool, IpPoolAssignment, IpPoolIdentity, IpPoolType,
+        IpVersion,
     };
     use nexus_types::deployment::{
         OmicronZoneExternalFloatingIp, OmicronZoneExternalIp,
@@ -2560,11 +2589,7 @@ mod test {
         let pool1_for_silo = datastore
             .ip_pool_create(
                 &opctx,
-                IpPool::new(
-                    &identity,
-                    IpVersion::V4,
-                    IpPoolReservationType::ExternalSilos,
-                ),
+                IpPool::new(&identity, IpVersion::V4, IpPoolAssignment::Silos),
             )
             .await
             .expect("Failed to create IP pool");
@@ -2658,11 +2683,7 @@ mod test {
         let second_silo_default = datastore
             .ip_pool_create(
                 &opctx,
-                IpPool::new(
-                    &identity,
-                    IpVersion::V4,
-                    IpPoolReservationType::ExternalSilos,
-                ),
+                IpPool::new(&identity, IpVersion::V4, IpPoolAssignment::Silos),
             )
             .await
             .expect("Failed to create pool");
@@ -2740,24 +2761,26 @@ mod test {
     }
 
     #[tokio::test]
-    async fn test_internal_ip_pools() {
-        let logctx = dev::test_setup_log("test_internal_ip_pools");
+    async fn test_ip_pools_assigned_to_system_services() {
+        let logctx =
+            dev::test_setup_log("test_ip_pools_assigned_to_system_services");
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
         for version in [IpVersion::V4, IpVersion::V6] {
-            // confirm internal pools appear as internal
+            // confirm system services pools are identified correctly
             let (authz_pool, pool) = datastore
                 .ip_pools_service_lookup(&opctx, version)
                 .await
                 .unwrap();
             assert_eq!(pool.ip_version, version);
 
-            let is_internal =
-                datastore.ip_pool_is_internal(&opctx, &authz_pool).await;
+            let is_internal = datastore
+                .ip_pool_is_assigned_to_system_services(&opctx, &authz_pool)
+                .await;
             assert_eq!(is_internal, Ok(true));
 
-            // another random pool should not be considered internal
+            // a silo pool should not be considered assigned for system services
             let identity = IdentityMetadataCreateParams {
                 name: format!("other-{version}-pool").parse().unwrap(),
                 description: "".to_string(),
@@ -2765,11 +2788,7 @@ mod test {
             let other_pool = datastore
                 .ip_pool_create(
                     &opctx,
-                    IpPool::new(
-                        &identity,
-                        version,
-                        IpPoolReservationType::ExternalSilos,
-                    ),
+                    IpPool::new(&identity, version, IpPoolAssignment::Silos),
                 )
                 .await
                 .expect("Failed to create IP pool");
@@ -2780,11 +2799,15 @@ mod test {
                 other_pool.id(),
                 LookupType::ById(other_pool.id()),
             );
-            let is_internal =
-                datastore.ip_pool_is_internal(&opctx, &authz_other_pool).await;
+            let is_internal = datastore
+                .ip_pool_is_assigned_to_system_services(
+                    &opctx,
+                    &authz_other_pool,
+                )
+                .await;
             assert_eq!(is_internal, Ok(false));
 
-            // now link it to the current silo, and it is still not internal.
+            // now link it to the current silo; it is still not assigned for system services
             let silo_id = opctx.authn.silo_required().unwrap().id();
             let is_default = matches!(version, IpVersion::V4);
             let link = IncompleteIpPoolResource {
@@ -2798,8 +2821,12 @@ mod test {
                 .await
                 .expect("Failed to link IP pool to silo");
 
-            let is_internal =
-                datastore.ip_pool_is_internal(&opctx, &authz_other_pool).await;
+            let is_internal = datastore
+                .ip_pool_is_assigned_to_system_services(
+                    &opctx,
+                    &authz_other_pool,
+                )
+                .await;
             assert_eq!(is_internal, Ok(false));
         }
 
@@ -2838,11 +2865,7 @@ mod test {
         let pool = datastore
             .ip_pool_create(
                 &opctx,
-                IpPool::new(
-                    &identity,
-                    IpVersion::V4,
-                    IpPoolReservationType::ExternalSilos,
-                ),
+                IpPool::new(&identity, IpVersion::V4, IpPoolAssignment::Silos),
             )
             .await
             .expect("Failed to create IP pool");
@@ -2955,11 +2978,7 @@ mod test {
         let pool = datastore
             .ip_pool_create(
                 &opctx,
-                IpPool::new(
-                    &identity,
-                    IpVersion::V6,
-                    IpPoolReservationType::ExternalSilos,
-                ),
+                IpPool::new(&identity, IpVersion::V6, IpPoolAssignment::Silos),
             )
             .await
             .expect("Failed to create IP pool");
@@ -3102,11 +3121,7 @@ mod test {
             let pool = datastore
                 .ip_pool_create(
                     &opctx,
-                    IpPool::new(
-                        &identity,
-                        version,
-                        IpPoolReservationType::ExternalSilos,
-                    ),
+                    IpPool::new(&identity, version, IpPoolAssignment::Silos),
                 )
                 .await
                 .expect("Failed to create IP pool");
@@ -3150,7 +3165,7 @@ mod test {
                 IpPool::new_multicast(
                     &identity,
                     IpVersion::V4,
-                    IpPoolReservationType::ExternalSilos,
+                    IpPoolAssignment::Silos,
                 ),
             )
             .await
@@ -3224,7 +3239,7 @@ mod test {
                 IpPool::new_multicast(
                     &identity,
                     IpVersion::V4,
-                    IpPoolReservationType::ExternalSilos,
+                    IpPoolAssignment::Silos,
                 ),
             )
             .await
@@ -3287,7 +3302,7 @@ mod test {
                 IpPool::new_multicast(
                     &identity,
                     IpVersion::V4,
-                    IpPoolReservationType::ExternalSilos,
+                    IpPoolAssignment::Silos,
                 ),
             )
             .await
@@ -3330,7 +3345,7 @@ mod test {
                 IpPool::new_multicast(
                     &default_identity,
                     IpVersion::V4,
-                    IpPoolReservationType::ExternalSilos,
+                    IpPoolAssignment::Silos,
                 ),
             )
             .await
@@ -3434,7 +3449,7 @@ mod test {
                         description: "IPv4 multicast pool".to_string(),
                     },
                     IpVersion::V4,
-                    IpPoolReservationType::ExternalSilos,
+                    IpPoolAssignment::Silos,
                 ),
             )
             .await
@@ -3462,7 +3477,7 @@ mod test {
                         description: "IPv6 multicast pool".to_string(),
                     },
                     IpVersion::V6,
-                    IpPoolReservationType::ExternalSilos,
+                    IpPoolAssignment::Silos,
                 ),
             )
             .await
@@ -3536,7 +3551,7 @@ mod test {
                 IpPool::new_multicast(
                     &ipv4_identity,
                     IpVersion::V4,
-                    IpPoolReservationType::ExternalSilos,
+                    IpPoolAssignment::Silos,
                 ),
             )
             .await
@@ -3577,7 +3592,7 @@ mod test {
                 IpPool::new_multicast(
                     &ipv6_identity,
                     IpVersion::V6,
-                    IpPoolReservationType::ExternalSilos,
+                    IpPoolAssignment::Silos,
                 ),
             )
             .await
@@ -3655,7 +3670,7 @@ mod test {
                 IpPool::new_multicast(
                     &ssm_identity,
                     IpVersion::V4,
-                    IpPoolReservationType::ExternalSilos,
+                    IpPoolAssignment::Silos,
                 ),
             )
             .await
@@ -3710,7 +3725,7 @@ mod test {
                 IpPool::new_multicast(
                     &asm_identity,
                     IpVersion::V4,
-                    IpPoolReservationType::ExternalSilos,
+                    IpPoolAssignment::Silos,
                 ),
             )
             .await
@@ -3771,7 +3786,7 @@ mod test {
                 IpPool::new_multicast(
                     &asm_v6_identity,
                     IpVersion::V6,
-                    IpPoolReservationType::ExternalSilos,
+                    IpPoolAssignment::Silos,
                 ),
             )
             .await
@@ -3871,7 +3886,7 @@ mod test {
                 IpPool::new_multicast(
                     &asm_identity,
                     IpVersion::V4,
-                    IpPoolReservationType::ExternalSilos,
+                    IpPoolAssignment::Silos,
                 ),
             )
             .await
@@ -3927,7 +3942,7 @@ mod test {
                 IpPool::new_multicast(
                     &ssm_identity,
                     IpVersion::V4,
-                    IpPoolReservationType::ExternalSilos,
+                    IpPoolAssignment::Silos,
                 ),
             )
             .await
@@ -3988,7 +4003,7 @@ mod test {
                 IpPool::new_multicast(
                     &ssm_v6_identity,
                     IpVersion::V6,
-                    IpPoolReservationType::ExternalSilos,
+                    IpPoolAssignment::Silos,
                 ),
             )
             .await
@@ -4065,8 +4080,8 @@ mod test {
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
-        // Insert a bunch of pools, not linked to any silo, and so reserved for
-        // customer use.
+        // Insert a bunch of pools, not linked to any silo, and so assigned for
+        // silo use.
         const N_POOLS: usize = 20;
         let mut customer_pools = Vec::with_capacity(N_POOLS);
         for i in 0..N_POOLS {
@@ -4081,7 +4096,7 @@ mod test {
                     IpPool::new(
                         &identity,
                         IpVersion::V4,
-                        IpPoolReservationType::ExternalSilos,
+                        IpPoolAssignment::Silos,
                     ),
                 )
                 .await
@@ -4090,7 +4105,7 @@ mod test {
         }
         customer_pools.sort_by_key(|pool| pool.id());
 
-        // Create a bunch which _are_ reserved for Oxide's usage.
+        // Create a bunch which _are_ assigned for system services use.
         let mut oxide_pools = Vec::with_capacity(N_POOLS);
         for i in 0..N_POOLS {
             // Create the pool
@@ -4104,16 +4119,16 @@ mod test {
                     IpPool::new(
                         &identity,
                         IpVersion::V4,
-                        IpPoolReservationType::OxideInternal,
+                        IpPoolAssignment::SystemServices,
                     ),
                 )
                 .await
-                .expect("Failed to create reserved IP pool");
+                .expect("Failed to create IP pool");
             oxide_pools.push(pool);
         }
         assert_eq!(oxide_pools.len(), N_POOLS);
 
-        let fetch_paginated = |reservation_type| async move {
+        let fetch_paginated = |assignment| async move {
             let mut found = Vec::with_capacity(N_POOLS);
             let mut paginator = Paginator::new(
                 NonZeroU32::new(5).unwrap(),
@@ -4123,7 +4138,7 @@ mod test {
                 let batch = datastore
                     .ip_pools_list_paginated(
                         opctx,
-                        reservation_type,
+                        assignment,
                         None,
                         None,
                         &PaginatedBy::Id(page.current_pagparams()),
@@ -4136,20 +4151,20 @@ mod test {
             found
         };
 
-        // Paginate all the customer-reserved.
+        // Paginate all the customer/silo pools.
         let customer_pools_found =
-            fetch_paginated(IpPoolReservationType::ExternalSilos).await;
+            fetch_paginated(IpPoolAssignment::Silos).await;
         assert_eq!(customer_pools.len(), customer_pools_found.len());
         assert_eq!(customer_pools, customer_pools_found);
 
-        // Paginate all those reserved for Oxide.
+        // Paginate all those assigned for system services use.
         //
         // Note that we have 2 extra pools today, which are the builtin service
         // pools. These will go away in the future, so we'll unfortunately need
         // to update this test at that time. Until then, fetch those service
         // pools explicitly and add them.
         let oxide_reserved_found =
-            fetch_paginated(IpPoolReservationType::OxideInternal).await;
+            fetch_paginated(IpPoolAssignment::SystemServices).await;
         let pools = datastore
             .ip_pools_service_lookup_both_versions(opctx)
             .await
@@ -4208,10 +4223,9 @@ mod test {
     }
 
     #[tokio::test]
-    async fn cannot_link_oxide_internal_pool_to_external_silo() {
-        let logctx = dev::test_setup_log(
-            "cannot_link_oxide_internal_pool_to_external_silo",
-        );
+    async fn cannot_link_system_services_pool_to_silo() {
+        let logctx =
+            dev::test_setup_log("cannot_link_system_services_pool_to_silo");
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
@@ -4226,7 +4240,7 @@ mod test {
                 IpPool::new(
                     &identity,
                     IpVersion::V4,
-                    IpPoolReservationType::OxideInternal,
+                    IpPoolAssignment::SystemServices,
                 ),
             )
             .await
@@ -4242,7 +4256,7 @@ mod test {
         let res = datastore.ip_pool_link_silo(&opctx, link).await;
         let Err(Error::InvalidRequest { message }) = &res else {
             panic!(
-                "Expected to fail linking an internally-reserved \
+                "Expected to fail linking an assigned for system services \
                 IP Pool to an external Silo, found: {res:#?}",
             );
         };
@@ -4253,14 +4267,14 @@ mod test {
     }
 
     #[tokio::test]
-    async fn cannot_reserve_externally_linked_pool_for_internal_use() {
+    async fn cannot_assign_externally_linked_pool_to_system_services() {
         let logctx = dev::test_setup_log(
-            "cannot_reserve_externally_linked_pool_for_internal_use",
+            "cannot_assign_externally_linked_pool_to_system_services",
         );
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
-        // Create the pool, reserved for external silos.
+        // Create the pool, assigned for silo use.
         let identity = IdentityMetadataCreateParams {
             name: "external-ip-pool".parse().unwrap(),
             description: "".to_string(),
@@ -4268,11 +4282,7 @@ mod test {
         let ip_pool = datastore
             .ip_pool_create(
                 opctx,
-                IpPool::new(
-                    &identity,
-                    IpVersion::V4,
-                    IpPoolReservationType::ExternalSilos,
-                ),
+                IpPool::new(&identity, IpVersion::V4, IpPoolAssignment::Silos),
             )
             .await
             .expect("Failed to create IP pool");
@@ -4289,18 +4299,18 @@ mod test {
             .await
             .expect("Should be able to link unlinked pool to default silo");
 
-        // We should fail to reserve it for Oxide-internal use now.
+        // We should fail to assign it for system services use now.
         let (authz_pool, db_pool) = LookupPath::new(opctx, datastore)
             .ip_pool_id(ip_pool.id())
             .fetch_for(authz::Action::Modify)
             .await
             .unwrap();
         let res = datastore
-            .ip_pool_reserve(
+            .ip_pool_assign(
                 opctx,
                 &authz_pool,
                 &db_pool,
-                IpPoolReservationType::OxideInternal,
+                IpPoolAssignment::SystemServices,
             )
             .await;
         let Err(Error::InvalidRequest { message }) = &res else {
@@ -4330,11 +4340,7 @@ mod test {
         let ip_pool = datastore
             .ip_pool_create(
                 opctx,
-                IpPool::new(
-                    &identity,
-                    IpVersion::V4,
-                    IpPoolReservationType::ExternalSilos,
-                ),
+                IpPool::new(&identity, IpVersion::V4, IpPoolAssignment::Silos),
             )
             .await
             .expect("Failed to create IP pool");
@@ -4386,11 +4392,7 @@ mod test {
         let ip_pool = datastore
             .ip_pool_create(
                 opctx,
-                IpPool::new(
-                    &identity,
-                    IpVersion::V4,
-                    IpPoolReservationType::ExternalSilos,
-                ),
+                IpPool::new(&identity, IpVersion::V4, IpPoolAssignment::Silos),
             )
             .await
             .expect("Failed to create IP pool");
@@ -4442,11 +4444,7 @@ mod test {
         let ip_pool = datastore
             .ip_pool_create(
                 opctx,
-                IpPool::new(
-                    &identity,
-                    IpVersion::V4,
-                    IpPoolReservationType::ExternalSilos,
-                ),
+                IpPool::new(&identity, IpVersion::V4, IpPoolAssignment::Silos),
             )
             .await
             .expect("Failed to create IP pool");
@@ -4520,11 +4518,7 @@ mod test {
         let ip_pool = datastore
             .ip_pool_create(
                 opctx,
-                IpPool::new(
-                    &identity,
-                    IpVersion::V4,
-                    IpPoolReservationType::ExternalSilos,
-                ),
+                IpPool::new(&identity, IpVersion::V4, IpPoolAssignment::Silos),
             )
             .await
             .expect("Failed to create IP pool");
@@ -4607,7 +4601,7 @@ mod test {
                         description: "IPv4 unicast pool".to_string(),
                     },
                     IpVersion::V4,
-                    IpPoolReservationType::ExternalSilos,
+                    IpPoolAssignment::Silos,
                 ),
             )
             .await
@@ -4639,7 +4633,7 @@ mod test {
                         description: "IPv6 unicast pool".to_string(),
                     },
                     IpVersion::V6,
-                    IpPoolReservationType::ExternalSilos,
+                    IpPoolAssignment::Silos,
                 ),
             )
             .await
@@ -4687,7 +4681,7 @@ mod test {
                         description: "Second IPv4 unicast pool".to_string(),
                     },
                     IpVersion::V4,
-                    IpPoolReservationType::ExternalSilos,
+                    IpPoolAssignment::Silos,
                 ),
             )
             .await
@@ -4784,7 +4778,7 @@ mod test {
                         description: "Unicast IPv4".to_string(),
                     },
                     IpVersion::V4,
-                    IpPoolReservationType::ExternalSilos,
+                    IpPoolAssignment::Silos,
                 ),
             )
             .await
@@ -4799,7 +4793,7 @@ mod test {
                         description: "Unicast IPv6".to_string(),
                     },
                     IpVersion::V6,
-                    IpPoolReservationType::ExternalSilos,
+                    IpPoolAssignment::Silos,
                 ),
             )
             .await
@@ -4814,7 +4808,7 @@ mod test {
                         description: "Multicast IPv4".to_string(),
                     },
                     IpVersion::V4,
-                    IpPoolReservationType::ExternalSilos,
+                    IpPoolAssignment::Silos,
                 ),
             )
             .await
@@ -4829,7 +4823,7 @@ mod test {
                         description: "Multicast IPv6".to_string(),
                     },
                     IpVersion::V6,
-                    IpPoolReservationType::ExternalSilos,
+                    IpPoolAssignment::Silos,
                 ),
             )
             .await
@@ -4954,7 +4948,7 @@ mod test {
                 IpPool::new_multicast(
                     &mcast_identity,
                     IpVersion::V4,
-                    IpPoolReservationType::ExternalSilos,
+                    IpPoolAssignment::Silos,
                 ),
             )
             .await
@@ -5006,7 +5000,7 @@ mod test {
                 IpPool::new(
                     &unicast_identity,
                     IpVersion::V4,
-                    IpPoolReservationType::ExternalSilos,
+                    IpPoolAssignment::Silos,
                 ),
             )
             .await
@@ -5051,7 +5045,7 @@ mod test {
                         description: "Multicast default pool".to_string(),
                     },
                     IpVersion::V4,
-                    IpPoolReservationType::ExternalSilos,
+                    IpPoolAssignment::Silos,
                 ),
             )
             .await
@@ -5087,7 +5081,7 @@ mod test {
                         description: "Unicast default pool".to_string(),
                     },
                     IpVersion::V4,
-                    IpPoolReservationType::ExternalSilos,
+                    IpPoolAssignment::Silos,
                 ),
             )
             .await
@@ -5142,7 +5136,7 @@ mod test {
                 IpPool::new(
                     &identity_ipv6,
                     IpVersion::V6,
-                    IpPoolReservationType::ExternalSilos,
+                    IpPoolAssignment::Silos,
                 ),
             )
             .await
@@ -5171,7 +5165,7 @@ mod test {
                 IpPool::new(
                     &identity_ipv4,
                     IpVersion::V4,
-                    IpPoolReservationType::ExternalSilos,
+                    IpPoolAssignment::Silos,
                 ),
             )
             .await
@@ -5270,7 +5264,7 @@ mod test {
                 IpPool::new(
                     &identity_ipv6,
                     IpVersion::V6,
-                    IpPoolReservationType::ExternalSilos,
+                    IpPoolAssignment::Silos,
                 ),
             )
             .await
@@ -5299,7 +5293,7 @@ mod test {
                 IpPool::new(
                     &identity_ipv4,
                     IpVersion::V4,
-                    IpPoolReservationType::ExternalSilos,
+                    IpPoolAssignment::Silos,
                 ),
             )
             .await
@@ -5394,7 +5388,7 @@ mod test {
                         description: "IPv6 only pool".to_string(),
                     },
                     IpVersion::V6,
-                    IpPoolReservationType::ExternalSilos,
+                    IpPoolAssignment::Silos,
                 ),
             )
             .await
@@ -5450,7 +5444,7 @@ mod test {
                         description: "Test unicast V4".to_string(),
                     },
                     IpVersion::V4,
-                    IpPoolReservationType::ExternalSilos,
+                    IpPoolAssignment::Silos,
                 ),
             )
             .await
@@ -5465,7 +5459,7 @@ mod test {
                         description: "Test unicast V6".to_string(),
                     },
                     IpVersion::V6,
-                    IpPoolReservationType::ExternalSilos,
+                    IpPoolAssignment::Silos,
                 ),
             )
             .await
@@ -5555,10 +5549,9 @@ mod test {
     }
 
     #[tokio::test]
-    async fn cannot_delete_last_internally_reserved_ip_pool() {
-        let logctx = dev::test_setup_log(
-            "cannot_delete_last_internally_reserved_ip_pool",
-        );
+    async fn cannot_delete_last_system_services_ip_pool() {
+        let logctx =
+            dev::test_setup_log("cannot_delete_last_system_services_ip_pool");
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
@@ -5573,7 +5566,7 @@ mod test {
             .ip_pool_delete(opctx, &pools.ipv4.authz_pool, &pools.ipv4.db_pool)
             .await
             .expect(
-                "Should be able to delete internally-reserved \
+                "Should be able to delete assigned for system services \
                 IP Pool when at least one remains",
             );
 
@@ -5586,7 +5579,7 @@ mod test {
         let l = datastore
             .ip_pools_list_paginated(
                 opctx,
-                IpPoolReservationType::OxideInternal,
+                IpPoolAssignment::SystemServices,
                 None,
                 None,
                 &pagparams,
@@ -5603,16 +5596,16 @@ mod test {
 
         let Err(Error::InvalidRequest { message }) = &res else {
             panic!(
-                "Should not be able to delete internally-reserved \
+                "Should not be able to delete assigned for system services \
                 IP Pool when only one remains, found {res:#?}"
             );
         };
-        assert_eq!(message.external_message(), LAST_POOL_ERROR);
+        assert_eq!(message.external_message(), DELETE_LAST_POOL_ERROR);
 
         let l = datastore
             .ip_pools_list_paginated(
                 opctx,
-                IpPoolReservationType::OxideInternal,
+                IpPoolAssignment::SystemServices,
                 None,
                 None,
                 &pagparams,
@@ -5626,9 +5619,9 @@ mod test {
     }
 
     #[tokio::test]
-    async fn cannot_externally_reserve_last_internally_reserved_ip_pool() {
+    async fn cannot_assign_last_system_services_ip_pool_to_silos() {
         let logctx = dev::test_setup_log(
-            "cannot_externally_reserve_last_internally_reserved_ip_pool",
+            "cannot_assign_last_system_services_ip_pool_to_silos",
         );
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
@@ -5639,18 +5632,18 @@ mod test {
             .await
             .unwrap();
 
-        // We should be able to reserve one of these for external use.
+        // We should be able to assign one of these for silo use.
         let _ = datastore
-            .ip_pool_reserve(
+            .ip_pool_assign(
                 opctx,
                 &pools.ipv4.authz_pool,
                 &pools.ipv4.db_pool,
-                IpPoolReservationType::ExternalSilos,
+                IpPoolAssignment::Silos,
             )
             .await
             .expect(
-                "Should be able to externally reserve IP Pool \
-                when at least one internally-reserved pool remains",
+                "Should be able to assign to silos IP Pool \
+                when at least one assigned for system services pool remains",
             );
 
         // Check there's only one left.
@@ -5662,7 +5655,7 @@ mod test {
         let l = datastore
             .ip_pools_list_paginated(
                 opctx,
-                IpPoolReservationType::OxideInternal,
+                IpPoolAssignment::SystemServices,
                 None,
                 None,
                 &pagparams,
@@ -5671,29 +5664,29 @@ mod test {
             .unwrap();
         assert_eq!(l.len(), 1);
 
-        // We should _not_ be able to reserve the other for external use now,
-        // because there's only one left for internal use.
+        // We should _not_ be able to assign the other for silo use now,
+        // because there's only one left for system services use.
         let res = datastore
-            .ip_pool_reserve(
+            .ip_pool_assign(
                 opctx,
                 &pools.ipv6.authz_pool,
                 &pools.ipv6.db_pool,
-                IpPoolReservationType::ExternalSilos,
+                IpPoolAssignment::Silos,
             )
             .await;
         let Err(Error::InvalidRequest { message }) = &res else {
             panic!(
-                "Should not be able to externally-reserve an \
-                internally-reserved IP Pool when only one remains, \
+                "Should not be able to assign to silos an \
+                assigned for system services IP Pool when only one remains, \
                 found {res:#?}"
             );
         };
-        assert_eq!(message.external_message(), LAST_POOL_ERROR);
+        assert_eq!(message.external_message(), REASSIGN_LAST_POOL_ERROR);
 
         let l = datastore
             .ip_pools_list_paginated(
                 opctx,
-                IpPoolReservationType::OxideInternal,
+                IpPoolAssignment::SystemServices,
                 None,
                 None,
                 &pagparams,
@@ -5707,9 +5700,9 @@ mod test {
     }
 
     #[tokio::test]
-    async fn cannot_externally_reserve_ip_pool_with_outstanding_external_ips() {
+    async fn cannot_assign_ip_pool_to_silos_with_outstanding_external_ips() {
         let logctx = dev::test_setup_log(
-            "cannot_externally_reserve_ip_pool_with_outstanding_external_ips",
+            "cannot_assign_ip_pool_to_silos_with_outstanding_external_ips",
         );
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
@@ -5753,34 +5746,34 @@ mod test {
             .await
             .expect("Should be able to create zone external IP");
 
-        // Should not be able to externally-reserve the IPv4 pool now, since
+        // Should not be able to assign to silos the IPv4 pool now, since
         // we've got an address in use.
         let res = datastore
-            .ip_pool_reserve(
+            .ip_pool_assign(
                 opctx,
                 &pools.ipv4.authz_pool,
                 &pools.ipv4.db_pool,
-                IpPoolReservationType::ExternalSilos,
+                IpPoolAssignment::Silos,
             )
             .await;
         let Err(Error::InvalidRequest { message }) = &res else {
             panic!(
-                "Should not be able to externally reserve internal \
+                "Should not be able to assign to silos internal \
                 IP Pool when an address is in use, found {res:#?}"
             );
         };
         assert_eq!(message.external_message(), POOL_HAS_IPS_ERROR);
 
-        // Delete the address, and now we can reserve the pool for external use.
+        // Delete the address, and now we can assign the pool for silo use.
         let _ = datastore
             .deallocate_external_ip(opctx, eip.id)
             .await
             .expect("Should be able to delete external IP");
-        let _ = datastore.ip_pool_reserve(
+        let _ = datastore.ip_pool_assign(
             opctx,
             &pools.ipv4.authz_pool,
             &pools.ipv4.db_pool,
-            IpPoolReservationType::ExternalSilos,
+            IpPoolAssignment::Silos,
         ).await
             .expect(
                 "Should be able to delete internal IP Pool when more than one remains, \
@@ -5792,9 +5785,9 @@ mod test {
     }
 
     #[tokio::test]
-    async fn can_explain_reserve_external_ip_pool_query() {
+    async fn can_explain_assign_ip_pool_to_silos_query() {
         let logctx =
-            dev::test_setup_log("can_explain_reserve_external_ip_pool_query");
+            dev::test_setup_log("can_explain_assign_ip_pool_to_silos_query");
         let db = TestDatabase::new_with_pool(&logctx.log).await;
         let pool = db.pool();
         let conn = pool.claim().await.unwrap();
@@ -5810,12 +5803,10 @@ mod test {
             ip_version: IpVersion::V4,
             pool_type: IpPoolType::Unicast,
             rcgen: 0,
-            reservation_type: IpPoolReservationType::ExternalSilos,
+            assignment: IpPoolAssignment::Silos,
         };
-        let query = reserve_ip_pool_query(
-            &ip_pool,
-            IpPoolReservationType::OxideInternal,
-        );
+        let query =
+            assign_ip_pool_query(&ip_pool, IpPoolAssignment::SystemServices);
         let _ = query
             .explain_async(&conn)
             .await
@@ -5826,7 +5817,7 @@ mod test {
     }
 
     #[tokio::test]
-    async fn expectorate_reserve_external_ip_pool_query() {
+    async fn expectorate_assign_ip_pool_to_silos_query() {
         let ip_pool = IpPool {
             identity: IpPoolIdentity::new(
                 uuid::uuid!("93fea64d-5d0a-4cc6-8f94-7c527ee640a9"),
@@ -5838,23 +5829,22 @@ mod test {
             ip_version: IpVersion::V4,
             pool_type: IpPoolType::Unicast,
             rcgen: 0,
-            reservation_type: IpPoolReservationType::ExternalSilos,
+            assignment: IpPoolAssignment::Silos,
         };
-        let query = reserve_ip_pool_query(
-            &ip_pool,
-            IpPoolReservationType::OxideInternal,
-        );
+        let query =
+            assign_ip_pool_query(&ip_pool, IpPoolAssignment::SystemServices);
         expectorate_query_contents(
             &query,
-            "tests/output/reserve_external_ip_pool.sql",
+            "tests/output/assign_ip_pool_to_silos.sql",
         )
         .await;
     }
 
     #[tokio::test]
-    async fn can_explain_reserve_internal_ip_pool_query() {
-        let logctx =
-            dev::test_setup_log("can_explain_reserve_internal_ip_pool_query");
+    async fn can_explain_assign_ip_pool_to_system_services_query() {
+        let logctx = dev::test_setup_log(
+            "can_explain_assign_ip_pool_to_system_services_query",
+        );
         let db = TestDatabase::new_with_pool(&logctx.log).await;
         let pool = db.pool();
         let conn = pool.claim().await.unwrap();
@@ -5870,12 +5860,9 @@ mod test {
             ip_version: IpVersion::V4,
             pool_type: IpPoolType::Unicast,
             rcgen: 0,
-            reservation_type: IpPoolReservationType::OxideInternal,
+            assignment: IpPoolAssignment::SystemServices,
         };
-        let query = reserve_ip_pool_query(
-            &ip_pool,
-            IpPoolReservationType::ExternalSilos,
-        );
+        let query = assign_ip_pool_query(&ip_pool, IpPoolAssignment::Silos);
         let _ = query
             .explain_async(&conn)
             .await
@@ -5886,7 +5873,7 @@ mod test {
     }
 
     #[tokio::test]
-    async fn expectorate_reserve_internal_ip_pool_query() {
+    async fn expectorate_assign_ip_pool_to_system_services_query() {
         let ip_pool = IpPool {
             identity: IpPoolIdentity::new(
                 uuid::uuid!("93fea64d-5d0a-4cc6-8f94-7c527ee640a9"),
@@ -5898,15 +5885,12 @@ mod test {
             ip_version: IpVersion::V4,
             pool_type: IpPoolType::Unicast,
             rcgen: 0,
-            reservation_type: IpPoolReservationType::OxideInternal,
+            assignment: IpPoolAssignment::SystemServices,
         };
-        let query = reserve_ip_pool_query(
-            &ip_pool,
-            IpPoolReservationType::ExternalSilos,
-        );
+        let query = assign_ip_pool_query(&ip_pool, IpPoolAssignment::Silos);
         expectorate_query_contents(
             &query,
-            "tests/output/reserve_internal_ip_pool.sql",
+            "tests/output/assign_ip_pool_to_system_services.sql",
         )
         .await;
     }
@@ -5928,11 +5912,7 @@ mod test {
         let pool = datastore
             .ip_pool_create(
                 &opctx,
-                IpPool::new(
-                    &identity,
-                    IpVersion::V4,
-                    IpPoolReservationType::ExternalSilos,
-                ),
+                IpPool::new(&identity, IpVersion::V4, IpPoolAssignment::Silos),
             )
             .await
             .expect("Should create unicast IP pool");
@@ -6041,7 +6021,7 @@ mod test {
                 IpPool::new_multicast(
                     &mcast_identity,
                     IpVersion::V4,
-                    IpPoolReservationType::ExternalSilos,
+                    IpPoolAssignment::Silos,
                 ),
             )
             .await
@@ -6159,11 +6139,7 @@ mod test {
         let pool = datastore
             .ip_pool_create(
                 &opctx,
-                IpPool::new(
-                    &identity,
-                    IpVersion::V6,
-                    IpPoolReservationType::ExternalSilos,
-                ),
+                IpPool::new(&identity, IpVersion::V6, IpPoolAssignment::Silos),
             )
             .await
             .expect("Failed to create IP pool");

@@ -12,6 +12,7 @@ use nexus_db_lookup::lookup;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
+use nexus_db_queries::db::datastore::sled::SledReservationReason;
 use nexus_types::deployment::DiskFilter;
 use nexus_types::deployment::SledFilter;
 use nexus_types::external_api::path_params;
@@ -25,6 +26,7 @@ use omicron_common::api::external::LookupResult;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
+use omicron_uuid_kinds::PhysicalDiskAdoptionRequestUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::PropolisUuid;
 use omicron_uuid_kinds::RackUuid;
@@ -213,6 +215,7 @@ impl super::Nexus {
         propolis_id: PropolisUuid,
         resources: db::model::Resources,
         constraints: db::model::SledReservationConstraints,
+        reservation_reason: SledReservationReason,
     ) -> Result<db::model::SledResourceVmm, Error> {
         self.db_datastore
             .sled_reservation_create(
@@ -221,6 +224,7 @@ impl super::Nexus {
                 propolis_id,
                 resources,
                 constraints,
+                reservation_reason,
             )
             .await
     }
@@ -283,6 +287,55 @@ impl super::Nexus {
             .await
     }
 
+    pub(crate) async fn physical_disk_list_unadopted(
+        &self,
+        opctx: &OpContext,
+    ) -> ListResultVec<db::model::InvPhysicalDisk> {
+        let collection_id =
+            self.db_datastore.inventory_get_latest_collection_id(opctx).await?;
+        let Some(collection_id) = collection_id else {
+            return Ok(vec![]);
+        };
+        self.db_datastore
+            .physical_disk_unadopted_list(opctx, collection_id)
+            .await
+    }
+
+    pub(crate) async fn physical_disk_adoption_request_list(
+        &self,
+        opctx: &OpContext,
+        pagparams: &DataPageParams<'_, Uuid>,
+    ) -> ListResultVec<db::model::PhysicalDiskAdoptionRequest> {
+        self.db_datastore
+            .physical_disk_adoption_request_list(opctx, pagparams)
+            .await
+    }
+
+    pub(crate) async fn physical_disk_enable_adoption(
+        &self,
+        opctx: &OpContext,
+        disk_id: nexus_types::external_api::physical_disk::PhysicalDiskManufacturerIdentity,
+    ) -> Result<
+        nexus_types::external_api::physical_disk::PhysicalDiskAdoptionRequest,
+        Error,
+    > {
+        let request = self
+            .db_datastore
+            .physical_disk_enable_adoption(opctx, disk_id)
+            .await?;
+        Ok(request.into())
+    }
+
+    pub(crate) async fn physical_disk_disable_adoption(
+        &self,
+        opctx: &OpContext,
+        req_uuid: PhysicalDiskAdoptionRequestUuid,
+    ) -> Result<(), Error> {
+        self.db_datastore
+            .physical_disk_adoption_request_delete(opctx, req_uuid)
+            .await
+    }
+
     /// Inserts a physical disk into the database unless it already exists.
     ///
     /// NOTE: I'd like to re-work this to avoid the upsert-like behavior - can
@@ -322,7 +375,7 @@ impl super::Nexus {
             Err(err) => return Err(err),
         }
 
-        let disk = db::model::PhysicalDisk::new(
+        let disk = db::model::PhysicalDisk::from_parts(
             request.id,
             request.vendor,
             request.serial,

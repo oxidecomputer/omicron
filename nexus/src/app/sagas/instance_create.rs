@@ -1489,10 +1489,11 @@ pub mod test {
     use nexus_test_utils::resource_helpers::create_project;
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::external_api::instance as instance_types;
+    use nexus_types::external_api::instance::InstanceCpuCount;
     use nexus_types::external_api::ip_pool::PoolSelector;
     use omicron_common::address::IpVersion;
     use omicron_common::api::external::{
-        ByteCount, IdentityMetadataCreateParams, InstanceCpuCount,
+        ByteCount, IdentityMetadataCreateParams,
     };
     use omicron_sled_agent::sim::SledAgent;
     use sled_agent_types::early_networking::SwitchSlot;
@@ -1548,6 +1549,7 @@ pub mod test {
                 auto_restart_policy: Default::default(),
                 anti_affinity_groups: Vec::new(),
                 multicast_groups: Vec::new(),
+                enable_jumbo_frames: false,
             },
             boundary_switches: HashSet::from([SwitchSlot::Switch0]),
         }

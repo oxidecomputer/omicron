@@ -149,6 +149,9 @@ impl SpEreportIngester {
                     continue;
                 }
             };
+
+            status.sps_found += 1;
+
             let SpIdentifier { type_, slot } = id;
             let sp_result = tasks
                 .spawn({
@@ -166,17 +169,17 @@ impl SpEreportIngester {
                     async move {
                         let status = ingester
                             .ingest_sp_ereports(opctx, &clients, type_, slot)
-                            .await?;
-                        Some(SpEreporterStatus {
+                            .await;
+                        SpEreporterStatus {
                             sp_type: type_,
                             slot,
                             ignition_type,
                             status,
-                        })
+                        }
                     }
                 })
                 .await;
-            if let Some(Some(sp_status)) = sp_result {
+            if let Some(sp_status) = sp_result {
                 total_ereports += sp_status.status.ereports_received;
                 total_new_ereports += sp_status.status.new_ereports;
                 status.sps.push(sp_status);
@@ -184,12 +187,10 @@ impl SpEreportIngester {
         }
 
         // Wait for remaining ingestion tasks to come back.
-        while let Some(sp_result) = tasks.join_next().await {
-            if let Some(sp_status) = sp_result {
-                total_ereports += sp_status.status.ereports_received;
-                total_new_ereports += sp_status.status.new_ereports;
-                status.sps.push(sp_status);
-            }
+        while let Some(sp_status) = tasks.join_next().await {
+            total_ereports += sp_status.status.ereports_received;
+            total_new_ereports += sp_status.status.new_ereports;
+            status.sps.push(sp_status);
         }
 
         // If any ereports were ingested that were not already in the database,
@@ -236,24 +237,24 @@ impl Ingester {
         clients: &[GatewayClient],
         sp_type: nexus_types::inventory::SpType,
         slot: u16,
-    ) -> Option<EreporterStatus> {
+    ) -> EreporterStatus {
         // Fetch the latest ereport from this SP.
         let reporter = nexus_types::fm::ereport::Reporter::Sp { sp_type, slot };
         let latest =
             match self.datastore.latest_ereport_id(&opctx, reporter).await {
                 Ok(latest) => latest,
                 Err(error) => {
-                    return Some(EreporterStatus {
+                    return EreporterStatus {
                         errors: vec![format!(
                             "failed to query for latest ereport: {error:#}"
                         )],
                         ..Default::default()
-                    });
+                    };
                 }
             };
 
         let mut params = EreportQueryParams::from_latest(latest);
-        let mut status = None;
+        let mut status = EreporterStatus::default();
 
         // Continue requesting ereports from this SP in a loop until we have
         // received all its ereports.
@@ -261,44 +262,37 @@ impl Ingester {
             .mgs_requests(&opctx, clients, &params, sp_type, slot, &mut status)
             .await
         {
+            status.requests += 1;
             if reports.items.is_empty() {
-                if let Some(ref mut status) = status {
-                    status.requests += 1;
-                }
                 slog::trace!(
                     &opctx.log,
                     "no ereports returned by SP";
                     "committed_ena" => ?params.committed_ena,
                     "start_ena" => ?params.start_ena,
                     "restart_id" => ?params.restart_id,
-                    "total_ereports_received" => status
-                        .as_ref()
-                        .map(|s| s.ereports_received),
-                    "total_new_ereports" => status
-                        .as_ref()
-                        .map(|s| s.new_ereports),
+                    "total_ereports_received" => status.ereports_received,
+                    "total_new_ereports" => status.new_ereports,
                 );
                 break;
-            } else {
-                status.get_or_insert_default().requests += 1;
             }
+
             let time_collected = Utc::now();
             let received = reports.items.len();
-            let status = status.get_or_insert_default();
             status.ereports_received += received;
 
             let db_ereports = reports.items.into_iter().map(|ereport| {
-                EreportData::from_sp_ereport(
-                    &opctx.log,
-                    restart_id,
-                    ereport,
-                    time_collected,
-                    self.nexus_id,
-                )
+                EreportData::from_sp_ereport(&opctx.log, restart_id, ereport)
             });
             let created = match self
                 .datastore
-                .ereports_insert(&opctx, reporter, db_ereports)
+                .ereports_insert(
+                    &opctx,
+                    restart_id,
+                    time_collected,
+                    self.nexus_id,
+                    reporter,
+                    db_ereports,
+                )
                 .await
             {
                 Ok((created, latest)) => {
@@ -347,7 +341,7 @@ impl Ingester {
         EreportQueryParams { committed_ena,start_ena, restart_id }: &EreportQueryParams,
         sp_type: nexus_types::inventory::SpType,
         slot: u16,
-        status: &mut Option<EreporterStatus>,
+        status: &mut EreporterStatus,
     ) -> Option<ereport_types::Ereports> {
         // If an attempt to collect ereports from one gateway fails, we will try
         // any other discovered gateways.
@@ -384,9 +378,8 @@ impl Ingester {
                         "gateway_addr" => %addr,
                         "error" => ?e,
                     );
-                    let stats = status.get_or_insert_default();
-                    stats.requests += 1;
-                    stats.errors.push(format!("MGS {addr}: {e:#}"));
+                    status.requests += 1;
+                    status.errors.push(format!("MGS {addr}: {e:#}"));
                 }
             }
         }
@@ -451,8 +444,6 @@ mod tests {
             false,
         );
 
-        let mut analysis_activated =
-            tokio_test::task::spawn(fm_analysis_activator.activated());
         let activation1 = ingester.actually_activate(&opctx).await;
         assert!(
             activation1.errors.is_empty(),
@@ -466,10 +457,9 @@ mod tests {
             "ereports from 4 SPs should be observed: {:?}",
             activation1.sps,
         );
-        tokio_test::assert_ready!(
-            analysis_activated.poll(),
-            "fm analysis task should be activated"
-        );
+        assert_eq!(activation1.sps_found, 4);
+        fm_analysis_activator
+            .assert_activated("fm analysis task should be activated");
 
         for SpEreporterStatus { sp_type, slot, status, ignition_type: _ } in
             &activation1.sps
@@ -657,8 +647,6 @@ mod tests {
 
         // Activate the task again and assert that no new ereports were
         // ingested.
-        let mut analysis_activated =
-            tokio_test::task::spawn(fm_analysis_activator.activated());
         let activation2 = ingester.actually_activate(&opctx).await;
         assert!(
             activation2.errors.is_empty(),
@@ -666,13 +654,45 @@ mod tests {
             activation2.errors
         );
         dbg!(&activation2);
-        tokio_test::assert_pending!(
-            analysis_activated.poll(),
+        fm_analysis_activator.assert_not_activated(
             "fm analysis task should not be activated when no new ereports \
-             have been ingested"
+             have been ingested",
         );
-
-        assert_eq!(activation2.sps, &[], "no new ereports should be observed");
+        assert_eq!(
+            activation2.sps_found, 4,
+            "4 present SPs should have been found via ignition",
+        );
+        assert_eq!(
+            activation2.sps.len(),
+            4,
+            "all 4 SPs should be reported in the status, even when no new \
+             ereports were observed: {:?}",
+            activation2.sps,
+        );
+        for SpEreporterStatus { sp_type, slot, status, ignition_type: _ } in
+            &activation2.sps
+        {
+            assert_eq!(
+                status.ereports_received, 0,
+                "no ereports should have been received from SP \
+                 {sp_type:?} {slot}",
+            );
+            assert_eq!(
+                status.new_ereports, 0,
+                "no new ereports should have been ingested from SP \
+                 {sp_type:?} {slot}",
+            );
+            assert_eq!(
+                status.requests, 1,
+                "one HTTP request should have been sent for SP \
+                 {sp_type:?} {slot} (empty response)",
+            );
+            assert_eq!(
+                &status.errors,
+                &Vec::<String>::new(),
+                "there should be no errors from SP {sp_type:?} {slot}",
+            );
+        }
 
         check_sp_ereports_exist(
             datastore,

@@ -148,6 +148,7 @@ mod disk_type_local_storage;
 mod dns;
 mod downstairs;
 pub mod ereport;
+mod ereporter_restart;
 mod ereporter_type;
 mod external_ip;
 mod external_subnet;
@@ -195,6 +196,7 @@ mod serde_time_delta;
 mod silo_auth_settings;
 mod switch_interface;
 mod switch_port;
+mod system_networking_settings;
 mod target_release;
 mod trust_quorum;
 mod v2p_mapping;
@@ -246,6 +248,7 @@ mod virtual_provisioning_collection;
 mod virtual_provisioning_resource;
 mod vmm;
 mod vmm_cpu_platform;
+mod vmm_failure_reason;
 mod vni;
 mod volume;
 mod volume_repair;
@@ -299,6 +302,7 @@ pub use disk_type_local_storage::*;
 pub use dns::*;
 pub use downstairs::*;
 pub use ereport::Ereport;
+pub use ereporter_restart::*;
 pub use ereporter_type::*;
 pub use external_ip::*;
 pub use external_subnet::*;
@@ -372,6 +376,7 @@ pub use support_bundle::*;
 pub use switch::*;
 pub use switch_interface::*;
 pub use switch_port::*;
+pub use system_networking_settings::*;
 pub use target_release::*;
 pub use trust_quorum::*;
 pub use tuf_repo::*;
@@ -386,6 +391,7 @@ pub use virtual_provisioning_collection::*;
 pub use virtual_provisioning_resource::*;
 pub use vmm::*;
 pub use vmm_cpu_platform::*;
+pub use vmm_failure_reason::*;
 pub use vmm_state::*;
 pub use vni::*;
 pub use volume::*;
@@ -466,6 +472,7 @@ pub(crate) use impl_enum_wrapper;
 /// our database into our model types. See [`VpcRouterKind`] for a sample usage.
 macro_rules! impl_enum_type {
     (
+        $(#[doc = $doc:expr])*
         $diesel_type:ident:
 
         $(#[$model_meta:meta])*
@@ -473,6 +480,7 @@ macro_rules! impl_enum_type {
 
         $($enum_item:ident => $sql_value:literal)+
     ) => {
+        $(#[doc = $doc])*
         $(#[$model_meta])*
         #[diesel(sql_type = ::nexus_db_schema::enums::$diesel_type)]
         pub enum $model_type {

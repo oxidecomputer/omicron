@@ -8,14 +8,16 @@
 //! instead of flat pool/ip_version fields.
 
 use omicron_common::api::external::{
-    ByteCount, Hostname, IdentityMetadataCreateParams,
-    InstanceAutoRestartPolicy, InstanceCpuCount, InstanceCpuPlatform, NameOrId,
+    ByteCount, Hostname, IdentityMetadataCreateParams, NameOrId,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use super::ip_pool::PoolSelector;
-use crate::v2025_11_20_00::instance::{UserData, bool_true};
+use crate::v2025_11_20_00::instance::{
+    InstanceAutoRestartPolicy, InstanceCpuCount, InstanceCpuPlatform, UserData,
+    bool_true,
+};
 use crate::v2025_12_03_00::instance::InstanceDiskAttachment;
 use crate::v2025_12_23_00;
 use crate::v2026_01_03_00;

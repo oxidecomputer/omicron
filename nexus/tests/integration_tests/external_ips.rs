@@ -47,7 +47,10 @@ use nexus_types::external_api::external_ip;
 use nexus_types::external_api::floating_ip;
 use nexus_types::external_api::floating_ip::FloatingIp;
 use nexus_types::external_api::instance;
-use nexus_types::external_api::instance::InstanceNetworkInterfaceAttachment;
+use nexus_types::external_api::instance::{
+    Instance, InstanceCpuCount, InstanceNetworkInterfaceAttachment,
+    InstanceState,
+};
 use nexus_types::external_api::ip_pool;
 use nexus_types::external_api::policy::SiloRole;
 use nexus_types::external_api::project;
@@ -61,9 +64,6 @@ use omicron_common::address::NUM_SOURCE_NAT_PORTS;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::IdentityMetadataUpdateParams;
-use omicron_common::api::external::Instance;
-use omicron_common::api::external::InstanceCpuCount;
-use omicron_common::api::external::InstanceState;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::PrivateIpStack;
@@ -1173,6 +1173,7 @@ async fn test_floating_ip_attach_fail_between_projects(
             auto_restart_policy: Default::default(),
             anti_affinity_groups: Vec::new(),
             multicast_groups: Vec::new(),
+            enable_jumbo_frames: false,
         },
         StatusCode::BAD_REQUEST,
     )
@@ -1463,7 +1464,7 @@ async fn test_floating_ip_ip_version_conflict(
             nexus_db_model::IpPool::new(
                 &v6_identity,
                 nexus_db_model::IpVersion::V6,
-                nexus_db_model::IpPoolReservationType::ExternalSilos,
+                nexus_db_model::IpPoolAssignment::Silos,
             ),
         )
         .await

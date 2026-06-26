@@ -111,6 +111,12 @@ The top-level items in this list are strictly sequential.  Control plane zone up
 
 MGS updates (e.g., SP updates) may be skipped if the new target release specifies the same versions for these components that are already deployed.  This is common in development/test environments, though unexpected in customer environments.  All releases, even development ones, have new versions of the host OS and control plane zones so these are never skipped.
 
+=== Verifying that the system is ready to be updated
+
+Before an update, we expect the response of the system update status endpoint to return `contact_support: false`. If viewing only through the console, there should be no warning asking the user to contact support. See <<task-check-for-contact-support-flag>>.
+
+Should the `contact_support` field be true, see <<task-check-cause-of-contact-support-true>>.
+
 === Verifying that everything is working okay during the update
 
 During an update, we expect:
@@ -131,10 +137,9 @@ After the update:
 
 * no new blueprints should be created
 * all components should be at the new version
+* a few minutes after the update is finished, check the system update status endpoint, or the console view of "System Update" to see if the response is telling the user they should call support. See <<task-check-for-contact-support-flag>>. If contact support is true see <<task-check-cause-of-contact-support-true>>.
 
-See the previous section for how to observe these.
-
-We rely on the health check script that support uses to verify that the system is fully healthy.
+See the previous sections for how to observe these.
 
 === Stepping through the update
 
@@ -361,6 +366,70 @@ Safety Options:
 |New
 
 |===
+
+[#task-check-for-contact-support-flag]
+=== Task: Check for contact_support flag
+
+NOTE: This field is intended for update purposes only. It flags whether it is safe to start an update, an update has stopped unexpectedly, or whether health checks on a subset of components passed after an update completed. It is NOT a health status API. If used as a health status API, it could show false positives and false negatives. For example, a newly commissioned sled that hasn't reported a reconciliation result yet would set the contact_support field to true. And many potential problems in the system are _not_ checked in computing this flag.
+
+Use the `oxide system update status` command to see the status of the contact support field
+
+```
+$ oxide system update status
+{
+  "target_release": {
+    time_requested: "2026-06-11T05:34:02.158806Z",
+    version: "20.0.0-0.ci+git863b79d5cd0"
+  },
+  "components_by_release_version": {
+    "20.0.0-0.ci+git863b79d5cd0": 249
+  },
+  "time_last_step_planned": "2026-04-16T07:08:43.121286Z",
+  "suspended": false,
+  "contact_support": false
+}
+```
+
+If viewing only through the console, the contact support field won't be present. If there is an issue, a warning will appear instead.
+
+image::assets/contact-support-true.png[]
+
+[#task-check-cause-of-contact-support-true]
+=== Task: Checking why the contact support field in system update status is true
+
+Every time the "system update status" endpoint is called, the system checks for a small set of known issues. If any are found, it reports `contact_support: true`.
+	
+Prior to the update, this flag indicates issues that could prevent an update from proceeding normally.
+During the update, this flag indicates that the update has stopped and requires support intervention to continue.
+After the update, this flag indicates that the update may have resulted in a system that's not fully working.
+	
+The API doesn't say anything else because this isn't customer-actionable. Details are available in the Nexus log that serviced the API request.
+
+This is an example of how the log entry would look in a very unhealthy system:
+
+```
+00:11:54.269Z WARN e6bff1ff-24fb-49dc-a54e-c6a350cd4d6c (dropshot_external): found problems in the system before or after an update
+    authenticated = true
+    enabled_smf_services_not_online_by_sled = {1cd22575-85e2-471d-88fd-3ec5c5e61ed6 (sled): SvcsEnabledNotOnline(SvcsEnabledNotOnline { services: [SvcEnabledNotOnline { fmri: "svc:/system/test2:default", zone: "global", state: Offline }, SvcEnabledNotOnline { fmri: "svc:/system/test:default", zone: "global", state: Maintenance }], errors: [], time_of_status: 2026-05-11T07:34:08.063055Z })}
+    local_addr = 127.0.0.1:12220
+    method = GET
+    remote_addr = 127.0.0.1:61900
+    req_id = 9ed1b600-1963-4691-b400-2a78c0cea4ba
+    silo_id = 980314eb-2969-4a13-b407-be9f3d93d330
+    silo_user_id = 41278141-e86f-41e8-b398-b0310a62d0ca
+    stale_inventory_collection_time_done = 2026-05-11T07:13:58.399541007Z
+    stuck_sagas = [StuckSaga { id: SagaId(1f0d13c3-6c81-43d0-b4ae-7c74e0ec45ef), name: "test stuck saga" }, StuckSaga { id: SagaId(f59a5b82-be73-4b04-9e7d-6d252663f605), name: "test stuck saga" }]
+    stuck_update_time_last_step_planned = 2026-05-11T07:03:58.399545477Z
+    type = silo_user
+    unhealthy_zpools_by_sled = {1cd22575-85e2-471d-88fd-3ec5c5e61ed6 (sled): [Zpool { time_collected: 2026-05-11T07:34:08.063086Z, id: b5383b08-68bf-4653-bb55-6bd1ff601d1b (zpool), total_size: ByteCount(1048576), health: Degraded }]}
+    uri = /v1/system/update/status
+```
+
+A few things to note:
+
+- If you call the update status endpoint during an update, the health checks won't run and no problems will be reported unless the system considers an update to be stuck.
+- There are many conditions outside the context of a self-service update that can transiently cause `contact_support: true`, such as when a sled is rebooting or a MUPdate is in progress. This flag should only be used to determine if it's okay to proceed with a self-service update, if a self-service update is stuck, or if a self-service update appears to have introduced a serious problem.
+ 
 
 [#task-check-reconfigurator-history]
 === Task: Checking recent Reconfigurator activity
@@ -1180,8 +1249,6 @@ Reconfigurator config:
     version: 8
     modified time: 2025-10-23T05:58:27.392Z
     planner enabled: true
-    planner config:
-        add zones with mupdate override:   false
 ```
 
 This shows that the planner is enabled.
@@ -1209,8 +1276,6 @@ note: (if this is not right, use --dns-server to specify an alternate DNS server
 note: using Nexus URL http://[fd00:1122:3344:101::6]:12232
 reconfigurator config updated to version 1:
     planner enabled: false
-    planner config:
-        add zones with mupdate override:   false
 ```
 
 You can see the result with:
@@ -1225,8 +1290,6 @@ Reconfigurator config:
     version: 1
     modified time: 2025-11-05T23:49:01.597Z
     planner enabled: false
-    planner config:
-        add zones with mupdate override:   false
 ```
 
 Note that it takes a few seconds for all Nexus instances to pick up the new configuration.  You can check this by checking the status of the `reconfigurator_config_watcher` background task:
@@ -1277,8 +1340,6 @@ note: (if this is not right, use --dns-server to specify an alternate DNS server
 note: using Nexus URL http://[fd00:1122:3344:101::6]:12232
 reconfigurator config updated to version 2:
 *   planner enabled:   false -> true
-    planner config:
-        add zones with mupdate override:   false (unchanged)
 ```
 
 Verify it:
@@ -1293,8 +1354,6 @@ Reconfigurator config:
     version: 2
     modified time: 2025-11-05T23:51:26.402Z
     planner enabled: true
-    planner config:
-        add zones with mupdate override:   false
 ```
 
 As before, it will take a few seconds for this to propagate.  Then you'll see this in the planner background task output:
