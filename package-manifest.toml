@@ -683,10 +683,10 @@ source.repo = "maghemite"
 # `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
 # building `ddm-admin-client` (which will instruct you to update
 # `tools/maghemite_openapi_version`).
-source.commit = "3e66478abf6f27b8bd1face138b5450578df0cef"
+source.commit = "37effe37ac47b44d4629f56009d116bfdb10c4ea"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/mg-ddm-gz.sha256.txt
-source.sha256 = "740fc0c42a63e1d60026566e54bf689b0aaa5a5bfdb39e4758fda606bf189e2c"
+source.sha256 = "8aab66c56d9ac1dd7a77ecd17dbf3dcd1cf9dd04f35be0c547ad8d973a76b0cd"
 output.type = "tarball"
 
 [package.mg-ddm]
@@ -699,10 +699,10 @@ source.repo = "maghemite"
 # `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
 # building `ddm-admin-client` (which will instruct you to update
 # `tools/maghemite_openapi_version`).
-source.commit = "3e66478abf6f27b8bd1face138b5450578df0cef"
+source.commit = "37effe37ac47b44d4629f56009d116bfdb10c4ea"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/mg-ddm.sha256.txt
-source.sha256 = "7c194152f0046c1838a50818c853b4c932ef685ce412ac1dd2fbb588f95516dc"
+source.sha256 = "9f40d73fb9f5d6bcb315cc4453c5b4c89c87c67b29dafdaca313efbd2086af79"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -714,7 +714,7 @@ source.repo = "maghemite"
 # `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
 # building `ddm-admin-client` (which will instruct you to update
 # `tools/maghemite_openapi_version`).
-source.commit = "3e66478abf6f27b8bd1face138b5450578df0cef"
+source.commit = "37effe37ac47b44d4629f56009d116bfdb10c4ea"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/mgd.sha256.txt
 source.sha256 = "908a53ed441a49cae329314b682319bc96ef3a0b1c38dd1d4bfd20a9c3eb81ee"
