@@ -436,7 +436,7 @@ impl TryFrom<Certificate> for TlsCertificate {
                 .expect("parsing private key PEM")
                 .expect("no private keys found");
             let rustls_signing_key =
-                rustls::crypto::ring::sign::any_supported_type(
+                rustls::crypto::aws_lc_rs::sign::any_supported_type(
                     &rustls_private_key,
                 )
                 .context("parsing DER private key")?;
