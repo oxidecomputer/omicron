@@ -6,17 +6,17 @@
 //!
 //! This crate holds the logic that the `sync_switch_configuration` Nexus
 //! background task uses to build the [`RackNetworkConfig`] that is written to
-//! the bootstore. It is currently an extraction of the task's previous inline
-//! logic and still reads the infra address-lot blocks and BFD sessions from the
-//! database. In the future, we'll move these reads out so the computation
-//! becomes a pure, database-free function.
+//! the bootstore. The computation is a pure, in-memory function: all database
+//! reads happen in the caller, which passes the results in via
+//! [`RackNetworkConfigInput`].
+//!
+//! The crate still depends on `nexus-db-model` and `nexus-db-queries` for input
+//! types; later changes will replace those with domain types to drop the
+//! dependency.
 
 use ipnetwork::IpNetwork;
-use nexus_db_model::{AddressLotBlock, BgpConfig, INFRA_LOT, SwitchLinkSpeed};
-use nexus_db_queries::context::OpContext;
-use nexus_db_queries::db::DataStore;
+use nexus_db_model::{BgpConfig, SwitchLinkSpeed};
 use nexus_db_queries::db::datastore::SwitchPortSettingsCombinedResult;
-use omicron_common::api::external::DataPageParams;
 use oxnet::IpNet;
 use sled_agent_types::early_networking::BfdPeerConfig;
 use sled_agent_types::early_networking::BgpConfig as SledBgpConfig;
@@ -34,31 +34,49 @@ use sled_agent_types::early_networking::UplinkAddress;
 use sled_agent_types::early_networking::UplinkAddressConfig;
 use slog::Logger;
 use slog::error;
-use slog::warn;
 use slog_error_chain::InlineErrorChain;
 use std::collections::HashMap;
+use std::net::IpAddr;
 use uuid::Uuid;
 
-/// Build the desired [`RackNetworkConfig`] for the bootstore from database
-/// state.
+/// Inputs to [`build_rack_network_config`].
+pub struct RackNetworkConfigInput<'a> {
+    pub rack: &'a nexus_db_model::Rack,
+    pub applied_ports: &'a [(
+        SwitchSlot,
+        &'a nexus_db_model::SwitchPort,
+        &'a SwitchPortSettingsCombinedResult,
+    )],
+    pub switch_bgp_config: &'a HashMap<SwitchSlot, (Uuid, BgpConfig)>,
+    pub bgp_announce_prefixes: &'a HashMap<Uuid, Vec<IpNet>>,
+    pub infra_ip_first: IpAddr,
+    pub infra_ip_last: IpAddr,
+    pub bfd: Vec<BfdPeerConfig>,
+}
+
+/// Build the desired [`RackNetworkConfig`] for the bootstore.
+///
+/// This is a pure, in-memory computation: all database reads happen while
+/// creating the [`RackNetworkConfigInput`].
 ///
 /// Returns `None` if a complete config cannot be built for this rack (in which
 /// case the caller should skip the rack and retry on the next activation). Note
 /// that, matching the historical behavior, individual ports are silently
 /// skipped on conversion errors. Later changes will address this.
-pub async fn build_rack_network_config(
-    opctx: &OpContext,
-    datastore: &DataStore,
+pub fn build_rack_network_config(
     log: &Logger,
-    rack: &nexus_db_model::Rack,
-    applied_ports: &[(
-        SwitchSlot,
-        &nexus_db_model::SwitchPort,
-        &SwitchPortSettingsCombinedResult,
-    )],
-    switch_bgp_config: &HashMap<SwitchSlot, (Uuid, BgpConfig)>,
-    bgp_announce_prefixes: &HashMap<Uuid, Vec<IpNet>>,
+    input: RackNetworkConfigInput<'_>,
 ) -> Option<RackNetworkConfig> {
+    let RackNetworkConfigInput {
+        rack,
+        applied_ports,
+        switch_bgp_config,
+        bgp_announce_prefixes,
+        infra_ip_first,
+        infra_ip_last,
+        bfd,
+    } = input;
+
     // build the desired bootstore config from the records we've fetched
     let subnet = match rack.rack_subnet {
         Some(IpNetwork::V6(subnet)) => subnet.into(),
@@ -251,41 +269,6 @@ pub async fn build_rack_network_config(
         ports.push(port_config);
     }
 
-    let blocks = match datastore
-        .address_lot_blocks_by_name(opctx, INFRA_LOT.into())
-        .await
-    {
-        Ok(blocks) => blocks,
-        Err(e) => {
-            error!(log, "error while fetching address lot blocks from db"; "error" => %e);
-            return None;
-        }
-    };
-
-    // currently there should only be one block assigned. If there is more than one
-    // block, grab the first one and emit a warning.
-    if blocks.len() > 1 {
-        warn!(log, "more than one block assigned to infra lot"; "blocks" => ?blocks);
-    }
-
-    let (infra_ip_first, infra_ip_last) = match blocks.get(0) {
-        Some(AddressLotBlock { first_address, last_address, .. }) => {
-            (first_address.ip(), last_address.ip())
-        }
-        None => {
-            error!(log, "no blocks assigned to infra lot");
-            return None;
-        }
-    };
-
-    let bfd = match bfd_peer_configs_from_db(datastore, opctx).await {
-        Ok(bfd) => bfd,
-        Err(e) => {
-            error!(log, "error fetching bfd config from db"; "error" => %e);
-            return None;
-        }
-    };
-
     Some(RackNetworkConfig {
         rack_subnet: subnet,
         infra_ip_first,
@@ -294,39 +277,4 @@ pub async fn build_rack_network_config(
         bgp,
         bfd,
     })
-}
-
-async fn bfd_peer_configs_from_db(
-    datastore: &DataStore,
-    opctx: &OpContext,
-) -> Result<Vec<BfdPeerConfig>, omicron_common::api::external::Error> {
-    let db_data =
-        datastore.bfd_session_list(opctx, &DataPageParams::max_page()).await?;
-
-    let mut result = Vec::new();
-    for spec in db_data.into_iter() {
-        let config = BfdPeerConfig {
-            local: spec.local.map(|x| x.ip()),
-            remote: spec.remote.ip(),
-            detection_threshold: spec
-                .detection_threshold
-                .0
-                .try_into()
-                .map_err(|_| {
-                    omicron_common::api::external::Error::InternalError {
-                        internal_message: format!(
-                            "db_bfd_peer_configs: detection threshold \
-                             overflow: {}",
-                            spec.detection_threshold.0,
-                        ),
-                    }
-                })?,
-            required_rx: spec.required_rx.0.into(),
-            mode: spec.mode.into(),
-            switch: spec.switch_slot.into(),
-        };
-        result.push(config);
-    }
-
-    Ok(result)
 }

@@ -7727,7 +7727,6 @@ dependencies = [
  "ipnetwork",
  "nexus-db-model",
  "nexus-db-queries",
- "omicron-common",
  "omicron-rpaths",
  "omicron-workspace-hack",
  "oxnet",
