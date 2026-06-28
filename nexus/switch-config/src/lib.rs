@@ -34,7 +34,6 @@ use sled_agent_types::early_networking::UplinkAddress;
 use sled_agent_types::early_networking::UplinkAddressConfig;
 use slog::Logger;
 use slog::error;
-use slog::info;
 use slog::warn;
 use slog_error_chain::InlineErrorChain;
 use std::collections::HashMap;
@@ -135,9 +134,9 @@ pub async fn build_rack_network_config(
                 Some((_id, config)) => config.asn.0,
                 None => {
                     // XXX: The port has BGP peers but no ASN configured. This
-                    // is an error, but we skip it for now. We should error out
-                    // here instead.
-                    info!(
+                    // is an error, but we continue for now. We should
+                    // completely fail the task instead.
+                    error!(
                         log,
                         "no bgp config for switch; skipping port for bootstore";
                         "switch_slot" => ?switch_slot,

@@ -24,7 +24,6 @@ omicron-common.workspace = true
 oxide-tokio-rt.workspace = true
 pem.workspace = true
 regex.workspace = true
-ring.workspace = true
 rustls.workspace = true
 slog.workspace = true
 subprocess.workspace = true

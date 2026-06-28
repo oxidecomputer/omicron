@@ -167,6 +167,10 @@ mod test {
                 example.input.external_ip_policy(),
             )
             .expect("constructed ExternalNetworkingAllocator");
+        let nexus_config = example
+            .input
+            .external_service_networking_policy()
+            .operator_nexus_config();
         for (sled_id, _zone_id, image_source) in &g1_nexus_ids {
             let external_ip = external_networking_alloc
                 .for_new_nexus()
@@ -177,6 +181,7 @@ mod test {
                     image_source.clone(),
                     external_ip,
                     g2,
+                    &nexus_config,
                 )
                 .expect("add Nexus zone");
         }
