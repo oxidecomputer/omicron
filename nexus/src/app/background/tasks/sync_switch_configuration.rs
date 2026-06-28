@@ -55,7 +55,7 @@ use nexus_db_queries::{
 };
 use nexus_switch_config::{
     AddressInput, BgpConfigInput, LinkInput, LldpInput, PortInput,
-    RackNetworkConfigInput, RouteInput, TxEqInput,
+    RackNetworkConfigInput,
 };
 use nexus_types::external_api::networking;
 use nexus_types::identity::{Asset, Resource};
@@ -72,6 +72,7 @@ use sled_agent_types::early_networking::InvalidIpAddrError;
 use sled_agent_types::early_networking::LldpAdminStatus;
 use sled_agent_types::early_networking::LldpPortConfig;
 use sled_agent_types::early_networking::RackNetworkConfig;
+use sled_agent_types::early_networking::RouteConfig;
 use sled_agent_types::early_networking::RouterPeerType;
 use sled_agent_types::early_networking::SwitchSlot;
 use sled_agent_types::early_networking::TxEqConfig;
@@ -1328,7 +1329,7 @@ fn port_input_from_db(
         routes: info
             .routes
             .iter()
-            .map(|r| RouteInput {
+            .map(|r| RouteConfig {
                 destination: r.dst.into(),
                 nexthop: r.gw.ip(),
                 vlan_id: r.vid.map(|x| x.0),
@@ -1351,7 +1352,7 @@ fn port_input_from_db(
         tx_eq: info
             .tx_eq
             .iter()
-            .map(|c| TxEqInput {
+            .map(|c| TxEqConfig {
                 pre1: c.pre1,
                 pre2: c.pre2,
                 main: c.main,

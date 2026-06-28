@@ -1180,6 +1180,7 @@ impl BackgroundTasksInitializer {
                 sitrep_watcher.clone(),
                 task_alert_dispatcher.clone(),
                 task_support_bundle_collector.clone(),
+                task_fm_sitrep_loader.clone(),
                 nexus_id,
             )),
             opctx: opctx.child(BTreeMap::new()),
