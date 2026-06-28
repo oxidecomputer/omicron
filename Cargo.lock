@@ -7725,16 +7725,12 @@ name = "nexus-switch-config"
 version = "0.1.0"
 dependencies = [
  "ipnetwork",
- "nexus-db-model",
- "nexus-db-queries",
- "omicron-rpaths",
+ "nexus-types",
  "omicron-workspace-hack",
  "oxnet",
- "pq-sys",
  "sled-agent-types",
  "slog",
  "slog-error-chain",
- "uuid",
 ]
 
 [[package]]
