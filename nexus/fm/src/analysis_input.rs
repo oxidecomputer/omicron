@@ -13,6 +13,7 @@ use nexus_types::in_service_disk::InServiceDisk;
 use nexus_types::inventory;
 use omicron_uuid_kinds::AlertUuid;
 use omicron_uuid_kinds::CollectionUuid;
+use omicron_uuid_kinds::SupportBundleUuid;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::collections::HashSet;
@@ -51,6 +52,13 @@ pub struct Input {
     /// [`crate::builder::SitrepBuilder::build`] to decide whether to bump the
     /// new sitrep's `alert_generation`.
     alerts_changed: bool,
+    /// Indicates whether `Builder::build` dropped any closed case
+    /// from the carry-forward list whose support bundle request set was
+    /// non-empty. ORed with
+    /// [`crate::builder::AllCases::support_bundle_set_changed`] in
+    /// [`crate::builder::SitrepBuilder::build`] to decide whether to bump the
+    /// new sitrep's `support_bundle_generation`.
+    support_bundles_changed: bool,
     in_service_disks: Arc<IdOrdMap<InServiceDisk>>,
 }
 
@@ -84,6 +92,10 @@ impl Input {
 
     pub(crate) fn alerts_changed(&self) -> bool {
         self.alerts_changed
+    }
+
+    pub(crate) fn support_bundles_changed(&self) -> bool {
+        self.support_bundles_changed
     }
 
     /// All control-plane-managed disks (`physical_disk.disk_policy =
@@ -127,6 +139,7 @@ impl Input {
             ereporter_restarts: IdOrdMap::default(),
             unmarked_seen_ereports: BTreeSet::default(),
             marked_alert_requests: HashSet::new(),
+            marked_support_bundle_requests: HashSet::new(),
         })
     }
 }
@@ -172,6 +185,19 @@ pub struct Builder {
     /// of the query shape in `fm_rendezvous_existing_alert_markers`, which
     /// needs to be an index lookup rather than a table scan.
     marked_alert_requests: HashSet<AlertUuid>,
+
+    /// The IDs of support bundle requests on the parent sitrep's closed cases
+    /// that already have a marker row in `rendezvous_support_bundle_created`.
+    /// A closed-case request absent from this set is outstanding work, and
+    /// (like an unmarked ereport) forces its case to be copied forward. Open
+    /// cases are copied forward unconditionally, so we don't need to track
+    /// their requests here.
+    ///
+    /// Unlike [`Self::unmarked_seen_ereports`], this set holds the requests
+    /// whose work is done rather than the outstanding ones. This is an artifact
+    /// of the query shape in `fm_rendezvous_existing_support_bundle_markers`,
+    /// which needs to be an index lookup rather than a table scan.
+    marked_support_bundle_requests: HashSet<SupportBundleUuid>,
 }
 
 impl Builder {
@@ -189,9 +215,9 @@ impl Builder {
         let parent_sitrep = self.parent_sitrep.as_ref().map(|s| &s.1);
         self.new_ereports.extend(ereports.into_iter().filter_map(|ereport| {
             if let Some(sitrep) = parent_sitrep {
-                let id = ereport.id();
+                let id = ereport.id;
                 if sitrep.ereports_by_id.contains_key(&id) {
-                    self.unmarked_seen_ereports.insert(*id);
+                    self.unmarked_seen_ereports.insert(id);
                     return None;
                 }
             }
@@ -209,6 +235,18 @@ impl Builder {
         marker_ids: impl IntoIterator<Item = AlertUuid>,
     ) {
         self.marked_alert_requests.extend(marker_ids);
+    }
+
+    /// Records the support bundle request ids (from the parent sitrep's
+    /// closed cases) whose `rendezvous_support_bundle_created` marker already
+    /// exists in the database. During [`Self::build`], a closed case with a
+    /// request *not* in this set counts as having outstanding work, and is
+    /// carried forward.
+    pub fn add_marked_support_bundle_requests(
+        &mut self,
+        marker_ids: impl IntoIterator<Item = SupportBundleUuid>,
+    ) {
+        self.marked_support_bundle_requests.extend(marker_ids);
     }
 
     pub fn num_ereports(&self) -> usize {
@@ -246,11 +284,7 @@ impl Builder {
             parent_sitrep_id,
             parent_inv_id,
             inv_id: self.inv.id,
-            new_ereport_ids: self
-                .new_ereports
-                .iter()
-                .map(|e| *e.id())
-                .collect(),
+            new_ereport_ids: self.new_ereports.iter().map(|e| e.id).collect(),
             num_ereporter_restarts: self.ereporter_restarts.len(),
             open_cases: BTreeMap::new(),
             closed_cases_copied_forward: BTreeMap::new(),
@@ -267,11 +301,14 @@ impl Builder {
         let mut open_cases = IdOrdMap::new();
         // - The case has been closed, but still has outstanding work:
         //   - an ereport which has not yet been marked as "seen" in the
-        //     database, or
+        //     database,
         //   - an alert request whose `rendezvous_alert_created` marker is not
-        //     yet present.
+        //     yet present, or
+        //   - a support bundle request whose
+        //     `rendezvous_support_bundle_created` marker is not yet present.
         let mut closed_cases_copied_forward = IdOrdMap::new();
         let mut alerts_changed = false;
+        let mut support_bundles_changed = false;
         for case in parent_sitrep.iter().flat_map(|s| s.cases.iter()) {
             if case.is_open() {
                 report.open_cases.insert(case.id, case.metadata.clone());
@@ -292,22 +329,37 @@ impl Builder {
                         }
                     })
                     .collect::<BTreeSet<_>>();
-                let unmarked_alert_requests: BTreeSet<AlertUuid> = case
+                let unmarked_alert_requests = case
                     .alerts_requested
                     .iter()
                     .map(|r| r.id)
                     .filter(|id| !self.marked_alert_requests.contains(id))
-                    .collect();
+                    .collect::<BTreeSet<_>>();
+                let unmarked_support_bundle_requests = case
+                    .support_bundles_requested
+                    .iter()
+                    .map(|r| r.id)
+                    .filter(|id| {
+                        !self.marked_support_bundle_requests.contains(id)
+                    })
+                    .collect::<BTreeSet<_>>();
                 let has_outstanding_work = !unmarked_ereports.is_empty()
-                    || !unmarked_alert_requests.is_empty();
+                    || !unmarked_alert_requests.is_empty()
+                    || !unmarked_support_bundle_requests.is_empty();
                 if has_outstanding_work {
-                    // The case has work remaining, so copy it forward intact.
+                    // The case has ereport, alert, and/or bundle work
+                    // remaining, so carry it forward intact. We keep even
+                    // already-satisfied alert and support bundle requests
+                    // around: the marker prevents their resurrection, and
+                    // pruning them would force a generation bump that buys us
+                    // only earlier marker GC.
                     report.closed_cases_copied_forward.insert(
                         case.id,
                         ClosedCaseReport {
                             metadata: case.metadata.clone(),
                             unmarked_ereports,
                             unmarked_alert_requests,
+                            unmarked_support_bundle_requests,
                         },
                     );
                     closed_cases_copied_forward
@@ -316,11 +368,15 @@ impl Builder {
                             "the case UUID is coming from iterating over \
                              another `IdOrdMap`, so it must be unique",
                         );
-                } else if !case.alerts_requested.is_empty() {
-                    // Case has no outstanding work AND had alert requests:
-                    // dropping it removes those ids from the carry-forward
-                    // set.
-                    alerts_changed = true;
+                } else {
+                    // Case has no outstanding work. If it had any alert or
+                    // support bundle requests, dropping it removes those ids
+                    // from the carry-forward set, so flag the corresponding
+                    // generation as changed. Empty request sets make these
+                    // `|=`s no-ops.
+                    alerts_changed |= !case.alerts_requested.is_empty();
+                    support_bundles_changed |=
+                        !case.support_bundles_requested.is_empty();
                 }
             }
         }
@@ -332,6 +388,7 @@ impl Builder {
             closed_cases_copied_forward,
             ereporter_restarts: self.ereporter_restarts,
             alerts_changed,
+            support_bundles_changed,
             in_service_disks: self.in_service_disks,
         };
 
@@ -344,12 +401,16 @@ mod tests {
     use super::*;
     use crate::builder::SitrepBuilder;
     use crate::test_util::FmTest;
+    use nexus_types::alert::AlertClass;
     use nexus_types::alert::test_alerts;
     use nexus_types::fm;
+    use nexus_types::fm::case::AlertRequest;
     use nexus_types::fm::case::CaseEreport;
+    use nexus_types::fm::case::SupportBundleRequest;
     use nexus_types::fm::ereport::Reporter;
     use nexus_types::fm::{DiagnosisEngineKind, SitrepVersion};
     use nexus_types::inventory::SpType;
+    use nexus_types::support_bundle::BundleDataSelection;
     use omicron_common::api::external::Generation;
     use omicron_uuid_kinds::{
         CaseEreportUuid, CaseUuid, OmicronZoneUuid, SitrepUuid,
@@ -553,6 +614,7 @@ mod tests {
                     time_created: chrono::Utc::now(),
                     next_inv_min_time_started: inv.time_done,
                     alert_generation: Generation::new(),
+                    support_bundle_generation: Generation::new(),
                 },
                 cases,
                 ereports_by_id,
@@ -594,22 +656,22 @@ mod tests {
 
         // Check the "new ereports" in the constructed input.
         assert!(
-            input.new_ereports().contains_key(ereport_new.id()),
+            input.new_ereports().contains_key(&ereport_new.id),
             "ereport_new should be in new_ereports (it was not in the parent \
              sitrep)"
         );
         assert!(
-            !input.new_ereports().contains_key(ereport_in_open_case1.id()),
+            !input.new_ereports().contains_key(&ereport_in_open_case1.id),
             "ereport_in_open_case1 should NOT be in new_ereports (it is \
              already associated with an open case in the parent sitrep)"
         );
         assert!(
-            !input.new_ereports().contains_key(ereport_in_open_case2.id()),
+            !input.new_ereports().contains_key(&ereport_in_open_case2.id),
             "ereport_in_open_case2 should NOT be in new_ereports (it is \
              already associated with an open case in the parent sitrep)"
         );
         assert!(
-            !input.new_ereports().contains_key(ereport_in_closed_unmarked.id()),
+            !input.new_ereports().contains_key(&ereport_in_closed_unmarked.id),
             "ereport_in_closed_unmarked should NOT be in new_ereports (it is \
              already associated with a closed case in the parent sitrep)"
         );
@@ -816,6 +878,7 @@ mod tests {
                 comment: String::new(),
                 time_created: chrono::Utc::now(),
                 alert_generation: Generation::new(),
+                support_bundle_generation: Generation::new(),
             },
             cases: [case].into_iter().collect(),
             ereports_by_id: IdOrdMap::new(),
@@ -839,9 +902,6 @@ mod tests {
     /// leaving the carry-forward set.
     #[test]
     fn build_drops_closed_case_when_all_alerts_satisfied() {
-        use nexus_types::alert::AlertClass;
-        use nexus_types::fm::case::AlertRequest;
-
         let alert_id = AlertUuid::new_v4();
         let case_id = CaseUuid::new_v4();
         let parent_sitrep_id = SitrepUuid::new_v4();
@@ -889,9 +949,6 @@ mod tests {
     /// prevents resurrection).
     #[test]
     fn build_keeps_closed_case_intact_when_not_all_alerts_satisfied() {
-        use nexus_types::alert::AlertClass;
-        use nexus_types::fm::case::AlertRequest;
-
         let satisfied_alert_id = AlertUuid::new_v4();
         let unsatisfied_alert_id = AlertUuid::new_v4();
         let case_id = CaseUuid::new_v4();
@@ -942,6 +999,115 @@ mod tests {
             !input.alerts_changed(),
             "case carried forward (not dropped), so alerts_changed must \
              remain false",
+        );
+    }
+
+    /// All support bundle requests on a closed case are satisfied and the
+    /// case has no unmarked ereports: the case must be dropped entirely,
+    /// and `support_bundles_changed` must flip to `true` because the
+    /// dropped requests are leaving the carry-forward set.
+    #[test]
+    fn build_drops_closed_case_when_all_bundles_satisfied() {
+        let bundle_id = SupportBundleUuid::new_v4();
+        let case_id = CaseUuid::new_v4();
+        let parent_sitrep_id = SitrepUuid::new_v4();
+
+        let closed_case = fm::Case {
+            id: case_id,
+            metadata: fm::case::Metadata {
+                created_sitrep_id: parent_sitrep_id,
+                closed_sitrep_id: Some(parent_sitrep_id),
+                de: fm::DiagnosisEngineKind::PowerShelf,
+                comment: String::new(),
+            },
+            ereports: IdOrdMap::new(),
+            alerts_requested: IdOrdMap::new(),
+            support_bundles_requested: [SupportBundleRequest {
+                id: bundle_id,
+                requested_sitrep_id: parent_sitrep_id,
+                data_selection: BundleDataSelection::all(),
+                comment: String::new(),
+            }]
+            .into_iter()
+            .collect(),
+            facts: IdOrdMap::new(),
+        };
+
+        let mut builder = builder_with_closed_case(closed_case);
+        builder.add_marked_support_bundle_requests([bundle_id]);
+        let (input, _) = builder.build();
+
+        assert_eq!(input.closed_cases_copied_forward().len(), 0);
+        assert!(
+            input.support_bundles_changed(),
+            "dropping a closed case removes ids from the request set, so \
+             support_bundles_changed must be true"
+        );
+    }
+
+    /// One of two support bundle requests has a marker; the other does not.
+    /// The closed case must be carried forward intact (both bundle requests
+    /// still present) and `support_bundles_changed` must remain `false`.
+    /// Satisfied requests are not pruned; the marker prevents resurrection.
+    #[test]
+    fn build_keeps_closed_case_intact_when_not_all_bundles_satisfied() {
+        let satisfied_bundle_id = SupportBundleUuid::new_v4();
+        let unsatisfied_bundle_id = SupportBundleUuid::new_v4();
+        let case_id = CaseUuid::new_v4();
+        let parent_sitrep_id = SitrepUuid::new_v4();
+
+        let bundle_request = |id| SupportBundleRequest {
+            id,
+            requested_sitrep_id: parent_sitrep_id,
+            data_selection: BundleDataSelection::all(),
+            comment: String::new(),
+        };
+        let closed_case = fm::Case {
+            id: case_id,
+            metadata: fm::case::Metadata {
+                created_sitrep_id: parent_sitrep_id,
+                closed_sitrep_id: Some(parent_sitrep_id),
+                de: fm::DiagnosisEngineKind::PowerShelf,
+                comment: String::new(),
+            },
+            ereports: IdOrdMap::new(),
+            alerts_requested: IdOrdMap::new(),
+            support_bundles_requested: [
+                bundle_request(satisfied_bundle_id),
+                bundle_request(unsatisfied_bundle_id),
+            ]
+            .into_iter()
+            .collect(),
+            facts: IdOrdMap::new(),
+        };
+
+        let mut builder = builder_with_closed_case(closed_case);
+        builder.add_marked_support_bundle_requests([satisfied_bundle_id]);
+        let (input, _) = builder.build();
+
+        let carried = input.closed_cases_copied_forward().get(&case_id).expect(
+            "one bundle request unsatisfied, so case must be carried \
+                 forward",
+        );
+        assert_eq!(
+            carried.support_bundles_requested.len(),
+            2,
+            "satisfied requests are not pruned from the carried-forward case",
+        );
+        assert!(
+            carried
+                .support_bundles_requested
+                .contains_key(&satisfied_bundle_id)
+        );
+        assert!(
+            carried
+                .support_bundles_requested
+                .contains_key(&unsatisfied_bundle_id)
+        );
+        assert!(
+            !input.support_bundles_changed(),
+            "case carried forward (not dropped), so support_bundles_changed \
+             must remain false",
         );
     }
 }

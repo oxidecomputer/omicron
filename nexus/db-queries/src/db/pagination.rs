@@ -968,7 +968,7 @@ mod test {
                     let records_batch = query(&p.current_pagparams());
                     paginator =
                         p.found_batch(&records_batch, &|i: &Item| i.marker);
-                    all_records.extend(records_batch.into_iter());
+                    all_records.extend(records_batch);
                 }
                 all_records
             };

@@ -13,6 +13,7 @@ omicron-rpaths.workspace = true
 ipnetwork.workspace = true
 nexus-db-model.workspace = true
 nexus-db-queries.workspace = true
+omicron-workspace-hack.workspace = true
 oxnet.workspace = true
 # See omicron-rpaths for more about the "pq-sys" dependency.
 pq-sys = "*"
@@ -20,5 +21,3 @@ sled-agent-types.workspace = true
 slog.workspace = true
 slog-error-chain.workspace = true
 uuid.workspace = true
-
-omicron-workspace-hack.workspace = true
