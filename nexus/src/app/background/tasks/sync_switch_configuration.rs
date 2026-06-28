@@ -1084,9 +1084,10 @@ impl BackgroundTask for SwitchPortSettingsManager {
                             Some((_id, config)) => config.asn.0,
                             None => {
                                 // XXX: The port has BGP peers but no ASN
-                                // configured. This is an error, but we skip it
-                                // for now. We should error out here instead.
-                                info!(
+                                // configured. This is an error, but we continue
+                                // for now. We should completely fail the task
+                                // instead.
+                                error!(
                                     log,
                                     "no bgp config for switch; skipping port \
                                      for bootstore";
