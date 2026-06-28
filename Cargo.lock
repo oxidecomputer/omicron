@@ -7721,6 +7721,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "nexus-switch-config"
+version = "0.1.0"
+dependencies = [
+ "ipnetwork",
+ "nexus-db-model",
+ "nexus-db-queries",
+ "omicron-common",
+ "omicron-rpaths",
+ "omicron-workspace-hack",
+ "oxnet",
+ "pq-sys",
+ "sled-agent-types",
+ "slog",
+ "slog-error-chain",
+ "uuid",
+]
+
+[[package]]
 name = "nexus-test-interface"
 version = "0.1.0"
 dependencies = [
@@ -8812,6 +8830,7 @@ dependencies = [
  "nexus-reconfigurator-preparation",
  "nexus-reconfigurator-rendezvous",
  "nexus-saga-recovery",
+ "nexus-switch-config",
  "nexus-test-interface",
  "nexus-test-utils",
  "nexus-test-utils-macros",
