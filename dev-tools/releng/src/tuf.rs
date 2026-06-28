@@ -68,47 +68,6 @@ pub(crate) async fn build_tuf_repo(
         manifest.artifacts.entry(kind).or_default().extend(artifacts);
     }
 
-    let mut measurement_corpus = vec![];
-
-    let mut read_dir = fs::read_dir(
-        output_dir.join("hubris-staging").join("measurement_corpus"),
-    )
-    .await
-    .context("failed to read `hubris-staging/measurement_corpus`")?;
-
-    while let Some(entry) = read_dir.next_entry().await? {
-        let corim = rats_corim::Corim::from_file(entry.path())?;
-
-        measurement_corpus.push(DeserializedArtifactData {
-            name: format!("staging-{}", corim.id),
-            version: ArtifactVersion::new(corim.get_version()?.clone())?,
-            source: DeserializedArtifactSource::File {
-                path: Utf8PathBuf::from_path_buf(entry.path()).unwrap(),
-            },
-        });
-    }
-
-    let mut read_dir = fs::read_dir(
-        output_dir.join("hubris-production").join("measurement_corpus"),
-    )
-    .await
-    .context("failed to read `hubris-production/measurement_corpus`")?;
-
-    while let Some(entry) = read_dir.next_entry().await? {
-        let corim = rats_corim::Corim::from_file(entry.path())?;
-        measurement_corpus.push(DeserializedArtifactData {
-            name: format!("production-{}", corim.id),
-            version: ArtifactVersion::new(corim.get_version()?.clone())?,
-            source: DeserializedArtifactSource::File {
-                path: Utf8PathBuf::from_path_buf(entry.path()).unwrap(),
-            },
-        });
-    }
-
-    manifest
-        .artifacts
-        .insert(KnownArtifactKind::MeasurementCorpus, measurement_corpus);
-
     if let Some(path) = extra_manifest {
         let m = DeserializedManifest::from_path(&path)
             .context("failed to open extra manifest")?;
