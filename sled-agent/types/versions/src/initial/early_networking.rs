@@ -190,6 +190,7 @@ pub struct UplinkAddressConfig {
 
 #[derive(
     Clone,
+    Copy,
     Debug,
     Default,
     Deserialize,
@@ -200,6 +201,7 @@ pub struct UplinkAddressConfig {
     JsonSchema,
 )]
 #[serde(rename_all = "snake_case")]
+#[cfg_attr(any(test, feature = "testing"), derive(test_strategy::Arbitrary))]
 /// To what extent should this port participate in LLDP
 pub enum LldpAdminStatus {
     #[default]
@@ -215,6 +217,7 @@ pub enum LldpAdminStatus {
 #[derive(
     Clone, Debug, Deserialize, Serialize, PartialEq, Eq, Hash, JsonSchema,
 )]
+#[cfg_attr(any(test, feature = "testing"), derive(test_strategy::Arbitrary))]
 pub struct LldpPortConfig {
     /// To what extent should this port participate in LLDP
     pub status: LldpAdminStatus,
