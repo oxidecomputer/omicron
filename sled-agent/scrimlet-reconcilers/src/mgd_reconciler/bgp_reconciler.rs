@@ -580,6 +580,9 @@ async fn apply_plan(
         );
     }
     for (iface, config) in unnumbered_peers_to_create {
+        if routers_that_failed_to_create.contains(&config.common.asn) {
+            continue;
+        }
         record_count!(
             client
                 .create_unnumbered_neighbor(
