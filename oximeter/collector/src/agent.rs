@@ -13,6 +13,7 @@ use crate::collection_task::ForcedCollectionError;
 use crate::probes;
 use crate::results_sink;
 use crate::self_stats;
+use crate::self_stats::DatabaseSamplesDropped;
 use anyhow::anyhow;
 use chrono::DateTime;
 use chrono::Utc;
@@ -21,6 +22,9 @@ use nexus_client::Client as NexusClient;
 use nexus_client::types::IdSortMode;
 use omicron_common::backoff;
 use omicron_common::backoff::BackoffError;
+use oximeter::Sample;
+use oximeter::types::Cumulative;
+use oximeter::types::ProducerResultsItem;
 use oximeter_db::Client;
 use oximeter_db::DbWrite;
 use oximeter_types::producer::ProducerDetails;
@@ -43,8 +47,11 @@ use std::ops::Bound;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::MutexGuard;
+use std::sync::atomic::AtomicU64;
+use std::sync::atomic::Ordering;
 use std::time::Duration;
 use tokio::sync::mpsc;
+use tokio::time::interval;
 use uuid::Uuid;
 
 /// The internal agent the oximeter server uses to collect metrics from producers.
@@ -93,7 +100,7 @@ impl OximeterAgent {
             "collector_ip" => address.ip().to_string(),
         ));
         let insertion_log = log.new(o!("component" => "results-sink"));
-        let instertion_log_cluster =
+        let insertion_log_cluster =
             log.new(o!("component" => "results-sink-cluster"));
 
         // Determine the version of the database.
@@ -139,17 +146,23 @@ impl OximeterAgent {
             collector_port: address.port(),
         };
 
+        let drop_counter = Arc::new(AtomicU64::new(0));
+
         // Spawn the task for aggregating and inserting all metrics to a
         // single node ClickHouse installation.
-        tokio::spawn(async move {
-            crate::results_sink::database_batcher(
-                insertion_log,
-                client,
-                db_config.batch_size,
-                Duration::from_secs(db_config.batch_interval),
-                collection_task_wrapper.single_rx,
-            )
-            .await
+        tokio::spawn({
+            let drop_counter = drop_counter.clone();
+            async move {
+                crate::results_sink::database_batcher(
+                    insertion_log,
+                    client,
+                    db_config.batch_size,
+                    Duration::from_secs(db_config.batch_interval),
+                    collection_task_wrapper.single_rx,
+                    drop_counter,
+                )
+                .await
+            }
         });
 
         // Our internal testing rack will be running a ClickHouse cluster
@@ -182,29 +195,114 @@ impl OximeterAgent {
             &log,
         );
 
+        let cluster_drop_counter = Arc::new(AtomicU64::new(0));
+
         // Spawn the task for aggregating and inserting all metrics to a
         // replicated cluster ClickHouse installation
-        tokio::spawn(async move {
-            results_sink::database_batcher(
-                instertion_log_cluster,
-                cluster_client,
-                db_config.batch_size,
-                Duration::from_secs(db_config.batch_interval),
-                collection_task_wrapper.cluster_rx,
-            )
-            .await
+        tokio::spawn({
+            let cluster_drop_counter = cluster_drop_counter.clone();
+            async move {
+                results_sink::database_batcher(
+                    insertion_log_cluster,
+                    cluster_client,
+                    db_config.batch_size,
+                    Duration::from_secs(db_config.batch_interval),
+                    collection_task_wrapper.cluster_rx,
+                    cluster_drop_counter,
+                )
+                .await
+            }
         });
 
         let self_ = Self {
             id,
-            log,
+            log: log.clone(),
             collection_target,
-            result_sender: collection_task_wrapper.wrapper_tx,
+            result_sender: collection_task_wrapper.wrapper_tx.clone(),
             collection_tasks: Arc::new(Mutex::new(BTreeMap::new())),
             refresh_interval,
             refresh_task: Arc::new(Mutex::new(None)),
             last_refresh_time: Arc::new(Mutex::new(None)),
         };
+
+        // Periodically emit self-stats about dropped samples.
+        //
+        // Note: If oximeter isn't able to write metrics to ClickHouse,
+        // self-stats about oximeter's inability to write metrics will
+        // also never reach ClickHouse. However, we may still be able to
+        // emit these metrics if the write path to ClickHouse is partially
+        // degraded. And because the relevant counters live in oximeter's
+        // memory, even if ClickHouse becomes fully unavailable and then
+        // recovers, the metrics will also eventually reach the database.
+        //
+        // TODO: Emit a metric about failed database writes as well.
+        tokio::spawn({
+            let mut drop_ticker = interval(self_stats::COLLECTION_INTERVAL);
+            let start_time = Utc::now();
+            async move {
+                loop {
+                    drop_ticker.tick().await;
+
+                    let single_metric = DatabaseSamplesDropped {
+                        datum: Cumulative::with_start_time(
+                            start_time,
+                            drop_counter.load(Ordering::Relaxed),
+                        ),
+                        collector_sink: "clickhouse-single".into(),
+                    };
+                    let single_sample = match Sample::new(
+                        &collection_target,
+                        &single_metric,
+                    ) {
+                        Ok(s) => s,
+                        Err(e) => {
+                            error!(
+                                log,
+                                "failed to build single-node samples_dropped sample";
+                                InlineErrorChain::new(&e),
+                            );
+                            continue;
+                        }
+                    };
+
+                    let cluster_metric = DatabaseSamplesDropped {
+                        datum: Cumulative::with_start_time(
+                            start_time,
+                            cluster_drop_counter.load(Ordering::Relaxed),
+                        ),
+                        collector_sink: "clickhouse-cluster".into(),
+                    };
+                    let cluster_sample = match Sample::new(
+                        &collection_target,
+                        &cluster_metric,
+                    ) {
+                        Ok(s) => s,
+                        Err(e) => {
+                            error!(
+                                log,
+                                "failed to build clustered samples_dropped sample";
+                                InlineErrorChain::new(&e),
+                            );
+                            continue;
+                        }
+                    };
+
+                    let _ = collection_task_wrapper
+                        .wrapper_tx
+                        .send(
+                            CollectionTaskOutput {
+                                results: vec![ProducerResultsItem::Ok(vec![
+                                    single_sample,
+                                    cluster_sample,
+                                ])],
+                                was_forced_collection: false,
+                            },
+                            &log,
+                        )
+                        .await;
+                }
+            }
+        });
 
         Ok(self_)
     }
@@ -269,6 +367,8 @@ impl OximeterAgent {
                 client.init_replicated_db().await?;
             }
 
+            let drop_counter = Arc::new(AtomicU64::new(0));
+
             // Spawn the task for aggregating and inserting all metrics
             tokio::spawn(async move {
                 results_sink::database_batcher(
@@ -277,6 +377,7 @@ impl OximeterAgent {
                     db_config.batch_size,
                     Duration::from_secs(db_config.batch_interval),
                     collection_task_wrapper.single_rx,
+                    drop_counter,
                 )
                 .await
             });

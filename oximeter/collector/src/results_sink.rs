@@ -24,6 +24,8 @@ use slog_error_chain::InlineErrorChain;
 use std::collections::VecDeque;
 use std::sync::Arc;
 use std::sync::Mutex;
+use std::sync::atomic::AtomicU64;
+use std::sync::atomic::Ordering;
 use std::time::Duration;
 use tokio::sync::Notify;
 use tokio::sync::mpsc;
@@ -41,6 +43,7 @@ pub async fn database_batcher(
     batch_size: usize,
     batch_interval: Duration,
     mut rx: mpsc::Receiver<CollectionTaskOutput>,
+    dropped_counter: Arc<AtomicU64>,
 ) {
     // Construct a handoff point between the batch task here, and the database
     // insertion task.
@@ -118,6 +121,7 @@ pub async fn database_batcher(
                                 "sample buffer full, dropped oldest samples";
                                 "n_dropped" => n_dropped,
                             );
+                            dropped_counter.fetch_add(n_dropped as u64, Ordering::Relaxed);
                         }
                     }
                     None => {
@@ -311,6 +315,7 @@ pub async fn logger(log: Logger, mut rx: mpsc::Receiver<CollectionTaskOutput>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use omicron_test_utils::dev::test_setup_log;
     use proptest::prelude::*;
     use tokio::time::timeout;
 
@@ -421,5 +426,43 @@ mod tests {
                 }).expect_err("Should not be notified");
             }
         }
+    }
+
+    #[tokio::test]
+    async fn batcher_increments_dropped_counter() {
+        let logctx = test_setup_log("batcher_increments_dropped_counter");
+        let log = &logctx.log;
+
+        // Construct a database batcher with a dummy ClickHouse client.
+        let client = Client::new("[::1]:0".parse().unwrap(), log);
+        let (tx, rx) = mpsc::channel(1);
+        let counter = Arc::new(AtomicU64::new(0));
+        let batcher = tokio::spawn(database_batcher(
+            log.clone(),
+            client,
+            BATCH_SIZE,
+            Duration::from_secs(3600),
+            rx,
+            counter.clone(),
+        ));
+
+        // Insert `want_dropped` too many samples into the batcher.
+        let want_dropped = 50;
+        let samples = (0..MAX_BUFFER_SIZE + want_dropped)
+            .map(|_| oximeter_test_utils::make_sample())
+            .collect();
+        tx.send(CollectionTaskOutput {
+            results: vec![ProducerResultsItem::Ok(samples)],
+            was_forced_collection: false,
+        })
+        .await
+        .unwrap();
+
+        // Drop the sender so that the batcher loop exits.
+        drop(tx);
+        batcher.await.unwrap();
+
+        assert_eq!(counter.load(Ordering::Relaxed), want_dropped as u64);
+        logctx.cleanup_successful();
     }
 }
