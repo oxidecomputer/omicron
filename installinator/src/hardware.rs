@@ -7,6 +7,7 @@ use anyhow::Result;
 use anyhow::anyhow;
 use anyhow::ensure;
 use omicron_common::disk::DiskVariant;
+use sled_hardware::ExternalDisks;
 use sled_hardware::HardwareManager;
 use sled_hardware::SledMode;
 use sled_storage::config::MountConfig;
@@ -25,10 +26,12 @@ impl Hardware {
             .context("failed to detect whether host is an oxide sled")?;
         ensure!(is_oxide_sled, "hardware scan only supported on oxide sleds");
 
-        let hardware = HardwareManager::new(log, SledMode::Auto, vec![])
-            .map_err(|err| {
-                anyhow!("failed to create HardwareManager: {err}")
-            })?;
+        let hardware = HardwareManager::new(
+            log,
+            SledMode::Auto,
+            ExternalDisks::DetectPhysical,
+        )
+        .map_err(|err| anyhow!("failed to create HardwareManager: {err}"))?;
 
         let disks: Vec<RawDisk> =
             hardware.disks().into_values().map(|disk| disk.into()).collect();

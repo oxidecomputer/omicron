@@ -65,6 +65,18 @@ pub enum DataLinks {
     Physical,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "kind")]
+pub enum ExternalDisks {
+    /// Instead of detecting physical disks, use the provided file-backed vdevs.
+    Virtual { vdevs: Vec<String> },
+    /// Instead of detecting physical disks, inject the provided ones during
+    /// device polling.
+    HardcodedPhysical { disks: Vec<UnparsedDisk> },
+    /// Detect physical external disks connected to the sled.
+    DetectPhysical,
+}
+
 /// Configuration for forcing a sled to run as a Scrimlet or compute Sled
 #[derive(Copy, Clone, Debug)]
 pub enum SledMode {

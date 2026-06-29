@@ -35,7 +35,7 @@ use sled_agent_health_monitor::HealthMonitorHandle;
 use sled_agent_measurements::MeasurementsHandle;
 use sled_agent_resolvable_files::ZoneImageSourceResolver;
 use sled_agent_types::zone_bundle::CleanupContext;
-use sled_hardware::{HardwareManager, SledMode, UnparsedDisk};
+use sled_hardware::{ExternalDisks, HardwareManager, SledMode};
 use sled_storage::config::MountConfig;
 use sled_storage::disk::RawSyntheticDisk;
 use slog::{Logger, info};
@@ -125,11 +125,9 @@ pub async fn spawn_all_longrunning_tasks(
             log,
         );
 
-    let nongimlet_observed_disks =
-        config.nongimlet_observed_disks.clone().unwrap_or(vec![]);
-
     let hardware_manager =
-        spawn_hardware_manager(log, sled_mode, nongimlet_observed_disks).await;
+        spawn_hardware_manager(log, sled_mode, config.external_disks.clone())
+            .await;
 
     // Start monitoring for hardware changes, adding some synthetic disks if
     // necessary.
@@ -231,7 +229,7 @@ fn spawn_key_manager(
 async fn spawn_hardware_manager(
     log: &Logger,
     sled_mode: SledMode,
-    nongimlet_observed_disks: Vec<UnparsedDisk>,
+    external_disks: ExternalDisks,
 ) -> HardwareManager {
     // The `HardwareManager` does not use the the "task/handle" pattern
     // and spawns its worker task inside `HardwareManager::new`. Instead of returning
@@ -241,10 +239,10 @@ async fn spawn_hardware_manager(
     //
     // There are pros and cons to both methods, but the reason to mention it here is that
     // the handle in this case is the `HardwareManager` itself.
-    info!(log, "Starting HardwareManager"; "sled_mode" => ?sled_mode, "nongimlet_observed_disks" => ?nongimlet_observed_disks);
+    info!(log, "Starting HardwareManager"; "sled_mode" => ?sled_mode, "external_disks" => ?external_disks);
     let log = log.clone();
     tokio::task::spawn_blocking(move || {
-        HardwareManager::new(&log, sled_mode, nongimlet_observed_disks).unwrap()
+        HardwareManager::new(&log, sled_mode, external_disks).unwrap()
     })
     .await
     .unwrap()
@@ -363,7 +361,7 @@ async fn upsert_synthetic_disks_if_needed(
     raw_disks_tx: &RawDisksSender,
     config: &Config,
 ) {
-    if let Some(vdevs) = &config.vdevs {
+    if let ExternalDisks::Virtual { vdevs } = &config.external_disks {
         for (i, vdev) in vdevs.iter().enumerate() {
             info!(
                 log,
