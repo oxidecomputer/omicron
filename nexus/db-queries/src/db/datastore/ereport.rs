@@ -261,7 +261,7 @@ impl DataStore {
     // meanings (e.g. `rack_id`, `restart_id`, and `collector_id` are all
     // different typed UUIDs), I'm not convinced that factoring stuff out into a
     // struct like `EreportTrancheMetadata` or whatever would actually make this
-    // any clearer --- it feels like justadding noise to me. So ignore the
+    // any clearer --- it feels like just adding noise to me. So ignore the
     // warning.
     #[allow(clippy::too_many_arguments)]
     pub async fn ereports_insert(
