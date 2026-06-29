@@ -31,7 +31,6 @@ use sled_agent_types::early_networking::UplinkAddress;
 use sled_agent_types::early_networking::UplinkAddressConfig;
 use slog::Logger;
 use slog::error;
-use slog::info;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::net::IpAddr;
@@ -79,11 +78,11 @@ pub struct PortInput {
     /// The port's links. Only the first is used today (no breakout support).
     pub links: Vec<LinkInput>,
     /// The static routes configured on this port.
-    pub routes: Vec<RouteInput>,
+    pub routes: Vec<SledRouteConfig>,
     /// The port's LLDP settings. Only the first entry is used today.
     pub lldp: Vec<LldpInput>,
     /// The port's TX-EQ overrides. Only the first entry is used today.
-    pub tx_eq: Vec<TxEqInput>,
+    pub tx_eq: Vec<TxEqConfig>,
 }
 
 /// An IP address assigned to a port.
@@ -100,14 +99,6 @@ pub struct LinkInput {
     pub speed: LinkSpeed,
 }
 
-/// A static route configured on a port.
-pub struct RouteInput {
-    pub destination: IpNet,
-    pub nexthop: IpAddr,
-    pub vlan_id: Option<u16>,
-    pub rib_priority: Option<u8>,
-}
-
 /// A port's LLDP settings.
 pub struct LldpInput {
     pub enabled: bool,
@@ -117,15 +108,6 @@ pub struct LldpInput {
     pub system_name: Option<String>,
     pub system_description: Option<String>,
     pub management_ip: Option<IpAddr>,
-}
-
-/// A port's TX-EQ overrides.
-pub struct TxEqInput {
-    pub pre1: Option<i32>,
-    pub pre2: Option<i32>,
-    pub main: Option<i32>,
-    pub post2: Option<i32>,
-    pub post1: Option<i32>,
 }
 
 /// Build the desired [`RackNetworkConfig`] for the bootstore.
@@ -197,17 +179,7 @@ pub fn build_rack_network_config(
 
     for port in port_inputs {
         // TODO https://github.com/oxidecomputer/omicron/issues/3062
-        let tx_eq = if let Some(c) = port.tx_eq.get(0) {
-            Some(TxEqConfig {
-                pre1: c.pre1,
-                pre2: c.pre2,
-                main: c.main,
-                post2: c.post2,
-                post1: c.post1,
-            })
-        } else {
-            None
-        };
+        let tx_eq = port.tx_eq.get(0).copied();
 
         // Build the bootstore BGP peers from the port's peers, which include
         // each peer's communities and import/export policies, though not the
@@ -220,9 +192,9 @@ pub fn build_rack_network_config(
                 Some(config) => config.asn,
                 None => {
                     // XXX: The port has BGP peers but no ASN configured. This
-                    // is an error, but we skip it for now. We should error out
-                    // here instead.
-                    info!(
+                    // is an error, but we continue for now. We should
+                    // completely fail the task instead.
+                    error!(
                         log,
                         "no bgp config for switch; skipping port for bootstore";
                         "switch_slot" => ?port.switch,
@@ -291,16 +263,7 @@ pub fn build_rack_network_config(
                 .unwrap_or(false),
             bgp_peers,
             port: port.port_name.clone(),
-            routes: port
-                .routes
-                .iter()
-                .map(|r| SledRouteConfig {
-                    destination: r.destination,
-                    nexthop: r.nexthop,
-                    vlan_id: r.vlan_id,
-                    rib_priority: r.rib_priority,
-                })
-                .collect(),
+            routes: port.routes,
             switch: port.switch,
             uplink_port_fec: port
                 .links
