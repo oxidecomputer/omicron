@@ -91,6 +91,7 @@ members = [
     "nexus/auth",
     "nexus/background-task-interface",
     "nexus/switch-config",
+    "nexus/switch-config/preparation",
     "nexus/db-errors",
     "nexus/db-fixed-data",
     "nexus/db-lookup",
@@ -282,6 +283,7 @@ default-members = [
     "nexus/auth",
     "nexus/background-task-interface",
     "nexus/switch-config",
+    "nexus/switch-config/preparation",
     "nexus/db-errors",
     "nexus/db-fixed-data",
     "nexus/db-lookup",
@@ -625,6 +627,7 @@ multimap = "0.10.1"
 nexus-auth = { path = "nexus/auth" }
 nexus-background-task-interface = { path = "nexus/background-task-interface" }
 nexus-switch-config = { path = "nexus/switch-config" }
+nexus-switch-config-preparation = { path = "nexus/switch-config/preparation" }
 nexus-client = { path = "clients/nexus-client" }
 nexus-config = { path = "nexus-config" }
 nexus-db-errors = { path = "nexus/db-errors" }

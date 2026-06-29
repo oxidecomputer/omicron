@@ -53,10 +53,6 @@ use nexus_db_queries::{
     context::OpContext,
     db::{DataStore, datastore::SwitchPortSettingsCombinedResult},
 };
-use nexus_switch_config::{
-    AddressInput, BgpConfigInput, LinkInput, LldpInput, PortInput,
-    RackNetworkConfigInput,
-};
 use nexus_types::external_api::networking;
 use nexus_types::identity::{Asset, Resource};
 use omicron_common::OMICRON_DPD_TAG;
@@ -72,7 +68,6 @@ use sled_agent_types::early_networking::InvalidIpAddrError;
 use sled_agent_types::early_networking::LldpAdminStatus;
 use sled_agent_types::early_networking::LldpPortConfig;
 use sled_agent_types::early_networking::RackNetworkConfig;
-use sled_agent_types::early_networking::RouteConfig;
 use sled_agent_types::early_networking::RouterPeerType;
 use sled_agent_types::early_networking::SwitchSlot;
 use sled_agent_types::early_networking::TxEqConfig;
@@ -83,7 +78,7 @@ use sled_agent_types::system_networking::SystemNetworkingConfig;
 use sled_agent_types::system_networking::WriteNetworkConfigRequest;
 use slog_error_chain::InlineErrorChain;
 use std::{
-    collections::{BTreeMap, HashMap, HashSet, hash_map::Entry},
+    collections::{HashMap, HashSet, hash_map::Entry},
     hash::Hash,
     net::{IpAddr, SocketAddr},
     str::FromStr,
@@ -965,39 +960,21 @@ impl BackgroundTask for SwitchPortSettingsManager {
                 // calculate and apply bootstore changes
                 //
 
-                let ports: Vec<PortInput> = changes
+                // The bootstore config is computed from the applied port
+                // settings; filter to those here.
+                let applied_ports: Vec<(
+                    SwitchSlot,
+                    &nexus_db_model::SwitchPort,
+                    &SwitchPortSettingsCombinedResult,
+                )> = changes
                     .iter()
                     .filter_map(|(switch_slot, port, change)| match change {
                         PortSettingsChange::Apply(info) => {
-                            Some(port_input_from_db(*switch_slot, port, info))
+                            Some((*switch_slot, port, info.as_ref()))
                         }
                         PortSettingsChange::Clear => None,
                     })
                     .collect();
-
-                let bgp_configs: BTreeMap<SwitchSlot, BgpConfigInput> =
-                    switch_bgp_config
-                        .iter()
-                        .map(|(switch_slot, (_id, config))| {
-                            let originate = bgp_announce_prefixes
-                                .get(&config.bgp_announce_set_id)
-                                .expect(
-                                    "bgp config is present but announce set \
-                                     is not populated",
-                                )
-                                .clone();
-                            (
-                                *switch_slot,
-                                BgpConfigInput {
-                                    asn: config.asn.0,
-                                    originate,
-                                    checker: config.checker.clone(),
-                                    shaper: config.shaper.clone(),
-                                    max_paths: *config.max_paths,
-                                },
-                            )
-                        })
-                        .collect();
 
                 // Read the infra IP range and BFD configuration; the builder
                 // itself is a pure, in-memory computation.
@@ -1039,17 +1016,19 @@ impl BackgroundTask for SwitchPortSettingsManager {
                         }
                     };
 
+                let input = nexus_switch_config_preparation::assemble(
+                    rack.rack_subnet,
+                    &applied_ports,
+                    &switch_bgp_config,
+                    &bgp_announce_prefixes,
+                    infra_ip_first,
+                    infra_ip_last,
+                    bfd,
+                );
+
                 let rack_network_config =
                     match nexus_switch_config::build_rack_network_config(
-                        &log,
-                        RackNetworkConfigInput {
-                            rack_subnet: rack.rack_subnet,
-                            bgp_configs,
-                            ports,
-                            infra_ip_first,
-                            infra_ip_last,
-                            bfd,
-                        },
+                        &log, input,
                     ) {
                         Some(rack_network_config) => rack_network_config,
                         None => continue,
@@ -1295,72 +1274,6 @@ where
     let left = left.iter().collect::<HashSet<&T>>();
     let right = right.iter().collect::<HashSet<&T>>();
     left == right
-}
-
-/// Translate a port's applied database settings into the [`PortInput`] consumed
-/// by the bootstore config builder.
-fn port_input_from_db(
-    switch: SwitchSlot,
-    port: &nexus_db_model::SwitchPort,
-    info: &SwitchPortSettingsCombinedResult,
-) -> PortInput {
-    PortInput {
-        switch,
-        port_name: port.port_name.to_string(),
-        bgp_peers: info
-            .bgp_peers
-            .iter()
-            .map(|peer| peer.as_bgp_peer().clone())
-            .collect(),
-        addresses: info
-            .addresses
-            .iter()
-            .map(|a| AddressInput { address: a.address, vlan_id: a.vlan_id })
-            .collect(),
-        links: info
-            .links
-            .iter()
-            .map(|l| LinkInput {
-                autoneg: l.autoneg,
-                fec: l.fec.map(Into::into),
-                speed: l.speed.into(),
-            })
-            .collect(),
-        routes: info
-            .routes
-            .iter()
-            .map(|r| RouteConfig {
-                destination: r.dst.into(),
-                nexthop: r.gw.ip(),
-                vlan_id: r.vid.map(|x| x.0),
-                rib_priority: r.rib_priority.map(|x| x.0),
-            })
-            .collect(),
-        lldp: info
-            .link_lldp
-            .iter()
-            .map(|c| LldpInput {
-                enabled: c.enabled,
-                link_name: c.link_name.clone(),
-                link_description: c.link_description.clone(),
-                chassis_id: c.chassis_id.clone(),
-                system_name: c.system_name.clone(),
-                system_description: c.system_description.clone(),
-                management_ip: c.management_ip.map(|a| a.ip()),
-            })
-            .collect(),
-        tx_eq: info
-            .tx_eq
-            .iter()
-            .map(|c| TxEqConfig {
-                pre1: c.pre1,
-                pre2: c.pre2,
-                main: c.main,
-                post2: c.post2,
-                post1: c.post1,
-            })
-            .collect(),
-    }
 }
 
 async fn bfd_peer_configs_from_db(
