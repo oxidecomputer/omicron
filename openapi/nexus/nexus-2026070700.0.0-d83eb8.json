@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "2026061000.0.0"
+    "version": "2026070700.0.0"
   },
   "paths": {
     "/device/auth": {
@@ -14049,6 +14049,34 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/Utilization"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/version": {
+      "get": {
+        "tags": [
+          "system/status"
+        ],
+        "summary": "Fetch version information",
+        "description": "Returns the version of the Oxide API currently being served and the version of the system software serving it.",
+        "operationId": "version",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Version"
                 }
               }
             }
@@ -30653,6 +30681,26 @@
         "required": [
           "metric_type",
           "values"
+        ]
+      },
+      "Version": {
+        "description": "Version information for the API and the system software serving it",
+        "type": "object",
+        "properties": {
+          "api_version": {
+            "description": "The API version, e.g. `2026062900.0.0`, matching the `version` field of the OpenAPI schema. Clients should send it in the `api-version` header to select this version of the API. The official SDKs do this automatically.",
+            "type": "string",
+            "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+([0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*))?$"
+          },
+          "system_version": {
+            "description": "The version of the system software serving this API, e.g., `21.0.0`. Use this version to find the right docs and release notes. During an upgrade, some components of the system may be running a newer version.",
+            "type": "string",
+            "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+([0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*))?$"
+          }
+        },
+        "required": [
+          "api_version",
+          "system_version"
         ]
       },
       "VirtualResourceCounts": {

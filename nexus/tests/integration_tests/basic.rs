@@ -558,6 +558,17 @@ async fn test_ping(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(health.status, system::PingStatus::Ok);
 }
 
+#[nexus_test]
+async fn test_version(cptestctx: &ControlPlaneTestContext) {
+    let client = &cptestctx.external_client;
+
+    let version = NexusRequest::object_get(client, "/v1/version")
+        .execute_and_parse_unwrap::<system::Version>()
+        .await;
+    assert_eq!(version.api_version, nexus_external_api::latest_version());
+    assert_eq!(version.system_version, omicron_common::SYSTEM_VERSION);
+}
+
 /// Test that the external API returns gzip-compressed responses when the
 /// client sends Accept-Encoding: gzip.
 #[nexus_test]

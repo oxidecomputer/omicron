@@ -16,6 +16,7 @@ dev-tools-common.workspace = true
 fs-err = { workspace = true, features = ["tokio"] }
 futures.workspace = true
 hex.workspace = true
+omicron-common.workspace = true
 omicron-pins.workspace = true
 omicron-workspace-hack.workspace = true
 omicron-zone-package.workspace = true

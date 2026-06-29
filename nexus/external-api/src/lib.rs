@@ -86,6 +86,7 @@ api_versions!([
     // |  date-based version should be at the top of the list.
     // v
     // (next_yyyy_mm_dd_nn, IDENT),
+    (2026_07_07_00, API_VERSION),
     (2026_06_10_00, BGP_CONFIGURATION_UPDATE),
     (2026_06_08_00, INSTANCE_CPU_TYPE_TURIN_V2),
     (2026_06_05_00, EXTERNAL_JUMBO_FRAMES),
@@ -414,6 +415,25 @@ pub trait NexusExternalApi {
     ) -> Result<HttpResponseOk<latest::system::Ping>, HttpError> {
         Ok(HttpResponseOk(latest::system::Ping {
             status: latest::system::PingStatus::Ok,
+        }))
+    }
+
+    /// Fetch version information
+    ///
+    /// Returns the version of the Oxide API currently being served and the
+    /// version of the system software serving it.
+    #[endpoint {
+        method = GET,
+        path = "/v1/version",
+        tags = ["system/status"],
+        versions = VERSION_API_VERSION..,
+    }]
+    async fn version(
+        _rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<latest::system::Version>, HttpError> {
+        Ok(HttpResponseOk(latest::system::Version {
+            api_version: latest_version(),
+            system_version: omicron_common::SYSTEM_VERSION,
         }))
     }
 
