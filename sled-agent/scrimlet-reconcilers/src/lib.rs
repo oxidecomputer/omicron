@@ -44,6 +44,7 @@
 
 mod dpd_reconciler;
 mod handle;
+mod lldpd_reconciler;
 mod mgd_reconciler;
 mod reconciler_task;
 mod status;
@@ -58,6 +59,7 @@ pub use dpd_reconciler::DpdReconcilerStatus;
 pub use handle::ScrimletReconcilers;
 pub use handle::ScrimletReconcilersMode;
 pub use handle::SledAgentNetworkingInfo;
+pub use lldpd_reconciler::LldpdReconcilerStatus;
 pub use mgd_reconciler::MgdBgpReconcilerStatus;
 pub use mgd_reconciler::MgdBgpReconcilerStatusOpCount;
 pub use mgd_reconciler::MgdReconcilerStatus;

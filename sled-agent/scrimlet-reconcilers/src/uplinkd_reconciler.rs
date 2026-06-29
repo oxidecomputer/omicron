@@ -280,7 +280,6 @@ fn current_uplink_addresses(
         .properties()?
         .map(|prop| {
             let prop = prop?;
-            let name = prop.name();
 
             let mut addrs = Vec::new();
             for value in prop.values()? {
@@ -291,15 +290,15 @@ fn current_uplink_addresses(
                     other => {
                         warn!(
                             log, "ignoring address value with unexpected type";
-                            "property" => name,
-                            "value-type" => %other.kind(),
+                            "property" => prop.fmri(),
+                            "type" => %other.kind(),
                             "value" => %other.display_smf(),
                         );
                     }
                 }
             }
 
-            Ok((name.to_owned(), addrs))
+            Ok((prop.name().to_owned(), addrs))
         })
         .collect::<anyhow::Result<BTreeMap<_, _>>>()?;
 
