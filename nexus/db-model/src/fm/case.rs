@@ -64,6 +64,7 @@ impl CaseMetadata {
             alerts_requested: _,
             support_bundles_requested: _,
             ereports: _,
+            facts: _,
         } = case;
         Self {
             sitrep_id: sitrep_id.into(),
@@ -122,8 +123,8 @@ impl CaseEreport {
     ) -> Self {
         let fm::case::CaseEreport { id, ereport, assigned_sitrep_id, comment } =
             ereport;
-        let restart_id = ereport.id().restart_id.into();
-        let ena = ereport.id().ena.into();
+        let restart_id = ereport.id.restart_id.into();
+        let ena = ereport.id.ena.into();
         Self {
             id: id.into(),
             case_id: case_id.into(),

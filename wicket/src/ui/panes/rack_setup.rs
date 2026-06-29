@@ -42,9 +42,9 @@ use std::borrow::Cow;
 use wicket_common::rack_setup::BgpAuthKeyInfo;
 use wicket_common::rack_setup::BgpAuthKeyStatus;
 use wicket_common::rack_setup::CurrentRssUserConfigInsensitive;
+use wicket_common::rack_setup::ManualPortConfig;
 use wicket_common::rack_setup::UserSpecifiedBgpPeerConfig;
 use wicket_common::rack_setup::UserSpecifiedImportExportPolicy;
-use wicket_common::rack_setup::UserSpecifiedPortConfig;
 use wicket_common::rack_setup::UserSpecifiedRackNetworkConfig;
 use wicket_common::rack_setup::UserSpecifiedRouterPeerAddr;
 use wicket_common::rack_setup::UserSpecifiedUplinkAddressConfig;
@@ -790,7 +790,7 @@ fn rss_config_text<'a>(
         } = cfg;
 
         for (i, (switch, port, uplink)) in cfg.iter_uplinks().enumerate() {
-            let UserSpecifiedPortConfig {
+            let ManualPortConfig {
                 routes,
                 addresses,
                 uplink_port_speed,

@@ -11,16 +11,16 @@ use anyhow::Context;
 use clap::Args;
 use clap::Subcommand;
 use futures::StreamExt;
-use gateway_client::types::PowerState;
-use gateway_client::types::RotState;
 use gateway_client::types::SpComponentCaboose;
 use gateway_client::types::SpComponentInfo;
 use gateway_client::types::SpIdentifier;
 use gateway_client::types::SpIgnitionInfo;
-use gateway_client::types::SpState;
+use gateway_types::component::PowerState;
+use gateway_types::component::SpState;
 use gateway_types::ignition::SpIgnition;
 use gateway_types::ignition::SpIgnitionSystemType;
 use gateway_types::rot::RotSlot;
+use gateway_types::rot::RotState;
 use internal_dns_types::names::ServiceName;
 use nexus_types::inventory::SpType;
 use tabled::Tabled;
@@ -132,7 +132,7 @@ async fn cmd_mgs_inventory(
         .await
         .context("listing ignition")?
         .into_inner();
-    sp_list_ignition.sort_by(|a, b| a.id.cmp(&b.id));
+    sp_list_ignition.sort_by_key(|a| a.id);
     show_sps_from_ignition(&sp_list_ignition)?;
     println!("");
 
