@@ -7717,6 +7717,8 @@ CREATE TABLE IF NOT EXISTS omicron.public.ereporter_restart (
     -- location of the sled is determined later, subsequent attempts to insert
     -- ereports will update this field.
     slot INT4,
+    -- The ID of the rack that the reporter is located in.
+    rack_id UUID NOT NULL,
 
     CONSTRAINT reporter_validity CHECK (
         (
@@ -8963,7 +8965,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '273.0.0', NULL)
+    (TRUE, NOW(), NOW(), '274.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;
