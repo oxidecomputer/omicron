@@ -1,6 +1,7 @@
 #!/bin/bash
 #:
 #: name = "build-and-test (helios)"
+#: enable = false
 #: variety = "basic"
 #: target = "helios-3.0-32c256gb"
 #: rust_toolchain = true

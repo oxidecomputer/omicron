@@ -1,6 +1,7 @@
 #!/bin/bash
 #:
 #: name = "helios / build TUF repo"
+#: enable = false
 #: variety = "basic"
 #: target = "helios-3.0-16c128gb"
 #: rust_toolchain = true

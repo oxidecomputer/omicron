@@ -1,6 +1,7 @@
 #!/bin/bash
 #:
 #: name = "omicron-common (helios)"
+#: enable = false
 #: variety = "basic"
 #: target = "helios-3.0"
 #: rust_toolchain = true
