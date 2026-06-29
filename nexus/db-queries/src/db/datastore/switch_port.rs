@@ -564,7 +564,6 @@ impl DataStore {
     ) -> Result<SwitchConfigData, Error> {
         use nexus_db_schema::schema::address_lot::dsl as address_lot_dsl;
         use nexus_db_schema::schema::address_lot_block::dsl as address_lot_block_dsl;
-        use nexus_db_schema::schema::bgp_announcement::dsl as announce_dsl;
         use nexus_db_schema::schema::bgp_config::dsl as bgp_config_dsl;
 
         let err = OptionalError::new();
@@ -611,7 +610,9 @@ impl DataStore {
                     // Note that neither the config nor its announce set is
                     // filtered by `time_deleted`. Other parts of the system
                     // such as bgp_config_delete and bgp_delete_announce_set
-                    // refuse to perform a delete if the config is in use.
+                    // refuse to perform a delete if the config is in use. We
+                    // plan to check that all time_deleted are null, and if that
+                    // were the case, raise a Problem in the future.
                     let mut bgp_configs = IdHashMap::new();
 
                     for (_port, settings) in &applied_ports {
@@ -629,21 +630,18 @@ impl DataStore {
                                 .first_async::<BgpConfig>(&conn)
                                 .await?;
                             let set_id = config.bgp_announce_set_id;
-                            if let hash_map::Entry::Vacant(set_entry) =
-                                announce_cache.entry(set_id)
-                            {
-                                let announcements =
-                                    announce_dsl::bgp_announcement
-                                        .filter(
-                                            announce_dsl::announce_set_id
-                                                .eq(set_id),
-                                        )
-                                        .select(BgpAnnouncement::as_select())
-                                        .load_async::<BgpAnnouncement>(&conn)
-                                        .await?;
-                                set_entry.insert(announcements);
-                            }
-                            let announcements = announce_cache[&set_id].clone();
+                            let announcements =
+                                match announce_cache.entry(set_id) {
+                                    hash_map::Entry::Vacant(set_entry) => {
+                                        let announcements =
+                                            load_announce_set(&conn, set_id)
+                                                .await?;
+                                        set_entry.insert(announcements).clone()
+                                    }
+                                    hash_map::Entry::Occupied(set_entry) => {
+                                        set_entry.get().clone()
+                                    }
+                                };
                             entry.insert(BgpConfigWithAnnouncements {
                                 config,
                                 announcements,
@@ -1251,6 +1249,19 @@ async fn load_all_bfd_sessions(
         .limit(i64::from(u32::MAX))
         .select(BfdSession::as_select())
         .load_async(conn)
+        .await
+}
+
+/// Load every announcement belonging to an announce set on an existing connection.
+async fn load_announce_set(
+    conn: &Connection<DTraceConnection<PgConnection>>,
+    set_id: Uuid,
+) -> Result<Vec<BgpAnnouncement>, diesel::result::Error> {
+    use nexus_db_schema::schema::bgp_announcement::dsl;
+    dsl::bgp_announcement
+        .filter(dsl::announce_set_id.eq(set_id))
+        .select(BgpAnnouncement::as_select())
+        .load_async::<BgpAnnouncement>(conn)
         .await
 }
 
