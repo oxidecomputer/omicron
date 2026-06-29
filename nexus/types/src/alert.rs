@@ -72,6 +72,10 @@ pub enum AlertClass {
     TestQuuxBar,
     #[strum(serialize = "test.quux.bar.baz")]
     TestQuuxBarBaz,
+    #[strum(serialize = "hw.insert.power.power_shelf.psu")]
+    PsuInserted,
+    #[strum(serialize = "hw.remove.power.power_shelf.psu")]
+    PsuRemoved,
 }
 
 impl AlertClass {
@@ -108,6 +112,12 @@ impl AlertClass {
             | Self::TestQuuxBar
             | Self::TestQuuxBarBaz => {
                 "This is a test of the emergency alert system"
+            }
+            Self::PsuInserted => {
+                "A power supply unit (PSU) has been inserted into a power shelf"
+            }
+            Self::PsuRemoved => {
+                "A power supply unit (PSU) has been removed from a power shelf"
             }
         }
     }
