@@ -73,7 +73,7 @@ impl MgdInstance {
 
         let temp_dir = temp_dir.keep();
         if port == 0 {
-            port = discover_port(temp_dir.join("mgd_stdout").into_string())
+            port = discover_port(temp_dir.join("mgd_stdout"))
                 .await
                 .with_context(|| {
                     format!(
@@ -252,14 +252,16 @@ async fn find_listening_port(
     }
 }
 
-async fn discover_port(logfile: String) -> Result<u16, anyhow::Error> {
+async fn discover_port(logfile: Utf8PathBuf) -> Result<u16, anyhow::Error> {
     let timeout = Instant::now() + MGD_TIMEOUT;
     tokio::time::timeout_at(timeout, find_mgd_port_in_log(logfile))
         .await
         .context("time out while discovering port number")?
 }
 
-async fn find_mgd_port_in_log(logfile: String) -> Result<u16, anyhow::Error> {
+async fn find_mgd_port_in_log(
+    logfile: Utf8PathBuf,
+) -> Result<u16, anyhow::Error> {
     let re = regex::Regex::new(r#""local_addr":"\[::1?\]:([0-9]+)""#).unwrap();
     let mut reader = BufReader::new(File::open(&logfile).await?);
     let mut lines = reader.lines();
@@ -445,7 +447,7 @@ mod tests {
         file.flush().unwrap();
 
         assert_eq!(
-            find_mgd_port_in_log(file.path().to_string()).await.unwrap(),
+            find_mgd_port_in_log(file.path().to_owned()).await.unwrap(),
             EXPECTED_PORT
         );
     }

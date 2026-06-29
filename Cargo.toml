@@ -849,7 +849,6 @@ libsw = { version = "3.5.0", features = ["tokio"] }
 syn = { version = "2.0" }
 tabled = "0.15.0"
 tar = "0.4"
-tempfile = "3.20"
 term = "0.7"
 termios = "0.3"
 termtree = "0.5.1"
