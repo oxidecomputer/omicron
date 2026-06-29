@@ -4,15 +4,21 @@
 
 use crate::SitrepBuilder;
 use crate::analysis_input::Input;
+use crate::case::CaseEreport;
 use crate::ereport;
 use crate::ereport::Ereport;
 use anyhow::Context;
-use iddqd::{BiHashItem, BiHashMap};
-use nexus_types::fm;
+use iddqd::{
+    BiHashItem, BiHashMap, IdHashItem, IdHashMap, IdOrdItem, IdOrdMap,
+    bi_hash_map, bi_upcast, id_upcast,
+};
 use nexus_types::fm::DiagnosisEngineKind;
 use nexus_types::inventory;
 use omicron_uuid_kinds::CaseUuid;
+use omicron_uuid_kinds::EreporterRestartUuid;
 use serde::Deserialize;
+use slog_error_chain::InlineErrorChain;
+use std::fmt;
 use std::sync::Arc;
 
 pub const PSU_REMOVE_EREPORT: &str = "hw.remove.psu";
@@ -22,6 +28,7 @@ pub fn analyze(
     builder: &mut SitrepBuilder<'_>,
 ) -> anyhow::Result<()> {
     let input = builder.input();
+    let log = builder.log.new(slog::o!("de" => "power_shelf"));
 
     // Okay so basically, here's what we do:
     // 1. index existing cases
@@ -30,16 +37,62 @@ pub fn analyze(
     // There's two kinds of cases, which are:
     // - has an ereport which indicates the rectifier was removed,
     // - has only a rectifier inserted ereport
-
     let parent_cases = input
         .open_cases()
         .iter()
         .filter(|c| c.metadata.de == DiagnosisEngineKind::PowerShelf);
-    for case in parent_cases {
+    let mut cases = BiHashMap::<PsuCase>::new();
+    'cases: for case in parent_cases {
         // Reconstruct the case by looking at its ereports:
         // - the ereports should all be associated with a single PSC at this
         //   point.
         // - put them in a map by PSC location
+        for case_ereport in case.ereports.iter() {
+            let ereport = &case_ereport.ereport;
+            let ereport = match PsuEreport::parse(&ereport) {
+                Ok(ereport) => ereport,
+                Err(e) => {
+                    // This is weird: a case in the parent sitrep created by
+                    // this DE contained an ereport that we couldn't understand.
+                    // Close the case since we don't know what to do with it.
+                    let err = InlineErrorChain::new(&*e);
+                    slog::warn!(
+                        &log,
+                        "couldn't interpret ereport assigned to a case in the \
+                         parent sitrep!";
+                        "case_id" => %case.id,
+                        "ereport_id" => %ereport.id(),
+                        "case_ereport_id" => %case_ereport.id,
+                        "error" => &err,
+                    );
+                    let comment = format!(
+                        "I couldn't understand this case, as it \
+                         contained an incomprehensible ereport {} \
+                        (case ereport {}). The ereport could not be \
+                        interpreted because: {err}",
+                        ereport.id(),
+                        case_ereport.id,
+                    );
+                    builder
+                        .cases
+                        .case_mut(&case.id)
+                        .expect("open case in parent sitrep should be present")
+                        .close(comment);
+                    continue 'cases;
+                }
+            };
+            match cases.entry(&case.id, &ereport.location) {
+                bi_hash_map::Entry::Occupied(entry) => {
+                    todo!()
+                }
+                bi_hash_map::Entry::Vacant(entry) => {
+                    let mut case = PsuCase::new(case.id, ereport.location);
+                    case.insert_ereport(ereport)
+                        .expect("case was created with this location");
+                    entry.insert(case);
+                }
+            }
+        }
     }
 
     for ereport in input.new_ereports().iter() {
@@ -57,7 +110,7 @@ pub fn analyze(
     //   determine if the PSU is present or not.
     //   - if the PSU is present (i.e., the most recent ereport is an insert),
     //     close the case
-    //   - if the PSU is not present (i.e., the most recent ereport is a
+    //   - if the PSU is not present (i.e., the most recent ereport is a_
     //     remove), leave the case open
     //
     // - generate an alert for each PSU insert/remove ereport in the case that
@@ -70,9 +123,75 @@ pub fn analyze(
     Ok(())
 }
 
+#[derive(Debug)]
 struct PsuCase {
     case_id: CaseUuid,
     location: PsuLocation,
+    restarts: IdHashMap<Restart>,
+}
+
+impl BiHashItem for PsuCase {
+    type K1<'a> = &'a CaseUuid;
+    type K2<'a> = &'a PsuLocation;
+
+    fn key1(&self) -> Self::K1<'_> {
+        &self.case_id
+    }
+
+    fn key2(&self) -> Self::K2<'_> {
+        &self.location
+    }
+
+    bi_upcast!();
+}
+
+impl PsuCase {
+    fn new(case_id: CaseUuid, location: PsuLocation) -> Self {
+        Self { case_id, location, restarts: IdHashMap::default() }
+    }
+
+    fn insert_ereport(&mut self, ereport: PsuEreport) -> anyhow::Result<()> {
+        let ereport_id = ereport.ereport.id;
+        anyhow::ensure!(
+            ereport.location == self.location,
+            "ereport {ereport_id} does not belong in case {}: it refers to {} \
+             but this case is about {}",
+            self.case_id,
+            ereport.location,
+            self.location,
+        );
+        let restart_id = ereport_id.restart_id;
+        self.restarts
+            .entry(&restart_id)
+            .or_insert_with(|| Restart {
+                restart_id,
+                ereports: IdOrdMap::default(),
+            })
+            .ereports
+            .insert_unique(ereport)
+            .map_err(|e| {
+                anyhow::anyhow!(
+                    "an ereport with id {ereport_id} already exists: {e}"
+                )
+            })?;
+        Ok(())
+    }
+}
+
+#[derive(Debug)]
+struct Restart {
+    restart_id: EreporterRestartUuid,
+    ereports: IdOrdMap<PsuEreport>,
+}
+
+impl IdHashItem for Restart {
+    type Key<'a> = &'a EreporterRestartUuid;
+
+    fn key(&self) -> Self::Key<'_> {
+        &self.restart_id
+    }
+
+    id_upcast!();
 }
 
 #[derive(Debug)]
@@ -81,6 +200,16 @@ struct PsuEreport {
     ereport: Arc<Ereport>,
     kind: PsuEreportKind,
     data: PsuEreportData,
+}
+
+impl IdOrdItem for PsuEreport {
+    type Key<'a> = &'a ereport::Ena;
+
+    fn key(&self) -> Self::Key<'_> {
+        &self.ereport.id.ena
+    }
+
+    id_upcast!();
 }
 
 impl PsuEreport {
@@ -124,10 +253,17 @@ struct PsuEreportData {
     refdes: String,
 }
 
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 struct PsuLocation {
     shelf: u8,
     slot: u8,
+}
+
+impl fmt::Display for PsuLocation {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let Self { shelf, slot } = *self;
+        write!(f, "power shelf {shelf}, PSU {slot}")
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
