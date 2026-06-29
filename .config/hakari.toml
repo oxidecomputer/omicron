@@ -34,10 +34,21 @@ workspace-members = [
     # Exclude dev-tools-common and xtask because they need to be built quickly.
     "dev-tools-common",
     "xtask",
-    
+
     # Exclude omicron-uuid-kinds because it is a no-std crate. Depending on the
     # workspace-hack isn't too problematic because other projects pulling in
     # omicron as a git dependency will only see an empty workspace-hack. But
     # let's make this explicit.
     "omicron-uuid-kinds",
+]
+
+[final-excludes]
+third-party = [
+    # `scuffle` has a `testing` features that's pulled in when it's used as a
+    # dev-dependency. This feature enables some gnarly stuff (poking at
+    # undocumented and unstable features in illumos's libscf), and should not
+    # be enabled to the workspace-hack. If/when hakari adds a way to exclude
+    # a feature only we can use that; until then, it's fine to just exclude
+    # this crate entirely: it's not very big and isn't used by many things.
+    { name = "scuffle" },
 ]
