@@ -114,10 +114,7 @@ impl DbRunArgs {
         for (k, v) in db_starter.environment() {
             println!("    {}={}", k, v);
         }
-        println!(
-            "db-dev: temporary directory: {}",
-            db_starter.temp_dir().display()
-        );
+        println!("db-dev: temporary directory: {}", db_starter.temp_dir());
 
         let mut db_instance = db_starter.start().await?;
         println!("\ndb-dev: child process: pid {}", db_instance.pid());

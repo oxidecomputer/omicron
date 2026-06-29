@@ -5670,6 +5670,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "assert_matches",
+ "camino-tempfile",
  "dns-server",
  "dns-server-api",
  "dns-service-client",
@@ -5691,7 +5692,6 @@ dependencies = [
  "serde_json",
  "sled",
  "slog",
- "tempfile",
  "thiserror 2.0.18",
  "tokio",
 ]
@@ -8919,7 +8919,6 @@ dependencies = [
  "subprocess",
  "support-bundle-collection",
  "swrite",
- "tempfile",
  "term 0.7.0",
  "thiserror 2.0.18",
  "tokio",
@@ -9375,7 +9374,6 @@ dependencies = [
  "strum 0.27.2",
  "subprocess",
  "tar",
- "tempfile",
  "thiserror 2.0.18",
  "tofino",
  "tokio",
@@ -9431,7 +9429,6 @@ dependencies = [
  "slog-error-chain",
  "subprocess",
  "tar",
- "tempfile",
  "thiserror 2.0.18",
  "tokio",
  "tokio-postgres",
@@ -10054,7 +10051,6 @@ dependencies = [
  "sqlparser",
  "strum 0.27.2",
  "tabled 0.15.0",
- "tempfile",
  "termtree",
  "thiserror 2.0.18",
  "tokio",
@@ -15573,6 +15569,7 @@ name = "transient-dns-server"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "camino-tempfile",
  "dns-server",
  "dns-service-client",
  "dropshot",
@@ -15581,7 +15578,6 @@ dependencies = [
  "internal-dns-types",
  "omicron-workspace-hack",
  "slog",
- "tempfile",
 ]
 
 [[package]]
@@ -16728,6 +16724,7 @@ dependencies = [
  "assert_cmd",
  "buf-list",
  "camino",
+ "camino-tempfile",
  "ciborium",
  "clap",
  "crossterm 0.29.0",
@@ -16760,7 +16757,6 @@ dependencies = [
  "slog-term",
  "supports-color 3.0.2",
  "tabled 0.15.0",
- "tempfile",
  "textwrap 0.16.2",
  "tokio",
  "tokio-util",
@@ -17580,6 +17576,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "camino",
+ "camino-tempfile",
  "clap",
  "flate2",
  "futures",
@@ -17591,7 +17588,6 @@ dependencies = [
  "slog-term",
  "strum 0.27.2",
  "tar",
- "tempfile",
  "tokio",
 ]
 
