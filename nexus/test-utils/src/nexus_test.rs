@@ -272,13 +272,7 @@ impl<N: NexusServer> ControlPlaneTestContext<N> {
         };
 
         let mgs = self.gateway.get(&switch_slot).unwrap();
-        let mgs_addr = std::net::SocketAddrV6::new(
-            std::net::Ipv6Addr::LOCALHOST,
-            mgs.port,
-            0,
-            0,
-        )
-        .into();
+        let mgs_addr = mgs.address().into();
 
         let dendrite =
             omicron_test_utils::dev::dendrite::DendriteInstance::start(

@@ -104,6 +104,66 @@ impl std::fmt::Display for UplinkIpNet {
     }
 }
 
+#[cfg(any(test, feature = "testing"))]
+impl proptest::arbitrary::Arbitrary for UplinkIpNet {
+    type Parameters = ();
+    type Strategy = proptest::prelude::BoxedStrategy<Self>;
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        use proptest::prelude::*;
+        use std::net::Ipv4Addr;
+        use test_strategy::Arbitrary;
+
+        // `UplinkIpNet::try_from()` rejects quite a lot of IP addresses that
+        // the default `Arbitrary` implementation likes to produce: loopback
+        // addresses, unspecified addresses, ipv4-mapped-ipv6, etc. `ValidIpNet`
+        // has restrictions on the first octet (ipv4) or segment (ipv6) that
+        // causes it to produce IPs that are valid `UplinkIpNet`s. We also skip
+        // plenty of valid `UplinkIpNet`s, but should provide sufficient
+        // coverage for any downstream tests.
+        #[derive(Debug, Clone, Copy, Arbitrary)]
+        enum ValidIpNet {
+            V4 {
+                #[strategy(1_u8..127)]
+                octet0: u8,
+                other_octets: [u8; 3],
+                #[strategy(0_u8..32)]
+                prefix: u8,
+            },
+            V6 {
+                #[strategy(1_u16..0xfe00)]
+                segment0: u16,
+                other_segments: [u16; 7],
+                #[strategy(0_u8..128)]
+                prefix: u8,
+            },
+        }
+
+        any::<ValidIpNet>()
+            .prop_map(|arb| {
+                let ipnet = match arb {
+                    ValidIpNet::V4 { octet0, other_octets, prefix } => {
+                        let mut octets = [0; 4];
+                        octets[0] = octet0;
+                        octets[1..].copy_from_slice(&other_octets);
+                        let ip = Ipv4Addr::from_octets(octets);
+                        IpNet::new(ip.into(), prefix).expect("valid prefix")
+                    }
+                    ValidIpNet::V6 { segment0, other_segments, prefix } => {
+                        let mut segments = [0; 8];
+                        segments[0] = segment0;
+                        segments[1..].copy_from_slice(&other_segments);
+                        let ip = Ipv6Addr::from_segments(segments);
+                        IpNet::new(ip.into(), prefix).expect("valid prefix")
+                    }
+                };
+                UplinkIpNet::try_from(ipnet)
+                    .expect("ValidIpNet produces valid UplinkIpNets")
+            })
+            .boxed()
+    }
+}
+
 impl std::fmt::Display for RouterPeerIpAddr {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.0.fmt(f)

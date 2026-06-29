@@ -2229,7 +2229,7 @@ source = "git+https://github.com/oxidecomputer/crucible?rev=2bfe090eb5318ec8c467
 dependencies = [
  "crucible-workspace-hack",
  "libc",
- "num-derive 0.4.2",
+ "num-derive",
  "num-traits",
  "thiserror 2.0.18",
 ]
@@ -6213,12 +6213,12 @@ dependencies = [
 
 [[package]]
 name = "libscf-sys"
-version = "1.1.0"
+version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "12f02d0eda38e8cc453c5ec5d49945545d8d9eb0e59cb2ce4152ba6518f373e7"
+checksum = "d0d7bd6cfd9b5d32738cebd83a1b68060d96b1ca10d88bf9a5cb10dfac0f1cdf"
 dependencies = [
  "libc",
- "num-derive 0.3.3",
+ "num-derive",
  "num-traits",
 ]
 
@@ -8144,17 +8144,6 @@ name = "num-conv"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf97ec579c3c42f953ef76dbf8d55ac91fb219dde70e49aa4a6b7d74e9919050"
-
-[[package]]
-name = "num-derive"
-version = "0.3.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "876a53fff98e03a936a674b29568b0e605f06b29372c2489ff4de23f1949743d"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 1.0.109",
-]
 
 [[package]]
 name = "num-derive"
@@ -10837,7 +10826,7 @@ dependencies = [
  "anyhow",
  "convert_case 0.4.0",
  "libm",
- "num-derive 0.4.2",
+ "num-derive",
  "num-traits",
  "ron",
  "serde",
@@ -11364,9 +11353,9 @@ dependencies = [
 
 [[package]]
 name = "proptest"
-version = "1.10.0"
+version = "1.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "37566cb3fdacef14c0737f9546df7cfeadbfbc9fef10991038bf5015d0c80532"
+checksum = "4b45fcc2344c680f5025fe57779faef368840d0bd1f42f216291f0dc4ace4744"
 dependencies = [
  "bit-set 0.8.0",
  "bit-vec 0.8.0",
@@ -13599,6 +13588,43 @@ dependencies = [
  "sled-agent-types",
  "sled-storage",
  "tufaceous-artifact",
+]
+
+[[package]]
+name = "sled-agent-scrimlet-reconcilers"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "assert_matches",
+ "chrono",
+ "daft",
+ "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=cc0c307c617f2988aafdca4e3bd35ea178b64801)",
+ "dropshot",
+ "either",
+ "futures",
+ "gateway-client",
+ "gateway-messages",
+ "gateway-test-utils",
+ "gateway-types",
+ "httpmock",
+ "iddqd",
+ "macaddr",
+ "mg-admin-client",
+ "mg-api-types",
+ "omicron-common",
+ "omicron-test-utils",
+ "omicron-uuid-kinds",
+ "omicron-workspace-hack",
+ "oxnet",
+ "proptest",
+ "reqwest 0.13.2",
+ "serde_json",
+ "sled-agent-types",
+ "slog",
+ "slog-error-chain",
+ "test-strategy",
+ "thiserror 2.0.18",
+ "tokio",
 ]
 
 [[package]]

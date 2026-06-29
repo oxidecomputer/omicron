@@ -155,6 +155,7 @@ members = [
     "sled-agent/measurements",
     "sled-agent/rack-setup",
     "sled-agent/repo-depot-api",
+    "sled-agent/scrimlet-reconcilers",
     "sled-agent/types",
     "sled-agent/types/versions",
     "sled-agent/resolvable-files",
@@ -346,6 +347,7 @@ default-members = [
     "sled-agent/measurements",
     "sled-agent/rack-setup",
     "sled-agent/repo-depot-api",
+    "sled-agent/scrimlet-reconcilers",
     "sled-agent/types",
     "sled-agent/types/versions",
     "sled-agent/resolvable-files",
@@ -743,7 +745,7 @@ propolis_api_types = { git = "https://github.com/oxidecomputer/propolis", rev = 
 propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "979b72896bc39a876c98fb32fe706da37a4fc408" }
 propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", rev = "979b72896bc39a876c98fb32fe706da37a4fc408" }
 # NOTE: see above!
-proptest = "1.7.0"
+proptest = "1.11.0"
 qorb = "0.4.1"
 quote = "1.0"
 # Some dependencies still require rand 0.8.x.
@@ -807,6 +809,7 @@ sled-agent-early-networking = { path = "sled-agent/early-networking" }
 sled-agent-health-monitor = { path = "sled-agent/health-monitor" }
 sled-agent-measurements = { path = "sled-agent/measurements" }
 sled-agent-rack-setup = { path = "sled-agent/rack-setup" }
+sled-agent-scrimlet-reconcilers = { path = "sled-agent/scrimlet-reconcilers" }
 sled-agent-types = { path = "sled-agent/types" }
 sled-agent-types-versions = { path = "sled-agent/types/versions" }
 sled-agent-resolvable-files = { path = "sled-agent/resolvable-files" }

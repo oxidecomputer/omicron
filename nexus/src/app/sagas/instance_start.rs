@@ -1164,7 +1164,6 @@ async fn sis_ensure_running(
 #[cfg(test)]
 mod test {
     use core::time::Duration;
-    use std::net::SocketAddrV6;
 
     use crate::app::sagas::disk_delete::test::ExpungeTestHarness;
     use crate::app::sagas::disk_delete::test::create_disk;
@@ -1506,8 +1505,7 @@ mod test {
         // Reuse the port number from the removed Switch0 to start a new dendrite instance
         let nexus_address = cptestctx.internal_client.bind_address;
         let mgs = cptestctx.gateway.get(&SwitchSlot::Switch0).unwrap();
-        let mgs_address =
-            SocketAddrV6::new(Ipv6Addr::LOCALHOST, mgs.port, 0, 0).into();
+        let mgs_address = mgs.address().into();
 
         // Test fault recovery for nat propogation
         // Start a new dendrite instance for switch0
