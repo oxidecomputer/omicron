@@ -8,6 +8,7 @@
 
 use crate::DetermineSwitchSlotStatus;
 use crate::dpd_reconciler::DpdReconciler;
+use crate::lldpd_reconciler::LldpdReconciler;
 use crate::mgd_reconciler::MgdReconciler;
 use crate::reconciler_task::ReconcilerTaskHandle;
 use crate::status::ScrimletReconcilersStatus;
@@ -223,11 +224,13 @@ impl ScrimletReconcilers {
         if let Some(running) = self.running_reconcilers.get() {
             let RunningReconcilers {
                 dpd_reconciler,
+                lldpd_reconciler,
                 mgd_reconciler,
                 uplinkd_reconciler,
             } = running;
             ScrimletReconcilersStatus::Running {
                 dpd_reconciler: dpd_reconciler.status(),
+                lldpd_reconciler: lldpd_reconciler.status(),
                 mgd_reconciler: mgd_reconciler.status(),
                 uplinkd_reconciler: uplinkd_reconciler.status(),
             }
@@ -359,6 +362,7 @@ async fn determine_switch_slot(
 #[derive(Debug)]
 struct RunningReconcilers {
     dpd_reconciler: ReconcilerTaskHandle<DpdReconciler>,
+    lldpd_reconciler: ReconcilerTaskHandle<LldpdReconciler>,
     mgd_reconciler: ReconcilerTaskHandle<MgdReconciler>,
     uplinkd_reconciler: ReconcilerTaskHandle<UplinkdReconciler>,
 }
@@ -371,6 +375,13 @@ impl RunningReconcilers {
         parent_log: &Logger,
     ) -> Self {
         let dpd_reconciler = ReconcilerTaskHandle::<DpdReconciler>::spawn(
+            scrimlet_status_rx.clone(),
+            networking_info.system_networking_config_rx.clone(),
+            networking_info.mode,
+            this_sled_switch_slot,
+            parent_log,
+        );
+        let lldpd_reconciler = ReconcilerTaskHandle::<LldpdReconciler>::spawn(
             scrimlet_status_rx.clone(),
             networking_info.system_networking_config_rx.clone(),
             networking_info.mode,
@@ -392,7 +403,12 @@ impl RunningReconcilers {
                 this_sled_switch_slot,
                 parent_log,
             );
-        Self { dpd_reconciler, mgd_reconciler, uplinkd_reconciler }
+        Self {
+            dpd_reconciler,
+            lldpd_reconciler,
+            mgd_reconciler,
+            uplinkd_reconciler,
+        }
     }
 }
 
