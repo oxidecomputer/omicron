@@ -25,6 +25,7 @@ omicron-common.workspace = true
 omicron-uuid-kinds.workspace = true
 oxnet.workspace = true
 reqwest.workspace = true
+scuffle.workspace = true
 sled-agent-types.workspace = true
 slog.workspace = true
 slog-error-chain.workspace = true
@@ -40,8 +41,10 @@ dropshot.workspace = true
 gateway-messages.workspace = true
 gateway-test-utils.workspace = true
 httpmock.workspace = true
+illumos-utils.workspace = true
 omicron-test-utils.workspace = true
 proptest.workspace = true
+scuffle = { workspace = true, features = ["testing"] }
 serde_json.workspace = true
 sled-agent-types = { workspace = true, features = ["testing"] }
 test-strategy.workspace = true
