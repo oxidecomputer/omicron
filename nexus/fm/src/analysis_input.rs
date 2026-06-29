@@ -463,7 +463,7 @@ mod tests {
         let now = chrono::Utc::now();
         let mut reporter = fm_test
             .reporters
-            .reporter(Reporter::Sp { sp_type: SpType::Sled, slot: 0 });
+            .reporter(Reporter::Sp { sp_type: SpType::Sled, slot: 0 }, now);
         let ereport_in_open_case1 =
             Arc::new(reporter.mk_ereport(now, Default::default()));
         let ereport_in_open_case2 =

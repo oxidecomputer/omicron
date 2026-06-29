@@ -2,7 +2,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::CaseBuilder;
 use crate::EreportId;
 use crate::SitrepBuilder;
 use crate::ereport;
@@ -249,7 +248,7 @@ pub fn analyze(builder: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
                         if let Err(err) = requested {
                             slog::error!(
                                 &log,
-                                "failed to request alert for ereport {}: {}",
+                                "failed to request PSU insert alert for ereport {}: {}",
                                 ereport.id(),
                                 &err
                             );
@@ -260,7 +259,41 @@ pub fn analyze(builder: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
                     // goodbye!
                     psus_absent[shelf as usize].insert(slot);
                     if ereport.provenance == Provenance::ThisSitrep {
-                        // TODO(eliza): request alert
+                        let baseboard = match ereport.psc_baseboard() {
+                            Ok(baseboard) => Some(baseboard),
+                            Err(err) => {
+                                let err = InlineErrorChain::new(&*err);
+                                slog::warn!(
+                                    &log,
+                                    "couldn't determine PSC baseboard identity \
+                                     for alert";
+                                    "ereport" => %ereport.id(),
+                                    &err,
+                                );
+                                None
+                            }
+                        };
+                        let requested = case_builder.request_alert(
+                            &alert_types::PsuRemovedV0 {
+                                psu: ereport.alert_psu(),
+                                power_shelf: alert_types::PowerShelf {
+                                    shelf,
+                                    baseboard,
+                                    rack_id: rack.into_untyped_uuid(),
+                                },
+                                time: ereport.ereport.time_collected,
+                            },
+                            format!("requested for ereport {}", ereport.id()),
+                        );
+                        if let Err(err) = requested {
+                            slog::error!(
+                                &log,
+                                "failed to request PSU removed alert for \
+                                 ereport {}: {}",
+                                ereport.id(),
+                                &err
+                            );
+                        }
                     }
                 }
             }
@@ -611,16 +644,13 @@ mod tests {
     use nexus_types::fm::{self, Sitrep, SitrepVersion};
     use nexus_types::inventory::SpType;
     use omicron_common::api::external::Generation;
-    use omicron_test_utils::dev;
     use omicron_uuid_kinds::{
-        AlertUuid, CaseEreportUuid, CaseUuid, CollectionUuid, GenericUuid,
-        OmicronZoneUuid, RackUuid, SitrepUuid,
+        AlertUuid, CaseEreportUuid, CaseUuid, CollectionUuid, OmicronZoneUuid,
+        SitrepUuid,
     };
-    use uuid::Uuid;
 
     // These are real life ereports I copied from the dogfood rack.
     mod ereports {
-        use super::*;
 
         pub(super) const PSU_REMOVE_JSON: &str = r#"{
             "baseboard_part_number": "913-0000003",
@@ -823,56 +853,14 @@ mod tests {
     /// every dogfood fixture above.
     const SHELF: u16 = 0;
 
-    /// Builds the example system and returns the test harness, its log
-    /// context, and an inventory collection to feed analysis.
-    fn setup(test_name: &'static str) -> (FmTest, dev::LogContext) {
-        let (fmtest, logctx) = FmTest::new_with_logctx(test_name);
-        (fmtest, logctx)
-    }
-
-    fn mk_restart(
-        restart_id: EreporterRestartUuid,
-        time_first_seen: DateTime<Utc>,
-    ) -> EreporterRestart {
-        EreporterRestart {
-            rack_id: RackUuid::from_untyped_uuid(RACK_ID).into(),
-            id: restart_id.into(),
-            time_first_seen,
-            reporter: nexus_db_model::EreporterType::Sp,
-            slot_type: nexus_db_model::SpType::Power,
-            slot: Some(nexus_db_model::SpMgsSlot::from(SHELF)),
-        }
-    }
-
-    /// Constructs an analysis [`Input`] from an inventory collection, an
+    /// Constructs an analysis `Input` from an inventory collection, an
     /// optional parent sitrep, and a set of brand-new ereports.
-    ///
-    /// The input's reporter-restart map is derived from the ereports in play
-    /// (new ones plus any in the parent sitrep): each restart's first-seen
-    /// time is the earliest collection time among its ereports, mirroring how
-    /// Nexus first learns of a restart in production.
     fn build_input(
+        fmtest: &FmTest,
         collection: inventory::Collection,
         parent_sitrep: Option<Sitrep>,
         new_ereports: impl IntoIterator<Item = Ereport>,
     ) -> Input {
-        let new_ereports: Vec<Ereport> = new_ereports.into_iter().collect();
-
-        let mut first_seen: BTreeMap<EreporterRestartUuid, DateTime<Utc>> =
-            BTreeMap::new();
-        let parent_ereports = parent_sitrep
-            .iter()
-            .flat_map(|s| s.ereports_by_id.iter().map(|e| (**e).clone()));
-        for ereport in new_ereports.iter().cloned().chain(parent_ereports) {
-            let restart_id = ereport.id.restart_id;
-            let entry =
-                first_seen.entry(restart_id).or_insert(ereport.time_collected);
-            *entry = (*entry).min(ereport.time_collected);
-        }
-        let restarts = first_seen
-            .into_iter()
-            .map(|(restart_id, time)| mk_restart(restart_id, time));
-
         let parent = parent_sitrep.map(|s| {
             Arc::new((
                 SitrepVersion {
@@ -883,15 +871,21 @@ mod tests {
                 s,
             ))
         });
-        let mut builder = Input::builder(
-            parent,
-            Arc::new(collection),
-            Arc::new(IdOrdMap::new()),
-        )
-        .expect("input builder should accept fresh inventory");
-        builder.add_ereporter_restarts(restarts);
+        let mut builder = fmtest
+            .input_builder(
+                parent,
+                Arc::new(collection),
+                Arc::new(IdOrdMap::new()),
+            )
+            .expect("input builder should accept fresh inventory");
         builder.add_unmarked_ereports(new_ereports);
-        builder.build().0
+        let (input, report) = builder.build();
+        slog::info!(
+            &fmtest.log,
+            "analysis inputs: {}",
+            report.display_multiline(0)
+        );
+        input
     }
 
     /// Runs the power shelf diagnosis engine over `input` and returns the
@@ -983,17 +977,18 @@ mod tests {
     /// inserted PSU's identity.
     #[test]
     fn single_insert_closes_case_with_inserted_alert() {
-        let (mut fmtest, logctx) =
-            setup("single_insert_closes_case_with_inserted_alert");
+        let (mut fmtest, logctx) = FmTest::new_with_logctx(
+            "single_insert_closes_case_with_inserted_alert",
+        );
         let (example, _bp) = fmtest.system_builder.build();
-        let mut reporter = fmtest.reporters.reporter(ereport::Reporter::Sp {
-            sp_type: SpType::Power,
-            slot: SHELF,
-        });
+        let mut reporter = fmtest.reporters.reporter(
+            ereport::Reporter::Sp { sp_type: SpType::Power, slot: SHELF },
+            Utc::now(),
+        );
         let insert =
             reporter.parse_ereport(Utc::now(), ereports::PSU_INSERT_JSON);
 
-        let input = build_input(example.collection, None, [insert]);
+        let input = build_input(&fmtest, example.collection, None, [insert]);
         let sitrep = run_analyze(&logctx.log, &input);
 
         let case = sole_case(&sitrep);
@@ -1008,11 +1003,15 @@ mod tests {
         );
         let alert = case.alerts_requested.iter().next().unwrap();
         assert_eq!(alert.class, AlertClass::PsuInserted);
-        assert_eq!(alert.payload["power_shelf"]["slot"].as_u64(), Some(0));
-        assert_eq!(alert.payload["psu"]["slot"].as_u64(), Some(4));
+        let alert_payload = dbg!(serde_json::from_value::<
+            alert_types::PsuInsertedV0,
+        >(alert.payload.clone()))
+        .unwrap();
+        assert_eq!(alert_payload.power_shelf.shelf, 0);
+        assert_eq!(alert_payload.psu.slot, 4);
         assert_eq!(
-            alert.payload["psu"]["identity"]["serial_number"].as_str(),
-            Some("LL2216RB003Z"),
+            alert_payload.psu.identity.as_ref().map(|id| id.serial.as_str()),
+            Some("LL2216RB003Z")
         );
 
         logctx.cleanup_successful();
@@ -1022,17 +1021,18 @@ mod tests {
     /// still missing), requesting one `PsuRemoved` alert.
     #[test]
     fn single_remove_opens_case_with_removed_alert() {
-        let (mut fmtest, logctx) =
-            setup("single_remove_opens_case_with_removed_alert");
+        let (mut fmtest, logctx) = FmTest::new_with_logctx(
+            "single_remove_opens_case_with_removed_alert",
+        );
         let (example, _bp) = fmtest.system_builder.build();
-        let mut reporter = fmtest.reporters.reporter(ereport::Reporter::Sp {
-            sp_type: SpType::Power,
-            slot: SHELF,
-        });
+        let mut reporter = fmtest.reporters.reporter(
+            ereport::Reporter::Sp { sp_type: SpType::Power, slot: SHELF },
+            Utc::now(),
+        );
         let remove =
             reporter.parse_ereport(Utc::now(), ereports::PSU_REMOVE_JSON);
 
-        let input = build_input(example.collection, None, [remove]);
+        let input = build_input(&fmtest, example.collection, None, [remove]);
         let sitrep = run_analyze(&logctx.log, &input);
 
         let case = sole_case(&sitrep);
@@ -1043,7 +1043,12 @@ mod tests {
         assert_eq!(case.alerts_requested.len(), 1);
         let alert = case.alerts_requested.iter().next().unwrap();
         assert_eq!(alert.class, AlertClass::PsuRemoved);
-        assert_eq!(alert.payload["psu"]["slot"].as_u64(), Some(4));
+        let alert_payload = dbg!(serde_json::from_value::<
+            alert_types::PsuRemovedV0,
+        >(alert.payload.clone()))
+        .unwrap();
+        assert_eq!(alert_payload.power_shelf.shelf, 0);
+        assert_eq!(alert_payload.psu.slot, 4);
 
         logctx.cleanup_successful();
     }
@@ -1053,13 +1058,14 @@ mod tests {
     /// but still requests one alert for each event.
     #[test]
     fn remove_then_insert_in_one_sitrep_closes_with_both_alerts() {
-        let (mut fmtest, logctx) =
-            setup("remove_then_insert_in_one_sitrep_closes_with_both_alerts");
+        let (mut fmtest, logctx) = FmTest::new_with_logctx(
+            "remove_then_insert_in_one_sitrep_closes_with_both_alerts",
+        );
         let (example, _bp) = fmtest.system_builder.build();
-        let mut reporter = fmtest.reporters.reporter(ereport::Reporter::Sp {
-            sp_type: SpType::Power,
-            slot: SHELF,
-        });
+        let mut reporter = fmtest.reporters.reporter(
+            ereport::Reporter::Sp { sp_type: SpType::Power, slot: SHELF },
+            Utc::now(),
+        );
         // Same reporter restart, so the insert gets the greater ENA and is
         // recognized as the more recent event.
         let remove =
@@ -1067,7 +1073,8 @@ mod tests {
         let insert =
             reporter.parse_ereport(Utc::now(), ereports::PSU_INSERT_JSON);
 
-        let input = build_input(example.collection, None, [remove, insert]);
+        let input =
+            build_input(&fmtest, example.collection, None, [remove, insert]);
         let sitrep = run_analyze(&logctx.log, &input);
 
         let case = sole_case(&sitrep);
@@ -1092,19 +1099,24 @@ mod tests {
     /// cases, since each case concerns a single PSU location.
     #[test]
     fn distinct_slots_get_distinct_cases() {
-        let (mut fmtest, logctx) = setup("distinct_slots_get_distinct_cases");
+        let (mut fmtest, logctx) =
+            FmTest::new_with_logctx("distinct_slots_get_distinct_cases");
         let (example, _bp) = fmtest.system_builder.build();
-        let mut reporter = fmtest.reporters.reporter(ereport::Reporter::Sp {
-            sp_type: SpType::Power,
-            slot: SHELF,
-        });
+        let mut reporter = fmtest.reporters.reporter(
+            ereport::Reporter::Sp { sp_type: SpType::Power, slot: SHELF },
+            Utc::now(),
+        );
         let remove_psu4 =
             reporter.parse_ereport(Utc::now(), ereports::PSU_REMOVE_JSON);
         let remove_psu2 =
             reporter.parse_ereport(Utc::now(), ereports::PSU_REMOVE_SLOT2_JSON);
 
-        let input =
-            build_input(example.collection, None, [remove_psu4, remove_psu2]);
+        let input = build_input(
+            &fmtest,
+            example.collection,
+            None,
+            [remove_psu4, remove_psu2],
+        );
         let sitrep = run_analyze(&logctx.log, &input);
 
         assert_eq!(
@@ -1124,18 +1136,20 @@ mod tests {
     /// transition) are ignored: no case is opened.
     #[test]
     fn unknown_ereports_are_ignored() {
-        let (mut fmtest, logctx) = setup("unknown_ereports_are_ignored");
+        let (mut fmtest, logctx) =
+            FmTest::new_with_logctx("unknown_ereports_are_ignored");
         let (example, _bp) = fmtest.system_builder.build();
-        let mut reporter = fmtest.reporters.reporter(ereport::Reporter::Sp {
-            sp_type: SpType::Power,
-            slot: SHELF,
-        });
+        let mut reporter = fmtest.reporters.reporter(
+            ereport::Reporter::Sp { sp_type: SpType::Power, slot: SHELF },
+            Utc::now(),
+        );
         let pwr_bad =
             reporter.parse_ereport(Utc::now(), ereports::PSU_PWR_BAD_JSON);
         let pwr_good =
             reporter.parse_ereport(Utc::now(), ereports::PSU_PWR_GOOD_JSON);
 
-        let input = build_input(example.collection, None, [pwr_bad, pwr_good]);
+        let input =
+            build_input(&fmtest, example.collection, None, [pwr_bad, pwr_good]);
         let sitrep = run_analyze(&logctx.log, &input);
 
         assert!(
@@ -1152,15 +1166,15 @@ mod tests {
     /// re-requesting the carried-forward remove.
     #[test]
     fn carried_forward_remove_then_insert_closes_without_duplicate_alert() {
-        let (mut fmtest, logctx) = setup(
+        let (mut fmtest, logctx) = FmTest::new_with_logctx(
             "carried_forward_remove_then_insert_closes_without_duplicate_alert",
         );
         let (example, _bp) = fmtest.system_builder.build();
         let inv_collection_id = example.collection.id;
-        let mut reporter = fmtest.reporters.reporter(ereport::Reporter::Sp {
-            sp_type: SpType::Power,
-            slot: SHELF,
-        });
+        let mut reporter = fmtest.reporters.reporter(
+            ereport::Reporter::Sp { sp_type: SpType::Power, slot: SHELF },
+            Utc::now(),
+        );
 
         // The parent sitrep already saw the remove and requested its alert.
         let remove = Arc::new(
@@ -1169,7 +1183,7 @@ mod tests {
         let remove_alert = AlertRequest {
             id: AlertUuid::new_v4(),
             class: AlertClass::PsuRemoved,
-            version: PsuRemovedV0::VERSION,
+            version: alert_types::PsuRemovedV0::VERSION,
             payload: serde_json::json!({}),
             requested_sitrep_id: SitrepUuid::new_v4(),
             comment: "removed earlier".to_string(),
@@ -1180,7 +1194,8 @@ mod tests {
         // Now a fresh insert arrives.
         let insert =
             reporter.parse_ereport(Utc::now(), ereports::PSU_INSERT_JSON);
-        let input = build_input(example.collection, Some(parent), [insert]);
+        let input =
+            build_input(&fmtest, example.collection, Some(parent), [insert]);
         let sitrep = run_analyze(&logctx.log, &input);
 
         let case = sole_case(&sitrep);
@@ -1222,31 +1237,37 @@ mod tests {
     /// and the case must stay open.
     #[test]
     fn most_recent_event_follows_restart_first_seen() {
-        let (mut fmtest, logctx) =
-            setup("most_recent_event_follows_restart_first_seen");
+        let (mut fmtest, logctx) = FmTest::new_with_logctx(
+            "most_recent_event_follows_restart_first_seen",
+        );
         let (example, _bp) = fmtest.system_builder.build();
-        let mut reporter = fmtest.reporters.reporter(ereport::Reporter::Sp {
-            sp_type: SpType::Power,
-            slot: SHELF,
-        });
 
         let t0 = Utc::now();
+        // Restart A is first seen at `t0`.
+        let mut restart_a = fmtest.reporters.reporter(
+            ereport::Reporter::Sp { sp_type: SpType::Power, slot: SHELF },
+            t0,
+        );
         // Restart A: remove, then a later-collected insert with a higher ENA.
-        let remove_a = reporter.parse_ereport(t0, ereports::PSU_REMOVE_JSON);
-        let insert_a = reporter.parse_ereport(
+        let remove_a = restart_a.parse_ereport(t0, ereports::PSU_REMOVE_JSON);
+        let insert_a = restart_a.parse_ereport(
             t0 + Duration::seconds(10),
             ereports::PSU_INSERT_JSON,
         );
 
-        // The reporter restarts (ENAs reset), and restart B is first seen
-        // after restart A but before A's insert was collected.
-        reporter.restart();
-        let remove_b = reporter.parse_ereport(
+        // The reporter restarts (ENAs reset): restart B is first seen after
+        // restart A but before A's insert was collected.
+        let mut restart_b = fmtest.reporters.reporter(
+            ereport::Reporter::Sp { sp_type: SpType::Power, slot: SHELF },
+            t0 + Duration::seconds(5),
+        );
+        let remove_b = restart_b.parse_ereport(
             t0 + Duration::seconds(5),
             ereports::PSU_REMOVE_JSON,
         );
 
         let input = build_input(
+            &fmtest,
             example.collection,
             None,
             [remove_a, insert_a, remove_b],
