@@ -96,6 +96,7 @@ pub enum UplinkAddress {
     Ord,
 )]
 #[serde(tag = "type", rename_all = "snake_case")]
+#[cfg_attr(any(test, feature = "testing"), derive(test_strategy::Arbitrary))]
 pub enum RouterPeerType {
     Unnumbered {
         /// Router lifetime in seconds for unnumbered BGP peers.

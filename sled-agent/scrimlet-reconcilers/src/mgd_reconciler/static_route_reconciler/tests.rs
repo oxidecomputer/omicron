@@ -42,27 +42,10 @@ impl Arbitrary for DiffableStaticRouteDescription {
 
                 // ipv4 prefixes can have either ipv4 or ipv6 for its nexthop
                 // address, but ipv6 prefixes must have an ipv6 nexthop
-                let (prefix, nexthop_strategy) = match prefix {
-                    IpNet::V4(prefix) => {
-                        let prefix = Ipv4Net::new(
-                            prefix.addr() & prefix.mask_addr(),
-                            prefix.width(),
-                        )
-                        .expect("still valid after applying mask");
-
-                        (IpNet::from(prefix), any::<IpAddr>().boxed())
-                    }
-                    IpNet::V6(prefix) => {
-                        let prefix = Ipv6Net::new(
-                            prefix.addr() & prefix.mask_addr(),
-                            prefix.width(),
-                        )
-                        .expect("still valid after applying mask");
-
-                        (
-                            IpNet::from(prefix),
-                            any::<Ipv6Addr>().prop_map(IpAddr::from).boxed(),
-                        )
+                let nexthop_strategy = match prefix {
+                    IpNet::V4(_) => any::<IpAddr>().boxed(),
+                    IpNet::V6(_) => {
+                        any::<Ipv6Addr>().prop_map(IpAddr::from).boxed()
                     }
                 };
                 (Just(prefix), nexthop_strategy)
