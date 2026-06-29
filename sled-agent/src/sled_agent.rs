@@ -5,8 +5,6 @@
 //! Sled agent implementation
 
 use crate::artifact_store::{ArtifactStore, SledAgentArtifactStoreWrapper};
-use crate::bootstrap::config::BOOTSTRAP_AGENT_RACK_INIT_PORT;
-use crate::bootstrap::early_networking::EarlyNetworkSetupError;
 use crate::config::Config;
 use crate::hardware_monitor::HardwareMonitorHandle;
 use crate::instance_manager::InstanceManager;
@@ -39,19 +37,22 @@ use illumos_utils::zfs::DatasetVolumeDeleteArgs;
 use illumos_utils::zfs::DatasetVolumeEnsureArgs;
 use illumos_utils::zfs::DestroyDatasetErrorVariant;
 use illumos_utils::zfs::Mountpoint;
+use illumos_utils::zfs::RemoveReservationError;
+use illumos_utils::zfs::RemoveReservationErrorInner;
 use illumos_utils::zfs::SizeDetails;
 use illumos_utils::zfs::Zfs;
 use illumos_utils::zpool::PathInPool;
 use illumos_utils::zpool::ZpoolOrRamdisk;
 use internal_dns_resolver::Resolver;
 use itertools::Itertools as _;
+use omicron_common::address::BOOTSTRAP_AGENT_RACK_INIT_PORT;
 use omicron_common::address::{Ipv6Subnet, SLED_PREFIX, get_sled_address};
 use omicron_common::api::external::{ByteCount, ByteCountRangeError, Vni};
-use omicron_common::api::internal::nexus::{DiskRuntimeState, SledVmmState};
+use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::shared::DelegatedZvol;
 use omicron_common::api::internal::shared::{
-    ExternalIpGatewayMap, ResolvedVpcFirewallRule, ResolvedVpcRouteSet,
-    ResolvedVpcRouteState, SledIdentifiers, VirtualNetworkInterfaceHost,
+    ExternalIpGatewayMap, ResolvedVpcRouteSet, ResolvedVpcRouteState,
+    SledIdentifiers, VirtualNetworkInterfaceHost,
 };
 use omicron_common::zpool_name::ZpoolName;
 use omicron_ddm_admin_client::Client as DdmAdminClient;
@@ -65,6 +66,7 @@ use sled_agent_config_reconciler::{
     InternalDisksReceiver, LedgerNewConfigError, LedgerTaskError,
     ReconcilerInventory, SledAgentFacilities,
 };
+use sled_agent_early_networking::EarlyNetworkSetupError;
 use sled_agent_health_monitor::handle::HealthMonitorHandle;
 use sled_agent_measurements::MeasurementsHandle;
 use sled_agent_types::attached_subnet::AttachedSubnet;
@@ -73,10 +75,11 @@ use sled_agent_types::dataset::LocalStorageDatasetDeleteRequest;
 use sled_agent_types::dataset::LocalStorageDatasetEnsureRequest;
 use sled_agent_types::disk::DiskStateRequested;
 use sled_agent_types::early_networking::EarlyNetworkConfigEnvelope;
-use sled_agent_types::early_networking::RackNetworkConfig;
+use sled_agent_types::instance::ResolvedVpcFirewallRule;
 use sled_agent_types::instance::{
     InstanceEnsureBody, InstanceExternalIpBody, InstanceMulticastBody,
-    VmmPutStateResponse, VmmStateRequested, VmmUnregisterResponse,
+    SledVmmState, VmmPutStateResponse, VmmStateRequested,
+    VmmUnregisterResponse,
 };
 use sled_agent_types::inventory::{Inventory, OmicronSledConfig, SledRole};
 use sled_agent_types::probes::ProbeCreate;
@@ -84,7 +87,10 @@ use sled_agent_types::resolvable_files::{
     PreparedOmicronZone, RemoveMupdateOverrideResult, ResolverStatus,
 };
 use sled_agent_types::rot::Rot;
-use sled_agent_types::sled::StartSledAgentRequest;
+use sled_agent_types::sled::{
+    StartSledAgentRequest, ThisSledSwitchZoneUnderlayIpAddr,
+};
+use sled_agent_types::system_networking::SystemNetworkingConfig;
 use sled_agent_types::uplink::HostPortConfig;
 use sled_agent_types::zone_bundle::{
     BundleUtilization, CleanupContext, CleanupCount, CleanupPeriod,
@@ -536,7 +542,7 @@ impl SledAgent {
         // Start collecting metric data.
         let baseboard = long_running_task_handles.hardware_manager.baseboard();
         let identifiers = SledIdentifiers {
-            rack_id: request.body.rack_id,
+            rack_id: request.body.rack_id.into_untyped_uuid(),
             sled_id: request.body.id.into_untyped_uuid(),
             model: baseboard.model().to_string(),
             revision: baseboard.revision(),
@@ -620,19 +626,20 @@ impl SledAgent {
         let svc_config =
             services::Config::new(identifiers, config.sidecar_revision.clone());
 
-        // Get our rack network config from the bootstore; we cannot proceed
-        // until we have this, as we need to know which switches have uplinks to
-        // correctly set up services.
+        // Get our system network config from the bootstore; we cannot proceed
+        // until we have this, as we need to set up uplinks inside the switch
+        // zone (if we're a scrimlet) and configure services that need NAT
+        // entries in dendrite (if we start any such services).
         let mut bootstore_network_config_rx =
             long_running_task_handles.bootstore.network_config_subscribe();
-        let rack_network_config = loop {
+        let network_config = loop {
             let maybe_serialized_config =
                 bootstore_network_config_rx.borrow_and_update().clone();
 
             // If we don't have a network config at all yet, wait until the
             // watch channel changes then try again.
             let Some(serialized_config) = maybe_serialized_config else {
-                warn!(log, "Waiting for early network config from bootstore");
+                warn!(log, "Waiting for network config from bootstore");
                 bootstore_network_config_rx
                     .changed()
                     .await
@@ -648,8 +655,8 @@ impl SledAgent {
             )
             .and_then(|envelope| envelope.deserialize_body())
             {
-                Ok(early_network_config) => {
-                    break early_network_config.rack_network_config;
+                Ok(network_config) => {
+                    break network_config;
                 }
                 Err(err) => {
                     warn!(
@@ -673,14 +680,14 @@ impl SledAgent {
         // This is spiritually a "long-running task", but we can't spawn it with
         // the other long-running tasks because it can't begin prior to this
         // point: we must have already received and successfully deserialized a
-        // `RackNetworkConfig`.
-        let (rack_network_config_tx, rack_network_config_rx) =
-            watch::channel(rack_network_config);
-        tokio::spawn(rack_network_config_deserialization_task(
+        // `SystemNetworkingConfig`.
+        let (network_config_tx, network_config_rx) =
+            watch::channel(network_config);
+        tokio::spawn(network_config_deserialization_task(
             bootstore_network_config_rx,
-            rack_network_config_tx,
+            network_config_tx,
             parent_log
-                .new(o!("component" => "RackNetworkConfigDeserializationTask")),
+                .new(o!("component" => "NetworkConfigDeserializationTask")),
         ));
 
         // Start reconciling against our ledgered sled config.
@@ -711,7 +718,7 @@ impl SledAgent {
                         &request,
                     ),
                 rack_id: request.body.rack_id,
-                rack_network_config_rx,
+                network_config_rx,
                 metrics_queue: metrics_manager.request_queue(),
             })
             .await?;
@@ -1241,7 +1248,7 @@ impl SledAgent {
     pub(crate) fn sled_identifiers(&self) -> SledIdentifiers {
         let baseboard = self.inner.hardware.baseboard();
         SledIdentifiers {
-            rack_id: self.inner.start_request.body.rack_id,
+            rack_id: self.inner.start_request.body.rack_id.into_untyped_uuid(),
             sled_id: self.inner.id.into_untyped_uuid(),
             model: baseboard.model().to_string(),
             revision: baseboard.revision(),
@@ -1272,6 +1279,8 @@ impl SledAgent {
         let smf_services_enabled_not_online =
             self.inner.health_monitor.to_inventory();
 
+        let fmd = crate::fmd::collect_fmd_inventory(&self.log).await;
+
         let ReconcilerInventory {
             disks,
             zpools,
@@ -1299,6 +1308,7 @@ impl SledAgent {
             file_source_resolver,
             smf_services_enabled_not_online,
             reference_measurements: self.inner.measurements.to_inventory(),
+            fmd,
         })
     }
 
@@ -1533,9 +1543,27 @@ impl SledAgent {
         // the volume, remove the reservation set for the parent dataset if one
         // exists.
 
-        Zfs::remove_reservation(&delegated_zvol.parent_dataset_name())
-            .await
-            .map_err(|e| HttpError::for_internal_error(e.to_string()))?;
+        let result =
+            Zfs::remove_reservation(&delegated_zvol.parent_dataset_name())
+                .await;
+
+        if let Err(e) = result {
+            let RemoveReservationError { name: _, err } = &e;
+            match err {
+                RemoveReservationErrorInner::DatasetNotFound => {
+                    // If the parent dataset is no longer found, then a
+                    // concurrent deletion occurred. Return Ok
+                    return Ok(());
+                }
+
+                _ => {
+                    // Anything else is a 500
+                    return Err(HttpError::for_internal_error(
+                        InlineErrorChain::new(&e).to_string(),
+                    ));
+                }
+            }
+        }
 
         // Then proceed with deleting the child volume dataset, then the parent
         // dataset
@@ -1717,17 +1745,17 @@ pub async fn sled_add(
     Ok(())
 }
 
-// Long-running task that updates the contents of `rack_network_config_tx` any
+// Long-running task that updates the contents of `network_config_tx` any
 // time the contents of `bootstore_network_config_rx` changes.
 //
 // Assumes the caller already deserialized the current bootstore network config
-// and used the result to initialize `rack_network_config_tx`; this task starts
+// and used the result to initialize `network_config_tx`; this task starts
 // by waiting for any changes to `bootstore_network_config_rx`.
-async fn rack_network_config_deserialization_task(
+async fn network_config_deserialization_task(
     mut bootstore_network_config_rx: watch::Receiver<
         Option<bootstore::NetworkConfig>,
     >,
-    rack_network_config_tx: watch::Sender<RackNetworkConfig>,
+    network_config_tx: watch::Sender<SystemNetworkingConfig>,
     log: Logger,
 ) {
     loop {
@@ -1736,7 +1764,7 @@ async fn rack_network_config_deserialization_task(
             error!(
                 log,
                 "bootstore task exited - \
-                 rack_network_config_deserialization_task exiting"
+                 network_config_deserialization_task exiting"
             );
             return;
         }
@@ -1765,16 +1793,14 @@ async fn rack_network_config_deserialization_task(
         )
         .and_then(|envelope| envelope.deserialize_body())
         {
-            Ok(early_network_config) => {
-                let rack_network_config =
-                    early_network_config.rack_network_config;
+            Ok(network_config) => {
                 info!(
                     log,
-                    "received new RackNetworkConfig from bootstore";
+                    "received new network config from bootstore";
                     "generation" => %bootstore_network_config.generation,
                 );
-                rack_network_config_tx.send_modify(|c| {
-                    *c = rack_network_config;
+                network_config_tx.send_modify(|c| {
+                    *c = network_config;
                 });
             }
             Err(err) => {
@@ -1853,72 +1879,5 @@ impl SledAgentFacilities for ReconcilerFacilities {
         self.service_manager
             .ddm_reconciler()
             .remove_internal_dns_subnet(prefix);
-    }
-}
-
-pub(crate) use self::local_switch_zone_ip::ThisSledSwitchZoneUnderlayIpAddr;
-
-/// Private module to enforce construction of
-/// [`ThisSledSwitchZoneUnderlayIpAddr`] only happens via the constructors we
-/// define.
-mod local_switch_zone_ip {
-    use omicron_common::address::get_switch_zone_address;
-    use sled_agent_types::sled::StartSledAgentRequest;
-    use std::fmt;
-    use std::net::IpAddr;
-    use std::net::Ipv6Addr;
-
-    /// Newtype wrapper around [`Ipv6Addr`]. This type is always the IP address
-    /// of our own, local switch zone.
-    ///
-    /// That switch zone will only exist if we are a scrimlet, but we always
-    /// know what the IP would be.
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-    pub(crate) struct ThisSledSwitchZoneUnderlayIpAddr(Ipv6Addr);
-
-    impl ThisSledSwitchZoneUnderlayIpAddr {
-        /// Construct a [`ThisSledSwitchZoneUnderlayIpAddr`] from the request to
-        /// start this sled agent.
-        ///
-        /// This takes a full request object instead of something smaller (like
-        /// just a sled subnet) to put up a roadblock to accidentally
-        /// constructing a [`ThisSledSwitchZoneUnderlayIpAddr`] that points to
-        /// any address other than our own. `sled-agent` has ready access to the
-        /// subnets and addresses of other sleds, but doesn't have ready access
-        /// to other sleds' [`StartSledAgentRequest`]s.
-        pub(crate) fn from_sled_agent_request(
-            request: &StartSledAgentRequest,
-        ) -> Self {
-            ThisSledSwitchZoneUnderlayIpAddr(get_switch_zone_address(
-                request.body.subnet,
-            ))
-        }
-    }
-
-    // NOTE: We impl `From` only in this direction: constructing a
-    // `ThisSledSwitchZoneUnderlayIpAddr` must happen only via
-    // `from_sled_agent_request()`.
-    impl From<ThisSledSwitchZoneUnderlayIpAddr> for Ipv6Addr {
-        fn from(value: ThisSledSwitchZoneUnderlayIpAddr) -> Self {
-            value.0
-        }
-    }
-
-    impl PartialEq<IpAddr> for ThisSledSwitchZoneUnderlayIpAddr {
-        fn eq(&self, other: &IpAddr) -> bool {
-            self.0.eq(other)
-        }
-    }
-
-    impl PartialEq<ThisSledSwitchZoneUnderlayIpAddr> for IpAddr {
-        fn eq(&self, other: &ThisSledSwitchZoneUnderlayIpAddr) -> bool {
-            self.eq(&other.0)
-        }
-    }
-
-    impl fmt::Display for ThisSledSwitchZoneUnderlayIpAddr {
-        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-            self.0.fmt(f)
-        }
     }
 }

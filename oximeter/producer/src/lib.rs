@@ -4,9 +4,6 @@
 
 //! Types for serving produced metric data to an Oximeter collector server.
 
-// Copyright 2024 Oxide Computer Company
-
-use dropshot::ApiDescription;
 use dropshot::ConfigDropshot;
 use dropshot::HttpError;
 use dropshot::HttpResponseOk;
@@ -14,7 +11,6 @@ use dropshot::HttpServer;
 use dropshot::Path;
 use dropshot::RequestContext;
 use dropshot::ServerBuilder;
-use dropshot::endpoint;
 use either::Either;
 use internal_dns_resolver::ResolveError;
 use internal_dns_resolver::Resolver;
@@ -26,9 +22,8 @@ use omicron_common::backoff;
 use omicron_common::backoff::BackoffError;
 use oximeter::types::ProducerRegistry;
 use oximeter::types::ProducerResults;
-use schemars::JsonSchema;
-use serde::Deserialize;
-use serde::Serialize;
+use oximeter_producer_api::ProducerApi;
+use oximeter_producer_api::producer_api_mod;
 use slog::Drain;
 use slog::Logger;
 use slog::debug;
@@ -41,7 +36,6 @@ use std::net::IpAddr;
 use std::net::SocketAddr;
 use std::time::Duration;
 use thiserror::Error;
-use uuid::Uuid;
 
 // Our public interface depends directly or indirectly on these types; we
 // export them so that consumers need not depend on dropshot themselves and
@@ -223,6 +217,7 @@ impl Server {
             default_request_body_max_bytes,
             default_handler_task_mode: dropshot::HandlerTaskMode::Detached,
             log_headers: vec![],
+            compression: dropshot::CompressionConfig::None,
         };
         let server = Self::build_dropshot_server(&log, &registry, &dropshot)?;
 
@@ -394,40 +389,34 @@ async fn resolve_nexus_and_register(
 }
 
 // Register API endpoints of the `Server`.
-fn metric_server_api() -> ApiDescription<ProducerRegistry> {
-    let mut api = ApiDescription::new();
-    api.register(collect).expect("Failed to register handler for collect");
-    api
+fn metric_server_api() -> dropshot::ApiDescription<ProducerRegistry> {
+    producer_api_mod::api_description::<ProducerApiImpl>()
+        .expect("registered entrypoints")
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, JsonSchema, Serialize)]
-pub struct ProducerIdPathParams {
-    /// The ID of the producer to be polled.
-    pub producer_id: Uuid,
-}
+enum ProducerApiImpl {}
 
-/// Collect metric data from this producer.
-#[endpoint {
-    method = GET,
-    path = "/{producer_id}",
-}]
-async fn collect(
-    request_context: RequestContext<ProducerRegistry>,
-    path_params: Path<ProducerIdPathParams>,
-) -> Result<HttpResponseOk<ProducerResults>, HttpError> {
-    let registry = request_context.context();
-    let producer_id = path_params.into_inner().producer_id;
-    if producer_id == registry.producer_id() {
-        Ok(HttpResponseOk(registry.collect()))
-    } else {
-        Err(HttpError::for_not_found(
-            None,
-            format!(
-                "Producer ID {} is not valid, expected {}",
-                producer_id,
-                registry.producer_id()
-            ),
-        ))
+impl ProducerApi for ProducerApiImpl {
+    type Context = ProducerRegistry;
+
+    async fn collect(
+        request_context: RequestContext<ProducerRegistry>,
+        path_params: Path<oximeter::producer::ProducerIdPathParams>,
+    ) -> Result<HttpResponseOk<ProducerResults>, HttpError> {
+        let registry = request_context.context();
+        let producer_id = path_params.into_inner().producer_id;
+        if producer_id == registry.producer_id() {
+            Ok(HttpResponseOk(registry.collect()))
+        } else {
+            Err(HttpError::for_not_found(
+                None,
+                format!(
+                    "Producer ID {} is not valid, expected {}",
+                    producer_id,
+                    registry.producer_id()
+                ),
+            ))
+        }
     }
 }
 
@@ -540,7 +529,7 @@ mod tests {
                 {
                     Ok(())
                 } else {
-                    Err(CondCheckError::<()>::NotYet)
+                    Err(CondCheckError::<()>::NotYet { status: None })
                 }
             },
             &POLL_INTERVAL,

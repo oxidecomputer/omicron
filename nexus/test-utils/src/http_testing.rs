@@ -97,6 +97,8 @@ impl<'a> RequestBuilder<'a> {
                 http::header::DATE,
                 http::header::LOCATION,
                 http::header::SET_COOKIE,
+                http::header::TRANSFER_ENCODING,
+                http::header::VARY,
                 http::header::HeaderName::from_static("x-request-id"),
             ]),
             expected_response_headers: http::HeaderMap::default(),

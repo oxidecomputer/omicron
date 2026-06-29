@@ -486,7 +486,7 @@ async fn test_cache_ttl_behavior() {
                 Ok(()) => Ok(()),
                 Err(_) => {
                     // Not yet updated, reconciler needs another cycle
-                    Err(CondCheckError::<String>::NotYet)
+                    Err(CondCheckError::<String>::NotYet { status: None })
                 }
             }
         },

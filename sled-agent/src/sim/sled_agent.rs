@@ -28,9 +28,7 @@ use iddqd::IdOrdMap;
 use omicron_common::api::external::{
     ByteCount, Error, Generation, ResourceType,
 };
-use omicron_common::api::internal::nexus::{
-    DiskRuntimeState, MigrationRuntimeState, MigrationState, SledVmmState,
-};
+use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::shared::{
     ResolvedVpcRoute, ResolvedVpcRouteSet, ResolvedVpcRouteState, RouterId,
     RouterKind, RouterVersion, VirtualNetworkInterfaceHost,
@@ -54,22 +52,24 @@ use sled_agent_health_monitor::HealthMonitorHandle;
 use sled_agent_types::attached_subnet::{AttachedSubnet, AttachedSubnets};
 use sled_agent_types::dataset::LocalStorageDatasetEnsureRequest;
 use sled_agent_types::disk::DiskStateRequested;
+use sled_agent_types::early_networking::EarlyNetworkConfigEnvelope;
+use sled_agent_types::early_networking::PortConfig;
 use sled_agent_types::early_networking::RackNetworkConfig;
-use sled_agent_types::early_networking::{
-    EarlyNetworkConfigBody, EarlyNetworkConfigEnvelope,
-};
+use sled_agent_types::early_networking::UplinkPorts;
 use sled_agent_types::instance::{
     InstanceEnsureBody, InstanceExternalIpBody, InstanceMulticastMembership,
-    VmmPutStateResponse, VmmStateRequested, VmmUnregisterResponse,
+    MigrationRuntimeState, MigrationState, SledVmmState, VmmPutStateResponse,
+    VmmStateRequested, VmmUnregisterResponse,
 };
 use sled_agent_types::inventory::{
     ConfigReconcilerInventory, ConfigReconcilerInventoryResult,
-    ConfigReconcilerInventoryStatus, HostPhase2DesiredSlots, Inventory,
-    InventoryDataset, InventoryDisk, InventoryZpool,
+    ConfigReconcilerInventoryStatus, FmdInventory, HostPhase2DesiredSlots,
+    Inventory, InventoryDataset, InventoryDisk, InventoryZpool,
     OmicronFileSourceResolverInventory, OmicronSledConfig, OmicronZonesConfig,
     SingleMeasurementInventory, SledRole, ZpoolHealth,
 };
 use sled_agent_types::support_bundle::SupportBundleMetadata;
+use sled_agent_types::system_networking::SystemNetworkingConfig;
 
 use slog::Logger;
 use std::collections::{HashMap, HashSet};
@@ -144,16 +144,25 @@ impl SledAgent {
         let storage_log = log.new(o!("kind" => "storage"));
 
         let bootstore_network_config = Mutex::new(
-            EarlyNetworkConfigEnvelope::from(&EarlyNetworkConfigBody {
+            EarlyNetworkConfigEnvelope::from(&SystemNetworkingConfig {
                 rack_network_config: RackNetworkConfig {
                     rack_subnet: Ipv6Net::new(Ipv6Addr::UNSPECIFIED, 56)
                         .unwrap(),
                     infra_ip_first: IpAddr::V4(Ipv4Addr::UNSPECIFIED),
                     infra_ip_last: IpAddr::V4(Ipv4Addr::UNSPECIFIED),
-                    ports: Vec::new(),
+                    // The simulated sled-agent doesn't do real uplink setup,
+                    // but `UplinkPorts` must be non-empty, so use a single
+                    // placeholder port.
+                    ports: UplinkPorts::new(vec![PortConfig::empty_for_tests(
+                        "qsfp0",
+                    )])
+                    .expect("placeholder port list is non-empty"),
                     bgp: Vec::new(),
                     bfd: Vec::new(),
                 },
+                // TODO-correctness Can we fill this in for the simulated
+                // sled-agent?
+                blueprint_external_networking_config: None,
             })
             .serialize_to_bootstore_with_generation(0),
         );
@@ -993,6 +1002,7 @@ impl SledAgent {
             ),
             smf_services_enabled_not_online,
             reference_measurements,
+            fmd: Ok(FmdInventory::default()),
         })
     }
 

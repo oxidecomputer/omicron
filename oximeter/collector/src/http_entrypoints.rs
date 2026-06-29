@@ -4,8 +4,6 @@
 
 //! Oximeter collector server HTTP API
 
-// Copyright 2025 Oxide Computer Company
-
 use crate::OximeterAgent;
 use dropshot::ApiDescription;
 use dropshot::EmptyScanParams;

@@ -25,8 +25,6 @@
 //! effectively a SQL-to-SQL transpiler, converting queries against the
 //! timeseries into one or more queries against the actual tables in ClickHouse.
 
-// Copyright 2023 Oxide Computer Company
-
 use crate::DatumType;
 use crate::Error as OxdbError;
 use crate::FieldType;
@@ -128,6 +126,13 @@ pub struct RestrictedQuery {
 impl std::fmt::Display for RestrictedQuery {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(f, "{}", self.query)
+    }
+}
+
+impl RestrictedQuery {
+    /// Return the timeseries names referenced by this query.
+    pub fn timeseries(&self) -> impl Iterator<Item = &TimeseriesName> {
+        self.timeseries.iter()
     }
 }
 

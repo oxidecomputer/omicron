@@ -2,7 +2,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 //
-// Copyright 2025 Oxide Computer Company
 
 //! Integration tests for multicast group APIs and IP pool operations.
 //!
@@ -866,6 +865,14 @@ async fn test_cannot_delete_multicast_pool_with_groups(
         "IP Pool cannot be deleted while it contains IP ranges"
     );
 
+    // Verify we can't unlink the pool from the silo while groups are
+    // allocated from it.
+    let unlink_url = format!(
+        "/v1/system/ip-pools/{pool_name}/silos/{}",
+        DEFAULT_SILO.name().as_str()
+    );
+    object_delete_error(client, &unlink_url, StatusCode::BAD_REQUEST).await;
+
     cleanup_instances(cptestctx, client, project_name, &[instance_name]).await;
     wait_for_group_deleted(cptestctx, group_name).await;
 
@@ -881,6 +888,9 @@ async fn test_cannot_delete_multicast_pool_with_groups(
     .expect(
         "Should be able to delete range after groups are implicitly deleted",
     );
+
+    // And we can unlink the pool from the silo
+    object_delete(client, &unlink_url).await;
 
     // And now we should be able to delete the pool
     NexusRequest::object_delete(client, &pool_url)

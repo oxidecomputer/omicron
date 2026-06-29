@@ -97,6 +97,7 @@ use super::{
     },
 };
 use crate::app::sagas::declare_saga_actions;
+use crate::app::sagas::sled_out_of_service_gone_check;
 use crate::app::{authn, authz, db};
 use anyhow::anyhow;
 use nexus_db_lookup::LookupPath;
@@ -105,15 +106,13 @@ use nexus_db_queries::db::identity::{Asset, Resource};
 use nexus_types::external_api::{disk, snapshot};
 use nexus_types::saga::saga_action_failed;
 use omicron_common::api::external::Error;
-use omicron_common::progenitor_operation_retry::ProgenitorOperationRetry;
-use omicron_common::progenitor_operation_retry::ProgenitorOperationRetryError;
 use omicron_common::{
     api::external, backoff::backon_retry_policy_internal_service,
 };
 use omicron_uuid_kinds::{GenericUuid, PropolisUuid, VolumeUuid};
-use progenitor_extras::retry::{
-    GoneCheckResult, retry_operation_while_indefinitely,
-};
+use progenitor_extras::retry::GoneCheckResult;
+use progenitor_extras::retry::IndefiniteRetryOperationWhileError;
+use progenitor_extras::retry::retry_operation_while_indefinitely;
 use rand::{RngCore, SeedableRng, rngs::StdRng};
 use serde::Deserialize;
 use serde::Serialize;
@@ -863,24 +862,20 @@ async fn ssc_send_snapshot_request_to_sled_agent(
             )
             .await
     };
-    // `check_sled_in_service` returns an error if the sled is no longer in
-    // service; if it succeeds, the sled is not gone.
+
+    // Bail out of the retry loop if the sled is gone.
     let gone_check = || async {
-        osagactx
-            .datastore()
-            .check_sled_in_service(&opctx, sled_id)
+        sled_out_of_service_gone_check(osagactx.datastore(), &opctx, sled_id)
             .await
-            .map(|()| GoneCheckResult::StillAvailable)
     };
 
-    let notify_log = log.clone();
     retry_operation_while_indefinitely(
         backon_retry_policy_internal_service(),
         snapshot_operation,
         gone_check,
         |notification| {
             slog::warn!(
-                notify_log,
+                log,
                 "failed to issue VMM disk snapshot request, retrying in {:?}",
                 notification.delay;
                 InlineErrorChain::new(&notification.error),
@@ -1184,8 +1179,11 @@ async fn ssc_call_pantry_attach_for_disk_undo(
         )
         .await
         {
+            Ok(()) => (),
+
             // We can treat the pantry being permanently gone as success.
-            Ok(()) | Err(ProgenitorOperationRetryError::Gone) => (),
+            Err(err) if err.is_gone() => (),
+
             Err(err) => {
                 return Err(anyhow!(
                     "failed to detach disk {} from pantry at {}: {}",
@@ -1239,15 +1237,42 @@ async fn ssc_call_pantry_snapshot_for_disk(
             )
             .await
     };
-    let gone_check =
-        || async { Ok(is_pantry_gone(nexus, pantry_address, log).await) };
 
-    ProgenitorOperationRetry::new(snapshot_operation, gone_check)
-        .run(log)
-        .await
-        .map_err(|e| {
-            saga_action_failed(Error::internal_error(&e.to_string()))
-        })?;
+    let gone_check = || async {
+        let result = match is_pantry_gone(nexus, pantry_address, log).await {
+            true => GoneCheckResult::Gone,
+            false => GoneCheckResult::StillAvailable,
+        };
+
+        Ok(result)
+    };
+
+    retry_operation_while_indefinitely(
+        backon_retry_policy_internal_service(),
+        snapshot_operation,
+        gone_check,
+        |notification| {
+            slog::warn!(
+                log,
+                "failed to issue pantry disk snapshot request, \
+                retrying in {:?}",
+                notification.delay;
+                InlineErrorChain::new(&notification.error),
+            );
+        },
+    )
+    .await
+    .map_err(
+        |e: IndefiniteRetryOperationWhileError<
+            crucible_pantry_client::types::Error,
+            Error,
+        >| {
+            saga_action_failed(Error::internal_error(&format!(
+                "pantry snapshot request failed: {}",
+                InlineErrorChain::new(&e)
+            )))
+        },
+    )?;
 
     Ok(())
 }
@@ -1766,10 +1791,10 @@ mod test {
     use nexus_test_utils::resource_helpers::object_create;
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::external_api::instance as instance_types;
+    use nexus_types::external_api::instance::InstanceCpuCount;
+    use nexus_types_versions::latest::instance::Instance;
     use omicron_common::api::external::ByteCount;
     use omicron_common::api::external::IdentityMetadataCreateParams;
-    use omicron_common::api::external::Instance;
-    use omicron_common::api::external::InstanceCpuCount;
     use omicron_common::api::external::Name;
     use omicron_common::api::external::NameOrId;
     use sled_agent_client::CrucibleOpts;
@@ -2170,6 +2195,7 @@ mod test {
                 auto_restart_policy: Default::default(),
                 anti_affinity_groups: Vec::new(),
                 multicast_groups: Vec::new(),
+                enable_jumbo_frames: false,
             },
         )
         .await;

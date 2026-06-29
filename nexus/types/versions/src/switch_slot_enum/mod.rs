@@ -17,7 +17,7 @@ pub mod networking;
 
 use omicron_common::api::external::Error;
 use omicron_common::api::external::Name;
-use sled_agent_types::early_networking::SwitchSlot;
+use sled_agent_types_versions::v1::early_networking::SwitchSlot;
 
 fn parse_str_as_switch_slot(switch_slot: &str) -> Result<SwitchSlot, Error> {
     match switch_slot {

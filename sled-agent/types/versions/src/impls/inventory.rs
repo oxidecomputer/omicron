@@ -11,8 +11,9 @@ use camino::Utf8PathBuf;
 use chrono::Utc;
 use iddqd::IdOrdMap;
 use indent_write::fmt::IndentWriter;
+use omicron_common::address::Ip;
+use omicron_common::address::NUM_SOURCE_NAT_PORTS;
 use omicron_common::api::external::Generation;
-use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_common::disk::{DatasetKind, DatasetName, M2Slot};
 use omicron_common::update::{ArtifactId, OmicronInstallManifestSource};
 use omicron_uuid_kinds::MupdateUuid;
@@ -20,15 +21,18 @@ use tufaceous_artifact::{ArtifactHash, KnownArtifactKind};
 
 use crate::latest::inventory::{
     BootImageHeader, BootPartitionContents, BootPartitionDetails,
-    ConfigReconcilerInventory, ConfigReconcilerInventoryResult,
-    HostPhase2DesiredContents, HostPhase2DesiredSlots, ManifestBootInventory,
-    ManifestInventory, ManifestNonBootInventory, MupdateOverrideBootInventory,
+    ConfigReconcilerInventory, ConfigReconcilerInventoryResult, FmdHostCase,
+    FmdInventory, FmdInventoryError, FmdResource, HostPhase2DesiredContents,
+    HostPhase2DesiredSlots, ManifestBootInventory, ManifestInventory,
+    ManifestNonBootInventory, MupdateOverrideBootInventory,
     MupdateOverrideInventory, MupdateOverrideNonBootInventory,
-    OmicronFileSourceResolverInventory, OmicronSledConfig, OmicronZoneConfig,
-    OmicronZoneImageSource, OmicronZoneType, OmicronZonesConfig,
-    RemoveMupdateOverrideBootSuccessInventory, RemoveMupdateOverrideInventory,
-    SingleMeasurementInventory, SvcState, SvcsEnabledNotOnline,
-    ZoneArtifactInventory, ZoneKind, ZpoolHealth,
+    NetworkInterface, OmicronFileSourceResolverInventory, OmicronSledConfig,
+    OmicronZoneConfig, OmicronZoneImageSource, OmicronZoneType,
+    OmicronZonesConfig, RemoveMupdateOverrideBootSuccessInventory,
+    RemoveMupdateOverrideInventory, SingleMeasurementInventory,
+    SourceNatConfig, SourceNatConfigGeneric, SourceNatConfigV4,
+    SourceNatConfigV6, SvcEnabledNotOnlineState, SvcState,
+    SvcsEnabledNotOnline, ZoneArtifactInventory, ZoneKind, ZpoolHealth,
 };
 
 impl ZoneKind {
@@ -907,6 +911,116 @@ impl fmt::Display for SingleMeasurementInventoryDisplay<'_> {
     }
 }
 
+/// a displayer for the FMD inventory result on a sled
+pub struct FmdInventoryResultDisplay<'a> {
+    inner: &'a Result<FmdInventory, FmdInventoryError>,
+}
+
+impl<'a> FmdInventoryResultDisplay<'a> {
+    pub fn new(result: &'a Result<FmdInventory, FmdInventoryError>) -> Self {
+        Self { inner: result }
+    }
+}
+
+impl fmt::Display for FmdInventoryResultDisplay<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.inner {
+            Ok(inv) => write!(f, "{}", inv.display()),
+            Err(err) => writeln!(f, "FMD collection failed: {err}"),
+        }
+    }
+}
+
+impl FmdInventory {
+    pub fn display(&self) -> FmdInventoryDisplay<'_> {
+        FmdInventoryDisplay { inner: self }
+    }
+}
+
+/// a displayer for [`FmdInventory`]
+pub struct FmdInventoryDisplay<'a> {
+    inner: &'a FmdInventory,
+}
+
+impl fmt::Display for FmdInventoryDisplay<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let FmdInventory { cases, resources } = self.inner;
+        if cases.is_empty() && resources.is_empty() {
+            writeln!(f, "no faults reported")?;
+            return Ok(());
+        }
+        writeln!(f, "cases ({}):", cases.len())?;
+        for case in cases {
+            let mut indent = IndentWriter::new("  ", &mut *f);
+            write!(indent, "{}", case.display())?;
+        }
+        writeln!(f, "resources ({}):", resources.len())?;
+        for resource in resources {
+            let mut indent = IndentWriter::new("  ", &mut *f);
+            write!(indent, "{}", resource.display())?;
+        }
+        Ok(())
+    }
+}
+
+impl FmdHostCase {
+    pub fn display(&self) -> FmdHostCaseDisplay<'_> {
+        FmdHostCaseDisplay { inner: self }
+    }
+}
+
+/// a displayer for [`FmdHostCase`]
+pub struct FmdHostCaseDisplay<'a> {
+    inner: &'a FmdHostCase,
+}
+
+impl fmt::Display for FmdHostCaseDisplay<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let FmdHostCase { uuid, code, url, event } = self.inner;
+        writeln!(f, "case {uuid} ({code})")?;
+        writeln!(f, "  url: {url}")?;
+        // The event payload is the FMD nvlist serialized to JSON. We
+        // intentionally do not interpret it; round-trip pretty-printing
+        // is enough to make it human-readable.
+        if let Some(event) = event {
+            match serde_json::to_string_pretty(event) {
+                Ok(rendered) => {
+                    writeln!(f, "  event:")?;
+                    let mut indent = IndentWriter::new("    ", &mut *f);
+                    writeln!(indent, "{rendered}")?;
+                }
+                Err(_) => writeln!(f, "  event: <unrenderable>")?,
+            }
+        }
+        Ok(())
+    }
+}
+
+impl FmdResource {
+    pub fn display(&self) -> FmdResourceDisplay<'_> {
+        FmdResourceDisplay { inner: self }
+    }
+}
+
+/// a displayer for [`FmdResource`]
+pub struct FmdResourceDisplay<'a> {
+    inner: &'a FmdResource,
+}
+
+impl fmt::Display for FmdResourceDisplay<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let FmdResource { uuid, fmri, case_id, faulty, unusable, invisible } =
+            self.inner;
+        writeln!(f, "resource {uuid} (case {case_id})")?;
+        writeln!(f, "  fmri: {fmri}")?;
+        writeln!(
+            f,
+            "  faulty: {faulty:<5}  unusable: {unusable:<5}  invisible: {invisible:<5}"
+        )?;
+        Ok(())
+    }
+}
+
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
 #[error("unrecognized zpool health value `{0}`")]
 pub struct ZpoolHealthParseError(pub String);
@@ -944,17 +1058,12 @@ impl fmt::Display for ZpoolHealth {
     }
 }
 
-impl From<&'_ str> for SvcState {
-    fn from(value: &str) -> Self {
+impl From<SvcEnabledNotOnlineState> for SvcState {
+    fn from(value: SvcEnabledNotOnlineState) -> Self {
         match value {
-            "uninitialized" => SvcState::Uninitialized,
-            "offline" => SvcState::Offline,
-            "online" => SvcState::Online,
-            "degraded" => SvcState::Degraded,
-            "maintenance" => SvcState::Maintenance,
-            "disabled" => SvcState::Disabled,
-            "legacy_run" => SvcState::LegacyRun,
-            _ => SvcState::Unknown,
+            SvcEnabledNotOnlineState::Degraded => Self::Degraded,
+            SvcEnabledNotOnlineState::Maintenance => Self::Maintenance,
+            SvcEnabledNotOnlineState::Offline => Self::Offline,
         }
     }
 }
@@ -969,9 +1078,189 @@ impl fmt::Display for SvcState {
             SvcState::Maintenance => "maintenance",
             SvcState::Disabled => "disabled",
             SvcState::LegacyRun => "legacy_run",
-            SvcState::Unknown => "unknown",
         };
 
         write!(f, "{state}")
+    }
+}
+
+impl fmt::Display for SvcEnabledNotOnlineState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let state = match self {
+            SvcEnabledNotOnlineState::Offline => "offline",
+            SvcEnabledNotOnlineState::Degraded => "degraded",
+            SvcEnabledNotOnlineState::Maintenance => "maintenance",
+        };
+
+        write!(f, "{state}")
+    }
+}
+
+impl<T: Ip> SourceNatConfig<T> {
+    /// Get the port range.
+    ///
+    /// Guaranteed to be aligned to [`NUM_SOURCE_NAT_PORTS`].
+    pub fn port_range(&self) -> std::ops::RangeInclusive<u16> {
+        self.first_port..=self.last_port
+    }
+
+    /// Get the port range as a raw tuple; both values are inclusive.
+    ///
+    /// Guaranteed to be aligned to [`NUM_SOURCE_NAT_PORTS`].
+    pub fn port_range_raw(&self) -> (u16, u16) {
+        self.port_range().into_inner()
+    }
+}
+
+impl SourceNatConfigGeneric {
+    /// Try to convert this to a concrete IPv4 configuration.
+    ///
+    /// Return None if this is an IPv6 configuration.
+    pub fn try_as_ipv4(&self) -> Option<SourceNatConfigV4> {
+        let IpAddr::V4(ip) = self.ip else {
+            return None;
+        };
+        Some(SourceNatConfig {
+            ip,
+            first_port: self.first_port,
+            last_port: self.last_port,
+        })
+    }
+
+    /// Try to convert this to a concrete IPv6 configuration.
+    ///
+    /// Return None if this is an IPv4 configuration.
+    pub fn try_as_ipv6(&self) -> Option<SourceNatConfigV6> {
+        let IpAddr::V6(ip) = self.ip else {
+            return None;
+        };
+        Some(SourceNatConfig {
+            ip,
+            first_port: self.first_port,
+            last_port: self.last_port,
+        })
+    }
+}
+
+#[cfg(any(test, feature = "testing"))]
+impl<T> proptest::arbitrary::Arbitrary for SourceNatConfig<T>
+where
+    T: Ip + proptest::arbitrary::Arbitrary,
+    T::Strategy: 'static,
+{
+    type Parameters = ();
+    type Strategy = proptest::prelude::BoxedStrategy<Self>;
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        use proptest::strategy::Strategy;
+
+        let num_possible_first_ports = u16::MAX / NUM_SOURCE_NAT_PORTS + 1;
+        let first_port_strategy = (0u16..num_possible_first_ports)
+            .prop_map(|i| i * NUM_SOURCE_NAT_PORTS);
+
+        (T::arbitrary(), first_port_strategy)
+            .prop_map(|(ip, first_port)| {
+                let last_port = first_port + (NUM_SOURCE_NAT_PORTS - 1);
+                Self::new(ip, first_port, last_port)
+                    .expect("Arbitrary impl produces aligned port pairs")
+            })
+            .boxed()
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum SourceNatConfigError {
+    #[error(
+        "snat port range is not aligned to {NUM_SOURCE_NAT_PORTS}: \
+         ({first_port}, {last_port})"
+    )]
+    UnalignedPortPair { first_port: u16, last_port: u16 },
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::latest::inventory::{FmdInventoryError, FmdInventoryErrorKind};
+    use iddqd::IdOrdMap;
+    use omicron_uuid_kinds::{FmdHostCaseUuid, FmdResourceUuid, GenericUuid};
+    use uuid::Uuid;
+
+    #[test]
+    fn fmd_inventory_result_display_snapshot() {
+        let case_uuid = FmdHostCaseUuid::from_untyped_uuid(Uuid::from_u128(
+            0xfeed_face_dead_beef_dead_beef_dead_beef,
+        ));
+        let case_uuid_2 = FmdHostCaseUuid::from_untyped_uuid(Uuid::from_u128(
+            0xfeed_face_dead_beef_dead_beef_dead_b00f,
+        ));
+        let resource_uuid = FmdResourceUuid::from_untyped_uuid(
+            Uuid::from_u128(0xbada_55ca_fe00_0000_0000_0000_0000_0001),
+        );
+        let resource_uuid_2 = FmdResourceUuid::from_untyped_uuid(
+            Uuid::from_u128(0xbada_55ca_fe00_0000_0000_0000_0000_0002),
+        );
+
+        let mut cases = IdOrdMap::new();
+        cases
+            .insert_unique(FmdHostCase {
+                uuid: case_uuid,
+                code: "JOKE-9001-FAKE".to_string(),
+                url: "http://example.invalid/msg/JOKE-9001-FAKE".to_string(),
+                event: Some(serde_json::json!({
+                    "class": "fault.vibes.off",
+                    "spookiness": 9001,
+                    "suspects": ["casper", "slimer"],
+                })),
+            })
+            .expect("case uuid is unique");
+        cases
+            .insert_unique(FmdHostCase {
+                uuid: case_uuid_2,
+                code: "BOO-0000-FAKE".to_string(),
+                url: "http://example.invalid/msg/BOO-0000-FAKE".to_string(),
+                event: None,
+            })
+            .expect("case uuid is unique");
+
+        let mut resources = IdOrdMap::new();
+        resources
+            .insert_unique(FmdResource {
+                uuid: resource_uuid,
+                fmri: "ghost:///not/a/real/fmri".to_string(),
+                case_id: case_uuid,
+                faulty: true,
+                unusable: false,
+                invisible: false,
+            })
+            .expect("resource uuid is unique");
+        resources
+            .insert_unique(FmdResource {
+                uuid: resource_uuid_2,
+                fmri: "ghost:///also/not/a/real/fmri".to_string(),
+                case_id: case_uuid_2,
+                faulty: false,
+                unusable: true,
+                invisible: true,
+            })
+            .expect("resource uuid is unique");
+
+        let ok: Result<FmdInventory, FmdInventoryError> =
+            Ok(FmdInventory { cases, resources });
+        let err: Result<FmdInventory, FmdInventoryError> =
+            Err(FmdInventoryError {
+                kind: FmdInventoryErrorKind::FmdError,
+                message: "haunted by an absent fmd daemon".to_string(),
+            });
+
+        let mut out = String::new();
+        out.push_str("--- ok variant ---\n");
+        out.push_str(&FmdInventoryResultDisplay::new(&ok).to_string());
+        out.push_str("--- err variant ---\n");
+        out.push_str(&FmdInventoryResultDisplay::new(&err).to_string());
+
+        expectorate::assert_contents(
+            "tests/output/fmd_inventory_display.txt",
+            &out,
+        );
     }
 }

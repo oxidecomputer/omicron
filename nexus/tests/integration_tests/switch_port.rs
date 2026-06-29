@@ -4,28 +4,32 @@
 
 //! Integration tests for operating on Ports
 
-use std::str::FromStr;
-
 use http::StatusCode;
 use http::method::Method;
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::networking::{
     Address, AddressConfig, AddressLotBlockCreate, AddressLotCreate,
-    BgpAnnounceSetCreate, BgpAnnouncementCreate, BgpConfigCreate, BgpPeer,
-    BgpPeerConfig, LinkConfigCreate, LldpLinkConfigCreate, Route, RouteConfig,
-    SwitchInterfaceConfigCreate, SwitchInterfaceKind, SwitchPort,
-    SwitchPortApplySettings, SwitchPortSettings, SwitchPortSettingsCreate,
+    AddressLotKind, BgpAnnounceSetCreate, BgpAnnouncementCreate, BgpConfig,
+    BgpConfigCreate, BgpConfigUpdate, BgpPeer, BgpPeerConfig, LinkConfigCreate,
+    LldpLinkConfigCreate, Route, RouteConfig, SwitchInterfaceConfigCreate,
+    SwitchInterfaceKind, SwitchPort, SwitchPortApplySettings,
+    SwitchPortSettings, SwitchPortSettingsCreate,
 };
 use nexus_types::external_api::rack::Rack;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::{
-    self, AddressLotKind, IdentityMetadataCreateParams, LinkFec, LinkSpeed,
-    NameOrId,
+    IdentityMetadataCreateParams, IdentityMetadataUpdateParams, NameOrId,
 };
 use oxnet::IpNet;
 use sled_agent_types::early_networking::ImportExportPolicy;
+use sled_agent_types::early_networking::LinkFec;
+use sled_agent_types::early_networking::LinkSpeed;
+use sled_agent_types::early_networking::MaxPathConfig;
+use sled_agent_types::early_networking::RouterLifetimeConfig;
+use sled_agent_types::early_networking::RouterPeerType;
 use sled_agent_types::early_networking::SwitchSlot;
+use std::str::FromStr;
 
 type ControlPlaneTestContext =
     nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
@@ -230,7 +234,7 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
     let ifx0 = &created.interfaces[0];
     assert_eq!(&ifx0.interface_name.to_string(), "phy0");
     assert_eq!(ifx0.v6_enabled, true);
-    assert_eq!(ifx0.kind, external::SwitchInterfaceKind::Primary);
+    assert_eq!(ifx0.kind, SwitchInterfaceKind::Primary);
 
     let route0 = &created.routes[0];
     assert_eq!(route0.dst, IpNet::from_str("1.2.3.0/24").unwrap());
@@ -272,7 +276,7 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
     let ifx0 = &roundtrip.interfaces[0];
     assert_eq!(&ifx0.interface_name.to_string(), "phy0");
     assert_eq!(ifx0.v6_enabled, true);
-    assert_eq!(ifx0.kind, external::SwitchInterfaceKind::Primary);
+    assert_eq!(ifx0.kind, SwitchInterfaceKind::Primary);
 
     let route0 = &roundtrip.routes[0];
     assert_eq!(route0.dst, IpNet::from_str("1.2.3.0/24").unwrap());
@@ -315,8 +319,9 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
             // Numbered peer - identified by address
             BgpPeer {
                 bgp_config: NameOrId::Name("as47".parse().unwrap()),
-                interface_name: "phy0".parse().unwrap(),
-                addr: Some("1.2.3.4".parse().unwrap()),
+                addr: RouterPeerType::Numbered {
+                    ip: "1.2.3.4".parse().unwrap(),
+                },
                 hold_time: 6,
                 idle_hold_time: 6,
                 delay_open: 0,
@@ -332,13 +337,13 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
                 allowed_export: ImportExportPolicy::NoFiltering,
                 allowed_import: ImportExportPolicy::NoFiltering,
                 vlan_id: None,
-                router_lifetime: 0,
             },
-            // Unnumbered peer - identified by interface only (addr is None)
+            // Unnumbered peer - identified by link from parent `BgpPeerConfig`
             BgpPeer {
                 bgp_config: NameOrId::Name("as47".parse().unwrap()),
-                interface_name: "phy0".parse().unwrap(),
-                addr: None,
+                addr: RouterPeerType::Unnumbered {
+                    router_lifetime: RouterLifetimeConfig::new(123).unwrap(),
+                },
                 hold_time: 6,
                 idle_hold_time: 6,
                 delay_open: 0,
@@ -358,7 +363,6 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
                     "192.168.0.0/16".parse().unwrap(),
                 ]),
                 vlan_id: None,
-                router_lifetime: 0,
             },
         ],
     });
@@ -381,11 +385,11 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
     let numbered_peer = created
         .bgp_peers
         .iter()
-        .find(|p| p.addr.is_some())
+        .find(|p| p.addr.is_numbered())
         .expect("Should have a numbered peer");
     assert_eq!(
         numbered_peer.addr,
-        Some("1.2.3.4".parse().unwrap()),
+        RouterPeerType::Numbered { ip: "1.2.3.4".parse().unwrap() },
         "Numbered peer should have addr 1.2.3.4"
     );
 
@@ -393,11 +397,13 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
     let unnumbered_peer = created
         .bgp_peers
         .iter()
-        .find(|p| p.addr.is_none())
+        .find(|p| p.addr.is_unnumbered())
         .expect("Should have an unnumbered peer");
     assert_eq!(
-        unnumbered_peer.addr, None,
-        "Unnumbered peer should have no addr"
+        unnumbered_peer.addr,
+        RouterPeerType::Unnumbered {
+            router_lifetime: RouterLifetimeConfig::new(123).unwrap(),
+        }
     );
     assert_eq!(
         unnumbered_peer.remote_asn,
@@ -451,8 +457,14 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
     let roundtrip_unnumbered = roundtrip
         .bgp_peers
         .iter()
-        .find(|p| p.addr.is_none())
+        .find(|p| p.addr.is_unnumbered())
         .expect("Roundtrip should have an unnumbered peer");
+    assert_eq!(
+        roundtrip_unnumbered.addr,
+        RouterPeerType::Unnumbered {
+            router_lifetime: RouterLifetimeConfig::new(123).unwrap(),
+        }
+    );
     assert_eq!(roundtrip_unnumbered.remote_asn, Some(65000));
     assert_eq!(roundtrip_unnumbered.communities, vec![65000]);
 
@@ -670,4 +682,146 @@ async fn test_port_settings_basic_v6_crud(ctx: &ControlPlaneTestContext) {
         }
     }
     panic!("expected number of routes not found");
+}
+
+#[nexus_test]
+async fn test_bgp_config_update(ctx: &ControlPlaneTestContext) {
+    let client = &ctx.external_client;
+
+    let parkinglot: Name = "parkinglot".parse().unwrap();
+    let as47: Name = "as47".parse().unwrap();
+    let instances = NameOrId::Name("instances".parse().unwrap());
+
+    // Create an address lot for the announce set blocks.
+    let lot_params = AddressLotCreate {
+        identity: IdentityMetadataCreateParams {
+            name: parkinglot.clone(),
+            description: "an address parking lot".into(),
+        },
+        kind: AddressLotKind::Infra,
+        blocks: vec![AddressLotBlockCreate {
+            first_address: "1.2.3.0".parse().unwrap(),
+            last_address: "1.2.3.255".parse().unwrap(),
+        }],
+    };
+    NexusRequest::objects_post(
+        client,
+        "/v1/system/networking/address-lot",
+        &lot_params,
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
+
+    // Create two announce sets so the config can be moved between them.
+    for name in ["instances", "instances2"] {
+        let announce_set = BgpAnnounceSetCreate {
+            identity: IdentityMetadataCreateParams {
+                name: name.parse().unwrap(),
+                description: "an announce set".into(),
+            },
+            announcement: vec![BgpAnnouncementCreate {
+                address_lot_block: NameOrId::Name(parkinglot.clone()),
+                network: "1.2.3.0/24".parse().unwrap(),
+            }],
+        };
+        NexusRequest::object_put(
+            client,
+            "/v1/system/networking/bgp-announce-set",
+            Some(&announce_set),
+        )
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .unwrap();
+    }
+
+    // Create the BGP config.
+    let bgp_config = BgpConfigCreate {
+        identity: IdentityMetadataCreateParams {
+            name: as47.clone(),
+            description: "autonomous system 47".into(),
+        },
+        bgp_announce_set_id: instances.clone(),
+        asn: 47,
+        vrf: None,
+        checker: None,
+        shaper: None,
+        max_paths: Default::default(),
+    };
+    NexusRequest::objects_post(
+        client,
+        "/v1/system/networking/bgp",
+        &bgp_config,
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
+
+    let valid_update = BgpConfigUpdate {
+        identity: IdentityMetadataUpdateParams {
+            name: Some(as47),
+            description: Some("autonomous system 47".into()),
+        },
+        bgp_announce_set_id: Some(instances),
+        max_paths: Some(MaxPathConfig::new(1).unwrap()),
+    };
+
+    // Updating a config that doesn't exist is a 404.
+    NexusRequest::expect_failure_with_body(
+        client,
+        StatusCode::NOT_FOUND,
+        Method::PUT,
+        "/v1/system/networking/bgp?name_or_id=does-not-exist",
+        &valid_update,
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
+
+    // Referencing an announce set that doesn't exist is a 404.
+    NexusRequest::expect_failure_with_body(
+        client,
+        StatusCode::NOT_FOUND,
+        Method::PUT,
+        "/v1/system/networking/bgp?name_or_id=as47",
+        &BgpConfigUpdate {
+            bgp_announce_set_id: Some(NameOrId::Name(
+                "does-not-exist".parse().unwrap(),
+            )),
+            ..valid_update.clone()
+        },
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
+
+    // A valid update returns the updated configuration.
+    let update = BgpConfigUpdate {
+        identity: IdentityMetadataUpdateParams {
+            name: Some("as47-renamed".parse().unwrap()),
+            description: Some("renamed config".into()),
+        },
+        bgp_announce_set_id: Some(NameOrId::Name(
+            "instances2".parse().unwrap(),
+        )),
+        max_paths: Some(MaxPathConfig::new(3).unwrap()),
+    };
+    let updated: BgpConfig = NexusRequest::object_put(
+        client,
+        "/v1/system/networking/bgp?name_or_id=as47",
+        Some(&update),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute_and_parse_unwrap()
+    .await;
+
+    assert_eq!(updated.identity.name.to_string(), "as47-renamed");
+    assert_eq!(updated.identity.description, "renamed config");
+    assert_eq!(updated.asn, 47);
+    assert_eq!(updated.max_paths, MaxPathConfig::new(3).unwrap());
 }

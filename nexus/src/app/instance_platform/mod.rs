@@ -81,7 +81,6 @@ use super::LOCAL_STORAGE_WORKERS;
 use crate::db::datastore::Disk;
 use nexus_db_queries::db;
 use omicron_common::api::external::Error;
-use omicron_common::api::internal::shared::NetworkInterface;
 use sled_agent_client::types::VirtioSocket;
 use sled_agent_client::types::{
     BlobStorageBackend, Board, BootOrderEntry, BootSettings, Chipset,
@@ -90,6 +89,7 @@ use sled_agent_client::types::{
     SerialPortNumber, SpecKey, VirtioDisk, VirtioNetworkBackend, VirtioNic,
     VmmSpec,
 };
+use sled_agent_types::inventory::NetworkInterface;
 use uuid::Uuid;
 
 /// Default `guest_cid` for a propolis guest.
@@ -480,7 +480,10 @@ impl super::Nexus {
         nics: &[NetworkInterface],
         ssh_keys: &[db::model::SshKey],
     ) -> Result<VmmSpec, Error> {
-        let cpus = u8::try_from(instance.ncpus.0.0).map_err(|c| {
+        let cpus = instance.ncpus.0.0;
+        // TODO: we should be able to pass the u16 directly to Propolis, but
+        // we'll need to adjust propolis-server's Board for the wider cpu count.
+        let cpus_u8 = u8::try_from(cpus).map_err(|c| {
             Error::invalid_value(
                 c.to_string(),
                 "failed to convert instance CPU count to a u8",
@@ -563,11 +566,20 @@ impl super::Nexus {
         components.add_nics(nics)?;
         components.add_cloud_init(instance, ssh_keys)?;
 
+        let cpuid = cpuid_from_vmm_cpu_platform(vmm.cpu_platform, cpus)
+            .map_err(|e| {
+                let message = format!(
+                    "failed to instantiate CPU platform {}",
+                    vmm.cpu_platform
+                );
+                Error::invalid_value(e.to_string(), message)
+            })?;
+
         let spec = InstanceSpec {
             board: Board {
                 chipset: Chipset::I440Fx(I440Fx { enable_pcie: false }),
-                cpuid: cpuid_from_vmm_cpu_platform(vmm.cpu_platform),
-                cpus,
+                cpuid,
+                cpus: cpus_u8,
                 guest_hv_interface: None,
                 memory_mb: instance.memory.to_whole_mebibytes(),
             },
@@ -587,9 +599,10 @@ impl super::Nexus {
 // type.
 fn cpuid_from_vmm_cpu_platform(
     platform: db::model::VmmCpuPlatform,
-) -> Option<Cpuid> {
+    ncpu: u16,
+) -> Result<Option<Cpuid>, cpu_platform::CpuPlatformError> {
     let cpuid = match platform {
-        db::model::VmmCpuPlatform::SledDefault => return None,
+        db::model::VmmCpuPlatform::SledDefault => return Ok(None),
         db::model::VmmCpuPlatform::AmdMilan => Cpuid {
             entries: cpu_platform::dump_to_cpuid_entries(
                 cpu_platform::milan_rfd314(),
@@ -602,7 +615,13 @@ fn cpuid_from_vmm_cpu_platform(
             ),
             vendor: CpuidVendor::Amd,
         },
+        db::model::VmmCpuPlatform::AmdTurinV2 => Cpuid {
+            entries: cpu_platform::dump_to_cpuid_entries(
+                cpu_platform::turin_v2(ncpu)?,
+            ),
+            vendor: CpuidVendor::Amd,
+        },
     };
 
-    Some(cpuid)
+    Ok(Some(cpuid))
 }

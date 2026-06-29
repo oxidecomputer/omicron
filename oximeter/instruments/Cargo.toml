@@ -8,14 +8,18 @@ license = "MPL-2.0"
 workspace = true
 
 [dependencies]
+anyhow = { workspace = true, optional = true }
 cfg-if = { workspace = true, optional = true }
 chrono = { workspace = true, optional = true }
 dropshot = { workspace = true, optional = true }
 futures = { workspace = true, optional = true }
 http = { workspace = true, optional = true }
 hyper = { workspace = true, optional = true }
+illumos-utils = { workspace = true, optional = true }
 kstat-rs = { workspace = true, optional = true }
 libc = { workspace = true, optional = true }
+omicron-common= { workspace = true, optional = true }
+omicron-uuid-kinds= { workspace = true, optional = true }
 oximeter = { workspace = true, optional = true }
 schemars = { workspace = true, optional = true }
 serde = { workspace = true, optional = true }
@@ -27,7 +31,7 @@ uuid = { workspace = true, optional = true }
 omicron-workspace-hack.workspace = true
 
 [features]
-default = ["http-instruments", "cpu", "datalink", "zone"]
+default = ["http-instruments", "cpu", "datalink", "zfs", "zone"]
 http-instruments = [
     "dep:chrono",
     "dep:dropshot",
@@ -55,6 +59,17 @@ kstat = [
 ]
 cpu = ["kstat"]
 datalink = ["kstat"]
+zfs = [
+    "dep:anyhow",
+    "dep:illumos-utils",
+    "dep:omicron-common",
+    "dep:omicron-uuid-kinds",
+    "dep:oximeter",
+    "dep:slog",
+    "dep:tokio",
+    "dep:thiserror",
+    "dep:uuid"
+]
 zone = ["kstat"]
 
 [dev-dependencies]

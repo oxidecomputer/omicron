@@ -16,7 +16,17 @@ use std::collections::HashSet;
 use std::fmt;
 
 /// Describes the category of support bundle data.
-#[derive(Debug, Clone, Copy, Hash, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    Hash,
+    Eq,
+    PartialEq,
+    Serialize,
+    Deserialize,
+    clap::ValueEnum,
+)]
 #[cfg_attr(test, derive(test_strategy::Arbitrary))]
 pub enum BundleDataCategory {
     /// Collects reconfigurator state (some of the latest blueprints,

@@ -5,8 +5,8 @@
 //! Functional code for server types.
 
 use crate::latest::config::{
-    ClickhouseHost, KeeperNodeConfig, LogConfig, Macros, NodeType,
-    ReplicaConfig, ServerNodeConfig,
+    ClickhouseHost, KeeperNodeConfig, LogConfig, Macros, ReplicaConfig,
+    ServerNodeConfig,
 };
 use crate::latest::server::{
     DistributedDdlQueue, ServerConfigurableSettings, ServerId, ServerSettings,
@@ -24,10 +24,7 @@ use std::net::Ipv6Addr;
 impl ServerConfigurableSettings {
     /// Generate a configuration file for a replica server node
     pub fn generate_xml_file(&self) -> Result<ReplicaConfig> {
-        let logger = LogConfig::new(
-            self.settings.datastore_path.clone(),
-            NodeType::Server,
-        );
+        let logger = self.settings.logger.clone();
         let macros = Macros::new(self.settings.id);
 
         let keepers: Vec<KeeperNodeConfig> = self
@@ -92,6 +89,7 @@ impl ServerSettings {
         listen_addr: Ipv6Addr,
         keepers: Vec<ClickhouseHost>,
         remote_servers: Vec<ClickhouseHost>,
+        logger: LogConfig,
     ) -> Self {
         Self {
             config_dir,
@@ -100,6 +98,7 @@ impl ServerSettings {
             listen_addr,
             keepers,
             remote_servers,
+            logger,
         }
     }
 }
@@ -237,7 +236,7 @@ impl SystemTimeSeries {
 
 #[cfg(test)]
 mod tests {
-    use crate::latest::config::ClickhouseHost;
+    use crate::latest::config::{ClickhouseHost, LogConfig, LogLevel};
     use crate::latest::server::{
         DistributedDdlQueue, ServerConfigurableSettings, ServerId,
         ServerSettings, SystemTimeSeries,
@@ -285,6 +284,7 @@ mod tests {
             Ipv6Addr::from_str("ff::08").unwrap(),
             keepers,
             servers,
+            LogConfig::new(LogLevel::default()),
         );
 
         let config = ServerConfigurableSettings {

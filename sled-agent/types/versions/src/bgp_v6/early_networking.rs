@@ -309,9 +309,9 @@ pub struct PortConfig {
     /// Nmae of the port this config applies to.
     pub port: String,
     /// Port speed.
-    pub uplink_port_speed: v1::PortSpeed,
+    pub uplink_port_speed: v1::LinkSpeed,
     /// Port forward error correction type.
-    pub uplink_port_fec: Option<v1::PortFec>,
+    pub uplink_port_fec: Option<v1::LinkFec>,
     /// BGP peers on this port
     pub bgp_peers: Vec<BgpPeerConfig>,
     /// Whether or not to set autonegotiation
@@ -468,6 +468,9 @@ impl RouterLifetimeConfig {
     // Maximum valid router lifetime is 9000 seconds (2.5 hours) per RFC 4861
     const MAX: u16 = 9000;
 
+    /// Construct a new `RouterLifetimeConfig`
+    ///
+    /// Fails if `v` is above the maximum allowable value.
     pub fn new(v: u16) -> Result<Self, RouterLifetimeConfigError> {
         if v > Self::MAX {
             return Err(RouterLifetimeConfigError::ValueTooLarge);
@@ -528,12 +531,12 @@ impl JsonSchema for RouterLifetimeConfig {
 #[derive(Debug, thiserror::Error)]
 pub enum RouterLifetimeConfigError {
     #[error(
-        "router lifetime config cannot be greater than {}",
+        "router_lifetime cannot be greater than {}",
         RouterLifetimeConfig::MAX
     )]
     ValueTooLarge,
     #[error(
-        "max path value must be an integer between {} and {}",
+        "router_lifetime must be an integer between {} and {}",
         RouterLifetimeConfig::DEFAULT,
         RouterLifetimeConfig::MAX
     )]

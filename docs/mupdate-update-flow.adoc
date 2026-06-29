@@ -166,10 +166,7 @@ When all zone and host phase 2 images across all sleds have their image sources 
 
 [NOTE]
 ====
-Zone adds (but not updates) are also allowed when either of the following conditions are met:
-
-- no target release has ever been set for the rack (i.e. the current target release generation is the initial generation, 1)
-- the `add_zones_with_mupdate_override` planner config (default false) is set to true.
+Zone adds (but not updates) are also allowed when no target release has ever been set for the rack (i.e. the current target release generation is the initial generation, 1).
 ====
 
 == Appendix: Implementation rationale

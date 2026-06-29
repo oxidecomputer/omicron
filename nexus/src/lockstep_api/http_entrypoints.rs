@@ -38,7 +38,8 @@ use nexus_types::external_api::path_params::{BlueprintPath, PhysicalDiskPath};
 use nexus_types::external_api::rack::RackMembershipConfigPathParams;
 use nexus_types::external_api::sled::{SledPolicy, SledSelector};
 use nexus_types::external_api::support_bundle::{
-    self, SupportBundleFilePath, SupportBundlePath, SupportBundleUpdate,
+    SupportBundleCreate, SupportBundleFilePath, SupportBundlePath,
+    SupportBundleUpdate,
 };
 use nexus_types::internal_api::params::InstanceMigrateRequest;
 use nexus_types::internal_api::params::RackInitializationRequest;
@@ -47,12 +48,13 @@ use nexus_types::internal_api::views::DemoSaga;
 use nexus_types::internal_api::views::MgsUpdateDriverStatus;
 use nexus_types::internal_api::views::QuiesceStatus;
 use nexus_types::internal_api::views::Saga;
+use nexus_types::internal_api::views::SupportBundleInfo;
 use nexus_types::internal_api::views::UpdateStatus;
 use nexus_types::internal_api::views::to_list;
 use nexus_types::trust_quorum::TrustQuorumConfig;
 use nexus_types_versions::latest::headers::RangeRequest;
+use nexus_types_versions::latest::instance::Instance;
 use omicron_common::api::external::Error;
-use omicron_common::api::external::Instance;
 use omicron_common::api::external::http_pagination::PaginatedById;
 use omicron_common::api::external::http_pagination::PaginatedByTimeAndId;
 use omicron_common::api::external::http_pagination::ScanById;
@@ -94,7 +96,7 @@ impl NexusLockstepApi for NexusLockstepApiImpl {
         nexus
             .rack_initialize(
                 &opctx,
-                path.rack_id,
+                RackUuid::from_untyped_uuid(path.rack_id),
                 request,
                 true, // blueprint_execution_enabled
             )
@@ -618,10 +620,7 @@ impl NexusLockstepApi for NexusLockstepApiImpl {
     async fn support_bundle_list(
         rqctx: RequestContext<ApiContext>,
         query_params: Query<PaginatedByTimeAndId>,
-    ) -> Result<
-        HttpResponseOk<ResultsPage<support_bundle::SupportBundleInfo>>,
-        HttpError,
-    > {
+    ) -> Result<HttpResponseOk<ResultsPage<SupportBundleInfo>>, HttpError> {
         let apictx = rqctx.context();
         let handler = async {
             let nexus = &apictx.context.nexus;
@@ -642,8 +641,11 @@ impl NexusLockstepApi for NexusLockstepApiImpl {
             Ok(HttpResponseOk(ScanByTimeAndId::results_page(
                 &query,
                 bundles,
-                &|_, bundle: &support_bundle::SupportBundleInfo| {
-                    (bundle.time_created, bundle.id.into_untyped_uuid())
+                &|_, bundle: &SupportBundleInfo| {
+                    (
+                        bundle.base.time_created,
+                        bundle.base.id.into_untyped_uuid(),
+                    )
                 },
             )?))
         };
@@ -657,8 +659,7 @@ impl NexusLockstepApi for NexusLockstepApiImpl {
     async fn support_bundle_view(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<SupportBundlePath>,
-    ) -> Result<HttpResponseOk<support_bundle::SupportBundleInfo>, HttpError>
-    {
+    ) -> Result<HttpResponseOk<SupportBundleInfo>, HttpError> {
         let apictx = rqctx.context();
         let handler = async {
             let nexus = &apictx.context.nexus;
@@ -862,9 +863,8 @@ impl NexusLockstepApi for NexusLockstepApiImpl {
 
     async fn support_bundle_create(
         rqctx: RequestContext<Self::Context>,
-        body: TypedBody<support_bundle::SupportBundleCreate>,
-    ) -> Result<HttpResponseCreated<support_bundle::SupportBundleInfo>, HttpError>
-    {
+        body: TypedBody<SupportBundleCreate>,
+    ) -> Result<HttpResponseCreated<SupportBundleInfo>, HttpError> {
         let apictx = rqctx.context();
         let handler = async {
             let nexus = &apictx.context.nexus;
@@ -921,8 +921,7 @@ impl NexusLockstepApi for NexusLockstepApiImpl {
         rqctx: RequestContext<Self::Context>,
         path_params: Path<SupportBundlePath>,
         body: TypedBody<SupportBundleUpdate>,
-    ) -> Result<HttpResponseOk<support_bundle::SupportBundleInfo>, HttpError>
-    {
+    ) -> Result<HttpResponseOk<SupportBundleInfo>, HttpError> {
         let apictx = rqctx.context();
         let handler = async {
             let nexus = &apictx.context.nexus;
@@ -1140,6 +1139,23 @@ impl NexusLockstepApi for NexusLockstepApiImpl {
                 crate::context::op_context_for_internal_api(&rqctx).await;
             let epoch = nexus.tq_remove_sled(&opctx, sled_id).await?;
             Ok(HttpResponseOk(epoch))
+        };
+        apictx
+            .internal_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn fm_known_ereport_classes_list(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<Vec<String>>, HttpError> {
+        let apictx = &rqctx.context().context;
+        let handler = async {
+            let classes = nexus_fm::diagnosis::known_ereport_classes()
+                .iter()
+                .map(|s| (*s).to_string())
+                .collect();
+            Ok(HttpResponseOk(classes))
         };
         apictx
             .internal_latencies

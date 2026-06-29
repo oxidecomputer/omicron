@@ -23,10 +23,8 @@ use nexus_types::deployment::OmicronZoneExternalSnatIp;
 use nexus_types::external_api::external_ip as external_ip_types;
 use nexus_types::external_api::floating_ip as floating_ip_types;
 use nexus_types::external_api::probe::{ProbeExternalIp, ProbeExternalIpKind};
-use nexus_types::inventory::SourceNatConfigGeneric;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::IdentityMetadata;
-use omicron_common::api::internal::shared::SourceNatConfigError;
 use omicron_uuid_kinds::ExternalIpUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
@@ -34,6 +32,8 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
 use sled_agent_client::types::InstanceExternalIpBody;
+use sled_agent_types::inventory::SourceNatConfigError;
+use sled_agent_types::inventory::SourceNatConfigGeneric;
 use sled_agent_types::inventory::ZoneKind;
 use slog_error_chain::SlogInlineError;
 use std::convert::TryFrom;
@@ -228,9 +228,7 @@ pub struct FloatingIp {
     pub project_id: Uuid,
 }
 
-impl TryFrom<ExternalIp>
-    for omicron_common::api::internal::shared::SourceNatConfigGeneric
-{
+impl TryFrom<ExternalIp> for SourceNatConfigGeneric {
     type Error = SourceNatConfigError;
 
     fn try_from(eip: ExternalIp) -> Result<Self, Self::Error> {

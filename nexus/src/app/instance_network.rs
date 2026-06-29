@@ -16,12 +16,12 @@ use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use omicron_common::api::external::Error;
-use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
 use oxnet::IpNet;
 use oxnet::Ipv6Net;
 use sled_agent_types::early_networking::SwitchSlot;
+use sled_agent_types::inventory::NetworkInterface;
 use slog_error_chain::InlineErrorChain;
 use std::collections::HashSet;
 use std::str::FromStr;
@@ -652,7 +652,15 @@ pub(crate) async fn instance_delete_dpd_config(
         instance_id,
     )
     .await;
-    notify_dendrite_nat_state(
+
+    // Just like in `instance_ensure_dpd_config`, we should not bail out if
+    // there is an error while notifying dendrite. If there is an error
+    // communicating with one dendrite instance but the other is operational and
+    // we bail here, it will prevent Nexus from tearing down the VMM's network
+    // config, leaving the instance stuck and preventing it from being restarted
+    // or deleted. Dendrite should still catch back up via a RPW if we fail to
+    // notify it here.
+    if let Err(error) = notify_dendrite_nat_state(
         datastore,
         log,
         resolver,
@@ -660,6 +668,15 @@ pub(crate) async fn instance_delete_dpd_config(
         Some(instance_id),
     )
     .await
+    {
+        warn!(
+            log,
+            "error encountered while notifying dendrite of deleted instance";
+            "error" => InlineErrorChain::new(&error),
+        );
+    }
+
+    Ok(())
 }
 
 async fn instance_send_attached_subnets_to_dendrite(

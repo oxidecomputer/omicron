@@ -1,3 +1,7 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 use dropshot::test_util::ClientTestContext;
 use http::Method;
 use http::StatusCode;
@@ -18,6 +22,7 @@ use nexus_test_utils::resource_helpers::test_params;
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::disk;
 use nexus_types::external_api::instance;
+use nexus_types::external_api::instance::InstanceCpuCount;
 use nexus_types::external_api::project;
 use nexus_types::external_api::silo::{
     Silo, SiloQuotas, SiloQuotasCreate, SiloUtilization, Utilization,
@@ -25,7 +30,6 @@ use nexus_types::external_api::silo::{
 };
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::IdentityMetadataCreateParams;
-use omicron_common::api::external::InstanceCpuCount;
 use oxide_client::types::SiloRole;
 
 static PROJECT_NAME: &str = "utilization-test-project";
@@ -242,6 +246,7 @@ async fn create_resources_in_test_suite_silo(
         auto_restart_policy: Default::default(),
         anti_affinity_groups: Vec::new(),
         multicast_groups: Vec::new(),
+        enable_jumbo_frames: false,
     };
 
     NexusRequest::objects_post(

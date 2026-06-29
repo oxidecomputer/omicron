@@ -6,12 +6,9 @@
 
 use super::BootstrapError;
 use super::RssAccessError;
-use super::config::BOOTSTRAP_AGENT_HTTP_PORT;
-use super::config::BOOTSTRAP_AGENT_LOCKSTEP_PORT;
 use super::http_entrypoints;
 use super::http_entrypoints_lockstep;
 use super::views::SledAgentResponse;
-use crate::bootstrap::config::BOOTSTRAP_AGENT_RACK_INIT_PORT;
 use crate::bootstrap::http_entrypoints::BootstrapServerContext;
 use crate::bootstrap::maghemite;
 use crate::bootstrap::pre_server::BootstrapAgentStartup;
@@ -37,6 +34,9 @@ use illumos_utils::zfs;
 use illumos_utils::zone;
 use illumos_utils::zone::Api;
 use illumos_utils::zone::Zones;
+use omicron_common::address::BOOTSTRAP_AGENT_HTTP_PORT;
+use omicron_common::address::BOOTSTRAP_AGENT_LOCKSTEP_PORT;
+use omicron_common::address::BOOTSTRAP_AGENT_RACK_INIT_PORT;
 use omicron_ddm_admin_client::DdmError;
 use omicron_ddm_admin_client::types::EnableStatsRequest;
 use omicron_ledger as ledger;
@@ -45,7 +45,7 @@ use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::RackInitUuid;
 use sled_agent_config_reconciler::ConfigReconcilerSpawnToken;
 use sled_agent_config_reconciler::InternalDisksReceiver;
-use sled_agent_types::rack_init::RackInitializeRequestParams;
+use sled_agent_rack_setup::RackInitializeRequestParams;
 use sled_agent_types::sled::StartSledAgentRequest;
 use sled_hardware::underlay;
 use sled_storage::dataset::CONFIG_DATASET;
@@ -423,7 +423,7 @@ async fn start_sled_agent(
     let ddm_reconciler = service_manager.ddm_reconciler();
     ddm_reconciler.set_underlay_subnet(request.body.subnet);
     ddm_reconciler.enable_stats(EnableStatsRequest {
-        rack_id: request.body.rack_id,
+        rack_id: request.body.rack_id.into_untyped_uuid(),
         sled_id: request.body.id.into_untyped_uuid(),
     });
 
@@ -779,10 +779,10 @@ mod tests {
     use super::*;
     use omicron_common::address::Ipv6Subnet;
     use omicron_test_utils::dev::test_setup_log;
+    use omicron_uuid_kinds::RackUuid;
     use omicron_uuid_kinds::SledUuid;
     use sled_agent_types::sled::StartSledAgentRequestBody;
     use std::net::Ipv6Addr;
-    use uuid::Uuid;
 
     #[tokio::test]
     async fn start_sled_agent_request_serialization() {
@@ -795,7 +795,7 @@ mod tests {
             schema_version: 1,
             body: StartSledAgentRequestBody {
                 id: SledUuid::new_v4(),
-                rack_id: Uuid::new_v4(),
+                rack_id: RackUuid::new_v4(),
                 use_trust_quorum: false,
                 is_lrtq_learner: false,
                 subnet: Ipv6Subnet::new(Ipv6Addr::LOCALHOST),

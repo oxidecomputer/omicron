@@ -38,15 +38,19 @@ use nexus_types::deployment::ClickhouseMode;
 use nexus_types::deployment::ClickhousePolicy;
 use nexus_types::deployment::ExpectedVersion;
 use nexus_types::deployment::OmicronZoneNic;
+use nexus_types::deployment::OperatorNexusConfig;
 use nexus_types::deployment::PlanningInput;
 use nexus_types::deployment::SledFilter;
 use nexus_types::deployment::TargetReleaseDescription;
+use nexus_types::deployment::UpstreamNtpConfig;
 use nexus_types::external_api::sled::SledPolicy;
 use nexus_types::inventory::Collection;
 use omicron_common::address::Ipv4Range;
 use omicron_common::api::external::TufRepoDescription;
+use omicron_common::policy::COCKROACHDB_REDUNDANCY;
 use omicron_common::policy::CRUCIBLE_PANTRY_REDUNDANCY;
 use omicron_common::policy::INTERNAL_DNS_REDUNDANCY;
+use omicron_common::policy::OXIMETER_REDUNDANCY;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SledKind;
 use omicron_uuid_kinds::VnicUuid;
@@ -409,6 +413,28 @@ impl ExampleSystemBuilder {
         self
     }
 
+    /// Configure the example system to deploy all supported zone types.
+    ///
+    /// This sets up 5 sleds with enough of each service to cover every
+    /// `ZoneKind` variant, including oximeter, CockroachDB, boundary NTP,
+    /// external DNS, and replicated ClickHouse.
+    pub fn all_zone_types(self) -> anyhow::Result<Self> {
+        Ok(self
+            .nsleds(5)
+            .oximeter_count(OXIMETER_REDUNDANCY)
+            .cockroachdb_count(COCKROACHDB_REDUNDANCY)
+            .boundary_ntp_count(2)
+            .external_dns_count(1)?
+            .clickhouse_policy(ClickhousePolicy {
+                version: 0,
+                mode: ClickhouseMode::Both {
+                    target_servers: 2,
+                    target_keepers: 3,
+                },
+                time_created: Utc::now(),
+            }))
+    }
+
     /// Create zones in the example system.
     ///
     /// The default is `true`.
@@ -712,15 +738,17 @@ impl ExampleSystemBuilder {
                             .for_new_nexus()
                             .expect("should have an external IP for Nexus");
                         builder
-                            .sled_add_zone_nexus_with_config(
+                            .sled_add_zone_nexus(
                                 sled_id,
-                                false,
-                                vec![],
                                 self.target_release
                                     .zone_image_source(ZoneKind::Nexus)
                                     .expect("obtained Nexus image source"),
                                 external_ip,
                                 initial_blueprint.nexus_generation,
+                                &OperatorNexusConfig {
+                                    external_tls: false,
+                                    external_dns_servers: &[],
+                                },
                             )
                             .unwrap();
                     }
@@ -874,26 +902,35 @@ impl ExampleSystemBuilder {
                     }
                     // Add BoundaryNtp zones on the first N discretionary sleds.
                     if will_get_boundary_ntp {
-                        let ntp_servers = vec!["ntp.example.com".to_string()];
-                        let dns_servers = vec!["8.8.8.8".parse().unwrap()];
-                        let domain = Some("example.com".to_string());
+                        // Use the upstream NTP / DNS values from the
+                        // `PlanningInput`'s policy so this stays in sync with
+                        // the `SystemDescription` defaults.
+                        let networking =
+                            base_input.external_service_networking_policy();
+                        let ntp_servers =
+                            networking.upstream_ntp_servers.clone();
+                        let dns_servers =
+                            networking.upstream_dns_servers.clone();
+                        let domain = networking.upstream_ntp_domain.clone();
                         let external_ip = external_networking_alloc
                             .for_new_boundary_ntp()
                             .expect(
                                 "should have an external IP for BoundaryNtp",
                             );
                         builder
-                            .sled_add_zone_boundary_ntp_with_config(
+                            .sled_add_zone_boundary_ntp(
                                 sled_id,
-                                ntp_servers,
-                                dns_servers,
-                                domain,
                                 self.target_release
                                     .zone_image_source(ZoneKind::BoundaryNtp)
                                     .expect(
                                         "obtained BoundaryNtp image source",
                                     ),
                                 external_ip,
+                                &UpstreamNtpConfig {
+                                    ntp_servers: &ntp_servers,
+                                    dns_servers: &dns_servers,
+                                    domain: domain.as_deref(),
+                                },
                             )
                             .unwrap();
                     }
@@ -1283,8 +1320,6 @@ mod tests {
     use omicron_common::address::REPO_DEPOT_PORT;
     use omicron_common::address::get_sled_address;
     use omicron_common::api::external::Generation;
-    use omicron_common::policy::COCKROACHDB_REDUNDANCY;
-    use omicron_common::policy::OXIMETER_REDUNDANCY;
     use omicron_test_utils::dev::test_setup_log;
     use sled_agent_types::inventory::{OmicronZoneConfig, ZoneKind};
     use slog_error_chain::InlineErrorChain;
@@ -1550,20 +1585,8 @@ mod tests {
         // Build an example system with all supported zone types.
         let (_example, blueprint) =
             ExampleSystemBuilder::new(&logctx.log, TEST_NAME)
-                .nsleds(5)
-                .oximeter_count(OXIMETER_REDUNDANCY)
-                .cockroachdb_count(COCKROACHDB_REDUNDANCY)
-                .boundary_ntp_count(2)
-                .external_dns_count(1)
+                .all_zone_types()
                 .unwrap()
-                .clickhouse_policy(ClickhousePolicy {
-                    version: 0,
-                    mode: ClickhouseMode::Both {
-                        target_servers: 2,
-                        target_keepers: 3,
-                    },
-                    time_created: chrono::Utc::now(),
-                })
                 .build();
 
         // Verify that we deploy every type of zone by iterating all ZoneKind
@@ -1844,7 +1867,8 @@ mod tests {
                 | ServiceName::RepoDepot
                 | ServiceName::ManagementGatewayService
                 | ServiceName::Dendrite
-                | ServiceName::Mgd => {
+                | ServiceName::Mgd
+                | ServiceName::Ddm => {
                     out.insert(service, Ok(()));
                 }
                 // InternalNtp is too large to fit in a single DNS packet and

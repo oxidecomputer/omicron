@@ -242,7 +242,6 @@ impl DataStore {
     ) -> Result<(), Error> {
         use nexus_db_fixed_data::vpc_firewall_rule::DNS_VPC_FW_RULE;
         use nexus_db_fixed_data::vpc_firewall_rule::NEXUS_ICMP_FW_RULE;
-        use nexus_db_fixed_data::vpc_firewall_rule::NEXUS_VPC_FW_RULE;
 
         debug!(opctx.log, "attempting to create built-in VPC firewall rules");
 
@@ -269,15 +268,6 @@ impl DataStore {
                 &DNS_VPC_FW_RULE,
             )?;
             fw_rules.insert(DNS_VPC_FW_RULE.name.clone(), rule);
-        }
-
-        if !fw_rules.contains_key(&NEXUS_VPC_FW_RULE.name) {
-            let rule = VpcFirewallRule::new(
-                Uuid::new_v4(),
-                *SERVICES_VPC_ID,
-                &NEXUS_VPC_FW_RULE,
-            )?;
-            fw_rules.insert(NEXUS_VPC_FW_RULE.name.clone(), rule);
         }
 
         if !fw_rules.contains_key(&NEXUS_ICMP_FW_RULE.name) {
@@ -2989,6 +2979,7 @@ mod tests {
     use nexus_types::deployment::BlueprintZoneConfig;
     use nexus_types::deployment::BlueprintZoneDisposition;
     use nexus_types::deployment::BlueprintZoneImageSource;
+    use nexus_types::deployment::OperatorNexusConfig;
     use nexus_types::external_api::instance as instance_types;
     use nexus_types::external_api::instance::PrivateIpStackCreate;
     use nexus_types::external_api::project;
@@ -3000,6 +2991,7 @@ mod tests {
     use omicron_uuid_kinds::BlueprintUuid;
     use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::InstanceUuid;
+    use omicron_uuid_kinds::RackUuid;
     use oxnet::IpNet;
     use oxnet::Ipv4Net;
     use slog::info;
@@ -3272,7 +3264,7 @@ mod tests {
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
         // Set up our fake system with 5 sleds.
-        let rack_id = Uuid::new_v4();
+        let rack_id = RackUuid::new_v4();
         let mut system = SystemDescription::new();
         let mut sled_ids = Vec::new();
         for _ in 0..5 {
@@ -3362,13 +3354,15 @@ mod tests {
             .for_new_nexus()
             .expect("found external IP for Nexus");
             builder
-                .sled_add_zone_nexus_with_config(
+                .sled_add_zone_nexus(
                     sled_ids[2],
-                    false,
-                    Vec::new(),
                     BlueprintZoneImageSource::InstallDataset,
                     external_ip,
                     bp0.nexus_generation,
+                    &OperatorNexusConfig {
+                        external_tls: false,
+                        external_dns_servers: &[],
+                    },
                 )
                 .expect("added nexus to third sled");
             builder.build(BlueprintSource::Test)
@@ -3452,13 +3446,15 @@ mod tests {
                     .for_new_nexus()
                     .expect("found external IP for Nexus");
                 builder
-                    .sled_add_zone_nexus_with_config(
+                    .sled_add_zone_nexus(
                         sled_id,
-                        false,
-                        Vec::new(),
                         BlueprintZoneImageSource::InstallDataset,
                         external_ip,
                         bp2.nexus_generation,
+                        &OperatorNexusConfig {
+                            external_tls: false,
+                            external_dns_servers: &[],
+                        },
                     )
                     .expect("added nexus to third sled");
             }
@@ -4018,7 +4014,7 @@ mod tests {
                             name: inst_name.clone(),
                             description: "An instance...".into(),
                         },
-                        ncpus: external::InstanceCpuCount(1),
+                        ncpus: instance_types::InstanceCpuCount(1),
                         memory: 10.into(),
                         hostname: "insty".parse().unwrap(),
                         user_data: vec![],
@@ -4033,6 +4029,7 @@ mod tests {
                         auto_restart_policy: Default::default(),
                         anti_affinity_groups: Vec::new(),
                         multicast_groups: Vec::new(),
+                        enable_jumbo_frames: false,
                     },
                 ),
             )

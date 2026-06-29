@@ -125,6 +125,8 @@ use uuid::Uuid;
 
 mod external_networking;
 
+pub use external_networking::ExternalServiceNetworkingConfig;
+
 impl DataStore {
     /// List blueprints
     pub async fn blueprints_list(
@@ -1618,6 +1620,8 @@ impl DataStore {
         let target_release_minimum_generation =
             *blueprint_row.target_release_minimum_generation;
         let nexus_generation = *blueprint_row.nexus_generation;
+        let external_networking_generation =
+            *blueprint_row.external_networking_generation;
         let cockroachdb_fingerprint = blueprint_row.cockroachdb_fingerprint;
         let cockroachdb_setting_preserve_downgrade =
             CockroachDbPreserveDowngrade::from_optional_string(
@@ -1643,6 +1647,7 @@ impl DataStore {
             external_dns_version,
             target_release_minimum_generation,
             nexus_generation,
+            external_networking_generation,
             cockroachdb_fingerprint,
             cockroachdb_setting_preserve_downgrade,
             clickhouse_cluster_config,
@@ -4644,7 +4649,7 @@ mod tests {
                 if target_check_done.load(Ordering::SeqCst) {
                     Ok(())
                 } else {
-                    Err(CondCheckError::<()>::NotYet)
+                    Err(CondCheckError::<()>::NotYet { status: None })
                 }
             },
             &Duration::from_millis(50),

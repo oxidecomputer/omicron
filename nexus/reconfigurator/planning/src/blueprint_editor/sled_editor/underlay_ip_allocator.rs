@@ -53,7 +53,10 @@ impl SledUnderlayIpAllocator {
         assert!(minimum > sled_gz_addr);
         let switch_zone_addr = get_switch_zone_address(sled_subnet);
         assert!(sled_subnet.net().contains(switch_zone_addr));
-        assert!(minimum > switch_zone_addr);
+        // It's intentional that we use >= here, as this will only allocate IPs
+        // greater than the minimum.  The minimum *will* be equal to the switch
+        // zone address right after RSS.
+        assert!(minimum >= switch_zone_addr);
         assert!(sled_subnet.net().contains(minimum));
         assert!(sled_subnet.net().contains(maximum));
 
@@ -103,9 +106,8 @@ impl SledUnderlayIpAllocator {
     /// nothing.
     ///
     /// Marking an address that is outside the range of this sled does nothing.
-    /// E.g., RSS currently allocates IPs from within the
-    /// `SLED_RESERVED_ADDRESSES` range, and internal DNS zone IPs are outside
-    /// the sled subnet entirely. IPs from these unexpected ranges are ignored.
+    /// E.g., internal DNS zone IPs are outside the sled subnet entirely. IPs
+    /// from these unexpected ranges are ignored.
     pub fn mark_as_allocated(&mut self, ip: Ipv6Addr) {
         if ip < self.maximum && ip > self.last {
             self.last = ip;

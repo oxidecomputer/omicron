@@ -67,6 +67,7 @@ impl<'a> BlueprintDiffSummary<'a> {
             clickhouse_cluster_config,
             target_release_minimum_generation,
             nexus_generation,
+            external_networking_generation,
             // Metadata fields for which changes don't reflect semantic
             // changes from one blueprint to the next.
             id: _,
@@ -117,6 +118,16 @@ impl<'a> BlueprintDiffSummary<'a> {
 
         // Did the nexus generation change?
         if nexus_generation.before != nexus_generation.after {
+            return true;
+        }
+
+        // Did the external networking generation change? (Since we never mutate
+        // networking config properties in place, and always expunge/add zones
+        // to change them, this should only happen if there was a change in
+        // sleds also, but it doesn't hurt to double check.)
+        if external_networking_generation.before
+            != external_networking_generation.after
+        {
             return true;
         }
 

@@ -1,0 +1,47 @@
+# This test exercises stale inventory with `BpSetOverride`.
+#
+# After the planner has cleared the "will remove mupdate override" field on a
+# sled, it should not set that field again if a subsequent planner run is
+# performed against a stale inventory that still has the override visible.
+
+load-example --nsleds 1 --ndisks-per-sled 3
+sled-list
+
+# Create a TUF repository, set as target release, and update the install dataset.
+tuf-assemble ../../update-common/manifests/fake.toml
+set target-release repo-1.0.0.zip
+sled-update-install-dataset serial0 --to-target-release
+
+# Simulate a mupdate on serial0.
+sled-set serial0 mupdate-override 11111111-1111-1111-1111-111111111111
+
+# Generate an inventory that captures the post-MUPdate state (mupdate override
+# visible, sled-agent generation still 2). We'll come back to plan against
+# this collection later, by which time it will be stale.
+inventory-generate
+inventory-list
+
+# First plan: sets remove_mupdate_override on serial0 and bumps the target
+# release minimum generation.
+blueprint-plan latest latest
+blueprint-diff latest
+
+# Simulate the sled processing the recovery blueprint: it clears the
+# override marker AND advances its reconciled config generation.
+sled-set serial0 mupdate-override unset
+sled-set serial0 omicron-config latest
+
+# Generate a fresh inventory. This inventory would not have a mupdate override,
+# and would advance the sled agent generation.
+inventory-generate
+
+# This planner run clears the "will remove mupdate override" field and
+# noop-convert zones to Artifact image sources.
+blueprint-plan latest latest
+blueprint-diff latest
+
+# Now plan against the stale inventory from earlier. The expected behavior
+# is that the planner detects inventory staleness on the BpSetOverride path and
+# does nothing. As a result, the blueprint diff should be empty.
+blueprint-plan latest eb0796d5-ab8a-4f7b-a884-b4aeacb8ab51
+blueprint-diff latest

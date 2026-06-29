@@ -9,10 +9,12 @@
 //! and upgrade. Furthermore when rack initialization functions are called
 //! it's expected that software components are on the same version.
 
+use bootstrap_agent_lockstep_types::RackInitializeRequest;
+use bootstrap_agent_lockstep_types::RackOperationStatus;
+use bootstrap_agent_lockstep_types::ReplicatedNetworkConfig;
 use dropshot::{HttpError, HttpResponseOk, RequestContext, TypedBody};
-use omicron_uuid_kinds::{RackInitUuid, RackResetUuid};
-use sled_agent_types::rack_init::RackInitializeRequest;
-use sled_agent_types::rack_ops::RackOperationStatus;
+use omicron_uuid_kinds::RackInitUuid;
+use omicron_uuid_kinds::RackResetUuid;
 
 #[dropshot::api_description]
 pub trait BootstrapAgentLockstepApi {
@@ -45,4 +47,19 @@ pub trait BootstrapAgentLockstepApi {
     async fn rack_reset(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<RackResetUuid>, HttpError>;
+
+    /// Get the current contents of the network config kept in the replicated
+    /// bootstore.
+    ///
+    /// This should ONLY be used for debugging (e.g., via `omdb`). Nexus, RSS,
+    /// and sled-agent should never access this endpoint in production - the
+    /// bootstore contents should be treated as "write only" from their point of
+    /// view.
+    #[endpoint {
+        method = GET,
+        path = "/debug/network-config-contents",
+    }]
+    async fn network_config_contents_for_debug(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<ReplicatedNetworkConfig>, HttpError>;
 }

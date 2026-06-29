@@ -9,6 +9,7 @@ use crate::Generation;
 use crate::PhysicalDiskKind;
 use crate::omicron_zone_config::{self, OmicronZoneNic};
 use crate::sled_cpu_family::SledCpuFamily;
+use crate::to_db_typed_uuid;
 use crate::typed_uuid::DbTypedUuid;
 use crate::{
     ByteCount, MacAddr, Name, ServiceKind, SqlU8, SqlU16, SqlU32,
@@ -33,6 +34,7 @@ use nexus_db_schema::schema::inv_zone_manifest_zone;
 use nexus_db_schema::schema::{
     hw_baseboard_id, inv_caboose, inv_clickhouse_keeper_membership,
     inv_cockroachdb_status, inv_collection, inv_collection_error, inv_dataset,
+    inv_fmd_host_case, inv_fmd_resource, inv_fmd_status,
     inv_host_phase_1_active_slot, inv_host_phase_1_flash_hash,
     inv_internal_dns, inv_last_reconciliation_dataset_result,
     inv_last_reconciliation_disk_result,
@@ -44,8 +46,9 @@ use nexus_db_schema::schema::{
     inv_omicron_sled_config_zone_nic, inv_physical_disk, inv_root_of_trust,
     inv_root_of_trust_page, inv_service_processor, inv_single_measurements,
     inv_sled_agent, inv_sled_boot_partition, inv_sled_config_reconciler,
-    inv_zone_manifest_measurement, inv_zpool, sw_caboose,
-    sw_root_of_trust_page,
+    inv_svc_enabled_not_online, inv_svc_enabled_not_online_parse_error,
+    inv_svc_enabled_not_online_service, inv_zone_manifest_measurement,
+    inv_zpool, sw_caboose, sw_root_of_trust_page,
 };
 use nexus_types::inventory::HostPhase1ActiveSlot;
 use nexus_types::inventory::{
@@ -53,7 +56,6 @@ use nexus_types::inventory::{
     NvmeFirmware, PowerState, RotPage, RotSlot, TimeSync,
 };
 use omicron_common::api::external;
-use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_common::disk::DatasetConfig;
 use omicron_common::disk::DatasetName;
 use omicron_common::disk::DiskIdentity;
@@ -63,6 +65,8 @@ use omicron_common::update::OmicronInstallManifestSource;
 use omicron_common::zpool_name::ZpoolName;
 use omicron_uuid_kinds::DatasetKind;
 use omicron_uuid_kinds::DatasetUuid;
+use omicron_uuid_kinds::FmdHostCaseKind;
+use omicron_uuid_kinds::FmdResourceKind;
 use omicron_uuid_kinds::InternalZpoolKind;
 use omicron_uuid_kinds::MupdateKind;
 use omicron_uuid_kinds::MupdateOverrideKind;
@@ -72,12 +76,22 @@ use omicron_uuid_kinds::OmicronSledConfigUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledKind;
 use omicron_uuid_kinds::SledUuid;
+use omicron_uuid_kinds::SvcEnabledNotOnlineKind;
+use omicron_uuid_kinds::SvcEnabledNotOnlineParseErrorKind;
+use omicron_uuid_kinds::SvcEnabledNotOnlineParseErrorUuid;
+use omicron_uuid_kinds::SvcEnabledNotOnlineServiceKind;
+use omicron_uuid_kinds::SvcEnabledNotOnlineServiceUuid;
+use omicron_uuid_kinds::SvcEnabledNotOnlineUuid;
 use omicron_uuid_kinds::ZpoolKind;
 use omicron_uuid_kinds::{CollectionKind, OmicronZoneKind};
 use omicron_uuid_kinds::{CollectionUuid, OmicronZoneUuid};
 use sled_agent_types::inventory::BootImageHeader;
 use sled_agent_types::inventory::BootPartitionDetails;
 use sled_agent_types::inventory::ConfigReconcilerInventoryStatus;
+use sled_agent_types::inventory::FmdHostCase;
+use sled_agent_types::inventory::FmdInventory;
+use sled_agent_types::inventory::FmdInventoryError;
+use sled_agent_types::inventory::FmdResource;
 use sled_agent_types::inventory::HostPhase2DesiredContents;
 use sled_agent_types::inventory::HostPhase2DesiredSlots;
 use sled_agent_types::inventory::ManifestBootInventory;
@@ -86,12 +100,16 @@ use sled_agent_types::inventory::ManifestNonBootInventory;
 use sled_agent_types::inventory::MupdateOverrideBootInventory;
 use sled_agent_types::inventory::MupdateOverrideInventory;
 use sled_agent_types::inventory::MupdateOverrideNonBootInventory;
+use sled_agent_types::inventory::NetworkInterface;
 use sled_agent_types::inventory::OmicronFileSourceResolverInventory;
 use sled_agent_types::inventory::OmicronSingleMeasurement;
 use sled_agent_types::inventory::OrphanedDataset;
 use sled_agent_types::inventory::RemoveMupdateOverrideBootSuccessInventory;
 use sled_agent_types::inventory::RemoveMupdateOverrideInventory;
 use sled_agent_types::inventory::SingleMeasurementInventory;
+use sled_agent_types::inventory::SourceNatConfigGeneric;
+use sled_agent_types::inventory::SvcEnabledNotOnline;
+use sled_agent_types::inventory::SvcEnabledNotOnlineState;
 use sled_agent_types::inventory::ZoneArtifactInventory;
 use sled_agent_types::inventory::ZpoolHealth;
 use sled_agent_types::inventory::{
@@ -2027,6 +2045,298 @@ impl From<InvMupdateOverrideNonBoot> for MupdateOverrideNonBootInventory {
     }
 }
 
+#[derive(Queryable, Clone, Debug, Selectable, Insertable)]
+#[diesel(table_name = inv_svc_enabled_not_online)]
+pub struct InvSvcEnabledNotOnline {
+    pub inv_collection_id: DbTypedUuid<CollectionKind>,
+    pub sled_id: DbTypedUuid<SledKind>,
+    pub id: DbTypedUuid<SvcEnabledNotOnlineKind>,
+    pub svcs_cmd_error: Option<String>,
+    pub time_of_status: DateTime<Utc>,
+}
+
+impl InvSvcEnabledNotOnline {
+    pub fn new(
+        inv_collection_id: CollectionUuid,
+        sled_id: SledUuid,
+        svcs_cmd_error: Option<String>,
+        time_of_status: DateTime<Utc>,
+    ) -> Self {
+        // This ID is only used as a primary key, it's fine to generate it here.
+        let id = to_db_typed_uuid(SvcEnabledNotOnlineUuid::new_v4());
+
+        Self {
+            inv_collection_id: inv_collection_id.into(),
+            sled_id: sled_id.into(),
+            id,
+            svcs_cmd_error,
+            time_of_status,
+        }
+    }
+}
+
+#[derive(Queryable, Clone, Debug, Selectable, Insertable)]
+#[diesel(table_name = inv_svc_enabled_not_online_service)]
+pub struct InvSvcEnabledNotOnlineService {
+    pub inv_collection_id: DbTypedUuid<CollectionKind>,
+    pub sled_id: DbTypedUuid<SledKind>,
+    pub id: DbTypedUuid<SvcEnabledNotOnlineServiceKind>,
+    pub fmri: String,
+    pub zone: String,
+    pub state: InvSvcEnabledNotOnlineState,
+}
+
+impl InvSvcEnabledNotOnlineService {
+    pub fn new(
+        inv_collection_id: CollectionUuid,
+        sled_id: SledUuid,
+        svc: SvcEnabledNotOnline,
+    ) -> Self {
+        let SvcEnabledNotOnline { fmri, zone, state } = svc;
+
+        // This ID is only used as a primary key, it's fine to generate it here.
+        let id = to_db_typed_uuid(SvcEnabledNotOnlineServiceUuid::new_v4());
+
+        Self {
+            inv_collection_id: inv_collection_id.into(),
+            sled_id: sled_id.into(),
+            id,
+            fmri,
+            zone,
+            state: state.into(),
+        }
+    }
+}
+
+#[derive(Queryable, Clone, Debug, Selectable, Insertable)]
+#[diesel(table_name = inv_svc_enabled_not_online_parse_error)]
+pub struct InvSvcEnabledNotOnlineParseError {
+    pub inv_collection_id: DbTypedUuid<CollectionKind>,
+    pub sled_id: DbTypedUuid<SledKind>,
+    pub id: DbTypedUuid<SvcEnabledNotOnlineParseErrorKind>,
+    pub error_message: String,
+}
+
+impl InvSvcEnabledNotOnlineParseError {
+    pub fn new(
+        inv_collection_id: CollectionUuid,
+        sled_id: SledUuid,
+        error_message: String,
+    ) -> Self {
+        // This ID is only used as a primary key, it's fine to generate it here.
+        let id = to_db_typed_uuid(SvcEnabledNotOnlineParseErrorUuid::new_v4());
+
+        Self {
+            inv_collection_id: inv_collection_id.into(),
+            sled_id: sled_id.into(),
+            id,
+            error_message,
+        }
+    }
+}
+
+impl_enum_type!(
+    FmdInventoryErrorKindEnum:
+
+    #[derive(Copy, Clone, Debug, AsExpression, FromSqlRow, PartialEq)]
+    pub enum FmdInventoryErrorKind;
+
+    // Enum values
+    FmdError => b"fmd_error"
+    TooManyCases => b"too_many_cases"
+    TooManyResources => b"too_many_resources"
+);
+
+impl From<sled_agent_types::inventory::FmdInventoryErrorKind>
+    for FmdInventoryErrorKind
+{
+    fn from(value: sled_agent_types::inventory::FmdInventoryErrorKind) -> Self {
+        use sled_agent_types::inventory::FmdInventoryErrorKind as ApiKind;
+        match value {
+            ApiKind::FmdError => FmdInventoryErrorKind::FmdError,
+            ApiKind::TooManyCases => FmdInventoryErrorKind::TooManyCases,
+            ApiKind::TooManyResources => {
+                FmdInventoryErrorKind::TooManyResources
+            }
+        }
+    }
+}
+
+impl From<FmdInventoryErrorKind>
+    for sled_agent_types::inventory::FmdInventoryErrorKind
+{
+    fn from(value: FmdInventoryErrorKind) -> Self {
+        use sled_agent_types::inventory::FmdInventoryErrorKind as ApiKind;
+        match value {
+            FmdInventoryErrorKind::FmdError => ApiKind::FmdError,
+            FmdInventoryErrorKind::TooManyCases => ApiKind::TooManyCases,
+            FmdInventoryErrorKind::TooManyResources => {
+                ApiKind::TooManyResources
+            }
+        }
+    }
+}
+
+/// One row per (collection, sled) recording the outcome of FMD inventory
+/// collection. Both `error_kind` and `error_message` are `NULL` when the
+/// daemon was queried successfully; both are set when collection failed.
+#[derive(Queryable, Clone, Debug, Selectable, Insertable)]
+#[diesel(table_name = inv_fmd_status)]
+pub struct InvFmdStatus {
+    pub inv_collection_id: DbTypedUuid<CollectionKind>,
+    pub sled_id: DbTypedUuid<SledKind>,
+    pub error_kind: Option<FmdInventoryErrorKind>,
+    pub error_message: Option<String>,
+}
+
+impl InvFmdStatus {
+    pub fn new(
+        inv_collection_id: CollectionUuid,
+        sled_id: SledUuid,
+        result: &Result<FmdInventory, FmdInventoryError>,
+    ) -> Self {
+        let (error_kind, error_message) = match result {
+            Ok(_) => (None, None),
+            Err(err) => (Some(err.kind.into()), Some(err.message.clone())),
+        };
+        Self {
+            inv_collection_id: inv_collection_id.into(),
+            sled_id: sled_id.into(),
+            error_kind,
+            error_message,
+        }
+    }
+}
+
+#[derive(Queryable, Clone, Debug, Selectable, Insertable)]
+#[diesel(table_name = inv_fmd_host_case)]
+pub struct InvFmdHostCase {
+    pub inv_collection_id: DbTypedUuid<CollectionKind>,
+    pub sled_id: DbTypedUuid<SledKind>,
+    pub case_id: DbTypedUuid<FmdHostCaseKind>,
+    pub code: String,
+    pub url: String,
+    pub event: Option<serde_json::Value>,
+}
+
+impl InvFmdHostCase {
+    pub fn new(
+        inv_collection_id: CollectionUuid,
+        sled_id: SledUuid,
+        case: &FmdHostCase,
+    ) -> Self {
+        Self {
+            inv_collection_id: inv_collection_id.into(),
+            sled_id: sled_id.into(),
+            case_id: case.uuid.into(),
+            code: case.code.clone(),
+            url: case.url.clone(),
+            event: case.event.clone(),
+        }
+    }
+}
+
+impl From<InvFmdHostCase> for FmdHostCase {
+    fn from(row: InvFmdHostCase) -> Self {
+        Self {
+            uuid: row.case_id.into(),
+            code: row.code,
+            url: row.url,
+            event: row.event,
+        }
+    }
+}
+
+#[derive(Queryable, Clone, Debug, Selectable, Insertable)]
+#[diesel(table_name = inv_fmd_resource)]
+pub struct InvFmdResource {
+    pub inv_collection_id: DbTypedUuid<CollectionKind>,
+    pub sled_id: DbTypedUuid<SledKind>,
+    pub resource_id: DbTypedUuid<FmdResourceKind>,
+    pub fmri: String,
+    pub case_id: DbTypedUuid<FmdHostCaseKind>,
+    pub faulty: bool,
+    pub unusable: bool,
+    pub invisible: bool,
+}
+
+impl InvFmdResource {
+    pub fn new(
+        inv_collection_id: CollectionUuid,
+        sled_id: SledUuid,
+        resource: &FmdResource,
+    ) -> Self {
+        Self {
+            inv_collection_id: inv_collection_id.into(),
+            sled_id: sled_id.into(),
+            resource_id: resource.uuid.into(),
+            fmri: resource.fmri.clone(),
+            case_id: resource.case_id.into(),
+            faulty: resource.faulty,
+            unusable: resource.unusable,
+            invisible: resource.invisible,
+        }
+    }
+}
+
+impl From<InvFmdResource> for FmdResource {
+    fn from(row: InvFmdResource) -> Self {
+        Self {
+            uuid: row.resource_id.into(),
+            fmri: row.fmri,
+            case_id: row.case_id.into(),
+            faulty: row.faulty,
+            unusable: row.unusable,
+            invisible: row.invisible,
+        }
+    }
+}
+
+// See [`sled_agent_types::inventory::SvcEnabledNotOnlineState`].
+impl_enum_type!(
+    InvSvcEnabledNotOnlineStateEnum:
+
+    #[derive(Copy, Clone, Debug, AsExpression, FromSqlRow, PartialEq)]
+    pub enum InvSvcEnabledNotOnlineState;
+
+    // Enum values
+    Offline => b"offline"
+    Degraded => b"degraded"
+    Maintenance => b"maintenance"
+);
+
+impl From<SvcEnabledNotOnlineState> for InvSvcEnabledNotOnlineState {
+    fn from(value: SvcEnabledNotOnlineState) -> Self {
+        match value {
+            SvcEnabledNotOnlineState::Degraded => {
+                InvSvcEnabledNotOnlineState::Degraded
+            }
+            SvcEnabledNotOnlineState::Offline => {
+                InvSvcEnabledNotOnlineState::Offline
+            }
+            SvcEnabledNotOnlineState::Maintenance => {
+                InvSvcEnabledNotOnlineState::Maintenance
+            }
+        }
+    }
+}
+
+impl From<InvSvcEnabledNotOnlineState> for SvcEnabledNotOnlineState {
+    fn from(value: InvSvcEnabledNotOnlineState) -> Self {
+        match value {
+            InvSvcEnabledNotOnlineState::Degraded => {
+                SvcEnabledNotOnlineState::Degraded
+            }
+            InvSvcEnabledNotOnlineState::Offline => {
+                SvcEnabledNotOnlineState::Offline
+            }
+            InvSvcEnabledNotOnlineState::Maintenance => {
+                SvcEnabledNotOnlineState::Maintenance
+            }
+        }
+    }
+}
+
 /// See [`nexus_types::inventory::PhysicalDisk`].
 #[derive(Queryable, Clone, Debug, Selectable, Insertable)]
 #[diesel(table_name = inv_physical_disk)]
@@ -2973,7 +3283,7 @@ impl InvOmicronSledConfigZone {
                     self.snat_last_port,
                 ) {
                     (Some(ip), Some(first_port), Some(last_port)) => {
-                        nexus_types::inventory::SourceNatConfigGeneric::new(
+                        SourceNatConfigGeneric::new(
                             ip.ip(),
                             *first_port,
                             *last_port,

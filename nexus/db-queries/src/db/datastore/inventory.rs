@@ -39,6 +39,9 @@ use nexus_db_model::InvCollectionError;
 use nexus_db_model::InvConfigReconcilerStatus;
 use nexus_db_model::InvConfigReconcilerStatusKind;
 use nexus_db_model::InvDataset;
+use nexus_db_model::InvFmdHostCase;
+use nexus_db_model::InvFmdResource;
+use nexus_db_model::InvFmdStatus;
 use nexus_db_model::InvHostPhase1ActiveSlot;
 use nexus_db_model::InvHostPhase1FlashHash;
 use nexus_db_model::InvInternalDns;
@@ -62,6 +65,9 @@ use nexus_db_model::InvSingleMeasurements;
 use nexus_db_model::InvSledAgent;
 use nexus_db_model::InvSledBootPartition;
 use nexus_db_model::InvSledConfigReconciler;
+use nexus_db_model::InvSvcEnabledNotOnline;
+use nexus_db_model::InvSvcEnabledNotOnlineParseError;
+use nexus_db_model::InvSvcEnabledNotOnlineService;
 use nexus_db_model::InvZpool;
 use nexus_db_model::RotImageError;
 use nexus_db_model::SledRole;
@@ -117,7 +123,10 @@ use sled_agent_types::inventory::MupdateOverrideNonBootInventory;
 use sled_agent_types::inventory::OmicronSledConfig;
 use sled_agent_types::inventory::OrphanedDataset;
 use sled_agent_types::inventory::SingleMeasurementInventory;
+use sled_agent_types::inventory::SvcEnabledNotOnline;
+use sled_agent_types::inventory::SvcsEnabledNotOnline;
 use sled_agent_types::inventory::SvcsEnabledNotOnlineResult;
+use sled_agent_types::inventory::SvcsError;
 use sled_agent_types::inventory::ZoneArtifactInventory;
 use sled_hardware_types::BaseboardId;
 use slog_error_chain::InlineErrorChain;
@@ -209,6 +218,86 @@ impl DataStore {
                 }
             }
         }
+
+        let mut svcs_enabled_not_online = Vec::new();
+        let mut svcs_enabled_not_online_services = Vec::new();
+        let mut svcs_enabled_not_online_errors = Vec::new();
+        for sled_agent in &collection.sled_agents {
+            match &sled_agent.smf_services_enabled_not_online {
+                SvcsEnabledNotOnlineResult::SvcsEnabledNotOnline(svcs) => {
+                    let SvcsEnabledNotOnline {
+                        services,
+                        errors,
+                        time_of_status,
+                    } = svcs;
+
+                    // Pull services enabled not online result out of each sled agent
+                    svcs_enabled_not_online.push(InvSvcEnabledNotOnline::new(
+                        collection_id,
+                        sled_agent.sled_id,
+                        None,
+                        *time_of_status,
+                    ));
+
+                    svcs_enabled_not_online_services.extend(
+                        services.iter().map(|svc| {
+                            InvSvcEnabledNotOnlineService::new(
+                                collection_id,
+                                sled_agent.sled_id,
+                                svc.clone(),
+                            )
+                        }),
+                    );
+
+                    svcs_enabled_not_online_errors.extend(errors.iter().map(
+                        |error| {
+                            InvSvcEnabledNotOnlineParseError::new(
+                                collection_id,
+                                sled_agent.sled_id,
+                                error.clone(),
+                            )
+                        },
+                    ));
+                }
+                SvcsEnabledNotOnlineResult::SvcsCmdError(e) => {
+                    let SvcsError { error, time_of_status } = e;
+
+                    // Pull services enabled not online result out of each sled agent
+                    svcs_enabled_not_online.push(InvSvcEnabledNotOnline::new(
+                        collection_id,
+                        sled_agent.sled_id,
+                        Some(error.to_string()),
+                        *time_of_status,
+                    ));
+                }
+                SvcsEnabledNotOnlineResult::DataUnavailable => {}
+            }
+        }
+
+        // Pull services in maintenance errors out of all sled agents
+        let svcs_enabled_not_online_errors: Vec<_> = collection
+            .sled_agents
+            .iter()
+            .flat_map(|sled_agent| {
+                match &sled_agent.smf_services_enabled_not_online {
+                    SvcsEnabledNotOnlineResult::SvcsEnabledNotOnline(svcs) => {
+                        svcs.errors
+                            .iter()
+                            .map(|error| {
+                                InvSvcEnabledNotOnlineParseError::new(
+                                    collection_id,
+                                    sled_agent.sled_id,
+                                    error.clone(),
+                                )
+                            })
+                            .collect()
+                    }
+                    // If there is an error we've already captured it above
+                    SvcsEnabledNotOnlineResult::SvcsCmdError(_) => vec![],
+                    SvcsEnabledNotOnlineResult::DataUnavailable => vec![],
+                }
+            })
+            .collect();
 
         // Pull disks out of all sled agents
         let disks: Vec<_> = collection
@@ -365,6 +454,46 @@ impl DataStore {
                         sled_agent.sled_id,
                         measurement.path.to_string(),
                         measurement.result.clone(),
+                    )
+                })
+            })
+            .collect();
+
+        // Pull FMD inventory out of all sled agents. We always record one
+        // status row per sled (capturing the success/failure discriminant)
+        // and, when collection succeeded, a row per case and per resource.
+        let fmd_status_rows: Vec<_> = collection
+            .sled_agents
+            .iter()
+            .map(|sled_agent| {
+                InvFmdStatus::new(
+                    collection_id,
+                    sled_agent.sled_id,
+                    &sled_agent.fmd,
+                )
+            })
+            .collect();
+        let fmd_host_case_rows: Vec<_> = collection
+            .sled_agents
+            .iter()
+            .flat_map(|sled_agent| {
+                let cases = sled_agent.fmd.as_ref().ok().map(|inv| &inv.cases);
+                cases.into_iter().flatten().map(|case| {
+                    InvFmdHostCase::new(collection_id, sled_agent.sled_id, case)
+                })
+            })
+            .collect();
+        let fmd_resource_rows: Vec<_> = collection
+            .sled_agents
+            .iter()
+            .flat_map(|sled_agent| {
+                let resources =
+                    sled_agent.fmd.as_ref().ok().map(|inv| &inv.resources);
+                resources.into_iter().flatten().map(|resource| {
+                    InvFmdResource::new(
+                        collection_id,
+                        sled_agent.sled_id,
+                        resource,
                     )
                 })
             })
@@ -825,9 +954,7 @@ impl DataStore {
                 // structures also contain their own slot. (Maybe we could use
                 // `iddqd` here instead?)
                 let phase1_hashes = collection
-                    .host_phase_1_flash_hashes
-                    .iter()
-                    .flat_map(|(_slot, by_baseboard)| by_baseboard.iter());
+                    .host_phase_1_flash_hashes.values().flat_map(|by_baseboard| by_baseboard.iter());
 
                 for (baseboard_id, phase1) in phase1_hashes {
                     let selection = nexus_db_schema::schema::hw_baseboard_id::table
@@ -1344,7 +1471,62 @@ impl DataStore {
                 }
             }
 
+            // Insert FMD status rows (one per sled).
+            {
+                use nexus_db_schema::schema::inv_fmd_status::dsl;
 
+                let batch_size = SQL_BATCH_SIZE.get().try_into().unwrap();
+                let mut rows = fmd_status_rows.into_iter();
+                loop {
+                    let some_rows =
+                        rows.by_ref().take(batch_size).collect::<Vec<_>>();
+                    if some_rows.is_empty() {
+                        break;
+                    }
+                    let _ = diesel::insert_into(dsl::inv_fmd_status)
+                        .values(some_rows)
+                        .execute_async(&conn)
+                        .await?;
+                }
+            }
+
+            // Insert FMD host case rows (zero or more per sled).
+            {
+                use nexus_db_schema::schema::inv_fmd_host_case::dsl;
+
+                let batch_size = SQL_BATCH_SIZE.get().try_into().unwrap();
+                let mut rows = fmd_host_case_rows.into_iter();
+                loop {
+                    let some_rows =
+                        rows.by_ref().take(batch_size).collect::<Vec<_>>();
+                    if some_rows.is_empty() {
+                        break;
+                    }
+                    let _ = diesel::insert_into(dsl::inv_fmd_host_case)
+                        .values(some_rows)
+                        .execute_async(&conn)
+                        .await?;
+                }
+            }
+
+            // Insert FMD resource rows (zero or more per sled).
+            {
+                use nexus_db_schema::schema::inv_fmd_resource::dsl;
+
+                let batch_size = SQL_BATCH_SIZE.get().try_into().unwrap();
+                let mut rows = fmd_resource_rows.into_iter();
+                loop {
+                    let some_rows =
+                        rows.by_ref().take(batch_size).collect::<Vec<_>>();
+                    if some_rows.is_empty() {
+                        break;
+                    }
+                    let _ = diesel::insert_into(dsl::inv_fmd_resource)
+                        .values(some_rows)
+                        .execute_async(&conn)
+                        .await?;
+                }
+            }
 
             // Insert rows for all the sled config reconciler disk results
             {
@@ -1517,6 +1699,65 @@ impl DataStore {
                     }
                     let _ = diesel::insert_into(dsl::inv_mupdate_override_non_boot)
                         .values(some_non_boot)
+                        .execute_async(&conn)
+                        .await?;
+                }
+            }
+
+            // Insert rows for all the results from the  enabled not online SMF
+            // services we found.
+            {
+                use nexus_db_schema::schema::inv_svc_enabled_not_online::dsl;
+
+                let batch_size = SQL_BATCH_SIZE.get().try_into().unwrap();
+                let mut svcs_enabled_not_online = svcs_enabled_not_online.into_iter();
+                loop {
+                    let some_svcs_enabled_not_online =
+                        svcs_enabled_not_online.by_ref().take(batch_size).collect::<Vec<_>>();
+                    if some_svcs_enabled_not_online.is_empty() {
+                        break;
+                    }
+                    let _ = diesel::insert_into(dsl::inv_svc_enabled_not_online)
+                        .values(some_svcs_enabled_not_online)
+                        .execute_async(&conn)
+                        .await?;
+                }
+            }
+
+            // Insert rows for all the SMF services enabled not online we found.
+            {
+                use nexus_db_schema::schema::inv_svc_enabled_not_online_service::dsl;
+
+                let batch_size = SQL_BATCH_SIZE.get().try_into().unwrap();
+                let mut svcs_enabled_not_online_services = svcs_enabled_not_online_services.into_iter();
+                loop {
+                    let some_svcs_enabled_not_online_services =
+                        svcs_enabled_not_online_services.by_ref().take(batch_size).collect::<Vec<_>>();
+                    if some_svcs_enabled_not_online_services.is_empty() {
+                        break;
+                    }
+                    let _ = diesel::insert_into(dsl::inv_svc_enabled_not_online_service)
+                        .values(some_svcs_enabled_not_online_services)
+                        .execute_async(&conn)
+                        .await?;
+                }
+            }
+
+            // Insert rows for all the errors from the enabled not online SMF
+            // services we found.
+            {
+                use nexus_db_schema::schema::inv_svc_enabled_not_online_parse_error::dsl;
+
+                let batch_size = SQL_BATCH_SIZE.get().try_into().unwrap();
+                let mut svcs_enabled_not_online_errors = svcs_enabled_not_online_errors.into_iter();
+                loop {
+                    let some_svcs_enabled_not_online_errors =
+                        svcs_enabled_not_online_errors.by_ref().take(batch_size).collect::<Vec<_>>();
+                    if some_svcs_enabled_not_online_errors.is_empty() {
+                        break;
+                    }
+                    let _ = diesel::insert_into(dsl::inv_svc_enabled_not_online_parse_error)
+                        .values(some_svcs_enabled_not_online_errors)
                         .execute_async(&conn)
                         .await?;
                 }
@@ -2019,6 +2260,9 @@ impl DataStore {
             nlast_reconciliation_orphaned_datasets: usize,
             nlast_reconciliation_zone_results: usize,
             nlast_reconciliation_measurements: usize,
+            nfmd_status: usize,
+            nfmd_host_cases: usize,
+            nfmd_resources: usize,
             nzone_manifest_zones: usize,
             nzone_manifest_measurements: usize,
             nzone_manifest_non_boot: usize,
@@ -2026,6 +2270,9 @@ impl DataStore {
             nmupdate_override_non_boot: usize,
             nconfig_reconcilers: usize,
             nboot_partitions: usize,
+            nsvcs_enabled_not_online: usize,
+            nsvcs_enabled_not_online_service: usize,
+            nsvcs_enabled_not_online_error: usize,
             nomicron_sled_configs: usize,
             nomicron_sled_config_disks: usize,
             nomicron_sled_config_datasets: usize,
@@ -2056,6 +2303,9 @@ impl DataStore {
             nlast_reconciliation_orphaned_datasets,
             nlast_reconciliation_zone_results,
             nlast_reconciliation_measurements,
+            nfmd_status,
+            nfmd_host_cases,
+            nfmd_resources,
             nzone_manifest_zones,
             nzone_manifest_measurements,
             nzone_manifest_non_boot,
@@ -2063,6 +2313,9 @@ impl DataStore {
             nmupdate_override_non_boot,
             nconfig_reconcilers,
             nboot_partitions,
+            nsvcs_enabled_not_online,
+            nsvcs_enabled_not_online_service,
+            nsvcs_enabled_not_online_error,
             nomicron_sled_configs,
             nomicron_sled_config_disks,
             nomicron_sled_config_datasets,
@@ -2231,6 +2484,31 @@ impl DataStore {
                         .await?
                     };
 
+                    // Remove FMD inventory rows.
+                    let nfmd_status = {
+                        use nexus_db_schema::schema::inv_fmd_status::dsl;
+                        diesel::delete(dsl::inv_fmd_status.filter(
+                            dsl::inv_collection_id.eq(db_collection_id),
+                        ))
+                        .execute_async(&conn)
+                        .await?
+                    };
+                    let nfmd_host_cases = {
+                        use nexus_db_schema::schema::inv_fmd_host_case::dsl;
+                        diesel::delete(dsl::inv_fmd_host_case.filter(
+                            dsl::inv_collection_id.eq(db_collection_id),
+                        ))
+                        .execute_async(&conn)
+                        .await?
+                    };
+                    let nfmd_resources = {
+                        use nexus_db_schema::schema::inv_fmd_resource::dsl;
+                        diesel::delete(dsl::inv_fmd_resource.filter(
+                            dsl::inv_collection_id.eq(db_collection_id),
+                        ))
+                        .execute_async(&conn)
+                        .await?
+                    };
 
                     // Remove rows associated with zone resolver inventory.
                     let nzone_manifest_zones = {
@@ -2287,6 +2565,34 @@ impl DataStore {
                     let nboot_partitions = {
                         use nexus_db_schema::schema::inv_sled_boot_partition::dsl;
                         diesel::delete(dsl::inv_sled_boot_partition.filter(
+                            dsl::inv_collection_id.eq(db_collection_id),
+                        ))
+                        .execute_async(&conn)
+                        .await?
+                    };
+
+                    // Remove rows associated with the enabled not online SMF services
+                    let nsvcs_enabled_not_online = {
+                        use nexus_db_schema::schema::inv_svc_enabled_not_online::dsl;
+                        diesel::delete(dsl::inv_svc_enabled_not_online.filter(
+                            dsl::inv_collection_id.eq(db_collection_id),
+                        ))
+                        .execute_async(&conn)
+                        .await?
+                    };
+
+                    let nsvcs_enabled_not_online_service = {
+                        use nexus_db_schema::schema::inv_svc_enabled_not_online_service::dsl;
+                        diesel::delete(dsl::inv_svc_enabled_not_online_service.filter(
+                            dsl::inv_collection_id.eq(db_collection_id),
+                        ))
+                        .execute_async(&conn)
+                        .await?
+                    };
+
+                    let nsvcs_enabled_not_online_error = {
+                        use nexus_db_schema::schema::inv_svc_enabled_not_online_parse_error::dsl;
+                        diesel::delete(dsl::inv_svc_enabled_not_online_parse_error.filter(
                             dsl::inv_collection_id.eq(db_collection_id),
                         ))
                         .execute_async(&conn)
@@ -2417,6 +2723,9 @@ impl DataStore {
                         nlast_reconciliation_orphaned_datasets,
                         nlast_reconciliation_zone_results,
                         nlast_reconciliation_measurements,
+                        nfmd_status,
+                        nfmd_host_cases,
+                        nfmd_resources,
                         nzone_manifest_zones,
                         nzone_manifest_measurements,
                         nzone_manifest_non_boot,
@@ -2424,6 +2733,9 @@ impl DataStore {
                         nmupdate_override_non_boot,
                         nconfig_reconcilers,
                         nboot_partitions,
+                        nsvcs_enabled_not_online,
+                        nsvcs_enabled_not_online_service,
+                        nsvcs_enabled_not_online_error,
                         nomicron_sled_configs,
                         nomicron_sled_config_disks,
                         nomicron_sled_config_datasets,
@@ -2465,6 +2777,9 @@ impl DataStore {
                 nlast_reconciliation_zone_results,
             "nlast_reconciliation_measurements" =>
                 nlast_reconciliation_measurements,
+            "nfmd_status" => nfmd_status,
+            "nfmd_host_cases" => nfmd_host_cases,
+            "nfmd_resources" => nfmd_resources,
             "nzone_manifest_zones" => nzone_manifest_zones,
             "nzone_manifest_measurements" => nzone_manifest_measurements,
             "nzone_manifest_non_boot" => nzone_manifest_non_boot,
@@ -2472,6 +2787,9 @@ impl DataStore {
             "nmupdate_override_non_boot" => nmupdate_override_non_boot,
             "nconfig_reconcilers" => nconfig_reconcilers,
             "nboot_partitions" => nboot_partitions,
+            "nsvcs_enabled_not_online" => nsvcs_enabled_not_online,
+            "nsvcs_enabled_not_online_service" => nsvcs_enabled_not_online_service,
+            "nsvcs_enabled_not_online_error" => nsvcs_enabled_not_online_error,
             "nomicron_sled_configs" => nomicron_sled_configs,
             "nomicron_sled_config_disks" => nomicron_sled_config_disks,
             "nomicron_sled_config_datasets" => nomicron_sled_config_datasets,
@@ -2873,6 +3191,106 @@ impl DataStore {
                 }
             }
             datasets
+        };
+
+        // Mapping of "Sled ID" -> "The result of enabled not online SMF
+        // services reported by that sled"
+        let mut svcs_enabled_not_online_by_sled = {
+            use nexus_db_schema::schema::inv_svc_enabled_not_online::dsl;
+
+            let mut svcs =
+                BTreeMap::<SledUuid, Vec<InvSvcEnabledNotOnline>>::new();
+            let mut paginator = Paginator::new(
+                batch_size,
+                dropshot::PaginationOrder::Ascending,
+            );
+            while let Some(p) = paginator.next() {
+                let batch: Vec<InvSvcEnabledNotOnline> = paginated_multicolumn(
+                    dsl::inv_svc_enabled_not_online,
+                    (dsl::sled_id, dsl::id),
+                    &p.current_pagparams(),
+                )
+                .filter(dsl::inv_collection_id.eq(db_id))
+                .select(InvSvcEnabledNotOnline::as_select())
+                .load_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?;
+                paginator = p.found_batch(&batch, &|row| (row.sled_id, row.id));
+                for svc in batch {
+                    svcs.entry(svc.sled_id.into()).or_default().push(svc);
+                }
+            }
+            svcs
+        };
+
+        // Mapping of "Sled ID" -> "All enabled not online SMF services reported
+        // by that sled"
+        let mut svcs_enabled_not_online_services_by_sled = {
+            use nexus_db_schema::schema::inv_svc_enabled_not_online_service::dsl;
+
+            let mut svcs =
+                BTreeMap::<SledUuid, Vec<InvSvcEnabledNotOnlineService>>::new();
+            let mut paginator = Paginator::new(
+                batch_size,
+                dropshot::PaginationOrder::Ascending,
+            );
+            while let Some(p) = paginator.next() {
+                let batch: Vec<InvSvcEnabledNotOnlineService> =
+                    paginated_multicolumn(
+                        dsl::inv_svc_enabled_not_online_service,
+                        (dsl::sled_id, dsl::id),
+                        &p.current_pagparams(),
+                    )
+                    .filter(dsl::inv_collection_id.eq(db_id))
+                    .select(InvSvcEnabledNotOnlineService::as_select())
+                    .load_async(&*conn)
+                    .await
+                    .map_err(|e| {
+                        public_error_from_diesel(e, ErrorHandler::Server)
+                    })?;
+                paginator = p.found_batch(&batch, &|row| (row.sled_id, row.id));
+                for svc in batch {
+                    svcs.entry(svc.sled_id.into()).or_default().push(svc);
+                }
+            }
+            svcs
+        };
+
+        // Mapping of "Sled ID" -> "All enabled not online SMF services errors
+        // reported by that sled"
+        let mut svcs_enabled_not_online_errors_by_sled = {
+            use nexus_db_schema::schema::inv_svc_enabled_not_online_parse_error::dsl;
+
+            let mut svcs = BTreeMap::<
+                SledUuid,
+                Vec<InvSvcEnabledNotOnlineParseError>,
+            >::new();
+            let mut paginator = Paginator::new(
+                batch_size,
+                dropshot::PaginationOrder::Ascending,
+            );
+            while let Some(p) = paginator.next() {
+                let batch: Vec<InvSvcEnabledNotOnlineParseError> =
+                    paginated_multicolumn(
+                        dsl::inv_svc_enabled_not_online_parse_error,
+                        (dsl::sled_id, dsl::id),
+                        &p.current_pagparams(),
+                    )
+                    .filter(dsl::inv_collection_id.eq(db_id))
+                    .select(InvSvcEnabledNotOnlineParseError::as_select())
+                    .load_async(&*conn)
+                    .await
+                    .map_err(|e| {
+                        public_error_from_diesel(e, ErrorHandler::Server)
+                    })?;
+                paginator = p.found_batch(&batch, &|row| (row.sled_id, row.id));
+                for svc in batch {
+                    svcs.entry(svc.sled_id.into()).or_default().push(svc);
+                }
+            }
+            svcs
         };
 
         // Collect the unique baseboard ids referenced by SPs, RoTs, and Sled
@@ -3766,6 +4184,107 @@ impl DataStore {
             measurements
         };
 
+        // Load all FMD inventory rows. The producer's per-sled bounds
+        // (`FMD_MAX_CASES` / `FMD_MAX_RESOURCES`) keep this size predictable,
+        // so we don't paginate.
+        let mut fmd_status_by_sled: BTreeMap<
+            SledUuid,
+            Option<(nexus_db_model::FmdInventoryErrorKind, String)>,
+        > = {
+            use nexus_db_schema::schema::inv_fmd_status::dsl;
+            let rows = dsl::inv_fmd_status
+                .filter(dsl::inv_collection_id.eq(db_id))
+                .select(InvFmdStatus::as_select())
+                .load_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?;
+            rows.into_iter()
+                .map(|row| {
+                    let err = match (row.error_kind, row.error_message) {
+                        (Some(kind), Some(message)) => Some((kind, message)),
+                        (None, None) => None,
+                        _ => {
+                            return Err(Error::internal_error(
+                                "inv_fmd_status row violates \
+                                 error_kind_and_message_together CHECK \
+                                 constraint: exactly one of (error_kind, \
+                                 error_message) is NULL",
+                            ));
+                        }
+                    };
+                    Ok((row.sled_id.into(), err))
+                })
+                .collect::<Result<BTreeMap<_, _>, _>>()?
+        };
+
+        let mut fmd_cases_by_sled: BTreeMap<
+            SledUuid,
+            IdOrdMap<sled_agent_types::inventory::FmdHostCase>,
+        > = {
+            use nexus_db_schema::schema::inv_fmd_host_case::dsl;
+            let rows = dsl::inv_fmd_host_case
+                .filter(dsl::inv_collection_id.eq(db_id))
+                .select(InvFmdHostCase::as_select())
+                .load_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?;
+            let mut by_sled: BTreeMap<
+                SledUuid,
+                IdOrdMap<sled_agent_types::inventory::FmdHostCase>,
+            > = BTreeMap::new();
+            for row in rows {
+                let sled_id: SledUuid = row.sled_id.into();
+                by_sled
+                    .entry(sled_id)
+                    .or_default()
+                    .insert_unique(row.into())
+                    .map_err(|err| Error::InternalError {
+                    internal_message: format!(
+                        "unexpected duplicate FMD case: {}",
+                        InlineErrorChain::new(&err)
+                    ),
+                })?;
+            }
+            by_sled
+        };
+
+        let mut fmd_resources_by_sled: BTreeMap<
+            SledUuid,
+            IdOrdMap<sled_agent_types::inventory::FmdResource>,
+        > = {
+            use nexus_db_schema::schema::inv_fmd_resource::dsl;
+            let rows = dsl::inv_fmd_resource
+                .filter(dsl::inv_collection_id.eq(db_id))
+                .select(InvFmdResource::as_select())
+                .load_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?;
+            let mut by_sled: BTreeMap<
+                SledUuid,
+                IdOrdMap<sled_agent_types::inventory::FmdResource>,
+            > = BTreeMap::new();
+            for row in rows {
+                let sled_id: SledUuid = row.sled_id.into();
+                by_sled
+                    .entry(sled_id)
+                    .or_default()
+                    .insert_unique(row.into())
+                    .map_err(|err| Error::InternalError {
+                    internal_message: format!(
+                        "unexpected duplicate FMD resource: {}",
+                        InlineErrorChain::new(&err)
+                    ),
+                })?;
+            }
+            by_sled
+        };
+
         // Load all the config reconciler zone results; build a map of maps
         // keyed by sled ID.
         let mut last_reconciliation_zone_results = {
@@ -4259,6 +4778,59 @@ impl DataStore {
                     ))
                 })?;
 
+            // Convert enabled not online SMF services into
+            // `SvcsEnabledNotOnlineResult`
+            let smf_services_enabled_not_online =
+                match svcs_enabled_not_online_by_sled
+                    .remove(&sled_id)
+                    .and_then(|rows| rows.into_iter().next())
+                {
+                    // There should only be one row per collection per sled
+                    None => SvcsEnabledNotOnlineResult::DataUnavailable,
+                    // Check if the svcs command itself failed first. If so, we
+                    // can safely assume no services have been reported and
+                    // return an error.
+                    Some(row) if row.svcs_cmd_error.is_some() => {
+                        SvcsEnabledNotOnlineResult::SvcsCmdError(SvcsError {
+                            error: row.svcs_cmd_error.unwrap(),
+                            time_of_status: row.time_of_status,
+                        })
+                    }
+                    Some(row) => {
+                        // Collect all services from svcs_enabled_not_online_services_by_sled
+                        // for this sled.
+                        let services: Vec<SvcEnabledNotOnline> =
+                            svcs_enabled_not_online_services_by_sled
+                                .remove(&sled_id)
+                                .unwrap_or_default()
+                                .into_iter()
+                                .map(|svc| SvcEnabledNotOnline {
+                                    fmri: svc.fmri,
+                                    zone: svc.zone,
+                                    state: svc.state.into(),
+                                })
+                                .collect();
+
+                        // Collect all errors from svcs_enabled_not_online_errors_by_sled
+                        // for this sled.
+                        let errors: Vec<String> =
+                            svcs_enabled_not_online_errors_by_sled
+                                .remove(&sled_id)
+                                .unwrap_or_default()
+                                .into_iter()
+                                .map(|err| err.error_message)
+                                .collect();
+
+                        SvcsEnabledNotOnlineResult::SvcsEnabledNotOnline(
+                            SvcsEnabledNotOnline {
+                                services,
+                                errors,
+                                time_of_status: row.time_of_status,
+                            },
+                        )
+                    }
+                };
+
             let sled_agent = nexus_types::inventory::SledAgent {
                 time_collected: s.time_collected,
                 source: s.source,
@@ -4295,13 +4867,32 @@ impl DataStore {
                 reconciler_status,
                 last_reconciliation,
                 file_source_resolver,
-                // TODO-K[omicron#9516]: Actually query the DB when there is
-                // something there
-                smf_services_enabled_not_online:
-                    SvcsEnabledNotOnlineResult::DataUnavailable,
+                smf_services_enabled_not_online,
                 reference_measurements: last_reconciliation_measurements
                     .remove(&sled_id)
                     .unwrap_or_default(),
+                fmd: {
+                    use sled_agent_types::inventory::{
+                        FmdInventory, FmdInventoryError,
+                    };
+                    let cases =
+                        fmd_cases_by_sled.remove(&sled_id).unwrap_or_default();
+                    let resources = fmd_resources_by_sled
+                        .remove(&sled_id)
+                        .unwrap_or_default();
+                    // The status row's (error_kind, error_message) columns
+                    // distinguish Ok (both NULL) from Err (both set). If no
+                    // row exists at all (older collection predating this
+                    // migration), fall back to Ok with whatever case/resource
+                    // rows we found, which will normally be empty.
+                    match fmd_status_by_sled.remove(&sled_id) {
+                        Some(Some((kind, message))) => Err(FmdInventoryError {
+                            kind: kind.into(),
+                            message,
+                        }),
+                        _ => Ok(FmdInventory { cases, resources }),
+                    }
+                },
             };
             sled_agents
                 .insert_unique(sled_agent)
@@ -4364,6 +4955,21 @@ impl DataStore {
             mupdate_override_non_boot_by_sled_id.is_empty(),
             "found extra mupdate override non-boot entries: {:?}",
             mupdate_override_non_boot_by_sled_id.keys()
+        );
+        bail_unless!(
+            svcs_enabled_not_online_by_sled.is_empty(),
+            "found extra svcs enabled not online entries: {:?}",
+            svcs_enabled_not_online_by_sled.keys()
+        );
+        bail_unless!(
+            svcs_enabled_not_online_services_by_sled.is_empty(),
+            "found extra svcs enabled not online services entries: {:?}",
+            svcs_enabled_not_online_services_by_sled.keys()
+        );
+        bail_unless!(
+            svcs_enabled_not_online_errors_by_sled.is_empty(),
+            "found extra svcs enabled not online entries: {:?}",
+            svcs_enabled_not_online_errors_by_sled.keys()
         );
 
         // Read the top-level collection metadata last. We do this at the end

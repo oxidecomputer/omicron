@@ -982,6 +982,34 @@
         }
       }
     },
+    "/fm/known-ereport-classes": {
+      "get": {
+        "summary": "List ereport classes that this Nexus's diagnosis engines consume.",
+        "operationId": "fm_known_ereport_classes_list",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Array_of_String",
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/instances/{instance_id}/migrate": {
       "post": {
         "operationId": "instance_migrate",
@@ -1953,6 +1981,14 @@
               }
             ]
           },
+          "external_networking_generation": {
+            "description": "The generation of the collective set of all external networking required for in-service zones\n\nThis generation number is bumped any time a zone with external networking is added, expunged, or changed in a way that affects the way NAT entries have to be configured in dendrite.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Generation"
+              }
+            ]
+          },
           "id": {
             "description": "unique identifier for this blueprint",
             "allOf": [
@@ -2045,6 +2081,7 @@
           "comment",
           "creator",
           "external_dns_version",
+          "external_networking_generation",
           "id",
           "internal_dns_version",
           "nexus_generation",
@@ -2314,6 +2351,14 @@
               }
             ]
           },
+          "external_networking_generation": {
+            "description": "The current generation of the collective set of external networking configuration across all in-service zones\n\nSee [`Blueprint::external_networking_generation`].",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Generation"
+              }
+            ]
+          },
           "id": {
             "description": "unique identifier for this blueprint",
             "allOf": [
@@ -2374,6 +2419,7 @@
           "comment",
           "creator",
           "external_dns_version",
+          "external_networking_generation",
           "id",
           "internal_dns_version",
           "nexus_generation",
@@ -3290,6 +3336,15 @@
           "stage0",
           "stage0_next"
         ]
+      },
+      "CaseUuid": {
+        "x-rust-type": {
+          "crate": "omicron-uuid-kinds",
+          "path": "omicron_uuid_kinds::CaseUuid",
+          "version": "*"
+        },
+        "type": "string",
+        "format": "uuid"
       },
       "Certificate": {
         "type": "object",
@@ -4220,44 +4275,6 @@
         },
         "type": "string",
         "format": "uuid"
-      },
-      "ExternalPortDiscovery": {
-        "oneOf": [
-          {
-            "type": "object",
-            "properties": {
-              "auto": {
-                "type": "object",
-                "additionalProperties": {
-                  "type": "string",
-                  "format": "ipv6"
-                }
-              }
-            },
-            "required": [
-              "auto"
-            ],
-            "additionalProperties": false
-          },
-          {
-            "type": "object",
-            "properties": {
-              "static": {
-                "type": "object",
-                "additionalProperties": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/Name"
-                  }
-                }
-              }
-            },
-            "required": [
-              "static"
-            ],
-            "additionalProperties": false
-          }
-        ]
       },
       "FailedHostOsUpdateReason": {
         "description": "Describes the reason why a Host OS failed to update",
@@ -5247,6 +5264,10 @@
             "description": "Human-readable free-form text about a resource",
             "type": "string"
           },
+          "enable_jumbo_frames": {
+            "description": "When true, this instance has opted in to jumbo frames (8500 byte MTU) on its primary network interface. The effective MTU also depends on the fleet-wide jumbo-frames opt-in; if that is disabled, the primary interface uses the default MTU regardless of this value. Changes only take effect on the next instance restart.",
+            "type": "boolean"
+          },
           "hostname": {
             "description": "RFC1035-compliant hostname for the instance",
             "type": "string"
@@ -5312,6 +5333,7 @@
         "required": [
           "auto_restart_enabled",
           "description",
+          "enable_jumbo_frames",
           "hostname",
           "id",
           "memory",
@@ -5350,7 +5372,7 @@
         "minimum": 0
       },
       "InstanceCpuPlatform": {
-        "description": "A required CPU platform for an instance.\n\nWhen an instance specifies a required CPU platform:\n\n- The system may expose (to the VM) new CPU features that are only present on that platform (or on newer platforms of the same lineage that also support those features). - The instance must run on hosts that have CPUs that support all the features of the supplied platform.\n\nThat is, the instance is restricted to hosts that have the CPUs which support all features of the required platform, but in exchange the CPU features exposed by the platform are available for the guest to use. Note that this may prevent an instance from starting (if the hosts that could run it are full but there is capacity on other incompatible hosts).\n\nIf an instance does not specify a required CPU platform, then when it starts, the control plane selects a host for the instance and then supplies the guest with the \"minimum\" CPU platform supported by that host. This maximizes the number of hosts that can run the VM if it later needs to migrate to another host.\n\nIn all cases, the CPU features presented by a given CPU platform are a subset of what the corresponding hardware may actually support; features which cannot be used from a virtual environment or do not have full hypervisor support may be masked off. See RFD 314 for specific CPU features in a CPU platform.",
+        "description": "A required CPU platform for an instance.\n\nWhen an instance specifies a required CPU platform:\n\n- The system may expose (to the VM) new CPU features that are only present on that platform (or on newer platforms of the same lineage that also support those features). - The instance must run on hosts that have CPUs that support all the features of the supplied platform.\n\nThat is, the instance is restricted to hosts that have the CPUs which support all features of the required platform, but in exchange the CPU features exposed by the platform are available for the guest to use. Note that this may prevent an instance from starting (if the hosts that could run it are full but there is capacity on other incompatible hosts).\n\nIf an instance does not specify a required CPU platform, then when it starts, the control plane selects a host for the instance and then supplies the guest with the \"minimum\" CPU platform supported by that host. This maximizes the number of hosts that can run the VM if it later needs to migrate to another host.\n\nIn all cases, the CPU features presented by a given CPU platform are a subset of what the corresponding hardware may actually support; features which cannot be used from a virtual environment or do not have full hypervisor support may be masked off.",
         "oneOf": [
           {
             "description": "An AMD Milan-like CPU platform.",
@@ -5360,10 +5382,17 @@
             ]
           },
           {
-            "description": "An AMD Turin-like CPU platform.",
+            "description": "An AMD Turin-like CPU platform. Prefer `amd_turin_v2` over this; this CPU platform is retained for instances that specifically requested it before `amd_turin_v2` was added.\n\nThis initial version of the Turin CPU platform includes no cache or TLB information in CPUID leaf `8000_0006`. While this was intentional, Oxide later discovered some guest software interprets the zeroed leaves as reporting cache sizes of 0 bytes and behaves incorrectly and unpredictably as a result (see [Propolis#1152](https://github.com/oxidecomputer/propolis/issues/1152)).",
             "type": "string",
             "enum": [
               "amd_turin"
+            ]
+          },
+          {
+            "description": "An AMD Turin-like CPU platform.\n\nThis version of the Turin CPU platform includes cache and TLB information in CPUID leaf `8000_0006`, similar to the cache information included in the initial Milan-like CPU platform.",
+            "type": "string",
+            "enum": [
+              "amd_turin_v2"
             ]
           }
         ]
@@ -5658,6 +5687,100 @@
           "iteration",
           "reason",
           "start_time"
+        ]
+      },
+      "LinkFec": {
+        "description": "The forward error correction mode of a link.",
+        "oneOf": [
+          {
+            "description": "Firecode forward error correction.",
+            "type": "string",
+            "enum": [
+              "firecode"
+            ]
+          },
+          {
+            "description": "No forward error correction.",
+            "type": "string",
+            "enum": [
+              "none"
+            ]
+          },
+          {
+            "description": "Reed-Solomon forward error correction.",
+            "type": "string",
+            "enum": [
+              "rs"
+            ]
+          }
+        ]
+      },
+      "LinkSpeed": {
+        "description": "The speed of a link.",
+        "oneOf": [
+          {
+            "description": "Zero gigabits per second.",
+            "type": "string",
+            "enum": [
+              "speed0_g"
+            ]
+          },
+          {
+            "description": "1 gigabit per second.",
+            "type": "string",
+            "enum": [
+              "speed1_g"
+            ]
+          },
+          {
+            "description": "10 gigabits per second.",
+            "type": "string",
+            "enum": [
+              "speed10_g"
+            ]
+          },
+          {
+            "description": "25 gigabits per second.",
+            "type": "string",
+            "enum": [
+              "speed25_g"
+            ]
+          },
+          {
+            "description": "40 gigabits per second.",
+            "type": "string",
+            "enum": [
+              "speed40_g"
+            ]
+          },
+          {
+            "description": "50 gigabits per second.",
+            "type": "string",
+            "enum": [
+              "speed50_g"
+            ]
+          },
+          {
+            "description": "100 gigabits per second.",
+            "type": "string",
+            "enum": [
+              "speed100_g"
+            ]
+          },
+          {
+            "description": "200 gigabits per second.",
+            "type": "string",
+            "enum": [
+              "speed200_g"
+            ]
+          },
+          {
+            "description": "400 gigabits per second.",
+            "type": "string",
+            "enum": [
+              "speed400_g"
+            ]
+          }
         ]
       },
       "LldpAdminStatus": {
@@ -6903,16 +7026,7 @@
         ]
       },
       "PlannerConfig": {
-        "type": "object",
-        "properties": {
-          "add_zones_with_mupdate_override": {
-            "description": "Whether to add zones even if a mupdate override is present.\n\nOnce Nexus-driven update is active on a customer system, we must not add new zones while the system is recovering from a MUPdate.\n\nThis setting, which is off by default, allows us to add zones even if we've detected a recent MUPdate on the system.",
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "add_zones_with_mupdate_override"
-        ]
+        "type": "object"
       },
       "PlanningAddOutOfEligibleSleds": {
         "description": "How many discretionary zones we actually placed out of how many we wanted to place.",
@@ -6943,10 +7057,6 @@
             "items": {
               "type": "string"
             }
-          },
-          "add_zones_with_mupdate_override": {
-            "description": "The value of the homonymous planner config. (What this really means is that zone adds happen despite being blocked by one or more MUPdate-related reasons.)",
-            "type": "boolean"
           },
           "discretionary_zones_placed": {
             "description": "Sled ID → kinds of discretionary zones placed there",
@@ -7032,7 +7142,6 @@
         },
         "required": [
           "add_update_blocked_reasons",
-          "add_zones_with_mupdate_override",
           "discretionary_zones_placed",
           "out_of_eligible_sleds",
           "sleds_getting_ntp_and_discretionary_zones",
@@ -7756,7 +7865,7 @@
             "description": "Port forward error correction type.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/PortFec"
+                "$ref": "#/components/schemas/LinkFec"
               }
             ]
           },
@@ -7764,7 +7873,7 @@
             "description": "Port speed.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/PortSpeed"
+                "$ref": "#/components/schemas/LinkSpeed"
               }
             ]
           }
@@ -7776,30 +7885,6 @@
           "routes",
           "switch",
           "uplink_port_speed"
-        ]
-      },
-      "PortFec": {
-        "description": "Switchport FEC options",
-        "type": "string",
-        "enum": [
-          "firecode",
-          "none",
-          "rs"
-        ]
-      },
-      "PortSpeed": {
-        "description": "Switchport Speed options",
-        "type": "string",
-        "enum": [
-          "speed0_g",
-          "speed1_g",
-          "speed10_g",
-          "speed25_g",
-          "speed40_g",
-          "speed50_g",
-          "speed100_g",
-          "speed200_g",
-          "speed400_g"
         ]
       },
       "PrivateIpConfig": {
@@ -8211,13 +8296,10 @@
             "description": "delegated DNS name for external DNS",
             "type": "string"
           },
-          "external_port_count": {
-            "description": "The external qsfp ports per sidecar",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/ExternalPortDiscovery"
-              }
-            ]
+          "external_jumbo_frames_opt_in_enabled": {
+            "description": "Fleet-wide jumbo-frames opt-in (defaults to false). Operators can change this post-init via the Nexus API.",
+            "default": false,
+            "type": "boolean"
           },
           "initial_trust_quorum_configuration": {
             "nullable": true,
@@ -8280,7 +8362,6 @@
           "certs",
           "crucible_datasets",
           "external_dns_zone_name",
-          "external_port_count",
           "internal_dns_zone_config",
           "internal_services_ip_pool_ranges",
           "physical_disks",
@@ -8320,10 +8401,11 @@
           },
           "ports": {
             "description": "Uplinks for connecting the rack to external networks",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/PortConfig"
-            }
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/UplinkPorts"
+              }
+            ]
           },
           "rack_subnet": {
             "$ref": "#/components/schemas/Ipv6Net"
@@ -8349,8 +8431,16 @@
       "ReconfiguratorConfig": {
         "type": "object",
         "properties": {
+          "disruption_policy": {
+            "$ref": "#/components/schemas/ReconfiguratorDisruptionPolicy"
+          },
           "planner_config": {
-            "$ref": "#/components/schemas/PlannerConfig"
+            "default": {},
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PlannerConfig"
+              }
+            ]
           },
           "planner_enabled": {
             "type": "boolean"
@@ -8360,7 +8450,7 @@
           }
         },
         "required": [
-          "planner_config",
+          "disruption_policy",
           "planner_enabled",
           "tuf_repo_pruner_enabled"
         ]
@@ -8402,6 +8492,32 @@
           "config",
           "time_modified",
           "version"
+        ]
+      },
+      "ReconfiguratorDisruptionPolicy": {
+        "description": "Controls how instances are disrupted during updates.",
+        "oneOf": [
+          {
+            "description": "Terminate instances during updates -- do not attempt to migrate instances. This is currently the default.",
+            "type": "string",
+            "enum": [
+              "terminate"
+            ]
+          },
+          {
+            "description": "Attempt to live-migrate instances, and terminate instances if migration is not possible.",
+            "type": "string",
+            "enum": [
+              "migrate_or_terminate"
+            ]
+          },
+          {
+            "description": "Live-migrate any potentially migratable instances, and block reconfigurator progress if migration is not currently possible for operational reasons.\n\nThis will still cause instances to be terminated if it is impossible for them to be live-migrated, such as if they use local storage.",
+            "type": "string",
+            "enum": [
+              "migrate_only"
+            ]
+          }
         ]
       },
       "RecoverySiloConfig": {
@@ -8539,10 +8655,6 @@
         "minimum": 0,
         "maximum": 9000
       },
-      "RouterPeerIpAddr": {
-        "type": "string",
-        "format": "ip"
-      },
       "RouterPeerType": {
         "oneOf": [
           {
@@ -8573,11 +8685,8 @@
             "properties": {
               "ip": {
                 "description": "IP address for numbered BGP peers.",
-                "allOf": [
-                  {
-                    "$ref": "#/components/schemas/RouterPeerIpAddr"
-                  }
-                ]
+                "type": "string",
+                "format": "ip"
               },
               "type": {
                 "type": "string",
@@ -9166,8 +9275,18 @@
         }
       },
       "SupportBundleInfo": {
+        "description": "Support bundle info with internal-only fields.\n\nThis wraps the external API's [`ExternalSupportBundleInfo`] and extends it with fields that are only exposed through the lockstep API (e.g., for OMDB).",
         "type": "object",
         "properties": {
+          "fm_case_id": {
+            "nullable": true,
+            "description": "The FM case ID that triggered creation of this bundle, if any.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/CaseUuid"
+              }
+            ]
+          },
           "id": {
             "type": "string",
             "format": "uuid"
@@ -9644,7 +9763,7 @@
             "type": "object",
             "properties": {
               "ip_net": {
-                "$ref": "#/components/schemas/UplinkIpNet"
+                "$ref": "#/components/schemas/IpNet"
               },
               "type": {
                 "type": "string",
@@ -9684,8 +9803,12 @@
           "address"
         ]
       },
-      "UplinkIpNet": {
-        "$ref": "#/components/schemas/IpNet"
+      "UplinkPorts": {
+        "type": "array",
+        "items": {
+          "$ref": "#/components/schemas/PortConfig"
+        },
+        "minItems": 1
       },
       "UserId": {
         "title": "A username for a local-only user",

@@ -2,12 +2,12 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use super::inventory::NetworkInterface;
 use crate::v6;
 use iddqd::IdHashItem;
 use iddqd::IdHashMap;
 use iddqd::id_upcast;
 use omicron_common::api::external::Error as ExternalError;
-use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_uuid_kinds::ProbeUuid;
 use schemars::JsonSchema;
 use serde::Deserialize;

@@ -17,6 +17,7 @@ camino.workspace = true
 chrono.workspace = true
 chrono-tz.workspace = true
 clap.workspace = true
+clickhouse-admin-types.workspace = true
 const_format.workspace = true
 clickward.workspace = true
 debug-ignore.workspace = true
@@ -25,6 +26,7 @@ futures.workspace = true
 gethostname.workspace = true
 highway.workspace = true
 iana-time-zone.workspace = true
+iddqd.workspace = true
 indexmap.workspace = true
 libc.workspace = true
 nom.workspace = true
@@ -117,7 +119,6 @@ slog-dtrace.workspace = true
 sqlformat.workspace = true
 sqlparser.workspace = true
 strum.workspace = true
-tempfile.workspace = true
 
 [features]
 default = [ "native-sql-shell", "oxql", "sql" ]
@@ -153,5 +154,9 @@ name = "protocol"
 harness = false
 
 [[bench]]
-name = "oxql"
+name = "oxql_field"
+harness = false
+
+[[bench]]
+name = "oxql_measurement"
 harness = false

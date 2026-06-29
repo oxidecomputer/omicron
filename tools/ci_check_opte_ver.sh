@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 set -euo pipefail
 
 source tools/opte_version_override
-if [[ "x$OPTE_COMMIT" != "x" ]]; then
-    exit 0
-fi
 
 # Grab all the oxidecomputer/opte dependencies' revisions
 readarray -t opte_deps_revs < <(toml get Cargo.toml workspace.dependencies | jq -r 'to_entries | .[] | select(.value.git? | contains("oxidecomputer/opte")?) | .value.rev')
@@ -18,6 +19,19 @@ for rev in "${opte_deps_revs[@]}"; do
         exit 1
     fi
 done
+
+# When an OPTE override is active, the kernel binary is built from
+# $OPTE_COMMIT while the userland (opte-ioctl, oxide-vpc) is built from
+# the Cargo dep revision. They must match, otherwise kernel/userland
+# ABI drift surfaces as opaque ioctl failures at runtime.
+if [[ "x$OPTE_COMMIT" != "x" ]]; then
+    if [ "$OPTE_REV" != "$OPTE_COMMIT" ]; then
+        echo "OPTE override mismatch:"
+        echo "  Cargo.toml deps: $OPTE_REV"
+        echo "  tools/opte_version_override: $OPTE_COMMIT"
+        exit 1
+    fi
+fi
 
 # Grab the API version for this revision
 API_VER=$(curl -s https://raw.githubusercontent.com/oxidecomputer/opte/"$OPTE_REV"/crates/opte-api/src/lib.rs | sed -n 's/pub const API_VERSION: u64 = \([0-9]*\);/\1/p')
@@ -68,9 +82,9 @@ fi
 
 # Also check that the buildomat deploy job is using the same version
 BUILDOMAT_DEPLOY_TARGET=$(cat .github/buildomat/jobs/deploy.sh | sed -n 's/#:[ ]*target[ ]*=[ ]*"\(.*\)"/\1/p')
-if [ "lab-2.0-opte-0.$API_VER" != "$BUILDOMAT_DEPLOY_TARGET" ]; then
+if [ "lab-3.0-opte-0.$API_VER" != "$BUILDOMAT_DEPLOY_TARGET" ]; then
     echo "OPTE version mismatch:"
     echo "Cargo.toml: $OPTE_REV ($OPTE_VER)"
-    echo "buildomat deploy job: $BUILDOMAT_DEPLOY_TARGET (expected lab-opte-0.$API_VER)"
+    echo "buildomat deploy job: $BUILDOMAT_DEPLOY_TARGET (expected lab-3.0-opte-0.$API_VER)"
     exit 1
 fi

@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 
 set -eu
 
@@ -112,7 +116,7 @@ function install_packages {
   if [[ "${HOST_OS}" == "SunOS" ]]; then
     packages=(
       'pkg:/package/pkg'
-      'library/postgresql-13'
+      'library/postgresql-18'
       'pkg-config'
       'brand/omicron1/tools'
       'library/libxmlsec1'

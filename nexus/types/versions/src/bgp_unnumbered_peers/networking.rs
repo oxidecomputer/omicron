@@ -16,6 +16,13 @@
 //! - `SwitchPortSettings` updated to use the new `BgpPeer`
 //! - `SwitchPortSettingsCreate` updated to use the new `BgpPeerConfig`.
 
+use crate::v2025_11_20_00::networking::SwitchInterfaceConfig;
+use crate::v2025_11_20_00::networking::SwitchPortAddressView;
+use crate::v2025_11_20_00::networking::SwitchPortConfig;
+use crate::v2025_11_20_00::networking::SwitchPortLinkConfig;
+use crate::v2025_11_20_00::networking::SwitchPortRouteConfig;
+use crate::v2025_11_20_00::networking::SwitchPortSettingsGroups;
+use crate::v2025_11_20_00::networking::SwitchVlanInterfaceConfig;
 use crate::v2025_12_12_00::networking::BgpPeerState;
 use api_identity::ObjectIdentity;
 use omicron_common::api::external::{
@@ -24,9 +31,9 @@ use omicron_common::api::external::{
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use sled_agent_types::early_networking::ImportExportPolicy;
-use sled_agent_types::early_networking::MaxPathConfig;
-use sled_agent_types::early_networking::SwitchSlot;
+use sled_agent_types_versions::v1::early_networking::ImportExportPolicy;
+use sled_agent_types_versions::v1::early_networking::SwitchSlot;
+use sled_agent_types_versions::v20::early_networking::MaxPathConfig;
 use std::net::IpAddr;
 
 /// A base BGP configuration.
@@ -314,28 +321,28 @@ pub struct SwitchPortSettings {
     pub identity: IdentityMetadata,
 
     /// Switch port settings included from other switch port settings groups.
-    pub groups: Vec<external::SwitchPortSettingsGroups>,
+    pub groups: Vec<SwitchPortSettingsGroups>,
 
     /// Layer 1 physical port settings.
-    pub port: external::SwitchPortConfig,
+    pub port: SwitchPortConfig,
 
     /// Layer 2 link settings.
-    pub links: Vec<external::SwitchPortLinkConfig>,
+    pub links: Vec<SwitchPortLinkConfig>,
 
     /// Layer 3 interface settings.
-    pub interfaces: Vec<external::SwitchInterfaceConfig>,
+    pub interfaces: Vec<SwitchInterfaceConfig>,
 
     /// Vlan interface settings.
-    pub vlan_interfaces: Vec<external::SwitchVlanInterfaceConfig>,
+    pub vlan_interfaces: Vec<SwitchVlanInterfaceConfig>,
 
     /// IP route settings.
-    pub routes: Vec<external::SwitchPortRouteConfig>,
+    pub routes: Vec<SwitchPortRouteConfig>,
 
     /// BGP peer settings.
     pub bgp_peers: Vec<BgpPeer>,
 
     /// Layer 3 IP address settings.
-    pub addresses: Vec<external::SwitchPortAddressView>,
+    pub addresses: Vec<SwitchPortAddressView>,
 }
 
 impl TryFrom<SwitchPortSettings>
@@ -394,25 +401,6 @@ pub struct SwitchPortSettingsCreate {
 
     /// Address configurations.
     pub addresses: Vec<crate::v2025_11_20_00::networking::AddressConfig>,
-}
-
-impl SwitchPortSettingsCreate {
-    pub fn new(identity: IdentityMetadataCreateParams) -> Self {
-        Self {
-            identity,
-            port_config:
-                crate::v2025_11_20_00::networking::SwitchPortConfigCreate {
-                    geometry:
-                        crate::v2025_11_20_00::networking::SwitchPortGeometry::Qsfp28x1,
-                },
-            groups: Vec::new(),
-            links: Vec::new(),
-            interfaces: Vec::new(),
-            routes: Vec::new(),
-            bgp_peers: Vec::new(),
-            addresses: Vec::new(),
-        }
-    }
 }
 
 impl From<crate::v2025_11_20_00::networking::SwitchPortSettingsCreate>

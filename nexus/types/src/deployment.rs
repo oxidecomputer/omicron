@@ -15,7 +15,6 @@
 use crate::external_api::sled::SledState;
 use crate::internal_api::params::DnsConfigParams;
 use crate::inventory::Collection;
-pub use crate::inventory::SourceNatConfigGeneric;
 pub use crate::inventory::ZpoolName;
 use blueprint_diff::ClickhouseClusterConfigDiffTablesForSingleBlueprint;
 use blueprint_display::BpDatasetsTableSchema;
@@ -33,6 +32,7 @@ use ipnet::IpAdd;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::SLED_PREFIX;
 use omicron_common::address::SLED_RESERVED_ADDRESSES;
+use omicron_common::address::get_sled_address;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Generation;
 use omicron_common::api::external::TufArtifactMeta;
@@ -54,6 +54,10 @@ use omicron_uuid_kinds::ZpoolUuid;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
+use sled_agent_types::system_networking::ServiceZoneNatEntries;
+use sled_agent_types::system_networking::ServiceZoneNatEntriesError;
+use sled_agent_types::system_networking::ServiceZoneNatEntry;
+use sled_agent_types::system_networking::ServiceZoneNatKind;
 use sled_agent_types_versions::latest::inventory::HostPhase2DesiredContents;
 use sled_agent_types_versions::latest::inventory::HostPhase2DesiredSlots;
 use sled_agent_types_versions::latest::inventory::OmicronSingleMeasurement;
@@ -111,6 +115,7 @@ pub use planning_input::DiskFilter;
 pub use planning_input::ExternalIpPolicy;
 pub use planning_input::ExternalIpPolicyBuilder;
 pub use planning_input::ExternalIpPolicyError;
+pub use planning_input::ExternalServiceNetworkingPolicy;
 pub use planning_input::OximeterReadMode;
 pub use planning_input::OximeterReadPolicy;
 pub use planning_input::PlanningInput;
@@ -149,7 +154,6 @@ pub use planning_report::ZoneUnsafeToShutdown;
 pub use planning_report::ZoneUpdatesWaitingOn;
 pub use planning_report::ZoneWaitingToExpunge;
 pub use reconfigurator_config::PlannerConfig;
-pub use reconfigurator_config::PlannerConfigDiff;
 pub use reconfigurator_config::PlannerConfigDisplay;
 pub use reconfigurator_config::ReconfiguratorConfig;
 pub use reconfigurator_config::ReconfiguratorConfigDiff;
@@ -158,6 +162,7 @@ pub use reconfigurator_config::ReconfiguratorConfigDisplay;
 pub use reconfigurator_config::ReconfiguratorConfigParam;
 pub use reconfigurator_config::ReconfiguratorConfigView;
 pub use reconfigurator_config::ReconfiguratorConfigViewDisplay;
+pub use reconfigurator_config::ReconfiguratorDisruptionPolicy;
 use sled_hardware_types::BaseboardId;
 pub use zone_type::BlueprintZoneType;
 pub use zone_type::DurableDataset;
@@ -253,6 +258,14 @@ pub struct Blueprint {
     /// control to the newer generation (see: RFD 588).
     pub nexus_generation: Generation,
 
+    /// The generation of the collective set of all external networking required
+    /// for in-service zones
+    ///
+    /// This generation number is bumped any time a zone with external
+    /// networking is added, expunged, or changed in a way that affects the way
+    /// NAT entries have to be configured in dendrite.
+    pub external_networking_generation: Generation,
+
     /// CockroachDB state fingerprint when this blueprint was created
     // See `nexus/db-queries/src/db/datastore/cockroachdb_settings.rs` for more
     // on this.
@@ -302,6 +315,7 @@ impl Blueprint {
             target_release_minimum_generation: self
                 .target_release_minimum_generation,
             nexus_generation: self.nexus_generation,
+            external_networking_generation: self.external_networking_generation,
             cockroachdb_fingerprint: self.cockroachdb_fingerprint.clone(),
             cockroachdb_setting_preserve_downgrade: Some(
                 self.cockroachdb_setting_preserve_downgrade,
@@ -311,6 +325,79 @@ impl Blueprint {
             comment: self.comment.clone(),
             source: self.source.clone(),
         }
+    }
+
+    /// Construct a [`ServiceZoneNatEntries`] containing all NAT entries for
+    /// relevant in-service zones in this blueprint.
+    ///
+    /// # Errors
+    ///
+    /// This method will fail if the blueprint contains overlapping NAT entries
+    /// (never expected) or has no in-service zones of the types required by
+    /// `ServiceZoneNatEntries` (boundary NTP, external DNS, and Nexus). Real
+    /// blueprints should always have at least one zone of this type, but many
+    /// test blueprints will not.
+    pub fn to_service_zone_nat_entries(
+        &self,
+    ) -> Result<ServiceZoneNatEntries, ServiceZoneNatEntriesError> {
+        let entries = self
+            .in_service_zones()
+            .filter_map(|(sled_id, zone_config)| {
+                let (nic_mac, vni, kind) = match &zone_config.zone_type {
+                    BlueprintZoneType::BoundaryNtp(ntp) => (
+                        ntp.nic.mac,
+                        ntp.nic.vni,
+                        ServiceZoneNatKind::BoundaryNtp {
+                            snat_cfg: ntp.external_ip.snat_cfg,
+                        },
+                    ),
+                    BlueprintZoneType::ExternalDns(dns) => (
+                        dns.nic.mac,
+                        dns.nic.vni,
+                        ServiceZoneNatKind::ExternalDns {
+                            external_ip: dns.dns_address.addr.ip(),
+                        },
+                    ),
+                    BlueprintZoneType::Nexus(nexus) => (
+                        nexus.nic.mac,
+                        nexus.nic.vni,
+                        ServiceZoneNatKind::Nexus {
+                            external_ip: nexus.external_ip.ip,
+                        },
+                    ),
+
+                    // None of these zone types have external NAT.
+                    BlueprintZoneType::Clickhouse(_)
+                    | BlueprintZoneType::ClickhouseKeeper(_)
+                    | BlueprintZoneType::ClickhouseServer(_)
+                    | BlueprintZoneType::CockroachDb(_)
+                    | BlueprintZoneType::Crucible(_)
+                    | BlueprintZoneType::CruciblePantry(_)
+                    | BlueprintZoneType::InternalDns(_)
+                    | BlueprintZoneType::InternalNtp(_)
+                    | BlueprintZoneType::Oximeter(_) => return None,
+                };
+
+                // in_service_zones() iterates over `self.sleds`, so it can only
+                // give us `sled_id`s that exist there. It's safe for us to
+                // unwrap here.
+                let sled_subnet = self
+                    .sleds
+                    .get(&sled_id)
+                    .expect("sled must exist if we have in-service zones")
+                    .subnet;
+
+                Some(ServiceZoneNatEntry {
+                    zone_id: zone_config.id,
+                    sled_underlay_ip: *get_sled_address(sled_subnet).ip(),
+                    nic_mac,
+                    vni,
+                    kind,
+                })
+            })
+            .collect::<IdOrdMap<_>>();
+
+        entries.try_into()
     }
 
     /// Iterate over the in-service [`BlueprintZoneConfig`] instances in the
@@ -595,69 +682,6 @@ impl Blueprint {
         )))
     }
 
-    /// Return the configuration of upstream NTP settings (needed to configure
-    /// boundary NTP zones).
-    ///
-    /// This information should be operator-configurable, but currently is not:
-    /// we carry it forward from rack setup time onward from blueprint to
-    /// blueprint. Fixing this is
-    /// <https://github.com/oxidecomputer/omicron/issues/9040>.
-    ///
-    /// Returns `None` if this blueprint contains no boundary NTP zones from
-    /// which we can infer the upstream configuration. (This should only be the
-    /// case for test blueprints - real systems always deploy at least one
-    /// boundary NTP zone).
-    pub fn upstream_ntp_config(&self) -> Option<UpstreamNtpConfig<'_>> {
-        // The upstream NTP config can't be changed, so it's fine to use
-        // `find()` here and include searching both in-service and expunged
-        // zones. (Real racks will always have at least one in-service boundary
-        // NTP zone, but some test or test systems may have 0 if they have only
-        // a single sled and that sled's boundary NTP zone is being upgraded.)
-        self.all_in_service_and_expunged_zones(
-            BlueprintExpungedZoneAccessReason::BoundaryNtpUpstreamConfig,
-        )
-        .find_map(|(_sled_id, zone)| match &zone.zone_type {
-            BlueprintZoneType::BoundaryNtp(ntp_config) => {
-                Some(UpstreamNtpConfig {
-                    ntp_servers: &ntp_config.ntp_servers,
-                    dns_servers: &ntp_config.dns_servers,
-                    domain: ntp_config.domain.as_deref(),
-                })
-            }
-            _ => None,
-        })
-    }
-
-    /// Return the operator-specified configuration of Nexus.
-    ///
-    /// This information should be operator-configurable, but currently is not:
-    /// we carry it forward from rack setup time onward from blueprint to
-    /// blueprint. Fixing this is
-    /// <https://github.com/oxidecomputer/omicron/issues/9040>.
-    ///
-    /// Returns `None` if this blueprint contains no Nexus zones from which we
-    /// can infer the configuration. (This should only be the case for test
-    /// blueprints - real systems always deploy at least one Nexus zone).
-    pub fn operator_nexus_config(&self) -> Option<OperatorNexusConfig<'_>> {
-        // The Nexus config can't be changed, so it's fine to use
-        // `find()` here and include searching both in-service and expunged
-        // zones. (Real racks will always have at least one in-service Nexus
-        // zone - the one calling this code - but some tests create blueprints
-        // without any.)
-        self.all_in_service_and_expunged_zones(
-            BlueprintExpungedZoneAccessReason::NexusExternalConfig,
-        )
-        .find_map(|(_sled_id, zone)| match &zone.zone_type {
-            BlueprintZoneType::Nexus(nexus_config) => {
-                Some(OperatorNexusConfig {
-                    external_tls: nexus_config.external_tls,
-                    external_dns_servers: &nexus_config.external_dns_servers,
-                })
-            }
-            _ => None,
-        })
-    }
-
     /// Returns the complete set of external IP addresses assigned to external
     /// DNS servers described by this blueprint, including both in-service and
     /// expunged external DNS zones.
@@ -665,7 +689,7 @@ impl Blueprint {
     /// This information should be operator-configurable, but currently is not:
     /// we carry it forward from rack setup time onward from blueprint to
     /// blueprint. Fixing this is
-    /// <https://github.com/oxidecomputer/omicron/issues/9040>.
+    /// <https://github.com/oxidecomputer/omicron/issues/3732>.
     ///
     /// Returns an empty set if this blueprint contains no external DNS zones.
     /// (This should only be the case for test blueprints - real systems always
@@ -708,14 +732,17 @@ impl Blueprint {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+/// Operator-supplied upstream NTP configuration plumbed into boundary NTP
+/// zones.
+#[derive(Debug, Clone)]
 pub struct UpstreamNtpConfig<'a> {
     pub ntp_servers: &'a [String],
     pub dns_servers: &'a [IpAddr],
     pub domain: Option<&'a str>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+/// Operator-supplied configuration for Nexus's external API endpoint.
+#[derive(Debug, Clone)]
 pub struct OperatorNexusConfig<'a> {
     pub external_tls: bool,
     pub external_dns_servers: &'a [IpAddr],
@@ -775,7 +802,7 @@ pub enum BlueprintExpungedZoneAccessReason {
     // conditions the planner must consider during pruning.
     // --------------------------------------------------------------------
     /// Carrying forward the upstream NTP configuration provided by the operator
-    /// during rack setup; see [`Blueprint::upstream_ntp_config()`].
+    /// during rack setup.
     ///
     /// The planner must not prune a boundary NTP zone if it's the last zone
     /// remaining with the set of configuration.
@@ -820,7 +847,7 @@ pub enum BlueprintExpungedZoneAccessReason {
     NexusDeleteMetadataRecord,
 
     /// Carrying forward the external Nexus configuration provided by the
-    /// operator during rack setup; see [`Blueprint::operator_nexus_config()`].
+    /// operator during rack setup.
     ///
     /// The planner must not prune a Nexus zone if it's the last zone
     /// remaining with the set of configuration.
@@ -1359,6 +1386,10 @@ impl BlueprintDisplay<'_> {
                         .to_string(),
                 ),
                 (NEXUS_GENERATION, self.blueprint.nexus_generation.to_string()),
+                (
+                    EXTERNAL_NETWORKING_GENERATION,
+                    self.blueprint.external_networking_generation.to_string(),
+                ),
             ],
         )
     }
@@ -1388,6 +1419,7 @@ impl fmt::Display for BlueprintDisplay<'_> {
             sleds,
             pending_mgs_updates,
             parent_blueprint_id,
+            source,
             // These two cockroachdb_* fields are handled by
             // `make_cockroachdb_table()`, called below.
             cockroachdb_fingerprint: _,
@@ -1398,16 +1430,15 @@ impl fmt::Display for BlueprintDisplay<'_> {
             // Handled by `make_oximeter_table`, called below.
             oximeter_read_version: _,
             oximeter_read_mode: _,
-            // These six fields are handled by `make_metadata_table()`, called
-            // below.
+            // Handled by `make_metadata_table()`, called below.
             target_release_minimum_generation: _,
             nexus_generation: _,
+            external_networking_generation: _,
             internal_dns_version: _,
             external_dns_version: _,
             time_created: _,
             creator: _,
             comment: _,
-            source,
         } = self.blueprint;
 
         writeln!(f, "blueprint  {}", id)?;
@@ -3233,6 +3264,11 @@ pub struct BlueprintMetadata {
     ///
     /// See [`Blueprint::nexus_generation`].
     pub nexus_generation: Generation,
+    /// The current generation of the collective set of external networking
+    /// configuration across all in-service zones
+    ///
+    /// See [`Blueprint::external_networking_generation`].
+    pub external_networking_generation: Generation,
     /// CockroachDB state fingerprint when this blueprint was created
     pub cockroachdb_fingerprint: String,
     /// Whether to set `cluster.preserve_downgrade_option` and what to set it to

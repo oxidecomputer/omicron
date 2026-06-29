@@ -30,7 +30,6 @@ use nexus_db_model::InstanceUpdate;
 use nexus_db_model::IpAttachState;
 use nexus_db_model::IpKind;
 use nexus_db_model::Vmm as DbVmm;
-use nexus_db_model::VmmRuntimeState;
 use nexus_db_model::VmmState as DbVmmState;
 use nexus_db_queries::authn;
 use nexus_db_queries::authz;
@@ -38,14 +37,19 @@ use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
 use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::datastore::InstanceAndActiveVmm;
-use nexus_db_queries::db::datastore::InstanceStateComputer;
 use nexus_db_queries::db::identity::Resource;
+use nexus_db_queries::db::model::InstanceStateComputer;
 use nexus_types::external_api::disk;
 use nexus_types::external_api::external_ip;
 use nexus_types::external_api::instance;
+// We'll use `InstanceState` frequently, and the code that uses it is already
+// subtle enough: break from the pattern of external API types being referenced
+// by `topic::Name` to help legibility and keep line wrapping under control..
+use nexus_types::external_api::instance::InstanceState;
 use nexus_types::external_api::ip_pool;
 use nexus_types::external_api::multicast;
 use nexus_types::external_api::project;
+use nexus_types::instance::SledVmmState;
 use omicron_common::address::ConcreteIp;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::CreateResult;
@@ -53,8 +57,6 @@ use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::Hostname;
-use omicron_common::api::external::InstanceCpuCount;
-use omicron_common::api::external::InstanceState;
 use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::IpVersion;
 use omicron_common::api::external::ListResultVec;
@@ -62,10 +64,6 @@ use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::http_pagination::PaginatedBy;
-use omicron_common::api::internal::nexus;
-use omicron_common::api::internal::shared::ExternalIpConfig;
-use omicron_common::api::internal::shared::ExternalIps;
-use omicron_common::api::internal::shared::external_ip::SourceNatConfig;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
 use omicron_uuid_kinds::MulticastGroupUuid;
@@ -83,6 +81,10 @@ use sagas::instance_update;
 use sled_agent_client::types::DelegatedZvol;
 use sled_agent_client::types::InstanceMigrationTargetParams;
 use sled_agent_client::types::VmmPutStateBody;
+use sled_agent_types::instance as sled_agent;
+use sled_agent_types::instance::ExternalIpConfig;
+use sled_agent_types::instance::ExternalIps;
+use sled_agent_types::inventory::SourceNatConfig;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeSet;
 use std::collections::{HashMap, HashSet};
@@ -187,6 +189,16 @@ impl SledAgentInstanceError {
                     && rv.error_code.as_deref() == Some("NO_SUCH_INSTANCE")
             }
             _ => false,
+        }
+    }
+
+    /// If this error indicates that the VMM should be marked as `Failed`,
+    /// returns the reason for the failure.
+    pub fn vmm_failure_reason(&self) -> Option<db::model::VmmFailureReason> {
+        if self.vmm_gone() {
+            Some(db::model::VmmFailureReason::NoSuchInstance)
+        } else {
+            None
         }
     }
 }
@@ -559,9 +571,26 @@ impl super::Nexus {
             boot_disk,
             cpu_platform,
             multicast_groups,
+            enable_jumbo_frames,
         } = params;
 
         check_instance_cpu_memory_sizes(*ncpus, *memory)?;
+
+        // Opting in to jumbo frames requires the fleet-wide opt-in. Opting out
+        // (`Some(false)`) is always allowed.
+        if *enable_jumbo_frames {
+            let settings = self
+                .db_datastore
+                .system_networking_settings_view(opctx)
+                .await?;
+            if !settings.external_jumbo_frames_opt_in_enabled {
+                return Err(Error::invalid_request(
+                    "enable_jumbo_frames may only be set to true when the \
+                     fleet-wide jumbo-frames opt-in is enabled by a fleet \
+                     administrator",
+                ));
+            }
+        }
 
         let boot_disk_id = match boot_disk.as_ref() {
             Some(disk) => {
@@ -593,6 +622,7 @@ impl super::Nexus {
             ncpus,
             memory,
             cpu_platform,
+            enable_jumbo_frames: *enable_jumbo_frames,
         };
 
         // Update the instance configuration
@@ -663,6 +693,22 @@ impl super::Nexus {
                 "An instance may not join more than {} multicast groups",
                 MAX_MULTICAST_GROUPS_PER_INSTANCE,
             )));
+        }
+
+        // Requiring jumbo frames on a new instance requires the fleet-wide
+        // opt-in.
+        if params.enable_jumbo_frames {
+            let settings = self
+                .db_datastore
+                .system_networking_settings_view(opctx)
+                .await?;
+            if !settings.external_jumbo_frames_opt_in_enabled {
+                return Err(Error::invalid_request(
+                    "enable_jumbo_frames may only be set on an instance when \
+                     the fleet-wide jumbo-frames opt-in is enabled by a \
+                     fleet administrator",
+                ));
+            }
         }
 
         // Collect ephemeral IP selectors for validation
@@ -1007,9 +1053,15 @@ impl super::Nexus {
             if let (InstanceStateChangeError::SledAgent(inner), Some(vmm)) =
                 (&e, state.vmm())
             {
-                if inner.vmm_gone() {
+                if let Some(reason) = inner.vmm_failure_reason() {
                     let _ = self
-                        .mark_vmm_failed(opctx, authz_instance, vmm, inner)
+                        .mark_vmm_failed(
+                            opctx,
+                            authz_instance,
+                            vmm,
+                            inner,
+                            reason,
+                        )
                         .await;
                 }
             }
@@ -1096,20 +1148,6 @@ impl super::Nexus {
             )
             .await?;
 
-        // Update multicast member state for this instance to "Left" and clear
-        // `sled_id` - only if multicast is enabled
-        if self.multicast_enabled() {
-            self.db_datastore
-                .multicast_group_members_detach_by_instance(
-                    opctx,
-                    InstanceUuid::from_untyped_uuid(authz_instance.id()),
-                )
-                .await?;
-        }
-
-        // Activate multicast reconciler to handle switch-level changes
-        self.background_tasks.task_multicast_reconciler.activate();
-
         if let Err(e) = self
             .instance_request_state(
                 opctx,
@@ -1121,15 +1159,22 @@ impl super::Nexus {
         {
             if let (InstanceStateChangeError::SledAgent(inner), Some(vmm)) =
                 (&e, state.vmm())
+                && let Some(reason) = inner.vmm_failure_reason()
             {
-                if inner.vmm_gone() {
-                    let _ = self
-                        .mark_vmm_failed(opctx, authz_instance, vmm, inner)
-                        .await;
-                }
+                let _ = self
+                    .mark_vmm_failed(opctx, authz_instance, vmm, inner, reason)
+                    .await;
             }
 
             return Err(e);
+        }
+
+        // Idempotent stop: with no active VMM, the instance-update saga will
+        // not fire (no terminal transition to drive it), so nudge the
+        // reconciler to converge any stale "Joined" rows now rather than wait
+        // a full reconciler tick.
+        if state.vmm().is_none() && self.multicast_enabled() {
+            self.background_tasks.task_multicast_reconciler.activate();
         }
 
         self.db_datastore
@@ -1145,7 +1190,7 @@ impl super::Nexus {
         &self,
         propolis_id: &PropolisUuid,
         sled_id: &SledUuid,
-    ) -> Result<Option<nexus::SledVmmState>, InstanceStateChangeError> {
+    ) -> Result<Option<SledVmmState>, InstanceStateChangeError> {
         let sa = self.sled_client(&sled_id).await?;
         sa.vmm_unregister(propolis_id)
             .await
@@ -1353,6 +1398,7 @@ impl super::Nexus {
             &requested,
         )? {
             InstanceStateChangeRequestAction::AlreadyDone => Ok(()),
+
             InstanceStateChangeRequestAction::UpdateRuntime(new_runtime) => {
                 let instance_id =
                     InstanceUuid::from_untyped_uuid(prev_instance_state.id());
@@ -1373,6 +1419,7 @@ impl super::Nexus {
                     Ok(())
                 }
             }
+
             InstanceStateChangeRequestAction::SendToSled {
                 sled_id,
                 propolis_id,
@@ -1627,6 +1674,20 @@ impl super::Nexus {
             })
             .collect();
 
+        // Compute the effective MTU for the instance's primary OPTE port.
+        let primary_nic_mtu = if db_instance.enable_jumbo_frames {
+            let settings = self
+                .db_datastore
+                .system_networking_settings_view(opctx)
+                .await?;
+            primary_nic_mtu_for_jumbo_frames(
+                db_instance.enable_jumbo_frames,
+                settings.external_jumbo_frames_opt_in_enabled,
+            )
+        } else {
+            None
+        };
+
         let local_config = sled_agent_client::types::InstanceSledLocalConfig {
             hostname,
             nics,
@@ -1641,6 +1702,7 @@ impl super::Nexus {
             },
             delegated_zvols,
             attached_subnets,
+            primary_nic_mtu,
         };
 
         let instance_id = InstanceUuid::from_untyped_uuid(db_instance.id());
@@ -1651,15 +1713,15 @@ impl super::Nexus {
         // the sled-agent to create the VMM in. Once sled-agent acknowledges our
         // registration request, we will advance the database record to the new
         // state.
-        let vmm_runtime = sled_agent_client::types::VmmRuntimeState {
+        let vmm_runtime = sled_agent::VmmRuntimeState {
             time_updated: chrono::Utc::now(),
-            gen_: initial_vmm.generation.next(),
+            generation: initial_vmm.generation.next(),
             state: match operation {
                 InstanceRegisterReason::Migrate { .. } => {
-                    sled_agent_client::types::VmmState::Migrating
+                    sled_agent::VmmState::Migrating
                 }
                 InstanceRegisterReason::Start { .. } => {
-                    sled_agent_client::types::VmmState::Starting
+                    sled_agent::VmmState::Starting
                 }
             },
         };
@@ -1687,23 +1749,28 @@ impl super::Nexus {
         match instance_register_result {
             Ok(state) => {
                 self.notify_vmm_updated(opctx, *propolis_id, &state).await?;
-                let runtime: db::model::VmmRuntimeState =
-                    state.vmm_state.into();
+                let runtime = state.vmm_state;
                 Ok(db::model::Vmm {
-                    time_state_updated: runtime.time_state_updated,
-                    generation: runtime.generation,
-                    state: runtime.state,
+                    time_state_updated: runtime.time_updated,
+                    generation: runtime.generation.into(),
+                    state: DbVmmState::from(runtime.state),
+                    failure_reason: db::model::VmmFailureReason::from_vmm_state(
+                        runtime.state,
+                    ),
                     ..initial_vmm.clone()
                 })
             }
             Err(e) => {
-                if e.vmm_gone() {
+                // If this error indicates that the VMM should be marked as
+                // `Failed`, do that now.
+                if let Some(reason) = e.vmm_failure_reason() {
                     let _ = self
                         .mark_vmm_failed(
                             &opctx,
                             authz_instance.clone(),
                             &initial_vmm,
                             &e,
+                            reason,
                         )
                         .await;
                 }
@@ -1714,7 +1781,7 @@ impl super::Nexus {
 
     /// Attempts to transition an instance to to the `Failed` state in
     /// response to an error returned from a call to a sled
-    /// agent instance API, supplied in `reason`.
+    /// agent instance API, supplied in `error`.
     ///
     /// This is done by first marking the associated `vmm` as `Failed`, and then
     /// running an `instance-update` saga which transitions the instance record
@@ -1733,25 +1800,30 @@ impl super::Nexus {
         opctx: &OpContext,
         authz_instance: authz::Instance,
         vmm: &db::model::Vmm,
-        reason: &SledAgentInstanceError,
+        error: &SledAgentInstanceError,
+        reason: db::model::VmmFailureReason,
     ) -> Result<(), Error> {
         let instance_id = InstanceUuid::from_untyped_uuid(authz_instance.id());
         let vmm_id = PropolisUuid::from_untyped_uuid(vmm.id);
-        error!(self.log, "marking VMM failed due to sled agent API error";
-               "instance_id" => %instance_id,
-               "vmm_id" => %vmm_id,
-               "error" => ?reason);
+        error!(
+            &opctx.log,
+            "marking VMM failed due to sled agent API error";
+            "instance_id" => %instance_id,
+            "vmm_id" => %vmm_id,
+            "error" => &InlineErrorChain::new(&error),
+            "reason" => %reason,
+        );
 
-        let new_runtime = VmmRuntimeState {
-            state: db::model::VmmState::Failed,
-            time_state_updated: chrono::Utc::now(),
-            generation: db::model::Generation(vmm.generation.next()),
-        };
+        let new_runtime = vmm
+            .runtime()
+            .transition(nexus_types::instance::VmmState::Failed(reason.into()));
 
         match self.db_datastore.vmm_update_runtime(&vmm_id, &new_runtime).await
         {
             Ok(_) => {
-                info!(self.log, "marked VMM as Failed, preparing update saga";
+                info!(
+                    &opctx.log,
+                    "marked VMM as Failed, preparing update saga";
                     "instance_id" => %instance_id,
                     "vmm_id" => %vmm_id,
                     "reason" => ?reason,
@@ -1945,7 +2017,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         propolis_id: PropolisUuid,
-        new_runtime_state: &nexus::SledVmmState,
+        new_runtime_state: &SledVmmState,
     ) -> Result<(), Error> {
         if let Some((instance_id, saga)) = process_vmm_update(
             &self.db_datastore,
@@ -2737,7 +2809,7 @@ pub(crate) async fn process_vmm_update(
     datastore: &DataStore,
     opctx: &OpContext,
     propolis_id: PropolisUuid,
-    new_runtime_state: &nexus::SledVmmState,
+    new_runtime_state: &SledVmmState,
 ) -> Result<Option<(InstanceUuid, steno::SagaDag)>, Error> {
     let migrations = new_runtime_state.migrations();
     info!(opctx.log, "received new VMM runtime state from sled agent";
@@ -2751,7 +2823,7 @@ pub(crate) async fn process_vmm_update(
             &opctx,
             propolis_id,
             // TODO(eliza): probably should take this by value...
-            &new_runtime_state.vmm_state.clone().into(),
+            &new_runtime_state.vmm_state.clone(),
             migrations,
         )
         .await?;
@@ -2796,7 +2868,7 @@ pub(crate) async fn process_vmm_update(
 /// Determines whether the supplied instance sizes (CPU count and memory size)
 /// are acceptable.
 fn check_instance_cpu_memory_sizes(
-    ncpus: InstanceCpuCount,
+    ncpus: instance::InstanceCpuCount,
     memory: ByteCount,
 ) -> Result<(), Error> {
     if ncpus.0 > MAX_VCPU_PER_INSTANCE {
@@ -2845,6 +2917,20 @@ fn check_instance_cpu_memory_sizes(
     }
 
     Ok(())
+}
+
+/// Effective MTU for an instance's primary OPTE port. Jumbo frames are only
+/// applied when both the fleet-wide opt-in is enabled and the per-instance bit
+/// is set; otherwise this returns `None` and OPTE applies the default MTU.
+fn primary_nic_mtu_for_jumbo_frames(
+    instance_jumbo_frames_enabled: bool,
+    fleet_jumbo_frames_opt_in_enabled: bool,
+) -> Option<u32> {
+    if instance_jumbo_frames_enabled && fleet_jumbo_frames_opt_in_enabled {
+        Some(omicron_common::address::EXTERNAL_JUMBO_FRAMES_MTU)
+    } else {
+        None
+    }
 }
 
 /// Determines the disposition of a request to start an instance given its state
@@ -2946,8 +3032,9 @@ mod tests {
         Instance as DbInstance, InstanceState as DbInstanceState,
         VmmCpuPlatform, VmmState as DbVmmState,
     };
+    use nexus_types::external_api::instance;
     use omicron_common::api::external::{
-        Hostname, IdentityMetadataCreateParams, InstanceCpuCount, Name,
+        Hostname, IdentityMetadataCreateParams, Name,
     };
     use omicron_test_utils::dev::test_setup_log;
     use propolis_client::support::tungstenite::protocol::Role;
@@ -3057,7 +3144,7 @@ mod tests {
                 name: Name::try_from("elysium".to_owned()).unwrap(),
                 description: "this instance is disco".to_owned(),
             },
-            ncpus: InstanceCpuCount(1),
+            ncpus: instance::InstanceCpuCount(1),
             memory: ByteCount::from_gibibytes_u32(1),
             hostname: Hostname::try_from("elysium").unwrap(),
             user_data: vec![],
@@ -3071,6 +3158,7 @@ mod tests {
             auto_restart_policy: Default::default(),
             anti_affinity_groups: Vec::new(),
             multicast_groups: Vec::new(),
+            enable_jumbo_frames: false,
         };
 
         let instance_id = InstanceUuid::from_untyped_uuid(Uuid::new_v4());
@@ -3201,5 +3289,59 @@ mod tests {
             .is_ok()
         );
         logctx.cleanup_successful();
+    }
+
+    /// Build a DbInstance from `make_instance_and_vmm`'s base params with the
+    /// `enable_jumbo_frames` field overridden.
+    fn make_instance_with_jumbo_frames(
+        enable_jumbo_frames: bool,
+    ) -> DbInstance {
+        let params = instance::InstanceCreate {
+            identity: IdentityMetadataCreateParams {
+                name: Name::try_from("jumbo".to_owned()).unwrap(),
+                description: "instance under jumbo-frames test".to_owned(),
+            },
+            ncpus: instance::InstanceCpuCount(1),
+            memory: ByteCount::from_gibibytes_u32(1),
+            hostname: Hostname::try_from("jumbo").unwrap(),
+            user_data: vec![],
+            network_interfaces: InstanceNetworkInterfaceAttachment::None,
+            external_ips: vec![],
+            disks: vec![],
+            boot_disk: None,
+            cpu_platform: None,
+            ssh_public_keys: None,
+            start: false,
+            auto_restart_policy: Default::default(),
+            anti_affinity_groups: Vec::new(),
+            multicast_groups: Vec::new(),
+            enable_jumbo_frames,
+        };
+        let instance_id = InstanceUuid::from_untyped_uuid(Uuid::new_v4());
+        let project_id = Uuid::new_v4();
+        DbInstance::new(instance_id, project_id, &params)
+    }
+
+    /// `InstanceCreate::enable_jumbo_frames` must be propagated into the
+    /// resulting `DbInstance`, so that downstream code (VMM registration, view
+    /// rendering) sees the value the user requested.
+    #[test]
+    fn test_instance_create_propagates_enable_jumbo_frames() {
+        assert!(!make_instance_with_jumbo_frames(false).enable_jumbo_frames);
+        assert!(make_instance_with_jumbo_frames(true).enable_jumbo_frames);
+    }
+
+    /// The effective primary-NIC MTU is jumbo only when both the per-instance
+    /// bit and the fleet-wide opt-in are enabled. Any other combination must
+    /// leave the MTU unset so OPTE applies its default.
+    #[test]
+    fn test_primary_nic_mtu_for_jumbo_frames() {
+        assert_eq!(primary_nic_mtu_for_jumbo_frames(false, false), None);
+        assert_eq!(primary_nic_mtu_for_jumbo_frames(true, false), None);
+        assert_eq!(primary_nic_mtu_for_jumbo_frames(false, true), None);
+        assert_eq!(
+            primary_nic_mtu_for_jumbo_frames(true, true),
+            Some(omicron_common::address::EXTERNAL_JUMBO_FRAMES_MTU),
+        );
     }
 }

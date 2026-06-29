@@ -52,6 +52,7 @@ use slog::Logger;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::collections::VecDeque;
 use std::net::{IpAddr, SocketAddr};
 use std::str::FromStr;
 use std::sync::Arc;
@@ -2018,6 +2019,137 @@ pub struct Pantry {
     inner: Mutex<PantryInner>,
 }
 
+/// Based on the argument VolumeConstructionRequest, return simulated VolumeInfo
+/// in the same shape that describes a fully active Volume.
+fn generate_new_volume_info(
+    value: &VolumeConstructionRequest,
+) -> crucible_client_types::VolumeInfo {
+    let mut traverse: VecDeque<&VolumeConstructionRequest> = VecDeque::new();
+    let mut flattened: VecDeque<&VolumeConstructionRequest> = VecDeque::new();
+    let mut output: VecDeque<crucible_client_types::VolumeInfo> =
+        VecDeque::new();
+
+    traverse.push_back(value);
+
+    while let Some(part) = traverse.pop_back() {
+        flattened.push_back(part);
+
+        match part {
+            VolumeConstructionRequest::Volume {
+                id: _,
+                block_size: _,
+                sub_volumes,
+                read_only_parent,
+            } => {
+                for sub_volume in sub_volumes {
+                    traverse.push_back(sub_volume);
+                }
+
+                if let Some(read_only_parent) = read_only_parent {
+                    traverse.push_back(read_only_parent);
+                }
+            }
+
+            VolumeConstructionRequest::Url { .. }
+            | VolumeConstructionRequest::File { .. }
+            | VolumeConstructionRequest::Region { .. } => {}
+        }
+    }
+
+    while let Some(part) = flattened.pop_back() {
+        match part {
+            VolumeConstructionRequest::Volume {
+                id: _,
+                block_size: _,
+                sub_volumes,
+                read_only_parent,
+            } => {
+                let mut subs = Vec::with_capacity(sub_volumes.len());
+                let mut rop = None;
+
+                if read_only_parent.is_some() {
+                    rop = Some(Box::new(output.pop_back().unwrap()));
+                }
+
+                for _ in 0..sub_volumes.len() {
+                    subs.push(output.pop_back().unwrap());
+                }
+
+                subs.reverse();
+
+                let info = crucible_client_types::VolumeInfo::Volume {
+                    sub_volumes: subs,
+                    read_only_parent: rop,
+                };
+
+                output.push_back(info);
+            }
+
+            VolumeConstructionRequest::Region {
+                block_size,
+                blocks_per_extent: _,
+                extent_count: _,
+                opts:
+                    crucible_client_types::CrucibleOpts {
+                        id,
+                        target,
+                        lossy: _,
+                        flush_timeout: _,
+                        key,
+                        cert_pem: _,
+                        key_pem: _,
+                        root_cert_pem: _,
+                        control: _,
+                        read_only,
+                    },
+                generation,
+            } => {
+                let info = crucible_client_types::VolumeInfo::Upstairs {
+                    state: crucible_client_types::UpstairsInfoStatus::Active,
+                    block_size: Some(*block_size),
+                    upstairs_id: *id,
+                    session_id: Uuid::new_v4(),
+                    generation: *generation,
+                    read_only: *read_only,
+                    encrypted: key.is_some(),
+                    reconcile_in_progress: false,
+                    live_repair_in_progress: false,
+                    targets: target.iter().map(|target|
+                        crucible_client_types::DownstairsInfo {
+                            // TODO update this when region id is part of the
+                            // construction request
+                            region_id: Some(Uuid::new_v4()),
+
+                            target_addr: Some(*target),
+
+                            repair_addr: Some({
+                                // TODO update this when repair address is part
+                                // of the construction request
+                                let mut target: SocketAddr = *target;
+                                target.set_port(target.port() + 4000);
+                                target
+                            }),
+
+                            state:
+                                crucible_client_types::DownstairsInfoStatus::Active,
+                        }
+                    ).collect(),
+                };
+
+                output.push_back(info);
+            }
+
+            VolumeConstructionRequest::Url { .. }
+            | VolumeConstructionRequest::File { .. } => {
+                panic!("should not see variant {part:?}");
+            }
+        }
+    }
+
+    assert_eq!(output.len(), 1);
+    output.pop_front().unwrap()
+}
+
 impl Pantry {
     pub fn new(simulated_upstairs: Arc<SimulatedUpstairs>) -> Self {
         Self {
@@ -2059,6 +2191,8 @@ impl Pantry {
     ) -> Result<()> {
         let mut inner = self.inner.lock().unwrap();
 
+        let info = generate_new_volume_info(&volume_construction_request);
+
         inner.volumes.insert(
             volume_id,
             PantryVolume {
@@ -2067,6 +2201,7 @@ impl Pantry {
                     active: true,
                     seen_active: true,
                     num_job_handles: 0,
+                    info,
                 },
                 activate_job: None,
             },
@@ -2089,6 +2224,8 @@ impl Pantry {
 
         let auto_activate_volumes = inner.auto_activate_volumes;
 
+        let info = generate_new_volume_info(&volume_construction_request);
+
         inner.volumes.insert(
             volume_id,
             PantryVolume {
@@ -2097,6 +2234,7 @@ impl Pantry {
                     active: auto_activate_volumes,
                     seen_active: auto_activate_volumes,
                     num_job_handles: 1,
+                    info,
                 },
                 activate_job: Some(activate_job_id.clone()),
             },
@@ -2317,6 +2455,7 @@ impl PantryServer {
             default_request_body_max_bytes: 8192 * 1024,
             default_handler_task_mode: HandlerTaskMode::Detached,
             log_headers: vec![],
+            compression: dropshot::CompressionConfig::None,
         })
         .start()
         .expect("Could not initialize pantry server");

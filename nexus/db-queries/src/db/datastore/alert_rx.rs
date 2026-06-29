@@ -1170,6 +1170,7 @@ mod test {
     use crate::db::model::Alert;
     use crate::db::pub_test_utils::TestDatabase;
     use nexus_db_lookup::LookupPath;
+    use nexus_types::alert::test_alerts;
     use omicron_common::api::external::IdentityMetadataCreateParams;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::AlertUuid;
@@ -1201,16 +1202,16 @@ mod test {
             .expect("cant create ye webhook receiver!!!!")
     }
 
-    async fn create_alert(
+    async fn create_alert<A: nexus_types::alert::AlertPayload>(
         datastore: &DataStore,
         opctx: &OpContext,
-        alert_class: AlertClass,
+        alert: &A,
     ) -> (authz::Alert, Alert) {
         let id = AlertUuid::new_v4();
         datastore
             .alert_create(
                 opctx,
-                Alert::new(id, alert_class, serde_json::json!({})),
+                Alert::new(id, alert).expect("alert payload should serialize"),
             )
             .await
             .expect("cant create ye event");
@@ -1455,12 +1456,24 @@ mod test {
             .await
             .expect("cant get ye receiver");
 
-        let (authz_foo, _) =
-            create_alert(datastore, opctx, AlertClass::TestFoo).await;
-        let (authz_foo_bar, _) =
-            create_alert(datastore, opctx, AlertClass::TestFooBar).await;
-        let (authz_quux_bar, _) =
-            create_alert(datastore, opctx, AlertClass::TestQuuxBar).await;
+        let (authz_foo, _) = create_alert(
+            datastore,
+            opctx,
+            &test_alerts::Foo(serde_json::json!({})),
+        )
+        .await;
+        let (authz_foo_bar, _) = create_alert(
+            datastore,
+            opctx,
+            &test_alerts::FooBar(serde_json::json!({})),
+        )
+        .await;
+        let (authz_quux_bar, _) = create_alert(
+            datastore,
+            opctx,
+            &test_alerts::QuuxBar(serde_json::json!({})),
+        )
+        .await;
 
         let is_subscribed_foo = datastore
             .alert_rx_is_subscribed_to_alert(opctx, &authz_rx, &authz_foo)

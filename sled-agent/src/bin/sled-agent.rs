@@ -13,9 +13,8 @@ use omicron_common::cmd::fatal;
 use omicron_sled_agent::bootstrap::RssAccessError;
 use omicron_sled_agent::bootstrap::server as bootstrap_server;
 use omicron_sled_agent::config::Config as SledConfig;
-use sled_agent_types::rack_init::{
-    RackInitializeRequestParams, rack_initialize_request_from_file,
-};
+use sled_agent_rack_setup::RackInitializeRequestParams;
+use sled_agent_rack_setup::rack_initialize_request_from_file;
 
 #[derive(Debug, Parser)]
 #[clap(

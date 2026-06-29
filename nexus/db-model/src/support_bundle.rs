@@ -14,6 +14,7 @@ use nexus_db_schema::schema::{
 use chrono::{DateTime, Utc};
 use nexus_types::external_api::support_bundle as support_bundle_types;
 use nexus_types::fm::ereport::{EreportFilters, EreportFiltersParams};
+use nexus_types::internal_api::views as internal_views;
 use nexus_types::support_bundle::BundleData;
 use nexus_types::support_bundle::SledSelection;
 use omicron_uuid_kinds::CaseKind;
@@ -149,6 +150,14 @@ impl From<SupportBundle> for support_bundle_types::SupportBundleInfo {
             user_comment: bundle.user_comment,
             state: bundle.state.into(),
         }
+    }
+}
+
+impl From<SupportBundle> for internal_views::SupportBundleInfo {
+    fn from(bundle: SupportBundle) -> Self {
+        let fm_case_id = bundle.fm_case_id.map(Into::into);
+        let base: support_bundle_types::SupportBundleInfo = bundle.into();
+        Self { base, fm_case_id }
     }
 }
 

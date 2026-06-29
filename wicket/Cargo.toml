@@ -37,6 +37,7 @@ slog-async.workspace = true
 slog-envlogger.workspace = true
 slog-term.workspace = true
 supports-color.workspace = true
+tabled.workspace = true
 textwrap.workspace = true
 tokio = { workspace = true, features = ["full"] }
 tokio-util.workspace = true
@@ -58,9 +59,9 @@ slog-error-chain.workspace = true
 
 [dev-dependencies]
 assert_cmd.workspace = true
+camino-tempfile.workspace = true
 expectorate.workspace = true
 maplit.workspace = true
-tempfile.workspace = true
 proptest.workspace = true
 
 [[bin]]

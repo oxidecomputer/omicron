@@ -1591,7 +1591,7 @@ mod tests {
     use nexus_auth::authz;
     use nexus_db_model::IpAttachState;
     use nexus_db_model::IpPool;
-    use nexus_db_model::IpPoolReservationType;
+    use nexus_db_model::IpPoolAssignment;
     use nexus_db_model::Name;
     use nexus_db_model::Project;
     use nexus_db_model::SubnetPool;
@@ -4152,7 +4152,7 @@ mod tests {
                 IpPool::new(
                     &identity,
                     IpVersion::V6.into(),
-                    IpPoolReservationType::ExternalSilos,
+                    IpPoolAssignment::Silos,
                 ),
             )
             .await

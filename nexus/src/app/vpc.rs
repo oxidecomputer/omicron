@@ -13,6 +13,7 @@ use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
 use nexus_db_queries::db::model::Name;
 use nexus_defaults as defaults;
+use nexus_networking::FirewallRulesError;
 use nexus_types::external_api::project;
 use nexus_types::external_api::vpc;
 use omicron_common::api::external;
@@ -28,8 +29,9 @@ use omicron_common::api::external::ServiceIcmpConfig;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::VpcFirewallRuleUpdateParams;
 use omicron_common::api::external::http_pagination::PaginatedBy;
-use omicron_common::api::internal::shared::ResolvedVpcFirewallRule;
 use omicron_uuid_kinds::SledUuid;
+use sled_agent_types::instance::ResolvedVpcFirewallRule;
+use slog_error_chain::InlineErrorChain;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -190,6 +192,12 @@ impl super::Nexus {
             params.clone(),
         )?;
 
+        // Reject cross-VPC references before writing anything. The same check
+        // happens again when resolving rules for sled-agents, but that runs
+        // after the write, so without this the rules would be persisted even
+        // though the request fails (omicron#10561).
+        nexus_networking::ensure_no_cross_vpc_references(&db_vpc, &rules)?;
+
         let rules = self
             .db_datastore
             .vpc_update_firewall_rules(opctx, &authz_vpc, rules)
@@ -263,6 +271,9 @@ impl super::Nexus {
             &self.log,
         )
         .await
+        .map_err(|e| {
+            Error::internal_error(&InlineErrorChain::new(&e).to_string())
+        })
     }
 
     pub(crate) async fn resolve_firewall_rules_for_sled_agent(
@@ -271,7 +282,7 @@ impl super::Nexus {
         vpc: &db::model::Vpc,
         rules: &[db::model::VpcFirewallRule],
     ) -> Result<Vec<ResolvedVpcFirewallRule>, Error> {
-        nexus_networking::resolve_firewall_rules_for_sled_agent(
+        match nexus_networking::resolve_firewall_rules_for_sled_agent(
             &self.db_datastore,
             opctx,
             vpc,
@@ -279,6 +290,27 @@ impl super::Nexus {
             &self.log,
         )
         .await
+        {
+            Ok(r) => Ok(r),
+            Err(FirewallRulesError::Lookup(e)) => Err(e),
+            Err(e @ FirewallRulesError::SledPush(_)) => {
+                // TODO-robustness:
+                // https://github.com/oxidecomputer/omicron/issues/10324.
+                //
+                // We probably want to add a background task specifically for
+                // propagating instance firewall rules, alongside the existing
+                // v2p and VPC route manager tasks. In the meantime, keep the
+                // existing behavior, and fail the instance-creation request if
+                // we can't contact any of the sleds.
+                let e = InlineErrorChain::new(&e);
+                error!(
+                    &self.log,
+                    "failed to push firewall rules to sleds";
+                    "error" => &e,
+                );
+                Err(Error::internal_error(&e.to_string()))
+            }
+        }
     }
 
     pub async fn nexus_firewall_inbound_icmp_view(

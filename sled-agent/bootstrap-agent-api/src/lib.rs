@@ -9,14 +9,10 @@
 
 use dropshot::{
     HttpError, HttpResponseOk, HttpResponseUpdatedNoContent, RequestContext,
-    TypedBody,
 };
 use dropshot_api_manager_types::api_versions;
-use omicron_uuid_kinds::{RackInitUuid, RackResetUuid};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use sled_agent_types::rack_ops::RackOperationStatus;
-use sled_agent_types_versions::v1::rack_init::RackInitializeRequest;
 use sled_hardware_types::Baseboard;
 use tufaceous_artifact::ArtifactVersion;
 
@@ -26,7 +22,9 @@ api_versions!([
 
     // Remove rack initialization endpoints moved to bootstrap-agent-lockstep-api.
     (2, REMOVE_RACK_INIT_ENDPOINTS),
-    (1, INITIAL),
+    // Version 1 has been retired (see
+    // <https://github.com/oxidecomputer/dropshot-api-manager> for mechanics).
+    // We no longer support in any server, nor expect it from any client.
 ]);
 
 #[dropshot::api_description]
@@ -53,43 +51,6 @@ pub trait BootstrapAgentApi {
     async fn components_get(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<Vec<Component>>, HttpError>;
-
-    /// Get the current status of rack initialization or reset.
-    ///
-    /// Deprecated. Do not use. Moved to bootstrap agent lockstep API.
-    #[endpoint {
-        method = GET,
-        path = "/rack-initialize",
-        versions = VERSION_INITIAL..VERSION_REMOVE_RACK_INIT_ENDPOINTS,
-    }]
-    async fn rack_initialization_status(
-        rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<RackOperationStatus>, HttpError>;
-
-    /// Initialize the rack with the provided configuration.
-    ///
-    /// Deprecated. Do not use. Moved to bootstrap agent lockstep API.
-    #[endpoint {
-        method = POST,
-        path = "/rack-initialize",
-        versions = VERSION_INITIAL..VERSION_REMOVE_RACK_INIT_ENDPOINTS,
-    }]
-    async fn rack_initialize(
-        rqctx: RequestContext<Self::Context>,
-        body: TypedBody<RackInitializeRequest>,
-    ) -> Result<HttpResponseOk<RackInitUuid>, HttpError>;
-
-    /// Reset the rack to an unconfigured state.
-    ///
-    /// Deprecated. Do not use. Moved to bootstrap agent lockstep API.
-    #[endpoint {
-        method = DELETE,
-        path = "/rack-initialize",
-        versions = VERSION_INITIAL..VERSION_REMOVE_RACK_INIT_ENDPOINTS,
-    }]
-    async fn rack_reset(
-        rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<RackResetUuid>, HttpError>;
 
     /// Reset this particular sled to an unconfigured state.
     #[endpoint {

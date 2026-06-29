@@ -1,5 +1,10 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 use crate::helpers::generate_name;
 use anyhow::{Context as _, Result, anyhow};
+use bootstrap_agent_lockstep_types::RackInitializeRequest;
 use chrono::Utc;
 use hickory_resolver::ResolveErrorKind;
 use hickory_resolver::proto::ProtoErrorKind;
@@ -10,7 +15,6 @@ use oxide_client::{Client, ClientImagesExt, ClientProjectsExt, ClientVpcsExt};
 use reqwest::Url;
 use reqwest::dns::Resolve;
 use reqwest::header::{HeaderMap, HeaderValue};
-use sled_agent_types::rack_init::RackInitializeRequest;
 use slog_error_chain::InlineErrorChain;
 use std::net::IpAddr;
 use std::net::SocketAddr;
@@ -263,7 +267,7 @@ impl ClientParams {
                     );
                     if let oxide_client::LoginError::RequestError(e) = &e {
                         if e.is_connect() {
-                            return CondCheckError::NotYet;
+                            return CondCheckError::NotYet { status: None };
                         }
                     }
 
@@ -313,7 +317,9 @@ async fn wait_for_records(
                 .await
                 .map_err(|e| match resolve_error_proto_kind(&e) {
                     Some(ProtoErrorKind::NoRecordsFound { .. })
-                    | Some(ProtoErrorKind::Timeout) => CondCheckError::NotYet,
+                    | Some(ProtoErrorKind::Timeout) => {
+                        CondCheckError::NotYet { status: None }
+                    }
                     _ => CondCheckError::Failed(anyhow::Error::new(e).context(
                         format!(
                             "resolving {:?} from {}",
@@ -324,7 +330,7 @@ async fn wait_for_records(
                 })?
                 .iter()
                 .next()
-                .ok_or(CondCheckError::NotYet)
+                .ok_or(CondCheckError::NotYet { status: None })
         },
         &check_period,
         &max,

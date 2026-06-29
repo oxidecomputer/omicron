@@ -24,6 +24,7 @@ use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
 use diesel::upsert::excluded;
+use iddqd::{IdOrdItem, IdOrdMap, id_upcast};
 use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::TransactionError;
 use nexus_db_errors::public_error_from_diesel;
@@ -50,16 +51,43 @@ pub struct ZpoolGetForSledReservationResult {
     pub pool: Zpool,
 
     /// Last reported inventory size for the zpool
-    pub last_inv_total_size: i64,
+    last_inv_total_size: i64,
 
     /// The rendezvous local storage dataset (unencrypted) for this zpool
     pub rendezvous_local_storage_unencrypted_dataset_id: DatasetUuid,
 
     /// Upper bound on Crucible dataset usage
-    pub crucible_dataset_usage: i64,
+    crucible_dataset_usage: i64,
 
     /// Upper bound on Local Storage dataset usage
-    pub local_storage_usage: i64,
+    local_storage_usage: i64,
+}
+
+impl ZpoolGetForSledReservationResult {
+    /// Does this Zpool have room for additional bytes to be allocated to it?
+    pub fn has_room_for_allocation(&self, additional_size: i64) -> bool {
+        let new_size_used: i64 = self.crucible_dataset_usage
+            + self.local_storage_usage
+            + additional_size;
+
+        let control_plane_storage_buffer: i64 =
+            self.pool.control_plane_storage_buffer().into();
+
+        let adjusted_total_available: i64 =
+            self.last_inv_total_size - control_plane_storage_buffer;
+
+        new_size_used < adjusted_total_available
+    }
+}
+
+impl IdOrdItem for ZpoolGetForSledReservationResult {
+    type Key<'a> = ZpoolUuid;
+
+    fn key(&self) -> Self::Key<'_> {
+        self.pool.id()
+    }
+
+    id_upcast!();
 }
 
 impl DataStore {
@@ -303,6 +331,37 @@ impl DataStore {
         Ok(())
     }
 
+    /// Returns true if a zpool exists and is in-service, false if not.
+    pub async fn check_zpool_in_service(
+        &self,
+        opctx: &OpContext,
+        id: ZpoolUuid,
+    ) -> Result<bool, Error> {
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        use nexus_db_schema::schema::physical_disk::dsl as physical_disk_dsl;
+        use nexus_db_schema::schema::zpool::dsl as zpool_dsl;
+
+        let zpool_exists_and_in_service =
+            diesel::select(diesel::dsl::exists(
+                zpool_dsl::zpool
+                    .filter(zpool_dsl::id.eq(to_db_typed_uuid(id)))
+                    .filter(zpool_dsl::time_deleted.is_null())
+                    .inner_join(physical_disk_dsl::physical_disk.on(
+                        zpool_dsl::physical_disk_id.eq(physical_disk_dsl::id),
+                    ))
+                    .filter(
+                        physical_disk_dsl::disk_policy
+                            .eq(PhysicalDiskPolicy::InService),
+                    ),
+            ))
+            .get_result_async::<bool>(&*conn)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        Ok(zpool_exists_and_in_service)
+    }
+
     pub async fn zpool_get_sled_if_in_service(
         &self,
         opctx: &OpContext,
@@ -378,7 +437,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         sled_id: SledUuid,
-    ) -> ListResultVec<ZpoolGetForSledReservationResult> {
+    ) -> LookupResult<IdOrdMap<ZpoolGetForSledReservationResult>> {
         opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
 
         use nexus_db_schema::schema::crucible_dataset;
@@ -462,7 +521,7 @@ impl DataStore {
                 )
             })?;
 
-        let mut converted = Vec::with_capacity(tuples.len());
+        let mut converted = IdOrdMap::with_capacity(tuples.len());
 
         for tuple in tuples {
             let (
@@ -510,16 +569,22 @@ impl DataStore {
                 continue;
             };
 
-            converted.push(ZpoolGetForSledReservationResult {
-                pool,
-                last_inv_total_size,
-                rendezvous_local_storage_unencrypted_dataset_id:
-                    DatasetUuid::from_untyped_uuid(
-                        rendezvous_local_storage_unencrypted_dataset_id,
-                    ),
-                crucible_dataset_usage: crucible_dataset_usage.into(),
-                local_storage_usage: local_storage_usage.into(),
-            });
+            converted
+                .insert_unique(ZpoolGetForSledReservationResult {
+                    pool,
+                    last_inv_total_size,
+                    rendezvous_local_storage_unencrypted_dataset_id:
+                        DatasetUuid::from_untyped_uuid(
+                            rendezvous_local_storage_unencrypted_dataset_id,
+                        ),
+                    crucible_dataset_usage: crucible_dataset_usage.into(),
+                    local_storage_usage: local_storage_usage.into(),
+                })
+                .map_err(|e| {
+                    Error::internal_error(format!(
+                        "multiple results for the same pool: {e}"
+                    ))
+                })?;
         }
 
         Ok(converted)

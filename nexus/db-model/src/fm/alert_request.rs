@@ -6,6 +6,7 @@
 
 use crate::AlertClass;
 use crate::DbTypedUuid;
+use crate::SqlU32;
 use nexus_db_schema::schema::fm_alert_request;
 use nexus_types::fm;
 use omicron_uuid_kinds::{AlertKind, CaseKind, SitrepKind};
@@ -20,6 +21,19 @@ pub struct AlertRequest {
     #[diesel(column_name = "alert_class")]
     pub class: AlertClass,
     pub payload: serde_json::Value,
+    /// A human-readable comment added by the diagnosis engine to explain why
+    /// it is requesting this alert.
+    ///
+    /// Sitrep comments are intended for debugging purposes only; i.e., they
+    /// are visible to Oxide support via OMDB, but are not presented to the
+    /// operator. The contents of comment fields are not stable, and a DE may
+    /// emit a different comment string for an analogous determination across
+    /// different software versions.
+    pub comment: String,
+    /// The version of the alert class' schema that this alert's payload
+    /// conforms to.
+    #[diesel(column_name = "alert_version")]
+    pub version: SqlU32,
 }
 
 impl AlertRequest {
@@ -28,15 +42,23 @@ impl AlertRequest {
         case_id: impl Into<DbTypedUuid<CaseKind>>,
         req: fm::case::AlertRequest,
     ) -> Self {
-        let fm::case::AlertRequest { id, requested_sitrep_id, payload, class } =
-            req;
+        let fm::case::AlertRequest {
+            id,
+            requested_sitrep_id,
+            payload,
+            class,
+            version,
+            comment,
+        } = req;
         AlertRequest {
             id: id.into(),
             sitrep_id: sitrep_id.into(),
             requested_sitrep_id: requested_sitrep_id.into(),
             case_id: case_id.into(),
             class: class.into(),
+            version: SqlU32::new(version),
             payload,
+            comment,
         }
     }
 }
@@ -48,6 +70,8 @@ impl From<AlertRequest> for fm::case::AlertRequest {
             requested_sitrep_id: req.requested_sitrep_id.into(),
             payload: req.payload,
             class: req.class.into(),
+            version: u32::from(req.version),
+            comment: req.comment,
         }
     }
 }

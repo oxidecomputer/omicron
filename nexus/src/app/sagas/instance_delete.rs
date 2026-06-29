@@ -240,12 +240,13 @@ mod test {
     use nexus_test_utils::resource_helpers::create_disk;
     use nexus_test_utils::resource_helpers::create_project;
     use nexus_test_utils_macros::nexus_test;
+    use nexus_types::external_api::instance::InstanceCpuCount;
     use nexus_types::external_api::ip_pool::PoolSelector;
     use nexus_types::external_api::{instance as instance_types, project};
     use nexus_types::identity::Resource;
     use omicron_common::address::IpVersion;
     use omicron_common::api::external::{
-        ByteCount, IdentityMetadataCreateParams, InstanceCpuCount,
+        ByteCount, IdentityMetadataCreateParams,
     };
     use sled_agent_types::early_networking::SwitchSlot;
     use std::collections::HashSet;
@@ -315,6 +316,7 @@ mod test {
             auto_restart_policy: Default::default(),
             anti_affinity_groups: Vec::new(),
             multicast_groups: Vec::new(),
+            enable_jumbo_frames: false,
         }
     }
 

@@ -10,6 +10,31 @@
     "version": "0.0.1"
   },
   "paths": {
+    "/debug/network-config-contents": {
+      "get": {
+        "summary": "Get the current contents of the network config kept in the replicated",
+        "description": "bootstore.\n\nThis should ONLY be used for debugging (e.g., via `omdb`). Nexus, RSS, and sled-agent should never access this endpoint in production - the bootstore contents should be treated as \"write only\" from their point of view.",
+        "operationId": "network_config_contents_for_debug",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReplicatedNetworkConfig"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/rack-initialize": {
       "get": {
         "summary": "Get the current status of rack initialization or reset.",
@@ -659,6 +684,100 @@
           "last"
         ]
       },
+      "LinkFec": {
+        "description": "The forward error correction mode of a link.",
+        "oneOf": [
+          {
+            "description": "Firecode forward error correction.",
+            "type": "string",
+            "enum": [
+              "firecode"
+            ]
+          },
+          {
+            "description": "No forward error correction.",
+            "type": "string",
+            "enum": [
+              "none"
+            ]
+          },
+          {
+            "description": "Reed-Solomon forward error correction.",
+            "type": "string",
+            "enum": [
+              "rs"
+            ]
+          }
+        ]
+      },
+      "LinkSpeed": {
+        "description": "The speed of a link.",
+        "oneOf": [
+          {
+            "description": "Zero gigabits per second.",
+            "type": "string",
+            "enum": [
+              "speed0_g"
+            ]
+          },
+          {
+            "description": "1 gigabit per second.",
+            "type": "string",
+            "enum": [
+              "speed1_g"
+            ]
+          },
+          {
+            "description": "10 gigabits per second.",
+            "type": "string",
+            "enum": [
+              "speed10_g"
+            ]
+          },
+          {
+            "description": "25 gigabits per second.",
+            "type": "string",
+            "enum": [
+              "speed25_g"
+            ]
+          },
+          {
+            "description": "40 gigabits per second.",
+            "type": "string",
+            "enum": [
+              "speed40_g"
+            ]
+          },
+          {
+            "description": "50 gigabits per second.",
+            "type": "string",
+            "enum": [
+              "speed50_g"
+            ]
+          },
+          {
+            "description": "100 gigabits per second.",
+            "type": "string",
+            "enum": [
+              "speed100_g"
+            ]
+          },
+          {
+            "description": "200 gigabits per second.",
+            "type": "string",
+            "enum": [
+              "speed200_g"
+            ]
+          },
+          {
+            "description": "400 gigabits per second.",
+            "type": "string",
+            "enum": [
+              "speed400_g"
+            ]
+          }
+        ]
+      },
       "LldpAdminStatus": {
         "description": "To what extent should this port participate in LLDP",
         "type": "string",
@@ -803,7 +922,7 @@
             "description": "Port forward error correction type.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/PortFec"
+                "$ref": "#/components/schemas/LinkFec"
               }
             ]
           },
@@ -811,7 +930,7 @@
             "description": "Port speed.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/PortSpeed"
+                "$ref": "#/components/schemas/LinkSpeed"
               }
             ]
           }
@@ -823,30 +942,6 @@
           "routes",
           "switch",
           "uplink_port_speed"
-        ]
-      },
-      "PortFec": {
-        "description": "Switchport FEC options",
-        "type": "string",
-        "enum": [
-          "firecode",
-          "none",
-          "rs"
-        ]
-      },
-      "PortSpeed": {
-        "description": "Switchport Speed options",
-        "type": "string",
-        "enum": [
-          "speed0_g",
-          "speed1_g",
-          "speed10_g",
-          "speed25_g",
-          "speed40_g",
-          "speed50_g",
-          "speed100_g",
-          "speed200_g",
-          "speed400_g"
         ]
       },
       "RackInitUuid": {
@@ -904,6 +999,11 @@
           "external_dns_zone_name": {
             "description": "DNS name for the DNS zone delegated to the rack for external DNS",
             "type": "string"
+          },
+          "external_jumbo_frames_opt_in_enabled": {
+            "description": "When true, end users may opt in to jumbo frames on the primary interface of an instance, and control plane services with external-facing OPTE NICs are brought up with an 8500 byte MTU. Operators can toggle this at runtime via the fleet networking settings API.",
+            "default": false,
+            "type": "boolean"
           },
           "internal_services_ip_pool_ranges": {
             "description": "Ranges of the service IP pool which may be used for internal services.",
@@ -988,10 +1088,11 @@
           },
           "ports": {
             "description": "Uplinks for connecting the rack to external networks",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/PortConfig"
-            }
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/UplinkPorts"
+              }
+            ]
           },
           "rack_subnet": {
             "$ref": "#/components/schemas/Ipv6Net"
@@ -1205,6 +1306,39 @@
           "user_password_hash"
         ]
       },
+      "ReplicatedNetworkConfig": {
+        "description": "Wrapper for optional contents of the replicated network config.",
+        "type": "object",
+        "properties": {
+          "contents": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ReplicatedNetworkConfigContents"
+              }
+            ]
+          }
+        }
+      },
+      "ReplicatedNetworkConfigContents": {
+        "description": "Contents of the replicated network config.\n\nAnalogous to the bootstore `NetworkConfig` type.",
+        "type": "object",
+        "properties": {
+          "base64_blob": {
+            "description": "The `NetworkConfig` arbitrary blob, encoded using the standard base64 alphabet.\n\nCurrently, the contents are expected to be JSON, but serialization/deserialization of the contents is performed outside the replication engine, which just deals with a binary blob.",
+            "type": "string"
+          },
+          "generation": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "base64_blob",
+          "generation"
+        ]
+      },
       "RouteConfig": {
         "type": "object",
         "properties": {
@@ -1250,10 +1384,6 @@
         "minimum": 0,
         "maximum": 9000
       },
-      "RouterPeerIpAddr": {
-        "type": "string",
-        "format": "ip"
-      },
       "RouterPeerType": {
         "oneOf": [
           {
@@ -1284,11 +1414,8 @@
             "properties": {
               "ip": {
                 "description": "IP address for numbered BGP peers.",
-                "allOf": [
-                  {
-                    "$ref": "#/components/schemas/RouterPeerIpAddr"
-                  }
-                ]
+                "type": "string",
+                "format": "ip"
               },
               "type": {
                 "type": "string",
@@ -1383,7 +1510,7 @@
               "status": {
                 "type": "string",
                 "enum": [
-                  "network_config_update"
+                  "initial_network_config_update"
                 ]
               }
             },
@@ -1398,6 +1525,20 @@
                 "type": "string",
                 "enum": [
                   "sled_init"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "final_network_config_update"
                 ]
               }
             },
@@ -1594,7 +1735,7 @@
             "type": "object",
             "properties": {
               "ip_net": {
-                "$ref": "#/components/schemas/UplinkIpNet"
+                "$ref": "#/components/schemas/IpNet"
               },
               "type": {
                 "type": "string",
@@ -1634,8 +1775,12 @@
           "address"
         ]
       },
-      "UplinkIpNet": {
-        "$ref": "#/components/schemas/IpNet"
+      "UplinkPorts": {
+        "type": "array",
+        "items": {
+          "$ref": "#/components/schemas/PortConfig"
+        },
+        "minItems": 1
       },
       "UserId": {
         "title": "A username for a local-only user",

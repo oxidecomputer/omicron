@@ -12,6 +12,7 @@ use crate::app::sagas::{
 };
 use nexus_db_lookup::LookupPath;
 use nexus_db_model::VmmCpuPlatform;
+use nexus_db_queries::db::datastore::sled::SledReservationReason;
 use nexus_db_queries::db::identity::Resource;
 use nexus_db_queries::{authn, authz, db};
 use nexus_types::internal_api::params::InstanceMigrateRequest;
@@ -241,6 +242,7 @@ async fn sim_reserve_sled_resources(
         u32::from(params.instance.ncpus.0.0),
         params.instance.memory,
         constraints,
+        SledReservationReason::MigrationTarget,
     )
     .await?;
 
@@ -624,8 +626,10 @@ mod tests {
     };
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::external_api::instance as instance_types;
+    use nexus_types::external_api::instance::InstanceCpuCount;
+    use nexus_types_versions::latest;
     use omicron_common::api::external::{
-        ByteCount, IdentityMetadataCreateParams, InstanceCpuCount,
+        ByteCount, IdentityMetadataCreateParams,
     };
 
     type ControlPlaneTestContext =
@@ -642,7 +646,7 @@ mod tests {
 
     async fn create_instance(
         client: &ClientTestContext,
-    ) -> omicron_common::api::external::Instance {
+    ) -> latest::instance::Instance {
         let instances_url = format!("/v1/instances?project={}", PROJECT_NAME);
         object_create(
             client,
@@ -667,6 +671,7 @@ mod tests {
                 auto_restart_policy: Default::default(),
                 anti_affinity_groups: Vec::new(),
                 multicast_groups: Vec::new(),
+                enable_jumbo_frames: false,
             },
         )
         .await

@@ -89,17 +89,13 @@ struct NicInfo {
     transit_ips_v6: Vec<crate::db::model::Ipv6Net>,
 }
 
-impl TryFrom<NicInfo>
-    for omicron_common::api::internal::shared::NetworkInterface
-{
+impl TryFrom<NicInfo> for sled_agent_types::inventory::NetworkInterface {
     type Error = Error;
 
     fn try_from(
         nic: NicInfo,
-    ) -> Result<
-        omicron_common::api::internal::shared::NetworkInterface,
-        Self::Error,
-    > {
+    ) -> Result<sled_agent_types::inventory::NetworkInterface, Self::Error>
+    {
         let maybe_ipv4_config = match nic.ipv4 {
             None => None,
             Some(ipv4) => {
@@ -144,16 +140,22 @@ impl TryFrom<NicInfo>
         };
         let kind = match nic.kind {
             NetworkInterfaceKind::Instance => {
-                omicron_common::api::internal::shared::NetworkInterfaceKind::Instance{ id: nic.parent_id }
+                sled_agent_types::inventory::NetworkInterfaceKind::Instance {
+                    id: nic.parent_id,
+                }
             }
             NetworkInterfaceKind::Service => {
-                omicron_common::api::internal::shared::NetworkInterfaceKind::Service{ id: nic.parent_id }
+                sled_agent_types::inventory::NetworkInterfaceKind::Service {
+                    id: nic.parent_id,
+                }
             }
             NetworkInterfaceKind::Probe => {
-                omicron_common::api::internal::shared::NetworkInterfaceKind::Probe{ id: nic.parent_id }
+                sled_agent_types::inventory::NetworkInterfaceKind::Probe {
+                    id: nic.parent_id,
+                }
             }
         };
-        Ok(omicron_common::api::internal::shared::NetworkInterface {
+        Ok(sled_agent_types::inventory::NetworkInterface {
             id: nic.id,
             kind,
             name: nic.name.into(),
@@ -588,8 +590,7 @@ impl DataStore {
         partial_query: BoxedQuery<
             nexus_db_schema::schema::network_interface::table,
         >,
-    ) -> ListResultVec<omicron_common::api::internal::shared::NetworkInterface>
-    {
+    ) -> ListResultVec<sled_agent_types::inventory::NetworkInterface> {
         use nexus_db_schema::schema::network_interface;
         use nexus_db_schema::schema::vpc;
         use nexus_db_schema::schema::vpc_subnet;
@@ -606,9 +607,8 @@ impl DataStore {
             .get_results_async(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
-        rows
-            .into_iter()
-            .map(omicron_common::api::internal::shared::NetworkInterface::try_from)
+        rows.into_iter()
+            .map(sled_agent_types::inventory::NetworkInterface::try_from)
             .collect::<Result<_, _>>()
     }
 
@@ -618,8 +618,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         authz_instance: &authz::Instance,
-    ) -> ListResultVec<omicron_common::api::internal::shared::NetworkInterface>
-    {
+    ) -> ListResultVec<sled_agent_types::inventory::NetworkInterface> {
         opctx.authorize(authz::Action::ListChildren, authz_instance).await?;
 
         use nexus_db_schema::schema::network_interface;
@@ -639,8 +638,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         probe_id: Uuid,
-    ) -> ListResultVec<omicron_common::api::internal::shared::NetworkInterface>
-    {
+    ) -> ListResultVec<sled_agent_types::inventory::NetworkInterface> {
         use nexus_db_schema::schema::network_interface;
         self.derive_network_interface_info(
             opctx,
@@ -658,8 +656,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         authz_vpc: &authz::Vpc,
-    ) -> ListResultVec<omicron_common::api::internal::shared::NetworkInterface>
-    {
+    ) -> ListResultVec<sled_agent_types::inventory::NetworkInterface> {
         opctx.authorize(authz::Action::ListChildren, authz_vpc).await?;
 
         use nexus_db_schema::schema::network_interface;
@@ -678,8 +675,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         authz_subnet: &authz::VpcSubnet,
-    ) -> ListResultVec<omicron_common::api::internal::shared::NetworkInterface>
-    {
+    ) -> ListResultVec<sled_agent_types::inventory::NetworkInterface> {
         opctx.authorize(authz::Action::ListChildren, authz_subnet).await?;
 
         use nexus_db_schema::schema::network_interface;

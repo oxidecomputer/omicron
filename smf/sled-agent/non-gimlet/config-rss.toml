@@ -146,6 +146,13 @@ allow = "any"
 # Note that single IP addresses must include the netmask as well, so `/32` or
 # `/128`.
 
+# Enable the fleet-wide jumbo-frames opt-in. When true, end users may opt
+# in to jumbo frames on the primary interface of an instance, and control
+# plane services with external-facing OPTE NICs are brought up with an 8500
+# byte MTU. Defaults to false. Can also be toggled at runtime via the Nexus
+# `/v1/system/networking/settings` endpoint after handoff.
+external_jumbo_frames_opt_in_enabled = false
+
 # Configuration for the initial Silo, user, and password.
 #
 # You don't need to change the silo or user names.

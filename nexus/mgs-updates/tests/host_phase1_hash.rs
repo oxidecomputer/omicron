@@ -208,7 +208,7 @@ async fn test_host_phase1_hashing() {
                     // expected intermediate states
                     SpUpdateStatus::Preparing { .. }
                     | SpUpdateStatus::InProgress { .. } => {
-                        Err(CondCheckError::NotYet)
+                        Err(CondCheckError::NotYet { status: None })
                     }
 
                     // never-expect-to-see states

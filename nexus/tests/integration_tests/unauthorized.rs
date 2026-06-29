@@ -70,6 +70,15 @@ async fn test_unauthorized() {
             .start::<omicron_nexus::Server>()
             .await;
 
+    // Some endpoints, such as `/v1/system/update/status`, return errors until the
+    // inventory watch channel is populated, so wait for that here to avoid a
+    // flake under contention.
+    cptestctx
+        .wait_for_at_least_one_inventory_collection(
+            std::time::Duration::from_secs(60),
+        )
+        .await;
+
     let mut disk_test = DiskTest::new(&cptestctx).await;
     let sled_id = cptestctx.first_sled_id();
     disk_test

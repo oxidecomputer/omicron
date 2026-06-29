@@ -411,6 +411,11 @@ task: "physical_disk_adoption"
     ensure new physical disks are automatically marked in-service
 
 
+task: "populate_switch_ports"
+    one-time population of the `switch_port` table containing all QSFP ports
+    managed by dendrite
+
+
 task: "probe_distributor"
     distributes networking probe zones to sleds
 
@@ -626,7 +631,7 @@ task: "bfd_manager"
   configured period: every <REDACTED_DURATION>s
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-    last completion reported error: failed to resolve addresses for Dendrite services: proto error: no records found for Query { name: Name("_dendrite._tcp.control-plane.oxide.internal."), query_type: SRV, query_class: IN }
+    last completion reported error: proto error: no records found for Query { name: Name("_mgd._tcp.control-plane.oxide.internal."), query_type: SRV, query_class: IN }
 
 task: "blueprint_planner"
   configured period: every <REDACTED_DURATION>m
@@ -695,46 +700,54 @@ task: "fm_analysis"
   configured period: every <REDACTED_DURATION>m
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-    parent sitrep ID:                None
+    parent sitrep ID:                Some(..........<REDACTED_UUID>........... (sitrep))
     current inventory collection ID: Some(..........<REDACTED_UUID>........... (collection))
+    ereport classes consumed:        (none)
     FAULT MANAGEMENT ANALYSIS SUMMARY
-    ===== ========== ======== =======
-/!\ analysis failed: FM analysis is not yet implemented
+    =================================
+    no changes from the current situation report (Some(..........<REDACTED_UUID>........... (sitrep)))
 
-    fault management analysis inputs
-    ----- ---------- -------- ------
-    parent sitrep:        <none>
-    inventory collection: ..........<REDACTED_UUID>...........
-    no new ereports since the parent sitrep
-    no cases copied forward
+    preparation report:
+      parent sitrep:        ..........<REDACTED_UUID>...........
+      inventory collection: ..........<REDACTED_UUID>...........
+      <FM_INPUT_INV_COMPARISON_REDACTED>
+      total known ereport restart IDs: 0
+      no new ereports since the parent sitrep
+      no cases copied forward
 
+      no in-service control plane disks
+
+    analysis report:
+      sitrep ID: ..........<REDACTED_UUID>...........
+      no cases changed in this analysis step
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
 
 task: "fm_rendezvous"
   configured period: every <REDACTED_DURATION>m
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-(i) no FM situation report loaded, so rendezvous was not performed
+    current sitrep: ..........<REDACTED_UUID>...........
     creating requested alerts:
-(i)   note: this operation was not executed
+      started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
       alerts requested:                0
         requested in this sitrep:      0
         created in this activation:    0
-        already created:               0
+        already existed:               0
         errors:                        0
     creating requested support bundles:
-(i)   note: this operation was not executed
+      started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
       support bundles requested:       0
         requested in this sitrep:      0
         created in this activation:    0
-        already created:               0
+        already existed:               0
         errors:                        0
     marking ereports as seen:
-(i)   note: this operation was not executed
+      started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
       total ereports in sitrep:                 0
       not marked when the sitrep was loaded:    0
         marked seen by this activation:         0
         already marked seen:                    0
-      batch size:                               0
+      batch size:                            1000
       batches:                                  0
       errors:                                   0
 
@@ -743,13 +756,17 @@ task: "fm_sitrep_gc"
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     batch size:                                                               1000
-    orphaned sitreps deleted:                                                    0
+    orphaned sitreps deleted:                                                    <ORPHANED_SITREPS_DELETED_REDACTED>
       batches:                                                                   1
     orphaned fm_alert_request rows deleted:                                      0
       batches:                                                                   1
     orphaned fm_case rows deleted:                                               0
       batches:                                                                   1
     orphaned fm_ereport_in_case rows deleted:                                    0
+      batches:                                                                   1
+    orphaned fm_fact_physical_disk rows deleted:                                 0
+      batches:                                                                   1
+    orphaned fm_sitrep_analysis_report rows deleted:                             <ORPHANED_FMSITREPANALYSISREPORT_ROWS_DELETED_REDACTED>
       batches:                                                                   1
     orphaned fm_support_bundle_request rows deleted:                             0
       batches:                                                                   1
@@ -764,7 +781,9 @@ task: "fm_sitrep_loader"
   configured period: every <REDACTED_DURATION>s
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-    no FM situation report available to load
+    loaded latest FM situation report as of <REDACTED_TIMESTAMP>:
+        sitrep ..........<REDACTED_UUID>........... (sitrep) (v1)
+        made current at: <REDACTED_TIMESTAMP>
 
 task: "instance_reincarnation"
   configured period: every <REDACTED_DURATION>m
@@ -847,7 +866,15 @@ task: "physical_disk_adoption"
   configured period: every <REDACTED_DURATION>s
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-    last completion reported error: task disabled
+physical disks added: 0
+/!\ task disabled
+
+task: "populate_switch_ports"
+  configured period: every <REDACTED_DURATION>s
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+switch0 failed: failed to look up dendrite clients: proto error: no records found for Query { name: Name("_dendrite._tcp.control-plane.oxide.internal."), query_type: SRV, query_class: IN }
+switch1 failed: failed to look up dendrite clients: proto error: no records found for Query { name: Name("_dendrite._tcp.control-plane.oxide.internal."), query_type: SRV, query_class: IN }
 
 task: "probe_distributor"
   configured period: every <REDACTED_DURATION>m
@@ -962,6 +989,7 @@ task: "sp_ereport_ingester"
   configured period: every <REDACTED_DURATION>s
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    SPs found via ignition:       0
     total ereports received:      <TOTAL_EREPORTS_RECEIVED_REDACTED>
       new ereports ingested:      <NEW_EREPORTS_INGESTED_REDACTED>
     total HTTP requests sent:     <TOTAL_HTTP_REQUESTS_SENT_REDACTED>
@@ -987,7 +1015,8 @@ task: "switch_port_config_manager"
   configured period: every <REDACTED_DURATION>s
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-warning: unknown background task: "switch_port_config_manager" (don't know how to interpret details: Object {})
+all racks appear to have a complete bootstore network config
+(note: this check is not yet complete -- there might still be errors that aren't in the report)
 
 task: "trust_quorum_manager"
   configured period: every <REDACTED_DURATION>m
@@ -1302,7 +1331,7 @@ task: "bfd_manager"
   configured period: every <REDACTED_DURATION>s
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-    last completion reported error: failed to resolve addresses for Dendrite services: proto error: no records found for Query { name: Name("_dendrite._tcp.control-plane.oxide.internal."), query_type: SRV, query_class: IN }
+    last completion reported error: proto error: no records found for Query { name: Name("_mgd._tcp.control-plane.oxide.internal."), query_type: SRV, query_class: IN }
 
 task: "blueprint_planner"
   configured period: every <REDACTED_DURATION>m
@@ -1371,46 +1400,54 @@ task: "fm_analysis"
   configured period: every <REDACTED_DURATION>m
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-    parent sitrep ID:                None
+    parent sitrep ID:                Some(..........<REDACTED_UUID>........... (sitrep))
     current inventory collection ID: Some(..........<REDACTED_UUID>........... (collection))
+    ereport classes consumed:        (none)
     FAULT MANAGEMENT ANALYSIS SUMMARY
-    ===== ========== ======== =======
-/!\ analysis failed: FM analysis is not yet implemented
+    =================================
+    no changes from the current situation report (Some(..........<REDACTED_UUID>........... (sitrep)))
 
-    fault management analysis inputs
-    ----- ---------- -------- ------
-    parent sitrep:        <none>
-    inventory collection: ..........<REDACTED_UUID>...........
-    no new ereports since the parent sitrep
-    no cases copied forward
+    preparation report:
+      parent sitrep:        ..........<REDACTED_UUID>...........
+      inventory collection: ..........<REDACTED_UUID>...........
+      <FM_INPUT_INV_COMPARISON_REDACTED>
+      total known ereport restart IDs: 0
+      no new ereports since the parent sitrep
+      no cases copied forward
 
+      no in-service control plane disks
+
+    analysis report:
+      sitrep ID: ..........<REDACTED_UUID>...........
+      no cases changed in this analysis step
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
 
 task: "fm_rendezvous"
   configured period: every <REDACTED_DURATION>m
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-(i) no FM situation report loaded, so rendezvous was not performed
+    current sitrep: ..........<REDACTED_UUID>...........
     creating requested alerts:
-(i)   note: this operation was not executed
+      started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
       alerts requested:                0
         requested in this sitrep:      0
         created in this activation:    0
-        already created:               0
+        already existed:               0
         errors:                        0
     creating requested support bundles:
-(i)   note: this operation was not executed
+      started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
       support bundles requested:       0
         requested in this sitrep:      0
         created in this activation:    0
-        already created:               0
+        already existed:               0
         errors:                        0
     marking ereports as seen:
-(i)   note: this operation was not executed
+      started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
       total ereports in sitrep:                 0
       not marked when the sitrep was loaded:    0
         marked seen by this activation:         0
         already marked seen:                    0
-      batch size:                               0
+      batch size:                            1000
       batches:                                  0
       errors:                                   0
 
@@ -1419,13 +1456,17 @@ task: "fm_sitrep_gc"
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     batch size:                                                               1000
-    orphaned sitreps deleted:                                                    0
+    orphaned sitreps deleted:                                                    <ORPHANED_SITREPS_DELETED_REDACTED>
       batches:                                                                   1
     orphaned fm_alert_request rows deleted:                                      0
       batches:                                                                   1
     orphaned fm_case rows deleted:                                               0
       batches:                                                                   1
     orphaned fm_ereport_in_case rows deleted:                                    0
+      batches:                                                                   1
+    orphaned fm_fact_physical_disk rows deleted:                                 0
+      batches:                                                                   1
+    orphaned fm_sitrep_analysis_report rows deleted:                             <ORPHANED_FMSITREPANALYSISREPORT_ROWS_DELETED_REDACTED>
       batches:                                                                   1
     orphaned fm_support_bundle_request rows deleted:                             0
       batches:                                                                   1
@@ -1440,7 +1481,9 @@ task: "fm_sitrep_loader"
   configured period: every <REDACTED_DURATION>s
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-    no FM situation report available to load
+    loaded latest FM situation report as of <REDACTED_TIMESTAMP>:
+        sitrep ..........<REDACTED_UUID>........... (sitrep) (v1)
+        made current at: <REDACTED_TIMESTAMP>
 
 task: "instance_reincarnation"
   configured period: every <REDACTED_DURATION>m
@@ -1523,7 +1566,15 @@ task: "physical_disk_adoption"
   configured period: every <REDACTED_DURATION>s
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-    last completion reported error: task disabled
+physical disks added: 0
+/!\ task disabled
+
+task: "populate_switch_ports"
+  configured period: every <REDACTED_DURATION>s
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+switch0 failed: failed to look up dendrite clients: proto error: no records found for Query { name: Name("_dendrite._tcp.control-plane.oxide.internal."), query_type: SRV, query_class: IN }
+switch1 failed: failed to look up dendrite clients: proto error: no records found for Query { name: Name("_dendrite._tcp.control-plane.oxide.internal."), query_type: SRV, query_class: IN }
 
 task: "probe_distributor"
   configured period: every <REDACTED_DURATION>m
@@ -1638,6 +1689,7 @@ task: "sp_ereport_ingester"
   configured period: every <REDACTED_DURATION>s
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    SPs found via ignition:       0
     total ereports received:      <TOTAL_EREPORTS_RECEIVED_REDACTED>
       new ereports ingested:      <NEW_EREPORTS_INGESTED_REDACTED>
     total HTTP requests sent:     <TOTAL_HTTP_REQUESTS_SENT_REDACTED>
@@ -1663,7 +1715,8 @@ task: "switch_port_config_manager"
   configured period: every <REDACTED_DURATION>s
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-warning: unknown background task: "switch_port_config_manager" (don't know how to interpret details: Object {})
+all racks appear to have a complete bootstore network config
+(note: this check is not yet complete -- there might still be errors that aren't in the report)
 
 task: "trust_quorum_manager"
   configured period: every <REDACTED_DURATION>m
@@ -1802,7 +1855,7 @@ parent:    <none>
     state:::::::::::::   active
     config generation:   2
     subnet::::::::::::   ::/64
-    last allocated IP:   ::20
+    last allocated IP:   ::2
 
     host phase 2 contents:
     ------------------------
@@ -1852,7 +1905,7 @@ parent:    <none>
     state:::::::::::::   active
     config generation:   2
     subnet::::::::::::   ::/64
-    last allocated IP:   ::20
+    last allocated IP:   ::2
 
     host phase 2 contents:
     ------------------------
@@ -1920,13 +1973,14 @@ parent:    <none>
     read from::   SingleNode
 
  METADATA:
-    created by:::::::::::::   nexus-test-utils
-    created at:::::::::::::   <REDACTED_TIMESTAMP>
-    comment::::::::::::::::   initial test blueprint
-    internal DNS version:::   1
-    external DNS version:::   2
-    target release min gen:   1
-    nexus gen::::::::::::::   1
+    created by::::::::::::::   nexus-test-utils
+    created at::::::::::::::   <REDACTED_TIMESTAMP>
+    comment:::::::::::::::::   initial test blueprint
+    internal DNS version::::   1
+    external DNS version::::   2
+    target release min gen::   1
+    nexus gen:::::::::::::::   1
+    external networking gen:   1
 
  PENDING MGS-MANAGED UPDATES: 0
 
@@ -1948,7 +2002,7 @@ parent:    <none>
     state:::::::::::::   active
     config generation:   2
     subnet::::::::::::   ::/64
-    last allocated IP:   ::20
+    last allocated IP:   ::2
 
     host phase 2 contents:
     ------------------------
@@ -1998,7 +2052,7 @@ parent:    <none>
     state:::::::::::::   active
     config generation:   2
     subnet::::::::::::   ::/64
-    last allocated IP:   ::20
+    last allocated IP:   ::2
 
     host phase 2 contents:
     ------------------------
@@ -2066,13 +2120,14 @@ parent:    <none>
     read from::   SingleNode
 
  METADATA:
-    created by:::::::::::::   nexus-test-utils
-    created at:::::::::::::   <REDACTED_TIMESTAMP>
-    comment::::::::::::::::   initial test blueprint
-    internal DNS version:::   1
-    external DNS version:::   2
-    target release min gen:   1
-    nexus gen::::::::::::::   1
+    created by::::::::::::::   nexus-test-utils
+    created at::::::::::::::   <REDACTED_TIMESTAMP>
+    comment:::::::::::::::::   initial test blueprint
+    internal DNS version::::   1
+    external DNS version::::   2
+    target release min gen::   1
+    nexus gen:::::::::::::::   1
+    external networking gen:   1
 
  PENDING MGS-MANAGED UPDATES: 0
 
@@ -2126,9 +2181,8 @@ Reconfigurator config:
     version: 1
     modified time: <REDACTED_TIMESTAMP>
     tuf repo pruner enabled: true
+    disruption policy: terminate
     planner enabled: false
-    planner config:
-        add zones with mupdate override:   false
 ---------------------------------------------
 stderr:
 note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
@@ -2208,21 +2262,19 @@ stdout:
 reconfigurator config updated to version 2:
     tuf repo pruner enabled:   true (unchanged)
 *   planner enabled:::::::::   false -> true
-    planner config:
-        add zones with mupdate override:   false (unchanged)
+    disruption policy:::::::   terminate (unchanged)
 ---------------------------------------------
 stderr:
 note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
 =============================================
-EXECUTING COMMAND: omdb ["-w", "nexus", "reconfigurator-config", "set", "--add-zones-with-mupdate-override", "true"]
+EXECUTING COMMAND: omdb ["-w", "nexus", "reconfigurator-config", "set", "--disruption-policy", "migrate-or-terminate"]
 termination: Exited(0)
 ---------------------------------------------
 stdout:
 reconfigurator config updated to version 3:
     tuf repo pruner enabled:   true (unchanged)
     planner enabled:::::::::   true (unchanged)
-    planner config:
-    *   add zones with mupdate override:   false -> true
+*   disruption policy:::::::   terminate -> live-migrate or terminate
 ---------------------------------------------
 stderr:
 note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
@@ -2235,9 +2287,8 @@ Reconfigurator config:
     version: 3
     modified time: <REDACTED_TIMESTAMP>
     tuf repo pruner enabled: true
+    disruption policy: live-migrate or terminate
     planner enabled: true
-    planner config:
-        add zones with mupdate override:   true
 ---------------------------------------------
 stderr:
 note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
