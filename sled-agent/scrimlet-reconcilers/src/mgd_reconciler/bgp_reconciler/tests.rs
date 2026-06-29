@@ -127,23 +127,23 @@ impl TestInput {
         rack_config(all_ports, vec![self.bgp_config.clone()])
     }
 
-    fn expected_origin4(&self) -> BTreeSet<MgdPrefix4> {
+    fn expected_origin4(&self) -> BTreeSet<Ipv4Net> {
         self.bgp_config
             .originate
             .iter()
             .filter_map(|net| match net {
-                IpNet::V4(net) => Some(oxnet4_to_mgdprefix4(*net)),
+                IpNet::V4(net) => Some(*net),
                 IpNet::V6(_) => None,
             })
             .collect()
     }
 
-    fn expected_origin6(&self) -> BTreeSet<MgdPrefix6> {
+    fn expected_origin6(&self) -> BTreeSet<Ipv6Net> {
         self.bgp_config
             .originate
             .iter()
             .filter_map(|net| match net {
-                IpNet::V6(net) => Some(oxnet6_to_mgdprefix6(*net)),
+                IpNet::V6(net) => Some(*net),
                 IpNet::V4(_) => None,
             })
             .collect()
@@ -243,8 +243,7 @@ impl MgdNeighborKind for MgdNeighbor {
         self.vlan_id
     }
     fn peer_type(&self) -> RouterPeerType {
-        let host: SocketAddr = self.host.parse().unwrap();
-        RouterPeerType::Numbered { ip: host.ip().try_into().unwrap() }
+        RouterPeerType::Numbered { ip: self.host.ip().try_into().unwrap() }
     }
 }
 
@@ -388,14 +387,14 @@ fn check_mgd_state_against_expected_config<T: MgdNeighborKind>(
                 let nets4 = nets
                     .iter()
                     .filter_map(|x| match x {
-                        IpNet::V4(p) => Some(oxnet4_to_mgdprefix4(*p)),
+                        IpNet::V4(p) => Some(*p),
                         IpNet::V6(_) => None,
                     })
                     .collect::<BTreeSet<_>>();
                 let nets6 = nets
                     .iter()
                     .filter_map(|x| match x {
-                        IpNet::V6(p) => Some(oxnet6_to_mgdprefix6(*p)),
+                        IpNet::V6(p) => Some(*p),
                         IpNet::V4(_) => None,
                     })
                     .collect::<BTreeSet<_>>();

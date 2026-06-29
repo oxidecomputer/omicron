@@ -14,6 +14,7 @@
 //! documentation in [`nexus_types::fm`] for more information, and the
 //! [crate-level documentation](crate) for general conventions.
 
+use crate::Generation;
 use crate::SqlU32;
 use crate::typed_uuid::DbTypedUuid;
 use chrono::{DateTime, Utc};
@@ -26,8 +27,14 @@ mod case;
 pub use case::*;
 mod diagnosis_engine;
 pub use diagnosis_engine::*;
+mod rendezvous_created;
+pub use rendezvous_created::*;
+mod fact_physical_disk;
+pub use fact_physical_disk::*;
 mod support_bundle_request;
 pub use support_bundle_request::*;
+mod sitrep_analysis_report;
+pub use sitrep_analysis_report::*;
 
 #[derive(Queryable, Insertable, Clone, Debug, Selectable)]
 #[diesel(table_name = fm_sitrep)]
@@ -39,6 +46,8 @@ pub struct SitrepMetadata {
     pub creator_id: DbTypedUuid<OmicronZoneKind>,
     pub comment: String,
     pub next_inv_min_time_started: DateTime<Utc>,
+    pub alert_generation: Generation,
+    pub support_bundle_generation: Generation,
 }
 
 impl From<SitrepMetadata> for nexus_types::fm::SitrepMetadata {
@@ -51,6 +60,8 @@ impl From<SitrepMetadata> for nexus_types::fm::SitrepMetadata {
             comment,
             time_created,
             next_inv_min_time_started,
+            alert_generation,
+            support_bundle_generation,
         } = db_meta;
         Self {
             id: id.into(),
@@ -60,6 +71,8 @@ impl From<SitrepMetadata> for nexus_types::fm::SitrepMetadata {
             next_inv_min_time_started,
             comment,
             time_created,
+            alert_generation: alert_generation.into(),
+            support_bundle_generation: support_bundle_generation.into(),
         }
     }
 }
@@ -74,6 +87,8 @@ impl From<nexus_types::fm::SitrepMetadata> for SitrepMetadata {
             comment,
             time_created,
             next_inv_min_time_started,
+            alert_generation,
+            support_bundle_generation,
         } = db_meta;
         Self {
             id: id.into(),
@@ -83,6 +98,8 @@ impl From<nexus_types::fm::SitrepMetadata> for SitrepMetadata {
             comment,
             time_created,
             next_inv_min_time_started,
+            alert_generation: alert_generation.into(),
+            support_bundle_generation: support_bundle_generation.into(),
         }
     }
 }

@@ -36,6 +36,7 @@ mod disk_types;
 mod drop_uninitialized_svc_enabled_not_online_state;
 mod ereport_everyone_gets_a_slot;
 mod ereport_trim_serial_trailing_nulls;
+mod ereporter_restart_order_v2;
 mod fix_leaked_bp_oximeter_read_policy_rows;
 mod fix_session_token_column_order;
 mod inv_clear_mupdate_override;
@@ -94,6 +95,7 @@ pub(crate) fn get_migration_checks() -> BTreeMap<Version, DataMigrationFns> {
     register!(bgp_unnumbered_peer_cleanup);
     register!(ereport_trim_serial_trailing_nulls);
     register!(sled_resource_vmm_state);
+    register!(ereporter_restart_order_v2);
 
     map
 }

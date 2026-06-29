@@ -105,7 +105,9 @@ swap_device_size_gb = 64
 # as-is.
 switch_zone_maghemite_links = ["tfportrear0_0"]
 
-data_links = ["net0", "net1"]
+[data_links]
+kind = "virtual"
+devices = ["net0", "net1"]
 
 [dropshot]
 default_request_body_max_bytes = 1048576

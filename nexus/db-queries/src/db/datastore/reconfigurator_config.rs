@@ -18,8 +18,10 @@ use diesel::sql_types;
 use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::public_error_from_diesel;
 use nexus_db_lookup::DbConnection;
+use nexus_db_model::DbReconfiguratorDisruptionPolicy;
 use nexus_db_model::ReconfiguratorConfig as DbReconfiguratorConfig;
 use nexus_db_model::SqlU32;
+use nexus_db_schema::enums::ReconfiguratorDisruptionPolicyEnum;
 use nexus_types::deployment::PlannerConfig;
 use nexus_types::deployment::ReconfiguratorConfig;
 use nexus_types::deployment::ReconfiguratorConfigParam;
@@ -156,6 +158,7 @@ impl DataStore {
                     planner_enabled,
                     planner_config: PlannerConfig {},
                     tuf_repo_pruner_enabled,
+                    disruption_policy,
                 },
             time_modified,
         } = *switches;
@@ -163,8 +166,8 @@ impl DataStore {
         sql_query(
             r"INSERT INTO reconfigurator_config
                 (version, planner_enabled, time_modified,
-                 tuf_repo_pruner_enabled)
-              SELECT $1, $2, $3, $4
+                 tuf_repo_pruner_enabled, disruption_policy)
+              SELECT $1, $2, $3, $4, $5
               WHERE $1 - 1 IN (
                   SELECT COALESCE(MAX(version), 0)
                   FROM reconfigurator_config
@@ -174,6 +177,9 @@ impl DataStore {
         .bind::<sql_types::Bool, _>(planner_enabled)
         .bind::<sql_types::Timestamptz, _>(time_modified)
         .bind::<sql_types::Bool, _>(tuf_repo_pruner_enabled)
+        .bind::<ReconfiguratorDisruptionPolicyEnum, _>(
+            DbReconfiguratorDisruptionPolicy::from(disruption_policy),
+        )
         .execute_async(conn)
         .await
         .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
@@ -183,7 +189,9 @@ impl DataStore {
 mod tests {
     use super::*;
     use crate::db::pub_test_utils::TestDatabase;
-    use nexus_types::deployment::{PlannerConfig, ReconfiguratorConfig};
+    use nexus_types::deployment::{
+        PlannerConfig, ReconfiguratorConfig, ReconfiguratorDisruptionPolicy,
+    };
     use omicron_test_utils::dev;
 
     #[tokio::test]
@@ -209,6 +217,7 @@ mod tests {
                 planner_enabled: false,
                 planner_config: PlannerConfig::default(),
                 tuf_repo_pruner_enabled: true,
+                disruption_policy: ReconfiguratorDisruptionPolicy::default(),
             },
         };
 

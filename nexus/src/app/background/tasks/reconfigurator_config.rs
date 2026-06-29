@@ -91,6 +91,7 @@ mod test {
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::deployment::{
         PlannerConfig, ReconfiguratorConfig, ReconfiguratorConfigParam,
+        ReconfiguratorDisruptionPolicy,
     };
     use nexus_types::internal_api::background::BlueprintPlannerStatus;
     use nexus_types::internal_api::background::TufRepoPrunerStatus;
@@ -150,6 +151,7 @@ mod test {
             planner_enabled: !default_switches.config.planner_enabled,
             planner_config: PlannerConfig::default(),
             tuf_repo_pruner_enabled: true,
+            disruption_policy: ReconfiguratorDisruptionPolicy::default(),
         };
         let switches =
             ReconfiguratorConfigParam { version: 1, config: expected_switches };
@@ -181,6 +183,7 @@ mod test {
             planner_enabled: !expected_switches.planner_enabled,
             planner_config: PlannerConfig::default(),
             tuf_repo_pruner_enabled: true,
+            disruption_policy: ReconfiguratorDisruptionPolicy::default(),
         };
         let switches =
             ReconfiguratorConfigParam { version: 2, config: expected_switches };
@@ -236,6 +239,7 @@ mod test {
             planner_enabled: false,
             planner_config: PlannerConfig::default(),
             tuf_repo_pruner_enabled: false,
+            disruption_policy: ReconfiguratorDisruptionPolicy::default(),
         };
         let switches = ReconfiguratorConfigParam {
             version: initial_config_version + 1,
@@ -270,6 +274,7 @@ mod test {
             planner_enabled: true,
             planner_config: PlannerConfig::default(),
             tuf_repo_pruner_enabled: true,
+            disruption_policy: ReconfiguratorDisruptionPolicy::default(),
         };
         let switches = ReconfiguratorConfigParam {
             version: initial_config_version + 2,
@@ -344,7 +349,7 @@ mod test {
                     .into_inner();
                 eprintln!("task {} status: {:#?}", task_name, task_status);
                 let LastResult::Completed(completed) = task_status.last else {
-                    return Err(CondCheckError::<()>::NotYet);
+                    return Err(CondCheckError::<()>::NotYet { status: None });
                 };
 
                 let status: T = serde_json::from_value(completed.details)
@@ -352,7 +357,7 @@ mod test {
                 if check(&status) {
                     Ok(())
                 } else {
-                    Err(CondCheckError::NotYet)
+                    Err(CondCheckError::NotYet { status: None })
                 }
             },
             &Duration::from_millis(100),

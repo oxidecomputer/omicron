@@ -46,7 +46,7 @@ use crate::job::Jobs;
 /// to as "v8", "version 8", or "release 8" to customers). The use of semantic
 /// versioning is mostly to hedge for perhaps wanting something more granular in
 /// the future.
-const BASE_VERSION: Version = Version::new(20, 0, 0);
+const BASE_VERSION: Version = Version::new(21, 0, 0);
 
 const RETRY_ATTEMPTS: usize = 3;
 
@@ -743,27 +743,14 @@ async fn main() -> Result<()> {
     .after("host-package")
     .after("recovery-package");
 
-    for (name, base_url, name_check) in [
-        (
-            "staging",
-            "https://permslip-staging.corp.oxide.computer",
-            "staging-devel",
-        ),
-        (
-            "production",
-            "https://signer-us-west.corp.oxide.computer",
-            "production-release",
-        ),
-    ] {
+    for env in hubris::Environment::ALL {
         jobs.push(
-            format!("hubris-{}", name),
+            format!("hubris-{}", env.short_name),
             hubris::fetch_hubris_artifacts(
                 logger.clone(),
-                base_url,
+                env,
                 client.clone(),
-                WORKSPACE_DIR.join(format!("tools/permslip_{}", name)),
-                args.output_dir.join(format!("hubris-{}", name)),
-                name_check,
+                args.output_dir.clone(),
             ),
         );
     }

@@ -10,8 +10,6 @@ use daft::Diffable;
 use either::Either;
 use mg_admin_client::Client;
 use mg_admin_client::types::Path as MgdPath;
-use mg_api_types::rdb::prefix::Prefix4 as MgdPrefix4;
-use mg_api_types::rdb::prefix::Prefix6 as MgdPrefix6;
 use mg_api_types::static_routes::AddStaticRoute4Request as MgdAddStaticRoute4Request;
 use mg_api_types::static_routes::AddStaticRoute6Request as MgdAddStaticRoute6Request;
 use mg_api_types::static_routes::DeleteStaticRoute4Request as MgdDeleteStaticRoute4Request;
@@ -476,10 +474,7 @@ impl DiffableStaticRoute {
             DiffableStaticRouteDescription::V4 { nexthop, prefix } => {
                 MgdStaticRoute::V4(MgdStaticRoute4 {
                     nexthop: nexthop.into(),
-                    prefix: MgdPrefix4 {
-                        value: prefix.addr(),
-                        length: prefix.width(),
-                    },
+                    prefix,
                     rib_priority: self.priority,
                     vlan_id: self.vlan_id,
                 })
@@ -487,10 +482,7 @@ impl DiffableStaticRoute {
             DiffableStaticRouteDescription::V4OverV6 { nexthop, prefix } => {
                 MgdStaticRoute::V4(MgdStaticRoute4 {
                     nexthop: nexthop.into(),
-                    prefix: MgdPrefix4 {
-                        value: prefix.addr(),
-                        length: prefix.width(),
-                    },
+                    prefix,
                     rib_priority: self.priority,
                     vlan_id: self.vlan_id,
                 })
@@ -498,10 +490,7 @@ impl DiffableStaticRoute {
             DiffableStaticRouteDescription::V6 { nexthop, prefix } => {
                 MgdStaticRoute::V6(MgdStaticRoute6 {
                     nexthop,
-                    prefix: MgdPrefix6 {
-                        value: prefix.addr(),
-                        length: prefix.width(),
-                    },
+                    prefix,
                     rib_priority: self.priority,
                     vlan_id: self.vlan_id,
                 })

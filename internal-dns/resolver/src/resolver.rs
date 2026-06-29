@@ -388,7 +388,7 @@ impl Resolver {
     ) -> impl Iterator<Item = SocketAddrV6> + Send + use<> {
         let futures =
             std::iter::repeat((self.log.clone(), self.resolver.clone()))
-                .zip(service_lookup.into_iter())
+                .zip(service_lookup)
                 .map(|((log, resolver), srv)| async move {
                     let target = srv.target();
                     let port = srv.port();

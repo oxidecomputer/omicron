@@ -977,9 +977,8 @@ impl From<MgdCurrentRoutes> for MgdStaticRouteLists {
                     .v4
                     .into_iter()
                     .flat_map(|(prefix, paths)| {
-                        let prefix = prefix
-                            .parse::<MgdPrefix4>()
-                            .expect("valid MgdPrefix4");
+                        let prefix =
+                            prefix.parse::<Ipv4Net>().expect("valid prefix");
                         paths.into_iter().map(move |path| MgdStaticRoute4 {
                             nexthop: path.nexthop,
                             prefix,
@@ -994,9 +993,8 @@ impl From<MgdCurrentRoutes> for MgdStaticRouteLists {
                     .v6
                     .into_iter()
                     .flat_map(|(prefix, paths)| {
-                        let prefix = prefix
-                            .parse::<MgdPrefix6>()
-                            .expect("valid MgdPrefix6");
+                        let prefix =
+                            prefix.parse::<Ipv6Net>().expect("valid prefix");
                         paths.into_iter().map(move |path| {
                             let nexthop = match path.nexthop {
                                 IpAddr::V6(ip) => ip,

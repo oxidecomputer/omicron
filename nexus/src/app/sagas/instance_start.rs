@@ -1177,11 +1177,12 @@ mod test {
         object_create,
     };
     use nexus_test_utils_macros::nexus_test;
+    use nexus_types::external_api::instance::InstanceCpuCount;
     use nexus_types::external_api::{instance as instance_types, networking};
     use nexus_types::identity::Resource;
     use nexus_types_versions::latest;
     use omicron_common::api::external::{
-        ByteCount, IdentityMetadataCreateParams, InstanceCpuCount, Name,
+        ByteCount, IdentityMetadataCreateParams, Name,
     };
     use omicron_test_utils::dev::poll;
     use sled_agent_types::early_networking::SwitchSlot;
@@ -1485,13 +1486,14 @@ mod test {
                 let result =
                     dpd_client.nat_ipv4_list(&nat_subnet, None, None).await;
 
-                let data =
-                    result.map_err(|_| poll::CondCheckError::<()>::NotYet)?;
+                let data = result.map_err(|_| {
+                    poll::CondCheckError::<()>::NotYet { status: None }
+                })?;
 
                 if data.items.len() == expected_nat_entries {
                     Ok(())
                 } else {
-                    Err(poll::CondCheckError::<()>::NotYet)
+                    Err(poll::CondCheckError::<()>::NotYet { status: None })
                 }
             },
             &poll_interval,
@@ -1539,15 +1541,16 @@ mod test {
 
                 info!(log, "nat_ipv4_list"; "result" => ?result);
 
-                let data =
-                    result.map_err(|_| poll::CondCheckError::<()>::NotYet)?;
+                let data = result.map_err(|_| {
+                    poll::CondCheckError::<()>::NotYet { status: None }
+                })?;
 
                 if data.items.is_empty() {
                     error!(
                         log,
                         "we are expecting nat entries but none were found"
                     );
-                    Err(poll::CondCheckError::<()>::NotYet)
+                    Err(poll::CondCheckError::<()>::NotYet { status: None })
                 } else {
                     Ok(())
                 }

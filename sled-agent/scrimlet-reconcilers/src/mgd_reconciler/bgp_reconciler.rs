@@ -22,11 +22,8 @@ use mg_api_types::bgp::config::ShaperSource as MgdShaperSource;
 use mg_api_types::bgp::history::Origin6 as MgdOrigin6;
 use mg_api_types::bgp::policy::ImportExportPolicy4 as MgdImportExportPolicy4;
 use mg_api_types::bgp::policy::ImportExportPolicy6 as MgdImportExportPolicy6;
-use mg_api_types::rdb::prefix::Prefix4 as MgdPrefix4;
-use mg_api_types::rdb::prefix::Prefix6 as MgdPrefix6;
 use mg_api_types::rib::BestpathFanoutRequest as MgdBestpathFanoutRequest;
 use oxnet::IpNet;
-use oxnet::IpNetPrefixError;
 use oxnet::Ipv4Net;
 use oxnet::Ipv6Net;
 use sled_agent_types::early_networking::BgpConfig;
@@ -418,11 +415,7 @@ async fn apply_plan(
             client
                 .update_origin4(&MgdOrigin4 {
                     asn,
-                    prefixes: prefixes
-                        .iter()
-                        .copied()
-                        .map(oxnet4_to_mgdprefix4)
-                        .collect()
+                    prefixes: prefixes.iter().copied().collect()
                 })
                 .await,
             origin4_updated,
@@ -434,11 +427,7 @@ async fn apply_plan(
             client
                 .update_origin6(&MgdOrigin6 {
                     asn,
-                    prefixes: prefixes
-                        .iter()
-                        .copied()
-                        .map(oxnet6_to_mgdprefix6)
-                        .collect()
+                    prefixes: prefixes.iter().copied().collect()
                 })
                 .await,
             origin6_updated,
@@ -523,11 +512,7 @@ async fn apply_plan(
             client
                 .create_origin4(&MgdOrigin4 {
                     asn: *asn,
-                    prefixes: prefixes
-                        .iter()
-                        .copied()
-                        .map(oxnet4_to_mgdprefix4)
-                        .collect()
+                    prefixes: prefixes.iter().copied().collect()
                 })
                 .await,
             origin4_created,
@@ -542,11 +527,7 @@ async fn apply_plan(
             client
                 .create_origin6(&MgdOrigin6 {
                     asn: *asn,
-                    prefixes: prefixes
-                        .iter()
-                        .copied()
-                        .map(oxnet6_to_mgdprefix6)
-                        .collect()
+                    prefixes: prefixes.iter().copied().collect()
                 })
                 .await,
             origin6_created,
@@ -880,11 +861,11 @@ impl DiffableBgpCommonPeerConfig {
             enforce_first_as: self.enforce_first_as,
             group: self.group.clone(),
             hold_time: self.hold_time,
-            host: addr.to_string(),
+            host: addr,
             idle_hold_jitter: self.idle_hold_jitter.map(From::from),
             idle_hold_time: self.idle_hold_time,
-            ipv4_unicast: self.ipv4_unicast.as_ref().map(From::from),
-            ipv6_unicast: self.ipv6_unicast.as_ref().map(From::from),
+            ipv4_unicast: self.ipv4_unicast.clone().map(From::from),
+            ipv6_unicast: self.ipv6_unicast.clone().map(From::from),
             keepalive: self.keepalive,
             local_pref: self.local_pref,
             md5_auth_key: self.md5_auth_key.clone(),
@@ -928,8 +909,8 @@ impl DiffableBgpUnnumberedPeerConfig {
             hold_time: common.hold_time,
             idle_hold_jitter: common.idle_hold_jitter.map(From::from),
             idle_hold_time: common.idle_hold_time,
-            ipv4_unicast: common.ipv4_unicast.as_ref().map(From::from),
-            ipv6_unicast: common.ipv6_unicast.as_ref().map(From::from),
+            ipv4_unicast: common.ipv4_unicast.clone().map(From::from),
+            ipv6_unicast: common.ipv6_unicast.clone().map(From::from),
             keepalive: common.keepalive,
             local_pref: common.local_pref,
             md5_auth_key: common.md5_auth_key.clone(),
@@ -984,66 +965,62 @@ impl From<F64Bits> for f64 {
     }
 }
 
-#[derive(Debug, Diffable, PartialEq, Eq)]
+#[derive(Debug, Clone, Diffable, PartialEq, Eq)]
 struct DiffableUnicastConfig<Proto> {
     nexthop: Option<IpAddr>,
     import_policy: DiffableImportExportPolicy<Proto>,
     export_policy: DiffableImportExportPolicy<Proto>,
 }
 
-impl TryFrom<MgdIpv4UnicastConfig> for DiffableUnicastConfig<Ipv4Net> {
-    type Error = IpNetPrefixError;
-
-    fn try_from(value: MgdIpv4UnicastConfig) -> Result<Self, Self::Error> {
+impl From<MgdIpv4UnicastConfig> for DiffableUnicastConfig<Ipv4Net> {
+    fn from(value: MgdIpv4UnicastConfig) -> Self {
         let MgdIpv4UnicastConfig { export_policy, import_policy, nexthop } =
             value;
-        Ok(Self {
+        Self {
             nexthop,
-            import_policy: import_policy.try_into()?,
-            export_policy: export_policy.try_into()?,
-        })
+            import_policy: import_policy.into(),
+            export_policy: export_policy.into(),
+        }
     }
 }
 
-impl TryFrom<MgdIpv6UnicastConfig> for DiffableUnicastConfig<Ipv6Net> {
-    type Error = IpNetPrefixError;
-
-    fn try_from(value: MgdIpv6UnicastConfig) -> Result<Self, Self::Error> {
+impl From<MgdIpv6UnicastConfig> for DiffableUnicastConfig<Ipv6Net> {
+    fn from(value: MgdIpv6UnicastConfig) -> Self {
         let MgdIpv6UnicastConfig { export_policy, import_policy, nexthop } =
             value;
-        Ok(Self {
+        Self {
             nexthop,
-            import_policy: import_policy.try_into()?,
-            export_policy: export_policy.try_into()?,
-        })
-    }
-}
-
-impl From<&'_ DiffableUnicastConfig<Ipv4Net>> for MgdIpv4UnicastConfig {
-    fn from(value: &DiffableUnicastConfig<Ipv4Net>) -> Self {
-        let DiffableUnicastConfig { export_policy, import_policy, nexthop } =
-            value;
-        Self {
-            nexthop: *nexthop,
             import_policy: import_policy.into(),
             export_policy: export_policy.into(),
         }
     }
 }
 
-impl From<&'_ DiffableUnicastConfig<Ipv6Net>> for MgdIpv6UnicastConfig {
-    fn from(value: &DiffableUnicastConfig<Ipv6Net>) -> Self {
+impl From<DiffableUnicastConfig<Ipv4Net>> for MgdIpv4UnicastConfig {
+    fn from(value: DiffableUnicastConfig<Ipv4Net>) -> Self {
         let DiffableUnicastConfig { export_policy, import_policy, nexthop } =
             value;
         Self {
-            nexthop: *nexthop,
+            nexthop,
             import_policy: import_policy.into(),
             export_policy: export_policy.into(),
         }
     }
 }
 
-#[derive(Debug, Diffable, PartialEq, Eq)]
+impl From<DiffableUnicastConfig<Ipv6Net>> for MgdIpv6UnicastConfig {
+    fn from(value: DiffableUnicastConfig<Ipv6Net>) -> Self {
+        let DiffableUnicastConfig { export_policy, import_policy, nexthop } =
+            value;
+        Self {
+            nexthop,
+            import_policy: import_policy.into(),
+            export_policy: export_policy.into(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Diffable, PartialEq, Eq)]
 enum DiffableImportExportPolicy<Proto> {
     NoFiltering,
     Allow(BTreeSet<Proto>),
@@ -1081,59 +1058,42 @@ impl From<&'_ ImportExportPolicy> for DiffableImportExportPolicy<Ipv6Net> {
     }
 }
 
-// TODO-cleanup Once <https://github.com/oxidecomputer/maghemite/pull/771> lands
-// and is available in omicron, these `TryFrom`s can become `From`s (and we can
-// delete the `mgdprefix*_to_oxnet*` conversions).
-impl TryFrom<MgdImportExportPolicy4> for DiffableImportExportPolicy<Ipv4Net> {
-    type Error = IpNetPrefixError;
-
-    fn try_from(value: MgdImportExportPolicy4) -> Result<Self, Self::Error> {
+impl From<MgdImportExportPolicy4> for DiffableImportExportPolicy<Ipv4Net> {
+    fn from(value: MgdImportExportPolicy4) -> Self {
         match value {
-            MgdImportExportPolicy4::NoFiltering => Ok(Self::NoFiltering),
-            MgdImportExportPolicy4::Allow(prefixes) => Ok(Self::Allow(
-                prefixes
-                    .into_iter()
-                    .map(mgdprefix4_to_oxnet4)
-                    .collect::<Result<_, _>>()?,
-            )),
+            MgdImportExportPolicy4::NoFiltering => Self::NoFiltering,
+            MgdImportExportPolicy4::Allow(prefixes) => Self::Allow(prefixes),
         }
     }
 }
 
-impl TryFrom<MgdImportExportPolicy6> for DiffableImportExportPolicy<Ipv6Net> {
-    type Error = IpNetPrefixError;
-
-    fn try_from(value: MgdImportExportPolicy6) -> Result<Self, Self::Error> {
+impl From<MgdImportExportPolicy6> for DiffableImportExportPolicy<Ipv6Net> {
+    fn from(value: MgdImportExportPolicy6) -> Self {
         match value {
-            MgdImportExportPolicy6::NoFiltering => Ok(Self::NoFiltering),
-            MgdImportExportPolicy6::Allow(prefixes) => Ok(Self::Allow(
-                prefixes
-                    .into_iter()
-                    .map(mgdprefix6_to_oxnet6)
-                    .collect::<Result<_, _>>()?,
-            )),
+            MgdImportExportPolicy6::NoFiltering => Self::NoFiltering,
+            MgdImportExportPolicy6::Allow(prefixes) => Self::Allow(prefixes),
         }
     }
 }
 
-impl From<&'_ DiffableImportExportPolicy<Ipv4Net>> for MgdImportExportPolicy4 {
-    fn from(value: &DiffableImportExportPolicy<Ipv4Net>) -> Self {
+impl From<DiffableImportExportPolicy<Ipv4Net>> for MgdImportExportPolicy4 {
+    fn from(value: DiffableImportExportPolicy<Ipv4Net>) -> Self {
         match value {
             DiffableImportExportPolicy::NoFiltering => Self::NoFiltering,
-            DiffableImportExportPolicy::Allow(prefixes) => Self::Allow(
-                prefixes.iter().copied().map(oxnet4_to_mgdprefix4).collect(),
-            ),
+            DiffableImportExportPolicy::Allow(prefixes) => {
+                Self::Allow(prefixes)
+            }
         }
     }
 }
 
-impl From<&'_ DiffableImportExportPolicy<Ipv6Net>> for MgdImportExportPolicy6 {
-    fn from(value: &DiffableImportExportPolicy<Ipv6Net>) -> Self {
+impl From<DiffableImportExportPolicy<Ipv6Net>> for MgdImportExportPolicy6 {
+    fn from(value: DiffableImportExportPolicy<Ipv6Net>) -> Self {
         match value {
             DiffableImportExportPolicy::NoFiltering => Self::NoFiltering,
-            DiffableImportExportPolicy::Allow(prefixes) => Self::Allow(
-                prefixes.iter().copied().map(oxnet6_to_mgdprefix6).collect(),
-            ),
+            DiffableImportExportPolicy::Allow(prefixes) => {
+                Self::Allow(prefixes)
+            }
         }
     }
 }
@@ -1192,19 +1152,7 @@ impl DiffableBgpConfig {
                     .await
                     .with_context(|| format!("read_origin4({asn}) failed"))?
                     .into_inner();
-                originate4.insert(
-                    asn,
-                    prefixes
-                        .into_iter()
-                        .map(mgdprefix4_to_oxnet4)
-                        .collect::<Result<_, _>>()
-                        .with_context(|| {
-                            format!(
-                                "invalid prefix length from \
-                                 read_origin4({asn})",
-                            )
-                        })?,
-                );
+                originate4.insert(asn, prefixes.into_iter().collect());
             }
             {
                 let MgdOrigin6 { asn: _, prefixes } = client
@@ -1212,19 +1160,7 @@ impl DiffableBgpConfig {
                     .await
                     .with_context(|| format!("read_origin6({asn}) failed"))?
                     .into_inner();
-                originate6.insert(
-                    asn,
-                    prefixes
-                        .into_iter()
-                        .map(mgdprefix6_to_oxnet6)
-                        .collect::<Result<_, _>>()
-                        .with_context(|| {
-                            format!(
-                                "invalid prefix length from \
-                                 read_origin6({asn})",
-                            )
-                        })?,
-                );
+                originate6.insert(asn, prefixes.into_iter().collect());
             }
 
             // Unlike `read_origin{4,6}` above, which return an empty set of
@@ -1302,10 +1238,6 @@ impl DiffableBgpConfig {
                     src_port,
                     vlan_id,
                 } = neighbor;
-
-                let host: SocketAddr = host.parse().with_context(|| {
-                    format!("failed to parse host {host} as a SocketAddr")
-                })?;
 
                 numbered_peers.insert(
                     host,
@@ -1709,22 +1641,6 @@ fn notfound_to_none<T>(
             }
         }
     }
-}
-
-fn oxnet4_to_mgdprefix4(net: Ipv4Net) -> MgdPrefix4 {
-    MgdPrefix4 { length: net.width(), value: net.addr() }
-}
-
-fn mgdprefix4_to_oxnet4(net: MgdPrefix4) -> Result<Ipv4Net, IpNetPrefixError> {
-    Ipv4Net::new(net.value, net.length)
-}
-
-fn oxnet6_to_mgdprefix6(net: Ipv6Net) -> MgdPrefix6 {
-    MgdPrefix6 { length: net.width(), value: net.addr() }
-}
-
-fn mgdprefix6_to_oxnet6(net: MgdPrefix6) -> Result<Ipv6Net, IpNetPrefixError> {
-    Ipv6Net::new(net.value, net.length)
 }
 
 #[cfg(test)]

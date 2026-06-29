@@ -267,7 +267,7 @@ impl ClientParams {
                     );
                     if let oxide_client::LoginError::RequestError(e) = &e {
                         if e.is_connect() {
-                            return CondCheckError::NotYet;
+                            return CondCheckError::NotYet { status: None };
                         }
                     }
 
@@ -317,7 +317,9 @@ async fn wait_for_records(
                 .await
                 .map_err(|e| match resolve_error_proto_kind(&e) {
                     Some(ProtoErrorKind::NoRecordsFound { .. })
-                    | Some(ProtoErrorKind::Timeout) => CondCheckError::NotYet,
+                    | Some(ProtoErrorKind::Timeout) => {
+                        CondCheckError::NotYet { status: None }
+                    }
                     _ => CondCheckError::Failed(anyhow::Error::new(e).context(
                         format!(
                             "resolving {:?} from {}",
@@ -328,7 +330,7 @@ async fn wait_for_records(
                 })?
                 .iter()
                 .next()
-                .ok_or(CondCheckError::NotYet)
+                .ok_or(CondCheckError::NotYet { status: None })
         },
         &check_period,
         &max,

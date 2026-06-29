@@ -4035,10 +4035,8 @@ mod tests {
 
     fn verify_target(actual: &crate::Target, expected: &Service) {
         assert_eq!(actual.name, expected.name());
-        for (field_name, field_value) in expected
-            .field_names()
-            .into_iter()
-            .zip(expected.field_values().into_iter())
+        for (field_name, field_value) in
+            expected.field_names().into_iter().zip(expected.field_values())
         {
             let actual_field = actual
                 .fields
@@ -4054,10 +4052,8 @@ mod tests {
 
     fn verify_metric(actual: &crate::Metric, expected: &RequestLatency) {
         assert_eq!(actual.name, expected.name());
-        for (field_name, field_value) in expected
-            .field_names()
-            .into_iter()
-            .zip(expected.field_values().into_iter())
+        for (field_name, field_value) in
+            expected.field_names().into_iter().zip(expected.field_values())
         {
             let actual_field = actual
                 .fields

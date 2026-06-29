@@ -8,7 +8,7 @@ use criterion::{Criterion, SamplingMode, criterion_group, criterion_main};
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
-use omicron_common::api::external;
+use nexus_types::external_api::affinity;
 use omicron_test_utils::dev;
 use omicron_uuid_kinds::InstanceUuid;
 use once_cell::sync::Lazy;
@@ -51,7 +51,7 @@ struct GroupInfo {
     // Name of affinity/anti-affinity group
     name: &'static str,
     // Policy of the group
-    policy: external::AffinityPolicy,
+    policy: affinity::AffinityPolicy,
     // Type of group
     flavor: GroupType,
 }
@@ -437,14 +437,14 @@ fn sled_reservation_benchmark(c: &mut Criterion) {
                 InstanceGroups {
                     belongs_to: vec![GroupInfo {
                         name: "affinity-1",
-                        policy: external::AffinityPolicy::Allow,
+                        policy: affinity::AffinityPolicy::Allow,
                         flavor: GroupType::Affinity,
                     }],
                 },
                 InstanceGroups {
                     belongs_to: vec![GroupInfo {
                         name: "anti-affinity-1",
-                        policy: external::AffinityPolicy::Allow,
+                        policy: affinity::AffinityPolicy::Allow,
                         flavor: GroupType::AntiAffinity,
                     }],
                 },
