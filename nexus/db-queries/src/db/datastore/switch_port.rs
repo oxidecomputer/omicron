@@ -574,12 +574,15 @@ impl DataStore {
             .transaction(&conn, |conn| {
                 let err = err.clone();
                 async move {
-                    // Every switch port. The bootstore config is rack-global,
-                    // so this is intentionally not filtered by rack.
+                    // Every switch port.
+                    //
+                    // XXX this doesn't filter by rack yet. The bootstore config
+                    // is per-rack so we'll likely need to filter this by rack
+                    // in the future.
                     let ports = load_all_switch_ports(&conn).await?;
 
                     // For each port that has applied settings, read those
-                    // settings on this same connection (no nested transaction).
+                    // settings on the same connection.
                     let mut applied_ports = Vec::new();
                     for port in ports {
                         let Some(port_settings_id) = port.port_settings_id

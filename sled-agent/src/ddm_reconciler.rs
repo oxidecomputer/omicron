@@ -221,7 +221,7 @@ impl Worker {
         // Ask DDM what prefixes we've originated.
         info!(self.log, "attempting to list currently-originated prefixes");
         let originated = match self.client.get_originated().await {
-            Ok(originated) => BTreeSet::from_iter(originated.into_iter()),
+            Ok(originated) => BTreeSet::from_iter(originated),
             Err(err) => {
                 warn!(
                     self.log, "failed to get originated prefixes";

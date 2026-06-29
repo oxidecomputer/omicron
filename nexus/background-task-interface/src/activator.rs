@@ -87,6 +87,29 @@ impl Activator {
         );
         self.0.notify.notified().await
     }
+
+    /// Asserts that this activator has been activated, panicking with `msg`
+    /// if it has not.
+    ///
+    /// `activate()` stores a permit synchronously (via `Notify::notify_one`),
+    /// so by the time a test's activation has completed, the activator is
+    /// either already activated or never will be; a single poll suffices to
+    /// tell which.
+    #[cfg(feature = "testing")]
+    #[track_caller]
+    pub fn assert_activated(&self, msg: &str) {
+        let mut activated = tokio_test::task::spawn(self.activated());
+        tokio_test::assert_ready!(activated.poll(), "{}", msg);
+    }
+
+    /// Asserts that this activator has not been activated, panicking with
+    /// `msg` if it has. See [`Activator::assert_activated`].
+    #[cfg(feature = "testing")]
+    #[track_caller]
+    pub fn assert_not_activated(&self, msg: &str) {
+        let mut activated = tokio_test::task::spawn(self.activated());
+        tokio_test::assert_pending!(activated.poll(), "{}", msg);
+    }
 }
 
 /// Indicates that an activator was wired up more than once.

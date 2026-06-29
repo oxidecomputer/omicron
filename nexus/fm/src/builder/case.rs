@@ -27,6 +27,14 @@ pub struct CaseBuilder {
     /// [`Self::request_alert`], read by [`super::SitrepBuilder::build`] via
     /// [`AllCases::alert_set_changed`].
     pub(super) new_alerts_requested: bool,
+    /// Set to `true` if this case requested at least one new support bundle
+    /// during the current analysis run. This means the new sitrep's support
+    /// bundle request set will differ from its parent's, so its support
+    /// bundle generation must be bumped. Set by
+    /// [`Self::request_support_bundle`], read by
+    /// [`super::SitrepBuilder::build`] via
+    /// [`AllCases::support_bundle_set_changed`].
+    pub(super) new_support_bundles_requested: bool,
 }
 
 #[derive(Debug)]
@@ -124,6 +132,10 @@ impl AllCases {
     pub(super) fn alert_set_changed(&self) -> bool {
         self.cases.iter().any(|c| c.new_alerts_requested)
     }
+
+    pub(super) fn support_bundle_set_changed(&self) -> bool {
+        self.cases.iter().any(|c| c.new_support_bundles_requested)
+    }
 }
 
 impl CaseBuilder {
@@ -145,6 +157,7 @@ impl CaseBuilder {
             rng,
             report_log: Default::default(),
             new_alerts_requested: false,
+            new_support_bundles_requested: false,
         }
     }
 
@@ -235,6 +248,7 @@ impl CaseBuilder {
             .entry("requested support bundle")
             .kv("support_bundle_id", id)
             .comment(comment);
+        self.new_support_bundles_requested = true;
     }
 
     pub fn close(&mut self, comment: impl ToString) {
@@ -333,8 +347,8 @@ impl CaseBuilder {
             Ok(_) => {
                 slog::info!(
                     self.log,
-                    "assigned ereport {} to case", report.id();
-                    "ereport_id" => %report.id(),
+                    "assigned ereport {} to case", report.id;
+                    "ereport_id" => %report.id,
                     "ereport_class" => ?report.class,
                     "assignment_id" => %assignment_id,
                     "comment" => %comment,
@@ -343,7 +357,7 @@ impl CaseBuilder {
                 self.report_log
                     .entry("assigned ereport to case")
                     .comment(comment)
-                    .kv("ereport_id", &format_args!("{}", report.id()))
+                    .kv("ereport_id", &format_args!("{}", report.id))
                     .kv(
                         "ereport_class",
                         &report.class.as_deref().unwrap_or("<none>"),
@@ -353,8 +367,8 @@ impl CaseBuilder {
             Err(_) => {
                 slog::warn!(
                     self.log,
-                    "ereport {} already assigned to case", report.id();
-                    "ereport_id" => %report.id(),
+                    "ereport {} already assigned to case", report.id;
+                    "ereport_id" => %report.id,
                     "ereport_class" => ?report.class,
                 );
             }
@@ -411,6 +425,7 @@ impl iddqd::IdOrdItem for CaseBuilder {
 mod tests {
     use super::*;
     use nexus_types::alert::test_alerts;
+    use nexus_types::support_bundle::BundleDataSelection;
     use omicron_test_utils::dev;
 
     fn make_all_cases(log: &slog::Logger) -> AllCases {
@@ -423,11 +438,12 @@ mod tests {
     }
 
     #[test]
-    fn dirty_bit_default_false() {
-        let logctx = dev::test_setup_log("dirty_bit_default_false");
+    fn dirty_bits_default_false() {
+        let logctx = dev::test_setup_log("dirty_bits_default_false");
         let mut all_cases = make_all_cases(&logctx.log);
         let case = all_cases.open_case(fm::DiagnosisEngineKind::PowerShelf);
         assert!(!case.new_alerts_requested);
+        assert!(!case.new_support_bundles_requested);
         logctx.cleanup_successful();
     }
 
@@ -443,9 +459,31 @@ mod tests {
             case.request_alert(&test_alerts::Foo(serde_json::json!({})), "")
                 .unwrap();
             assert!(case.new_alerts_requested);
+            assert!(!case.new_support_bundles_requested);
         }
 
         assert!(all_cases.alert_set_changed());
+        assert!(!all_cases.support_bundle_set_changed());
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn request_support_bundle_flips_bundle_state() {
+        let logctx =
+            dev::test_setup_log("request_support_bundle_flips_bundle_state");
+        let mut all_cases = make_all_cases(&logctx.log);
+        assert!(!all_cases.support_bundle_set_changed());
+
+        {
+            let mut case =
+                all_cases.open_case(fm::DiagnosisEngineKind::PowerShelf);
+            case.request_support_bundle(BundleDataSelection::default(), "");
+            assert!(case.new_support_bundles_requested);
+            assert!(!case.new_alerts_requested);
+        }
+
+        assert!(all_cases.support_bundle_set_changed());
+        assert!(!all_cases.alert_set_changed());
         logctx.cleanup_successful();
     }
 }
