@@ -92,6 +92,12 @@ impl SpEreportIngester {
         }
         // Find MGS clients.
         // TODO(eliza): reuse the same client across activations; qorb, etc.
+        //
+        // TODO-multirack: eventually, we'll need a way to discover the MGS
+        // clients for *all* the racks in the cluster, along with the rack ID of
+        // the rack those clients will talk to. How this works has yet to be
+        // determined. See also the 'TODO-multirack' comment in the
+        // `mgs_requests()` function for where the rack ID would be used.
         let mgs_clients = match GatewayClient::resolve_all_gateways(
             &opctx.log,
             &self.resolver,
@@ -305,7 +311,11 @@ impl Ingester {
                     // If this code changes to ingest ereports from the
                     // management gateways in multiple racks, we'll need to
                     // change this to pass the rack ID of the target rack, not
-                    // the one this Nexus lives in.
+                    // the one this Nexus lives in. Eventually, the rack ID will
+                    // become a property of the MGS clients that are passed into
+                    // this function: they'll have to become a type that says
+                    // "here are the clients for talking to the management
+                    // gateways in *that* rack, in particular".
                     self.rack_id,
                     reporter,
                     db_ereports,
