@@ -9542,7 +9542,6 @@ dependencies = [
  "rustls",
  "schemars 0.8.22",
  "scopeguard",
- "scuffle",
  "semver 1.0.28",
  "serde",
  "serde_core",
