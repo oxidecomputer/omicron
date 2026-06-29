@@ -612,7 +612,7 @@ impl DataStore {
                     // such as bgp_config_delete and bgp_delete_announce_set
                     // refuse to perform a delete if the config is in use. We
                     // plan to check that all time_deleted are null, and if that
-                    // were the case, raise a Problem in the future.
+                    // were not the case, raise a Problem in the future.
                     let mut bgp_configs = IdHashMap::new();
 
                     for (_port, settings) in &applied_ports {
