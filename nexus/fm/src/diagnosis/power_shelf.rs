@@ -18,9 +18,12 @@ use nexus_types::fm::DiagnosisEngineKind;
 use nexus_types::inventory;
 use omicron_uuid_kinds::CaseUuid;
 use omicron_uuid_kinds::EreporterRestartUuid;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::RackUuid;
 use serde::Deserialize;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
+use std::collections::HashMap;
 use std::collections::HashSet;
 use std::fmt;
 use std::sync::Arc;
@@ -31,9 +34,7 @@ pub const PSU_INSERT_EREPORT: &str = "hw.insert.psu";
 
 const KNOWN_EREPORTS: &[&str] = &[PSU_INSERT_EREPORT, PSU_REMOVE_EREPORT];
 
-pub fn analyze(
-    builder: &mut SitrepBuilder<'_>,
-) -> anyhow::Result<()> {
+pub fn analyze(builder: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
     let input = builder.input();
     let log = builder.log.new(slog::o!("de" => "power_shelf"));
 
@@ -64,8 +65,11 @@ pub fn analyze(
             // These ereports were assigned to the case in an earlier sitrep,
             // so they are not new in this run and have already had their
             // alerts requested.
-            let ereport = match PsuEreport::parse(&ereport, Provenance::Parent)
-            {
+            let ereport = match PsuEreport::parse(
+                input.ereporter_restarts(),
+                &ereport,
+                Provenance::Parent,
+            ) {
                 Ok(ereport) => ereport,
                 Err(e) => {
                     // This is weird: a case in the parent sitrep created by
@@ -86,8 +90,7 @@ pub fn analyze(
                          contained an incomprehensible ereport {} \
                         (case ereport {}). The ereport could not be \
                         interpreted because: {err}",
-                        ereport.id,
-                        case_ereport.id,
+                        ereport.id, case_ereport.id,
                     );
                     builder
                         .cases
@@ -131,6 +134,7 @@ pub fn analyze(
         // This ereport is new in this run, so it'll have an alert requested
         // for it once it's assigned to a case below.
         let psu_ereport = match PsuEreport::parse(
+            input.ereporter_restarts(),
             &ereport,
             Provenance::ThisSitrep,
         ) {
@@ -207,7 +211,7 @@ pub fn analyze(
         // TODO(eliza): also track happiness
         let mut psus_absent = [PsuSet::default(), PsuSet::default()];
         for ereport in psc_case.ereports_in_order(input.ereporter_restarts()) {
-            let PsuLocation { shelf, slot } = ereport.location;
+            let PsuLocation { rack, shelf, slot } = ereport.location;
 
             // TODO(eliza): some kind of debouncing if two ereports of the same
             // type are seen close together.
@@ -236,7 +240,7 @@ pub fn analyze(
                                 power_shelf: alert_types::PowerShelf {
                                     shelf,
                                     baseboard,
-                                    rack_id: todo!("eliza: figure out how to get the rack id"),
+                                    rack_id: rack.into_untyped_uuid(),
                                 },
                                 time: ereport.ereport.time_collected,
                             },
@@ -348,7 +352,7 @@ impl fmt::Debug for PsuSet {
 #[derive(Debug)]
 struct PscCase {
     case_id: CaseUuid,
-    impacted: [PsuSet; 2],
+    impacted: HashMap<(RackUuid, u8), PsuSet>,
     restarts: IdHashMap<Restart>,
 }
 
@@ -366,7 +370,7 @@ impl PscCase {
     fn new(case_id: CaseUuid) -> Self {
         Self {
             case_id,
-            impacted: [PsuSet::default(), PsuSet::default()],
+            impacted: HashMap::default(),
             restarts: IdHashMap::default(),
         }
     }
@@ -388,15 +392,17 @@ impl PscCase {
                     "an ereport with id {ereport_id} already exists: {e}"
                 )
             })?;
-        self.impacted[location.shelf as usize].insert(location.slot);
+        self.impacted
+            .entry((location.rack, location.shelf))
+            .or_default()
+            .insert(location.slot);
         Ok(())
     }
 
     /// Iterates over the `PsuLocation` of every PSU impacted by this case.
     fn impacted_psus(&self) -> impl Iterator<Item = PsuLocation> + '_ {
-        self.impacted.iter().enumerate().flat_map(|(shelf, slots)| {
-            let shelf = shelf as u8;
-            slots.iter().map(move |slot| PsuLocation { shelf, slot })
+        self.impacted.iter().flat_map(|(&(rack, shelf), slots)| {
+            slots.iter().map(move |slot| PsuLocation { rack, shelf, slot })
         })
     }
 
@@ -451,6 +457,7 @@ enum Provenance {
 #[derive(Debug)]
 struct PsuEreport {
     location: PsuLocation,
+    reporter_first_seen_at: DateTime<Utc>,
     ereport: Arc<Ereport>,
     kind: PsuEreportKind,
     data: PsuEreportData,
@@ -473,6 +480,7 @@ impl PsuEreport {
     }
 
     fn parse(
+        restarts: &IdOrdMap<EreporterRestart>,
         ereport: &Arc<ereport::Ereport>,
         provenance: Provenance,
     ) -> anyhow::Result<Self> {
@@ -481,6 +489,10 @@ impl PsuEreport {
             Some(k) if k == PSU_REMOVE_EREPORT => PsuEreportKind::Remove,
             k => anyhow::bail!("unknown ereport class: {k:?}"),
         };
+        let restart_id = &ereport.id.restart_id;
+        let reporter = restarts.get(restart_id).ok_or_else(|| {
+            anyhow::anyhow!("no restart ID entry for {restart_id}")
+        })?;
         let shelf = match ereport.reporter {
             ereport::Reporter::Sp {
                 sp_type: inventory::SpType::Power,
@@ -499,8 +511,15 @@ impl PsuEreport {
         let slot = PsuSlot::from_repr(data.slot).ok_or_else(|| {
             anyhow::anyhow!("PSU slot {} out of range (must be 0-5)", data.slot)
         })?;
-        let location = PsuLocation { shelf, slot };
-        Ok(Self { kind, data, location, ereport: ereport.clone(), provenance })
+        let location = PsuLocation { rack: *reporter.rack_id(), shelf, slot };
+        Ok(Self {
+            kind,
+            data,
+            location,
+            ereport: ereport.clone(),
+            provenance,
+            reporter_first_seen_at: reporter.time_first_seen,
+        })
     }
 
     fn psc_baseboard(
@@ -553,14 +572,15 @@ struct PsuEreportData {
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
 struct PsuLocation {
+    rack: RackUuid,
     shelf: u8,
     slot: PsuSlot,
 }
 
 impl fmt::Display for PsuLocation {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let Self { shelf, slot } = *self;
-        write!(f, "power shelf {shelf}, PSU {slot}")
+        let Self { rack, shelf, slot } = *self;
+        write!(f, "rack {rack},p ower shelf {shelf}, PSU {slot}")
     }
 }
 
@@ -593,9 +613,10 @@ mod tests {
     use omicron_common::api::external::Generation;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::{
-        AlertUuid, CaseEreportUuid, CaseUuid, CollectionUuid, OmicronZoneUuid,
-        SitrepUuid,
+        AlertUuid, CaseEreportUuid, CaseUuid, CollectionUuid, GenericUuid,
+        OmicronZoneUuid, RackUuid, SitrepUuid,
     };
+    use uuid::Uuid;
 
     // These are real life ereports I copied from the dogfood rack.
     mod ereports {
@@ -740,13 +761,17 @@ mod tests {
     ) {
         const SHELF: u16 = 0;
         let (mut fmtest, logctx) = FmTest::new_with_logctx(test_name);
-        let mut reporter = fmtest.reporters.reporter(ereport::Reporter::Sp {
-            sp_type: SpType::Power,
-            slot: SHELF,
-        });
+        let mut reporter = fmtest.reporters.reporter(
+            ereport::Reporter::Sp { sp_type: SpType::Power, slot: SHELF },
+            Utc::now(),
+        );
         let ereport = dbg!(Arc::new(reporter.parse_ereport(Utc::now(), json)));
-        let parsed = dbg!(PsuEreport::parse(&ereport, Provenance::ThisSitrep))
-            .expect("dogfood ereport should parse as a PsuEreport");
+        let parsed = dbg!(PsuEreport::parse(
+            fmtest.reporters.ereporter_restarts(),
+            &ereport,
+            Provenance::ThisSitrep
+        ))
+        .expect("dogfood ereport should parse as a PsuEreport");
 
         // The payload fields shared by every dogfood ereport above; all of them
         // describe PSU4 on rail V54_PSU4.
@@ -766,7 +791,11 @@ mod tests {
         assert_eq!(parsed.kind, expected_class);
         assert_eq!(
             parsed.location,
-            PsuLocation { shelf: SHELF as u8, slot: PsuSlot::Psu4 }
+            PsuLocation {
+                rack: fmtest.rack_id,
+                shelf: SHELF as u8,
+                slot: PsuSlot::Psu4
+            }
         );
         assert_eq!(parsed.data, expected_data);
         logctx.cleanup_successful();
@@ -801,14 +830,12 @@ mod tests {
         (fmtest, logctx)
     }
 
-    /// Builds a reporter-restart entry. Only the restart id and first-seen
-    /// time matter to analysis ordering; the remaining fields are fixed to
-    /// plausible power-shelf values.
     fn mk_restart(
         restart_id: EreporterRestartUuid,
         time_first_seen: DateTime<Utc>,
     ) -> EreporterRestart {
         EreporterRestart {
+            rack_id: RackUuid::from_untyped_uuid(RACK_ID).into(),
             id: restart_id.into(),
             time_first_seen,
             reporter: nexus_db_model::EreporterType::Sp,
@@ -837,7 +864,7 @@ mod tests {
             .iter()
             .flat_map(|s| s.ereports_by_id.iter().map(|e| (**e).clone()));
         for ereport in new_ereports.iter().cloned().chain(parent_ereports) {
-            let restart_id = ereport.id().restart_id;
+            let restart_id = ereport.id.restart_id;
             let entry =
                 first_seen.entry(restart_id).or_insert(ereport.time_collected);
             *entry = (*entry).min(ereport.time_collected);
@@ -933,6 +960,7 @@ mod tests {
                 next_inv_min_time_started: Utc::now(),
                 comment: "parent sitrep for test".to_string(),
                 alert_generation: Generation::new(),
+                support_bundle_generation: Generation::new(),
             },
             cases,
             ereports_by_id: ereports.into_iter().collect(),
