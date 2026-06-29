@@ -7741,11 +7741,13 @@ dependencies = [
  "nexus-db-model",
  "nexus-db-queries",
  "nexus-switch-config",
+ "omicron-common",
  "omicron-rpaths",
  "omicron-workspace-hack",
  "oxnet",
  "pq-sys",
  "sled-agent-types",
+ "slog",
  "uuid",
 ]
 

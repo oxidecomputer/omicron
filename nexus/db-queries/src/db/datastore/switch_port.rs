@@ -22,11 +22,16 @@ use diesel::{
     PgConnection, PgExpressionMethods, QueryDsl, SelectableHelper,
 };
 use diesel_dtrace::DTraceConnection;
+use iddqd::IdHashItem;
+use iddqd::IdHashMap;
+use iddqd::id_hash_map;
+use iddqd::id_upcast;
 use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::OptionalError;
 use nexus_db_errors::public_error_from_diesel;
 use nexus_db_model::{
-    AddressLot, BgpConfig, DbSwitchInterfaceKind, DbSwitchSlot,
+    AddressLot, AddressLotBlock, BfdSession, BgpAnnouncement, BgpConfig,
+    DbSwitchInterfaceKind, DbSwitchSlot, INFRA_LOT,
     RouterPeerTypeDbRepresentation, SqlU16, SwitchPortBgpPeerConfigAllowExport,
     SwitchPortBgpPeerConfigAllowImport, SwitchPortBgpPeerConfigCommunity,
 };
@@ -44,6 +49,8 @@ use sled_agent_types::early_networking::RouterPeerType;
 use sled_agent_types::early_networking::SwitchSlot;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
+use std::collections::HashMap;
+use std::collections::hash_map;
 use std::net::IpAddr;
 use uuid::Uuid;
 
@@ -278,6 +285,36 @@ impl From<LinkConfigCombinedResult> for networking::SwitchPortLinkConfig {
             tx_eq_config: value.tx_eq_config.map(Into::into),
         }
     }
+}
+
+/// A snapshot of database records needed to build the bootstore rack network
+/// config.
+pub struct SwitchConfigData {
+    /// Each switch port that has applied settings, paired with those settings.
+    pub applied_ports: Vec<(SwitchPort, SwitchPortSettingsCombinedResult)>,
+    /// Every BGP config referenced by a peer on an applied port, keyed by its
+    /// id.
+    pub bgp_configs: IdHashMap<BgpConfigWithAnnouncements>,
+    /// The blocks of the infrastructure address lot.
+    pub infra_blocks: Vec<AddressLotBlock>,
+    /// The configured BFD sessions.
+    pub bfd_sessions: Vec<BfdSession>,
+}
+
+/// A BGP config, together with the announcements of the announce set it
+/// references.
+pub struct BgpConfigWithAnnouncements {
+    pub config: BgpConfig,
+    pub announcements: Vec<BgpAnnouncement>,
+}
+
+impl IdHashItem for BgpConfigWithAnnouncements {
+    // TODO: use newtype-uuid for the UUID
+    type Key<'a> = Uuid;
+    fn key(&self) -> Self::Key<'_> {
+        self.config.identity.id
+    }
+    id_upcast!();
 }
 
 impl DataStore {
@@ -515,6 +552,154 @@ impl DataStore {
                             &name,
                         ),
                     )
+                }
+            })
+    }
+
+    /// Read every database record needed to build the bootstore rack network
+    /// config as a coherent snapshot.
+    pub async fn switch_config_read(
+        &self,
+        opctx: &OpContext,
+    ) -> Result<SwitchConfigData, Error> {
+        use nexus_db_schema::schema::address_lot::dsl as address_lot_dsl;
+        use nexus_db_schema::schema::address_lot_block::dsl as address_lot_block_dsl;
+        use nexus_db_schema::schema::bgp_config::dsl as bgp_config_dsl;
+
+        let err = OptionalError::new();
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        self.transaction_retry_wrapper("switch_config_read")
+            .transaction(&conn, |conn| {
+                let err = err.clone();
+                async move {
+                    // Every switch port.
+                    //
+                    // XXX this doesn't filter by rack yet. The bootstore config
+                    // is per-rack so we'll likely need to filter this by rack
+                    // in the future.
+                    let ports = load_all_switch_ports(&conn).await?;
+
+                    // For each port that has applied settings, read those
+                    // settings on the same connection.
+                    let mut applied_ports = Vec::new();
+                    for port in ports {
+                        let Some(port_settings_id) = port.port_settings_id
+                        else {
+                            continue;
+                        };
+                        let settings = switch_port_settings_get_on_conn(
+                            &conn,
+                            err.clone(),
+                            &NameOrId::Id(port_settings_id),
+                        )
+                        .await?;
+                        applied_ports.push((port, settings));
+                    }
+
+                    // A cache of announcements keyed by announce set ID, to
+                    // avoid redundant reads from the database.
+                    let mut announce_cache: HashMap<
+                        Uuid,
+                        Vec<BgpAnnouncement>,
+                    > = HashMap::new();
+
+                    // Every BGP config referenced by a peer, paired with the
+                    // announcements of the announce set it references.
+                    //
+                    // Note that neither the config nor its announce set is
+                    // filtered by `time_deleted`. Other parts of the system
+                    // such as bgp_config_delete and bgp_delete_announce_set
+                    // refuse to perform a delete if the config is in use. We
+                    // plan to check that all time_deleted are null, and if that
+                    // were not the case, raise a Problem in the future.
+                    let mut bgp_configs = IdHashMap::new();
+
+                    for (_port, settings) in &applied_ports {
+                        for peer in &settings.bgp_peers {
+                            let id = peer.bgp_config_id();
+                            let id_hash_map::Entry::Vacant(entry) =
+                                bgp_configs.entry(id)
+                            else {
+                                continue;
+                            };
+                            let config = bgp_config_dsl::bgp_config
+                                .filter(bgp_config_dsl::id.eq(id))
+                                .select(BgpConfig::as_select())
+                                .limit(1)
+                                .first_async::<BgpConfig>(&conn)
+                                .await?;
+                            let set_id = config.bgp_announce_set_id;
+                            let announcements =
+                                match announce_cache.entry(set_id) {
+                                    hash_map::Entry::Vacant(set_entry) => {
+                                        let announcements =
+                                            load_announce_set(&conn, set_id)
+                                                .await?;
+                                        set_entry.insert(announcements).clone()
+                                    }
+                                    hash_map::Entry::Occupied(set_entry) => {
+                                        set_entry.get().clone()
+                                    }
+                                };
+                            entry.insert(BgpConfigWithAnnouncements {
+                                config,
+                                announcements,
+                            });
+                        }
+                    }
+
+                    // The infrastructure address lot's blocks.
+                    let infra_lot_id = address_lot_dsl::address_lot
+                        .filter(address_lot_dsl::name.eq(INFRA_LOT.to_string()))
+                        .select(address_lot_dsl::id)
+                        .limit(1)
+                        .first_async::<Uuid>(&conn)
+                        .await?;
+                    let infra_blocks = address_lot_block_dsl::address_lot_block
+                        .filter(
+                            address_lot_block_dsl::address_lot_id
+                                .eq(infra_lot_id),
+                        )
+                        .select(AddressLotBlock::as_select())
+                        .load_async::<AddressLotBlock>(&conn)
+                        .await?;
+
+                    // Every BFD session.
+                    let bfd_sessions = load_all_bfd_sessions(&conn).await?;
+
+                    Ok(SwitchConfigData {
+                        applied_ports,
+                        bgp_configs,
+                        infra_blocks,
+                        bfd_sessions,
+                    })
+                }
+            })
+            .await
+            .map_err(|e| {
+                if let Some(err) = err.take() {
+                    match err {
+                        SwitchPortSettingsGetError::NotFound(name_or_id) => {
+                            match name_or_id {
+                                NameOrId::Id(uuid) => Error::not_found_by_id(
+                                    ResourceType::SwitchPortSettings,
+                                    &uuid,
+                                ),
+                                NameOrId::Name(name) => {
+                                    Error::not_found_by_name(
+                                        ResourceType::SwitchPortSettings,
+                                        &name,
+                                    )
+                                }
+                            }
+                        }
+                        SwitchPortSettingsGetError::InternalError(cause) => {
+                            Error::internal_error(&cause)
+                        }
+                    }
+                } else {
+                    public_error_from_diesel(e, ErrorHandler::Server)
                 }
             })
     }
@@ -1030,6 +1215,54 @@ impl SwitchPortSettingsInternalError for SwitchPortSettingsGetError {
     fn internal_error(reason: String) -> Self {
         Self::InternalError(reason)
     }
+}
+
+/// Load every switch port on an existing connection.
+async fn load_all_switch_ports(
+    conn: &Connection<DTraceConnection<PgConnection>>,
+) -> Result<Vec<SwitchPort>, diesel::result::Error> {
+    // This is equivalent to `paginated` with a max limit, but is written in
+    // this style because `paginated` seems to trigger super-linear behavior in
+    // the Rust type checker in this context.
+    //
+    // If you're poking at this in the future, note that boxing the future
+    // returned by load_all_switch_ports seems to mitigate some of the blowup,
+    // though not as much as just inlining the pagination logic.
+    use nexus_db_schema::schema::switch_port::dsl;
+    dsl::switch_port
+        .order(dsl::id.asc())
+        .limit(i64::from(u32::MAX))
+        .select(SwitchPort::as_select())
+        .load_async(conn)
+        .await
+}
+
+/// Load every non-deleted BFD session on an existing connection.
+async fn load_all_bfd_sessions(
+    conn: &Connection<DTraceConnection<PgConnection>>,
+) -> Result<Vec<BfdSession>, diesel::result::Error> {
+    // See the comment in load_all_switch_ports above.
+    use nexus_db_schema::schema::bfd_session::dsl;
+    dsl::bfd_session
+        .filter(dsl::time_deleted.is_null())
+        .order(dsl::id.asc())
+        .limit(i64::from(u32::MAX))
+        .select(BfdSession::as_select())
+        .load_async(conn)
+        .await
+}
+
+/// Load every announcement belonging to an announce set on an existing connection.
+async fn load_announce_set(
+    conn: &Connection<DTraceConnection<PgConnection>>,
+    set_id: Uuid,
+) -> Result<Vec<BgpAnnouncement>, diesel::result::Error> {
+    use nexus_db_schema::schema::bgp_announcement::dsl;
+    dsl::bgp_announcement
+        .filter(dsl::announce_set_id.eq(set_id))
+        .select(BgpAnnouncement::as_select())
+        .load_async::<BgpAnnouncement>(conn)
+        .await
 }
 
 /// Read a switch port settings object and all of its child rows on an
@@ -2067,18 +2300,23 @@ async fn do_switch_port_settings_delete(
 mod test {
     use crate::db::datastore::UpdatePrecondition;
     use crate::db::pub_test_utils::TestDatabase;
+    use nexus_db_model::INFRA_LOT;
     use nexus_types::external_api::networking::{
-        BgpAnnounceSetCreate, BgpConfigCreate, BgpPeer, BgpPeerConfig,
-        SwitchPortConfigCreate, SwitchPortGeometry, SwitchPortSettingsCreate,
+        AddressLotBlockCreate, AddressLotCreate, BfdSessionEnable,
+        BgpAnnounceSetCreate, BgpAnnouncementCreate, BgpConfigCreate, BgpPeer,
+        BgpPeerConfig, SwitchPortConfigCreate, SwitchPortGeometry,
+        SwitchPortSettingsCreate,
     };
     use omicron_common::api::external::{
-        IdentityMetadataCreateParams, Name, NameOrId,
+        AddressLotKind, IdentityMetadataCreateParams, Name, NameOrId,
     };
     use omicron_test_utils::dev;
+    use sled_agent_types::early_networking::BfdMode;
     use sled_agent_types::early_networking::ImportExportPolicy;
     use sled_agent_types::early_networking::RouterLifetimeConfig;
     use sled_agent_types::early_networking::RouterPeerType;
     use sled_agent_types::early_networking::SwitchSlot;
+    use std::net::IpAddr;
     use std::{collections::HashMap, str::FromStr};
     use uuid::Uuid;
 
@@ -2453,6 +2691,173 @@ mod test {
                 assert_eq!(peer, db_peer.inner);
             }
         }
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_switch_config_read_snapshot() {
+        let logctx = dev::test_setup_log("test_switch_config_read_snapshot");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let rack_id: Uuid =
+            nexus_test_utils::RACK_UUID.parse().expect("parse uuid");
+        let switch0 = SwitchSlot::Switch0;
+        let qsfp0: Name = "qsfp0".parse().expect("parse qsfp0");
+
+        let port_result = datastore
+            .switch_port_create(&opctx, rack_id, switch0, qsfp0.into())
+            .await
+            .expect("switch port create");
+
+        let announce_set = BgpAnnounceSetCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "test-announce-set".parse().unwrap(),
+                description: "test bgp announce set".into(),
+            },
+            announcement: vec![BgpAnnouncementCreate {
+                address_lot_block: NameOrId::Name(
+                    "test-block".parse().unwrap(),
+                ),
+                network: "10.0.0.0/24".parse().unwrap(),
+            }],
+        };
+        datastore.bgp_create_announce_set(&opctx, &announce_set).await.unwrap();
+
+        let bgp_config = BgpConfigCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "test-bgp-config".parse().unwrap(),
+                description: "test bgp config".into(),
+            },
+            asn: 47,
+            bgp_announce_set_id: NameOrId::Name(
+                "test-announce-set".parse().unwrap(),
+            ),
+            vrf: None,
+            checker: None,
+            shaper: None,
+            max_paths: Default::default(),
+        };
+        datastore.bgp_config_create(&opctx, &bgp_config).await.unwrap();
+
+        // Switch port settings with one BGP peer, applied to the port.
+        let settings = SwitchPortSettingsCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "test-settings".parse().unwrap(),
+                description: "test settings".into(),
+            },
+            port_config: SwitchPortConfigCreate {
+                geometry: SwitchPortGeometry::Qsfp28x1,
+            },
+            groups: Vec::new(),
+            links: vec![],
+            interfaces: vec![],
+            routes: vec![],
+            bgp_peers: vec![BgpPeerConfig {
+                link_name: Name::from_str("phy0").unwrap(),
+                peers: vec![BgpPeer {
+                    bgp_config: bgp_config.identity.name.clone().into(),
+                    addr: RouterPeerType::Numbered {
+                        ip: "192.168.1.1".parse().unwrap(),
+                    },
+                    hold_time: 0,
+                    idle_hold_time: 0,
+                    delay_open: 0,
+                    connect_retry: 0,
+                    keepalive: 0,
+                    remote_asn: None,
+                    min_ttl: None,
+                    md5_auth_key: None,
+                    multi_exit_discriminator: None,
+                    communities: vec![1, 2, 3, 4],
+                    local_pref: None,
+                    enforce_first_as: false,
+                    allowed_export: ImportExportPolicy::NoFiltering,
+                    allowed_import: ImportExportPolicy::NoFiltering,
+                    vlan_id: None,
+                }],
+            }],
+            addresses: vec![],
+        };
+        let settings_result = datastore
+            .switch_port_settings_create(&opctx, &settings, None)
+            .await
+            .unwrap();
+        datastore
+            .switch_port_set_settings_id(
+                &opctx,
+                port_result.id,
+                Some(settings_result.settings.identity.id),
+                UpdatePrecondition::DontCare,
+            )
+            .await
+            .unwrap();
+
+        // The infra address lot the bootstore reads its IP range from.
+        let infra_lot = AddressLotCreate {
+            identity: IdentityMetadataCreateParams {
+                name: INFRA_LOT.parse().unwrap(),
+                description: "infra lot".into(),
+            },
+            kind: AddressLotKind::Infra,
+            blocks: vec![AddressLotBlockCreate {
+                first_address: "172.20.15.21".parse().unwrap(),
+                last_address: "172.20.15.22".parse().unwrap(),
+            }],
+        };
+        datastore.address_lot_create(&opctx, &infra_lot).await.unwrap();
+
+        // A BFD session.
+        let bfd = BfdSessionEnable {
+            local: None,
+            remote: "10.0.0.1".parse().unwrap(),
+            detection_threshold: 3,
+            required_rx: 1000,
+            switch_slot: switch0,
+            mode: BfdMode::SingleHop,
+        };
+        datastore.bfd_session_create(&opctx, &bfd).await.unwrap();
+
+        // The read returns a coherent view of all of the above.
+        let data = datastore.switch_config_read(opctx).await.unwrap();
+
+        // The applied port, carrying its settings and BGP peer.
+        assert_eq!(data.applied_ports.len(), 1);
+        let (port, port_settings) = &data.applied_ports[0];
+        assert_eq!(port.id, port_result.id);
+        assert_eq!(port.port_name.to_string(), "qsfp0");
+        assert_eq!(port_settings.bgp_peers.len(), 1);
+        let peer_config_id = port_settings.bgp_peers[0].bgp_config_id();
+
+        // The BGP config that peer references.
+        assert_eq!(data.bgp_configs.len(), 1);
+        let config = data
+            .bgp_configs
+            .get(&peer_config_id)
+            .expect("the peer's bgp config is in the snapshot");
+        assert_eq!(*config.config.asn, 47);
+        assert_eq!(config.announcements.len(), 1);
+        assert_eq!(config.announcements[0].network.to_string(), "10.0.0.0/24");
+
+        // The infra IP range.
+        assert_eq!(data.infra_blocks.len(), 1);
+        assert_eq!(
+            data.infra_blocks[0].first_address.ip(),
+            "172.20.15.21".parse::<IpAddr>().unwrap(),
+        );
+        assert_eq!(
+            data.infra_blocks[0].last_address.ip(),
+            "172.20.15.22".parse::<IpAddr>().unwrap(),
+        );
+
+        // The BFD session.
+        assert_eq!(data.bfd_sessions.len(), 1);
+        assert_eq!(
+            data.bfd_sessions[0].remote.ip(),
+            "10.0.0.1".parse::<IpAddr>().unwrap(),
+        );
 
         db.terminate().await;
         logctx.cleanup_successful();
