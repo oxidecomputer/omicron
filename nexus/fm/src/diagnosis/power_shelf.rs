@@ -77,7 +77,7 @@ pub fn analyze(
                         "couldn't interpret ereport assigned to a case in the \
                          parent sitrep!";
                         "case_id" => %case.id,
-                        "ereport_id" => %ereport.id(),
+                        "ereport_id" => %ereport.id,
                         "case_ereport_id" => %case_ereport.id,
                         "error" => &err,
                     );
@@ -86,7 +86,7 @@ pub fn analyze(
                          contained an incomprehensible ereport {} \
                         (case ereport {}). The ereport could not be \
                         interpreted because: {err}",
-                        ereport.id(),
+                        ereport.id,
                         case_ereport.id,
                     );
                     builder
@@ -140,7 +140,7 @@ pub fn analyze(
                     &log,
                     "skipping a new ereport that isn't an interpretable PSU \
                      insert/remove event";
-                    "ereport_id" => %ereport.id(),
+                    "ereport_id" => %ereport.id,
                     "ereport_class" => ?ereport.class,
                     "error" => InlineErrorChain::new(&*e),
                 );
