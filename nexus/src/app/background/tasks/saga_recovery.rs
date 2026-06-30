@@ -358,6 +358,9 @@ impl<N: MakeSagaContext> SagaRecoveryInner<N> {
             return;
         }
 
+        // We can't abandon a saga whose current SEC is unknown (there's no row to
+        // conditionally update on), so a permanent failure with no `current_sec` is
+        // left as a recovery candidate.
         let Some(sec_id) = current_sec else {
             warn!(
                 log,
@@ -630,6 +633,7 @@ mod test {
     use nexus_db_queries::context::OpContext;
     use nexus_db_queries::db::pub_test_utils::TestDatabase;
     use nexus_db_queries::db::test_utils::UnpluggableCockroachDbSecStore;
+    use nexus_saga_recovery::RecoveryFailureKind;
     use nexus_test_utils::resource_helpers::create_project;
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::internal_api::views::LastResult;
@@ -942,6 +946,222 @@ mod test {
         // The nodes should not have been replayed.
         assert_eq!(uctx.n1_count.load(Ordering::SeqCst), 1);
         assert_eq!(uctx.n2_count.load(Ordering::SeqCst), 1);
+
+        // Test cleanup
+        drop(task);
+        let sec_client = Arc::try_unwrap(sec_client).unwrap();
+        sec_client.shutdown().await;
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    async fn setup_recovery_task(
+        log: &slog::Logger,
+        db_datastore: Arc<db::DataStore>,
+        sec_id: db::SecId,
+    ) -> (SagaRecovery<Arc<TestContext>>, Arc<SecClient>, OpContext) {
+        let (_storage, sec_client, uctx) =
+            create_storage_sec_and_context(log, db_datastore.clone(), sec_id);
+        let opctx = OpContext::for_tests(
+            log.clone(),
+            Arc::clone(&db_datastore) as Arc<dyn nexus_auth::storage::Storage>,
+        );
+        let saga_recovery_opctx =
+            opctx.child_with_authn(authn::Context::internal_saga_recovery());
+        let sec_client = Arc::new(sec_client);
+        let (_, sagas_started_rx) = tokio::sync::mpsc::unbounded_channel();
+        let quiesce = SagaQuiesceHandle::new(log.clone());
+        let task = SagaRecovery::new(
+            db_datastore,
+            sec_id,
+            SagaRecoveryHelpers {
+                recovery_opctx: saga_recovery_opctx,
+                maker: uctx,
+                sec_client: sec_client.clone(),
+                registry: registry_create(),
+                sagas_started_rx,
+                quiesce,
+            },
+        );
+        (task, sec_client, opctx)
+    }
+
+    // Inserts a saga in the Running state assigned to `sec_id`, so that it
+    // appears as a recovery candidate.
+    //
+    // Its DAG is `null` (invalid), which only matters if the saga is actually
+    // resumed during a recovery pass. Resume fails with a non-transient error.
+    // The "unrecoverable saga" test relies on that. The other tests never
+    // resume it, they drive the abandonment step directly, so the invalid DAG
+    // is irrelevant to them.
+    async fn create_recovery_candidate_saga(
+        datastore: &DataStore,
+        sec_id: db::SecId,
+    ) -> SagaId {
+        let saga_id = SagaId(Uuid::new_v4());
+        let params = steno::SagaCreateParams {
+            id: saga_id,
+            name: SagaName::new("test-saga"),
+            dag: serde_json::Value::Null,
+            state: steno::SagaCachedState::Running,
+        };
+        let saga = nexus_db_model::Saga::new(sec_id, params);
+        datastore.saga_create(&saga).await.expect("creating saga");
+        saga_id
+    }
+
+    // Returns true if `saga_id` is currently a saga-recovery candidate (i.e. in
+    // the Running/Unwinding state) assigned to `sec_id`. An abandoned saga is
+    // not a candidate, so this flips to false once a saga is abandoned.
+    async fn is_recovery_candidate(
+        datastore: &DataStore,
+        opctx: &OpContext,
+        sec_id: db::SecId,
+        saga_id: SagaId,
+    ) -> bool {
+        datastore
+            .saga_list_recovery_candidates_batched(opctx, sec_id)
+            .await
+            .expect("listing recovery candidates")
+            .into_iter()
+            .any(|saga| SagaId::from(saga.id) == saga_id)
+    }
+
+    #[tokio::test]
+    async fn test_unrecoverable_saga_is_abandoned() {
+        let logctx =
+            dev::test_setup_log("test_unrecoverable_saga_is_abandoned");
+        let log = logctx.log.new(o!());
+        let db = TestDatabase::new_with_raw_datastore(&log).await;
+        let db_datastore = db.datastore();
+        let sec_id = db::SecId(uuid::Uuid::new_v4());
+        let (mut task, sec_client, opctx) =
+            setup_recovery_task(&log, db_datastore.clone(), sec_id).await;
+
+        // Insert a saga whose DAG is invalid (so resume fails permanently) and
+        // confirm it starts out as a recovery candidate.
+        let saga_id =
+            create_recovery_candidate_saga(&db_datastore, sec_id).await;
+        assert!(
+            is_recovery_candidate(&db_datastore, &opctx, sec_id, saga_id).await
+        );
+
+        // Run a recovery pass.  Recovery of this saga should fail.
+        let Some((_completion_future, last_pass_success)) =
+            task.inner.activate_internal(&opctx, &task.quiesce).await
+        else {
+            panic!("saga recovery failed to construct a plan");
+        };
+
+        // The pass found the saga, recovered nothing, and recorded one failure.
+        assert_eq!(last_pass_success.nfound, 1);
+        assert_eq!(last_pass_success.nrecovered, 0);
+        assert_eq!(last_pass_success.nfailed, 1);
+        assert_eq!(last_pass_success.nskipped, 0);
+        assert_eq!(last_pass_success.nremoved, 0);
+
+        // The recorded failure should describe our saga, classified permanent.
+        let failures: Vec<&RecoveryFailure> =
+            task.inner.status.recent_failures.iter().collect();
+        assert_eq!(failures.len(), 1);
+        let failure = failures[0];
+        assert_eq!(failure.saga_id, saga_id);
+        assert_eq!(failure.current_sec, Some(sec_id));
+        assert_eq!(failure.kind, RecoveryFailureKind::Permanent);
+        assert!(
+            failure.message.contains("resume"),
+            "unexpected failure message: {:?}",
+            failure.message,
+        );
+
+        // Because the failure was permanent, the saga was abandoned and is no
+        // longer a recovery candidate. (The database CHECK constraint also
+        // guarantees the abandonment metadata was written, or the update would
+        // have failed.)
+        assert!(
+            !is_recovery_candidate(&db_datastore, &opctx, sec_id, saga_id)
+                .await
+        );
+
+        // Test cleanup
+        drop(task);
+        let sec_client = Arc::try_unwrap(sec_client).unwrap();
+        sec_client.shutdown().await;
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_transient_recovery_failure_does_not_abandon_saga() {
+        let logctx = dev::test_setup_log(
+            "test_transient_recovery_failure_does_not_abandon_saga",
+        );
+        let log = logctx.log.new(o!());
+        let db = TestDatabase::new_with_raw_datastore(&log).await;
+        let db_datastore = db.datastore();
+        let sec_id = db::SecId(uuid::Uuid::new_v4());
+        let (task, sec_client, opctx) =
+            setup_recovery_task(&log, db_datastore.clone(), sec_id).await;
+
+        let saga_id =
+            create_recovery_candidate_saga(&db_datastore, sec_id).await;
+        assert!(
+            is_recovery_candidate(&db_datastore, &opctx, sec_id, saga_id).await
+        );
+
+        let failure = RecoveryFailure {
+            time: chrono::Utc::now(),
+            saga_id,
+            current_sec: Some(sec_id),
+            kind: RecoveryFailureKind::Transient,
+            message: "transient recovery failure".to_string(),
+        };
+        task.inner.abandon_non_transient_failed_sagas(&log, &[failure]).await;
+
+        // Still a candidate. A transient failure is retried, not abandoned.
+        assert!(
+            is_recovery_candidate(&db_datastore, &opctx, sec_id, saga_id).await
+        );
+
+        // Test cleanup
+        drop(task);
+        let sec_client = Arc::try_unwrap(sec_client).unwrap();
+        sec_client.shutdown().await;
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_recovery_failure_without_sec_does_not_abandon_saga() {
+        let logctx = dev::test_setup_log(
+            "test_recovery_failure_without_sec_does_not_abandon_saga",
+        );
+        let log = logctx.log.new(o!());
+        let db = TestDatabase::new_with_raw_datastore(&log).await;
+        let db_datastore = db.datastore();
+        let sec_id = db::SecId(uuid::Uuid::new_v4());
+        let (task, sec_client, opctx) =
+            setup_recovery_task(&log, db_datastore.clone(), sec_id).await;
+
+        let saga_id =
+            create_recovery_candidate_saga(&db_datastore, sec_id).await;
+        assert!(
+            is_recovery_candidate(&db_datastore, &opctx, sec_id, saga_id).await
+        );
+
+        let failure = RecoveryFailure {
+            time: chrono::Utc::now(),
+            saga_id,
+            current_sec: None,
+            kind: RecoveryFailureKind::Permanent,
+            message: "permanent recovery failure with no SEC".to_string(),
+        };
+        task.inner.abandon_non_transient_failed_sagas(&log, &[failure]).await;
+
+        // Still a candidate. Without a current SEC we can't abandon it.
+        assert!(
+            is_recovery_candidate(&db_datastore, &opctx, sec_id, saga_id).await
+        );
 
         // Test cleanup
         drop(task);
