@@ -107,7 +107,7 @@ pub fn analyze(builder: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
         }
 
         // Now, add the case to the index of cases by PSU.
-        for location in psc_case.impacted_psus() {
+        for location in psc_case.impacted_psus.iter() {
             // N.B. that this allows us to model multiple cases impacting the
             // same PSU. At present we will not do this, but it will become
             // important later.
@@ -207,80 +207,70 @@ pub fn analyze(builder: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
         // replay all the ereports in the case, tracking changes in PSU presence
         // and happiness
         // TODO(eliza): also track happiness
-        let mut psus_absent = [PsuSet::default(), PsuSet::default()];
+        let mut psus_absent = PsuSet::default();
         for ereport in psc_case.ereports_in_order() {
-            let PsuLocation { rack, shelf, slot } = ereport.location;
-
+            let psu = ereport.location;
             // TODO(eliza): some kind of debouncing if two ereports of the same
             // type are seen close together.
-            match ereport.kind {
+            let alert_result = match ereport.kind {
                 PsuEreportKind::Insert => {
                     // hello!
-                    psus_absent[shelf as usize].remove(slot);
+                    psus_absent.remove(psu);
                     if ereport.provenance == Provenance::ThisSitrep {
-                        let requested = case_builder.request_alert(
+                        case_builder.request_alert(
                             &alert_types::PsuInsertedV0 {
                                 psu: ereport.alert_psu(),
                                 power_shelf: ereport.alert_power_shelf(&log),
                                 time: ereport.ereport.time_collected,
                             },
-                            format!("requested for ereport {}", ereport.id()),
-                        );
-                        if let Err(err) = requested {
-                            slog::error!(
-                                &log,
-                                "failed to request PSU insert alert for ereport \
-                                 {}: {}",
+                            format_args!(
+                                "requested for ereport {}, class {} ({psu})",
                                 ereport.id(),
-                                &err
-                            );
-                        }
+                                ereport.class(),
+                            ),
+                        )
+                    } else {
+                        Ok(())
                     }
                 }
                 PsuEreportKind::Remove => {
                     // goodbye!
-                    psus_absent[shelf as usize].insert(slot);
+                    psus_absent.insert(psu);
                     if ereport.provenance == Provenance::ThisSitrep {
-                        let requested = case_builder.request_alert(
+                        case_builder.request_alert(
                             &alert_types::PsuRemovedV0 {
                                 psu: ereport.alert_psu(),
                                 power_shelf: ereport.alert_power_shelf(&log),
                                 time: ereport.ereport.time_collected,
                             },
-                            format!("requested for ereport {}", ereport.id()),
-                        );
-                        if let Err(err) = requested {
-                            slog::error!(
-                                &log,
-                                "failed to request PSU removed alert for \
-                                 ereport {}: {}",
+                            format_args!(
+                                "requested for ereport {}, class {} ({psu})",
                                 ereport.id(),
-                                &err
-                            );
-                        }
+                                ereport.class(),
+                            ),
+                        )
+                    } else {
+                        Ok(())
                     }
                 }
+            };
+            if let Err(err) = alert_result {
+                slog::error!(
+                    &log,
+                    "failed to request alert for ereport";
+                    "ereport" => %ereport.id(),
+                    "ereport_class" => %ereport.class(),
+                    "ereport_location" => %psu,
+                    "error" => &InlineErrorChain::new(&*err)
+                );
             }
         }
 
-        let mut any_absent = false;
-        for (shelf, psu) in psus_absent
-            .iter()
-            .enumerate()
-            .flat_map(|(shelf, psus)| psus.iter().map(move |psu| (shelf, psu)))
-        {
-            use std::fmt::Write;
-
-            any_absent |= true;
-            writeln!(
-                case_builder.comment_mut(),
-                "* shelf {shelf} PSU {psu} absent"
-            )
-            .expect("writing to a string is infallible")
-        }
-
-        if !any_absent {
-            case_builder.close("every PSU is now present");
+        if psus_absent.is_empty() {
+            case_builder.close("no absent PSUs detected");
+        } else {
+            *case_builder.comment_mut() =
+                format!("the following PSUs are absent: {psus_absent:?}")
         }
     }
 
@@ -315,20 +305,72 @@ impl fmt::Display for PsuSlot {
     }
 }
 
-#[derive(Copy, Clone, Eq, PartialEq, Hash, Default)]
-struct PsuSet(u8);
+/// A set of PSUs across any number of power shelves.
+#[derive(Default)]
+struct PsuSet {
+    shelves: HashMap<(RackUuid, u8), ShelfPsuSet>,
+}
 
 impl PsuSet {
+    fn insert(&mut self, PsuLocation { rack, shelf, slot }: PsuLocation) {
+        self.shelves.entry((rack, shelf)).or_default().insert(slot)
+    }
+
+    // TODO(eliza): perhaps this ought to return whether there was
+    // previously a slot in the set? we are not currently using this but...
+    fn remove(&mut self, PsuLocation { rack, shelf, slot }: PsuLocation) {
+        let shelf_key = (rack, shelf);
+        let emptied = if let Some(shelf) = self.shelves.get_mut(&shelf_key) {
+            shelf.remove(slot);
+            shelf.is_empty()
+        } else {
+            false
+        };
+        if emptied {
+            self.shelves
+                .remove(&shelf_key)
+                .expect("we just removed it, it should be there");
+        }
+    }
+
+    fn is_empty(&self) -> bool {
+        // This is valid as we ensure that removing the last slot from a slot
+        // set removes it from the map.
+        self.shelves.is_empty()
+    }
+
+    fn iter(&self) -> impl Iterator<Item = PsuLocation> + '_ {
+        self.shelves.iter().flat_map(|(&(rack, shelf), slots)| {
+            slots.iter().map(move |slot| PsuLocation { rack, shelf, slot })
+        })
+    }
+}
+
+impl fmt::Debug for PsuSet {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_set().entries(self.iter()).finish()
+    }
+}
+
+/// A set of PSU slots for an individual power shelf.
+#[derive(Copy, Clone, Eq, PartialEq, Hash, Default)]
+struct ShelfPsuSet(u8);
+
+impl ShelfPsuSet {
     fn contains(&self, slot: PsuSlot) -> bool {
-        (self.0 & PsuSet::bit(slot)) != 0
+        (self.0 & ShelfPsuSet::bit(slot)) != 0
     }
 
     fn insert(&mut self, slot: PsuSlot) {
-        self.0 |= PsuSet::bit(slot);
+        self.0 |= ShelfPsuSet::bit(slot);
     }
 
     fn remove(&mut self, slot: PsuSlot) {
-        self.0 &= !PsuSet::bit(slot);
+        self.0 &= !ShelfPsuSet::bit(slot);
+    }
+
+    fn is_empty(&self) -> bool {
+        self.0 == 0
     }
 
     fn bit(slot: PsuSlot) -> u8 {
@@ -340,7 +382,7 @@ impl PsuSet {
     }
 }
 
-impl fmt::Debug for PsuSet {
+impl fmt::Debug for ShelfPsuSet {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_set().entries(self.iter()).finish()
     }
@@ -349,7 +391,7 @@ impl fmt::Debug for PsuSet {
 #[derive(Debug)]
 struct PscCase {
     case_id: CaseUuid,
-    impacted: HashMap<(RackUuid, u8), PsuSet>,
+    impacted_psus: PsuSet,
     restarts: IdHashMap<Restart>,
 }
 
@@ -367,7 +409,7 @@ impl PscCase {
     fn new(case_id: CaseUuid) -> Self {
         Self {
             case_id,
-            impacted: HashMap::default(),
+            impacted_psus: PsuSet::default(),
             restarts: IdHashMap::default(),
         }
     }
@@ -389,18 +431,8 @@ impl PscCase {
                     "an ereport with id {ereport_id} already exists: {e}"
                 )
             })?;
-        self.impacted
-            .entry((location.rack, location.shelf))
-            .or_default()
-            .insert(location.slot);
+        self.impacted_psus.insert(location);
         Ok(())
-    }
-
-    /// Iterates over the `PsuLocation` of every PSU impacted by this case.
-    fn impacted_psus(&self) -> impl Iterator<Item = PsuLocation> + '_ {
-        self.impacted.iter().flat_map(|(&(rack, shelf), slots)| {
-            slots.iter().map(move |slot| PsuLocation { rack, shelf, slot })
-        })
     }
 
     /// Returns all ereports assigned to this case, in the order in which their
@@ -468,6 +500,13 @@ impl IdOrdItem for PsuEreport {
 impl PsuEreport {
     fn id(&self) -> &ereport::EreportId {
         &self.ereport.id
+    }
+
+    fn class(&self) -> &str {
+        self.ereport
+            .class
+            .as_deref()
+            .expect("if an ereport was parsed, it must have a class")
     }
 
     fn parse(
@@ -594,7 +633,7 @@ struct PsuLocation {
 impl fmt::Display for PsuLocation {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let Self { rack, shelf, slot } = *self;
-        write!(f, "rack {rack},p ower shelf {shelf}, PSU {slot}")
+        write!(f, "rack {rack}, shelf {shelf}, PSU {slot}")
     }
 }
 
@@ -861,11 +900,7 @@ mod tests {
             .expect("input builder should accept fresh inventory");
         builder.add_unmarked_ereports(new_ereports);
         let (input, report) = builder.build();
-        slog::info!(
-            &fmtest.log,
-            "analysis inputs: {}",
-            report.display_multiline(0)
-        );
+        eprintln!("\n--- inputs ---\n{}", report.display_multiline(0));
         input
     }
 
