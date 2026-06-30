@@ -19,3 +19,16 @@ tags
 connectivity-report.json
 *.local
 .DS_Store
+# Personal, per-developer agent instructions
+CLAUDE.local.md
+
+# Per-directory agent instructions are set up by `cargo xtask setup-agents`,
+# which walks the repo and, for every README it finds, creates symlinks in the
+# same directory from CLAUDE.md and AGENTS.md to the README. This effectively
+# allows agents to use the READMEs as their CLAUDE.md/AGENTS.md, while we keep
+# everything in READMEs. The not-ignored root CLAUDE.md and AGENTS.md only exist
+# to tell agents about `cargo xtask setup-agents` and point to the root README.
+CLAUDE.md
+AGENTS.md
+!/CLAUDE.md
+!/AGENTS.md
