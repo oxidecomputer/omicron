@@ -1,8 +1,8 @@
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
-use super::DataStore;
 
+use super::DataStore;
 use crate::authz;
 use crate::context::OpContext;
 use crate::db::datastore::address_lot::{
@@ -12,7 +12,6 @@ use crate::db::model::LoopbackAddress;
 use crate::db::pagination::paginated;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
-use ipnetwork::IpNetwork;
 use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::OptionalError;
 use nexus_db_errors::public_error_from_diesel;
@@ -42,10 +41,6 @@ impl DataStore {
         }
 
         let conn = self.pool_connection_authorized(opctx).await?;
-
-        let inet = IpNetwork::new(params.address, params.mask)
-            .map_err(|_| Error::invalid_request("invalid address"))?;
-
         let err = OptionalError::new();
 
         // TODO https://github.com/oxidecomputer/omicron/issues/2811
@@ -58,7 +53,7 @@ impl DataStore {
                     let (block, rsvd_block) =
                         crate::db::datastore::address_lot::try_reserve_block(
                             lot_id,
-                            inet.ip().into(),
+                            params.address.into(),
                             params.anycast,
                             &conn,
                         )
@@ -78,7 +73,7 @@ impl DataStore {
                         rsvd_block.id,
                         params.rack_id,
                         params.switch_slot,
-                        inet,
+                        params.address,
                         params.anycast,
                     );
 
@@ -108,7 +103,7 @@ impl DataStore {
                         e,
                         ErrorHandler::Conflict(
                             ResourceType::LoopbackAddress,
-                            &format!("lo {}", inet),
+                            &format!("lo {}", params.address),
                         ),
                     )
                 }

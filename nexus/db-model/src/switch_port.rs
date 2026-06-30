@@ -30,6 +30,7 @@ use omicron_uuid_kinds::TypedUuid;
 use oxnet::IpNet;
 use serde::{Deserialize, Serialize};
 use sled_agent_types::early_networking::ImportExportPolicy;
+use sled_agent_types::early_networking::InvalidIpAddrError;
 use sled_agent_types::early_networking::LinkFec;
 use sled_agent_types::early_networking::LinkSpeed;
 use sled_agent_types::early_networking::RouterLifetimeConfig;
@@ -38,6 +39,7 @@ use sled_agent_types::early_networking::RouterPeerIpAddr;
 use sled_agent_types::early_networking::RouterPeerIpAddrError;
 use sled_agent_types::early_networking::RouterPeerType;
 use sled_agent_types::early_networking::SwitchSlot;
+use sled_agent_types::early_networking::UplinkAddress;
 use uuid::Uuid;
 
 /// Extension trait on [`RouterPeerType`] for converting it to and from the way
@@ -987,7 +989,7 @@ pub struct SwitchPortAddressConfig {
     pub port_settings_id: Uuid,
     pub address_lot_block_id: Uuid,
     pub rsvd_address_lot_block_id: Uuid,
-    pub address: IpNetwork,
+    address: IpNetwork,
     pub interface_name: Name,
     pub vlan_id: Option<SqlU16>,
 }
@@ -997,39 +999,40 @@ impl SwitchPortAddressConfig {
         port_settings_id: Uuid,
         address_lot_block_id: Uuid,
         rsvd_address_lot_block_id: Uuid,
-        address: IpNetwork,
+        address: UplinkAddress,
         interface_name: Name,
         vlan_id: Option<u16>,
     ) -> Self {
+        // TODO-cleanup `switch_port_settings_address_config.address` is not
+        // nullable; we store addrconf addresses as the sentinel value `::/128`.
+        // We should consider reworking this to be consistent with BGP peers
+        // (e.g., store addrconf as `NULL`):
+        // https://github.com/oxidecomputer/omicron/issues/9832#issuecomment-4092974372
+        let address = address.ip_net_squashing_addrconf_to_unspecified();
         Self {
             port_settings_id,
             address_lot_block_id,
             rsvd_address_lot_block_id,
-            address,
+            address: address.into(),
             interface_name,
             vlan_id: vlan_id.map(|x| x.into()),
         }
     }
-}
 
-impl Into<networking_types::SwitchPortAddressConfig>
-    for SwitchPortAddressConfig
-{
-    fn into(self) -> networking_types::SwitchPortAddressConfig {
-        networking_types::SwitchPortAddressConfig {
-            port_settings_id: self.port_settings_id,
-            address_lot_block_id: self.address_lot_block_id,
-            address: self.address.into(),
-            interface_name: self.interface_name.into(),
-            vlan_id: self.vlan_id.map(|x| x.into()),
-        }
+    /// Return the address of this address config.
+    ///
+    /// Only fails if we've stored invalid data in the DB (i.e., an address that
+    /// contains an IP that we don't allow for uplink addresses).
+    pub fn address(&self) -> Result<UplinkAddress, InvalidIpAddrError> {
+        UplinkAddress::try_from_ip_net_treating_unspecified_as_addrconf(
+            self.address.into(),
+        )
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sled_agent_types::early_networking::InvalidIpAddrError;
     use sled_agent_types::early_networking::RouterLifetimeConfig;
     use sled_agent_types::early_networking::RouterPeerIpAddr;
     use sled_agent_types::early_networking::RouterPeerType;

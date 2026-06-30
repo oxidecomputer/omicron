@@ -16,7 +16,6 @@ use oxnet::IpNet;
 use sled_agent_types::early_networking::BfdPeerConfig;
 use sled_agent_types::early_networking::BgpConfig as SledBgpConfig;
 use sled_agent_types::early_networking::BgpPeerConfig as SledBgpPeerConfig;
-use sled_agent_types::early_networking::InvalidIpAddrError;
 use sled_agent_types::early_networking::LinkFec;
 use sled_agent_types::early_networking::LinkSpeed;
 use sled_agent_types::early_networking::LldpAdminStatus;
@@ -27,7 +26,6 @@ use sled_agent_types::early_networking::RackNetworkConfig;
 use sled_agent_types::early_networking::RouteConfig as SledRouteConfig;
 use sled_agent_types::early_networking::SwitchSlot;
 use sled_agent_types::early_networking::TxEqConfig;
-use sled_agent_types::early_networking::UplinkAddress;
 use sled_agent_types::early_networking::UplinkAddressConfig;
 use slog::Logger;
 use slog::error;
@@ -74,7 +72,7 @@ pub struct PortInput {
     /// The BGP peers configured on this port.
     pub bgp_peers: Vec<networking::BgpPeer>,
     /// The IP addresses assigned to this port.
-    pub addresses: Vec<AddressInput>,
+    pub addresses: Vec<UplinkAddressConfig>,
     /// The port's links. Only the first is used today (no breakout support).
     pub links: Vec<LinkInput>,
     /// The static routes configured on this port.
@@ -83,12 +81,6 @@ pub struct PortInput {
     pub lldp: Vec<LldpInput>,
     /// The port's TX-EQ overrides. Only the first entry is used today.
     pub tx_eq: Vec<TxEqConfig>,
-}
-
-/// An IP address assigned to a port.
-pub struct AddressInput {
-    pub address: IpNet,
-    pub vlan_id: Option<u16>,
 }
 
 /// A port's link-level settings. The caller has already translated the FEC and
@@ -228,34 +220,8 @@ pub fn build_rack_network_config(
                 .collect()
         };
 
-        let addresses = match port
-            .addresses
-            .iter()
-            .map(|a| {
-                 let address = UplinkAddress::try_from_ip_net_treating_unspecified_as_addrconf(a.address)?;
-                 Ok(UplinkAddressConfig {
-                     address,
-                     vlan_id: a.vlan_id
-                 })
-            })
-            .collect::<Result<_, InvalidIpAddrError>>()
-        {
-            Ok(addresses) => addresses,
-            Err(err) => {
-                error!(
-                    log,
-                    "failed to convert database uplink addresses \
-                     to API uplink addresses";
-                    "switch_slot" => ?port.switch,
-                    "port" => &port.port_name,
-                    InlineErrorChain::new(&err),
-                );
-                continue;
-            }
-        };
-
         let port_config = PortConfig {
-            addresses,
+            addresses: port.addresses,
             autoneg: port
                 .links
                 .get(0) //TODO breakout support

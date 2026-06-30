@@ -112,6 +112,7 @@ use propolis_client::support::tungstenite::protocol::{
 };
 use range_requests::PotentialRange;
 use ref_cast::RefCast;
+use slog_error_chain::InlineErrorChain;
 use trust_quorum_types::types::Epoch;
 
 type NexusApiDescription = ApiDescription<ApiContext>;
@@ -4050,7 +4051,18 @@ impl NexusExternalApi for NexusExternalApiImpl {
         audit_and_time(&rqctx, |opctx, nexus| async move {
             let params = new_loopback_address.into_inner();
             let result = nexus.loopback_address_create(&opctx, params).await?;
-            let addr: networking::LoopbackAddress = result.into();
+            let result_id = result.identity.id;
+            let addr = networking::LoopbackAddress::try_from(result).map_err(
+                |err| {
+                    // If we successfully created the address, we should not
+                    // fail to convert it back to an API type.
+                    HttpError::for_internal_error(format!(
+                        "unexpectedly failed to convert db loopback address \
+                         {result_id} back to API type: {}",
+                        InlineErrorChain::new(&err),
+                    ))
+                },
+            )?;
             Ok(HttpResponseCreated(addr))
         })
         .await
@@ -4100,8 +4112,19 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 .loopback_address_list(&opctx, &pagparams)
                 .await?
                 .into_iter()
-                .map(|p| p.into())
-                .collect();
+                .map(|row| {
+                    let id = row.identity.id;
+                    networking::LoopbackAddress::try_from(row).map_err(|err| {
+                        // Failure to convert means we've got invalid data
+                        // stored in the db; this should be impossible.
+                        HttpError::for_internal_error(format!(
+                            "unexpectedly failed to convert db loopback \
+                             address {id} back to API type: {}",
+                            InlineErrorChain::new(&err),
+                        ))
+                    })
+                })
+                .collect::<Result<_, _>>()?;
 
             Ok(HttpResponseOk(ScanById::results_page(
                 &query,

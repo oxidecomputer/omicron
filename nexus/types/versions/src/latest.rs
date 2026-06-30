@@ -255,8 +255,6 @@ pub mod multicast {
 }
 
 pub mod networking {
-    pub use crate::v2025_11_20_00::networking::Address;
-    pub use crate::v2025_11_20_00::networking::AddressConfig;
     pub use crate::v2025_11_20_00::networking::AddressLot;
     pub use crate::v2025_11_20_00::networking::AddressLotBlock;
     pub use crate::v2025_11_20_00::networking::AddressLotBlockCreate;
@@ -286,7 +284,6 @@ pub mod networking {
     pub use crate::v2025_11_20_00::networking::SwitchInterfaceConfigCreate;
     pub use crate::v2025_11_20_00::networking::SwitchInterfaceKind;
     pub use crate::v2025_11_20_00::networking::SwitchPortAddressConfig;
-    pub use crate::v2025_11_20_00::networking::SwitchPortAddressView;
     pub use crate::v2025_11_20_00::networking::SwitchPortApplySettings;
     pub use crate::v2025_11_20_00::networking::SwitchPortConfig;
     pub use crate::v2025_11_20_00::networking::SwitchPortConfigCreate;
@@ -315,8 +312,6 @@ pub mod networking {
     pub use crate::v2026_03_06_01::networking::BfdSessionDisable;
     pub use crate::v2026_03_06_01::networking::BfdSessionEnable;
     pub use crate::v2026_03_06_01::networking::LldpPortPathSelector;
-    pub use crate::v2026_03_06_01::networking::LoopbackAddress;
-    pub use crate::v2026_03_06_01::networking::LoopbackAddressCreate;
     pub use crate::v2026_03_06_01::networking::LoopbackAddressPath;
     pub use crate::v2026_03_06_01::networking::SwitchPort;
     pub use crate::v2026_03_06_01::networking::SwitchPortSelector;
@@ -324,10 +319,18 @@ pub mod networking {
     pub use crate::v2026_04_16_00::networking::BgpPeer;
     pub use crate::v2026_04_16_00::networking::BgpPeerConfig;
     pub use crate::v2026_04_16_00::networking::BgpPeerConversionError;
-    pub use crate::v2026_04_16_00::networking::SwitchPortSettingsCreate;
 
     pub use crate::v2026_05_07_00::networking::SwitchInterfaceConfig;
-    pub use crate::v2026_05_07_00::networking::SwitchPortSettings;
+
+    pub use crate::v2026_06_30_00::networking::Address;
+    pub use crate::v2026_06_30_00::networking::AddressConfig;
+    pub use crate::v2026_06_30_00::networking::LoopbackAddress;
+    pub use crate::v2026_06_30_00::networking::LoopbackAddressConversionError;
+    pub use crate::v2026_06_30_00::networking::LoopbackAddressCreate;
+    pub use crate::v2026_06_30_00::networking::LoopbackAddressIpNet;
+    pub use crate::v2026_06_30_00::networking::SwitchPortAddressView;
+    pub use crate::v2026_06_30_00::networking::SwitchPortSettings;
+    pub use crate::v2026_06_30_00::networking::SwitchPortSettingsCreate;
 }
 
 pub mod oxql {
