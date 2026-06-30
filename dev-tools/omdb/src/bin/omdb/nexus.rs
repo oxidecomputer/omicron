@@ -61,6 +61,7 @@ use nexus_types::internal_api::background::DatasetsRendezvousStats;
 use nexus_types::internal_api::background::EreporterStatus;
 use nexus_types::internal_api::background::FmAnalysisStatus;
 use nexus_types::internal_api::background::FmRendezvousStatus;
+use nexus_types::internal_api::background::IncompleteBootstoreConfigReport;
 use nexus_types::internal_api::background::InstanceReincarnationStatus;
 use nexus_types::internal_api::background::InstanceUpdaterStatus;
 use nexus_types::internal_api::background::InventoryLoadStatus;
@@ -83,6 +84,7 @@ use nexus_types::internal_api::background::SupportBundleCleanupReport;
 use nexus_types::internal_api::background::SupportBundleCollectionStepStatus;
 use nexus_types::internal_api::background::SwitchPortPopulatorStatus;
 use nexus_types::internal_api::background::SwitchPortPopulatorStatusKind;
+use nexus_types::internal_api::background::SwitchPortSettingsManagerStatus;
 use nexus_types::internal_api::background::TrustQuorumManagerStatus;
 use nexus_types::internal_api::background::TufArtifactReplicationCounters;
 use nexus_types::internal_api::background::TufArtifactReplicationRequest;
@@ -1376,6 +1378,9 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
         }
         "populate_switch_ports" => {
             print_task_populate_switch_ports(details);
+        }
+        "switch_port_config_manager" => {
+            print_task_switch_port_settings_manager(details);
         }
         _ => {
             println!(
@@ -3998,6 +4003,51 @@ fn print_task_populate_switch_ports(details: &serde_json::Value) {
     let SwitchPortPopulatorStatus { switch0, switch1 } = status;
     print_one("switch0", switch0);
     print_one("switch1", switch1);
+}
+
+fn print_task_switch_port_settings_manager(details: &serde_json::Value) {
+    let status = match serde_json::from_value::<SwitchPortSettingsManagerStatus>(
+        details.clone(),
+    ) {
+        Ok(status) => status,
+        Err(error) => {
+            eprintln!(
+                "warning: failed to interpret task details: {:?}: {:#?}",
+                error, details
+            );
+            return;
+        }
+    };
+
+    let SwitchPortSettingsManagerStatus { incomplete_bootstore_configs } =
+        status;
+
+    if incomplete_bootstore_configs.is_empty() {
+        println!(
+            "all racks appear to have a complete bootstore network config\n\
+             (note: this check is not yet complete -- there might still \
+             be errors that aren't in the report)"
+        );
+        return;
+    }
+
+    println!(
+        "{ERRICON} {} rack(s) skipped due to an incomplete bootstore network \
+         config:",
+        incomplete_bootstore_configs.len(),
+    );
+    for IncompleteBootstoreConfigReport { rack_id, problems } in
+        incomplete_bootstore_configs
+    {
+        println!("  rack {rack_id}: {} problem(s)", problems.len());
+        for problem in problems {
+            println!("    {ERRICON} {problem}");
+        }
+    }
+    println!(
+        "(note: this check is not yet complete -- there might be other \
+         errors that aren't in the report)"
+    );
 }
 
 fn print_task_physical_disk_adoption(details: &serde_json::Value) {

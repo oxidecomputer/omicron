@@ -15,6 +15,7 @@ use omicron_uuid_kinds::AlertReceiverUuid;
 use omicron_uuid_kinds::AlertUuid;
 use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::CollectionUuid;
+use omicron_uuid_kinds::RackUuid;
 use omicron_uuid_kinds::SitrepUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::SupportBundleUuid;
@@ -1223,6 +1224,24 @@ pub struct SwitchPortPopulatorStatus {
     pub switch0: Result<SwitchPortPopulatorStatusKind, String>,
     /// Result of populating switch 1's ports, if any.
     pub switch1: Result<SwitchPortPopulatorStatusKind, String>,
+}
+
+/// The status of a `sync_switch_configuration` background task activation.
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+pub struct SwitchPortSettingsManagerStatus {
+    /// Racks skipped because a complete bootstore network config could not be
+    /// built from their switch port settings.
+    pub incomplete_bootstore_configs: Vec<IncompleteBootstoreConfigReport>,
+}
+
+/// A rack that `sync_switch_configuration` skipped because its bootstore network
+/// config could not be built completely.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub struct IncompleteBootstoreConfigReport {
+    /// The rack that was skipped.
+    pub rack_id: RackUuid,
+    /// The list of problems encountered.
+    pub problems: Vec<String>,
 }
 
 /// The status of a `session_cleanup` background task activation.
