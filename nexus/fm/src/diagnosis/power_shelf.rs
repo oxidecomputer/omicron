@@ -209,7 +209,7 @@ pub fn analyze(builder: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
         // and happiness
         // TODO(eliza): also track happiness
         let mut psus_absent = [PsuSet::default(), PsuSet::default()];
-        for ereport in psc_case.ereports_in_order(input.ereporter_restarts()) {
+        for ereport in psc_case.ereports_in_order() {
             let PsuLocation { rack, shelf, slot } = ereport.location;
 
             // TODO(eliza): some kind of debouncing if two ereports of the same
@@ -248,7 +248,8 @@ pub fn analyze(builder: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
                         if let Err(err) = requested {
                             slog::error!(
                                 &log,
-                                "failed to request PSU insert alert for ereport {}: {}",
+                                "failed to request PSU insert alert for ereport \
+                                 {}: {}",
                                 ereport.id(),
                                 &err
                             );
@@ -444,10 +445,7 @@ impl PscCase {
     ///
     /// `known_restarts` is the analysis input's map of reporter restarts, used
     /// to order events that span more than one restart.
-    fn ereports_in_order(
-        &self,
-        known_restarts: &IdOrdMap<EreporterRestart>,
-    ) -> Vec<&PsuEreport> {
+    fn ereports_in_order(&self) -> Vec<&PsuEreport> {
         let mut ereports = self
             .restarts
             .iter()
@@ -455,9 +453,7 @@ impl PscCase {
             .collect::<Vec<_>>();
         ereports.sort_by_key(|ereport| {
             let EreportId { restart_id, ena } = ereport.id();
-            let time_first_seen =
-                known_restarts.get(restart_id).map(|r| r.time_first_seen);
-            (time_first_seen, ena)
+            (ereport.reporter_first_seen_at, ena)
         });
         ereports
     }
