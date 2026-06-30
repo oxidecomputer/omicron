@@ -174,18 +174,6 @@ impl RouterPeerType {
 }
 
 impl UplinkAddress {
-    /// Squash this address down to a flat IP address by converting
-    /// [`UplinkAddress::AddrConf`] to `::`.
-    ///
-    /// Uses of this function probably indicate places where we could consider
-    /// using stronger types.
-    pub fn ip_squashing_addrconf_to_unspecified(&self) -> IpAddr {
-        match self {
-            UplinkAddress::AddrConf => IpAddr::V6(Ipv6Addr::UNSPECIFIED),
-            UplinkAddress::Static { ip_net } => ip_net.addr(),
-        }
-    }
-
     /// Squash this address down to an [`IpNet`] address by converting
     /// [`UplinkAddress::AddrConf`] to `::/128`.
     ///
