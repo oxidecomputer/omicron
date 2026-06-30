@@ -301,41 +301,85 @@ impl<N: MakeSagaContext> SagaRecoveryInner<N> {
                                 &plan, &execution,
                             );
 
-                        // TODO-K: mark all failed here
-                        for saga in &execution.failed {
-                            let RecoveryFailure { time, saga_id, current_sec, message } = saga;
-                            // TODO-K: Make sure we're only abandoning ones with non-transient errors
-                        match current_sec {
-                            Some(sec_id) => {
-                                warn!(
-                                    log,
-                                    "recovered saga is stuck; \
-                                    marking as abandoned";
-                                    "saga_id" => %saga_id,
-                                    // TODO-K: find which one is better to keep
-                                    "message" => ?message,
-                                    "time_failed" => ?time,
-                                );
-                                // TODO-K: Let's ignore the result for now
-                                let _ = self.datastore.saga_update_state(
-                                    *saga_id,
-                                    SagaStateTransition::Abandoned {
-                                        reason: SagaReasonAbandoned::Unrecoverable,
-                                        information: "recovered saga is stuck".to_string(),
-                                    },
-                                    *sec_id)
-                                    .await;
-                            },
-                            None => {
-                                warn!(
-                                    log,
-                                    "unable to mark saga as abandoned; \
-                                    missing current SEC";
-                                    "saga_id" => %saga_id,
-                                );
-                            },
-                    }
-                }
+                        // TODO-K: Extract abandon code into it's own method so
+                        // we can test the functionality
+
+                        // Abandon any sagas that failed to recover with a
+                        // non-transient error. A transient failure (e.g. the
+                        // datastore was briefly unavailable) will be retried on
+                        // the next recovery pass.
+                        for failure in &execution.failed {
+                            let RecoveryFailure {
+                                time,
+                                saga_id,
+                                current_sec,
+                                class,
+                                message,
+                            } = failure;
+
+                            // TODO-K: This continue seems unnecessary. we can
+                            // just do a if class.is_permanent() and then attempt
+                            // to abandon
+                            if !class.is_permanent() {
+                                // Transient: the next recovery pass will retry.
+                                continue;
+                            }
+
+                            match current_sec {
+                                Some(sec_id) => {
+                                    warn!(
+                                        log,
+                                        "recovered saga failed permanently; \
+                                        marking as abandoned";
+                                        "saga_id" => %saga_id,
+                                        "message" => message,
+                                        "time_failed" => ?time,
+                                    );
+                                    // We deliberately don't propagate this
+                                    // error: abandoning is idempotent and best
+                                    // effort.  If it fails, the saga remains a
+                                    // recovery candidate and the next pass will
+                                    // try again.
+                                    if let Err(error) = self
+                                        .datastore
+                                        .saga_update_state(
+                                            *saga_id,
+                                            SagaStateTransition::Abandoned {
+                                                reason:
+                                                    SagaReasonAbandoned::Unrecoverable,
+                                                information: message.clone(),
+                                            },
+                                            *sec_id,
+                                        )
+                                        // TODO-K: Should we wait for the
+                                        // saga to be marked as abandoned?
+                                        // we can always try again in the next
+                                        // recovery pass no? We don't want to
+                                        // stop everything if the request hangs
+                                        // for some reason
+                                        .await
+                                    {
+                                        warn!(
+                                            log,
+                                            "failed to mark saga as abandoned";
+                                            "saga_id" => %saga_id,
+                                            "error" => %error,
+                                        );
+                                    }
+                                }
+                                None => {
+                                    warn!(
+                                        log,
+                                        "unable to mark saga as abandoned; \
+                                        missing current SEC";
+                                        "saga_id" => %saga_id,
+                                        "message" => message,
+                                        "time_failed" => ?time,
+                                    );
+                                }
+                            }
+                        }
+
                         self.status.update_after_pass(&plan, execution, nstarted);
                         (Some((future, last_pass_success)), true)
                     }

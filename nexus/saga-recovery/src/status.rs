@@ -100,7 +100,57 @@ pub struct RecoveryFailure {
     pub time: DateTime<Utc>,
     pub saga_id: SagaId,
     pub current_sec: Option<SecId>,
+    /// Whether this failure is worth retrying on a future recovery pass.
+    pub class: RecoveryFailureClass,
     pub message: String,
+}
+
+/// Whether a saga recovery failure is transient or permanent.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+// TODO-K: I don't like "class" maybe "kind" is better? Or another more accurate
+// term?
+pub enum RecoveryFailureClass {
+    /// The failure is likely temporary. The next recovery pass should retry.
+    Transient,
+    /// The failure is permanent. Retrying recovery will not change anything.
+    Permanent,
+}
+
+impl RecoveryFailureClass {
+    // TODO-K: adapt comment to reflect changes
+    /// Classify a saga-recovery error by its HTTP-style status.
+    ///
+    /// Saga recovery errors are [`Error`]s, which carry an HTTP-style status.
+    /// We treat only [`Error::ServiceUnavailable`] (HTTP 503) -- how the
+    /// datastore signals "temporarily unreachable, try again" -- as transient.
+    /// Everything else, notably [`Error::InternalError`] (HTTP 500) from a
+    /// failed `saga_resume`/`saga_start`, is permanent: the saga cannot be
+    /// recovered, so it should be abandoned rather than retried forever.
+    pub fn classify(error: &Error) -> Self {
+        match error {
+            Error::ServiceUnavailable { .. }
+            | Error::InsufficientCapacity { .. }
+            | Error::Unauthenticated { .. } => Self::Transient,
+
+            // Permanent failures: retrying recovery won't change the outcome.
+            Error::InternalError { .. }
+            | Error::TypeVersionMismatch { .. }
+            | Error::ObjectNotFound { .. }
+            | Error::ObjectAlreadyExists { .. }
+            | Error::InvalidRequest { .. }
+            | Error::InvalidValue { .. }
+            | Error::Forbidden
+            | Error::Conflict { .. }
+            | Error::NotFound { .. }
+            | Error::Gone => Self::Permanent,
+        }
+    }
+
+    // TODO-K: Do I really need this?
+    pub fn is_permanent(self) -> bool {
+        matches!(self, Self::Permanent)
+    }
 }
 
 /// Describes what happened during the last saga recovery pass

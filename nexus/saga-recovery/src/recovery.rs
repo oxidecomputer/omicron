@@ -5,6 +5,7 @@
 //! Guts of the saga recovery bookkeeping
 
 use super::status::RecoveryFailure;
+use super::status::RecoveryFailureClass;
 use super::status::RecoverySuccess;
 use chrono::{DateTime, Utc};
 use nexus_db_model::SecId;
@@ -479,7 +480,6 @@ impl ExecutionBuilder {
     }
 
     /// Record that we failed to recover this saga
-    // TODO-K: preserve in error whether the error is transient or not
     pub fn saga_recovery_failure(
         &mut self,
         saga_id: SagaId,
@@ -495,6 +495,7 @@ impl ExecutionBuilder {
             time: Utc::now(),
             saga_id,
             current_sec,
+            class: RecoveryFailureClass::classify(error),
             message: InlineErrorChain::new(error).to_string(),
         });
     }
