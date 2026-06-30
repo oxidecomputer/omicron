@@ -1551,7 +1551,7 @@ async fn switch_port_settings_get_on_conn(
         .load_async::<SwitchPortAddressConfig>(conn)
         .await?;
 
-    result.addresses = switch_port_address_view(conn, addresses).await?;
+    result.addresses = switch_port_address_view(conn, addresses, err).await?;
 
     Ok(result)
 }
@@ -1945,7 +1945,7 @@ async fn do_switch_port_settings_create(
             let (block, rsvd_block) =
                 crate::db::datastore::address_lot::try_reserve_block(
                     address_lot_id,
-                    address.address.addr().into(),
+                    address.address,
                     // TODO: Should we allow anycast addresses for switch_ports?
                     // anycast
                     false,
@@ -1963,7 +1963,7 @@ async fn do_switch_port_settings_create(
                 psid,
                 block.id,
                 rsvd_block.id,
-                address.address.into(),
+                address.address,
                 a.link_name.clone().into(),
                 address.vlan_id,
             ));
@@ -1977,7 +1977,7 @@ async fn do_switch_port_settings_create(
     .get_results_async(conn)
     .await?;
 
-    result.addresses = switch_port_address_view(conn, addresses).await?;
+    result.addresses = switch_port_address_view(conn, addresses, err).await?;
 
     Ok(result)
 }
@@ -2047,10 +2047,14 @@ impl<'a> BgpPeerProperties<'a> {
     }
 }
 
-async fn switch_port_address_view(
+async fn switch_port_address_view<E>(
     conn: &Connection<DTraceConnection<PgConnection>>,
     addresses: Vec<SwitchPortAddressConfig>,
-) -> Result<Vec<networking::SwitchPortAddressView>, diesel::result::Error> {
+    err: OptionalError<E>
+) -> Result<Vec<networking::SwitchPortAddressView>, diesel::result::Error>
+where
+    E: SwitchPortSettingsInternalError,
+{
     use nexus_db_schema::schema::{address_lot, address_lot_block};
 
     let mut result = vec![];
@@ -2067,12 +2071,25 @@ async fn switch_port_address_view(
             .first_async::<AddressLot>(conn)
             .await?;
 
+        // Converting the address back to an `UplinkAddress` should never fail;
+        // convert it to an internal error if it does.
+        let uplink_address = match address.address() {
+            Ok(uplink_address) => uplink_address,
+            Err(reason) => {
+                return Err(err.bail(E::internal_error(format!(
+                    "invalid IP address in SwitchPortAddressConfig {}: {}",
+                    address.port_settings_id,
+                    InlineErrorChain::new(&reason),
+                ))));
+            }
+        };
+
         result.push(networking::SwitchPortAddressView {
             port_settings_id: address.port_settings_id,
             address_lot_id: lot.id(),
             address_lot_name: lot.name().clone(),
             address_lot_block_id: address.address_lot_block_id,
-            address: address.address.into(),
+            address: uplink_address,
             vlan_id: address.vlan_id.map(Into::into),
             interface_name: address.interface_name.into(),
         })

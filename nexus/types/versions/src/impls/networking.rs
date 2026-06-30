@@ -6,6 +6,9 @@ use crate::latest;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::SimpleIdentity;
 use oxnet::IpNet;
+use sled_agent_types_versions::v30::early_networking::UplinkAddress;
+use std::fmt;
+use std::net::IpAddr;
 use uuid::Uuid;
 
 impl From<IpNet> for latest::networking::AddressLotBlockCreate {
@@ -75,5 +78,29 @@ impl latest::networking::SwitchPortSettingsCreate {
 impl SimpleIdentity for latest::networking::LldpNeighbor {
     fn id(&self) -> Uuid {
         self.id
+    }
+}
+
+impl latest::networking::LoopbackAddressIpNet {
+    pub const fn addr(&self) -> IpAddr {
+        self.0.addr()
+    }
+}
+
+impl fmt::Display for latest::networking::LoopbackAddressIpNet {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+impl From<latest::networking::LoopbackAddressIpNet> for IpNet {
+    fn from(value: latest::networking::LoopbackAddressIpNet) -> Self {
+        value.0.into()
+    }
+}
+
+impl From<latest::networking::LoopbackAddressIpNet> for UplinkAddress {
+    fn from(value: latest::networking::LoopbackAddressIpNet) -> Self {
+        Self::Static { ip_net: value.into() }
     }
 }

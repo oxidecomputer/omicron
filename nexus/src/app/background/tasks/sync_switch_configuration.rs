@@ -17,9 +17,7 @@ use slog::{Logger, o};
 
 use internal_dns_resolver::Resolver;
 use ipnetwork::IpNetwork;
-use nexus_db_model::{
-    BgpConfig, BootstoreConfig, LoopbackAddress, NETWORK_KEY,
-};
+use nexus_db_model::{BgpConfig, BootstoreConfig, NETWORK_KEY};
 use tokio::sync::watch;
 use uuid::Uuid;
 
@@ -62,14 +60,12 @@ use omicron_common::{
 use serde_json::json;
 use sled_agent_client::types::HostPortConfig;
 use sled_agent_types::early_networking::EarlyNetworkConfigEnvelope;
-use sled_agent_types::early_networking::InvalidIpAddrError;
 use sled_agent_types::early_networking::LldpAdminStatus;
 use sled_agent_types::early_networking::LldpPortConfig;
 use sled_agent_types::early_networking::RackNetworkConfig;
 use sled_agent_types::early_networking::RouterPeerType;
 use sled_agent_types::early_networking::SwitchSlot;
 use sled_agent_types::early_networking::TxEqConfig;
-use sled_agent_types::early_networking::UplinkAddress;
 use sled_agent_types::early_networking::UplinkAddressConfig;
 use sled_agent_types::system_networking::BlueprintExternalNetworkingConfig;
 use sled_agent_types::system_networking::SystemNetworkingConfig;
@@ -255,9 +251,24 @@ impl SwitchPortSettingsManager {
 
         let mut set: HashSet<(SwitchSlot, IpAddr)> = HashSet::new();
 
-        // TODO: are we doing anything special with anycast addresses at the moment?
-        for LoopbackAddress { switch_slot, address, .. } in values.iter() {
-            set.insert((SwitchSlot::from(*switch_slot), address.ip()));
+        // TODO: are we doing anything special with anycast addresses at the
+        // moment?
+        for loopback_addr in values.iter() {
+            let switch_slot = SwitchSlot::from(loopback_addr.switch_slot);
+            let ip = loopback_addr
+                .address()
+                .map_err(|err| {
+                    omicron_common::api::external::Error::internal_error(
+                        format!(
+                            "unexpectedly failed to convert db loopback \
+                             address {} IP: {}",
+                            loopback_addr.id(),
+                            InlineErrorChain::new(&err)
+                        ),
+                    )
+                })?
+                .addr();
+            set.insert((switch_slot, ip));
         }
 
         Ok(set)
@@ -454,7 +465,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                 //
                 // calculate and apply switch zone SMF changes
                 //
-                let uplinks = uplinks(&changes, &log);
+                let uplinks = uplinks(&changes);
 
                 // yeet the messages
                 for (switch_slot, config) in &uplinks {
@@ -1412,7 +1423,6 @@ async fn switch_loopback_addresses(
 
 fn uplinks(
     changes: &[(SwitchSlot, nexus_db_model::SwitchPort, PortSettingsChange)],
-    log: &slog::Logger,
 ) -> HashMap<SwitchSlot, Vec<HostPortConfig>> {
     let mut uplinks: HashMap<SwitchSlot, Vec<HostPortConfig>> = HashMap::new();
     for (switch_slot, port, change) in changes {
@@ -1454,31 +1464,14 @@ fn uplinks(
             None
         };
 
-        let addrs = match config
+        let addrs = config
             .addresses
             .iter()
-            .map(|a| {
-                 let address = UplinkAddress::try_from_ip_net_treating_unspecified_as_addrconf(a.address)?;
-                 Ok(UplinkAddressConfig {
-                     address,
-                     vlan_id: a.vlan_id
-                 })
+            .map(|a| UplinkAddressConfig {
+                address: a.address,
+                vlan_id: a.vlan_id,
             })
-            .collect::<Result<_, InvalidIpAddrError>>()
-        {
-            Ok(addresses) => addresses,
-            Err(err) => {
-                error!(
-                    log,
-                    "failed to convert database uplink addresses to \
-                     API uplink addresses";
-                    "switch_slot" => ?switch_slot,
-                    "port" => &port.port_name.to_string(),
-                    InlineErrorChain::new(&err),
-                );
-                continue;
-            }
-        };
+            .collect();
 
         let config = HostPortConfig {
             port: port.port_name.to_string(),

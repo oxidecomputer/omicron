@@ -851,7 +851,10 @@ fn build_port_settings(
     let addrs = uplink
         .addresses
         .iter()
-        .map(|a| a.address.ip_squashing_addrconf_to_unspecified())
+        .filter_map(|a| match a.address {
+            UplinkAddress::AddrConf => None,
+            UplinkAddress::Static { ip_net } => Some(ip_net.addr()),
+        })
         .collect();
 
     port_settings.links.insert(
