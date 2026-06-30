@@ -31,6 +31,7 @@ use slog::Logger;
 use slog::debug;
 use slog::error;
 use slog::info;
+use slog::warn;
 use slog_term::FullFormat;
 use slog_term::TermDecorator;
 use tokio::sync::Semaphore;
@@ -420,6 +421,24 @@ async fn main() -> Result<()> {
                 option
             );
             preflight_ok = false;
+        }
+    }
+
+    // Check that the local console assets match the pinned console version and
+    // were generated against the current nexus external API version. The
+    // console routinely lags the API on main, so a mismatch is only fatal on
+    // release branches (identified by the presence of a helios pin in
+    // tools/pins.toml); on other branches it is logged as a warning.
+    if let Err(err) = check_console_assets(&logger).await {
+        if pins.helios.is_some() {
+            error!(logger, "console asset check failed: {err:#}");
+            preflight_ok = false;
+        } else {
+            warn!(
+                logger,
+                "console asset check failed (not fatal outside a \
+                release branch): {err:#}"
+            );
         }
     }
 
@@ -998,6 +1017,80 @@ async fn host_add_root_profile(host_proto_root: Utf8PathBuf) -> Result<()> {
         export PATH=$PATH:/opt/oxide/opte/bin:/opt/oxide/mg-ddm:/opt/oxide/oxlog\n",
     ).await?;
     Ok(())
+}
+
+/// Check that the local console assets match the pinned console version and
+/// were built against the current nexus external API version.
+async fn check_console_assets(logger: &Logger) -> Result<()> {
+    let console_version_path = WORKSPACE_DIR.join("tools/console_version");
+    let console_version = fs::read_to_string(&console_version_path).await?;
+    let pinned_commit = console_version
+        .lines()
+        .find_map(|line| {
+            line.trim().strip_prefix("COMMIT=\"")?.strip_suffix('"')
+        })
+        .with_context(|| {
+            format!("failed to parse COMMIT from {console_version_path}")
+        })?;
+
+    // The console records its source commit in a top-level `VERSION` file in
+    // its asset tarball, which `cargo xtask download console` has already
+    // unpacked into `out/console-assets`.
+    let asset_version_path = WORKSPACE_DIR.join("out/console-assets/VERSION");
+    let asset_commit = fs::read_to_string(&asset_version_path)
+        .await
+        .with_context(|| format!("failed to read {asset_version_path}"))?
+        .trim()
+        .to_owned();
+
+    if asset_commit != pinned_commit {
+        bail!(
+            "the console assets in out/console-assets were built from \
+            commit {asset_commit}, but tools/console_version pins \
+            {pinned_commit}; run `cargo xtask download console`"
+        );
+    }
+    info!(
+        logger,
+        "console assets match pinned console commit ({pinned_commit})"
+    );
+
+    // The current API version is the `info.version` field of the spec
+    // `nexus-latest.json` points to.
+    let spec_path = WORKSPACE_DIR.join("openapi/nexus/nexus-latest.json");
+    let spec: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&spec_path).await?)
+            .with_context(|| format!("failed to parse {spec_path}"))?;
+    let nexus_version = spec
+        .pointer("/info/version")
+        .and_then(serde_json::Value::as_str)
+        .with_context(|| {
+            format!("failed to read info.version from {spec_path}")
+        })?;
+
+    // The console records its API version next to the source commit.
+    let api_version_path = WORKSPACE_DIR.join("out/console-assets/API_VERSION");
+    let console_api_version = fs::read_to_string(&api_version_path)
+        .await
+        .with_context(|| format!("failed to read {api_version_path}"))?
+        .trim()
+        .to_owned();
+
+    if console_api_version == nexus_version {
+        info!(
+            logger,
+            "console client API version matches nexus API version \
+            ({nexus_version})"
+        );
+        Ok(())
+    } else {
+        bail!(
+            "the console assets in out/console-assets were generated \
+            against API version {console_api_version}, but the current nexus \
+            API version is {nexus_version}; the console needs a client \
+            regen and tools/console_version needs a bump"
+        );
+    }
 }
 
 async fn git_resolve_commit(
