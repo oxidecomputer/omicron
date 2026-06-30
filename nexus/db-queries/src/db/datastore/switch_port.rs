@@ -2050,7 +2050,7 @@ impl<'a> BgpPeerProperties<'a> {
 async fn switch_port_address_view<E>(
     conn: &Connection<DTraceConnection<PgConnection>>,
     addresses: Vec<SwitchPortAddressConfig>,
-    err: OptionalError<E>
+    err: OptionalError<E>,
 ) -> Result<Vec<networking::SwitchPortAddressView>, diesel::result::Error>
 where
     E: SwitchPortSettingsInternalError,
