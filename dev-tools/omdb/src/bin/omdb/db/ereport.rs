@@ -9,7 +9,6 @@ use super::check_limit;
 use crate::Omdb;
 use crate::helpers::CONNECTION_OPTIONS_HEADING;
 use crate::helpers::const_max_len;
-use crate::helpers::datetime_opt_rfc3339_concise;
 use crate::helpers::datetime_rfc3339_concise;
 use crate::helpers::display_option_blank;
 use crate::helpers::display_option_invalid;
@@ -23,20 +22,25 @@ use chrono::Utc;
 use clap::Args;
 use clap::Subcommand;
 use diesel::AggregateExpressionMethods;
-use diesel::dsl::{count, min};
+use diesel::dsl::{count, max};
 use diesel::prelude::*;
 use internal_dns_types::names::ServiceName;
 use nexus_db_lookup::DbConnection;
+use nexus_db_model::EreporterRestart;
 use nexus_db_model::ereport as model;
 use nexus_db_model::ereport::DbEna;
 use nexus_db_queries::db;
 use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::queries::ALLOW_FULL_TABLE_SCAN_SQL;
 use nexus_db_schema::schema::ereport::dsl;
+use nexus_db_schema::schema::ereporter_restart::dsl as restart_dsl;
 use nexus_types::fm::ereport::Ena;
 use nexus_types::fm::ereport::Reporter;
 use omicron_uuid_kinds::EreporterRestartUuid;
 use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::RackUuid;
+use omicron_uuid_kinds::SledUuid;
+use std::collections::HashMap;
 use tabled::Tabled;
 use uuid::Uuid;
 
@@ -145,6 +149,7 @@ struct ReportersArgs {
     #[clap(long = "slot", short = 's', requires = "slot_type")]
     slot: Option<u16>,
 
+    #[clap(long = "serial")]
     serial: Option<String>,
 }
 
@@ -372,16 +377,20 @@ async fn cmd_db_ereport_info(
     const CLASS: &str = "class";
     const REPORTER: &str = "reported by";
     const RESTART_ID: &str = "restart ID";
+    const RACK_ID: &str = "rack ID";
     const SLED_ID: &str = "  sled ID";
     const PART_NUMBER: &str = "  part number";
     const SERIAL_NUMBER: &str = "  serial number";
     const MARKED_SEEN_IN: &str = "marked seen in sitrep";
     const WIDTH: usize = const_max_len(&[
+        ENA,
         CLASS,
         TIME_COLLECTED,
         TIME_DELETED,
         COLLECTOR_ID,
+        RESTART_ID,
         REPORTER,
+        RACK_ID,
         SLED_ID,
         PART_NUMBER,
         SERIAL_NUMBER,
@@ -463,6 +472,25 @@ async fn cmd_db_ereport_info(
             }
         }
         println!("    {RESTART_ID:>WIDTH$}: {restart_id}");
+
+        // Grab the reporter entry so that we can print the rack ID.
+        let reporter = restart_dsl::ereporter_restart
+            .filter(restart_dsl::id.eq(restart_id.into_untyped_uuid()))
+            .select(db::model::EreporterRestart::as_select())
+            .first_async(&*conn)
+            .await;
+        match reporter {
+            Ok(reporter) => {
+                println!("    {RACK_ID:>WIDTH$}: {}", reporter.rack_id());
+            }
+            Err(err) => {
+                eprintln!(
+                    "error: failed to fetch ereporter_restart entry for \
+                     {restart_id}: {err}"
+                );
+            }
+        }
+
         println!(
             "    {PART_NUMBER:>WIDTH$}: {}",
             part_number.as_deref().unwrap_or("<unknown>")
@@ -508,69 +536,74 @@ async fn cmd_db_ereporters(
     datastore: &DataStore,
     args: &ReportersArgs,
 ) -> anyhow::Result<()> {
-    let &ReportersArgs { slot, slot_type, ref serial } = args;
+    let &ReportersArgs { slot_type, slot, serial: ref want_serial } = args;
     let slot_type = slot_type.map(nexus_db_model::SpType::from);
 
     let conn = datastore.pool_connection_for_tests().await?;
-    let reporters = (*conn).transaction_async({
-        let serial = serial.clone();
-        async move |conn| {
-            // Selecting all reporters may require a full table scan, depending
-            // on filters.
+    let (restarts, ereport_info) = (*conn)
+        .transaction_async(async move |conn| {
             conn.batch_execute_async(ALLOW_FULL_TABLE_SCAN_SQL).await?;
-            let mut query = dsl::ereport
-                .group_by((
-                    dsl::restart_id,
-                    dsl::reporter,
-                    dsl::sled_id,
-                    dsl::slot_type,
-                    dsl::slot,
-                    dsl::serial_number,
-                    dsl::part_number
-                ))
+
+            // The canonical list of reporter restarts comes from the
+            // `ereporter_restart` table.
+            let mut query = restart_dsl::ereporter_restart
+                .select(EreporterRestart::as_select())
+                .into_boxed();
+            if let Some(slot_type) = slot_type {
+                query = query.filter(restart_dsl::slot_type.eq(slot_type));
+            }
+            if let Some(slot) = slot {
+                query = query
+                    .filter(restart_dsl::slot.eq(db::model::SqlU16::new(slot)));
+            }
+            let restarts = query
+                .load_async::<EreporterRestart>(&conn)
+                .await
+                .context("listing ereporter restarts")?;
+
+            // The `ereporter_restart` table doesn't record the reporter's sled
+            // ID, VPD identity, or ereport count, so gather those from the
+            // `ereport` table, grouped by restart ID. The sled ID is part of
+            // the `GROUP BY` (rather than aggregated) since it is constant for
+            // a given restart ID; the VPD identity may start out NULL and be
+            // filled in later, so we take its `MAX` (ignoring NULLs) as we do
+            // for the slot number. This may require a full table scan.
+            let ereport_info = dsl::ereport
+                .group_by((dsl::restart_id, dsl::sled_id))
                 .select((
                     dsl::restart_id,
-                    model::Reporter::as_select(),
-                    dsl::serial_number,
-                    dsl::part_number,
-                    min(dsl::time_collected),
+                    dsl::sled_id,
+                    max(dsl::serial_number),
+                    max(dsl::part_number),
                     count(dsl::ena).aggregate_distinct(),
                 ))
-                .into_boxed();
+                .load_async::<(
+                    Uuid,
+                    Option<Uuid>,
+                    Option<String>,
+                    Option<String>,
+                    i64,
+                )>(&conn)
+                .await
+                .context("querying ereport metadata by restart ID")?;
 
-            if let Some(slot) = slot {
-                if slot_type.is_some() {
-                    query = query
-                        .filter(dsl::slot.eq(db::model::SqlU16::new(slot)));
-                } else {
-                    anyhow::bail!(
-                        "cannot filter reporters by slot without a value for `--type`"
-                    )
-                }
-            }
+            Ok::<_, anyhow::Error>((restarts, ereport_info))
+        })
+        .await?;
 
-            if let Some(slot_type) = slot_type {
-                query = query
-                    .filter(dsl::slot_type.eq(slot_type));
-            }
-
-            if let Some(serial) = serial {
-                query = query.filter(dsl::serial_number.eq(serial.clone()));
-            }
-
-            query
-                .load_async::<(Uuid, model::Reporter, Option<String>, Option<String>, Option<DateTime<Utc>>, i64)>(
-                    &conn,
-                )
-                .await.context("listing reporter entries")
-        }
-    }).await?;
+    // Index the per-restart `ereport` metadata by restart ID.
+    let mut ereport_info = ereport_info
+        .into_iter()
+        .map(|(id, sled_id, serial, part_number, ereports)| {
+            (id, (sled_id, serial, part_number, ereports))
+        })
+        .collect::<HashMap<_, _>>();
 
     #[derive(Tabled)]
     #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
     struct ReporterRow {
-        #[tabled(display_with = "datetime_opt_rfc3339_concise")]
-        first_seen: Option<DateTime<Utc>>,
+        #[tabled(display_with = "datetime_rfc3339_concise")]
+        first_seen: DateTime<Utc>,
         id: Uuid,
         #[tabled(display_with = "display_option_invalid")]
         identity: Option<Reporter>,
@@ -578,30 +611,50 @@ async fn cmd_db_ereporters(
         serial: Option<String>,
         #[tabled(display_with = "display_option_blank", rename = "P/N")]
         part_number: Option<String>,
+        rack_id: RackUuid,
         ereports: i64,
     }
 
-    let mut rows = reporters
+    let mut rows = restarts
         .into_iter()
-        .map(|(id, reporter, serial, part_number, first_seen, ereports)| {
-            let identity = match reporter.try_into() {
+        .filter_map(|restart| {
+            let id = restart.id.into_untyped_uuid();
+            let (sled_id, serial, part_number, ereports) =
+                ereport_info.remove(&id).unwrap_or((None, None, None, 0));
+            // If we are filtering by serial number, skip any that don't match.
+            if want_serial.is_some() && serial.as_ref() != want_serial.as_ref()
+            {
+                return None;
+            }
+            // The reporter identity combines the restart's location (from
+            // `ereporter_restart`) with the sled ID (from `ereport`).
+            let identity = match (model::Reporter {
+                reporter: restart.reporter,
+                sled_id: sled_id
+                    .map(|sled| SledUuid::from_untyped_uuid(sled).into()),
+                slot_type: restart.slot_type,
+                slot: restart.slot,
+            })
+            .try_into()
+            {
                 Ok(reporter) => Some(reporter),
                 Err(err) => {
                     eprintln!(
-                        "error: encounted an invalid reporter entry for \
+                        "error: encountered an invalid reporter entry for \
                          reporter ID {id}: {err}",
                     );
                     None
                 }
             };
-            ReporterRow {
-                first_seen,
+            Some(ReporterRow {
+                first_seen: restart.time_first_seen,
                 id,
                 identity,
                 serial,
                 part_number,
                 ereports,
-            }
+                rack_id: *restart.rack_id(),
+            })
         })
         .collect::<Vec<_>>();
     rows.sort_by_key(|row| row.first_seen);

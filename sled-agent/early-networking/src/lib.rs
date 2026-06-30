@@ -28,7 +28,6 @@ use mg_api_types::bgp::policy::{
     ImportExportPolicy4 as MgImportExportPolicy4,
     ImportExportPolicy6 as MgImportExportPolicy6,
 };
-use mg_api_types::rdb::prefix::{Prefix, Prefix4, Prefix6};
 use mg_api_types::rib::BestpathFanoutRequest;
 use mg_api_types::static_routes::{
     AddStaticRoute4Request, AddStaticRoute6Request, StaticRoute4,
@@ -55,7 +54,7 @@ use slog::o;
 use slog::warn;
 use slog_error_chain::InlineErrorChain;
 use std::collections::{HashMap, HashSet};
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::time::{Duration, Instant};
 use thiserror::Error;
 use tokio::sync::watch;
@@ -465,10 +464,7 @@ impl<'a> EarlyNetworkSetup<'a> {
                     MgImportExportPolicy4::Allow(
                         list.iter()
                             .filter_map(|x| match x {
-                                IpNet::V4(p) => Some(Prefix4 {
-                                    length: p.width(),
-                                    value: p.addr(),
-                                }),
+                                IpNet::V4(p) => Some(*p),
                                 IpNet::V6(_) => None,
                             })
                             .collect(),
@@ -483,10 +479,7 @@ impl<'a> EarlyNetworkSetup<'a> {
                     MgImportExportPolicy4::Allow(
                         list.iter()
                             .filter_map(|x| match x {
-                                IpNet::V4(p) => Some(Prefix4 {
-                                    length: p.width(),
-                                    value: p.addr(),
-                                }),
+                                IpNet::V4(p) => Some(*p),
                                 IpNet::V6(_) => None,
                             })
                             .collect(),
@@ -506,10 +499,7 @@ impl<'a> EarlyNetworkSetup<'a> {
                     MgImportExportPolicy6::Allow(
                         list.iter()
                             .filter_map(|x| match x {
-                                IpNet::V6(p) => Some(Prefix6 {
-                                    length: p.width(),
-                                    value: p.addr(),
-                                }),
+                                IpNet::V6(p) => Some(*p),
                                 IpNet::V4(_) => None,
                             })
                             .collect(),
@@ -524,10 +514,7 @@ impl<'a> EarlyNetworkSetup<'a> {
                     MgImportExportPolicy6::Allow(
                         list.iter()
                             .filter_map(|x| match x {
-                                IpNet::V6(p) => Some(Prefix6 {
-                                    length: p.width(),
-                                    value: p.addr(),
-                                }),
+                                IpNet::V6(p) => Some(*p),
                                 IpNet::V4(_) => None,
                             })
                             .collect(),
@@ -574,7 +561,7 @@ impl<'a> EarlyNetworkSetup<'a> {
                     RouterPeerType::Numbered { ip: addr } => {
                         let bpc = MgBgpPeerConfig {
                             name: format!("{}", addr),
-                            host: format!("{}:179", addr),
+                            host: SocketAddr::new(addr.into(), 179),
                             hold_time: peer
                                 .hold_time
                                 .unwrap_or(BgpPeerConfig::DEFAULT_HOLD_TIME),
@@ -696,20 +683,7 @@ impl<'a> EarlyNetworkSetup<'a> {
                         code: x.clone(),
                         asn: config.asn,
                     }),
-                    originate: config
-                        .originate
-                        .iter()
-                        .map(|x| match x {
-                            IpNet::V4(ipv4_net) => Prefix::V4(Prefix4 {
-                                length: ipv4_net.width(),
-                                value: ipv4_net.addr(),
-                            }),
-                            IpNet::V6(ipv6_net) => Prefix::V6(Prefix6 {
-                                length: ipv6_net.width(),
-                                value: ipv6_net.addr(),
-                            }),
-                        })
-                        .collect(),
+                    originate: config.originate.clone(),
                 };
 
                 let fanout = BestpathFanoutRequest {
@@ -751,38 +725,17 @@ impl<'a> EarlyNetworkSetup<'a> {
                 let rib_priority =
                     r.rib_priority.unwrap_or(DEFAULT_RIB_PRIORITY_STATIC);
 
-                match (r.nexthop, r.destination.addr()) {
-                    (IpAddr::V4(nexthop), IpAddr::V4(dest_addr)) => {
-                        let prefix = Prefix4 {
-                            value: dest_addr,
-                            length: r.destination.width(),
-                        };
+                match (r.nexthop, r.destination) {
+                    (nexthop, IpNet::V4(prefix)) => {
                         let sr = StaticRoute4 {
-                            nexthop: IpAddr::V4(nexthop),
+                            nexthop,
                             prefix,
                             vlan_id,
                             rib_priority,
                         };
                         rq.routes.list.push(sr);
                     }
-                    (IpAddr::V6(nexthop), IpAddr::V4(dest_addr)) => {
-                        let prefix = Prefix4 {
-                            value: dest_addr,
-                            length: r.destination.width(),
-                        };
-                        let sr = StaticRoute4 {
-                            nexthop: IpAddr::V6(nexthop),
-                            prefix,
-                            vlan_id,
-                            rib_priority,
-                        };
-                        rq.routes.list.push(sr);
-                    }
-                    (IpAddr::V6(nexthop), IpAddr::V6(dest_addr)) => {
-                        let prefix = Prefix6 {
-                            value: dest_addr,
-                            length: r.destination.width(),
-                        };
+                    (IpAddr::V6(nexthop), IpNet::V6(prefix)) => {
                         let sr = StaticRoute6 {
                             nexthop,
                             prefix,
@@ -791,7 +744,7 @@ impl<'a> EarlyNetworkSetup<'a> {
                         };
                         rqv6.routes.list.push(sr);
                     }
-                    (IpAddr::V4(_), IpAddr::V6(_)) => {
+                    (IpAddr::V4(_), IpNet::V6(_)) => {
                         error!(
                             self.log,
                             "v6 destination over v4 nexthop not supported";

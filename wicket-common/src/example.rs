@@ -136,7 +136,7 @@ impl ExampleRackSetupData {
                     part_number: "model2".into(),
                     serial_number: "serial 4 5 6".into(),
                 },
-                bootstrap_ip: Some(Ipv6Addr::LOCALHOST),
+                bootstrap_ip: None
             },
         ];
 

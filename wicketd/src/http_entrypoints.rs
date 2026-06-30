@@ -15,7 +15,6 @@ use crate::mgs::MgsHandle;
 use crate::mgs::ShutdownInProgress;
 use crate::multirack_config::CurrentMultirackJoinConfig;
 use crate::transceivers::GetTransceiversResponse;
-use crate::transceivers::Handle as TransceiverHandle;
 use bootstrap_agent_lockstep_client::types::RackOperationStatus;
 use dropshot::ApiDescription;
 use dropshot::HttpError;
@@ -34,6 +33,7 @@ use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use wicket_common::WICKETD_TIMEOUT;
+use wicket_common::inventory::MgsV1Inventory;
 use wicket_common::inventory::MgsV1InventorySnapshot;
 use wicket_common::inventory::RackV1Inventory;
 use wicket_common::inventory::SpIdentifier;
@@ -85,19 +85,12 @@ impl WicketdApi for WicketdApiImpl {
 
         // We can't run RSS if we don't have an inventory from MGS yet; we always
         // need to fill in the bootstrap sleds first.
-        let inventory =
-            mgs_inventory_or_unavail(&ctx.mgs_handle, &ctx.transceiver_handle)
-                .await?;
+        let inventory = mgs_inventory_or_unavail(&ctx.mgs_handle).await?;
 
         let mut config = ctx.rss_or_multirack_join_config.lock().unwrap();
         let rss_config = config.rss_config_mut_or_conflict(
             "cannot get RSS config when not preparing for RSS",
         )?;
-
-        let inventory = inventory
-            .mgs
-            .expect("verified by `inventory_or_unavail`")
-            .inventory;
 
         let ddm_discovered_sleds = &ctx.bootstrap_peers.sleds();
         let config =
@@ -113,9 +106,7 @@ impl WicketdApi for WicketdApiImpl {
 
         // We can't join a multirack cluster if we don't have an inventory from
         // MGS yet; we always need to fill in the bootstrap sleds first.
-        let inventory =
-            mgs_inventory_or_unavail(&ctx.mgs_handle, &ctx.transceiver_handle)
-                .await?;
+        let inventory = mgs_inventory_or_unavail(&ctx.mgs_handle).await?;
 
         let mut config = ctx.rss_or_multirack_join_config.lock().unwrap();
         let join_config =
@@ -125,11 +116,6 @@ impl WicketdApi for WicketdApiImpl {
                     "multirack join config not found".to_string(),
                 )
             })?;
-
-        let inventory = inventory
-            .mgs
-            .expect("verified by `inventory_or_unavail`")
-            .inventory;
 
         let ddm_discovered_sleds = &ctx.bootstrap_peers.sleds();
         let config =
@@ -146,12 +132,7 @@ impl WicketdApi for WicketdApiImpl {
 
         // We can't run RSS if we don't have an inventory from MGS yet; we always
         // need to fill in the bootstrap sleds first.
-        let inventory =
-            mgs_inventory_or_unavail(&ctx.mgs_handle, &ctx.transceiver_handle)
-                .await?
-                .mgs
-                .expect("verified by `inventory_or_unavail`")
-                .inventory;
+        let inventory = mgs_inventory_or_unavail(&ctx.mgs_handle).await?;
 
         let mut config = ctx.rss_or_multirack_join_config.lock().unwrap();
 
@@ -180,12 +161,7 @@ impl WicketdApi for WicketdApiImpl {
 
         // We can't join a multirack cluster if we don't have an inventory from
         // MGS yet; we always need to fill in the bootstrap sleds first.
-        let inventory =
-            mgs_inventory_or_unavail(&ctx.mgs_handle, &ctx.transceiver_handle)
-                .await?
-                .mgs
-                .expect("verified by `inventory_or_unavail`")
-                .inventory;
+        let inventory = mgs_inventory_or_unavail(&ctx.mgs_handle).await?;
 
         let ddm_discovered_sleds = &ctx.bootstrap_peers.sleds();
         let mut config = ctx.rss_or_multirack_join_config.lock().unwrap();
@@ -520,11 +496,7 @@ impl WicketdApi for WicketdApiImpl {
         rqctx: RequestContext<ServerContext>,
     ) -> Result<HttpResponseOk<GetLocationResponse>, HttpError> {
         let rqctx = rqctx.context();
-        let inventory = mgs_inventory_or_unavail(
-            &rqctx.mgs_handle,
-            &rqctx.transceiver_handle,
-        )
-        .await?;
+        let inventory = mgs_inventory_or_unavail(&rqctx.mgs_handle).await?;
 
         let switch_id = rqctx.local_switch_id().await;
         let sled_baseboard_id = rqctx.baseboard_id.clone();
@@ -534,12 +506,7 @@ impl WicketdApi for WicketdApiImpl {
 
         // Safety: `inventory_or_unavail` returns an error if there is no
         // MGS-derived inventory, so option is always `Some(_)`.
-        for sp in &inventory
-            .mgs
-            .expect("checked by `inventory_or_unavail`")
-            .inventory
-            .sps
-        {
+        for sp in &inventory.sps {
             if Some(sp.id) == switch_id {
                 switch_baseboard = sp.state.as_ref().map(|state| {
                     // TODO-correctness `new_gimlet` isn't the right name: this is a
@@ -961,11 +928,10 @@ impl WicketdApi for WicketdApiImpl {
 // to get the transceivers, that's not considered a fatal 503.
 async fn mgs_inventory_or_unavail(
     mgs_handle: &MgsHandle,
-    transceiver_handle: &TransceiverHandle,
-) -> Result<RackV1Inventory, HttpError> {
-    let mgs = match mgs_handle.get_cached_inventory().await {
-        Ok(GetMgsInventoryResponse::Response { inventory, mgs_last_seen }) => {
-            Some(MgsV1InventorySnapshot { inventory, last_seen: mgs_last_seen })
+) -> Result<MgsV1Inventory, HttpError> {
+    match mgs_handle.get_cached_inventory().await {
+        Ok(GetMgsInventoryResponse::Response { inventory, .. }) => {
+            Ok(inventory)
         }
         Ok(GetMgsInventoryResponse::Unavailable) => {
             return Err(HttpError::for_unavail(
@@ -979,18 +945,7 @@ async fn mgs_inventory_or_unavail(
                 "Server is shutting down".into(),
             ));
         }
-    };
-    let transceivers = match transceiver_handle.get_transceivers() {
-        GetTransceiversResponse::Response {
-            transceivers,
-            transceivers_last_seen,
-        } => Some(TransceiverInventorySnapshot {
-            inventory: transceivers,
-            last_seen: transceivers_last_seen,
-        }),
-        GetTransceiversResponse::Unavailable => None,
-    };
-    Ok(RackV1Inventory { mgs, transceivers })
+    }
 }
 
 fn http_error_from_client_error(

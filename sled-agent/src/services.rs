@@ -102,7 +102,6 @@ use sled_agent_types::system_networking::SystemNetworkingConfig;
 use sled_agent_types::uplink::HostPortConfig;
 use sled_hardware::DendriteAsic;
 use sled_hardware::SledMode;
-use sled_hardware::is_oxide_sled;
 use sled_hardware::underlay;
 use sled_hardware_types::Baseboard;
 use slog::Logger;
@@ -975,10 +974,6 @@ impl ServiceManager {
     ) -> Result<Vec<(Link, bool)>, Error> {
         let mut links: Vec<(Link, bool)> = Vec::new();
 
-        let is_oxide_sled = is_oxide_sled().map_err(|e| {
-            Error::Underlay(underlay::Error::SystemDetection(e))
-        })?;
-
         for svc_details in zone_args.switch_zone_services() {
             match &svc_details {
                 SwitchService::Tfport { pkt_source, asic: _ } => {
@@ -998,7 +993,7 @@ impl ServiceManager {
                             links.push((link, false));
                         }
                         Err(_) => {
-                            if is_oxide_sled {
+                            if self.inner.sidecar_revision.is_physical() {
                                 return Err(Error::MissingDevice {
                                     device: pkt_source.to_string(),
                                 });
@@ -2562,6 +2557,8 @@ impl ServiceManager {
             ),
         };
 
+        let real_sidecar = self.inner.sidecar_revision.is_physical();
+
         // Define all services in the switch zone
         let mut mgs_service = ServiceBuilder::new("oxide/mgs");
         let mut wicketd_service = ServiceBuilder::new("oxide/wicketd");
@@ -2896,11 +2893,7 @@ impl ServiceManager {
                         );
                     }
 
-                    let is_oxide_sled = is_oxide_sled().map_err(|e| {
-                        Error::Underlay(underlay::Error::SystemDetection(e))
-                    })?;
-
-                    if is_oxide_sled {
+                    if real_sidecar {
                         // Collect the prefixes for each techport.
                         let nameaddr = bootstrap_name_and_address.as_ref();
                         let techport_prefixes = match nameaddr {
@@ -2929,7 +2922,7 @@ impl ServiceManager {
                         }
                     };
 
-                    if is_oxide_sled
+                    if real_sidecar
                         || asic == &DendriteAsic::SoftNpuPropolisDevice
                         || asic == &DendriteAsic::TofinoAsic
                     {
@@ -3096,12 +3089,7 @@ impl ServiceManager {
                         }
                     }
 
-                    let is_oxide_sled = is_oxide_sled().map_err(|e| {
-                        Error::Underlay(underlay::Error::SystemDetection(e))
-                    })?;
-
-                    let maghemite_interfaces: Vec<AddrObject> = if is_oxide_sled
-                    {
+                    let maghemite_interfaces: Vec<_> = if real_sidecar {
                         (0..32)
                             .map(|i| {
                                 // See the `tfport_name` function
@@ -3145,7 +3133,7 @@ impl ServiceManager {
                         );
                     }
 
-                    if is_oxide_sled {
+                    if real_sidecar {
                         mg_ddm_config = mg_ddm_config
                             .add_property("dpd_host", "astring", "[::1]")
                             .add_property(

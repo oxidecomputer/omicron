@@ -2,22 +2,22 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::SitrepBuilder;
-use crate::analysis_input::Input;
+//! Fault management diagnosis engines.
+//!
+//! Each submodule defines one diagnosis engine (DE). `analyze` dispatches to
+//! each engine in turn; engines are deterministic and idempotent per RFD 603.
 
-pub fn analyze(
-    _input: &Input,
-    _builder: &mut SitrepBuilder<'_>,
-) -> anyhow::Result<()> {
-    anyhow::bail!("FM analysis is not yet implemented")
+use crate::SitrepBuilder;
+
+mod physical_disk;
+
+pub fn analyze(builder: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
+    physical_disk::analyze(builder)?;
+    Ok(())
 }
 
-/// Ereport classes that the diagnosis engine currently understands.
-/// Preparation only surfaces ereports whose class is in this set — there is
-/// no value in loading ereports FM analysis cannot consume.
-///
-/// Empty until [`analyze`] gains real handling. Grow this alongside FM
-/// analysis as new classes gain support.
+/// Ereport classes that any diagnosis engine in this build of Nexus knows
+/// how to consume. The background task uses this to filter loaded ereports.
 ///
 /// **NULL-class ereports are intentionally excluded by the loader's SQL
 /// filter** (`class = ANY(...)` never matches NULL). If FM analysis ever

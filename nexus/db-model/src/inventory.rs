@@ -34,6 +34,7 @@ use nexus_db_schema::schema::inv_zone_manifest_zone;
 use nexus_db_schema::schema::{
     hw_baseboard_id, inv_caboose, inv_clickhouse_keeper_membership,
     inv_cockroachdb_status, inv_collection, inv_collection_error, inv_dataset,
+    inv_fmd_host_case, inv_fmd_resource, inv_fmd_status,
     inv_host_phase_1_active_slot, inv_host_phase_1_flash_hash,
     inv_internal_dns, inv_last_reconciliation_dataset_result,
     inv_last_reconciliation_disk_result,
@@ -64,6 +65,8 @@ use omicron_common::update::OmicronInstallManifestSource;
 use omicron_common::zpool_name::ZpoolName;
 use omicron_uuid_kinds::DatasetKind;
 use omicron_uuid_kinds::DatasetUuid;
+use omicron_uuid_kinds::FmdHostCaseKind;
+use omicron_uuid_kinds::FmdResourceKind;
 use omicron_uuid_kinds::InternalZpoolKind;
 use omicron_uuid_kinds::MupdateKind;
 use omicron_uuid_kinds::MupdateOverrideKind;
@@ -85,6 +88,10 @@ use omicron_uuid_kinds::{CollectionUuid, OmicronZoneUuid};
 use sled_agent_types::inventory::BootImageHeader;
 use sled_agent_types::inventory::BootPartitionDetails;
 use sled_agent_types::inventory::ConfigReconcilerInventoryStatus;
+use sled_agent_types::inventory::FmdHostCase;
+use sled_agent_types::inventory::FmdInventory;
+use sled_agent_types::inventory::FmdInventoryError;
+use sled_agent_types::inventory::FmdResource;
 use sled_agent_types::inventory::HostPhase2DesiredContents;
 use sled_agent_types::inventory::HostPhase2DesiredSlots;
 use sled_agent_types::inventory::ManifestBootInventory;
@@ -2124,6 +2131,163 @@ impl InvSvcEnabledNotOnlineParseError {
             sled_id: sled_id.into(),
             id,
             error_message,
+        }
+    }
+}
+
+impl_enum_type!(
+    FmdInventoryErrorKindEnum:
+
+    #[derive(Copy, Clone, Debug, AsExpression, FromSqlRow, PartialEq)]
+    pub enum FmdInventoryErrorKind;
+
+    // Enum values
+    FmdError => b"fmd_error"
+    TooManyCases => b"too_many_cases"
+    TooManyResources => b"too_many_resources"
+);
+
+impl From<sled_agent_types::inventory::FmdInventoryErrorKind>
+    for FmdInventoryErrorKind
+{
+    fn from(value: sled_agent_types::inventory::FmdInventoryErrorKind) -> Self {
+        use sled_agent_types::inventory::FmdInventoryErrorKind as ApiKind;
+        match value {
+            ApiKind::FmdError => FmdInventoryErrorKind::FmdError,
+            ApiKind::TooManyCases => FmdInventoryErrorKind::TooManyCases,
+            ApiKind::TooManyResources => {
+                FmdInventoryErrorKind::TooManyResources
+            }
+        }
+    }
+}
+
+impl From<FmdInventoryErrorKind>
+    for sled_agent_types::inventory::FmdInventoryErrorKind
+{
+    fn from(value: FmdInventoryErrorKind) -> Self {
+        use sled_agent_types::inventory::FmdInventoryErrorKind as ApiKind;
+        match value {
+            FmdInventoryErrorKind::FmdError => ApiKind::FmdError,
+            FmdInventoryErrorKind::TooManyCases => ApiKind::TooManyCases,
+            FmdInventoryErrorKind::TooManyResources => {
+                ApiKind::TooManyResources
+            }
+        }
+    }
+}
+
+/// One row per (collection, sled) recording the outcome of FMD inventory
+/// collection. Both `error_kind` and `error_message` are `NULL` when the
+/// daemon was queried successfully; both are set when collection failed.
+#[derive(Queryable, Clone, Debug, Selectable, Insertable)]
+#[diesel(table_name = inv_fmd_status)]
+pub struct InvFmdStatus {
+    pub inv_collection_id: DbTypedUuid<CollectionKind>,
+    pub sled_id: DbTypedUuid<SledKind>,
+    pub error_kind: Option<FmdInventoryErrorKind>,
+    pub error_message: Option<String>,
+}
+
+impl InvFmdStatus {
+    pub fn new(
+        inv_collection_id: CollectionUuid,
+        sled_id: SledUuid,
+        result: &Result<FmdInventory, FmdInventoryError>,
+    ) -> Self {
+        let (error_kind, error_message) = match result {
+            Ok(_) => (None, None),
+            Err(err) => (Some(err.kind.into()), Some(err.message.clone())),
+        };
+        Self {
+            inv_collection_id: inv_collection_id.into(),
+            sled_id: sled_id.into(),
+            error_kind,
+            error_message,
+        }
+    }
+}
+
+#[derive(Queryable, Clone, Debug, Selectable, Insertable)]
+#[diesel(table_name = inv_fmd_host_case)]
+pub struct InvFmdHostCase {
+    pub inv_collection_id: DbTypedUuid<CollectionKind>,
+    pub sled_id: DbTypedUuid<SledKind>,
+    pub case_id: DbTypedUuid<FmdHostCaseKind>,
+    pub code: String,
+    pub url: String,
+    pub event: Option<serde_json::Value>,
+}
+
+impl InvFmdHostCase {
+    pub fn new(
+        inv_collection_id: CollectionUuid,
+        sled_id: SledUuid,
+        case: &FmdHostCase,
+    ) -> Self {
+        Self {
+            inv_collection_id: inv_collection_id.into(),
+            sled_id: sled_id.into(),
+            case_id: case.uuid.into(),
+            code: case.code.clone(),
+            url: case.url.clone(),
+            event: case.event.clone(),
+        }
+    }
+}
+
+impl From<InvFmdHostCase> for FmdHostCase {
+    fn from(row: InvFmdHostCase) -> Self {
+        Self {
+            uuid: row.case_id.into(),
+            code: row.code,
+            url: row.url,
+            event: row.event,
+        }
+    }
+}
+
+#[derive(Queryable, Clone, Debug, Selectable, Insertable)]
+#[diesel(table_name = inv_fmd_resource)]
+pub struct InvFmdResource {
+    pub inv_collection_id: DbTypedUuid<CollectionKind>,
+    pub sled_id: DbTypedUuid<SledKind>,
+    pub resource_id: DbTypedUuid<FmdResourceKind>,
+    pub fmri: String,
+    pub case_id: DbTypedUuid<FmdHostCaseKind>,
+    pub faulty: bool,
+    pub unusable: bool,
+    pub invisible: bool,
+}
+
+impl InvFmdResource {
+    pub fn new(
+        inv_collection_id: CollectionUuid,
+        sled_id: SledUuid,
+        resource: &FmdResource,
+    ) -> Self {
+        Self {
+            inv_collection_id: inv_collection_id.into(),
+            sled_id: sled_id.into(),
+            resource_id: resource.uuid.into(),
+            fmri: resource.fmri.clone(),
+            case_id: resource.case_id.into(),
+            faulty: resource.faulty,
+            unusable: resource.unusable,
+            invisible: resource.invisible,
+        }
+    }
+}
+
+impl From<InvFmdResource> for FmdResource {
+    fn from(row: InvFmdResource) -> Self {
+        Self {
+            uuid: row.resource_id.into(),
+            fmri: row.fmri,
+            case_id: row.case_id.into(),
+            faulty: row.faulty,
+            unusable: row.unusable,
+            invisible: row.invisible,
         }
     }
 }

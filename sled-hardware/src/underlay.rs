@@ -7,7 +7,6 @@
 
 use std::net::Ipv6Addr;
 
-use crate::is_oxide_sled;
 use illumos_utils::addrobj;
 use illumos_utils::addrobj::AddrObject;
 use illumos_utils::dladm;
@@ -19,6 +18,8 @@ use illumos_utils::dladm::PhysicalLink;
 use illumos_utils::dladm::SetLinkpropError;
 use illumos_utils::zone::Zones;
 use omicron_common::api::external::MacAddr;
+
+use crate::DataLinks;
 
 #[doc(inline)]
 pub use sled_hardware_types::underlay::BOOTSTRAP_MASK;
@@ -51,10 +52,8 @@ pub enum Error {
 /// Convenience function that calls
 /// `ensure_links_have_global_zone_link_local_v6_addresses()` with the links
 /// returned by `find_chelsio_links()`.
-pub async fn find_nics(
-    config_data_links: &[String; 2],
-) -> Result<Vec<AddrObject>, Error> {
-    let underlay_nics = find_chelsio_links(config_data_links).await?;
+pub async fn find_nics(links: &DataLinks) -> Result<Vec<AddrObject>, Error> {
+    let underlay_nics = find_chelsio_links(links).await?;
 
     // Before these links have any consumers (eg. IP interfaces), set the MTU.
     // If we have previously set the MTU, do not attempt to re-set.
@@ -72,25 +71,23 @@ pub async fn find_nics(
 }
 
 /// Return the Chelsio links on the system.
-///
-/// For a real Oxide sled, this should return the devices like `cxgbeN`. For a
-/// developer machine, or generally a non-sled, this will return the
-/// VNICs we use to emulate those Chelsio links.
 pub async fn find_chelsio_links(
-    config_data_links: &[String; 2],
+    links: &DataLinks,
 ) -> Result<Vec<PhysicalLink>, Error> {
-    if is_oxide_sled().map_err(Error::SystemDetection)? {
-        Dladm::list_physical().await.map_err(Error::FindLinks).map(|links| {
-            links
-                .into_iter()
-                .filter(|link| link.0.starts_with(CHELSIO_LINK_PREFIX))
-                .collect()
-        })
-    } else {
-        Ok(config_data_links
-            .into_iter()
+    match links {
+        DataLinks::Virtual { devices } => Ok(devices
+            .iter()
             .map(|name| PhysicalLink(name.to_string()))
-            .collect())
+            .collect()),
+        DataLinks::Physical => Dladm::list_physical()
+            .await
+            .map_err(Error::FindLinks)
+            .map(|links| {
+                links
+                    .into_iter()
+                    .filter(|link| link.0.starts_with(CHELSIO_LINK_PREFIX))
+                    .collect()
+            }),
     }
 }
 

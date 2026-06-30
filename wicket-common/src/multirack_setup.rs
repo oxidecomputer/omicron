@@ -9,7 +9,6 @@ use crate::rack_setup::{
     BootstrapSledDescription, GetBgpAuthKeyInfoResponse,
     UserSpecifiedRackNetworkConfig,
 };
-use omicron_common::api::internal::shared::AllowedSourceIps;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
@@ -26,7 +25,6 @@ pub struct MultirackJoinConfigBaseUserInput {
     /// List of slot numbers only.
     pub bootstrap_slots: BTreeSet<u16>,
     pub rack_network_config: UserSpecifiedRackNetworkConfig,
-    pub allowed_source_ips: AllowedSourceIps,
 }
 
 /// A version of the multirack join configuration which contains learned
@@ -46,6 +44,5 @@ pub struct MultirackJoinConfigBaseUserInput {
 pub struct CurrentMultirackJoinUserConfig {
     pub bootstrap_sleds: BTreeSet<BootstrapSledDescription>,
     pub rack_network_config: UserSpecifiedRackNetworkConfig,
-    pub allowed_source_ips: AllowedSourceIps,
     pub bgp_auth_keys: GetBgpAuthKeyInfoResponse,
 }

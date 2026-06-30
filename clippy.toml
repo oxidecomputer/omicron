@@ -46,6 +46,18 @@ disallowed-methods = [
     # (or until a gone check aborts).
     { path = "progenitor_extras::retry::retry_operation", reason = "use retry_operation_indefinitely instead" },
     { path = "progenitor_extras::retry::retry_operation_while", reason = "use retry_operation_while_indefinitely instead" },
+
+    # We use camino-tempfile in Omicron.
+    { path = "tempfile::tempdir", reason = "use camino_tempfile::tempdir instead, which yields a Utf8TempDir" },
+    { path = "tempfile::tempdir_in", reason = "use camino_tempfile::tempdir_in instead, which yields a Utf8TempDir" },
+    { path = "tempfile::tempfile", reason = "use camino_tempfile::tempfile instead" },
+    { path = "tempfile::tempfile_in", reason = "use camino_tempfile::tempfile_in instead" },
+]
+
+disallowed-types = [
+    # We use camino-tempfile in Omicron.
+    { path = "tempfile::TempDir", reason = "use camino_tempfile::Utf8TempDir instead" },
+    { path = "tempfile::NamedTempFile", reason = "use camino_tempfile::NamedUtf8TempFile instead" },
 ]
 
 [[disallowed-macros]]
