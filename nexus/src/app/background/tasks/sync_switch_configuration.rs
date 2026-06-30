@@ -18,8 +18,7 @@ use slog::{Logger, o};
 use internal_dns_resolver::Resolver;
 use ipnetwork::IpNetwork;
 use nexus_db_model::{
-    AddressLotBlock, BgpConfig, BootstoreConfig, INFRA_LOT, LoopbackAddress,
-    NETWORK_KEY,
+    BgpConfig, BootstoreConfig, LoopbackAddress, NETWORK_KEY,
 };
 use tokio::sync::watch;
 use uuid::Uuid;
@@ -62,7 +61,6 @@ use omicron_common::{
 };
 use serde_json::json;
 use sled_agent_client::types::HostPortConfig;
-use sled_agent_types::early_networking::BfdPeerConfig;
 use sled_agent_types::early_networking::EarlyNetworkConfigEnvelope;
 use sled_agent_types::early_networking::InvalidIpAddrError;
 use sled_agent_types::early_networking::LldpAdminStatus;
@@ -960,71 +958,25 @@ impl BackgroundTask for SwitchPortSettingsManager {
                 // calculate and apply bootstore changes
                 //
 
-                // The bootstore config is computed from the applied port
-                // settings; filter to those here.
-                let applied_ports: Vec<(
-                    SwitchSlot,
-                    &nexus_db_model::SwitchPort,
-                    &SwitchPortSettingsCombinedResult,
-                )> = changes
-                    .iter()
-                    .filter_map(|(switch_slot, port, change)| match change {
-                        PortSettingsChange::Apply(info) => {
-                            Some((*switch_slot, port, info.as_ref()))
-                        }
-                        PortSettingsChange::Clear => None,
-                    })
-                    .collect();
-
-                // Read the infra IP range and BFD configuration; the builder
-                // itself is a pure, in-memory computation.
-                let blocks = match self
-                    .datastore
-                    .address_lot_blocks_by_name(opctx, INFRA_LOT.into())
-                    .await
-                {
-                    Ok(blocks) => blocks,
-                    Err(e) => {
-                        error!(log, "error while fetching address lot blocks from db"; "error" => %e);
-                        continue;
-                    }
-                };
-
-                // currently there should only be one block assigned. If there is more than one
-                // block, grab the first one and emit a warning.
-                if blocks.len() > 1 {
-                    warn!(log, "more than one block assigned to infra lot"; "blocks" => ?blocks);
-                }
-
-                let (infra_ip_first, infra_ip_last) = match blocks.get(0) {
-                    Some(AddressLotBlock { first_address, last_address, .. }) => {
-                        (first_address.ip(), last_address.ip())
-                    }
-                    None => {
-                        error!(log, "no blocks assigned to infra lot");
-                        continue;
-                    }
-                };
-
-                let bfd =
-                    match bfd_peer_configs_from_db(&self.datastore, opctx).await
-                    {
-                        Ok(bfd) => bfd,
-                        Err(e) => {
-                            error!(log, "error fetching bfd config from db"; "error" => %e);
-                            continue;
-                        }
-                    };
-
-                let input = nexus_switch_config_preparation::assemble(
+                let input = match nexus_switch_config_preparation::read_and_assemble(
+                    &self.datastore,
+                    opctx,
+                    &log,
                     rack.rack_subnet,
-                    &applied_ports,
-                    &switch_bgp_config,
-                    &bgp_announce_prefixes,
-                    infra_ip_first,
-                    infra_ip_last,
-                    bfd,
-                );
+                )
+                .await
+                {
+                    Ok(input) => input,
+                    Err(e) => {
+                        error!(
+                            log,
+                            "failed to read bootstore network config; \
+                             skipping rack";
+                            "error" => InlineErrorChain::new(&e),
+                        );
+                        continue;
+                    }
+                };
 
                 let rack_network_config =
                     match nexus_switch_config::build_rack_network_config(
@@ -1274,41 +1226,6 @@ where
     let left = left.iter().collect::<HashSet<&T>>();
     let right = right.iter().collect::<HashSet<&T>>();
     left == right
-}
-
-async fn bfd_peer_configs_from_db(
-    datastore: &DataStore,
-    opctx: &OpContext,
-) -> Result<Vec<BfdPeerConfig>, omicron_common::api::external::Error> {
-    let db_data =
-        datastore.bfd_session_list(opctx, &DataPageParams::max_page()).await?;
-
-    let mut result = Vec::new();
-    for spec in db_data.into_iter() {
-        let config = BfdPeerConfig {
-            local: spec.local.map(|x| x.ip()),
-            remote: spec.remote.ip(),
-            detection_threshold: spec
-                .detection_threshold
-                .0
-                .try_into()
-                .map_err(|_| {
-                    omicron_common::api::external::Error::InternalError {
-                        internal_message: format!(
-                            "db_bfd_peer_configs: detection threshold \
-                             overflow: {}",
-                            spec.detection_threshold.0,
-                        ),
-                    }
-                })?,
-            required_rx: spec.required_rx.0.into(),
-            mode: spec.mode.into(),
-            switch: spec.switch_slot.into(),
-        };
-        result.push(config);
-    }
-
-    Ok(result)
 }
 
 /// Ensure that a loopback address is created.
