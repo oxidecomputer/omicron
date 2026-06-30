@@ -101,39 +101,42 @@ pub struct RecoveryFailure {
     pub saga_id: SagaId,
     pub current_sec: Option<SecId>,
     /// Whether this failure is worth retrying on a future recovery pass.
-    pub class: RecoveryFailureClass,
+    pub kind: RecoveryFailureKind,
     pub message: String,
 }
 
 /// Whether a saga recovery failure is transient or permanent.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
-// TODO-K: I don't like "class" maybe "kind" is better? Or another more accurate
-// term?
-pub enum RecoveryFailureClass {
+pub enum RecoveryFailureKind {
     /// The failure is likely temporary. The next recovery pass should retry.
     Transient,
     /// The failure is permanent. Retrying recovery will not change anything.
     Permanent,
 }
 
-impl RecoveryFailureClass {
-    // TODO-K: adapt comment to reflect changes
+impl RecoveryFailureKind {
     /// Classify a saga-recovery error by its HTTP-style status.
     ///
     /// Saga recovery errors are [`Error`]s, which carry an HTTP-style status.
-    /// We treat only [`Error::ServiceUnavailable`] (HTTP 503) -- how the
-    /// datastore signals "temporarily unreachable, try again" -- as transient.
-    /// Everything else, notably [`Error::InternalError`] (HTTP 500) from a
-    /// failed `saga_resume`/`saga_start`, is permanent: the saga cannot be
+    /// We treat an error as *transient* when the condition it describes may
+    /// resolve on its own, so retrying recovery on a later pass could succeed:
+    ///
+    /// - [`Error::ServiceUnavailable`] (HTTP 503): the datastore (or another
+    ///   dependency) is temporarily unreachable.
+    /// - [`Error::InsufficientCapacity`] (HTTP 507): capacity may free up.
+    /// - [`Error::Unauthenticated`] (HTTP 401): credentials may have been
+    ///   temporarily unavailable.
+    ///
+    /// Everything else is *permanent*: retrying won't change the outcome. In
+    /// particular, [`Error::InternalError`] (HTTP 500), which is how a failed
+    /// `saga_resume`/`saga_start` surfaces, means the saga cannot be
     /// recovered, so it should be abandoned rather than retried forever.
     pub fn classify(error: &Error) -> Self {
         match error {
             Error::ServiceUnavailable { .. }
             | Error::InsufficientCapacity { .. }
             | Error::Unauthenticated { .. } => Self::Transient,
-
-            // Permanent failures: retrying recovery won't change the outcome.
             Error::InternalError { .. }
             | Error::TypeVersionMismatch { .. }
             | Error::ObjectNotFound { .. }
@@ -147,9 +150,8 @@ impl RecoveryFailureClass {
         }
     }
 
-    // TODO-K: Do I really need this?
-    pub fn is_permanent(self) -> bool {
-        matches!(self, Self::Permanent)
+    pub fn is_transient(self) -> bool {
+        matches!(self, Self::Transient)
     }
 }
 

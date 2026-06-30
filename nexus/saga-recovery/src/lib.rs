@@ -93,7 +93,7 @@ pub use status::DebuggingHistory;
 pub use status::LastPass;
 pub use status::LastPassSuccess;
 pub use status::RecoveryFailure;
-pub use status::RecoveryFailureClass;
+pub use status::RecoveryFailureKind;
 pub use status::RecoverySuccess;
 pub use status::Report;
 

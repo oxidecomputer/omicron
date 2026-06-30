@@ -300,87 +300,13 @@ impl<N: MakeSagaContext> SagaRecoveryInner<N> {
                             nexus_saga_recovery::LastPassSuccess::new(
                                 &plan, &execution,
                             );
-
-                        // TODO-K: Extract abandon code into it's own method so
-                        // we can test the functionality
-
-                        // Abandon any sagas that failed to recover with a
-                        // non-transient error. A transient failure (e.g. the
-                        // datastore was briefly unavailable) will be retried on
-                        // the next recovery pass.
-                        for failure in &execution.failed {
-                            let RecoveryFailure {
-                                time,
-                                saga_id,
-                                current_sec,
-                                class,
-                                message,
-                            } = failure;
-
-                            // TODO-K: This continue seems unnecessary. we can
-                            // just do a if class.is_permanent() and then attempt
-                            // to abandon
-                            if !class.is_permanent() {
-                                // Transient: the next recovery pass will retry.
-                                continue;
-                            }
-
-                            match current_sec {
-                                Some(sec_id) => {
-                                    warn!(
-                                        log,
-                                        "recovered saga failed permanently; \
-                                        marking as abandoned";
-                                        "saga_id" => %saga_id,
-                                        "message" => message,
-                                        "time_failed" => ?time,
-                                    );
-                                    // We deliberately don't propagate this
-                                    // error: abandoning is idempotent and best
-                                    // effort.  If it fails, the saga remains a
-                                    // recovery candidate and the next pass will
-                                    // try again.
-                                    if let Err(error) = self
-                                        .datastore
-                                        .saga_update_state(
-                                            *saga_id,
-                                            SagaStateTransition::Abandoned {
-                                                reason:
-                                                    SagaReasonAbandoned::Unrecoverable,
-                                                information: message.clone(),
-                                            },
-                                            *sec_id,
-                                        )
-                                        // TODO-K: Should we wait for the
-                                        // saga to be marked as abandoned?
-                                        // we can always try again in the next
-                                        // recovery pass no? We don't want to
-                                        // stop everything if the request hangs
-                                        // for some reason
-                                        .await
-                                    {
-                                        warn!(
-                                            log,
-                                            "failed to mark saga as abandoned";
-                                            "saga_id" => %saga_id,
-                                            "error" => %error,
-                                        );
-                                    }
-                                }
-                                None => {
-                                    warn!(
-                                        log,
-                                        "unable to mark saga as abandoned; \
-                                        missing current SEC";
-                                        "saga_id" => %saga_id,
-                                        "message" => message,
-                                        "time_failed" => ?time,
-                                    );
-                                }
-                            }
-                        }
-
-                        self.status.update_after_pass(&plan, execution, nstarted);
+                        self.abandon_non_transient_failed_sagas(
+                            log,
+                            &execution.failed,
+                        )
+                        .await;
+                        self.status
+                            .update_after_pass(&plan, execution, nstarted);
                         (Some((future, last_pass_success)), true)
                     }
                     Err(error) => {
@@ -390,6 +316,79 @@ impl<N: MakeSagaContext> SagaRecoveryInner<N> {
                 }
             })
             .await
+    }
+
+    /// Abandon any sagas that failed to recover with a non-transient error.
+    ///
+    /// A transient failure means the saga remains a recovery candidate and the
+    /// next pass will retry it.
+    async fn abandon_non_transient_failed_sagas(
+        &self,
+        log: &slog::Logger,
+        failures: &[RecoveryFailure],
+    ) {
+        for failure in failures {
+            self.abandon_non_transient_failed_saga(log, failure).await;
+        }
+    }
+
+    /// If a single saga failed to recover due to a non-transient error, mark
+    /// it as abandoned.
+    async fn abandon_non_transient_failed_saga(
+        &self,
+        log: &slog::Logger,
+        failure: &RecoveryFailure,
+    ) {
+        let RecoveryFailure { time, saga_id, current_sec, kind, message } =
+            failure;
+
+        // Failure is transient, the next recovery pass will retry.
+        if kind.is_transient() {
+            return;
+        }
+
+        let Some(sec_id) = current_sec else {
+            warn!(
+                log,
+                "unable to mark saga as abandoned; missing current SEC";
+                "saga_id" => %saga_id,
+                "message" => message,
+                "time_failed" => ?time,
+            );
+            return;
+        };
+
+        warn!(
+            log,
+            "saga recovery failed permanently; marking as abandoned";
+            "saga_id" => %saga_id,
+            "message" => message,
+            "time_failed" => ?time,
+        );
+
+        // Abandoning is idempotent and best effort.  We await the write (it's a
+        // quick, bounded datastore call), but if it fails we just log and move
+        // on: the saga stays a recovery candidate, so a later pass will try
+        // again.  We don't block the rest of the pass on it beyond this call.
+        if let Err(error) = self
+            .datastore
+            .saga_update_state(
+                *saga_id,
+                SagaStateTransition::Abandoned {
+                    reason: SagaReasonAbandoned::Unrecoverable,
+                    information: message.clone(),
+                },
+                *sec_id,
+            )
+            .await
+        {
+            warn!(
+                log,
+                "failed to mark saga as abandoned";
+                "saga_id" => %saga_id,
+                "error" => %error,
+            );
+        }
     }
 
     /// Check that for each saga that we inferred was done, Steno agrees
@@ -484,7 +483,6 @@ impl<N: MakeSagaContext> SagaRecoveryInner<N> {
         saga_logger: &slog::Logger,
         saga: &nexus_db_model::Saga,
         recovery: &SagaRecoveryInProgress,
-        // TODO-K: return error , make sure error says whether it's transient or not
     ) -> Result<BoxFuture<'static, Result<(), Error>>, Error> {
         let datastore = &self.datastore;
         let saga_id: SagaId = saga.id.into();
@@ -512,7 +510,6 @@ impl<N: MakeSagaContext> SagaRecoveryInner<N> {
             .map_err(|error| {
                 // TODO-robustness We want to differentiate between retryable and
                 // not here
-                // TODO-K: This is a non-transient error catch this
                 Error::internal_error(&format!(
                     "failed to resume saga: {:#}",
                     error

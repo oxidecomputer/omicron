@@ -5,7 +5,7 @@
 //! Guts of the saga recovery bookkeeping
 
 use super::status::RecoveryFailure;
-use super::status::RecoveryFailureClass;
+use super::status::RecoveryFailureKind;
 use super::status::RecoverySuccess;
 use chrono::{DateTime, Utc};
 use nexus_db_model::SecId;
@@ -495,7 +495,7 @@ impl ExecutionBuilder {
             time: Utc::now(),
             saga_id,
             current_sec,
-            class: RecoveryFailureClass::classify(error),
+            kind: RecoveryFailureKind::classify(error),
             message: InlineErrorChain::new(error).to_string(),
         });
     }
@@ -690,7 +690,6 @@ mod test {
             if i == to_recover.len() - 1 {
                 execution_builder.saga_recovery_failure(
                     *saga_id,
-                    // TODO-K: verify this is correct
                     Some(SecId::from(Uuid::new_v4())),
                     &Error::internal_error("test error"),
                 );
