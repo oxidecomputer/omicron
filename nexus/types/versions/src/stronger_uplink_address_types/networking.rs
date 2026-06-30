@@ -54,7 +54,8 @@ pub struct Address {
     /// The address lot this address is drawn from.
     pub address_lot: NameOrId,
 
-    /// The IP/prefix of this address, or a specification of "addrconf".
+    /// The IP address and prefix, or indicator that this is an `addrconf`
+    /// address.
     pub address: UplinkAddress,
 
     /// Optional VLAN ID for this address
