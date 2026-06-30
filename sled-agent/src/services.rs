@@ -2735,14 +2735,6 @@ impl ServiceManager {
                             .add_property_group(wicketd_config),
                     );
 
-                    let baseboard_info = serde_json::to_string(&baseboard)?;
-
-                    switch_zone_setup_config =
-                        switch_zone_setup_config.clone().add_property(
-                            "baseboard_info",
-                            "astring",
-                            &baseboard_info,
-                        );
                 }
                 SwitchService::Dendrite { asic } => {
                     info!(self.inner.log, "Setting up dendrite service");
