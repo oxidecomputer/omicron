@@ -216,6 +216,11 @@ pub fn analyze(builder: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
                 PsuEreportKind::Insert => {
                     // hello!
                     psus_absent.remove(psu);
+                    // TODO(eliza): once we have a model of what rectifiers we
+                    // believed to be present, rather than just which are known
+                    // to be *absent*, we should try to reason about whether the
+                    // *same* PSU was already believed to be there when deciding
+                    // whether to alert?
                     if ereport.provenance == Provenance::ThisSitrep {
                         case_builder.request_alert(
                             &alert_types::PsuInsertedV0 {
