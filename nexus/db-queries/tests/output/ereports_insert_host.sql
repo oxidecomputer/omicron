@@ -34,13 +34,13 @@ WITH
     AS (
       INSERT
       INTO
-        ereporter_restart (id, time_first_seen, reporter, slot_type, slot)
+        ereporter_restart (id, time_first_seen, reporter, slot_type, slot, rack_id)
       VALUES
-        ($25, $26, $27, $28, $29)
+        ($25, $26, $27, $28, $29, $30)
       ON CONFLICT
         (id)
       DO
-        UPDATE SET slot = $30
+        UPDATE SET slot = $31
       RETURNING
         id
     )

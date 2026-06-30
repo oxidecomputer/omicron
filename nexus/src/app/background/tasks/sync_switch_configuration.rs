@@ -1242,6 +1242,11 @@ impl BackgroundTask for SwitchPortSettingsManager {
             }
             // TODO: we have some early returns in this task. We should instead
             // collect all problems and return them in the response.
+            //
+            // As part of that, we should move the body into an
+            // `activate_impl(...)` function which returns a
+            // `SwitchPortManagerStatus`. That'll force us to not do early
+            // returns.
             json!(status)
         }
         .boxed()
