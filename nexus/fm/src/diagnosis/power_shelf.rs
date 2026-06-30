@@ -452,8 +452,7 @@ impl PscCase {
             .flat_map(|restart| restart.ereports.iter())
             .collect::<Vec<_>>();
         ereports.sort_by_key(|ereport| {
-            let EreportId { restart_id, ena } = ereport.id();
-            (ereport.reporter_first_seen_at, ena)
+            (ereport.reporter_first_seen_at, ereport.id().ena)
         });
         ereports
     }
