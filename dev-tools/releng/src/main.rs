@@ -764,8 +764,8 @@ async fn main() -> Result<()> {
         .after("recovery-stamp");
 
     if args.verify_debug_libraries {
-        // Run `nice cargo xtask verify-libraries`. This builds *all* binaries
-        // in the workspace in debug mode and verifies them against the rules in
+        // Run `cargo xtask verify-libraries`. This builds *all* binaries in
+        // the workspace in debug mode and verifies them against the rules in
         // .cargo/xtask.toml.
         //
         // This does not directly contribute to building or verifying the TUF
@@ -777,11 +777,7 @@ async fn main() -> Result<()> {
         // save this job any time.)
         jobs.push_command(
             "verify-libraries",
-            Command::new("nice").args([
-                cargo.as_str(),
-                "xtask",
-                "verify-libraries",
-            ]),
+            Command::new(&cargo).args(["xtask", "verify-libraries"]),
         )
         .after("host-libraries")
         .after("recovery-libraries");
