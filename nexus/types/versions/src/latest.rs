@@ -279,6 +279,8 @@ pub mod networking {
     pub use crate::v2025_11_20_00::networking::SwitchBgpHistory;
     pub use crate::v2025_11_20_00::networking::SwitchInterfaceConfigCreate;
     pub use crate::v2025_11_20_00::networking::SwitchInterfaceKind;
+    pub use crate::v2025_11_20_00::networking::SwitchPortAddressConfig;
+    pub use crate::v2025_11_20_00::networking::SwitchPortAddressView;
     pub use crate::v2025_11_20_00::networking::SwitchPortApplySettings;
     pub use crate::v2025_11_20_00::networking::SwitchPortConfig;
     pub use crate::v2025_11_20_00::networking::SwitchPortConfigCreate;
@@ -286,6 +288,7 @@ pub mod networking {
     pub use crate::v2025_11_20_00::networking::SwitchPortLinkConfig;
     pub use crate::v2025_11_20_00::networking::SwitchPortPageSelector;
     pub use crate::v2025_11_20_00::networking::SwitchPortPathSelector;
+    pub use crate::v2025_11_20_00::networking::SwitchPortRouteConfig;
     pub use crate::v2025_11_20_00::networking::SwitchPortSettingsGroup;
     pub use crate::v2025_11_20_00::networking::SwitchPortSettingsGroups;
     pub use crate::v2025_11_20_00::networking::SwitchPortSettingsIdentity;

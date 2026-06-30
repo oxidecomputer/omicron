@@ -17,8 +17,10 @@
 //! - `SwitchPortSettingsCreate` updated to use the new `BgpPeerConfig`.
 
 use crate::v2025_11_20_00::networking::SwitchInterfaceConfig;
+use crate::v2025_11_20_00::networking::SwitchPortAddressView;
 use crate::v2025_11_20_00::networking::SwitchPortConfig;
 use crate::v2025_11_20_00::networking::SwitchPortLinkConfig;
+use crate::v2025_11_20_00::networking::SwitchPortRouteConfig;
 use crate::v2025_11_20_00::networking::SwitchPortSettingsGroups;
 use crate::v2025_11_20_00::networking::SwitchVlanInterfaceConfig;
 use crate::v2025_12_12_00::networking::BgpPeerState;
@@ -334,13 +336,13 @@ pub struct SwitchPortSettings {
     pub vlan_interfaces: Vec<SwitchVlanInterfaceConfig>,
 
     /// IP route settings.
-    pub routes: Vec<external::SwitchPortRouteConfig>,
+    pub routes: Vec<SwitchPortRouteConfig>,
 
     /// BGP peer settings.
     pub bgp_peers: Vec<BgpPeer>,
 
     /// Layer 3 IP address settings.
-    pub addresses: Vec<external::SwitchPortAddressView>,
+    pub addresses: Vec<SwitchPortAddressView>,
 }
 
 impl TryFrom<SwitchPortSettings>
