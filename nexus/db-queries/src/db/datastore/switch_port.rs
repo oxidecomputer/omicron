@@ -40,7 +40,7 @@ use nexus_types::identity::Resource;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::{
     self, CreateResult, DataPageParams, DeleteResult, Error, ListResultVec,
-    LookupResult, NameOrId, ResourceType, SwitchPortAddressView, UpdateResult,
+    LookupResult, NameOrId, ResourceType, UpdateResult,
 };
 use ref_cast::RefCast;
 use serde::{Deserialize, Serialize};
@@ -162,7 +162,7 @@ pub struct SwitchPortSettingsCombinedResult {
     pub vlan_interfaces: Vec<SwitchVlanInterfaceConfig>,
     pub routes: Vec<SwitchPortRouteConfig>,
     pub bgp_peers: Vec<BgpPeerFromDb>,
-    pub addresses: Vec<SwitchPortAddressView>,
+    pub addresses: Vec<networking::SwitchPortAddressView>,
 }
 
 impl SwitchPortSettingsCombinedResult {
@@ -564,7 +564,6 @@ impl DataStore {
     ) -> Result<SwitchConfigData, Error> {
         use nexus_db_schema::schema::address_lot::dsl as address_lot_dsl;
         use nexus_db_schema::schema::address_lot_block::dsl as address_lot_block_dsl;
-        use nexus_db_schema::schema::bgp_announcement::dsl as announce_dsl;
         use nexus_db_schema::schema::bgp_config::dsl as bgp_config_dsl;
 
         let err = OptionalError::new();
@@ -574,12 +573,15 @@ impl DataStore {
             .transaction(&conn, |conn| {
                 let err = err.clone();
                 async move {
-                    // Every switch port. The bootstore config is rack-global,
-                    // so this is intentionally not filtered by rack.
+                    // Every switch port.
+                    //
+                    // XXX this doesn't filter by rack yet. The bootstore config
+                    // is per-rack so we'll likely need to filter this by rack
+                    // in the future.
                     let ports = load_all_switch_ports(&conn).await?;
 
                     // For each port that has applied settings, read those
-                    // settings on this same connection (no nested transaction).
+                    // settings on the same connection.
                     let mut applied_ports = Vec::new();
                     for port in ports {
                         let Some(port_settings_id) = port.port_settings_id
@@ -608,7 +610,9 @@ impl DataStore {
                     // Note that neither the config nor its announce set is
                     // filtered by `time_deleted`. Other parts of the system
                     // such as bgp_config_delete and bgp_delete_announce_set
-                    // refuse to perform a delete if the config is in use.
+                    // refuse to perform a delete if the config is in use. We
+                    // plan to check that all time_deleted are null, and if that
+                    // were not the case, raise a Problem in the future.
                     let mut bgp_configs = IdHashMap::new();
 
                     for (_port, settings) in &applied_ports {
@@ -626,21 +630,18 @@ impl DataStore {
                                 .first_async::<BgpConfig>(&conn)
                                 .await?;
                             let set_id = config.bgp_announce_set_id;
-                            if let hash_map::Entry::Vacant(set_entry) =
-                                announce_cache.entry(set_id)
-                            {
-                                let announcements =
-                                    announce_dsl::bgp_announcement
-                                        .filter(
-                                            announce_dsl::announce_set_id
-                                                .eq(set_id),
-                                        )
-                                        .select(BgpAnnouncement::as_select())
-                                        .load_async::<BgpAnnouncement>(&conn)
-                                        .await?;
-                                set_entry.insert(announcements);
-                            }
-                            let announcements = announce_cache[&set_id].clone();
+                            let announcements =
+                                match announce_cache.entry(set_id) {
+                                    hash_map::Entry::Vacant(set_entry) => {
+                                        let announcements =
+                                            load_announce_set(&conn, set_id)
+                                                .await?;
+                                        set_entry.insert(announcements).clone()
+                                    }
+                                    hash_map::Entry::Occupied(set_entry) => {
+                                        set_entry.get().clone()
+                                    }
+                                };
                             entry.insert(BgpConfigWithAnnouncements {
                                 config,
                                 announcements,
@@ -1248,6 +1249,19 @@ async fn load_all_bfd_sessions(
         .limit(i64::from(u32::MAX))
         .select(BfdSession::as_select())
         .load_async(conn)
+        .await
+}
+
+/// Load every announcement belonging to an announce set on an existing connection.
+async fn load_announce_set(
+    conn: &Connection<DTraceConnection<PgConnection>>,
+    set_id: Uuid,
+) -> Result<Vec<BgpAnnouncement>, diesel::result::Error> {
+    use nexus_db_schema::schema::bgp_announcement::dsl;
+    dsl::bgp_announcement
+        .filter(dsl::announce_set_id.eq(set_id))
+        .select(BgpAnnouncement::as_select())
+        .load_async::<BgpAnnouncement>(conn)
         .await
 }
 
@@ -2036,7 +2050,7 @@ impl<'a> BgpPeerProperties<'a> {
 async fn switch_port_address_view(
     conn: &Connection<DTraceConnection<PgConnection>>,
     addresses: Vec<SwitchPortAddressConfig>,
-) -> Result<Vec<SwitchPortAddressView>, diesel::result::Error> {
+) -> Result<Vec<networking::SwitchPortAddressView>, diesel::result::Error> {
     use nexus_db_schema::schema::{address_lot, address_lot_block};
 
     let mut result = vec![];
@@ -2053,7 +2067,7 @@ async fn switch_port_address_view(
             .first_async::<AddressLot>(conn)
             .await?;
 
-        result.push(SwitchPortAddressView {
+        result.push(networking::SwitchPortAddressView {
             port_settings_id: address.port_settings_id,
             address_lot_id: lot.id(),
             address_lot_name: lot.name().clone(),
@@ -2288,13 +2302,13 @@ mod test {
     use crate::db::pub_test_utils::TestDatabase;
     use nexus_db_model::INFRA_LOT;
     use nexus_types::external_api::networking::{
-        AddressLotBlockCreate, AddressLotCreate, BfdSessionEnable,
-        BgpAnnounceSetCreate, BgpAnnouncementCreate, BgpConfigCreate, BgpPeer,
-        BgpPeerConfig, SwitchPortConfigCreate, SwitchPortGeometry,
-        SwitchPortSettingsCreate,
+        AddressLotBlockCreate, AddressLotCreate, AddressLotKind,
+        BfdSessionEnable, BgpAnnounceSetCreate, BgpAnnouncementCreate,
+        BgpConfigCreate, BgpPeer, BgpPeerConfig, SwitchPortConfigCreate,
+        SwitchPortGeometry, SwitchPortSettingsCreate,
     };
     use omicron_common::api::external::{
-        AddressLotKind, IdentityMetadataCreateParams, Name, NameOrId,
+        IdentityMetadataCreateParams, Name, NameOrId,
     };
     use omicron_test_utils::dev;
     use sled_agent_types::early_networking::BfdMode;

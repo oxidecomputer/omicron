@@ -92,7 +92,6 @@ use omicron_uuid_kinds::ZpoolUuid;
 use oximeter_collector::Oximeter;
 use oximeter_producer::LogConfig;
 use oximeter_producer::Server as ProducerServer;
-use sled_agent_types::early_networking::LinkSpeed;
 use sled_agent_types::early_networking::PortConfig;
 use sled_agent_types::early_networking::RackNetworkConfig;
 use sled_agent_types::early_networking::SwitchSlot;
@@ -953,18 +952,9 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
                     infra_ip_last: "192.0.2.100".parse().unwrap(),
                     // `UplinkPorts` must be non-empty; this test harness
                     // doesn't exercise uplinks, so use a placeholder port.
-                    ports: UplinkPorts::new(vec![PortConfig {
-                        routes: Vec::new(),
-                        addresses: Vec::new(),
-                        switch: SwitchSlot::Switch0,
-                        port: "qsfp0".to_string(),
-                        uplink_port_speed: LinkSpeed::Speed100G,
-                        uplink_port_fec: None,
-                        bgp_peers: Vec::new(),
-                        autoneg: false,
-                        lldp: None,
-                        tx_eq: None,
-                    }])
+                    ports: UplinkPorts::new(vec![PortConfig::empty_for_tests(
+                        "qsfp0",
+                    )])
                     .expect("placeholder port list is non-empty"),
                     rack_subnet: "fd00:1122:3344:0100::/56".parse().unwrap(),
                 },

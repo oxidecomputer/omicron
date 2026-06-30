@@ -13,12 +13,14 @@ use nexus_db_queries::db::datastore::SwitchConfigData;
 use nexus_db_queries::db::datastore::SwitchPortSettingsCombinedResult;
 use nexus_switch_config::{
     AddressInput, BgpConfigInput, LinkInput, LldpInput, PortInput,
-    RackNetworkConfigInput, RouteInput, TxEqInput,
+    RackNetworkConfigInput,
 };
 use omicron_common::api::external::Error;
 use oxnet::IpNet;
 use sled_agent_types::early_networking::BfdPeerConfig;
+use sled_agent_types::early_networking::RouteConfig;
 use sled_agent_types::early_networking::SwitchSlot;
+use sled_agent_types::early_networking::TxEqConfig;
 use slog::Logger;
 use slog::warn;
 use std::collections::HashMap;
@@ -216,7 +218,7 @@ fn port_input_from_db(
         routes: info
             .routes
             .iter()
-            .map(|r| RouteInput {
+            .map(|r| RouteConfig {
                 destination: r.dst.into(),
                 nexthop: r.gw.ip(),
                 vlan_id: r.vid.map(|x| x.0),
@@ -239,7 +241,7 @@ fn port_input_from_db(
         tx_eq: info
             .tx_eq
             .iter()
-            .map(|c| TxEqInput {
+            .map(|c| TxEqConfig {
                 pre1: c.pre1,
                 pre2: c.pre2,
                 main: c.main,

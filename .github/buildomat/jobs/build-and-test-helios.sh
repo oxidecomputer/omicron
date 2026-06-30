@@ -14,9 +14,6 @@
 #:	"!/var/tmp/omicron_tmp/crdb-base*",
 #:	"!/var/tmp/omicron_tmp/rustc*",
 #: ]
-#: access_repos = [
-#:	"oxidecomputer/dendrite"
-#: ]
 #:
 #: [[publish]]
 #: series = "junit-helios"

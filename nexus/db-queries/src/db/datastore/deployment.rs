@@ -125,6 +125,8 @@ use uuid::Uuid;
 
 mod external_networking;
 
+pub use external_networking::ExternalServiceNetworkingConfig;
+
 impl DataStore {
     /// List blueprints
     pub async fn blueprints_list(
