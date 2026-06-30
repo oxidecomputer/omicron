@@ -86,8 +86,8 @@ pub fn analyze(builder: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
                     let comment = format!(
                         "I couldn't understand this case, as it \
                          contained an incomprehensible ereport {} \
-                        (case ereport {}). The ereport could not be \
-                        interpreted because: {err}",
+                         (case ereport {}). The ereport could not be \
+                         interpreted because: {err}",
                         ereport.id, case_ereport.id,
                     );
                     builder
