@@ -18,6 +18,7 @@ use std::time::Duration;
 
 oximeter::use_timeseries!("oximeter-collector.toml");
 pub use self::oximeter_collector::Collections;
+pub use self::oximeter_collector::DatabaseSamplesDropped;
 pub use self::oximeter_collector::FailedCollections;
 pub use self::oximeter_collector::OximeterCollector;
 

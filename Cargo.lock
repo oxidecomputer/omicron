@@ -9968,6 +9968,7 @@ dependencies = [
  "oximeter-api",
  "oximeter-client",
  "oximeter-db",
+ "oximeter-test-utils",
  "oximeter-types",
  "proptest",
  "qorb",
