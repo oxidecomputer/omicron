@@ -1113,6 +1113,7 @@ pub struct BgpConfig {
 
 // SWITCH PORT SETTINGS (old response type with required BgpPeer.addr)
 
+/// Switch port settings (old version with required BgpPeer.addr).
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct SwitchPortSettings {
     #[serde(flatten)]
