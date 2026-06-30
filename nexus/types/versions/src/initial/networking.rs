@@ -8,6 +8,8 @@
 //! types.
 
 use api_identity::ObjectIdentity;
+use chrono::DateTime;
+use chrono::Utc;
 use omicron_common::api::external::{
     IdentityMetadata, IdentityMetadataCreateParams, Name, NameOrId,
     ObjectIdentity,
@@ -499,6 +501,44 @@ impl PartialEq<LldpLinkConfig> for LldpLinkConfigCreate {
             && self.system_description == other.system_description
             && self.management_ip == other.management_ip
     }
+}
+
+/// Information about LLDP advertisements from other network entities directly
+/// connected to a switch port.  This structure contains both metadata about
+/// when and where the neighbor was seen, as well as the specific information
+/// the neighbor was advertising.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
+pub struct LldpNeighbor {
+    // Unique ID assigned to this neighbor - only used for pagination
+    #[serde(skip)]
+    pub id: Uuid,
+
+    /// The port on which the neighbor was seen
+    pub local_port: String,
+
+    /// Initial sighting of this LldpNeighbor
+    pub first_seen: DateTime<Utc>,
+
+    /// Most recent sighting of this LldpNeighbor
+    pub last_seen: DateTime<Utc>,
+
+    /// The LLDP link name advertised by the neighbor
+    pub link_name: String,
+
+    /// The LLDP link description advertised by the neighbor
+    pub link_description: Option<String>,
+
+    /// The LLDP chassis identifier advertised by the neighbor
+    pub chassis_id: String,
+
+    /// The LLDP system name advertised by the neighbor
+    pub system_name: Option<String>,
+
+    /// The LLDP system description advertised by the neighbor
+    pub system_description: Option<String>,
+
+    /// The LLDP management IP(s) advertised by the neighbor
+    pub management_ip: Vec<lldp_protocol::types::ManagementAddress>,
 }
 
 /// A layer-3 switch interface configuration. When IPv6 is enabled, a link local
