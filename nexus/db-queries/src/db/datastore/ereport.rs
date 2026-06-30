@@ -40,6 +40,8 @@ use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_uuid_kinds::EreporterRestartUuid;
 use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::OmicronZoneUuid;
+use omicron_uuid_kinds::RackUuid;
 use omicron_uuid_kinds::SitrepUuid;
 use omicron_uuid_kinds::SledUuid;
 use uuid::Uuid;
@@ -255,25 +257,38 @@ impl DataStore {
     ///   additional ereports were inserted concurrently
     /// - have a different restart ID than the one provided, if ereports from
     ///   a newer restart of that reporter were inserted concurrently
+    // Since all the arguments to this function are newtypes with pretty clear
+    // meanings (e.g. `rack_id`, `restart_id`, and `collector_id` are all
+    // different typed UUIDs), I'm not convinced that factoring stuff out into a
+    // struct like `EreportTrancheMetadata` or whatever would actually make this
+    // any clearer --- it feels like just adding noise to me. So ignore the
+    // warning.
+    #[allow(clippy::too_many_arguments)]
     pub async fn ereports_insert(
         &self,
         opctx: &OpContext,
         restart_id: EreporterRestartUuid,
         time_collected: DateTime<Utc>,
+        collector_id: OmicronZoneUuid,
+        rack_id: RackUuid,
         reporter: fm::Reporter,
-        ereports: impl IntoIterator<Item = fm::EreportData>,
+        ereports: impl IntoIterator<Item = (fm::Ena, fm::EreportData)>,
     ) -> CreateResult<(usize, Option<EreportId>)> {
         opctx.authorize(authz::Action::CreateChild, &authz::FLEET).await?;
         let conn = self.pool_connection_authorized(opctx).await?;
 
         let ereports = ereports
             .into_iter()
-            .map(|data| Ereport::new(data, reporter))
+            .map(|(ena, data)| {
+                let id = EreportId { restart_id, ena };
+                Ereport::new(id, time_collected, collector_id, data, reporter)
+            })
             .collect::<Vec<_>>();
         let n_ereports = ereports.len();
         let created = Self::ereports_insert_query(
             restart_id,
             time_collected,
+            rack_id,
             reporter,
             ereports,
         )
@@ -322,6 +337,7 @@ impl DataStore {
     fn ereports_insert_query(
         restart_id: EreporterRestartUuid,
         time_collected: chrono::DateTime<chrono::Utc>,
+        rack_id: RackUuid,
         reporter: fm::Reporter,
         ereports: Vec<Ereport>,
     ) -> impl RunnableQuery<i64> {
@@ -414,6 +430,7 @@ impl DataStore {
             reporter,
             slot_type,
             slot: slot.map(SpMgsSlot::from),
+            rack_id: rack_id.into(),
         });
         EreportInsertQuery { insert_ereports, insert_reporter, slot }
     }
@@ -596,6 +613,7 @@ mod tests {
     use ereport_types::Ena;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::OmicronZoneUuid;
+    use omicron_uuid_kinds::RackUuid;
     use std::collections::BTreeMap;
     use std::num::NonZeroU32;
     use std::time::Duration;
@@ -916,11 +934,13 @@ mod tests {
     async fn expectorate_ereports_insert_sp() {
         let restart_id = EreporterRestartUuid::nil();
         let collector_id = OmicronZoneUuid::nil();
+        let rack_id = RackUuid::nil();
         let reporter =
             fm::Reporter::Sp { sp_type: SpType::Sled.into(), slot: 16 };
         let query = DataStore::ereports_insert_query(
             restart_id,
             DateTime::<Utc>::MIN_UTC,
+            rack_id,
             reporter,
             vec![
                 Ereport {
@@ -962,11 +982,13 @@ mod tests {
     async fn expectorate_ereports_insert_host() {
         let restart_id = EreporterRestartUuid::nil();
         let collector_id = OmicronZoneUuid::nil();
+        let rack_id = RackUuid::nil();
         let reporter =
             fm::Reporter::HostOs { slot: Some(16), sled: SledUuid::nil() };
         let query = DataStore::ereports_insert_query(
             restart_id,
             DateTime::<Utc>::MIN_UTC,
+            rack_id,
             reporter,
             vec![
                 Ereport {
@@ -1024,10 +1046,9 @@ mod tests {
         let restart_id = EreporterRestartUuid::new_v4();
         let id = fm::EreportId { restart_id, ena: ereport_types::Ena(2) };
         let time_collected = Utc::now();
+        let collector_id = OmicronZoneUuid::new_v4();
+        let rack_id = RackUuid::new_v4();
         let ereport = fm::EreportData {
-            id,
-            time_collected,
-            collector_id: OmicronZoneUuid::new_v4(),
             part_number: Some("my cool CPN".to_string()),
             serial_number: Some("my cool serial".to_string()),
             class: Some("my cool ereport".to_string()),
@@ -1038,11 +1059,13 @@ mod tests {
                 &opctx,
                 restart_id,
                 time_collected,
+                collector_id,
+                rack_id,
                 fm::Reporter::Sp {
                     sp_type: nexus_types::inventory::SpType::Sled,
                     slot: 19,
                 },
-                vec![ereport.clone()],
+                vec![(id.ena, ereport.clone())],
             )
             .await
             .expect("insert should succeed");
@@ -1051,14 +1074,12 @@ mod tests {
         fn check_results(
             found_ereports: Vec<Ereport>,
             expected_id: &fm::EreportId,
+            collector_id: OmicronZoneUuid,
             expected: &fm::EreportData,
         ) {
             assert_eq!(found_ereports.len(), 1);
             assert_eq!(&found_ereports[0].id(), expected_id);
-            assert_eq!(
-                found_ereports[0].collector_id,
-                expected.collector_id.into()
-            );
+            assert_eq!(found_ereports[0].collector_id, collector_id.into());
             assert_eq!(&found_ereports[0].part_number, &expected.part_number);
             assert_eq!(
                 &found_ereports[0].serial_number,
@@ -1078,21 +1099,19 @@ mod tests {
             .ereport_fetch_matching(opctx, &Default::default(), &pagparams)
             .await
             .expect("fetch matching with default filters should succeed");
-        check_results(dbg!(found_default), &id, &ereport);
+        check_results(dbg!(found_default), &id, collector_id, &ereport);
 
         let found_by_time_range = datastore
             .ereport_fetch_matching(
                 opctx,
                 &EreportFilters::new()
-                    .with_start_time(
-                        ereport.time_collected - Duration::from_secs(600),
-                    )
+                    .with_start_time(time_collected - Duration::from_secs(600))
                     .expect("no end time set"),
                 &pagparams,
             )
             .await
             .expect("fetch matching with time range filters should succeed");
-        check_results(dbg!(found_by_time_range), &id, &ereport);
+        check_results(dbg!(found_by_time_range), &id, collector_id, &ereport);
 
         let found_by_serial = datastore
             .ereport_fetch_matching(
@@ -1102,7 +1121,7 @@ mod tests {
             )
             .await
             .expect("fetch matching with serial number filters should succeed");
-        check_results(dbg!(found_by_serial), &id, &ereport);
+        check_results(dbg!(found_by_serial), &id, collector_id, &ereport);
 
         let found_by_class = datastore
             .ereport_fetch_matching(
@@ -1112,7 +1131,7 @@ mod tests {
             )
             .await
             .expect("fetch matching with class filters should succeed");
-        check_results(dbg!(found_by_class), &id, &ereport);
+        check_results(dbg!(found_by_class), &id, collector_id, &ereport);
 
         db.terminate().await;
         logctx.cleanup_successful();
@@ -1134,20 +1153,25 @@ mod tests {
         // and NULL.
         let restart_id = EreporterRestartUuid::new_v4();
         let collector_id = OmicronZoneUuid::new_v4();
-        let make = |ena: u64, class: Option<&str>| fm::EreportData {
-            id: fm::EreportId { restart_id, ena: ereport_types::Ena(ena) },
-            time_collected: Utc::now(),
-            collector_id,
-            part_number: Some("CPN".to_string()),
-            serial_number: Some("SN".to_string()),
-            class: class.map(str::to_string),
-            report: serde_json::json!({}),
+        let rack_id = RackUuid::new_v4();
+        let make = |ena: u64, class: Option<&str>| {
+            (
+                ereport_types::Ena(ena),
+                fm::EreportData {
+                    part_number: Some("CPN".to_string()),
+                    serial_number: Some("SN".to_string()),
+                    class: class.map(str::to_string),
+                    report: serde_json::json!({}),
+                },
+            )
         };
         datastore
             .ereports_insert(
                 &opctx,
                 restart_id,
                 Utc::now(),
+                collector_id,
+                rack_id,
                 fm::Reporter::Sp {
                     sp_type: nexus_types::inventory::SpType::Sled,
                     slot: 0,
@@ -1248,25 +1272,23 @@ mod tests {
 
     #[tokio::test]
     async fn test_ereporter_restarts() {
-        fn ereport_data(
-            restart_id: EreporterRestartUuid,
-            ena: u64,
-            time_collected: DateTime<Utc>,
-        ) -> fm::EreportData {
-            fm::EreportData {
-                id: fm::EreportId { restart_id, ena: Ena(ena) },
-                time_collected,
-                collector_id: OmicronZoneUuid::new_v4(),
-                part_number: None,
-                serial_number: None,
-                class: None,
-                report: serde_json::json!({}),
-            }
+        fn mk_ereport(ena: u64) -> (fm::Ena, fm::EreportData) {
+            (
+                Ena(ena),
+                fm::EreportData {
+                    part_number: None,
+                    serial_number: None,
+                    class: None,
+                    report: serde_json::json!({}),
+                },
+            )
         }
 
         let logctx = dev::test_setup_log("test_ereporter_restarts");
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
+        let collector_id = OmicronZoneUuid::new_v4();
+        let rack_id = RackUuid::new_v4();
         let t0 = Utc::now();
 
         let timestamp = move |secs: usize| -> DateTime<Utc> {
@@ -1295,8 +1317,10 @@ mod tests {
                 opctx,
                 host0_restart_id,
                 host0_first_seen,
+                collector_id,
+                rack_id,
                 fm::Reporter::HostOs { sled, slot: None },
-                vec![ereport_data(host0_restart_id, 1, host0_first_seen)],
+                vec![mk_ereport(1)],
             )
             .await
             .unwrap();
@@ -1307,11 +1331,10 @@ mod tests {
                     opctx,
                     host0_restart_id,
                     time_collected,
+                    collector_id,
+                    rack_id,
                     fm::Reporter::HostOs { sled, slot: Some(host0_slot) },
-                    vec![
-                        ereport_data(host0_restart_id, 2, time_collected),
-                        ereport_data(host0_restart_id, 3, time_collected),
-                    ],
+                    vec![mk_ereport(2), mk_ereport(3)],
                 )
                 .await
                 .unwrap();
@@ -1331,11 +1354,10 @@ mod tests {
                 opctx,
                 host1_restart_id,
                 host1_first_seen,
+                collector_id,
+                rack_id,
                 fm::Reporter::HostOs { sled, slot: Some(host1_slot) },
-                vec![
-                    ereport_data(host1_restart_id, 1, host1_first_seen),
-                    ereport_data(host1_restart_id, 2, host1_first_seen),
-                ],
+                vec![mk_ereport(1), mk_ereport(2)],
             )
             .await
             .unwrap();
@@ -1344,8 +1366,10 @@ mod tests {
                 opctx,
                 host1_restart_id,
                 timestamp(250),
+                collector_id,
+                rack_id,
                 fm::Reporter::HostOs { sled, slot: None },
-                vec![ereport_data(host1_restart_id, 3, timestamp(250))],
+                vec![mk_ereport(3)],
             )
             .await
             .unwrap();
@@ -1360,14 +1384,13 @@ mod tests {
                 opctx,
                 sp0_restart_id0,
                 sp0_first_seen,
+                collector_id,
+                rack_id,
                 fm::Reporter::Sp {
                     sp_type: SpType::Switch.into(),
                     slot: sp0_slot,
                 },
-                vec![
-                    ereport_data(sp0_restart_id0, 1, sp0_first_seen),
-                    ereport_data(sp0_restart_id0, 2, sp0_first_seen),
-                ],
+                vec![mk_ereport(1), mk_ereport(2)],
             )
             .await
             .unwrap();
@@ -1378,11 +1401,13 @@ mod tests {
                     opctx,
                     sp0_restart_id0,
                     time_collected,
+                    collector_id,
+                    rack_id,
                     fm::Reporter::Sp {
                         sp_type: SpType::Switch.into(),
                         slot: sp0_slot,
                     },
-                    vec![ereport_data(sp0_restart_id0, 3, time_collected)],
+                    vec![mk_ereport(3)],
                 )
                 .await
                 .unwrap();
@@ -1395,14 +1420,13 @@ mod tests {
                 opctx,
                 sp0_restart_id1,
                 sp0_restart1_first_seen,
+                collector_id,
+                rack_id,
                 fm::Reporter::Sp {
                     sp_type: SpType::Switch.into(),
                     slot: sp0_slot,
                 },
-                vec![
-                    ereport_data(sp0_restart_id1, 1, sp0_restart1_first_seen),
-                    ereport_data(sp0_restart_id1, 2, sp0_restart1_first_seen),
-                ],
+                vec![mk_ereport(1), mk_ereport(2)],
             )
             .await
             .unwrap();
