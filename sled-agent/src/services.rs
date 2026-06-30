@@ -2734,7 +2734,6 @@ impl ServiceManager {
                         ServiceInstanceBuilder::new("default")
                             .add_property_group(wicketd_config),
                     );
-
                 }
                 SwitchService::Dendrite { asic } => {
                     info!(self.inner.log, "Setting up dendrite service");
