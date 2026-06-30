@@ -435,11 +435,13 @@ impl PscCase {
         Ok(())
     }
 
-    /// Returns all ereports assigned to this case, in the order in which their
-    /// events occurred (see [`PsuEreport::event_order`]).
+    /// Returns all ereports assigned to this case in the order in which the
+    /// events represented by those ereports occurred.
     ///
-    /// `known_restarts` is the analysis input's map of reporter restarts, used
-    /// to order events that span more than one restart.
+    /// Within a given reporter restart, ereports are ordered by their ENAs.
+    /// Ereports from multiple restarts of the same reporter are ordered first
+    /// by the time that the restart ID was first observed, and then by ENA
+    /// within the restart.
     fn ereports_in_order(&self) -> Vec<&PsuEreport> {
         let mut ereports = self
             .restarts
