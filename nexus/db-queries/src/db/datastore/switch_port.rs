@@ -2302,13 +2302,13 @@ mod test {
     use crate::db::pub_test_utils::TestDatabase;
     use nexus_db_model::INFRA_LOT;
     use nexus_types::external_api::networking::{
-        AddressLotBlockCreate, AddressLotCreate, BfdSessionEnable,
-        BgpAnnounceSetCreate, BgpAnnouncementCreate, BgpConfigCreate, BgpPeer,
-        BgpPeerConfig, SwitchPortConfigCreate, SwitchPortGeometry,
-        SwitchPortSettingsCreate,
+        AddressLotBlockCreate, AddressLotCreate, AddressLotKind,
+        BfdSessionEnable, BgpAnnounceSetCreate, BgpAnnouncementCreate,
+        BgpConfigCreate, BgpPeer, BgpPeerConfig, SwitchPortConfigCreate,
+        SwitchPortGeometry, SwitchPortSettingsCreate,
     };
     use omicron_common::api::external::{
-        AddressLotKind, IdentityMetadataCreateParams, Name, NameOrId,
+        IdentityMetadataCreateParams, Name, NameOrId,
     };
     use omicron_test_utils::dev;
     use sled_agent_types::early_networking::BfdMode;

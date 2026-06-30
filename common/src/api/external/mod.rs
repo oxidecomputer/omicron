@@ -2484,67 +2484,6 @@ impl std::fmt::Display for Digest {
     }
 }
 
-/// An address lot and associated blocks resulting from creating an address lot.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-pub struct AddressLotCreateResponse {
-    /// The address lot that was created.
-    pub lot: AddressLot,
-
-    /// The address lot blocks that were created.
-    pub blocks: Vec<AddressLotBlock>,
-}
-
-/// An address lot and associated blocks resulting from viewing an address lot.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-pub struct AddressLotViewResponse {
-    /// The address lot.
-    pub lot: AddressLot,
-
-    /// The address lot blocks.
-    pub blocks: Vec<AddressLotBlock>,
-}
-
-/// Represents an address lot object, containing the id of the lot that can be
-/// used in other API calls.
-// TODO Add kind attribute to AddressLot
-// https://github.com/oxidecomputer/omicron/issues/3064
-#[derive(
-    ObjectIdentity, Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq,
-)]
-pub struct AddressLot {
-    #[serde(flatten)]
-    pub identity: IdentityMetadata,
-
-    /// Desired use of `AddressLot`
-    pub kind: AddressLotKind,
-}
-
-/// The kind associated with an address lot.
-#[derive(Copy, Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
-#[serde(rename_all = "snake_case")]
-pub enum AddressLotKind {
-    /// Infrastructure address lots are used for network infrastructure like
-    /// addresses assigned to rack switches.
-    Infra,
-
-    /// Pool address lots are used by IP pools.
-    Pool,
-}
-
-/// An address lot block is a part of an address lot and contains a range of
-/// addresses. The range is inclusive.
-#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
-pub struct AddressLotBlock {
-    /// The id of the address lot block.
-    pub id: Uuid,
-
-    /// The first address of the block (inclusive).
-    pub first_address: IpAddr,
-
-    /// The last address of the block (inclusive).
-    pub last_address: IpAddr,
-}
-
 /// Information about LLDP advertisements from other network entities directly
 /// connected to a switch port.  This structure contains both metadata about
 /// when and where the neighbor was seen, as well as the specific information

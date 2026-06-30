@@ -257,9 +257,14 @@ pub mod multicast {
 pub mod networking {
     pub use crate::v2025_11_20_00::networking::Address;
     pub use crate::v2025_11_20_00::networking::AddressConfig;
+    pub use crate::v2025_11_20_00::networking::AddressLot;
+    pub use crate::v2025_11_20_00::networking::AddressLotBlock;
     pub use crate::v2025_11_20_00::networking::AddressLotBlockCreate;
     pub use crate::v2025_11_20_00::networking::AddressLotCreate;
+    pub use crate::v2025_11_20_00::networking::AddressLotCreateResponse;
+    pub use crate::v2025_11_20_00::networking::AddressLotKind;
     pub use crate::v2025_11_20_00::networking::AddressLotSelector;
+    pub use crate::v2025_11_20_00::networking::AddressLotViewResponse;
     pub use crate::v2025_11_20_00::networking::AggregateBgpMessageHistory;
     pub use crate::v2025_11_20_00::networking::BgpAnnounceListSelector;
     pub use crate::v2025_11_20_00::networking::BgpAnnounceSet;
