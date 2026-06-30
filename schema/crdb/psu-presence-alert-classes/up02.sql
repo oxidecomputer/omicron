@@ -1,6 +1,6 @@
 ALTER TYPE
    omicron.public.alert_class
 ADD VALUE IF NOT EXISTS
-   'hw.remove.power.power_shelf.psu'
+   'hardware.power_shelf.psu.remove'
 AFTER
    'hardware.power_shelf.psu.insert'
