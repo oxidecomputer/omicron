@@ -34,7 +34,16 @@ use uuid::Uuid;
 /// For us, these will generally be Nexus instances, and the SEC id will match
 /// the Nexus id.
 #[derive(
-    AsExpression, FromSqlRow, Clone, Copy, Eq, Ord, PartialEq, PartialOrd,
+    AsExpression,
+    FromSqlRow,
+    Clone,
+    Copy,
+    Eq,
+    Ord,
+    PartialEq,
+    PartialOrd,
+    Serialize,
+    Deserialize,
 )]
 #[diesel(sql_type = sql_types::Uuid)]
 pub struct SecId(pub Uuid);

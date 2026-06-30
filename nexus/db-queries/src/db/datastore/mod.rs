@@ -122,7 +122,7 @@ mod region_snapshot;
 pub mod region_snapshot_replacement;
 mod rendezvous_debug_dataset;
 mod role;
-mod saga;
+pub mod saga;
 mod scim;
 mod scim_provider_store;
 mod silo;

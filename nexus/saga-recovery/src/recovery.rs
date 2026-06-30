@@ -7,6 +7,7 @@
 use super::status::RecoveryFailure;
 use super::status::RecoverySuccess;
 use chrono::{DateTime, Utc};
+use nexus_db_model::SecId;
 use omicron_common::api::external::Error;
 use slog::{debug, error, info, warn};
 use slog_error_chain::InlineErrorChain;
@@ -478,7 +479,13 @@ impl ExecutionBuilder {
     }
 
     /// Record that we failed to recover this saga
-    pub fn saga_recovery_failure(&mut self, saga_id: SagaId, error: &Error) {
+    // TODO-K: preserve in error whether the error is transient or not
+    pub fn saga_recovery_failure(
+        &mut self,
+        saga_id: SagaId,
+        current_sec: Option<SecId>,
+        error: &Error,
+    ) {
         let saga_logger = self
             .in_progress
             .remove(&saga_id)
@@ -487,6 +494,7 @@ impl ExecutionBuilder {
         self.failed.push(RecoveryFailure {
             time: Utc::now(),
             saga_id,
+            current_sec,
             message: InlineErrorChain::new(error).to_string(),
         });
     }
@@ -499,6 +507,7 @@ mod test {
     use crate::test::make_fake_saga;
     use crate::test::make_saga_ids;
     use omicron_test_utils::dev::test_setup_log;
+    use uuid::Uuid;
 
     #[test]
     fn test_read_all_from_channel() {
@@ -680,6 +689,8 @@ mod test {
             if i == to_recover.len() - 1 {
                 execution_builder.saga_recovery_failure(
                     *saga_id,
+                    // TODO-K: verify this is correct
+                    Some(SecId::from(Uuid::new_v4())),
                     &Error::internal_error("test error"),
                 );
             } else {

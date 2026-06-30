@@ -6,6 +6,7 @@
 
 use super::recovery;
 use chrono::{DateTime, Utc};
+use nexus_db_model::SecId;
 use omicron_common::api::external::Error;
 use serde::{Deserialize, Serialize};
 use slog_error_chain::InlineErrorChain;
@@ -98,6 +99,7 @@ pub struct RecoverySuccess {
 pub struct RecoveryFailure {
     pub time: DateTime<Utc>,
     pub saga_id: SagaId,
+    pub current_sec: Option<SecId>,
     pub message: String,
 }
 

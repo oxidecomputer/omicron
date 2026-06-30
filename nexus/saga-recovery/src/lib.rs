@@ -278,6 +278,7 @@ mod test {
                     nerrors += 1;
                     execution_builder.saga_recovery_failure(
                         *saga_id,
+                        saga.current_sec,
                         &Error::internal_error("test error"),
                     );
                 } else {

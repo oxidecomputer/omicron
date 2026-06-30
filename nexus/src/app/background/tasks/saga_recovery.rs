@@ -126,9 +126,12 @@ use crate::app::sagas::NexusSagaType;
 use crate::saga_interface::SagaContext;
 use futures::FutureExt;
 use futures::future::BoxFuture;
+use nexus_db_model::SagaReasonAbandoned;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
 use nexus_db_queries::db::DataStore;
+use nexus_db_queries::db::datastore::saga::SagaStateTransition;
+use nexus_saga_recovery::RecoveryFailure;
 use nexus_types::quiesce::SagaQuiesceHandle;
 use nexus_types::quiesce::SagaRecoveryInProgress;
 use omicron_common::api::external::Error;
@@ -137,7 +140,6 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use steno::SagaId;
 use steno::SagaStateView;
-use steno::UndoActionError;
 use tokio::sync::mpsc;
 
 /// Helpers used for saga recovery
@@ -298,8 +300,43 @@ impl<N: MakeSagaContext> SagaRecoveryInner<N> {
                             nexus_saga_recovery::LastPassSuccess::new(
                                 &plan, &execution,
                             );
-                        self.status
-                            .update_after_pass(&plan, execution, nstarted);
+
+                        // TODO-K: mark all failed here
+                        for saga in &execution.failed {
+                            let RecoveryFailure { time, saga_id, current_sec, message } = saga;
+                            // TODO-K: Make sure we're only abandoning ones with non-transient errors
+                        match current_sec {
+                            Some(sec_id) => {
+                                warn!(
+                                    log,
+                                    "recovered saga is stuck; \
+                                    marking as abandoned";
+                                    "saga_id" => %saga_id,
+                                    // TODO-K: find which one is better to keep
+                                    "message" => ?message,
+                                    "time_failed" => ?time,
+                                );
+                                // TODO-K: Let's ignore the result for now
+                                let _ = self.datastore.saga_update_state(
+                                    *saga_id,
+                                    SagaStateTransition::Abandoned {
+                                        reason: SagaReasonAbandoned::Unrecoverable,
+                                        information: "recovered saga is stuck".to_string(),
+                                    },
+                                    *sec_id)
+                                    .await;
+                            },
+                            None => {
+                                warn!(
+                                    log,
+                                    "unable to mark saga as abandoned; \
+                                    missing current SEC";
+                                    "saga_id" => %saga_id,
+                                );
+                            },
+                    }
+                }
+                        self.status.update_after_pass(&plan, execution, nstarted);
                         (Some((future, last_pass_success)), true)
                     }
                     Err(error) => {
@@ -380,7 +417,11 @@ impl<N: MakeSagaContext> SagaRecoveryInner<N> {
                     // It's essential that we not bail out early just because we
                     // hit an error here.  We want to recover all the sagas that
                     // we can.
-                    builder.saga_recovery_failure(*saga_id, &error);
+                    builder.saga_recovery_failure(
+                        *saga_id,
+                        saga.current_sec,
+                        &error,
+                    );
                 }
             }
         }
@@ -399,6 +440,7 @@ impl<N: MakeSagaContext> SagaRecoveryInner<N> {
         saga_logger: &slog::Logger,
         saga: &nexus_db_model::Saga,
         recovery: &SagaRecoveryInProgress,
+        // TODO-K: return error , make sure error says whether it's transient or not
     ) -> Result<BoxFuture<'static, Result<(), Error>>, Error> {
         let datastore = &self.datastore;
         let saga_id: SagaId = saga.id.into();
@@ -426,52 +468,12 @@ impl<N: MakeSagaContext> SagaRecoveryInner<N> {
             .map_err(|error| {
                 // TODO-robustness We want to differentiate between retryable and
                 // not here
+                // TODO-K: This is a non-transient error catch this
                 Error::internal_error(&format!(
                     "failed to resume saga: {:#}",
                     error
                 ))
             })?;
-
-        // The saga stays "pending" (and so blocks quiesce from declaring
-        // itself fully drained) until the DB write lands.
-        //
-        // In case of cancellation the saga is still listed as in-progress in
-        // the database, so the next recovery pass re-resumes it, it gets stuck
-        // again, and we retry the DB write.
-        let abandon_log = saga_logger.clone();
-        let saga_completion = async move {
-            let result = saga_completion.await;
-            if let Err(error) = &result.kind {
-                // A `SagaResultErr` will contain both transient and permanent
-                // errors. In this case we ignore transient errors and only mark
-                // a saga as abandoned if we find a permanent error.
-                match &error.undo_failure {
-                    Some((node_name, action_error)) => {
-                        // The saga failed and unwinding failed, so it can
-                        // move neither forward to its goal nor back to its
-                        // initial state. Mark it as abandoned so we stop trying
-                        // to recover it.
-                        match action_error {
-                            UndoActionError::PermanentFailure { source_error } => {
-                                warn!(
-                                    abandon_log,
-                                    "recovered saga is stuck; marking as abandoned";
-                                    "saga_id" => %saga_id,
-                                    // TODO-K: find which one is better to keep
-                                    "error" => ?error,
-                                    "node_name" => ?node_name,
-                                    "source_error" => ?source_error,
-                                );
-                                // TODO-K: saga_update_state to abandoned here
-                            }
-                        }
-                    },
-                None => {},
-                }
-            }
-            result
-        }
-        .boxed();
 
         let saga_completion = recovery
             .record_saga_recovery(saga_id, &steno::SagaName::new(&saga.name))
