@@ -218,28 +218,10 @@ pub fn analyze(builder: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
                     // hello!
                     psus_absent[shelf as usize].remove(slot);
                     if ereport.provenance == Provenance::ThisSitrep {
-                        let baseboard = match ereport.psc_baseboard() {
-                            Ok(baseboard) => Some(baseboard),
-                            Err(err) => {
-                                let err = InlineErrorChain::new(&*err);
-                                slog::warn!(
-                                    &log,
-                                    "couldn't determine PSC baseboard identity \
-                                     for alert";
-                                    "ereport" => %ereport.id(),
-                                    &err,
-                                );
-                                None
-                            }
-                        };
                         let requested = case_builder.request_alert(
                             &alert_types::PsuInsertedV0 {
                                 psu: ereport.alert_psu(),
-                                power_shelf: alert_types::PowerShelf {
-                                    shelf,
-                                    baseboard,
-                                    rack_id: rack.into_untyped_uuid(),
-                                },
+                                power_shelf: ereport.alert_power_shelf(&log),
                                 time: ereport.ereport.time_collected,
                             },
                             format!("requested for ereport {}", ereport.id()),
@@ -259,28 +241,10 @@ pub fn analyze(builder: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
                     // goodbye!
                     psus_absent[shelf as usize].insert(slot);
                     if ereport.provenance == Provenance::ThisSitrep {
-                        let baseboard = match ereport.psc_baseboard() {
-                            Ok(baseboard) => Some(baseboard),
-                            Err(err) => {
-                                let err = InlineErrorChain::new(&*err);
-                                slog::warn!(
-                                    &log,
-                                    "couldn't determine PSC baseboard identity \
-                                     for alert";
-                                    "ereport" => %ereport.id(),
-                                    &err,
-                                );
-                                None
-                            }
-                        };
                         let requested = case_builder.request_alert(
                             &alert_types::PsuRemovedV0 {
                                 psu: ereport.alert_psu(),
-                                power_shelf: alert_types::PowerShelf {
-                                    shelf,
-                                    baseboard,
-                                    rack_id: rack.into_untyped_uuid(),
-                                },
+                                power_shelf: ereport.alert_power_shelf(&log),
                                 time: ereport.ereport.time_collected,
                             },
                             format!("requested for ereport {}", ereport.id()),
@@ -578,6 +542,29 @@ impl PsuEreport {
                 .cloned()
                 .map(alert_types::PsuIdentity::from),
             slot: self.location.slot as u8,
+        }
+    }
+
+    fn alert_power_shelf(&self, log: &slog::Logger) -> alert_types::PowerShelf {
+        let baseboard = match self.psc_baseboard() {
+            Ok(bb) => Some(bb),
+            Err(err) => {
+                let err = InlineErrorChain::new(&*err);
+                slog::warn!(
+                    &log,
+                    "couldn't determine ereport PSC baseboard identity \
+                    for alert payload";
+                    "ereport" => %self.id(),
+                    "ereport_class" => ?self.ereport.class,
+                    &err,
+                );
+                None
+            }
+        };
+        alert_types::PowerShelf {
+            rack_id: self.location.rack.into_untyped_uuid(),
+            shelf: self.location.shelf,
+            baseboard,
         }
     }
 }
