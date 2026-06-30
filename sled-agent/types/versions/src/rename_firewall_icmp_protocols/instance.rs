@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Instance types for version `ADD_ICMPV6_FIREWALL_SUPPORT`.
+//! Instance types for version `RENAME_FIREWALL_ICMP_PROTOCOLS`.
 
 use std::collections::HashSet;
 use std::net::SocketAddr;
@@ -21,34 +21,18 @@ use uuid::Uuid;
 use crate::v1::instance::InstanceMetadata;
 use crate::v1::instance::VmmRuntimeState;
 use crate::v7::instance::InstanceMulticastMembership;
-use crate::v10;
 use crate::v10::inventory::NetworkInterface;
-use crate::v11::instance::ExternalIpConfig;
-use crate::v18;
 use crate::v18::attached_subnet::AttachedSubnet;
-use crate::v29;
 use crate::v29::instance::VmmSpec;
-
-/// The protocols that may be specified in a firewall rule's filter.
-//
-// This is frozen at the `ADD_ICMPV6_FIREWALL_SUPPORT` representation, which
-// serializes ICMP protocols as `icmp` and `icmp6`. It is a local copy rather
-// than `external::VpcFirewallRuleProtocol` so that later renames of that type
-// (to `icmp_v4`/`icmp_v6`) do not change this version's wire format.
-#[derive(Clone, Copy, Debug, PartialEq, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-#[serde(tag = "type", content = "value")]
-pub enum VpcFirewallRuleProtocol {
-    Tcp,
-    Udp,
-    Icmp(Option<external::VpcFirewallIcmpFilter>),
-    Icmp6(Option<external::VpcFirewallIcmpFilter>),
-}
+use crate::v31;
+use crate::v32::instance::ExternalIpConfig;
+use crate::v41;
 
 /// VPC firewall rule after object name resolution has been performed by Nexus.
 //
-// This version supports `Icmp6` in the protocol filter, added in
-// `ADD_ICMPV6_FIREWALL_SUPPORT`.
+// This version uses `external::VpcFirewallRuleProtocol`, which serializes ICMP
+// protocols as `icmp_v4` and `icmp_v6`. The prior version (`v31`) froze its own
+// copy that serializes them as `icmp`/`icmp6`.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, JsonSchema)]
 pub struct ResolvedVpcFirewallRule {
     pub status: external::VpcFirewallRuleStatus,
@@ -56,13 +40,13 @@ pub struct ResolvedVpcFirewallRule {
     pub targets: Vec<NetworkInterface>,
     pub filter_hosts: Option<HashSet<HostIdentifier>>,
     pub filter_ports: Option<Vec<external::L4PortRange>>,
-    pub filter_protocols: Option<Vec<VpcFirewallRuleProtocol>>,
+    pub filter_protocols: Option<Vec<external::VpcFirewallRuleProtocol>>,
     pub action: external::VpcFirewallRuleAction,
     pub priority: external::VpcFirewallRulePriority,
 }
 
-impl From<v10::instance::ResolvedVpcFirewallRule> for ResolvedVpcFirewallRule {
-    fn from(old: v10::instance::ResolvedVpcFirewallRule) -> Self {
+impl From<v31::instance::ResolvedVpcFirewallRule> for ResolvedVpcFirewallRule {
+    fn from(old: v31::instance::ResolvedVpcFirewallRule) -> Self {
         Self {
             status: old.status,
             direction: old.direction,
@@ -72,14 +56,17 @@ impl From<v10::instance::ResolvedVpcFirewallRule> for ResolvedVpcFirewallRule {
             filter_protocols: old.filter_protocols.map(|ps| {
                 ps.into_iter()
                     .map(|p| match p {
-                        v10::instance::VpcFirewallRuleProtocol::Tcp => {
-                            VpcFirewallRuleProtocol::Tcp
+                        v31::instance::VpcFirewallRuleProtocol::Tcp => {
+                            external::VpcFirewallRuleProtocol::Tcp
                         }
-                        v10::instance::VpcFirewallRuleProtocol::Udp => {
-                            VpcFirewallRuleProtocol::Udp
+                        v31::instance::VpcFirewallRuleProtocol::Udp => {
+                            external::VpcFirewallRuleProtocol::Udp
                         }
-                        v10::instance::VpcFirewallRuleProtocol::Icmp(f) => {
-                            VpcFirewallRuleProtocol::Icmp(f)
+                        v31::instance::VpcFirewallRuleProtocol::Icmp(f) => {
+                            external::VpcFirewallRuleProtocol::IcmpV4(f)
+                        }
+                        v31::instance::VpcFirewallRuleProtocol::Icmp6(f) => {
+                            external::VpcFirewallRuleProtocol::IcmpV6(f)
                         }
                     })
                     .collect()
@@ -126,16 +113,20 @@ pub struct InstanceEnsureBody {
 pub struct InstanceSledLocalConfig {
     pub hostname: Hostname,
     pub nics: Vec<NetworkInterface>,
-    pub external_ips: Option<ExternalIpConfig>,
+    pub external_ips: ExternalIpConfig,
     pub attached_subnets: Vec<AttachedSubnet>,
     pub multicast_groups: Vec<InstanceMulticastMembership>,
     pub firewall_rules: Vec<ResolvedVpcFirewallRule>,
     pub dhcp_config: DhcpConfig,
     pub delegated_zvols: Vec<DelegatedZvol>,
+    /// The MTU to apply to the instance's primary OPTE port, in bytes. If
+    /// `None`, the OPTE default is used (1500). Set when the fleet has
+    /// enabled external jumbo frames and the instance has opted in.
+    pub primary_nic_mtu: Option<u32>,
 }
 
-impl From<v29::instance::InstanceEnsureBody> for InstanceEnsureBody {
-    fn from(old: v29::instance::InstanceEnsureBody) -> Self {
+impl From<v41::instance::InstanceEnsureBody> for InstanceEnsureBody {
+    fn from(old: v41::instance::InstanceEnsureBody) -> Self {
         Self {
             vmm_spec: old.vmm_spec,
             local_config: old.local_config.into(),
@@ -148,21 +139,22 @@ impl From<v29::instance::InstanceEnsureBody> for InstanceEnsureBody {
     }
 }
 
-impl From<v18::instance::InstanceSledLocalConfig> for InstanceSledLocalConfig {
-    fn from(v18: v18::instance::InstanceSledLocalConfig) -> Self {
+impl From<v41::instance::InstanceSledLocalConfig> for InstanceSledLocalConfig {
+    fn from(old: v41::instance::InstanceSledLocalConfig) -> Self {
         Self {
-            hostname: v18.hostname,
-            nics: v18.nics,
-            external_ips: v18.external_ips,
-            attached_subnets: v18.attached_subnets,
-            multicast_groups: v18.multicast_groups,
-            firewall_rules: v18
+            hostname: old.hostname,
+            nics: old.nics,
+            external_ips: old.external_ips,
+            attached_subnets: old.attached_subnets,
+            multicast_groups: old.multicast_groups,
+            firewall_rules: old
                 .firewall_rules
                 .into_iter()
                 .map(ResolvedVpcFirewallRule::from)
                 .collect(),
-            dhcp_config: v18.dhcp_config,
-            delegated_zvols: v18.delegated_zvols,
+            dhcp_config: old.dhcp_config,
+            delegated_zvols: old.delegated_zvols,
+            primary_nic_mtu: old.primary_nic_mtu,
         }
     }
 }
@@ -172,26 +164,28 @@ mod tests {
     use super::*;
 
     #[test]
-    fn firewall_protocol_uses_legacy_wire_spelling() {
+    fn resolved_firewall_rule_converts_legacy_protocol_variants() {
+        let old = v31::instance::ResolvedVpcFirewallRule {
+            status: external::VpcFirewallRuleStatus::Enabled,
+            direction: external::VpcFirewallRuleDirection::Inbound,
+            targets: Vec::new(),
+            filter_hosts: None,
+            filter_ports: None,
+            filter_protocols: Some(vec![
+                v31::instance::VpcFirewallRuleProtocol::Icmp(None),
+                v31::instance::VpcFirewallRuleProtocol::Icmp6(None),
+            ]),
+            action: external::VpcFirewallRuleAction::Allow,
+            priority: external::VpcFirewallRulePriority(100),
+        };
+
+        let new = ResolvedVpcFirewallRule::from(old);
         assert_eq!(
-            serde_json::to_value(VpcFirewallRuleProtocol::Icmp(None)).unwrap(),
-            serde_json::json!({
-                "type": "icmp",
-                "value": null,
-            })
-        );
-        assert_eq!(
-            serde_json::to_value(VpcFirewallRuleProtocol::Icmp6(Some(
-                external::VpcFirewallIcmpFilter { icmp_type: 128, code: None }
-            )))
-            .unwrap(),
-            serde_json::json!({
-                "type": "icmp6",
-                "value": {
-                    "icmp_type": 128,
-                    "code": null,
-                },
-            })
+            new.filter_protocols,
+            Some(vec![
+                external::VpcFirewallRuleProtocol::IcmpV4(None),
+                external::VpcFirewallRuleProtocol::IcmpV6(None),
+            ])
         );
     }
 }

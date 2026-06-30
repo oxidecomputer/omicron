@@ -1565,27 +1565,33 @@ pub struct VpcFirewallRuleFilter {
 pub enum VpcFirewallRuleProtocol {
     Tcp,
     Udp,
-    Icmp(Option<VpcFirewallIcmpFilter>),
-    Icmp6(Option<VpcFirewallIcmpFilter>),
+    IcmpV4(Option<VpcFirewallIcmpFilter>),
+    IcmpV6(Option<VpcFirewallIcmpFilter>),
     // TODO: OPTE does not yet permit further L4 protocols. (opte#609)
     // Other(u16),
 }
 
 impl VpcFirewallRuleProtocol {
-    /// Returns a string representation of this protocol filter suitable for
-    /// use as an API string or in the database.
+    /// Returns the string representation of this protocol filter used for
+    /// database storage.
+    ///
+    /// This deliberately keeps the legacy `icmp`/`icmp6` spellings rather than
+    /// the API wire spellings (`icmp_v4`/`icmp_v6`), so that existing stored
+    /// rows remain valid without a data migration. The wire representation is
+    /// produced by serde (see the `serde(rename_all = "snake_case")` attribute
+    /// on the enum).
     ///
     /// This is the inverse of `from_api_string`.
     pub fn to_api_string(&self) -> String {
         match self {
             VpcFirewallRuleProtocol::Tcp => "tcp".to_string(),
             VpcFirewallRuleProtocol::Udp => "udp".to_string(),
-            VpcFirewallRuleProtocol::Icmp(None) => "icmp".to_string(),
-            VpcFirewallRuleProtocol::Icmp(Some(v)) => {
+            VpcFirewallRuleProtocol::IcmpV4(None) => "icmp".to_string(),
+            VpcFirewallRuleProtocol::IcmpV4(Some(v)) => {
                 format!("icmp:{}", v.to_api_string())
             }
-            VpcFirewallRuleProtocol::Icmp6(None) => "icmp6".to_string(),
-            VpcFirewallRuleProtocol::Icmp6(Some(v)) => {
+            VpcFirewallRuleProtocol::IcmpV6(None) => "icmp6".to_string(),
+            VpcFirewallRuleProtocol::IcmpV6(Some(v)) => {
                 format!("icmp6:{}", v.to_api_string())
             }
         }
@@ -1604,17 +1610,21 @@ impl VpcFirewallRuleProtocol {
             (lhs, None) if lhs.eq_ignore_ascii_case("tcp") => Ok(Self::Tcp),
             (lhs, None) if lhs.eq_ignore_ascii_case("udp") => Ok(Self::Udp),
             (lhs, None) if lhs.eq_ignore_ascii_case("icmp") => {
-                Ok(Self::Icmp(None))
+                Ok(Self::IcmpV4(None))
             }
-            (lhs, Some(rhs)) if lhs.eq_ignore_ascii_case("icmp") => Ok(
-                Self::Icmp(Some(VpcFirewallIcmpFilter::from_api_string(rhs)?)),
-            ),
+            (lhs, Some(rhs)) if lhs.eq_ignore_ascii_case("icmp") => {
+                Ok(Self::IcmpV4(Some(VpcFirewallIcmpFilter::from_api_string(
+                    rhs,
+                )?)))
+            }
             (lhs, None) if lhs.eq_ignore_ascii_case("icmp6") => {
-                Ok(Self::Icmp6(None))
+                Ok(Self::IcmpV6(None))
             }
-            (lhs, Some(rhs)) if lhs.eq_ignore_ascii_case("icmp6") => Ok(
-                Self::Icmp6(Some(VpcFirewallIcmpFilter::from_api_string(rhs)?)),
-            ),
+            (lhs, Some(rhs)) if lhs.eq_ignore_ascii_case("icmp6") => {
+                Ok(Self::IcmpV6(Some(VpcFirewallIcmpFilter::from_api_string(
+                    rhs,
+                )?)))
+            }
             (lhs, None) => Err(Error::invalid_value(
                 "vpc_firewall_rule_protocol",
                 format!("unrecognized protocol: {lhs}"),
@@ -3424,25 +3434,25 @@ mod test {
         );
 
         assert_eq!(
-            VpcFirewallRuleProtocol::Icmp(None),
+            VpcFirewallRuleProtocol::IcmpV4(None),
             VpcFirewallRuleProtocol::from_api_string("icmp").unwrap()
         );
         assert_eq!(
-            VpcFirewallRuleProtocol::Icmp(Some(VpcFirewallIcmpFilter {
+            VpcFirewallRuleProtocol::IcmpV4(Some(VpcFirewallIcmpFilter {
                 icmp_type: 4,
                 code: None
             })),
             VpcFirewallRuleProtocol::from_api_string("icmp:4").unwrap()
         );
         assert_eq!(
-            VpcFirewallRuleProtocol::Icmp(Some(VpcFirewallIcmpFilter {
+            VpcFirewallRuleProtocol::IcmpV4(Some(VpcFirewallIcmpFilter {
                 icmp_type: 60,
                 code: Some(0.into())
             })),
             VpcFirewallRuleProtocol::from_api_string("icmp:60,0").unwrap()
         );
         assert_eq!(
-            VpcFirewallRuleProtocol::Icmp(Some(VpcFirewallIcmpFilter {
+            VpcFirewallRuleProtocol::IcmpV4(Some(VpcFirewallIcmpFilter {
                 icmp_type: 60,
                 code: Some((0..=10).try_into().unwrap())
             })),
@@ -3486,6 +3496,40 @@ mod test {
         assert_eq!(
             VpcFirewallRuleProtocol::from_api_string("icmp:0,30-"),
             Err(Error::invalid_value("code", "range has no end value"))
+        );
+    }
+
+    #[test]
+    fn test_firewall_rule_protocol_wire_format() {
+        assert_eq!(
+            serde_json::to_value(VpcFirewallRuleProtocol::IcmpV4(None))
+                .unwrap(),
+            serde_json::json!({
+                "type": "icmp_v4",
+                "value": null,
+            })
+        );
+        assert_eq!(
+            serde_json::to_value(VpcFirewallRuleProtocol::IcmpV6(Some(
+                VpcFirewallIcmpFilter { icmp_type: 128, code: None }
+            )))
+            .unwrap(),
+            serde_json::json!({
+                "type": "icmp_v6",
+                "value": {
+                    "icmp_type": 128,
+                    "code": null,
+                },
+            })
+        );
+
+        assert_eq!(
+            VpcFirewallRuleProtocol::IcmpV4(None).to_api_string(),
+            "icmp"
+        );
+        assert_eq!(
+            VpcFirewallRuleProtocol::IcmpV6(None).to_api_string(),
+            "icmp6"
         );
     }
 

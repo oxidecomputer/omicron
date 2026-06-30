@@ -56,6 +56,7 @@ mod v2026_01_01_00_local;
 mod v2026_01_30_00_local;
 mod v2026_03_24_00_local;
 mod v2026_05_20_00_local;
+mod v2026_06_16_00_local;
 
 api_versions!([
     // API versions are in the format YYYY_MM_DD_NN.0.0, defined below as
@@ -86,6 +87,7 @@ api_versions!([
     // |  date-based version should be at the top of the list.
     // v
     // (next_yyyy_mm_dd_nn, IDENT),
+    (2026_06_16_00, RENAME_FIREWALL_ICMP_PROTOCOLS),
     (2026_06_08_00, INSTANCE_CPU_TYPE_TURIN_V2),
     (2026_06_05_00, EXTERNAL_JUMBO_FRAMES),
     (2026_06_04_00, IMAGE_BLOCK_SIZE_TYPE),
@@ -6929,12 +6931,30 @@ pub trait NexusExternalApi {
         method = GET,
         path = "/v1/vpc-firewall-rules",
         tags = ["vpcs"],
-        versions = VERSION_ADD_ICMPV6_FIREWALL_SUPPORT..,
+        versions = VERSION_RENAME_FIREWALL_ICMP_PROTOCOLS..,
     }]
     async fn vpc_firewall_rules_view(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<latest::vpc::VpcSelector>,
     ) -> Result<HttpResponseOk<VpcFirewallRules>, HttpError>;
+
+    /// List firewall rules
+    #[endpoint {
+        operation_id = "vpc_firewall_rules_view",
+        method = GET,
+        path = "/v1/vpc-firewall-rules",
+        tags = ["vpcs"],
+        versions = VERSION_ADD_ICMPV6_FIREWALL_SUPPORT..VERSION_RENAME_FIREWALL_ICMP_PROTOCOLS,
+    }]
+    async fn vpc_firewall_rules_view_v2026_06_16_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<latest::vpc::VpcSelector>,
+    ) -> Result<HttpResponseOk<v2026_06_16_00_local::VpcFirewallRules>, HttpError>
+    {
+        Self::vpc_firewall_rules_view(rqctx, query_params)
+            .await
+            .map(|resp| resp.map(Into::into))
+    }
 
     /// List firewall rules
     #[endpoint {
@@ -6975,13 +6995,33 @@ pub trait NexusExternalApi {
         method = PUT,
         path = "/v1/vpc-firewall-rules",
         tags = ["vpcs"],
-        versions = VERSION_ADD_ICMPV6_FIREWALL_SUPPORT..,
+        versions = VERSION_RENAME_FIREWALL_ICMP_PROTOCOLS..,
     }]
     async fn vpc_firewall_rules_update(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<latest::vpc::VpcSelector>,
         update: TypedBody<VpcFirewallRuleUpdateParams>,
     ) -> Result<HttpResponseOk<VpcFirewallRules>, HttpError>;
+
+    /// Replace firewall rules
+    #[endpoint {
+        operation_id = "vpc_firewall_rules_update",
+        method = PUT,
+        path = "/v1/vpc-firewall-rules",
+        tags = ["vpcs"],
+        versions = VERSION_ADD_ICMPV6_FIREWALL_SUPPORT..VERSION_RENAME_FIREWALL_ICMP_PROTOCOLS,
+    }]
+    async fn vpc_firewall_rules_update_v2026_06_16_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<latest::vpc::VpcSelector>,
+        update: TypedBody<v2026_06_16_00_local::VpcFirewallRuleUpdateParams>,
+    ) -> Result<HttpResponseOk<v2026_06_16_00_local::VpcFirewallRules>, HttpError>
+    {
+        let body = update.map(Into::into);
+        Self::vpc_firewall_rules_update(rqctx, query_params, body)
+            .await
+            .map(|resp| resp.map(Into::into))
+    }
 
     /// Replace firewall rules
     #[endpoint {

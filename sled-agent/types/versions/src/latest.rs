@@ -86,7 +86,7 @@ pub mod early_networking {
 }
 
 pub mod firewall_rules {
-    pub use crate::v31::firewall_rules::VpcFirewallRulesEnsureBody;
+    pub use crate::v42::firewall_rules::VpcFirewallRulesEnsureBody;
 }
 
 pub mod instance {
@@ -113,13 +113,14 @@ pub mod instance {
 
     pub use crate::v29::instance::VmmSpec;
 
-    pub use crate::v31::instance::ResolvedVpcFirewallRule;
     pub use crate::v32::instance::ExternalIpConfig;
     pub use crate::v32::instance::ExternalIps;
     pub use crate::v32::instance::ExternalIpv4Config;
     pub use crate::v32::instance::ExternalIpv6Config;
-    pub use crate::v41::instance::InstanceEnsureBody;
-    pub use crate::v41::instance::InstanceSledLocalConfig;
+
+    pub use crate::v42::instance::InstanceEnsureBody;
+    pub use crate::v42::instance::InstanceSledLocalConfig;
+    pub use crate::v42::instance::ResolvedVpcFirewallRule;
 }
 
 pub mod inventory {

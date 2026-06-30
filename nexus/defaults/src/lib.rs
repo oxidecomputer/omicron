@@ -82,7 +82,7 @@ pub static DEFAULT_FIREWALL_RULES: LazyLock<VpcFirewallRuleUpdateParams> =
                     targets,
                     filters: VpcFirewallRuleFilter {
                         hosts: None,
-                        protocols: Some(vec![VpcFirewallRuleProtocol::Icmp(None)]),
+                        protocols: Some(vec![VpcFirewallRuleProtocol::IcmpV4(None)]),
                         ports: None,
                     },
                     action: VpcFirewallRuleAction::Allow,

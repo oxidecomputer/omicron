@@ -226,7 +226,7 @@ fn validate_protocols(
     items: &[external::VpcFirewallRuleProtocol],
 ) -> Result<(), external::Error> {
     for proto in items {
-        if let external::VpcFirewallRuleProtocol::Icmp(Some(
+        if let external::VpcFirewallRuleProtocol::IcmpV4(Some(
             external::VpcFirewallIcmpFilter {
                 code: Some(external::IcmpParamRange { first, last }),
                 ..
