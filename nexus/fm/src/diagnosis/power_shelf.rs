@@ -938,6 +938,15 @@ mod tests {
         let (sitrep, report) =
             builder.build(OmicronZoneUuid::new_v4(), Utc::now());
         eprintln!("\n--- analysis report ---\n{}", report.display_multiline(0));
+        eprintln!("\n--- sitrep! ---\n");
+        let mut seen_any_cases = false;
+        for case in sitrep.open_cases() {
+            seen_any_cases = true;
+            eprintln!("{}", case.display_indented(0, Some(sitrep.id())));
+        }
+        if !seen_any_cases {
+            eprintln!("(that was the whole sitrep, btw)")
+        }
         sitrep
     }
 
