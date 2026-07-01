@@ -760,7 +760,7 @@ ratatui = "0.29.0"
 rats-corim = { git = "https://github.com/oxidecomputer/rats-corim.git", rev = "f0d5d5168d3d31487a56df32c676b0c6240bcc6b" }
 raw-cpuid = { git = "https://github.com/oxidecomputer/rust-cpuid.git", rev = "a4cf01df76f35430ff5d39dc2fe470bcb953503b" }
 rayon = "1.10"
-rcgen = { version = "0.12.1", default-features = false, features = ["aws_lc_rs", "pem"] }
+rcgen = { version = "0.14.8", default-features = false, features = ["aws_lc_rs", "pem"] }
 mg-api-types = { git = "https://github.com/oxidecomputer/maghemite", rev = "dc84a6ce494a9d004568b67e22add2285a04d887" }
 reconfigurator-cli = { path = "dev-tools/reconfigurator-cli" }
 reedline = "0.40.0"
