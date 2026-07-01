@@ -9,12 +9,12 @@
 //! and upgrade. Furthermore when rack initialization functions are called
 //! it's expected that software components are on the same version.
 
+use bootstrap_agent_lockstep_types::BaseboardIds;
 use bootstrap_agent_lockstep_types::RackInitializeRequest;
 use bootstrap_agent_lockstep_types::RackOperationStatus;
 use bootstrap_agent_lockstep_types::ReplicatedNetworkConfig;
 use dropshot::{HttpError, HttpResponseOk, RequestContext, TypedBody};
 use omicron_uuid_kinds::RackInitUuid;
-use omicron_uuid_kinds::RackResetUuid;
 
 #[dropshot::api_description]
 pub trait BootstrapAgentLockstepApi {
@@ -39,15 +39,6 @@ pub trait BootstrapAgentLockstepApi {
         body: TypedBody<RackInitializeRequest>,
     ) -> Result<HttpResponseOk<RackInitUuid>, HttpError>;
 
-    /// Reset the rack to an unconfigured state.
-    #[endpoint {
-        method = DELETE,
-        path = "/rack-initialize",
-    }]
-    async fn rack_reset(
-        rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<RackResetUuid>, HttpError>;
-
     /// Get the current contents of the network config kept in the replicated
     /// bootstore.
     ///
@@ -62,4 +53,13 @@ pub trait BootstrapAgentLockstepApi {
     async fn network_config_contents_for_debug(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<ReplicatedNetworkConfig>, HttpError>;
+
+    /// Return all known `BaseboardId`s and their bootstrap addresses.
+    #[endpoint {
+        method = GET,
+        path = "/baseboard-ids"
+    }]
+    async fn baseboard_ids(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<BaseboardIds>, HttpError>;
 }

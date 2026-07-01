@@ -17,7 +17,7 @@
   </dependency>
 
   <exec_method type='method' name='start'
-      exec='ctrun -l child -o noorphan,regent /opt/oxide/wicketd/bin/wicketd run /var/svc/manifest/site/wicketd/config.toml --address %{config/address} --artifact-address %{config/artifact-address} --mgs-address %{config/mgs-address} --nexus-proxy-address %{config/nexus-proxy-address} --baseboard-file %{config/baseboard-file} --read-smf-config &amp;'
+      exec='ctrun -l child -o noorphan,regent /opt/oxide/wicketd/bin/wicketd run /var/svc/manifest/site/wicketd/config.toml --address %{config/address} --artifact-address %{config/artifact-address} --mgs-address %{config/mgs-address} --nexus-proxy-address %{config/nexus-proxy-address} --baseboard-part %{config/baseboard-part} --baseboard-serial %{config/baseboard-serial} --bootstrap-agent-lockstep-address %{config/bootstrap-agent-lockstep-address} --read-smf-config &amp;'
     timeout_seconds='0' />
   <exec_method type='method' name='stop' exec=':kill' timeout_seconds='0' />
 
@@ -47,9 +47,11 @@
   <property_group name='config' type='application'>
     <propval name='address' type='astring' value='unknown' />
     <propval name='artifact-address' type='astring' value='unknown' />
+    <propval name='baseboard-part' type='astring' value='unknown' />
+    <propval name='baseboard-serial' type='astring' value='unknown' />
     <propval name='mgs-address' type='astring' value='unknown' />
     <propval name='nexus-proxy-address' type='astring' value='unknown' />
-    <propval name='baseboard-file' type='astring' value='unknown' />
+    <propval name='bootstrap-agent-lockstep-address' type='astring' value='unknown' />
     <!--
       In a standard deployment, this will remain `unknown` until rack setup
       is complete, at which point it will be populated. Prior to this being

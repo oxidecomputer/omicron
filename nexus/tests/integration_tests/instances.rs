@@ -1668,7 +1668,6 @@ async fn test_instance_migration_compatible_cpu_platforms(
         SledUuid::new_v4(),
         omicron_sled_agent::sim::SimMode::Explicit,
         Some(nexus_address),
-        Some(&camino::Utf8Path::new("/an/unused/update/directory")),
         omicron_sled_agent::sim::ZpoolConfig::None,
         sled_agent_types::inventory::SledCpuFamily::AmdTurin,
     );
@@ -1856,7 +1855,6 @@ async fn test_instance_migration_incompatible_cpu_platforms(
         SledUuid::new_v4(),
         omicron_sled_agent::sim::SimMode::Explicit,
         Some(nexus_address),
-        Some(&camino::Utf8Path::new("/an/unused/update/directory")),
         omicron_sled_agent::sim::ZpoolConfig::None,
         sled_agent_types::inventory::SledCpuFamily::AmdTurin,
     );
@@ -1933,7 +1931,6 @@ async fn test_instance_migration_unknown_sled_type(
         SledUuid::new_v4(),
         omicron_sled_agent::sim::SimMode::Explicit,
         Some(nexus_address),
-        Some(&camino::Utf8Path::new("/an/unused/update/directory")),
         omicron_sled_agent::sim::ZpoolConfig::None,
         sled_agent_types::inventory::SledCpuFamily::Unknown,
     );
@@ -7789,7 +7786,6 @@ async fn test_can_start_instance_with_cpu_platform(
         SledUuid::new_v4(),
         omicron_sled_agent::sim::SimMode::Explicit,
         Some(nexus_address),
-        Some(&camino::Utf8Path::new("/an/unused/update/directory")),
         omicron_sled_agent::sim::ZpoolConfig::None,
         sled_agent_types::inventory::SledCpuFamily::AmdTurin,
     );

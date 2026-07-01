@@ -26,7 +26,6 @@ use dropshot::StreamingBody;
 use dropshot::TypedBody;
 use internal_dns_resolver::Resolver;
 use omicron_uuid_kinds::RackInitUuid;
-use omicron_uuid_kinds::RackResetUuid;
 use sled_agent_types::early_networking::SwitchSlot;
 use sled_hardware_types::Baseboard;
 use slog::o;
@@ -144,7 +143,7 @@ impl WicketdApi for WicketdApiImpl {
         rss_config
             .update(
                 body.into_inner(),
-                ctx.baseboard.as_ref(),
+                &ctx.baseboard_id,
                 &inventory,
                 &ddm_discovered_sleds,
                 &ctx.log,
@@ -173,7 +172,7 @@ impl WicketdApi for WicketdApiImpl {
             join_config
                 .update(
                     body.into_inner(),
-                    ctx.baseboard.as_ref(),
+                    &ctx.baseboard_id,
                     &inventory,
                     &ddm_discovered_sleds,
                     &ctx.log,
@@ -183,7 +182,7 @@ impl WicketdApi for WicketdApiImpl {
             // Overwrite any non-multirack-join config
             *config = RssOrMultirackJoinConfig::MultirackJoin(
                 CurrentMultirackJoinConfig::new_with_inventory_and_peers(
-                    ctx.baseboard.as_ref(),
+                    &ctx.baseboard_id,
                     body.into_inner(),
                     &inventory,
                     &ddm_discovered_sleds,
@@ -304,11 +303,7 @@ impl WicketdApi for WicketdApiImpl {
     ) -> Result<HttpResponseOk<RackOperationStatus>, HttpError> {
         let ctx = rqctx.context();
 
-        let lockstep_addr =
-            ctx.bootstrap_agent_lockstep_addr().map_err(|err| {
-                HttpError::for_bad_request(None, format!("{err:#}"))
-            })?;
-
+        let lockstep_addr = ctx.bootstrap_agent_lockstep_address;
         let client = bootstrap_agent_lockstep_client::Client::new(
             &format!("http://{}", lockstep_addr),
             ctx.log.new(slog::o!("component" => "bootstrap lockstep client")),
@@ -351,11 +346,7 @@ impl WicketdApi for WicketdApiImpl {
         let ctx = rqctx.context();
         let log = &rqctx.log;
 
-        let lockstep_addr =
-            ctx.bootstrap_agent_lockstep_addr().map_err(|err| {
-                HttpError::for_bad_request(None, format!("{err:#}"))
-            })?;
-
+        let lockstep_addr = ctx.bootstrap_agent_lockstep_address;
         let request = {
             let mut config = ctx.rss_or_multirack_join_config.lock().unwrap();
 
@@ -407,53 +398,6 @@ impl WicketdApi for WicketdApiImpl {
             .into_inner();
 
         Ok(HttpResponseOk(init_id))
-    }
-
-    async fn post_run_rack_reset(
-        rqctx: RequestContext<ServerContext>,
-    ) -> Result<HttpResponseOk<RackResetUuid>, HttpError> {
-        let ctx = rqctx.context();
-
-        let lockstep_addr =
-            ctx.bootstrap_agent_lockstep_addr().map_err(|err| {
-                HttpError::for_bad_request(None, format!("{err:#}"))
-            })?;
-
-        slog::info!(ctx.log, "Sending RSS reset request to {}", lockstep_addr);
-        let client = bootstrap_agent_lockstep_client::Client::new(
-            &format!("http://{}", lockstep_addr),
-            ctx.log.new(slog::o!("component" => "bootstrap lockstep client")),
-        );
-
-        let reset_id = client
-            .rack_reset()
-            .await
-            .map_err(|err| {
-                use bootstrap_agent_lockstep_client::Error as BaError;
-                match err {
-                    BaError::CommunicationError(err) => {
-                        let message = format!(
-                            "Failed to send rack reset request: {}",
-                            InlineErrorChain::new(&err)
-                        );
-                        HttpError {
-                            status_code:
-                                dropshot::ErrorStatusCode::SERVICE_UNAVAILABLE,
-                            error_code: None,
-                            external_message: message.clone(),
-                            internal_message: message,
-                            headers: None,
-                        }
-                    }
-                    other => HttpError::for_bad_request(
-                        None,
-                        format!("Rack setup request failed: {other}"),
-                    ),
-                }
-            })?
-            .into_inner();
-
-        Ok(HttpResponseOk(reset_id))
     }
 
     async fn get_inventory(
@@ -544,7 +488,7 @@ impl WicketdApi for WicketdApiImpl {
     ) -> Result<HttpResponseOk<GetBaseboardResponse>, HttpError> {
         let rqctx = rqctx.context();
         Ok(HttpResponseOk(GetBaseboardResponse {
-            baseboard: rqctx.baseboard.clone(),
+            baseboard: rqctx.baseboard_id.clone(),
         }))
     }
 
@@ -555,7 +499,7 @@ impl WicketdApi for WicketdApiImpl {
         let inventory = mgs_inventory_or_unavail(&rqctx.mgs_handle).await?;
 
         let switch_id = rqctx.local_switch_id().await;
-        let sled_baseboard = rqctx.baseboard.clone();
+        let sled_baseboard_id = rqctx.baseboard_id.clone();
 
         let mut switch_baseboard = None;
         let mut sled_id = None;
@@ -573,12 +517,9 @@ impl WicketdApi for WicketdApiImpl {
                         state.revision,
                     )
                 });
-            } else if let (Some(sled_baseboard), Some(state)) =
-                (sled_baseboard.as_ref(), sp.state.as_ref())
-            {
-                if sled_baseboard.identifier() == state.serial_number
-                    && sled_baseboard.model() == state.model
-                    && sled_baseboard.revision() == state.revision
+            } else if let Some(state) = sp.state.as_ref() {
+                if sled_baseboard_id.serial_number == state.serial_number
+                    && sled_baseboard_id.part_number == state.model
                 {
                     sled_id = Some(sp.id);
                 }
@@ -587,7 +528,7 @@ impl WicketdApi for WicketdApiImpl {
 
         Ok(HttpResponseOk(GetLocationResponse {
             sled_id,
-            sled_baseboard,
+            sled_baseboard_id,
             switch_baseboard,
             switch_id,
         }))
@@ -656,7 +597,6 @@ impl WicketdApi for WicketdApiImpl {
         // Error cases.
         let mut inventory_absent = BTreeSet::new();
         let mut self_update = None;
-        let mut maybe_self_update = BTreeSet::new();
 
         // Next, do we have the states of the target SP?
         let sp_states = match inventory {
@@ -690,30 +630,12 @@ impl WicketdApi for WicketdApiImpl {
 
             // If we have the state of the SP, are we allowed to update it? We
             // refuse to try to update our own sled.
-            match &rqctx.baseboard {
-                Some(baseboard) => {
-                    if baseboard.identifier() == sp_state.serial_number
-                        && baseboard.model() == sp_state.model
-                        && baseboard.revision() == sp_state.revision
-                    {
-                        self_update = Some(*target);
-                        continue;
-                    }
-                }
-                None => {
-                    // We don't know our own baseboard, which is a very questionable
-                    // state to be in! For now, we will hard-code the possibly
-                    // locations where we could be running: scrimlets can only be in
-                    // cubbies 14 or 16, so we refuse to update either of those.
-                    let target_is_scrimlet = matches!(
-                        (target.type_, target.slot),
-                        (SpType::Sled, 14 | 16)
-                    );
-                    if target_is_scrimlet {
-                        maybe_self_update.insert(*target);
-                        continue;
-                    }
-                }
+            let baseboard_id = &rqctx.baseboard_id;
+            if baseboard_id.serial_number == sp_state.serial_number
+                && baseboard_id.part_number == sp_state.model
+            {
+                self_update = Some(*target);
+                continue;
             }
         }
 
@@ -729,13 +651,6 @@ impl WicketdApi for WicketdApiImpl {
             errors.push(format!(
                 "cannot update sled where wicketd is running ({})",
                 SpIdentifierDisplay(self_update)
-            ));
-        }
-        if !maybe_self_update.is_empty() {
-            errors.push(format!(
-                "wicketd does not know its own baseboard details: \
-             refusing to update either scrimlet ({})",
-                sps_to_string(&inventory_absent)
             ));
         }
 

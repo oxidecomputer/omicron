@@ -4,9 +4,7 @@
 
 //! Executable program to run a simulated sled agent
 
-// TODO see the TODO for nexus.
-
-use anyhow::{Context, anyhow};
+use anyhow::Context;
 use camino::Utf8PathBuf;
 use clap::Parser;
 use dropshot::ConfigDropshot;
@@ -98,8 +96,6 @@ fn main() {
 async fn do_run() -> Result<(), CmdError> {
     let args = Args::parse();
 
-    let tmp = camino_tempfile::tempdir()
-        .map_err(|e| CmdError::Failure(anyhow!(e)))?;
     let config = Config {
         dropshot: ConfigDropshot {
             bind_address: args.sled_agent_addr.into(),
@@ -131,7 +127,6 @@ async fn do_run() -> Result<(), CmdError> {
             args.uuid,
             args.sim_mode,
             Some(args.nexus_addr),
-            Some(tmp.path()),
             ZpoolConfig::TenVirtualU2s,
             SledCpuFamily::AmdMilan,
         )

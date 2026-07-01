@@ -2,6 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use crate::v1::inventory::Baseboard;
 use camino::Utf8PathBuf;
 use iddqd::id_upcast;
 use iddqd::{IdOrdItem, IdOrdMap};
@@ -14,7 +15,7 @@ use schemars::{
     JsonSchema, SchemaGenerator, schema::Schema, schema::SchemaObject,
 };
 use serde::{Deserialize, Serialize};
-use sled_hardware_types::{Baseboard, SledCpuFamily};
+use sled_hardware_types::SledCpuFamily;
 use std::collections::BTreeMap;
 use std::net::SocketAddrV6;
 

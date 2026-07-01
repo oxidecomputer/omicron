@@ -5,9 +5,7 @@
 //! CLI to set up zone configuration
 
 use anyhow::{Context, anyhow, bail};
-use clap::builder::{
-    NonEmptyStringValueParser, StringValueParser, TypedValueParser,
-};
+use clap::builder::NonEmptyStringValueParser;
 use clap::{ArgAction, Args, Parser, Subcommand};
 use illumos_utils::ExecutionError;
 use illumos_utils::addrobj::{AddrObject, IPV6_LINK_LOCAL_ADDROBJ_NAME};
@@ -20,14 +18,13 @@ use omicron_common::backoff::{BackoffError, retry_notify, retry_policy_local};
 use omicron_common::cmd::CmdError;
 use omicron_common::cmd::fatal;
 use oxnet::Ipv6Net;
-use sled_agent_types::sled::SWITCH_ZONE_BASEBOARD_FILE;
 use slog::{Logger, info};
 use std::fmt::Write as _;
 use std::fs::{OpenOptions, metadata, read_to_string, set_permissions, write};
 use std::io::Write as _;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::os::unix::fs::chown;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use uzers::{get_group_by_name, get_user_by_name};
 use zone_setup::switch_zone_user::SwitchZoneUser;
 
@@ -117,20 +114,8 @@ struct ChronySetupArgs {
     boundary_pool: String,
 }
 
-// The default clap parser for `serde_json::Value` is to wrap the argument in a
-// `Value::String`; this value parser parses the argument as JSON instead.
-fn json_value_parser() -> impl TypedValueParser<Value = serde_json::Value> {
-    StringValueParser::new().try_map(|s| s.parse())
-}
-
 #[derive(Debug, Args)]
 struct SwitchZoneArgs {
-    /// path to the baseboard file
-    #[arg(short, long, default_value = SWITCH_ZONE_BASEBOARD_FILE)]
-    baseboard_file: PathBuf,
-    /// baseboard info JSON blob
-    #[arg(short = 'i', long, value_parser = json_value_parser())]
-    baseboard_info: serde_json::Value,
     /// bootstrap IPv6 address
     #[arg(short = 'a', long)]
     bootstrap_addr: Ipv6Addr,
@@ -196,20 +181,11 @@ async fn switch_zone_setup(
     log: &Logger,
 ) -> anyhow::Result<()> {
     let SwitchZoneArgs {
-        baseboard_file: file,
-        baseboard_info: info,
         bootstrap_addr,
         bootstrap_vnic,
         gz_local_link_addr,
         link_local_links: links,
     } = args;
-
-    info!(
-        log, "Generating baseboard.json file";
-        "baseboard file" => %file.display(),
-        "baseboard info" => ?info,
-    );
-    generate_switch_zone_baseboard_file(&file, info)?;
 
     info!(log, "Setting up the users required for wicket and support");
     let wicket_user = SwitchZoneUser::new(
@@ -292,30 +268,6 @@ async fn switch_zone_setup(
         )
     })?;
 
-    Ok(())
-}
-
-fn generate_switch_zone_baseboard_file(
-    file: &Path,
-    info: serde_json::Value,
-) -> anyhow::Result<()> {
-    let config_file = OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(true)
-        .open(file)
-        .with_context(|| {
-            format!(
-                "Could not create baseboard configuration file {}",
-                file.display(),
-            )
-        })?;
-    serde_json::to_writer(config_file, &info).with_context(|| {
-        format!(
-            "Could not write to baseboard configuration file {}",
-            file.display(),
-        )
-    })?;
     Ok(())
 }
 

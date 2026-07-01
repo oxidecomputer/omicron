@@ -918,43 +918,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "bootstrap-agent-api"
-version = "0.1.0"
-dependencies = [
- "dropshot",
- "dropshot-api-manager-types",
- "omicron-common",
- "omicron-uuid-kinds",
- "omicron-workspace-hack",
- "schemars 0.8.22",
- "serde",
- "sled-agent-types",
- "sled-agent-types-versions",
- "sled-hardware-types",
- "tufaceous-artifact",
-]
-
-[[package]]
-name = "bootstrap-agent-client"
-version = "0.1.0"
-dependencies = [
- "omicron-common",
- "omicron-uuid-kinds",
- "omicron-workspace-hack",
- "oxnet",
- "progenitor 0.14.0",
- "regress 0.10.5",
- "reqwest 0.13.2",
- "schemars 0.8.22",
- "serde",
- "serde_json",
- "sled-agent-types",
- "sled-hardware-types",
- "slog",
- "uuid",
-]
-
-[[package]]
 name = "bootstrap-agent-lockstep-api"
 version = "0.1.0"
 dependencies = [
@@ -988,6 +951,7 @@ name = "bootstrap-agent-lockstep-types"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "iddqd",
  "omicron-common",
  "omicron-passwords",
  "omicron-uuid-kinds",
@@ -8889,7 +8853,6 @@ name = "omicron-dropshot-apis"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "bootstrap-agent-api",
  "bootstrap-agent-lockstep-api",
  "camino",
  "clap",
@@ -9577,8 +9540,6 @@ dependencies = [
  "atomicwrites",
  "base64 0.22.1",
  "bootstore",
- "bootstrap-agent-api",
- "bootstrap-agent-client",
  "bootstrap-agent-lockstep-api",
  "bootstrap-agent-lockstep-types",
  "bytes",
@@ -17309,7 +17270,6 @@ dependencies = [
  "anyhow",
  "async-trait",
  "base64 0.22.1",
- "bootstrap-agent-client",
  "bootstrap-agent-lockstep-client",
  "buf-list",
  "bytes",

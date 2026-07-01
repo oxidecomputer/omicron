@@ -5,7 +5,6 @@
 use std::process::ExitCode;
 
 use anyhow::{Context, anyhow};
-use bootstrap_agent_api::*;
 use bootstrap_agent_lockstep_api::*;
 use camino::Utf8PathBuf;
 use clap::Parser;
@@ -54,24 +53,6 @@ fn environment() -> anyhow::Result<Environment> {
 // TODO The metadata here overlaps with metadata in api-manifest.toml.
 fn all_apis() -> anyhow::Result<ManagedApis> {
     let apis = vec![
-        ManagedApi::from(ManagedApiConfig {
-            title: "Bootstrap Agent API",
-            versions: Versions::new_versioned(
-                bootstrap_agent_api::supported_versions(),
-            ),
-            metadata: ManagedApiMetadata {
-                description: Some("Per-sled API for setup and teardown"),
-                contact_url: Some("https://oxide.computer"),
-                contact_email: Some("api@oxide.computer"),
-                extra: to_value(ApiBoundary::Internal),
-            },
-            api_description: bootstrap_agent_api_mod::stub_api_description,
-            ident: "bootstrap-agent",
-        })
-        // The bootstrap-agent API is client-side-versioned and currently frozen.
-        // We allow trivial changes to go through. If we did not, we would need to
-        // unfreeze the API and bump the version number for trivial changes.
-        .allow_trivial_changes_for_latest(),
         ManagedApi::from(ManagedApiConfig {
             title: "Bootstrap Agent Lockstep API",
             versions: Versions::new_lockstep(semver::Version::new(0, 0, 1)),

@@ -37,7 +37,7 @@ use nexus_proxy::NexusTcpProxy;
 use omicron_common::FileKv;
 use omicron_common::address::{AZ_PREFIX, Ipv6Subnet};
 use preflight_check::PreflightCheckerHandler;
-use sled_hardware_types::Baseboard;
+use sled_hardware_types::BaseboardId;
 use slog::{Drain, debug, error, o};
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
@@ -55,8 +55,9 @@ pub struct Args {
     pub artifact_address: SocketAddrV6,
     pub mgs_address: SocketAddrV6,
     pub nexus_proxy_address: SocketAddrV6,
-    pub baseboard: Option<Baseboard>,
+    pub baseboard_id: BaseboardId,
     pub rack_subnet: Option<Ipv6Subnet<AZ_PREFIX>>,
+    pub bootstrap_agent_lockstep_address: SocketAddrV6,
 }
 
 pub struct SmfConfigValues {
@@ -165,7 +166,10 @@ impl Server {
             ipr_update_tracker.clone(),
         ));
 
-        let bootstrap_peers = BootstrapPeersFromDdm::new(&log);
+        let bootstrap_peers = BootstrapPeersFromDdm::new(
+            &log,
+            args.bootstrap_agent_lockstep_address,
+        );
         let internal_dns_resolver = args
             .rack_subnet
             .map(|addr| {
@@ -203,9 +207,11 @@ impl Server {
                     transceiver_handle,
                     log: log.clone(),
                     local_switch_id: OnceLock::new(),
+                    bootstrap_agent_lockstep_address: args
+                        .bootstrap_agent_lockstep_address,
                     bootstrap_peers,
                     update_tracker: update_tracker.clone(),
-                    baseboard: args.baseboard,
+                    baseboard_id: args.baseboard_id,
                     rss_or_multirack_join_config: Default::default(),
                     preflight_checker: PreflightCheckerHandler::new(&log),
                     internal_dns_resolver,

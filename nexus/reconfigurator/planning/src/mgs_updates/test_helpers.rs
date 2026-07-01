@@ -33,7 +33,6 @@ use omicron_common::api::external::TufRepoMeta;
 use omicron_common::disk::M2Slot;
 use omicron_common::update::ArtifactId;
 use omicron_uuid_kinds::SledUuid;
-use sled_agent_types::inventory::Baseboard;
 use sled_agent_types::inventory::BootImageHeader;
 use sled_agent_types::inventory::BootPartitionContents;
 use sled_agent_types::inventory::BootPartitionDetails;
@@ -47,6 +46,7 @@ use sled_agent_types::inventory::OmicronSledConfig;
 use sled_agent_types::inventory::SledCpuFamily;
 use sled_agent_types::inventory::SledRole;
 use sled_agent_types::inventory::SvcsEnabledNotOnlineResult;
+use sled_hardware_types::BaseboardId;
 use sled_hardware_types::COSMO_SLED_MODEL;
 use sled_hardware_types::GIMLET_SLED_MODEL;
 use sled_hardware_types::OxideSled;
@@ -1340,10 +1340,9 @@ impl<'a> TestBoardCollectionBuilder<'a> {
                         Inventory {
                             // fields we care about
                             sled_id,
-                            baseboard: Baseboard::Gimlet {
-                                identifier: sp_state.serial_number.clone(),
-                                model: sp_state.model.clone(),
-                                revision: 0,
+                            baseboard_id: BaseboardId {
+                                part_number: sp_state.model.clone(),
+                                serial_number: sp_state.serial_number.clone(),
                             },
                             last_reconciliation: Some(
                                 ConfigReconcilerInventory {

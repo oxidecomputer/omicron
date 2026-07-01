@@ -12,7 +12,7 @@ use sled_agent_types::early_networking::BgpConfig;
 use sled_agent_types::early_networking::LldpPortConfig;
 use sled_agent_types::early_networking::RouteConfig;
 use sled_agent_types::early_networking::UplinkAddress;
-use sled_hardware_types::Baseboard;
+use sled_hardware_types::BaseboardId;
 use std::borrow::Cow;
 use std::collections::BTreeSet;
 use std::fmt;
@@ -195,20 +195,9 @@ fn build_sleds_array(sleds: &BTreeSet<BootstrapSledDescription>) -> Array {
             .bootstrap_ip
             .map(|ip| Cow::from(format!("{ip}")))
             .unwrap_or_else(|| Cow::from("IP address UNKNOWN"));
-        match &sled.baseboard {
-            Baseboard::Gimlet { identifier, model, revision } => {
-                format!(
-                    " # {identifier} (model {model} revision {revision}, {ip})\
-                     {end}"
-                )
-            }
-            Baseboard::Unknown => {
-                format!(" # UNKNOWN SLED ({ip}){end}")
-            }
-            Baseboard::Pc { identifier, model } => {
-                format!(" # NON-OXIDE {identifier} (model {model}, {ip}){end}")
-            }
-        }
+
+        let BaseboardId { serial_number, part_number } = &sled.baseboard_id;
+        format!(" # {serial_number} (model {part_number}, {ip}){end}")
     }
 
     let mut array = Array::new();

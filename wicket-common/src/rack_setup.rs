@@ -30,7 +30,7 @@ use sled_agent_types::early_networking::TxEqConfig;
 use sled_agent_types::early_networking::UplinkAddress;
 use sled_agent_types::early_networking::UplinkAddressConfig;
 use sled_agent_types::early_networking::UplinkIpNet;
-use sled_hardware_types::Baseboard;
+use sled_hardware_types::BaseboardId;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
@@ -99,7 +99,7 @@ pub struct PutRssUserConfigInsensitive {
 )]
 pub struct BootstrapSledDescription {
     pub id: SpIdentifier,
-    pub baseboard: Baseboard,
+    pub baseboard_id: BaseboardId,
     /// The sled's bootstrap address, if the host is on and we've discovered it
     /// on the bootstrap network.
     pub bootstrap_ip: Option<Ipv6Addr>,

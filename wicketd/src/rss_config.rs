@@ -32,7 +32,7 @@ use sled_agent_types::early_networking::RouterPeerType;
 use sled_agent_types::early_networking::SwitchSlot;
 use sled_agent_types::early_networking::UplinkAddress;
 use sled_agent_types::early_networking::UplinkPorts;
-use sled_hardware_types::Baseboard;
+use sled_hardware_types::BaseboardId;
 use slog::warn;
 use std::collections::BTreeMap;
 use std::net::IpAddr;
@@ -165,12 +165,13 @@ impl CurrentRssConfig {
         let known_bootstrap_sleds = bootstrap_peers.sleds();
         let mut bootstrap_ips = Vec::new();
         for sled in &self.common.bootstrap_sleds {
-            let Some(ip) = known_bootstrap_sleds.get(&sled.baseboard).copied()
+            let Some(ip) =
+                known_bootstrap_sleds.get(&sled.baseboard_id).copied()
             else {
                 bail!(
                     "IP address not (yet?) known for sled {} ({:?})",
                     sled.id.slot,
-                    sled.baseboard,
+                    sled.baseboard_id,
                 );
             };
             bootstrap_ips.push(ip);
@@ -182,13 +183,13 @@ impl CurrentRssConfig {
         // a small rack cluster that does not support trust quorum.
         // https://github.com/oxidecomputer/omicron/issues/3690
         const TRUST_QUORUM_MIN_SIZE: usize = 3;
-        let trust_quorum_peers: Option<Vec<Baseboard>> =
+        let trust_quorum_peers: Option<Vec<BaseboardId>> =
             if self.common.bootstrap_sleds.len() >= TRUST_QUORUM_MIN_SIZE {
                 Some(
                     self.common
                         .bootstrap_sleds
                         .iter()
-                        .map(|sled| sled.baseboard.clone())
+                        .map(|sled| sled.baseboard_id.clone())
                         .collect(),
                 )
             } else {
@@ -331,9 +332,9 @@ impl CurrentRssConfig {
     pub(crate) fn update(
         &mut self,
         config: PutRssUserConfigInsensitive,
-        our_baseboard: Option<&Baseboard>,
+        our_baseboard: &BaseboardId,
         inventory: &MgsV1Inventory,
-        ddm_discovered_sleds: &BTreeMap<Baseboard, Ipv6Addr>,
+        ddm_discovered_sleds: &BTreeMap<BaseboardId, Ipv6Addr>,
         log: &slog::Logger,
     ) -> Result<(), String> {
         self.common.update(
@@ -800,7 +801,7 @@ mod tests {
         current_config
             .update(
                 example.put_insensitive.clone(),
-                example.our_baseboard.as_ref(),
+                &example.our_baseboard_id,
                 &example.inventory,
                 &example.ddm_discovered_sleds,
                 &logctx.log,
@@ -910,7 +911,7 @@ mod tests {
         current_config
             .update(
                 example_data_2.put_insensitive,
-                example_data_2.our_baseboard.as_ref(),
+                &example_data_2.our_baseboard_id,
                 &example_data_2.inventory,
                 &example_data_2.ddm_discovered_sleds,
                 &logctx.log,
@@ -930,7 +931,7 @@ mod tests {
         current_config
             .update(
                 example.put_insensitive,
-                example.our_baseboard.as_ref(),
+                &example.our_baseboard_id,
                 &example.inventory,
                 &example.ddm_discovered_sleds,
                 &logctx.log,
