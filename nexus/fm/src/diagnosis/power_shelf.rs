@@ -24,6 +24,7 @@ use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::fmt;
+use std::fmt::Write;
 use std::sync::Arc;
 use strum::VariantArray;
 
@@ -169,7 +170,8 @@ pub fn analyze(builder: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
                 let mut c =
                     builder.cases.open_case(DiagnosisEngineKind::PowerShelf);
                 *c.comment_mut() = format!(
-                    "opened because {location} was {verbed} (in ereport {})",
+                    "opened because {location} was {verbed}\n\
+                     this happened in ereport {}",
                     ereport.id
                 );
                 cases_by_psu
@@ -229,7 +231,8 @@ pub fn analyze(builder: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
                                 time: ereport.ereport.time_collected,
                             },
                             format_args!(
-                                "requested for ereport {}, class {} ({psu})",
+                                "requested for ereport {}\nereport class: {}\n\
+                                 location: {psu}",
                                 ereport.id(),
                                 ereport.class(),
                             ),
@@ -249,7 +252,8 @@ pub fn analyze(builder: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
                                 time: ereport.ereport.time_collected,
                             },
                             format_args!(
-                                "requested for ereport {}, class {} ({psu})",
+                                "requested for ereport {}\nereport class: {}\n\
+                                 location: {psu}",
                                 ereport.id(),
                                 ereport.class(),
                             ),
@@ -274,8 +278,13 @@ pub fn analyze(builder: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
         if psus_absent.is_empty() {
             case_builder.close("no absent PSUs detected");
         } else {
-            *case_builder.comment_mut() =
-                format!("the following PSUs are absent: {psus_absent:?}")
+            let comment = case_builder.comment_mut();
+            writeln!(comment, "the following PSUs are absent:")
+                .expect("write to string is infallible");
+            for psu in psus_absent.iter() {
+                writeln!(comment, " - {psu}")
+                    .expect("write to string is infallible");
+            }
         }
     }
 
