@@ -3,17 +3,24 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::context::ServerContext;
+use anyhow::bail;
 use dropshot::HttpError;
 use dropshot::HttpResponseOk;
 use dropshot::RequestContext;
 use ntp_admin_api::*;
+use ntp_admin_types::debug::DebugInfo;
 use ntp_admin_types::timesync::TimeSync;
+use scuffle::HasDirectPropertyGroups;
+use scuffle::Scf;
+use scuffle::Value;
 use slog::info;
 use slog_error_chain::InlineErrorChain;
 use std::net::IpAddr;
 use std::net::Ipv6Addr;
 use std::str::FromStr;
 use std::sync::Arc;
+use std::time::Duration;
+use tokio::net::lookup_host;
 
 type NtpApiDescription = dropshot::ApiDescription<Arc<ServerContext>>;
 
@@ -170,6 +177,74 @@ const fn compute_max_error(
     correction.abs() + root_delay / 2.0 + root_dispersion
 }
 
+struct ChronySetupProperties {
+    server: Vec<Value>,
+    boundary: Value,
+    boundary_pool: Value,
+}
+
+impl ChronySetupProperties {
+    fn load() -> Result<Self, anyhow::Error> {
+        // TODO-K: add with_context to all errors returned
+
+        let scf = Scf::connect_current_zone()?;
+        let scope = scf.scope_local()?;
+
+        let Some(service) = scope.service("oxide/chrony-setup")? else {
+            bail!("SMF service 'oxide/chrony-setup' was not found")
+        };
+        let Some(instance) = service.instance("default")? else {
+            bail!("instance default not found within {}", service.fmri())
+        };
+        let Some(pg) = instance.property_group_direct("config")? else {
+            bail!("property group 'config' not found for {}", instance.fmri())
+        };
+
+        // TODO-K: Should I mark a property as blank if a property isn't set?
+        // This is for debugging purposes anyway will want to capture as much
+        // as possible?
+
+        // Retrieve whether this is a boundary zone or not
+        let Some(property) = pg.property("boundary")? else {
+            bail!("property 'boundary' not found for {:?}", pg,);
+        };
+        let boundary = property.single_value()?;
+
+        let is_boundary = match &boundary {
+            Value::Bool(b) => *b,
+            _ => bail!(
+                "the value kind for property 'boundary' is {};\
+            should be a boolean",
+                &boundary.kind()
+            ),
+        };
+
+        // Retrieve the server property, should only be present in boundary zones
+        let mut server = vec![];
+        if is_boundary {
+            if let Some(property) = pg.property("server")? {
+                let values: Vec<Value> =
+                    property.values()?.collect::<Result<_, _>>()?;
+                server = values;
+            } else {
+                bail!(
+                    "property 'server' not found for {:?} in a boundary zone",
+                    pg
+                )
+            }
+        }
+
+        // Retrieve the hostname that resolves to the boundary NTP server
+        // addresses
+        let Some(property) = pg.property("boundary_pool")? else {
+            bail!("unable to find value for boundary pool");
+        };
+        let boundary_pool = property.single_value()?;
+
+        Ok(Self { server, boundary, boundary_pool })
+    }
+}
+
 enum NtpAdminImpl {}
 
 impl NtpAdminImpl {
@@ -189,6 +264,89 @@ impl NtpAdminImpl {
         info!(log, "parse_timesync_result"; "result" => ?result);
         result
     }
+
+    async fn debug_get(ctx: &ServerContext) -> Result<DebugInfo, HttpError> {
+        let log = ctx.log();
+        info!(log, "collecting NTP zone debug info");
+
+        // TODO-K: get rid of unwrap
+        let ChronySetupProperties { server, boundary, boundary_pool } =
+            ChronySetupProperties::load().unwrap();
+
+        // TODO-K: This doesn't seem to work on an a4x2 for some reason
+        // when I ping time.cloudflare.com, it just times out, or if I leave it
+        // I get ping: unknown host time.cloudflare.com. I need to test on a
+        // raclette
+        //
+        // Can I reach the DNS server / resolve the configured upstream NTP servers?
+        //
+        // `tokio::net::lookup_host` goes through getaddrinfo -> /etc/resolv.conf,
+        // so a successful lookup means at least one nameserver in resolv.conf
+        // answered. We probe every configured upstream NTP name.
+
+        // TODO-K: clean this up, probably should separate external NTP servers
+        // and internal ones?
+        let mut server_values = vec![];
+        for value in &server {
+            server_values.push(value.display_smf().to_string());
+        }
+        let mut all_ntp_servers = server_values.clone();
+        all_ntp_servers.push(boundary_pool.clone().display_smf().to_string());
+
+        let mut name_lookups: Vec<(String, String)> =
+            Vec::with_capacity(all_ntp_servers.len());
+
+        // TODO-K: Should spawn tasks for this
+        for name in &all_ntp_servers {
+            let result = match tokio::time::timeout(
+                // TODO-K: set this timeout as a constant
+                Duration::from_secs(3),
+                lookup_host(format!("{name}:0")),
+            )
+            .await
+            {
+                Ok(Ok(addrs)) => {
+                    let ips: Vec<IpAddr> = addrs.map(|sa| sa.ip()).collect();
+                    format!("resolved to {ips:?}")
+                }
+                Ok(Err(err)) => {
+                    format!("lookup failed: {}", InlineErrorChain::new(&err))
+                }
+                Err(_) => "timed out after 3s".to_string(),
+            };
+
+            info!(log, "dns lookup probe"; "name" => name, "result" => &result);
+            name_lookups.push((name.clone(), result));
+        }
+
+        let lookup_lines: Vec<String> =
+            name_lookups.iter().map(|(n, r)| format!("{n} -> {r}")).collect();
+
+        // Boundary zone: Can I reach the upstream NTP server (e.g. ICMP ping)?
+        // Internal zone: Can I reach the boundary NTP server (e.g. ICMP ping)?
+
+        // Boundary zone: Can I resolve the upstream NTP server's name via DNS?
+        //                svcprop -p config/server svc:/oxide/chrony-setup:default
+        //
+        // Internal zone: Can I resolve the boundary NTP server's name via DNS?
+        //                svcprop -p config/boundary_pool svc:/oxide/chrony-setup:default
+        //                Should look like boundary_ntp.<some-uuid>.oxide.internal
+
+        // TODO-K: Log the data too
+
+        Ok(DebugInfo {
+            data: format!(
+                "IS BOUNDARY: {}\n
+                EXTERNAL NTP SERVER: {server_values:?}\n
+                BOUNDARY POOL: {}\n
+                NAME LOOKUPS: {}\n
+            ",
+                boundary.display_smf(),
+                boundary_pool.display_smf(),
+                lookup_lines.join("\n  "),
+            ),
+        })
+    }
 }
 
 impl NtpAdminApi for NtpAdminImpl {
@@ -199,6 +357,14 @@ impl NtpAdminApi for NtpAdminImpl {
     ) -> Result<HttpResponseOk<TimeSync>, HttpError> {
         let ctx = rqctx.context();
         let response = Self::timesync_get(ctx).await?;
+        Ok(HttpResponseOk(response))
+    }
+
+    async fn debug(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<DebugInfo>, HttpError> {
+        let ctx = rqctx.context();
+        let response = Self::debug_get(ctx).await?;
         Ok(HttpResponseOk(response))
     }
 }

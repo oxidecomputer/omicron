@@ -23,6 +23,7 @@ oxide-tokio-rt.workspace = true
 pq-sys = "*"
 reqwest.workspace = true
 schemars.workspace = true
+scuffle.workspace = true
 slog.workspace = true
 slog-async.workspace = true
 slog-dtrace.workspace = true

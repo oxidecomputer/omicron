@@ -15,6 +15,7 @@ api_versions!([
     // which CRDB panics early during control plane startup because the clocks
     // are not synchronized well-enough. We're adding this as part of a
     // two-phase rollout to get around #9290 for now.
+    (3, ADD_DEBUG_ENDPOINT),
     (2, ADD_MAX_ERROR_AND_OFFSET),
     (1, INITIAL),
 ]);
@@ -22,6 +23,16 @@ api_versions!([
 #[dropshot::api_description]
 pub trait NtpAdminApi {
     type Context;
+
+    /// Collect read-only diagnostic information
+    #[endpoint {
+        method = GET,
+        path = "/debug",
+        versions = VERSION_ADD_DEBUG_ENDPOINT..,
+    }]
+    async fn debug(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<latest::debug::DebugInfo>, HttpError>;
 
     /// Query for the state of time synchronization
     #[endpoint {

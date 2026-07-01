@@ -780,6 +780,7 @@ rustix = "1.1.2"
 samael = { version = "0.0.19", features = ["xmlsec"] }
 schemars = "0.8.22"
 scopeguard = "1.2.0"
+scuffle = "0.1.0"
 secrecy = "0.10.3"
 semver = { version = "1.0.26", features = ["std", "serde"] }
 seq-macro = "0.3.6"
@@ -856,7 +857,7 @@ textwrap = { version = "0.16.2", features = [ "terminal_size" ] }
 test-strategy = "0.4.3"
 thiserror = "2.0"
 tofino = { git = "https://github.com/oxidecomputer/tofino" }
-tokio = "1.52.1"
+tokio = { version = "1.52.1", features = ["net"]}
 tokio-postgres = { version = "0.7", features = [ "with-chrono-0_4", "with-uuid-1" ] }
 tokio-stream = "0.1.17"
 tokio-test = "0.4.5"

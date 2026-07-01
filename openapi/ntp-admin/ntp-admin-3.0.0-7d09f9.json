@@ -7,9 +7,33 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "2.0.0"
+    "version": "3.0.0"
   },
   "paths": {
+    "/debug": {
+      "get": {
+        "summary": "Collect read-only diagnostic information",
+        "operationId": "debug",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DebugInfo"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/timesync": {
       "get": {
         "summary": "Query for the state of time synchronization",
@@ -37,6 +61,18 @@
   },
   "components": {
     "schemas": {
+      "DebugInfo": {
+        "description": "Diagnostic information",
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "data"
+        ]
+      },
       "Error": {
         "description": "Error information from a response.",
         "type": "object",
