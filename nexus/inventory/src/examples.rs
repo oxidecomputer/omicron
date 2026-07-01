@@ -625,15 +625,17 @@ pub fn representative() -> Representative {
     // Now report a couple more sleds with their own distinct baseboards.
     let sled_agent_id_pc =
         "c4a5325b-e852-4747-b28a-8aaa7eded8a0".parse().unwrap();
+
+    let sled5_bb = Arc::new(BaseboardId {
+        part_number: String::from("fellofftruck"),
+        serial_number: String::from("fellofftruck1"),
+    });
     builder
         .found_sled_inventory(
             "fake sled agent 5",
             sled_agent(
                 sled_agent_id_pc,
-                BaseboardId {
-                    part_number: String::from("fellofftruck"),
-                    serial_number: String::from("fellofftruck1"),
-                },
+                (*sled5_bb).clone(),
                 SledRole::Gimlet,
                 vec![],
                 vec![],
@@ -662,15 +664,16 @@ pub fn representative() -> Representative {
     let sled_agent_id_unknown =
         "5c5b4cf9-3e13-45fd-871c-f177d6537510".parse().unwrap();
 
+    let sled6_bb = Arc::new(BaseboardId {
+        part_number: "test".to_string(),
+        serial_number: "test".to_string(),
+    });
     builder
         .found_sled_inventory(
             "fake sled agent 6",
             sled_agent(
                 sled_agent_id_unknown,
-                BaseboardId {
-                    part_number: "test".to_string(),
-                    serial_number: "test".to_string(),
-                },
+                (*sled6_bb).clone(),
                 SledRole::Gimlet,
                 vec![],
                 vec![],
@@ -731,7 +734,7 @@ pub fn representative() -> Representative {
 
     Representative {
         builder,
-        sleds: [sled1_bb, sled2_bb, sled3_bb, sled4_bb],
+        sleds: [sled1_bb, sled2_bb, sled3_bb, sled4_bb, sled5_bb, sled6_bb],
         switch: switch1_bb,
         psc: psc_bb,
         sled_agents: [
@@ -745,7 +748,7 @@ pub fn representative() -> Representative {
 
 pub struct Representative {
     pub builder: CollectionBuilder,
-    pub sleds: [Arc<BaseboardId>; 4],
+    pub sleds: [Arc<BaseboardId>; 6],
     pub switch: Arc<BaseboardId>,
     pub psc: Arc<BaseboardId>,
     pub sled_agents: [SledUuid; 4],
@@ -754,7 +757,7 @@ pub struct Representative {
 impl Representative {
     pub fn new(
         builder: CollectionBuilder,
-        sleds: [Arc<BaseboardId>; 4],
+        sleds: [Arc<BaseboardId>; 6],
         switch: Arc<BaseboardId>,
         psc: Arc<BaseboardId>,
         sled_agents: [SledUuid; 4],

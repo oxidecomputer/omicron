@@ -513,7 +513,6 @@ struct Inner {
 impl Inner {
     async fn run(mut self) {
         let log = self.base_log.new(o!("component" => "SledAgentMain"));
-        // Cancel-safe per the docs on `mpsc::Receiver::recv()`.
         while let Some((request, response_tx)) = self.sled_init_rx.recv().await
         {
             self.handle_start_sled_agent_request(request, response_tx, &log)

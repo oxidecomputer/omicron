@@ -600,7 +600,15 @@ enum SwitchZoneState {
 /// Manages miscellaneous Sled-local services.
 pub struct ServiceManagerInner {
     log: Logger,
+    // The bootstrap IP of the global zone. It's used for services such as trust
+    // quorum and the bootstrap-agent-lockstep server and is reported by DDMD as
+    // a peer address.
     global_zone_bootstrap_ip: Ipv6Addr,
+    // This is the link-local bootstrap address of the global zone. It's only
+    // reachable over the direct link and is used solely for DDM routing on the
+    // bootstrap network. It is not reported by DDMD as a peer address as it
+    // is not reachable remotely except by it's directly connected peer on the
+    // same link.
     global_zone_bootstrap_link_local_address: Ipv6Addr,
     switch_zone: Mutex<SwitchZoneState>,
     sled_mode: SledMode,

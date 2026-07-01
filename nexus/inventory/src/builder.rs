@@ -836,7 +836,7 @@ mod test {
         let time_before = now_db_precision();
         let Representative {
             builder,
-            sleds: [sled1_bb, sled2_bb, sled3_bb, sled4_bb],
+            sleds: [sled1_bb, sled2_bb, sled3_bb, sled4_bb, sled5_bb, sled6_bb],
             switch,
             psc,
             sled_agents:
@@ -865,14 +865,14 @@ mod test {
         );
 
         // Verify the baseboard ids found.
-        let expected_baseboards =
-            &[&sled1_bb, &sled2_bb, &sled3_bb, &sled4_bb, &switch, &psc];
+        let expected_baseboards = &[
+            &sled1_bb, &sled2_bb, &sled3_bb, &sled4_bb, &sled5_bb, &sled6_bb,
+            &switch, &psc,
+        ];
         for bb in expected_baseboards {
             assert!(collection.baseboards.contains(*bb));
         }
-        // In addition to the baseboards above, sled agents 5 and 6 each report
-        // their own baseboard, giving two more than `expected_baseboards`.
-        assert_eq!(collection.baseboards.len(), expected_baseboards.len() + 2);
+        assert_eq!(collection.baseboards.len(), expected_baseboards.len());
 
         // Verify the stuff that's easy to verify for all SPs: timestamps.
         // There will be three more baseboards than SPs: one for each of the

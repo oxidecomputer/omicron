@@ -197,7 +197,7 @@ fn build_sleds_array(sleds: &BTreeSet<BootstrapSledDescription>) -> Array {
             .unwrap_or_else(|| Cow::from("IP address UNKNOWN"));
 
         let BaseboardId { serial_number, part_number } = &sled.baseboard_id;
-        format!(" # {serial_number} (model {part_number}, {ip}) {end}")
+        format!(" # {serial_number} (model {part_number}, {ip}){end}")
     }
 
     let mut array = Array::new();

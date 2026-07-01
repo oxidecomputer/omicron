@@ -9,6 +9,9 @@
 //! out of this crate and into the relevant `*-types-versions` / `*-types` crate
 //! pairs.
 
+use iddqd::IdOrdItem;
+use iddqd::IdOrdMap;
+use iddqd::id_upcast;
 use omicron_common::address::AZ_PREFIX;
 use omicron_common::address::IpRange;
 use omicron_common::address::Ipv6Subnet;
@@ -345,15 +348,35 @@ pub struct ReplicatedNetworkConfigContents {
     pub base64_blob: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Serialize,
+    Deserialize,
+    JsonSchema,
+)]
 pub struct BootstrapIpOfBaseboardId {
     pub id: BaseboardId,
     pub ip: Ipv6Addr,
+}
+
+impl IdOrdItem for BootstrapIpOfBaseboardId {
+    type Key<'a> = &'a BaseboardId;
+
+    fn key(&self) -> Self::Key<'_> {
+        &self.id
+    }
+
+    id_upcast!();
 }
 
 /// All `BaseboardId`s that can be found by sprockets connections on the
 /// bootstrap network.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct BaseboardIds {
-    pub data: Vec<BootstrapIpOfBaseboardId>,
+    pub data: IdOrdMap<BootstrapIpOfBaseboardId>,
 }

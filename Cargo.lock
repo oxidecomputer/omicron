@@ -911,6 +911,7 @@ name = "bootstrap-agent-lockstep-types"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "iddqd",
  "omicron-common",
  "omicron-passwords",
  "omicron-uuid-kinds",
