@@ -1035,6 +1035,12 @@ pub const DEMO_BGP_ROUTES_IPV4_URL: &'static str =
     "/v1/system/networking/bgp-imported?asn=47";
 pub const DEMO_BGP_MESSAGE_HISTORY_URL: &'static str =
     "/v1/system/networking/bgp-message-history?asn=47";
+pub const DEMO_BGP_UNNUMBERED_MANAGER_URL: &'static str =
+    "/v1/system/networking/bgp/unnumbered/manager";
+pub const DEMO_BGP_UNNUMBERED_INTERFACES_URL: &'static str =
+    "/v1/system/networking/bgp/unnumbered/interfaces";
+pub const DEMO_BGP_UNNUMBERED_INTERFACE_URL: &'static str =
+    "/v1/system/networking/bgp/unnumbered/interfaces/switch0/qsfp0";
 
 pub const DEMO_BFD_STATUS_URL: &'static str =
     "/v1/system/networking/bfd-status";
@@ -3481,6 +3487,24 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
             },
             VerifyEndpoint {
                 url: &DEMO_BGP_MESSAGE_HISTORY_URL,
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::GetNonexistent],
+            },
+            VerifyEndpoint {
+                url: &DEMO_BGP_UNNUMBERED_MANAGER_URL,
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::GetNonexistent],
+            },
+            VerifyEndpoint {
+                url: &DEMO_BGP_UNNUMBERED_INTERFACES_URL,
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::GetNonexistent],
+            },
+            VerifyEndpoint {
+                url: &DEMO_BGP_UNNUMBERED_INTERFACE_URL,
                 visibility: Visibility::Public,
                 unprivileged_access: UnprivilegedAccess::None,
                 allowed_methods: vec![AllowedMethod::GetNonexistent],

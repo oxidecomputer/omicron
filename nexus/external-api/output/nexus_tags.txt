@@ -283,6 +283,9 @@ networking_bgp_exported                  GET      /v1/system/networking/bgp-expo
 networking_bgp_imported                  GET      /v1/system/networking/bgp-imported
 networking_bgp_message_history           GET      /v1/system/networking/bgp-message-history
 networking_bgp_status                    GET      /v1/system/networking/bgp-status
+networking_bgp_unnumbered_interface_list GET      /v1/system/networking/bgp/unnumbered/interfaces
+networking_bgp_unnumbered_interface_view GET      /v1/system/networking/bgp/unnumbered/interfaces/{switch_slot}/{interface_name}
+networking_bgp_unnumbered_manager_status GET      /v1/system/networking/bgp/unnumbered/manager
 networking_inbound_icmp_update           PUT      /v1/system/networking/inbound-icmp
 networking_inbound_icmp_view             GET      /v1/system/networking/inbound-icmp
 networking_loopback_address_create       POST     /v1/system/networking/loopback-address
