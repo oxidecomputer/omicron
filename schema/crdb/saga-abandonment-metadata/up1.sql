@@ -1,4 +1,4 @@
-CREATE TYPE IF NOT EXISTS omicron.public.saga_reason_abandoned AS ENUM (
+CREATE TYPE IF NOT EXISTS omicron.public.saga_abandon_reason AS ENUM (
     'omdb',
     'unrecoverable'
 );

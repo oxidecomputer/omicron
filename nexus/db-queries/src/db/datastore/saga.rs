@@ -30,11 +30,11 @@ use std::ops::Add;
 
 #[derive(AsChangeset)]
 #[diesel(table_name = saga, treat_none_as_null = true)]
-struct SagaStateUpdate {
-    saga_state: SagaState,
-    reason_abandoned: Option<SagaReasonAbandoned>,
-    abandon_information: Option<String>,
-    time_abandoned: Option<chrono::DateTime<chrono::Utc>>,
+pub struct SagaStateUpdate {
+    pub saga_state: SagaState,
+    pub abandon_reason: Option<SagaReasonAbandoned>,
+    pub abandon_information: Option<String>,
+    pub abandon_time: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 // Due to DB CHECK constraint requirements, when a saga is abandoned, we must
@@ -77,17 +77,17 @@ impl SagaStateTransition {
             | SagaStateTransition::Unwinding
             | SagaStateTransition::Done => SagaStateUpdate {
                 saga_state: self.into(),
-                reason_abandoned: None,
+                abandon_reason: None,
                 abandon_information: None,
-                time_abandoned: None,
+                abandon_time: None,
             },
             SagaStateTransition::Abandoned { reason, information } => {
                 let now = chrono::Utc::now();
                 SagaStateUpdate {
                     saga_state: SagaState::Abandoned,
-                    reason_abandoned: Some(reason),
+                    abandon_reason: Some(reason),
                     abandon_information: Some(information),
-                    time_abandoned: Some(now),
+                    abandon_time: Some(now),
                 }
             }
         }
@@ -679,10 +679,10 @@ mod test {
             let mut saga =
                 db::model::saga_types::Saga::new(self.sec_id, params);
             saga.saga_state = SagaState::Abandoned;
-            saga.time_abandoned = Some(saga.adopt_time);
+            saga.abandon_time = Some(saga.adopt_time);
             saga.abandon_information =
                 Some("fake abandoned saga created".to_string());
-            saga.reason_abandoned = Some(SagaReasonAbandoned::Unrecoverable);
+            saga.abandon_reason = Some(SagaReasonAbandoned::Unrecoverable);
             saga
         }
 

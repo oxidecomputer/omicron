@@ -28,6 +28,7 @@ use nexus_db_model::SecId;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::datastore::SQL_BATCH_SIZE;
+use nexus_db_queries::db::datastore::saga::SagaStateUpdate;
 use nexus_db_queries::db::pagination::Paginator;
 use nexus_db_queries::db::pagination::paginated;
 use owo_colors::OwoColorize;
@@ -97,9 +98,11 @@ struct SagaInjectErrorArgs {
     bypass_sec_check: bool,
 }
 
-#[derive(Clone, Copy, Debug, Args)]
+#[derive(Clone, Debug, Args)]
 struct SagaAbandonArgs {
     saga_id: Uuid,
+
+    information: Option<String>,
 
     /// Skip checking if the SEC is up
     #[clap(long, default_value_t = false)]
@@ -129,7 +132,8 @@ impl SagaArgs {
 
             SagaCommands::Abandon(args) => {
                 let token = omdb.check_allow_destructive()?;
-                cmd_sagas_abandon(omdb, opctx, datastore, *args, token).await
+                cmd_sagas_abandon(omdb, opctx, datastore, args.clone(), token)
+                    .await
             }
 
             SagaCommands::Show(args) => {
@@ -181,8 +185,8 @@ impl From<Saga> for SagaRow {
             adopt_generation: _,
             adopt_time: _,
             abandon_information: _,
-            reason_abandoned: _,
-            time_abandoned: _,
+            abandon_reason: _,
+            abandon_time: _,
         } = saga;
         Self {
             id: id.0.into(),
@@ -360,12 +364,11 @@ You should only do this if:
     Ok(())
 }
 
-// TODO-K: Add logic to add abandon metadata
 async fn cmd_sagas_abandon(
     omdb: &Omdb,
     opctx: &OpContext,
     datastore: &DataStore,
-    SagaAbandonArgs { saga_id, bypass_sec_check }: SagaAbandonArgs,
+    SagaAbandonArgs { saga_id, information, bypass_sec_check }: SagaAbandonArgs,
     _destruction_token: DestructiveOperationToken,
 ) -> anyhow::Result<()> {
     use nexus_db_schema::schema::saga::dsl;
@@ -439,6 +442,19 @@ execute even if it is abandoned. You should only proceed if:
     diesel::update(dsl::saga)
         .filter(dsl::id.eq(saga_id))
         .set(dsl::saga_state.eq(SagaState::Abandoned))
+        .execute_async(&*conn)
+        .await?;
+
+    let new_state = SagaStateUpdate {
+        saga_state: SagaState::Abandoned,
+        abandon_reason: Some(nexus_db_model::SagaReasonAbandoned::Omdb),
+        abandon_information: information,
+        abandon_time: Some(Utc::now()),
+    };
+
+    diesel::update(dsl::saga)
+        .filter(dsl::id.eq(saga_id))
+        .set(new_state)
         .execute_async(&*conn)
         .await?;
 

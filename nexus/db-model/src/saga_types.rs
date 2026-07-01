@@ -160,7 +160,7 @@ where
 }
 
 impl_enum_type!(
-    SagaReasonAbandonedEnum:
+    SagaAbandonReasonEnum:
 
     #[derive(
         Copy,
@@ -235,8 +235,8 @@ pub struct Saga {
 
     /// Abandonment metadata.  These are only set when `saga_state` is
     /// `Abandoned` and are `None` otherwise.
-    pub time_abandoned: Option<chrono::DateTime<chrono::Utc>>,
-    pub reason_abandoned: Option<SagaReasonAbandoned>,
+    pub abandon_time: Option<chrono::DateTime<chrono::Utc>>,
+    pub abandon_reason: Option<SagaReasonAbandoned>,
     pub abandon_information: Option<String>,
 }
 
@@ -262,8 +262,8 @@ impl Saga {
             current_sec: Some(creator),
             adopt_generation: Generation::new().into(),
             adopt_time: now,
-            time_abandoned: None,
-            reason_abandoned: None,
+            abandon_time: None,
+            abandon_reason: None,
             abandon_information: None,
         }
     }

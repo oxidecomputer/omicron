@@ -2922,7 +2922,7 @@ CREATE TYPE IF NOT EXISTS omicron.public.saga_state AS ENUM (
 /*
  * Why a saga was abandoned (only set when `saga_state` is 'abandoned')
  */
-CREATE TYPE IF NOT EXISTS omicron.public.saga_reason_abandoned AS ENUM (
+CREATE TYPE IF NOT EXISTS omicron.public.saga_abandon_reason AS ENUM (
     /* an operator explicitly abandoned the saga via omdb */
     'omdb',
     /* the saga failed and unwinding also failed, leaving it stuck */
@@ -2960,8 +2960,8 @@ CREATE TABLE IF NOT EXISTS omicron.public.saga (
      * Abandonment metadata. These are only set when `saga_state` is
      * 'abandoned' and are NULL otherwise.
      */
-    time_abandoned TIMESTAMPTZ,
-    reason_abandoned omicron.public.saga_reason_abandoned,
+    abandon_time TIMESTAMPTZ,
+    abandon_reason omicron.public.saga_abandon_reason,
     abandon_information TEXT,
 
     /*
@@ -2971,8 +2971,8 @@ CREATE TABLE IF NOT EXISTS omicron.public.saga (
     CONSTRAINT abandoned_requires_metadata CHECK (
         saga_state != 'abandoned'
         OR (
-            time_abandoned IS NOT NULL
-            AND reason_abandoned IS NOT NULL
+            abandon_time IS NOT NULL
+            AND abandon_reason IS NOT NULL
             AND abandon_information IS NOT NULL
         )
     )

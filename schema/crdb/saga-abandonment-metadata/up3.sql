@@ -9,13 +9,13 @@
  */
 UPDATE omicron.public.saga
 SET
-    reason_abandoned = 'omdb',
-    time_abandoned = adopt_time,
-    abandon_information = 'Backfilled by schema migration: abandoned via omdb before abandonment metadata was recorded. The true time of abandonment is unknown; time_abandoned is set to adopt_time as a placeholder.'
+    abandon_reason = 'omdb',
+    abandon_time = adopt_time,
+    abandon_information = 'Backfilled by schema migration: abandoned via omdb before abandonment metadata was recorded. The true time of abandonment is unknown; abandon_time is set to adopt_time as a placeholder.'
 WHERE
     saga_state = 'abandoned'
     AND (
-        reason_abandoned IS NULL
-        OR time_abandoned IS NULL
+        abandon_reason IS NULL
+        OR abandon_time IS NULL
         OR abandon_information IS NULL
     );
