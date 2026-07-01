@@ -560,6 +560,8 @@ mod test {
     use std::num::NonZeroU32;
     use uuid::Uuid;
 
+    type BoxedQuery<T> = diesel::helper_types::IntoBoxed<'static, T, Pg>;
+
     mod schema {
         use diesel::prelude::*;
 
