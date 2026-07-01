@@ -316,8 +316,8 @@ impl russh::client::Handler for SshClient {
         &mut self,
         server_public_key: &PublicKey,
     ) -> impl Future<Output = Result<bool, Self::Error>> + Send {
-        dbg!(&self.host_key);
-        dbg!(server_public_key);
-        futures::future::ready(Ok(&self.host_key == server_public_key))
+        futures::future::ready(Ok(
+            self.host_key.key_data() == server_public_key.key_data()
+        ))
     }
 }
