@@ -81,4 +81,4 @@ esac
 pfexec zfs create -p "rpool/images/$USER/host"
 pfexec zfs create -p "rpool/images/$USER/recovery"
 
-cargo xtask releng --output-dir /work --mkincorp
+cargo xtask releng --output-dir /work --mkincorp --verify-debug-libraries

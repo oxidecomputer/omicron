@@ -1799,9 +1799,7 @@ mod test {
     use omicron_uuid_kinds::SledUuid;
     use oxnet::Ipv6Net;
     use sled_agent_types::{
-        early_networking::{
-            LinkSpeed, PortConfig, RackNetworkConfig, SwitchSlot, UplinkPorts,
-        },
+        early_networking::{PortConfig, RackNetworkConfig, UplinkPorts},
         inventory::{
             Baseboard, ConfigReconcilerInventoryStatus, FmdInventory,
             Inventory, InventoryDisk, OmicronFileSourceResolverInventory,
@@ -2129,18 +2127,9 @@ mod test {
                 infra_ip_last: IpAddr::V4(Ipv4Addr::LOCALHOST),
                 // The list of ports must be non-empty -- this test doesn't
                 // exercise uplinks, so use a placeholder port here.
-                ports: UplinkPorts::new(vec![PortConfig {
-                    routes: Vec::new(),
-                    addresses: Vec::new(),
-                    switch: SwitchSlot::Switch0,
-                    port: "qsfp0".to_string(),
-                    uplink_port_speed: LinkSpeed::Speed100G,
-                    uplink_port_fec: None,
-                    bgp_peers: Vec::new(),
-                    autoneg: false,
-                    lldp: None,
-                    tx_eq: None,
-                }])
+                ports: UplinkPorts::new(vec![PortConfig::empty_for_tests(
+                    "qsfp0",
+                )])
                 .expect("placeholder port list is non-empty"),
                 bgp: Vec::new(),
                 bfd: Vec::new(),

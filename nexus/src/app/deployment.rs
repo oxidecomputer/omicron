@@ -150,7 +150,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
     ) -> Result<PlanningContext, Error> {
-        let creator = self.id.to_string();
+        let creator = format!("nexus {}", self.id);
         let datastore = self.datastore();
 
         let (_, parent_blueprint) =

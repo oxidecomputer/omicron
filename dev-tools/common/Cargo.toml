@@ -7,6 +7,8 @@ license = "MPL-2.0"
 [lints]
 workspace = true
 
-[dependencies]
 # Please read the note in `dev-tools/xtask/Cargo.toml` before adding a new
 # dependency!
+[dependencies]
+camino.workspace = true
+serde.workspace = true

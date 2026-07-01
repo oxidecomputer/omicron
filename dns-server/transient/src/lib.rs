@@ -22,7 +22,7 @@ pub use dns_server::http_server::Context as HttpServerContext;
 
 pub struct TransientDnsServer {
     /// Server storage dir.
-    pub storage_dir: tempfile::TempDir,
+    pub storage_dir: camino_tempfile::Utf8TempDir,
     /// DNS server.
     pub dns_server: ServerHandle,
     /// Dropshot server.
@@ -38,7 +38,7 @@ impl TransientDnsServer {
         log: &slog::Logger,
         dns_bind_address: SocketAddr,
     ) -> Result<Self, anyhow::Error> {
-        let storage_dir = tempfile::tempdir()?;
+        let storage_dir = camino_tempfile::tempdir()?;
 
         let dns_log = log.new(o!("kind" => "dns"));
 
@@ -46,11 +46,7 @@ impl TransientDnsServer {
             log.new(o!("component" => "store")),
             &dns_server::storage::Config {
                 keep_old_generations: 3,
-                storage_path: storage_dir
-                    .path()
-                    .to_string_lossy()
-                    .to_string()
-                    .into(),
+                storage_path: storage_dir.path().to_owned(),
             },
         )
         .context("initializing DNS storage")?;

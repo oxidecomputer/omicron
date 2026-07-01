@@ -374,6 +374,24 @@ pub struct PortConfig {
     pub tx_eq: Option<v1::TxEqConfig>,
 }
 
+impl PortConfig {
+    /// Create a placeholder `PortConfig` for use in tests.
+    pub fn empty_for_tests(port: &str) -> Self {
+        Self {
+            routes: Vec::new(),
+            addresses: Vec::new(),
+            switch: v1::SwitchSlot::Switch0,
+            port: port.to_string(),
+            uplink_port_speed: v1::LinkSpeed::Speed100G,
+            uplink_port_fec: None,
+            bgp_peers: Vec::new(),
+            autoneg: false,
+            lldp: None,
+            tx_eq: None,
+        }
+    }
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum PortConfigConversionError {
     #[error(transparent)]

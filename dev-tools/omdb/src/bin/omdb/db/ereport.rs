@@ -38,6 +38,7 @@ use nexus_types::fm::ereport::Ena;
 use nexus_types::fm::ereport::Reporter;
 use omicron_uuid_kinds::EreporterRestartUuid;
 use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::RackUuid;
 use omicron_uuid_kinds::SledUuid;
 use std::collections::HashMap;
 use tabled::Tabled;
@@ -376,16 +377,20 @@ async fn cmd_db_ereport_info(
     const CLASS: &str = "class";
     const REPORTER: &str = "reported by";
     const RESTART_ID: &str = "restart ID";
+    const RACK_ID: &str = "rack ID";
     const SLED_ID: &str = "  sled ID";
     const PART_NUMBER: &str = "  part number";
     const SERIAL_NUMBER: &str = "  serial number";
     const MARKED_SEEN_IN: &str = "marked seen in sitrep";
     const WIDTH: usize = const_max_len(&[
+        ENA,
         CLASS,
         TIME_COLLECTED,
         TIME_DELETED,
         COLLECTOR_ID,
+        RESTART_ID,
         REPORTER,
+        RACK_ID,
         SLED_ID,
         PART_NUMBER,
         SERIAL_NUMBER,
@@ -467,6 +472,25 @@ async fn cmd_db_ereport_info(
             }
         }
         println!("    {RESTART_ID:>WIDTH$}: {restart_id}");
+
+        // Grab the reporter entry so that we can print the rack ID.
+        let reporter = restart_dsl::ereporter_restart
+            .filter(restart_dsl::id.eq(restart_id.into_untyped_uuid()))
+            .select(db::model::EreporterRestart::as_select())
+            .first_async(&*conn)
+            .await;
+        match reporter {
+            Ok(reporter) => {
+                println!("    {RACK_ID:>WIDTH$}: {}", reporter.rack_id());
+            }
+            Err(err) => {
+                eprintln!(
+                    "error: failed to fetch ereporter_restart entry for \
+                     {restart_id}: {err}"
+                );
+            }
+        }
+
         println!(
             "    {PART_NUMBER:>WIDTH$}: {}",
             part_number.as_deref().unwrap_or("<unknown>")
@@ -587,6 +611,7 @@ async fn cmd_db_ereporters(
         serial: Option<String>,
         #[tabled(display_with = "display_option_blank", rename = "P/N")]
         part_number: Option<String>,
+        rack_id: RackUuid,
         ereports: i64,
     }
 
@@ -628,6 +653,7 @@ async fn cmd_db_ereporters(
                 serial,
                 part_number,
                 ereports,
+                rack_id: *restart.rack_id(),
             })
         })
         .collect::<Vec<_>>();

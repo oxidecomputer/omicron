@@ -24,6 +24,7 @@ use nexus_types::internal_api::background::SpEreportIngesterStatus;
 use nexus_types::internal_api::background::SpEreporterStatus;
 use omicron_uuid_kinds::EreporterRestartUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
+use omicron_uuid_kinds::RackUuid;
 use parallel_task_set::ParallelTaskSet;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
@@ -40,6 +41,7 @@ pub struct SpEreportIngester {
 struct Ingester {
     datastore: Arc<DataStore>,
     nexus_id: OmicronZoneUuid,
+    rack_id: RackUuid,
 }
 
 impl BackgroundTask for SpEreportIngester {
@@ -60,12 +62,13 @@ impl SpEreportIngester {
         datastore: Arc<DataStore>,
         resolver: internal_dns_resolver::Resolver,
         nexus_id: OmicronZoneUuid,
+        rack_id: RackUuid,
         fm_analysis: Activator,
         disabled: bool,
     ) -> Self {
         Self {
             resolver,
-            inner: Ingester { datastore, nexus_id },
+            inner: Ingester { datastore, nexus_id, rack_id },
             fm_analysis,
             disabled,
         }
@@ -89,6 +92,12 @@ impl SpEreportIngester {
         }
         // Find MGS clients.
         // TODO(eliza): reuse the same client across activations; qorb, etc.
+        //
+        // TODO-multirack: eventually, we'll need a way to discover the MGS
+        // clients for *all* the racks in the cluster, along with the rack ID of
+        // the rack those clients will talk to. How this works has yet to be
+        // determined. See also the 'TODO-multirack' comment in the
+        // `mgs_requests()` function for where the rack ID would be used.
         let mgs_clients = match GatewayClient::resolve_all_gateways(
             &opctx.log,
             &self.resolver,
@@ -281,13 +290,7 @@ impl Ingester {
             status.ereports_received += received;
 
             let db_ereports = reports.items.into_iter().map(|ereport| {
-                EreportData::from_sp_ereport(
-                    &opctx.log,
-                    restart_id,
-                    ereport,
-                    time_collected,
-                    self.nexus_id,
-                )
+                EreportData::from_sp_ereport(&opctx.log, restart_id, ereport)
             });
             let created = match self
                 .datastore
@@ -295,6 +298,25 @@ impl Ingester {
                     &opctx,
                     restart_id,
                     time_collected,
+                    self.nexus_id,
+                    // TODO-multirack: this argument to `ereports_insert` is
+                    // used to determine the rack ID of the SP that generated
+                    // this batch of ereports. Currently, using `self.rack_id`
+                    // (the rack ID of the Nexus instance ingesting the
+                    // ereports) is always correct, since this Nexus is only
+                    // ingesting ereports from SPs in its own rack. This will
+                    // not be the case if we begin ingesting ereports from SPs
+                    // in other racks.
+                    //
+                    // If this code changes to ingest ereports from the
+                    // management gateways in multiple racks, we'll need to
+                    // change this to pass the rack ID of the target rack, not
+                    // the one this Nexus lives in. Eventually, the rack ID will
+                    // become a property of the MGS clients that are passed into
+                    // this function: they'll have to become a type that says
+                    // "here are the clients for talking to the management
+                    // gateways in *that* rack, in particular".
+                    self.rack_id,
                     reporter,
                     db_ereports,
                 )
@@ -445,12 +467,11 @@ mod tests {
             datastore.clone(),
             nexus.internal_resolver.clone(),
             nexus.id(),
+            nexus.rack_id(),
             fm_analysis_activator.clone(),
             false,
         );
 
-        let mut analysis_activated =
-            tokio_test::task::spawn(fm_analysis_activator.activated());
         let activation1 = ingester.actually_activate(&opctx).await;
         assert!(
             activation1.errors.is_empty(),
@@ -465,10 +486,8 @@ mod tests {
             activation1.sps,
         );
         assert_eq!(activation1.sps_found, 4);
-        tokio_test::assert_ready!(
-            analysis_activated.poll(),
-            "fm analysis task should be activated"
-        );
+        fm_analysis_activator
+            .assert_activated("fm analysis task should be activated");
 
         for SpEreporterStatus { sp_type, slot, status, ignition_type: _ } in
             &activation1.sps
@@ -656,8 +675,6 @@ mod tests {
 
         // Activate the task again and assert that no new ereports were
         // ingested.
-        let mut analysis_activated =
-            tokio_test::task::spawn(fm_analysis_activator.activated());
         let activation2 = ingester.actually_activate(&opctx).await;
         assert!(
             activation2.errors.is_empty(),
@@ -665,10 +682,9 @@ mod tests {
             activation2.errors
         );
         dbg!(&activation2);
-        tokio_test::assert_pending!(
-            analysis_activated.poll(),
+        fm_analysis_activator.assert_not_activated(
             "fm analysis task should not be activated when no new ereports \
-             have been ingested"
+             have been ingested",
         );
         assert_eq!(
             activation2.sps_found, 4,
