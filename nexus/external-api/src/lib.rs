@@ -86,6 +86,7 @@ api_versions!([
     // |  date-based version should be at the top of the list.
     // v
     // (next_yyyy_mm_dd_nn, IDENT),
+    (2026_06_25_00, BGP_UNNUMBERED_STATUS),
     (2026_06_08_00, INSTANCE_CPU_TYPE_TURIN_V2),
     (2026_06_05_00, EXTERNAL_JUMBO_FRAMES),
     (2026_06_04_00, IMAGE_BLOCK_SIZE_TYPE),
@@ -5986,6 +5987,49 @@ pub trait NexusExternalApi {
                 .map(|statuses| statuses.into_iter().map(From::from).collect())
         })
     }
+
+    /// Get BGP Unnumbered manager state
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/networking/bgp/unnumbered/manager",
+        tags = ["system/networking"],
+        versions = VERSION_BGP_UNNUMBERED_STATUS..,
+    }]
+    async fn networking_bgp_unnumbered_manager_status(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<
+        HttpResponseOk<Vec<latest::networking::SwitchUnnumberedManagerState>>,
+        HttpError,
+    >;
+
+    /// List BGP Unnumbered interfaces
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/networking/bgp/unnumbered/interfaces",
+        tags = ["system/networking"],
+        versions = VERSION_BGP_UNNUMBERED_STATUS..,
+    }]
+    async fn networking_bgp_unnumbered_interface_list(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<
+        HttpResponseOk<Vec<latest::networking::SwitchUnnumberedInterface>>,
+        HttpError,
+    >;
+
+    /// Get BGP Unnumbered interface state
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/networking/bgp/unnumbered/interfaces/{switch_slot}/{interface_name}",
+        tags = ["system/networking"],
+        versions = VERSION_BGP_UNNUMBERED_STATUS..,
+    }]
+    async fn networking_bgp_unnumbered_interface_view(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::networking::UnnumberedInterfacePath>,
+    ) -> Result<
+        HttpResponseOk<latest::networking::SwitchUnnumberedInterface>,
+        HttpError,
+    >;
 
     /// Get user-facing services IP allowlist
     #[endpoint {

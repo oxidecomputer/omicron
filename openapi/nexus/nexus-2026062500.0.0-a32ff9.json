@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "2026060800.0.0"
+    "version": "2026062500.0.0"
   },
   "paths": {
     "/device/auth": {
@@ -10740,6 +10740,113 @@
         }
       }
     },
+    "/v1/system/networking/bgp/unnumbered/interfaces": {
+      "get": {
+        "tags": [
+          "system/networking"
+        ],
+        "summary": "List BGP Unnumbered interfaces",
+        "operationId": "networking_bgp_unnumbered_interface_list",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Array_of_SwitchUnnumberedInterface",
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SwitchUnnumberedInterface"
+                  }
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/system/networking/bgp/unnumbered/interfaces/{switch_slot}/{interface_name}": {
+      "get": {
+        "tags": [
+          "system/networking"
+        ],
+        "summary": "Get BGP Unnumbered interface state",
+        "operationId": "networking_bgp_unnumbered_interface_view",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "interface_name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "switch_slot",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SwitchSlot"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SwitchUnnumberedInterface"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/system/networking/bgp/unnumbered/manager": {
+      "get": {
+        "tags": [
+          "system/networking"
+        ],
+        "summary": "Get BGP Unnumbered manager state",
+        "operationId": "networking_bgp_unnumbered_manager_status",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Array_of_SwitchUnnumberedManagerState",
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SwitchUnnumberedManagerState"
+                  }
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/v1/system/networking/bgp-announce-set": {
       "get": {
         "tags": [
@@ -19831,6 +19938,60 @@
           }
         ]
       },
+      "DiscoveredRouter": {
+        "type": "object",
+        "properties": {
+          "address": {
+            "description": "Peer IPv6 address",
+            "type": "string",
+            "format": "ipv6"
+          },
+          "discovered_at": {
+            "description": "When the peer was first discovered (ISO 8601 timestamp)",
+            "type": "string"
+          },
+          "expired": {
+            "description": "Whether the peer entry has expired",
+            "type": "boolean"
+          },
+          "last_advertisement": {
+            "description": "When the most recent Router Advertisement was received (ISO 8601 timestamp)",
+            "type": "string"
+          },
+          "reachable_time": {
+            "description": "Reachable time from RA (milliseconds)",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "retrans_timer": {
+            "description": "Retransmit timer from RA (milliseconds)",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "router_lifetime": {
+            "description": "Router lifetime from RA (seconds)",
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          },
+          "time_until_expiry": {
+            "nullable": true,
+            "description": "Time until expiry (human-readable), or None if already expired",
+            "type": "string"
+          }
+        },
+        "required": [
+          "address",
+          "discovered_at",
+          "expired",
+          "last_advertisement",
+          "reachable_time",
+          "retrans_timer",
+          "router_lifetime"
+        ]
+      },
       "Disk": {
         "description": "View of a Disk",
         "type": "object",
@@ -25369,6 +25530,25 @@
         "type": "string",
         "maxLength": 512
       },
+      "PendingUnnumberedInterface": {
+        "type": "object",
+        "properties": {
+          "interface": {
+            "description": "Interface name",
+            "type": "string"
+          },
+          "router_lifetime": {
+            "description": "Configured router lifetime (seconds)",
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "interface",
+          "router_lifetime"
+        ]
+      },
       "PhysicalDisk": {
         "description": "View of a Physical Disk\n\nPhysical disks reside in a particular sled and are used to store both Instance Disk data as well as internal metadata.",
         "type": "object",
@@ -26833,6 +27013,23 @@
               "type"
             ]
           }
+        ]
+      },
+      "RouterDiscoveryRuntimeState": {
+        "type": "object",
+        "properties": {
+          "rx": {
+            "description": "ICMPv6 Router Advertisement receive loop is running",
+            "type": "boolean"
+          },
+          "tx": {
+            "description": "ICMPv6 Router Advertisement transmit loop is running",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "rx",
+          "tx"
         ]
       },
       "RouterLifetimeConfig": {
@@ -29667,6 +29864,36 @@
           }
         ]
       },
+      "SwitchUnnumberedInterface": {
+        "type": "object",
+        "properties": {
+          "interface": {
+            "$ref": "#/components/schemas/UnnumberedInterface"
+          },
+          "switch_slot": {
+            "$ref": "#/components/schemas/SwitchSlot"
+          }
+        },
+        "required": [
+          "interface",
+          "switch_slot"
+        ]
+      },
+      "SwitchUnnumberedManagerState": {
+        "type": "object",
+        "properties": {
+          "state": {
+            "$ref": "#/components/schemas/UnnumberedManagerState"
+          },
+          "switch_slot": {
+            "$ref": "#/components/schemas/SwitchSlot"
+          }
+        },
+        "required": [
+          "state",
+          "switch_slot"
+        ]
+      },
       "SystemNetworkingSettings": {
         "description": "Fleet-wide networking settings. Only fleet viewers may view these settings. Only fleet admins can modify them.",
         "type": "object",
@@ -30076,6 +30303,74 @@
               "rpm"
             ]
           }
+        ]
+      },
+      "UnnumberedInterface": {
+        "type": "object",
+        "properties": {
+          "discovered_peer": {
+            "nullable": true,
+            "description": "Information about discovered peer",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/DiscoveredRouter"
+              }
+            ]
+          },
+          "interface": {
+            "description": "Interface name (e.g. \"qsfp0\")",
+            "type": "string"
+          },
+          "local_address": {
+            "description": "IPv6 link-local address of this interface.",
+            "type": "string",
+            "format": "ipv6"
+          },
+          "ndp_state": {
+            "description": "State of rx/tx loops (None if interface not active in NDP)",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/RouterDiscoveryRuntimeState"
+              }
+            ]
+          },
+          "router_lifetime": {
+            "description": "Router Lifetime advertised in ICMPv6 Router Advertisements sent on this interface.",
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "interface",
+          "local_address",
+          "ndp_state",
+          "router_lifetime"
+        ]
+      },
+      "UnnumberedManagerState": {
+        "type": "object",
+        "properties": {
+          "active_interfaces": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "monitor_running": {
+            "type": "boolean"
+          },
+          "pending_interfaces": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PendingUnnumberedInterface"
+            }
+          }
+        },
+        "required": [
+          "active_interfaces",
+          "monitor_running",
+          "pending_interfaces"
         ]
       },
       "UpdateStatus": {
