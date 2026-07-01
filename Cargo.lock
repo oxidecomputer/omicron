@@ -2755,6 +2755,10 @@ dependencies = [
 [[package]]
 name = "dev-tools-common"
 version = "0.1.0"
+dependencies = [
+ "camino",
+ "serde",
+]
 
 [[package]]
 name = "dhcproto"
@@ -9142,6 +9146,7 @@ dependencies = [
  "cargo_metadata",
  "chrono",
  "clap",
+ "dev-tools-common",
  "fs-err 3.3.0",
  "futures",
  "hex",
