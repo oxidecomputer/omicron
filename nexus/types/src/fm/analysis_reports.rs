@@ -84,8 +84,8 @@ impl AnalysisReport {
                     indent,
                 } = self;
 
-                if !comment.is_empty() {
-                    writeln!(f, "{:indent$}// {comment}", "")?;
+                for line in comment.lines() {
+                    writeln!(f, "{:indent$}// {line}", "")?;
                 }
                 writeln!(f, "{:indent$}sitrep ID: {sitrep_id}", "")?;
                 if cases.is_empty() {
@@ -205,7 +205,9 @@ impl LogEntry {
                 let colon = if kvs.is_empty() { "" } else { ":" };
                 writeln!(f, "{:indent$}{bullet}{event}{colon}", "")?;
                 if let Some(comment) = comment {
-                    writeln!(f, "{:indent$}  // {comment}", "")?;
+                    for line in comment.lines() {
+                        writeln!(f, "{:indent$}  // {line}", "")?;
+                    }
                 }
                 for (k, v) in kvs {
                     fmt_json_value(f, k, v, indent + 2)?;
