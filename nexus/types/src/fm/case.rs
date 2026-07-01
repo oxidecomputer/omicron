@@ -115,8 +115,8 @@ impl Metadata {
                 const CLOSED_IN: &str = "closed in sitrep:";
                 const WIDTH: usize = const_max_len(&[DE, OPENED_IN, CLOSED_IN]);
 
-                if !comment.is_empty() {
-                    writeln!(f, "{:>indent$}// {comment}", "")?;
+                for line in comment.lines() {
+                    writeln!(f, "{:>indent$}// {line}", "")?;
                 }
                 writeln!(f, "{:>indent$}{DE:<WIDTH$} {de}", "")?;
                 writeln!(
@@ -233,8 +233,8 @@ impl Fact {
                 };
 
                 writeln!(f, "{BULLET:>indent$}fact {id}")?;
-                if !comment.is_empty() {
-                    writeln!(f, "{:>indent$}// {comment}", "")?;
+                for line in comment.lines() {
+                    writeln!(f, "{:>indent$}// {line}", "")?;
                 }
                 writeln!(
                     f,
@@ -360,6 +360,9 @@ impl fmt::Display for DisplayCase<'_> {
                 let sn =
                     ereport.serial_number.as_deref().unwrap_or("<UNKNOWN>");
                 writeln!(f, "{BULLET:>indent$}ereport {}", ereport.id)?;
+                for line in comment.lines() {
+                    writeln!(f, "{:>indent$}// {line}", "")?;
+                }
                 writeln!(
                     f,
                     "{:>indent$}{CLASS:<WIDTH$} {}",
@@ -378,7 +381,6 @@ impl fmt::Display for DisplayCase<'_> {
                     this_sitrep(*assigned_sitrep_id)
                 )?;
                 writeln!(f, "{:>indent$}{ASSIGNMENT_ID:<WIDTH$} {id}", "")?;
-                writeln!(f, "{:>indent$}{COMMENT:<WIDTH$} {comment}\n", "",)?;
             }
         }
 
@@ -414,6 +416,9 @@ impl fmt::Display for DisplayCase<'_> {
                     const_max_len(&[CLASS, REQUESTED_IN, COMMENT]);
 
                 writeln!(f, "{BULLET:>indent$}alert {id}",)?;
+                for line in comment.lines() {
+                    writeln!(f, "{:>indent$}// {line}", "")?;
+                }
                 writeln!(
                     f,
                     "{:>indent$}{CLASS:<WIDTH$} {class}, v{version}",
@@ -425,7 +430,6 @@ impl fmt::Display for DisplayCase<'_> {
                     "",
                     this_sitrep(*requested_sitrep_id)
                 )?;
-                writeln!(f, "{:>indent$}{COMMENT:<WIDTH$} {comment}\n", "")?;
             }
         }
 
@@ -443,11 +447,13 @@ impl fmt::Display for DisplayCase<'_> {
             {
                 const REQUESTED_IN: &str = "requested in:";
                 const DATA: &str = "data:";
-                const COMMENT: &str = "comment:";
-                const WIDTH: usize =
-                    const_max_len(&[REQUESTED_IN, DATA, COMMENT]);
+                const WIDTH: usize = const_max_len(&[REQUESTED_IN, DATA]);
 
                 writeln!(f, "{BULLET:>indent$}bundle {id}",)?;
+
+                for line in comment.lines() {
+                    writeln!(f, "{:>indent$}// {line}", "")?;
+                }
                 writeln!(
                     f,
                     "{:>indent$}{REQUESTED_IN:<WIDTH$} {requested_sitrep_id}{}",
@@ -456,7 +462,6 @@ impl fmt::Display for DisplayCase<'_> {
                 )?;
                 writeln!(f, "{:>indent$}{DATA}", "")?;
                 writeln!(f, "{}", data_selection.display(indent + 2))?;
-                writeln!(f, "{:>indent$}{COMMENT:<WIDTH$} {comment}\n", "")?;
             }
         }
 
