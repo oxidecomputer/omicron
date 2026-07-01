@@ -381,11 +381,11 @@ impl<N: MakeSagaContext> SagaRecoveryInner<N> {
                     "time_failed" => ?time,
                 );
 
-                // Abandoning is idempotent and best effort.  The datastore write has no
-                // SQL statement timeout, so we bound it explicitly: a hung write must
-                // not stall the recovery pass.  If it times out or errors, we log and
-                // move on -- the saga stays a recovery candidate, so a later pass will
-                // try again.  Dropping the write future on timeout is safe: its only
+                // Abandoning is idempotent and best effort. The datastore write has no
+                // SQL statement timeout, so we bound it explicitly. A hung write must
+                // not stall the recovery pass. If it times out or errors, we log and
+                // move on. The saga stays a recovery candidate, so a later pass will
+                // try again.  Dropping the write future on timeout is safe. The only
                 // effect is this single, idempotent state transition.
                 let mark_abandoned = self.datastore.saga_update_state(
                     *saga_id,
