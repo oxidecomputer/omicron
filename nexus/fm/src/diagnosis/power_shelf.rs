@@ -163,15 +163,19 @@ pub fn analyze(builder: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
             .get(&location)
             .and_then(|case_ids| case_ids.iter().copied().next());
         let mut case_builder = match case_id {
-            Some(id) => builder.cases.case_mut(&id).expect(
-                "an open case from the parent sitrep should be in the builder",
-            ),
+            Some(id) => {
+                let mut case = builder.cases.case_mut(&id).expect(
+                    "an open case from the parent sitrep should be in the builder",
+                );
+                case.comment_mut().clear();
+                case
+            }
             None => {
                 let mut c =
                     builder.cases.open_case(DiagnosisEngineKind::PowerShelf);
                 *c.comment_mut() = format!(
                     "opened because {location} was {verbed}\n\
-                     this happened in ereport {}",
+                     this happened in ereport {}\n",
                     ereport.id
                 );
                 cases_by_psu
@@ -204,7 +208,6 @@ pub fn analyze(builder: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
             .cases
             .case_mut(&psc_case.case_id)
             .expect("every case in the by-id index is open in the builder");
-        case_builder.comment_mut().clear();
 
         // replay all the ereports in the case, tracking changes in PSU presence
         // and happiness
@@ -279,8 +282,11 @@ pub fn analyze(builder: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
             case_builder.close("no absent PSUs detected");
         } else {
             let comment = case_builder.comment_mut();
-            writeln!(comment, "the following PSUs are absent:")
-                .expect("write to string is infallible");
+            writeln!(
+                comment,
+                "when analysis completed, the following PSUs were absent:"
+            )
+            .expect("write to string is infallible");
             for psu in psus_absent.iter() {
                 writeln!(comment, " - {psu}")
                     .expect("write to string is infallible");
