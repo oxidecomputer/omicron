@@ -7,8 +7,6 @@
 //! This includes the usual task that inserts data into ClickHouse, and a
 //! printing task used in `oximeter` standalone.
 
-// Copyright 2026 Oxide Computer Company
-
 use crate::collection_task::CollectionTaskOutput;
 use crate::probes;
 use oximeter::Sample;
