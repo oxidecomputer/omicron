@@ -1489,14 +1489,22 @@ mod test {
                 let result =
                     dpd_client.nat_ipv4_list(&nat_subnet, None, None).await;
 
-                let data = result.map_err(|_| {
-                    poll::CondCheckError::<()>::NotYet { status: None }
-                })?;
+                let data = match result {
+                    Ok(data) => data,
+                    Err(error) if error.is_retryable() => {
+                        return Err(poll::CondCheckError::NotYet {
+                            status: None,
+                        });
+                    }
+                    Err(error) => {
+                        return Err(poll::CondCheckError::Failed(error));
+                    }
+                };
 
                 if data.items.len() == expected_nat_entries {
                     Ok(())
                 } else {
-                    Err(poll::CondCheckError::<()>::NotYet { status: None })
+                    Err(poll::CondCheckError::NotYet { status: None })
                 }
             },
             &poll_interval,
@@ -1545,16 +1553,24 @@ mod test {
 
                 info!(log, "nat_ipv4_list"; "result" => ?result);
 
-                let data = result.map_err(|_| {
-                    poll::CondCheckError::<()>::NotYet { status: None }
-                })?;
+                let data = match result {
+                    Ok(data) => data,
+                    Err(error) if error.is_retryable() => {
+                        return Err(poll::CondCheckError::NotYet {
+                            status: None,
+                        });
+                    }
+                    Err(error) => {
+                        return Err(poll::CondCheckError::Failed(error));
+                    }
+                };
 
                 if data.items.is_empty() {
                     error!(
                         log,
                         "we are expecting nat entries but none were found"
                     );
-                    Err(poll::CondCheckError::<()>::NotYet { status: None })
+                    Err(poll::CondCheckError::NotYet { status: None })
                 } else {
                     Ok(())
                 }

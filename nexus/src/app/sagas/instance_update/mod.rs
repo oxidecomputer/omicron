@@ -2857,15 +2857,16 @@ mod test {
                 // (Triggering reconciliation is idempotent, so it is safe to do
                 // on every iteration.)
                 if let Err(error) = client.nat_trigger_update().await {
+                    if !error.is_retryable() {
+                        return Err(poll::CondCheckError::Failed(error));
+                    }
                     slog::info!(
                         log,
                         "failed to trigger NAT reconciliation, will retry";
                         "switch" => ?switch,
                         InlineErrorChain::new(&error),
                     );
-                    return Err(poll::CondCheckError::<&'static str>::NotYet {
-                        status: None,
-                    });
+                    return Err(poll::CondCheckError::NotYet { status: None });
                 }
 
                 let result =
@@ -2877,15 +2878,17 @@ mod test {
                     "result" => ?result,
                 );
 
-                let data = result.map_err(|_| {
-                    // Use `&'static str` as the permanent error type so that it
-                    // implements `Display`, which is necessary for the
-                    // `poll::Error` to be `Display`...even though we never
-                    // return a `Permanent` error here. I love types.
-                    poll::CondCheckError::<&'static str>::NotYet {
-                        status: None,
+                let data = match result {
+                    Ok(data) => data,
+                    Err(error) if error.is_retryable() => {
+                        return Err(poll::CondCheckError::NotYet {
+                            status: None,
+                        });
                     }
-                })?;
+                    Err(error) => {
+                        return Err(poll::CondCheckError::Failed(error));
+                    }
+                };
                 let len = data.items.len();
                 if len != n {
                     slog::info!(
@@ -2895,9 +2898,7 @@ mod test {
                         "entries" => ?data.items,
                         "expected_len" => n,
                     );
-                    return Err(poll::CondCheckError::<&'static str>::NotYet {
-                        status: None,
-                    });
+                    return Err(poll::CondCheckError::NotYet { status: None });
                 }
 
                 Ok(())
