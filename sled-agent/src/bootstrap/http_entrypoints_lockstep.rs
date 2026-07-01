@@ -132,10 +132,18 @@ impl BootstrapAgentLockstepApi for BootstrapAgentLockstepImpl {
                 HttpError::for_internal_error(err.to_string())
             })?;
 
+        // We then also have to join our own information, since trust quorum
+        // doesn't connect to itself.
+        let ourself = BootstrapIpOfBaseboardId {
+            id: ctx.trust_quorum_handle.baseboard_id().clone(),
+            ip: ctx.global_zone_bootstrap_ip,
+        };
+
         let data = status
             .connected_peers()
             .into_iter()
             .map(|(id, ip)| BootstrapIpOfBaseboardId { id, ip })
+            .chain(std::iter::once(ourself))
             .collect();
 
         Ok(HttpResponseOk(BaseboardIds { data }))
