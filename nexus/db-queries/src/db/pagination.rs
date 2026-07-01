@@ -23,19 +23,7 @@ use omicron_common::api::external::http_pagination::PaginatedBy;
 use ref_cast::RefCast;
 use std::num::NonZeroU32;
 
-// Shorthand alias for "the SQL type of the whole table".
-type TableSqlType<T> = <T as AsQuery>::SqlType;
-
-// Shorthand alias for the type made from "table.into_boxed()".
-type BoxedQuery<T> = diesel::helper_types::IntoBoxed<'static, T, Pg>;
-type BoxedDslOutput<T> = diesel::internal::table_macro::BoxedSelectStatement<
-    'static,
-    TableSqlType<T>,
-    diesel::internal::table_macro::FromClause<T>,
-    Pg,
->;
-
-/// Uses `pagparams` to list a subset of rows in `table`, ordered by `column`.
+/// Uses `pagparams` to list a subset of rows in `query`, ordered by `column`.
 pub fn paginated<T, C, M>(
     query: T,
     column: C,
@@ -74,8 +62,7 @@ where
     <T::Query as query_methods::BoxedDsl<'static, Pg>>::Output:
         query_methods::FilterDsl<
             Gt<C, M>,
-            Output =
-            <T::Query as query_methods::BoxedDsl<'static, Pg>>::Output,
+            Output = <T::Query as query_methods::BoxedDsl<'static, Pg>>::Output,
         >,
 // Necessary for query.filter(column.lt(...))
     <T::Query as query_methods::BoxedDsl<'static, Pg>>::Output:
