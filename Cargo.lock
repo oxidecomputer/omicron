@@ -8049,6 +8049,7 @@ dependencies = [
  "nexus-switch-config",
  "omicron-common",
  "omicron-rpaths",
+ "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "oxnet",
  "pq-sys",

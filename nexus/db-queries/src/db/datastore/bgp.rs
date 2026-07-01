@@ -4,7 +4,9 @@
 
 use super::DataStore;
 use crate::context::OpContext;
-use crate::db::model::{BgpAnnounceSet, BgpAnnouncement, BgpConfig, Name};
+use crate::db::model::{
+    BgpAnnounceSet, BgpAnnouncement, BgpConfig, Name, to_db_typed_uuid,
+};
 use crate::db::pagination::paginated;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
@@ -27,6 +29,7 @@ use omicron_common::api::external::{
     CreateResult, DeleteResult, Error, ListResultVec, LookupResult, NameOrId,
     ResourceType,
 };
+use omicron_uuid_kinds::{BgpAnnounceSetUuid, GenericUuid};
 use ref_cast::RefCast;
 use sled_agent_types::early_networking::RouterPeerType;
 use sled_agent_types::early_networking::SwitchSlot;
@@ -101,8 +104,10 @@ impl DataStore {
                             }),
                     }?;
 
-                    let config =
-                        BgpConfig::from_config_create(config, announce_set_id);
+                    let config = BgpConfig::from_config_create(
+                        config,
+                        BgpAnnounceSetUuid::from_untyped_uuid(announce_set_id),
+                    );
 
                     // Idempotency:
                     // Check to see if an exact match for the config already exists
@@ -573,7 +578,8 @@ impl DataStore {
                 // clear existing announcements
                 diesel::delete(bgp_announcement_dsl::bgp_announcement)
                     .filter(
-                        bgp_announcement_dsl::announce_set_id.eq(db_as.id()),
+                        bgp_announcement_dsl::announce_set_id
+                            .eq(to_db_typed_uuid(db_as.id())),
                     )
                     .execute_async(&conn)
                     .await?;
@@ -582,8 +588,11 @@ impl DataStore {
                 let mut db_annoucements = Vec::new();
                 for a in &announce.announcement {
                     let an = BgpAnnouncement {
-                        announce_set_id: db_as.id(),
-                        address_lot_block_id: bas.identity.id,
+                        announce_set_id: to_db_typed_uuid(db_as.id()),
+                        // XXX: address_lot_block_id seems unused -- get rid of
+                        // it?
+                        // https://github.com/oxidecomputer/omicron/issues/10719
+                        address_lot_block_id: bas.id().into_untyped_uuid(),
                         network: a.network.into(),
                     };
                     let db_an = diesel::insert_into(
@@ -650,8 +659,11 @@ impl DataStore {
                 let mut db_annoucements = Vec::new();
                 for a in &announce.announcement {
                     let an = BgpAnnouncement {
-                        announce_set_id: db_as.id(),
-                        address_lot_block_id: bas.identity.id,
+                        announce_set_id: to_db_typed_uuid(db_as.id()),
+                        // XXX: address_lot_block_id seems unused -- get rid of
+                        // it?
+                        // https://github.com/oxidecomputer/omicron/issues/10719
+                        address_lot_block_id: bas.id().into_untyped_uuid(),
                         network: a.network.into(),
                     };
 
@@ -659,7 +671,7 @@ impl DataStore {
                         bgp_announcement_dsl::bgp_announcement
                             .filter(
                                 bgp_announcement_dsl::announce_set_id
-                                    .eq(db_as.id()),
+                                    .eq(to_db_typed_uuid(db_as.id())),
                             )
                             .filter(
                                 bgp_announcement_dsl::network

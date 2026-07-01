@@ -43,6 +43,7 @@ use omicron_common::api::external::{
     self, CreateResult, DataPageParams, DeleteResult, Error, ListResultVec,
     LookupResult, NameOrId, ResourceType, UpdateResult,
 };
+use omicron_uuid_kinds::BgpAnnounceSetUuid;
 use omicron_uuid_kinds::RackUuid;
 use ref_cast::RefCast;
 use serde::{Deserialize, Serialize};
@@ -602,7 +603,7 @@ impl DataStore {
                     // A cache of announcements keyed by announce set ID, to
                     // avoid redundant reads from the database.
                     let mut announce_cache: HashMap<
-                        Uuid,
+                        BgpAnnounceSetUuid,
                         Vec<BgpAnnouncement>,
                     > = HashMap::new();
 
@@ -631,7 +632,7 @@ impl DataStore {
                                 .limit(1)
                                 .first_async::<BgpConfig>(&conn)
                                 .await?;
-                            let set_id = config.bgp_announce_set_id;
+                            let set_id = config.bgp_announce_set_id();
                             let announcements =
                                 match announce_cache.entry(set_id) {
                                     hash_map::Entry::Vacant(set_entry) => {
@@ -1257,11 +1258,11 @@ async fn load_all_bfd_sessions(
 /// Load every announcement belonging to an announce set on an existing connection.
 async fn load_announce_set(
     conn: &Connection<DTraceConnection<PgConnection>>,
-    set_id: Uuid,
+    set_id: BgpAnnounceSetUuid,
 ) -> Result<Vec<BgpAnnouncement>, diesel::result::Error> {
     use nexus_db_schema::schema::bgp_announcement::dsl;
     dsl::bgp_announcement
-        .filter(dsl::announce_set_id.eq(set_id))
+        .filter(dsl::announce_set_id.eq(to_db_typed_uuid(set_id)))
         .select(BgpAnnouncement::as_select())
         .load_async::<BgpAnnouncement>(conn)
         .await
