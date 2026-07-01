@@ -61,8 +61,6 @@ use omicron_common::{
     address::{Ipv6Subnet, get_sled_address},
     api::external::DataPageParams,
 };
-use omicron_uuid_kinds::GenericUuid;
-use omicron_uuid_kinds::RackUuid;
 use serde_json::json;
 use sled_agent_client::types::HostPortConfig;
 use sled_agent_types::early_networking::EarlyNetworkConfigEnvelope;
@@ -998,10 +996,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                             );
                             status.incomplete_bootstore_configs.push(
                                 IncompleteBootstoreConfigReport {
-                                    // TODO: `Rack` should use newtype-uuid.
-                                    rack_id: RackUuid::from_untyped_uuid(
-                                        rack.id(),
-                                    ),
+                                    rack_id: rack.id(),
                                     problems: report
                                         .problems
                                         .iter()

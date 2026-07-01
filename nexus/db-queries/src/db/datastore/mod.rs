@@ -704,6 +704,7 @@ mod test {
     use omicron_uuid_kinds::DatasetUuid;
     use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::PhysicalDiskUuid;
+    use omicron_uuid_kinds::RackUuid;
     use omicron_uuid_kinds::SiloUserUuid;
     use omicron_uuid_kinds::SledUuid;
     use omicron_uuid_kinds::VolumeUuid;
@@ -1965,7 +1966,7 @@ mod test {
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
-        let rack_id = Uuid::new_v4();
+        let rack_id = RackUuid::new_v4();
         let addr1 = "[fd00:1de::1]:12345".parse().unwrap();
         let sled1_id = "0de4b299-e0b4-46f0-d528-85de81a7095f".parse().unwrap();
 
@@ -2094,7 +2095,7 @@ mod test {
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
         // Create a Rack, insert it into the DB.
-        let rack = Rack::new(Uuid::new_v4());
+        let rack = Rack::new(RackUuid::new_v4());
         let result = datastore.rack_insert(&opctx, &rack).await.unwrap();
         assert_eq!(result.id(), rack.id());
         assert_eq!(result.initialized, false);

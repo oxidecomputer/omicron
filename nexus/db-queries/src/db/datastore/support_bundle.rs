@@ -974,6 +974,7 @@ mod test {
     use omicron_uuid_kinds::BlueprintUuid;
     use omicron_uuid_kinds::DatasetUuid;
     use omicron_uuid_kinds::PhysicalDiskUuid;
+    use omicron_uuid_kinds::RackUuid;
     use omicron_uuid_kinds::SledUuid;
     use omicron_uuid_kinds::ZpoolUuid;
     use rand::Rng;
@@ -1043,7 +1044,7 @@ mod test {
             datastore: &DataStore,
             opctx: &OpContext,
         ) {
-            let rack_id = Uuid::new_v4();
+            let rack_id = RackUuid::new_v4();
             let blueprint_id = BlueprintUuid::new_v4();
             let sled = SledUpdate::new(
                 self.sled,

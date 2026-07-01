@@ -717,7 +717,7 @@ impl SledAgent {
                     ThisSledSwitchZoneUnderlayIpAddr::from_sled_agent_request(
                         &request,
                     ),
-                rack_id: request.body.rack_id.into_untyped_uuid(),
+                rack_id: request.body.rack_id,
                 network_config_rx,
                 metrics_queue: metrics_manager.request_queue(),
             })

@@ -24,6 +24,7 @@ use nexus_db_queries::{authn, authz, db};
 use omicron_common::address::{AZ_PREFIX, Ipv6Subnet};
 use omicron_uuid_kinds::ConsoleSessionUuid;
 use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::RackUuid;
 use omicron_uuid_kinds::SiloUserUuid;
 use oximeter::types::ProducerRegistry;
 use oximeter_instruments::http::{HttpService, LatencyTracker};
@@ -65,7 +66,7 @@ impl ApiContext {
     /// Create a new context with a rack ID and logger. This creates the
     /// underlying `Nexus` as well.
     pub async fn for_internal(
-        rack_id: Uuid,
+        rack_id: RackUuid,
         log: Logger,
         config: &NexusConfig,
     ) -> Result<Self, String> {
@@ -131,7 +132,7 @@ impl ServerContext {
     /// Create a new context with the given rack id and log.  This creates the
     /// underlying nexus as well.
     pub async fn new(
-        rack_id: Uuid,
+        rack_id: RackUuid,
         log: Logger,
         config: &NexusConfig,
     ) -> Result<Arc<ServerContext>, String> {

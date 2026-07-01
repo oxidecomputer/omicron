@@ -34,6 +34,7 @@ use nexus_db_model::{
     DbSwitchInterfaceKind, DbSwitchSlot, INFRA_LOT,
     RouterPeerTypeDbRepresentation, SqlU16, SwitchPortBgpPeerConfigAllowExport,
     SwitchPortBgpPeerConfigAllowImport, SwitchPortBgpPeerConfigCommunity,
+    to_db_typed_uuid,
 };
 use nexus_types::external_api::networking;
 use nexus_types::identity::Resource;
@@ -42,6 +43,7 @@ use omicron_common::api::external::{
     self, CreateResult, DataPageParams, DeleteResult, Error, ListResultVec,
     LookupResult, NameOrId, ResourceType, UpdateResult,
 };
+use omicron_uuid_kinds::RackUuid;
 use ref_cast::RefCast;
 use serde::{Deserialize, Serialize};
 use sled_agent_types::early_networking::ImportExportPolicy;
@@ -709,7 +711,7 @@ impl DataStore {
     pub async fn switch_port_create(
         &self,
         opctx: &OpContext,
-        rack_id: Uuid,
+        rack_id: RackUuid,
         switch_slot: SwitchSlot,
         port: Name,
     ) -> CreateResult<SwitchPort> {
@@ -733,7 +735,7 @@ impl DataStore {
                     use nexus_db_schema::schema::rack;
                     use nexus_db_schema::schema::rack::dsl as rack_dsl;
                     rack_dsl::rack
-                        .filter(rack::id.eq(rack_id))
+                        .filter(rack::id.eq(to_db_typed_uuid(rack_id)))
                         .select(rack::id)
                         .limit(1)
                         .first_async::<Uuid>(&conn)
@@ -1059,7 +1061,7 @@ impl DataStore {
     pub async fn switch_port_get_id(
         &self,
         opctx: &OpContext,
-        rack_id: Uuid,
+        rack_id: RackUuid,
         switch_slot: SwitchSlot,
         port_name: Name,
     ) -> LookupResult<Uuid> {
@@ -1069,7 +1071,7 @@ impl DataStore {
         let conn = self.pool_connection_authorized(opctx).await?;
         let switch_slot = DbSwitchSlot::from(switch_slot);
         let id: Uuid = switch_port_dsl::switch_port
-            .filter(switch_port::rack_id.eq(rack_id))
+            .filter(switch_port::rack_id.eq(to_db_typed_uuid(rack_id)))
             .filter(switch_port::switch_slot.eq(switch_slot))
             .filter(switch_port::port_name.eq(port_name.to_string()))
             .select(switch_port::id)
@@ -2318,7 +2320,6 @@ mod test {
     use sled_agent_types::early_networking::SwitchSlot;
     use std::net::IpAddr;
     use std::{collections::HashMap, str::FromStr};
-    use uuid::Uuid;
 
     #[tokio::test]
     async fn test_bgp_boundary_switches() {
@@ -2326,8 +2327,7 @@ mod test {
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
-        let rack_id: Uuid =
-            nexus_test_utils::RACK_UUID.parse().expect("parse uuid");
+        let rack_id = nexus_test_utils::RACK_UUID;
         let switch0 = SwitchSlot::Switch0;
         let qsfp0: Name = "qsfp0".parse().expect("parse qsfp0");
 
@@ -2702,8 +2702,7 @@ mod test {
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
-        let rack_id: Uuid =
-            nexus_test_utils::RACK_UUID.parse().expect("parse uuid");
+        let rack_id = nexus_test_utils::RACK_UUID;
         let switch0 = SwitchSlot::Switch0;
         let qsfp0: Name = "qsfp0".parse().expect("parse qsfp0");
 
@@ -2873,8 +2872,7 @@ mod test {
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
-        let rack_id: Uuid =
-            nexus_test_utils::RACK_UUID.parse().expect("parse uuid");
+        let rack_id = nexus_test_utils::RACK_UUID;
 
         datastore
             .switch_port_create(
