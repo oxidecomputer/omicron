@@ -124,13 +124,3 @@ pub struct ProjectUpdate {
     pub description: Option<String>,
     pub time_modified: DateTime<Utc>,
 }
-
-impl From<project_types::ProjectUpdate> for ProjectUpdate {
-    fn from(params: project_types::ProjectUpdate) -> Self {
-        Self {
-            name: params.identity.name.map(Name),
-            description: params.identity.description,
-            time_modified: Utc::now(),
-        }
-    }
-}

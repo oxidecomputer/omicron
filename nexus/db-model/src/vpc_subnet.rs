@@ -117,17 +117,6 @@ pub struct VpcSubnetUpdate {
     pub custom_router_id: Option<Option<Uuid>>,
 }
 
-impl From<vpc::VpcSubnetUpdate> for VpcSubnetUpdate {
-    fn from(params: vpc::VpcSubnetUpdate) -> Self {
-        Self {
-            name: params.identity.name.map(Name),
-            description: params.identity.description,
-            time_modified: Utc::now(),
-            custom_router_id: None,
-        }
-    }
-}
-
 impl DatastoreCollectionConfig<NetworkInterface> for VpcSubnet {
     type CollectionId = Uuid;
     type GenerationNumberColumn = vpc_subnet::dsl::rcgen;

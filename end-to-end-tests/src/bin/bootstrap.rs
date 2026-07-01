@@ -121,9 +121,9 @@ async fn run_test() -> Result<()> {
         .silo_quotas_update()
         .silo("recovery")
         .body(SiloQuotasUpdate {
-            cpus: Some(16),
-            memory: Some(ByteCount(1024 * 1024 * 1024 * 10)),
-            storage: Some(ByteCount(1024 * 1024 * 1024 * 1024)),
+            cpus: 16,
+            memory: ByteCount(1024 * 1024 * 1024 * 10),
+            storage: ByteCount(1024 * 1024 * 1024 * 1024),
         })
         .send()
         .await?;
