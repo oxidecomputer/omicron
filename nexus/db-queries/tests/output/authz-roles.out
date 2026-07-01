@@ -2545,16 +2545,20 @@ resource: BgpConfig id "8c1e3f7a-2d4b-4e6c-9a8f-1b2c3d4e5f60"
   fleet-admin                       ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
   fleet-collaborator                ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
   fleet-viewer                      ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
-  silo1-admin                       ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-collaborator                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-limited-collaborator        ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-viewer                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-proj1-admin                 ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-proj1-collaborator          ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-proj1-limited-collaborator  ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-proj1-viewer                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-admin                       ∅  ∅  ∅  ∅  ∅  ∅  ∅  ∅
+  silo1-collaborator                ∅  ∅  ∅  ∅  ∅  ∅  ∅  ∅
+  silo1-limited-collaborator        ∅  ∅  ∅  ∅  ∅  ∅  ∅  ∅
+  silo1-viewer                      ∅  ∅  ∅  ∅  ∅  ∅  ∅  ∅
+  silo1-user-self                   ∅  ∅  ∅  ∅  ∅  ∅  ∅  ∅
+  silo1-proj1-admin                 ∅  ∅  ∅  ∅  ∅  ∅  ∅  ∅
+  silo1-proj1-collaborator          ∅  ∅  ∅  ∅  ∅  ∅  ∅  ∅
+  silo1-proj1-limited-collaborator  ∅  ∅  ∅  ∅  ∅  ∅  ∅  ∅
+  silo1-proj1-viewer                ∅  ∅  ∅  ∅  ∅  ∅  ∅  ∅
   unauthenticated                   !  !  !  !  !  !  !  !
-  scim                              ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  scim                              ∅  ∅  ∅  ∅  ∅  ∅  ∅  ∅
+  db-init                           ∅  ∅  ∅  ∅  ∅  ∅  ∅  ∅
+  internal-api                      ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
+  external-authn                    ∅  ∅  ∅  ∅  ∅  ∅  ∅  ∅
 
 resource: BgpAnnounceSet id "f1e6c5d4-3b2a-4190-8e7d-6c5b4a392817"
 
@@ -2562,16 +2566,20 @@ resource: BgpAnnounceSet id "f1e6c5d4-3b2a-4190-8e7d-6c5b4a392817"
   fleet-admin                       ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
   fleet-collaborator                ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
   fleet-viewer                      ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
-  silo1-admin                       ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-collaborator                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-limited-collaborator        ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-viewer                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-proj1-admin                 ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-proj1-collaborator          ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-proj1-limited-collaborator  ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-proj1-viewer                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-admin                       ∅  ∅  ∅  ∅  ∅  ∅  ∅  ∅
+  silo1-collaborator                ∅  ∅  ∅  ∅  ∅  ∅  ∅  ∅
+  silo1-limited-collaborator        ∅  ∅  ∅  ∅  ∅  ∅  ∅  ∅
+  silo1-viewer                      ∅  ∅  ∅  ∅  ∅  ∅  ∅  ∅
+  silo1-user-self                   ∅  ∅  ∅  ∅  ∅  ∅  ∅  ∅
+  silo1-proj1-admin                 ∅  ∅  ∅  ∅  ∅  ∅  ∅  ∅
+  silo1-proj1-collaborator          ∅  ∅  ∅  ∅  ∅  ∅  ∅  ∅
+  silo1-proj1-limited-collaborator  ∅  ∅  ∅  ∅  ∅  ∅  ∅  ∅
+  silo1-proj1-viewer                ∅  ∅  ∅  ∅  ∅  ∅  ∅  ∅
   unauthenticated                   !  !  !  !  !  !  !  !
-  scim                              ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  scim                              ∅  ∅  ∅  ∅  ∅  ∅  ∅  ∅
+  db-init                           ∅  ∅  ∅  ∅  ∅  ∅  ∅  ∅
+  internal-api                      ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
+  external-authn                    ∅  ∅  ∅  ∅  ∅  ∅  ∅  ∅
 
 resource: LoopbackAddress id "9efbf1b1-16f9-45ab-864a-f7ebe501ae5b"
 
