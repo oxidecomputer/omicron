@@ -118,17 +118,10 @@ pub enum RecoveryFailureKind {
 impl RecoveryFailureKind {
     /// Classify a saga-recovery error by its HTTP-style status.
     ///
-    /// Saga recovery errors are [`Error`]s, which carry an HTTP-style status.
-    /// We treat an error as *transient* when the condition it describes may
-    /// resolve on its own, so retrying recovery on a later pass could succeed:
+    /// We treat an error as transient when the condition it describes may
+    /// resolve on its own, so retrying recovery on a later pass could succeed.
     ///
-    /// - [`Error::ServiceUnavailable`] (HTTP 503): the datastore (or another
-    ///   dependency) is temporarily unreachable.
-    /// - [`Error::InsufficientCapacity`] (HTTP 507): capacity may free up.
-    /// - [`Error::Unauthenticated`] (HTTP 401): credentials may have been
-    ///   temporarily unavailable.
-    ///
-    /// Everything else is *permanent*: retrying won't change the outcome. In
+    /// Everything else is permanent. Retrying won't change the outcome. In
     /// particular, [`Error::InternalError`] (HTTP 500), which is how a failed
     /// `saga_resume`/`saga_start` surfaces, means the saga cannot be
     /// recovered, so it should be abandoned rather than retried forever.
@@ -148,10 +141,6 @@ impl RecoveryFailureKind {
             | Error::NotFound { .. }
             | Error::Gone => Self::Permanent,
         }
-    }
-
-    pub fn is_transient(self) -> bool {
-        matches!(self, Self::Transient)
     }
 }
 

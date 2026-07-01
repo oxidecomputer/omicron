@@ -618,8 +618,6 @@ mod test {
             .await
             .expect("updating state to Running again");
 
-        // TODO-K: Let's update to abandoned instead
-
         // Update the state to Done.
         datastore
             .saga_update_state(
@@ -640,6 +638,39 @@ mod test {
             )
             .await
             .expect("updating state to Done again");
+
+        // Test cleanup
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_update_state_to_abandoned() {
+        // Test setup
+        let logctx = dev::test_setup_log("test_update_state_to_abandoned");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let datastore = db.datastore();
+        let node_cx = SagaTestContext::new(SecId(Uuid::new_v4()));
+
+        // Create a saga in the running state.
+        let params = node_cx.new_running_db_saga();
+        datastore
+            .saga_create(&params)
+            .await
+            .expect("creating saga in Running state");
+
+        // Update the state to Abandoned.
+        datastore
+            .saga_update_state(
+                node_cx.saga_id,
+                SagaStateTransition::Abandoned {
+                    reason: SagaReasonAbandoned::Unrecoverable,
+                    information: "test".to_string(),
+                },
+                node_cx.sec_id,
+            )
+            .await
+            .expect("updating state to Abandoned");
 
         // Test cleanup
         db.terminate().await;

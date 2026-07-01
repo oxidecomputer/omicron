@@ -102,7 +102,9 @@ struct SagaInjectErrorArgs {
 struct SagaAbandonArgs {
     saga_id: Uuid,
 
-    information: Option<String>,
+    #[clap(long, default_value = "manually abandoned")]
+    /// Additional information as to why the saga was abandoned
+    information: String,
 
     /// Skip checking if the SEC is up
     #[clap(long, default_value_t = false)]
@@ -439,14 +441,10 @@ execute even if it is abandoned. You should only proceed if:
     prompt.read_and_validate("y/N", "y")?;
     drop(prompt);
 
-    let abandon_information = Some(
-        information.unwrap_or_else(|| "manually abandoned by omdb".to_string()),
-    );
-
     let new_state = SagaStateUpdate {
         saga_state: SagaState::Abandoned,
         abandon_reason: Some(nexus_db_model::SagaReasonAbandoned::Omdb),
-        abandon_information,
+        abandon_information: Some(information),
         abandon_time: Some(Utc::now()),
     };
 
