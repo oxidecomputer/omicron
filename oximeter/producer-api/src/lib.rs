@@ -4,8 +4,6 @@
 
 //! API description for the Oximeter producer server.
 
-// Copyright 2026 Oxide Computer Company
-
 use dropshot::HttpError;
 use dropshot::HttpResponseOk;
 use dropshot::Path;

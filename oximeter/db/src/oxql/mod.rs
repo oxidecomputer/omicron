@@ -4,8 +4,6 @@
 
 //! The Oximeter Query Language, OxQL.
 
-// Copyright 2024 Oxide Computer Company
-
 use peg::error::ParseError as PegError;
 use peg::str::LineCol;
 

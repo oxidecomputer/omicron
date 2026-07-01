@@ -4,8 +4,6 @@
 
 //! Schema for tables in OxQL queries.
 
-// Copyright 2024 Oxide Computer Company
-
 use std::collections::BTreeMap;
 
 use oximeter::DatumType;

@@ -4,8 +4,6 @@
 
 //! Methods for walking a tree of filter nodes and applying a function to them.
 
-// Copyright 2024 Oxide Computer Company
-
 use std::time::Duration;
 
 use super::CompoundFilter;

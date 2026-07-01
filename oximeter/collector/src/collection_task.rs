@@ -4,8 +4,6 @@
 
 //! Task responsible for collecting from a single producer.
 
-// Copyright 2025 Oxide Computer Company
-
 use crate::agent::CollectionTaskSenderWrapper;
 use crate::probes;
 use crate::self_stats;

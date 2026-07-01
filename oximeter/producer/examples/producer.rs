@@ -4,8 +4,6 @@
 
 //! Integration test running a producer that exports a few basic metrics.
 
-// Copyright 2023 Oxide Computer Company
-
 use anyhow::Context;
 use chrono::DateTime;
 use chrono::Utc;

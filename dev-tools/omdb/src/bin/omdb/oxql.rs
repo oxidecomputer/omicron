@@ -4,8 +4,6 @@
 
 //! omdb OxQL shell for interactive queries on metrics/timeseries.
 
-// Copyright 2024 Oxide Computer
-
 use crate::Omdb;
 use crate::helpers::CONNECTION_OPTIONS_HEADING;
 use anyhow::Context;

@@ -4,8 +4,6 @@
 
 //! Rust client to ClickHouse database
 
-// Copyright 2026 Oxide Computer Company
-
 pub(crate) mod dbwrite;
 #[cfg(any(feature = "oxql", test))]
 pub(crate) mod oxql;

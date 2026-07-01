@@ -4,8 +4,6 @@
 
 //! Tools for interacting with the control plane telemetry database.
 
-// Copyright 2025 Oxide Computer Company
-
 use crate::query::StringFieldSelector;
 use anyhow::Context as _;
 use chrono::DateTime;

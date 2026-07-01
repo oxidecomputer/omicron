@@ -2,8 +2,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-// Copyright 2022 Oxide Computer Company
-
 //! Interface for API requests to a Management Gateway Service (MGS) instance
 
 pub use gateway_messages::SpComponent;

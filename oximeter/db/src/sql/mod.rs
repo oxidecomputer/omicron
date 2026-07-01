@@ -25,8 +25,6 @@
 //! effectively a SQL-to-SQL transpiler, converting queries against the
 //! timeseries into one or more queries against the actual tables in ClickHouse.
 
-// Copyright 2023 Oxide Computer Company
-
 use crate::DatumType;
 use crate::Error as OxdbError;
 use crate::FieldType;

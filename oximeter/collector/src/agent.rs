@@ -4,8 +4,6 @@
 
 //! The oximeter agent handles collection tasks for each producer.
 
-// Copyright 2025 Oxide Computer Company
-
 use crate::DbConfig;
 use crate::Error;
 use crate::ProducerEndpoint;

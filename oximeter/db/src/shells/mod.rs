@@ -4,8 +4,6 @@
 
 //! Helper for the OxQL and SQL shell implementations.
 
-// Copyright 2024 Oxide Computer Company
-
 use crate::Client;
 use dropshot::EmptyScanParams;
 use dropshot::WhichPage;

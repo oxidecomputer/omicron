@@ -4,8 +4,6 @@
 
 //! Definitions of timeseries and groups of them, a [`Table`].
 
-// Copyright 2024 Oxide Computer Company
-
 use crate::Alignment;
 use crate::point::DataType;
 use crate::point::MetricType;

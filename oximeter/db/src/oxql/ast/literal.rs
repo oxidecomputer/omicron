@@ -4,8 +4,6 @@
 
 //! AST node for literal values.
 
-// Copyright 2024 Oxide Computer Company
-
 use crate::oxql::Error;
 use crate::oxql::ast::cmp::Comparison;
 use anyhow::Context;

@@ -4,8 +4,6 @@
 
 //! An AST node describing filtering table operations.
 
-// Copyright 2024 Oxide Computer Company
-
 use crate::oxql::Error;
 use crate::oxql::ast::cmp::Comparison;
 use crate::oxql::ast::ident::Ident;
