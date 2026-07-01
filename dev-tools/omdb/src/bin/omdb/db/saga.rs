@@ -439,16 +439,14 @@ execute even if it is abandoned. You should only proceed if:
     prompt.read_and_validate("y/N", "y")?;
     drop(prompt);
 
-    diesel::update(dsl::saga)
-        .filter(dsl::id.eq(saga_id))
-        .set(dsl::saga_state.eq(SagaState::Abandoned))
-        .execute_async(&*conn)
-        .await?;
+    let abandon_information = Some(
+        information.unwrap_or_else(|| "manually abandoned by omdb".to_string()),
+    );
 
     let new_state = SagaStateUpdate {
         saga_state: SagaState::Abandoned,
         abandon_reason: Some(nexus_db_model::SagaReasonAbandoned::Omdb),
-        abandon_information: information,
+        abandon_information,
         abandon_time: Some(Utc::now()),
     };
 
