@@ -10,8 +10,8 @@ use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::networking::{
     Address, AddressConfig, AddressLotBlockCreate, AddressLotCreate,
-    AddressLotKind, BgpAnnounceSetCreate, BgpAnnouncementCreate,
-    BgpConfigCreate, BgpPeer, BgpPeerConfig, LinkConfigCreate,
+    AddressLotKind, BgpAnnounceSetCreate, BgpAnnouncementCreate, BgpConfig,
+    BgpConfigCreate, BgpConfigUpdate, BgpPeer, BgpPeerConfig, LinkConfigCreate,
     LldpLinkConfigCreate, Route, RouteConfig, SwitchInterfaceConfigCreate,
     SwitchInterfaceKind, SwitchPort, SwitchPortApplySettings,
     SwitchPortSettings, SwitchPortSettingsCreate,
@@ -23,6 +23,7 @@ use oxnet::IpNet;
 use sled_agent_types::early_networking::ImportExportPolicy;
 use sled_agent_types::early_networking::LinkFec;
 use sled_agent_types::early_networking::LinkSpeed;
+use sled_agent_types::early_networking::MaxPathConfig;
 use sled_agent_types::early_networking::RouterLifetimeConfig;
 use sled_agent_types::early_networking::RouterPeerType;
 use sled_agent_types::early_networking::SwitchSlot;
@@ -679,4 +680,156 @@ async fn test_port_settings_basic_v6_crud(ctx: &ControlPlaneTestContext) {
         }
     }
     panic!("expected number of routes not found");
+}
+
+#[nexus_test]
+async fn test_bgp_config_update(ctx: &ControlPlaneTestContext) {
+    let client = &ctx.external_client;
+
+    // Names referenced more than once below.
+    let parkinglot: Name = "parkinglot".parse().unwrap();
+    let as47: Name = "as47".parse().unwrap();
+    let instances = NameOrId::Name("instances".parse().unwrap());
+
+    // Create an address lot for the announce set blocks.
+    let lot_params = AddressLotCreate {
+        identity: IdentityMetadataCreateParams {
+            name: parkinglot.clone(),
+            description: "an address parking lot".into(),
+        },
+        kind: AddressLotKind::Infra,
+        blocks: vec![AddressLotBlockCreate {
+            first_address: "1.2.3.0".parse().unwrap(),
+            last_address: "1.2.3.255".parse().unwrap(),
+        }],
+    };
+    NexusRequest::objects_post(
+        client,
+        "/v1/system/networking/address-lot",
+        &lot_params,
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
+
+    // Create two announce sets so the config can be moved between them.
+    for name in ["instances", "instances2"] {
+        let announce_set = BgpAnnounceSetCreate {
+            identity: IdentityMetadataCreateParams {
+                name: name.parse().unwrap(),
+                description: "an announce set".into(),
+            },
+            announcement: vec![BgpAnnouncementCreate {
+                address_lot_block: NameOrId::Name(parkinglot.clone()),
+                network: "1.2.3.0/24".parse().unwrap(),
+            }],
+        };
+        NexusRequest::object_put(
+            client,
+            "/v1/system/networking/bgp-announce-set",
+            Some(&announce_set),
+        )
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .unwrap();
+    }
+
+    // Create the BGP config.
+    let bgp_config = BgpConfigCreate {
+        identity: IdentityMetadataCreateParams {
+            name: as47.clone(),
+            description: "autonomous system 47".into(),
+        },
+        bgp_announce_set_id: instances.clone(),
+        asn: 47,
+        vrf: None,
+        checker: None,
+        shaper: None,
+        max_paths: Default::default(),
+    };
+    NexusRequest::objects_post(
+        client,
+        "/v1/system/networking/bgp",
+        &bgp_config,
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
+
+    let valid_update = BgpConfigUpdate {
+        name: as47,
+        description: "autonomous system 47".into(),
+        asn: 47,
+        bgp_announce_set_id: instances,
+        max_paths: MaxPathConfig::new(1).unwrap(),
+    };
+
+    // The `asn` field is immutable; attempting to change it is a 400.
+    NexusRequest::expect_failure_with_body(
+        client,
+        StatusCode::BAD_REQUEST,
+        Method::PUT,
+        "/v1/system/networking/bgp?name_or_id=as47",
+        &BgpConfigUpdate { asn: 48, ..valid_update.clone() },
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
+
+    // Updating a config that doesn't exist is a 404.
+    NexusRequest::expect_failure_with_body(
+        client,
+        StatusCode::NOT_FOUND,
+        Method::PUT,
+        "/v1/system/networking/bgp?name_or_id=does-not-exist",
+        &valid_update,
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
+
+    // Referencing an announce set that doesn't exist is a 404.
+    NexusRequest::expect_failure_with_body(
+        client,
+        StatusCode::NOT_FOUND,
+        Method::PUT,
+        "/v1/system/networking/bgp?name_or_id=as47",
+        &BgpConfigUpdate {
+            bgp_announce_set_id: NameOrId::Name(
+                "does-not-exist".parse().unwrap(),
+            ),
+            ..valid_update.clone()
+        },
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
+
+    // A valid update returns the updated configuration.
+    let update = BgpConfigUpdate {
+        name: "as47-renamed".parse().unwrap(),
+        description: "renamed config".into(),
+        asn: 47,
+        bgp_announce_set_id: NameOrId::Name("instances2".parse().unwrap()),
+        max_paths: MaxPathConfig::new(3).unwrap(),
+    };
+    let updated: BgpConfig = NexusRequest::object_put(
+        client,
+        "/v1/system/networking/bgp?name_or_id=as47",
+        Some(&update),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute_and_parse_unwrap()
+    .await;
+
+    assert_eq!(updated.identity.name.to_string(), "as47-renamed");
+    assert_eq!(updated.identity.description, "renamed config");
+    assert_eq!(updated.asn, 47);
+    assert_eq!(updated.max_paths, MaxPathConfig::new(3).unwrap());
 }

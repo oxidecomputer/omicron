@@ -3,6 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use super::DataStore;
+use crate::authz;
 use crate::context::OpContext;
 use crate::db::model::{BgpAnnounceSet, BgpAnnouncement, BgpConfig, Name};
 use crate::db::pagination::paginated;
@@ -15,17 +16,17 @@ use ipnetwork::IpNetwork;
 use nexus_db_errors::OptionalError;
 use nexus_db_errors::{ErrorHandler, public_error_from_diesel};
 use nexus_db_model::{
-    BgpPeerView, DbSwitchSlot, RouterPeerTypeDbRepresentation,
+    BgpPeerView, DbSwitchSlot, RouterPeerTypeDbRepresentation, SqlU8,
     SwitchPortBgpPeerConfigAllowExport, SwitchPortBgpPeerConfigAllowImport,
     SwitchPortBgpPeerConfigCommunity,
 };
 use nexus_types::external_api::networking;
 use nexus_types::identity::Resource;
-use omicron_common::api::external;
 use omicron_common::api::external::http_pagination::PaginatedBy;
+use omicron_common::api::external::{self};
 use omicron_common::api::external::{
     CreateResult, DeleteResult, Error, ListResultVec, LookupResult, NameOrId,
-    ResourceType,
+    ResourceType, UpdateResult,
 };
 use ref_cast::RefCast;
 use sled_agent_types::early_networking::RouterPeerType;
@@ -222,6 +223,43 @@ impl DataStore {
                     error!(opctx.log, "{msg}"; "error" => ?e);
                     public_error_from_diesel(e, ErrorHandler::Server)
                 }
+            })
+    }
+
+    pub async fn bgp_config_update(
+        &self,
+        opctx: &OpContext,
+        authz_bgp_config: &authz::BgpConfig,
+        bgp_announce_set_id: authz::BgpAnnounceSet,
+        update: &networking::BgpConfigUpdate,
+    ) -> UpdateResult<BgpConfig> {
+        use nexus_db_schema::schema::bgp_config::dsl;
+
+        // The `asn` field is immutable and was already checked.
+        let networking::BgpConfigUpdate {
+            name: new_name,
+            description: new_description,
+            asn: _,
+            bgp_announce_set_id: _,
+            max_paths: new_max_paths,
+        } = update;
+
+        diesel::update(dsl::bgp_config)
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::id.eq(authz_bgp_config.id()))
+            .set((
+                dsl::time_modified.eq(Utc::now()),
+                dsl::name.eq(new_name.to_string()),
+                dsl::description.eq(new_description.to_string()),
+                dsl::bgp_announce_set_id.eq(bgp_announce_set_id.id()),
+                dsl::max_paths.eq(SqlU8(new_max_paths.as_u8())),
+            ))
+            .returning(BgpConfig::as_returning())
+            .get_result_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| {
+                error!(opctx.log, "bgp_config_update failed"; "error" => ?e);
+                public_error_from_diesel(e, ErrorHandler::Server)
             })
     }
 
@@ -1046,6 +1084,7 @@ impl DataStore {
 mod tests {
     use super::*;
     use crate::db::pub_test_utils::TestDatabase;
+    use nexus_db_lookup::LookupPath;
     use nexus_db_model::SwitchPortBgpPeerConfig;
     use nexus_types::external_api::networking::BgpPeer;
     use omicron_common::api::external::IdentityMetadataCreateParams;
@@ -1053,8 +1092,126 @@ mod tests {
     use omicron_test_utils::dev;
     use oxnet::IpNet;
     use sled_agent_types::early_networking::ImportExportPolicy;
+    use sled_agent_types::early_networking::MaxPathConfig;
     use sled_agent_types::early_networking::RouterLifetimeConfig;
     use std::net::IpAddr;
+
+    #[tokio::test]
+    async fn test_update_bgp_config() {
+        let logctx = dev::test_setup_log("test_update_bgp_config");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let config_name: Name = "config-name".parse().unwrap();
+        let announce_name: Name = "announce-name".parse().unwrap();
+        let asn = 47;
+
+        let config = networking::BgpConfigCreate {
+            identity: IdentityMetadataCreateParams {
+                name: config_name.clone(),
+                description: String::from("a test config"),
+            },
+            asn,
+            bgp_announce_set_id: NameOrId::Name(announce_name.clone()),
+            vrf: None,
+            shaper: None,
+            checker: None,
+            max_paths: MaxPathConfig::new(1).unwrap(),
+        };
+
+        let new_announce_name: Name = "new-announce-name".parse().unwrap();
+        let new_max_paths = MaxPathConfig::new(2).unwrap();
+        let new_config_name: Name = "new-config-name".parse().unwrap();
+        let new_description = String::from("updated description");
+
+        let update = networking::BgpConfigUpdate {
+            name: new_config_name.clone(),
+            description: new_description.clone(),
+            asn,
+            bgp_announce_set_id: NameOrId::Name(new_announce_name.clone()),
+            max_paths: new_max_paths,
+        };
+
+        // Make sure the announces exist
+        datastore
+            .bgp_create_announce_set(
+                &opctx,
+                &networking::BgpAnnounceSetCreate {
+                    identity: IdentityMetadataCreateParams {
+                        name: announce_name.clone(),
+                        description: String::from("the first announce set"),
+                    },
+                    announcement: Vec::default(),
+                },
+            )
+            .await
+            .expect("create bgp announce set");
+
+        let new_announce_id = datastore
+            .bgp_create_announce_set(
+                &opctx,
+                &networking::BgpAnnounceSetCreate {
+                    identity: IdentityMetadataCreateParams {
+                        name: new_announce_name.clone(),
+                        description: String::from("the second announce set"),
+                    },
+                    announcement: Vec::default(),
+                },
+            )
+            .await
+            .expect("create bgp announce set")
+            .0
+            .identity
+            .id;
+
+        // Create the BGP config
+        let config_id = datastore
+            .bgp_config_create(&opctx, &config)
+            .await
+            .expect("create bgp config")
+            .identity
+            .id;
+
+        let (.., authz_bgp_config) = LookupPath::new(&opctx, datastore)
+            .bgp_config_id(config_id)
+            .lookup_for(authz::Action::Modify)
+            .await
+            .expect("lookup bgp config");
+
+        let (.., authz_announce_set) = LookupPath::new(&opctx, datastore)
+            .bgp_announce_set_id(new_announce_id)
+            .lookup_for(authz::Action::Read)
+            .await
+            .expect("lookup bgp announce set");
+
+        // Update the BGP config
+        datastore
+            .bgp_config_update(
+                &opctx,
+                &authz_bgp_config,
+                authz_announce_set,
+                &update,
+            )
+            .await
+            .expect("update bgp config");
+
+        // Verify the BGP config was updated
+        let bgp_config = datastore
+            .bgp_config_get(&opctx, &NameOrId::Id(config_id))
+            .await
+            .expect("get bgp config");
+
+        assert_eq!(
+            bgp_config.identity.name.to_string(),
+            new_config_name.to_string()
+        );
+        assert_eq!(bgp_config.identity.description, new_description);
+        assert_eq!(bgp_config.bgp_announce_set_id, new_announce_id);
+        assert_eq!(bgp_config.max_paths.0, new_max_paths.as_u8());
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
 
     #[tokio::test]
     async fn test_delete_bgp_config_and_announce_set_by_name() {

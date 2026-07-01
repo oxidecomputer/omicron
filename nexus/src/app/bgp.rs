@@ -4,12 +4,15 @@
 
 use crate::app::authz;
 use mg_admin_client::types::MessageHistoryRequest;
+use nexus_db_lookup::LookupPath;
+use nexus_db_lookup::lookup;
 use nexus_db_model::{BgpAnnounceSet, BgpAnnouncement, BgpConfig};
 use nexus_db_queries::context::OpContext;
 use nexus_types::external_api::networking;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::{
     self, CreateResult, DeleteResult, ListResultVec, LookupResult, NameOrId,
+    UpdateResult,
 };
 use slog_error_chain::InlineErrorChain;
 
@@ -40,6 +43,78 @@ impl super::Nexus {
     ) -> ListResultVec<BgpConfig> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
         self.db_datastore.bgp_config_list(opctx, pagparams).await
+    }
+
+    pub fn bgp_config_lookup<'a>(
+        &'a self,
+        opctx: &'a OpContext,
+        name_or_id: NameOrId,
+    ) -> LookupResult<lookup::BgpConfig<'a>> {
+        match name_or_id {
+            NameOrId::Id(id) => {
+                Ok(LookupPath::new(opctx, &self.db_datastore).bgp_config_id(id))
+            }
+            NameOrId::Name(name) => {
+                Ok(LookupPath::new(opctx, &self.db_datastore)
+                    .bgp_config_name_owned(name.into()))
+            }
+        }
+    }
+
+    pub fn bgp_announce_set_lookup<'a>(
+        &'a self,
+        opctx: &'a OpContext,
+        name_or_id: NameOrId,
+    ) -> LookupResult<lookup::BgpAnnounceSet<'a>> {
+        match name_or_id {
+            NameOrId::Id(id) => Ok(LookupPath::new(opctx, &self.db_datastore)
+                .bgp_announce_set_id(id)),
+            NameOrId::Name(name) => {
+                Ok(LookupPath::new(opctx, &self.db_datastore)
+                    .bgp_announce_set_name_owned(name.into()))
+            }
+        }
+    }
+
+    pub async fn bgp_config_update(
+        &self,
+        opctx: &OpContext,
+        sel: &networking::BgpConfigSelector,
+        update: &networking::BgpConfigUpdate,
+    ) -> UpdateResult<BgpConfig> {
+        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
+        let (.., authz_bgp_config, db_bgp_config) = self
+            .bgp_config_lookup(opctx, sel.name_or_id.clone())?
+            .fetch_for(authz::Action::Modify)
+            .await?;
+
+        // The autonomous system number is immutable; to change it, the
+        // configuration must be deleted and recreated.
+        if *db_bgp_config.asn != update.asn {
+            return Err(external::Error::invalid_request(
+                "asn cannot be updated",
+            ));
+        }
+
+        let (.., authz_announce_set) = self
+            .bgp_announce_set_lookup(opctx, update.bgp_announce_set_id.clone())?
+            .lookup_for(authz::Action::Read)
+            .await?;
+
+        let result = self
+            .db_datastore
+            .bgp_config_update(
+                opctx,
+                &authz_bgp_config,
+                authz_announce_set,
+                update,
+            )
+            .await?;
+
+        // Eagerly propagate changes via background task
+        self.background_tasks
+            .activate(&self.background_tasks.task_switch_port_settings_manager);
+        Ok(result)
     }
 
     pub async fn bgp_config_delete(

@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "2026060800.0.0"
+    "version": "2026061000.0.0"
   },
   "paths": {
     "/device/auth": {
@@ -10675,6 +10675,53 @@
           "required": []
         }
       },
+      "put": {
+        "tags": [
+          "system/networking"
+        ],
+        "summary": "Update the mutable fields of an existing BGP configuration",
+        "description": "The asn field is not updatable; to change the autonomous system number, create a new BGP configuration object.",
+        "operationId": "networking_bgp_config_update",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "name_or_id",
+            "description": "A name or id to use when selecting BGP config.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BgpConfigUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BgpConfig"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
       "post": {
         "tags": [
           "system/networking"
@@ -17531,6 +17578,53 @@
         },
         "required": [
           "items"
+        ]
+      },
+      "BgpConfigUpdate": {
+        "description": "Parameters for updating a BGP configuration",
+        "type": "object",
+        "properties": {
+          "asn": {
+            "description": "The autonomous system number of this BGP configuration. Cannot be updated.",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "bgp_announce_set_id": {
+            "description": "Update the BGP announce set associated with this configuration.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/NameOrId"
+              }
+            ]
+          },
+          "description": {
+            "description": "Update the description of this BGP configuration.",
+            "type": "string"
+          },
+          "max_paths": {
+            "description": "Update the maximum number of equal-cost paths.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/MaxPathConfig"
+              }
+            ]
+          },
+          "name": {
+            "description": "Update the name of this BGP configuration.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
+          }
+        },
+        "required": [
+          "asn",
+          "bgp_announce_set_id",
+          "description",
+          "max_paths",
+          "name"
         ]
       },
       "BgpExported": {

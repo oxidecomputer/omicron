@@ -335,6 +335,22 @@ impl<'a> LookupPath<'a> {
         AddressLot::OwnedName(Root { lookup_root: self }, name)
     }
 
+    pub fn bgp_config_id(self, id: Uuid) -> BgpConfig<'a> {
+        BgpConfig::PrimaryKey(Root { lookup_root: self }, id)
+    }
+
+    pub fn bgp_config_name_owned(self, name: Name) -> BgpConfig<'a> {
+        BgpConfig::OwnedName(Root { lookup_root: self }, name)
+    }
+
+    pub fn bgp_announce_set_id(self, id: Uuid) -> BgpAnnounceSet<'a> {
+        BgpAnnounceSet::PrimaryKey(Root { lookup_root: self }, id)
+    }
+
+    pub fn bgp_announce_set_name_owned(self, name: Name) -> BgpAnnounceSet<'a> {
+        BgpAnnounceSet::OwnedName(Root { lookup_root: self }, name)
+    }
+
     /// Select a resource of type MulticastGroup, identified by its name
     pub fn multicast_group_name<'b, 'c>(
         self,
@@ -867,6 +883,22 @@ lookup_resource! {
 lookup_resource! {
     name = "AddressLot",
     ancestors = [], // TODO: Should this include AddressLotBlock?
+    lookup_by_name = true,
+    soft_deletes = true,
+    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
+}
+
+lookup_resource! {
+    name = "BgpConfig",
+    ancestors = [],
+    lookup_by_name = true,
+    soft_deletes = true,
+    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
+}
+
+lookup_resource! {
+    name = "BgpAnnounceSet",
+    ancestors = [],
     lookup_by_name = true,
     soft_deletes = true,
     primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
