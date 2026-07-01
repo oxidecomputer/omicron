@@ -54,11 +54,15 @@ use nexus_db_queries::{
 };
 use nexus_types::external_api::networking;
 use nexus_types::identity::{Asset, Resource};
+use nexus_types::internal_api::background::IncompleteBootstoreConfigReport;
+use nexus_types::internal_api::background::SwitchPortSettingsManagerStatus;
 use omicron_common::OMICRON_DPD_TAG;
 use omicron_common::{
     address::{Ipv6Subnet, get_sled_address},
     api::external::DataPageParams,
 };
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::RackUuid;
 use serde_json::json;
 use sled_agent_client::types::HostPortConfig;
 use sled_agent_types::early_networking::EarlyNetworkConfigEnvelope;
@@ -293,6 +297,8 @@ impl BackgroundTask for SwitchPortSettingsManager {
                     });
                 },
             };
+
+            let mut status = SwitchPortSettingsManagerStatus::default();
 
             // TODO: https://github.com/oxidecomputer/omicron/issues/3090
             // Here we're iterating over racks because that's technically the correct thing to do,
@@ -980,10 +986,31 @@ impl BackgroundTask for SwitchPortSettingsManager {
 
                 let rack_network_config =
                     match nexus_switch_config::build_rack_network_config(
-                        &log, input,
+                        input,
                     ) {
-                        Some(rack_network_config) => rack_network_config,
-                        None => continue,
+                        Ok(rack_network_config) => rack_network_config,
+                        Err(report) => {
+                            error!(
+                                log,
+                                "incomplete bootstore network config; \
+                                 skipping rack";
+                                "problems" => %report,
+                            );
+                            status.incomplete_bootstore_configs.push(
+                                IncompleteBootstoreConfigReport {
+                                    // TODO: `Rack` should use newtype-uuid.
+                                    rack_id: RackUuid::from_untyped_uuid(
+                                        rack.id(),
+                                    ),
+                                    problems: report
+                                        .problems
+                                        .iter()
+                                        .map(|problem| problem.to_string())
+                                        .collect(),
+                                },
+                            );
+                            continue;
+                        }
                     };
 
                 let (
@@ -1213,7 +1240,14 @@ impl BackgroundTask for SwitchPortSettingsManager {
                     }
                 }
             }
-            json!({})
+            // TODO: we have some early returns in this task. We should instead
+            // collect all problems and return them in the response.
+            //
+            // As part of that, we should move the body into an
+            // `activate_impl(...)` function which returns a
+            // `SwitchPortManagerStatus`. That'll force us to not do early
+            // returns.
+            json!(status)
         }
         .boxed()
     }
@@ -2137,7 +2171,7 @@ fn does_bootstore_need_update(
 
         let rnc_differs = !hashset_eq(current_bgp, desired_bgp)
             || !hashset_eq(current_bfd, desired_bfd)
-            || !hashset_eq(current_ports, desired_ports)
+            || !hashset_eq(current_ports.as_slice(), desired_ports.as_slice())
             || current_subnet != desired_subnet
             || current_infra_ip_first != desired_infra_ip_first
             || current_infra_ip_last != desired_infra_ip_last;
@@ -2216,6 +2250,8 @@ mod tests {
     use omicron_common::api::external::Generation;
     use omicron_common::api::external::Vni;
     use omicron_test_utils::dev::test_setup_log;
+    use sled_agent_types::early_networking::PortConfig;
+    use sled_agent_types::early_networking::UplinkPorts;
     use sled_agent_types::inventory::SourceNatConfigGeneric;
     use sled_agent_types::system_networking::ServiceZoneNatEntries;
     use sled_agent_types::system_networking::ServiceZoneNatEntry;
@@ -2226,7 +2262,9 @@ mod tests {
             rack_subnet: rack_subnet.parse().unwrap(),
             infra_ip_first: "172.20.15.21".parse().unwrap(),
             infra_ip_last: "172.20.15.22".parse().unwrap(),
-            ports: vec![],
+            // `UplinkPorts` must be non-empty -- use a single placeholder port.
+            ports: UplinkPorts::new(vec![PortConfig::empty_for_tests("qsfp0")])
+                .expect("placeholder port list is non-empty"),
             bgp: vec![],
             bfd: vec![],
         }

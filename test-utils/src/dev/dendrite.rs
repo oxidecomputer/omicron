@@ -4,7 +4,7 @@
 
 //! Tools for managing Dendrite during development
 
-use std::net::SocketAddr;
+use std::net::{Ipv6Addr, SocketAddr, SocketAddrV6};
 use std::process::Stdio;
 use std::time::Duration;
 
@@ -91,6 +91,13 @@ impl DendriteInstance {
                 )
             })?;
         }
+
+        // Print the dendrite address to stderr. This is captured by nextest and
+        // kept in the run recording, so that a cross-test ephemeral port
+        // collision can be traced back to a test even if it passes. See
+        // https://github.com/oxidecomputer/omicron/issues/10697.
+        let address = SocketAddrV6::new(Ipv6Addr::LOCALHOST, port, 0, 0);
+        eprintln!("Dendrite address: {address}");
 
         Ok(Self { port, args, child: Some(child), data_dir: Some(temp_dir) })
     }

@@ -183,10 +183,22 @@
         "type": "object",
         "properties": {
           "data": {
+            "title": "IdOrdMap",
+            "x-rust-type": {
+              "crate": "iddqd",
+              "parameters": [
+                {
+                  "$ref": "#/components/schemas/BootstrapIpOfBaseboardId"
+                }
+              ],
+              "path": "iddqd::IdOrdMap",
+              "version": "*"
+            },
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/BootstrapIpOfBaseboardId"
-            }
+            },
+            "uniqueItems": true
           }
         },
         "required": [
@@ -1070,10 +1082,11 @@
           },
           "ports": {
             "description": "Uplinks for connecting the rack to external networks",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/PortConfig"
-            }
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/UplinkPorts"
+              }
+            ]
           },
           "rack_subnet": {
             "$ref": "#/components/schemas/Ipv6Net"
@@ -1679,6 +1692,13 @@
         "required": [
           "address"
         ]
+      },
+      "UplinkPorts": {
+        "type": "array",
+        "items": {
+          "$ref": "#/components/schemas/PortConfig"
+        },
+        "minItems": 1
       },
       "UserId": {
         "title": "A username for a local-only user",

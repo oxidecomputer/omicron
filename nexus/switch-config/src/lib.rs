@@ -29,10 +29,9 @@ use sled_agent_types::early_networking::SwitchSlot;
 use sled_agent_types::early_networking::TxEqConfig;
 use sled_agent_types::early_networking::UplinkAddress;
 use sled_agent_types::early_networking::UplinkAddressConfig;
-use slog::Logger;
-use slog::error;
-use slog_error_chain::InlineErrorChain;
+use sled_agent_types::early_networking::UplinkPorts;
 use std::collections::BTreeMap;
+use std::fmt;
 use std::net::IpAddr;
 
 /// Inputs to [`build_rack_network_config`].
@@ -110,19 +109,96 @@ pub struct LldpInput {
     pub management_ip: Option<IpAddr>,
 }
 
+/// A single reason the bootstore config could not be built completely.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Problem {
+    /// The rack's subnet was not set.
+    RackSubnetMissing,
+    /// The rack's subnet was set but is not IPv6.
+    RackSubnetNotIpv6 { subnet: IpNetwork },
+    /// A switch's BGP config has a `max_paths` value our types reject. This
+    /// should be impossible given the database constraints.
+    IllegalMaxPaths { switch: SwitchSlot, value: u8 },
+    /// A port is on a switch that has no BGP config, so its peers' ASN is
+    /// unknown.
+    MissingBgpConfigForSwitch { switch: SwitchSlot, port: String },
+    /// A port has an address that can't be converted to an uplink address.
+    MalformedUplinkAddress {
+        switch: SwitchSlot,
+        port: String,
+        error: InvalidIpAddrError,
+    },
+    /// The rack ended up with no usable uplink ports, so the config would be
+    /// empty. A rack with no uplinks can't reach external networks.
+    NoUplinkPorts,
+}
+
+impl fmt::Display for Problem {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Problem::RackSubnetMissing => write!(f, "rack subnet is not set"),
+            Problem::RackSubnetNotIpv6 { subnet } => {
+                write!(f, "rack subnet {subnet} must be ipv6")
+            }
+            Problem::IllegalMaxPaths { switch, value } => write!(
+                f,
+                "bgp config for switch {switch:?} has illegal max_paths \
+                 value {value}",
+            ),
+            Problem::MissingBgpConfigForSwitch { switch, port } => write!(
+                f,
+                "port {port} is on switch {switch:?}, which has no bgp config",
+            ),
+            Problem::MalformedUplinkAddress { switch, port, error } => write!(
+                f,
+                "port {port} on switch {switch:?} has a malformed uplink \
+                 address: {error}",
+            ),
+            Problem::NoUplinkPorts => {
+                write!(
+                    f,
+                    "the rack has no usable uplink ports (possibly due to \
+                     other errors, if reported above)"
+                )
+            }
+        }
+    }
+}
+
+/// The error returned when bootstore rack network config could not be built.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IncompleteBootstoreConfig {
+    /// The list of problems encountered while building the config.
+    pub problems: Vec<Problem>,
+}
+
+impl fmt::Display for IncompleteBootstoreConfig {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "could not build a complete bootstore rack network config \
+             ({} problem(s)):",
+            self.problems.len(),
+        )?;
+        for problem in &self.problems {
+            write!(f, "\n  - {problem}")?;
+        }
+        Ok(())
+    }
+}
+
+impl std::error::Error for IncompleteBootstoreConfig {}
+
 /// Build the desired [`RackNetworkConfig`] for the bootstore.
 ///
 /// This is a pure, in-memory computation: all database reads happen while
 /// creating the [`RackNetworkConfigInput`].
 ///
-/// Returns `None` if a complete config cannot be built for this rack (in which
-/// case the caller should skip the rack and retry on the next activation). Note
-/// that, matching the historical behavior, individual ports are silently
-/// skipped on conversion errors. Later changes will address this.
+/// Returns an [`IncompleteBootstoreConfig`] listing the [`Problem`]s found if a
+/// complete config cannot be built for this rack.
 pub fn build_rack_network_config(
-    log: &Logger,
     input: RackNetworkConfigInput,
-) -> Option<RackNetworkConfig> {
+) -> Result<RackNetworkConfig, IncompleteBootstoreConfig> {
     let RackNetworkConfigInput {
         rack_subnet,
         bgp_configs,
@@ -132,46 +208,46 @@ pub fn build_rack_network_config(
         bfd,
     } = input;
 
-    // build the desired bootstore config from the records we've fetched
+    let mut problems = Vec::new();
+
+    // The rack subnet must be set and IPv6. Record the problem, but keep going
+    // so we report everything else that's wrong too.
     let subnet = match rack_subnet {
-        Some(IpNetwork::V6(subnet)) => subnet.into(),
-        Some(IpNetwork::V4(_)) => {
-            error!(log, "rack subnet must be ipv6"; "rack_subnet" => ?rack_subnet);
-            return None;
+        Some(IpNetwork::V6(subnet)) => Some(subnet.into()),
+        Some(other) => {
+            problems.push(Problem::RackSubnetNotIpv6 { subnet: other });
+            None
         }
         None => {
-            error!(log, "rack subnet not set");
-            return None;
+            problems.push(Problem::RackSubnetMissing);
+            None
         }
     };
 
-    // TODO: is this correct? Do we place the BgpConfig for both switches in a single Vec to send to the bootstore?
-    let mut bgp: Vec<SledBgpConfig> = bgp_configs
-        .values()
-        .filter_map(|config| {
-            let max_paths = match MaxPathConfig::new(config.max_paths) {
-                Ok(max_paths) => max_paths,
-                Err(err) => {
-                    // This should be impossible - our db constraints
-                    // should ensure legal values.
-                    error!(
-                        log,
-                        "database contains illegal max_paths value";
-                        InlineErrorChain::new(&err),
-                    );
-                    return None;
-                }
-            };
+    let mut bgp: Vec<SledBgpConfig> = Vec::new();
+    for (switch, config) in &bgp_configs {
+        let max_paths = match MaxPathConfig::new(config.max_paths) {
+            Ok(max_paths) => max_paths,
+            Err(_) => {
+                // TODO: We should have read_and_assemble handle this problem.
+                // (Needs read_and_assemble to start accumulating a list of
+                // problems.)
+                problems.push(Problem::IllegalMaxPaths {
+                    switch: *switch,
+                    value: config.max_paths,
+                });
+                continue;
+            }
+        };
 
-            Some(SledBgpConfig {
-                asn: config.asn,
-                originate: config.originate.clone(),
-                checker: config.checker.clone(),
-                shaper: config.shaper.clone(),
-                max_paths,
-            })
-        })
-        .collect();
+        bgp.push(SledBgpConfig {
+            asn: config.asn,
+            originate: config.originate.clone(),
+            checker: config.checker.clone(),
+            shaper: config.shaper.clone(),
+            max_paths,
+        });
+    }
 
     bgp.dedup();
 
@@ -191,15 +267,20 @@ pub fn build_rack_network_config(
             let asn = match bgp_configs.get(&port.switch) {
                 Some(config) => config.asn,
                 None => {
-                    // XXX: The port has BGP peers but no ASN configured. This
-                    // is an error, but we continue for now. We should
-                    // completely fail the task instead.
-                    error!(
-                        log,
-                        "no bgp config for switch; skipping port for bootstore";
-                        "switch_slot" => ?port.switch,
-                        "port" => &port.port_name,
-                    );
+                    // We attempt to enforce this constraint at the application
+                    // layer, though this code hasn't been fully audited for
+                    // transaction safety and it's possible there are customer
+                    // systems with missing BGP configs. That is definitely data
+                    // corruption, so produce a problem. We'll see how this
+                    // shakes out in the field.
+                    //
+                    // TODO: RSS does check for missing BGP configs (by virtue
+                    // of going through the datastore methods). But wicket could
+                    // check for them even further in advance too.
+                    problems.push(Problem::MissingBgpConfigForSwitch {
+                        switch: port.switch,
+                        port: port.port_name.clone(),
+                    });
                     continue;
                 }
             };
@@ -242,14 +323,11 @@ pub fn build_rack_network_config(
         {
             Ok(addresses) => addresses,
             Err(err) => {
-                error!(
-                    log,
-                    "failed to convert database uplink addresses \
-                     to API uplink addresses";
-                    "switch_slot" => ?port.switch,
-                    "port" => &port.port_name,
-                    InlineErrorChain::new(&err),
-                );
+                problems.push(Problem::MalformedUplinkAddress {
+                    switch: port.switch,
+                    port: port.port_name.clone(),
+                    error: err,
+                });
                 continue;
             }
         };
@@ -296,11 +374,30 @@ pub fn build_rack_network_config(
         ports.push(port_config);
     }
 
-    Some(RackNetworkConfig {
-        rack_subnet: subnet,
+    // A rack with no uplink ports can't reach external networks; refuse to
+    // build an empty config. The `UplinkPorts` newtype makes that invalid state
+    // unrepresentable downstream (omicron#10640).
+    let ports = match UplinkPorts::new(ports) {
+        Ok(ports) => Some(ports),
+        Err(_) => {
+            problems.push(Problem::NoUplinkPorts);
+            None
+        }
+    };
+
+    if !problems.is_empty() {
+        return Err(IncompleteBootstoreConfig { problems });
+    }
+
+    Ok(RackNetworkConfig {
+        // `subnet` and `ports` are `Some` whenever there are no problems: a
+        // missing/non-IPv6 subnet or an empty port list each push a problem
+        // above, which we just returned on.
+        rack_subnet: subnet
+            .expect("rack subnet is set when there are no problems"),
         infra_ip_first,
         infra_ip_last,
-        ports,
+        ports: ports.expect("ports is set when there are no problems"),
         bgp,
         bfd,
     })
@@ -309,37 +406,409 @@ pub fn build_rack_network_config(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use omicron_common::api::external::NameOrId;
+    use proptest::prelude::*;
+    use sled_agent_types::early_networking::ImportExportPolicy;
+    use sled_agent_types::early_networking::RouterPeerIpAddr;
+    use sled_agent_types::early_networking::RouterPeerType;
+    use test_strategy::proptest;
 
-    #[test]
-    fn peerless_port_needs_no_switch_bgp_config() {
-        // A port with no BGP peers (e.g. a static-routing-only uplink) should
-        // not be dropped.
-        let log = slog::Logger::root(slog::Discard, slog::o!());
-        let input = RackNetworkConfigInput {
+    fn valid_bgp_config() -> BgpConfigInput {
+        BgpConfigInput {
+            asn: 65000,
+            originate: vec![],
+            checker: None,
+            shaper: None,
+            max_paths: 1,
+        }
+    }
+
+    fn input_with(
+        bgp_configs: BTreeMap<SwitchSlot, BgpConfigInput>,
+        ports: Vec<PortInput>,
+    ) -> RackNetworkConfigInput {
+        RackNetworkConfigInput {
             rack_subnet: Some("fd00:1122:3344:1::/64".parse().unwrap()),
-            // No switch has a BGP config.
-            bgp_configs: BTreeMap::new(),
-            // A single peerless port.
-            ports: vec![PortInput {
-                switch: SwitchSlot::Switch0,
-                port_name: "qsfp0".to_string(),
-                bgp_peers: vec![],
-                addresses: vec![],
-                links: vec![],
-                routes: vec![],
-                lldp: vec![],
-                tx_eq: vec![],
-            }],
+            bgp_configs,
+            ports,
             infra_ip_first: "fd00:1122:3344:1::1".parse().unwrap(),
             infra_ip_last: "fd00:1122:3344:1::2".parse().unwrap(),
             bfd: vec![],
-        };
-        let config = build_rack_network_config(&log, input)
-            .expect("a valid subnet builds a config");
+        }
+    }
+
+    fn bare_port(switch: SwitchSlot, name: &str) -> PortInput {
+        PortInput {
+            switch,
+            port_name: name.to_string(),
+            bgp_peers: vec![],
+            addresses: vec![],
+            links: vec![],
+            routes: vec![],
+            lldp: vec![],
+            tx_eq: vec![],
+        }
+    }
+
+    /// A minimal BGP peer for tests.
+    ///
+    /// The builder doesn't validate the values so they're all quite arbitrary.
+    fn peer() -> networking::BgpPeer {
+        networking::BgpPeer {
+            // This is arbitrary, since configs are matched by switch slot and
+            // not this name.
+            bgp_config: NameOrId::Name("test-bgp".parse().unwrap()),
+            addr: RouterPeerType::Numbered {
+                ip: RouterPeerIpAddr::try_from(
+                    "192.0.2.1".parse::<IpAddr>().unwrap(),
+                )
+                .expect("192.0.2.1 is a valid router peer ip"),
+            },
+            hold_time: 6,
+            idle_hold_time: 3,
+            delay_open: 0,
+            connect_retry: 3,
+            keepalive: 2,
+            remote_asn: None,
+            min_ttl: None,
+            md5_auth_key: None,
+            multi_exit_discriminator: None,
+            communities: vec![],
+            local_pref: None,
+            enforce_first_as: false,
+            allowed_import: ImportExportPolicy::NoFiltering,
+            allowed_export: ImportExportPolicy::NoFiltering,
+            vlan_id: None,
+        }
+    }
+
+    /// A port that has a single BGP peer (and so needs its switch's BGP config).
+    fn port_with_peer(switch: SwitchSlot, name: &str) -> PortInput {
+        PortInput { bgp_peers: vec![peer()], ..bare_port(switch, name) }
+    }
+
+    #[test]
+    fn peerless_port_needs_no_switch_bgp_config() {
+        // A port without BGP peers (e.g. a static-routing-only uplink) does not
+        // need its switch to have a BGP config.
+        let config = build_rack_network_config(input_with(
+            // No switch has a BGP config.
+            BTreeMap::new(),
+            // A single peerless port.
+            vec![bare_port(SwitchSlot::Switch0, "qsfp0")],
+        ))
+        .expect("a peerless port needs no switch bgp config");
         assert_eq!(
             config.ports.len(),
             1,
             "the peerless port must be included, not dropped",
         );
+    }
+
+    #[test]
+    fn peered_port_requires_switch_bgp_config() {
+        // A port that *does* have peers needs its switch's BGP config.
+        let err = build_rack_network_config(input_with(
+            BTreeMap::new(),
+            vec![port_with_peer(SwitchSlot::Switch0, "qsfp0")],
+        ))
+        .unwrap_err();
+        assert_eq!(
+            err.problems,
+            vec![
+                Problem::MissingBgpConfigForSwitch {
+                    switch: SwitchSlot::Switch0,
+                    port: "qsfp0".to_string(),
+                },
+                // Skipping the only port leaves the rack with no uplinks.
+                Problem::NoUplinkPorts,
+            ],
+        );
+    }
+
+    #[test]
+    fn missing_rack_subnet_is_reported() {
+        let input = RackNetworkConfigInput {
+            rack_subnet: None,
+            ..input_with(BTreeMap::new(), vec![])
+        };
+        let err = build_rack_network_config(input).unwrap_err();
+        // No subnet and (incidentally) no ports: both are reported.
+        assert_eq!(
+            err.problems,
+            vec![Problem::RackSubnetMissing, Problem::NoUplinkPorts],
+        );
+    }
+
+    #[test]
+    fn non_ipv6_rack_subnet_is_reported() {
+        let v4: IpNetwork = "10.0.0.0/24".parse().unwrap();
+        let input = RackNetworkConfigInput {
+            rack_subnet: Some(v4),
+            ..input_with(BTreeMap::new(), vec![])
+        };
+        let err = build_rack_network_config(input).unwrap_err();
+        assert_eq!(
+            err.problems,
+            vec![
+                Problem::RackSubnetNotIpv6 { subnet: v4 },
+                Problem::NoUplinkPorts,
+            ],
+        );
+    }
+
+    #[test]
+    fn empty_port_list_is_reported() {
+        // A valid subnet but no ports at all: the rack has no uplinks, so the
+        // builder must bail rather than emit an empty config.
+        let err =
+            build_rack_network_config(input_with(BTreeMap::new(), vec![]))
+                .unwrap_err();
+        assert_eq!(err.problems, vec![Problem::NoUplinkPorts]);
+    }
+
+    #[test]
+    fn all_problems_are_accumulated() {
+        let v4: IpNetwork = "10.0.0.0/24".parse().unwrap();
+        let input = RackNetworkConfigInput {
+            rack_subnet: Some(v4),
+            ..input_with(
+                BTreeMap::new(),
+                vec![port_with_peer(SwitchSlot::Switch0, "qsfp0")],
+            )
+        };
+        let err = build_rack_network_config(input).unwrap_err();
+        assert_eq!(
+            err.problems,
+            // This order is fixed.
+            vec![
+                Problem::RackSubnetNotIpv6 { subnet: v4 },
+                Problem::MissingBgpConfigForSwitch {
+                    switch: SwitchSlot::Switch0,
+                    port: "qsfp0".to_string(),
+                },
+                Problem::NoUplinkPorts,
+            ],
+        );
+    }
+
+    #[test]
+    fn peered_port_switch_asn() {
+        // A peered port needs its switch's BGP config to source the peer ASN.
+        // Use two switches with distinct ASNs to ensure that the matching up
+        // occurs properly.
+        let mut bgp_configs = BTreeMap::new();
+        bgp_configs.insert(
+            SwitchSlot::Switch0,
+            BgpConfigInput { asn: 64999, ..valid_bgp_config() },
+        );
+        bgp_configs.insert(
+            SwitchSlot::Switch1,
+            BgpConfigInput { asn: 65111, ..valid_bgp_config() },
+        );
+
+        let config = build_rack_network_config(input_with(
+            bgp_configs,
+            vec![
+                port_with_peer(SwitchSlot::Switch0, "qsfp0"),
+                port_with_peer(SwitchSlot::Switch1, "qsfp1"),
+            ],
+        ))
+        .expect("both peered ports' switches have a bgp config");
+
+        let p0 = config
+            .ports
+            .iter()
+            .find(|p| p.port == "qsfp0")
+            .expect("qsfp0 is in the built config");
+        assert_eq!(p0.bgp_peers.len(), 1);
+        assert_eq!(
+            p0.bgp_peers[0].asn, 64999,
+            "the peer ASN must come from switch 0's bgp config",
+        );
+
+        let p1 = config
+            .ports
+            .iter()
+            .find(|p| p.port == "qsfp1")
+            .expect("qsfp1 is in the built config");
+        assert_eq!(p1.bgp_peers.len(), 1);
+        assert_eq!(
+            p1.bgp_peers[0].asn, 65111,
+            "the peer ASN must come from switch 1's bgp config",
+        );
+    }
+
+    #[test]
+    fn malformed_uplink_address_is_reported() {
+        // A loopback address can't be converted to an uplink address, so a port
+        // carrying one must be reported, not silently dropped from the config.
+        let loopback: IpNet = "127.0.0.1/8".parse().unwrap();
+        let port = PortInput {
+            addresses: vec![AddressInput { address: loopback, vlan_id: None }],
+            ..bare_port(SwitchSlot::Switch0, "qsfp0")
+        };
+        let err =
+            build_rack_network_config(input_with(BTreeMap::new(), vec![port]))
+                .unwrap_err();
+        assert_eq!(
+            err.problems,
+            vec![
+                Problem::MalformedUplinkAddress {
+                    switch: SwitchSlot::Switch0,
+                    port: "qsfp0".to_string(),
+                    error: InvalidIpAddrError::LoopbackAddress,
+                },
+                // Skipping the only port leaves the rack with no uplinks.
+                Problem::NoUplinkPorts,
+            ],
+        );
+    }
+
+    #[test]
+    fn unspecified_address_becomes_addrconf_not_a_problem() {
+        // An unspecified address is a sentinel value that's converted to
+        // `UplinkAddress::AddrConf`.
+        let unspecified: IpNet = "0.0.0.0/0".parse().unwrap();
+        let port = PortInput {
+            addresses: vec![AddressInput {
+                address: unspecified,
+                vlan_id: None,
+            }],
+            ..bare_port(SwitchSlot::Switch0, "qsfp0")
+        };
+        let config =
+            build_rack_network_config(input_with(BTreeMap::new(), vec![port]))
+                .expect("built network config successfully");
+        assert_eq!(config.ports.len(), 1);
+        assert_eq!(config.ports.first().addresses.len(), 1);
+        assert_eq!(
+            config.ports.first().addresses[0].address,
+            UplinkAddress::AddrConf,
+        );
+    }
+
+    #[test]
+    fn illegal_max_paths_is_reported() {
+        // The builder consumes an unvalidated `max_paths`, so an out-of-range
+        // value must surface as a problem.
+        let mut bgp_configs = BTreeMap::new();
+        bgp_configs.insert(
+            SwitchSlot::Switch0,
+            BgpConfigInput { max_paths: 0, ..valid_bgp_config() },
+        );
+        let err = build_rack_network_config(input_with(bgp_configs, vec![]))
+            .unwrap_err();
+        assert_eq!(
+            err.problems,
+            vec![
+                Problem::IllegalMaxPaths {
+                    switch: SwitchSlot::Switch0,
+                    value: 0,
+                },
+                Problem::NoUplinkPorts,
+            ],
+        );
+    }
+
+    /// The builder must never silently drop a port (see #10640).
+    #[proptest]
+    fn no_silent_port_drops(
+        switch0_has_bgp: bool,
+        switch1_has_bgp: bool,
+        // Each port is (switch, has_peer).
+        #[strategy(prop::collection::vec(
+            (
+                prop_oneof![
+                    Just(SwitchSlot::Switch0),
+                    Just(SwitchSlot::Switch1),
+                ],
+                any::<bool>(),
+            ),
+            0..8,
+        ))]
+        ports_spec: Vec<(SwitchSlot, bool)>,
+    ) {
+        let mut bgp_configs = BTreeMap::new();
+        if switch0_has_bgp {
+            bgp_configs.insert(SwitchSlot::Switch0, valid_bgp_config());
+        }
+        if switch1_has_bgp {
+            bgp_configs.insert(SwitchSlot::Switch1, valid_bgp_config());
+        }
+
+        let ports: Vec<PortInput> = ports_spec
+            .iter()
+            .enumerate()
+            .map(|(i, &(switch, has_peer))| {
+                let name = format!("qsfp{i}");
+                if has_peer {
+                    port_with_peer(switch, &name)
+                } else {
+                    bare_port(switch, &name)
+                }
+            })
+            .collect();
+
+        // The names we fed in. On a successful build the output ports must be
+        // exactly these.
+        let mut input_names: Vec<String> =
+            (0..ports.len()).map(|i| format!("qsfp{i}")).collect();
+        input_names.sort();
+
+        // A port needs its switch's BGP config only if it has peers.
+        let switch_has_bgp = |switch: SwitchSlot| match switch {
+            SwitchSlot::Switch0 => switch0_has_bgp,
+            SwitchSlot::Switch1 => switch1_has_bgp,
+        };
+        let all_peered_have_bgp = ports_spec
+            .iter()
+            .all(|&(switch, has_peer)| !has_peer || switch_has_bgp(switch));
+
+        let result = build_rack_network_config(input_with(bgp_configs, ports));
+
+        if input_names.is_empty() {
+            // No ports at all -> a NoUplinkPorts bail, never an empty
+            // (silently truncated) config.
+            let err = result.expect_err("an empty port list must force a bail");
+            prop_assert_eq!(err.problems, vec![Problem::NoUplinkPorts]);
+        } else if all_peered_have_bgp {
+            let config = result.expect(
+                "every peered port's switch has a bgp config, so it builds",
+            );
+            let mut got_names: Vec<String> =
+                config.ports.iter().map(|p| p.port.clone()).collect();
+            got_names.sort();
+            prop_assert_eq!(got_names, input_names);
+        } else {
+            let err = result.expect_err(
+                "a peered port whose switch has no bgp config must bail",
+            );
+            // This mirrors the implementation, which generally isn't great in a
+            // PBT, but it's hard to describe this in a way that doesn't weaken
+            // the test.
+            let mut expected: Vec<Problem> = ports_spec
+                .iter()
+                .enumerate()
+                .filter_map(|(i, &(switch, has_peer))| {
+                    (has_peer && !switch_has_bgp(switch)).then(|| {
+                        Problem::MissingBgpConfigForSwitch {
+                            switch,
+                            port: format!("qsfp{i}"),
+                        }
+                    })
+                })
+                .collect();
+            // A port survives unless it's peered with no switch bgp config. If
+            // none survive, the built list is empty, so the builder appends
+            // NoUplinkPorts after the per-port problems.
+            let any_port_survives = ports_spec
+                .iter()
+                .any(|&(switch, has_peer)| !has_peer || switch_has_bgp(switch));
+            if !any_port_survives {
+                expected.push(Problem::NoUplinkPorts);
+            }
+            prop_assert_eq!(err.problems, expected);
+        }
     }
 }

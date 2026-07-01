@@ -1363,7 +1363,9 @@ mod tests {
     use omicron_common::api::internal::shared::AllowedSourceIps;
     use omicron_test_utils::dev::test_setup_log;
     use oxnet::Ipv6Net;
+    use sled_agent_types::early_networking::PortConfig;
     use sled_agent_types::early_networking::RackNetworkConfig;
+    use sled_agent_types::early_networking::UplinkPorts;
     use sled_agent_types::inventory::ConfigReconcilerInventoryStatus;
     use sled_agent_types::inventory::FmdInventory;
     use sled_agent_types::inventory::OmicronFileSourceResolverInventory;
@@ -1480,7 +1482,12 @@ mod tests {
                 rack_subnet: Ipv6Net::host_net(Ipv6Addr::LOCALHOST),
                 infra_ip_first: std::net::IpAddr::V4(Ipv4Addr::LOCALHOST),
                 infra_ip_last: std::net::IpAddr::V4(Ipv4Addr::LOCALHOST),
-                ports: Vec::new(),
+                // The list of ports must be non-empty -- this test doesn't
+                // exercise uplinks, so use a placeholder port here.
+                ports: UplinkPorts::new(vec![PortConfig::empty_for_tests(
+                    "qsfp0",
+                )])
+                .expect("placeholder port list is non-empty"),
                 bgp: Vec::new(),
                 bfd: Vec::new(),
             },

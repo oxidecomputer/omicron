@@ -49,8 +49,10 @@ use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::DatasetUuid;
 use oximeter::types::ProducerRegistry;
 use oximeter_producer::Server as ProducerServer;
+use sled_agent_types::early_networking::PortConfig;
 use sled_agent_types::early_networking::RackNetworkConfig;
 use sled_agent_types::early_networking::SwitchSlot;
+use sled_agent_types::early_networking::UplinkPorts;
 use sled_hardware_types::BaseboardId;
 use slog::Logger;
 use slog_error_chain::InlineErrorChain;
@@ -475,7 +477,12 @@ impl nexus_test_interface::NexusServer for Server {
                         infra_ip_last: std::net::IpAddr::V4(
                             Ipv4Addr::UNSPECIFIED,
                         ),
-                        ports: Vec::new(),
+                        // `UplinkPorts` must be non-empty; this test harness
+                        // doesn't exercise uplinks, so use a placeholder port.
+                        ports: UplinkPorts::new(vec![
+                            PortConfig::empty_for_tests("qsfp0"),
+                        ])
+                        .expect("placeholder port list is non-empty"),
                         bgp: Vec::new(),
                         bfd: Vec::new(),
                     },

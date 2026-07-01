@@ -40,7 +40,7 @@ use nexus_types::identity::Resource;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::{
     self, CreateResult, DataPageParams, DeleteResult, Error, ListResultVec,
-    LookupResult, NameOrId, ResourceType, SwitchPortAddressView, UpdateResult,
+    LookupResult, NameOrId, ResourceType, UpdateResult,
 };
 use ref_cast::RefCast;
 use serde::{Deserialize, Serialize};
@@ -162,7 +162,7 @@ pub struct SwitchPortSettingsCombinedResult {
     pub vlan_interfaces: Vec<SwitchVlanInterfaceConfig>,
     pub routes: Vec<SwitchPortRouteConfig>,
     pub bgp_peers: Vec<BgpPeerFromDb>,
-    pub addresses: Vec<SwitchPortAddressView>,
+    pub addresses: Vec<networking::SwitchPortAddressView>,
 }
 
 impl SwitchPortSettingsCombinedResult {
@@ -2050,7 +2050,7 @@ impl<'a> BgpPeerProperties<'a> {
 async fn switch_port_address_view(
     conn: &Connection<DTraceConnection<PgConnection>>,
     addresses: Vec<SwitchPortAddressConfig>,
-) -> Result<Vec<SwitchPortAddressView>, diesel::result::Error> {
+) -> Result<Vec<networking::SwitchPortAddressView>, diesel::result::Error> {
     use nexus_db_schema::schema::{address_lot, address_lot_block};
 
     let mut result = vec![];
@@ -2067,7 +2067,7 @@ async fn switch_port_address_view(
             .first_async::<AddressLot>(conn)
             .await?;
 
-        result.push(SwitchPortAddressView {
+        result.push(networking::SwitchPortAddressView {
             port_settings_id: address.port_settings_id,
             address_lot_id: lot.id(),
             address_lot_name: lot.name().clone(),
@@ -2302,13 +2302,13 @@ mod test {
     use crate::db::pub_test_utils::TestDatabase;
     use nexus_db_model::INFRA_LOT;
     use nexus_types::external_api::networking::{
-        AddressLotBlockCreate, AddressLotCreate, BfdSessionEnable,
-        BgpAnnounceSetCreate, BgpAnnouncementCreate, BgpConfigCreate, BgpPeer,
-        BgpPeerConfig, SwitchPortConfigCreate, SwitchPortGeometry,
-        SwitchPortSettingsCreate,
+        AddressLotBlockCreate, AddressLotCreate, AddressLotKind,
+        BfdSessionEnable, BgpAnnounceSetCreate, BgpAnnouncementCreate,
+        BgpConfigCreate, BgpPeer, BgpPeerConfig, SwitchPortConfigCreate,
+        SwitchPortGeometry, SwitchPortSettingsCreate,
     };
     use omicron_common::api::external::{
-        AddressLotKind, IdentityMetadataCreateParams, Name, NameOrId,
+        IdentityMetadataCreateParams, Name, NameOrId,
     };
     use omicron_test_utils::dev;
     use sled_agent_types::early_networking::BfdMode;

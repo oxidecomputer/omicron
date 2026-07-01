@@ -1,4 +1,7 @@
 #!/bin/bash
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
 #:
 #: name = "helios / build TUF repo"
 #: variety = "basic"
@@ -81,4 +84,4 @@ esac
 pfexec zfs create -p "rpool/images/$USER/host"
 pfexec zfs create -p "rpool/images/$USER/recovery"
 
-cargo xtask releng --output-dir /work --mkincorp
+cargo xtask releng --output-dir /work --mkincorp --verify-debug-libraries

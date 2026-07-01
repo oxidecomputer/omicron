@@ -1,4 +1,8 @@
 #!/bin/bash
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 #
 # Dump a partial ClickHouse measurement table (time-windowed slice) to disk in
 # native format. Run against a test rack with realistic oximeter data. Used to

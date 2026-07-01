@@ -1,8 +1,11 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 #![cfg(test)]
 
 use crate::helpers::{ctx::Context, generate_name};
 use anyhow::{Context as _, Result, ensure};
-use async_trait::async_trait;
 use omicron_test_utils::dev::poll::{CondCheckError, wait_for_condition};
 use oxide_client::types::{
     ByteCount, DiskBackend, DiskCreate, DiskSource, ExternalIp,
@@ -11,9 +14,10 @@ use oxide_client::types::{
     SshKeyCreate,
 };
 use oxide_client::{ClientCurrentUserExt, ClientDisksExt, ClientInstancesExt};
+use russh::keys::PrivateKeyWithHashAlg;
 use russh::{ChannelMsg, Disconnect};
-use russh_keys::PublicKeyBase64;
-use russh_keys::key::{KeyPair, PublicKey};
+use ssh_key::PublicKey;
+use ssh_key::private::Ed25519Keypair;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -22,9 +26,9 @@ async fn instance_launch() -> Result<()> {
     let ctx = Context::new().await?;
 
     eprintln!("generate SSH key");
-    let key =
-        Arc::new(KeyPair::generate_ed25519().context("key generation failed")?);
-    let public_key_str = format!("ssh-ed25519 {}", key.public_key_base64());
+    let key = Arc::new(Ed25519Keypair::random(&mut rand_010::rng()).into());
+    let key = PrivateKeyWithHashAlg::new(key, None);
+    let public_key_str = key.public_key().to_openssh()?;
     eprintln!("create SSH key: {}", public_key_str);
     let ssh_key_name = generate_name("key")?;
     ctx.client
@@ -161,16 +165,9 @@ async fn instance_launch() -> Result<()> {
         .and_then(|(lines, _)| {
             lines.trim().lines().find(|line| line.starts_with("ssh-ed25519"))
         })
-        .and_then(|line| line.split_whitespace().nth(1))
         .context("failed to get SSH host key from serial console")?;
-    eprintln!("host key: ssh-ed25519 {}", host_key);
-    let host_key = PublicKey::parse(
-        b"ssh-ed25519",
-        &base64::Engine::decode(
-            &base64::engine::general_purpose::STANDARD,
-            host_key,
-        )?,
-    )?;
+    eprintln!("host key: {}", host_key);
+    let host_key = PublicKey::from_openssh(host_key)?;
 
     eprintln!("connecting ssh");
     let mut session = russh::client::connect(
@@ -181,7 +178,7 @@ async fn instance_launch() -> Result<()> {
     .await?;
     eprintln!("authenticating ssh");
     ensure!(
-        session.authenticate_publickey("debian", key).await?,
+        session.authenticate_publickey("debian", key).await?.success(),
         "authentication failed"
     );
 
@@ -316,14 +313,15 @@ struct SshClient {
     host_key: PublicKey,
 }
 
-#[async_trait]
 impl russh::client::Handler for SshClient {
     type Error = anyhow::Error;
 
-    async fn check_server_key(
+    fn check_server_key(
         &mut self,
         server_public_key: &PublicKey,
-    ) -> Result<bool, Self::Error> {
-        Ok(&self.host_key == server_public_key)
+    ) -> impl Future<Output = Result<bool, Self::Error>> + Send {
+        futures::future::ready(Ok(
+            self.host_key.key_data() == server_public_key.key_data()
+        ))
     }
 }

@@ -18,13 +18,17 @@ use std::time::Instant;
 use anyhow::Context;
 use anyhow::Result;
 use anyhow::bail;
+use anyhow::ensure;
 use camino::Utf8Path;
 use camino::Utf8PathBuf;
 use chrono::Utc;
 use clap::Parser;
+use dev_tools_common::XtaskConfig;
+use dev_tools_common::verify_executable_libraries;
 use fs_err::tokio as fs;
 use omicron_zone_package::config::Config;
 use omicron_zone_package::config::PackageName;
+use omicron_zone_package::package::PackageSource;
 use semver::Version;
 use slog::Drain;
 use slog::Logger;
@@ -170,6 +174,13 @@ struct Args {
     /// tools/pins.toml.
     #[clap(long, conflicts_with("helios_local"))]
     mkincorp: bool,
+
+    /// Verify binaries against the dynamic library linking rules in
+    /// .cargo/xtask.toml.
+    ///
+    /// This is run in CI.
+    #[clap(long)]
+    verify_debug_libraries: bool,
 }
 
 impl Args {
@@ -263,6 +274,13 @@ async fn main() -> Result<()> {
     let version_str = version.to_string();
     info!(logger, "version: {}", version_str);
 
+    let xtask_config: Arc<XtaskConfig> = Arc::new(
+        toml::from_str(
+            &fs::read_to_string(WORKSPACE_DIR.join(".cargo/xtask.toml"))
+                .await?,
+        )
+        .context("failed to parse .cargo/xtask.toml")?,
+    );
     let manifest = Arc::new(omicron_zone_package::config::parse_manifest(
         &fs::read_to_string(WORKSPACE_DIR.join("package-manifest.toml"))
             .await?,
@@ -593,6 +611,17 @@ async fn main() -> Result<()> {
         )
         .after(format!("{}-target", target));
 
+        // verify libraries built by omicron-package
+        jobs.push(
+            format!("{}-libraries", target),
+            target.verify_libraries(
+                xtask_config.clone(),
+                manifest.clone(),
+                target_dir.clone(),
+            ),
+        )
+        .after(format!("{}-package", target));
+
         // omicron-package stamp
         stamp_packages!(
             format!("{}-stamp", target),
@@ -711,11 +740,12 @@ async fn main() -> Result<()> {
             image_job.after(format!("{target}-opte-p5p"));
         }
     }
-    // Build the recovery target after we build the host target. Only one
-    // of these will build at a time since Cargo locks its target directory;
-    // since host-package and host-image both take longer than their recovery
-    // counterparts, this should be the fastest option to go first.
-    jobs.select("recovery-package").after("host-package");
+    // Build the recovery target after we build the host target (and have
+    // finished verifying its binaries). Only one of these will build at a time
+    // since Cargo locks its target directory; since host-package and host-image
+    // both take longer than their recovery counterparts, this should be the
+    // fastest option to go first.
+    jobs.select("recovery-package").after("host-libraries");
     if args.host_dataset == args.recovery_dataset {
         // If the datasets are the same, we can't parallelize these.
         jobs.select("recovery-image").after("host-image");
@@ -733,15 +763,25 @@ async fn main() -> Result<()> {
         .after("host-stamp")
         .after("recovery-stamp");
 
-    // Run `cargo xtask verify-libraries --release`. (This was formerly run in
-    // the build-and-test Buildomat job, but this fits better here where we've
-    // already built most of the binaries.)
-    jobs.push_command(
-        "verify-libraries",
-        Command::new(&cargo).args(["xtask", "verify-libraries", "--release"]),
-    )
-    .after("host-package")
-    .after("recovery-package");
+    if args.verify_debug_libraries {
+        // Run `cargo xtask verify-libraries`. This builds *all* binaries in
+        // the workspace in debug mode and verifies them against the rules in
+        // .cargo/xtask.toml.
+        //
+        // This does not directly contribute to building or verifying the TUF
+        // repo and is hence optional; this check runs in CI beause we want to
+        // ensure that if you build a debug binary, you can copy it onto a test
+        // rack without unexpected dependencies, and it lives here because we
+        // are essentially using unused CPU while waiting for the OS images to
+        // build. (Adding this to other jobs would make them take longer but not
+        // save this job any time.)
+        jobs.push_command(
+            "verify-libraries",
+            Command::new(&cargo).args(["xtask", "verify-libraries"]),
+        )
+        .after("host-libraries")
+        .after("recovery-libraries");
+    }
 
     for env in hubris::Environment::ALL {
         jobs.push(
@@ -834,6 +874,60 @@ impl Target {
                 "-R", // recovery image
             ],
         }
+    }
+
+    async fn verify_libraries(
+        self,
+        xtask_config: Arc<XtaskConfig>,
+        package_manifest: Arc<Config>,
+        target_dir: Utf8PathBuf,
+    ) -> Result<()> {
+        // `verify_executable_libraries` uses std::process::Command, so run this
+        // in a blocking task.
+        tokio::task::spawn_blocking(move || {
+            let preset_name =
+                self.as_str().parse().context("could not parse preset name")?;
+            let preset = package_manifest
+                .target
+                .presets
+                .get(&preset_name)
+                .with_context(|| {
+                    format!("preset {preset_name} not found in config")
+                })?;
+            let mut errors = BTreeMap::new();
+            for package in package_manifest.packages_to_build(preset).0.values()
+            {
+                let PackageSource::Local { rust: Some(p), .. } =
+                    &package.source
+                else {
+                    continue;
+                };
+                let dir = if p.release { "release" } else { "debug" };
+                let dir = target_dir.join(dir);
+                for bin in &p.binary_names {
+                    verify_executable_libraries(
+                        &xtask_config,
+                        &dir.join(bin),
+                        &mut errors,
+                    )
+                    .with_context(|| {
+                        format!("failed to verify libraries for {bin}")
+                    })?;
+                }
+            }
+            ensure!(
+                errors.is_empty(),
+                "Found library issues:\n{concat}",
+                concat = errors
+                    .iter()
+                    .flat_map(|(bin, es)| es.iter().map(move |e| (bin, e)))
+                    .map(|(bin, e)| format!("- {bin}: {e}"))
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            );
+            Ok(())
+        })
+        .await?
     }
 }
 

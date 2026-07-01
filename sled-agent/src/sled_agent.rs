@@ -543,7 +543,7 @@ impl SledAgent {
         // Start collecting metric data.
         let baseboard = long_running_task_handles.hardware_manager.baseboard();
         let identifiers = SledIdentifiers {
-            rack_id: request.body.rack_id,
+            rack_id: request.body.rack_id.into_untyped_uuid(),
             sled_id: request.body.id.into_untyped_uuid(),
             model: baseboard.model().to_string(),
             revision: baseboard.revision(),
@@ -718,7 +718,7 @@ impl SledAgent {
                     ThisSledSwitchZoneUnderlayIpAddr::from_sled_agent_request(
                         &request,
                     ),
-                rack_id: request.body.rack_id,
+                rack_id: request.body.rack_id.into_untyped_uuid(),
                 network_config_rx,
                 metrics_queue: metrics_manager.request_queue(),
             })
@@ -1249,7 +1249,7 @@ impl SledAgent {
     pub(crate) fn sled_identifiers(&self) -> SledIdentifiers {
         let baseboard = self.inner.hardware.baseboard();
         SledIdentifiers {
-            rack_id: self.inner.start_request.body.rack_id,
+            rack_id: self.inner.start_request.body.rack_id.into_untyped_uuid(),
             sled_id: self.inner.id.into_untyped_uuid(),
             model: baseboard.model().to_string(),
             revision: baseboard.revision(),
