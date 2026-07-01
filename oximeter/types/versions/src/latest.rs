@@ -24,10 +24,11 @@ pub mod histogram {
 
 pub mod producer {
     pub use crate::v1::producer::FailedCollection;
-    pub use crate::v1::producer::ProducerDetails;
     pub use crate::v1::producer::ProducerIdPathParams;
     pub use crate::v1::producer::ProducerPage;
     pub use crate::v1::producer::SuccessfulCollection;
+
+    pub use crate::v3::producer::ProducerDetails;
 }
 
 pub mod quantile {
