@@ -41,7 +41,8 @@ use nexus_test_utils::resource_helpers::{
 };
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::ip_pool::{
-    IpPool, IpPoolCreate, IpPoolRange, IpRange, IpVersion, Ipv4Range, Ipv6Range,
+    IpPool, IpPoolAssignment, IpPoolCreate, IpPoolRange, IpPoolType, IpRange,
+    IpVersion, Ipv4Range, Ipv6Range,
 };
 use nexus_types::external_api::multicast::{
     InstanceMulticastGroupJoin, MulticastGroup, MulticastGroupMember,
@@ -61,13 +62,15 @@ async fn test_multicast_ip_pool_range_validation(
     let client = &cptestctx.external_client;
 
     // Create IPv4 multicast pool
-    let pool_params = IpPoolCreate::new_multicast(
-        IdentityMetadataCreateParams {
+    let pool_params = IpPoolCreate {
+        identity: IdentityMetadataCreateParams {
             name: "test-v4-pool".parse().unwrap(),
             description: "IPv4 multicast pool for validation tests".to_string(),
         },
-        IpVersion::V4,
-    );
+        ip_version: IpVersion::V4,
+        pool_type: IpPoolType::Multicast,
+        assignment: IpPoolAssignment::Silos,
+    };
     object_create::<_, IpPool>(client, "/v1/system/ip-pools", &pool_params)
         .await;
 
@@ -116,13 +119,15 @@ async fn test_multicast_ip_pool_range_validation(
     object_create::<_, IpPoolRange>(client, range_url, &valid_ipv4_range).await;
 
     // Create IPv6 multicast pool
-    let ipv6_pool_params = IpPoolCreate::new_multicast(
-        IdentityMetadataCreateParams {
+    let ipv6_pool_params = IpPoolCreate {
+        identity: IdentityMetadataCreateParams {
             name: "test-v6-pool".parse().unwrap(),
             description: "IPv6 multicast pool for validation tests".to_string(),
         },
-        IpVersion::V6,
-    );
+        ip_version: IpVersion::V6,
+        pool_type: IpPoolType::Multicast,
+        assignment: IpPoolAssignment::Silos,
+    };
     object_create::<_, IpPool>(
         client,
         "/v1/system/ip-pools",

@@ -1102,14 +1102,26 @@ pub const DEMO_IP_POOLS_URL: &'static str = "/v1/system/ip-pools";
 pub static DEMO_IP_POOL_NAME: LazyLock<Name> =
     LazyLock::new(|| "default".parse().unwrap());
 pub static DEMO_IP_POOL_CREATE: LazyLock<ip_pool::IpPoolCreate> =
-    LazyLock::new(|| {
-        ip_pool::IpPoolCreate::new(
-            IdentityMetadataCreateParams {
-                name: DEMO_IP_POOL_NAME.clone(),
-                description: String::from("an IP pool"),
-            },
-            IpVersion::V4,
-        )
+    LazyLock::new(|| ip_pool::IpPoolCreate {
+        identity: IdentityMetadataCreateParams {
+            name: DEMO_IP_POOL_NAME.clone(),
+            description: String::from("an IP pool"),
+        },
+        ip_version: IpVersion::V4,
+        pool_type: ip_pool::IpPoolType::Unicast,
+        assignment: ip_pool::IpPoolAssignment::Silos,
+    });
+pub static DEMO_SERVICES_IP_POOL_NAME: LazyLock<Name> =
+    LazyLock::new(|| "default-service-pool".parse().unwrap());
+pub static DEMO_SERVICES_IP_POOL_CREATE: LazyLock<ip_pool::IpPoolCreate> =
+    LazyLock::new(|| ip_pool::IpPoolCreate {
+        identity: IdentityMetadataCreateParams {
+            name: DEMO_SERVICES_IP_POOL_NAME.clone(),
+            description: String::from("a services IP pool"),
+        },
+        ip_version: IpVersion::V4,
+        pool_type: ip_pool::IpPoolType::Unicast,
+        assignment: ip_pool::IpPoolAssignment::SystemServices,
     });
 pub static DEMO_IP_POOL_PROJ_URL: LazyLock<String> = LazyLock::new(|| {
     format!(
@@ -1128,19 +1140,27 @@ pub static DEMO_IP_POOL_UPDATE: LazyLock<ip_pool::IpPoolUpdate> =
             description: Some(String::from("a new IP pool")),
         },
     });
+pub static DEMO_IP_POOL_ASSIGNMENT_URL: LazyLock<String> =
+    LazyLock::new(|| {
+        format!("/v1/system/ip-pools/{}/assignment", *DEMO_IP_POOL_NAME)
+    });
+pub static DEMO_IP_POOL_ASSIGN: LazyLock<ip_pool::IpPoolAssignParam> =
+    LazyLock::new(|| ip_pool::IpPoolAssignParam {
+        assignment: ip_pool::IpPoolAssignment::SystemServices,
+    });
 
 // Multicast IP Pool
 pub static DEMO_MULTICAST_IP_POOL_NAME: LazyLock<Name> =
     LazyLock::new(|| "default-multicast".parse().unwrap());
 pub static DEMO_MULTICAST_IP_POOL_CREATE: LazyLock<ip_pool::IpPoolCreate> =
-    LazyLock::new(|| {
-        ip_pool::IpPoolCreate::new_multicast(
-            IdentityMetadataCreateParams {
-                name: DEMO_MULTICAST_IP_POOL_NAME.clone(),
-                description: String::from("a multicast IP pool"),
-            },
-            IpVersion::V4,
-        )
+    LazyLock::new(|| ip_pool::IpPoolCreate {
+        identity: IdentityMetadataCreateParams {
+            name: DEMO_MULTICAST_IP_POOL_NAME.clone(),
+            description: String::from("a multicast IP pool"),
+        },
+        ip_version: IpVersion::V4,
+        pool_type: ip_pool::IpPoolType::Multicast,
+        assignment: ip_pool::IpPoolAssignment::Silos,
     });
 pub static DEMO_MULTICAST_IP_POOL_URL: LazyLock<String> = LazyLock::new(|| {
     format!("/v1/system/ip-pools/{}", *DEMO_MULTICAST_IP_POOL_NAME)
@@ -1196,16 +1216,6 @@ pub static DEMO_IP_POOL_RANGES_ADD_URL: LazyLock<String> =
     LazyLock::new(|| format!("{}/add", *DEMO_IP_POOL_RANGES_URL));
 pub static DEMO_IP_POOL_RANGES_DEL_URL: LazyLock<String> =
     LazyLock::new(|| format!("{}/remove", *DEMO_IP_POOL_RANGES_URL));
-
-// IP Pools (Services)
-pub const DEMO_IP_POOL_SERVICE_URL: &'static str =
-    "/v1/system/ip-pools-service";
-pub static DEMO_IP_POOL_SERVICE_RANGES_URL: LazyLock<String> =
-    LazyLock::new(|| format!("{}/ranges", DEMO_IP_POOL_SERVICE_URL));
-pub static DEMO_IP_POOL_SERVICE_RANGES_ADD_URL: LazyLock<String> =
-    LazyLock::new(|| format!("{}/add", *DEMO_IP_POOL_SERVICE_RANGES_URL));
-pub static DEMO_IP_POOL_SERVICE_RANGES_DEL_URL: LazyLock<String> =
-    LazyLock::new(|| format!("{}/remove", *DEMO_IP_POOL_SERVICE_RANGES_URL));
 
 // Subnet Pools
 pub const DEMO_SUBNET_POOLS_URL: &'static str = "/v1/system/subnet-pools";
@@ -1923,36 +1933,13 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
                 unprivileged_access: UnprivilegedAccess::None,
                 allowed_methods: vec![AllowedMethod::Get],
             },
-            // IP Pool endpoint (Oxide services)
+            // IP Pool assignment endpoint
             VerifyEndpoint {
-                url: &DEMO_IP_POOL_SERVICE_URL,
-                visibility: Visibility::Protected,
-                unprivileged_access: UnprivilegedAccess::None,
-                allowed_methods: vec![AllowedMethod::Get],
-            },
-            // IP Pool ranges endpoint (Oxide services)
-            VerifyEndpoint {
-                url: &DEMO_IP_POOL_SERVICE_RANGES_URL,
-                visibility: Visibility::Protected,
-                unprivileged_access: UnprivilegedAccess::None,
-                allowed_methods: vec![AllowedMethod::Get],
-            },
-            // IP Pool ranges/add endpoint (Oxide services)
-            VerifyEndpoint {
-                url: &DEMO_IP_POOL_SERVICE_RANGES_ADD_URL,
+                url: &DEMO_IP_POOL_ASSIGNMENT_URL,
                 visibility: Visibility::Protected,
                 unprivileged_access: UnprivilegedAccess::None,
                 allowed_methods: vec![AllowedMethod::Post(
-                    serde_json::to_value(&*DEMO_IP_POOL_RANGE).unwrap(),
-                )],
-            },
-            // IP Pool ranges/delete endpoint (Oxide services)
-            VerifyEndpoint {
-                url: &DEMO_IP_POOL_SERVICE_RANGES_DEL_URL,
-                visibility: Visibility::Protected,
-                unprivileged_access: UnprivilegedAccess::None,
-                allowed_methods: vec![AllowedMethod::Post(
-                    serde_json::to_value(&*DEMO_IP_POOL_RANGE).unwrap(),
+                    serde_json::to_value(&*DEMO_IP_POOL_ASSIGN).unwrap(),
                 )],
             },
             /* Subnet Pools */
