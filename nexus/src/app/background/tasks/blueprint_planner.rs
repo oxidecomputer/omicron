@@ -25,6 +25,7 @@ use omicron_common::api::external::Error;
 use omicron_common::api::external::LookupType;
 use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::GenericUuid as _;
+use omicron_uuid_kinds::OmicronZoneUuid;
 use serde_json::json;
 use slog_error_chain::InlineErrorChain;
 use std::sync::Arc;
@@ -62,6 +63,7 @@ pub struct BlueprintPlanner {
     rx_blueprint: Receiver<Option<LoadedTargetBlueprint>>,
     tx_planned: Sender<Option<BlueprintUuid>>,
     blueprint_limit: u64,
+    creator: String,
 }
 
 /// The default number of blueprints, beyond which the auto-planner will stop
@@ -86,6 +88,7 @@ impl BlueprintPlanner {
         rx_config: Receiver<ReconfiguratorConfigLoaderState>,
         rx_inventory: Receiver<Option<Arc<Collection>>>,
         rx_blueprint: Receiver<Option<LoadedTargetBlueprint>>,
+        nexus_id: OmicronZoneUuid,
     ) -> Self {
         let (tx_planned, _) = watch::channel(None);
         Self {
@@ -95,6 +98,7 @@ impl BlueprintPlanner {
             rx_blueprint,
             tx_planned,
             blueprint_limit: DEFAULT_BLUEPRINT_LIMIT,
+            creator: format!("nexus {}", nexus_id),
         }
     }
 
@@ -205,7 +209,7 @@ impl BlueprintPlanner {
         let planner = Planner::new_based_on(
             opctx.log.clone(),
             &input,
-            "blueprint_planner",
+            &self.creator,
             &collection,
             PlannerRng::from_entropy(),
         )
@@ -517,6 +521,7 @@ mod test {
             rx_config_loader,
             rx_inventory,
             rx_loader.clone(),
+            nexus.id,
         );
 
         // On activation, the planner should run successfully and generate
@@ -550,6 +555,13 @@ mod test {
         assert_eq!(target.target_id, blueprint_id);
         assert!(
             blueprint.diff_since_blueprint(&initial_blueprint).has_changes()
+        );
+
+        // Verify the creator is the Nexus UUID, not the hardcoded string.
+        let expected_creator = format!("nexus {}", nexus.id);
+        assert_eq!(
+            blueprint.creator, expected_creator,
+            "blueprint creator should be the 'nexus UUID', not a hardcoded string"
         );
 
         // Planning again should not change the plan, because nothing has changed.
@@ -687,11 +699,13 @@ mod test {
         let (_tx_inventory, rx_inventory) = watch::channel(None);
         let (_tx_blueprint, rx_blueprint) = watch::channel(None);
 
+        let test_nexus_id = OmicronZoneUuid::new_v4();
         let mut planner = BlueprintPlanner::new(
             datastore.clone(),
             rx_config_loader,
             rx_inventory,
             rx_blueprint,
+            test_nexus_id,
         );
 
         // This limit matches the loop above.

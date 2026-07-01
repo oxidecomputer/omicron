@@ -55,9 +55,7 @@ use sled_agent_rack_setup::{
     from_ipaddr_to_external_floating_ip,
     from_sockaddr_to_external_floating_addr,
 };
-use sled_agent_types::early_networking::LinkSpeed;
 use sled_agent_types::early_networking::PortConfig;
-use sled_agent_types::early_networking::SwitchSlot;
 use sled_agent_types::early_networking::UplinkPorts;
 use sled_agent_types::inventory::NetworkInterface;
 use sled_agent_types::inventory::NetworkInterfaceKind;
@@ -658,19 +656,8 @@ pub async fn run_standalone_server(
             infra_ip_last: IpAddr::V4(Ipv4Addr::LOCALHOST),
             // `UplinkPorts` must be non-empty; the simulated rack doesn't
             // exercise uplinks, so use a single placeholder port.
-            ports: UplinkPorts::new(vec![PortConfig {
-                routes: Vec::new(),
-                addresses: Vec::new(),
-                switch: SwitchSlot::Switch0,
-                port: "qsfp0".to_string(),
-                uplink_port_speed: LinkSpeed::Speed100G,
-                uplink_port_fec: None,
-                bgp_peers: Vec::new(),
-                autoneg: false,
-                lldp: None,
-                tx_eq: None,
-            }])
-            .expect("placeholder port list is non-empty"),
+            ports: UplinkPorts::new(vec![PortConfig::empty_for_tests("qsfp0")])
+                .expect("placeholder port list is non-empty"),
             bgp: Vec::new(),
             bfd: Vec::new(),
         },

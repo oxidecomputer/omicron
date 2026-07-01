@@ -8,6 +8,7 @@ use ipnetwork::IpNetwork;
 use nexus_db_schema::schema::{
     address_lot, address_lot_block, address_lot_rsvd_block,
 };
+use nexus_types::external_api::networking as networking_types;
 use nexus_types::identity::Resource;
 use omicron_common::api::external;
 use serde::{Deserialize, Serialize};
@@ -56,29 +57,29 @@ pub struct AddressLot {
     pub kind: AddressLotKind,
 }
 
-impl Into<external::AddressLot> for AddressLot {
-    fn into(self) -> external::AddressLot {
-        external::AddressLot {
+impl Into<networking_types::AddressLot> for AddressLot {
+    fn into(self) -> networking_types::AddressLot {
+        networking_types::AddressLot {
             identity: self.identity(),
             kind: self.kind.into(),
         }
     }
 }
 
-impl From<external::AddressLotKind> for AddressLotKind {
-    fn from(k: external::AddressLotKind) -> AddressLotKind {
+impl From<networking_types::AddressLotKind> for AddressLotKind {
+    fn from(k: networking_types::AddressLotKind) -> AddressLotKind {
         match k {
-            external::AddressLotKind::Infra => AddressLotKind::Infra,
-            external::AddressLotKind::Pool => AddressLotKind::Pool,
+            networking_types::AddressLotKind::Infra => AddressLotKind::Infra,
+            networking_types::AddressLotKind::Pool => AddressLotKind::Pool,
         }
     }
 }
 
-impl From<AddressLotKind> for external::AddressLotKind {
+impl From<AddressLotKind> for networking_types::AddressLotKind {
     fn from(value: AddressLotKind) -> Self {
         match value {
-            AddressLotKind::Infra => external::AddressLotKind::Infra,
-            AddressLotKind::Pool => external::AddressLotKind::Pool,
+            AddressLotKind::Infra => networking_types::AddressLotKind::Infra,
+            AddressLotKind::Pool => networking_types::AddressLotKind::Pool,
         }
     }
 }
@@ -118,9 +119,9 @@ impl AddressLotBlock {
     }
 }
 
-impl Into<external::AddressLotBlock> for AddressLotBlock {
-    fn into(self) -> external::AddressLotBlock {
-        external::AddressLotBlock {
+impl Into<networking_types::AddressLotBlock> for AddressLotBlock {
+    fn into(self) -> networking_types::AddressLotBlock {
+        networking_types::AddressLotBlock {
             id: self.id,
             first_address: self.first_address.ip(),
             last_address: self.last_address.ip(),

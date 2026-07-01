@@ -434,8 +434,13 @@ pub enum Reincarnatability {
     /// The instance remains bound to the cycle of saṃsāra and can return in the
     /// next life.
     WillReincarnate,
-    /// The instance cannot reincarnate again until the specified time.
-    CoolingDown(TimeDelta),
+    /// The instance cannot reincarnate again until the cooldown period elapses
+    /// at the specified time.
+    CoolingDown {
+        /// The wall-clock time at which the cooldown period will expire and the
+        /// instance will once again be eligible to reincarnate.
+        until: DateTime<Utc>,
+    },
     /// The instance's auto-restart policy indicates that it has attained
     /// nirvāṇa and will not reincarnate.
     Nirvana,
@@ -477,13 +482,14 @@ impl InstanceAutoRestart {
             // Eventually, we may also allow a project-level default, so we will
             // need to consider that as well.
             let cooldown = self.cooldown.unwrap_or(Self::DEFAULT_COOLDOWN);
-            let time_since_last = Utc::now().signed_duration_since(last);
-            if time_since_last >= cooldown {
+            // The instance is eligible to reincarnate if the current time is
+            // greater than or equal to the last restart time plus the cooldown
+            // duration.
+            let until = last + cooldown;
+            if Utc::now() >= until {
                 return Reincarnatability::WillReincarnate;
             } else {
-                return Reincarnatability::CoolingDown(
-                    cooldown - time_since_last,
-                );
+                return Reincarnatability::CoolingDown { until };
             }
         }
 

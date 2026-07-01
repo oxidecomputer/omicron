@@ -591,6 +591,7 @@ impl DataStore {
                         announce_set_id: to_db_typed_uuid(db_as.id()),
                         // XXX: address_lot_block_id seems unused -- get rid of
                         // it?
+                        // https://github.com/oxidecomputer/omicron/issues/10719
                         address_lot_block_id: bas.id().into_untyped_uuid(),
                         network: a.network.into(),
                     };
@@ -661,6 +662,7 @@ impl DataStore {
                         announce_set_id: to_db_typed_uuid(db_as.id()),
                         // XXX: address_lot_block_id seems unused -- get rid of
                         // it?
+                        // https://github.com/oxidecomputer/omicron/issues/10719
                         address_lot_block_id: bas.id().into_untyped_uuid(),
                         network: a.network.into(),
                     };
