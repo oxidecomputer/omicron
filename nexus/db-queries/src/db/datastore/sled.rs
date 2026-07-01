@@ -11,6 +11,7 @@ use crate::context::OpContext;
 use crate::db;
 use crate::db::datastore;
 use crate::db::datastore::LocalStorageDisk;
+use crate::db::datastore::RunnableQuery;
 use crate::db::datastore::ValidateTransition;
 use crate::db::datastore::zpool::ZpoolGetForSledReservationResult;
 use crate::db::model::AffinityPolicy;
@@ -19,6 +20,7 @@ use crate::db::model::SledResourceVmm;
 use crate::db::model::SledResourceVmmState;
 use crate::db::model::SledState;
 use crate::db::model::SledUpdate;
+use crate::db::model::VmmState;
 use crate::db::model::to_db_sled_policy;
 use crate::db::model::to_db_typed_uuid;
 use crate::db::pagination::Paginator;
@@ -1592,6 +1594,37 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
         Ok(())
+    }
+
+    pub async fn sled_reservation_list_abandoned(
+        &self,
+        opctx: &OpContext,
+        pagparams: &DataPageParams<'_, Uuid>,
+    ) -> ListResultVec<SledResourceVmm> {
+        todo!()
+    }
+
+    fn reservation_list_abandoned_query(
+        pagparams: &DataPageParams<'_, Uuid>,
+    ) -> impl RunnableQuery<SledResourceVmm> {
+        use nexus_db_schema::schema::sled_resource_vmm::dsl as resource_dsl;
+        use nexus_db_schema::schema::vmm::dsl as vmm_dsl;
+        let joined = resource_dsl::sled_resource_vmm
+            .left_join(vmm_dsl::vmm.on(resource_dsl::id.eq(vmm_dsl::id)));
+        paginated(joined, resource_dsl::id, &pagparams)
+            .filter(resource_dsl::state.eq(SledResourceVmmState::Tombstoned))
+            .filter(
+                vmm_dsl::state
+                    // Select rows where either the corresponding `vmm` record
+                    // is in a state that indicates it is definitely not
+                    // occupying any sled resources...
+                    .eq_any(VmmState::DESTROYABLE_STATES)
+                    // ...or where it has been deleted...
+                    .or(vmm_dsl::time_deleted.is_not_null())
+                    // ...or where it has been *really* deleted.
+                    .or(vmm_dsl::state.is_null()),
+            )
+            .select(SledResourceVmm::as_select())
     }
 
     /// Sets the provision policy for this sled.
