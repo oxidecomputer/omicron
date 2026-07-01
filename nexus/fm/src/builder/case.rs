@@ -394,6 +394,17 @@ impl CaseBuilder {
         &mut self.case.metadata.comment
     }
 
+    /// Adds an event to the analysis report debug log for this case in the
+    /// current sitrep.
+    pub fn log_event(
+        &mut self,
+        event: impl ToString,
+    ) -> &mut fm::analysis_reports::LogEntry {
+        let event = event.to_string();
+        slog::debug!(self.log, "{event}");
+        self.report_log.entry(event)
+    }
+
     pub(crate) fn build(self) -> (fm::Case, fm::analysis_reports::CaseReport) {
         let Self { case, report_log, .. } = self;
         let report = fm::analysis_reports::CaseReport {

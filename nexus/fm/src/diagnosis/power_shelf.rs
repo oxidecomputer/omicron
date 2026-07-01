@@ -163,13 +163,9 @@ pub fn analyze(builder: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
             .get(&location)
             .and_then(|case_ids| case_ids.iter().copied().next());
         let mut case_builder = match case_id {
-            Some(id) => {
-                let mut case = builder.cases.case_mut(&id).expect(
-                    "an open case from the parent sitrep should be in the builder",
-                );
-                case.comment_mut().clear();
-                case
-            }
+            Some(id) => builder.cases.case_mut(&id).expect(
+                "an open case from the parent sitrep should be in the builder",
+            ),
             None => {
                 let mut c =
                     builder.cases.open_case(DiagnosisEngineKind::PowerShelf);
@@ -281,16 +277,15 @@ pub fn analyze(builder: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
         if psus_absent.is_empty() {
             case_builder.close("no absent PSUs detected");
         } else {
-            let comment = case_builder.comment_mut();
-            writeln!(
-                comment,
-                "when analysis completed, the following PSUs were absent:"
-            )
-            .expect("write to string is infallible");
-            for psu in psus_absent.iter() {
-                writeln!(comment, " - {psu}")
-                    .expect("write to string is infallible");
-            }
+            case_builder
+                .log_event("case remains open, as some PSUs are still absent")
+                .kv(
+                    "psus_absent",
+                    psus_absent
+                        .iter()
+                        .map(|psu| psu.to_string())
+                        .collect::<Vec<_>>(),
+                );
         }
     }
 
