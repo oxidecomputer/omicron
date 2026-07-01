@@ -940,7 +940,7 @@ impl DataStore {
         authz_instance: &authz::Instance,
         authz_disk: &authz::Disk,
         max_disks: u32,
-    ) -> Result<(Instance, Disk), Error> {
+    ) -> Result<(Instance, model::Disk), Error> {
         use nexus_db_schema::schema::disk;
         use nexus_db_schema::schema::instance;
         use nexus_db_schema::schema::sled_resource_vmm;
@@ -1095,12 +1095,11 @@ impl DataStore {
 
         let conn = self.pool_connection_authorized(opctx).await?;
 
-        let instance = match query.attach_and_get_result_async(&conn).await {
-            Ok((instance, _db_disk)) => {
-                // We'll re-fetch the datastore::Disk later, so ignore the
-                // model::Disk here
-                instance
-            }
+        let (instance, db_disk) = match query
+            .attach_and_get_result_async(&conn)
+            .await
+        {
+            Ok((instance, db_disk)) => (instance, db_disk),
 
             Err(e) => match e {
                 AttachError::CollectionNotFound => {
@@ -1128,12 +1127,12 @@ impl DataStore {
                         api::external::DiskState::Attached(id)
                             if id == authz_instance.id() =>
                         {
-                            collection
+                            (collection, resource)
                         }
                         api::external::DiskState::Attaching(id)
                             if id == authz_instance.id() =>
                         {
-                            collection
+                            (collection, resource)
                         }
                         // Ok-to-attach disk states: Inspect the state to infer
                         // why we did not attach.
@@ -1239,9 +1238,21 @@ impl DataStore {
             },
         };
 
-        // Re-fetch the disk to get the updates
-        let disk = self.disk_get(&opctx, authz_disk.id()).await?;
-        Ok((instance, disk))
+        // NB: The attach mutation above is the *last fallible operation* in this
+        // method, and we return the `model::Disk` produced by the CTE directly.
+        //
+        // We deliberately do NOT re-fetch here to build a richer
+        // `datastore::Disk`: a re-fetch acquires an additional pool connection
+        // *after* the attach has already committed, and if that acquisition
+        // fails (e.g. under connection-pool exhaustion) the caller observes an
+        // error even though the disk is now attached. In a saga that is fatal:
+        // steno never runs the undo of a failed forward node, so the committed
+        // attach would leak and later wedge the unwind (see omicron#10695).
+        //
+        // Callers that need a `datastore::Disk` should upgrade the returned
+        // `model::Disk` via `disk_get`, in a context where a post-commit failure
+        // is recoverable (i.e. not from a saga action).
+        Ok((instance, db_disk))
     }
 
     pub async fn instance_detach_disk(
@@ -1249,7 +1260,7 @@ impl DataStore {
         opctx: &OpContext,
         authz_instance: &authz::Instance,
         authz_disk: &authz::Disk,
-    ) -> Result<Disk, Error> {
+    ) -> Result<model::Disk, Error> {
         use nexus_db_schema::schema::{disk, instance};
 
         opctx.authorize(authz::Action::Modify, authz_instance).await?;
@@ -1275,7 +1286,7 @@ impl DataStore {
 
         let conn = self.pool_connection_authorized(opctx).await?;
 
-        let _db_disk = Instance::detach_resource(
+        let db_disk = Instance::detach_resource(
             authz_instance.id(),
             authz_disk.id(),
             instance::table
@@ -1390,9 +1401,15 @@ impl DataStore {
             }
         })?;
 
-        let disk = self.disk_get(&opctx, authz_disk.id()).await?;
-
-        Ok(disk)
+        // NB: As with `instance_attach_disk`, the detach mutation above is the
+        // *last fallible operation* in this method: we return the `model::Disk`
+        // produced by the CTE directly rather than re-fetching. A post-commit
+        // re-fetch here would be especially dangerous because `instance_detach_disk`
+        // is used as a saga *undo* action (`sic_attach_disk_to_instance_undo`);
+        // steno gives undo actions a single attempt with no retry, so a failure
+        // after the detach commits would permanently wedge the unwind even
+        // though the detach succeeded (see omicron#10695).
+        Ok(db_disk)
     }
 
     pub async fn disk_update_runtime(
