@@ -702,7 +702,9 @@ task: "fm_analysis"
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     parent sitrep ID:                Some(..........<REDACTED_UUID>........... (sitrep))
     current inventory collection ID: Some(..........<REDACTED_UUID>........... (collection))
-    ereport classes consumed:        (none)
+    ereport classes consumed:        (2 total)
+      - hw.insert.psu
+      - hw.remove.psu
     FAULT MANAGEMENT ANALYSIS SUMMARY
     =================================
     no changes from the current situation report (Some(..........<REDACTED_UUID>........... (sitrep)))
@@ -1402,7 +1404,9 @@ task: "fm_analysis"
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     parent sitrep ID:                Some(..........<REDACTED_UUID>........... (sitrep))
     current inventory collection ID: Some(..........<REDACTED_UUID>........... (collection))
-    ereport classes consumed:        (none)
+    ereport classes consumed:        (2 total)
+      - hw.insert.psu
+      - hw.remove.psu
     FAULT MANAGEMENT ANALYSIS SUMMARY
     =================================
     no changes from the current situation report (Some(..........<REDACTED_UUID>........... (sitrep)))

@@ -42,7 +42,7 @@ pub struct Input {
     inv: Arc<inventory::Collection>,
     /// Ereports which are new and should be input to analysis in the next
     /// sitrep.
-    new_ereports: IdOrdMap<fm::Ereport>,
+    new_ereports: IdOrdMap<Arc<fm::Ereport>>,
     open_cases: IdOrdMap<fm::Case>,
     closed_cases_copied_forward: IdOrdMap<fm::Case>,
     ereporter_restarts: IdOrdMap<EreporterRestart>,
@@ -71,7 +71,7 @@ impl Input {
         &self.inv
     }
 
-    pub fn new_ereports(&self) -> &IdOrdMap<fm::Ereport> {
+    pub fn new_ereports(&self) -> &IdOrdMap<Arc<fm::Ereport>> {
         &self.new_ereports
     }
 
@@ -164,7 +164,7 @@ pub struct Builder {
     in_service_disks: Arc<IdOrdMap<InServiceDisk>>,
     /// Ereports which are new and should be input to analysis in the next
     /// sitrep.
-    new_ereports: IdOrdMap<fm::Ereport>,
+    new_ereports: IdOrdMap<Arc<fm::Ereport>>,
 
     /// The IDs of any ereports which have been included in the parent sitrep,
     /// but which have *not* yet been marked as seen in the database.
@@ -222,7 +222,7 @@ impl Builder {
                 }
             }
 
-            Some(ereport)
+            Some(Arc::new(ereport))
         }))
     }
 
@@ -463,7 +463,7 @@ mod tests {
         let now = chrono::Utc::now();
         let mut reporter = fm_test
             .reporters
-            .reporter(Reporter::Sp { sp_type: SpType::Sled, slot: 0 });
+            .reporter(Reporter::Sp { sp_type: SpType::Sled, slot: 0 }, now);
         let ereport_in_open_case1 =
             Arc::new(reporter.mk_ereport(now, Default::default()));
         let ereport_in_open_case2 =

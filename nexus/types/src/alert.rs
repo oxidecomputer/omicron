@@ -8,6 +8,8 @@ use schemars::JsonSchema;
 use serde::Serialize;
 use std::fmt;
 
+pub mod power_shelf;
+
 /// Trait implemented by alerts.
 pub trait AlertPayload: Serialize + JsonSchema + std::fmt::Debug {
     const CLASS: AlertClass;
@@ -72,6 +74,10 @@ pub enum AlertClass {
     TestQuuxBar,
     #[strum(serialize = "test.quux.bar.baz")]
     TestQuuxBarBaz,
+    #[strum(serialize = "hardware.power_shelf.psu.insert")]
+    PsuInserted,
+    #[strum(serialize = "hardware.power_shelf.psu.remove")]
+    PsuRemoved,
 }
 
 impl AlertClass {
@@ -108,6 +114,12 @@ impl AlertClass {
             | Self::TestQuuxBar
             | Self::TestQuuxBarBaz => {
                 "This is a test of the emergency alert system"
+            }
+            Self::PsuInserted => {
+                "A power supply unit (PSU) has been inserted into a power shelf"
+            }
+            Self::PsuRemoved => {
+                "A power supply unit (PSU) has been removed from a power shelf"
             }
         }
     }
