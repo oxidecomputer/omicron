@@ -32,7 +32,7 @@ use tokio::sync::watch;
 use tokio::time::Instant;
 use tokio::time::Interval;
 use tokio::time::MissedTickBehavior;
-use tokio::time::interval;
+use tokio::time::interval_at;
 use uuid::Uuid;
 
 /// Error returned when a forced collection fails.
@@ -624,17 +624,12 @@ impl CollectionTask {
         };
 
         // Construct self-collection statistics and our collection times.
-        //
-        // If we miss a tick, say because the results sink is full when we try
-        // to pass off our collection result, we'll delay the next tick rather
-        // than burst to catch up.
         let stats = self_stats::CollectionTaskStats::new(collector, &producer);
-        let mut collection_timer = interval(producer.interval);
-        collection_timer.set_missed_tick_behavior(MissedTickBehavior::Delay);
-        let mut self_collection_timer =
-            interval(self_stats::COLLECTION_INTERVAL);
-        self_collection_timer
-            .set_missed_tick_behavior(MissedTickBehavior::Delay);
+
+        let now = Instant::now();
+        let collection_timer = make_collection_timer(now, producer.interval);
+        let self_collection_timer =
+            make_collection_timer(now, self_stats::COLLECTION_INTERVAL);
         let self_ = Self {
             log,
             producer_details_tx,
@@ -721,9 +716,8 @@ impl CollectionTask {
         self.producer_details_tx
             .send_modify(|details| details.update(&new_info));
         self.stats.update(&new_info);
-        self.collection_timer = interval(new_info.interval);
-        self.collection_timer
-            .set_missed_tick_behavior(MissedTickBehavior::Delay);
+        self.collection_timer =
+            make_collection_timer(Instant::now(), new_info.interval);
     }
 
     /// Handle a single message from the task handle.
@@ -927,4 +921,26 @@ impl CollectionTask {
         }
         TaskAction::Continue(())
     }
+}
+
+// Make a timer for a collection task.
+//
+// We inject random jitter from `0..interval` at the start of the interval to
+// avoid a thundering herd. If many collection tasks with the same interval, or
+// intervals with a common multiple, are started at the same time, they tick in
+// lockstep and can overwhelm the database batcher queue and drop samples, even
+// if the volume per unit time isn't particularly high.
+fn make_collection_timer(now: Instant, interval: Duration) -> Interval {
+    let jitter = Duration::from_millis(rand::random_range(
+        0..interval.as_millis().max(1) as u64,
+    ));
+
+    let mut timer = interval_at(now + jitter, interval);
+
+    // If we miss a tick, say because the results sink is full when we try
+    // to pass off our collection result, we'll delay the next tick rather
+    // than burst to catch up.
+    timer.set_missed_tick_behavior(MissedTickBehavior::Delay);
+
+    timer
 }
