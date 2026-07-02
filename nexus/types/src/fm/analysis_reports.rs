@@ -84,8 +84,8 @@ impl AnalysisReport {
                     indent,
                 } = self;
 
-                if !comment.is_empty() {
-                    writeln!(f, "{:indent$}// {comment}", "")?;
+                for line in comment.lines() {
+                    writeln!(f, "{:indent$}// {line}", "")?;
                 }
                 writeln!(f, "{:indent$}sitrep ID: {sitrep_id}", "")?;
                 if cases.is_empty() {
@@ -205,7 +205,9 @@ impl LogEntry {
                 let colon = if kvs.is_empty() { "" } else { ":" };
                 writeln!(f, "{:indent$}{bullet}{event}{colon}", "")?;
                 if let Some(comment) = comment {
-                    writeln!(f, "{:indent$}  // {comment}", "")?;
+                    for line in comment.lines() {
+                        writeln!(f, "{:indent$}  // {line}", "")?;
+                    }
                 }
                 for (k, v) in kvs {
                     fmt_json_value(f, k, v, indent + 2)?;
@@ -738,6 +740,23 @@ mod tests {
         let output = format!("{}", entry.display_indented(0));
         expectorate::assert_contents(
             "output/log_entry_display_nested_values.out",
+            &output,
+        );
+    }
+
+    /// The pretty-printer handles multi-line strings in comments by outputting
+    /// them at the correct indentation and prefixing each line with a `//`.
+    #[test]
+    fn test_log_entry_display_multiline_comment() {
+        let json = serde_json::json!({
+            "event": "multi-line comment",
+            "comment": "this comment\nspans multiple lines\nisn't that cool?",
+            "flat_key": "flat_value",
+        });
+        let entry: LogEntry = serde_json::from_value(json).unwrap();
+        let output = format!("{}", entry.display_indented(0));
+        expectorate::assert_contents(
+            "output/log_entry_display_multiline_comment.out",
             &output,
         );
     }
