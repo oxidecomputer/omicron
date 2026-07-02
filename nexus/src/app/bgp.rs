@@ -80,35 +80,34 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         sel: &networking::BgpConfigSelector,
-        update: &networking::BgpConfigUpdate,
+        update: networking::BgpConfigUpdate,
     ) -> UpdateResult<BgpConfig> {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
+
         let (.., authz_bgp_config, db_bgp_config) = self
             .bgp_config_lookup(opctx, sel.name_or_id.clone())?
             .fetch_for(authz::Action::Modify)
             .await?;
 
-        // The autonomous system number is immutable; to change it, the
-        // configuration must be deleted and recreated.
-        if *db_bgp_config.asn != update.asn {
-            return Err(external::Error::invalid_request(
-                "asn cannot be updated",
-            ));
-        }
-
-        let (.., authz_announce_set) = self
-            .bgp_announce_set_lookup(opctx, update.bgp_announce_set_id.clone())?
+        let (.., authz_bgp_announce_set) = self
+            .bgp_announce_set_lookup(
+                opctx,
+                update
+                    .bgp_announce_set_id
+                    .clone()
+                    .unwrap_or(NameOrId::Id(db_bgp_config.bgp_announce_set_id)),
+            )?
             .lookup_for(authz::Action::Read)
             .await?;
 
+        let update = nexus_db_model::BgpConfigUpdate::new(
+            update,
+            authz_bgp_announce_set.id(),
+        );
+
         let result = self
             .db_datastore
-            .bgp_config_update(
-                opctx,
-                &authz_bgp_config,
-                authz_announce_set,
-                update,
-            )
+            .bgp_config_update(opctx, &authz_bgp_config, update)
             .await?;
 
         // Eagerly propagate changes via background task

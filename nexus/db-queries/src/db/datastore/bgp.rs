@@ -16,7 +16,7 @@ use ipnetwork::IpNetwork;
 use nexus_db_errors::OptionalError;
 use nexus_db_errors::{ErrorHandler, public_error_from_diesel};
 use nexus_db_model::{
-    BgpPeerView, DbSwitchSlot, RouterPeerTypeDbRepresentation, SqlU8,
+    BgpPeerView, DbSwitchSlot, RouterPeerTypeDbRepresentation,
     SwitchPortBgpPeerConfigAllowExport, SwitchPortBgpPeerConfigAllowImport,
     SwitchPortBgpPeerConfigCommunity,
 };
@@ -230,30 +230,14 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         authz_bgp_config: &authz::BgpConfig,
-        bgp_announce_set_id: authz::BgpAnnounceSet,
-        update: &networking::BgpConfigUpdate,
+        update: nexus_db_model::BgpConfigUpdate,
     ) -> UpdateResult<BgpConfig> {
         use nexus_db_schema::schema::bgp_config::dsl;
-
-        // The `asn` field is immutable and was already checked.
-        let networking::BgpConfigUpdate {
-            name: new_name,
-            description: new_description,
-            asn: _,
-            bgp_announce_set_id: _,
-            max_paths: new_max_paths,
-        } = update;
 
         diesel::update(dsl::bgp_config)
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::id.eq(authz_bgp_config.id()))
-            .set((
-                dsl::time_modified.eq(Utc::now()),
-                dsl::name.eq(new_name.to_string()),
-                dsl::description.eq(new_description.to_string()),
-                dsl::bgp_announce_set_id.eq(bgp_announce_set_id.id()),
-                dsl::max_paths.eq(SqlU8(new_max_paths.as_u8())),
-            ))
+            .set(update)
             .returning(BgpConfig::as_returning())
             .get_result_async(&*self.pool_connection_authorized(opctx).await?)
             .await
@@ -1088,6 +1072,7 @@ mod tests {
     use nexus_db_model::SwitchPortBgpPeerConfig;
     use nexus_types::external_api::networking::BgpPeer;
     use omicron_common::api::external::IdentityMetadataCreateParams;
+    use omicron_common::api::external::IdentityMetadataUpdateParams;
     use omicron_common::api::external::Name;
     use omicron_test_utils::dev;
     use oxnet::IpNet;
@@ -1104,14 +1089,13 @@ mod tests {
 
         let config_name: Name = "config-name".parse().unwrap();
         let announce_name: Name = "announce-name".parse().unwrap();
-        let asn = 47;
 
         let config = networking::BgpConfigCreate {
             identity: IdentityMetadataCreateParams {
                 name: config_name.clone(),
                 description: String::from("a test config"),
             },
-            asn,
+            asn: 47,
             bgp_announce_set_id: NameOrId::Name(announce_name.clone()),
             vrf: None,
             shaper: None,
@@ -1125,11 +1109,14 @@ mod tests {
         let new_description = String::from("updated description");
 
         let update = networking::BgpConfigUpdate {
-            name: new_config_name.clone(),
-            description: new_description.clone(),
-            asn,
-            bgp_announce_set_id: NameOrId::Name(new_announce_name.clone()),
-            max_paths: new_max_paths,
+            identity: IdentityMetadataUpdateParams {
+                name: Some(new_config_name.clone()),
+                description: Some(new_description.clone()),
+            },
+            bgp_announce_set_id: Some(NameOrId::Name(
+                new_announce_name.clone(),
+            )),
+            max_paths: Some(new_max_paths),
         };
 
         // Make sure the announces exist
@@ -1184,14 +1171,14 @@ mod tests {
             .await
             .expect("lookup bgp announce set");
 
+        let update = nexus_db_model::BgpConfigUpdate::new(
+            update,
+            authz_announce_set.id(),
+        );
+
         // Update the BGP config
         datastore
-            .bgp_config_update(
-                &opctx,
-                &authz_bgp_config,
-                authz_announce_set,
-                &update,
-            )
+            .bgp_config_update(&opctx, &authz_bgp_config, update)
             .await
             .expect("update bgp config");
 

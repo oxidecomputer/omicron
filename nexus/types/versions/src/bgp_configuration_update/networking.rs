@@ -10,26 +10,22 @@
 //!   `name`, `description`, `max_paths` and `bgp_announce_set_id` fields
 //!   without deleting and recreating the object.
 
-use omicron_common::api::external::{Name, NameOrId};
+use omicron_common::api::external::{IdentityMetadataUpdateParams, NameOrId};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sled_agent_types_versions::v20::early_networking::MaxPathConfig;
 
 /// Parameters for updating a BGP configuration
+///
+/// If a value is not specified, it will remain unchanged.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct BgpConfigUpdate {
-    /// Update the name of this BGP configuration.
-    pub name: Name,
-
-    /// Update the description of this BGP configuration.
-    pub description: String,
-
-    /// The autonomous system number of this BGP configuration. Cannot be updated.
-    pub asn: u32,
+    #[serde(flatten)]
+    pub identity: IdentityMetadataUpdateParams,
 
     /// Update the BGP announce set associated with this configuration.
-    pub bgp_announce_set_id: NameOrId,
+    pub bgp_announce_set_id: Option<NameOrId>,
 
     /// Update the maximum number of equal-cost paths.
-    pub max_paths: MaxPathConfig,
+    pub max_paths: Option<MaxPathConfig>,
 }

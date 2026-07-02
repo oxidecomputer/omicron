@@ -1013,11 +1013,12 @@ pub static DEMO_BGP_CONFIG: LazyLock<networking::BgpConfigCreate> =
     });
 pub static DEMO_BGP_CONFIG_UPDATE: LazyLock<networking::BgpConfigUpdate> =
     LazyLock::new(|| networking::BgpConfigUpdate {
-        name: "as47".parse().unwrap(),
-        description: "BGP config for AS47".into(),
-        asn: 47,
-        bgp_announce_set_id: NameOrId::Name("instances".parse().unwrap()),
-        max_paths: MaxPathConfig::new(1).unwrap(),
+        identity: IdentityMetadataUpdateParams {
+            name: Some("as47".parse().unwrap()),
+            description: Some("BGP config for AS47".into()),
+        },
+        bgp_announce_set_id: Some(NameOrId::Name("instances".parse().unwrap())),
+        max_paths: Some(MaxPathConfig::new(1).unwrap()),
     });
 
 pub const DEMO_BGP_ANNOUNCE_SET_URL: &'static str =

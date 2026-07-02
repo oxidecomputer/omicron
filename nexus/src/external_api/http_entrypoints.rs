@@ -4552,7 +4552,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
         audit_and_time(&rqctx, |opctx, nexus| async move {
             let sel = sel.into_inner();
             let update = update.into_inner();
-            let result = nexus.bgp_config_update(&opctx, &sel, &update).await?;
+            let result = nexus.bgp_config_update(&opctx, &sel, update).await?;
             Ok(HttpResponseOk::<networking::BgpConfig>(result.try_into()?))
         })
         .await

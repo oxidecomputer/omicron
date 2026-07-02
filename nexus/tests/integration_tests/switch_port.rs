@@ -18,7 +18,9 @@ use nexus_types::external_api::networking::{
 };
 use nexus_types::external_api::rack::Rack;
 use omicron_common::api::external::Name;
-use omicron_common::api::external::{IdentityMetadataCreateParams, NameOrId};
+use omicron_common::api::external::{
+    IdentityMetadataCreateParams, IdentityMetadataUpdateParams, NameOrId,
+};
 use oxnet::IpNet;
 use sled_agent_types::early_networking::ImportExportPolicy;
 use sled_agent_types::early_networking::LinkFec;
@@ -686,7 +688,6 @@ async fn test_port_settings_basic_v6_crud(ctx: &ControlPlaneTestContext) {
 async fn test_bgp_config_update(ctx: &ControlPlaneTestContext) {
     let client = &ctx.external_client;
 
-    // Names referenced more than once below.
     let parkinglot: Name = "parkinglot".parse().unwrap();
     let as47: Name = "as47".parse().unwrap();
     let instances = NameOrId::Name("instances".parse().unwrap());
@@ -760,25 +761,13 @@ async fn test_bgp_config_update(ctx: &ControlPlaneTestContext) {
     .unwrap();
 
     let valid_update = BgpConfigUpdate {
-        name: as47,
-        description: "autonomous system 47".into(),
-        asn: 47,
-        bgp_announce_set_id: instances,
-        max_paths: MaxPathConfig::new(1).unwrap(),
+        identity: IdentityMetadataUpdateParams {
+            name: Some(as47),
+            description: Some("autonomous system 47".into()),
+        },
+        bgp_announce_set_id: Some(instances),
+        max_paths: Some(MaxPathConfig::new(1).unwrap()),
     };
-
-    // The `asn` field is immutable; attempting to change it is a 400.
-    NexusRequest::expect_failure_with_body(
-        client,
-        StatusCode::BAD_REQUEST,
-        Method::PUT,
-        "/v1/system/networking/bgp?name_or_id=as47",
-        &BgpConfigUpdate { asn: 48, ..valid_update.clone() },
-    )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute()
-    .await
-    .unwrap();
 
     // Updating a config that doesn't exist is a 404.
     NexusRequest::expect_failure_with_body(
@@ -800,9 +789,9 @@ async fn test_bgp_config_update(ctx: &ControlPlaneTestContext) {
         Method::PUT,
         "/v1/system/networking/bgp?name_or_id=as47",
         &BgpConfigUpdate {
-            bgp_announce_set_id: NameOrId::Name(
+            bgp_announce_set_id: Some(NameOrId::Name(
                 "does-not-exist".parse().unwrap(),
-            ),
+            )),
             ..valid_update.clone()
         },
     )
@@ -813,11 +802,14 @@ async fn test_bgp_config_update(ctx: &ControlPlaneTestContext) {
 
     // A valid update returns the updated configuration.
     let update = BgpConfigUpdate {
-        name: "as47-renamed".parse().unwrap(),
-        description: "renamed config".into(),
-        asn: 47,
-        bgp_announce_set_id: NameOrId::Name("instances2".parse().unwrap()),
-        max_paths: MaxPathConfig::new(3).unwrap(),
+        identity: IdentityMetadataUpdateParams {
+            name: Some("as47-renamed".parse().unwrap()),
+            description: Some("renamed config".into()),
+        },
+        bgp_announce_set_id: Some(NameOrId::Name(
+            "instances2".parse().unwrap(),
+        )),
+        max_paths: Some(MaxPathConfig::new(3).unwrap()),
     };
     let updated: BgpConfig = NexusRequest::object_put(
         client,
