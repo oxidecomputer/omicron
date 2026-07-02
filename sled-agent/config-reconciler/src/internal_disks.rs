@@ -1000,7 +1000,6 @@ mod tests {
                     dev_path: None,
                 },
                 slot: raw_disk.slot(),
-                variant: raw_disk.variant(),
                 identity: raw_disk.identity().clone(),
                 is_boot_disk: raw_disk.is_boot_disk(),
                 partitions: vec![],

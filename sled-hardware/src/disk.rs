@@ -283,7 +283,6 @@ impl UnparsedDisk {
 pub struct PooledDisk {
     pub paths: DiskPaths,
     pub slot: i64,
-    pub variant: DiskVariant,
     pub identity: DiskIdentity,
     pub is_boot_disk: bool,
     pub partitions: Vec<Partition>,
@@ -327,7 +326,6 @@ impl PooledDisk {
         Ok(Self {
             paths: unparsed_disk.paths,
             slot: unparsed_disk.slot,
-            variant: unparsed_disk.variant,
             identity: unparsed_disk.identity,
             is_boot_disk: unparsed_disk.is_boot_disk,
             partitions,
