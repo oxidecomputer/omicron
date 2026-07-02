@@ -202,10 +202,6 @@ impl RawDisk {
         }
     }
 
-    pub fn is_real(&self) -> bool {
-        !self.is_synthetic()
-    }
-
     pub fn u2_zpool_path(&self) -> Result<Utf8PathBuf, PooledDiskError> {
         if !matches!(self.variant(), DiskVariant::U2) {
             return Err(PooledDiskError::UnexpectedVariant);
