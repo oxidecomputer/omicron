@@ -188,3 +188,21 @@ NOTE: The `serial_test` crate **does not work** within Omicron: it depends on an
 
 * https://github.com/oxidecomputer/omicron/commit/c9dec4111860[`c9dec4111860`] ensures that learner nodes' ledger file names cannot collide with those of regular peer nodes. (Learner 1 and peer node `pc-b-1` both generated `test-1-network-config-ledger`.)
 * https://github.com/oxidecomputer/omicron/commit/067c79302158[`067c79302158`] changes a scenario from being a separate test to being listed within `test_replicated`.
+
+=== Ephemeral port reuse races [[ephemeral-port-reuse-races]]
+
+**What this is:** A test performs the following sequence of operations:
+
+. Start a service on an ephemeral TCP port (i.e., bind to port 0).
+. Kill the service.
+. Restart the service, attempting to bind to the port determined in step 1.
+
+In between steps 2 and 3, a different process such as a test running concurrently can grab the same port. This can result in test flakiness.
+
+**Why this is bad:** This is a test flake at best and cross-test interference at worst.
+
+**How to fix this:** Use the `RetargetableTcpProxy` available at `test-utils/src/dev/tcp-proxy.rs`. That provides a persistent port that stays bound throughout process restarts.
+
+**Example commits:**
+
+* https://github.com/oxidecomputer/omicron/commit/AAAAA[`AAAAA`] introduces the TCP proxy.
