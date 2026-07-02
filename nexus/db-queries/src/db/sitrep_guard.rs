@@ -371,6 +371,7 @@ mod tests {
     use crate::db::fm_rendezvous_resources::test_utils::DummyResource;
     use crate::db::fm_rendezvous_resources::test_utils::dummy_marker;
     use crate::db::fm_rendezvous_resources::test_utils::dummy_resource;
+    use crate::db::fm_rendezvous_resources::test_utils::insert_dummy_marker;
     use crate::db::fm_rendezvous_resources::test_utils::setup_dummy_schema;
 
     // Snapshots the SQL the combinator generates, so accidental changes to the
@@ -542,14 +543,7 @@ mod tests {
         // the one we will execute at, so the final assertion can distinguish
         // "marker preserved" from "marker overwritten with the executed
         // generation".
-        diesel::insert_into(dummy_marker::table)
-            .values((
-                dummy_marker::dsl::dummy_id.eq(resource_id),
-                dummy_marker::dsl::created_at_generation.eq(1i64),
-            ))
-            .execute_async(&*conn)
-            .await
-            .unwrap();
+        insert_dummy_marker(&conn, resource_id, 1).await;
 
         let outcome = run_guarded_insert(&conn, resource_id, 2).await;
 

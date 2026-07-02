@@ -78,6 +78,7 @@ impl FmRendezvousResource for nexus_db_model::SupportBundle {
 #[cfg(test)]
 pub(crate) mod test_utils {
     use super::FmRendezvousResource;
+    use async_bb8_diesel::AsyncRunQueryDsl;
     use async_bb8_diesel::AsyncSimpleConnection;
     use diesel::prelude::*;
     use nexus_db_lookup::DbConnection;
@@ -153,5 +154,23 @@ pub(crate) mod test_utils {
         )
         .await
         .unwrap();
+    }
+
+    /// Insert a row into the dummy marker table at the given
+    /// `created_at_generation`.
+    pub(crate) async fn insert_dummy_marker(
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        id: Uuid,
+        created_at_generation: i64,
+    ) {
+        diesel::insert_into(dummy_marker::table)
+            .values((
+                dummy_marker::dsl::dummy_id.eq(id),
+                dummy_marker::dsl::created_at_generation
+                    .eq(created_at_generation),
+            ))
+            .execute_async(conn)
+            .await
+            .unwrap();
     }
 }
