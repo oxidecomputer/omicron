@@ -60,6 +60,8 @@ pub enum PooledDiskError {
     CannotFormatM2NotImplemented,
     #[error(transparent)]
     NvmeFormatAndResize(#[from] NvmeFormattingError),
+    #[error("synthetic disks do not have a devfs path")]
+    SyntheticDiskNoDevfsPath,
 }
 
 /// A partition (or 'slice') of a disk.

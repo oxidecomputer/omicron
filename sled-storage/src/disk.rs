@@ -310,17 +310,6 @@ impl Disk {
         Ok(disk)
     }
 
-    pub fn is_synthetic(&self) -> bool {
-        match self {
-            Self::Real(_) => false,
-            Self::Synthetic(_) => true,
-        }
-    }
-
-    pub fn is_real(&self) -> bool {
-        !self.is_synthetic()
-    }
-
     pub fn is_boot_disk(&self) -> bool {
         match self {
             Self::Real(disk) => disk.is_boot_disk,
@@ -366,7 +355,9 @@ impl Disk {
                 Partition::BootImage,
                 raw,
             ),
-            Self::Synthetic(_) => unreachable!(),
+            Self::Synthetic(_) => {
+                Err(PooledDiskError::SyntheticDiskNoDevfsPath)
+            }
         }
     }
 
@@ -380,7 +371,9 @@ impl Disk {
                 Partition::DumpDevice,
                 raw,
             ),
-            Self::Synthetic(_) => unreachable!(),
+            Self::Synthetic(_) => {
+                Err(PooledDiskError::SyntheticDiskNoDevfsPath)
+            }
         }
     }
 
