@@ -1165,7 +1165,6 @@ async fn sis_ensure_running(
 mod test {
     use core::time::Duration;
     use nexus_types::identity::Asset as _;
-    use std::net::SocketAddrV6;
 
     use crate::app::sagas::disk_delete::test::ExpungeTestHarness;
     use crate::app::sagas::disk_delete::test::create_disk;
@@ -1397,19 +1396,14 @@ mod test {
             .expect("unable to update switch1 settings");
 
         // Shutdown one of the switch daemons
-        let mut switch0_dpd = cptestctx
-            .dendrite
-            .write()
-            .unwrap()
-            .remove(&SwitchSlot::Switch0)
-            .expect("there should be at least one dendrite running");
-
-        let switch0_port = switch0_dpd.port;
-
-        switch0_dpd
-            .cleanup()
-            .await
-            .expect("switch0 process should get cleaned up");
+        let switch0_port = {
+            let dendrite_guard = cptestctx.dendrite.read().unwrap();
+            dendrite_guard
+                .get(&SwitchSlot::Switch0)
+                .expect("a dendrite instance should exist for switch0")
+                .port()
+        };
+        cptestctx.stop_dendrite(SwitchSlot::Switch0).await;
 
         let log = &opctx.log;
 
@@ -1455,7 +1449,7 @@ mod test {
             dendrite_guard
                 .get(&SwitchSlot::Switch1)
                 .expect("two dendrites should be present in test context")
-                .port
+                .port()
         };
 
         let client_state = dpd_client::ClientState {
@@ -1505,28 +1499,9 @@ mod test {
         .await
         .expect("NAT entry should appear on switch1");
 
-        // Reuse the port number from the removed Switch0 to start a new dendrite instance
-        let nexus_address = cptestctx.internal_client.bind_address;
-        let mgs = cptestctx.gateway.get(&SwitchSlot::Switch0).unwrap();
-        let mgs_address =
-            SocketAddrV6::new(Ipv6Addr::LOCALHOST, mgs.port, 0, 0).into();
-
         // Test fault recovery for nat propogation
-        // Start a new dendrite instance for switch0
-        let new_switch0 =
-            omicron_test_utils::dev::dendrite::DendriteInstance::start(
-                switch0_port,
-                Some(nexus_address),
-                Some(mgs_address),
-            )
-            .await
-            .unwrap();
-
-        cptestctx
-            .dendrite
-            .write()
-            .unwrap()
-            .insert(SwitchSlot::Switch0, new_switch0);
+        // Start a new dpd for switch0
+        cptestctx.restart_dendrite(SwitchSlot::Switch0).await;
 
         // Ensure that the nat entry for the address has made it onto the new switch0 dendrite.
         // This might take some time while the new dendrite comes online.

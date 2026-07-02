@@ -2554,7 +2554,7 @@ mod test {
         .unwrap();
 
         // Shutdown switch 0.
-        shutdown_switch0(&cptestctx).await;
+        cptestctx.stop_dendrite(SwitchSlot::Switch0).await;
         assert!(switch0_dpd_client.dpd_uptime().await.is_err());
 
         // Okay, now that we've taken down one of the simulated switches, we
@@ -2656,7 +2656,7 @@ mod test {
             .await;
 
         // Shut down switch 0.
-        let switch0_port = shutdown_switch0(&cptestctx).await;
+        cptestctx.stop_dendrite(SwitchSlot::Switch0).await;
         assert!(switch0_dpd_client.dpd_uptime().await.is_err());
 
         // Run the instance-update saga to complete the migration.
@@ -2696,7 +2696,7 @@ mod test {
         .unwrap();
 
         // Restart switch 0 and verify it also gets the new entries.
-        restart_switch0(&cptestctx, switch0_port).await;
+        cptestctx.restart_dendrite(SwitchSlot::Switch0).await;
         wait_for_n_nat_entries(
             log,
             &switch0_dpd_client,
@@ -2819,7 +2819,7 @@ mod test {
         let port = dendrite_guard
             .get(&switch_slot)
             .expect("dendrite should be present for this switch slot")
-            .port;
+            .port();
         let client_state = dpd_client::ClientState {
             tag: String::from("nexus"),
             log: cptestctx.logctx.log.new(o!(
@@ -2911,54 +2911,6 @@ mod test {
                 "{switch:?} did not have {n} NAT entries after {max_wait:?}"
             )
         })
-    }
-
-    /// Shut down switch 0's dendrite, returning the port it was listening on.
-    async fn shutdown_switch0(cptestctx: &ControlPlaneTestContext) -> u16 {
-        let mut switch0_dpd = cptestctx
-            .dendrite
-            .write()
-            .unwrap()
-            .remove(&SwitchSlot::Switch0)
-            .expect("switch 0 dendrite should be running");
-
-        let port = switch0_dpd.port;
-
-        switch0_dpd
-            .cleanup()
-            .await
-            .expect("switch0 process should get cleaned up");
-
-        port
-    }
-
-    /// Restart switch 0's dendrite on the given port.
-    async fn restart_switch0(
-        cptestctx: &ControlPlaneTestContext,
-        switch0_port: u16,
-    ) {
-        use std::net::Ipv6Addr;
-        use std::net::SocketAddrV6;
-
-        let nexus_address = cptestctx.internal_client.bind_address;
-        let mgs = cptestctx.gateway.get(&SwitchSlot::Switch0).unwrap();
-        let mgs_address =
-            SocketAddrV6::new(Ipv6Addr::LOCALHOST, mgs.port, 0, 0).into();
-
-        let new_switch0 =
-            omicron_test_utils::dev::dendrite::DendriteInstance::start(
-                switch0_port,
-                Some(nexus_address),
-                Some(mgs_address),
-            )
-            .await
-            .unwrap();
-
-        cptestctx
-            .dendrite
-            .write()
-            .unwrap()
-            .insert(SwitchSlot::Switch0, new_switch0);
     }
 
     // === migration test helpers ===
