@@ -8,3 +8,10 @@
 
 # Color the output for easier readability.
 export CARGO_TERM_COLOR=always
+
+# On illumos, store crashing process cores in the test temp dir since that's
+# uploaded by Buildomat. `-p` sets the pattern on this shell, and children of
+# the shell inherit it.
+if [[ "$(uname -s)" == "SunOS" ]]; then
+    coreadm -p '/var/tmp/omicron_tmp/core.%f.%p.core'
+fi

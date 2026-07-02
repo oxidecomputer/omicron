@@ -414,6 +414,14 @@ mod tests {
 
     const EXPECTED_PORT: u16 = 4676;
 
+    // XXX temporary SIGSEGV.
+    #[test]
+    fn null_deref_probe() {
+        let p = std::hint::black_box(std::ptr::null::<u8>());
+        let v = unsafe { std::ptr::read(p) };
+        std::hint::black_box(v);
+    }
+
     #[tokio::test]
     async fn test_mgd_in_path() {
         // With no arguments, we expect to see the default help message.
