@@ -7,6 +7,7 @@ mod helios;
 mod hubris;
 mod job;
 mod tuf;
+mod tuf_v2;
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -39,6 +40,7 @@ use slog::warn;
 use slog_term::FullFormat;
 use slog_term::TermDecorator;
 use tokio::sync::Semaphore;
+use tufaceous_artifact_v2::OsVariant;
 
 use crate::cmd::Command;
 use crate::job::Jobs;
@@ -248,11 +250,10 @@ async fn main() -> Result<()> {
     // Read pins.toml.
     let pins = omicron_pins::Pins::read_from_dir(&metadata.workspace_root)?;
 
-    let permits = Arc::new(Semaphore::new(
-        std::thread::available_parallelism()
-            .context("couldn't get available parallelism")?
-            .into(),
-    ));
+    let threads = std::thread::available_parallelism()
+        .context("couldn't get available parallelism")?
+        .into();
+    let permits = Arc::new(Semaphore::new(threads));
 
     let commit = Command::new(&args.git_bin)
         .args(["rev-parse", "HEAD"])
@@ -467,6 +468,7 @@ async fn main() -> Result<()> {
     fs::create_dir_all(&args.output_dir).await?;
 
     // DEFINE JOBS ============================================================
+    let editor_v2 = tuf_v2::SharedEditor::new(version.clone())?;
     let tempdir = camino_tempfile::tempdir()
         .context("failed to create temporary directory")?;
     let mut jobs = Jobs::new(&logger, permits.clone(), &args.output_dir);
@@ -669,13 +671,13 @@ async fn main() -> Result<()> {
             commit.chars().take(7).collect::<String>(),
             Utc::now().format("%Y-%m-%d %H:%M")
         );
-
+        let output_dir = args.output_dir.join(format!("os-{}", target));
         let mut image_cmd = Command::new("ptime")
             .arg("-m")
             .arg(args.helios_dir.join("helios-build"))
             .arg("experiment-image")
             .arg("-o") // output directory for image
-            .arg(args.output_dir.join(format!("os-{}", target)))
+            .arg(&output_dir)
             .arg("-F") // pass extra image builder features
             .arg(format!("optever={opte_version}"))
             .arg("-P") // include all files from extra proto area
@@ -749,8 +751,9 @@ async fn main() -> Result<()> {
                 .arg(format!("helios-dev=file://{p5p_path}"));
         }
 
+        let image_job_name = format!("{target}-image");
         let image_job = jobs
-            .push_command(format!("{target}-image"), image_cmd)
+            .push_command(&image_job_name, image_cmd)
             .after("helios-setup")
             .after("helios-incorp")
             .after(format!("{target}-proto"));
@@ -758,6 +761,16 @@ async fn main() -> Result<()> {
         if opte_override.is_some() {
             image_job.after(format!("{target}-opte-p5p"));
         }
+
+        let editor = editor_v2.clone();
+        jobs.push(format!("tuf-v2-{target}"), async move {
+            let os_variant = match target {
+                Target::Host => OsVariant::Host,
+                Target::Recovery => OsVariant::Recovery,
+            };
+            editor.add_os_image_dir(os_variant, output_dir).await
+        })
+        .after(image_job_name);
     }
     // Build the recovery target after we build the host target (and have
     // finished verifying its binaries). Only one of these will build at a time
@@ -781,6 +794,19 @@ async fn main() -> Result<()> {
     stamp_packages!("tuf-stamp", Target::Host, TUF_PACKAGES)
         .after("host-stamp")
         .after("recovery-stamp");
+    {
+        let editor = editor_v2.clone();
+        jobs.push("tuf-v2-zones", async move {
+            for package in TUF_PACKAGES {
+                let path = crate::WORKSPACE_DIR
+                    .join("out/versioned")
+                    .join(format!("{}.tar.gz", package));
+                editor.add_zone_image(path).await?;
+            }
+            Ok(())
+        })
+        .after("tuf-stamp");
+    }
 
     if args.verify_debug_libraries {
         // Run `cargo xtask verify-libraries`. This builds *all* binaries in
@@ -810,6 +836,7 @@ async fn main() -> Result<()> {
                 env,
                 client.clone(),
                 args.output_dir.clone(),
+                editor_v2.clone(),
             ),
         );
     }
@@ -822,11 +849,27 @@ async fn main() -> Result<()> {
             version,
             manifest,
             args.extra_manifest,
+            threads,
         ),
     )
     .after("tuf-stamp")
     .after("host-image")
     .after("recovery-image")
+    .after("hubris-staging")
+    .after("hubris-production");
+
+    jobs.push(
+        "tuf-v2-repo",
+        tuf_v2::build_tuf_repo(
+            logger.clone(),
+            args.output_dir.clone(),
+            editor_v2,
+            threads,
+        ),
+    )
+    .after("tuf-v2-host")
+    .after("tuf-v2-recovery")
+    .after("tuf-v2-zones")
     .after("hubris-staging")
     .after("hubris-production");
 
