@@ -703,9 +703,9 @@ impl SwitchPortRouteConfig {
     }
 }
 
-impl Into<external::SwitchPortRouteConfig> for SwitchPortRouteConfig {
-    fn into(self) -> external::SwitchPortRouteConfig {
-        external::SwitchPortRouteConfig {
+impl Into<networking_types::SwitchPortRouteConfig> for SwitchPortRouteConfig {
+    fn into(self) -> networking_types::SwitchPortRouteConfig {
+        networking_types::SwitchPortRouteConfig {
             port_settings_id: self.port_settings_id,
             interface_name: self.interface_name.into(),
             dst: self.dst.into(),
@@ -1026,9 +1026,11 @@ impl SwitchPortAddressConfig {
     }
 }
 
-impl Into<external::SwitchPortAddressConfig> for SwitchPortAddressConfig {
-    fn into(self) -> external::SwitchPortAddressConfig {
-        external::SwitchPortAddressConfig {
+impl Into<networking_types::SwitchPortAddressConfig>
+    for SwitchPortAddressConfig
+{
+    fn into(self) -> networking_types::SwitchPortAddressConfig {
+        networking_types::SwitchPortAddressConfig {
             port_settings_id: self.port_settings_id,
             address_lot_block_id: self.address_lot_block_id,
             address: self.address.into(),

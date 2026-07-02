@@ -29,7 +29,6 @@ use nexus_types::external_api::sled as sled_types;
 use nexus_types::inventory::SpType;
 use nexus_types::silo::silo_dns_name;
 use omicron_common::address::{Ipv6Subnet, RACK_PREFIX, get_64_subnet};
-use omicron_common::api::external::AddressLotKind;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::IdentityMetadataCreateParams;
@@ -314,7 +313,7 @@ impl super::Nexus {
             description: "initial infrastructure ip address lot".to_string(),
         };
 
-        let kind = AddressLotKind::Infra;
+        let kind = networking::AddressLotKind::Infra;
 
         let first_address = rack_network_config.infra_ip_first;
         let last_address = rack_network_config.infra_ip_last;
@@ -366,7 +365,7 @@ impl super::Nexus {
                                 bgp_config.asn
                             ),
                         },
-                        kind: AddressLotKind::Infra,
+                        kind: networking::AddressLotKind::Infra,
                         blocks: bgp_config
                             .originate
                             .iter()

@@ -1637,9 +1637,12 @@ mod tests {
     use nexus_types::fm::ereport::{EreportData, Reporter};
     use omicron_common::api::external::Generation;
     use omicron_test_utils::dev;
+    use omicron_uuid_kinds::CaseEreportUuid;
     use omicron_uuid_kinds::CollectionUuid;
+    use omicron_uuid_kinds::EreporterRestartUuid;
     use omicron_uuid_kinds::FactUuid;
     use omicron_uuid_kinds::OmicronZoneUuid;
+    use omicron_uuid_kinds::RackUuid;
     use omicron_uuid_kinds::SupportBundleUuid;
     use std::collections::BTreeMap;
     use std::collections::BTreeSet;
@@ -1852,6 +1855,7 @@ mod tests {
                 parent_sitrep_id: None,
                 next_inv_min_time_started: Utc::now(),
                 alert_generation: Generation::new(),
+                support_bundle_generation: Generation::new(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),
@@ -1904,6 +1908,7 @@ mod tests {
                 parent_sitrep_id: None,
                 next_inv_min_time_started: Utc::now(),
                 alert_generation: Generation::new(),
+                support_bundle_generation: Generation::new(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),
@@ -1924,6 +1929,7 @@ mod tests {
                 parent_sitrep_id: Some(sitrep1.id()),
                 next_inv_min_time_started: Utc::now(),
                 alert_generation: Generation::new(),
+                support_bundle_generation: Generation::new(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),
@@ -1968,6 +1974,7 @@ mod tests {
                 parent_sitrep_id: None,
                 next_inv_min_time_started: Utc::now(),
                 alert_generation: Generation::new(),
+                support_bundle_generation: Generation::new(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),
@@ -1989,6 +1996,7 @@ mod tests {
                 parent_sitrep_id: Some(nonexistent_id),
                 next_inv_min_time_started: Utc::now(),
                 alert_generation: Generation::new(),
+                support_bundle_generation: Generation::new(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),
@@ -2027,6 +2035,7 @@ mod tests {
                 parent_sitrep_id: None,
                 next_inv_min_time_started: Utc::now(),
                 alert_generation: Generation::new(),
+                support_bundle_generation: Generation::new(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),
@@ -2047,6 +2056,7 @@ mod tests {
                 parent_sitrep_id: Some(sitrep1.id()),
                 next_inv_min_time_started: Utc::now(),
                 alert_generation: Generation::new(),
+                support_bundle_generation: Generation::new(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),
@@ -2068,6 +2078,7 @@ mod tests {
                 parent_sitrep_id: Some(sitrep1.id()),
                 next_inv_min_time_started: Utc::now(),
                 alert_generation: Generation::new(),
+                support_bundle_generation: Generation::new(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),
@@ -2165,7 +2176,7 @@ mod tests {
             // Now, check that all the ereports are present in both cases.
             assert_eq!(ereports.len(), expected.ereports.len());
             for expected in &expected.ereports {
-                let ereport_id = expected.ereport.id();
+                let ereport_id = expected.ereport.id;
                 let Some(ereport) = ereports.get(&ereport_id) else {
                     panic!(
                         "assertion failed: left == right (while checking case {case_id})\n  \
@@ -2173,7 +2184,7 @@ mod tests {
                         it contains only these ereports: {:?}\n",
                         ereports
                             .iter()
-                            .map(|e| e.ereport.id().to_string())
+                            .map(|e| e.ereport.id.to_string())
                             .collect::<Vec<_>>(),
                     )
                 };
@@ -2191,8 +2202,7 @@ mod tests {
                 // This is where we go out of our way to avoid the timestamp,
                 // btw.
                 assert_eq!(
-                    expected.ereport.id(),
-                    ereport.id(),
+                    expected.ereport.id, ereport.id,
                     "while checking ereport {ereport_id} in case {case_id}",
                 );
                 assert_eq!(
@@ -2225,24 +2235,23 @@ mod tests {
         // In order to read sitreps with case ereport assignments, the
         // corresponding entries in the `ereport` table must also exist, so
         // we'll make those here first.
-        let restart_id = omicron_uuid_kinds::EreporterRestartUuid::new_v4();
+        let restart_id = EreporterRestartUuid::new_v4();
         let collector_id = OmicronZoneUuid::new_v4();
+        let rack_id = RackUuid::new_v4();
         let time_collected = Utc::now();
 
+        let ereport1_id =
+            fm::EreportId { restart_id, ena: ereport_types::Ena(2) };
         let ereport1 = EreportData {
-            id: fm::EreportId { restart_id, ena: ereport_types::Ena(2) },
-            time_collected,
-            collector_id,
             part_number: Some("930-55555".to_string()),
             serial_number: Some("BRM6900420".to_string()),
             class: Some("ereport.my_cool_ereport.wow".to_string()),
             report: serde_json::json!({"severity": "critical"}),
         };
 
+        let ereport2_id =
+            fm::EreportId { restart_id, ena: ereport_types::Ena(3) };
         let ereport2 = EreportData {
-            id: fm::EreportId { restart_id, ena: ereport_types::Ena(3) },
-            time_collected,
-            collector_id,
             part_number: Some("930-55555".to_string()),
             serial_number: Some("BRM6900420".to_string()),
             class: Some("ereport.gov.nasa.apollo".to_string()),
@@ -2260,8 +2269,13 @@ mod tests {
                 &opctx,
                 restart_id,
                 time_collected,
+                collector_id,
+                rack_id,
                 reporter,
-                vec![ereport1.clone(), ereport2.clone()],
+                vec![
+                    (ereport1_id.ena, ereport1.clone()),
+                    (ereport2_id.ena, ereport2.clone()),
+                ],
             )
             .await
             .expect("failed to insert ereports");
@@ -2272,8 +2286,14 @@ mod tests {
             let mut ereports = iddqd::IdOrdMap::new();
             ereports
                 .insert_unique(fm::case::CaseEreport {
-                    id: omicron_uuid_kinds::CaseEreportUuid::new_v4(),
-                    ereport: Arc::new(fm::Ereport::new(ereport1, reporter)),
+                    id: CaseEreportUuid::new_v4(),
+                    ereport: Arc::new(fm::Ereport::new(
+                        ereport1_id,
+                        time_collected,
+                        collector_id,
+                        ereport1,
+                        reporter,
+                    )),
                     assigned_sitrep_id: sitrep_id,
                     comment: "this has something to do with case 1".to_string(),
                 })
@@ -2386,7 +2406,13 @@ mod tests {
             ereports
                 .insert_unique(fm::case::CaseEreport {
                     id: omicron_uuid_kinds::CaseEreportUuid::new_v4(),
-                    ereport: Arc::new(fm::Ereport::new(ereport2, reporter)),
+                    ereport: Arc::new(fm::Ereport::new(
+                        ereport2_id,
+                        time_collected,
+                        collector_id,
+                        ereport2,
+                        reporter,
+                    )),
                     assigned_sitrep_id: sitrep_id,
                     comment: "this has something to do with case 2".to_string(),
                 })
@@ -2438,6 +2464,7 @@ mod tests {
                 parent_sitrep_id: None,
                 next_inv_min_time_started: Utc::now(),
                 alert_generation: Generation::new(),
+                support_bundle_generation: Generation::new(),
             },
             cases,
             ereports_by_id,
@@ -2627,6 +2654,7 @@ mod tests {
                 parent_sitrep_id: None,
                 next_inv_min_time_started: Utc::now(),
                 alert_generation: Generation::new(),
+                support_bundle_generation: Generation::new(),
             },
             cases,
             ereports_by_id: Default::default(),
@@ -2681,6 +2709,7 @@ mod tests {
                         inv_collection_id: CollectionUuid::new_v4(),
                         next_inv_min_time_started: Utc::now(),
                         alert_generation: Generation::new(),
+                        support_bundle_generation: Generation::new(),
                     },
                     cases: Default::default(),
                     ereports_by_id: Default::default(),
@@ -2838,6 +2867,7 @@ mod tests {
                 inv_collection_id: CollectionUuid::new_v4(),
                 next_inv_min_time_started: Utc::now(),
                 alert_generation: Generation::new(),
+                support_bundle_generation: Generation::new(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),
@@ -2975,6 +3005,7 @@ mod tests {
                 parent_sitrep_id: None,
                 next_inv_min_time_started: Utc::now(),
                 alert_generation: Generation::new(),
+                support_bundle_generation: Generation::new(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),
@@ -3282,6 +3313,7 @@ mod tests {
                 parent_sitrep_id: None,
                 next_inv_min_time_started: Utc::now(),
                 alert_generation: Generation::new(),
+                support_bundle_generation: Generation::new(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),
@@ -3411,6 +3443,7 @@ mod tests {
                 parent_sitrep_id: None,
                 next_inv_min_time_started: Utc::now(),
                 alert_generation: Generation::new(),
+                support_bundle_generation: Generation::new(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),
@@ -3706,6 +3739,7 @@ mod tests {
                 inv_collection_id: CollectionUuid::new_v4(),
                 next_inv_min_time_started: Utc::now(),
                 alert_generation: Generation::new(),
+                support_bundle_generation: Generation::new(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),

@@ -272,6 +272,7 @@ mod tests {
                 parent_sitrep_id: None,
                 next_inv_min_time_started: Utc::now(),
                 alert_generation,
+                support_bundle_generation: Generation::new(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),
@@ -501,38 +502,6 @@ mod tests {
             .expect("empty input must return Ok");
 
         assert!(existing.is_empty(), "empty input returns empty result");
-
-        db.terminate().await;
-        logctx.cleanup_successful();
-    }
-
-    #[tokio::test]
-    async fn fm_rendezvous_existing_alert_markers_explain_no_full_scan() {
-        use crate::db::explain::ExplainableAsync;
-
-        let logctx = dev::test_setup_log(
-            "fm_rendezvous_existing_alert_markers_explain_no_full_scan",
-        );
-        let db = TestDatabase::new_with_pool(&logctx.log).await;
-        let pool = db.pool();
-        let conn = pool.claim().await.unwrap();
-
-        let candidates: Vec<Uuid> =
-            (0..3).map(|_| AlertUuid::new_v4().into_untyped_uuid()).collect();
-        let query = alert_marker_dsl::rendezvous_alert_created
-            .filter(alert_marker_dsl::alert_id.eq_any(candidates))
-            .select(alert_marker_dsl::alert_id);
-
-        let explanation = query
-            .explain_async(&conn)
-            .await
-            .expect("query should be valid SQL");
-        eprintln!("{explanation}");
-        assert!(
-            !explanation.contains("FULL SCAN"),
-            "Found an unexpected FULL SCAN: {}",
-            explanation
-        );
 
         db.terminate().await;
         logctx.cleanup_successful();

@@ -257,8 +257,8 @@ impl<'a> Downloader<'a> {
 
         // Need to build - create temp directory
         info!(self.log, "Building {project} from source at commit {commit}");
-        let temp_dir = tempfile::tempdir()?;
-        let temp_path = Utf8PathBuf::try_from(temp_dir.path().to_path_buf())?;
+        let temp_dir = camino_tempfile::tempdir()?;
+        let temp_path = temp_dir.path().to_owned();
 
         // Clone and checkout the specific commit
         let repo_url = format!("https://github.com/oxidecomputer/{}", project);

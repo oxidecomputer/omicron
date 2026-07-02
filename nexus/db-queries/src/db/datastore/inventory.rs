@@ -954,9 +954,7 @@ impl DataStore {
                 // structures also contain their own slot. (Maybe we could use
                 // `iddqd` here instead?)
                 let phase1_hashes = collection
-                    .host_phase_1_flash_hashes
-                    .iter()
-                    .flat_map(|(_slot, by_baseboard)| by_baseboard.iter());
+                    .host_phase_1_flash_hashes.values().flat_map(|by_baseboard| by_baseboard.iter());
 
                 for (baseboard_id, phase1) in phase1_hashes {
                     let selection = nexus_db_schema::schema::hw_baseboard_id::table

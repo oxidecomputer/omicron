@@ -66,6 +66,7 @@ use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use sled_hardware_types::BaseboardId;
 use slog::Logger;
+use slog_error_chain::InlineErrorChain;
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
 use std::collections::HashSet;
@@ -1321,6 +1322,12 @@ impl DataStore {
                             );
                         } else {
                             // The query failed, return this as an error
+                            error!(
+                                &log,
+                                "sled reservation insert query failed";
+                                "sled_target" => %sled_target,
+                                "error" => InlineErrorChain::new(&e),
+                            );
                             return Err(
                                 SledReservationTransactionError::Diesel(e),
                             );
@@ -1497,6 +1504,12 @@ impl DataStore {
                                 break 'local_storage_allocation_search;
                             } else {
                                 // The query failed, return this as an error
+                                error!(
+                                    &log,
+                                    "sled reservation insert query failed";
+                                    "sled_target" => %sled_target,
+                                    "error" => InlineErrorChain::new(&e),
+                                );
                                 return Err(
                                     SledReservationTransactionError::Diesel(e),
                                 );

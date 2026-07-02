@@ -120,6 +120,7 @@ mod tests {
                 parent_sitrep_id: None,
                 next_inv_min_time_started: Utc::now(),
                 alert_generation: Generation::new(),
+                support_bundle_generation: Generation::new(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),
@@ -146,6 +147,7 @@ mod tests {
                 parent_sitrep_id: Some(sitrep1.metadata.id),
                 next_inv_min_time_started: Utc::now(),
                 alert_generation: Generation::new(),
+                support_bundle_generation: Generation::new(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),
@@ -240,6 +242,7 @@ mod tests {
                 next_inv_min_time_started: Utc::now(),
                 parent_sitrep_id,
                 alert_generation: Generation::new(),
+                support_bundle_generation: Generation::new(),
             },
             // We could populate the orphan sitreps with cases and ereports
             // here, but there's a unit test

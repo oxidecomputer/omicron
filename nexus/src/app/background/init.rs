@@ -588,6 +588,7 @@ impl BackgroundTasksInitializer {
             reconfigurator_config_watcher.clone(),
             inventory_load_watcher.clone(),
             rx_blueprint.clone(),
+            nexus_id,
         );
         let rx_planner = blueprint_planner.watcher();
         driver.register(TaskDefinition {
@@ -1118,6 +1119,7 @@ impl BackgroundTasksInitializer {
                 datastore.clone(),
                 resolver.clone(),
                 nexus_id,
+                rack_id,
                 task_fm_analysis.clone(),
                 config.sp_ereport_ingester.disable,
             )),
@@ -1180,6 +1182,7 @@ impl BackgroundTasksInitializer {
                 sitrep_watcher.clone(),
                 task_alert_dispatcher.clone(),
                 task_support_bundle_collector.clone(),
+                task_fm_sitrep_loader.clone(),
                 nexus_id,
             )),
             opctx: opctx.child(BTreeMap::new()),
@@ -1428,6 +1431,7 @@ fn init_dns(
 pub mod test {
     use crate::app::saga::SagaCompletionFuture;
     use crate::app::saga::StartSaga;
+    use camino_tempfile::Utf8TempDir;
     use dropshot::HandlerTaskMode;
     use futures::FutureExt;
     use internal_dns_types::names::ServiceName;
@@ -1445,7 +1449,6 @@ pub mod test {
     use std::sync::atomic::AtomicU64;
     use std::sync::atomic::Ordering;
     use std::time::Duration;
-    use tempfile::TempDir;
     use uuid::Uuid;
 
     /// Used by various tests of tasks that kick off sagas
@@ -1564,14 +1567,10 @@ pub mod test {
         // new service ought to do that for us.
         let log = &cptestctx.logctx.log;
         let storage_path =
-            TempDir::new().expect("Failed to create temporary directory");
+            Utf8TempDir::new().expect("Failed to create temporary directory");
         let config_store = dns_server::storage::Config {
             keep_old_generations: 3,
-            storage_path: storage_path
-                .path()
-                .to_string_lossy()
-                .into_owned()
-                .into(),
+            storage_path: storage_path.path().to_owned(),
         };
         let store = dns_server::storage::Store::new(
             log.new(o!("component" => "DnsStore")),

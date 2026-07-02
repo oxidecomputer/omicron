@@ -161,7 +161,7 @@ impl IdOrdItem for CaseEreport {
 
 impl CaseEreport {
     pub fn ereport_id(&self) -> &EreportId {
-        self.ereport.id()
+        &self.ereport.id
     }
 }
 
@@ -359,7 +359,7 @@ impl fmt::Display for DisplayCase<'_> {
                 let pn = ereport.part_number.as_deref().unwrap_or("<UNKNOWN>");
                 let sn =
                     ereport.serial_number.as_deref().unwrap_or("<UNKNOWN>");
-                writeln!(f, "{BULLET:>indent$}ereport {}", ereport.id())?;
+                writeln!(f, "{BULLET:>indent$}ereport {}", ereport.id)?;
                 writeln!(
                     f,
                     "{:>indent$}{CLASS:<WIDTH$} {}",
@@ -537,10 +537,10 @@ mod tests {
             )
             .unwrap(),
             ereport: Arc::new(Ereport {
+                id: EreportId { restart_id, ena: Ena::from(2u64) },
+                time_collected,
+                collector_id,
                 data: crate::fm::ereport::EreportData {
-                    id: EreportId { restart_id, ena: Ena::from(2u64) },
-                    time_collected,
-                    collector_id,
                     serial_number: Some("BRM6900420".to_string()),
                     part_number: Some("913-0000037".to_string()),
                     class: Some("hw.pwr.remove.psu".to_string()),
@@ -563,10 +563,10 @@ mod tests {
             )
             .unwrap(),
             ereport: Arc::new(Ereport {
+                id: EreportId { restart_id, ena: Ena::from(3u64) },
+                time_collected,
+                collector_id,
                 data: crate::fm::ereport::EreportData {
-                    id: EreportId { restart_id, ena: Ena::from(3u64) },
-                    time_collected,
-                    collector_id,
                     serial_number: Some("BRM6900420".to_string()),
                     part_number: Some("913-0000037".to_string()),
                     class: Some("hw.pwr.insert.psu".to_string()),

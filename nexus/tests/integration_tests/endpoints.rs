@@ -51,7 +51,6 @@ use nexus_types::external_api::timeseries;
 use nexus_types::external_api::update;
 use nexus_types::external_api::vpc;
 use omicron_common::address::{IpRange, IpVersion, Ipv4Range};
-use omicron_common::api::external::AddressLotKind;
 use omicron_common::api::external::AllowedSourceIps;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::IdentityMetadataCreateParams;
@@ -989,7 +988,7 @@ pub static DEMO_ADDRESS_LOT_CREATE: LazyLock<networking::AddressLotCreate> =
             name: "parkinglot".parse().unwrap(),
             description: "an address parking lot".into(),
         },
-        kind: AddressLotKind::Infra,
+        kind: networking::AddressLotKind::Infra,
         blocks: vec![networking::AddressLotBlockCreate {
             first_address: "203.0.113.10".parse().unwrap(),
             last_address: "203.0.113.20".parse().unwrap(),

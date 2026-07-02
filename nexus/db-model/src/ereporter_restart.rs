@@ -11,6 +11,8 @@ use chrono::Utc;
 use nexus_db_schema::schema::ereporter_restart;
 use omicron_uuid_kinds::EreporterRestartKind;
 use omicron_uuid_kinds::EreporterRestartUuid;
+use omicron_uuid_kinds::RackKind;
+use omicron_uuid_kinds::RackUuid;
 
 #[derive(Clone, Debug, Insertable, Queryable, Selectable)]
 #[diesel(table_name = ereporter_restart)]
@@ -20,6 +22,7 @@ pub struct EreporterRestart {
     pub reporter: EreporterType,
     pub slot_type: SpType,
     pub slot: Option<SpMgsSlot>,
+    pub rack_id: DbTypedUuid<RackKind>,
 }
 
 impl EreporterRestart {
@@ -29,6 +32,10 @@ impl EreporterRestart {
 
     pub fn id(&self) -> &EreporterRestartUuid {
         &self.id.0
+    }
+
+    pub fn rack_id(&self) -> &RackUuid {
+        &self.rack_id.0
     }
 }
 
