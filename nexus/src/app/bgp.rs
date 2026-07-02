@@ -14,6 +14,9 @@ use omicron_common::api::external::{
     self, CreateResult, DeleteResult, ListResultVec, LookupResult, NameOrId,
     UpdateResult,
 };
+use omicron_uuid_kinds::BgpAnnounceSetUuid;
+use omicron_uuid_kinds::BgpConfigUuid;
+use omicron_uuid_kinds::GenericUuid;
 use slog_error_chain::InlineErrorChain;
 
 impl super::Nexus {
@@ -51,9 +54,8 @@ impl super::Nexus {
         name_or_id: NameOrId,
     ) -> LookupResult<lookup::BgpConfig<'a>> {
         match name_or_id {
-            NameOrId::Id(id) => {
-                Ok(LookupPath::new(opctx, &self.db_datastore).bgp_config_id(id))
-            }
+            NameOrId::Id(id) => Ok(LookupPath::new(opctx, &self.db_datastore)
+                .bgp_config_id(BgpConfigUuid::from_untyped_uuid(id))),
             NameOrId::Name(name) => {
                 Ok(LookupPath::new(opctx, &self.db_datastore)
                     .bgp_config_name_owned(name.into()))
@@ -68,7 +70,9 @@ impl super::Nexus {
     ) -> LookupResult<lookup::BgpAnnounceSet<'a>> {
         match name_or_id {
             NameOrId::Id(id) => Ok(LookupPath::new(opctx, &self.db_datastore)
-                .bgp_announce_set_id(id)),
+                .bgp_announce_set_id(BgpAnnounceSetUuid::from_untyped_uuid(
+                    id,
+                ))),
             NameOrId::Name(name) => {
                 Ok(LookupPath::new(opctx, &self.db_datastore)
                     .bgp_announce_set_name_owned(name.into()))
@@ -92,17 +96,16 @@ impl super::Nexus {
         let (.., authz_bgp_announce_set) = self
             .bgp_announce_set_lookup(
                 opctx,
-                update
-                    .bgp_announce_set_id
-                    .clone()
-                    .unwrap_or(NameOrId::Id(db_bgp_config.bgp_announce_set_id)),
+                update.bgp_announce_set_id.clone().unwrap_or(NameOrId::Id(
+                    db_bgp_config.bgp_announce_set_id.into_untyped_uuid(),
+                )),
             )?
             .lookup_for(authz::Action::Read)
             .await?;
 
         let update = nexus_db_model::BgpConfigUpdate::new(
             update,
-            authz_bgp_announce_set.id(),
+            authz_bgp_announce_set.id().into_untyped_uuid(),
         );
 
         let result = self

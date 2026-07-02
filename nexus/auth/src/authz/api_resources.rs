@@ -1540,7 +1540,7 @@ authz_resource! {
 authz_resource! {
     name = "BgpConfig",
     parent = "Fleet",
-    primary_key = Uuid,
+    primary_key = { uuid_kind = BgpConfigKind },
     roles_allowed = false,
     polar_snippet = FleetChild,
 }
@@ -1548,7 +1548,7 @@ authz_resource! {
 authz_resource! {
     name = "BgpAnnounceSet",
     parent = "Fleet",
-    primary_key = Uuid,
+    primary_key = { uuid_kind = BgpAnnounceSetKind },
     roles_allowed = false,
     polar_snippet = FleetChild,
 }

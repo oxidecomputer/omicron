@@ -241,7 +241,7 @@ impl DataStore {
 
         diesel::update(dsl::bgp_config)
             .filter(dsl::time_deleted.is_null())
-            .filter(dsl::id.eq(authz_bgp_config.id()))
+            .filter(dsl::id.eq(to_db_typed_uuid(authz_bgp_config.id())))
             .set(update)
             .returning(BgpConfig::as_returning())
             .get_result_async(&*self.pool_connection_authorized(opctx).await?)
@@ -1173,20 +1173,20 @@ mod tests {
             .id;
 
         let (.., authz_bgp_config) = LookupPath::new(&opctx, datastore)
-            .bgp_config_id(config_id)
+            .bgp_config_id(config_id.into())
             .lookup_for(authz::Action::Modify)
             .await
             .expect("lookup bgp config");
 
         let (.., authz_announce_set) = LookupPath::new(&opctx, datastore)
-            .bgp_announce_set_id(new_announce_id)
+            .bgp_announce_set_id(new_announce_id.into())
             .lookup_for(authz::Action::Read)
             .await
             .expect("lookup bgp announce set");
 
         let update = nexus_db_model::BgpConfigUpdate::new(
             update,
-            authz_announce_set.id(),
+            authz_announce_set.id().into_untyped_uuid(),
         );
 
         // Update the BGP config
@@ -1197,7 +1197,10 @@ mod tests {
 
         // Verify the BGP config was updated
         let bgp_config = datastore
-            .bgp_config_get(&opctx, &NameOrId::Id(config_id))
+            .bgp_config_get(
+                &opctx,
+                &NameOrId::Id(config_id.into_untyped_uuid()),
+            )
             .await
             .expect("get bgp config");
 

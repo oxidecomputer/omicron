@@ -185,7 +185,7 @@ pub async fn make_resources(
     builder.new_resource(authz::BgpConfig::new(
         authz::FLEET,
         bgp_config_id,
-        LookupType::ById(bgp_config_id),
+        LookupType::ById(bgp_config_id.into_untyped_uuid()),
     ));
 
     let bgp_announce_set_id =
@@ -193,7 +193,7 @@ pub async fn make_resources(
     builder.new_resource(authz::BgpAnnounceSet::new(
         authz::FLEET,
         bgp_announce_set_id,
-        LookupType::ById(bgp_announce_set_id),
+        LookupType::ById(bgp_announce_set_id.into_untyped_uuid()),
     ));
 
     let loopback_address_id =

@@ -335,7 +335,7 @@ impl<'a> LookupPath<'a> {
         AddressLot::OwnedName(Root { lookup_root: self }, name)
     }
 
-    pub fn bgp_config_id(self, id: Uuid) -> BgpConfig<'a> {
+    pub fn bgp_config_id(self, id: BgpConfigUuid) -> BgpConfig<'a> {
         BgpConfig::PrimaryKey(Root { lookup_root: self }, id)
     }
 
@@ -343,7 +343,10 @@ impl<'a> LookupPath<'a> {
         BgpConfig::OwnedName(Root { lookup_root: self }, name)
     }
 
-    pub fn bgp_announce_set_id(self, id: Uuid) -> BgpAnnounceSet<'a> {
+    pub fn bgp_announce_set_id(
+        self,
+        id: BgpAnnounceSetUuid,
+    ) -> BgpAnnounceSet<'a> {
         BgpAnnounceSet::PrimaryKey(Root { lookup_root: self }, id)
     }
 
@@ -893,7 +896,7 @@ lookup_resource! {
     ancestors = [],
     lookup_by_name = true,
     soft_deletes = true,
-    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
+    primary_key_columns = [ { column_name = "id", uuid_kind = BgpConfigKind} ]
 }
 
 lookup_resource! {
@@ -901,7 +904,7 @@ lookup_resource! {
     ancestors = [],
     lookup_by_name = true,
     soft_deletes = true,
-    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
+    primary_key_columns = [ { column_name = "id", uuid_kind = BgpAnnounceSetKind } ]
 }
 
 lookup_resource! {
