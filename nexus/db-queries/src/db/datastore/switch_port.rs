@@ -34,6 +34,7 @@ use nexus_db_model::{
     DbSwitchInterfaceKind, DbSwitchSlot, INFRA_LOT,
     RouterPeerTypeDbRepresentation, SqlU16, SwitchPortBgpPeerConfigAllowExport,
     SwitchPortBgpPeerConfigAllowImport, SwitchPortBgpPeerConfigCommunity,
+    to_db_typed_uuid,
 };
 use nexus_types::external_api::networking;
 use nexus_types::identity::Resource;
@@ -42,6 +43,10 @@ use omicron_common::api::external::{
     self, CreateResult, DataPageParams, DeleteResult, Error, ListResultVec,
     LookupResult, NameOrId, ResourceType, UpdateResult,
 };
+use omicron_uuid_kinds::BgpAnnounceSetUuid;
+use omicron_uuid_kinds::BgpConfigUuid;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::RackUuid;
 use ref_cast::RefCast;
 use serde::{Deserialize, Serialize};
 use sled_agent_types::early_networking::ImportExportPolicy;
@@ -65,7 +70,7 @@ use uuid::Uuid;
 #[derive(Clone, Debug)]
 pub struct BgpPeerFromDb {
     port_settings_id: Uuid,
-    bgp_config_id: Uuid,
+    bgp_config_id: BgpConfigUuid,
     interface_name: external::Name,
     inner: networking::BgpPeer,
 }
@@ -81,7 +86,7 @@ impl BgpPeerFromDb {
         self.port_settings_id
     }
 
-    pub fn bgp_config_id(&self) -> Uuid {
+    pub fn bgp_config_id(&self) -> BgpConfigUuid {
         self.bgp_config_id
     }
 
@@ -123,10 +128,10 @@ impl BgpPeerFromDbBuilder<'_> {
 
         Ok(BgpPeerFromDb {
             port_settings_id: p.port_settings_id,
-            bgp_config_id: p.bgp_config_id,
+            bgp_config_id: p.bgp_config_id(),
             interface_name: p.interface_name.clone().into(),
             inner: networking::BgpPeer {
-                bgp_config: p.bgp_config_id.into(),
+                bgp_config: p.bgp_config_id().into_untyped_uuid().into(),
                 addr,
                 hold_time: p.hold_time.into(),
                 idle_hold_time: p.idle_hold_time.into(),
@@ -309,10 +314,9 @@ pub struct BgpConfigWithAnnouncements {
 }
 
 impl IdHashItem for BgpConfigWithAnnouncements {
-    // TODO: use newtype-uuid for the UUID
-    type Key<'a> = Uuid;
+    type Key<'a> = BgpConfigUuid;
     fn key(&self) -> Self::Key<'_> {
-        self.config.identity.id
+        self.config.id()
     }
     id_upcast!();
 }
@@ -600,7 +604,7 @@ impl DataStore {
                     // A cache of announcements keyed by announce set ID, to
                     // avoid redundant reads from the database.
                     let mut announce_cache: HashMap<
-                        Uuid,
+                        BgpAnnounceSetUuid,
                         Vec<BgpAnnouncement>,
                     > = HashMap::new();
 
@@ -624,12 +628,14 @@ impl DataStore {
                                 continue;
                             };
                             let config = bgp_config_dsl::bgp_config
-                                .filter(bgp_config_dsl::id.eq(id))
+                                .filter(
+                                    bgp_config_dsl::id.eq(to_db_typed_uuid(id)),
+                                )
                                 .select(BgpConfig::as_select())
                                 .limit(1)
                                 .first_async::<BgpConfig>(&conn)
                                 .await?;
-                            let set_id = config.bgp_announce_set_id;
+                            let set_id = config.bgp_announce_set_id();
                             let announcements =
                                 match announce_cache.entry(set_id) {
                                     hash_map::Entry::Vacant(set_entry) => {
@@ -709,7 +715,7 @@ impl DataStore {
     pub async fn switch_port_create(
         &self,
         opctx: &OpContext,
-        rack_id: Uuid,
+        rack_id: RackUuid,
         switch_slot: SwitchSlot,
         port: Name,
     ) -> CreateResult<SwitchPort> {
@@ -733,7 +739,7 @@ impl DataStore {
                     use nexus_db_schema::schema::rack;
                     use nexus_db_schema::schema::rack::dsl as rack_dsl;
                     rack_dsl::rack
-                        .filter(rack::id.eq(rack_id))
+                        .filter(rack::id.eq(to_db_typed_uuid(rack_id)))
                         .select(rack::id)
                         .limit(1)
                         .first_async::<Uuid>(&conn)
@@ -1059,7 +1065,7 @@ impl DataStore {
     pub async fn switch_port_get_id(
         &self,
         opctx: &OpContext,
-        rack_id: Uuid,
+        rack_id: RackUuid,
         switch_slot: SwitchSlot,
         port_name: Name,
     ) -> LookupResult<Uuid> {
@@ -1069,7 +1075,7 @@ impl DataStore {
         let conn = self.pool_connection_authorized(opctx).await?;
         let switch_slot = DbSwitchSlot::from(switch_slot);
         let id: Uuid = switch_port_dsl::switch_port
-            .filter(switch_port::rack_id.eq(rack_id))
+            .filter(switch_port::rack_id.eq(to_db_typed_uuid(rack_id)))
             .filter(switch_port::switch_slot.eq(switch_slot))
             .filter(switch_port::port_name.eq(port_name.to_string()))
             .select(switch_port::id)
@@ -1255,11 +1261,11 @@ async fn load_all_bfd_sessions(
 /// Load every announcement belonging to an announce set on an existing connection.
 async fn load_announce_set(
     conn: &Connection<DTraceConnection<PgConnection>>,
-    set_id: Uuid,
+    set_id: BgpAnnounceSetUuid,
 ) -> Result<Vec<BgpAnnouncement>, diesel::result::Error> {
     use nexus_db_schema::schema::bgp_announcement::dsl;
     dsl::bgp_announcement
-        .filter(dsl::announce_set_id.eq(set_id))
+        .filter(dsl::announce_set_id.eq(to_db_typed_uuid(set_id)))
         .select(BgpAnnouncement::as_select())
         .load_async::<BgpAnnouncement>(conn)
         .await
@@ -1867,7 +1873,7 @@ async fn do_switch_port_settings_create(
 
             bgp_peer_config.push(SwitchPortBgpPeerConfig::new(
                 psid,
-                bgp_config_id,
+                BgpConfigUuid::from_untyped_uuid(bgp_config_id),
                 peer_config.link_name.clone().into(),
                 p,
             ));
@@ -2311,6 +2317,7 @@ mod test {
         IdentityMetadataCreateParams, Name, NameOrId,
     };
     use omicron_test_utils::dev;
+    use omicron_uuid_kinds::GenericUuid;
     use sled_agent_types::early_networking::BfdMode;
     use sled_agent_types::early_networking::ImportExportPolicy;
     use sled_agent_types::early_networking::RouterLifetimeConfig;
@@ -2318,7 +2325,6 @@ mod test {
     use sled_agent_types::early_networking::SwitchSlot;
     use std::net::IpAddr;
     use std::{collections::HashMap, str::FromStr};
-    use uuid::Uuid;
 
     #[tokio::test]
     async fn test_bgp_boundary_switches() {
@@ -2326,8 +2332,7 @@ mod test {
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
-        let rack_id: Uuid =
-            nexus_test_utils::RACK_UUID.parse().expect("parse uuid");
+        let rack_id = nexus_test_utils::RACK_UUID;
         let switch0 = SwitchSlot::Switch0;
         let qsfp0: Name = "qsfp0".parse().expect("parse qsfp0");
 
@@ -2635,13 +2640,18 @@ mod test {
 
                 match peer.bgp_config {
                     NameOrId::Id(id) => {
-                        assert_eq!(db_peer.bgp_config_id, id);
+                        assert_eq!(
+                            db_peer.bgp_config_id.into_untyped_uuid(),
+                            id
+                        );
                     }
                     NameOrId::Name(name) => {
                         let db_bgp_config = datastore
                             .bgp_config_get(
                                 opctx,
-                                &NameOrId::Id(db_peer.bgp_config_id),
+                                &NameOrId::Id(
+                                    db_peer.bgp_config_id.into_untyped_uuid(),
+                                ),
                             )
                             .await
                             .expect("bgp config should be present in db");
@@ -2657,7 +2667,8 @@ mod test {
                 // `peer.bgp_config` to an ID (potentially replacing a Name) so
                 // we can compare the rest of the struct at once, since
                 // `db_peer.inner.bgp_config` is always populated with an ID.
-                peer.bgp_config = NameOrId::Id(db_peer.bgp_config_id);
+                peer.bgp_config =
+                    NameOrId::Id(db_peer.bgp_config_id.into_untyped_uuid());
 
                 // TODO-correctness `ImportExportPolicy::Allow(_)` should
                 // probably use `BTreeSet<_>` instead of `Vec<_>`; for now, sort
@@ -2702,8 +2713,7 @@ mod test {
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
-        let rack_id: Uuid =
-            nexus_test_utils::RACK_UUID.parse().expect("parse uuid");
+        let rack_id = nexus_test_utils::RACK_UUID;
         let switch0 = SwitchSlot::Switch0;
         let qsfp0: Name = "qsfp0".parse().expect("parse qsfp0");
 
@@ -2873,8 +2883,7 @@ mod test {
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
-        let rack_id: Uuid =
-            nexus_test_utils::RACK_UUID.parse().expect("parse uuid");
+        let rack_id = nexus_test_utils::RACK_UUID;
 
         datastore
             .switch_port_create(

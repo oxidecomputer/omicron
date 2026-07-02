@@ -16,6 +16,7 @@ use omicron_common::api::external::Error;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::UpdateResult;
+use omicron_uuid_kinds::RackUuid;
 use sled_agent_types::early_networking::SwitchSlot;
 use slog_error_chain::InlineErrorChain;
 use uuid::Uuid;
@@ -26,7 +27,7 @@ impl super::Nexus {
     pub(crate) async fn lldp_config_get(
         &self,
         opctx: &OpContext,
-        rack_id: Uuid,
+        rack_id: RackUuid,
         switch_slot: SwitchSlot,
         port: Name,
     ) -> LookupResult<LldpLinkConfig> {
@@ -42,7 +43,7 @@ impl super::Nexus {
     pub async fn lldp_config_update(
         &self,
         opctx: &OpContext,
-        rack_id: Uuid,
+        rack_id: RackUuid,
         switch_slot: SwitchSlot,
         port: Name,
         config: LldpLinkConfig,
@@ -65,7 +66,7 @@ impl super::Nexus {
         opctx: &OpContext,
         previous: &Option<Uuid>,
         limit: u32,
-        rack_id: Uuid,
+        rack_id: RackUuid,
         switch_slot: SwitchSlot,
         port: &Name,
     ) -> Result<Vec<LldpNeighbor>, Error> {

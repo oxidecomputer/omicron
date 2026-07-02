@@ -44,6 +44,7 @@ use omicron_common::update::ArtifactId;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
 use omicron_uuid_kinds::PropolisUuid;
+use omicron_uuid_kinds::RackUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::TufRepoUuid;
 use omicron_uuid_kinds::VolumeUuid;
@@ -156,7 +157,7 @@ pub struct SledUpdateBuilder {
     sled_id: SledUuid,
     addr: SocketAddrV6,
     repo_depot_port: u16,
-    rack_id: Uuid,
+    rack_id: RackUuid,
     sled_hardware: SledSystemHardwareBuilder,
 }
 
@@ -166,7 +167,7 @@ impl Default for SledUpdateBuilder {
             sled_id: SledUuid::new_v4(),
             addr: SocketAddrV6::new(Ipv6Addr::LOCALHOST, 0, 0, 0),
             repo_depot_port: 0,
-            rack_id: Uuid::new_v4(),
+            rack_id: RackUuid::new_v4(),
             sled_hardware: SledSystemHardwareBuilder::default(),
         }
     }
@@ -192,7 +193,7 @@ impl SledUpdateBuilder {
         self
     }
 
-    pub fn rack_id(&mut self, rack_id: Uuid) -> &mut Self {
+    pub fn rack_id(&mut self, rack_id: RackUuid) -> &mut Self {
         self.rack_id = rack_id;
         self
     }

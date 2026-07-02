@@ -29,6 +29,7 @@ use sled_agent_types::early_networking::SwitchSlot;
 use sled_agent_types::early_networking::TxEqConfig;
 use sled_agent_types::early_networking::UplinkAddress;
 use sled_agent_types::early_networking::UplinkAddressConfig;
+use sled_agent_types::early_networking::UplinkPorts;
 use std::collections::BTreeMap;
 use std::fmt;
 use std::net::IpAddr;
@@ -127,6 +128,9 @@ pub enum Problem {
         port: String,
         error: InvalidIpAddrError,
     },
+    /// The rack ended up with no usable uplink ports, so the config would be
+    /// empty. A rack with no uplinks can't reach external networks.
+    NoUplinkPorts,
 }
 
 impl fmt::Display for Problem {
@@ -150,6 +154,13 @@ impl fmt::Display for Problem {
                 "port {port} on switch {switch:?} has a malformed uplink \
                  address: {error}",
             ),
+            Problem::NoUplinkPorts => {
+                write!(
+                    f,
+                    "the rack has no usable uplink ports (possibly due to \
+                     other errors, if reported above)"
+                )
+            }
         }
     }
 }
@@ -363,16 +374,30 @@ pub fn build_rack_network_config(
         ports.push(port_config);
     }
 
+    // A rack with no uplink ports can't reach external networks; refuse to
+    // build an empty config. The `UplinkPorts` newtype makes that invalid state
+    // unrepresentable downstream (omicron#10640).
+    let ports = match UplinkPorts::new(ports) {
+        Ok(ports) => Some(ports),
+        Err(_) => {
+            problems.push(Problem::NoUplinkPorts);
+            None
+        }
+    };
+
     if !problems.is_empty() {
         return Err(IncompleteBootstoreConfig { problems });
     }
 
     Ok(RackNetworkConfig {
+        // `subnet` and `ports` are `Some` whenever there are no problems: a
+        // missing/non-IPv6 subnet or an empty port list each push a problem
+        // above, which we just returned on.
         rack_subnet: subnet
             .expect("rack subnet is set when there are no problems"),
         infra_ip_first,
         infra_ip_last,
-        ports,
+        ports: ports.expect("ports is set when there are no problems"),
         bgp,
         bfd,
     })
@@ -490,10 +515,14 @@ mod tests {
         .unwrap_err();
         assert_eq!(
             err.problems,
-            vec![Problem::MissingBgpConfigForSwitch {
-                switch: SwitchSlot::Switch0,
-                port: "qsfp0".to_string(),
-            }],
+            vec![
+                Problem::MissingBgpConfigForSwitch {
+                    switch: SwitchSlot::Switch0,
+                    port: "qsfp0".to_string(),
+                },
+                // Skipping the only port leaves the rack with no uplinks.
+                Problem::NoUplinkPorts,
+            ],
         );
     }
 
@@ -504,7 +533,11 @@ mod tests {
             ..input_with(BTreeMap::new(), vec![])
         };
         let err = build_rack_network_config(input).unwrap_err();
-        assert_eq!(err.problems, vec![Problem::RackSubnetMissing]);
+        // No subnet and (incidentally) no ports: both are reported.
+        assert_eq!(
+            err.problems,
+            vec![Problem::RackSubnetMissing, Problem::NoUplinkPorts],
+        );
     }
 
     #[test]
@@ -517,8 +550,21 @@ mod tests {
         let err = build_rack_network_config(input).unwrap_err();
         assert_eq!(
             err.problems,
-            vec![Problem::RackSubnetNotIpv6 { subnet: v4 }],
+            vec![
+                Problem::RackSubnetNotIpv6 { subnet: v4 },
+                Problem::NoUplinkPorts,
+            ],
         );
+    }
+
+    #[test]
+    fn empty_port_list_is_reported() {
+        // A valid subnet but no ports at all: the rack has no uplinks, so the
+        // builder must bail rather than emit an empty config.
+        let err =
+            build_rack_network_config(input_with(BTreeMap::new(), vec![]))
+                .unwrap_err();
+        assert_eq!(err.problems, vec![Problem::NoUplinkPorts]);
     }
 
     #[test]
@@ -541,6 +587,7 @@ mod tests {
                     switch: SwitchSlot::Switch0,
                     port: "qsfp0".to_string(),
                 },
+                Problem::NoUplinkPorts,
             ],
         );
     }
@@ -606,11 +653,15 @@ mod tests {
                 .unwrap_err();
         assert_eq!(
             err.problems,
-            vec![Problem::MalformedUplinkAddress {
-                switch: SwitchSlot::Switch0,
-                port: "qsfp0".to_string(),
-                error: InvalidIpAddrError::LoopbackAddress,
-            }],
+            vec![
+                Problem::MalformedUplinkAddress {
+                    switch: SwitchSlot::Switch0,
+                    port: "qsfp0".to_string(),
+                    error: InvalidIpAddrError::LoopbackAddress,
+                },
+                // Skipping the only port leaves the rack with no uplinks.
+                Problem::NoUplinkPorts,
+            ],
         );
     }
 
@@ -630,9 +681,9 @@ mod tests {
             build_rack_network_config(input_with(BTreeMap::new(), vec![port]))
                 .expect("built network config successfully");
         assert_eq!(config.ports.len(), 1);
-        assert_eq!(config.ports[0].addresses.len(), 1);
+        assert_eq!(config.ports.first().addresses.len(), 1);
         assert_eq!(
-            config.ports[0].addresses[0].address,
+            config.ports.first().addresses[0].address,
             UplinkAddress::AddrConf,
         );
     }
@@ -650,10 +701,13 @@ mod tests {
             .unwrap_err();
         assert_eq!(
             err.problems,
-            vec![Problem::IllegalMaxPaths {
-                switch: SwitchSlot::Switch0,
-                value: 0,
-            }],
+            vec![
+                Problem::IllegalMaxPaths {
+                    switch: SwitchSlot::Switch0,
+                    value: 0,
+                },
+                Problem::NoUplinkPorts,
+            ],
         );
     }
 
@@ -713,7 +767,12 @@ mod tests {
 
         let result = build_rack_network_config(input_with(bgp_configs, ports));
 
-        if all_peered_have_bgp {
+        if input_names.is_empty() {
+            // No ports at all -> a NoUplinkPorts bail, never an empty
+            // (silently truncated) config.
+            let err = result.expect_err("an empty port list must force a bail");
+            prop_assert_eq!(err.problems, vec![Problem::NoUplinkPorts]);
+        } else if all_peered_have_bgp {
             let config = result.expect(
                 "every peered port's switch has a bgp config, so it builds",
             );
@@ -728,7 +787,7 @@ mod tests {
             // This mirrors the implementation, which generally isn't great in a
             // PBT, but it's hard to describe this in a way that doesn't weaken
             // the test.
-            let expected: Vec<Problem> = ports_spec
+            let mut expected: Vec<Problem> = ports_spec
                 .iter()
                 .enumerate()
                 .filter_map(|(i, &(switch, has_peer))| {
@@ -740,6 +799,15 @@ mod tests {
                     })
                 })
                 .collect();
+            // A port survives unless it's peered with no switch bgp config. If
+            // none survive, the built list is empty, so the builder appends
+            // NoUplinkPorts after the per-port problems.
+            let any_port_survives = ports_spec
+                .iter()
+                .any(|&(switch, has_peer)| !has_peer || switch_has_bgp(switch));
+            if !any_port_survives {
+                expected.push(Problem::NoUplinkPorts);
+            }
             prop_assert_eq!(err.problems, expected);
         }
     }

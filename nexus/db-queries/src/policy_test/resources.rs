@@ -254,13 +254,15 @@ async fn make_services(builder: &mut ResourceBuilder<'_>) {
 
 /// Helper for `make_resources()` that constructs a small Rack hierarchy
 fn make_rack(builder: &mut ResourceBuilder<'_>) {
-    let rack_id = "c037e882-8b6d-c8b5-bef4-97e848eb0a50".parse().unwrap();
-    let rack =
-        authz::Rack::new(authz::FLEET, rack_id, LookupType::ById(rack_id));
+    let rack_id: RackUuid =
+        "c037e882-8b6d-c8b5-bef4-97e848eb0a50".parse().unwrap();
+    let rack = authz::Rack::new(
+        authz::FLEET,
+        rack_id,
+        LookupType::ById(rack_id.into_untyped_uuid()),
+    );
     builder.new_resource(rack.clone());
-    builder.new_resource(authz::TrustQuorumConfig::for_rack_id(
-        RackUuid::from_untyped_uuid(rack_id),
-    ));
+    builder.new_resource(authz::TrustQuorumConfig::for_rack_id(rack_id));
 }
 
 /// Helper for `make_resources()` that constructs a small Silo hierarchy
