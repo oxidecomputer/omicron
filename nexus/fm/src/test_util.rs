@@ -80,7 +80,7 @@ pub struct SimReporters {
     log: slog::Logger,
     parent: StdRng,
     collector_id_rng: TypedUuidRng<OmicronZoneKind>,
-    sim_restarts: IdOrdMap<nexus_db_model::EreporterRestart>,
+    sim_restarts: IdOrdMap<Arc<nexus_db_model::EreporterRestart>>,
     rack_id: RackUuid,
 }
 
@@ -103,7 +103,7 @@ impl SimReporters {
 
     pub fn ereporter_restarts(
         &self,
-    ) -> &IdOrdMap<nexus_db_model::EreporterRestart> {
+    ) -> &IdOrdMap<Arc<nexus_db_model::EreporterRestart>> {
         &self.sim_restarts
     }
 
@@ -131,14 +131,14 @@ impl SimReporters {
             ),
         };
         self.sim_restarts
-            .insert_unique(nexus_db_model::EreporterRestart {
+            .insert_unique(Arc::new(nexus_db_model::EreporterRestart {
                 id: restart_id.into(),
                 time_first_seen,
                 reporter: reporter_type,
                 slot_type,
                 slot,
                 rack_id: self.rack_id.into(),
-            })
+            }))
             .expect("generated a colliding UUID!");
         SimReporter {
             reporter,
