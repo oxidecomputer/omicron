@@ -2,12 +2,11 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use crate::CaseBuilder;
 use crate::SitrepBuilder;
 use crate::ereport;
 use crate::ereport::Ereport;
 use anyhow::Context;
-use chrono::DateTime;
-use chrono::Utc;
 use iddqd::{IdHashItem, IdHashMap, IdOrdItem, IdOrdMap, id_upcast};
 use nexus_db_model::EreporterRestart;
 use nexus_types::alert::power_shelf as alert_types;
@@ -183,9 +182,6 @@ pub fn analyze(builder: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
                     .entry(location)
                     .or_insert_with(HashSet::new)
                     .insert(c.id);
-                // Track the freshly-opened case in the by-id index too, so
-                // the loop below can reconstruct its ereport sequence
-                // alongside the cases carried forward from the parent sitrep.
                 cases_by_id
                     .insert_unique(PscCase::new(c.id))
                     .expect("a freshly-opened case has a unique id");
@@ -210,111 +206,56 @@ pub fn analyze(builder: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
             .case_mut(&psc_case.case_id)
             .expect("every case in the by-id index is open in the builder");
 
-        let mut latest: Option<(Arc<EreporterRestart>, PsuSet)> = None;
+        let mut latest: Option<PscState> = None;
         for restart in psc_case.restarts.iter() {
-            // replay all the ereports in this restart of the PSC, tracking
-            // changes in PSU presence and happiness
             // TODO(eliza): the initial state for this scan should begin with
             // the PSC inventory request for the SP after the restart was
             // detected...
-            // TODO(eliza): also track happiness
-            let mut psus_absent = PsuSet::default();
-            for ereport in &restart.ereports {
-                let psu = ereport.location;
-                // TODO(eliza): some kind of debouncing if two ereports of the
-                // same type are seen close together.
-                let alert_result = match ereport.kind {
-                    PsuEreportKind::Insert => {
-                        // hello!
-                        psus_absent.remove(psu);
-                        // TODO(eliza): once we have a model of what rectifiers
-                        // we believed to be present, rather than just which are
-                        // known to be *absent*, we should try to reason about
-                        // whether the *same* PSU was already believed to be
-                        // there when deciding whether to alert?
-                        if ereport.provenance == Provenance::ThisSitrep {
-                            case_builder.request_alert(
-                                &alert_types::PsuInsertedV0 {
-                                    psu: ereport.alert_psu(),
-                                    power_shelf: ereport.alert_power_shelf(&log),
-                                    time: ereport.ereport.time_collected,
-                                },
-                                format_args!(
-                                    "requested for ereport {}\nereport class: {}\n\
-                                     location: {psu}",
-                                    ereport.id(),
-                                    ereport.class(),
-                                ),
-                            )
-                        } else {
-                            Ok(())
-                        }
-                    }
-                    PsuEreportKind::Remove => {
-                        // goodbye!
-                        psus_absent.insert(psu);
-                        if ereport.provenance == Provenance::ThisSitrep {
-                            case_builder.request_alert(
-                                &alert_types::PsuRemovedV0 {
-                                    psu: ereport.alert_psu(),
-                                    power_shelf: ereport.alert_power_shelf(&log),
-                                    time: ereport.ereport.time_collected,
-                                },
-                                format_args!(
-                                    "requested for ereport {}\nereport class: {}\n\
-                                     location: {psu}",
-                                    ereport.id(),
-                                    ereport.class(),
-                                ),
-                            )
-                        } else {
-                            Ok(())
-                        }
-                    }
-                };
-                if let Err(err) = alert_result {
-                    slog::error!(
-                        &log,
-                        "failed to request alert for ereport";
-                        "ereport" => %ereport.id(),
-                        "ereport_class" => %ereport.class(),
-                        "ereport_location" => %psu,
-                        "error" => &InlineErrorChain::new(&*err)
-                    );
-                }
-            }
-
+            let state = restart.process_ereports(&mut case_builder);
+            case_builder
+                .log_event("analyzed PSC restart")
+                .kv("restart_id", restart.metadata.id())
+                .kv("first_seen_at", restart.metadata.time_first_seen)
+                .kv("num_ereports", restart.ereports.len())
+                .kv(
+                    "psus_absent",
+                    state
+                        .psus_absent
+                        .iter()
+                        .map(|psu| psu.to_string())
+                        .collect::<Vec<_>>(),
+                );
             // Is this the latest restart of this PSC we've seen so far?
-            let is_latest = match &latest {
-                Some((prev, _)) => {
-                    restart.time_first_seen() > prev.time_first_seen
-                }
-                None => true,
-            };
-            if is_latest {
-                latest = Some((restart.metadata.clone(), psus_absent));
+            let current_latest =
+                latest.as_ref().map(|l| l.psc_restart.time_first_seen);
+            if Some(state.psc_restart.time_first_seen) > current_latest {
+                latest = Some(state);
             }
         }
 
         // Decide the case's fate from the latest restart's end state.
         match latest {
-            Some((restart, psus_absent)) if !psus_absent.is_empty() => {
+            Some(state) if !state.psus_absent.is_empty() => {
                 case_builder
                     .log_event(
-                        "case remains open, as some PSUs are still absent",
+                        "case remains open, as some PSUs are still absent \
+                         in the latest restart",
                     )
-                    .kv("latest_restart_id", restart.id())
-                    .kv("latest_restart_first_seen", restart.time_first_seen)
+                    .kv("latest_restart_id", state.psc_restart.id())
                     .kv(
-                        "psus_absent",
-                        psus_absent
-                            .iter()
-                            .map(|psu| psu.to_string())
-                            .collect::<Vec<_>>(),
+                        "latest_restart_first_seen",
+                        state.psc_restart.time_first_seen,
                     );
             }
-            _ => {
-                case_builder.close("no absent PSUs detected");
+            Some(_) => {
+                case_builder
+                    .close("as of the latest restart, all PSUs are present");
+            }
+            None => {
+                case_builder.close(
+                    "case has no ereports, I dunno what the previous \
+                     DE was thinking...",
+                );
             }
         }
     }
@@ -481,6 +422,11 @@ impl PscCase {
     }
 }
 
+struct PscState {
+    psc_restart: Arc<EreporterRestart>,
+    psus_absent: PsuSet,
+}
+
 #[derive(Debug)]
 struct Restart {
     metadata: Arc<EreporterRestart>,
@@ -492,8 +438,79 @@ impl Restart {
         self.metadata.id()
     }
 
-    fn time_first_seen(&self) -> DateTime<Utc> {
-        self.metadata.time_first_seen
+    fn process_ereports(&self, case: &mut CaseBuilder) -> PscState {
+        // replay all the ereports in this restart of the PSC, tracking
+        // changes in PSU presence and happiness
+        // TODO(eliza): also track happiness
+        let mut psus_absent = PsuSet::default();
+        for ereport in &self.ereports {
+            let psu = ereport.location;
+            // TODO(eliza): some kind of debouncing if two ereports of the
+            // same type are seen close together.
+            let alert_result = match ereport.kind {
+                PsuEreportKind::Insert => {
+                    // hello!
+                    psus_absent.remove(psu);
+                    // TODO(eliza): once we have a model of what rectifiers
+                    // we believed to be present, rather than just which are
+                    // known to be *absent*, we should try to reason about
+                    // whether the *same* PSU was already believed to be
+                    // there when deciding whether to alert?
+                    if ereport.provenance == Provenance::ThisSitrep {
+                        case.request_alert(
+                            &alert_types::PsuInsertedV0 {
+                                psu: ereport.alert_psu(),
+                                power_shelf: ereport
+                                    .alert_power_shelf(&case.log),
+                                time: ereport.ereport.time_collected,
+                            },
+                            format_args!(
+                                "requested for ereport {}\nereport class: {}\n\
+                                 location: {psu}",
+                                ereport.id(),
+                                ereport.class(),
+                            ),
+                        )
+                    } else {
+                        Ok(())
+                    }
+                }
+                PsuEreportKind::Remove => {
+                    // goodbye!
+                    psus_absent.insert(psu);
+                    if ereport.provenance == Provenance::ThisSitrep {
+                        case.request_alert(
+                            &alert_types::PsuRemovedV0 {
+                                psu: ereport.alert_psu(),
+                                power_shelf: ereport
+                                    .alert_power_shelf(&case.log),
+                                time: ereport.ereport.time_collected,
+                            },
+                            format_args!(
+                                "requested for ereport {}\nereport class: {}\n\
+                                 location: {psu}",
+                                ereport.id(),
+                                ereport.class(),
+                            ),
+                        )
+                    } else {
+                        Ok(())
+                    }
+                }
+            };
+            if let Err(err) = alert_result {
+                slog::error!(
+                    &case.log,
+                    "failed to request alert for ereport";
+                    "ereport" => %ereport.id(),
+                    "ereport_class" => %ereport.class(),
+                    "ereport_location" => %psu,
+                    "error" => &InlineErrorChain::new(&*err)
+                );
+            }
+        }
+
+        PscState { psc_restart: self.metadata.clone(), psus_absent }
     }
 }
 
