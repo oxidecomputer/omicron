@@ -278,7 +278,7 @@ impl<N: NexusServer> ControlPlaneTestContext<N> {
         debug!(log, "Restarting dpd behind its proxy"; "port" => port);
 
         let prior_dpd_state = dendrite.restart_dpd().await.unwrap();
-        debug!(log; "Restarted dpd"; "prior_dpd_state" => ?prior_dpd_state);
+        debug!(log, "Restarted dpd"; "prior_dpd_state" => ?prior_dpd_state);
 
         // Wait for Dendrite to be ready before returning.
         // We check `switch_identifiers()` rather than just `dpd_uptime()`

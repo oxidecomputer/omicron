@@ -9,7 +9,7 @@
 //!
 //! 1. Start a service on an ephemeral port (i.e., bind to port 0).
 //! 2. Kill the service.
-//! 3. Restart the service on the same port.
+//! 3. Restart the service, attempting to bind to the port determined in step 1.
 //!
 //! The problem is that between steps 2 and 3, it is possible for the port to be
 //! reused by a different test running concurrently, causing interference
