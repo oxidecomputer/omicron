@@ -2646,7 +2646,7 @@ async fn cmd_db_disk_info(
             .select(nexus_db_model::Disk::as_select())
             .get_result_async(&*conn)
             .await
-            .unwrap()
+            .context("failed to find disk")?
     };
 
     match datastore.disk_get_with_model(opctx, disk).await? {
