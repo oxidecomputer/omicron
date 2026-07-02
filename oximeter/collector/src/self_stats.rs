@@ -5,17 +5,23 @@
 //! Metrics oximeter reports about itself
 
 use crate::ProducerEndpoint;
+use chrono::DateTime;
+use chrono::Utc;
 use oximeter::MetricsError;
 use oximeter::Sample;
+use oximeter::histogram::Histogram;
 use oximeter::types::Cumulative;
 use oximeter::types::ProducerResultsItem;
 use reqwest::StatusCode;
 use std::borrow::Cow;
 use std::collections::BTreeMap;
+use std::sync::Arc;
+use std::sync::Mutex;
 use std::time::Duration;
 
 oximeter::use_timeseries!("oximeter-collector.toml");
 pub use self::oximeter_collector::Collections;
+pub use self::oximeter_collector::DatabaseQueueDepth;
 pub use self::oximeter_collector::DatabaseSamplesDropped;
 pub use self::oximeter_collector::FailedCollections;
 pub use self::oximeter_collector::OximeterCollector;
@@ -69,6 +75,70 @@ impl FailureReason {
             }
             Self::Other(c) => Cow::Owned(c.as_u16().to_string()),
         }
+    }
+}
+
+pub struct CollectorStats {
+    pub single_stats: Arc<CollectorSinkStats>,
+    pub cluster_stats: Arc<CollectorSinkStats>,
+}
+
+impl CollectorStats {
+    pub fn new(start_time: DateTime<Utc>) -> Self {
+        Self {
+            single_stats: Arc::new(CollectorSinkStats::new(
+                "clickhouse-single".into(),
+                start_time,
+            )),
+            cluster_stats: Arc::new(CollectorSinkStats::new(
+                "clickhouse-cluster".into(),
+                start_time,
+            )),
+        }
+    }
+}
+
+pub struct CollectorSinkStats {
+    pub label: String,
+    pub samples_dropped: Mutex<Cumulative<u64>>,
+    pub queue_depth: Mutex<Histogram<u64>>,
+}
+
+impl CollectorSinkStats {
+    pub fn new(label: String, start_time: DateTime<Utc>) -> Self {
+        // Note: `span_decades(0, 5)` produces a log-linear histogram that spans
+        // [0, 1_000_000). As of this writing, the collector's `BoundedQueue` is
+        // sized at a fixed 100_000 (batch_size of 1000 * MAX_BUFFER_SIZE_MULTIPLIER
+        // of 100), but we set a higher cap here so that we don't saturate it if we
+        // choose a larger queue later on.
+        let mut queue_depth =
+            Histogram::span_decades(0, 5).expect("histogram bounds are valid");
+        queue_depth.set_start_time(start_time);
+        Self {
+            label,
+            samples_dropped: Mutex::new(Cumulative::with_start_time(
+                start_time, 0,
+            )),
+            queue_depth: Mutex::new(queue_depth),
+        }
+    }
+
+    pub fn samples(
+        &self,
+        collection_target: &OximeterCollector,
+    ) -> Result<Vec<Sample>, MetricsError> {
+        let drop_metric = DatabaseSamplesDropped {
+            datum: *self.samples_dropped.lock().unwrap(),
+            collector_sink: self.label.clone().into(),
+        };
+        let queue_metric = DatabaseQueueDepth {
+            datum: self.queue_depth.lock().unwrap().clone(),
+            collector_sink: self.label.clone().into(),
+        };
+        Ok(vec![
+            Sample::new(collection_target, &drop_metric)?,
+            Sample::new(collection_target, &queue_metric)?,
+        ])
     }
 }
 

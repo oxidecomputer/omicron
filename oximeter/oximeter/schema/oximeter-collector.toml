@@ -28,9 +28,18 @@ versions = [
 
 [[metrics]]
 name = "database_samples_dropped"
-description = "Total number of samples dropped from the database queue"
+description = "Total number of samples dropped from the database insertion queue"
 units = "count"
 datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = [ "collector_sink" ] }
+]
+
+[[metrics]]
+name = "database_queue_depth"
+description = "Size of the database insertion queue, sampled at queue insert time"
+units = "count"
+datum_type = "histogram_u64"
 versions = [
     { added_in = 1, fields = [ "collector_sink" ] }
 ]
