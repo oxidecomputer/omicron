@@ -17,6 +17,7 @@ use nexus_switch_config::{
 };
 use omicron_common::api::external::Error;
 use omicron_uuid_kinds::BgpAnnounceSetUuid;
+use omicron_uuid_kinds::BgpConfigUuid;
 use oxnet::IpNet;
 use sled_agent_types::early_networking::BfdPeerConfig;
 use sled_agent_types::early_networking::RouteConfig;
@@ -26,7 +27,6 @@ use slog::Logger;
 use slog::warn;
 use std::collections::HashMap;
 use std::net::IpAddr;
-use uuid::Uuid;
 
 /// Read the bootstore network config inputs from the database and assemble them
 /// into a [`RackNetworkConfigInput`].
@@ -45,7 +45,7 @@ pub async fn read_and_assemble(
 
     // One BGP config per switch. Every peer on a switch references that switch's
     // single BGP config, so associate the first one we see per switch.
-    let mut switch_bgp_config: HashMap<SwitchSlot, (Uuid, BgpConfig)> =
+    let mut switch_bgp_config: HashMap<SwitchSlot, (BgpConfigUuid, BgpConfig)> =
         HashMap::new();
     for (port, settings) in &applied_ports {
         let switch = SwitchSlot::from(port.switch_slot);
@@ -148,7 +148,7 @@ pub fn assemble(
         &SwitchPort,
         &SwitchPortSettingsCombinedResult,
     )],
-    switch_bgp_config: &HashMap<SwitchSlot, (Uuid, BgpConfig)>,
+    switch_bgp_config: &HashMap<SwitchSlot, (BgpConfigUuid, BgpConfig)>,
     bgp_announce_prefixes: &HashMap<BgpAnnounceSetUuid, Vec<IpNet>>,
     infra_ip_first: IpAddr,
     infra_ip_last: IpAddr,

@@ -8055,7 +8055,6 @@ dependencies = [
  "pq-sys",
  "sled-agent-types",
  "slog",
- "uuid",
 ]
 
 [[package]]

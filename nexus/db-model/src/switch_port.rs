@@ -23,6 +23,8 @@ use nexus_db_schema::schema::{
 use nexus_types::external_api::networking as networking_types;
 use nexus_types::identity::Resource;
 use omicron_common::api::external;
+use omicron_uuid_kinds::BgpConfigKind;
+use omicron_uuid_kinds::BgpConfigUuid;
 use omicron_uuid_kinds::BgpPeerConfigAllowExportKind;
 use omicron_uuid_kinds::BgpPeerConfigAllowImportKind;
 use omicron_uuid_kinds::BgpPeerConfigCommunityKind;
@@ -727,7 +729,7 @@ impl Into<networking_types::SwitchPortRouteConfig> for SwitchPortRouteConfig {
 #[diesel(table_name = switch_port_settings_bgp_peer_config)]
 pub struct SwitchPortBgpPeerConfig {
     pub port_settings_id: Uuid,
-    pub bgp_config_id: Uuid,
+    pub bgp_config_id: DbTypedUuid<BgpConfigKind>,
     pub interface_name: Name,
     addr: Option<IpNetwork>,
     pub hold_time: SqlU32,
@@ -771,6 +773,11 @@ pub enum SwitchPortBgpPeerConfigInvalidData {
 }
 
 impl SwitchPortBgpPeerConfig {
+    /// Return the ID of the BGP config this peer references.
+    pub fn bgp_config_id(&self) -> BgpConfigUuid {
+        self.bgp_config_id.into()
+    }
+
     /// Return the [`RouterPeerType`] (numbered or unnumbered, with additional
     /// details specific to each type) of this peer.
     ///
@@ -936,7 +943,7 @@ impl SwitchPortBgpPeerConfigAllowImport {
 impl SwitchPortBgpPeerConfig {
     pub fn new(
         port_settings_id: Uuid,
-        bgp_config_id: Uuid,
+        bgp_config_id: BgpConfigUuid,
         interface_name: Name,
         p: &networking_types::BgpPeer,
     ) -> Self {
@@ -949,7 +956,7 @@ impl SwitchPortBgpPeerConfig {
         Self {
             id: Uuid::new_v4(),
             port_settings_id,
-            bgp_config_id,
+            bgp_config_id: bgp_config_id.into(),
             interface_name,
             addr: p.addr.ip_db_repr(),
             hold_time: p.hold_time.into(),
@@ -1145,7 +1152,7 @@ mod tests {
         let original = RouterPeerType::Numbered { ip };
         let db_peer = SwitchPortBgpPeerConfig::new(
             Uuid::new_v4(),
-            Uuid::new_v4(),
+            BgpConfigUuid::new_v4(),
             "phy0".parse::<external::Name>().unwrap().into(),
             &make_bgp_peer(original),
         );
@@ -1164,7 +1171,7 @@ mod tests {
         let original = RouterPeerType::Unnumbered { router_lifetime: lifetime };
         let db_peer = SwitchPortBgpPeerConfig::new(
             Uuid::new_v4(),
-            Uuid::new_v4(),
+            BgpConfigUuid::new_v4(),
             "phy0".parse::<external::Name>().unwrap().into(),
             &make_bgp_peer(original),
         );

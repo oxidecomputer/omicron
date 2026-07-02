@@ -14,7 +14,9 @@ use nexus_types::external_api::networking;
 use nexus_types::identity::Resource;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::IdentityMetadataCreateParams;
-use omicron_uuid_kinds::{BgpAnnounceSetKind, BgpAnnounceSetUuid, GenericUuid};
+use omicron_uuid_kinds::{
+    BgpAnnounceSetKind, BgpAnnounceSetUuid, BgpConfigUuid, GenericUuid,
+};
 use serde::{Deserialize, Serialize};
 use sled_agent_types::early_networking::BgpPeerConfig;
 use sled_agent_types::early_networking::ImportExportPolicy;
@@ -36,6 +38,7 @@ use uuid::Uuid;
     Serialize,
     Deserialize,
 )]
+#[resource(uuid_kind = BgpConfigKind)]
 #[diesel(table_name = bgp_config)]
 pub struct BgpConfig {
     #[diesel(embed)]
@@ -76,7 +79,7 @@ impl BgpConfig {
     ) -> BgpConfig {
         BgpConfig {
             identity: BgpConfigIdentity::new(
-                Uuid::new_v4(),
+                BgpConfigUuid::new_v4(),
                 IdentityMetadataCreateParams {
                     name: c.identity.name.clone(),
                     description: c.identity.description.clone(),

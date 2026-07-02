@@ -1063,6 +1063,7 @@ mod tests {
     use omicron_common::api::external::IdentityMetadataCreateParams;
     use omicron_common::api::external::Name;
     use omicron_test_utils::dev;
+    use omicron_uuid_kinds::BgpConfigUuid;
     use oxnet::IpNet;
     use sled_agent_types::early_networking::ImportExportPolicy;
     use sled_agent_types::early_networking::RouterLifetimeConfig;
@@ -1233,7 +1234,7 @@ mod tests {
 
     // Helper to construct a `BgpPeer` for allow import/export tests below
     fn make_bgp_peer_for_allow_import_export_tests(
-        bgp_config_id: Uuid,
+        bgp_config_id: BgpConfigUuid,
         addr: RouterPeerType,
         import_subnets: Vec<IpNet>,
         export_subnets: Vec<IpNet>,
@@ -1249,7 +1250,7 @@ mod tests {
             ImportExportPolicy::Allow(export_subnets)
         };
         BgpPeer {
-            bgp_config: bgp_config_id.into(),
+            bgp_config: bgp_config_id.into_untyped_uuid().into(),
             addr,
             hold_time: 0,
             idle_hold_time: 0,
@@ -1322,7 +1323,7 @@ mod tests {
             use nexus_db_schema::schema::switch_port_settings_bgp_peer_config::dsl;
             let conn =
                 datastore.pool_connection_authorized(&opctx).await.unwrap();
-            let bgp_config_id = Uuid::new_v4();
+            let bgp_config_id = BgpConfigUuid::new_v4();
             diesel::insert_into(dsl::switch_port_settings_bgp_peer_config)
                 .values(vec![
                     SwitchPortBgpPeerConfig::new(
@@ -1479,7 +1480,7 @@ mod tests {
             use nexus_db_schema::schema::switch_port_settings_bgp_peer_config::dsl;
             let conn =
                 datastore.pool_connection_authorized(&opctx).await.unwrap();
-            let bgp_config_id = Uuid::new_v4();
+            let bgp_config_id = BgpConfigUuid::new_v4();
             diesel::insert_into(dsl::switch_port_settings_bgp_peer_config)
                 .values(vec![
                     SwitchPortBgpPeerConfig::new(
