@@ -369,9 +369,9 @@ mod tests {
     // The synthetic resource and dummy schema are shared with the GC test suite;
     // see `crate::db::fm_rendezvous_resources::test_utils`.
     use crate::db::fm_rendezvous_resources::test_utils::DummyResource;
-    use crate::db::fm_rendezvous_resources::test_utils::dummy_marker;
     use crate::db::fm_rendezvous_resources::test_utils::dummy_resource;
     use crate::db::fm_rendezvous_resources::test_utils::insert_dummy_marker;
+    use crate::db::fm_rendezvous_resources::test_utils::marker_generation;
     use crate::db::fm_rendezvous_resources::test_utils::setup_dummy_schema;
 
     // Snapshots the SQL the combinator generates, so accidental changes to the
@@ -474,20 +474,6 @@ mod tests {
         .get_result_async::<bool>(conn)
         .await
         .unwrap()
-    }
-
-    // The generation recorded in the marker row for `id`, if any.
-    async fn marker_generation(
-        conn: &async_bb8_diesel::Connection<DbConnection>,
-        id: Uuid,
-    ) -> Option<i64> {
-        dummy_marker::table
-            .filter(dummy_marker::dsl::dummy_id.eq(id))
-            .select(dummy_marker::dsl::created_at_generation)
-            .first_async::<i64>(conn)
-            .await
-            .optional()
-            .unwrap()
     }
 
     // Both guards pass: the resource row is inserted and a marker is written

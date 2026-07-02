@@ -173,4 +173,19 @@ pub(crate) mod test_utils {
             .await
             .unwrap();
     }
+
+    /// The `created_at_generation` recorded in the marker row for `id`, if
+    /// any (`None` means no marker row exists).
+    pub(crate) async fn marker_generation(
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        id: Uuid,
+    ) -> Option<i64> {
+        dummy_marker::table
+            .filter(dummy_marker::dsl::dummy_id.eq(id))
+            .select(dummy_marker::dsl::created_at_generation)
+            .first_async::<i64>(conn)
+            .await
+            .optional()
+            .unwrap()
+    }
 }
