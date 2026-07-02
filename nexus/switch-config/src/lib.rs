@@ -138,11 +138,11 @@ pub struct PortInput {
     /// The port's links. Only the first is used today (no breakout support).
     pub links: Vec<LinkInput>,
     /// The static routes configured on this port.
-    pub routes: Vec<RouteInput>,
+    pub routes: Vec<SledRouteConfig>,
     /// The port's LLDP settings. Only the first entry is used today.
     pub lldp: Vec<LldpInput>,
     /// The port's TX-EQ overrides. Only the first entry is used today.
-    pub tx_eq: Vec<TxEqInput>,
+    pub tx_eq: Vec<TxEqConfig>,
 }
 
 /// An IP address assigned to a port.
@@ -159,14 +159,6 @@ pub struct LinkInput {
     pub speed: LinkSpeed,
 }
 
-/// A static route configured on a port.
-pub struct RouteInput {
-    pub destination: IpNet,
-    pub nexthop: IpAddr,
-    pub vlan_id: Option<u16>,
-    pub rib_priority: Option<u8>,
-}
-
 /// A port's LLDP settings.
 pub struct LldpInput {
     pub enabled: bool,
@@ -176,15 +168,6 @@ pub struct LldpInput {
     pub system_name: Option<String>,
     pub system_description: Option<String>,
     pub management_ip: Option<IpAddr>,
-}
-
-/// A port's TX-EQ overrides.
-pub struct TxEqInput {
-    pub pre1: Option<i32>,
-    pub pre2: Option<i32>,
-    pub main: Option<i32>,
-    pub post2: Option<i32>,
-    pub post1: Option<i32>,
 }
 
 /// A single reason the bootstore config could not be built completely.
@@ -332,6 +315,9 @@ pub fn build_rack_network_config(
         let max_paths = match MaxPathConfig::new(config.max_paths) {
             Ok(max_paths) => max_paths,
             Err(_) => {
+                // TODO: We should have read_and_assemble handle this problem.
+                // (Needs read_and_assemble to start accumulating a list of
+                // problems.)
                 problems.push(Problem::IllegalMaxPaths {
                     switch: *switch,
                     value: config.max_paths,
@@ -353,17 +339,7 @@ pub fn build_rack_network_config(
 
     for port in port_inputs {
         // TODO https://github.com/oxidecomputer/omicron/issues/3062
-        let tx_eq = if let Some(c) = port.tx_eq.get(0) {
-            Some(TxEqConfig {
-                pre1: c.pre1,
-                pre2: c.pre2,
-                main: c.main,
-                post2: c.post2,
-                post1: c.post1,
-            })
-        } else {
-            None
-        };
+        let tx_eq = port.tx_eq.get(0).copied();
 
         // Build the bootstore BGP peers from the port's peers, which include
         // each peer's communities and import/export policies, though not the
@@ -382,6 +358,16 @@ pub fn build_rack_network_config(
                     continue;
                 }
                 None => {
+                    // We attempt to enforce this constraint at the application
+                    // layer, though this code hasn't been fully audited for
+                    // transaction safety and it's possible there are customer
+                    // systems with missing BGP configs. That is definitely data
+                    // corruption, so produce a problem. We'll see how this
+                    // shakes out in the field.
+                    //
+                    // TODO: RSS does check for missing BGP configs (by virtue
+                    // of going through the datastore methods). But wicket could
+                    // check for them even further in advance too.
                     problems.push(Problem::MissingBgpConfigForSwitch {
                         switch: port.switch,
                         port: port.port_name.clone(),
@@ -446,16 +432,7 @@ pub fn build_rack_network_config(
                 .unwrap_or(false),
             bgp_peers,
             port: port.port_name.clone(),
-            routes: port
-                .routes
-                .iter()
-                .map(|r| SledRouteConfig {
-                    destination: r.destination,
-                    nexthop: r.nexthop,
-                    vlan_id: r.vlan_id,
-                    rib_priority: r.rib_priority,
-                })
-                .collect(),
+            routes: port.routes,
             switch: port.switch,
             uplink_port_fec: port
                 .links

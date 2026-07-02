@@ -398,6 +398,7 @@ mod tests {
     use iddqd::IdOrdMap;
     use nexus_types::fm::Sitrep;
     use nexus_types::fm::SitrepMetadata;
+    use omicron_common::api::external;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::CollectionUuid;
     use omicron_uuid_kinds::OmicronZoneUuid;
@@ -507,8 +508,8 @@ mod tests {
                 creator_id: OmicronZoneUuid::new_v4(),
                 comment: "sitrep_guard test sitrep".to_string(),
                 time_created: Utc::now(),
-                alert_generation:
-                    omicron_common::api::external::Generation::new(),
+                alert_generation: external::Generation::new(),
+                support_bundle_generation: external::Generation::new(),
             },
             cases: IdOrdMap::new(),
             ereports_by_id: IdOrdMap::new(),
@@ -754,4 +755,10 @@ mod tests {
         db.terminate().await;
         logctx.cleanup_successful();
     }
+}
+
+impl SitrepGuardedResource for nexus_db_model::SupportBundle {
+    type GenerationColumn = schema::fm_sitrep::dsl::support_bundle_generation;
+    type MarkerIdColumn =
+        schema::rendezvous_support_bundle_created::dsl::support_bundle_id;
 }

@@ -716,10 +716,9 @@ mod test {
     use nexus_db_model::RendezvousDebugDataset;
     use nexus_db_model::Zpool;
     use nexus_db_queries::db::datastore::SupportBundleCreateParams;
-    use nexus_db_queries::db::datastore::SupportBundleProvenance;
     use nexus_test_utils::SLED_AGENT_UUID;
     use nexus_test_utils_macros::nexus_test;
-    use nexus_types::fm::ereport::{EreportData, EreportId, Reporter};
+    use nexus_types::fm::ereport::{EreportData, Reporter};
     use nexus_types::identity::Asset;
     use nexus_types::internal_api::background::SupportBundleCollectionStep;
     use nexus_types::internal_api::background::SupportBundleCollectionStepStatus;
@@ -736,7 +735,7 @@ mod test {
     use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::{
         BlueprintUuid, DatasetUuid, EreporterRestartUuid, OmicronZoneUuid,
-        PhysicalDiskUuid, SledUuid,
+        PhysicalDiskUuid, RackUuid, SledUuid,
     };
     use sled_agent_types::inventory::ZpoolHealth;
     use std::num::NonZeroU64;
@@ -862,37 +861,48 @@ mod test {
         // Make some SP ereports...
         let sp_restart_id = EreporterRestartUuid::new_v4();
         let time_collected = chrono::Utc::now();
-        datastore.ereports_insert(&opctx, sp_restart_id, time_collected, Reporter::Sp { sp_type: SpType::Sled, slot: SLED_SLOT}, vec![
-            EreportData {
-                id: EreportId { restart_id: sp_restart_id, ena: ereport_types::Ena(1) },
-                time_collected,
-                collector_id: OmicronZoneUuid::new_v4(),
+        let collector_id = OmicronZoneUuid::new_v4();
+        let rack_id = RackUuid::new_v4();
+        datastore.ereports_insert(&opctx, sp_restart_id, time_collected, collector_id, rack_id, Reporter::Sp { sp_type: SpType::Sled, slot: SLED_SLOT}, vec![
+            (ereport_types::Ena(1), EreportData {
                 part_number: Some(GIMLET_PN.to_string()),
                 serial_number: Some(SP_SERIAL.to_string()),
                 class: Some("ereport.fake.whatever".to_string()),
                 report: serde_json::json!({"hello world": true})
-            },
-            EreportData {
-                id: EreportId { restart_id: sp_restart_id, ena: ereport_types::Ena(2) },
-                time_collected,
-                collector_id: OmicronZoneUuid::new_v4(),
+            }),
+            (ereport_types::Ena(2), EreportData {
                 part_number: Some(GIMLET_PN.to_string()),
                 serial_number: Some(SP_SERIAL.to_string()),
                 class: Some("ereport.something.blah".to_string()),
                 report: serde_json::json!({"system_working": "seems to be",})
-            },
-            EreportData {
-                id: EreportId { restart_id: EreporterRestartUuid::new_v4(), ena: ereport_types::Ena(1) },
-                time_collected,
-                collector_id: OmicronZoneUuid::new_v4(),
-                // Let's do a silly one! No VPD, to make sure that's also
-                // handled correctly.
-                part_number: None,
-                serial_number: None,
-                class: Some("ereport.fake.whatever".to_string()),
-                report: serde_json::json!({"hello_world": true})
-            },
+            }),
         ]).await.expect("failed to insert fake SP ereports");
+
+        // Let's do a silly one! No VPD, to make sure that's also
+        // handled correctly.
+        let sp_restart_id2 = EreporterRestartUuid::new_v4();
+        let time_collected = chrono::Utc::now();
+        datastore
+            .ereports_insert(
+                &opctx,
+                sp_restart_id2,
+                time_collected,
+                collector_id,
+                rack_id,
+                Reporter::Sp { sp_type: SpType::Sled, slot: SLED_SLOT },
+                vec![(
+                    ereport_types::Ena(1),
+                    EreportData {
+                        part_number: None,
+                        serial_number: None,
+                        class: Some("ereport.fake.whatever".to_string()),
+                        report: serde_json::json!({"hello_world": true}),
+                    },
+                )],
+            )
+            .await
+            .expect("failed to insert another fake SP ereport");
+
         // And one from a different serial. N.B. that I made sure the number of
         // host-OS and SP ereports are different for when we make assertions
         // about the bundle report.
@@ -903,59 +913,57 @@ mod test {
                 &opctx,
                 sp2_restart_id,
                 time_collected,
+                OmicronZoneUuid::new_v4(),
+                rack_id,
                 Reporter::Sp { sp_type: SpType::Switch, slot: 1 },
-                vec![EreportData {
-                    id: EreportId {
-                        restart_id: sp2_restart_id,
-                        ena: ereport_types::Ena(1),
+                vec![(
+                    ereport_types::Ena(1),
+                    EreportData {
+                        part_number: Some("9130000006".to_string()),
+                        serial_number: Some("BRM41000555".to_string()),
+                        class: Some("ereport.fake.whatever".to_string()),
+                        report: serde_json::json!({"im_a_sidecar": true}),
                     },
-                    time_collected,
-                    collector_id: OmicronZoneUuid::new_v4(),
-                    part_number: Some("9130000006".to_string()),
-                    serial_number: Some("BRM41000555".to_string()),
-                    class: Some("ereport.fake.whatever".to_string()),
-                    report: serde_json::json!({"im_a_sidecar": true}),
-                }],
+                )],
             )
             .await
             .expect("failed to insert another fake SP ereport");
         // And some host OS ones...
         let sled1_restart_id = EreporterRestartUuid::new_v4();
         let time_collected = chrono::Utc::now();
+        let collector_id = OmicronZoneUuid::new_v4();
         datastore
             .ereports_insert(
                 &opctx,
                 sled1_restart_id,
                 time_collected,
+                collector_id,
+                rack_id,
                 Reporter::HostOs {
                     sled: SledUuid::new_v4(),
                     slot: Some(SLED_SLOT),
                 },
                 vec![
-                    EreportData {
-                        id: EreportId {
-                            restart_id: sled1_restart_id,
-                            ena: ereport_types::Ena(1),
+                    (
+                        ereport_types::Ena(1),
+                        EreportData {
+                            serial_number: Some(HOST_SERIAL.to_string()),
+                            part_number: Some(GIMLET_PN.to_string()),
+                            class: Some("ereport.fake.whatever".to_string()),
+                            report: serde_json::json!({"hello_world": true}),
                         },
-                        time_collected,
-                        collector_id: OmicronZoneUuid::new_v4(),
-                        serial_number: Some(HOST_SERIAL.to_string()),
-                        part_number: Some(GIMLET_PN.to_string()),
-                        class: Some("ereport.fake.whatever".to_string()),
-                        report: serde_json::json!({"hello_world": true}),
-                    },
-                    EreportData {
-                        id: EreportId {
-                            restart_id: sled1_restart_id,
-                            ena: ereport_types::Ena(2),
+                    ),
+                    (
+                        ereport_types::Ena(2),
+                        EreportData {
+                            serial_number: Some(HOST_SERIAL.to_string()),
+                            part_number: Some(GIMLET_PN.to_string()),
+                            class: Some(
+                                "ereport.fake.whatever.thingy".to_string(),
+                            ),
+                            report: serde_json::json!({"goodbye_world": false}),
                         },
-                        time_collected,
-                        collector_id: OmicronZoneUuid::new_v4(),
-                        serial_number: Some(HOST_SERIAL.to_string()),
-                        part_number: Some(GIMLET_PN.to_string()),
-                        class: Some("ereport.fake.whatever.thingy".to_string()),
-                        report: serde_json::json!({"goodbye_world": false}),
-                    },
+                    ),
                 ],
             )
             .await
@@ -967,17 +975,16 @@ mod test {
                 &opctx,
                 sled2_restart_id,
                 time_collected,
+                OmicronZoneUuid::new_v4(),
+                rack_id,
                 Reporter::HostOs { sled: SledUuid::new_v4(), slot: Some(SLED_SLOT) },
                 vec![
-                    EreportData {
-                        id: EreportId { restart_id: sled2_restart_id, ena:  ereport_types::Ena(1) },
-                        time_collected,
-                        collector_id: OmicronZoneUuid::new_v4(),
+                    (ereport_types::Ena(1), EreportData {
                         serial_number: Some(HOST_SERIAL.to_string()),
                         part_number: Some(GIMLET_PN.to_string()),
                         class: Some("ereport.something.hostos_related".to_string()),
                         report: serde_json::json!({"illumos": "very yes", "whatever": 42}),
-                    },
+                    }),
                 ],
             )
             .await
@@ -1099,7 +1106,6 @@ mod test {
             .support_bundle_create(
                 &opctx,
                 SupportBundleCreateParams {
-                    provenance: SupportBundleProvenance::User,
                     reason: "For collection testing",
                     nexus_id: nexus.id(),
                     user_comment: None,
@@ -1198,7 +1204,6 @@ mod test {
             .support_bundle_create(
                 &opctx,
                 SupportBundleCreateParams {
-                    provenance: SupportBundleProvenance::User,
                     reason: "For trace file testing",
                     nexus_id: nexus.id(),
                     user_comment: None,
@@ -1311,7 +1316,6 @@ mod test {
             .support_bundle_create(
                 &opctx,
                 SupportBundleCreateParams {
-                    provenance: SupportBundleProvenance::User,
                     reason: "For collection testing",
                     nexus_id: nexus.id(),
                     user_comment: None,
@@ -1405,7 +1409,6 @@ mod test {
             .support_bundle_create(
                 &opctx,
                 SupportBundleCreateParams {
-                    provenance: SupportBundleProvenance::User,
                     reason: "For collection testing",
                     nexus_id: nexus.id(),
                     user_comment: None,
@@ -1419,7 +1422,6 @@ mod test {
             .support_bundle_create(
                 &opctx,
                 SupportBundleCreateParams {
-                    provenance: SupportBundleProvenance::User,
                     reason: "For collection testing",
                     nexus_id: nexus.id(),
                     user_comment: None,
@@ -1524,7 +1526,6 @@ mod test {
             .support_bundle_create(
                 &opctx,
                 SupportBundleCreateParams {
-                    provenance: SupportBundleProvenance::User,
                     reason: "For collection testing",
                     nexus_id: nexus.id(),
                     user_comment: None,
@@ -1592,7 +1593,6 @@ mod test {
             .support_bundle_create(
                 &opctx,
                 SupportBundleCreateParams {
-                    provenance: SupportBundleProvenance::User,
                     reason: "For collection testing",
                     nexus_id: nexus.id(),
                     user_comment: None,
@@ -1681,7 +1681,6 @@ mod test {
             .support_bundle_create(
                 &opctx,
                 SupportBundleCreateParams {
-                    provenance: SupportBundleProvenance::User,
                     reason: "For collection testing",
                     nexus_id: nexus.id(),
                     user_comment: None,
@@ -1754,7 +1753,6 @@ mod test {
             .support_bundle_create(
                 &opctx,
                 SupportBundleCreateParams {
-                    provenance: SupportBundleProvenance::User,
                     reason: "For collection testing",
                     nexus_id: nexus.id(),
                     user_comment: None,
@@ -1842,7 +1840,6 @@ mod test {
             .support_bundle_create(
                 &opctx,
                 SupportBundleCreateParams {
-                    provenance: SupportBundleProvenance::User,
                     reason: "For collection testing",
                     nexus_id: nexus.id(),
                     user_comment: None,
@@ -1929,7 +1926,6 @@ mod test {
             .support_bundle_create(
                 &opctx,
                 SupportBundleCreateParams {
-                    provenance: SupportBundleProvenance::User,
                     reason: "Testing reconfigurator state collection",
                     nexus_id: nexus.id(),
                     user_comment: None,
@@ -2033,7 +2029,6 @@ mod test {
             .support_bundle_create(
                 &opctx,
                 SupportBundleCreateParams {
-                    provenance: SupportBundleProvenance::User,
                     reason: "Testing per-bundle data selection",
                     nexus_id: nexus.id(),
                     user_comment: None,

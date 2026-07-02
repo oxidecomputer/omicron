@@ -1,4 +1,8 @@
 #!/bin/bash
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 
 set -o errexit
 set -o pipefail
@@ -110,16 +114,6 @@ export CARGO_INCREMENTAL=0
 export RUSTC_BOOTSTRAP=1
 
 # Build all the packages and tests, and keep track of how long each took to build.
-#
-# The build graph ends up building several bin/test targets that depend on
-# omicron-nexus at the same time, which uses significant memory to compile on
-# illumos. To mitigate this we build everything except omicron-nexus's bin/test
-# targets first, then finish the build after.
-#
-# Both invocations use the same flags to avoid cache invalidation.
-# We collect timing data only from the second (full workspace) build.
-ptime -m cargo --config 'build.analysis.enabled=true' build -Zbuild-analysis \
-    --workspace --exclude=omicron-nexus --tests --locked --verbose
 ptime -m cargo --config 'build.analysis.enabled=true' build -Zbuild-analysis \
     --workspace --tests --locked --verbose
 cp "$(ls -t "${CARGO_HOME:-$HOME/.cargo}/log/"*.jsonl | head -1)" \

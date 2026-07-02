@@ -1243,6 +1243,11 @@ impl BackgroundTask for SwitchPortSettingsManager {
             }
             // TODO: we have some early returns in this task. We should instead
             // collect all problems and return them in the response.
+            //
+            // As part of that, we should move the body into an
+            // `activate_impl(...)` function which returns a
+            // `SwitchPortManagerStatus`. That'll force us to not do early
+            // returns.
             json!(status)
         }
         .boxed()
@@ -2246,7 +2251,6 @@ mod tests {
     use omicron_common::api::external::Generation;
     use omicron_common::api::external::Vni;
     use omicron_test_utils::dev::test_setup_log;
-    use sled_agent_types::early_networking::LinkSpeed;
     use sled_agent_types::early_networking::PortConfig;
     use sled_agent_types::early_networking::UplinkPorts;
     use sled_agent_types::inventory::SourceNatConfigGeneric;
@@ -2260,19 +2264,8 @@ mod tests {
             infra_ip_first: "172.20.15.21".parse().unwrap(),
             infra_ip_last: "172.20.15.22".parse().unwrap(),
             // `UplinkPorts` must be non-empty -- use a single placeholder port.
-            ports: UplinkPorts::new(vec![PortConfig {
-                routes: vec![],
-                addresses: vec![],
-                switch: SwitchSlot::Switch0,
-                port: "qsfp0".to_string(),
-                uplink_port_speed: LinkSpeed::Speed100G,
-                uplink_port_fec: None,
-                bgp_peers: vec![],
-                autoneg: false,
-                lldp: None,
-                tx_eq: None,
-            }])
-            .expect("placeholder port list is non-empty"),
+            ports: UplinkPorts::new(vec![PortConfig::empty_for_tests("qsfp0")])
+                .expect("placeholder port list is non-empty"),
             bgp: vec![],
             bfd: vec![],
         }

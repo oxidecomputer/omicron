@@ -135,16 +135,10 @@ pub fn mk_ereport(
     time_collected: chrono::DateTime<Utc>,
     json: serde_json::Map<String, serde_json::Value>,
 ) -> Ereport {
-    let data = match reporter {
+    let (_ena, data) = match reporter {
         Reporter::Sp { .. } => {
             let raw = ereport_types::Ereport { ena: id.ena, data: json };
-            EreportData::from_sp_ereport(
-                log,
-                id.restart_id,
-                raw,
-                time_collected,
-                collector_id,
-            )
+            EreportData::from_sp_ereport(log, id.restart_id, raw)
         }
         Reporter::HostOs { .. } => {
             todo!(
@@ -156,11 +150,11 @@ pub fn mk_ereport(
     };
     slog::info!(
         &log,
-        "simulating an ereport: {}", data.id;
-        "ereport_id" => %data.id,
+        "simulating an ereport: {}", id;
+        "ereport_id" => %id,
         "ereport_class" => ?data.class,
         "serial_number" => ?data.serial_number,
         "part_number" => ?data.part_number,
     );
-    Ereport::new(data, reporter)
+    Ereport::new(id, time_collected, collector_id, data, reporter)
 }

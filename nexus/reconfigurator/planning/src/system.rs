@@ -22,6 +22,7 @@ use nexus_types::deployment::CockroachDbClusterVersion;
 use nexus_types::deployment::CockroachDbSettings;
 use nexus_types::deployment::ExpectedVersion;
 use nexus_types::deployment::ExternalIpPolicy;
+use nexus_types::deployment::ExternalServiceNetworkingPolicy;
 use nexus_types::deployment::OximeterReadPolicy;
 use nexus_types::deployment::PlannerConfig;
 use nexus_types::deployment::PlanningInputBuilder;
@@ -124,7 +125,7 @@ pub struct SystemDescription {
     target_cockroachdb_zone_count: usize,
     target_cockroachdb_cluster_version: CockroachDbClusterVersion,
     target_crucible_pantry_zone_count: usize,
-    external_ip_policy: ExternalIpPolicy,
+    external_service_networking: ExternalServiceNetworkingPolicy,
     internal_dns_version: Generation,
     external_dns_version: Generation,
     clickhouse_policy: Option<ClickhousePolicy>,
@@ -193,7 +194,7 @@ impl SystemDescription {
         // Nexus / Boundary NTPs IPs from TEST-NET-1 (RFC 5737).
         //
         // This policy doesn't configure any external DNS IPs.
-        let external_ip_policy = {
+        let external_ips = {
             let mut builder = ExternalIpPolicy::builder();
             builder
                 .push_service_pool_ipv4_range(
@@ -205,6 +206,18 @@ impl SystemDescription {
                 )
                 .unwrap();
             builder.build()
+        };
+
+        // Upstream networking policy for an example system. This mirrors the
+        // values used in `ExampleSystemBuilder`, so that a new
+        // `SystemDescription` produces a `PlanningInput` whose policy matches
+        // the zones that it would build.
+        let external_service_networking = ExternalServiceNetworkingPolicy {
+            external_ips,
+            upstream_ntp_servers: vec!["ntp.example.com".to_string()],
+            upstream_ntp_domain: Some("example.com".to_string()),
+            upstream_dns_servers: vec!["8.8.8.8".parse().unwrap()],
+            nexus_external_tls: false,
         };
 
         SystemDescription {
@@ -220,7 +233,7 @@ impl SystemDescription {
             target_cockroachdb_zone_count,
             target_cockroachdb_cluster_version,
             target_crucible_pantry_zone_count,
-            external_ip_policy,
+            external_service_networking,
             internal_dns_version: Generation::new(),
             external_dns_version: Generation::new(),
             clickhouse_policy: None,
@@ -334,15 +347,29 @@ impl SystemDescription {
         self.target_oximeter_zone_count
     }
 
+    pub fn external_service_networking_policy(
+        &self,
+    ) -> &ExternalServiceNetworkingPolicy {
+        &self.external_service_networking
+    }
+
+    pub fn set_external_service_networking_policy(
+        &mut self,
+        policy: ExternalServiceNetworkingPolicy,
+    ) -> &mut Self {
+        self.external_service_networking = policy;
+        self
+    }
+
     pub fn external_ip_policy(&self) -> &ExternalIpPolicy {
-        &self.external_ip_policy
+        &self.external_service_networking.external_ips
     }
 
     pub fn set_external_ip_policy(
         &mut self,
         policy: ExternalIpPolicy,
     ) -> &mut Self {
-        self.external_ip_policy = policy;
+        self.external_service_networking.external_ips = policy;
         self
     }
 
@@ -1172,7 +1199,9 @@ impl SystemDescription {
         parent_blueprint: Arc<Blueprint>,
     ) -> anyhow::Result<PlanningInputBuilder> {
         let policy = Policy {
-            external_ips: self.external_ip_policy.clone(),
+            external_service_networking: self
+                .external_service_networking
+                .clone(),
             target_boundary_ntp_zone_count: self.target_boundary_ntp_zone_count,
             target_nexus_zone_count: self.target_nexus_zone_count,
             target_internal_dns_zone_count: self.target_internal_dns_zone_count,

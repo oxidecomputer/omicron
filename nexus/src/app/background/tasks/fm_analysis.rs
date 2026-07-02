@@ -24,6 +24,7 @@ use nexus_types::inventory;
 use omicron_uuid_kinds::AlertUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
+use omicron_uuid_kinds::SupportBundleUuid;
 use serde_json::json;
 use slog_error_chain::InlineErrorChain;
 use std::sync::Arc;
@@ -258,6 +259,13 @@ impl FmAnalysis {
         )
         .await
         .context("failed to load existing alert markers")?;
+        self.load_existing_support_bundle_markers(
+            opctx,
+            parent_sitrep.as_ref().map(|s| &s.1),
+            &mut builder,
+        )
+        .await
+        .context("failed to load existing support bundle markers")?;
 
         let (input, report) = builder.build();
         Ok((input, status::PreparationStatus { warnings, report }))
@@ -389,7 +397,7 @@ impl FmAnalysis {
 
                 // Check if this is a reporter we know about, and issue a
                 // warning if it is not.
-                let id = ereport.id();
+                let id = ereport.id;
                 if !builder.ereporter_restarts().contains_key(&id.restart_id) {
                     let msg = format!(
                         "ereport {id} has a restart ID not contained in the \
@@ -441,6 +449,37 @@ impl FmAnalysis {
             .await
             .context("failed to look up alert marker existence")?;
         builder.add_marked_alert_requests(marked);
+        Ok(())
+    }
+
+    async fn load_existing_support_bundle_markers(
+        &mut self,
+        opctx: &OpContext,
+        parent: Option<&nexus_types::fm::Sitrep>,
+        builder: &mut fm::analysis_input::Builder,
+    ) -> anyhow::Result<()> {
+        let Some(parent) = parent else {
+            // No parent sitrep, so no closed cases, so nothing to look up.
+            return Ok(());
+        };
+        let candidate_ids: Vec<SupportBundleUuid> = parent
+            .cases
+            .iter()
+            .filter(|c| !c.is_open())
+            .flat_map(|c| c.support_bundles_requested.iter().map(|r| r.id))
+            .collect();
+        if candidate_ids.is_empty() {
+            return Ok(());
+        }
+        let marked = self
+            .datastore
+            .fm_rendezvous_existing_support_bundle_markers(
+                opctx,
+                &candidate_ids,
+            )
+            .await
+            .context("failed to look up support bundle marker existence")?;
+        builder.add_marked_support_bundle_requests(marked);
         Ok(())
     }
 
@@ -629,6 +668,7 @@ mod tests {
                     comment: "test sitrep".to_string(),
                     time_created: Utc::now(),
                     alert_generation: Generation::new(),
+                    support_bundle_generation: Generation::new(),
                 },
                 cases: Default::default(),
                 ereports_by_id: Default::default(),
@@ -921,6 +961,7 @@ mod tests {
                 comment: "test sitrep".to_string(),
                 time_created: Utc::now(),
                 alert_generation: Generation::new(),
+                support_bundle_generation: Generation::new(),
             },
             cases,
             ereports_by_id: Default::default(),

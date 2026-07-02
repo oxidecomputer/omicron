@@ -1339,8 +1339,7 @@ async fn test_ip_pool_range_pagination(cptestctx: &ControlPlaneTestContext) {
         assert_eq!(range.last_address(), created_range.range.last_address());
         expected_ranges.push(created_range);
     }
-    expected_ranges
-        .sort_by(|a, b| a.range.first_address().cmp(&b.range.first_address()));
+    expected_ranges.sort_by_key(|a| a.range.first_address());
 
     // List the first 2 results, then the last. These should appear sorted by
     // their first address.
@@ -1652,8 +1651,7 @@ async fn test_ip_pool_service(cptestctx: &ControlPlaneTestContext) {
         assert_eq!(range.last_address(), created_range.range.last_address());
         expected_ranges.push(created_range);
     }
-    expected_ranges
-        .sort_by(|a, b| a.range.first_address().cmp(&b.range.first_address()));
+    expected_ranges.sort_by_key(|a| a.range.first_address());
 
     // List the ranges.
     let first_page =

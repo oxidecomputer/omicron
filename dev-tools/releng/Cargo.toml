@@ -6,11 +6,13 @@ license = "MPL-2.0"
 
 [dependencies]
 anyhow.workspace = true
+blake3 = "1.8.5"
 camino.workspace = true
 camino-tempfile.workspace = true
 cargo_metadata.workspace = true
 chrono.workspace = true
 clap.workspace = true
+dev-tools-common.workspace = true
 fs-err = { workspace = true, features = ["tokio"] }
 futures.workspace = true
 hex.workspace = true
