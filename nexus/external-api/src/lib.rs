@@ -433,7 +433,7 @@ pub trait NexusExternalApi {
     ) -> Result<HttpResponseOk<latest::system::Version>, HttpError> {
         Ok(HttpResponseOk(latest::system::Version {
             api_version: latest_version(),
-            system_version: omicron_common::SYSTEM_VERSION,
+            system_version: omicron_common::system_version().clone(),
         }))
     }
 

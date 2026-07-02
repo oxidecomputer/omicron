@@ -111,8 +111,45 @@ pub fn format_time_delta(time_delta: chrono::TimeDelta) -> String {
 /// the future.
 ///
 /// The releng build process appends build metadata to this to produce the full
-/// version string; the `/v1/version` API endpoint returns it as-is.
+/// version string. It is the compile-time fallback for [`system_version`],
+/// which prefers the full stamped string when running in a deployed zone.
 pub const SYSTEM_VERSION: semver::Version = semver::Version::new(22, 0, 0);
+
+/// Path, inside a deployed zone, of the file holding the full stamped system
+/// version string (e.g. `21.0.0-0.ci+git0abc1234def`).
+///
+/// `omicron-package stamp` writes the version into each zone image's top-level
+/// `oxide.json` metadata, but that metadata is only readable from the global
+/// zone (by re-opening the image tarball); a process running *inside* a zone
+/// cannot see it. To make the full version available to Nexus at runtime, the
+/// stamp step also writes it to this path within the zone filesystem. The file
+/// is absent in dev/test builds and in unstamped packages.
+const SYSTEM_VERSION_PATH: &str = "/var/oxide/system-version";
+
+/// The full version of the running system software, as served by `/v1/version`.
+///
+/// Returns the stamped version string from [`SYSTEM_VERSION_PATH`] when present
+/// (a deployed, stamped zone), otherwise the compile-time [`SYSTEM_VERSION`]
+/// core. The result is read once and cached: a system update replaces the zone
+/// image and restarts the process, so the file cannot change under a running
+/// server.
+pub fn system_version() -> &'static semver::Version {
+    static VERSION: std::sync::OnceLock<semver::Version> =
+        std::sync::OnceLock::new();
+    VERSION.get_or_init(|| {
+        read_system_version(std::path::Path::new(SYSTEM_VERSION_PATH))
+    })
+}
+
+/// Read and parse the stamped system version from `path`, falling back to
+/// [`SYSTEM_VERSION`] when the file is absent or does not contain a valid
+/// semver. Split out from [`system_version`] (which caches) to be testable.
+fn read_system_version(path: &std::path::Path) -> semver::Version {
+    match std::fs::read_to_string(path) {
+        Ok(contents) => contents.trim().parse().unwrap_or(SYSTEM_VERSION),
+        Err(_) => SYSTEM_VERSION,
+    }
+}
 
 pub const OMICRON_DPD_TAG: &str = "omicron";
 
@@ -185,5 +222,46 @@ impl std::fmt::Debug for BytesToHexDebug<'_> {
             f.write_char(lower_nib)?;
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::{SYSTEM_VERSION, read_system_version};
+    use camino_tempfile::NamedUtf8TempFile;
+    use std::io::Write;
+
+    fn write_version_file(contents: &str) -> NamedUtf8TempFile {
+        let mut file = NamedUtf8TempFile::new().unwrap();
+        file.write_all(contents.as_bytes()).unwrap();
+        file.flush().unwrap();
+        file
+    }
+
+    #[test]
+    fn system_version_falls_back_when_file_absent() {
+        let path = camino::Utf8Path::new("/nonexistent/system-version");
+        assert_eq!(read_system_version(path.as_std_path()), SYSTEM_VERSION);
+    }
+
+    #[test]
+    fn system_version_reads_full_stamped_string() {
+        // The stamped string carries prerelease and build metadata that the
+        // compile-time SYSTEM_VERSION core lacks. The trailing newline tests
+        // that whitespace around the version is trimmed.
+        const STAMPED_VERSION: &str = "21.0.0-0.ci+git0abc1234def";
+        let expected: semver::Version = STAMPED_VERSION.parse().unwrap();
+        let file = write_version_file(&format!("{STAMPED_VERSION}\n"));
+        let version = read_system_version(file.path().as_std_path());
+        assert_eq!(version, expected);
+    }
+
+    #[test]
+    fn system_version_falls_back_on_unparseable_file() {
+        let file = write_version_file("not a version");
+        assert_eq!(
+            read_system_version(file.path().as_std_path()),
+            SYSTEM_VERSION
+        );
     }
 }
