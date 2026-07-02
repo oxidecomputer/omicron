@@ -743,4 +743,21 @@ mod tests {
             &output,
         );
     }
+
+    /// The pretty-printer handles multi-line strings in comments by outputting
+    /// them at the correct indentation and prefixing each line with a `//`.
+    #[test]
+    fn test_log_entry_display_multiline_comment() {
+        let json = serde_json::json!({
+            "event": "multi-line comment",
+            "comment": "this comment\nspans multiple lines\nisn't that cool?",
+            "flat_key": "flat_value",
+        });
+        let entry: LogEntry = serde_json::from_value(json).unwrap();
+        let output = format!("{}", entry.display_indented(0));
+        expectorate::assert_contents(
+            "output/log_entry_display_multiline_comment.out",
+            &output,
+        );
+    }
 }
