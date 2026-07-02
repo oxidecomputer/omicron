@@ -4072,7 +4072,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             nexus
                 .loopback_address_delete(
                     &opctx,
-                    path.rack_id,
+                    RackUuid::from_untyped_uuid(path.rack_id),
                     path.switch_slot,
                     addr.into(),
                 )
@@ -4306,7 +4306,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let settings = nexus
                 .lldp_config_get(
                     &opctx,
-                    query.rack_id,
+                    RackUuid::from_untyped_uuid(query.rack_id),
                     query.switch_slot,
                     path.port,
                 )
@@ -4333,7 +4333,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             nexus
                 .lldp_config_update(
                     &opctx,
-                    query.rack_id,
+                    RackUuid::from_untyped_uuid(query.rack_id),
                     query.switch_slot,
                     path.port,
                     config,
@@ -4366,7 +4366,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
                     &opctx,
                     &prev,
                     limit,
-                    path.rack_id,
+                    RackUuid::from_untyped_uuid(path.rack_id),
                     path.switch_slot,
                     &path.port,
                 )
@@ -6543,7 +6543,9 @@ impl NexusExternalApi for NexusExternalApiImpl {
         let handler = async {
             let opctx =
                 crate::context::op_context_for_external_api(&rqctx).await?;
-            let rack_info = nexus.rack_lookup(&opctx, &path.rack_id).await?;
+            let rack_info = nexus
+                .rack_lookup(&opctx, &RackUuid::from_untyped_uuid(path.rack_id))
+                .await?;
             Ok(HttpResponseOk(rack_info.into()))
         };
         apictx

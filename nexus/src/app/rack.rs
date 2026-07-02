@@ -68,7 +68,7 @@ impl super::Nexus {
     pub(crate) async fn rack_lookup(
         &self,
         opctx: &OpContext,
-        rack_id: &Uuid,
+        rack_id: &RackUuid,
     ) -> LookupResult<db::model::Rack> {
         let (.., db_rack) = LookupPath::new(opctx, &self.db_datastore)
             .rack_id(*rack_id)
@@ -83,7 +83,7 @@ impl super::Nexus {
     pub(crate) async fn rack_initialize(
         &self,
         opctx: &OpContext,
-        rack_id: Uuid,
+        rack_id: RackUuid,
         request: RackInitializationRequest,
         blueprint_execution_enabled: bool,
     ) -> Result<(), Error> {
@@ -760,7 +760,7 @@ impl super::Nexus {
                                 part: k.part_number.clone(),
                                 revision: v.baseboard_revision,
                             },
-                            rack_id: self.rack_id,
+                            rack_id: self.rack_id.into_untyped_uuid(),
                             cubby: v.sp_slot,
                         })
                     } else {
@@ -830,7 +830,7 @@ impl super::Nexus {
                 schema_version: 1,
                 body: StartSledAgentRequestBody {
                     id: allocation.sled_id.into(),
-                    rack_id: RackUuid::from_untyped_uuid(allocation.rack_id),
+                    rack_id: allocation.rack_id.into(),
                     use_trust_quorum: true,
                     is_lrtq_learner: true,
                     subnet: sled_agent_client::types::Ipv6Subnet {

@@ -9,6 +9,7 @@ use omicron_common::api::external::IdentityMetadata;
 use omicron_sled_agent::sim;
 use omicron_test_utils::dev::poll::{CondCheckError, wait_for_condition};
 use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::RackUuid;
 use std::fmt::Debug;
 use std::net::Ipv6Addr;
 use std::time::Duration;
@@ -38,9 +39,12 @@ pub use starter::start_producer_server;
 pub use starter::start_sled_agent;
 pub use starter::start_sled_agent_with_config;
 
+// TODO: Convert all the UUIDs here to be (typed) constants, similar to
+// RACK_UUID, and using the pattern
+// RackUuid::from_u128(0xc19a698f_c6f9_4a17_ae30_20d711b8f7dc).
 pub const SLED_AGENT_UUID: &str = "b6d65341-167c-41df-9b5c-41cded99c229";
 pub const SLED_AGENT2_UUID: &str = "039be560-54cc-49e3-88df-1a29dadbf913";
-pub const RACK_UUID: &str = nexus_db_queries::db::pub_test_utils::RACK_UUID;
+pub const RACK_UUID: RackUuid = nexus_db_queries::db::pub_test_utils::RACK_UUID;
 pub const SWITCH_UUID: &str = "dae4e1f1-410e-4314-bff1-fec0504be07e";
 pub const PHYSICAL_DISK_UUID: &str = "fbf4e1f1-410e-4314-bff1-fec0504be07e";
 pub const OXIMETER_UUID: &str = "39e6175b-4df2-4730-b11d-cbc1e60a2e78";
@@ -127,12 +131,12 @@ pub fn dpd_client<N: NexusServer>(
     let dendrite_guard = cptestctx.dendrite.read().unwrap();
     let (switch_slot, dendrite_instance) = dendrite_guard
         .iter()
-        .next()
+        .find(|(_, instance)| instance.is_dpd_running())
         .expect("No dendrite instances running for test");
 
     // Copy the values we need while the guard is still alive
     let switch_slot = *switch_slot;
-    let port = dendrite_instance.port;
+    let port = dendrite_instance.port();
     drop(dendrite_guard);
 
     let client_state = dpd_client::ClientState {
