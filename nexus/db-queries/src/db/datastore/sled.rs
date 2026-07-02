@@ -1596,17 +1596,38 @@ impl DataStore {
         Ok(())
     }
 
+    /// Returns a list of sled resource reservations that are no longer occupied
+    /// by a VMM, paginated by VMM UUID.
+    ///
+    /// Sled resource reservations are considered abandoned if the reservation
+    /// is in [`SledResourceVmmState::Tombstoned`],  and any of the following
+    /// set of conditions is true:
+    ///
+    /// - The reservation's VMM ID corresponds to a record in the `vmm` table
+    ///   that has been soft-deleted,
+    /// - The reservation's VMM ID does not exist in the `vmm` table at all
+    ///   (i.e, it has been hard-deleted somehow)
+    /// - The reservation's VMM ID corresponds to a record in the `vmm` table
+    ///   that is in [`VmmState::Destroyed`], [`VmmState::SagaUnwound`], or
+    ///   [`VmmState::Failed`].
+    ///
+    /// Any of these conditions being met indicates that no VMM is currently
+    /// using the reserved resources, and the resources are not allocated for a
+    /// VMM which is in he process of being created.
     pub async fn sled_reservation_list_abandoned(
         &self,
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<SledResourceVmm> {
-        todo!()
+        Self::reservation_list_abandoned_query(pagparams)
+            .load_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
     fn reservation_list_abandoned_query(
         pagparams: &DataPageParams<'_, Uuid>,
-    ) -> impl RunnableQuery<SledResourceVmm> {
+    ) -> impl RunnableQuery<SledResourceVmm> + use<> {
         use nexus_db_schema::schema::sled_resource_vmm::dsl as resource_dsl;
         use nexus_db_schema::schema::vmm::dsl as vmm_dsl;
         let joined = resource_dsl::sled_resource_vmm
@@ -2116,6 +2137,7 @@ pub(in crate::db::datastore) mod test {
     use crate::db::datastore::test_utils::{
         Expected, IneligibleSleds, sled_set_policy, sled_set_state,
     };
+    use crate::db::explain::ExplainableAsync;
     use crate::db::model::ByteCount;
     use crate::db::model::SqlU32;
     use crate::db::model::Zpool;
@@ -2127,6 +2149,7 @@ pub(in crate::db::datastore) mod test {
     use crate::db::pub_test_utils::helpers::create_project;
     use crate::db::pub_test_utils::helpers::small_resource_request;
     use crate::db::queries::ALLOW_FULL_TABLE_SCAN_SQL;
+    use crate::db::raw_query_builder::expectorate_query_contents;
     use anyhow::{Context, Result};
     use async_bb8_diesel::AsyncConnection;
     use async_bb8_diesel::AsyncSimpleConnection;
@@ -7392,6 +7415,48 @@ pub(in crate::db::datastore) mod test {
             .unwrap();
 
         assert_eq!(previously_target_vmm.state, SledResourceVmmState::Active,);
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn expectorate_reservation_list_abandoned_query() {
+        let pagparams = DataPageParams {
+            marker: None,
+            direction: dropshot::PaginationOrder::Ascending,
+            limit: std::num::NonZeroU32::new(100).unwrap(),
+        };
+
+        let query = DataStore::reservation_list_abandoned_query(&pagparams);
+        expectorate_query_contents(
+            &query,
+            "tests/output/sled_reservation_list_abandoned_query.sql",
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn explain_reservation_list_abandoned_query() {
+        let logctx =
+            dev::test_setup_log("explain_reservation_list_abandoned_query");
+        let db = TestDatabase::new_with_pool(&logctx.log).await;
+        let pool = db.pool();
+        let conn = pool.claim().await.unwrap();
+
+        let pagparams = DataPageParams {
+            marker: None,
+            direction: dropshot::PaginationOrder::Ascending,
+            limit: std::num::NonZeroU32::new(100).unwrap(),
+        };
+
+        let query = DataStore::reservation_list_abandoned_query(&pagparams);
+        let explanation = query
+            .explain_async(&conn)
+            .await
+            .expect("Failed to explain query - is it valid SQL?");
+
+        eprintln!("{explanation}");
 
         db.terminate().await;
         logctx.cleanup_successful();
