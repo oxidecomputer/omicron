@@ -531,7 +531,7 @@ mod tests {
                 {
                     Ok(())
                 } else {
-                    Err(CondCheckError::<()>::NotYet)
+                    Err(CondCheckError::<()>::NotYet { status: None })
                 }
             },
             &POLL_INTERVAL,

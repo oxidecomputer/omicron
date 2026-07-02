@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "40.0.0"
+    "version": "42.0.0"
   },
   "paths": {
     "/artifacts": {
@@ -6082,6 +6082,13 @@
             "items": {
               "$ref": "#/components/schemas/NetworkInterface"
             }
+          },
+          "primary_nic_mtu": {
+            "nullable": true,
+            "description": "The MTU to apply to the instance's primary OPTE port, in bytes. If `None`, the OPTE default is used (1500). Set when the fleet has enabled external jumbo frames and the instance has opted in.",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
           }
         },
         "required": [
@@ -8743,10 +8750,11 @@
           },
           "ports": {
             "description": "Uplinks for connecting the rack to external networks",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/PortConfig"
-            }
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/UplinkPorts"
+              }
+            ]
           },
           "rack_subnet": {
             "$ref": "#/components/schemas/Ipv6Net"
@@ -9847,8 +9855,11 @@
           },
           "rack_id": {
             "description": "Uuid of the rack to which this sled agent belongs.",
-            "type": "string",
-            "format": "uuid"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/RackUuid"
+              }
+            ]
           },
           "subnet": {
             "description": "Portion of the IP space to be managed by the Sled Agent.",
@@ -10222,6 +10233,13 @@
         "required": [
           "address"
         ]
+      },
+      "UplinkPorts": {
+        "type": "array",
+        "items": {
+          "$ref": "#/components/schemas/PortConfig"
+        },
+        "minItems": 1
       },
       "VirtioDisk": {
         "description": "A disk that presents a virtio-block interface to the guest.",

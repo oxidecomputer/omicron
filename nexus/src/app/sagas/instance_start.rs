@@ -25,6 +25,7 @@ use nexus_db_lookup::LookupPath;
 use nexus_db_queries::db::datastore::Disk;
 use nexus_db_queries::db::datastore::LocalStorageAllocation;
 use nexus_db_queries::db::datastore::LocalStorageDisk;
+use nexus_db_queries::db::datastore::sled::SledReservationReason;
 use nexus_db_queries::db::identity::Resource;
 use nexus_db_queries::{authn, authz, db};
 use nexus_types::saga::saga_action_failed;
@@ -148,7 +149,6 @@ declare_saga_actions! {
     ENSURE_RUNNING -> "ensure_running" {
         + sis_ensure_running
     }
-
 }
 
 /// Node name for looking up the VMM record once it has been registered with the
@@ -235,6 +235,7 @@ async fn sis_alloc_server(
         u32::from(hardware_threads.0),
         reservoir_ram,
         constraint_builder.build(),
+        SledReservationReason::Start,
     )
     .await?;
 
@@ -1163,6 +1164,7 @@ async fn sis_ensure_running(
 #[cfg(test)]
 mod test {
     use core::time::Duration;
+    use nexus_types::identity::Asset as _;
     use std::net::SocketAddrV6;
 
     use crate::app::sagas::disk_delete::test::ExpungeTestHarness;
@@ -1176,20 +1178,18 @@ mod test {
         attach_disk_to_instance, create_default_ip_pools, create_project,
         object_create,
     };
-    use nexus_test_utils_macros::nexus_test;
+    use nexus_types::external_api::instance::InstanceCpuCount;
     use nexus_types::external_api::{instance as instance_types, networking};
     use nexus_types::identity::Resource;
+    use nexus_types_versions::latest;
     use omicron_common::api::external::{
-        ByteCount, IdentityMetadataCreateParams, InstanceCpuCount, Name,
+        ByteCount, IdentityMetadataCreateParams, Name,
     };
     use omicron_test_utils::dev::poll;
     use sled_agent_types::early_networking::SwitchSlot;
     use uuid::Uuid;
 
     use super::*;
-
-    type ControlPlaneTestContext =
-        nexus_test_utils::ControlPlaneTestContext<crate::Server>;
 
     const PROJECT_NAME: &str = "test-project";
     const INSTANCE_NAME: &str = "test-instance";
@@ -1202,7 +1202,7 @@ mod test {
 
     async fn create_instance(
         client: &ClientTestContext,
-    ) -> omicron_common::api::external::Instance {
+    ) -> latest::instance::Instance {
         let instances_url = format!("/v1/instances?project={}", PROJECT_NAME);
         object_create(
             client,
@@ -1227,22 +1227,27 @@ mod test {
                 auto_restart_policy: Default::default(),
                 anti_affinity_groups: Vec::new(),
                 multicast_groups: Vec::new(),
+                enable_jumbo_frames: false,
             },
         )
         .await
     }
 
-    #[nexus_test(server = crate::Server)]
-    async fn test_saga_basic_usage_succeeds(
-        cptestctx: &ControlPlaneTestContext,
-    ) {
+    #[tokio::test]
+    async fn test_saga_basic_usage_succeeds() {
+        let cptestctx = test_helpers::instance_saga_test_builder(
+            "test_saga_basic_usage_succeeds",
+        )
+        .start::<crate::Server>()
+        .await;
+
         let client = &cptestctx.external_client;
         let nexus = &cptestctx.server.server_context().nexus;
         let _project_id = setup_test_project(&client).await;
-        let opctx = test_helpers::test_opctx(cptestctx);
+        let opctx = test_helpers::test_opctx(&cptestctx);
         let instance = create_instance(client).await;
         let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
-        let db_instance = test_helpers::instance_fetch(cptestctx, instance_id)
+        let db_instance = test_helpers::instance_fetch(&cptestctx, instance_id)
             .await
             .instance()
             .clone();
@@ -1259,8 +1264,8 @@ mod test {
             .await
             .expect("Start saga should succeed");
 
-        test_helpers::instance_simulate(cptestctx, &instance_id).await;
-        let vmm_state = test_helpers::instance_fetch(cptestctx, instance_id)
+        test_helpers::instance_simulate(&cptestctx, &instance_id).await;
+        let vmm_state = test_helpers::instance_fetch(&cptestctx, instance_id)
             .await
             .vmm()
             .as_ref()
@@ -1268,11 +1273,13 @@ mod test {
             .state;
 
         assert_eq!(vmm_state, nexus_db_model::VmmState::Running);
+
+        cptestctx.teardown().await;
     }
 
     #[tokio::test]
     async fn should_start_with_dead_switch() {
-        let cptestctx = nexus_test_utils::ControlPlaneBuilder::new(
+        let cptestctx = test_helpers::instance_saga_test_builder(
             "should_start_with_dead_switch",
         )
         .with_extra_sled_agents(3)
@@ -1347,8 +1354,7 @@ mod test {
             .unwrap()
             .pop()
             .unwrap()
-            .identity
-            .id;
+            .id();
 
         let uplink0 = datastore
             .switch_port_get_id(
@@ -1483,13 +1489,14 @@ mod test {
                 let result =
                     dpd_client.nat_ipv4_list(&nat_subnet, None, None).await;
 
-                let data =
-                    result.map_err(|_| poll::CondCheckError::<()>::NotYet)?;
+                let data = result.map_err(|_| {
+                    poll::CondCheckError::<()>::NotYet { status: None }
+                })?;
 
                 if data.items.len() == expected_nat_entries {
                     Ok(())
                 } else {
-                    Err(poll::CondCheckError::<()>::NotYet)
+                    Err(poll::CondCheckError::<()>::NotYet { status: None })
                 }
             },
             &poll_interval,
@@ -1538,15 +1545,16 @@ mod test {
 
                 info!(log, "nat_ipv4_list"; "result" => ?result);
 
-                let data =
-                    result.map_err(|_| poll::CondCheckError::<()>::NotYet)?;
+                let data = result.map_err(|_| {
+                    poll::CondCheckError::<()>::NotYet { status: None }
+                })?;
 
                 if data.items.is_empty() {
                     error!(
                         log,
                         "we are expecting nat entries but none were found"
                     );
-                    Err(poll::CondCheckError::<()>::NotYet)
+                    Err(poll::CondCheckError::<()>::NotYet { status: None })
                 } else {
                     Ok(())
                 }
@@ -1560,15 +1568,19 @@ mod test {
         cptestctx.teardown().await;
     }
 
-    #[nexus_test(server = crate::Server)]
-    async fn test_action_failure_can_unwind(
-        cptestctx: &ControlPlaneTestContext,
-    ) {
+    #[tokio::test]
+    async fn test_action_failure_can_unwind() {
+        let cptestctx = test_helpers::instance_saga_test_builder(
+            "test_action_failure_can_unwind",
+        )
+        .start::<crate::Server>()
+        .await;
+
         let log = &cptestctx.logctx.log;
         let client = &cptestctx.external_client;
         let nexus = &cptestctx.server.server_context().nexus;
         let _project_id = setup_test_project(&client).await;
-        let opctx = test_helpers::test_opctx(cptestctx);
+        let opctx = test_helpers::test_opctx(&cptestctx);
         let instance = create_instance(client).await;
         let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
 
@@ -1582,7 +1594,7 @@ mod test {
                 Box::pin({
                     async {
                         let db_instance = test_helpers::instance_fetch(
-                            cptestctx,
+                            &cptestctx,
                             instance_id,
                         )
                         .await.instance().clone();
@@ -1599,7 +1611,7 @@ mod test {
             || {
                 Box::pin(async {
                     let new_db_state = test_helpers::instance_wait_for_state(
-                        cptestctx,
+                        &cptestctx,
                         instance_id,
                         nexus_db_model::InstanceState::NoVmm,
                     ).await;
@@ -1612,25 +1624,31 @@ mod test {
 
                     assert!(new_db_instance.runtime().propolis_id.is_none());
 
-                    assert!(test_helpers::no_virtual_provisioning_resource_records_exist(cptestctx).await);
-                    assert!(test_helpers::no_virtual_provisioning_collection_records_using_instances(cptestctx).await);
+                    assert!(test_helpers::no_virtual_provisioning_resource_records_exist(&cptestctx).await);
+                    assert!(test_helpers::no_virtual_provisioning_collection_records_using_instances(&cptestctx).await);
                 })
             },
             log,
         ).await;
+
+        cptestctx.teardown().await;
     }
 
-    #[nexus_test(server = crate::Server)]
-    async fn test_actions_succeed_idempotently(
-        cptestctx: &ControlPlaneTestContext,
-    ) {
+    #[tokio::test]
+    async fn test_actions_succeed_idempotently() {
+        let cptestctx = test_helpers::instance_saga_test_builder(
+            "test_actions_succeed_idempotently",
+        )
+        .start::<crate::Server>()
+        .await;
+
         let client = &cptestctx.external_client;
         let nexus = &cptestctx.server.server_context().nexus;
         let _project_id = setup_test_project(&client).await;
-        let opctx = test_helpers::test_opctx(cptestctx);
+        let opctx = test_helpers::test_opctx(&cptestctx);
         let instance = create_instance(client).await;
         let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
-        let db_instance = test_helpers::instance_fetch(cptestctx, instance_id)
+        let db_instance = test_helpers::instance_fetch(&cptestctx, instance_id)
             .await
             .instance()
             .clone();
@@ -1643,8 +1661,8 @@ mod test {
 
         let dag = create_saga_dag::<SagaInstanceStart>(params).unwrap();
         test_helpers::actions_succeed_idempotently(nexus, dag).await;
-        test_helpers::instance_simulate(cptestctx, &instance_id).await;
-        let vmm_state = test_helpers::instance_fetch(cptestctx, instance_id)
+        test_helpers::instance_simulate(&cptestctx, &instance_id).await;
+        let vmm_state = test_helpers::instance_fetch(&cptestctx, instance_id)
             .await
             .vmm()
             .as_ref()
@@ -1652,6 +1670,8 @@ mod test {
             .state;
 
         assert_eq!(vmm_state, nexus_db_model::VmmState::Running);
+
+        cptestctx.teardown().await;
     }
 
     /// Tests that if a start saga unwinds because sled agent returned failure
@@ -1662,15 +1682,21 @@ mod test {
     /// test causes saga nodes to "fail" without actually executing anything,
     /// whereas this test injects a failure into the normal operation of the
     /// ensure-running node.
-    #[nexus_test(server = crate::Server)]
-    async fn test_ensure_running_unwind(cptestctx: &ControlPlaneTestContext) {
+    #[tokio::test]
+    async fn test_ensure_running_unwind() {
+        let cptestctx = test_helpers::instance_saga_test_builder(
+            "test_ensure_running_unwind",
+        )
+        .start::<crate::Server>()
+        .await;
+
         let client = &cptestctx.external_client;
         let nexus = &cptestctx.server.server_context().nexus;
         let _project_id = setup_test_project(&client).await;
-        let opctx = test_helpers::test_opctx(cptestctx);
+        let opctx = test_helpers::test_opctx(&cptestctx);
         let instance = create_instance(client).await;
         let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
-        let db_instance = test_helpers::instance_fetch(cptestctx, instance_id)
+        let db_instance = test_helpers::instance_fetch(&cptestctx, instance_id)
             .await
             .instance()
             .clone();
@@ -1716,7 +1742,7 @@ mod test {
         assert_eq!(saga_error.error_node_name, last_node_name);
 
         let db_instance =
-            test_helpers::instance_fetch(cptestctx, instance_id).await;
+            test_helpers::instance_fetch(&cptestctx, instance_id).await;
 
         assert_eq!(
             db_instance.instance().nexus_state,
@@ -1726,21 +1752,27 @@ mod test {
 
         assert!(
             test_helpers::no_virtual_provisioning_resource_records_exist(
-                cptestctx
+                &cptestctx
             )
             .await
         );
-        assert!(test_helpers::no_virtual_provisioning_collection_records_using_instances(cptestctx).await);
+        assert!(test_helpers::no_virtual_provisioning_collection_records_using_instances(&cptestctx).await);
+
+        cptestctx.teardown().await;
     }
 
-    #[nexus_test(server = crate::Server)]
-    async fn test_cannot_start_local_storage_disk_gone(
-        cptestctx: &ControlPlaneTestContext,
-    ) {
+    #[tokio::test]
+    async fn test_cannot_start_local_storage_disk_gone() {
+        let cptestctx = test_helpers::instance_saga_test_builder(
+            "test_cannot_start_local_storage_disk_gone",
+        )
+        .start::<crate::Server>()
+        .await;
+
         let client = &cptestctx.external_client;
         let nexus = &cptestctx.server.server_context().nexus;
         let _project_id = setup_test_project(&client).await;
-        let opctx = test_helpers::test_opctx(cptestctx);
+        let opctx = test_helpers::test_opctx(&cptestctx);
 
         let instance = create_instance(client).await;
 
@@ -1748,7 +1780,7 @@ mod test {
         // local storage on a pool, attach the disk to the instance, then
         // expunge the disk backing the pool.
 
-        let disk_test = DiskTest::new(cptestctx).await;
+        let disk_test = DiskTest::new(&cptestctx).await;
         let zpool = disk_test.zpools().next().unwrap();
         let disk = create_disk(&cptestctx, new_local_disk_create_params).await;
         let harness =
@@ -1767,7 +1799,7 @@ mod test {
         // Run the saga and make sure that the instance does not start
 
         let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
-        let db_instance = test_helpers::instance_fetch(cptestctx, instance_id)
+        let db_instance = test_helpers::instance_fetch(&cptestctx, instance_id)
             .await
             .instance()
             .clone();
@@ -1797,7 +1829,7 @@ mod test {
         );
 
         let db_instance =
-            test_helpers::instance_fetch(cptestctx, instance_id).await;
+            test_helpers::instance_fetch(&cptestctx, instance_id).await;
 
         assert_eq!(
             db_instance.instance().nexus_state,
@@ -1807,11 +1839,13 @@ mod test {
 
         assert!(
             test_helpers::no_virtual_provisioning_resource_records_exist(
-                cptestctx
+                &cptestctx
             )
             .await
         );
 
-        assert!(test_helpers::no_virtual_provisioning_collection_records_using_instances(cptestctx).await);
+        assert!(test_helpers::no_virtual_provisioning_collection_records_using_instances(&cptestctx).await);
+
+        cptestctx.teardown().await;
     }
 }

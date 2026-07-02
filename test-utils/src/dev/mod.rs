@@ -83,11 +83,7 @@ async fn setup_database(
         }
     };
     let starter = builder.build().context("error building CockroachStarter")?;
-    info!(
-        &log,
-        "cockroach temporary directory: {}",
-        starter.temp_dir().display()
-    );
+    info!(&log, "cockroach temporary directory: {}", starter.temp_dir());
 
     // If we're going to copy the storage directory from the seed,
     // it is critical we do so before starting the DB.
@@ -99,7 +95,7 @@ async fn setup_database(
                 &log,
                 "cockroach: copying from seed tarball ({}) to storage directory ({})",
                 input_tar,
-                starter.store_dir().to_string_lossy(),
+                starter.store_dir(),
             );
             let reader = std::fs::File::open(input_tar).with_context(|| {
                 format!("cannot open input tar {}", input_tar)
@@ -109,7 +105,7 @@ async fn setup_database(
                 format!(
                     "cannot unpack input tar {} into {}",
                     input_tar,
-                    starter.store_dir().display()
+                    starter.store_dir()
                 )
             })?;
         }

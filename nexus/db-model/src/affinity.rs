@@ -1,8 +1,8 @@
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
-// file, You can obtain one at https://mozilla.org/MPL/5.0/.
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-// Copyright 2025 Oxide Computer Company
+// Copyright 2026 Oxide Computer Company
 
 //! Database representation of affinity and anti-affinity groups
 
@@ -16,6 +16,7 @@ use nexus_db_schema::schema::affinity_group_instance_membership;
 use nexus_db_schema::schema::anti_affinity_group;
 use nexus_db_schema::schema::anti_affinity_group_instance_membership;
 use nexus_types::external_api::affinity;
+use nexus_types::external_api::instance;
 use omicron_common::api::external;
 use omicron_common::api::external::IdentityMetadata;
 use omicron_uuid_kinds::AffinityGroupKind;
@@ -37,7 +38,7 @@ impl_enum_type!(
     Allow => b"allow"
 );
 
-impl From<AffinityPolicy> for external::AffinityPolicy {
+impl From<AffinityPolicy> for affinity::AffinityPolicy {
     fn from(policy: AffinityPolicy) -> Self {
         match policy {
             AffinityPolicy::Fail => Self::Fail,
@@ -46,11 +47,11 @@ impl From<AffinityPolicy> for external::AffinityPolicy {
     }
 }
 
-impl From<external::AffinityPolicy> for AffinityPolicy {
-    fn from(policy: external::AffinityPolicy) -> Self {
+impl From<affinity::AffinityPolicy> for AffinityPolicy {
+    fn from(policy: affinity::AffinityPolicy) -> Self {
         match policy {
-            external::AffinityPolicy::Fail => Self::Fail,
-            external::AffinityPolicy::Allow => Self::Allow,
+            affinity::AffinityPolicy::Fail => Self::Fail,
+            affinity::AffinityPolicy::Allow => Self::Allow,
         }
     }
 }
@@ -65,7 +66,7 @@ impl_enum_type!(
     Sled => b"sled"
 );
 
-impl From<FailureDomain> for external::FailureDomain {
+impl From<FailureDomain> for affinity::FailureDomain {
     fn from(domain: FailureDomain) -> Self {
         match domain {
             FailureDomain::Sled => Self::Sled,
@@ -73,10 +74,10 @@ impl From<FailureDomain> for external::FailureDomain {
     }
 }
 
-impl From<external::FailureDomain> for FailureDomain {
-    fn from(domain: external::FailureDomain) -> Self {
+impl From<affinity::FailureDomain> for FailureDomain {
+    fn from(domain: affinity::FailureDomain) -> Self {
         match domain {
-            external::FailureDomain::Sled => Self::Sled,
+            affinity::FailureDomain::Sled => Self::Sled,
         }
     }
 }
@@ -228,9 +229,9 @@ impl AffinityGroupInstanceMembership {
     pub fn to_external(
         self,
         member_name: external::Name,
-        run_state: external::InstanceState,
-    ) -> external::AffinityGroupMember {
-        external::AffinityGroupMember::Instance {
+        run_state: instance::InstanceState,
+    ) -> affinity::AffinityGroupMember {
+        affinity::AffinityGroupMember::Instance {
             id: self.instance_id.into(),
             name: member_name,
             run_state,
@@ -256,9 +257,9 @@ impl AntiAffinityGroupInstanceMembership {
     pub fn to_external(
         self,
         member_name: external::Name,
-        run_state: external::InstanceState,
-    ) -> external::AntiAffinityGroupMember {
-        external::AntiAffinityGroupMember::Instance {
+        run_state: instance::InstanceState,
+    ) -> affinity::AntiAffinityGroupMember {
+        affinity::AntiAffinityGroupMember::Instance {
             id: self.instance_id.into(),
             name: member_name,
             run_state,

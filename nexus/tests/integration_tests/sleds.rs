@@ -214,7 +214,7 @@ async fn test_sled_instance_list(cptestctx: &ControlPlaneTestContext) {
                 if total_instances.len() == 1 {
                     Ok(total_instances)
                 } else {
-                    Err(CondCheckError::<()>::NotYet)
+                    Err(CondCheckError::<()>::NotYet { status: None })
                 }
             }
         },

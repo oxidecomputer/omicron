@@ -13,7 +13,7 @@ use iddqd::errors::DuplicateItem;
 use iddqd::id_upcast;
 use illumos_utils::zpool::ZpoolName;
 use internal_dns_types::config::{
-    DnsConfigBuilder, DnsConfigParams, Host, Zone,
+    DnsConfigBuilder, DnsConfigParams, Host, HostSwitchZonePorts, Zone,
 };
 use internal_dns_types::names::ServiceName;
 use nexus_types::deployment::LastAllocatedSubnetIpOffset;
@@ -29,10 +29,10 @@ use nexus_types::deployment::{
 };
 use nexus_types::external_api::sled::SledState;
 use omicron_common::address::{
-    CP_SERVICES_RESERVED_ADDRESSES, DENDRITE_PORT, DNS_HTTP_PORT, DNS_PORT,
-    Ipv6Subnet, MGD_PORT, MGS_PORT, NEXUS_INTERNAL_PORT, NEXUS_LOCKSTEP_PORT,
-    NTP_PORT, NUM_SOURCE_NAT_PORTS, REPO_DEPOT_PORT, ReservedRackSubnet,
-    SLED_PREFIX, SLED_RESERVED_ADDRESSES, get_sled_address,
+    CP_SERVICES_RESERVED_ADDRESSES, DDMD_PORT, DENDRITE_PORT, DNS_HTTP_PORT,
+    DNS_PORT, Ipv6Subnet, MGD_PORT, MGS_PORT, NEXUS_INTERNAL_PORT,
+    NEXUS_LOCKSTEP_PORT, NTP_PORT, NUM_SOURCE_NAT_PORTS, REPO_DEPOT_PORT,
+    ReservedRackSubnet, SLED_PREFIX, SLED_RESERVED_ADDRESSES, get_sled_address,
     get_switch_zone_address,
 };
 use omicron_common::api::external::{Generation, MacAddr, Vni};
@@ -338,9 +338,12 @@ impl ServicePlan {
                 .host_zone_switch(
                     sled.sled_id,
                     address,
-                    DENDRITE_PORT,
-                    MGS_PORT,
-                    MGD_PORT,
+                    HostSwitchZonePorts {
+                        dendrite: DENDRITE_PORT,
+                        mgs: MGS_PORT,
+                        mgd: MGD_PORT,
+                        ddm: DDMD_PORT,
+                    },
                 )
                 .unwrap();
         }
@@ -1360,7 +1363,9 @@ mod tests {
     use omicron_common::api::internal::shared::AllowedSourceIps;
     use omicron_test_utils::dev::test_setup_log;
     use oxnet::Ipv6Net;
+    use sled_agent_types::early_networking::PortConfig;
     use sled_agent_types::early_networking::RackNetworkConfig;
+    use sled_agent_types::early_networking::UplinkPorts;
     use sled_agent_types::inventory::ConfigReconcilerInventoryStatus;
     use sled_agent_types::inventory::FmdInventory;
     use sled_agent_types::inventory::OmicronFileSourceResolverInventory;
@@ -1477,11 +1482,17 @@ mod tests {
                 rack_subnet: Ipv6Net::host_net(Ipv6Addr::LOCALHOST),
                 infra_ip_first: std::net::IpAddr::V4(Ipv4Addr::LOCALHOST),
                 infra_ip_last: std::net::IpAddr::V4(Ipv4Addr::LOCALHOST),
-                ports: Vec::new(),
+                // The list of ports must be non-empty -- this test doesn't
+                // exercise uplinks, so use a placeholder port here.
+                ports: UplinkPorts::new(vec![PortConfig::empty_for_tests(
+                    "qsfp0",
+                )])
+                .expect("placeholder port list is non-empty"),
                 bgp: Vec::new(),
                 bfd: Vec::new(),
             },
             allowed_source_ips: AllowedSourceIps::Any,
+            external_jumbo_frames_opt_in_enabled: false,
         };
 
         (dns_ips.to_vec(), config)

@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "2026060300.0.0"
+    "version": "2026060800.0.0"
   },
   "paths": {
     "/device/auth": {
@@ -11269,6 +11269,68 @@
         }
       }
     },
+    "/v1/system/networking/settings": {
+      "get": {
+        "tags": [
+          "system/networking"
+        ],
+        "summary": "Fetch fleet-wide networking settings",
+        "operationId": "system_networking_settings_view",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SystemNetworkingSettings"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "system/networking"
+        ],
+        "summary": "Update fleet-wide networking settings",
+        "operationId": "system_networking_settings_update",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SystemNetworkingSettingsUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SystemNetworkingSettings"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/v1/system/networking/switch-port-settings": {
       "get": {
         "tags": [
@@ -18775,7 +18837,7 @@
         ]
       },
       "BlockSize": {
-        "title": "Disk block size in bytes",
+        "title": "Block size in bytes",
         "description": "Valid values are: 512, 2048, or 4096.",
         "type": "integer",
         "enum": [
@@ -22398,7 +22460,7 @@
             "description": "Size of blocks in bytes",
             "allOf": [
               {
-                "$ref": "#/components/schemas/ByteCount"
+                "$ref": "#/components/schemas/BlockSize"
               }
             ]
           },
@@ -22654,6 +22716,10 @@
             "description": "Human-readable free-form text about a resource",
             "type": "string"
           },
+          "enable_jumbo_frames": {
+            "description": "When true, this instance has opted in to jumbo frames (8500 byte MTU) on its primary network interface. The effective MTU also depends on the fleet-wide jumbo-frames opt-in; if that is disabled, the primary interface uses the default MTU regardless of this value. Changes only take effect on the next instance restart.",
+            "type": "boolean"
+          },
           "hostname": {
             "description": "RFC1035-compliant hostname for the instance",
             "type": "string"
@@ -22719,6 +22785,7 @@
         "required": [
           "auto_restart_enabled",
           "description",
+          "enable_jumbo_frames",
           "hostname",
           "id",
           "memory",
@@ -22757,7 +22824,7 @@
         "minimum": 0
       },
       "InstanceCpuPlatform": {
-        "description": "A required CPU platform for an instance.\n\nWhen an instance specifies a required CPU platform:\n\n- The system may expose (to the VM) new CPU features that are only present on that platform (or on newer platforms of the same lineage that also support those features). - The instance must run on hosts that have CPUs that support all the features of the supplied platform.\n\nThat is, the instance is restricted to hosts that have the CPUs which support all features of the required platform, but in exchange the CPU features exposed by the platform are available for the guest to use. Note that this may prevent an instance from starting (if the hosts that could run it are full but there is capacity on other incompatible hosts).\n\nIf an instance does not specify a required CPU platform, then when it starts, the control plane selects a host for the instance and then supplies the guest with the \"minimum\" CPU platform supported by that host. This maximizes the number of hosts that can run the VM if it later needs to migrate to another host.\n\nIn all cases, the CPU features presented by a given CPU platform are a subset of what the corresponding hardware may actually support; features which cannot be used from a virtual environment or do not have full hypervisor support may be masked off. See RFD 314 for specific CPU features in a CPU platform.",
+        "description": "A required CPU platform for an instance.\n\nWhen an instance specifies a required CPU platform:\n\n- The system may expose (to the VM) new CPU features that are only present on that platform (or on newer platforms of the same lineage that also support those features). - The instance must run on hosts that have CPUs that support all the features of the supplied platform.\n\nThat is, the instance is restricted to hosts that have the CPUs which support all features of the required platform, but in exchange the CPU features exposed by the platform are available for the guest to use. Note that this may prevent an instance from starting (if the hosts that could run it are full but there is capacity on other incompatible hosts).\n\nIf an instance does not specify a required CPU platform, then when it starts, the control plane selects a host for the instance and then supplies the guest with the \"minimum\" CPU platform supported by that host. This maximizes the number of hosts that can run the VM if it later needs to migrate to another host.\n\nIn all cases, the CPU features presented by a given CPU platform are a subset of what the corresponding hardware may actually support; features which cannot be used from a virtual environment or do not have full hypervisor support may be masked off.",
         "oneOf": [
           {
             "description": "An AMD Milan-like CPU platform.",
@@ -22767,10 +22834,17 @@
             ]
           },
           {
-            "description": "An AMD Turin-like CPU platform.",
+            "description": "An AMD Turin-like CPU platform. Prefer `amd_turin_v2` over this; this CPU platform is retained for instances that specifically requested it before `amd_turin_v2` was added.\n\nThis initial version of the Turin CPU platform includes no cache or TLB information in CPUID leaf `8000_0006`. While this was intentional, Oxide later discovered some guest software interprets the zeroed leaves as reporting cache sizes of 0 bytes and behaves incorrectly and unpredictably as a result (see [Propolis#1152](https://github.com/oxidecomputer/propolis/issues/1152)).",
             "type": "string",
             "enum": [
               "amd_turin"
+            ]
+          },
+          {
+            "description": "An AMD Turin-like CPU platform.\n\nThis version of the Turin CPU platform includes cache and TLB information in CPUID leaf `8000_0006`, similar to the cache information included in the initial Milan-like CPU platform.",
+            "type": "string",
+            "enum": [
+              "amd_turin_v2"
             ]
           }
         ]
@@ -22827,6 +22901,11 @@
             "items": {
               "$ref": "#/components/schemas/InstanceDiskAttachment"
             }
+          },
+          "enable_jumbo_frames": {
+            "description": "Enable jumbo frames (8500 byte MTU) on the instance's primary OPTE interface. Requires the fleet-wide jumbo-frames opt-in to be enabled by an operator; otherwise this field must be `false`. Changes only take effect on the next instance restart.",
+            "default": false,
+            "type": "boolean"
           },
           "external_ips": {
             "description": "The external IP addresses provided to this instance.\n\nBy default, all instances have outbound connectivity, but no inbound connectivity. These external addresses can be used to provide a fixed, known IP address for making inbound connections to the instance.",
@@ -23437,6 +23516,10 @@
               }
             ]
           },
+          "enable_jumbo_frames": {
+            "description": "Update the per-instance jumbo-frames opt-in. Setting this to `true` requires the fleet-wide jumbo-frames opt-in to be enabled. Changes only take effect on the next instance restart.",
+            "type": "boolean"
+          },
           "memory": {
             "description": "The amount of RAM (in bytes) to be allocated to the instance",
             "allOf": [
@@ -23467,6 +23550,7 @@
           "auto_restart_policy",
           "boot_disk",
           "cpu_platform",
+          "enable_jumbo_frames",
           "memory",
           "ncpus"
         ]
@@ -29582,6 +29666,30 @@
             ]
           }
         ]
+      },
+      "SystemNetworkingSettings": {
+        "description": "Fleet-wide networking settings. Only fleet viewers may view these settings. Only fleet admins can modify them.",
+        "type": "object",
+        "properties": {
+          "external_jumbo_frames_opt_in_enabled": {
+            "description": "When true, end users may opt in to jumbo frames (8500 byte MTU) on the primary interface of an instance. When false, instance-level opt-in is ignored and OPTE ports are created with the default MTU.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "external_jumbo_frames_opt_in_enabled"
+        ]
+      },
+      "SystemNetworkingSettingsUpdate": {
+        "description": "Parameters for updating the fleet-wide networking settings.",
+        "type": "object",
+        "properties": {
+          "external_jumbo_frames_opt_in_enabled": {
+            "description": "Toggle the fleet-wide external jumbo-frames opt-in.",
+            "default": false,
+            "type": "boolean"
+          }
+        }
       },
       "TargetRelease": {
         "description": "View of a system software target release",

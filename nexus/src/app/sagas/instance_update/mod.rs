@@ -344,6 +344,7 @@ use super::{
     ACTION_GENERATE_ID, ActionRegistry, NexusActionContext, NexusSaga,
     SagaContext, SagaInitError,
 };
+use crate::app::db::datastore;
 use crate::app::db::datastore::InstanceGestalt;
 use crate::app::db::datastore::VmmStateUpdateResult;
 use crate::app::db::datastore::instance;
@@ -474,13 +475,24 @@ struct UpdatesRequired {
     new_intent: Option<InstanceIntendedState>,
 
     /// If this is [`Some`], the instance's active VMM with this UUID has
-    /// transitioned to [`VmmState::Destroyed`], and its resources must be
-    /// cleaned up by a [`destroyed`] subsaga.
+    /// transitioned to a terminal state ([`VmmState::Destroyed`] or
+    /// [`VmmState::Failed`]), and its resources must be cleaned up by a
+    /// [`destroyed`] subsaga.
     destroy_active_vmm: Option<PropolisUuid>,
 
+    /// If this is [`Some`], then a migration finished successfully, and the
+    /// associated sled resource reservation records for the instance have to be
+    /// updated:
+    ///
+    /// - the previously active record has to have its state set to `tombstoned`
+    /// - the migration target record has to have its state set to `active`
+    update_sled_reservations_for_migration_success:
+        Option<MigrateSuccessUpdate>,
+
     /// If this is [`Some`], the instance's migration target VMM with this UUID
-    /// has transitioned to [`VmmState::Destroyed`], and its resources must be
-    /// cleaned up by a [`destroyed`] subsaga.
+    /// has transitioned to a terminal state ([`VmmState::Destroyed`] or
+    /// [`VmmState::Failed`]), and its resources must be cleaned up by a
+    /// [`destroyed`] subsaga.
     destroy_target_vmm: Option<PropolisUuid>,
 
     /// If this is [`Some`], the instance no longer has an active VMM, and its
@@ -493,6 +505,12 @@ struct UpdatesRequired {
     /// instance has moved to a new sled, or deleting them if it is no longer
     /// incarnated.
     network_config: Option<NetworkConfigUpdate>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct MigrateSuccessUpdate {
+    active_vmm_id: Uuid,
+    target_vmm_id: Uuid,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -524,6 +542,7 @@ impl UpdatesRequired {
         let mut update_required = false;
         let mut active_vmm_failed = false;
         let mut network_config = None;
+        let mut update_sled_reservations_for_migration_success = None;
 
         // Has the active VMM been destroyed?
         let destroy_active_vmm =
@@ -597,6 +616,7 @@ impl UpdatesRequired {
                 new_runtime.migration_id = None;
                 new_runtime.dst_propolis_id = None;
                 update_required = true;
+
                 // If the active VMM was destroyed, the network config must be
                 // deleted (which was determined above). Otherwise, if the
                 // migration failed but the active VMM was still there, we must
@@ -686,8 +706,16 @@ impl UpdatesRequired {
                         "src_propolis_id" => %migration.source_propolis_id,
                         "target_propolis_id" => %migration.target_propolis_id,
                     );
+
                     new_runtime.migration_id = None;
                     new_runtime.dst_propolis_id = None;
+
+                    update_sled_reservations_for_migration_success =
+                        Some(MigrateSuccessUpdate {
+                            active_vmm_id: migration.source_propolis_id,
+                            target_vmm_id: migration.target_propolis_id,
+                        });
+
                     update_required = true;
                 }
             }
@@ -739,6 +767,7 @@ impl UpdatesRequired {
             new_intent,
             new_runtime,
             destroy_active_vmm,
+            update_sled_reservations_for_migration_success,
             destroy_target_vmm,
             deprovision,
             network_config,
@@ -831,6 +860,13 @@ declare_saga_actions! {
         + siu_commit_instance_updates
     }
 
+    // If a migration was successfully completed, update the target VMM's
+    // `sled_resource_vmm` record to be the active one, and tombstone the source
+    // record.
+    UPDATE_SLED_RESERVATIONS_FOR_MIGRATION_SUCCESS -> "update_active_vmm" {
+        + siu_update_sled_reservations_for_migration_success
+    }
+
     // Check if the VMM or migration state has changed while the update saga was
     // running and whether an additional update saga is now required. If one is
     // required, try to start it.
@@ -882,15 +918,25 @@ impl NexusSaga for SagaDoActualInstanceUpdate {
         ));
         builder.append(become_updater_action());
 
+        let UpdatesRequired {
+            new_runtime: _,
+            new_intent: _,
+            destroy_active_vmm,
+            update_sled_reservations_for_migration_success,
+            destroy_target_vmm,
+            deprovision,
+            network_config,
+        } = &params.update;
+
         // If a network config update is required, do that.
-        if let Some(ref update) = params.update.network_config {
+        if let Some(update) = network_config {
             builder.append(const_node(NETWORK_CONFIG_UPDATE, update)?);
             builder.append(update_network_config_action());
         }
 
         // If the instance now has no active VMM, release its virtual
         // provisioning resources and unassign its Oximeter producer.
-        if params.update.deprovision.is_some() {
+        if deprovision.is_some() {
             builder.append(release_virtual_provisioning_action());
             builder.append(unassign_oximeter_producer_action());
         }
@@ -898,6 +944,18 @@ impl NexusSaga for SagaDoActualInstanceUpdate {
         // Once we've finished mutating everything owned by the instance, we can
         // write back the updated state and release the instance lock.
         builder.append(commit_instance_updates_action());
+
+        // If a migration succeeded, we need to set the destination propolis'
+        // associated sled_resource_vmm record's state to active, and the
+        // source's to tombstoned.
+        if update_sled_reservations_for_migration_success.is_some() {
+            // Only perform this update if the target VMM is not to be destroyed.
+            if destroy_target_vmm.is_none() {
+                builder.append(
+                    update_sled_reservations_for_migration_success_action(),
+                );
+            }
+        }
 
         // If either VMM linked to this instance has been destroyed, append
         // subsagas to clean up the VMMs resources and mark them as deleted.
@@ -940,12 +998,12 @@ impl NexusSaga for SagaDoActualInstanceUpdate {
                 Ok::<(), SagaInitError>(())
             };
 
-        if let Some(vmm_id) = params.update.destroy_active_vmm {
-            append_destroyed_vmm_subsaga(vmm_id, "active")?;
+        if let Some(vmm_id) = destroy_active_vmm {
+            append_destroyed_vmm_subsaga(*vmm_id, "active")?;
         }
 
-        if let Some(vmm_id) = params.update.destroy_target_vmm {
-            append_destroyed_vmm_subsaga(vmm_id, "target")?;
+        if let Some(vmm_id) = destroy_target_vmm {
+            append_destroyed_vmm_subsaga(*vmm_id, "target")?;
         }
 
         // Finally, check if any additional updates are required to reconcile
@@ -1298,6 +1356,50 @@ async fn siu_commit_instance_updates(
     Ok(())
 }
 
+async fn siu_update_sled_reservations_for_migration_success(
+    sagactx: NexusActionContext,
+) -> Result<(), ActionError> {
+    let osagactx = sagactx.user_data();
+    let RealParams { serialized_authn, authz_instance, ref update, .. } =
+        sagactx.saga_params::<RealParams>()?;
+
+    let opctx =
+        crate::context::op_context_for_saga_action(&sagactx, &serialized_authn);
+    let log = osagactx.log();
+    let instance_id = authz_instance.id();
+
+    let Some(update) = &update.update_sled_reservations_for_migration_success
+    else {
+        return Err(saga_action_failed(Error::internal_error(
+            "saga node called with None update_active_vmm_for_migration_success",
+        )));
+    };
+
+    let MigrateSuccessUpdate { active_vmm_id, target_vmm_id } = &update;
+
+    osagactx
+        .datastore()
+        .sled_reservation_update_for_migrate_success(
+            &opctx,
+            datastore::sled::MigrateSuccessUpdate {
+                active_vmm_id: *active_vmm_id,
+                target_vmm_id: *target_vmm_id,
+                instance_id,
+            },
+        )
+        .await
+        .map_err(saga_action_failed)?;
+
+    info!(
+        log,
+        "instance update: set sled reservation record {active_vmm_id} to \
+        state 'tombstoned' and reservation {target_vmm_id} to state 'active'";
+        "instance_id" => %instance_id,
+    );
+
+    Ok(())
+}
+
 /// Check if the VMM or migration state has changed while the update saga was
 /// running and whether an additional update saga is now required. If one is
 /// required, try to start it.
@@ -1588,22 +1690,24 @@ mod test {
         create_default_ip_pools, create_project, object_create,
     };
     use nexus_test_utils_macros::nexus_test;
+    use nexus_types::external_api::instance::InstanceCpuCount;
     use nexus_types::external_api::{
         instance as instance_types, networking as networking_types,
     };
+    use nexus_types::identity::Asset as _;
     use nexus_types::instance::Migrations;
     use nexus_types::instance::VmmFailureReason;
     use nexus_types::instance::VmmState as NexusVmmState;
     use nexus_types::internal_api::params::InstanceMigrateRequest;
     use omicron_common::api::external::{
-        ByteCount, DataPageParams, IdentityMetadataCreateParams,
-        InstanceCpuCount, Name,
+        ByteCount, DataPageParams, IdentityMetadataCreateParams, Name,
     };
     use omicron_test_utils::dev::poll;
     use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::PropolisUuid;
     use sled_agent_types::early_networking::SwitchSlot;
     use sled_agent_types::instance::{MigrationRuntimeState, MigrationState};
+    use slog_error_chain::InlineErrorChain;
     use std::sync::Arc;
     use std::sync::Mutex;
     use std::time::Duration;
@@ -1643,7 +1747,7 @@ mod test {
 
     async fn create_instance(
         client: &ClientTestContext,
-    ) -> omicron_common::api::external::Instance {
+    ) -> nexus_types_versions::latest::instance::Instance {
         let instances_url = format!("/v1/instances?project={}", PROJECT_NAME);
         object_create(
             client,
@@ -1670,6 +1774,7 @@ mod test {
                 auto_restart_policy: Default::default(),
                 anti_affinity_groups: Vec::new(),
                 multicast_groups: Vec::new(),
+                enable_jumbo_frames: false,
             },
         )
         .await
@@ -2663,8 +2768,7 @@ mod test {
             .unwrap()
             .pop()
             .unwrap()
-            .identity
-            .id;
+            .id();
 
         let uplink0 = datastore
             .switch_port_get_id(
@@ -2746,6 +2850,24 @@ mod test {
 
         poll::wait_for_condition(
             async || {
+                // Force dendrite's NAT to reconcile against Nexus now. (See
+                // "Relying on periodic background-task activation" in
+                // docs/flake-patterns.adoc.)
+                //
+                // (Triggering reconciliation is idempotent, so it is safe to do
+                // on every iteration.)
+                if let Err(error) = client.nat_trigger_update().await {
+                    slog::info!(
+                        log,
+                        "failed to trigger NAT reconciliation, will retry";
+                        "switch" => ?switch,
+                        InlineErrorChain::new(&error),
+                    );
+                    return Err(poll::CondCheckError::<&'static str>::NotYet {
+                        status: None,
+                    });
+                }
+
                 let result =
                     client.nat_ipv4_list(&NAT_SUBNET, None, None).await;
 
@@ -2760,7 +2882,9 @@ mod test {
                     // implements `Display`, which is necessary for the
                     // `poll::Error` to be `Display`...even though we never
                     // return a `Permanent` error here. I love types.
-                    poll::CondCheckError::<&'static str>::NotYet
+                    poll::CondCheckError::<&'static str>::NotYet {
+                        status: None,
+                    }
                 })?;
                 let len = data.items.len();
                 if len != n {
@@ -2771,7 +2895,9 @@ mod test {
                         "entries" => ?data.items,
                         "expected_len" => n,
                     );
-                    return Err(poll::CondCheckError::<&'static str>::NotYet);
+                    return Err(poll::CondCheckError::<&'static str>::NotYet {
+                        status: None,
+                    });
                 }
 
                 Ok(())

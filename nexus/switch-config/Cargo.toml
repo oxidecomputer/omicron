@@ -1,0 +1,19 @@
+[package]
+name = "nexus-switch-config"
+version = "0.1.0"
+edition.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+ipnetwork.workspace = true
+nexus-types.workspace = true
+omicron-workspace-hack.workspace = true
+oxnet.workspace = true
+sled-agent-types.workspace = true
+
+[dev-dependencies]
+omicron-common.workspace = true
+proptest.workspace = true
+test-strategy.workspace = true

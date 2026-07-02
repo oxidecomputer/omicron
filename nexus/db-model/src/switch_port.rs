@@ -26,6 +26,9 @@ use omicron_common::api::external;
 use omicron_uuid_kinds::BgpPeerConfigAllowExportKind;
 use omicron_uuid_kinds::BgpPeerConfigAllowImportKind;
 use omicron_uuid_kinds::BgpPeerConfigCommunityKind;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::RackKind;
+use omicron_uuid_kinds::RackUuid;
 use omicron_uuid_kinds::TypedUuid;
 use oxnet::IpNet;
 use serde::{Deserialize, Serialize};
@@ -315,7 +318,7 @@ impl From<SwitchSlot> for DbSwitchSlot {
 #[diesel(table_name = switch_port)]
 pub struct SwitchPort {
     pub id: Uuid,
-    pub rack_id: Uuid,
+    pub rack_id: DbTypedUuid<RackKind>,
     pub port_name: Name,
     pub port_settings_id: Option<Uuid>,
     pub switch_slot: DbSwitchSlot,
@@ -323,17 +326,21 @@ pub struct SwitchPort {
 
 impl SwitchPort {
     pub fn new(
-        rack_id: Uuid,
+        rack_id: RackUuid,
         switch_slot: SwitchSlot,
         port_name: Name,
     ) -> Self {
         Self {
             id: Uuid::new_v4(),
-            rack_id,
+            rack_id: rack_id.into(),
             switch_slot: switch_slot.into(),
             port_name,
             port_settings_id: None,
         }
+    }
+
+    pub fn rack_id(&self) -> RackUuid {
+        self.rack_id.into()
     }
 }
 
@@ -341,7 +348,7 @@ impl Into<networking_types::SwitchPort> for SwitchPort {
     fn into(self) -> networking_types::SwitchPort {
         networking_types::SwitchPort {
             id: self.id,
-            rack_id: self.rack_id,
+            rack_id: self.rack_id.into_untyped_uuid(),
             switch_slot: self.switch_slot.into(),
             port_name: self.port_name.into(),
             port_settings_id: self.port_settings_id,
@@ -694,9 +701,9 @@ impl SwitchPortRouteConfig {
     }
 }
 
-impl Into<external::SwitchPortRouteConfig> for SwitchPortRouteConfig {
-    fn into(self) -> external::SwitchPortRouteConfig {
-        external::SwitchPortRouteConfig {
+impl Into<networking_types::SwitchPortRouteConfig> for SwitchPortRouteConfig {
+    fn into(self) -> networking_types::SwitchPortRouteConfig {
+        networking_types::SwitchPortRouteConfig {
             port_settings_id: self.port_settings_id,
             interface_name: self.interface_name.into(),
             dst: self.dst.into(),
@@ -1012,9 +1019,11 @@ impl SwitchPortAddressConfig {
     }
 }
 
-impl Into<external::SwitchPortAddressConfig> for SwitchPortAddressConfig {
-    fn into(self) -> external::SwitchPortAddressConfig {
-        external::SwitchPortAddressConfig {
+impl Into<networking_types::SwitchPortAddressConfig>
+    for SwitchPortAddressConfig
+{
+    fn into(self) -> networking_types::SwitchPortAddressConfig {
+        networking_types::SwitchPortAddressConfig {
             port_settings_id: self.port_settings_id,
             address_lot_block_id: self.address_lot_block_id,
             address: self.address.into(),

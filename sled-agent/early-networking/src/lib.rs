@@ -16,18 +16,22 @@ use internal_dns_resolver::{ResolveError, Resolver as DnsResolver};
 use internal_dns_types::names::ServiceName;
 use mg_admin_client::Client as MgdClient;
 use mg_admin_client::types::{
-    AddStaticRoute4Request, AddStaticRoute6Request, ApplyRequest,
-    BestpathFanoutRequest, CheckerSource,
-    ImportExportPolicy4 as MgImportExportPolicy4,
-    ImportExportPolicy6 as MgImportExportPolicy6, JitterRange, ShaperSource,
-    StaticRoute4, StaticRoute4List, StaticRoute6, StaticRoute6List,
-};
-use mg_admin_client::types::{
-    BfdPeerConfig as MgBfdPeerConfig, Ipv4UnicastConfig,
-};
-use mg_admin_client::types::{
-    BgpPeerConfig as MgBgpPeerConfig, Ipv6UnicastConfig,
+    ApplyRequest, BfdPeerConfig as MgBfdPeerConfig,
+    BgpPeerConfig as MgBgpPeerConfig,
     UnnumberedBgpPeerConfig as MgUnnumberedBgpPeerConfig,
+};
+use mg_api_types::bgp::config::{
+    CheckerSource, Ipv4UnicastConfig, Ipv6UnicastConfig, JitterRange,
+    ShaperSource,
+};
+use mg_api_types::bgp::policy::{
+    ImportExportPolicy4 as MgImportExportPolicy4,
+    ImportExportPolicy6 as MgImportExportPolicy6,
+};
+use mg_api_types::rib::BestpathFanoutRequest;
+use mg_api_types::static_routes::{
+    AddStaticRoute4Request, AddStaticRoute6Request, StaticRoute4,
+    StaticRoute4List, StaticRoute6, StaticRoute6List,
 };
 use omicron_common::OMICRON_DPD_TAG;
 use omicron_common::address::DENDRITE_PORT;
@@ -37,7 +41,6 @@ use omicron_common::backoff::{
 };
 use omicron_ddm_admin_client::DdmError;
 use oxnet::IpNet;
-use rdb_types::{Prefix, Prefix4, Prefix6};
 use sled_agent_types::early_networking::{
     BfdMode, BgpConfig, BgpPeerConfig, ImportExportPolicy, LinkFec, LinkSpeed,
     PortConfig, RouterPeerType, SwitchSlot, UplinkAddress,
@@ -51,7 +54,7 @@ use slog::o;
 use slog::warn;
 use slog_error_chain::InlineErrorChain;
 use std::collections::{HashMap, HashSet};
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::time::{Duration, Instant};
 use thiserror::Error;
 use tokio::sync::watch;
@@ -129,8 +132,8 @@ impl<'a> EarlyNetworkSetup<'a> {
     /// Dynamically looks up (via internal DNS and queries to MGS) the underlay
     /// addresses of the switch zone(s) that have uplinks configured.
     ///
-    /// If the `RackNetworkConfig` inside `config_rx` does not contain any
-    /// uplinks, returns an empty set. Otherwise:
+    /// The `RackNetworkConfig` inside `config_rx` always has at least one uplink
+    /// port, so there is always at least one switch zone to find:
     ///
     /// * If the config specifies only one switch with an uplink, blocks until
     ///   we can find that switch zone's underlay address.
@@ -149,7 +152,9 @@ impl<'a> EarlyNetworkSetup<'a> {
         let uplinked_switch_zone_addrs = retry_notify(
             retry_policy_switch_mapping(),
             || async {
-                // Which switches have configured ports?
+                // Which switches have configured ports? The list of ports is
+                // guaranteed to be non-empty by the type system, so this set
+                // always has at least one switch.
                 let uplinked_switches = config_rx
                     .borrow()
                     .rack_network_config
@@ -157,11 +162,6 @@ impl<'a> EarlyNetworkSetup<'a> {
                     .iter()
                     .map(|port_config| port_config.switch)
                     .collect::<HashSet<SwitchSlot>>();
-
-                // If we have no uplinks, we have nothing to look up.
-                if uplinked_switches.is_empty() {
-                    return Ok(HashMap::new());
-                }
 
                 match self
                     .lookup_switch_zone_underlay_addrs_one_attempt(
@@ -220,9 +220,10 @@ impl<'a> EarlyNetworkSetup<'a> {
         .await
         .expect("Expected an infinite retry loop finding switch zones");
 
-        // lookup_switch_zone_underlay_addrs_impl should not return until it
-        // finds at least one of the uplinked_switches
-        assert!(!uplinked_switch_zone_addrs.is_empty());
+        assert!(
+            !uplinked_switch_zone_addrs.is_empty(),
+            "retry loop found at least one switch zone"
+        );
 
         uplinked_switch_zone_addrs
     }
@@ -461,10 +462,7 @@ impl<'a> EarlyNetworkSetup<'a> {
                     MgImportExportPolicy4::Allow(
                         list.iter()
                             .filter_map(|x| match x {
-                                IpNet::V4(p) => Some(Prefix4 {
-                                    length: p.width(),
-                                    value: p.addr(),
-                                }),
+                                IpNet::V4(p) => Some(*p),
                                 IpNet::V6(_) => None,
                             })
                             .collect(),
@@ -479,10 +477,7 @@ impl<'a> EarlyNetworkSetup<'a> {
                     MgImportExportPolicy4::Allow(
                         list.iter()
                             .filter_map(|x| match x {
-                                IpNet::V4(p) => Some(Prefix4 {
-                                    length: p.width(),
-                                    value: p.addr(),
-                                }),
+                                IpNet::V4(p) => Some(*p),
                                 IpNet::V6(_) => None,
                             })
                             .collect(),
@@ -502,10 +497,7 @@ impl<'a> EarlyNetworkSetup<'a> {
                     MgImportExportPolicy6::Allow(
                         list.iter()
                             .filter_map(|x| match x {
-                                IpNet::V6(p) => Some(Prefix6 {
-                                    length: p.width(),
-                                    value: p.addr(),
-                                }),
+                                IpNet::V6(p) => Some(*p),
                                 IpNet::V4(_) => None,
                             })
                             .collect(),
@@ -520,10 +512,7 @@ impl<'a> EarlyNetworkSetup<'a> {
                     MgImportExportPolicy6::Allow(
                         list.iter()
                             .filter_map(|x| match x {
-                                IpNet::V6(p) => Some(Prefix6 {
-                                    length: p.width(),
-                                    value: p.addr(),
-                                }),
+                                IpNet::V6(p) => Some(*p),
                                 IpNet::V4(_) => None,
                             })
                             .collect(),
@@ -570,7 +559,7 @@ impl<'a> EarlyNetworkSetup<'a> {
                     RouterPeerType::Numbered { ip: addr } => {
                         let bpc = MgBgpPeerConfig {
                             name: format!("{}", addr),
-                            host: format!("{}:179", addr),
+                            host: SocketAddr::new(addr.into(), 179),
                             hold_time: peer
                                 .hold_time
                                 .unwrap_or(BgpPeerConfig::DEFAULT_HOLD_TIME),
@@ -692,27 +681,14 @@ impl<'a> EarlyNetworkSetup<'a> {
                         code: x.clone(),
                         asn: config.asn,
                     }),
-                    originate: config
-                        .originate
-                        .iter()
-                        .map(|x| match x {
-                            IpNet::V4(ipv4_net) => Prefix::V4(Prefix4 {
-                                length: ipv4_net.width(),
-                                value: ipv4_net.addr(),
-                            }),
-                            IpNet::V6(ipv6_net) => Prefix::V6(Prefix6 {
-                                length: ipv6_net.width(),
-                                value: ipv6_net.addr(),
-                            }),
-                        })
-                        .collect(),
+                    originate: config.originate.clone(),
                 };
 
                 let fanout = BestpathFanoutRequest {
                     fanout: config.max_paths.as_nonzero_u8(),
                 };
 
-                if let Err(e) = mgd.bgp_apply_v2(&request).await {
+                if let Err(e) = mgd.bgp_apply(&request).await {
                     error!(
                         self.log,
                         "BGP peer configuration failed";
@@ -747,12 +723,8 @@ impl<'a> EarlyNetworkSetup<'a> {
                 let rib_priority =
                     r.rib_priority.unwrap_or(DEFAULT_RIB_PRIORITY_STATIC);
 
-                match (r.nexthop, r.destination.addr()) {
-                    (IpAddr::V4(nexthop), IpAddr::V4(dest_addr)) => {
-                        let prefix = Prefix4 {
-                            value: dest_addr,
-                            length: r.destination.width(),
-                        };
+                match (r.nexthop, r.destination) {
+                    (nexthop, IpNet::V4(prefix)) => {
                         let sr = StaticRoute4 {
                             nexthop,
                             prefix,
@@ -761,11 +733,7 @@ impl<'a> EarlyNetworkSetup<'a> {
                         };
                         rq.routes.list.push(sr);
                     }
-                    (IpAddr::V6(nexthop), IpAddr::V6(dest_addr)) => {
-                        let prefix = Prefix6 {
-                            value: dest_addr,
-                            length: r.destination.width(),
-                        };
+                    (IpAddr::V6(nexthop), IpNet::V6(prefix)) => {
                         let sr = StaticRoute6 {
                             nexthop,
                             prefix,
@@ -774,10 +742,10 @@ impl<'a> EarlyNetworkSetup<'a> {
                         };
                         rqv6.routes.list.push(sr);
                     }
-                    _ => {
+                    (IpAddr::V4(_), IpNet::V6(_)) => {
                         error!(
                             self.log,
-                            "nexthop and destination are different address types";
+                            "v6 destination over v4 nexthop not supported";
                             "nexthop" => ?r.nexthop,
                             "destination" => ?r.destination.addr(),
                         );
@@ -800,7 +768,7 @@ impl<'a> EarlyNetworkSetup<'a> {
                 self.log,
                 "static route configuration failed";
                 "error" => ?e,
-                "configuration" => ?rq,
+                "configuration" => ?rqv6,
             );
         };
 

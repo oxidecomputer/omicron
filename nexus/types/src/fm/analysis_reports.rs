@@ -9,7 +9,10 @@ use super::case;
 use super::ereport::EreportId;
 use super::json_display::fmt_json_value;
 use iddqd::IdOrdMap;
-use omicron_uuid_kinds::{CaseUuid, CollectionUuid, SitrepUuid};
+use omicron_uuid_kinds::{
+    AlertUuid, CaseUuid, CollectionUuid, PhysicalDiskUuid, SitrepUuid,
+    SupportBundleUuid,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
@@ -80,8 +83,7 @@ impl AnalysisReport {
                     report: AnalysisReport { cases, sitrep_id, comment },
                     indent,
                 } = self;
-                writeln!(f, "{:indent$}fault management analysis report", "")?;
-                writeln!(f, "{:indent$}--------------------------------", "")?;
+
                 if !comment.is_empty() {
                     writeln!(f, "{:indent$}// {comment}", "")?;
                 }
@@ -227,12 +229,19 @@ pub struct InputReport {
     /// Cases which have closed, but which have been copied forwards as they
     /// contain ereports which have not yet been marked seen.
     pub closed_cases_copied_forward: BTreeMap<CaseUuid, ClosedCaseReport>,
+    /// Number of entries in the ereporter restart table.
+    pub num_ereporter_restarts: usize,
+    /// All control-plane-managed physical disks visible to the diagnosis
+    /// engines for this analysis pass.
+    pub in_service_disks: BTreeSet<PhysicalDiskUuid>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ClosedCaseReport {
     pub metadata: case::Metadata,
     pub unmarked_ereports: BTreeSet<EreportId>,
+    pub unmarked_alert_requests: BTreeSet<AlertUuid>,
+    pub unmarked_support_bundle_requests: BTreeSet<SupportBundleUuid>,
 }
 
 impl InputReport {
@@ -257,12 +266,12 @@ impl fmt::Display for InputReportMultilineDisplay<'_> {
                     new_ereport_ids,
                     open_cases,
                     closed_cases_copied_forward,
+                    num_ereporter_restarts,
+                    in_service_disks,
                 },
             indent,
         } = self;
 
-        writeln!(f, "{:indent$}fault management analysis inputs", "")?;
-        writeln!(f, "{:indent$}--------------------------------", "")?;
         if let Some(id) = parent_sitrep_id {
             writeln!(f, "{:indent$}parent sitrep:        {id}", "",)?;
         } else {
@@ -280,6 +289,13 @@ impl fmt::Display for InputReportMultilineDisplay<'_> {
                 "",
             )?;
         }
+
+        writeln!(
+            f,
+            "{:indent$}total known ereport restart IDs: \
+                {num_ereporter_restarts}",
+            "",
+        )?;
 
         if !new_ereport_ids.is_empty() {
             writeln!(
@@ -336,25 +352,96 @@ impl fmt::Display for InputReportMultilineDisplay<'_> {
                 let indent = indent + 2;
                 for (
                     case_id,
-                    ClosedCaseReport { metadata, unmarked_ereports },
+                    ClosedCaseReport {
+                        metadata,
+                        unmarked_ereports,
+                        unmarked_alert_requests,
+                        unmarked_support_bundle_requests,
+                    },
                 ) in closed_cases_copied_forward
                 {
                     writeln!(f, "{:indent$}* case {case_id}", "")?;
                     let indent = indent + 2;
                     metadata.display_multiline(indent, None).fmt(f)?;
-                    writeln!(
-                        f,
-                        "{:indent$}copied forwards because these ereports \
-                         haven't been marked seen yet:",
-                        ""
-                    )?;
-                    for ereport_id in unmarked_ereports {
-                        writeln!(f, "{:indent$}* ereport {ereport_id}", "")?;
+                    // A closed case is only carried forward when it has
+                    // outstanding work, so spell out why. If we don't seem to
+                    // have any outstanding work but the closed case was carried
+                    // forward anyway, that's weird and worth a warning.
+                    if unmarked_ereports.is_empty()
+                        && unmarked_alert_requests.is_empty()
+                        && unmarked_support_bundle_requests.is_empty()
+                    {
+                        writeln!(
+                            f,
+                            "{:indent$}/!\\ WEIRD: this case has no recorded \
+                             reason for being copied forwards!",
+                            ""
+                        )?;
+                        continue;
+                    }
+                    writeln!(f, "{:indent$}copied forwards due to:", "")?;
+                    let indent = indent + 2;
+                    if !unmarked_ereports.is_empty() {
+                        writeln!(
+                            f,
+                            "{:indent$}ereports not yet marked seen:",
+                            ""
+                        )?;
+                        let indent = indent + 2;
+                        for ereport_id in unmarked_ereports {
+                            writeln!(
+                                f,
+                                "{:indent$}* ereport {ereport_id}",
+                                ""
+                            )?;
+                        }
+                    }
+                    if !unmarked_alert_requests.is_empty() {
+                        writeln!(
+                            f,
+                            "{:indent$}alert requests not yet satisfied:",
+                            ""
+                        )?;
+                        let indent = indent + 2;
+                        for alert_id in unmarked_alert_requests {
+                            writeln!(f, "{:indent$}* alert {alert_id}", "")?;
+                        }
+                    }
+                    if !unmarked_support_bundle_requests.is_empty() {
+                        writeln!(
+                            f,
+                            "{:indent$}support bundle requests not yet \
+                             satisfied:",
+                            ""
+                        )?;
+                        let indent = indent + 2;
+                        for bundle_id in unmarked_support_bundle_requests {
+                            writeln!(
+                                f,
+                                "{:indent$}* support bundle {bundle_id}",
+                                ""
+                            )?;
+                        }
                     }
                 }
             }
         } else {
             writeln!(f, "{:indent$}no cases copied forward", "")?;
+        }
+
+        if in_service_disks.is_empty() {
+            writeln!(f, "\n{:indent$}no in-service control plane disks", "")?;
+        } else {
+            writeln!(
+                f,
+                "\n{:indent$}in-service control plane disks ({} total):",
+                "",
+                in_service_disks.len()
+            )?;
+            let indent = indent + 2;
+            for disk_id in in_service_disks {
+                writeln!(f, "{:indent$}* disk {disk_id}", "")?;
+            }
         }
 
         Ok(())
@@ -368,7 +455,8 @@ mod tests {
     use super::*;
     use ereport_types::{Ena, EreportId};
     use omicron_uuid_kinds::{
-        CaseUuid, CollectionUuid, EreporterRestartUuid, SitrepUuid,
+        CaseUuid, CollectionUuid, EreporterRestartUuid, PhysicalDiskUuid,
+        SitrepUuid,
     };
     use std::str::FromStr;
 
@@ -402,6 +490,9 @@ mod tests {
             SitrepUuid::from_str("55555555-5555-5555-5555-555555555555")
                 .unwrap();
 
+        let case3_id =
+            CaseUuid::from_str("77777777-7777-7777-7777-777777777777").unwrap();
+
         let mut open_cases = BTreeMap::new();
         open_cases.insert(
             case1_id,
@@ -421,6 +512,16 @@ mod tests {
         let mut unmarked_ereports = BTreeSet::new();
         unmarked_ereports
             .insert(EreportId { restart_id, ena: Ena::from(2u64) });
+        let mut unmarked_alert_requests = BTreeSet::new();
+        unmarked_alert_requests.insert(
+            AlertUuid::from_str("66666666-6666-6666-6666-666666666666")
+                .unwrap(),
+        );
+        let mut unmarked_support_bundle_requests = BTreeSet::new();
+        unmarked_support_bundle_requests.insert(
+            SupportBundleUuid::from_str("88888888-8888-8888-8888-888888888888")
+                .unwrap(),
+        );
         closed_cases_copied_forward.insert(
             case2_id,
             ClosedCaseReport {
@@ -431,16 +532,47 @@ mod tests {
                     comment: "PSU 1 replaced".to_string(),
                 },
                 unmarked_ereports,
+                unmarked_alert_requests,
+                unmarked_support_bundle_requests,
             },
+        );
+        // A closed case with no recorded reason for being copied forwards. The
+        // real input builder never produces this; the display code prints a
+        // warning instead of an empty reason list.
+        closed_cases_copied_forward.insert(
+            case3_id,
+            ClosedCaseReport {
+                metadata: case::Metadata {
+                    created_sitrep_id: case2_created_sitrep,
+                    closed_sitrep_id: Some(case2_closed_sitrep),
+                    de: DiagnosisEngineKind::PowerShelf,
+                    comment: "PSU 2 replaced".to_string(),
+                },
+                unmarked_ereports: BTreeSet::new(),
+                unmarked_alert_requests: BTreeSet::new(),
+                unmarked_support_bundle_requests: BTreeSet::new(),
+            },
+        );
+
+        let mut in_service_disks = BTreeSet::new();
+        in_service_disks.insert(
+            PhysicalDiskUuid::from_str("11111111-1111-1111-1111-111111111111")
+                .unwrap(),
+        );
+        in_service_disks.insert(
+            PhysicalDiskUuid::from_str("22222222-2222-2222-2222-222222222222")
+                .unwrap(),
         );
 
         InputReport {
             parent_sitrep_id: Some(parent_sitrep_id),
             parent_inv_id: Some(parent_inv_id),
             inv_id,
+            num_ereporter_restarts: 420,
             new_ereport_ids,
             open_cases,
             closed_cases_copied_forward,
+            in_service_disks,
         }
     }
 
@@ -453,9 +585,11 @@ mod tests {
             parent_sitrep_id: None,
             parent_inv_id: None,
             inv_id,
+            num_ereporter_restarts: 0,
             new_ereport_ids: BTreeSet::new(),
             open_cases: BTreeMap::new(),
             closed_cases_copied_forward: BTreeMap::new(),
+            in_service_disks: BTreeSet::new(),
         }
     }
 
@@ -471,9 +605,11 @@ mod tests {
             parent_sitrep_id: Some(parent_sitrep_id),
             parent_inv_id: Some(inv_id),
             inv_id,
+            num_ereporter_restarts: 420,
             new_ereport_ids: BTreeSet::new(),
             open_cases: BTreeMap::new(),
             closed_cases_copied_forward: BTreeMap::new(),
+            in_service_disks: BTreeSet::new(),
         }
     }
 

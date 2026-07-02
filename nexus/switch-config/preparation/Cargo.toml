@@ -1,0 +1,25 @@
+[package]
+name = "nexus-switch-config-preparation"
+version = "0.1.0"
+edition.workspace = true
+
+[lints]
+workspace = true
+
+[build-dependencies]
+omicron-rpaths.workspace = true
+
+[dependencies]
+ipnetwork.workspace = true
+nexus-switch-config.workspace = true
+nexus-db-model.workspace = true
+nexus-db-queries.workspace = true
+omicron-common.workspace = true
+omicron-uuid-kinds.workspace = true
+omicron-workspace-hack.workspace = true
+oxnet.workspace = true
+# See omicron-rpaths for more about the "pq-sys" dependency.
+pq-sys = "*"
+sled-agent-types.workspace = true
+slog.workspace = true
+uuid.workspace = true

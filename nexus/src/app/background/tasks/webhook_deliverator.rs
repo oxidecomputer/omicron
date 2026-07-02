@@ -233,7 +233,9 @@ impl WebhookDeliverator {
             ..Default::default()
         };
 
-        for DeliveryAndEvent { delivery, alert_class, event } in deliveries {
+        for DeliveryAndEvent { delivery, alert_class, alert_version, event } in
+            deliveries
+        {
             let attempt = (*delivery.attempts) + 1;
             let delivery_id = WebhookDeliveryUuid::from(delivery.id);
             match self
@@ -301,7 +303,13 @@ impl WebhookDeliverator {
 
             // okay, actually do the thing...
             let delivery_attempt = match client
-                .send_delivery_request(opctx, &delivery, alert_class, &event)
+                .send_delivery_request(
+                    opctx,
+                    &delivery,
+                    alert_class,
+                    alert_version.into(),
+                    &event,
+                )
                 .await
             {
                 Ok(delivery) => delivery,

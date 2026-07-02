@@ -337,11 +337,13 @@ mod test {
     };
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::external_api::instance;
+    use nexus_types::external_api::instance::InstanceAutoRestartPolicy;
+    use nexus_types_versions::latest;
     use omicron_common::api::external::ByteCount;
     use omicron_common::api::external::IdentityMetadataCreateParams;
-    use omicron_common::api::external::InstanceAutoRestartPolicy;
     use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::InstanceUuid;
+    use omicron_uuid_kinds::PropolisUuid;
     use omicron_uuid_kinds::SledUuid;
     use std::time::Duration;
 
@@ -380,39 +382,39 @@ mod test {
         // Use the first chunk of the UUID as the name, to avoid conflicts.
         // Start with a lower ascii character to satisfy the name constraints.
         let name = name.parse().unwrap();
-        let instance =
-            object_create::<_, omicron_common::api::external::Instance>(
-                &cptestctx.external_client,
-                &instances_url,
-                &instance::InstanceCreate {
-                    identity: IdentityMetadataCreateParams {
-                        name,
-                        description: "It's an instance".into(),
-                    },
-                    // In this test, we will "leak" sled resources, since we
-                    // munge the database records for the instance without
-                    // deleting its VMM (as we want to explicitly activate the
-                    // reincarnation task, rather than letting the
-                    // `instance-update` saga do so). Therefore, make our
-                    // resource requests as small as possible.
-                    ncpus: 1i64.try_into().unwrap(),
-                    memory: ByteCount::from_gibibytes_u32(2),
-                    hostname: "myhostname".try_into().unwrap(),
-                    user_data: Vec::new(),
-                    network_interfaces:
-                        instance::InstanceNetworkInterfaceAttachment::None,
-                    external_ips: Vec::new(),
-                    disks: Vec::new(),
-                    boot_disk: None,
-                    cpu_platform: None,
-                    ssh_public_keys: None,
-                    start: state == InstanceState::Vmm,
-                    auto_restart_policy,
-                    anti_affinity_groups: Vec::new(),
-                    multicast_groups: Vec::new(),
+        let instance = object_create::<_, latest::instance::Instance>(
+            &cptestctx.external_client,
+            &instances_url,
+            &instance::InstanceCreate {
+                identity: IdentityMetadataCreateParams {
+                    name,
+                    description: "It's an instance".into(),
                 },
-            )
-            .await;
+                // In this test, we will "leak" sled resources, since we
+                // munge the database records for the instance without
+                // deleting its VMM (as we want to explicitly activate the
+                // reincarnation task, rather than letting the
+                // `instance-update` saga do so). Therefore, make our
+                // resource requests as small as possible.
+                ncpus: 1i64.try_into().unwrap(),
+                memory: ByteCount::from_gibibytes_u32(2),
+                hostname: "myhostname".try_into().unwrap(),
+                user_data: Vec::new(),
+                network_interfaces:
+                    instance::InstanceNetworkInterfaceAttachment::None,
+                external_ips: Vec::new(),
+                disks: Vec::new(),
+                boot_disk: None,
+                cpu_platform: None,
+                ssh_public_keys: None,
+                start: state == InstanceState::Vmm,
+                auto_restart_policy,
+                anti_affinity_groups: Vec::new(),
+                multicast_groups: Vec::new(),
+                enable_jumbo_frames: false,
+            },
+        )
+        .await;
 
         let id = InstanceUuid::from_untyped_uuid(instance.identity.id);
         let datastore = cptestctx.server.server_context().nexus.datastore();
@@ -487,6 +489,51 @@ mod test {
         eprintln!(
             "instance {instance_id}: attached SagaUnwound active VMM {vmm_id}"
         );
+    }
+
+    async fn fail_instance_vmm(
+        cptestctx: &ControlPlaneTestContext,
+        opctx: &OpContext,
+        id: InstanceUuid,
+    ) {
+        let datastore = cptestctx.server.server_context().nexus.datastore();
+
+        let (_, _, _, db_instance) = LookupPath::new(&opctx, datastore)
+            .instance_id(id.into_untyped_uuid())
+            .fetch_for(authz::Action::Modify)
+            .await
+            .expect("instance must exist");
+
+        let vmm_id: PropolisUuid = PropolisUuid::from_untyped_uuid(
+            db_instance.propolis_id.expect("instance has vmm"),
+        );
+
+        info!(
+            &cptestctx.logctx.log,
+            "failing instance {id} with active vmm id {vmm_id}",
+        );
+
+        let int_client = cptestctx.internal_client();
+
+        let db_vmm = datastore.vmm_fetch(&opctx, &vmm_id).await.unwrap();
+
+        let vmm_state = db_vmm.runtime();
+
+        int_client
+            .cpapi_instances_put(
+                &vmm_id,
+                &nexus_client::types::SledVmmState {
+                    vmm_state: nexus_client::types::VmmRuntimeState {
+                        state: nexus_client::types::VmmState::Failed,
+                        gen_: vmm_state.generation.next(),
+                        time_updated: Utc::now(),
+                    },
+                    migration_in: None,
+                    migration_out: None,
+                },
+            )
+            .await
+            .unwrap();
     }
 
     async fn put_instance_in_state(
@@ -911,42 +958,29 @@ mod test {
             InstanceState::Vmm,
         )
         .await;
-        put_instance_in_state(
-            &cptestctx,
-            &opctx,
-            instance1_id,
-            InstanceState::Failed,
-        )
-        .await;
+
+        fail_instance_vmm(&cptestctx, &opctx, instance1_id).await;
 
         // Move instance 2 to failed.
-        put_instance_in_state(
-            &cptestctx,
-            &opctx,
-            instance2_id,
-            InstanceState::Failed,
-        )
-        .await;
+        fail_instance_vmm(&cptestctx, &opctx, instance2_id).await;
 
-        // Activate the background task again. Now, only instance 2 should be
-        // restarted.  Possible test flake here and this adds a bit more debug
-        // if we see this assertion fail.
-        let status = assert_activation_ok!(task.activate(&opctx).await);
-        eprintln!("status: {:?}", status);
-        assert_eq!(status.total_instances_found(), 1);
-        assert_eq!(
-            status.instances_reincarnated,
-            &[failed(instance2_id.into_untyped_uuid())]
-        );
-        assert_eq!(status.changed_state, Vec::new());
+        // Wait for any instance updater sagas to complete
+        test_helpers::wait_for_running_sagas(&cptestctx).await;
 
-        // Instance 2 should be started
+        // Instance 2 should be started by the instance updater saga
         test_helpers::instance_wait_for_state(
             &cptestctx,
             instance2_id,
             InstanceState::Vmm,
         )
         .await;
+
+        // Activate the background task again. Nothing should get restarted,
+        // this call should happen before the cooldown is done so instance 1
+        // still has to wait.
+        let status = assert_activation_ok!(task.activate(&opctx).await);
+        eprintln!("status: {:?}", status);
+        assert_eq!(status.total_instances_found(), 0);
 
         // Wait out the cooldown period, and give it another shot. Now, instance
         // 1 should be restarted again.

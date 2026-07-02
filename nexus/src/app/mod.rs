@@ -38,6 +38,7 @@ use omicron_common::address::MGS_PORT;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Error;
 use omicron_uuid_kinds::OmicronZoneUuid;
+use omicron_uuid_kinds::RackUuid;
 use oximeter_producer::Server as ProducerServer;
 use sagas::common_storage::PooledPantryClient;
 use sagas::common_storage::make_pantry_connection_pool;
@@ -105,6 +106,7 @@ pub(crate) mod support_bundles;
 mod switch;
 mod switch_interface;
 mod switch_port;
+mod system_networking;
 pub mod test_interfaces;
 mod trust_quorum;
 mod update;
@@ -186,7 +188,7 @@ pub struct Nexus {
     id: OmicronZoneUuid,
 
     /// uuid for this rack
-    rack_id: Uuid,
+    rack_id: RackUuid,
 
     /// general server log
     log: Logger,
@@ -323,7 +325,7 @@ impl Nexus {
     // TODO-polish revisit rack metadata
     #[allow(clippy::too_many_arguments)]
     pub(crate) async fn new_with_id(
-        rack_id: Uuid,
+        rack_id: RackUuid,
         log: Logger,
         resolver: internal_dns_resolver::Resolver,
         qorb_resolver: internal_dns_resolver::QorbResolver,
@@ -694,7 +696,7 @@ impl Nexus {
     }
 
     /// Return the rack ID for this Nexus instance.
-    pub fn rack_id(&self) -> Uuid {
+    pub fn rack_id(&self) -> RackUuid {
         self.rack_id
     }
 
@@ -1153,7 +1155,7 @@ impl Nexus {
 
     pub(crate) async fn lldpd_clients(
         &self,
-        rack_id: Uuid,
+        rack_id: RackUuid,
     ) -> Result<HashMap<SwitchSlot, lldpd_client::Client>, String> {
         let resolver = self.resolver();
         lldpd_clients(resolver, rack_id, &self.log).await
@@ -1310,7 +1312,7 @@ pub(crate) async fn dpd_clients(
 /// of SwitchSlot -> Zone Underlay Address, we omit an entry for that client.
 pub(crate) async fn lldpd_clients(
     resolver: &internal_dns_resolver::Resolver,
-    _rack_id: Uuid,
+    _rack_id: RackUuid,
     log: &slog::Logger,
 ) -> Result<HashMap<SwitchSlot, lldpd_client::Client>, String> {
     let mappings = switch_zone_address_mappings(resolver, log).await?;

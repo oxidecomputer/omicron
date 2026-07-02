@@ -15,6 +15,7 @@ use omicron_uuid_kinds::AlertReceiverUuid;
 use omicron_uuid_kinds::AlertUuid;
 use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::CollectionUuid;
+use omicron_uuid_kinds::RackUuid;
 use omicron_uuid_kinds::SitrepUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::SupportBundleUuid;
@@ -271,21 +272,31 @@ pub struct SupportBundleCleanupReport {
 
 /// Identifies what we could or could not store within a support bundle.
 ///
-/// This struct will get emitted as part of the background task infrastructure.
+/// This struct describes facts known by the end of bundle collection: the
+/// set of steps that ran and what they produced. Post-collection facts
+/// (such as whether the bundle was successfully activated in the database)
+/// live on [`SupportBundleActivationReport`], which wraps this struct.
 #[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct SupportBundleCollectionReport {
     pub bundle: SupportBundleUuid,
 
-    /// True iff the bundle was successfully made 'active' in the database.
-    pub activated_in_db_ok: bool,
-
     /// All steps taken, alongside their timing information, when collecting the
     /// bundle.
     pub steps: Vec<SupportBundleCollectionStep>,
+}
 
-    /// Status of ereport collection, or `None` if no ereports were requested
-    /// for this support bundle.
-    pub ereports: Option<SupportBundleEreportStatus>,
+/// Pairs a [`SupportBundleCollectionReport`] with facts known only after
+/// collection finishes, such as whether the bundle was successfully made
+/// 'active' in the database.
+///
+/// This is what the Nexus support-bundle-collector background task emits as
+/// its `collection_report`.
+#[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub struct SupportBundleActivationReport {
+    pub collection: SupportBundleCollectionReport,
+
+    /// True iff the bundle was successfully made 'active' in the database.
+    pub activated_in_db_ok: bool,
 }
 
 #[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -294,6 +305,13 @@ pub struct SupportBundleCollectionStep {
     pub start: DateTime<Utc>,
     pub end: DateTime<Utc>,
     pub status: SupportBundleCollectionStepStatus,
+
+    /// Optional structured payload from the step. Steps that have only
+    /// pass/fail semantics leave this `None`; steps that can partially
+    /// succeed or want to surface counts/errors serialize their detail
+    /// struct here.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub details: Option<serde_json::Value>,
 }
 
 impl SupportBundleCollectionStep {
@@ -310,7 +328,7 @@ impl SupportBundleCollectionStep {
     pub const STEP_SPAWN_SLEDS: &'static str = "spawn steps to query all sleds";
 }
 
-#[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub enum SupportBundleCollectionStepStatus {
     Ok,
     Skipped,
@@ -346,12 +364,7 @@ pub struct SupportBundleEreportStatus {
 
 impl SupportBundleCollectionReport {
     pub fn new(bundle: SupportBundleUuid) -> Self {
-        Self {
-            bundle,
-            activated_in_db_ok: false,
-            steps: vec![],
-            ereports: None,
-        }
+        Self { bundle, steps: vec![] }
     }
 }
 
@@ -926,6 +939,9 @@ pub struct FmAnalysisStatus {
     /// nothing matched.
     pub known_classes: Vec<String>,
     pub outcome: fm_analysis::Outcome,
+    /// Errors encountered during analysis which did *not* prevent the analysis
+    /// step from completing.
+    pub warnings: Vec<String>,
 }
 
 pub mod fm_analysis {
@@ -934,7 +950,9 @@ pub mod fm_analysis {
 
     #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
     pub struct PreparationStatus {
-        pub errors: Vec<String>,
+        /// Errors encountered during the preparation step which did *not*
+        /// prevent the analysis step from completing.
+        pub warnings: Vec<String>,
         pub report: analysis_reports::InputReport,
     }
 
@@ -1009,6 +1027,18 @@ pub struct FmRendezvousStatus {
         fm_rendezvous::OpStatus<fm_rendezvous::EreportMarkingStatus>,
 }
 
+impl FmRendezvousStatus {
+    /// Returns `true` if any operation in this activation observed that the
+    /// task's sitrep is older than the current sitrep in the database.
+    ///
+    /// If a new operation that uses `SitrepGuardedInsert` is added to the
+    /// rendezvous task, its stale-sitrep flag should be included here.
+    pub fn stale_sitrep_detected(&self) -> bool {
+        self.alerts.details.stale_sitrep
+            || self.support_bundles.details.stale_sitrep
+    }
+}
+
 pub mod fm_rendezvous {
     use super::*;
 
@@ -1036,19 +1066,39 @@ pub mod fm_rendezvous {
         pub current_sitrep_alerts_requested: usize,
         /// The number of alerts created by this activation.
         pub alerts_created: usize,
+        /// The number of alerts that were already created by an earlier
+        /// activation (the `SitrepGuardedInsert` short-circuited on the
+        /// `rendezvous_alert_created` marker).
+        pub alerts_already_existed: usize,
+        /// If `true`, the activation aborted early because the
+        /// `SitrepGuardedInsert` guard detected that the rendezvous task's
+        /// sitrep is older than the current sitrep in the database. The
+        /// remaining alert requests for this activation were skipped; a
+        /// fresher activation will retry them.
+        pub stale_sitrep: bool,
         /// Errors that occurred during this activation.
         pub errors: Vec<String>,
     }
 
     #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
     pub struct SupportBundleCreationStatus {
-        /// The total number of support bundles requested by the current sitrep.
+        /// The number of support bundle requests in the current sitrep.
         pub total_bundles_requested: usize,
-        /// The total number of support bundles which were *first* requested in the
-        /// current sitrep.
+        /// Of those, the number which were *first* requested in the current
+        /// sitrep (rather than carried forward from an ancestor).
         pub current_sitrep_bundles_requested: usize,
         /// The number of support bundles created by this activation.
         pub bundles_created: usize,
+        /// The number of support bundles that were already created by an
+        /// earlier activation (the `SitrepGuardedInsert` short-circuited on
+        /// the `rendezvous_support_bundle_created` marker).
+        pub bundles_already_existed: usize,
+        /// If `true`, the activation aborted early because the
+        /// `SitrepGuardedInsert` guard detected that the rendezvous task's
+        /// sitrep is older than the current sitrep in the database. The
+        /// remaining bundle requests for this activation were skipped; a
+        /// fresher activation will retry them.
+        pub stale_sitrep: bool,
         /// Errors that occurred during this activation.
         pub errors: Vec<String>,
     }
@@ -1174,6 +1224,24 @@ pub struct SwitchPortPopulatorStatus {
     pub switch0: Result<SwitchPortPopulatorStatusKind, String>,
     /// Result of populating switch 1's ports, if any.
     pub switch1: Result<SwitchPortPopulatorStatusKind, String>,
+}
+
+/// The status of a `sync_switch_configuration` background task activation.
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+pub struct SwitchPortSettingsManagerStatus {
+    /// Racks skipped because a complete bootstore network config could not be
+    /// built from their switch port settings.
+    pub incomplete_bootstore_configs: Vec<IncompleteBootstoreConfigReport>,
+}
+
+/// A rack that `sync_switch_configuration` skipped because its bootstore network
+/// config could not be built completely.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub struct IncompleteBootstoreConfigReport {
+    /// The rack that was skipped.
+    pub rack_id: RackUuid,
+    /// The list of problems encountered.
+    pub problems: Vec<String>,
 }
 
 /// The status of a `session_cleanup` background task activation.

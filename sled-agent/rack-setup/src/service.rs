@@ -109,9 +109,7 @@ use sled_agent_client::{
     Client as SledAgentClient, Error as SledAgentError, types as SledAgentTypes,
 };
 use sled_agent_config_reconciler::InternalDisksReceiver;
-use sled_agent_types::early_networking::{
-    EarlyNetworkConfigEnvelope, LldpAdminStatus,
-};
+use sled_agent_types::early_networking::EarlyNetworkConfigEnvelope;
 use sled_agent_types::inventory::{
     ConfigReconcilerInventoryResult, HostPhase2DesiredSlots, OmicronSledConfig,
     OmicronZoneConfig, OmicronZoneType, OmicronZonesConfig,
@@ -899,88 +897,7 @@ impl ServiceInner {
                 rack_subnet: config.rack_subnet,
                 infra_ip_first: config.infra_ip_first,
                 infra_ip_last: config.infra_ip_last,
-                ports: config
-                    .ports
-                    .iter()
-                    .map(|config| NexusTypes::PortConfig {
-                        port: config.port.clone(),
-                        routes: config
-                            .routes
-                            .iter()
-                            .map(|r| NexusTypes::RouteConfig {
-                                destination: r.destination,
-                                nexthop: r.nexthop,
-                                vlan_id: r.vlan_id,
-                                rib_priority: r.rib_priority,
-                            })
-                            .collect(),
-                        addresses: config.addresses.clone(),
-                        switch: config.switch,
-                        uplink_port_speed: config.uplink_port_speed,
-                        uplink_port_fec: config.uplink_port_fec,
-                        autoneg: config.autoneg,
-                        bgp_peers: config
-                            .bgp_peers
-                            .iter()
-                            .map(|b| NexusTypes::BgpPeerConfig {
-                                addr: b.addr,
-                                asn: b.asn,
-                                port: b.port.clone(),
-                                hold_time: b.hold_time,
-                                connect_retry: b.connect_retry,
-                                delay_open: b.delay_open,
-                                idle_hold_time: b.idle_hold_time,
-                                keepalive: b.keepalive,
-                                remote_asn: b.remote_asn,
-                                min_ttl: b.min_ttl,
-                                md5_auth_key: b.md5_auth_key.clone(),
-                                multi_exit_discriminator: b
-                                    .multi_exit_discriminator,
-                                local_pref: b.local_pref,
-                                enforce_first_as: b.enforce_first_as,
-                                communities: b.communities.clone(),
-                                allowed_export: b.allowed_export.clone(),
-                                allowed_import: b.allowed_import.clone(),
-                                vlan_id: b.vlan_id,
-                            })
-                            .collect(),
-                        lldp: config.lldp.as_ref().map(|lp| {
-                            NexusTypes::LldpPortConfig {
-                                status: match lp.status {
-                                    LldpAdminStatus::Enabled => {
-                                        NexusTypes::LldpAdminStatus::Enabled
-                                    }
-                                    LldpAdminStatus::Disabled => {
-                                        NexusTypes::LldpAdminStatus::Disabled
-                                    }
-                                    LldpAdminStatus::TxOnly => {
-                                        NexusTypes::LldpAdminStatus::TxOnly
-                                    }
-                                    LldpAdminStatus::RxOnly => {
-                                        NexusTypes::LldpAdminStatus::RxOnly
-                                    }
-                                },
-                                chassis_id: lp.chassis_id.clone(),
-                                port_id: lp.port_id.clone(),
-                                system_name: lp.system_name.clone(),
-                                system_description: lp
-                                    .system_description
-                                    .clone(),
-                                port_description: lp.port_description.clone(),
-                                management_addrs: lp.management_addrs.clone(),
-                            }
-                        }),
-                        tx_eq: config.tx_eq.as_ref().map(|tx_eq| {
-                            NexusTypes::TxEqConfig {
-                                pre1: tx_eq.pre1,
-                                pre2: tx_eq.pre2,
-                                main: tx_eq.main,
-                                post2: tx_eq.post2,
-                                post1: tx_eq.post1,
-                            }
-                        }),
-                    })
-                    .collect(),
+                ports: config.ports.clone(),
                 bgp: config
                     .bgp
                     .iter()
@@ -1063,6 +980,8 @@ impl ServiceInner {
             rack_network_config,
             allowed_source_ips,
             initial_trust_quorum_configuration,
+            external_jumbo_frames_opt_in_enabled: config
+                .external_jumbo_frames_opt_in_enabled,
         };
 
         let notify_nexus = || async {
@@ -1880,7 +1799,7 @@ mod test {
     use omicron_uuid_kinds::SledUuid;
     use oxnet::Ipv6Net;
     use sled_agent_types::{
-        early_networking::RackNetworkConfig,
+        early_networking::{PortConfig, RackNetworkConfig, UplinkPorts},
         inventory::{
             Baseboard, ConfigReconcilerInventoryStatus, FmdInventory,
             Inventory, InventoryDisk, OmicronFileSourceResolverInventory,
@@ -2206,11 +2125,17 @@ mod test {
                 .unwrap(),
                 infra_ip_first: IpAddr::V4(Ipv4Addr::LOCALHOST),
                 infra_ip_last: IpAddr::V4(Ipv4Addr::LOCALHOST),
-                ports: Vec::new(),
+                // The list of ports must be non-empty -- this test doesn't
+                // exercise uplinks, so use a placeholder port here.
+                ports: UplinkPorts::new(vec![PortConfig::empty_for_tests(
+                    "qsfp0",
+                )])
+                .expect("placeholder port list is non-empty"),
                 bgp: Vec::new(),
                 bfd: Vec::new(),
             },
             allowed_source_ips: AllowedSourceIps::Any,
+            external_jumbo_frames_opt_in_enabled: false,
         };
 
         assert_eq!(

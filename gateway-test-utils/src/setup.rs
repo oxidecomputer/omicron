@@ -246,7 +246,7 @@ pub async fn test_setup_with_config(
                 }) {
                 Ok(())
             } else {
-                Err(CondCheckError::NotYet)
+                Err(CondCheckError::NotYet { status: None })
             };
             future::ready(result)
         },

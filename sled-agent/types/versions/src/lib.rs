@@ -87,6 +87,10 @@ pub mod v39;
 pub mod v4;
 #[path = "add_fmd_to_inventory/mod.rs"]
 pub mod v40;
+#[path = "add_instance_primary_nic_mtu/mod.rs"]
+pub mod v41;
+#[path = "non_empty_uplink_ports/mod.rs"]
+pub mod v42;
 #[path = "add_probe_put_endpoint/mod.rs"]
 pub mod v6;
 #[path = "multicast_support/mod.rs"]

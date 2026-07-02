@@ -1000,6 +1000,11 @@
             "description": "DNS name for the DNS zone delegated to the rack for external DNS",
             "type": "string"
           },
+          "external_jumbo_frames_opt_in_enabled": {
+            "description": "When true, end users may opt in to jumbo frames on the primary interface of an instance, and control plane services with external-facing OPTE NICs are brought up with an 8500 byte MTU. Operators can toggle this at runtime via the fleet networking settings API.",
+            "default": false,
+            "type": "boolean"
+          },
           "internal_services_ip_pool_ranges": {
             "description": "Ranges of the service IP pool which may be used for internal services.",
             "type": "array",
@@ -1083,10 +1088,11 @@
           },
           "ports": {
             "description": "Uplinks for connecting the rack to external networks",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/PortConfig"
-            }
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/UplinkPorts"
+              }
+            ]
           },
           "rack_subnet": {
             "$ref": "#/components/schemas/Ipv6Net"
@@ -1768,6 +1774,13 @@
         "required": [
           "address"
         ]
+      },
+      "UplinkPorts": {
+        "type": "array",
+        "items": {
+          "$ref": "#/components/schemas/PortConfig"
+        },
+        "minItems": 1
       },
       "UserId": {
         "title": "A username for a local-only user",

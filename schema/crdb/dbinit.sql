@@ -281,6 +281,26 @@ CREATE INDEX IF NOT EXISTS lookup_sled_by_policy_and_state ON omicron.public.sle
     sled_state
 );
 
+CREATE TYPE IF NOT EXISTS omicron.public.sled_resource_vmm_state AS ENUM (
+    -- The VMM is not currently running the instance, but the propolis process
+    -- may still exist and/or the zone has not been destroyed yet, meaning it
+    -- is still consuming sled resources.
+    'tombstoned',
+
+    -- This VMM either is or will be running the instance.
+    --
+    -- A sled resource reservation is in the active state under
+    -- either of the following conditions:
+    --
+    -- 1. It was reserved in order to start a previously-stopped
+    --    instance.
+    -- 2. A migration into that VMM has completed successfully.
+    'active',
+
+    -- This VMM is a migration destination for the active VMM
+    'target'
+);
+
 -- Accounting for VMMs using resources on a sled
 CREATE TABLE IF NOT EXISTS omicron.public.sled_resource_vmm (
     -- Should match the UUID of the corresponding VMM
@@ -307,7 +327,9 @@ CREATE TABLE IF NOT EXISTS omicron.public.sled_resource_vmm (
     -- If we tried to backfill + make this column non-nullable while that saga
     -- was mid-execution, we would still have some rows in this table with nullable
     -- values that would be more complex to fix.
-    instance_id UUID
+    instance_id UUID,
+
+    state omicron.public.sled_resource_vmm_state NOT NULL
 );
 
 -- Allow looking up all VMM resources which reside on a sled
@@ -315,6 +337,20 @@ CREATE UNIQUE INDEX IF NOT EXISTS lookup_vmm_resource_by_sled ON omicron.public.
     sled_id,
     id
 );
+
+-- Allow a single VMM reservation per instance state
+--
+-- Note: `tombstoned` means that the propolis zone may not have been cleaned up
+-- yet, and should be considered as still consuming sled resources. This should
+-- not block out reserving another active VMM for an instance if the sled
+-- reservation algorithm can find a spot for it, hence why this unique index
+-- does not include the `tombstoned` state.
+CREATE UNIQUE INDEX IF NOT EXISTS
+    single_vmm_reservation_per_state
+ON omicron.public.sled_resource_vmm (
+    instance_id,
+    state
+) WHERE state != 'tombstoned';
 
 -- Allow looking up all resources by instance
 CREATE INDEX IF NOT EXISTS lookup_vmm_resource_by_instance ON omicron.public.sled_resource_vmm (
@@ -1208,6 +1244,29 @@ CREATE TABLE IF NOT EXISTS omicron.public.silo_auth_settings (
     -- null means no max: users can tokens that never expire
     device_token_max_ttl_seconds INT8 CHECK (device_token_max_ttl_seconds > 0)
 );
+
+/*
+ * Fleet-wide networking settings. Singleton row; see `db_metadata` for an
+ * explanation of the singleton pattern.
+ */
+CREATE TABLE IF NOT EXISTS omicron.public.system_networking_settings (
+    singleton BOOL NOT NULL PRIMARY KEY,
+
+    -- When true, end users may opt in to jumbo frames (8500 byte MTU) on the
+    -- primary interface of an instance. When false, the per-instance bit is
+    -- ignored and ports are created with the default MTU.
+    external_jumbo_frames_opt_in_enabled BOOL NOT NULL,
+
+    CHECK (singleton = true)
+);
+
+INSERT INTO omicron.public.system_networking_settings (
+    singleton,
+    external_jumbo_frames_opt_in_enabled
+) VALUES (
+    TRUE, FALSE
+) ON CONFLICT DO NOTHING;
+
 /*
  * Projects
  */
@@ -1296,7 +1355,8 @@ CREATE TYPE IF NOT EXISTS omicron.public.instance_auto_restart AS ENUM (
 
 CREATE TYPE IF NOT EXISTS omicron.public.instance_cpu_platform AS ENUM (
   'amd_milan',
-  'amd_turin'
+  'amd_turin',
+  'amd_turin_v2'
 );
 
 /*
@@ -1422,6 +1482,15 @@ CREATE TABLE IF NOT EXISTS omicron.public.instance (
      * sled to maximize the number of sleds the VM can migrate to.
      */
     cpu_platform omicron.public.instance_cpu_platform,
+
+    /*
+     * When set this instance has opted in to jumbo frames (8500 byte MTU)
+     * on its primary OPTE interface. The effective MTU also depends on the
+     * fleet-wide setting in `system_networking_settings`; if that flag is off,
+     * the OPTE port is created with the default MTU regardless of this column.
+     * Changes to this column only take effect on the next instance restart.
+     */
+    enable_jumbo_frames BOOL NOT NULL,
 
     CONSTRAINT vmm_iff_active_propolis CHECK (
         ((state = 'vmm') AND (active_propolis_id IS NOT NULL)) OR
@@ -5228,6 +5297,76 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_svc_enabled_not_online_parse_error
     PRIMARY KEY (inv_collection_id, sled_id, id)
 );
 
+CREATE TYPE IF NOT EXISTS omicron.public.fmd_inventory_error_kind AS ENUM (
+    -- Catch-all for FMD-side failures: daemon unreachable, listing cases
+    -- or resources failed, or the platform doesn't have FMD at all. The
+    -- accompanying `error_message` carries specifics.
+    'fmd_error',
+    -- Number of FMD cases reported by the sled exceeded the producer's
+    -- limit; no partial data is recorded.
+    'too_many_cases',
+    -- Number of FMD resources reported by the sled exceeded the limit;
+    -- no partial data is recorded.
+    'too_many_resources'
+);
+
+CREATE TABLE IF NOT EXISTS omicron.public.inv_fmd_status (
+    -- (foreign key into `inv_collection` table)
+    inv_collection_id UUID NOT NULL,
+    -- guaranteed to match a row in this collection's `inv_sled_agent`
+    sled_id UUID NOT NULL,
+    -- Classifies the failure mode when FMD inventory collection failed.
+    -- NULL iff `error_message` is NULL (FMD was successfully collected).
+    error_kind omicron.public.fmd_inventory_error_kind,
+    -- Display() of the original error; informational only, do not parse.
+    -- The `error_kind` discriminator is the structured signal.
+    -- NULL iff `error_kind` is NULL.
+    error_message TEXT,
+
+    CONSTRAINT error_kind_and_message_together CHECK (
+        (error_kind IS NULL) = (error_message IS NULL)
+    ),
+
+    PRIMARY KEY (inv_collection_id, sled_id)
+);
+
+CREATE TABLE IF NOT EXISTS omicron.public.inv_fmd_host_case (
+    -- (foreign key into `inv_collection` table)
+    inv_collection_id UUID NOT NULL,
+    -- guaranteed to match a row in this collection's `inv_sled_agent`
+    sled_id UUID NOT NULL,
+    case_id UUID NOT NULL,
+    code TEXT NOT NULL,
+    url TEXT NOT NULL,
+    -- The full FMD fault event payload as JSON, if present. Stored as
+    -- JSONB without parsing — Nexus does not interpret the FMD event
+    -- schema. JSONB normalizes whitespace and key order, so the value is
+    -- preserved structurally (not byte-for-byte) for downstream tooling
+    -- (e.g. omdb).
+    event JSONB,
+
+    PRIMARY KEY (inv_collection_id, sled_id, case_id)
+);
+
+CREATE TABLE IF NOT EXISTS omicron.public.inv_fmd_resource (
+    -- (foreign key into `inv_collection` table)
+    inv_collection_id UUID NOT NULL,
+    -- guaranteed to match a row in this collection's `inv_sled_agent`
+    sled_id UUID NOT NULL,
+    resource_id UUID NOT NULL,
+    -- Fault Management Resource Identifier
+    -- (e.g. "dev:////pci@af,0/pci1022,1483@3,5").
+    fmri TEXT NOT NULL,
+    -- (foreign key into `inv_fmd_host_case`, with the same
+    -- (inv_collection_id, sled_id))
+    case_id UUID NOT NULL,
+    faulty BOOL NOT NULL,
+    unusable BOOL NOT NULL,
+    invisible BOOL NOT NULL,
+
+    PRIMARY KEY (inv_collection_id, sled_id, resource_id)
+);
+
 /*
  * Various runtime configuration switches for reconfigurator
  *
@@ -5237,6 +5376,12 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_svc_enabled_not_online_parse_error
  *
  * See https://github.com/oxidecomputer/omicron/issues/8253 for more details.
  */
+CREATE TYPE IF NOT EXISTS omicron.public.reconfigurator_disruption_policy AS ENUM (
+    'terminate',
+    'migrate_or_terminate',
+    'migrate_only'
+);
+
 CREATE TABLE IF NOT EXISTS omicron.public.reconfigurator_config (
     -- Monotonically increasing version for all bp_targets
     version INT8 PRIMARY KEY,
@@ -5248,7 +5393,10 @@ CREATE TABLE IF NOT EXISTS omicron.public.reconfigurator_config (
     time_modified TIMESTAMPTZ NOT NULL,
 
     -- Enable the TUF repo pruner background task
-    tuf_repo_pruner_enabled BOOL NOT NULL
+    tuf_repo_pruner_enabled BOOL NOT NULL,
+
+    -- How to disrupt instances during updates.
+    disruption_policy omicron.public.reconfigurator_disruption_policy NOT NULL
 );
 
 /*
@@ -6016,7 +6164,8 @@ CREATE INDEX IF NOT EXISTS lookup_anti_affinity_group_instance_membership_by_ins
 CREATE TYPE IF NOT EXISTS omicron.public.vmm_cpu_platform AS ENUM (
   'sled_default',
   'amd_milan',
-  'amd_turin'
+  'amd_turin',
+  'amd_turin_v2'
 );
 
 /* Describes why a VMM record is in the 'failed' `vmm_state`. */
@@ -7070,7 +7219,8 @@ CREATE TABLE IF NOT EXISTS omicron.public.alert (
     time_modified TIMESTAMPTZ NOT NULL,
     -- The class of alert that this is.
     alert_class omicron.public.alert_class NOT NULL,
-    -- Actual alert data. The structure of this depends on the alert class.
+    -- Actual alert data. The structure of this depends on the alert class and
+    -- version.
     payload JSONB NOT NULL,
 
     -- Set when dispatch entries have been created for this alert.
@@ -7081,12 +7231,20 @@ CREATE TABLE IF NOT EXISTS omicron.public.alert (
     -- The ID of the fault management case that created this alert, if any.
     case_id UUID,
 
+    -- The version of the alert class' schema that this alert's payload conforms
+    -- to, starting at version 0.
+    alert_version INT8 NOT NULL,
+
     CONSTRAINT time_dispatched_set_if_dispatched CHECK (
         (num_dispatched = 0) OR (time_dispatched IS NOT NULL)
     ),
 
     CONSTRAINT num_dispatched_is_positive CHECK (
         (num_dispatched >= 0)
+    ),
+
+    CONSTRAINT alert_version_is_non_negative CHECK (
+        (alert_version >= 0)
     )
 );
 
@@ -7098,7 +7256,8 @@ INSERT INTO omicron.public.alert (
     alert_class,
     payload,
     time_dispatched,
-    num_dispatched
+    num_dispatched,
+    alert_version
 ) VALUES (
     -- NOTE: this UUID is duplicated in nexus_db_model::alert.
     '001de000-7768-4000-8000-000000000001',
@@ -7109,6 +7268,7 @@ INSERT INTO omicron.public.alert (
     -- Pretend to be dispatched so we won't show up in "list alerts needing
     -- dispatch" queries
     NOW(),
+    0,
     0
 ) ON CONFLICT DO NOTHING;
 
@@ -7536,6 +7696,44 @@ WHERE
     marked_seen_in IS NULL
     AND time_deleted IS NULL;
 
+-- Table tracking the timestamp of the first ereport received from each restart
+-- ID.
+CREATE TABLE IF NOT EXISTS omicron.public.ereporter_restart (
+    -- The reporter restart ID.
+    --
+    -- This corresponds to the `restart_id` column in `omicron.public.ereport`.
+    id UUID PRIMARY KEY,
+    -- The timestamp at which the first ereport received from this restart ID
+    -- was received.
+    time_first_seen TIMESTAMPTZ NOT NULL,
+    -- Whether this ereport was generated by SP firmware or the host OS.
+    reporter omicron.public.ereporter_type NOT NULL,
+    -- The type of the physical slot occupied by the reporter.
+    slot_type omicron.public.sp_type NOT NULL,
+    -- The number of the physical slot occupied by the reporter.
+    --
+    -- For sled host OS reporters, this may be NULL if the sled's location is
+    -- not known to the system when the ereport was received. If the physical
+    -- location of the sled is determined later, subsequent attempts to insert
+    -- ereports will update this field.
+    slot INT4,
+    -- The ID of the rack that the reporter is located in.
+    rack_id UUID NOT NULL,
+
+    CONSTRAINT reporter_validity CHECK (
+        (
+            -- ereports from SPs must always have a SP type and slot, so we need
+            -- not worry about temporarily accepting NULL slots so that they can
+            -- be back-populated later as we do for host OS reporters.
+            reporter = 'sp'  AND slot IS NOT NULL
+        ) OR (
+            -- ereports from the sled host OS must have the 'sled' slot type (as
+            -- switches and PSCs do not have a host OS)
+            reporter = 'host' AND slot_type = 'sled'
+        )
+    )
+);
+
 /*
     * Fault management situation reports (and accessories)
     *
@@ -7590,7 +7788,24 @@ CREATE TABLE IF NOT EXISTS omicron.public.fm_sitrep (
     -- The earliest time at which an inventory collection may have started if
     -- it is to be considered newer than the inventory collection that was used
     -- to produce this sitrep.
-    next_inv_min_time_started TIMESTAMPTZ NOT NULL
+    next_inv_min_time_started TIMESTAMPTZ NOT NULL,
+
+    -- Generation counter for alerts: `SitrepBuilder` increments this each time
+    -- it builds a sitrep whose alert request set differs from its parent's.
+    -- Alert creation compares it against the latest sitrep's value, rejecting
+    -- inserts from a rendezvous task working from a stale sitrep. (It is the
+    -- `rendezvous_alert_created` marker, not this generation, that prevents a
+    -- deleted alert from being resurrected.)
+    alert_generation INT8 NOT NULL,
+
+    -- Generation counter for support bundles: `SitrepBuilder` increments this
+    -- each time it builds a sitrep whose support bundle request set differs
+    -- from its parent's. Support bundle creation compares it against the
+    -- latest sitrep's value, rejecting inserts from a rendezvous task working
+    -- from a stale sitrep. (It is the `rendezvous_support_bundle_created`
+    -- marker, not this generation, that prevents a deleted bundle from being
+    -- resurrected.)
+    support_bundle_generation INT8 NOT NULL
 );
 
 -- Index for looking up all potential children of a given parent sitrep.
@@ -7618,9 +7833,30 @@ CREATE UNIQUE INDEX IF NOT EXISTS
     lookup_sitrep_version_by_id
 ON omicron.public.fm_sitrep_history (sitrep_id);
 
+-- Human-readable debugging reports for a sitrep.
+--
+-- These are for diagnostic purposes only (i.e. for use by omdb, inclusion in
+-- support bundles, etc), and are not intended as operational data.
+CREATE TABLE IF NOT EXISTS omicron.public.fm_sitrep_analysis_report (
+    -- The ID of the sitrep that these reports describe.
+    -- This is a foreign key into the `fm_sitrep` table.
+    sitrep_id UUID PRIMARY KEY,
+
+    -- The Git commit of the Nexus that produced this report.
+    git_commit STRING(64) NOT NULL,
+
+    -- A JSON object describing the inputs to the analysis phase that produced
+    -- this sitrep (collected during the analysis phase).
+    input_report JSONB NOT NULL,
+
+    -- A JSON object describing the analysis phase that produced this sitrep.
+    analysis_report JSONB NOT NULL
+);
+
 
 CREATE TYPE IF NOT EXISTS omicron.public.diagnosis_engine AS ENUM (
-    'power_shelf'
+    'power_shelf',
+    'physical_disk'
 );
 
 CREATE TABLE IF NOT EXISTS omicron.public.fm_case (
@@ -7646,6 +7882,59 @@ CREATE TABLE IF NOT EXISTS omicron.public.fm_case (
 CREATE INDEX IF NOT EXISTS
     lookup_fm_cases_for_sitrep
 ON omicron.public.fm_case (sitrep_id);
+
+-- Per-engine "facts" attached to a case. Each diagnosis engine persists its
+-- facts in its own table (one table per engine), with a fact's content
+-- represented as typed columns. The `fm_fact_physical_disk` table below holds
+-- the physical-disk engine's facts.
+CREATE TYPE IF NOT EXISTS omicron.public.fm_fact_physical_disk_kind AS ENUM (
+    'zpool_unhealthy'
+);
+
+CREATE TABLE IF NOT EXISTS omicron.public.fm_fact_physical_disk (
+    -- Stable UUID for this fact across sitreps.
+    id UUID NOT NULL,
+    -- Sitrep this row belongs to.
+    sitrep_id UUID NOT NULL,
+    -- UUID of the case this fact attaches to.
+    case_id UUID NOT NULL,
+    -- UUID of the sitrep in which this fact was first added. Preserved
+    -- unchanged when the fact is carried forward into a child sitrep, so
+    -- this can be used to tell at a glance how long a fact has been
+    -- attached to its case. Debug-only.
+    created_sitrep_id UUID NOT NULL,
+    -- Free-form, debug-only comment.
+    comment TEXT NOT NULL,
+
+    -- The physical disk this fact is about. Common to every kind of
+    -- physical-disk fact (the case is keyed by it), so it is always present
+    -- regardless of `kind`.
+    physical_disk_id UUID NOT NULL,
+
+    -- Which physical-disk fact this row represents. The columns below are
+    -- populated according to this discriminant (see the CHECK constraint).
+    kind omicron.public.fm_fact_physical_disk_kind NOT NULL,
+
+    -- Columns for a 'zpool_unhealthy' fact. NULL for any other kind.
+    zpool_id UUID,
+    last_seen_health omicron.public.inv_zpool_health,
+    observed_in_inv UUID,
+    time_observed TIMESTAMPTZ,
+
+    PRIMARY KEY (sitrep_id, id),
+
+    -- Each variant validates that the columns it expects are present.
+    -- Future variants should add their own constraint like this one,
+    -- leaving existing constraints untouched.
+    CONSTRAINT zpool_unhealthy_columns_present CHECK (
+        kind != 'zpool_unhealthy' OR (
+            zpool_id IS NOT NULL
+            AND last_seen_health IS NOT NULL
+            AND observed_in_inv IS NOT NULL
+            AND time_observed IS NOT NULL
+        )
+    )
+);
 
 CREATE TABLE IF NOT EXISTS omicron.public.fm_ereport_in_case (
     -- ID of this association. When an ereport is assigned to a case, that
@@ -7715,13 +8004,22 @@ CREATE TABLE IF NOT EXISTS omicron.public.fm_alert_request (
 
     -- The class of alert that was requested
     alert_class omicron.public.alert_class NOT NULL,
-    -- Actual alert data. The structure of this depends on the alert class.
+    -- Actual alert data. The structure of this depends on the alert class and
+    -- version.
     payload JSONB NOT NULL,
     -- A human-readable comment from the diagnosis engine explaining why it
     -- requested this alert.
     comment TEXT NOT NULL,
 
-    PRIMARY KEY (sitrep_id, id)
+    -- The version of the alert class' schema that this alert's payload conforms
+    -- to, starting at version 0.
+    alert_version INT8 NOT NULL,
+
+    PRIMARY KEY (sitrep_id, id),
+
+    CONSTRAINT alert_version_is_non_negative CHECK (
+        (alert_version >= 0)
+    )
 );
 
 CREATE INDEX IF NOT EXISTS
@@ -7791,6 +8089,50 @@ CREATE TABLE IF NOT EXISTS omicron.public.fm_support_bundle_request_data_selecti
 
     PRIMARY KEY (sitrep_id, request_id),
     CHECK (start_time IS NULL OR end_time IS NULL OR start_time <= end_time)
+);
+
+-- Marker written by `SitrepGuardedInsert` atomically with a corresponding
+-- alert row when FM rendezvous successfully creates an alert. This serves as
+-- a guard against resurrection: if the alert is deleted after its initial
+-- creation, but an executing sitrep still contains an fm_alert_request for the
+-- same alert, this marker prevents `SitrepGuardedInsert` from re-creating
+-- the alert.
+--
+-- A marker can be GC'ed in FM rendezvous when:
+--   * its alert_id is not present in any fm_alert_request in the executing
+--     sitrep,
+--   * its created_at_generation is less than that of the alert_generation on
+--     the sitrep being executed.
+-- Taken together, these two conditions ensure that no sitrep will ever attempt
+-- to resurrect a deleted alert, meaning the marker is no longer needed.
+CREATE TABLE IF NOT EXISTS omicron.public.rendezvous_alert_created (
+    alert_id UUID PRIMARY KEY,
+    created_at_generation INT8 NOT NULL
+);
+
+-- Marker written by `SitrepGuardedInsert` atomically with a corresponding
+-- support_bundle row when FM rendezvous successfully creates a bundle. This
+-- serves as a guard against resurrection: if the bundle is deleted after its
+-- initial creation, but an executing sitrep still contains an
+-- fm_support_bundle_request for the same bundle, this marker prevents
+-- `SitrepGuardedInsert` from re-creating the bundle.
+--
+-- Note that this means creation is attempted exactly once per requested
+-- bundle id: once the marker exists, fault management treats the request as
+-- satisfied and will not create the bundle again, even if bundle collection
+-- subsequently fails, the bundle expires, or a user deletes it. Collecting
+-- another bundle requires a new request with a new bundle id.
+--
+-- A marker can be GC'ed in FM rendezvous when:
+--   * its support_bundle_id is not present in any fm_support_bundle_request in
+--     the executing sitrep,
+--   * its created_at_generation is less than that of the
+--     support_bundle_generation on the sitrep being executed.
+-- Taken together, these two conditions ensure that no sitrep will ever attempt
+-- to resurrect a deleted bundle, meaning the marker is no longer needed.
+CREATE TABLE IF NOT EXISTS omicron.public.rendezvous_support_bundle_created (
+    support_bundle_id UUID PRIMARY KEY,
+    created_at_generation INT8 NOT NULL
 );
 
 /*
@@ -8623,7 +8965,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '262.0.0', NULL)
+    (TRUE, NOW(), NOW(), '274.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;
