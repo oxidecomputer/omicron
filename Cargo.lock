@@ -2255,7 +2255,7 @@ source = "git+https://github.com/oxidecomputer/crucible?rev=2bfe090eb5318ec8c467
 dependencies = [
  "crucible-workspace-hack",
  "libc",
- "num-derive 0.4.2",
+ "num-derive",
  "num-traits",
  "thiserror 2.0.18",
 ]
@@ -6493,12 +6493,12 @@ dependencies = [
 
 [[package]]
 name = "libscf-sys"
-version = "1.1.0"
+version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "12f02d0eda38e8cc453c5ec5d49945545d8d9eb0e59cb2ce4152ba6518f373e7"
+checksum = "d0d7bd6cfd9b5d32738cebd83a1b68060d96b1ca10d88bf9a5cb10dfac0f1cdf"
 dependencies = [
  "libc",
- "num-derive 0.3.3",
+ "num-derive",
  "num-traits",
 ]
 
@@ -8471,17 +8471,6 @@ checksum = "cf97ec579c3c42f953ef76dbf8d55ac91fb219dde70e49aa4a6b7d74e9919050"
 
 [[package]]
 name = "num-derive"
-version = "0.3.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "876a53fff98e03a936a674b29568b0e605f06b29372c2489ff4de23f1949743d"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 1.0.109",
-]
-
-[[package]]
-name = "num-derive"
 version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ed3955f1a9c7c0c15e092f9c887db08b1fc683305fdf6eb6684f22555355e202"
@@ -9270,6 +9259,7 @@ dependencies = [
  "proptest",
  "reqwest 0.13.2",
  "schemars 0.8.22",
+ "scuffle",
  "serde",
  "serde_json",
  "slog",
@@ -11213,7 +11203,7 @@ dependencies = [
  "anyhow",
  "convert_case 0.4.0",
  "libm",
- "num-derive 0.4.2",
+ "num-derive",
  "num-traits",
  "ron",
  "serde",
@@ -13230,6 +13220,20 @@ dependencies = [
  "pbkdf2",
  "salsa20",
  "sha2 0.11.0",
+]
+
+[[package]]
+name = "scuffle"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3bc8f6723061cb7e5f176f3132f96b7bbd3554afd7d533587fd58edbad02f97f"
+dependencies = [
+ "chrono",
+ "libc",
+ "libscf-sys",
+ "num-traits",
+ "oxnet",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
