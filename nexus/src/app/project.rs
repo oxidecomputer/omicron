@@ -14,6 +14,8 @@ use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
 use nexus_types::external_api::policy;
 use nexus_types::external_api::project;
+// Oldest API version whose update bodies still allow omitting fields.
+use nexus_types_versions::v2025_11_20_00 as update_compat;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
@@ -81,17 +83,27 @@ impl super::Nexus {
         self.db_datastore.projects_list(opctx, pagparams).await
     }
 
+    /// Update a project. Both API versions of this endpoint pass through here.
+    /// The newer body is strict — `name` and `description` are required — while
+    /// the older (`update_compat`) one is lax: either may be omitted, leaving it
+    /// unchanged. We take the lax type because it can hold a body from either
+    /// version. A strict body converts into it by wrapping each field in `Some`;
+    /// the reverse is impossible, since there's no value to supply for a field
+    /// the lax body omitted.
     pub(crate) async fn project_update(
         &self,
         opctx: &OpContext,
         project_lookup: &lookup::Project<'_>,
-        new_params: &project::ProjectUpdate,
+        params: update_compat::project::ProjectUpdate,
     ) -> UpdateResult<db::model::Project> {
         let (.., authz_project) =
             project_lookup.lookup_for(authz::Action::Modify).await?;
-        self.db_datastore
-            .project_update(opctx, &authz_project, new_params.clone().into())
-            .await
+        let updates = db::model::ProjectUpdate {
+            name: params.identity.name.map(db::model::Name),
+            description: params.identity.description,
+            time_modified: chrono::Utc::now(),
+        };
+        self.db_datastore.project_update(opctx, &authz_project, updates).await
     }
 
     pub(crate) async fn project_delete(

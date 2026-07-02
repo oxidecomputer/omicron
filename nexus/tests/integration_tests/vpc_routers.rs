@@ -9,6 +9,7 @@ use http::StatusCode;
 use http::method::Method;
 use nexus_db_lookup::LookupPath;
 use nexus_db_queries::context::OpContext;
+use nexus_test_interface::NexusServer;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
@@ -26,9 +27,11 @@ use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::instance;
 use nexus_types::external_api::instance::PrivateIpStackCreate;
 use nexus_types::external_api::vpc;
+use omicron_common::api::VERSION_HEADER;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::IdentityMetadataUpdateParams;
 use omicron_common::api::external::NameOrId;
+use omicron_common::api::external::Nullable;
 use omicron_common::api::external::SimpleIdentityOrName;
 use omicron_common::api::internal::shared::ResolvedVpcRoute;
 use omicron_common::api::internal::shared::RouterTarget;
@@ -336,11 +339,11 @@ async fn test_vpc_routers_attach_to_subnet(
             "/v1/vpc-subnets/{subnet_name}?project={PROJECT_NAME}&vpc={VPC_NAME}"
         ),
         &vpc::VpcSubnetUpdate {
-            identity: IdentityMetadataUpdateParams {
-                name: None,
-                description: None,
+            identity: vpc::IdentityMetadataUpdateParamsStrict {
+                name: subnet_name.parse().unwrap(),
+                description: "".to_string(),
             },
-            custom_router: Some(routers[0].identity.id.into()),
+            custom_router: Nullable(Some(routers[0].identity.id.into())),
         },
         StatusCode::BAD_REQUEST,
     )
@@ -400,11 +403,11 @@ async fn test_vpc_routers_attach_to_subnet(
         client,
         &format!("/v1/vpc-subnets/default?project={PROJECT_NAME}&vpc=vpc1"),
         &vpc::VpcSubnetUpdate {
-            identity: IdentityMetadataUpdateParams {
-                name: None,
-                description: None,
+            identity: vpc::IdentityMetadataUpdateParamsStrict {
+                name: "default".parse().unwrap(),
+                description: "".to_string(),
             },
-            custom_router: Some(router.identity.id.into()),
+            custom_router: Nullable(Some(router.identity.id.into())),
         },
         StatusCode::BAD_REQUEST,
     )
@@ -459,6 +462,75 @@ async fn test_vpc_routers_attach_to_subnet(
     {
         assert!(subnet.custom_router_id.is_none(), "{subnet:?}");
     }
+}
+
+/// Documents the prior-version back-compat behavior of `custom_router` on
+/// `vpc_subnet_update`, which strict PUT bodies address.
+///
+/// `custom_router` went from a lenient `Option<NameOrId>` to a required
+/// `Nullable<NameOrId>`. One might expect that, like `name`/`description`,
+/// omitting it in an old-version request leaves the existing attachment
+/// unchanged. It does NOT: the datastore treats an absent `custom_router` as an
+/// explicit detach (`custom_router_id = Some(None)`), so an old-version update
+/// that omits `custom_router` *clears* any attached router. This is a latent
+/// clear-on-omit hazard (cf. `support_bundle.user_comment`) — the audit had
+/// bucketed `vpc_subnet` as preserve-on-omit, but that only holds for its
+/// AsChangeset columns, not `custom_router`. Strict PUT bodies resolve the
+/// ambiguity for new clients by requiring the field. This test pins the
+/// behavior so we notice if it changes.
+#[nexus_test]
+async fn test_vpc_subnet_update_prior_version_clears_custom_router(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    create_project(client, PROJECT_NAME).await;
+    create_vpc(client, PROJECT_NAME, VPC_NAME).await;
+    let router =
+        create_router(client, PROJECT_NAME, VPC_NAME, ROUTER_NAMES[0]).await;
+
+    // Create a subnet with the custom router attached.
+    let subnet = create_vpc_subnet(
+        client,
+        PROJECT_NAME,
+        VPC_NAME,
+        "with-router",
+        "192.168.0.0/24".parse().unwrap(),
+        None,
+        Some(ROUTER_NAMES[0]),
+    )
+    .await;
+    assert_eq!(subnet.custom_router_id, Some(router.identity.id));
+
+    // Send an old-version update that omits `custom_router` (changing only the
+    // description). The prior version, before strict PUT bodies.
+    const PRIOR_VERSION: &str = "2025112000.0.0";
+    let test_cx = ClientTestContext::new(
+        cptestctx.server.get_http_server_external_address(),
+        cptestctx.logctx.log.clone(),
+    );
+    let body = serde_json::json!({ "description": "changed, router omitted" });
+    let updated: vpc::VpcSubnet = NexusRequest::new(
+        RequestBuilder::new(
+            &test_cx,
+            Method::PUT,
+            &format!(
+                "/v1/vpc-subnets/with-router?project={PROJECT_NAME}&vpc={VPC_NAME}"
+            ),
+        )
+        .header(VERSION_HEADER, PRIOR_VERSION)
+        .body(Some(&body))
+        .expect_status(Some(StatusCode::OK)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("prior-version subnet update should succeed")
+    .parsed_body()
+    .expect("failed to parse VpcSubnet");
+
+    // The omitted custom_router was CLEARED, not left unchanged.
+    assert_eq!(updated.identity.description, "changed, router omitted");
+    assert_eq!(updated.custom_router_id, None);
 }
 
 #[nexus_test]
@@ -693,17 +765,28 @@ async fn set_custom_router(
     vpc_name: &str,
     custom_router: Option<NameOrId>,
 ) -> vpc::VpcSubnet {
+    let url = format!(
+        "/v1/vpc-subnets/{subnet_name}?project={PROJECT_NAME}&vpc={vpc_name}"
+    );
+    // The update body is now strict, so it must carry the full
+    // representation. Read the current subnet to preserve its name and
+    // description while changing only the custom router attachment.
+    let current: vpc::VpcSubnet = NexusRequest::object_get(client, &url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .unwrap()
+        .parsed_body()
+        .unwrap();
     object_put(
         client,
-        &format!(
-            "/v1/vpc-subnets/{subnet_name}?project={PROJECT_NAME}&vpc={vpc_name}"
-        ),
+        &url,
         &vpc::VpcSubnetUpdate {
-            identity: IdentityMetadataUpdateParams {
-                name: None,
-                description: None,
+            identity: vpc::IdentityMetadataUpdateParamsStrict {
+                name: current.identity.name.clone(),
+                description: current.identity.description.clone(),
             },
-            custom_router,
+            custom_router: Nullable(custom_router),
         },
     )
     .await

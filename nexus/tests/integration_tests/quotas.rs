@@ -305,9 +305,9 @@ async fn test_quotas(cptestctx: &ControlPlaneTestContext) {
         .set_quotas(
             client,
             SiloQuotasUpdate {
-                cpus: Some(4),
-                memory: Some(ByteCount::from_gibibytes_u32(15)),
-                storage: Some(ByteCount::from_gibibytes_u32(2)),
+                cpus: 4,
+                memory: ByteCount::from_gibibytes_u32(15),
+                storage: ByteCount::from_gibibytes_u32(2),
             },
         )
         .await
@@ -369,18 +369,18 @@ async fn test_quota_limits(cptestctx: &ControlPlaneTestContext) {
 
     // Maximal legal limits should be allowed.
     let quota_limit = SiloQuotasUpdate {
-        cpus: Some(i64::MAX),
-        memory: Some(i64::MAX.try_into().unwrap()),
-        storage: Some(i64::MAX.try_into().unwrap()),
+        cpus: i64::MAX,
+        memory: i64::MAX.try_into().unwrap(),
+        storage: i64::MAX.try_into().unwrap(),
     };
     system
         .set_quotas(client, quota_limit.clone())
         .await
         .expect("set max quotas");
     let quotas = system.get_quotas(client).await;
-    assert_eq!(quotas.limits.cpus, quota_limit.cpus.unwrap());
-    assert_eq!(quotas.limits.memory, quota_limit.memory.unwrap());
-    assert_eq!(quotas.limits.storage, quota_limit.storage.unwrap());
+    assert_eq!(quotas.limits.cpus, quota_limit.cpus);
+    assert_eq!(quotas.limits.memory, quota_limit.memory);
+    assert_eq!(quotas.limits.storage, quota_limit.storage);
 
     // Construct a value that fits in a u64 but not an i64.
     let out_of_bounds = u64::try_from(i64::MAX).unwrap() + 1;
@@ -416,9 +416,9 @@ async fn test_quota_limits(cptestctx: &ControlPlaneTestContext) {
 
         // The quota limits we set above should be unchanged.
         let quotas = system.get_quotas(client).await;
-        assert_eq!(quotas.limits.cpus, quota_limit.cpus.unwrap());
-        assert_eq!(quotas.limits.memory, quota_limit.memory.unwrap());
-        assert_eq!(quotas.limits.storage, quota_limit.storage.unwrap());
+        assert_eq!(quotas.limits.cpus, quota_limit.cpus);
+        assert_eq!(quotas.limits.memory, quota_limit.memory);
+        assert_eq!(quotas.limits.storage, quota_limit.storage);
     }
 }
 
@@ -466,9 +466,9 @@ async fn test_negative_quota(cptestctx: &ControlPlaneTestContext) {
 
     // Can't update a silo with a negative quota
     let quota_limit = SiloQuotasUpdate {
-        cpus: Some(-1),
-        memory: Some(0_u64.try_into().unwrap()),
-        storage: Some(0_u64.try_into().unwrap()),
+        cpus: -1,
+        memory: 0_u64.try_into().unwrap(),
+        storage: 0_u64.try_into().unwrap(),
     };
     let response = system
         .set_quotas_expect_error(

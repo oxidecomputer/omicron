@@ -8,17 +8,19 @@
 //! TODO-coverage add test for racks, sleds
 
 use dropshot::HttpErrorResponseBody;
+use dropshot::test_util::ClientTestContext;
 use http::StatusCode;
 use http::method::Method;
 use nexus_types::external_api::project;
 use nexus_types::external_api::project::Project;
 use nexus_types::external_api::system;
+use omicron_common::api::VERSION_HEADER;
 use omicron_common::api::external::IdentityMetadataCreateParams;
-use omicron_common::api::external::IdentityMetadataUpdateParams;
 use omicron_common::api::external::Name;
 use serde::Serialize;
 use uuid::Uuid;
 
+use nexus_test_interface::NexusServer;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
@@ -260,9 +262,9 @@ async fn test_projects_basic(cptestctx: &ControlPlaneTestContext) {
     NexusRequest::new(
         RequestBuilder::new(client, Method::PUT, "/v1/projects/simproject2")
             .body(Some(&project::ProjectUpdate {
-                identity: IdentityMetadataUpdateParams {
-                    name: None,
-                    description: None,
+                identity: project::IdentityMetadataUpdateParamsStrict {
+                    name: "simproject2".parse().unwrap(),
+                    description: "".to_string(),
                 },
             }))
             .expect_status(Some(StatusCode::NOT_FOUND)),
@@ -300,10 +302,12 @@ async fn test_projects_basic(cptestctx: &ControlPlaneTestContext) {
 
     // Update "simproject3".  We'll make sure that's reflected in the other
     // requests.
+    // `name` is unchanged ("simproject3"); strict PUT bodies require
+    // resending it.
     let project_update = project::ProjectUpdate {
-        identity: IdentityMetadataUpdateParams {
-            name: None,
-            description: Some("Li'l lightnin'".to_string()),
+        identity: project::IdentityMetadataUpdateParamsStrict {
+            name: "simproject3".parse().unwrap(),
+            description: "Li'l lightnin'".to_string(),
         },
     };
     let project = NexusRequest::object_put(
@@ -331,9 +335,9 @@ async fn test_projects_basic(cptestctx: &ControlPlaneTestContext) {
     // operation under the hood.  This case also exercises changes to multiple
     // fields in one request.
     let project_update = project::ProjectUpdate {
-        identity: IdentityMetadataUpdateParams {
-            name: Some("lil-lightnin".parse().unwrap()),
-            description: Some("little lightning".to_string()),
+        identity: project::IdentityMetadataUpdateParamsStrict {
+            name: "lil-lightnin".parse().unwrap(),
+            description: "little lightning".to_string(),
         },
     };
     let project = NexusRequest::object_put(
@@ -441,6 +445,75 @@ async fn test_projects_basic(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(projects[1].identity.description, "little lightning");
     assert_eq!(projects[2].identity.name, "simproject1");
     assert!(!projects[2].identity.description.is_empty());
+}
+
+/// Regression test for the strict PUT body conversion of `project_update`.
+///
+/// The latest version of the body is strict (every field required), but clients
+/// pinned to an earlier API version still send the lenient
+/// "PATCH-via-PUT" body where omitted fields are left unchanged. This test
+/// confirms that contract: a request pinned to the prior version (via the
+/// `api-version` header) may omit `name`, and the project's existing name is
+/// preserved. As a contrast, it also confirms the latest version *rejects* the
+/// same partial body, since `name` is required there.
+#[nexus_test]
+async fn test_project_update_prior_version_partial(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    // `create_project` sets description to "a pier".
+    create_project(client, "prior-version-proj").await;
+
+    // The prior API version, before strict PUT bodies. Anything in
+    // `[INITIAL, STRICT_PUT_BODIES)` routes to the lenient handler.
+    const PRIOR_VERSION: &str = "2025112000.0.0";
+
+    // The default `external_client` does not set the api-version header, which
+    // routes to the latest version. To pin to the prior version we build a
+    // fresh client and set the header ourselves.
+    let test_cx = ClientTestContext::new(
+        cptestctx.server.get_http_server_external_address(),
+        cptestctx.logctx.log.clone(),
+    );
+
+    // A partial body that omits `name` entirely. Under the prior (lenient)
+    // contract this leaves the name unchanged.
+    let partial =
+        serde_json::json!({ "description": "updated via old client" });
+    let project: Project = NexusRequest::new(
+        RequestBuilder::new(
+            &test_cx,
+            Method::PUT,
+            "/v1/projects/prior-version-proj",
+        )
+        .header(VERSION_HEADER, PRIOR_VERSION)
+        .body(Some(&partial))
+        .expect_status(Some(StatusCode::OK)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("prior-version update with omitted name should succeed")
+    .parsed_body()
+    .expect("failed to parse Project");
+    assert_eq!(project.identity.name, "prior-version-proj");
+    assert_eq!(project.identity.description, "updated via old client");
+
+    // The latest version requires `name`, so the same partial body is rejected.
+    // (`external_client` sends no api-version header, which routes to latest.)
+    NexusRequest::new(
+        RequestBuilder::new(
+            client,
+            Method::PUT,
+            "/v1/projects/prior-version-proj",
+        )
+        .body(Some(&partial))
+        .expect_status(Some(StatusCode::BAD_REQUEST)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("latest-version update with omitted name should 400");
 }
 
 #[nexus_test]

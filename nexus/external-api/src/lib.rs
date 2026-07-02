@@ -86,6 +86,7 @@ api_versions!([
     // |  date-based version should be at the top of the list.
     // v
     // (next_yyyy_mm_dd_nn, IDENT),
+    (2026_06_23_00, STRICT_PUT_BODIES),
     (2026_06_08_00, INSTANCE_CPU_TYPE_TURIN_V2),
     (2026_06_05_00, EXTERNAL_JUMBO_FRAMES),
     (2026_06_04_00, IMAGE_BLOCK_SIZE_TYPE),
@@ -582,18 +583,33 @@ pub trait NexusExternalApi {
     ) -> Result<HttpResponseOk<latest::silo::SiloQuotas>, HttpError>;
 
     /// Update resource quotas for silo
-    ///
-    /// If a quota value is not specified, it will remain unchanged.
     #[endpoint {
         method = PUT,
         path = "/v1/system/silos/{silo}/quotas",
         tags = ["system/silos"],
+        versions = VERSION_STRICT_PUT_BODIES..,
     }]
     async fn silo_quotas_update(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<latest::path_params::SiloPath>,
         new_quota: TypedBody<latest::silo::SiloQuotasUpdate>,
     ) -> Result<HttpResponseOk<latest::silo::SiloQuotas>, HttpError>;
+
+    /// Update resource quotas for silo
+    ///
+    /// If a quota value is not specified, it will remain unchanged.
+    #[endpoint {
+        operation_id = "silo_quotas_update",
+        method = PUT,
+        path = "/v1/system/silos/{silo}/quotas",
+        tags = ["system/silos"],
+        versions = ..VERSION_STRICT_PUT_BODIES,
+    }]
+    async fn silo_quotas_update_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<v2025_11_20_00::path_params::SiloPath>,
+        new_quota: TypedBody<v2025_11_20_00::silo::SiloQuotasUpdate>,
+    ) -> Result<HttpResponseOk<v2025_11_20_00::silo::SiloQuotas>, HttpError>;
 
     /// List silos
     ///
@@ -1181,12 +1197,27 @@ pub trait NexusExternalApi {
         method = PUT,
         path = "/v1/projects/{project}",
         tags = ["projects"],
+        versions = VERSION_STRICT_PUT_BODIES..,
     }]
     async fn project_update(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<latest::path_params::ProjectPath>,
         updated_project: TypedBody<latest::project::ProjectUpdate>,
     ) -> Result<HttpResponseOk<latest::project::Project>, HttpError>;
+
+    /// Update project
+    #[endpoint {
+        operation_id = "project_update",
+        method = PUT,
+        path = "/v1/projects/{project}",
+        tags = ["projects"],
+        versions = ..VERSION_STRICT_PUT_BODIES,
+    }]
+    async fn project_update_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<v2025_11_20_00::path_params::ProjectPath>,
+        updated_project: TypedBody<v2025_11_20_00::project::ProjectUpdate>,
+    ) -> Result<HttpResponseOk<v2025_11_20_00::project::Project>, HttpError>;
 
     /// Fetch project's IAM policy
     #[endpoint {
@@ -6878,6 +6909,7 @@ pub trait NexusExternalApi {
         method = PUT,
         path = "/v1/vpc-subnets/{subnet}",
         tags = ["vpcs"],
+        versions = VERSION_STRICT_PUT_BODIES..,
     }]
     async fn vpc_subnet_update(
         rqctx: RequestContext<Self::Context>,
@@ -6885,6 +6917,21 @@ pub trait NexusExternalApi {
         query_params: Query<latest::vpc::OptionalVpcSelector>,
         subnet_params: TypedBody<latest::vpc::VpcSubnetUpdate>,
     ) -> Result<HttpResponseOk<latest::vpc::VpcSubnet>, HttpError>;
+
+    /// Update subnet
+    #[endpoint {
+        operation_id = "vpc_subnet_update",
+        method = PUT,
+        path = "/v1/vpc-subnets/{subnet}",
+        tags = ["vpcs"],
+        versions = ..VERSION_STRICT_PUT_BODIES,
+    }]
+    async fn vpc_subnet_update_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<v2025_11_20_00::path_params::SubnetPath>,
+        query_params: Query<v2025_11_20_00::vpc::OptionalVpcSelector>,
+        subnet_params: TypedBody<v2025_11_20_00::vpc::VpcSubnetUpdate>,
+    ) -> Result<HttpResponseOk<v2025_11_20_00::vpc::VpcSubnet>, HttpError>;
 
     // This endpoint is likely temporary. We would rather list all IPs allocated in
     // a subnet whether they come from NICs or something else. See
@@ -8404,6 +8451,7 @@ pub trait NexusExternalApi {
         method = PUT,
         path = "/experimental/v1/system/support-bundles/{bundle_id}",
         tags = ["experimental"], // system/support-bundles: only one tag is allowed
+        versions = VERSION_STRICT_PUT_BODIES..,
     }]
     async fn support_bundle_update(
         rqctx: RequestContext<Self::Context>,
@@ -8411,6 +8459,23 @@ pub trait NexusExternalApi {
         body: TypedBody<latest::support_bundle::SupportBundleUpdate>,
     ) -> Result<
         HttpResponseOk<latest::support_bundle::SupportBundleInfo>,
+        HttpError,
+    >;
+
+    /// Update support bundle
+    #[endpoint {
+        operation_id = "support_bundle_update",
+        method = PUT,
+        path = "/experimental/v1/system/support-bundles/{bundle_id}",
+        tags = ["experimental"], // system/support-bundles: only one tag is allowed
+        versions = ..VERSION_STRICT_PUT_BODIES,
+    }]
+    async fn support_bundle_update_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<v2025_11_20_00::support_bundle::SupportBundlePath>,
+        body: TypedBody<v2025_11_20_00::support_bundle::SupportBundleUpdate>,
+    ) -> Result<
+        HttpResponseOk<v2025_11_20_00::support_bundle::SupportBundleInfo>,
         HttpError,
     >;
 

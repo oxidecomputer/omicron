@@ -26,6 +26,7 @@ use nexus_types::internal_api::background::SupportBundleCollectionStep;
 use nexus_types::internal_api::background::SupportBundleCollectionStepStatus;
 use nexus_types::internal_api::background::SupportBundleEreportStatus;
 use omicron_common::api::external::LookupType;
+use omicron_common::api::external::Nullable;
 use omicron_uuid_kinds::SupportBundleUuid;
 use serde::Deserialize;
 use std::io::Cursor;
@@ -310,7 +311,9 @@ async fn bundle_update_comment(
     use nexus_types::external_api::support_bundle::SupportBundleUpdate;
 
     let url = format!("{BUNDLES_URL}/{id}");
-    let update = SupportBundleUpdate { user_comment: comment };
+    // Strict PUT body: a `None` comment is sent as an explicit `null` (clear),
+    // not omitted.
+    let update = SupportBundleUpdate { user_comment: Nullable(comment) };
 
     NexusRequest::new(
         RequestBuilder::new(client, Method::PUT, &url)
@@ -820,7 +823,7 @@ async fn test_support_bundle_update_comment(
     let url = format!("{BUNDLES_URL}/{}", bundle.id);
     let update =
         nexus_types::external_api::support_bundle::SupportBundleUpdate {
-            user_comment: Some(too_long_comment),
+            user_comment: Nullable(Some(too_long_comment)),
         };
 
     let error = NexusRequest::new(

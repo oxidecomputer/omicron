@@ -89,14 +89,3 @@ pub struct SiloQuotasUpdate {
     pub storage: Option<ByteCount>,
     pub time_modified: DateTime<Utc>,
 }
-
-impl From<silo::SiloQuotasUpdate> for SiloQuotasUpdate {
-    fn from(params: silo::SiloQuotasUpdate) -> Self {
-        Self {
-            cpus: params.cpus,
-            memory: params.memory.map(|f| f.into()),
-            storage: params.storage.map(|f| f.into()),
-            time_modified: Utc::now(),
-        }
-    }
-}
