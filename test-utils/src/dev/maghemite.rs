@@ -414,14 +414,6 @@ mod tests {
 
     const EXPECTED_PORT: u16 = 4676;
 
-    // XXX temporary SIGSEGV.
-    #[test]
-    fn null_deref_probe() {
-        let p = std::hint::black_box(std::ptr::null::<u8>());
-        let v = unsafe { std::ptr::read(p) };
-        std::hint::black_box(v);
-    }
-
     #[tokio::test]
     async fn test_mgd_in_path() {
         // With no arguments, we expect to see the default help message.
@@ -435,7 +427,14 @@ mod tests {
 
     #[tokio::test]
     async fn test_ddmd_in_path() {
+        // Run ddmd --help to exit cleanly instead of actually launching the
+        // daemon. The latter would attempt to write to /var/run, get EACCES as
+        // non-root, and abort.
+        //
+        // In this test, we only care about ddmd being present, not whether it
+        // works.
         tokio::process::Command::new("ddmd")
+            .arg("--help")
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null())

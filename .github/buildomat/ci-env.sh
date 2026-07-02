@@ -9,9 +9,14 @@
 # Color the output for easier readability.
 export CARGO_TERM_COLOR=always
 
-# On illumos, store crashing process cores in the test temp dir since that's
-# uploaded by Buildomat. `-p` sets the pattern on this shell, and children of
-# the shell inherit it.
+# On illumos, store crashing process cores in the test temp dir so that:
+#
+# * Any core files are uploaded by Buildomat.
+# * Core files cause the CI job to fail even if the run is otherwise successful.
+#
+# `-p` sets the pattern on this shell, and child processes of the shell inherit
+# it.
 if [[ "$(uname -s)" == "SunOS" ]]; then
-    coreadm -p '/var/tmp/omicron_tmp/core.%f.%p.core'
+    mkdir -p /var/tmp/omicron_tmp/cores
+    coreadm -p '/var/tmp/omicron_tmp/cores/core.%f.%p.core'
 fi

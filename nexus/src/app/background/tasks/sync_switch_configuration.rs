@@ -21,7 +21,6 @@ use nexus_db_model::{
     BgpConfig, BootstoreConfig, LoopbackAddress, NETWORK_KEY,
 };
 use tokio::sync::watch;
-use uuid::Uuid;
 
 use crate::app::background::BackgroundTask;
 use display_error_chain::DisplayErrorChain;
@@ -61,7 +60,7 @@ use omicron_common::{
     address::{Ipv6Subnet, get_sled_address},
     api::external::DataPageParams,
 };
-use omicron_uuid_kinds::{BgpAnnounceSetUuid, GenericUuid};
+use omicron_uuid_kinds::{BgpAnnounceSetUuid, BgpConfigUuid, GenericUuid};
 use serde_json::json;
 use sled_agent_client::types::HostPortConfig;
 use sled_agent_types::early_networking::EarlyNetworkConfigEnvelope;
@@ -503,7 +502,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                         > = HashMap::new();
 
                 // we currently only support one bgp config per switch
-                let mut switch_bgp_config: HashMap<SwitchSlot, (Uuid, BgpConfig)> = HashMap::new();
+                let mut switch_bgp_config: HashMap<SwitchSlot, (BgpConfigUuid, BgpConfig)> = HashMap::new();
 
                 // Prefixes are associated to BgpConfig via the config id
                 let mut bgp_announce_prefixes: HashMap<BgpAnnounceSetUuid, Vec<IpNet>> = HashMap::new();
@@ -546,7 +545,12 @@ impl BackgroundTask for SwitchPortSettingsManager {
                                 // get the bgp config for this peer
                                 let config = match self
                                     .datastore
-                                    .bgp_config_get(opctx, &bgp_config_id.into())
+                                    .bgp_config_get(
+                                        opctx,
+                                        &bgp_config_id
+                                            .into_untyped_uuid()
+                                            .into(),
+                                    )
                                     .await
                                 {
                                     Ok(config) => config,
