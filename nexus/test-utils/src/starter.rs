@@ -92,8 +92,10 @@ use omicron_uuid_kinds::ZpoolUuid;
 use oximeter_collector::Oximeter;
 use oximeter_producer::LogConfig;
 use oximeter_producer::Server as ProducerServer;
+use sled_agent_types::early_networking::PortConfig;
 use sled_agent_types::early_networking::RackNetworkConfig;
 use sled_agent_types::early_networking::SwitchSlot;
+use sled_agent_types::early_networking::UplinkPorts;
 use sled_agent_types::inventory::HostPhase2DesiredSlots;
 use sled_agent_types::inventory::NetworkInterface;
 use sled_agent_types::inventory::NetworkInterfaceKind;
@@ -431,13 +433,13 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
 
         // Set up a stub instance of dendrite
         let dendrite = dev::dendrite::DendriteInstance::start(
-            0,
             self.nexus_internal_addr,
-            Some(mgs_addr),
+            mgs_addr,
+            &log.new(o!("switch_slot" => format!("{switch_slot:?}"))),
         )
         .await
         .unwrap();
-        let port = dendrite.port;
+        let port = dendrite.port();
         self.dendrite.write().unwrap().insert(switch_slot, dendrite);
 
         let address = SocketAddrV6::new(Ipv6Addr::LOCALHOST, port, 0, 0);
@@ -505,7 +507,7 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
                         .unwrap()
                         .get(&switch_slot)
                         .unwrap()
-                        .port,
+                        .port(),
                     mgs: self.gateway.get(&switch_slot).unwrap().port,
                     mgd: self.mgd.get(&switch_slot).unwrap().port,
                     ddm: self.ddm.get(&switch_slot).unwrap().port,
@@ -948,7 +950,12 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
                     bgp: Vec::new(),
                     infra_ip_first: "192.0.2.10".parse().unwrap(),
                     infra_ip_last: "192.0.2.100".parse().unwrap(),
-                    ports: Vec::new(),
+                    // `UplinkPorts` must be non-empty; this test harness
+                    // doesn't exercise uplinks, so use a placeholder port.
+                    ports: UplinkPorts::new(vec![PortConfig::empty_for_tests(
+                        "qsfp0",
+                    )])
+                    .expect("placeholder port list is non-empty"),
                     rack_subnet: "fd00:1122:3344:0100::/56".parse().unwrap(),
                 },
                 // TODO-correctness Can we fill this in for tests?
@@ -1277,7 +1284,6 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
             logctx: self.logctx,
             gateway: self.gateway,
             dendrite: RwLock::new(self.dendrite.into_inner().unwrap()),
-            stopped_dendrite_ports: RwLock::new(HashMap::new()),
             mgd: self.mgd,
             ddm: self.ddm,
             external_dns_zone_name: self.external_dns_zone_name.unwrap(),
@@ -1315,7 +1321,7 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
         for (_, gateway) in self.gateway {
             gateway.teardown().await;
         }
-        for (_, mut dendrite) in self.dendrite.into_inner().unwrap() {
+        for (_, dendrite) in self.dendrite.into_inner().unwrap() {
             dendrite.cleanup().await.unwrap();
         }
         for (_, mut mgd) in self.mgd {

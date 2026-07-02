@@ -1017,7 +1017,8 @@ task: "switch_port_config_manager"
   configured period: every <REDACTED_DURATION>s
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-warning: unknown background task: "switch_port_config_manager" (don't know how to interpret details: Object {})
+all racks appear to have a complete bootstore network config
+(note: this check is not yet complete -- there might still be errors that aren't in the report)
 
 task: "trust_quorum_manager"
   configured period: every <REDACTED_DURATION>m
@@ -1718,7 +1719,8 @@ task: "switch_port_config_manager"
   configured period: every <REDACTED_DURATION>s
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-warning: unknown background task: "switch_port_config_manager" (don't know how to interpret details: Object {})
+all racks appear to have a complete bootstore network config
+(note: this check is not yet complete -- there might still be errors that aren't in the report)
 
 task: "trust_quorum_manager"
   configured period: every <REDACTED_DURATION>m

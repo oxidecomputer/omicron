@@ -467,7 +467,7 @@ mod tests {
             datastore.clone(),
             nexus.internal_resolver.clone(),
             nexus.id(),
-            RackUuid::from_untyped_uuid(nexus.rack_id()),
+            nexus.rack_id(),
             fm_analysis_activator.clone(),
             false,
         );

@@ -31,6 +31,7 @@ use sled_agent_types::early_networking::RouterLifetimeConfig;
 use sled_agent_types::early_networking::RouterPeerType;
 use sled_agent_types::early_networking::SwitchSlot;
 use sled_agent_types::early_networking::UplinkAddress;
+use sled_agent_types::early_networking::UplinkPorts;
 use sled_hardware_types::Baseboard;
 use slog::warn;
 use std::collections::BTreeMap;
@@ -485,16 +486,20 @@ fn validate_rack_network_config(
 
     // TODO Add more client side checks on `rack_network_config` contents?
 
+    let ports = config
+        .iter_uplinks()
+        .map(|(switch, port, config)| {
+            build_port_config(switch, port, config, bgp_auth_keys)
+        })
+        .collect::<Vec<_>>();
+    let ports = UplinkPorts::new(ports)
+        .context("rack network config must specify at least one uplink port")?;
+
     Ok(bootstrap_agent_lockstep_client::types::RackNetworkConfig {
         rack_subnet,
         infra_ip_first: config.infra_ip_first,
         infra_ip_last: config.infra_ip_last,
-        ports: config
-            .iter_uplinks()
-            .map(|(switch, port, config)| {
-                build_port_config(switch, port, config, bgp_auth_keys)
-            })
-            .collect(),
+        ports,
         bgp: config
             .bgp
             .iter()
