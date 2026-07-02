@@ -5,7 +5,6 @@
 //! Assembly of the bootstore config builder's inputs from database records.
 
 use ipnetwork::IpNetwork;
-use nexus_db_model::BgpConfig;
 use nexus_db_model::SwitchPort;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
@@ -13,19 +12,15 @@ use nexus_db_queries::db::datastore::SwitchConfigData;
 use nexus_db_queries::db::datastore::SwitchPortSettingsCombinedResult;
 use nexus_switch_config::{
     AddressInput, BgpConfigInput, LinkInput, LldpInput, PortInput,
-    RackNetworkConfigInput,
+    RackNetworkConfigInput, collapse_bgp_configs,
 };
 use omicron_common::api::external::Error;
-use omicron_uuid_kinds::BgpAnnounceSetUuid;
-use omicron_uuid_kinds::BgpConfigUuid;
-use oxnet::IpNet;
 use sled_agent_types::early_networking::BfdPeerConfig;
 use sled_agent_types::early_networking::RouteConfig;
 use sled_agent_types::early_networking::SwitchSlot;
 use sled_agent_types::early_networking::TxEqConfig;
 use slog::Logger;
 use slog::warn;
-use std::collections::HashMap;
 use std::net::IpAddr;
 
 /// Read the bootstore network config inputs from the database and assemble them
@@ -43,36 +38,38 @@ pub async fn read_and_assemble(
         bfd_sessions,
     } = datastore.switch_config_read(opctx).await?;
 
-    // One BGP config per switch. Every peer on a switch references that switch's
-    // single BGP config, so associate the first one we see per switch.
-    let mut switch_bgp_config: HashMap<SwitchSlot, (BgpConfigUuid, BgpConfig)> =
-        HashMap::new();
+    // Each `(switch, BGP config)` association a peer makes.
+    //
+    // We have to be a bit careful here -- note that many peers reference the
+    // same config, so an association can appear more than once. `assemble`
+    // dedups these configs, marking disagreements with `Conflicting`.
+    let mut switch_bgp_configs: Vec<(SwitchSlot, BgpConfigInput)> = Vec::new();
     for (port, settings) in &applied_ports {
         let switch = SwitchSlot::from(port.switch_slot);
         for peer in &settings.bgp_peers {
             let id = peer.bgp_config_id();
             if let Some(cfg) = bgp_configs.get(&id) {
-                switch_bgp_config
-                    .entry(switch)
-                    .or_insert_with(|| (id, cfg.config.clone()));
-            }
-        }
-    }
-
-    // Resolve each config's announce set into the prefixes the switch
-    // originates.
-    let bgp_announce_prefixes: HashMap<BgpAnnounceSetUuid, Vec<IpNet>> =
-        bgp_configs
-            .iter()
-            .map(|cfg| {
-                let prefixes = cfg
+                // Resolve the config's announce set into the prefixes the
+                // switch originates.
+                let originate = cfg
                     .announcements
                     .iter()
                     .map(|a| a.network.into())
                     .collect();
-                (cfg.config.bgp_announce_set_id(), prefixes)
-            })
-            .collect();
+                switch_bgp_configs.push((
+                    switch,
+                    BgpConfigInput {
+                        id,
+                        asn: cfg.config.asn.0,
+                        originate,
+                        checker: cfg.config.checker.clone(),
+                        shaper: cfg.config.shaper.clone(),
+                        max_paths: *cfg.config.max_paths,
+                    },
+                ));
+            }
+        }
+    }
 
     // The infra IP range comes from the (single) block of the infra address
     // lot.
@@ -128,8 +125,7 @@ pub async fn read_and_assemble(
     Ok(assemble(
         rack_subnet,
         &applied_port_refs,
-        &switch_bgp_config,
-        &bgp_announce_prefixes,
+        switch_bgp_configs,
         infra_ip_first,
         infra_ip_last,
         bfd,
@@ -148,35 +144,14 @@ pub fn assemble(
         &SwitchPort,
         &SwitchPortSettingsCombinedResult,
     )],
-    switch_bgp_config: &HashMap<SwitchSlot, (BgpConfigUuid, BgpConfig)>,
-    bgp_announce_prefixes: &HashMap<BgpAnnounceSetUuid, Vec<IpNet>>,
+    switch_bgp_configs: Vec<(SwitchSlot, BgpConfigInput)>,
     infra_ip_first: IpAddr,
     infra_ip_last: IpAddr,
     bfd: Vec<BfdPeerConfig>,
 ) -> RackNetworkConfigInput {
-    // One BGP config per switch, with its announce-set prefixes resolved into
-    // the prefixes the switch originates.
-    let bgp_configs = switch_bgp_config
-        .iter()
-        .map(|(switch_slot, (_id, config))| {
-            let originate = bgp_announce_prefixes
-                .get(&config.bgp_announce_set_id())
-                .expect(
-                    "bgp config is present but announce set is not populated",
-                )
-                .clone();
-            (
-                *switch_slot,
-                BgpConfigInput {
-                    asn: config.asn.0,
-                    originate,
-                    checker: config.checker.clone(),
-                    shaper: config.shaper.clone(),
-                    max_paths: *config.max_paths,
-                },
-            )
-        })
-        .collect();
+    // Collapse the per-switch BGP associations into one `SwitchBgpConfig` per
+    // switch, flagging conflicting entries.
+    let bgp_configs = collapse_bgp_configs(switch_bgp_configs);
 
     let ports = applied_ports
         .iter()

@@ -8029,9 +8029,11 @@ dependencies = [
 name = "nexus-switch-config"
 version = "0.1.0"
 dependencies = [
+ "iddqd",
  "ipnetwork",
  "nexus-types",
  "omicron-common",
+ "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "oxnet",
  "proptest",
