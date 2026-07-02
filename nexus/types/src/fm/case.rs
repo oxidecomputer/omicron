@@ -381,6 +381,7 @@ impl fmt::Display for DisplayCase<'_> {
                     this_sitrep(*assigned_sitrep_id)
                 )?;
                 writeln!(f, "{:>indent$}{ASSIGNMENT_ID:<WIDTH$} {id}", "")?;
+                writeln!(f)?;
             }
         }
 
@@ -430,6 +431,7 @@ impl fmt::Display for DisplayCase<'_> {
                     "",
                     this_sitrep(*requested_sitrep_id)
                 )?;
+                writeln!(f)?;
             }
         }
 
@@ -462,6 +464,7 @@ impl fmt::Display for DisplayCase<'_> {
                 )?;
                 writeln!(f, "{:>indent$}{DATA}", "")?;
                 writeln!(f, "{}", data_selection.display(indent + 2))?;
+                writeln!(f)?;
             }
         }
 
