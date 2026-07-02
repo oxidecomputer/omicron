@@ -17,6 +17,5 @@ export CARGO_TERM_COLOR=always
 # `-p` sets the pattern on this shell, and child processes of the shell inherit
 # it.
 if [[ "$(uname -s)" == "SunOS" ]]; then
-    mkdir -p /var/tmp/omicron_tmp
     coreadm -p '/var/tmp/omicron_tmp/core.%f.%p.core'
 fi
