@@ -3,6 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::context::ServerContext;
+use anyhow::Context;
 use anyhow::bail;
 use dropshot::HttpError;
 use dropshot::HttpResponseOk;
@@ -185,36 +186,59 @@ struct ChronySetupProperties {
 
 impl ChronySetupProperties {
     fn load() -> Result<Self, anyhow::Error> {
-        // TODO-K: add with_context to all errors returned
+        let scf = Scf::connect_current_zone().context(
+            "failed to connect to the `svc.configd` instance in the NTP zone",
+        )?;
+        let scope = scf
+            .scope_local()
+            .context("failed to get the local scope in the NTP zone")?;
 
-        let scf = Scf::connect_current_zone()?;
-        let scope = scf.scope_local()?;
-
-        let Some(service) = scope.service("oxide/chrony-setup")? else {
+        let Some(service) = scope
+            .service("oxide/chrony-setup")
+            .context("failed to look up SMF service 'oxide/chrony-setup'")?
+        else {
             bail!("SMF service 'oxide/chrony-setup' was not found")
         };
-        let Some(instance) = service.instance("default")? else {
+
+        let Some(instance) =
+            service.instance("default").with_context(|| {
+                format!(
+                    "failed to look up instance 'default' within {}",
+                    service.fmri(),
+                )
+            })?
+        else {
             bail!("instance default not found within {}", service.fmri())
         };
-        let Some(pg) = instance.property_group_direct("config")? else {
+
+        let Some(pg) =
+            instance.property_group_direct("config").with_context(|| {
+                format!(
+                    "failed to look up property group 'config' for {}",
+                    instance.fmri(),
+                )
+            })?
+        else {
             bail!("property group 'config' not found for {}", instance.fmri())
         };
 
-        // TODO-K: Should I mark a property as blank if a property isn't set?
-        // This is for debugging purposes anyway will want to capture as much
-        // as possible?
-
         // Retrieve whether this is a boundary zone or not
-        let Some(property) = pg.property("boundary")? else {
+        let Some(property) = pg.property("boundary").with_context(|| {
+            format!("failed to look up property 'boundary' for {:?}", pg)
+        })?
+        else {
             bail!("property 'boundary' not found for {:?}", pg,);
         };
-        let boundary = property.single_value()?;
+
+        let boundary = property
+            .single_value()
+            .context("failed to read value of property 'boundary'")?;
 
         let is_boundary = match &boundary {
             Value::Bool(b) => *b,
             _ => bail!(
-                "the value kind for property 'boundary' is {};\
-            should be a boolean",
+                "the value kind for property 'boundary' is {}; \
+                should be a boolean",
                 &boundary.kind()
             ),
         };
@@ -222,9 +246,16 @@ impl ChronySetupProperties {
         // Retrieve the server property, should only be present in boundary zones
         let mut server = vec![];
         if is_boundary {
-            if let Some(property) = pg.property("server")? {
-                let values: Vec<Value> =
-                    property.values()?.collect::<Result<_, _>>()?;
+            if let Some(property) =
+                pg.property("server").with_context(|| {
+                    format!("failed to look up property 'server' for {:?}", pg)
+                })?
+            {
+                let values: Vec<Value> = property
+                    .values()
+                    .context("failed to iterate values of property 'server'")?
+                    .collect::<Result<_, _>>()
+                    .context("failed to collect values of property 'server'")?;
                 server = values;
             } else {
                 bail!(
@@ -236,10 +267,20 @@ impl ChronySetupProperties {
 
         // Retrieve the hostname that resolves to the boundary NTP server
         // addresses
-        let Some(property) = pg.property("boundary_pool")? else {
+        let Some(property) =
+            pg.property("boundary_pool").with_context(|| {
+                format!(
+                    "failed to look up property 'boundary_pool' for {:?}",
+                    pg,
+                )
+            })?
+        else {
             bail!("unable to find value for boundary pool");
         };
-        let boundary_pool = property.single_value()?;
+
+        let boundary_pool = property
+            .single_value()
+            .context("failed to read value of property 'boundary_pool'")?;
 
         Ok(Self { server, boundary, boundary_pool })
     }
