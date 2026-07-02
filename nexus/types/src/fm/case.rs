@@ -346,14 +346,12 @@ impl fmt::Display for DisplayCase<'_> {
                 const REPORTED_BY: &str = "reported by:";
                 const ADDED_IN: &str = "added in:";
                 const ASSIGNMENT_ID: &str = "assignment ID:";
-                const COMMENT: &str = "comment:";
 
                 const WIDTH: usize = const_max_len(&[
                     CLASS,
                     REPORTED_BY,
                     ADDED_IN,
                     ASSIGNMENT_ID,
-                    COMMENT,
                 ]);
 
                 let pn = ereport.part_number.as_deref().unwrap_or("<UNKNOWN>");
@@ -381,6 +379,7 @@ impl fmt::Display for DisplayCase<'_> {
                     this_sitrep(*assigned_sitrep_id)
                 )?;
                 writeln!(f, "{:>indent$}{ASSIGNMENT_ID:<WIDTH$} {id}", "")?;
+                writeln!(f)?;
             }
         }
 
@@ -410,10 +409,8 @@ impl fmt::Display for DisplayCase<'_> {
             {
                 const CLASS: &str = "class:";
                 const REQUESTED_IN: &str = "requested in:";
-                const COMMENT: &str = "comment:";
 
-                const WIDTH: usize =
-                    const_max_len(&[CLASS, REQUESTED_IN, COMMENT]);
+                const WIDTH: usize = const_max_len(&[CLASS, REQUESTED_IN]);
 
                 writeln!(f, "{BULLET:>indent$}alert {id}",)?;
                 for line in comment.lines() {
@@ -430,6 +427,7 @@ impl fmt::Display for DisplayCase<'_> {
                     "",
                     this_sitrep(*requested_sitrep_id)
                 )?;
+                writeln!(f)?;
             }
         }
 
@@ -462,6 +460,7 @@ impl fmt::Display for DisplayCase<'_> {
                 )?;
                 writeln!(f, "{:>indent$}{DATA}", "")?;
                 writeln!(f, "{}", data_selection.display(indent + 2))?;
+                writeln!(f)?;
             }
         }
 
