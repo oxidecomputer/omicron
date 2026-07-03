@@ -30,7 +30,7 @@ slog-error-chain.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 transceiver-controller.workspace = true
-tufaceous-artifact.workspace = true
+tufaceous-artifact-v2.workspace = true
 update-engine.workspace = true
 
 [dev-dependencies]

@@ -4,6 +4,7 @@
 
 use std::time::Duration;
 
+pub mod artifact;
 pub mod example;
 pub mod inventory;
 pub mod multirack_setup;

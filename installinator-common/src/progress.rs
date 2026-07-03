@@ -49,16 +49,15 @@ pub enum InstallinatorComponent {
     /// The host phase 2 component.
     HostPhase2,
 
-    /// The control plane component.
-    ControlPlane,
+    /// The control plane zone component.
+    ControlPlaneZone,
 
     /// The measurement corpus component.
     MeasurementCorpus,
 
-    /// A component that means "both the host and the control plane", used for
-    /// writes for now. It is possible that this component will go away in the
-    /// future.
-    Both,
+    /// A component that means "all components", used for downloads and writes
+    /// for now. It is possible that this component will go away in the future.
+    All,
 
     /// Future variants that might be unknown.
     #[serde(other, deserialize_with = "deserialize_ignore_any")]
@@ -72,18 +71,7 @@ pub enum InstallinatorComponent {
 #[serde(rename_all = "snake_case")]
 pub enum InstallinatorStepId {
     Download,
-    Format,
     Scan,
-    // There are multiple "composite" artifacts in the tuf repository the user
-    // gives to wicketd: the RoT (A/B images), the host (phase1/phase2), and the
-    // control plane (the collection of zones). wicketd handles unpacking the
-    // RoT and host composite artifacts, because it needs to give pieces from
-    // inside them to MGS. However, it does not unpack the control plane
-    // artifact: only installinator needs access to the zone images inside, so
-    // we have an explicit step here for that unpacking. If the user uploads a
-    // tuf repository with a malformed control plane composite artifact, this
-    // step is the point at which we'd discover that and fail.
-    UnpackControlPlaneArtifact,
     Write,
 }
 
@@ -126,15 +114,11 @@ pub enum InstallinatorCompletionMetadata {
         disks_found: usize,
     },
 
-    ControlPlaneZones {
-        /// Number of zone images that will be installed.
-        zones_to_install: usize,
-    },
-
     Download {
         /// The address the artifact was downloaded from.
         address: SocketAddr,
     },
+
     Write {
         /// The output of the write operation.
         output: WriteOutput,

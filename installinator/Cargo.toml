@@ -18,6 +18,7 @@ cancel-safe-futures.workspace = true
 clap.workspace = true
 daft.workspace = true
 display-error-chain.workspace = true
+flate2.workspace = true
 futures.workspace = true
 hex.workspace = true
 http.workspace = true
@@ -31,10 +32,11 @@ libc.workspace = true
 omicron-common.workspace = true
 omicron-ddm-admin-client.workspace = true
 omicron-uuid-kinds.workspace = true
+omicron-workspace-hack.workspace = true
 oxide-tokio-rt.workspace = true
 reqwest.workspace = true
-sha2.workspace = true
 serde_json.workspace = true
+sha2.workspace = true
 sled-hardware.workspace = true
 sled-hardware-types.workspace = true
 sled-storage.workspace = true
@@ -44,12 +46,11 @@ slog-envlogger.workspace = true
 slog-error-chain.workspace = true
 slog-term.workspace = true
 smf.workspace = true
+tar.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["full"] }
-tufaceous-artifact.workspace = true
-tufaceous-lib.workspace = true
+tufaceous-artifact-v2.workspace = true
 update-engine.workspace = true
-omicron-workspace-hack.workspace = true
 
 [dev-dependencies]
 omicron-test-utils.workspace = true

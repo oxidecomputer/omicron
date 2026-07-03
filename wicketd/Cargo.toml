@@ -45,8 +45,8 @@ slog-dtrace.workspace = true
 slog.workspace = true
 rand.workspace = true
 thiserror.workspace = true
-tufaceous-artifact.workspace = true
-tufaceous-lib.workspace = true
+tufaceous-artifact-v2.workspace = true
+tufaceous-v2.workspace = true
 tokio = { workspace = true, features = [ "full" ] }
 tokio-stream.workspace = true
 tokio-util.workspace = true
@@ -76,12 +76,14 @@ wicketd-client.workspace = true
 omicron-workspace-hack.workspace = true
 semver.workspace = true
 slog-error-chain.workspace = true
+lpc55_areas.workspace = true
 
 [[bin]]
 name = "wicketd"
 doc = false
 
 [dev-dependencies]
+chrono.workspace = true
 expectorate.workspace = true
 flate2.workspace = true
 fs-err.workspace = true

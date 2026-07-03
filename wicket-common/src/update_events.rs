@@ -3,15 +3,17 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use gateway_client::types::PowerState;
-use omicron_common::update::ArtifactId;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
 use std::fmt;
 use std::sync::Arc;
 use thiserror::Error;
+use tufaceous_artifact_v2::DisplayTags;
 use update_engine::StepSpec;
 use update_engine::errors::NestedEngineError;
+
+use crate::artifact::ArtifactId;
 
 #[derive(JsonSchema)]
 pub enum WicketdEngineSpec {}
@@ -162,18 +164,13 @@ pub enum UpdateTerminalError {
         #[source]
         error: gateway_client::Error<gateway_client::types::Error>,
     },
+    #[error("getting RoT bootloader caboose failed")]
+    GetRotBootloaderCabooseFailed {
+        #[source]
+        error: gateway_client::Error<gateway_client::types::Error>,
+    },
     #[error("getting RoT CMPA failed")]
     GetRotCmpaFailed {
-        #[source]
-        error: anyhow::Error,
-    },
-    #[error("getting RoT CFPA failed")]
-    GetRotCfpaFailed {
-        #[source]
-        error: anyhow::Error,
-    },
-    #[error("failed to find correctly-signed RoT image")]
-    FailedFindingSignedRotImage {
         #[source]
         error: anyhow::Error,
     },
@@ -182,8 +179,12 @@ pub enum UpdateTerminalError {
         #[source]
         error: gateway_client::Error<gateway_client::types::Error>,
     },
-    #[error("TUF repository missing SP image for board {board}")]
-    MissingSpImageForBoard { board: String },
+    #[error("failed to find artifact matching {tags}")]
+    MissingArtifact {
+        tags: tufaceous_artifact_v2::KnownArtifactTags,
+        #[source]
+        error: tufaceous_artifact_v2::artifact_set::GetError,
+    },
     #[error("setting installinator image ID failed")]
     SetInstallinatorImageIdFailed {
         #[source]
@@ -239,8 +240,9 @@ impl update_engine::AsError for UpdateTerminalError {
 #[derive(Debug, Error)]
 pub enum SpComponentUpdateTerminalError {
     #[error(
-        "SP component update failed at stage \"{stage}\" for {}",
-        display_artifact_id(.artifact)
+        "SP component update failed at stage \"{stage}\" for {} version {}",
+        DisplayTags::from(&.artifact.tags),
+        .artifact.version,
     )]
     SpComponentUpdateFailed {
         stage: SpComponentUpdateStage,
@@ -291,13 +293,6 @@ impl update_engine::AsError for SpComponentUpdateTerminalError {
     fn as_error(&self) -> &(dyn std::error::Error + 'static) {
         self
     }
-}
-
-fn display_artifact_id(artifact: &ArtifactId) -> String {
-    format!(
-        "{}:{} (version {})",
-        artifact.kind, artifact.name, artifact.version
-    )
 }
 
 #[derive(

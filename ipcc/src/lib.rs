@@ -13,7 +13,7 @@ use serde::Deserialize;
 use serde::Serialize;
 use slog_error_chain::InlineErrorChain;
 use thiserror::Error;
-use tufaceous_artifact::ArtifactHash;
+use tufaceous_artifact_v2::ArtifactHash;
 
 #[cfg(test)]
 use proptest::arbitrary::any;

@@ -36,7 +36,7 @@ use std::fmt;
 use std::net::IpAddr;
 use std::net::Ipv6Addr;
 use std::str::FromStr;
-use tufaceous_artifact::ArtifactHash;
+use tufaceous_artifact_v2::ArtifactHash;
 
 use crate::inventory::SpIdentifier;
 
