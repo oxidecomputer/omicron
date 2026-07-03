@@ -15,6 +15,7 @@ use std::sync::Arc;
 mod config;
 mod context;
 mod http_entrypoints;
+mod ping;
 
 pub use config::Config;
 

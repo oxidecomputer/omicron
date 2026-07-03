@@ -373,6 +373,52 @@ impl NtpAdminImpl {
         //                svcprop -p config/boundary_pool svc:/oxide/chrony-setup:default
         //                Should look like boundary_ntp.<some-uuid>.oxide.internal
 
+        // For each configured name, resolve it and send one ICMP echo to
+        // each resolved IP with a short timeout. Requires the raw socket
+        // privileges available inside the NTP zone.
+        let mut ping_results: Vec<(String, IpAddr, String)> = Vec::new();
+        for name in &all_ntp_servers {
+            let ips: Vec<IpAddr> = match tokio::time::timeout(
+                // TODO-K: set this timeout as a constant
+                Duration::from_secs(3),
+                lookup_host(format!("{name}:0")),
+            )
+            .await
+            {
+                Ok(Ok(addrs)) => addrs.map(|sa| sa.ip()).collect(),
+                Ok(Err(_)) | Err(_) => Vec::new(),
+            };
+
+            for ip in ips {
+                let outcome = match crate::ping::ping_once(
+                    ip,
+                    // TODO-K: set this timeout as a constant
+                    Duration::from_secs(3),
+                )
+                .await
+                {
+                    Ok(pong) => format!(
+                        "reachable, rtt {:.2} ms",
+                        pong.rtt.as_secs_f64() * 1000.0,
+                    ),
+                    Err(err) => format!(
+                        "unreachable: {}",
+                        InlineErrorChain::new(&err),
+                    ),
+                };
+                info!(
+                    log, "ping probe";
+                    "name" => name, "ip" => %ip, "result" => &outcome,
+                );
+                ping_results.push((name.clone(), ip, outcome));
+            }
+        }
+
+        let ping_lines: Vec<String> = ping_results
+            .iter()
+            .map(|(n, ip, r)| format!("{n} ({ip}) -> {r}"))
+            .collect();
+
         // TODO-K: Log the data too
 
         Ok(DebugInfo {
@@ -380,11 +426,13 @@ impl NtpAdminImpl {
                 "IS BOUNDARY: {}\n
                 EXTERNAL NTP SERVER: {server_values:?}\n
                 BOUNDARY POOL: {}\n
-                NAME LOOKUPS: {}\n
+                NAME LOOKUPS:\n  {}\n
+                PINGS:\n  {}\n
             ",
                 boundary.display_smf(),
                 boundary_pool.display_smf(),
                 lookup_lines.join("\n  "),
+                ping_lines.join("\n  "),
             ),
         })
     }
