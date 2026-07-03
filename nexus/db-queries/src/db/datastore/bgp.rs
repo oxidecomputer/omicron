@@ -1273,6 +1273,90 @@ mod tests {
         logctx.cleanup_successful();
     }
 
+    /// After a config name is reused, a by-name `bgp_config_get` must return
+    /// the live config.
+    #[tokio::test]
+    async fn bgp_config_get_by_name_after_reuse_returns_live() {
+        let logctx = dev::test_setup_log(
+            "bgp_config_get_by_name_after_reuse_returns_live",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let announce_name: Name = "test-announce-set".parse().unwrap();
+        let config_name: Name = "test-bgp-config".parse().unwrap();
+
+        datastore
+            .bgp_create_announce_set(
+                &opctx,
+                &networking::BgpAnnounceSetCreate {
+                    identity: IdentityMetadataCreateParams {
+                        name: announce_name.clone(),
+                        description: "a test announce set".into(),
+                    },
+                    announcement: vec![],
+                },
+            )
+            .await
+            .expect("created announce set");
+
+        let make_config = || networking::BgpConfigCreate {
+            identity: IdentityMetadataCreateParams {
+                name: config_name.clone(),
+                description: "a test config".into(),
+            },
+            asn: 47,
+            bgp_announce_set_id: NameOrId::Name(announce_name.clone()),
+            vrf: None,
+            shaper: None,
+            checker: None,
+            max_paths: Default::default(),
+        };
+
+        // Create the config, delete it, then create it again under the same
+        // name.
+        let first =
+            datastore.bgp_config_create(&opctx, &make_config()).await.unwrap();
+        let first_id = first.id().into_untyped_uuid();
+        datastore
+            .bgp_config_delete(
+                &opctx,
+                &networking::BgpConfigSelector {
+                    name_or_id: NameOrId::Name(config_name.clone()),
+                },
+            )
+            .await
+            .expect("the unreferenced config can be deleted");
+        let second =
+            datastore.bgp_config_create(&opctx, &make_config()).await.unwrap();
+        let second_id = second.id().into_untyped_uuid();
+        assert_ne!(first_id, second_id, "the recreation is a distinct row");
+
+        // A by-name lookup returns the live (second) config, not the dead one.
+        let got = datastore
+            .bgp_config_get(&opctx, &NameOrId::Name(config_name.clone()))
+            .await
+            .expect("the reused name resolves to the live config");
+        assert_eq!(got.id().into_untyped_uuid(), second_id);
+        assert!(got.identity.time_deleted.is_none());
+
+        datastore
+            .bgp_config_get(&opctx, &NameOrId::Id(second_id))
+            .await
+            .expect("the live config is readable by id");
+        let dead = datastore
+            .bgp_config_get(&opctx, &NameOrId::Id(first_id))
+            .await
+            .expect_err("the soft-deleted row must not be found by id");
+        let Error::ObjectNotFound { type_name, .. } = &dead else {
+            panic!("expected ObjectNotFound, got {dead:#?}");
+        };
+        assert_eq!(*type_name, ResourceType::BgpConfig);
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
     #[tokio::test]
     async fn test_communities_for_peer() {
         let logctx = dev::test_setup_log("test_communities_for_peer");
@@ -1748,7 +1832,7 @@ mod tests {
             .identity
             .id;
 
-        datastore
+        let config_id = datastore
             .bgp_config_create(
                 &opctx,
                 &networking::BgpConfigCreate {
@@ -1767,7 +1851,9 @@ mod tests {
                 },
             )
             .await
-            .expect("create bgp config");
+            .expect("create bgp config")
+            .id()
+            .into_untyped_uuid();
 
         let bgp_config = datastore
             .bgp_config_get(&opctx, &NameOrId::Name(config_name.clone()))
@@ -1779,6 +1865,12 @@ mod tests {
         assert_eq!(bgp_config.asn.0, asn);
         assert_eq!(bgp_config.bgp_announce_set_id, announce_id);
 
+        // The same live config is also readable by id.
+        datastore
+            .bgp_config_get(&opctx, &NameOrId::Id(config_id))
+            .await
+            .expect("get bgp config by id");
+
         datastore
             .bgp_config_delete(
                 &opctx,
@@ -1789,12 +1881,25 @@ mod tests {
             .await
             .expect("delete bgp config by name");
 
-        assert!(
-            datastore
-                .bgp_config_get(&opctx, &NameOrId::Name(config_name))
-                .await
-                .is_err()
-        );
+        // Once soft-deleted, the config is gone by both name and id (rather
+        // than resolving to the dead row or full-scanning).
+        let by_name = datastore
+            .bgp_config_get(&opctx, &NameOrId::Name(config_name))
+            .await
+            .expect_err("a soft-deleted config must not be found by name");
+        let Error::ObjectNotFound { type_name, .. } = &by_name else {
+            panic!("expected ObjectNotFound by name, got {by_name:#?}");
+        };
+        assert_eq!(*type_name, ResourceType::BgpConfig);
+
+        let by_id = datastore
+            .bgp_config_get(&opctx, &NameOrId::Id(config_id))
+            .await
+            .expect_err("a soft-deleted config must not be found by id");
+        let Error::ObjectNotFound { type_name, .. } = &by_id else {
+            panic!("expected ObjectNotFound by id, got {by_id:#?}");
+        };
+        assert_eq!(*type_name, ResourceType::BgpConfig);
 
         db.terminate().await;
         logctx.cleanup_successful();
