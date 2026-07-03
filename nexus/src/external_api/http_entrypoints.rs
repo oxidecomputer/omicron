@@ -4544,6 +4544,20 @@ impl NexusExternalApi for NexusExternalApiImpl {
         .await
     }
 
+    async fn networking_bgp_config_update(
+        rqctx: RequestContext<ApiContext>,
+        sel: Query<networking::BgpConfigSelector>,
+        update: TypedBody<networking::BgpConfigUpdate>,
+    ) -> Result<HttpResponseOk<networking::BgpConfig>, HttpError> {
+        audit_and_time(&rqctx, |opctx, nexus| async move {
+            let sel = sel.into_inner();
+            let update = update.into_inner();
+            let result = nexus.bgp_config_update(&opctx, &sel, update).await?;
+            Ok(HttpResponseOk::<networking::BgpConfig>(result.try_into()?))
+        })
+        .await
+    }
+
     async fn networking_bgp_announce_set_update(
         rqctx: RequestContext<ApiContext>,
         config: TypedBody<networking::BgpAnnounceSetCreate>,
