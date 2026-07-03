@@ -1757,7 +1757,9 @@ mod tests {
                         description: description.clone(),
                     },
                     asn,
-                    bgp_announce_set_id: NameOrId::Id(announce_id),
+                    bgp_announce_set_id: NameOrId::Id(
+                        announce_id.into_untyped_uuid(),
+                    ),
                     vrf: None,
                     shaper: None,
                     checker: None,
