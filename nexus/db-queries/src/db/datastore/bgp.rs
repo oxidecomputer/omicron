@@ -1083,6 +1083,26 @@ mod tests {
     use sled_agent_types::early_networking::RouterLifetimeConfig;
     use std::net::IpAddr;
 
+    /// A `BgpConfigCreate` for a test config named `name` that references
+    /// `bgp_announce_set_id`.
+    fn make_bgp_config(
+        name: &Name,
+        bgp_announce_set_id: NameOrId,
+    ) -> networking::BgpConfigCreate {
+        networking::BgpConfigCreate {
+            identity: IdentityMetadataCreateParams {
+                name: name.clone(),
+                description: "a test config".into(),
+            },
+            asn: 47,
+            bgp_announce_set_id,
+            vrf: None,
+            shaper: None,
+            checker: None,
+            max_paths: Default::default(),
+        }
+    }
+
     #[tokio::test]
     async fn test_update_bgp_config() {
         let logctx = dev::test_setup_log("test_update_bgp_config");
@@ -1233,18 +1253,10 @@ mod tests {
         datastore
             .bgp_config_create(
                 &opctx,
-                &networking::BgpConfigCreate {
-                    identity: IdentityMetadataCreateParams {
-                        name: config_name.clone(),
-                        description: String::from("a test config"),
-                    },
-                    asn: 47,
-                    bgp_announce_set_id: NameOrId::Name(announce_name.clone()),
-                    vrf: None,
-                    shaper: None,
-                    checker: None,
-                    max_paths: Default::default(),
-                },
+                &make_bgp_config(
+                    &config_name,
+                    NameOrId::Name(announce_name.clone()),
+                ),
             )
             .await
             .expect("create bgp config");
@@ -1300,23 +1312,13 @@ mod tests {
             .await
             .expect("created announce set");
 
-        let make_config = || networking::BgpConfigCreate {
-            identity: IdentityMetadataCreateParams {
-                name: config_name.clone(),
-                description: "a test config".into(),
-            },
-            asn: 47,
-            bgp_announce_set_id: NameOrId::Name(announce_name.clone()),
-            vrf: None,
-            shaper: None,
-            checker: None,
-            max_paths: Default::default(),
-        };
+        let config =
+            make_bgp_config(&config_name, NameOrId::Name(announce_name.clone()));
 
         // Create the config, delete it, then create it again under the same
         // name.
         let first =
-            datastore.bgp_config_create(&opctx, &make_config()).await.unwrap();
+            datastore.bgp_config_create(&opctx, &config).await.unwrap();
         let first_id = first.id().into_untyped_uuid();
         datastore
             .bgp_config_delete(
@@ -1328,7 +1330,7 @@ mod tests {
             .await
             .expect("the unreferenced config can be deleted");
         let second =
-            datastore.bgp_config_create(&opctx, &make_config()).await.unwrap();
+            datastore.bgp_config_create(&opctx, &config).await.unwrap();
         let second_id = second.id().into_untyped_uuid();
         assert_ne!(first_id, second_id, "the recreation is a distinct row");
 
@@ -1812,8 +1814,6 @@ mod tests {
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
         let config_name: Name = "config-name".parse().unwrap();
-        let description = String::from("a test config");
-        let asn = 47;
 
         let announce_id = datastore
             .bgp_create_announce_set(
@@ -1835,20 +1835,10 @@ mod tests {
         let config_id = datastore
             .bgp_config_create(
                 &opctx,
-                &networking::BgpConfigCreate {
-                    identity: IdentityMetadataCreateParams {
-                        name: config_name.clone(),
-                        description: description.clone(),
-                    },
-                    asn,
-                    bgp_announce_set_id: NameOrId::Id(
-                        announce_id.into_untyped_uuid(),
-                    ),
-                    vrf: None,
-                    shaper: None,
-                    checker: None,
-                    max_paths: Default::default(),
-                },
+                &make_bgp_config(
+                    &config_name,
+                    NameOrId::Id(announce_id.into_untyped_uuid()),
+                ),
             )
             .await
             .expect("create bgp config")
@@ -1861,8 +1851,8 @@ mod tests {
             .expect("get bgp config by name");
 
         assert_eq!(bgp_config.identity.name.0, config_name);
-        assert_eq!(bgp_config.identity.description, description);
-        assert_eq!(bgp_config.asn.0, asn);
+        assert_eq!(bgp_config.identity.description, "a test config");
+        assert_eq!(bgp_config.asn.0, 47);
         assert_eq!(bgp_config.bgp_announce_set_id, announce_id);
 
         // The same live config is also readable by id.
