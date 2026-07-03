@@ -364,47 +364,35 @@ impl DataStore {
         use nexus_db_schema::schema::bgp_config::dsl;
         let conn = self.pool_connection_authorized(opctx).await?;
 
-        let name_or_id = name_or_id.clone();
+        let (query, not_found_err, msg) = match &name_or_id {
+            NameOrId::Id(id) => (
+                dsl::bgp_config.filter(bgp_config::id.eq(*id)).into_boxed(),
+                Error::not_found_by_id(ResourceType::BgpConfig, id),
+                "failed to lookup bgp config by id",
+            ),
+            NameOrId::Name(name) => (
+                dsl::bgp_config
+                    .filter(bgp_config::name.eq(name.to_string()))
+                    .into_boxed(),
+                Error::not_found_by_name(ResourceType::BgpConfig, name),
+                "failed to lookup bgp config by name",
+            ),
+        };
 
-        match name_or_id {
-            NameOrId::Name(name) => dsl::bgp_config
-                .filter(bgp_config::name.eq(name.to_string()))
-                .select(BgpConfig::as_select())
-                .limit(1)
-                .first_async::<BgpConfig>(&*conn)
-                .await
-                .map_err(|e| {
-                    let msg = "failed to lookup bgp config by name";
-                    error!(opctx.log, "{msg}"; "error" => ?e);
+        query
+            .filter(bgp_config::time_deleted.is_null())
+            .select(BgpConfig::as_select())
+            .limit(1)
+            .first_async::<BgpConfig>(&*conn)
+            .await
+            .map_err(|e| {
+                error!(opctx.log, "{msg}"; "error" => ?e);
 
-                    match e {
-                        diesel::result::Error::NotFound => {
-                            Error::not_found_by_name(
-                                ResourceType::BgpConfig,
-                                &name,
-                            )
-                        }
-                        _ => Error::internal_error(msg),
-                    }
-                }),
-            NameOrId::Id(id) => dsl::bgp_config
-                .filter(bgp_config::id.eq(id))
-                .select(BgpConfig::as_select())
-                .limit(1)
-                .first_async::<BgpConfig>(&*conn)
-                .await
-                .map_err(|e| {
-                    let msg = "failed to lookup bgp config by id";
-                    error!(opctx.log, "{msg}"; "error" => ?e);
-
-                    match e {
-                        diesel::result::Error::NotFound => {
-                            Error::not_found_by_id(ResourceType::BgpConfig, &id)
-                        }
-                        _ => Error::internal_error(msg),
-                    }
-                }),
-        }
+                match e {
+                    diesel::result::Error::NotFound => not_found_err,
+                    _ => Error::internal_error(msg),
+                }
+            })
     }
 
     pub async fn bgp_config_list(
@@ -1082,6 +1070,7 @@ mod tests {
     use crate::db::pub_test_utils::TestDatabase;
     use nexus_db_lookup::LookupPath;
     use nexus_db_model::SwitchPortBgpPeerConfig;
+    use nexus_types::external_api::networking::BgpConfigSelector;
     use nexus_types::external_api::networking::BgpPeer;
     use omicron_common::api::external::IdentityMetadataCreateParams;
     use omicron_common::api::external::IdentityMetadataUpdateParams;
@@ -1726,6 +1715,84 @@ mod tests {
             .await
             .expect("lookup other peer");
         assert!(empty.is_none());
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    // Regression test for being able to get/delete bgp configs by name
+    #[tokio::test]
+    async fn test_bgp_config_by_name() {
+        let logctx = dev::test_setup_log("test_bgp_config_by_name");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let config_name: Name = "config-name".parse().unwrap();
+        let description = String::from("a test config");
+        let asn = 47;
+
+        let announce_id = datastore
+            .bgp_create_announce_set(
+                &opctx,
+                &networking::BgpAnnounceSetCreate {
+                    identity: IdentityMetadataCreateParams {
+                        name: "announce-set".parse().unwrap(),
+                        description: String::from("the first announce set"),
+                    },
+                    announcement: Vec::default(),
+                },
+            )
+            .await
+            .expect("create bgp announce set")
+            .0
+            .identity
+            .id;
+
+        datastore
+            .bgp_config_create(
+                &opctx,
+                &networking::BgpConfigCreate {
+                    identity: IdentityMetadataCreateParams {
+                        name: config_name.clone(),
+                        description: description.clone(),
+                    },
+                    asn,
+                    bgp_announce_set_id: NameOrId::Id(announce_id),
+                    vrf: None,
+                    shaper: None,
+                    checker: None,
+                    max_paths: Default::default(),
+                },
+            )
+            .await
+            .expect("create bgp config");
+
+        let bgp_config = datastore
+            .bgp_config_get(&opctx, &NameOrId::Name(config_name.clone()))
+            .await
+            .expect("get bgp config by name");
+
+        assert_eq!(bgp_config.identity.name.0, config_name);
+        assert_eq!(bgp_config.identity.description, description);
+        assert_eq!(bgp_config.asn.0, asn);
+        assert_eq!(bgp_config.bgp_announce_set_id, announce_id);
+
+        datastore
+            .bgp_config_delete(
+                &opctx,
+                &BgpConfigSelector {
+                    name_or_id: NameOrId::Name(config_name.clone()),
+                },
+            )
+            .await
+            .expect("delete bgp config by name");
+
+        assert!(
+            datastore
+                .bgp_config_get(&opctx, &NameOrId::Name(config_name))
+                .await
+                .is_err()
+        );
 
         db.terminate().await;
         logctx.cleanup_successful();
