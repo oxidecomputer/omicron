@@ -503,6 +503,20 @@ while ! curl -sSf "$OXIDE_HOST/v1/ping" --resolve "$OXIDE_RESOLVE" --cacert "$E2
 	retry=$((retry + 1))
 done
 
+EXPECTED_SYSTEM_VERSION=$(<out/deploy-system-version)
+VERSION_RESPONSE=$(
+	/usr/oxide/oxide \
+	    --resolve "$OXIDE_RESOLVE" \
+	    --cacert "$E2E_TLS_CERT" \
+	    api /v1/version
+)
+EXPECTED_SYSTEM_VERSION_FIELD="\"system_version\": \"$EXPECTED_SYSTEM_VERSION\""
+if [[ "$VERSION_RESPONSE" != *"$EXPECTED_SYSTEM_VERSION_FIELD"* ]]; then
+	echo "expected system version $EXPECTED_SYSTEM_VERSION; response:"
+	echo "$VERSION_RESPONSE"
+	exit 1
+fi
+
 /usr/oxide/oxide --resolve "$OXIDE_RESOLVE" --cacert "$E2E_TLS_CERT" \
 	project create --name images --description "some images"
 /usr/oxide/oxide \
