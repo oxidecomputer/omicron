@@ -1036,7 +1036,9 @@ async fn host_add_root_profile(host_proto_root: Utf8PathBuf) -> Result<()> {
 /// were built against the current nexus external API version.
 async fn check_console_assets(logger: &Logger) -> Result<()> {
     let console_version_path = WORKSPACE_DIR.join("tools/console_version");
-    let console_version = fs::read_to_string(&console_version_path).await?;
+    let console_version = fs::read_to_string(&console_version_path)
+        .await
+        .with_context(|| format!("failed to read {console_version_path}"))?;
     let pinned_commit = console_version
         .lines()
         .find_map(|line| {
@@ -1052,7 +1054,12 @@ async fn check_console_assets(logger: &Logger) -> Result<()> {
     let asset_version_path = WORKSPACE_DIR.join("out/console-assets/VERSION");
     let asset_commit = fs::read_to_string(&asset_version_path)
         .await
-        .with_context(|| format!("failed to read {asset_version_path}"))?
+        .with_context(|| {
+            format!(
+                "failed to read {asset_version_path}; \
+                run `cargo xtask download console`"
+            )
+        })?
         .trim()
         .to_owned();
 
@@ -1071,9 +1078,11 @@ async fn check_console_assets(logger: &Logger) -> Result<()> {
     // The current API version is the `info.version` field of the spec
     // `nexus-latest.json` points to.
     let spec_path = WORKSPACE_DIR.join("openapi/nexus/nexus-latest.json");
-    let spec: serde_json::Value =
-        serde_json::from_str(&fs::read_to_string(&spec_path).await?)
-            .with_context(|| format!("failed to parse {spec_path}"))?;
+    let spec_json = fs::read_to_string(&spec_path)
+        .await
+        .with_context(|| format!("failed to read {spec_path}"))?;
+    let spec: serde_json::Value = serde_json::from_str(&spec_json)
+        .with_context(|| format!("failed to parse {spec_path}"))?;
     let nexus_version = spec
         .pointer("/info/version")
         .and_then(serde_json::Value::as_str)
