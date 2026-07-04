@@ -4573,8 +4573,10 @@ impl NexusExternalApi for NexusExternalApiImpl {
     async fn networking_bgp_announce_set_list(
         rqctx: RequestContext<ApiContext>,
         query_params: Query<PaginatedByNameOrId>,
-    ) -> Result<HttpResponseOk<Vec<networking::BgpAnnounceSet>>, HttpError>
-    {
+    ) -> Result<
+        HttpResponseOk<ResultsPage<networking::BgpAnnounceSet>>,
+        HttpError,
+    > {
         let apictx = rqctx.context();
         let handler = async {
             let nexus = &apictx.context.nexus;
@@ -4584,13 +4586,18 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let paginated_by = name_or_id_pagination(&pag_params, scan_params)?;
             let opctx =
                 crate::context::op_context_for_external_api(&rqctx).await?;
-            let result = nexus
+            let items = nexus
                 .bgp_announce_set_list(&opctx, &paginated_by)
                 .await?
                 .into_iter()
-                .map(|p| p.into())
+                .map(Into::into)
                 .collect();
-            Ok(HttpResponseOk(result))
+
+            Ok(HttpResponseOk(ScanByNameOrId::results_page(
+                &query,
+                items,
+                &marker_for_name_or_id,
+            )?))
         };
         apictx
             .context
