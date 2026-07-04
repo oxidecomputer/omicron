@@ -1312,13 +1312,14 @@ mod tests {
             .await
             .expect("created announce set");
 
-        let config =
-            make_bgp_config(&config_name, NameOrId::Name(announce_name.clone()));
+        let config = make_bgp_config(
+            &config_name,
+            NameOrId::Name(announce_name.clone()),
+        );
 
         // Create the config, delete it, then create it again under the same
         // name.
-        let first =
-            datastore.bgp_config_create(&opctx, &config).await.unwrap();
+        let first = datastore.bgp_config_create(&opctx, &config).await.unwrap();
         let first_id = first.id().into_untyped_uuid();
         datastore
             .bgp_config_delete(
