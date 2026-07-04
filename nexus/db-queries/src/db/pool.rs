@@ -79,7 +79,17 @@ fn make_postgres_connector(
     // - Creating async_bb8_diesel connections that also wrap DTraceConnections.
     let user = "root";
     let db = "omicron";
-    let args = vec![("sslmode", "disable")];
+    // Tune libpq's TCP keepalive so a dead CockroachDB connection is caught
+    // in about 2 minutes, not the OS default of 2 hours. See
+    // oxidecomputer/omicron#10668: this gap once made Nexus hold a dead
+    // connection for 45+ minutes and hang a rack update.
+    let args = vec![
+        ("sslmode", "disable"),
+        ("keepalives", "1"),
+        ("keepalives_idle", "10"),
+        ("keepalives_interval", "10"),
+        ("keepalives_count", "12"),
+    ];
     Arc::new(DieselPgConnector::new(
         log,
         DieselPgConnectorArgs { user, db, args },
