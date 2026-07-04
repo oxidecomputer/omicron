@@ -691,7 +691,7 @@ impl TrustQuorumConfig {
     pub fn for_rack_id(rack_id: RackUuid) -> TrustQuorumConfig {
         Self::new(Rack::new(
             FLEET,
-            rack_id.into_untyped_uuid(),
+            rack_id,
             LookupType::ById(rack_id.into_untyped_uuid()),
         ))
     }
@@ -1538,6 +1538,22 @@ authz_resource! {
 }
 
 authz_resource! {
+    name = "BgpConfig",
+    parent = "Fleet",
+    primary_key = { uuid_kind = BgpConfigKind },
+    roles_allowed = false,
+    polar_snippet = FleetChild,
+}
+
+authz_resource! {
+    name = "BgpAnnounceSet",
+    parent = "Fleet",
+    primary_key = { uuid_kind = BgpAnnounceSetKind },
+    roles_allowed = false,
+    polar_snippet = FleetChild,
+}
+
+authz_resource! {
     name = "AddressLotBlock",
     parent = "Fleet",
     primary_key = Uuid,
@@ -1622,7 +1638,7 @@ authz_resource! {
 authz_resource! {
     name = "Rack",
     parent = "Fleet",
-    primary_key = Uuid,
+    primary_key = { uuid_kind = RackKind },
     roles_allowed = false,
     polar_snippet = FleetChild,
 }

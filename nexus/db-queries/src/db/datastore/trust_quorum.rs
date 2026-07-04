@@ -36,7 +36,6 @@ use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::OptionalLookupResult;
 use omicron_common::bail_unless;
-use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::RackKind;
 use omicron_uuid_kinds::RackUuid;
 use rand::rng;
@@ -147,7 +146,7 @@ impl DataStore {
     ) -> Result<(), Error> {
         opctx.authorize(authz::Action::Modify, &authz_tq).await?;
 
-        let rack_id = RackUuid::from_untyped_uuid(authz_tq.rack().id());
+        let rack_id = authz_tq.rack().id();
         let initial_config = TrustQuorumConfig::new_rss_committed_config(
             rack_id,
             initial_members,
@@ -167,7 +166,7 @@ impl DataStore {
     ) -> OptionalLookupResult<TrustQuorumConfig> {
         opctx.authorize(authz::Action::Read, &authz_tq).await?;
         let conn = &*self.pool_connection_authorized(opctx).await?;
-        let rack_id = RackUuid::from_untyped_uuid(authz_tq.rack().id());
+        let rack_id = authz_tq.rack().id();
 
         Self::tq_get_latest_config_with_members_conn(conn, rack_id)
             .await
@@ -183,7 +182,7 @@ impl DataStore {
         opctx.authorize(authz::Action::Read, &authz_tq).await?;
         let conn = &*self.pool_connection_authorized(opctx).await?;
 
-        let rack_id = RackUuid::from_untyped_uuid(authz_tq.rack().id());
+        let rack_id = authz_tq.rack().id();
         use nexus_db_schema::schema::trust_quorum_configuration::dsl;
         paginated(dsl::trust_quorum_configuration, dsl::epoch, pagparams)
             .filter(dsl::rack_id.eq(DbTypedUuid::<RackKind>::from(rack_id)))
@@ -202,7 +201,7 @@ impl DataStore {
     ) -> OptionalLookupResult<TrustQuorumConfig> {
         opctx.authorize(authz::Action::Read, &authz_tq).await?;
         let conn = &*self.pool_connection_authorized(opctx).await?;
-        let rack_id = RackUuid::from_untyped_uuid(authz_tq.rack().id());
+        let rack_id = authz_tq.rack().id();
 
         Self::tq_get_config_with_members_from_epoch_conn(conn, rack_id, epoch)
             .await
@@ -802,7 +801,7 @@ impl DataStore {
         opctx.authorize(authz::Action::Modify, &authz_tq).await?;
         let conn = &*self.pool_connection_authorized(opctx).await?;
 
-        let rack_id = RackUuid::from_untyped_uuid(authz_tq.rack().id());
+        let rack_id = authz_tq.rack().id();
         let epoch = epoch_to_i64(epoch)?;
 
         let err = OptionalError::new();
@@ -907,7 +906,7 @@ impl DataStore {
         opctx.authorize(authz::Action::Modify, &authz_tq).await?;
         let conn = &*self.pool_connection_authorized(opctx).await?;
 
-        let rack_id = RackUuid::from_untyped_uuid(authz_tq.rack().id());
+        let rack_id = authz_tq.rack().id();
         let epoch = epoch_to_i64(epoch)?;
 
         let err = OptionalError::new();

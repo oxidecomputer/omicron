@@ -58,6 +58,8 @@ define_enums! {
     DownstairsClientStoppedReasonEnum => "downstairs_client_stopped_reason_type",
     EreporterTypeEnum => "ereporter_type",
     FailureDomainEnum => "failure_domain",
+    FmFactPhysicalDiskKindEnum => "fm_fact_physical_disk_kind",
+    FmdInventoryErrorKindEnum => "fmd_inventory_error_kind",
     HwM2SlotEnum => "hw_m2_slot",
     HwPowerStateEnum => "hw_power_state",
     HwRotSlotEnum => "hw_rot_slot",

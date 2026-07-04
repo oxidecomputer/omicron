@@ -700,18 +700,22 @@ task: "fm_analysis"
   configured period: every <REDACTED_DURATION>m
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-    parent sitrep ID:                None
+    parent sitrep ID:                Some(..........<REDACTED_UUID>........... (sitrep))
     current inventory collection ID: Some(..........<REDACTED_UUID>........... (collection))
     ereport classes consumed:        (none)
     FAULT MANAGEMENT ANALYSIS SUMMARY
     =================================
-/!\ analysis failed: FM analysis is not yet implemented
+    no changes from the current situation report (Some(..........<REDACTED_UUID>........... (sitrep)))
 
     preparation report:
-      parent sitrep:        <none>
+      parent sitrep:        ..........<REDACTED_UUID>...........
       inventory collection: ..........<REDACTED_UUID>...........
+      <FM_INPUT_INV_COMPARISON_REDACTED>
+      total known ereport restart IDs: 0
       no new ereports since the parent sitrep
       no cases copied forward
+
+      no in-service control plane disks
 
     analysis report:
       sitrep ID: ..........<REDACTED_UUID>...........
@@ -722,28 +726,28 @@ task: "fm_rendezvous"
   configured period: every <REDACTED_DURATION>m
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-(i) no FM situation report loaded, so rendezvous was not performed
+    current sitrep: ..........<REDACTED_UUID>...........
     creating requested alerts:
-(i)   note: this operation was not executed
+      started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
       alerts requested:                0
         requested in this sitrep:      0
         created in this activation:    0
-        already created:               0
+        already existed:               0
         errors:                        0
     creating requested support bundles:
-(i)   note: this operation was not executed
+      started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
       support bundles requested:       0
         requested in this sitrep:      0
         created in this activation:    0
-        already created:               0
+        already existed:               0
         errors:                        0
     marking ereports as seen:
-(i)   note: this operation was not executed
+      started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
       total ereports in sitrep:                 0
       not marked when the sitrep was loaded:    0
         marked seen by this activation:         0
         already marked seen:                    0
-      batch size:                               0
+      batch size:                            1000
       batches:                                  0
       errors:                                   0
 
@@ -752,7 +756,7 @@ task: "fm_sitrep_gc"
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     batch size:                                                               1000
-    orphaned sitreps deleted:                                                    0
+    orphaned sitreps deleted:                                                    <ORPHANED_SITREPS_DELETED_REDACTED>
       batches:                                                                   1
     orphaned fm_alert_request rows deleted:                                      0
       batches:                                                                   1
@@ -760,7 +764,9 @@ task: "fm_sitrep_gc"
       batches:                                                                   1
     orphaned fm_ereport_in_case rows deleted:                                    0
       batches:                                                                   1
-    orphaned fm_sitrep_analysis_report rows deleted:                             0
+    orphaned fm_fact_physical_disk rows deleted:                                 0
+      batches:                                                                   1
+    orphaned fm_sitrep_analysis_report rows deleted:                             <ORPHANED_FMSITREPANALYSISREPORT_ROWS_DELETED_REDACTED>
       batches:                                                                   1
     orphaned fm_support_bundle_request rows deleted:                             0
       batches:                                                                   1
@@ -775,7 +781,9 @@ task: "fm_sitrep_loader"
   configured period: every <REDACTED_DURATION>s
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-    no FM situation report available to load
+    loaded latest FM situation report as of <REDACTED_TIMESTAMP>:
+        sitrep ..........<REDACTED_UUID>........... (sitrep) (v1)
+        made current at: <REDACTED_TIMESTAMP>
 
 task: "instance_reincarnation"
   configured period: every <REDACTED_DURATION>m
@@ -1007,7 +1015,8 @@ task: "switch_port_config_manager"
   configured period: every <REDACTED_DURATION>s
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-warning: unknown background task: "switch_port_config_manager" (don't know how to interpret details: Object {})
+all racks appear to have a complete bootstore network config
+(note: this check is not yet complete -- there might still be errors that aren't in the report)
 
 task: "trust_quorum_manager"
   configured period: every <REDACTED_DURATION>m
@@ -1391,18 +1400,22 @@ task: "fm_analysis"
   configured period: every <REDACTED_DURATION>m
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-    parent sitrep ID:                None
+    parent sitrep ID:                Some(..........<REDACTED_UUID>........... (sitrep))
     current inventory collection ID: Some(..........<REDACTED_UUID>........... (collection))
     ereport classes consumed:        (none)
     FAULT MANAGEMENT ANALYSIS SUMMARY
     =================================
-/!\ analysis failed: FM analysis is not yet implemented
+    no changes from the current situation report (Some(..........<REDACTED_UUID>........... (sitrep)))
 
     preparation report:
-      parent sitrep:        <none>
+      parent sitrep:        ..........<REDACTED_UUID>...........
       inventory collection: ..........<REDACTED_UUID>...........
+      <FM_INPUT_INV_COMPARISON_REDACTED>
+      total known ereport restart IDs: 0
       no new ereports since the parent sitrep
       no cases copied forward
+
+      no in-service control plane disks
 
     analysis report:
       sitrep ID: ..........<REDACTED_UUID>...........
@@ -1413,28 +1426,28 @@ task: "fm_rendezvous"
   configured period: every <REDACTED_DURATION>m
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-(i) no FM situation report loaded, so rendezvous was not performed
+    current sitrep: ..........<REDACTED_UUID>...........
     creating requested alerts:
-(i)   note: this operation was not executed
+      started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
       alerts requested:                0
         requested in this sitrep:      0
         created in this activation:    0
-        already created:               0
+        already existed:               0
         errors:                        0
     creating requested support bundles:
-(i)   note: this operation was not executed
+      started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
       support bundles requested:       0
         requested in this sitrep:      0
         created in this activation:    0
-        already created:               0
+        already existed:               0
         errors:                        0
     marking ereports as seen:
-(i)   note: this operation was not executed
+      started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
       total ereports in sitrep:                 0
       not marked when the sitrep was loaded:    0
         marked seen by this activation:         0
         already marked seen:                    0
-      batch size:                               0
+      batch size:                            1000
       batches:                                  0
       errors:                                   0
 
@@ -1443,7 +1456,7 @@ task: "fm_sitrep_gc"
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     batch size:                                                               1000
-    orphaned sitreps deleted:                                                    0
+    orphaned sitreps deleted:                                                    <ORPHANED_SITREPS_DELETED_REDACTED>
       batches:                                                                   1
     orphaned fm_alert_request rows deleted:                                      0
       batches:                                                                   1
@@ -1451,7 +1464,9 @@ task: "fm_sitrep_gc"
       batches:                                                                   1
     orphaned fm_ereport_in_case rows deleted:                                    0
       batches:                                                                   1
-    orphaned fm_sitrep_analysis_report rows deleted:                             0
+    orphaned fm_fact_physical_disk rows deleted:                                 0
+      batches:                                                                   1
+    orphaned fm_sitrep_analysis_report rows deleted:                             <ORPHANED_FMSITREPANALYSISREPORT_ROWS_DELETED_REDACTED>
       batches:                                                                   1
     orphaned fm_support_bundle_request rows deleted:                             0
       batches:                                                                   1
@@ -1466,7 +1481,9 @@ task: "fm_sitrep_loader"
   configured period: every <REDACTED_DURATION>s
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-    no FM situation report available to load
+    loaded latest FM situation report as of <REDACTED_TIMESTAMP>:
+        sitrep ..........<REDACTED_UUID>........... (sitrep) (v1)
+        made current at: <REDACTED_TIMESTAMP>
 
 task: "instance_reincarnation"
   configured period: every <REDACTED_DURATION>m
@@ -1698,7 +1715,8 @@ task: "switch_port_config_manager"
   configured period: every <REDACTED_DURATION>s
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-warning: unknown background task: "switch_port_config_manager" (don't know how to interpret details: Object {})
+all racks appear to have a complete bootstore network config
+(note: this check is not yet complete -- there might still be errors that aren't in the report)
 
 task: "trust_quorum_manager"
   configured period: every <REDACTED_DURATION>m

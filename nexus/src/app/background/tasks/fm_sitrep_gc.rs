@@ -94,6 +94,7 @@ mod tests {
     use nexus_db_queries::db::pub_test_utils::TestDatabase;
     use nexus_types::fm;
     use omicron_common::api::external::Error;
+    use omicron_common::api::external::Generation;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::CollectionUuid;
     use omicron_uuid_kinds::OmicronZoneUuid;
@@ -118,6 +119,8 @@ mod tests {
                 time_created: Utc::now(),
                 parent_sitrep_id: None,
                 next_inv_min_time_started: Utc::now(),
+                alert_generation: Generation::new(),
+                support_bundle_generation: Generation::new(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),
@@ -143,6 +146,8 @@ mod tests {
                 time_created: Utc::now(),
                 parent_sitrep_id: Some(sitrep1.metadata.id),
                 next_inv_min_time_started: Utc::now(),
+                alert_generation: Generation::new(),
+                support_bundle_generation: Generation::new(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),
@@ -236,6 +241,8 @@ mod tests {
                 time_created: Utc::now(),
                 next_inv_min_time_started: Utc::now(),
                 parent_sitrep_id,
+                alert_generation: Generation::new(),
+                support_bundle_generation: Generation::new(),
             },
             // We could populate the orphan sitreps with cases and ereports
             // here, but there's a unit test

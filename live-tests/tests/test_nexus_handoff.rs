@@ -188,6 +188,9 @@ async fn test_nexus_handoff(lc: &LiveTestContext) {
                     .context(
                         "failed to construct external networking allocator",
                     )?;
+                let nexus_config = planning_input
+                    .external_service_networking_policy()
+                    .operator_nexus_config();
                 for current_nexus in current_nexus_zones.values() {
                     let external_ip = external_networking_alloc
                         .for_new_nexus()
@@ -198,6 +201,7 @@ async fn test_nexus_handoff(lc: &LiveTestContext) {
                             current_nexus.image_source.clone(),
                             external_ip,
                             next_generation,
+                            &nexus_config,
                         )
                         .context("adding Nexus zone")?;
                 }

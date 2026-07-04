@@ -18,11 +18,9 @@ use slog::{Logger, o};
 use internal_dns_resolver::Resolver;
 use ipnetwork::IpNetwork;
 use nexus_db_model::{
-    AddressLotBlock, BgpConfig, BootstoreConfig, INFRA_LOT, LoopbackAddress,
-    NETWORK_KEY, SwitchLinkSpeed,
+    BgpConfig, BootstoreConfig, LoopbackAddress, NETWORK_KEY,
 };
 use tokio::sync::watch;
-use uuid::Uuid;
 
 use crate::app::background::BackgroundTask;
 use display_error_chain::DisplayErrorChain;
@@ -55,47 +53,39 @@ use nexus_db_queries::{
 };
 use nexus_types::external_api::networking;
 use nexus_types::identity::{Asset, Resource};
+use nexus_types::internal_api::background::IncompleteBootstoreConfigReport;
+use nexus_types::internal_api::background::SwitchPortSettingsManagerStatus;
 use omicron_common::OMICRON_DPD_TAG;
 use omicron_common::{
     address::{Ipv6Subnet, get_sled_address},
-    api::external::{DataPageParams, Name},
+    api::external::DataPageParams,
 };
+use omicron_uuid_kinds::{BgpAnnounceSetUuid, BgpConfigUuid, GenericUuid};
 use serde_json::json;
 use sled_agent_client::types::HostPortConfig;
-use sled_agent_types::early_networking::BgpConfig as SledBgpConfig;
-use sled_agent_types::early_networking::BgpPeerConfig as SledBgpPeerConfig;
 use sled_agent_types::early_networking::EarlyNetworkConfigEnvelope;
-use sled_agent_types::early_networking::ImportExportPolicy;
 use sled_agent_types::early_networking::InvalidIpAddrError;
 use sled_agent_types::early_networking::LldpAdminStatus;
 use sled_agent_types::early_networking::LldpPortConfig;
-use sled_agent_types::early_networking::MaxPathConfig;
-use sled_agent_types::early_networking::PortConfig;
 use sled_agent_types::early_networking::RackNetworkConfig;
-use sled_agent_types::early_networking::RouteConfig as SledRouteConfig;
 use sled_agent_types::early_networking::RouterPeerType;
 use sled_agent_types::early_networking::SwitchSlot;
 use sled_agent_types::early_networking::TxEqConfig;
 use sled_agent_types::early_networking::UplinkAddress;
 use sled_agent_types::early_networking::UplinkAddressConfig;
+use sled_agent_types::system_networking::BlueprintExternalNetworkingConfig;
 use sled_agent_types::system_networking::SystemNetworkingConfig;
 use sled_agent_types::system_networking::WriteNetworkConfigRequest;
-use sled_agent_types::{
-    early_networking::BfdPeerConfig,
-    system_networking::BlueprintExternalNetworkingConfig,
-};
 use slog_error_chain::InlineErrorChain;
 use std::{
     collections::{HashMap, HashSet, hash_map::Entry},
     hash::Hash,
     net::{IpAddr, SocketAddr},
     str::FromStr,
-    sync::{Arc, LazyLock},
+    sync::Arc,
 };
 
 const DPD_TAG: Option<&'static str> = Some(OMICRON_DPD_TAG);
-static PHY0: LazyLock<Name> =
-    LazyLock::new(|| "phy0".parse().expect("phy0 is a valid Name"));
 
 // This is more of an implementation detail of the BGP implementation. It
 // defines the maximum time the peering engine will wait for external messages
@@ -274,43 +264,6 @@ impl SwitchPortSettingsManager {
 
         Ok(set)
     }
-
-    async fn bfd_peer_configs_from_db(
-        &mut self,
-        opctx: &OpContext,
-    ) -> Result<Vec<BfdPeerConfig>, omicron_common::api::external::Error> {
-        let db_data = self
-            .datastore
-            .bfd_session_list(opctx, &DataPageParams::max_page())
-            .await?;
-
-        let mut result = Vec::new();
-        for spec in db_data.into_iter() {
-            let config = BfdPeerConfig {
-                local: spec.local.map(|x| x.ip()),
-                remote: spec.remote.ip(),
-                detection_threshold: spec
-                    .detection_threshold
-                    .0
-                    .try_into()
-                    .map_err(|_| {
-                        omicron_common::api::external::Error::InternalError {
-                            internal_message: format!(
-                                "db_bfd_peer_configs: detection threshold \
-                                 overflow: {}",
-                                spec.detection_threshold.0,
-                            ),
-                        }
-                    })?,
-                required_rx: spec.required_rx.0.into(),
-                mode: spec.mode.into(),
-                switch: spec.switch_slot.into(),
-            };
-            result.push(config);
-        }
-
-        Ok(result)
-    }
 }
 
 #[derive(Debug)]
@@ -342,6 +295,8 @@ impl BackgroundTask for SwitchPortSettingsManager {
                     });
                 },
             };
+
+            let mut status = SwitchPortSettingsManagerStatus::default();
 
             // TODO: https://github.com/oxidecomputer/omicron/issues/3090
             // Here we're iterating over racks because that's technically the correct thing to do,
@@ -547,10 +502,10 @@ impl BackgroundTask for SwitchPortSettingsManager {
                         > = HashMap::new();
 
                 // we currently only support one bgp config per switch
-                let mut switch_bgp_config: HashMap<SwitchSlot, (Uuid, BgpConfig)> = HashMap::new();
+                let mut switch_bgp_config: HashMap<SwitchSlot, (BgpConfigUuid, BgpConfig)> = HashMap::new();
 
                 // Prefixes are associated to BgpConfig via the config id
-                let mut bgp_announce_prefixes: HashMap<Uuid, Vec<IpNet>> = HashMap::new();
+                let mut bgp_announce_prefixes: HashMap<BgpAnnounceSetUuid, Vec<IpNet>> = HashMap::new();
 
                 for (switch_slot, port, change) in &changes {
                     let PortSettingsChange::Apply(settings) = change else {
@@ -590,7 +545,12 @@ impl BackgroundTask for SwitchPortSettingsManager {
                                 // get the bgp config for this peer
                                 let config = match self
                                     .datastore
-                                    .bgp_config_get(opctx, &bgp_config_id.into())
+                                    .bgp_config_get(
+                                        opctx,
+                                        &bgp_config_id
+                                            .into_untyped_uuid()
+                                            .into(),
+                                    )
                                     .await
                                 {
                                     Ok(config) => config,
@@ -617,14 +577,15 @@ impl BackgroundTask for SwitchPortSettingsManager {
                         // Same thing as above, check to see if we've already built the announce set,
                         // if so we'll skip this step
                         #[allow(clippy::map_entry)]
-                        if !bgp_announce_prefixes.contains_key(&bgp_config.bgp_announce_set_id) {
+                        if !bgp_announce_prefixes.contains_key(&bgp_config.bgp_announce_set_id()) {
                             let announcements = match self
                                 .datastore
                                 .bgp_announcement_list(
                                     opctx,
                                     &networking::BgpAnnounceSetSelector {
                                         announce_set: bgp_config
-                                            .bgp_announce_set_id
+                                            .bgp_announce_set_id()
+                                            .into_untyped_uuid()
                                             .into(),
                                     },
                                 )
@@ -636,7 +597,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                                         log,
                                         "error while fetching bgp announcements from db";
                                         "switch_slot" => ?switch_slot,
-                                        "bgp_announce_set_id" => %bgp_config.bgp_announce_set_id,
+                                        "bgp_announce_set_id" => %bgp_config.bgp_announce_set_id(),
                                         "error" => %DisplayErrorChain::new(&e)
                                     );
                                     continue;
@@ -657,9 +618,15 @@ impl BackgroundTask for SwitchPortSettingsManager {
                                     },
                                 };
                             }
-                            bgp_announce_prefixes.insert(bgp_config.bgp_announce_set_id, prefixes);
+                            bgp_announce_prefixes.insert(bgp_config.bgp_announce_set_id(), prefixes);
                         }
 
+                        // NOTE: this mgd-apply path re-reads each peer's
+                        // communities and import/export policies via
+                        // `communities_for_peer` / `allow_*_for_peer`, even
+                        // though `switch_port_settings_get` already loaded
+                        // them. That redundancy could be removed too, but is
+                        // left for now.
                         //TODO consider awaiting in parallel and joining
                         let communities = match self.datastore.communities_for_peer(
                             opctx,
@@ -917,14 +884,14 @@ impl BackgroundTask for SwitchPortSettingsManager {
                     };
 
                     let request_prefixes = match bgp_announce_prefixes.get(
-                        &request_bgp_config.bgp_announce_set_id) {
+                        &request_bgp_config.bgp_announce_set_id()) {
                         Some(prefixes) => prefixes,
                         None => {
                             error!(
                                 log,
                                 "no prefixes to announce found for bgp config";
                                 "switch" => ?switch_slot,
-                                "announce_set_id" => ?request_bgp_config.bgp_announce_set_id,
+                                "announce_set_id" => ?request_bgp_config.bgp_announce_set_id(),
                                 "bgp_config_id" => ?config_id,
                             );
                             continue;
@@ -1001,285 +968,51 @@ impl BackgroundTask for SwitchPortSettingsManager {
                 // calculate and apply bootstore changes
                 //
 
-                // build the desired bootstore config from the records we've fetched
-                let subnet = match rack.rack_subnet {
-                    Some(IpNetwork::V6(subnet)) => subnet.into(),
-                    Some(IpNetwork::V4(_)) => {
-                        error!(log, "rack subnet must be ipv6"; "rack" => ?rack);
-                        continue;
-                    },
-                    None => {
-                        error!(log, "rack subnet not set"; "rack" => ?rack);
-                        continue;
-                    }
-                };
-
-                // TODO: is this correct? Do we place the BgpConfig for both switches in a single Vec to send to the bootstore?
-                let mut bgp: Vec<SledBgpConfig> = switch_bgp_config.iter().filter_map(|(_location, (_id, config))| {
-                    let announcements = bgp_announce_prefixes
-                        .get(&config.bgp_announce_set_id)
-                        .expect("bgp config is present but announce set is not populated");
-
-                    let max_paths = match MaxPathConfig::new(*config.max_paths)
-                    {
-                        Ok(max_paths) => max_paths,
-                        Err(err) => {
-                            // This should be impossible - our db constraints
-                            // should ensure legal values.
-                            error!(
-                                log,
-                                "database contains illegal max_paths value";
-                                InlineErrorChain::new(&err),
-                            );
-                            return None;
-                        }
-                    };
-
-                    Some(SledBgpConfig {
-                        asn: config.asn.0,
-                        originate: announcements.clone(),
-                        checker: config.checker.clone(),
-                        shaper: config.shaper.clone(),
-                        max_paths,
-                    })
-                }).collect();
-
-                bgp.dedup();
-
-                let mut ports: Vec<PortConfig> = vec![];
-
-                for (switch_slot, port, change) in &changes {
-                    let PortSettingsChange::Apply(info) = change else {
-                        continue;
-                    };
-
-                    let peer_configs = match self.datastore.bgp_peer_configs(opctx, *switch_slot, port.port_name.to_string()).await {
-                        Ok(v) => v,
-                        Err(e) => {
-                            error!(
-                                log,
-                                "failed to fetch bgp peer config for switch port";
-                                "switch_slot" => ?switch_slot,
-                                "port" => &port.port_name.to_string(),
-                                "error" => %DisplayErrorChain::new(&e)
-                            );
-                            continue;
-                        },
-                    };
-
-                    // TODO https://github.com/oxidecomputer/omicron/issues/3062
-                    let tx_eq = if let Some(c) = info.tx_eq.get(0) {
-                        Some(TxEqConfig {
-                            pre1: c.pre1,
-                            pre2: c.pre2,
-                            main: c.main,
-                            post2: c.post2,
-                            post1: c.post1,
-                        })
-                    } else {
-                        None
-                    };
-
-                    let bgp_peers = match peer_configs
-                        .into_iter()
-                        .map(SledBgpPeerConfig::try_from)
-                        .collect::<Result<_, _>>()
-                    {
-                        Ok(bgp_peers) => bgp_peers,
-                        Err(err) => {
-                            error!(
-                                log,
-                                "failed to convert database peer configs to \
-                                 API peer configs";
-                                "switch_slot" => ?switch_slot,
-                                "port" => &port.port_name.to_string(),
-                                InlineErrorChain::new(&err),
-                            );
-                            continue;
-                        }
-                    };
-
-                    let addresses = match info
-                        .addresses
-                        .iter()
-                        .map(|a| {
-                             let address = UplinkAddress::try_from_ip_net_treating_unspecified_as_addrconf(a.address)?;
-                             Ok(UplinkAddressConfig {
-                                 address,
-                                 vlan_id: a.vlan_id
-                             })
-                        })
-                        .collect::<Result<_, InvalidIpAddrError>>()
-                    {
-                        Ok(addresses) => addresses,
-                        Err(err) => {
-                            error!(
-                                log,
-                                "failed to convert database uplink addresses \
-                                 to API uplink addresses";
-                                "switch_slot" => ?switch_slot,
-                                "port" => &port.port_name.to_string(),
-                                InlineErrorChain::new(&err),
-                            );
-                            continue;
-                        }
-                    };
-
-                    let mut port_config = PortConfig {
-                        addresses,
-                        autoneg: info
-                            .links
-                            .get(0) //TODO breakout support
-                            .map(|l| l.autoneg)
-                            .unwrap_or(false),
-                        bgp_peers,
-                        port: port.port_name.to_string(),
-                        routes: info
-                            .routes
-                            .iter()
-                            .map(|r| SledRouteConfig {
-                                destination: r.dst.into(),
-                                nexthop: r.gw.ip(),
-                                vlan_id: r.vid.map(|x| x.0),
-                                rib_priority: r.rib_priority.map(|x| x.0),
-                            })
-                            .collect(),
-                        switch: *switch_slot,
-                        uplink_port_fec: info
-                            .links
-                            .get(0) //TODO https://github.com/oxidecomputer/omicron/issues/3062
-                            .map(|l| l.fec.map(|fec| fec.into()))
-                            .unwrap_or(None),
-                        uplink_port_speed: info
-                            .links
-                            .get(0) //TODO https://github.com/oxidecomputer/omicron/issues/3062
-                            .map(|l| l.speed)
-                            .unwrap_or(SwitchLinkSpeed::Speed100G)
-                            .into(),
-			lldp: info
-			    .link_lldp
-			    .get(0) //TODO https://github.com/oxidecomputer/omicron/issues/3062
-			    .map(|c|  LldpPortConfig {
-				status: match c.enabled {
-				    true => LldpAdminStatus::Enabled,
-				    false=> LldpAdminStatus::Disabled,
-				},
-				port_id: c.link_name.clone().map(|p| p.to_string()),
-				port_description: c.link_description.clone(),
-				chassis_id: c.chassis_id.clone(),
-				system_name: c.system_name.clone(),
-				system_description: c.system_description.clone(),
-				management_addrs:c.management_ip.map(|a| vec![a.ip()]),
-			    }),
-			    tx_eq,
-		    }
-                    ;
-
-                    for peer in port_config.bgp_peers.iter_mut() {
-                        peer.communities = match self
-                            .datastore
-                            .communities_for_peer(
-                                opctx,
-                                port.port_settings_id.unwrap(),
-                                &PHY0, //TODO https://github.com/oxidecomputer/omicron/issues/3062
-                                peer.addr,
-                            ).await {
-                                Ok(cs) => cs.iter().map(|c| c.community.0).collect(),
-                                Err(e) => {
-                                    error!(log,
-                                        "failed to get communities for peer";
-                                        "peer" => ?peer,
-                                        "error" => %DisplayErrorChain::new(&e)
-                                    );
-                                    continue;
-                                }
-                            };
-
-                        //TODO consider awaiting in parallel and joining
-                        let allow_import = match self.datastore.allow_import_for_peer(
-                            opctx,
-                            port.port_settings_id.unwrap(),
-                            &PHY0, //TODO https://github.com/oxidecomputer/omicron/issues/3062
-                            peer.addr,
-                        ).await {
-                            Ok(cs) => cs,
-                            Err(e) => {
-                                error!(log,
-                                    "failed to get peer allowed imports";
-                                    "peer" => ?peer,
-                                    "error" => %DisplayErrorChain::new(&e)
-                                );
-                                continue;
-                            }
-                        };
-
-                        peer.allowed_import = match allow_import {
-                            Some(list) => ImportExportPolicy::Allow(
-                                list.clone().into_iter().map(|x| x.prefix.into()).collect()
-                            ),
-                            None => ImportExportPolicy::NoFiltering,
-                        };
-
-                        let allow_export = match self.datastore.allow_export_for_peer(
-                            opctx,
-                            port.port_settings_id.unwrap(),
-                            &PHY0, //TODO https://github.com/oxidecomputer/omicron/issues/3062
-                            peer.addr,
-                        ).await {
-                            Ok(cs) => cs,
-                            Err(e) => {
-                                error!(log,
-                                    "failed to get peer allowed exports";
-                                    "peer" => ?peer,
-                                    "error" => %DisplayErrorChain::new(&e)
-                                );
-                                continue;
-                            }
-                        };
-
-                        peer.allowed_export = match allow_export {
-                            Some(list) => ImportExportPolicy::Allow(
-                                list.clone().into_iter().map(|x| x.prefix.into()).collect()
-                            ),
-                            None => ImportExportPolicy::NoFiltering,
-                        };
-                    }
-                    ports.push(port_config);
-                }
-
-                let blocks = match self.datastore.address_lot_blocks_by_name(opctx, INFRA_LOT.into()).await {
-                    Ok(blocks) => blocks,
+                let input = match nexus_switch_config_preparation::read_and_assemble(
+                    &self.datastore,
+                    opctx,
+                    &log,
+                    rack.rack_subnet,
+                )
+                .await
+                {
+                    Ok(input) => input,
                     Err(e) => {
-                        error!(log, "error while fetching address lot blocks from db"; "error" => %e);
-                        continue;
-                    },
-                };
-
-                // currently there should only be one block assigned. If there is more than one
-                // block, grab the first one and emit a warning.
-                if blocks.len() > 1 {
-                    warn!(log, "more than one block assigned to infra lot"; "blocks" => ?blocks);
-                }
-
-                let (infra_ip_first, infra_ip_last)= match blocks.get(0) {
-                    Some(AddressLotBlock{ first_address, last_address, ..}) => {
-                        (first_address.ip(), last_address.ip())
-                    },
-                    None => {
-                        error!(log, "no blocks assigned to infra lot");
-                        continue;
-                    },
-                }
-                ;
-
-
-                let bfd = match self.bfd_peer_configs_from_db(opctx).await {
-                    Ok(bfd) => bfd,
-                    Err(e) => {
-                        error!(log, "error fetching bfd config from db"; "error" => %e);
+                        error!(
+                            log,
+                            "failed to read bootstore network config; \
+                             skipping rack";
+                            "error" => InlineErrorChain::new(&e),
+                        );
                         continue;
                     }
                 };
+
+                let rack_network_config =
+                    match nexus_switch_config::build_rack_network_config(
+                        input,
+                    ) {
+                        Ok(rack_network_config) => rack_network_config,
+                        Err(report) => {
+                            error!(
+                                log,
+                                "incomplete bootstore network config; \
+                                 skipping rack";
+                                "problems" => %report,
+                            );
+                            status.incomplete_bootstore_configs.push(
+                                IncompleteBootstoreConfigReport {
+                                    rack_id: rack.id(),
+                                    problems: report
+                                        .problems
+                                        .iter()
+                                        .map(|problem| problem.to_string())
+                                        .collect(),
+                                },
+                            );
+                            continue;
+                        }
+                    };
 
                 let (
                     blueprint_external_networking_generation,
@@ -1317,14 +1050,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                 // reference to the config we supplied, which we need below to
                 // call `does_bootstore_need_update()`.
                 let mut desired_config = SystemNetworkingConfig {
-                    rack_network_config: RackNetworkConfig {
-                        rack_subnet: subnet,
-                        infra_ip_first,
-                        infra_ip_last,
-                        ports,
-                        bgp,
-                        bfd,
-                    },
+                    rack_network_config,
                     blueprint_external_networking_config: None,
                 };
                 let desired_blueprint_networking_config = &*desired_config
@@ -1515,7 +1241,14 @@ impl BackgroundTask for SwitchPortSettingsManager {
                     }
                 }
             }
-            json!({})
+            // TODO: we have some early returns in this task. We should instead
+            // collect all problems and return them in the response.
+            //
+            // As part of that, we should move the body into an
+            // `activate_impl(...)` function which returns a
+            // `SwitchPortManagerStatus`. That'll force us to not do early
+            // returns.
+            json!(status)
         }
         .boxed()
     }
@@ -2439,7 +2172,7 @@ fn does_bootstore_need_update(
 
         let rnc_differs = !hashset_eq(current_bgp, desired_bgp)
             || !hashset_eq(current_bfd, desired_bfd)
-            || !hashset_eq(current_ports, desired_ports)
+            || !hashset_eq(current_ports.as_slice(), desired_ports.as_slice())
             || current_subnet != desired_subnet
             || current_infra_ip_first != desired_infra_ip_first
             || current_infra_ip_last != desired_infra_ip_last;
@@ -2518,6 +2251,8 @@ mod tests {
     use omicron_common::api::external::Generation;
     use omicron_common::api::external::Vni;
     use omicron_test_utils::dev::test_setup_log;
+    use sled_agent_types::early_networking::PortConfig;
+    use sled_agent_types::early_networking::UplinkPorts;
     use sled_agent_types::inventory::SourceNatConfigGeneric;
     use sled_agent_types::system_networking::ServiceZoneNatEntries;
     use sled_agent_types::system_networking::ServiceZoneNatEntry;
@@ -2528,7 +2263,9 @@ mod tests {
             rack_subnet: rack_subnet.parse().unwrap(),
             infra_ip_first: "172.20.15.21".parse().unwrap(),
             infra_ip_last: "172.20.15.22".parse().unwrap(),
-            ports: vec![],
+            // `UplinkPorts` must be non-empty -- use a single placeholder port.
+            ports: UplinkPorts::new(vec![PortConfig::empty_for_tests("qsfp0")])
+                .expect("placeholder port list is non-empty"),
             bgp: vec![],
             bfd: vec![],
         }

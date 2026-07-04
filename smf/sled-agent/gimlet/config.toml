@@ -59,7 +59,8 @@ vmm_reservoir_percentage = 86.3
 # allocated.
 swap_device_size_gb = 256
 
-data_links = ["cxgbe0", "cxgbe1"]
+[data_links]
+kind = "physical"
 
 [dropshot]
 default_request_body_max_bytes = 1048576

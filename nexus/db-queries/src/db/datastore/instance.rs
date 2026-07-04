@@ -48,8 +48,8 @@ use nexus_db_errors::public_error_from_diesel;
 use nexus_db_lookup::DbConnection;
 use nexus_db_lookup::LookupPath;
 use nexus_db_model::Disk;
+use nexus_types::external_api::instance as instance_types;
 use nexus_types::internal_api::background::ReincarnationReason;
-use nexus_types_versions::latest;
 use omicron_common::api;
 use omicron_common::api::external;
 use omicron_common::api::external::CreateResult;
@@ -99,9 +99,9 @@ impl InstanceAndActiveVmm {
     }
 
     /// Returns the operator-visible [external API
-    /// `InstanceState`](external::InstanceState) for this instance and its
+    /// `InstanceState`](instance_types::InstanceState) for this instance and its
     /// active VMM.
-    pub fn effective_state(&self) -> external::InstanceState {
+    pub fn effective_state(&self) -> instance_types::InstanceState {
         InstanceStateComputer::from(self).compute_state()
     }
 }
@@ -112,7 +112,7 @@ impl From<(Instance, Option<Vmm>)> for InstanceAndActiveVmm {
     }
 }
 
-impl From<InstanceAndActiveVmm> for latest::instance::Instance {
+impl From<InstanceAndActiveVmm> for instance_types::Instance {
     fn from(value: InstanceAndActiveVmm) -> Self {
         let time_run_state_updated = value
             .vmm
@@ -152,7 +152,7 @@ impl From<InstanceAndActiveVmm> for latest::instance::Instance {
                 InstanceAutoRestartPolicy::Never => false,
                 InstanceAutoRestartPolicy::BestEffort => true,
             };
-            external::InstanceAutoRestartStatus {
+            instance_types::InstanceAutoRestartStatus {
                 enabled,
                 policy: policy.map(Into::into),
                 cooldown_expiration,
@@ -171,7 +171,7 @@ impl From<InstanceAndActiveVmm> for latest::instance::Instance {
                 .expect("found invalid hostname in the database"),
             boot_disk_id: value.instance.boot_disk_id,
             cpu_platform: value.instance.cpu_platform.map(Into::into),
-            runtime: external::InstanceRuntimeState {
+            runtime: instance_types::InstanceRuntimeState {
                 run_state: value.effective_state(),
                 time_run_state_updated,
                 time_last_auto_restarted: value
@@ -1492,8 +1492,8 @@ impl DataStore {
                 }
                 let instance_state = collection.nexus_state.state();
                 match instance_state {
-                    api::external::InstanceState::Stopped
-                    | api::external::InstanceState::Failed => {
+                    instance_types::InstanceState::Stopped
+                    | instance_types::InstanceState::Failed => {
                         Err(Error::internal_error("cannot delete instance"))
                     }
                     _ => Err(Error::invalid_request(&format!(

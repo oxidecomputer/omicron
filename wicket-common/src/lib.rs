@@ -8,6 +8,7 @@ use std::time::Duration;
 
 pub mod example;
 pub mod inventory;
+pub mod multirack_setup;
 pub mod preflight_check;
 pub mod rack_setup;
 pub mod rack_update;

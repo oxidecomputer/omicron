@@ -8,7 +8,7 @@ use crate::app::background::BackgroundTask;
 use crate::app::instance::SledAgentInstanceError;
 use crate::app::saga::StartSaga;
 use futures::{FutureExt, future::BoxFuture};
-use gateway_client::types::PowerState;
+use gateway_types::component::PowerState;
 use nexus_db_model::Instance;
 use nexus_db_model::InstanceStateComputer;
 use nexus_db_model::Project;
@@ -18,6 +18,7 @@ use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::pagination::Paginator;
 use nexus_networking::GatewayClient;
+use nexus_types::external_api::instance::InstanceState;
 use nexus_types::external_api::sled::SledPolicy;
 use nexus_types::identity::Asset;
 use nexus_types::identity::Resource;
@@ -26,10 +27,10 @@ use nexus_types::instance::VmmFailureReason;
 use nexus_types::instance::VmmState;
 use nexus_types::inventory;
 use omicron_common::api::external::Error;
-use omicron_common::api::external::InstanceState;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::PropolisUuid;
+use omicron_uuid_kinds::RackUuid;
 use omicron_uuid_kinds::SledUuid;
 use oximeter::types::ProducerRegistry;
 use parallel_task_set::ParallelTaskSet;
@@ -43,7 +44,6 @@ use std::future::Future;
 use std::sync::Arc;
 use std::sync::Mutex;
 use tokio::sync::watch;
-use uuid::Uuid;
 
 oximeter::use_timeseries!("vm-health-check.toml");
 use virtual_machine::VirtualMachine;
@@ -452,7 +452,7 @@ async fn is_computer_on(
 #[derive(Copy, Clone)]
 pub struct WatcherIdentity {
     pub nexus_id: OmicronZoneUuid,
-    pub rack_id: Uuid,
+    pub rack_id: RackUuid,
 }
 
 impl VirtualMachine {
@@ -465,7 +465,7 @@ impl VirtualMachine {
     ) -> Self {
         let addr = sled.address();
         Self {
-            rack_id,
+            rack_id: rack_id.into_untyped_uuid(),
             nexus_id: nexus_id.into_untyped_uuid(),
             instance_id: instance.id(),
             silo_id: project.silo_id,

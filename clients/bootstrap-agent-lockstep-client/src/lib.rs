@@ -38,6 +38,7 @@ progenitor::generate_api!(
         SwitchSlot = sled_agent_types::early_networking::SwitchSlot,
         TxEqConfig = sled_agent_types::early_networking::TxEqConfig,
         UplinkAddressConfig = sled_agent_types::early_networking::UplinkAddressConfig,
+        UplinkPorts = sled_agent_types::early_networking::UplinkPorts,
     },
 );
 

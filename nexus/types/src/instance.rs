@@ -74,13 +74,6 @@ impl From<sled_agent::VmmRuntimeState> for VmmRuntimeState {
     }
 }
 
-impl From<VmmRuntimeState> for sled_agent::VmmRuntimeState {
-    fn from(state: VmmRuntimeState) -> Self {
-        let VmmRuntimeState { state, generation, time_updated } = state;
-        Self { state: state.into(), generation, time_updated }
-    }
-}
-
 #[derive(Copy, Clone, Debug, Deserialize, Serialize, Eq, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum VmmState {
@@ -180,30 +173,6 @@ impl From<sled_agent::VmmState> for VmmState {
                 VmmState::Failed(VmmFailureReason::FromSledAgent)
             }
             sled_agent::VmmState::Destroyed => VmmState::Destroyed,
-        }
-    }
-}
-
-impl From<VmmState> for sled_agent::VmmState {
-    fn from(state: VmmState) -> Self {
-        match state {
-            // The `Creating` state is internal to Nexus; the outside world
-            // should treat it as equivalent to `Starting`.
-            VmmState::Starting | VmmState::Creating => {
-                sled_agent::VmmState::Starting
-            }
-            VmmState::Running => sled_agent::VmmState::Running,
-            VmmState::Stopping => sled_agent::VmmState::Stopping,
-            VmmState::Stopped => sled_agent::VmmState::Stopped,
-            VmmState::Rebooting => sled_agent::VmmState::Rebooting,
-            VmmState::Migrating => sled_agent::VmmState::Migrating,
-            VmmState::Failed(_) => sled_agent::VmmState::Failed,
-
-            // The `SagaUnwound` state is internal to Nexus; the outside world
-            // should treat it as equivalent to `Destroyed`.
-            VmmState::Destroyed | VmmState::SagaUnwound => {
-                sled_agent::VmmState::Destroyed
-            }
         }
     }
 }

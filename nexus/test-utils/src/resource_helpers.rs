@@ -18,7 +18,9 @@ use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO;
 use nexus_test_interface::NexusServer;
 use nexus_types::deployment::Blueprint;
 use nexus_types::external_api::affinity;
-use nexus_types::external_api::affinity::{AffinityGroup, AntiAffinityGroup};
+use nexus_types::external_api::affinity::{
+    AffinityGroup, AffinityPolicy, AntiAffinityGroup, FailureDomain,
+};
 use nexus_types::external_api::certificate;
 use nexus_types::external_api::certificate::Certificate;
 use nexus_types::external_api::device::{
@@ -33,6 +35,9 @@ use nexus_types::external_api::floating_ip::FloatingIp;
 use nexus_types::external_api::hardware::Baseboard;
 use nexus_types::external_api::image;
 use nexus_types::external_api::instance;
+use nexus_types::external_api::instance::{
+    InstanceAutoRestartPolicy, InstanceCpuCount,
+};
 use nexus_types::external_api::internet_gateway;
 use nexus_types::external_api::internet_gateway::{
     InternetGateway, InternetGatewayIpAddress, InternetGatewayIpPool,
@@ -59,15 +64,11 @@ use nexus_types::identity::Resource;
 use nexus_types::internal_api::params as internal_params;
 use nexus_types_versions::latest::instance::Instance;
 use nexus_types_versions::latest::instance::InstanceCpuPlatform;
-use omicron_common::api::external::AffinityPolicy;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Disk;
 use omicron_common::api::external::Error;
-use omicron_common::api::external::FailureDomain;
 use omicron_common::api::external::Generation;
 use omicron_common::api::external::IdentityMetadataCreateParams;
-use omicron_common::api::external::InstanceAutoRestartPolicy;
-use omicron_common::api::external::InstanceCpuCount;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::RouteDestination;
