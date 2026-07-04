@@ -1133,6 +1133,78 @@ async fn test_ip_pool_range_overlapping_ranges_fails(
     // Put them back when IPv6 ranges are supported again.
 }
 
+// Integration test checking that ranges merely adjacent to an existing
+// range, touching no shared address, are still accepted. This is the
+// mirror image of `test_ip_pool_range_overlapping_ranges_fails` above:
+// that test checks many things that should be rejected, but never
+// checks that a valid, non-overlapping neighbor is allowed through.
+//
+// Both directions matter for the overlap-detection query in
+// `nexus/db-queries/src/db/queries/ip_pool.rs`. An off-by-one using
+// `<`/`>` instead of `<=`/`>=` would show up here as a false rejection.
+// An off-by-one the other way would show up as a false acceptance in
+// the "overlaps" test above. Neither test alone catches both bugs.
+#[nexus_test]
+async fn test_ip_pool_range_adjacent_ranges_succeed(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    let ip_pools_url = "/v1/system/ip-pools";
+    let pool_name = "adjacent-ranges-pool";
+    let ip_pool_url = format!("{}/{}", ip_pools_url, pool_name);
+    let ip_pool_ranges_url = format!("{}/ranges", ip_pool_url);
+    let ip_pool_add_range_url = format!("{}/add", ip_pool_ranges_url);
+
+    let params = IpPoolCreate::new(
+        IdentityMetadataCreateParams {
+            name: String::from(pool_name).parse().unwrap(),
+            description: String::from("a pool for testing adjacency"),
+        },
+        IpVersion::V4,
+    );
+    let _: IpPool = object_create(client, ip_pools_url, &params).await;
+
+    // The base range in the middle of our little slice of address space.
+    let base_range = IpRange::V4(
+        Ipv4Range::new(
+            std::net::Ipv4Addr::new(10, 0, 0, 10),
+            std::net::Ipv4Addr::new(10, 0, 0, 15),
+        )
+        .unwrap(),
+    );
+    let _: IpPoolRange =
+        object_create(client, &ip_pool_add_range_url, &base_range).await;
+
+    // Immediately below: ends the instant before the base range starts
+    // (10.0.0.9, one less than 10.0.0.10). No address is shared, so this
+    // must be accepted.
+    let below = IpRange::V4(
+        Ipv4Range::new(
+            std::net::Ipv4Addr::new(10, 0, 0, 5),
+            std::net::Ipv4Addr::new(10, 0, 0, 9),
+        )
+        .unwrap(),
+    );
+    let created_below: IpPoolRange =
+        object_create(client, &ip_pool_add_range_url, &below).await;
+    assert_eq!(created_below.range.first_address(), below.first_address());
+    assert_eq!(created_below.range.last_address(), below.last_address());
+
+    // Immediately above: starts the instant after the base range ends
+    // (10.0.0.16, one more than 10.0.0.15). Also must be accepted.
+    let above = IpRange::V4(
+        Ipv4Range::new(
+            std::net::Ipv4Addr::new(10, 0, 0, 16),
+            std::net::Ipv4Addr::new(10, 0, 0, 20),
+        )
+        .unwrap(),
+    );
+    let created_above: IpPoolRange =
+        object_create(client, &ip_pool_add_range_url, &above).await;
+    assert_eq!(created_above.range.first_address(), above.first_address());
+    assert_eq!(created_above.range.last_address(), above.last_address());
+}
+
 async fn test_bad_ip_ranges(
     client: &ClientTestContext,
     url: &str,

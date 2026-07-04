@@ -2508,11 +2508,12 @@ mod test {
     };
     use crate::db::explain::ExplainableAsync as _;
     use crate::db::model::{
-        IncompleteIpPoolResource, IpPool, IpPoolResource, IpPoolResourceType,
-        Project,
+        IncompleteIpPoolResource, IpPool, IpPoolRange, IpPoolResource,
+        IpPoolResourceType, Project,
     };
     use crate::db::pagination::Paginator;
     use crate::db::pub_test_utils::TestDatabase;
+    use crate::db::queries::ip_pool::FilterOverlappingIpRanges;
     use crate::db::raw_query_builder::expectorate_query_contents;
     use assert_matches::assert_matches;
     use async_bb8_diesel::AsyncRunQueryDsl as _;
@@ -6174,6 +6175,239 @@ mod test {
                 range.last_address(),
             ),
         );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    // The test above (`cannot_insert_ip_pool_range_which_overlaps_...`)
+    // only checks one case of overlap: a small IP Pool range landing
+    // inside a much bigger Subnet Pool member. The two tests below add
+    // the missing cross-table cases for `FilterOverlappingIpRanges`.
+    // They check the same two things that
+    // `test_ip_pool_range_overlapping_ranges_fails` and
+    // `test_ip_pool_range_adjacent_ranges_succeed` (in
+    // nexus/tests/integration_tests/ip_pools.rs) already check for the
+    // ip_pool_range-vs-ip_pool_range case: a range that contains an
+    // existing one should still be rejected, and a range that is merely
+    // next to one should be accepted.
+    #[tokio::test]
+    async fn cannot_insert_ip_pool_range_which_contains_subnet_pool_member() {
+        let logctx = dev::test_setup_log(
+            "cannot_insert_ip_pool_range_which_contains_subnet_pool_member",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        // Create a Subnet Pool and member covering fd00::/48, i.e. every
+        // address from fd00:: through fd00:0:0:ffff:ffff:ffff:ffff:ffff.
+        let params = SubnetPoolCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "my-pool".parse().unwrap(),
+                description: String::new(),
+            },
+            ip_version: IpVersion::V6.into(),
+        };
+        let db_pool = datastore
+            .create_subnet_pool(opctx, params)
+            .await
+            .expect("able to create external subnet pool");
+        let authz_pool = authz::SubnetPool::new(
+            authz::FLEET,
+            db_pool.identity.id.into(),
+            LookupType::ById(db_pool.identity.id.into_untyped_uuid()),
+        );
+        let _member = datastore
+            .add_subnet_pool_member(
+                opctx,
+                &authz_pool,
+                &db_pool,
+                &SubnetPoolMemberAdd {
+                    subnet: "fd00::/48".parse().unwrap(),
+                    min_prefix_length: None,
+                    max_prefix_length: None,
+                },
+            )
+            .await
+            .expect("able to create subnet pool member");
+
+        // Now try to insert an IP Pool range that *entirely contains* the
+        // fd00::/48 subnet: fc00:: is numerically below fd00:: (a smaller
+        // first group, 0xfc00 < 0xfd00), and fe00:: is numerically above
+        // every address in fd00::/48 (a bigger first group, 0xfe00 >
+        // 0xfd00), regardless of what the lower 112 bits are. So this
+        // candidate strictly contains the subnet on both ends - this is
+        // the "candidate contains an existing record" overlap direction,
+        // as opposed to the "existing record contains candidate" direction
+        // the older test above exercises.
+        let identity = IdentityMetadataCreateParams {
+            name: "test-pool".parse().unwrap(),
+            description: "".to_string(),
+        };
+        let pool = datastore
+            .ip_pool_create(
+                &opctx,
+                IpPool::new(&identity, IpVersion::V6, IpPoolAssignment::Silos),
+            )
+            .await
+            .expect("Failed to create IP pool");
+        let authz_pool = authz::IpPool::new(
+            authz::FLEET,
+            pool.id(),
+            LookupType::ById(pool.id()),
+        );
+        let range = IpRange::V6(
+            Ipv6Range::new(
+                Ipv6Addr::new(0xfc00, 0, 0, 0, 0, 0, 0, 0),
+                Ipv6Addr::new(0xfe00, 0, 0, 0, 0, 0, 0, 0),
+            )
+            .unwrap(),
+        );
+        let err = datastore
+            .ip_pool_add_range(&opctx, &authz_pool, &pool, &range)
+            .await
+            .expect_err(
+                "should fail to insert IP Pool range that contains \
+                a Subnet Pool member",
+            );
+        let Error::InvalidRequest { message } = &err else {
+            panic!("Expected InvalidRequest, found {err:#?}");
+        };
+        assert_eq!(
+            message.external_message(),
+            format!(
+                "The provided IP range {}-{} overlaps with an existing \
+                IP pool range or subnet pool member",
+                range.first_address(),
+                range.last_address(),
+            ),
+        );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn can_insert_ip_pool_range_adjacent_to_subnet_pool_member() {
+        let logctx = dev::test_setup_log(
+            "can_insert_ip_pool_range_adjacent_to_subnet_pool_member",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        // Same fd00::/48 Subnet Pool member as the tests above: its last
+        // address is fd00:0:0:ffff:ffff:ffff:ffff:ffff.
+        let params = SubnetPoolCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "my-pool".parse().unwrap(),
+                description: String::new(),
+            },
+            ip_version: IpVersion::V6.into(),
+        };
+        let db_pool = datastore
+            .create_subnet_pool(opctx, params)
+            .await
+            .expect("able to create external subnet pool");
+        let authz_pool = authz::SubnetPool::new(
+            authz::FLEET,
+            db_pool.identity.id.into(),
+            LookupType::ById(db_pool.identity.id.into_untyped_uuid()),
+        );
+        let _member = datastore
+            .add_subnet_pool_member(
+                opctx,
+                &authz_pool,
+                &db_pool,
+                &SubnetPoolMemberAdd {
+                    subnet: "fd00::/48".parse().unwrap(),
+                    min_prefix_length: None,
+                    max_prefix_length: None,
+                },
+            )
+            .await
+            .expect("able to create subnet pool member");
+
+        // fd00:0:1:: is exactly one address past the end of fd00::/48
+        // (incrementing fd00:0:0:ffff:ffff:ffff:ffff:ffff by one rolls the
+        // third 16-bit group from 0000 to 0001 and zeroes everything after
+        // it). No address is shared with the subnet, so this must succeed.
+        let identity = IdentityMetadataCreateParams {
+            name: "test-pool".parse().unwrap(),
+            description: "".to_string(),
+        };
+        let pool = datastore
+            .ip_pool_create(
+                &opctx,
+                IpPool::new(&identity, IpVersion::V6, IpPoolAssignment::Silos),
+            )
+            .await
+            .expect("Failed to create IP pool");
+        let authz_pool = authz::IpPool::new(
+            authz::FLEET,
+            pool.id(),
+            LookupType::ById(pool.id()),
+        );
+        let range = IpRange::V6(
+            Ipv6Range::new(
+                Ipv6Addr::new(0xfd00, 0, 1, 0, 0, 0, 0, 0),
+                Ipv6Addr::new(0xfd00, 0, 1, 0, 0, 0, 0, 0x10),
+            )
+            .unwrap(),
+        );
+        let inserted = datastore
+            .ip_pool_add_range(&opctx, &authz_pool, &pool, &range)
+            .await
+            .expect(
+                "should succeed inserting an IP Pool range merely adjacent \
+                to a Subnet Pool member",
+            );
+        assert_eq!(inserted.first_address.ip(), range.first_address());
+        assert_eq!(inserted.last_address.ip(), range.last_address());
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    // Smoke test mirroring this file's existing `can_explain_*` convention
+    // (see e.g. `can_explain_assign_ip_pool_to_silos_query` above): just
+    // confirms the query is well-formed SQL that CockroachDB can plan,
+    // against the real schema. The `expectorate_filter_overlapping_ip_ranges`
+    // test next to the query's definition
+    // (nexus/db-queries/src/db/queries/ip_pool.rs) is what pins down the
+    // exact generated SQL text.
+    #[tokio::test]
+    async fn can_explain_filter_overlapping_ip_ranges_query() {
+        let logctx = dev::test_setup_log(
+            "can_explain_filter_overlapping_ip_ranges_query",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let conn = db.datastore().pool_connection_for_tests().await.unwrap();
+
+        let range = IpPoolRange::new(
+            &IpRange::V4(
+                Ipv4Range::new(
+                    std::net::Ipv4Addr::new(10, 0, 0, 1),
+                    std::net::Ipv4Addr::new(10, 0, 0, 5),
+                )
+                .unwrap(),
+            ),
+            uuid::Uuid::nil(),
+        );
+        let query = FilterOverlappingIpRanges { range };
+
+        // `FilterOverlappingIpRanges` only implements the traits needed to
+        // be the right-hand side of an INSERT (see its `Insertable` impl in
+        // queries/ip_pool.rs) - it doesn't stand on its own as a runnable
+        // query. So, same as production code does in
+        // `ip_pool_add_range_on_connection` above, wrap it in an actual
+        // `INSERT INTO ip_pool_range ...` statement before asking
+        // CockroachDB to explain it.
+        use nexus_db_schema::schema::ip_pool_range::dsl;
+        let insert_query = diesel::insert_into(dsl::ip_pool_range).values(query);
+        let _ = insert_query
+            .explain_async(&conn)
+            .await
+            .expect("Failed to explain query - is it valid SQL?");
 
         db.terminate().await;
         logctx.cleanup_successful();
