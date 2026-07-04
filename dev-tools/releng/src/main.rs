@@ -1117,9 +1117,7 @@ async fn host_add_root_profile(host_proto_root: Utf8PathBuf) -> Result<()> {
 /// were built against the current nexus external API version.
 async fn check_console_assets(logger: &Logger) -> Result<()> {
     let console_version_path = WORKSPACE_DIR.join("tools/console_version");
-    let console_version = fs::read_to_string(&console_version_path)
-        .await
-        .with_context(|| format!("failed to read {console_version_path}"))?;
+    let console_version = fs::read_to_string(&console_version_path).await?;
     let pinned_commit = console_version
         .lines()
         .find_map(|line| {
@@ -1132,15 +1130,10 @@ async fn check_console_assets(logger: &Logger) -> Result<()> {
     // The console records its source commit in a top-level `VERSION` file in
     // its asset tarball, which `cargo xtask download console` has already
     // unpacked into `out/console-assets`.
-    let asset_version_path = WORKSPACE_DIR.join("out/console-assets/VERSION");
-    let asset_commit = fs::read_to_string(&asset_version_path)
+    let assets_dir = WORKSPACE_DIR.join("out/console-assets");
+    let asset_commit = fs::read_to_string(assets_dir.join("VERSION"))
         .await
-        .with_context(|| {
-            format!(
-                "failed to read {asset_version_path}; \
-                run `cargo xtask download console`"
-            )
-        })?
+        .context("run `cargo xtask download console` to fetch console assets")?
         .trim()
         .to_owned();
 
@@ -1159,11 +1152,9 @@ async fn check_console_assets(logger: &Logger) -> Result<()> {
     // The current API version is the `info.version` field of the spec
     // `nexus-latest.json` points to.
     let spec_path = WORKSPACE_DIR.join("openapi/nexus/nexus-latest.json");
-    let spec_json = fs::read_to_string(&spec_path)
-        .await
-        .with_context(|| format!("failed to read {spec_path}"))?;
-    let spec: serde_json::Value = serde_json::from_str(&spec_json)
-        .with_context(|| format!("failed to parse {spec_path}"))?;
+    let spec: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&spec_path).await?)
+            .with_context(|| format!("failed to parse {spec_path}"))?;
     let nexus_version = spec
         .pointer("/info/version")
         .and_then(serde_json::Value::as_str)
@@ -1172,21 +1163,13 @@ async fn check_console_assets(logger: &Logger) -> Result<()> {
         })?;
 
     // The console records its API version next to the source commit.
-    let api_version_path = WORKSPACE_DIR.join("out/console-assets/API_VERSION");
-    let console_api_version = fs::read_to_string(&api_version_path)
-        .await
-        .with_context(|| format!("failed to read {api_version_path}"))?
-        .trim()
-        .to_owned();
+    let console_api_version =
+        fs::read_to_string(assets_dir.join("API_VERSION"))
+            .await?
+            .trim()
+            .to_owned();
 
-    if console_api_version == nexus_version {
-        info!(
-            logger,
-            "console client API version matches nexus API version \
-            ({nexus_version})"
-        );
-        Ok(())
-    } else {
+    if console_api_version != nexus_version {
         bail!(
             "the console assets in out/console-assets were generated \
             against API version {console_api_version}, but the current nexus \
@@ -1194,6 +1177,12 @@ async fn check_console_assets(logger: &Logger) -> Result<()> {
             regen and tools/console_version needs a bump"
         );
     }
+    info!(
+        logger,
+        "console client API version matches nexus API version \
+        ({nexus_version})"
+    );
+    Ok(())
 }
 
 async fn git_resolve_commit(
