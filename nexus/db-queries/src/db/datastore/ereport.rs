@@ -173,29 +173,18 @@ impl DataStore {
         reporter: fm::Reporter,
     ) -> Result<Option<EreportId>, Error> {
         opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
-        self.latest_ereport_id_on_conn(
-            &*self.pool_connection_authorized(opctx).await?,
-            reporter,
-        )
-        .await
-    }
-
-    async fn latest_ereport_id_on_conn(
-        &self,
-        conn: &async_bb8_diesel::Connection<DbConnection>,
-        reporter: fm::Reporter,
-    ) -> Result<Option<EreportId>, Error> {
+        let conn = self.pool_connection_authorized(opctx).await?;
         let result = match reporter {
             fm::Reporter::Sp { sp_type, slot } => {
                 let sp_type = sp_type.into();
                 let slot = SpMgsSlot::from(SqlU16::new(slot));
                 Self::sp_latest_ereport_id_query(sp_type, slot)
-                    .get_result_async(conn)
+                    .get_result_async(&*conn)
                     .await
             }
             fm::Reporter::HostOs { sled, .. } => {
                 Self::host_latest_ereport_id_query(sled)
-                    .get_result_async(conn)
+                    .get_result_async(&*conn)
                     .await
             }
         };
@@ -237,6 +226,23 @@ impl DataStore {
             .order_by((dsl::time_collected.desc(), dsl::ena.desc()))
             .limit(1)
             .select((dsl::restart_id, dsl::ena))
+    }
+
+    async fn latest_ena_for_restart_on_conn(
+        &self,
+        restart_id: EreporterRestartUuid,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+    ) -> Result<Option<EreportId>, Error> {
+        let ena = dsl::ereport
+            .filter(dsl::restart_id.eq(restart_id.into_untyped_uuid()))
+            .order_by(dsl::ena.desc())
+            .limit(1)
+            .select(dsl::ena)
+            .first_async(conn)
+            .await
+            .optional()
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+        Ok(ena.map(|DbEna(ena)| EreportId { restart_id, ena }))
     }
 
     /// Inserts the provided tranche of `ereports` into the `ereport` table, and
@@ -302,13 +308,12 @@ impl DataStore {
                 ),
             )
         })?;
-
         let latest = self
-            .latest_ereport_id_on_conn(&conn, reporter)
+            .latest_ena_for_restart_on_conn(restart_id, &*conn)
             .await
             .map_err(|e| {
                 e.internal_context(format!(
-                    "failed to refresh latest ereport ID for {reporter}",
+                    "failed to get latest ENA for restart {restart_id}"
                 ))
             })?;
         Ok((created, latest))
