@@ -252,17 +252,11 @@ impl DataStore {
     /// # Returns
     ///
     /// This function returns a tuple containing the number of new `ereport`
-    /// rows that were created, along with the newest [`EreportId`] for the same
-    /// reporter index as the inserted ereports.
+    /// rows that were created, along with the newest [`EreportId`] to use for a
+    /// subsequent request to ingest ereports from the same reporter. This may
+    /// be a newer ENA than the highest ENA in the inserted ereports, if
+    /// additional ereports were inserted concurrently.
     ///
-    /// The returned ereport ID is intended to provide the caller with the
-    /// latest ENA to use in a subsequent request to ingest ereports from the
-    /// same reporter. In some cases, it may:
-    ///
-    /// - be a newer ENA than the highest ENA in the inserted ereports, if
-    ///   additional ereports were inserted concurrently
-    /// - have a different restart ID than the one provided, if ereports from
-    ///   a newer restart of that reporter were inserted concurrently
     // Since all the arguments to this function are newtypes with pretty clear
     // meanings (e.g. `rack_id`, `restart_id`, and `collector_id` are all
     // different typed UUIDs), I'm not convinced that factoring stuff out into a
