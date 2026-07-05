@@ -3340,6 +3340,73 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn external_subnet_allocation_of_consecutive_single_addresses() {
+        let context = setup_external_subnet_test(
+            "external_subnet_allocation_of_consecutive_single_addresses",
+        )
+        .await;
+
+        // Add a member that permits allocating single addresses (/128s).
+        let member_subnet: IpNet = "2001:db8:4::/48".parse().unwrap();
+        context
+            .db
+            .datastore()
+            .add_subnet_pool_member(
+                context.db.opctx(),
+                &context.authz_pool,
+                &context.db_pool,
+                &SubnetPoolMemberAdd {
+                    subnet: member_subnet,
+                    min_prefix_length: Some(48),
+                    max_prefix_length: Some(128),
+                },
+            )
+            .await
+            .expect("able to add /128-capable pool member");
+
+        // Allocate two consecutive /128s. Only the new member can fit a /128,
+        // so both come from it, at its first two addresses.
+        let prefix_length = 128;
+        let mut subnets = Vec::with_capacity(2);
+        for i in 0..subnets.capacity() {
+            let subnet = context
+                .db
+                .datastore()
+                .create_external_subnet(
+                    context.db.opctx(),
+                    &DEFAULT_SILO_ID,
+                    &context.authz_project,
+                    ExternalSubnetCreate {
+                        identity: IdentityMetadataCreateParams {
+                            name: format!("single{i}").parse().unwrap(),
+                            description: String::new(),
+                        },
+                        allocator: ExternalSubnetAllocator::Auto {
+                            pool_selector: PoolSelector::Auto {
+                                ip_version: None,
+                            },
+                            prefix_length,
+                        },
+                    },
+                )
+                .await
+                .expect("able to allocate consecutive single-address subnets");
+            subnets.push(subnet);
+        }
+
+        // The two allocations must be distinct, and the second must be the
+        // address immediately following the first.
+        assert_ne!(subnets[0].subnet, subnets[1].subnet);
+        let first: IpNet = "2001:db8:4::/128".parse().unwrap();
+        let second: IpNet = "2001:db8:4::1/128".parse().unwrap();
+        assert_eq!(oxnet::IpNet::from(subnets[0].subnet), first);
+        assert_eq!(oxnet::IpNet::from(subnets[1].subnet), second);
+
+        context.db.terminate().await;
+        context.logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
     async fn external_subnet_allocation_takes_smallest_gap_in_member_middle() {
         let context = setup_external_subnet_test(
             "external_subnet_allocation_takes_smallest_gap_in_member_middle",
