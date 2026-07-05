@@ -443,8 +443,11 @@ mod tests {
     use super::*;
     use nexus_db_queries::db::pagination::Paginator;
     use nexus_test_utils_macros::nexus_test;
+    use omicron_common::api::external::Error;
+    use omicron_test_utils::dev::poll;
     use omicron_uuid_kinds::GenericUuid;
     use std::collections::BTreeSet;
+    use std::time::Duration;
     use uuid::uuid;
 
     type ControlPlaneTestContext =
@@ -811,13 +814,29 @@ mod tests {
             "3e0e701d-79cc-4d1a-a742-e0410324b1de"
         ));
 
-        let clients = GatewayClient::resolve_all_gateways(
-            &opctx.log,
-            &nexus.internal_resolver,
+        let clients = poll::wait_for_condition(
+            || async {
+                let gateways = GatewayClient::resolve_all_gateways(
+                    &opctx.log,
+                    &nexus.internal_resolver,
+                )
+                .await
+                .map_err(|e| poll::CondCheckError::<Error>::NotYet {
+                    status: Some(e.to_string()),
+                })?
+                .collect::<Vec<_>>();
+                if gateways.is_empty() {
+                    return Err(poll::CondCheckError::<Error>::NotYet {
+                        status: Some("no gateways resolved".to_string()),
+                    });
+                }
+                Ok(gateways)
+            },
+            &Duration::from_millis(200),
+            &Duration::from_secs(60),
         )
         .await
-        .expect("MGS clients should resolve")
-        .collect::<Vec<_>>();
+        .unwrap();
 
         // Request all the ereports from the simulated SP and insert them into
         // the database, as though we have already ingested them.
@@ -921,7 +940,7 @@ mod tests {
 
         // Generously longer than a terminating ingestion pass (a couple of
         // HTTP requests and a handful of database queries) could ever take.
-        const TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
+        const TIMEOUT: std::time::Duration = Duration::from_secs(60);
         let status = tokio::time::timeout(
             TIMEOUT,
             ingester.ingest_sp_ereports(
