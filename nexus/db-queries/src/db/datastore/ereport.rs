@@ -309,7 +309,7 @@ impl DataStore {
             )
         })?;
         let latest = self
-            .latest_ena_for_restart_on_conn(restart_id, &*conn)
+            .latest_ena_for_restart_on_conn(restart_id, &conn)
             .await
             .map_err(|e| {
                 e.internal_context(format!(
