@@ -235,6 +235,7 @@ impl DataStore {
     ) -> Result<Option<EreportId>, Error> {
         let ena = dsl::ereport
             .filter(dsl::restart_id.eq(restart_id.into_untyped_uuid()))
+            .filter(dsl::time_deleted.is_null())
             .order_by(dsl::ena.desc())
             .limit(1)
             .select(dsl::ena)
