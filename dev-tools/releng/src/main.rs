@@ -796,12 +796,24 @@ async fn main() -> Result<()> {
         .after("recovery-stamp");
     {
         let editor = editor_v2.clone();
+        let manifest = manifest.clone();
         jobs.push("tuf-v2-zones", async move {
-            for package in TUF_PACKAGES {
-                let path = crate::WORKSPACE_DIR
-                    .join("out/versioned")
-                    .join(format!("{}.tar.gz", package));
-                editor.add_zone_image(path).await?;
+            let stamped_dir = crate::WORKSPACE_DIR.join("out/versioned");
+            for package_name in TUF_PACKAGES {
+                let path = stamped_dir.join(format!("{}.tar.gz", package_name));
+                // Rename to the file name we actually want in the repo; this
+                // is load-bearing for getting the right file name into the
+                // Installinator document.
+                let package = manifest
+                    .packages
+                    .get(package_name)
+                    .expect("checked in preflight");
+                let correct_path = stamped_dir
+                    .join(format!("{}.tar.gz", package.service_name));
+                if path != correct_path {
+                    fs::copy(&path, &correct_path).await?;
+                }
+                editor.add_zone_image(correct_path).await?;
             }
             Ok(())
         })
