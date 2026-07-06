@@ -4,8 +4,6 @@
 
 //! The top-level query plan itself.
 
-// Copyright 2025 Oxide Computer Company
-
 use crate::oxql::ast::Query;
 use crate::oxql::ast::table_ops::BasicTableOp;
 use crate::oxql::ast::table_ops::GroupedTableOp;
