@@ -3402,6 +3402,35 @@ mod tests {
         assert_eq!(oxnet::IpNet::from(subnets[0].subnet), first);
         assert_eq!(oxnet::IpNet::from(subnets[1].subnet), second);
 
+        // Explicitly request one of the /128s we just allocated to confirm
+        // we get the overlap error.
+        let err = context
+            .db
+            .datastore()
+            .create_external_subnet(
+                context.db.opctx(),
+                &DEFAULT_SILO_ID,
+                &context.authz_project,
+                ExternalSubnetCreate {
+                    identity: IdentityMetadataCreateParams {
+                        name: "explicit-dup".parse().unwrap(),
+                        description: String::new(),
+                    },
+                    allocator: ExternalSubnetAllocator::Explicit {
+                        subnet: first,
+                    },
+                },
+            )
+            .await
+            .expect_err("cannot explicitly request an allocated subnet");
+        let Error::InvalidRequest { message } = &err else {
+            panic!("Expected InvalidRequest, found {err:#?}");
+        };
+        assert_eq!(
+            message.external_message(),
+            SUBNET_OVERLAPS_EXISTING_ERR_MSG,
+        );
+
         context.db.terminate().await;
         context.logctx.cleanup_successful();
     }
