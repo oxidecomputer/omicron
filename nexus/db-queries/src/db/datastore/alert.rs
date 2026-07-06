@@ -344,14 +344,26 @@ impl DataStore {
         opctx: &OpContext,
     ) -> Result<Option<Alert>, Error> {
         let conn = self.pool_connection_authorized(&opctx).await?;
+        Self::alert_select_next_for_dispatch_query()
+            .get_result_async(&*conn)
+            .await
+            .optional()
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    /// Returns the query used by [`Self::alert_select_next_for_dispatch`] to
+    /// find the oldest not-yet-dispatched alert.
+    ///
+    /// The `LIMIT 1` is included here (rather than relying on `first_async`) so
+    /// that the query's plan --- and therefore the `EXPLAIN` output exercised by
+    /// tests --- matches what actually runs in production.
+    fn alert_select_next_for_dispatch_query()
+    -> impl RunnableQuery<Alert> + use<> {
         alert_dsl::alert
             .filter(alert_dsl::time_dispatched.is_null())
             .order_by(alert_dsl::time_created.asc())
             .select(Alert::as_select())
-            .first_async(&*conn)
-            .await
-            .optional()
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+            .limit(1)
     }
 
     pub async fn alert_mark_dispatched(
@@ -576,6 +588,37 @@ mod tests {
             requested_sitrep_id: SitrepUuid::new_v4(),
             comment: String::new(),
         }
+    }
+
+    #[tokio::test]
+    async fn explain_alert_select_next_for_dispatch() {
+        let logctx =
+            dev::test_setup_log("explain_alert_select_next_for_dispatch");
+        let db = TestDatabase::new_with_pool(&logctx.log).await;
+        let pool = db.pool();
+        let conn = pool.claim().await.unwrap();
+
+        let query = DataStore::alert_select_next_for_dispatch_query();
+        let explanation = query
+            .explain_async(&conn)
+            .await
+            .expect("Failed to explain query - is it valid SQL?");
+
+        eprintln!("{explanation}");
+
+        // This query filters on `time_dispatched IS NULL` and orders by
+        // `time_created`. It must be served by an index rather than a full
+        // scan; in particular, dropping the old `lookup_undispatched_alerts`
+        // partial index in favor of the single-column `time_dispatched` and
+        // `time_created` indexes must not have regressed this query into a
+        // full table scan.
+        assert!(
+            !explanation.contains("FULL SCAN"),
+            "Found an unexpected FULL SCAN: {explanation}",
+        );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
     }
 
     #[tokio::test]
