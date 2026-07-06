@@ -7272,14 +7272,25 @@ INSERT INTO omicron.public.alert (
     0
 ) ON CONFLICT DO NOTHING;
 
--- Look up webhook events in need of dispatching.
---
--- This is used by the message dispatcher when looking for events to dispatch.
-CREATE INDEX IF NOT EXISTS lookup_undispatched_alerts
+CREATE INDEX IF NOT EXISTS lookup_alerts_by_time_dispatched
 ON omicron.public.alert (
-    id, time_created
-) WHERE time_dispatched IS NULL;
+    time_dispatched
+);
 
+CREATE INDEX IF NOT EXISTS lookup_alerts_by_time_created
+ON omicron.public.alert (
+    time_created
+);
+
+CREATE INDEX IF NOT EXISTS lookup_alerts_by_class
+ON omicron.public.alert (
+    alert_class
+);
+
+CREATE INDEX IF NOT EXISTS lookup_alerts_for_fm_case
+ON omicron.public.alert (
+    case_id
+);
 
 /*
  * Alert message dispatching and delivery attempts.
@@ -8965,7 +8976,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '274.0.0', NULL)
+    (TRUE, NOW(), NOW(), '275.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;
