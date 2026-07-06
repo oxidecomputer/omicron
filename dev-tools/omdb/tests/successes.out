@@ -2322,7 +2322,7 @@ EXECUTING COMMAND: omdb ["db", "alert", "list", "--cases", "..........<REDACTED_
 termination: Exited(0)
 ---------------------------------------------
 stdout:
-ID CLASS TIME_CREATED TIME_DISPATCHED DISPATCHED FM_CASE_ID FM_GEN 
+ID CLASS V TIME_CREATED TIME_DISPATCHED DISPATCHED FM_CASE_ID FM_GEN 
 ---------------------------------------------
 stderr:
 note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
@@ -2332,7 +2332,7 @@ EXECUTING COMMAND: omdb ["db", "alert", "list", "--classes", "test.foo.bar", "te
 termination: Exited(0)
 ---------------------------------------------
 stdout:
-ID CLASS TIME_CREATED TIME_DISPATCHED DISPATCHED FM_CASE_ID FM_GEN 
+ID CLASS V TIME_CREATED TIME_DISPATCHED DISPATCHED FM_CASE_ID FM_GEN 
 ---------------------------------------------
 stderr:
 note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable

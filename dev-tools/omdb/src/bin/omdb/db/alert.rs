@@ -979,6 +979,8 @@ async fn cmd_db_alert_list(
     struct AlertRow {
         id: Uuid,
         class: AlertClass,
+        #[tabled(rename = "V")]
+        version: u32,
         #[tabled(display_with = "datetime_rfc3339_concise")]
         time_created: DateTime<Utc>,
         #[tabled(display_with = "datetime_opt_rfc3339_concise")]
@@ -994,6 +996,7 @@ async fn cmd_db_alert_list(
         |alert: &Alert, marker: &Option<RendezvousAlertCreated>| AlertRow {
             id: alert.identity.id.into_untyped_uuid(),
             class: alert.class,
+            version: u32::from(alert.version),
             time_created: alert.identity.time_created,
             time_dispatched: alert.time_dispatched,
             dispatched: alert.num_dispatched,
