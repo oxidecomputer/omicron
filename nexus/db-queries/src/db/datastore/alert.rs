@@ -9,6 +9,7 @@ use super::RunnableQuery;
 use crate::authz;
 use crate::context::OpContext;
 use crate::db::model::Alert;
+use crate::db::model::fm;
 use crate::db::sitrep_guard::SitrepGuardedInsert;
 use crate::db::sitrep_guard::SitrepGuardedInsertOutcome;
 use async_bb8_diesel::AsyncRunQueryDsl;
@@ -26,6 +27,7 @@ use nexus_types::identity::Asset;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::Generation;
+use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
 use omicron_uuid_kinds::{AlertUuid, CaseUuid, GenericUuid};
@@ -240,6 +242,24 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
         Ok(rows.into_iter().map(AlertUuid::from_untyped_uuid).collect())
+    }
+
+    pub async fn alert_fetch_fm_rendezvous_gen(
+        &self,
+        opctx: &OpContext,
+        authz_alert: &authz::Alert,
+    ) -> LookupResult<Option<fm::RendezvousAlertCreated>> {
+        use nexus_db_schema::schema::rendezvous_alert_created::dsl as marker_dsl;
+
+        marker_dsl::rendezvous_alert_created
+            .filter(
+                marker_dsl::alert_id.eq(authz_alert.id().into_untyped_uuid()),
+            )
+            .select(fm::RendezvousAlertCreated::as_select())
+            .first_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .optional()
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 }
 

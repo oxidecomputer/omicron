@@ -28,7 +28,6 @@ use nexus_db_model::AlertClass;
 use nexus_db_model::AlertReceiver;
 use nexus_db_model::WebhookDelivery;
 use nexus_db_model::fm::RendezvousAlertCreated;
-use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
 use nexus_db_queries::db::DataStore;
@@ -1030,31 +1029,22 @@ async fn cmd_db_alert_info(
     args: &AlertInfoArgs,
 ) -> anyhow::Result<()> {
     let AlertInfoArgs { id } = args;
-    let authz_alert = LookupPath::new(opctx, datastore)
+    let (authz_alert, alert) = LookupPath::new(opctx, datastore)
         .alert_id(*id)
-        .lookup_for(authz::Action::Read)
+        .fetch()
         .await
         .with_context(|| format!("failed to look up alert {id}"))?;
 
-    // Fetch the requested alert, including any corresponding
-    // `rendezvous_alert_created` marker so we can display the generation at
-    // which the alert was created. Note, all FM-created alerts can be
-    // distinguished by their fm_case_id, but won't necessarily have a creation
-    // marker: GC will clean up markers that are no longer needed.
-    let (alert, rendezvous_created): (Alert, Option<RendezvousAlertCreated>) =
-        alert_dsl::alert
-            .left_join(rendezvous_created_dsl::rendezvous_alert_created)
-            .filter(alert_dsl::id.eq(id.into_untyped_uuid()))
-            .select((
-                Alert::as_select(),
-                Option::<RendezvousAlertCreated>::as_select(),
-            ))
-            .limit(1)
-            .get_result_async(&*datastore.pool_connection_for_tests().await?)
-            .await
-            .optional()
-            .with_context(|| format!("loading alert {id}"))?
-            .ok_or_else(|| anyhow::anyhow!("no alert {id} exists"))?;
+    // Fetch any corresponding `rendezvous_alert_created` marker so we can
+    // display the generation at which the alert was created. Note, all
+    // FM-created alerts can be distinguished by their fm_case_id, but won't
+    // necessarily have a creation marker: GC will clean up markers that are no
+    // longer needed.
+    let rendezvous_created =
+        datastore.alert_fetch_fm_rendezvous_gen(opctx, &authz_alert).await;
+    if let Err(ref e) = rendezvous_created {
+        eprintln!("error: failed to fetch FM rendezvous marker: {e}");
+    }
 
     let Alert {
         identity: db::model::AlertIdentity { time_created, time_modified, .. },
@@ -1107,19 +1097,23 @@ async fn cmd_db_alert_info(
         (Some(case_id), marker) => {
             println!("    {PROVENANCE:>WIDTH$}: created by fault management");
             println!("    {CASE_ID:>WIDTH$}: {case_id:?}");
-            if let Some(marker) = marker {
-                println!(
-                    "    {FM_GENERATION:>WIDTH$}: {}",
-                    marker.created_at_generation.0
-                );
+            match marker {
+                Ok(Some(marker)) => {
+                    println!(
+                        "    {FM_GENERATION:>WIDTH$}: {}",
+                        marker.created_at_generation.0
+                    );
+                }
+                Ok(None) => {} // may have been GCed...
+                Err(_) => {
+                    println!(
+                        "    {FM_GENERATION:>WIDTH$}: /!\\ UNKNOWN (failed to \
+                         fetch marker record)"
+                    );
+                }
             }
         }
-        (None, None) => {
-            println!(
-                "    {PROVENANCE:>WIDTH$}: not created by fault management"
-            );
-        }
-        (None, Some(marker)) => {
+        (None, Ok(Some(marker))) => {
             println!(
                 "    {PROVENANCE:>WIDTH$}: /!\\ WEIRD: creation marker present \
                  but no FM case (possible bug)"
@@ -1127,6 +1121,16 @@ async fn cmd_db_alert_info(
             println!(
                 "    {FM_GENERATION:>WIDTH$}: {}",
                 marker.created_at_generation.0
+            );
+        }
+        // Note that this includes both cases where we successfully fetched an
+        // `Ok(None)` marker record *and* cases where there was a database
+        // error. We already printed the db error earlier, so we need not print
+        // it again here, and we know the alert is not supposed to have one
+        // regardless.
+        (None, _) => {
+            println!(
+                "    {PROVENANCE:>WIDTH$}: not created by fault management"
             );
         }
     }
@@ -1141,7 +1145,7 @@ async fn cmd_db_alert_info(
     let pagparams =
         DataPageParams { marker: None, ..first_page(fetch_opts.fetch_limit) };
     let deliveries = datastore
-        .alert_list_webhook_deliveries(opctx, authz_alert, &pagparams)
+        .alert_list_webhook_deliveries(opctx, &authz_alert, &pagparams)
         .await
         .with_context(ctx)?;
 
