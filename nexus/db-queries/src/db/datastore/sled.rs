@@ -578,7 +578,8 @@ impl<'a> CompleteLocalStorageAllocationLists<'a> {
             for allocation in &incomplete_allocation_list.allocations {
                 match zpools_for_sled.get(&allocation.pool_id) {
                     Some(zpool_for_sled) => {
-                        // Zpool still exists, does it still have room?
+                        // Zpool still exists and is still a valid target, does
+                        // it still have room?
 
                         if !zpool_for_sled.has_room_for_allocation(
                             allocation.required_dataset_size,
@@ -590,7 +591,9 @@ impl<'a> CompleteLocalStorageAllocationLists<'a> {
                     }
 
                     None => {
-                        // Zpool doesn't exist anymore!
+                        // Zpool doesn't exist anymore or it's no longer a valid
+                        // target (for example due to being marked
+                        // no_provision).
                         return false;
                     }
                 }
