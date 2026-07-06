@@ -22,11 +22,13 @@ use diesel::ExpressionMethods;
 use diesel::OptionalExtension;
 use diesel::expression::SelectableHelper;
 use diesel::query_dsl::QueryDsl;
+use nexus_db_lookup::LookupPath;
 use nexus_db_model::Alert;
 use nexus_db_model::AlertClass;
 use nexus_db_model::AlertReceiver;
 use nexus_db_model::WebhookDelivery;
 use nexus_db_model::fm::RendezvousAlertCreated;
+use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
 use nexus_db_queries::db::DataStore;
@@ -215,7 +217,7 @@ pub(super) async fn cmd_db_alert(
 ) -> anyhow::Result<()> {
     match &args.command {
         Commands::Info(args) => {
-            cmd_db_alert_info(datastore, fetch_opts, args).await
+            cmd_db_alert_info(opctx, datastore, fetch_opts, args).await
         }
         Commands::List(args) => {
             cmd_db_alert_list(datastore, fetch_opts, args).await
@@ -1022,12 +1024,17 @@ async fn cmd_db_alert_list(
 }
 
 async fn cmd_db_alert_info(
+    opctx: &OpContext,
     datastore: &DataStore,
     fetch_opts: &DbFetchOptions,
     args: &AlertInfoArgs,
 ) -> anyhow::Result<()> {
     let AlertInfoArgs { id } = args;
-    let conn = datastore.pool_connection_for_tests().await?;
+    let authz_alert = LookupPath::new(opctx, datastore)
+        .alert_id(*id)
+        .lookup_for(authz::Action::Read)
+        .await
+        .with_context(|| format!("failed to look up alert {id}"))?;
 
     // Fetch the requested alert, including any corresponding
     // `rendezvous_alert_created` marker so we can display the generation at
@@ -1043,14 +1050,14 @@ async fn cmd_db_alert_info(
                 Option::<RendezvousAlertCreated>::as_select(),
             ))
             .limit(1)
-            .get_result_async(&*conn)
+            .get_result_async(&*datastore.pool_connection_for_tests().await?)
             .await
             .optional()
             .with_context(|| format!("loading alert {id}"))?
             .ok_or_else(|| anyhow::anyhow!("no alert {id} exists"))?;
 
     let Alert {
-        identity: db::model::AlertIdentity { id, time_created, time_modified },
+        identity: db::model::AlertIdentity { time_created, time_modified, .. },
         time_dispatched,
         class,
         payload,
@@ -1130,11 +1137,11 @@ async fn cmd_db_alert_info(
     )?;
 
     let ctx = || format!("listing deliveries for alert {id:?}");
-    let deliveries = delivery_dsl::webhook_delivery
-        .limit(fetch_opts.fetch_limit.get().into())
-        .order_by(delivery_dsl::time_created.desc())
-        .select(WebhookDelivery::as_select())
-        .load_async(&*conn)
+
+    let pagparams =
+        DataPageParams { marker: None, ..first_page(fetch_opts.fetch_limit) };
+    let deliveries = datastore
+        .alert_list_webhook_deliveries(opctx, authz_alert, &pagparams)
         .await
         .with_context(ctx)?;
 
