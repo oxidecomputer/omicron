@@ -1447,7 +1447,7 @@ impl DataStore {
                                 return Ok(resource);
                             }
 
-                            // If an insert fails to add any rows, Log that this
+                            // If an insert fails to add any rows, log that this
                             // is happening.  Ending up here is expected during
                             // concurrent reservations requiring local storage
                             // allocations, but repeatedly ending up here
