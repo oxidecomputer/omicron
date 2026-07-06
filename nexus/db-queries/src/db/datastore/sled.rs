@@ -7365,7 +7365,7 @@ pub(in crate::db::datastore) mod test {
             .await
             .unwrap();
 
-        assert_eq!(previously_target_vmm.state, SledResourceVmmState::Active,);
+        assert_eq!(previously_target_vmm.state, SledResourceVmmState::Active);
 
         db.terminate().await;
         logctx.cleanup_successful();
@@ -7429,19 +7429,18 @@ pub(in crate::db::datastore) mod test {
             .await
             .unwrap();
 
-        assert_eq!(previously_target_vmm.state, SledResourceVmmState::Active,);
+        assert_eq!(previously_target_vmm.state, SledResourceVmmState::Active);
 
         db.terminate().await;
         logctx.cleanup_successful();
     }
 
-    // Ensure that Nexus does not perform an exhaustive search through all
-    // possible local storage allocations if a rendezvous dataset is marked
-    // no_provision = true.
+    // Ensure that Nexus does not perform an instance reservation with local
+    // storage if a rendezvous dataset is marked no_provision = true.
     #[tokio::test]
-    async fn local_storage_allocation_no_exhaustive_search_no_provision() {
+    async fn local_storage_allocation_no_reserve_no_provision() {
         let logctx = dev::test_setup_log(
-            "local_storage_allocation_no_exhaustive_search_no_provision",
+            "local_storage_allocation_no_reserve_no_provision",
         );
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
@@ -7504,7 +7503,7 @@ pub(in crate::db::datastore) mod test {
         )
         .await;
 
-        // Now attempt the reservation. This should complete quickly!
+        // Now attempt the reservation.
 
         let instance =
             Instance::from_local_storage_test_instance(&config.instances[0]);
@@ -7548,12 +7547,12 @@ pub(in crate::db::datastore) mod test {
         logctx.cleanup_successful();
     }
 
-    // Ensure that Nexus does not perform an exhaustive search through all
-    // possible local storage allocations if a rendezvous dataset is tombstoned.
+    // Ensure that Nexus does not perform an instance reservation with local
+    // storage if a rendezvous dataset is tombstoned.
     #[tokio::test]
-    async fn local_storage_allocation_no_exhaustive_search_tombstoned() {
+    async fn local_storage_allocation_no_reserve_tombstoned() {
         let logctx = dev::test_setup_log(
-            "local_storage_allocation_no_exhaustive_search_tombstoned",
+            "local_storage_allocation_no_reserve_tombstoned",
         );
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
@@ -7615,7 +7614,7 @@ pub(in crate::db::datastore) mod test {
         )
         .await;
 
-        // Now attempt the reservation. This should complete quickly!
+        // Now attempt the reservation.
 
         let instance =
             Instance::from_local_storage_test_instance(&config.instances[0]);
@@ -7659,12 +7658,12 @@ pub(in crate::db::datastore) mod test {
         logctx.cleanup_successful();
     }
 
-    // Ensure that Nexus does not perform an exhaustive search through all
-    // possible local storage allocations if a sled is expunged.
+    // Ensure that Nexus does not perform an instance reservation with local
+    // storage if a sled is expunged.
     #[tokio::test]
-    async fn local_storage_allocation_no_exhaustive_search_sled_expunge() {
+    async fn local_storage_allocation_no_reserve_sled_expunge() {
         let logctx = dev::test_setup_log(
-            "local_storage_allocation_no_exhaustive_search_sled_expunge",
+            "local_storage_allocation_no_reserve_sled_expunge",
         );
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
@@ -7722,7 +7721,7 @@ pub(in crate::db::datastore) mod test {
 
         set_sled_expunged(datastore, &opctx, config.sleds[0].sled_id).await;
 
-        // Now attempt the reservation. This should complete quickly!
+        // Now attempt the reservation.
 
         let instance =
             Instance::from_local_storage_test_instance(&config.instances[0]);
@@ -7766,12 +7765,12 @@ pub(in crate::db::datastore) mod test {
         logctx.cleanup_successful();
     }
 
-    // Ensure that Nexus does not perform an exhaustive search through all
-    // possible local storage allocations if a physical disk is expunged.
+    // Ensure that Nexus does not perform an instance reservation with local
+    // storage if a physical disk is expunged.
     #[tokio::test]
-    async fn local_storage_allocation_no_exhaustive_search_disk_expunge() {
+    async fn local_storage_allocation_no_reserve_disk_expunge() {
         let logctx = dev::test_setup_log(
-            "local_storage_allocation_no_exhaustive_search_disk_expunge",
+            "local_storage_allocation_no_reserve_disk_expunge",
         );
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
@@ -7834,7 +7833,7 @@ pub(in crate::db::datastore) mod test {
         )
         .await;
 
-        // Now attempt the reservation. This should complete quickly!
+        // Now attempt the reservation.
 
         let instance =
             Instance::from_local_storage_test_instance(&config.instances[0]);
@@ -7949,7 +7948,222 @@ pub(in crate::db::datastore) mod test {
             .await;
         }
 
-        // Now attempt the reservation. This should complete quickly!
+        // Now attempt the reservation.
+
+        let instance =
+            Instance::from_local_storage_test_instance(&config.instances[0]);
+
+        datastore
+            .sled_reservation_create_inner(
+                &opctx,
+                instance.id,
+                PropolisUuid::new_v4(),
+                instance.resources(),
+                db::model::SledReservationConstraints::none(),
+                SledReservationReason::Start,
+            )
+            .await
+            .unwrap();
+
+        let allocation_records: Vec<_> = {
+            let conn = datastore.pool_connection_for_tests().await.unwrap();
+
+            use nexus_db_schema::schema::local_storage_unencrypted_dataset_allocation::dsl;
+
+            dsl::local_storage_unencrypted_dataset_allocation
+                .filter(dsl::time_deleted.is_null())
+                .select(db::model::LocalStorageUnencryptedDatasetAllocation::as_select())
+                .load_async(&*conn)
+                .await
+                .unwrap()
+        };
+
+        assert_eq!(allocation_records.len(), 5);
+
+        validate_local_storage_allocations(&datastore).await;
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    // Ensure Nexus successfully performs an instance reservation even if some
+    // datasets are tombstoned.
+    #[tokio::test]
+    async fn local_storage_allocation_partial_tombstone() {
+        let logctx =
+            dev::test_setup_log("local_storage_allocation_partial_tombstone");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let config = LocalStorageTest {
+            sleds: vec![LocalStorageTestSled {
+                sled_id: SledUuid::new_v4(),
+                sled_serial: String::from("sled"),
+                u2s: (0..10)
+                    .map(|i| LocalStorageTestSledU2 {
+                        physical_disk_id: PhysicalDiskUuid::new_v4(),
+                        physical_disk_serial: format!("sled-phys{i}"),
+
+                        zpool_id: ZpoolUuid::new_v4(),
+                        control_plane_storage_buffer:
+                            external::ByteCount::from_gibibytes_u32(250),
+
+                        inventory_total_size:
+                            external::ByteCount::from_gibibytes_u32(1024),
+
+                        crucible_dataset_id: DatasetUuid::new_v4(),
+                        crucible_dataset_addr: format!(
+                            "[fd00:1122:3344:101::{i}]:12345"
+                        )
+                        .parse()
+                        .unwrap(),
+
+                        local_storage_unencrypted_dataset_id:
+                            DatasetUuid::new_v4(),
+                    })
+                    .collect(),
+            }],
+            affinity_groups: vec![],
+            anti_affinity_groups: vec![],
+            instances: vec![LocalStorageTestInstance {
+                id: InstanceUuid::new_v4(),
+                name: String::from("local"),
+                affinity: None,
+                ncpus: 16,
+                memory: external::ByteCount::from_gibibytes_u32(32),
+                // Note here that only 5 local storage disks are requested.
+                disks: (0..5)
+                    .map(|i| LocalStorageTestInstanceDisk {
+                        id: Uuid::new_v4(),
+                        name: external::Name::try_from(format!("local-{i}"))
+                            .unwrap(),
+                        size: external::ByteCount::from_gibibytes_u32(128),
+                    })
+                    .collect(),
+            }],
+        };
+
+        setup_local_storage_allocation_test(&opctx, datastore, &config).await;
+
+        // Before attempting sled reservation, tombstone every other disk
+
+        for i in 0..5 {
+            set_local_storage_unencrypted_dataset_tombstoned(
+                datastore,
+                config.sleds[0].u2s[i * 2].local_storage_unencrypted_dataset_id,
+            )
+            .await;
+        }
+
+        // Now attempt the reservation.
+
+        let instance =
+            Instance::from_local_storage_test_instance(&config.instances[0]);
+
+        datastore
+            .sled_reservation_create_inner(
+                &opctx,
+                instance.id,
+                PropolisUuid::new_v4(),
+                instance.resources(),
+                db::model::SledReservationConstraints::none(),
+                SledReservationReason::Start,
+            )
+            .await
+            .unwrap();
+
+        let allocation_records: Vec<_> = {
+            let conn = datastore.pool_connection_for_tests().await.unwrap();
+
+            use nexus_db_schema::schema::local_storage_unencrypted_dataset_allocation::dsl;
+
+            dsl::local_storage_unencrypted_dataset_allocation
+                .filter(dsl::time_deleted.is_null())
+                .select(db::model::LocalStorageUnencryptedDatasetAllocation::as_select())
+                .load_async(&*conn)
+                .await
+                .unwrap()
+        };
+
+        assert_eq!(allocation_records.len(), 5);
+
+        validate_local_storage_allocations(&datastore).await;
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    // Ensure Nexus successfully performs an instance reservation even if some
+    // physical disks are expunged.
+    #[tokio::test]
+    async fn local_storage_allocation_partial_expunge() {
+        let logctx =
+            dev::test_setup_log("local_storage_allocation_partial_expunge");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let config = LocalStorageTest {
+            sleds: vec![LocalStorageTestSled {
+                sled_id: SledUuid::new_v4(),
+                sled_serial: String::from("sled"),
+                u2s: (0..10)
+                    .map(|i| LocalStorageTestSledU2 {
+                        physical_disk_id: PhysicalDiskUuid::new_v4(),
+                        physical_disk_serial: format!("sled-phys{i}"),
+
+                        zpool_id: ZpoolUuid::new_v4(),
+                        control_plane_storage_buffer:
+                            external::ByteCount::from_gibibytes_u32(250),
+
+                        inventory_total_size:
+                            external::ByteCount::from_gibibytes_u32(1024),
+
+                        crucible_dataset_id: DatasetUuid::new_v4(),
+                        crucible_dataset_addr: format!(
+                            "[fd00:1122:3344:101::{i}]:12345"
+                        )
+                        .parse()
+                        .unwrap(),
+
+                        local_storage_unencrypted_dataset_id:
+                            DatasetUuid::new_v4(),
+                    })
+                    .collect(),
+            }],
+            affinity_groups: vec![],
+            anti_affinity_groups: vec![],
+            instances: vec![LocalStorageTestInstance {
+                id: InstanceUuid::new_v4(),
+                name: String::from("local"),
+                affinity: None,
+                ncpus: 16,
+                memory: external::ByteCount::from_gibibytes_u32(32),
+                // Note here that only 5 local storage disks are requested.
+                disks: (0..5)
+                    .map(|i| LocalStorageTestInstanceDisk {
+                        id: Uuid::new_v4(),
+                        name: external::Name::try_from(format!("local-{i}"))
+                            .unwrap(),
+                        size: external::ByteCount::from_gibibytes_u32(128),
+                    })
+                    .collect(),
+            }],
+        };
+
+        setup_local_storage_allocation_test(&opctx, datastore, &config).await;
+
+        // Before attempting sled reservation, expunge every other disk
+
+        for i in 0..5 {
+            set_disk_expunged(
+                datastore,
+                &opctx,
+                config.sleds[0].u2s[i * 2].physical_disk_id,
+            )
+            .await;
+        }
+
+        // Now attempt the reservation.
 
         let instance =
             Instance::from_local_storage_test_instance(&config.instances[0]);
