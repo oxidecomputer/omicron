@@ -8,6 +8,7 @@ use nexus_types::external_api::networking::{
 };
 use omicron_common::api::external::Error;
 use sled_agent_types::early_networking::SwitchSlot;
+use strum::IntoEnumIterator;
 
 fn maghemite_interface_name(interface_name: &str) -> String {
     format!("tfport{interface_name}_0")
@@ -16,14 +17,14 @@ fn maghemite_interface_name(interface_name: &str) -> String {
 impl super::Nexus {
     pub async fn bgp_unnumbered_manager_status(
         &self,
-        _optctx: &OpContext,
+        _opctx: &OpContext,
     ) -> Result<Vec<SwitchUnnumberedManagerState>, Error> {
         // Ask each switch about the BGP unnumbered interfaces it manages.
         let mg_clients = self.mg_clients().await.map_err(|err| {
             Error::internal_error(&format!("failed to get mg clients: {err}"))
         })?;
         let mut result = Vec::new();
-        for switch_slot in [SwitchSlot::Switch0, SwitchSlot::Switch1] {
+        for switch_slot in SwitchSlot::iter() {
             // Log an error if we only have one scrimlet, but keep going.
             // We still want to return anything we're able to collect.
             let Some(mg_client) = mg_clients.get(&switch_slot) else {
@@ -53,14 +54,14 @@ impl super::Nexus {
 
     pub async fn bgp_unnumbered_interfaces(
         &self,
-        _optctx: &OpContext,
+        _opctx: &OpContext,
     ) -> Result<Vec<SwitchUnnumberedInterface>, Error> {
         // Ask each switch about the BGP unnumbered interfaces it manages.
         let mg_clients = self.mg_clients().await.map_err(|err| {
             Error::internal_error(&format!("failed to get mg clients: {err}"))
         })?;
         let mut result = Vec::new();
-        for switch_slot in [SwitchSlot::Switch0, SwitchSlot::Switch1] {
+        for switch_slot in SwitchSlot::iter() {
             // Log an error if we only have one scrimlet, but keep going.
             // We still want to return anything we're able to collect.
             let Some(mg_client) = mg_clients.get(&switch_slot) else {
@@ -92,7 +93,7 @@ impl super::Nexus {
 
     pub async fn bgp_unnumbered_interface(
         &self,
-        _optctx: &OpContext,
+        _opctx: &OpContext,
         switch_slot: SwitchSlot,
         interface_name: String,
     ) -> Result<SwitchUnnumberedInterface, Error> {
