@@ -4,8 +4,6 @@
 
 //! Metrics oximeter reports about itself
 
-// Copyright 2023 Oxide Computer Company
-
 use crate::ProducerEndpoint;
 use oximeter::MetricsError;
 use oximeter::Sample;
