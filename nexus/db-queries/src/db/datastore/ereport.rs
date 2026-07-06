@@ -228,6 +228,15 @@ impl DataStore {
             .select((dsl::restart_id, dsl::ena))
     }
 
+    /// Returns an [`EreportId`] with the latest ENA that exists for the given
+    /// [`EreporterRestartUuid`], or [`None`] if no (non-deleted)ereports exist
+    /// with that restart ID.
+    ///
+    /// This is used when inserting a batch of ereports, in order to determine
+    /// the most recent ENA to use in a subsequent request for more ereports
+    /// from that reporter. This is intentionally a separate query than the CTE
+    /// that inserts the batch, as additional ereports with a greater ENA may
+    /// have been inserted concurrently.
     async fn latest_ena_for_restart_on_conn(
         &self,
         restart_id: EreporterRestartUuid,
@@ -235,6 +244,7 @@ impl DataStore {
     ) -> Result<Option<EreportId>, Error> {
         let ena = dsl::ereport
             .filter(dsl::restart_id.eq(restart_id.into_untyped_uuid()))
+            .filter(dsl::time_deleted.is_null())
             .order_by(dsl::ena.desc())
             .limit(1)
             .select(dsl::ena)
