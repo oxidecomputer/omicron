@@ -964,8 +964,12 @@ async fn cmd_db_alert_list(
         filters
     };
 
-    let pagparams =
-        DataPageParams { marker: None, ..first_page(fetch_opts.fetch_limit) };
+    let pagparams = DataPageParams {
+        marker: None,
+        // Descending order shows the newest alerts first
+        direction: dropshot::PaginationOrder::Descending,
+        limit: fetch_opts.fetch_limit,
+    };
 
     let ctx = || "loading alerts";
     let alerts: Vec<(Alert, Option<RendezvousAlertCreated>)> = datastore
