@@ -1447,17 +1447,11 @@ impl DataStore {
                                 return Ok(resource);
                             }
 
-                            // If an insert fails to add any rows, log that this
-                            // is happening.  Ending up here is expected during
-                            // concurrent reservations requiring local storage
-                            // allocations, but repeatedly ending up here
-                            // without pruning any allocations is likely a bug.
-
-                            info!(
-                                &log,
-                                "sled_insert_resource_query executed but \
-                                inserted 0 rows",
-                            );
+                            // Ending up here without inserting any rows is
+                            // expected during concurrent reservations requiring
+                            // local storage allocations, but repeatedly ending
+                            // up here without pruning any allocations is likely
+                            // a bug.
                         }
 
                         Err(diesel::result::Error::DatabaseError(
