@@ -95,8 +95,19 @@ struct AlertListArgs {
     /// cases will be included in the output.
     ///
     /// Note that not all alerts are requested by fault management cases.
-    #[clap(long = "case")]
+    #[clap(long, num_args(1..))]
     cases: Vec<Uuid>,
+
+    /// Include only alerts with the specified alert classes.
+    ///
+    /// If multiple values are provided, alerts with any of those classes will
+    /// be included in the output.
+    #[clap(
+        long,
+        num_args(1..),
+        value_enum,
+    )]
+    classes: Vec<ClapAlertClass>,
 
     /// If `true`, include only alerts that have been fully dispatched.
     /// If `false`, include only alerts that have not been fully dispatched.
@@ -105,6 +116,39 @@ struct AlertListArgs {
     /// events are included.
     #[clap(long, short)]
     dispatched: Option<bool>,
+}
+
+// A workaround for not being able to derive `clap::ValueEnum` on
+// `nexus_types::alert::AlertClass`, due to it living in the `nexus_types`
+// crate(which doesn't really want a `clap` dependency).
+#[derive(Debug, Copy, Clone)]
+struct ClapAlertClass(nexus_types::alert::AlertClass);
+
+impl clap::ValueEnum for ClapAlertClass {
+    fn value_variants<'a>() -> &'a [Self] {
+        static VALUE_VARIANTS: std::sync::LazyLock<Vec<ClapAlertClass>> =
+            std::sync::LazyLock::new(|| {
+                nexus_types::alert::AlertClass::ALL_CLASSES
+                    .iter()
+                    .copied()
+                    .map(ClapAlertClass)
+                    .collect()
+            });
+        &VALUE_VARIANTS
+    }
+
+    fn to_possible_value(&self) -> Option<clap::builder::PossibleValue> {
+        Some(
+            clap::builder::PossibleValue::new(self.0.as_str())
+                .help(self.0.description()),
+        )
+    }
+}
+
+impl From<&'_ ClapAlertClass> for AlertClass {
+    fn from(&ClapAlertClass(class): &ClapAlertClass) -> AlertClass {
+        class.into()
+    }
 }
 
 #[derive(Debug, Args, Clone)]
@@ -889,6 +933,7 @@ async fn cmd_db_alert_list(
         dispatched_before,
         dispatched_after,
         dispatched,
+        classes,
     } = args;
 
     let filters = {
@@ -910,8 +955,11 @@ async fn cmd_db_alert_list(
         }
         if !cases.is_empty() {
             filters = filters.for_fm_cases(
-                cases.iter().cloned().map(CaseUuid::from_untyped_uuid),
+                cases.iter().copied().map(CaseUuid::from_untyped_uuid),
             );
+        }
+        if !classes.is_empty() {
+            filters = filters.with_classes(classes);
         }
         filters
     };
