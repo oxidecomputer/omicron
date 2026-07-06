@@ -31,8 +31,6 @@ use nexus_db_model::fm::RendezvousAlertCreated;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
 use nexus_db_queries::db::DataStore;
-use nexus_db_schema::schema::alert::dsl as alert_dsl;
-use nexus_db_schema::schema::rendezvous_alert_created::dsl as rendezvous_created_dsl;
 use nexus_db_schema::schema::webhook_delivery::dsl as delivery_dsl;
 use nexus_db_schema::schema::webhook_delivery_attempt::dsl as attempt_dsl;
 use nexus_types::identity::Resource;
@@ -41,6 +39,7 @@ use omicron_common::api::external::Generation;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_uuid_kinds::AlertUuid;
+use omicron_uuid_kinds::CaseUuid;
 use omicron_uuid_kinds::GenericUuid;
 use tabled::Tabled;
 use uuid::Uuid;
@@ -219,7 +218,7 @@ pub(super) async fn cmd_db_alert(
             cmd_db_alert_info(opctx, datastore, fetch_opts, args).await
         }
         Commands::List(args) => {
-            cmd_db_alert_list(datastore, fetch_opts, args).await
+            cmd_db_alert_list(opctx, datastore, fetch_opts, args).await
         }
         Commands::Webhook(args) => {
             cmd_db_webhook(opctx, datastore, fetch_opts, args).await
@@ -877,6 +876,7 @@ async fn cmd_db_webhook_delivery_info(
 }
 
 async fn cmd_db_alert_list(
+    opctx: &OpContext,
     datastore: &DataStore,
     fetch_opts: &DbFetchOptions,
     args: &AlertListArgs,
@@ -891,71 +891,39 @@ async fn cmd_db_alert_list(
         dispatched,
     } = args;
 
-    if let (Some(before), Some(after)) = (before, after) {
-        anyhow::ensure!(
-            after < before,
-            "if both `--after` and `--before` are included, after must be
-             earlier than before"
-        );
-    }
-
-    if let (Some(before), Some(after)) = (dispatched_before, dispatched_after) {
-        anyhow::ensure!(
-            after < before,
-            "if both `--dispatched-after` and `--dispatched-before` are
-             included, after must be earlier than before"
-        );
-    }
-
-    let conn = datastore.pool_connection_for_tests().await?;
-
-    // Fetch all alerts up to our limit, including any corresponding
-    // `rendezvous_alert_created` markers so we can display the generation at
-    // which the alert was created. Note, all FM-created alerts can be
-    // distinguished by their fm_case_id, but won't necessarily have a creation
-    // marker: GC will clean up markers that are no longer needed.
-    let mut query = alert_dsl::alert
-        .left_join(rendezvous_created_dsl::rendezvous_alert_created)
-        .limit(fetch_opts.fetch_limit.get().into())
-        .order_by(alert_dsl::time_created.asc())
-        .select((
-            Alert::as_select(),
-            Option::<RendezvousAlertCreated>::as_select(),
-        ))
-        .into_boxed();
-
-    if let Some(before) = before {
-        query = query.filter(alert_dsl::time_created.lt(*before));
-    }
-
-    if let Some(after) = after {
-        query = query.filter(alert_dsl::time_created.gt(*after));
-    }
-
-    if let Some(before) = dispatched_before {
-        query = query.filter(alert_dsl::time_dispatched.lt(*before));
-    }
-
-    if let Some(after) = dispatched_after {
-        query = query.filter(alert_dsl::time_dispatched.gt(*after));
-    }
-
-    if let Some(dispatched) = dispatched {
-        if *dispatched {
-            query = query.filter(alert_dsl::time_dispatched.is_not_null());
-        } else {
-            query = query.filter(alert_dsl::time_dispatched.is_null());
+    let filters = {
+        let mut filters = nexus_db_queries::db::datastore::AlertFilters::new();
+        if let &Some(before) = before {
+            filters = filters.before(before)?;
         }
-    }
+        if let &Some(after) = after {
+            filters = filters.after(after)?;
+        }
+        if let &Some(dispatched_before) = dispatched_before {
+            filters = filters.dispatched_before(dispatched_before)?;
+        }
+        if let &Some(dispatched_after) = dispatched_after {
+            filters = filters.dispatched_after(dispatched_after)?;
+        }
+        if let &Some(dispatched) = dispatched {
+            filters = filters.dispatched(dispatched)?;
+        }
+        if !cases.is_empty() {
+            filters = filters.for_fm_cases(
+                cases.iter().cloned().map(CaseUuid::from_untyped_uuid),
+            );
+        }
+        filters
+    };
 
-    if !cases.is_empty() {
-        query = query.filter(alert_dsl::case_id.eq_any(cases.clone()));
-    }
+    let pagparams =
+        DataPageParams { marker: None, ..first_page(fetch_opts.fetch_limit) };
 
     let ctx = || "loading alerts";
-    let alerts: Vec<(Alert, Option<RendezvousAlertCreated>)> =
-        query.load_async(&*conn).await.with_context(ctx)?;
-
+    let alerts: Vec<(Alert, Option<RendezvousAlertCreated>)> = datastore
+        .alert_list_matching(opctx, &filters, &pagparams)
+        .await
+        .with_context(ctx)?;
     check_limit(&alerts, fetch_opts.fetch_limit, ctx);
 
     #[derive(Tabled)]

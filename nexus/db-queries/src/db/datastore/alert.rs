@@ -8,11 +8,16 @@ use super::DataStore;
 use super::RunnableQuery;
 use crate::authz;
 use crate::context::OpContext;
+use crate::db::model;
 use crate::db::model::Alert;
+use crate::db::model::DbTypedUuid;
 use crate::db::model::fm;
+use crate::db::pagination::paginated_multicolumn;
 use crate::db::sitrep_guard::SitrepGuardedInsert;
 use crate::db::sitrep_guard::SitrepGuardedInsertOutcome;
 use async_bb8_diesel::AsyncRunQueryDsl;
+use chrono::DateTime;
+use chrono::Utc;
 use diesel::dsl::AsSelect;
 use diesel::dsl::SqlTypeOf;
 use diesel::pg::Pg;
@@ -25,11 +30,14 @@ use nexus_db_schema::schema::alert::dsl as alert_dsl;
 use nexus_types::fm::case::AlertRequest;
 use nexus_types::identity::Asset;
 use omicron_common::api::external::CreateResult;
+use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::Generation;
+use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
+use omicron_uuid_kinds::CaseKind;
 use omicron_uuid_kinds::{AlertUuid, CaseUuid, GenericUuid};
 use std::collections::HashSet;
 use uuid::Uuid;
@@ -54,6 +62,179 @@ pub enum FmRendezvousAlertCreateError {
     /// An error occurred while accessing the database.
     #[error(transparent)]
     Database(#[from] Error),
+}
+
+#[derive(Debug, Default)]
+pub struct AlertFilters {
+    /// Include only alerts created before this timestamp
+    before: Option<DateTime<Utc>>,
+
+    /// Include only alerts created after this timestamp
+    after: Option<DateTime<Utc>>,
+
+    /// Include only alerts fully dispatched before this timestamp
+    dispatched_before: Option<DateTime<Utc>>,
+
+    /// Include only alerts fully dispatched after this timestamp
+    dispatched_after: Option<DateTime<Utc>>,
+
+    /// Include only alerts requested by the fault management case(s) with the
+    /// specified UUIDs.
+    ///
+    /// If multiple case IDs are provided, alerts requested by any of those
+    /// cases will be included in the output.
+    ///
+    /// Note that not all alerts are requested by fault management cases.
+    cases: Vec<DbTypedUuid<CaseKind>>,
+
+    /// Include only alerts with the specified alert classes.
+    classes: Vec<model::AlertClass>,
+
+    /// If `true`, include only alerts that have been fully dispatched.
+    /// If `false`, include only alerts that have not been fully dispatched.
+    ///
+    /// If this argument is not provided, both dispatched and un-dispatched
+    /// events are included.
+    dispatched: Option<bool>,
+}
+
+impl AlertFilters {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Includes only alerts created at or after `time`
+    ///
+    /// Returns an error if `time` is after a previously set `before` time..
+    pub fn after(mut self, time: DateTime<Utc>) -> Result<Self, Error> {
+        if let Some(before) = self.before {
+            if time > before {
+                return Err(Error::invalid_request(
+                    "`after` timestamp must be earlier than `before` \
+                    timestamp",
+                ));
+            }
+        }
+        self.after = Some(time);
+        Ok(self)
+    }
+
+    /// Includes only alerts created at or before `time`.
+    ///
+    /// Returns an error if `time` is before a previously set `after` time.
+    pub fn before(mut self, time: DateTime<Utc>) -> Result<Self, Error> {
+        if let Some(after) = self.after {
+            if after > time {
+                return Err(Error::invalid_request(
+                    "`before` timestamp must be later than `after` \
+                    timestamp",
+                ));
+            }
+        }
+        self.before = Some(time);
+        Ok(self)
+    }
+
+    /// Includes only alerts dispatched at or after `time`
+    ///
+    /// Returns an error if `time` is after a previously set `dispatched_before` time.
+    pub fn dispatched_after(
+        mut self,
+        time: DateTime<Utc>,
+    ) -> Result<Self, Error> {
+        if let Some(false) = self.dispatched {
+            return Err(Error::invalid_request(
+                "cannot filter by `dispatched_after` when querying \
+                 for undispatched alerts (i.e. when `dispatched` is `false`)",
+            ));
+        }
+        if let Some(before) = self.dispatched_before {
+            if time > before {
+                return Err(Error::invalid_request(
+                    "`dispatched_after` timestamp must be earlier \
+                    than `dispatched_before` timestamp",
+                ));
+            }
+        }
+        self.dispatched_after = Some(time);
+        Ok(self)
+    }
+
+    /// Includes only alerts dispatched at or before `time`.
+    ///
+    /// Returns an error if `time` is before a previously set `dispatched_after`
+    /// time.
+    pub fn dispatched_before(
+        mut self,
+        time: DateTime<Utc>,
+    ) -> Result<Self, Error> {
+        if let Some(false) = self.dispatched {
+            return Err(Error::invalid_request(
+                "cannot filter by `dispatched_before` when querying \
+                 for undispatched alerts (i.e. when `dispatched` is `false`)",
+            ));
+        }
+        if let Some(after) = self.dispatched_after {
+            if after > time {
+                return Err(Error::invalid_request(
+                    "`dispatched_before` timestamp must be later \
+                    than  `dispatched_after` timestamp",
+                ));
+            }
+        }
+        self.dispatched_before = Some(time);
+        Ok(self)
+    }
+
+    /// Add a set of fault management case IDs to filter by.
+    ///
+    /// Multiple calls to this method are additive; the filters will include
+    /// alerts for any of the fault management case IDs provided by *any* time
+    /// this method was called on a given instance of `AlertFilters`.
+    pub fn for_fm_cases<I>(mut self, cases: impl IntoIterator<Item = I>) -> Self
+    where
+        I: Into<DbTypedUuid<CaseKind>>,
+    {
+        self.cases.extend(cases.into_iter().map(Into::into));
+        self
+    }
+
+    /// Add a set of alert classes to filter by.
+    ///
+    /// Multiple calls to this method are additive; the filters will include
+    /// alerts with any of the alert classes provided by *any* time
+    /// this method was called on a given instance of `AlertFilters`.
+    pub fn with_classes<I>(
+        mut self,
+        classes: impl IntoIterator<Item = I>,
+    ) -> Self
+    where
+        I: Into<model::AlertClass>,
+    {
+        self.classes.extend(classes.into_iter().map(Into::into));
+        self
+    }
+
+    /// If `true`, include only dispatched alerts; if `false`, include only
+    /// undispatched alerts.
+    pub fn dispatched(mut self, dispatched: bool) -> Result<Self, Error> {
+        if !dispatched {
+            if self.dispatched_after.is_some() {
+                return Err(Error::invalid_request(
+                    "cannot filter by `dispatched_after` when \
+                     querying for undispatched alerts",
+                ));
+            }
+            if self.dispatched_before.is_some() {
+                return Err(Error::invalid_request(
+                    "cannot filter by `dispatched_before` when \
+                     querying for undispatched alerts",
+                ));
+            }
+        }
+        self.dispatched = Some(dispatched);
+        Ok(self)
+    }
 }
 
 impl DataStore {
@@ -261,16 +442,95 @@ impl DataStore {
             .optional()
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
+
+    pub async fn alert_list_matching(
+        &self,
+        opctx: &OpContext,
+        filters: &AlertFilters,
+        pagparams: &DataPageParams<'_, (DateTime<Utc>, Uuid)>,
+    ) -> ListResultVec<(Alert, Option<fm::RendezvousAlertCreated>)> {
+        opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
+        Self::alert_list_matching_query(filters, pagparams)
+            .load_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    fn alert_list_matching_query(
+        filters: &AlertFilters,
+        pagparams: &DataPageParams<'_, (DateTime<Utc>, Uuid)>,
+    ) -> impl RunnableQuery<(Alert, Option<fm::RendezvousAlertCreated>)> + use<>
+    {
+        use nexus_db_schema::schema::rendezvous_alert_created::dsl as marker_dsl;
+
+        let mut query = paginated_multicolumn(
+            alert_dsl::alert,
+            (alert_dsl::time_created, alert_dsl::id),
+            &pagparams,
+        )
+        .left_join(marker_dsl::rendezvous_alert_created)
+        .select((
+            Alert::as_select(),
+            Option::<fm::RendezvousAlertCreated>::as_select(),
+        ));
+
+        let &AlertFilters {
+            before,
+            after,
+            dispatched_before,
+            dispatched_after,
+            dispatched,
+            ref cases,
+            ref classes,
+        } = filters;
+        if let Some(before) = before {
+            query = query.filter(alert_dsl::time_created.lt(before));
+        }
+
+        if let Some(after) = after {
+            query = query.filter(alert_dsl::time_created.gt(after));
+        }
+
+        if let Some(before) = dispatched_before {
+            query = query.filter(alert_dsl::time_dispatched.lt(before));
+        }
+
+        if let Some(after) = dispatched_after {
+            query = query.filter(alert_dsl::time_dispatched.gt(after));
+        }
+
+        if let Some(dispatched) = dispatched {
+            if dispatched {
+                query = query.filter(alert_dsl::time_dispatched.is_not_null());
+            } else {
+                query = query.filter(alert_dsl::time_dispatched.is_null());
+            }
+        }
+
+        if !cases.is_empty() {
+            query = query.filter(alert_dsl::case_id.eq_any(cases.clone()));
+        }
+
+        if !classes.is_empty() {
+            query =
+                query.filter(alert_dsl::alert_class.eq_any(classes.clone()));
+        }
+
+        query
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::db::explain::ExplainableAsync;
     use crate::db::pub_test_utils::TestDatabase;
     use assert_matches::assert_matches;
     use chrono::Utc;
+    use dropshot::PaginationOrder;
     use nexus_db_model::fm::RendezvousAlertCreated;
     use nexus_db_schema::schema::rendezvous_alert_created::dsl as alert_marker_dsl;
+    use nexus_types::alert::AlertClass;
     use nexus_types::alert::test_alerts;
     use nexus_types::fm::Sitrep;
     use nexus_types::fm::SitrepMetadata;
@@ -280,6 +540,7 @@ mod tests {
     use omicron_uuid_kinds::OmicronZoneUuid;
     use omicron_uuid_kinds::SitrepUuid;
     use serde_json::json;
+    use std::num::NonZeroU32;
 
     fn make_sitrep(alert_generation: Generation) -> Sitrep {
         Sitrep {
@@ -315,6 +576,152 @@ mod tests {
             requested_sitrep_id: SitrepUuid::new_v4(),
             comment: String::new(),
         }
+    }
+
+    #[tokio::test]
+    async fn explain_alert_list_matching_default() {
+        explain_list_matching_query(
+            "explain_alert_list_matching_default",
+            AlertFilters::default(),
+        )
+        .await
+    }
+
+    #[tokio::test]
+    async fn explain_alert_list_matching_created_time() {
+        let now = Utc::now();
+        explain_list_matching_query(
+            "explain_alert_list_matching_created_time",
+            AlertFilters::new()
+                .after(now - chrono::Duration::hours(1))
+                .expect("`after` is before `before`")
+                .before(now)
+                .expect("`before` is after `after`"),
+        )
+        .await
+    }
+
+    #[tokio::test]
+    async fn explain_alert_list_matching_dispatched_time() {
+        let now = Utc::now();
+        explain_list_matching_query(
+            "explain_alert_list_matching_dispatched_time",
+            AlertFilters::new()
+                .dispatched_after(now - chrono::Duration::hours(1))
+                .expect("`dispatched_after` is before `dispatched_before`")
+                .dispatched_before(now)
+                .expect("`dispatched_before` is after `dispatched_after`"),
+        )
+        .await
+    }
+
+    #[tokio::test]
+    async fn explain_alert_list_matching_dispatched_true() {
+        explain_list_matching_query(
+            "explain_alert_list_matching_dispatched_true",
+            AlertFilters::new()
+                .dispatched(true)
+                .expect("no conflicting filters"),
+        )
+        .await
+    }
+
+    #[tokio::test]
+    async fn explain_alert_list_matching_dispatched_false() {
+        explain_list_matching_query(
+            "explain_alert_list_matching_dispatched_false",
+            AlertFilters::new()
+                .dispatched(false)
+                .expect("no conflicting filters"),
+        )
+        .await
+    }
+
+    #[tokio::test]
+    async fn explain_alert_list_matching_only_cases() {
+        explain_list_matching_query(
+            "explain_alert_list_matching_only_cases",
+            AlertFilters::new()
+                .for_fm_cases([CaseUuid::new_v4(), CaseUuid::new_v4()]),
+        )
+        .await
+    }
+
+    #[tokio::test]
+    async fn explain_alert_list_matching_only_classes() {
+        explain_list_matching_query(
+            "explain_alert_list_matching_only_classes",
+            AlertFilters::new()
+                .with_classes([AlertClass::TestFoo, AlertClass::TestFooBar]),
+        )
+        .await
+    }
+
+    #[tokio::test]
+    async fn explain_alert_list_matching_cases_and_classes() {
+        explain_list_matching_query(
+            "explain_alert_list_matching_cases_and_classes",
+            AlertFilters::new()
+                .for_fm_cases([CaseUuid::new_v4(), CaseUuid::new_v4()])
+                .with_classes([AlertClass::TestFoo, AlertClass::TestFooBar]),
+        )
+        .await
+    }
+
+    #[tokio::test]
+    async fn explain_alert_list_matching_all_filters() {
+        let now = Utc::now();
+        explain_list_matching_query(
+            "explain_alert_list_matching_all_filters",
+            AlertFilters::new()
+                .after(now - chrono::Duration::hours(2))
+                .expect("`after` is before `before`")
+                .before(now)
+                .expect("`before` is after `after`")
+                .dispatched_after(now - chrono::Duration::hours(1))
+                .expect("`dispatched_after` is before `dispatched_before`")
+                .dispatched_before(now)
+                .expect("`dispatched_before` is after `dispatched_after`")
+                .dispatched(true)
+                .expect("true and dispatched before/after is valid")
+                .for_fm_cases([CaseUuid::new_v4(), CaseUuid::new_v4()])
+                .with_classes([AlertClass::TestFoo, AlertClass::TestFooBar]),
+        )
+        .await
+    }
+
+    async fn explain_list_matching_query(
+        test_name: &str,
+        filters: AlertFilters,
+    ) {
+        let logctx = dev::test_setup_log(test_name);
+        let db = TestDatabase::new_with_pool(&logctx.log).await;
+        let pool = db.pool();
+        let conn = pool.claim().await.unwrap();
+
+        let pagparams = DataPageParams::<'_, (DateTime<Utc>, Uuid)> {
+            marker: None,
+            direction: PaginationOrder::Ascending,
+            limit: NonZeroU32::new(100).unwrap(),
+        };
+        eprintln!("--- filters: {filters:#?}\n");
+
+        let query = DataStore::alert_list_matching_query(&filters, &pagparams);
+
+        let explanation = query
+            .explain_async(&conn)
+            .await
+            .expect("Failed to explain query - is it valid SQL?");
+
+        eprintln!("--- explanation: {explanation}");
+
+        assert!(
+            !explanation.contains("FULL SCAN"),
+            "Found an unexpected FULL SCAN: {explanation}",
+        );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
     }
 
     #[tokio::test]
