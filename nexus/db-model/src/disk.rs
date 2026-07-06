@@ -129,6 +129,10 @@ impl Disk {
         self.identity.id
     }
 
+    pub fn time_deleted(&self) -> Option<DateTime<Utc>> {
+        self.identity.time_deleted
+    }
+
     pub fn slot(&self) -> Option<u8> {
         self.slot.map(Into::into)
     }

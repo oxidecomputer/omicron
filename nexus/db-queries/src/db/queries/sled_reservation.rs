@@ -602,7 +602,16 @@ pub fn sled_insert_resource_query(
                             .into_untyped_uuid(),
                     );
 
-                query.sql(")");
+                query.sql(") AND");
+
+                // and the disk must not be deleted
+
+                query
+                    .sql("(SELECT time_deleted IS NULL FROM DISK WHERE ID = ")
+                    .param()
+                    .bind::<sql_types::Uuid, _>(allocation.disk_id);
+
+                query.sql(") ");
 
                 if index != (allocations.len() - 1) {
                     query.sql(" AND ");

@@ -69,6 +69,11 @@ allow_tables_to_appear_in_same_query!(
     disk_type_local_storage,
 );
 
+allow_tables_to_appear_in_same_query!(
+    disk,
+    local_storage_unencrypted_dataset_allocation,
+);
+
 allow_tables_to_appear_in_same_query!(volume, disk_type_crucible);
 allow_tables_to_appear_in_same_query!(
     disk_type_crucible,
