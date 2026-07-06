@@ -4,8 +4,6 @@
 
 //! Query plan node for constructing a delta from a cumulative timeseries.
 
-// Copyright 2024 Oxide Computer Company
-
 use oxql_types::point::MetricType;
 
 use crate::oxql::schema::TableSchema;

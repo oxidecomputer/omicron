@@ -4,8 +4,6 @@
 
 //! Methods for reading / writing oximeter fields to the database.
 
-// Copyright 2024 Oxide Computer Company
-
 use super::columns;
 use super::from_block::FromBlock;
 use crate::Metric;

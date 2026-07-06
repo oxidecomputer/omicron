@@ -2,8 +2,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-// Copyright 2023 Oxide Computer Company
-
 use crate::artifacts::WicketdArtifactStore;
 use crate::helpers::sps_to_string;
 use crate::installinator_progress::IprStartReceiver;
