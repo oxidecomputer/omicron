@@ -109,9 +109,8 @@ fn ping_once_blocking(
         let received_at = Instant::now();
 
         // SAFETY: `recv_from` reports how many bytes were actually written.
-        let bytes: &[u8] = unsafe {
-            std::slice::from_raw_parts(buf.as_ptr() as *const u8, n)
-        };
+        let bytes: &[u8] =
+            unsafe { std::slice::from_raw_parts(buf.as_ptr() as *const u8, n) };
 
         // On an IPv4 raw ICMP socket the kernel hands us the full IPv4
         // packet (variable-length header + ICMP payload). On an IPv6 raw
@@ -150,7 +149,9 @@ fn ping_once_blocking(
             }
         }
 
-        return Ok(PingResult { rtt: received_at.saturating_duration_since(sent_at) });
+        return Ok(PingResult {
+            rtt: received_at.saturating_duration_since(sent_at),
+        });
     }
 }
 

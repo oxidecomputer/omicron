@@ -16,6 +16,7 @@ use scuffle::Scf;
 use scuffle::Value;
 use slog::info;
 use slog_error_chain::InlineErrorChain;
+use std::collections::BTreeMap;
 use std::net::IpAddr;
 use std::net::Ipv6Addr;
 use std::str::FromStr;
@@ -334,49 +335,8 @@ impl NtpAdminImpl {
         let mut all_ntp_servers = server_values.clone();
         all_ntp_servers.push(boundary_pool.clone().display_smf().to_string());
 
-        let mut name_lookups: Vec<(String, String)> =
-            Vec::with_capacity(all_ntp_servers.len());
-
-        // TODO-K: Should spawn tasks for this
-        for name in &all_ntp_servers {
-            let result = match tokio::time::timeout(
-                // TODO-K: set this timeout as a constant
-                Duration::from_secs(3),
-                lookup_host(format!("{name}:0")),
-            )
-            .await
-            {
-                Ok(Ok(addrs)) => {
-                    let ips: Vec<IpAddr> = addrs.map(|sa| sa.ip()).collect();
-                    format!("resolved to {ips:?}")
-                }
-                Ok(Err(err)) => {
-                    format!("lookup failed: {}", InlineErrorChain::new(&err))
-                }
-                Err(_) => "timed out after 3s".to_string(),
-            };
-
-            info!(log, "dns lookup probe"; "name" => name, "result" => &result);
-            name_lookups.push((name.clone(), result));
-        }
-
-        let lookup_lines: Vec<String> =
-            name_lookups.iter().map(|(n, r)| format!("{n} -> {r}")).collect();
-
-        // Boundary zone: Can I reach the upstream NTP server (e.g. ICMP ping)?
-        // Internal zone: Can I reach the boundary NTP server (e.g. ICMP ping)?
-
-        // Boundary zone: Can I resolve the upstream NTP server's name via DNS?
-        //                svcprop -p config/server svc:/oxide/chrony-setup:default
-        //
-        // Internal zone: Can I resolve the boundary NTP server's name via DNS?
-        //                svcprop -p config/boundary_pool svc:/oxide/chrony-setup:default
-        //                Should look like boundary_ntp.<some-uuid>.oxide.internal
-
-        // For each configured name, resolve it and send one ICMP echo to
-        // each resolved IP with a short timeout. Requires the raw socket
-        // privileges available inside the NTP zone.
-        let mut ping_results: Vec<(String, IpAddr, String)> = Vec::new();
+        let mut ips_per_host = BTreeMap::new();
+        // TODO-K: Should spawn tasks for this?
         for name in &all_ntp_servers {
             let ips: Vec<IpAddr> = match tokio::time::timeout(
                 // TODO-K: set this timeout as a constant
@@ -386,9 +346,35 @@ impl NtpAdminImpl {
             .await
             {
                 Ok(Ok(addrs)) => addrs.map(|sa| sa.ip()).collect(),
-                Ok(Err(_)) | Err(_) => Vec::new(),
+                // TODO-K: We don't actually want to return here with an error,
+                // we want to check all hosts in the list and then collect a list
+                // of the ones that failed. Maybe have the BTreeMap have an enum
+                // with variants Vec<ips> or Error? Or just a Result?
+                Ok(Err(e)) => {
+                    return Err(HttpError::for_internal_error(format!(
+                        "lookup failed: {}",
+                        InlineErrorChain::new(&e)
+                    )));
+                }
+                Err(_) => {
+                    return Err(HttpError::for_internal_error(
+                        "timed out after 3s".to_string(),
+                    ));
+                }
             };
+            info!(log, "dns lookup probe"; "name" => name, "ips" => format!("{:?}", ips));
+            ips_per_host.insert(name, ips);
+        }
 
+        let lookup_lines: Vec<String> =
+            ips_per_host.iter().map(|(n, r)| format!("{n} -> {r:?}")).collect();
+
+        // For each configured name, resolve it and send one ICMP echo to
+        // each resolved IP with a short timeout. Requires the raw socket
+        // privileges available inside the NTP zone.
+        let mut ping_results: Vec<(String, IpAddr, String)> = Vec::new();
+        for (host, ips) in ips_per_host {
+            // TODO-K: Should spawn tasks for this
             for ip in ips {
                 let outcome = match crate::ping::ping_once(
                     ip,
@@ -401,16 +387,15 @@ impl NtpAdminImpl {
                         "reachable, rtt {:.2} ms",
                         pong.rtt.as_secs_f64() * 1000.0,
                     ),
-                    Err(err) => format!(
-                        "unreachable: {}",
-                        InlineErrorChain::new(&err),
-                    ),
+                    Err(err) => {
+                        format!("unreachable: {}", InlineErrorChain::new(&err),)
+                    }
                 };
                 info!(
                     log, "ping probe";
-                    "name" => name, "ip" => %ip, "result" => &outcome,
+                    "host" => host, "ip" => %ip, "result" => &outcome,
                 );
-                ping_results.push((name.clone(), ip, outcome));
+                ping_results.push((host.clone(), ip, outcome));
             }
         }
 
