@@ -83,6 +83,7 @@ indexmap = { version = "2.14.0", features = ["serde"] }
 ipnet = { version = "2.11.0", features = ["serde"] }
 ipnetwork = { version = "0.21.1", features = ["schemars", "serde"] }
 itertools = { version = "0.13.0" }
+jiff = { version = "0.2.34", features = ["serde"] }
 lalrpop-util = { version = "0.19.12" }
 lazy_static = { version = "1.5.0", default-features = false, features = ["spin_no_std"] }
 libc = { version = "0.2.185", features = ["extra_traits"] }
@@ -233,6 +234,7 @@ indexmap = { version = "2.14.0", features = ["serde"] }
 ipnet = { version = "2.11.0", features = ["serde"] }
 ipnetwork = { version = "0.21.1", features = ["schemars", "serde"] }
 itertools = { version = "0.13.0" }
+jiff = { version = "0.2.34", features = ["serde"] }
 lalrpop-util = { version = "0.19.12" }
 lazy_static = { version = "1.5.0", default-features = false, features = ["spin_no_std"] }
 libc = { version = "0.2.185", features = ["extra_traits"] }

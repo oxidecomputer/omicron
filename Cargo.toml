@@ -1134,6 +1134,14 @@ opt-level = 3
 git = 'https://github.com/oxidecomputer/pq-sys'
 branch = "oxide/omicron"
 
+#
+# We maintain a fork of tough to integrate changes before upstream merges them.
+# See README.oxide.md in the "oxide/develop" branch of our fork for details.
+#
+[patch.crates-io.tough]
+git = "https://github.com/oxidecomputer/tough"
+branch = "oxide/develop"
+
 # Using the workspace-hack via this patch directive means that it only applies
 # while building within this workspace. If another workspace imports a crate
 # from here via a git dependency, it will not have the workspace-hack applied
