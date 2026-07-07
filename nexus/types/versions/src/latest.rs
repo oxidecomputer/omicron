@@ -328,6 +328,8 @@ pub mod networking {
 
     pub use crate::v2026_05_07_00::networking::SwitchInterfaceConfig;
     pub use crate::v2026_05_07_00::networking::SwitchPortSettings;
+
+    pub use crate::v2026_06_10_00::networking::BgpConfigUpdate;
 }
 
 pub mod oxql {

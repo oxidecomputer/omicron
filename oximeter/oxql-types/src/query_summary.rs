@@ -4,8 +4,6 @@
 
 //! Types representing summaries of queries against the timeseries database.
 
-// Copyright 2024 Oxide Computer Company
-
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;

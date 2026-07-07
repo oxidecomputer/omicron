@@ -427,7 +427,14 @@ mod tests {
 
     #[tokio::test]
     async fn test_ddmd_in_path() {
+        // Run ddmd --help to exit cleanly instead of actually launching the
+        // daemon. The latter would attempt to write to /var/run, get EACCES as
+        // non-root, and abort.
+        //
+        // In this test, we only care about ddmd being present, not whether it
+        // works.
         tokio::process::Command::new("ddmd")
+            .arg("--help")
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null())

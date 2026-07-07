@@ -1981,6 +1981,22 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b0e03e9489176ebd301922fdcd0234f6dee954cbf65311863353f20d2746a8db"
 
 [[package]]
+name = "corpus-adjust"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "camino",
+ "clap",
+ "iddqd",
+ "omicron-common",
+ "omicron-workspace-hack",
+ "serde_json",
+ "sha2 0.10.9",
+ "tufaceous-artifact",
+ "uuid",
+]
+
+[[package]]
 name = "cpubits"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8029,9 +8045,11 @@ dependencies = [
 name = "nexus-switch-config"
 version = "0.1.0"
 dependencies = [
+ "iddqd",
  "ipnetwork",
  "nexus-types",
  "omicron-common",
+ "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "oxnet",
  "proptest",
@@ -8049,12 +8067,12 @@ dependencies = [
  "nexus-switch-config",
  "omicron-common",
  "omicron-rpaths",
+ "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "oxnet",
  "pq-sys",
  "sled-agent-types",
  "slog",
- "uuid",
 ]
 
 [[package]]
@@ -12915,9 +12933,9 @@ checksum = "f87165f0995f63a9fbeea62b64d10b4d9d8e78ec6d7d51fb2125fda7bb36788f"
 
 [[package]]
 name = "rustls-webpki"
-version = "0.103.9"
+version = "0.103.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d7df23109aa6c1567d1c575b9952556388da57401e4ace1d15f79eedad0d8f53"
+checksum = "61c429a8649f110dddef65e2a5ad240f747e85f7758a6bccc7e5777bd33f756e"
 dependencies = [
  "aws-lc-rs",
  "ring",

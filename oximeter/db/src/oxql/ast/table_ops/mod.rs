@@ -4,8 +4,6 @@
 
 //! AST nodes for table operations.
 
-// Copyright 2024 Oxide Computer Company
-
 pub mod align;
 pub mod filter;
 pub mod get;

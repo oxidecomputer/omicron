@@ -4,8 +4,6 @@
 
 //! Definition of data points for OxQL.
 
-// Copyright 2026 Oxide Computer Company
-
 use anyhow::Context;
 use anyhow::Error;
 use chrono::DateTime;
