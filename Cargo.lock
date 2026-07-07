@@ -1981,6 +1981,22 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b0e03e9489176ebd301922fdcd0234f6dee954cbf65311863353f20d2746a8db"
 
 [[package]]
+name = "corpus-adjust"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "camino",
+ "clap",
+ "iddqd",
+ "omicron-common",
+ "omicron-workspace-hack",
+ "serde_json",
+ "sha2 0.10.9",
+ "tufaceous-artifact",
+ "uuid",
+]
+
+[[package]]
 name = "cpubits"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
