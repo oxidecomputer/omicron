@@ -34,6 +34,7 @@ use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
 use nexus_db_queries::db::DataStore;
+use nexus_db_queries::db::datastore::WebhookDeliveryFilters;
 use nexus_db_schema::schema::webhook_delivery::dsl as delivery_dsl;
 use nexus_db_schema::schema::webhook_delivery_attempt::dsl as attempt_dsl;
 use nexus_types::external_api::alert as types;
@@ -662,8 +663,7 @@ async fn cmd_db_webhook_delivery_list(
         alert,
     } = args;
     let filters = {
-        let mut filters =
-            nexus_db_queries::db::datastore::WebhookDeliveryFilters::new();
+        let mut filters = WebhookDeliveryFilters::new();
         if let &Some(before) = before {
             filters = filters.before(before)?;
         }
@@ -707,10 +707,13 @@ async fn cmd_db_webhook_delivery_list(
         filters
     };
 
-    let pagparams =
-        DataPageParams { marker: None, ..first_page(fetch_opts.fetch_limit) };
-
     let ctx = || "listing webhook deliveries";
+
+    let pagparams = DataPageParams {
+        // Descending order shows the most recent delivery first
+        direction: dropshot::PaginationOrder::Descending,
+        ..first_page(fetch_opts.fetch_limit)
+    };
 
     let deliveries = datastore
         .webhook_delivery_list(opctx, &filters, &pagparams)
@@ -1266,7 +1269,11 @@ async fn cmd_db_alert_info(
         ..first_page(fetch_opts.fetch_limit)
     };
     let deliveries = datastore
-        .alert_list_webhook_deliveries(opctx, &authz_alert, &pagparams)
+        .webhook_delivery_list(
+            opctx,
+            &WebhookDeliveryFilters::default().for_alert(&authz_alert),
+            &pagparams,
+        )
         .await
         .with_context(ctx)?;
 

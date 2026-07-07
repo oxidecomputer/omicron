@@ -560,31 +560,6 @@ impl DataStore {
         Err(Error::internal_error(MSG))
     }
 
-    pub async fn alert_list_webhook_deliveries(
-        &self,
-        opctx: &OpContext,
-        authz_alert: &authz::Alert,
-        pagparams: &DataPageParams<'_, (DateTime<Utc>, Uuid)>,
-    ) -> ListResultVec<WebhookDelivery> {
-        Self::alert_list_webhook_deliveries_query(authz_alert.id(), pagparams)
-            .load_async(&*self.pool_connection_authorized(&opctx).await?)
-            .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
-    }
-
-    fn alert_list_webhook_deliveries_query(
-        alert_id: AlertUuid,
-        pagparams: &DataPageParams<'_, (DateTime<Utc>, Uuid)>,
-    ) -> impl RunnableQuery<WebhookDelivery> + Send + use<> {
-        paginated_multicolumn(
-            dsl::webhook_delivery,
-            (dsl::time_created, dsl::id),
-            pagparams,
-        )
-        .filter(dsl::alert_id.eq(alert_id.into_untyped_uuid()))
-        .select(WebhookDelivery::as_select())
-    }
-
     /// List webhook deliveries matching the provided [`WebhookDeliveryFilters`].
     ///
     /// This backs the `omdb db alert webhook delivery list` command.
@@ -622,11 +597,11 @@ impl DataStore {
         } = filters;
 
         if let Some(before) = before {
-            query = query.filter(dsl::time_created.lt(before));
+            query = query.filter(dsl::time_created.le(before));
         }
 
         if let Some(after) = after {
-            query = query.filter(dsl::time_created.gt(after));
+            query = query.filter(dsl::time_created.ge(after));
         }
 
         if let Some(rx_id) = rx_id {
@@ -812,39 +787,6 @@ mod test {
 
         let query = DataStore::rx_list_resendable_events_query(
             AlertReceiverUuid::nil(),
-        );
-        let explanation = query
-            .explain_async(&conn)
-            .await
-            .expect("Failed to explain query - is it valid SQL?");
-
-        eprintln!("{explanation}");
-
-        assert!(
-            !explanation.contains("FULL SCAN"),
-            "Found an unexpected FULL SCAN: {}",
-            explanation
-        );
-
-        db.terminate().await;
-        logctx.cleanup_successful();
-    }
-
-    #[tokio::test]
-    async fn explain_alert_list_webhook_delivery() {
-        let logctx = dev::test_setup_log("explain_alert_list_webhook_delivery");
-        let db = TestDatabase::new_with_pool(&logctx.log).await;
-        let pool = db.pool();
-        let conn = pool.claim().await.unwrap();
-
-        let pagparams = DataPageParams {
-            marker: None,
-            direction: dropshot::PaginationOrder::Ascending,
-            limit: std::num::NonZeroU32::new(100).unwrap(),
-        };
-        let query = DataStore::alert_list_webhook_deliveries_query(
-            AlertUuid::nil(),
-            &pagparams,
         );
         let explanation = query
             .explain_async(&conn)
