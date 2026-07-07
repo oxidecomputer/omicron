@@ -434,7 +434,7 @@ impl DataStore {
     ///   storage datasets
     /// - their most recent total_size as reported by inventory.
     pub async fn zpool_get_for_sled_reservation(
-        &self,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
         opctx: &OpContext,
         sled_id: SledUuid,
     ) -> LookupResult<IdOrdMap<ZpoolGetForSledReservationResult>> {
@@ -445,8 +445,6 @@ impl DataStore {
         use nexus_db_schema::schema::physical_disk::dsl as physical_disk_dsl;
         use nexus_db_schema::schema::rendezvous_local_storage_unencrypted_dataset;
         use nexus_db_schema::schema::zpool::dsl;
-
-        let conn = self.pool_connection_authorized(opctx).await?;
 
         let tuples = dsl::zpool
             .filter(dsl::sled_id.eq(to_db_typed_uuid(sled_id)))
@@ -509,7 +507,7 @@ impl DataStore {
                 Option<diesel::pg::data_types::PgNumeric>,
                 Option<Uuid>,
                 Option<i64>,
-            )>(&*conn)
+            )>(conn)
             .await
             .map_err(|e| {
                 public_error_from_diesel(

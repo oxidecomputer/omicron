@@ -601,9 +601,12 @@ impl<'a> CompleteLocalStorageAllocationLists<'a> {
             }
         }
 
-        let zpools_for_sled = datastore
-            .zpool_get_for_sled_reservation(opctx, self.sled_target)
-            .await?;
+        let zpools_for_sled = DataStore::zpool_get_for_sled_reservation(
+            &conn,
+            opctx,
+            self.sled_target,
+        )
+        .await?;
 
         self.queue.retain(|incomplete_allocation_list| {
             // An incomplete allocation list has a set of local storage
@@ -1390,8 +1393,12 @@ impl DataStore {
                 // possible configurations that would satisfy the requests for
                 // local storage and tries them all.
 
-                let zpools_for_sled = self
-                    .zpool_get_for_sled_reservation(&opctx, sled_target)
+                let zpools_for_sled =
+                    DataStore::zpool_get_for_sled_reservation(
+                        &conn,
+                        &opctx,
+                        sled_target,
+                    )
                     .await?;
 
                 if zpools_for_sled.is_empty() {
@@ -7557,10 +7564,13 @@ pub(in crate::db::datastore) mod test {
 
         // Duplicate the loop logic that performs the allocation search
 
-        let zpools_for_sled = datastore
-            .zpool_get_for_sled_reservation(&opctx, config.sleds[0].sled_id)
-            .await
-            .unwrap();
+        let zpools_for_sled = DataStore::zpool_get_for_sled_reservation(
+            &conn,
+            &opctx,
+            config.sleds[0].sled_id,
+        )
+        .await
+        .unwrap();
 
         let mut complete_allocation_lists =
             CompleteLocalStorageAllocationLists::new(
