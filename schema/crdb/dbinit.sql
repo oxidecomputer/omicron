@@ -7285,7 +7285,7 @@ INSERT INTO omicron.public.alert (
 -- The `EXPLAIN` output will encourage us to make this into a covering index. I
 -- didn't do that, because duplicating all the fields, including the JSON, is a
 -- lot of work to do in the write path, and the pkey index join in the
--- `alert_set_next_for_dispatch` isn't a big deal, since the query only ever
+-- `alert_select_next_for_dispatch` isn't a big deal, since the query only ever
 -- reads one row at a time.
 CREATE INDEX IF NOT EXISTS lookup_alerts_by_time_dispatched
 ON omicron.public.alert (

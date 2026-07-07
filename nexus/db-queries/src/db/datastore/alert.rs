@@ -105,7 +105,7 @@ impl AlertFilters {
 
     /// Includes only alerts created at or after `time`
     ///
-    /// Returns an error if `time` is after a previously set `before` time..
+    /// Returns an error if `time` is after a previously set `before` time.
     pub fn after(mut self, time: DateTime<Utc>) -> Result<Self, Error> {
         if let Some(before) = self.before {
             if time > before {
@@ -137,7 +137,8 @@ impl AlertFilters {
 
     /// Includes only alerts dispatched at or after `time`
     ///
-    /// Returns an error if `time` is after a previously set `dispatched_before` time.
+    /// Returns an error if `time` is after a previously set `dispatched_before`
+    /// time.
     pub fn dispatched_after(
         mut self,
         time: DateTime<Utc>,
@@ -188,9 +189,10 @@ impl AlertFilters {
 
     /// Add a set of fault management case IDs to filter by.
     ///
-    /// Multiple calls to this method are additive; the filters will include
-    /// alerts for any of the fault management case IDs provided by *any* time
-    /// this method was called on a given instance of `AlertFilters`.
+    /// Multiple calls to this method are additive: if this method is called
+    /// multiple times on one instance of `AlertFilters`, the query will include
+    /// alerts for any of the fault management case IDs passed to *any* of those
+    /// calls.
     pub fn for_fm_cases<I>(mut self, cases: impl IntoIterator<Item = I>) -> Self
     where
         I: Into<DbTypedUuid<CaseKind>>,
@@ -201,9 +203,9 @@ impl AlertFilters {
 
     /// Add a set of alert classes to filter by.
     ///
-    /// Multiple calls to this method are additive; the filters will include
-    /// alerts with any of the alert classes provided by *any* time
-    /// this method was called on a given instance of `AlertFilters`.
+    /// Multiple calls to this method are additive: if this method is called
+    /// multiple times on one instance of `AlertFilters`, the query will include
+    /// alerts with any of the alert classes passed to *any* of those calls.
     pub fn with_classes<I>(
         mut self,
         classes: impl IntoIterator<Item = I>,
