@@ -605,10 +605,7 @@ impl FmRendezvous {
         match result {
             Ok(MarkerGcResult { rows_deleted, batches }) => {
                 if rows_deleted > 0 {
-                    slog::debug!(
-                        log,
-                        "GC swept {rows_deleted} marker row(s)",
-                    );
+                    slog::debug!(log, "GC swept {rows_deleted} marker row(s)",);
                 }
                 MarkerGcStatus { rows_deleted, batches, errors: Vec::new() }
             }
