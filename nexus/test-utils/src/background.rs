@@ -221,8 +221,8 @@ pub async fn run_abandoned_vmm_reaper(
     });
 
     assert!(
-        status.errors.is_empty(),
-        "abandoned_vmm_reaper task should complete without errors: {status:?}",
+        status.vmms.errors.is_empty() && status.reservations.errors.is_empty(),
+        "abandoned_vmm_reaper task should complete without errors: {status:#?}",
     );
 
     status
