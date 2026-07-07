@@ -1395,62 +1395,116 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
 }
 
 fn print_task_abandoned_vmm_reaper(details: &serde_json::Value) {
-    todo!("eliza lol")
-    // match serde_json::from_value::<AbandonedVmmReaperStatus>(details.clone()) {
-    //     Err(error) => eprintln!(
-    //         "warning: failed to interpret task details: {:?}: {:?}",
-    //         error, details
-    //     ),
-    //     Ok(AbandonedVmmReaperStatus {
-    //         vmms_found,
-    //         vmms_deleted,
-    //         vmms_already_deleted,
-    //         sled_reservations_deleted,
-    //         errors,
-    //     }) => {
-    //         if !errors.is_empty() {
-    //             println!(
-    //                 "    task did not complete successfully! ({} errors)",
-    //                 errors.len()
-    //             );
-    //             for error in errors {
-    //                 println!("    > {error}");
-    //             }
-    //         }
+    use nexus_types::internal_api::background::abandoned_vmm_reaper as status;
+    match serde_json::from_value::<AbandonedVmmReaperStatus>(details.clone()) {
+        Err(error) => eprintln!(
+            "warning: failed to interpret task details: {:?}: {:?}",
+            error, details
+        ),
+        Ok(status) => {
+            const BATCH_SIZE: &'static str = "batch size:";
+            const VMMS: &'static str = "reaping abandoned VMM records:";
+            const VMM_ERRORS: &'static str = "  errors reaping abandoned VMMs:";
+            const VMMS_FOUND: &'static str = "  total abandoned VMMs found:";
+            const BATCHES: &'static str = "    in batches:";
+            const VMMS_DELETED: &'static str = "  VMM records deleted:";
+            const VMMS_ALREADY_DELETED: &'static str =
+                "    VMMs already deleted by another Nexus:";
+            const SLED_RESERVATIONS_DELETED: &'static str =
+                "  sled resource reservations deleted:";
 
-    //         const VMMS_FOUND: &'static str = "total abandoned VMMs found:";
-    //         const VMMS_DELETED: &'static str = "  VMM records deleted:";
-    //         const VMMS_ALREADY_DELETED: &'static str =
-    //             "  VMMs already deleted by another Nexus:";
-    //         const SLED_RESERVATIONS_DELETED: &'static str =
-    //             "sled resource reservations deleted:";
-    //         // To align the number column, figure out the length of the
-    //         // longest line of text and add one (so that there's a space).
-    //         //
-    //         // Yes, I *could* just count the number of characters in each
-    //         // line myself, but why do something by hand when you could make
-    //         // the computer do it for you? And, this way, if we change the
-    //         // text, we won't need to figure it out again.
-    //         const WIDTH: usize = const_max_len(&[
-    //             VMMS_FOUND,
-    //             VMMS_DELETED,
-    //             VMMS_ALREADY_DELETED,
-    //             SLED_RESERVATIONS_DELETED,
-    //         ]) + 1;
-    //         const NUM_WIDTH: usize = 3;
+            const RESERVATIONS: &'static str =
+                "reaping abandoned sled resource reservations records:";
+            const RESERVATIONS_FOUND: &'static str =
+                "  total abandoned reservations found:";
+            const RESERVATIONS_DELETED: &'static str =
+                "  abandoned reservations deleted:";
+            const RESERVATION_ERRORS: &'static str =
+                "  errors reaping abandoned reservations:";
+            // To align the number column, figure out the length of the
+            // longest line of text and add one (so that there's a space).
+            //
+            // Yes, I *could* just count the number of characters in each
+            // line myself, but why do something by hand when you could make
+            // the computer do it for you? And, this way, if we change the
+            // text, we won't need to figure it out again.
+            const WIDTH: usize = const_max_len(&[
+                BATCH_SIZE,
+                BATCHES,
+                VMMS_FOUND,
+                VMMS_DELETED,
+                VMMS_ALREADY_DELETED,
+                SLED_RESERVATIONS_DELETED,
+                RESERVATIONS,
+                RESERVATIONS_FOUND,
+                RESERVATIONS_DELETED,
+                RESERVATION_ERRORS,
+            ]) + 1;
+            const NUM_WIDTH: usize = 3;
 
-    //         println!("    {VMMS_FOUND:<WIDTH$}{vmms_found:>NUM_WIDTH$}");
-    //         println!("    {VMMS_DELETED:<WIDTH$}{vmms_deleted:>NUM_WIDTH$}");
-    //         println!(
-    //             "    {VMMS_ALREADY_DELETED:<WIDTH$}{:>NUM_WIDTH$}",
-    //             vmms_already_deleted
-    //         );
-    //         println!(
-    //             "    {SLED_RESERVATIONS_DELETED:<WIDTH$}{:>NUM_WIDTH$}",
-    //             sled_reservations_deleted,
-    //         );
-    //     }
-    // };
+            let total_errors = status.total_errors();
+            if total_errors > 0 {
+                println!(
+                    "    task did not complete successfully! ({} errors)",
+                    total_errors
+                );
+            }
+            println!(
+                "    {BATCH_SIZE:<WIDTH$}{:>NUM_WIDTH$}",
+                status.batch_size,
+            );
+
+            println!("    {VMMS:<WIDTH$}");
+            let status::AbandonedVmms {
+                batches,
+                found,
+                deleted,
+                already_deleted,
+                sled_reservations_deleted,
+                errors,
+            } = &status.vmms;
+            println!("    {VMMS_FOUND:<WIDTH$}{found:>NUM_WIDTH$}");
+            println!("    {BATCHES:<WIDTH$}{batches:>NUM_WIDTH$}");
+            println!("    {VMMS_DELETED:<WIDTH$}{deleted:>NUM_WIDTH$}");
+            println!(
+                "    {VMMS_ALREADY_DELETED:<WIDTH$}{:>NUM_WIDTH$}",
+                already_deleted,
+            );
+            println!(
+                "    {SLED_RESERVATIONS_DELETED:<WIDTH$}{:>NUM_WIDTH$}",
+                sled_reservations_deleted,
+            );
+            if !errors.is_empty() {
+                println!(
+                    "    {VMM_ERRORS:<WIDTH$}{:>NUM_WIDTH$}",
+                    errors.len()
+                );
+                for error in errors {
+                    println!("      > {error}")
+                }
+            }
+
+            println!("    {RESERVATIONS:<WIDTH$}");
+            let status::AbandonedReservations {
+                found,
+                deleted,
+                batches,
+                errors,
+            } = status.reservations;
+            println!("    {RESERVATIONS_FOUND:<WIDTH$}{found:>NUM_WIDTH$}");
+            println!("    {BATCHES:<WIDTH$}{batches:>NUM_WIDTH$}");
+            println!("    {RESERVATIONS_DELETED:<WIDTH$}{deleted:>NUM_WIDTH$}");
+            if !errors.is_empty() {
+                println!(
+                    "    {RESERVATION_ERRORS:<WIDTH$}{:>NUM_WIDTH$}",
+                    errors.len()
+                );
+                for error in errors {
+                    println!("      > {error}")
+                }
+            }
+        }
+    };
 }
 
 fn print_task_blueprint_planner(details: &serde_json::Value) {

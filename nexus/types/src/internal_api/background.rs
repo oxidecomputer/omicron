@@ -103,6 +103,12 @@ pub struct AbandonedVmmReaperStatus {
     pub reservations: abandoned_vmm_reaper::AbandonedReservations,
 }
 
+impl AbandonedVmmReaperStatus {
+    pub fn total_errors(&self) -> usize {
+        self.vmms.errors.len() + self.reservations.errors.len()
+    }
+}
+
 pub mod abandoned_vmm_reaper {
     use super::*;
 
