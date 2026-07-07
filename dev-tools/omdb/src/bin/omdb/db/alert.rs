@@ -22,6 +22,7 @@ use diesel::ExpressionMethods;
 use diesel::OptionalExtension;
 use diesel::expression::SelectableHelper;
 use diesel::query_dsl::QueryDsl;
+use nexus_db_lookup::LookupPath;
 use nexus_db_model::Alert;
 use nexus_db_model::AlertClass;
 use nexus_db_model::AlertReceiver;
@@ -30,8 +31,6 @@ use nexus_db_model::fm::RendezvousAlertCreated;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
 use nexus_db_queries::db::DataStore;
-use nexus_db_schema::schema::alert::dsl as alert_dsl;
-use nexus_db_schema::schema::rendezvous_alert_created::dsl as rendezvous_created_dsl;
 use nexus_db_schema::schema::webhook_delivery::dsl as delivery_dsl;
 use nexus_db_schema::schema::webhook_delivery_attempt::dsl as attempt_dsl;
 use nexus_types::identity::Resource;
@@ -40,6 +39,7 @@ use omicron_common::api::external::Generation;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_uuid_kinds::AlertUuid;
+use omicron_uuid_kinds::CaseUuid;
 use omicron_uuid_kinds::GenericUuid;
 use tabled::Tabled;
 use uuid::Uuid;
@@ -95,8 +95,19 @@ struct AlertListArgs {
     /// cases will be included in the output.
     ///
     /// Note that not all alerts are requested by fault management cases.
-    #[clap(long = "case")]
+    #[clap(long, num_args(1..))]
     cases: Vec<Uuid>,
+
+    /// Include only alerts with the specified alert classes.
+    ///
+    /// If multiple values are provided, alerts with any of those classes will
+    /// be included in the output.
+    #[clap(
+        long,
+        num_args(1..),
+        value_enum,
+    )]
+    classes: Vec<ClapAlertClass>,
 
     /// If `true`, include only alerts that have been fully dispatched.
     /// If `false`, include only alerts that have not been fully dispatched.
@@ -105,6 +116,39 @@ struct AlertListArgs {
     /// events are included.
     #[clap(long, short)]
     dispatched: Option<bool>,
+}
+
+// A workaround for not being able to derive `clap::ValueEnum` on
+// `nexus_types::alert::AlertClass`, due to it living in the `nexus_types`
+// crate(which doesn't really want a `clap` dependency).
+#[derive(Debug, Copy, Clone)]
+struct ClapAlertClass(nexus_types::alert::AlertClass);
+
+impl clap::ValueEnum for ClapAlertClass {
+    fn value_variants<'a>() -> &'a [Self] {
+        static VALUE_VARIANTS: std::sync::LazyLock<Vec<ClapAlertClass>> =
+            std::sync::LazyLock::new(|| {
+                nexus_types::alert::AlertClass::ALL_CLASSES
+                    .iter()
+                    .copied()
+                    .map(ClapAlertClass)
+                    .collect()
+            });
+        &VALUE_VARIANTS
+    }
+
+    fn to_possible_value(&self) -> Option<clap::builder::PossibleValue> {
+        Some(
+            clap::builder::PossibleValue::new(self.0.as_str())
+                .help(self.0.description()),
+        )
+    }
+}
+
+impl From<&'_ ClapAlertClass> for AlertClass {
+    fn from(&ClapAlertClass(class): &ClapAlertClass) -> AlertClass {
+        class.into()
+    }
 }
 
 #[derive(Debug, Args, Clone)]
@@ -215,10 +259,10 @@ pub(super) async fn cmd_db_alert(
 ) -> anyhow::Result<()> {
     match &args.command {
         Commands::Info(args) => {
-            cmd_db_alert_info(datastore, fetch_opts, args).await
+            cmd_db_alert_info(opctx, datastore, fetch_opts, args).await
         }
         Commands::List(args) => {
-            cmd_db_alert_list(datastore, fetch_opts, args).await
+            cmd_db_alert_list(opctx, datastore, fetch_opts, args).await
         }
         Commands::Webhook(args) => {
             cmd_db_webhook(opctx, datastore, fetch_opts, args).await
@@ -876,6 +920,7 @@ async fn cmd_db_webhook_delivery_info(
 }
 
 async fn cmd_db_alert_list(
+    opctx: &OpContext,
     datastore: &DataStore,
     fetch_opts: &DbFetchOptions,
     args: &AlertListArgs,
@@ -888,73 +933,48 @@ async fn cmd_db_alert_list(
         dispatched_before,
         dispatched_after,
         dispatched,
+        classes,
     } = args;
 
-    if let (Some(before), Some(after)) = (before, after) {
-        anyhow::ensure!(
-            after < before,
-            "if both `--after` and `--before` are included, after must be
-             earlier than before"
-        );
-    }
-
-    if let (Some(before), Some(after)) = (dispatched_before, dispatched_after) {
-        anyhow::ensure!(
-            after < before,
-            "if both `--dispatched-after` and `--dispatched-before` are
-             included, after must be earlier than before"
-        );
-    }
-
-    let conn = datastore.pool_connection_for_tests().await?;
-
-    // Fetch all alerts up to our limit, including any corresponding
-    // `rendezvous_alert_created` markers so we can display the generation at
-    // which the alert was created. Note, all FM-created alerts can be
-    // distinguished by their fm_case_id, but won't necessarily have a creation
-    // marker: GC will clean up markers that are no longer needed.
-    let mut query = alert_dsl::alert
-        .left_join(rendezvous_created_dsl::rendezvous_alert_created)
-        .limit(fetch_opts.fetch_limit.get().into())
-        .order_by(alert_dsl::time_created.asc())
-        .select((
-            Alert::as_select(),
-            Option::<RendezvousAlertCreated>::as_select(),
-        ))
-        .into_boxed();
-
-    if let Some(before) = before {
-        query = query.filter(alert_dsl::time_created.lt(*before));
-    }
-
-    if let Some(after) = after {
-        query = query.filter(alert_dsl::time_created.gt(*after));
-    }
-
-    if let Some(before) = dispatched_before {
-        query = query.filter(alert_dsl::time_dispatched.lt(*before));
-    }
-
-    if let Some(after) = dispatched_after {
-        query = query.filter(alert_dsl::time_dispatched.gt(*after));
-    }
-
-    if let Some(dispatched) = dispatched {
-        if *dispatched {
-            query = query.filter(alert_dsl::time_dispatched.is_not_null());
-        } else {
-            query = query.filter(alert_dsl::time_dispatched.is_null());
+    let filters = {
+        let mut filters = nexus_db_queries::db::datastore::AlertFilters::new();
+        if let &Some(before) = before {
+            filters = filters.before(before)?;
         }
-    }
+        if let &Some(after) = after {
+            filters = filters.after(after)?;
+        }
+        if let &Some(dispatched_before) = dispatched_before {
+            filters = filters.dispatched_before(dispatched_before)?;
+        }
+        if let &Some(dispatched_after) = dispatched_after {
+            filters = filters.dispatched_after(dispatched_after)?;
+        }
+        if let &Some(dispatched) = dispatched {
+            filters = filters.dispatched(dispatched)?;
+        }
+        if !cases.is_empty() {
+            filters = filters.for_fm_cases(
+                cases.iter().copied().map(CaseUuid::from_untyped_uuid),
+            );
+        }
+        if !classes.is_empty() {
+            filters = filters.with_classes(classes);
+        }
+        filters
+    };
 
-    if !cases.is_empty() {
-        query = query.filter(alert_dsl::case_id.eq_any(cases.clone()));
-    }
+    let pagparams = DataPageParams {
+        // Descending order shows the newest alerts first
+        direction: dropshot::PaginationOrder::Descending,
+        ..first_page(fetch_opts.fetch_limit)
+    };
 
     let ctx = || "loading alerts";
-    let alerts: Vec<(Alert, Option<RendezvousAlertCreated>)> =
-        query.load_async(&*conn).await.with_context(ctx)?;
-
+    let alerts: Vec<(Alert, Option<RendezvousAlertCreated>)> = datastore
+        .alert_list_matching(opctx, &filters, &pagparams)
+        .await
+        .with_context(ctx)?;
     check_limit(&alerts, fetch_opts.fetch_limit, ctx);
 
     #[derive(Tabled)]
@@ -962,6 +982,8 @@ async fn cmd_db_alert_list(
     struct AlertRow {
         id: Uuid,
         class: AlertClass,
+        #[tabled(rename = "V")]
+        version: u32,
         #[tabled(display_with = "datetime_rfc3339_concise")]
         time_created: DateTime<Utc>,
         #[tabled(display_with = "datetime_opt_rfc3339_concise")]
@@ -977,6 +999,7 @@ async fn cmd_db_alert_list(
         |alert: &Alert, marker: &Option<RendezvousAlertCreated>| AlertRow {
             id: alert.identity.id.into_untyped_uuid(),
             class: alert.class,
+            version: u32::from(alert.version),
             time_created: alert.identity.time_created,
             time_dispatched: alert.time_dispatched,
             dispatched: alert.num_dispatched,
@@ -1022,35 +1045,31 @@ async fn cmd_db_alert_list(
 }
 
 async fn cmd_db_alert_info(
+    opctx: &OpContext,
     datastore: &DataStore,
     fetch_opts: &DbFetchOptions,
     args: &AlertInfoArgs,
 ) -> anyhow::Result<()> {
     let AlertInfoArgs { id } = args;
-    let conn = datastore.pool_connection_for_tests().await?;
+    let (authz_alert, alert) = LookupPath::new(opctx, datastore)
+        .alert_id(*id)
+        .fetch()
+        .await
+        .with_context(|| format!("failed to look up alert {id}"))?;
 
-    // Fetch the requested alert, including any corresponding
-    // `rendezvous_alert_created` marker so we can display the generation at
-    // which the alert was created. Note, all FM-created alerts can be
-    // distinguished by their fm_case_id, but won't necessarily have a creation
-    // marker: GC will clean up markers that are no longer needed.
-    let (alert, rendezvous_created): (Alert, Option<RendezvousAlertCreated>) =
-        alert_dsl::alert
-            .left_join(rendezvous_created_dsl::rendezvous_alert_created)
-            .filter(alert_dsl::id.eq(id.into_untyped_uuid()))
-            .select((
-                Alert::as_select(),
-                Option::<RendezvousAlertCreated>::as_select(),
-            ))
-            .limit(1)
-            .get_result_async(&*conn)
-            .await
-            .optional()
-            .with_context(|| format!("loading alert {id}"))?
-            .ok_or_else(|| anyhow::anyhow!("no alert {id} exists"))?;
+    // Fetch any corresponding `rendezvous_alert_created` marker so we can
+    // display the generation at which the alert was created. Note, all
+    // FM-created alerts can be distinguished by their fm_case_id, but won't
+    // necessarily have a creation marker: GC will clean up markers that are no
+    // longer needed.
+    let rendezvous_created =
+        datastore.alert_fetch_fm_rendezvous_gen(opctx, &authz_alert).await;
+    if let Err(ref e) = rendezvous_created {
+        eprintln!("error: failed to fetch FM rendezvous marker: {e}");
+    }
 
     let Alert {
-        identity: db::model::AlertIdentity { id, time_created, time_modified },
+        identity: db::model::AlertIdentity { time_created, time_modified, .. },
         time_dispatched,
         class,
         payload,
@@ -1100,19 +1119,23 @@ async fn cmd_db_alert_info(
         (Some(case_id), marker) => {
             println!("    {PROVENANCE:>WIDTH$}: created by fault management");
             println!("    {CASE_ID:>WIDTH$}: {case_id:?}");
-            if let Some(marker) = marker {
-                println!(
-                    "    {FM_GENERATION:>WIDTH$}: {}",
-                    marker.created_at_generation.0
-                );
+            match marker {
+                Ok(Some(marker)) => {
+                    println!(
+                        "    {FM_GENERATION:>WIDTH$}: {}",
+                        marker.created_at_generation.0
+                    );
+                }
+                Ok(None) => {} // may have been GCed...
+                Err(_) => {
+                    println!(
+                        "    {FM_GENERATION:>WIDTH$}: /!\\ UNKNOWN (failed to \
+                         fetch marker record)"
+                    );
+                }
             }
         }
-        (None, None) => {
-            println!(
-                "    {PROVENANCE:>WIDTH$}: not created by fault management"
-            );
-        }
-        (None, Some(marker)) => {
+        (None, Ok(Some(marker))) => {
             println!(
                 "    {PROVENANCE:>WIDTH$}: /!\\ WEIRD: creation marker present \
                  but no FM case (possible bug)"
@@ -1120,6 +1143,16 @@ async fn cmd_db_alert_info(
             println!(
                 "    {FM_GENERATION:>WIDTH$}: {}",
                 marker.created_at_generation.0
+            );
+        }
+        // Note that this includes both cases where we successfully fetched an
+        // `Ok(None)` marker record *and* cases where there was a database
+        // error. We already printed the db error earlier, so we need not print
+        // it again here, and we know the alert is not supposed to have one
+        // regardless.
+        (None, _) => {
+            println!(
+                "    {PROVENANCE:>WIDTH$}: not created by fault management"
             );
         }
     }
@@ -1130,11 +1163,14 @@ async fn cmd_db_alert_info(
     )?;
 
     let ctx = || format!("listing deliveries for alert {id:?}");
-    let deliveries = delivery_dsl::webhook_delivery
-        .limit(fetch_opts.fetch_limit.get().into())
-        .order_by(delivery_dsl::time_created.desc())
-        .select(WebhookDelivery::as_select())
-        .load_async(&*conn)
+
+    let pagparams = DataPageParams {
+        // Descending order shows the most recent delivery first
+        direction: dropshot::PaginationOrder::Descending,
+        ..first_page(fetch_opts.fetch_limit)
+    };
+    let deliveries = datastore
+        .alert_list_webhook_deliveries(opctx, &authz_alert, &pagparams)
         .await
         .with_context(ctx)?;
 
