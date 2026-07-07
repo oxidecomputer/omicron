@@ -5,6 +5,7 @@
 //! Tests images support in the API
 
 use dropshot::ResultsPage;
+use dropshot::test_util::ClientTestContext;
 use http::StatusCode;
 use http::method::Method;
 use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO;
@@ -26,6 +27,7 @@ use nexus_types::identity::Asset;
 use nexus_types::identity::Resource;
 use omicron_common::api::external::Disk;
 use omicron_common::api::external::{ByteCount, IdentityMetadataCreateParams};
+use uuid::Uuid;
 
 type ControlPlaneTestContext =
     nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
@@ -619,281 +621,179 @@ async fn test_image_deletion_permissions(cptestctx: &ControlPlaneTestContext) {
     .expect("should be able to delete project image as unpriv user!");
 }
 
-#[nexus_test]
-async fn test_silo_collaborator_can_promote_demote_images(
-    cptestctx: &ControlPlaneTestContext,
-) {
-    let client = &cptestctx.external_client;
-    DiskTest::new(&cptestctx).await;
+// Helpers for the promote/demote permission tests below. The tests all follow
+// the same shape: grant the unprivileged user a role, create a project image,
+// then check which of promote / demote / delete / direct silo image creation
+// are allowed.
 
-    // Create a project
-    create_project(client, PROJECT_NAME).await;
+const SILO_IMAGES_URL: &str = "/v1/images";
 
-    // Grant the unprivileged user collaborator on the silo
+async fn grant_silo_role(client: &ClientTestContext, role: SiloRole) {
     let silo_url = format!("/v1/system/silos/{}", DEFAULT_SILO.id());
     grant_iam(
         client,
         &silo_url,
-        SiloRole::Collaborator,
+        role,
         USER_TEST_UNPRIVILEGED.id(),
         AuthnMode::PrivilegedUser,
     )
     .await;
+}
 
-    let images_url = get_project_images_url(PROJECT_NAME);
-    let silo_images_url = "/v1/images";
-
-    // Create a project image as the unprivileged user (silo collaborator can do this)
+/// Create a disk and snapshot in PROJECT_NAME, then create a project image
+/// from the snapshot as `authn`. Returns the image ID and the create params,
+/// which can be reused to create a silo image directly.
+async fn create_project_image(
+    client: &ClientTestContext,
+    authn: &AuthnMode,
+) -> (Uuid, image::ImageCreate) {
     create_disk(client, PROJECT_NAME, DISK_NAME).await;
     let snapshot =
         create_snapshot(client, PROJECT_NAME, DISK_NAME, DISK_NAME).await;
-    let image_create_params = get_image_create(image::ImageSource::Snapshot {
+    let params = get_image_create(image::ImageSource::Snapshot {
         id: snapshot.identity.id,
     });
-
-    let image =
-        NexusRequest::objects_post(client, &images_url, &image_create_params)
-            .authn_as(AuthnMode::UnprivilegedUser)
-            .execute_and_parse_unwrap::<image::Image>()
-            .await;
-
-    let image_id = image.identity.id;
-
-    // Promote the image to the silo as collaborator
-    let promote_url = format!("/v1/images/{}/promote", image_id);
-    NexusRequest::new(
-        RequestBuilder::new(client, http::Method::POST, &promote_url)
-            .expect_status(Some(http::StatusCode::ACCEPTED)),
+    let image = NexusRequest::objects_post(
+        client,
+        &get_project_images_url(PROJECT_NAME),
+        &params,
     )
-    .authn_as(AuthnMode::UnprivilegedUser)
+    .authn_as(authn.clone())
     .execute_and_parse_unwrap::<image::Image>()
     .await;
+    (image.identity.id, params)
+}
 
-    // Verify the image is now a silo image
-    let silo_images = NexusRequest::object_get(client, &silo_images_url)
-        .authn_as(AuthnMode::UnprivilegedUser)
-        .execute_and_parse_unwrap::<ResultsPage<image::Image>>()
-        .await
-        .items;
-
-    assert_eq!(silo_images.len(), 1);
-    assert_eq!(silo_images[0].identity.id, image_id);
-
-    // Demote the image back to the project as collaborator
-    let demote_url =
-        format!("/v1/images/{}/demote?project={}", image_id, PROJECT_NAME);
+async fn promote_image(
+    client: &ClientTestContext,
+    image_id: Uuid,
+    authn: &AuthnMode,
+    expected_status: StatusCode,
+) {
+    let url = format!("/v1/images/{}/promote", image_id);
     NexusRequest::new(
-        RequestBuilder::new(client, http::Method::POST, &demote_url)
-            .expect_status(Some(http::StatusCode::ACCEPTED)),
+        RequestBuilder::new(client, Method::POST, &url)
+            .expect_status(Some(expected_status)),
     )
-    .authn_as(AuthnMode::UnprivilegedUser)
-    .execute_and_parse_unwrap::<image::Image>()
-    .await;
-
-    // Verify the image is back in the project
-    let project_images = NexusRequest::object_get(client, &images_url)
-        .authn_as(AuthnMode::UnprivilegedUser)
-        .execute_and_parse_unwrap::<ResultsPage<image::Image>>()
-        .await
-        .items;
-
-    assert_eq!(project_images.len(), 1);
-    assert_eq!(project_images[0].identity.id, image_id);
-
-    // Test that silo collaborator can delete silo images
-    // First, promote the image back to silo
-    let promote_url = format!("/v1/images/{}/promote", image_id);
-    NexusRequest::new(
-        RequestBuilder::new(client, http::Method::POST, &promote_url)
-            .expect_status(Some(http::StatusCode::ACCEPTED)),
-    )
-    .authn_as(AuthnMode::UnprivilegedUser)
-    .execute_and_parse_unwrap::<image::Image>()
-    .await;
-
-    // Delete the silo image as collaborator - should succeed
-    let image_url = format!("/v1/images/{}", image_id);
-    NexusRequest::new(
-        RequestBuilder::new(client, http::Method::DELETE, &image_url)
-            .expect_status(Some(http::StatusCode::NO_CONTENT)),
-    )
-    .authn_as(AuthnMode::UnprivilegedUser)
+    .authn_as(authn.clone())
     .execute()
     .await
-    .expect("silo collaborator should be able to delete silo image");
+    .unwrap();
+}
 
-    // Verify no silo images remain
-    let silo_images = NexusRequest::object_get(client, &silo_images_url)
-        .authn_as(AuthnMode::UnprivilegedUser)
+async fn demote_image(
+    client: &ClientTestContext,
+    image_id: Uuid,
+    project_name: &str,
+    authn: &AuthnMode,
+    expected_status: StatusCode,
+) {
+    let url =
+        format!("/v1/images/{}/demote?project={}", image_id, project_name);
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &url)
+            .expect_status(Some(expected_status)),
+    )
+    .authn_as(authn.clone())
+    .execute()
+    .await
+    .unwrap();
+}
+
+async fn delete_image(
+    client: &ClientTestContext,
+    image_id: Uuid,
+    authn: &AuthnMode,
+    expected_status: StatusCode,
+) {
+    let url = format!("/v1/images/{}", image_id);
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::DELETE, &url)
+            .expect_status(Some(expected_status)),
+    )
+    .authn_as(authn.clone())
+    .execute()
+    .await
+    .unwrap();
+}
+
+/// Fetch the image list at `url` as `authn` and assert it contains exactly
+/// the expected IDs
+async fn assert_image_ids(
+    client: &ClientTestContext,
+    url: &str,
+    authn: &AuthnMode,
+    expected: &[Uuid],
+) {
+    let images = NexusRequest::object_get(client, url)
+        .authn_as(authn.clone())
         .execute_and_parse_unwrap::<ResultsPage<image::Image>>()
         .await
         .items;
+    let ids = images.iter().map(|i| i.identity.id).collect::<Vec<_>>();
+    assert_eq!(ids, expected);
+}
 
-    assert_eq!(silo_images.len(), 0);
+/// Silo collaborator and limited-collaborator can promote, demote, delete,
+/// and directly create silo images
+async fn can_promote_demote_images(
+    cptestctx: &ControlPlaneTestContext,
+    role: SiloRole,
+) {
+    let client = &cptestctx.external_client;
+    DiskTest::new(&cptestctx).await;
+    create_project(client, PROJECT_NAME).await;
+    grant_silo_role(client, role).await;
+
+    let project_images_url = get_project_images_url(PROJECT_NAME);
+    let user = AuthnMode::UnprivilegedUser;
+
+    // the role can create a project image
+    let (image_id, image_create_params) =
+        create_project_image(client, &user).await;
+    assert_image_ids(client, &project_images_url, &user, &[image_id]).await;
+
+    // promote the image to the silo
+    promote_image(client, image_id, &user, StatusCode::ACCEPTED).await;
+    assert_image_ids(client, SILO_IMAGES_URL, &user, &[image_id]).await;
+    assert_image_ids(client, &project_images_url, &user, &[]).await;
+
+    // demote it back to the project
+    demote_image(client, image_id, PROJECT_NAME, &user, StatusCode::ACCEPTED)
+        .await;
+    assert_image_ids(client, &project_images_url, &user, &[image_id]).await;
+    assert_image_ids(client, SILO_IMAGES_URL, &user, &[]).await;
+
+    // promote again and delete the silo image
+    promote_image(client, image_id, &user, StatusCode::ACCEPTED).await;
+    delete_image(client, image_id, &user, StatusCode::NO_CONTENT).await;
+    assert_image_ids(client, SILO_IMAGES_URL, &user, &[]).await;
+
+    // create a silo image directly (not via promotion)
+    let image = NexusRequest::objects_post(
+        client,
+        SILO_IMAGES_URL,
+        &image_create_params,
+    )
+    .authn_as(user.clone())
+    .execute_and_parse_unwrap::<image::Image>()
+    .await;
+    assert_image_ids(client, SILO_IMAGES_URL, &user, &[image.identity.id])
+        .await;
+}
+
+#[nexus_test]
+async fn test_silo_collaborator_can_promote_demote_images(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    can_promote_demote_images(cptestctx, SiloRole::Collaborator).await;
 }
 
 #[nexus_test]
 async fn test_silo_limited_collaborator_can_promote_demote_images(
     cptestctx: &ControlPlaneTestContext,
 ) {
-    let client = &cptestctx.external_client;
-    DiskTest::new(&cptestctx).await;
-
-    // Create a project
-    create_project(client, PROJECT_NAME).await;
-
-    // Grant the unprivileged user limited-collaborator on the silo
-    let silo_url = format!("/v1/system/silos/{}", DEFAULT_SILO.id());
-    grant_iam(
-        client,
-        &silo_url,
-        SiloRole::LimitedCollaborator,
-        USER_TEST_UNPRIVILEGED.id(),
-        AuthnMode::PrivilegedUser,
-    )
-    .await;
-
-    let images_url = get_project_images_url(PROJECT_NAME);
-    let silo_images_url = "/v1/images";
-
-    create_disk(client, PROJECT_NAME, DISK_NAME).await;
-    let snapshot =
-        create_snapshot(client, PROJECT_NAME, DISK_NAME, DISK_NAME).await;
-    let image_create_params = get_image_create(image::ImageSource::Snapshot {
-        id: snapshot.identity.id,
-    });
-
-    let image =
-        NexusRequest::objects_post(client, &images_url, &image_create_params)
-            .authn_as(AuthnMode::UnprivilegedUser)
-            .execute_and_parse_unwrap::<image::Image>()
-            .await;
-
-    let image_id = image.identity.id;
-
-    // Verify the image is in the project
-    let project_images = NexusRequest::object_get(client, &images_url)
-        .authn_as(AuthnMode::UnprivilegedUser)
-        .execute_and_parse_unwrap::<ResultsPage<image::Image>>()
-        .await
-        .items;
-
-    assert_eq!(project_images.len(), 1);
-    assert_eq!(project_images[0].identity.id, image_id);
-
-    // Promote the image to the silo as limited-collaborator
-    let promote_url = format!("/v1/images/{}/promote", image_id);
-    NexusRequest::new(
-        RequestBuilder::new(client, http::Method::POST, &promote_url)
-            .expect_status(Some(http::StatusCode::ACCEPTED)),
-    )
-    .authn_as(AuthnMode::UnprivilegedUser)
-    .execute_and_parse_unwrap::<image::Image>()
-    .await;
-
-    // Verify the image is now a silo image
-    let silo_images = NexusRequest::object_get(client, &silo_images_url)
-        .authn_as(AuthnMode::UnprivilegedUser)
-        .execute_and_parse_unwrap::<ResultsPage<image::Image>>()
-        .await
-        .items;
-
-    assert_eq!(silo_images.len(), 1);
-    assert_eq!(silo_images[0].identity.id, image_id);
-
-    // Verify no project images remain
-    let project_images = NexusRequest::object_get(client, &images_url)
-        .authn_as(AuthnMode::UnprivilegedUser)
-        .execute_and_parse_unwrap::<ResultsPage<image::Image>>()
-        .await
-        .items;
-
-    assert_eq!(project_images.len(), 0);
-
-    // Demote the image back to the project as limited-collaborator
-    let demote_url =
-        format!("/v1/images/{}/demote?project={}", image_id, PROJECT_NAME);
-    NexusRequest::new(
-        RequestBuilder::new(client, http::Method::POST, &demote_url)
-            .expect_status(Some(http::StatusCode::ACCEPTED)),
-    )
-    .authn_as(AuthnMode::UnprivilegedUser)
-    .execute_and_parse_unwrap::<image::Image>()
-    .await;
-
-    // Verify the image is back in the project
-    let project_images = NexusRequest::object_get(client, &images_url)
-        .authn_as(AuthnMode::UnprivilegedUser)
-        .execute_and_parse_unwrap::<ResultsPage<image::Image>>()
-        .await
-        .items;
-
-    assert_eq!(project_images.len(), 1);
-    assert_eq!(project_images[0].identity.id, image_id);
-
-    // Verify no silo images remain
-    let silo_images = NexusRequest::object_get(client, &silo_images_url)
-        .authn_as(AuthnMode::UnprivilegedUser)
-        .execute_and_parse_unwrap::<ResultsPage<image::Image>>()
-        .await
-        .items;
-
-    assert_eq!(silo_images.len(), 0);
-
-    // Test that limited-collaborator can delete both project and silo images
-    // First, promote the image back to silo
-    let promote_url = format!("/v1/images/{}/promote", image_id);
-    NexusRequest::new(
-        RequestBuilder::new(client, http::Method::POST, &promote_url)
-            .expect_status(Some(http::StatusCode::ACCEPTED)),
-    )
-    .authn_as(AuthnMode::UnprivilegedUser)
-    .execute_and_parse_unwrap::<image::Image>()
-    .await;
-
-    // Verify it's a silo image
-    let silo_images = NexusRequest::object_get(client, &silo_images_url)
-        .authn_as(AuthnMode::UnprivilegedUser)
-        .execute_and_parse_unwrap::<ResultsPage<image::Image>>()
-        .await
-        .items;
-
-    assert_eq!(silo_images.len(), 1);
-
-    // Delete the silo image as limited-collaborator - should succeed
-    let image_url = format!("/v1/images/{}", image_id);
-    NexusRequest::new(
-        RequestBuilder::new(client, http::Method::DELETE, &image_url)
-            .expect_status(Some(http::StatusCode::NO_CONTENT)),
-    )
-    .authn_as(AuthnMode::UnprivilegedUser)
-    .execute()
-    .await
-    .expect("limited-collaborator should be able to delete silo image");
-
-    // Verify no silo images remain
-    let silo_images = NexusRequest::object_get(client, &silo_images_url)
-        .authn_as(AuthnMode::UnprivilegedUser)
-        .execute_and_parse_unwrap::<ResultsPage<image::Image>>()
-        .await
-        .items;
-
-    assert_eq!(silo_images.len(), 0);
-
-    // Create a silo image directly (not via promotion) as limited-collaborator
-    // - should succeed
-    NexusRequest::objects_post(client, silo_images_url, &image_create_params)
-        .authn_as(AuthnMode::UnprivilegedUser)
-        .execute_and_parse_unwrap::<image::Image>()
-        .await;
-
-    let silo_images = NexusRequest::object_get(client, &silo_images_url)
-        .authn_as(AuthnMode::UnprivilegedUser)
-        .execute_and_parse_unwrap::<ResultsPage<image::Image>>()
-        .await
-        .items;
-
-    assert_eq!(silo_images.len(), 1);
+    can_promote_demote_images(cptestctx, SiloRole::LimitedCollaborator).await;
 }
 
 #[nexus_test]
@@ -902,260 +802,102 @@ async fn test_silo_viewer_cannot_promote_demote_images(
 ) {
     let client = &cptestctx.external_client;
     DiskTest::new(&cptestctx).await;
+    create_project(client, PROJECT_NAME).await;
+    grant_silo_role(client, SiloRole::Viewer).await;
 
-    // Create a project
+    let priv_user = AuthnMode::PrivilegedUser;
+    let viewer = AuthnMode::UnprivilegedUser;
+
+    let (image_id, image_create_params) =
+        create_project_image(client, &priv_user).await;
+
+    // viewer cannot promote; promote as privileged user so we can test
+    // demote and delete on a silo image
+    promote_image(client, image_id, &viewer, StatusCode::FORBIDDEN).await;
+    promote_image(client, image_id, &priv_user, StatusCode::ACCEPTED).await;
+
+    demote_image(
+        client,
+        image_id,
+        PROJECT_NAME,
+        &viewer,
+        StatusCode::FORBIDDEN,
+    )
+    .await;
+    delete_image(client, image_id, &viewer, StatusCode::FORBIDDEN).await;
+
+    // viewer cannot create a silo image directly
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, SILO_IMAGES_URL)
+            .body(Some(&image_create_params))
+            .expect_status(Some(StatusCode::FORBIDDEN)),
+    )
+    .authn_as(viewer)
+    .execute()
+    .await
+    .expect("expected viewer to be blocked from creating silo image");
+}
+
+/// Project-level roles confer no silo-level permissions: promote, demote, and
+/// delete on silo images all fail with 404 because the user can't read the
+/// image through the by-ID lookup
+async fn project_role_cannot_promote_demote_images(
+    cptestctx: &ControlPlaneTestContext,
+    role: ProjectRole,
+) {
+    let client = &cptestctx.external_client;
+    DiskTest::new(&cptestctx).await;
     create_project(client, PROJECT_NAME).await;
 
-    // Grant the unprivileged user viewer on the silo
-    let silo_url = format!("/v1/system/silos/{}", DEFAULT_SILO.id());
+    // Grant the unprivileged user a role on the project only (no silo role)
+    let project_url = format!("/v1/projects/{}", PROJECT_NAME);
     grant_iam(
         client,
-        &silo_url,
-        SiloRole::Viewer,
+        &project_url,
+        role,
         USER_TEST_UNPRIVILEGED.id(),
         AuthnMode::PrivilegedUser,
     )
     .await;
 
-    let images_url = get_project_images_url(PROJECT_NAME);
+    let user = AuthnMode::UnprivilegedUser;
 
-    // Create a project image as privileged user
-    create_disk(client, PROJECT_NAME, DISK_NAME).await;
-    let snapshot =
-        create_snapshot(client, PROJECT_NAME, DISK_NAME, DISK_NAME).await;
-    let image_create_params = get_image_create(image::ImageSource::Snapshot {
-        id: snapshot.identity.id,
-    });
+    // the project-level role can create a project image
+    let (image_id, _) = create_project_image(client, &user).await;
 
-    let image =
-        NexusRequest::objects_post(client, &images_url, &image_create_params)
-            .authn_as(AuthnMode::PrivilegedUser)
-            .execute_and_parse_unwrap::<image::Image>()
-            .await;
+    promote_image(client, image_id, &user, StatusCode::NOT_FOUND).await;
 
-    let image_id = image.identity.id;
-
-    // Attempt to promote the image as viewer - should fail
-    let promote_url = format!("/v1/images/{}/promote", image_id);
-    NexusRequest::new(
-        RequestBuilder::new(client, http::Method::POST, &promote_url)
-            .expect_status(Some(StatusCode::FORBIDDEN)),
+    // promote as privileged user so we can test demote and delete
+    promote_image(
+        client,
+        image_id,
+        &AuthnMode::PrivilegedUser,
+        StatusCode::ACCEPTED,
     )
-    .authn_as(AuthnMode::UnprivilegedUser)
-    .execute()
-    .await
-    .expect("expected viewer to be blocked from promoting image");
-
-    // Promote the image as privileged user
-    NexusRequest::new(
-        RequestBuilder::new(client, http::Method::POST, &promote_url)
-            .expect_status(Some(http::StatusCode::ACCEPTED)),
-    )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute_and_parse_unwrap::<image::Image>()
     .await;
-
-    // Attempt to demote the image as viewer - should fail
-    let demote_url =
-        format!("/v1/images/{}/demote?project={}", image_id, PROJECT_NAME);
-    NexusRequest::new(
-        RequestBuilder::new(client, http::Method::POST, &demote_url)
-            .expect_status(Some(StatusCode::FORBIDDEN)),
-    )
-    .authn_as(AuthnMode::UnprivilegedUser)
-    .execute()
-    .await
-    .expect("expected viewer to be blocked from demoting image");
-
-    // Attempt to delete the silo image as viewer - should fail
-    let image_url = format!("/v1/images/{}", image_id);
-    NexusRequest::new(
-        RequestBuilder::new(client, http::Method::DELETE, &image_url)
-            .expect_status(Some(StatusCode::FORBIDDEN)),
-    )
-    .authn_as(AuthnMode::UnprivilegedUser)
-    .execute()
-    .await
-    .expect("expected viewer to be blocked from deleting silo image");
-
-    // Attempt to create a silo image directly as viewer - should fail
-    NexusRequest::new(
-        RequestBuilder::new(client, http::Method::POST, "/v1/images")
-            .body(Some(&image_create_params))
-            .expect_status(Some(StatusCode::FORBIDDEN)),
-    )
-    .authn_as(AuthnMode::UnprivilegedUser)
-    .execute()
-    .await
-    .expect("expected viewer to be blocked from creating silo image");
+    demote_image(client, image_id, PROJECT_NAME, &user, StatusCode::NOT_FOUND)
+        .await;
+    delete_image(client, image_id, &user, StatusCode::NOT_FOUND).await;
 }
 
 #[nexus_test]
 async fn test_project_collaborator_cannot_promote_demote_images(
     cptestctx: &ControlPlaneTestContext,
 ) {
-    let client = &cptestctx.external_client;
-    DiskTest::new(&cptestctx).await;
-
-    // Create a project
-    create_project(client, PROJECT_NAME).await;
-
-    // Grant the unprivileged user collaborator on the project only (no silo role)
-    let project_url = format!("/v1/projects/{}", PROJECT_NAME);
-    grant_iam(
-        client,
-        &project_url,
+    project_role_cannot_promote_demote_images(
+        cptestctx,
         ProjectRole::Collaborator,
-        USER_TEST_UNPRIVILEGED.id(),
-        AuthnMode::PrivilegedUser,
     )
     .await;
-
-    let images_url = get_project_images_url(PROJECT_NAME);
-
-    // Create a project image as the unprivileged user (project collaborator can do this)
-    create_disk(client, PROJECT_NAME, DISK_NAME).await;
-    let snapshot =
-        create_snapshot(client, PROJECT_NAME, DISK_NAME, DISK_NAME).await;
-    let image_create_params = get_image_create(image::ImageSource::Snapshot {
-        id: snapshot.identity.id,
-    });
-
-    let image =
-        NexusRequest::objects_post(client, &images_url, &image_create_params)
-            .authn_as(AuthnMode::UnprivilegedUser)
-            .execute_and_parse_unwrap::<image::Image>()
-            .await;
-
-    let image_id = image.identity.id;
-
-    // Attempt to promote the image as project collaborator - should fail
-    let promote_url = format!("/v1/images/{}/promote", image_id);
-    NexusRequest::new(
-        RequestBuilder::new(client, http::Method::POST, &promote_url)
-            .expect_status(Some(StatusCode::NOT_FOUND)),
-    )
-    .authn_as(AuthnMode::UnprivilegedUser)
-    .execute()
-    .await
-    .expect("expected project collaborator to be blocked from promoting image");
-
-    // Promote the image as privileged user (who has silo role)
-    NexusRequest::new(
-        RequestBuilder::new(client, http::Method::POST, &promote_url)
-            .expect_status(Some(http::StatusCode::ACCEPTED)),
-    )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute_and_parse_unwrap::<image::Image>()
-    .await;
-
-    // Attempt to demote the image as project collaborator - should fail
-    let demote_url =
-        format!("/v1/images/{}/demote?project={}", image_id, PROJECT_NAME);
-    NexusRequest::new(
-        RequestBuilder::new(client, http::Method::POST, &demote_url)
-            .expect_status(Some(StatusCode::NOT_FOUND)),
-    )
-    .authn_as(AuthnMode::UnprivilegedUser)
-    .execute()
-    .await
-    .expect("expected project collaborator to be blocked from demoting image");
-
-    // Attempt to delete the silo image as project collaborator - should fail
-    // Project collaborators have no silo-level permissions, so they get NOT_FOUND
-    let image_url = format!("/v1/images/{}", image_id);
-    NexusRequest::new(
-        RequestBuilder::new(client, http::Method::DELETE, &image_url)
-            .expect_status(Some(StatusCode::NOT_FOUND)),
-    )
-    .authn_as(AuthnMode::UnprivilegedUser)
-    .execute()
-    .await
-    .expect(
-        "expected project collaborator to be blocked from deleting silo image",
-    );
 }
 
 #[nexus_test]
 async fn test_project_limited_collaborator_cannot_promote_demote_images(
     cptestctx: &ControlPlaneTestContext,
 ) {
-    let client = &cptestctx.external_client;
-    DiskTest::new(&cptestctx).await;
-
-    // Create a project
-    create_project(client, PROJECT_NAME).await;
-
-    // Grant the unprivileged user limited-collaborator on the project only (no silo role)
-    let project_url = format!("/v1/projects/{}", PROJECT_NAME);
-    grant_iam(
-        client,
-        &project_url,
+    project_role_cannot_promote_demote_images(
+        cptestctx,
         ProjectRole::LimitedCollaborator,
-        USER_TEST_UNPRIVILEGED.id(),
-        AuthnMode::PrivilegedUser,
     )
     .await;
-
-    let images_url = get_project_images_url(PROJECT_NAME);
-
-    // Create a project image as the unprivileged user (project limited-collaborator can do this)
-    create_disk(client, PROJECT_NAME, DISK_NAME).await;
-    let snapshot =
-        create_snapshot(client, PROJECT_NAME, DISK_NAME, DISK_NAME).await;
-    let image_create_params = get_image_create(image::ImageSource::Snapshot {
-        id: snapshot.identity.id,
-    });
-
-    let image =
-        NexusRequest::objects_post(client, &images_url, &image_create_params)
-            .authn_as(AuthnMode::UnprivilegedUser)
-            .execute_and_parse_unwrap::<image::Image>()
-            .await;
-
-    let image_id = image.identity.id;
-
-    // Attempt to promote the image as project limited-collaborator - should fail
-    let promote_url = format!("/v1/images/{}/promote", image_id);
-    NexusRequest::new(
-        RequestBuilder::new(client, http::Method::POST, &promote_url)
-            .expect_status(Some(StatusCode::NOT_FOUND)),
-    )
-    .authn_as(AuthnMode::UnprivilegedUser)
-    .execute()
-    .await
-    .expect("expected project limited-collaborator to be blocked from promoting image");
-
-    // Promote the image as privileged user (who has silo role)
-    NexusRequest::new(
-        RequestBuilder::new(client, http::Method::POST, &promote_url)
-            .expect_status(Some(http::StatusCode::ACCEPTED)),
-    )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute_and_parse_unwrap::<image::Image>()
-    .await;
-
-    // Attempt to demote the image as project limited-collaborator - should fail
-    let demote_url =
-        format!("/v1/images/{}/demote?project={}", image_id, PROJECT_NAME);
-    NexusRequest::new(
-        RequestBuilder::new(client, http::Method::POST, &demote_url)
-            .expect_status(Some(StatusCode::NOT_FOUND)),
-    )
-    .authn_as(AuthnMode::UnprivilegedUser)
-    .execute()
-    .await
-    .expect("expected project limited-collaborator to be blocked from demoting image");
-
-    // Attempt to delete the silo image as project limited-collaborator - should fail
-    // Project limited-collaborators have no silo-level permissions, so they get NOT_FOUND
-    let image_url = format!("/v1/images/{}", image_id);
-    NexusRequest::new(
-        RequestBuilder::new(client, http::Method::DELETE, &image_url)
-            .expect_status(Some(StatusCode::NOT_FOUND)),
-    )
-    .authn_as(AuthnMode::UnprivilegedUser)
-    .execute()
-    .await
-    .expect("expected project limited-collaborator to be blocked from deleting silo image");
 }
