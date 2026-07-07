@@ -17462,7 +17462,6 @@ dependencies = [
  "toml 0.8.23",
  "tough",
  "transceiver-controller 0.1.1 (git+https://github.com/oxidecomputer/transceiver-control)",
- "tufaceous 0.1.0",
  "tufaceous 0.2.0",
  "tufaceous-artifact 0.2.0",
  "update-engine",
