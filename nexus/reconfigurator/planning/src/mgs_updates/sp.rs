@@ -116,12 +116,12 @@ pub(super) fn try_make_update(
                     | KnownArtifactKind::InstallinatorDocument
                     | KnownArtifactKind::ControlPlane
                     | KnownArtifactKind::Zone
+                    | KnownArtifactKind::MeasurementCorpus
                     | KnownArtifactKind::PscRot
                     | KnownArtifactKind::SwitchRot
                     | KnownArtifactKind::GimletRotBootloader
                     | KnownArtifactKind::PscRotBootloader
-                    | KnownArtifactKind::SwitchRotBootloader
-                    | KnownArtifactKind::MeasurementCorpus,
+                    | KnownArtifactKind::SwitchRotBootloader,
                 ) => false,
             }
         })

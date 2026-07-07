@@ -10,6 +10,12 @@
 // easier it will be to test, version, and update in deployed systems.
 
 use crate::saga_interface::SagaContext;
+use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db::DataStore;
+use omicron_common::api::external::Error;
+use omicron_uuid_kinds::SledUuid;
+use omicron_uuid_kinds::ZpoolUuid;
+use progenitor_extras::retry::GoneCheckResult;
 use serde::Serialize;
 use std::sync::Arc;
 use std::sync::LazyLock;
@@ -39,7 +45,6 @@ pub mod instance_migrate;
 pub mod instance_start;
 pub mod instance_update;
 pub mod multicast_group_dpd_ensure;
-pub mod multicast_group_dpd_update;
 pub mod project_create;
 pub mod region_replacement_drive;
 pub mod region_replacement_finish;
@@ -51,6 +56,8 @@ pub mod region_snapshot_replacement_step;
 pub mod region_snapshot_replacement_step_garbage_collect;
 pub mod snapshot_create;
 pub mod snapshot_delete;
+pub mod subnet_attach;
+pub mod subnet_detach;
 pub mod test_saga;
 pub mod volume_delete;
 pub mod volume_remove_rop;
@@ -163,6 +170,8 @@ fn make_action_registry() -> ActionRegistry {
         disk_create::SagaDiskCreate,
         disk_delete::SagaDiskDelete,
         finalize_disk::SagaFinalizeDisk,
+        image_delete::SagaImageDelete,
+        image_create::SagaImageCreate,
         instance_create::SagaInstanceCreate,
         instance_delete::SagaInstanceDelete,
         instance_ip_attach::SagaInstanceIpAttach,
@@ -170,16 +179,8 @@ fn make_action_registry() -> ActionRegistry {
         instance_migrate::SagaInstanceMigrate,
         instance_start::SagaInstanceStart,
         instance_update::SagaInstanceUpdate,
+        multicast_group_dpd_ensure::SagaMulticastGroupDpdEnsure,
         project_create::SagaProjectCreate,
-        snapshot_create::SagaSnapshotCreate,
-        snapshot_delete::SagaSnapshotDelete,
-        volume_delete::SagaVolumeDelete,
-        volume_remove_rop::SagaVolumeRemoveROP,
-        vpc_create::SagaVpcCreate,
-        vpc_subnet_create::SagaVpcSubnetCreate,
-        vpc_subnet_delete::SagaVpcSubnetDelete,
-        vpc_subnet_update::SagaVpcSubnetUpdate,
-        image_delete::SagaImageDelete,
         region_replacement_start::SagaRegionReplacementStart,
         region_replacement_drive::SagaRegionReplacementDrive,
         region_replacement_finish::SagaRegionReplacementFinish,
@@ -188,9 +189,16 @@ fn make_action_registry() -> ActionRegistry {
         region_snapshot_replacement_step::SagaRegionSnapshotReplacementStep,
         region_snapshot_replacement_step_garbage_collect::SagaRegionSnapshotReplacementStepGarbageCollect,
         region_snapshot_replacement_finish::SagaRegionSnapshotReplacementFinish,
-        image_create::SagaImageCreate,
-        multicast_group_dpd_ensure::SagaMulticastGroupDpdEnsure,
-        multicast_group_dpd_update::SagaMulticastGroupDpdUpdate
+        snapshot_create::SagaSnapshotCreate,
+        snapshot_delete::SagaSnapshotDelete,
+        subnet_attach::SagaSubnetAttach,
+        subnet_detach::SagaSubnetDetach,
+        volume_delete::SagaVolumeDelete,
+        volume_remove_rop::SagaVolumeRemoveROP,
+        vpc_create::SagaVpcCreate,
+        vpc_subnet_create::SagaVpcSubnetCreate,
+        vpc_subnet_delete::SagaVpcSubnetDelete,
+        vpc_subnet_update::SagaVpcSubnetUpdate
     ];
 
     #[cfg(test)]
@@ -524,4 +532,41 @@ fn subsaga_append<S: Serialize>(
     ));
 
     Ok(())
+}
+
+/// Returns a GoneCheckResult corresponding to if a sled is still exists and is
+/// in-service. Will return an error if the associated query fails.
+async fn sled_out_of_service_gone_check(
+    datastore: &DataStore,
+    opctx: &OpContext,
+    sled_id: SledUuid,
+) -> Result<GoneCheckResult, Error> {
+    datastore.check_sled_in_service(&opctx, sled_id).await.map(
+        |sled_in_service| {
+            if sled_in_service {
+                GoneCheckResult::StillAvailable
+            } else {
+                GoneCheckResult::Gone
+            }
+        },
+    )
+}
+
+/// Returns a GoneCheckResult corresponding to if a zpool is still exists and
+/// the backing physical disk is still in-service. Will return an error if the
+/// associated query fails.
+async fn zpool_out_of_service_gone_check(
+    datastore: &DataStore,
+    opctx: &OpContext,
+    zpool_id: ZpoolUuid,
+) -> Result<GoneCheckResult, Error> {
+    datastore.check_zpool_in_service(&opctx, zpool_id).await.map(
+        |zpool_in_service| {
+            if zpool_in_service {
+                GoneCheckResult::StillAvailable
+            } else {
+                GoneCheckResult::Gone
+            }
+        },
+    )
 }

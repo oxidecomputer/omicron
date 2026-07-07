@@ -6,6 +6,7 @@ use super::{ActionRegistry, NexusActionContext, NexusSaga, SagaInitError};
 use crate::app::sagas;
 use crate::app::sagas::declare_saga_actions;
 use nexus_db_queries::authn;
+use nexus_types::saga::saga_action_failed;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::VolumeUuid;
 use serde::Deserialize;
@@ -143,7 +144,7 @@ async fn svr_create_temp_volume(
         .datastore()
         .volume_create(temp_volume_id, volume_construction_request)
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     Ok(())
 }
@@ -159,7 +160,7 @@ async fn svr_create_temp_volume_undo(
         .datastore()
         .volume_hard_delete(temp_volume_id)
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
     Ok(())
 }
 
@@ -175,6 +176,6 @@ async fn svr_remove_read_only_parent(
         .datastore()
         .volume_remove_rop(params.volume_id, temp_volume_id)
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
     Ok(())
 }

@@ -10,13 +10,15 @@ use lldpd_client::types::ChassisId;
 use lldpd_client::types::Neighbor;
 use lldpd_client::types::PortId;
 use nexus_db_queries::context::OpContext;
+use nexus_types::external_api::networking::LldpLinkConfig;
+use nexus_types::external_api::networking::LldpNeighbor;
 use omicron_common::api::external::Error;
-use omicron_common::api::external::LldpLinkConfig;
-use omicron_common::api::external::LldpNeighbor;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::Name;
-use omicron_common::api::external::SwitchLocation;
 use omicron_common::api::external::UpdateResult;
+use omicron_uuid_kinds::RackUuid;
+use sled_agent_types::early_networking::SwitchSlot;
+use slog_error_chain::InlineErrorChain;
 use uuid::Uuid;
 
 impl super::Nexus {
@@ -25,13 +27,13 @@ impl super::Nexus {
     pub(crate) async fn lldp_config_get(
         &self,
         opctx: &OpContext,
-        rack_id: Uuid,
-        switch_location: Name,
+        rack_id: RackUuid,
+        switch_slot: SwitchSlot,
         port: Name,
     ) -> LookupResult<LldpLinkConfig> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
         self.db_datastore
-            .lldp_config_get(opctx, rack_id, switch_location, port)
+            .lldp_config_get(opctx, rack_id, switch_slot, port)
             .await
     }
 
@@ -41,14 +43,14 @@ impl super::Nexus {
     pub async fn lldp_config_update(
         &self,
         opctx: &OpContext,
-        rack_id: Uuid,
-        switch_location: Name,
+        rack_id: RackUuid,
+        switch_slot: SwitchSlot,
         port: Name,
         config: LldpLinkConfig,
     ) -> UpdateResult<()> {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
         self.db_datastore
-            .lldp_config_update(opctx, rack_id, switch_location, port, config)
+            .lldp_config_update(opctx, rack_id, switch_slot, port, config)
             .await?;
 
         // eagerly propagate changes via rpw
@@ -64,36 +66,36 @@ impl super::Nexus {
         opctx: &OpContext,
         previous: &Option<Uuid>,
         limit: u32,
-        rack_id: Uuid,
-        switch_location: &Name,
+        rack_id: RackUuid,
+        switch_slot: SwitchSlot,
         port: &Name,
     ) -> Result<Vec<LldpNeighbor>, Error> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
-
-        let loc: SwitchLocation =
-            switch_location.as_str().parse().map_err(|e| {
-                Error::invalid_request(&format!(
-                    "invalid switch name {switch_location}: {e}"
-                ))
-            })?;
 
         let lldpd_clients = self.lldpd_clients(rack_id).await.map_err(|e| {
             Error::internal_error(&format!("lldpd clients get: {e}"))
         })?;
 
-        let lldpd =
-            lldpd_clients.get(&loc).ok_or(Error::internal_error(&format!(
-                "no lldpd client for rack: {rack_id} switch {switch_location}"
-            )))?;
+        let lldpd = lldpd_clients.get(&switch_slot).ok_or(
+            Error::internal_error(&format!(
+                "no lldpd client for rack: {rack_id} switch {switch_slot:?}"
+            )),
+        )?;
 
         let mut neighbors: Vec<Neighbor> = lldpd
             .get_neighbors_stream(&format!("{port}/0"), None)
             .try_collect()
             .await
-            .map_err(|e| {
-                Error::internal_error(&format!(
-                    "failed to get neighbor list for {loc}/{port}: {e}"
-                ))
+            .map_err(|e| match e.status() {
+                Some(http::StatusCode::NOT_FOUND) => Error::not_found_by_name(
+                    omicron_common::api::external::ResourceType::SwitchPort,
+                    port,
+                ),
+                _ => Error::internal_error(&format!(
+                    "failed to get neighbor list for \
+                     {switch_slot:?}/{port}: {}",
+                    InlineErrorChain::new(&e),
+                )),
             })?;
 
         // Strip out any neighbors seen on previous pages prior to sorting the

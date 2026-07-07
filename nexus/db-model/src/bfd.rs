@@ -1,3 +1,8 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+use crate::DbSwitchSlot;
 use crate::{SqlU32, impl_enum_type};
 use chrono::DateTime;
 use chrono::Utc;
@@ -35,22 +40,31 @@ pub struct BfdSession {
     pub remote: IpNetwork,
     pub detection_threshold: SqlU32,
     pub required_rx: SqlU32,
-    pub switch: String,
     pub mode: BfdMode,
     pub time_created: DateTime<Utc>,
     pub time_modified: DateTime<Utc>,
     pub time_deleted: Option<DateTime<Utc>>,
+    pub switch_slot: DbSwitchSlot,
 }
 
-impl From<omicron_common::api::external::BfdMode> for BfdMode {
-    fn from(value: omicron_common::api::external::BfdMode) -> Self {
+impl From<sled_agent_types::early_networking::BfdMode> for BfdMode {
+    fn from(value: sled_agent_types::early_networking::BfdMode) -> Self {
         match value {
-            omicron_common::api::external::BfdMode::SingleHop => {
-                BfdMode::SingleHop
+            sled_agent_types::early_networking::BfdMode::SingleHop => {
+                Self::SingleHop
             }
-            omicron_common::api::external::BfdMode::MultiHop => {
-                BfdMode::MultiHop
+            sled_agent_types::early_networking::BfdMode::MultiHop => {
+                Self::MultiHop
             }
+        }
+    }
+}
+
+impl From<BfdMode> for sled_agent_types::early_networking::BfdMode {
+    fn from(value: BfdMode) -> Self {
+        match value {
+            BfdMode::SingleHop => Self::SingleHop,
+            BfdMode::MultiHop => Self::MultiHop,
         }
     }
 }

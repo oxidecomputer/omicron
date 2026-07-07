@@ -8,11 +8,16 @@ use super::external_ips::floating_ip_get;
 use super::external_ips::get_floating_ip_by_id_url;
 use super::metrics::{assert_silo_metrics, assert_system_metrics};
 
+use async_bb8_diesel::AsyncRunQueryDsl;
+use diesel::prelude::*;
 use http::StatusCode;
 use http::method::Method;
 use itertools::Itertools;
 use nexus_auth::authz::Action;
+use nexus_db_lookup::AsyncConnection;
 use nexus_db_lookup::LookupPath;
+use nexus_db_model::SledResourceVmm;
+use nexus_db_model::to_db_typed_uuid;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO;
@@ -29,6 +34,7 @@ use nexus_test_utils::resource_helpers::create_disk;
 use nexus_test_utils::resource_helpers::create_floating_ip;
 use nexus_test_utils::resource_helpers::create_ip_pool;
 use nexus_test_utils::resource_helpers::create_local_user;
+use nexus_test_utils::resource_helpers::create_project_image;
 use nexus_test_utils::resource_helpers::create_silo;
 use nexus_test_utils::resource_helpers::grant_iam;
 use nexus_test_utils::resource_helpers::link_ip_pool;
@@ -43,36 +49,42 @@ use nexus_test_utils::resource_helpers::objects_list_page_authz;
 use nexus_test_utils::resource_helpers::test_params;
 use nexus_test_utils::start_sled_agent_with_config;
 use nexus_test_utils::wait_for_producer;
-use nexus_types::external_api::params::IpAssignment;
-use nexus_types::external_api::params::PrivateIpStackCreate;
-use nexus_types::external_api::params::PrivateIpv4StackCreate;
-use nexus_types::external_api::params::PrivateIpv6StackCreate;
-use nexus_types::external_api::params::SshKeyCreate;
-use nexus_types::external_api::shared::IpKind;
-use nexus_types::external_api::shared::IpRange;
-use nexus_types::external_api::shared::Ipv4Range;
-use nexus_types::external_api::shared::SiloIdentityMode;
-use nexus_types::external_api::views::Sled;
-use nexus_types::external_api::views::SshKey;
-use nexus_types::external_api::views::VpcSubnet;
-use nexus_types::external_api::{params, views};
+use nexus_types::external_api::affinity;
+use nexus_types::external_api::disk;
+use nexus_types::external_api::external_ip::{ExternalIp, IpKind};
+use nexus_types::external_api::floating_ip;
+use nexus_types::external_api::instance;
+use nexus_types::external_api::instance::ExternalIpCreate;
+use nexus_types::external_api::instance::IpAssignment;
+use nexus_types::external_api::instance::PrivateIpStackCreate;
+use nexus_types::external_api::instance::PrivateIpv4StackCreate;
+use nexus_types::external_api::instance::PrivateIpv6StackCreate;
+use nexus_types::external_api::instance::{
+    Instance, InstanceAutoRestartPolicy, InstanceCpuCount, InstanceCpuPlatform,
+    InstanceState,
+};
+use nexus_types::external_api::ip_pool::{
+    self, IpRange, Ipv4Range, PoolSelector,
+};
+use nexus_types::external_api::path_params;
+use nexus_types::external_api::project;
+use nexus_types::external_api::silo::{self, SiloIdentityMode};
+use nexus_types::external_api::sled::{self, Sled, SledProvisionPolicy};
+use nexus_types::external_api::ssh_key::{SshKey, SshKeyCreate};
+use nexus_types::external_api::system_networking;
+use nexus_types::external_api::vpc;
+use nexus_types::external_api::vpc::VpcSubnet;
 use nexus_types::identity::Resource;
 use nexus_types::internal_api::params::InstanceMigrateRequest;
 use nexus_types::silo::DEFAULT_SILO_ID;
-use omicron_common::api::external::AffinityPolicy;
+use omicron_common::address::IpVersion;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Disk;
 use omicron_common::api::external::DiskState;
 use omicron_common::api::external::Error;
-use omicron_common::api::external::FailureDomain;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::IdentityMetadataUpdateParams;
-use omicron_common::api::external::Instance;
-use omicron_common::api::external::InstanceAutoRestartPolicy;
-use omicron_common::api::external::InstanceCpuCount;
-use omicron_common::api::external::InstanceCpuPlatform;
 use omicron_common::api::external::InstanceNetworkInterface;
-use omicron_common::api::external::InstanceState;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::Nullable;
@@ -109,7 +121,7 @@ use nexus_test_utils::resource_helpers::{
     create_project, create_vpc, create_vpc_subnet,
 };
 use nexus_test_utils_macros::nexus_test;
-use nexus_types::external_api::shared::{ProjectRole, SiloRole};
+use nexus_types::external_api::policy::{ProjectRole, SiloRole};
 use omicron_test_utils::dev::poll;
 use omicron_test_utils::dev::poll::CondCheckError;
 
@@ -166,7 +178,7 @@ const SLEDS_URL: &'static str = "/v1/system/hardware/sleds";
 
 pub async fn create_project_and_pool(
     client: &ClientTestContext,
-) -> views::Project {
+) -> project::Project {
     create_default_ip_pools(client).await;
     create_project(client, PROJECT_NAME).await
 }
@@ -250,7 +262,7 @@ async fn test_create_instance_with_bad_hostname_impl(
     // We'll do this by creating a _valid_ set of parameters, convert it to
     // JSON, and then muck with the hostname.
     let instance_name = "happy-accident";
-    let params = params::InstanceCreate {
+    let params = instance::InstanceCreate {
         identity: IdentityMetadataCreateParams {
             name: instance_name.parse().unwrap(),
             description: format!("instance {:?}", instance_name),
@@ -271,6 +283,7 @@ async fn test_create_instance_with_bad_hostname_impl(
         auto_restart_policy: Default::default(),
         anti_affinity_groups: Vec::new(),
         multicast_groups: Vec::new(),
+        enable_jumbo_frames: false,
     };
     let mut body: serde_json::Value =
         serde_json::from_str(&serde_json::to_string(&params).unwrap()).unwrap();
@@ -357,7 +370,7 @@ async fn test_instances_create_reboot_halt(
     // Attempt to create a second instance with a conflicting name.
     let error: HttpErrorResponseBody = NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &get_instances_url())
-            .body(Some(&params::InstanceCreate {
+            .body(Some(&instance::InstanceCreate {
                 identity: IdentityMetadataCreateParams {
                     name: instance.identity.name.clone(),
                     description: format!(
@@ -371,7 +384,7 @@ async fn test_instances_create_reboot_halt(
                 user_data: vec![],
                 ssh_public_keys: None,
                 network_interfaces:
-                    params::InstanceNetworkInterfaceAttachment::DefaultIpv4,
+                    instance::InstanceNetworkInterfaceAttachment::DefaultIpv4,
                 external_ips: vec![],
                 disks: vec![],
                 boot_disk: None,
@@ -380,6 +393,7 @@ async fn test_instances_create_reboot_halt(
                 auto_restart_policy: Default::default(),
                 anti_affinity_groups: Vec::new(),
                 multicast_groups: Vec::new(),
+                enable_jumbo_frames: false,
             }))
             .expect_status(Some(StatusCode::BAD_REQUEST)),
     )
@@ -735,16 +749,42 @@ async fn test_instance_start_creates_networking_state(
     assert!(checked);
 }
 
+/// Fetch the source and target VMMs' `sled_resource_vmm` records, returning `None`
+/// if the corresponding record is not found.
+///
+/// To avoid torn reads, this function reads the records in a single query.
+///
+/// Panics if a database error occurs.
+async fn fetch_sled_resource_vmm_records(
+    src_propolis_id: PropolisUuid,
+    dst_propolis_id: PropolisUuid,
+    conn: &AsyncConnection,
+) -> (Option<SledResourceVmm>, Option<SledResourceVmm>) {
+    use nexus_db_schema::schema::sled_resource_vmm::dsl;
+
+    let records: Vec<SledResourceVmm> = dsl::sled_resource_vmm
+        .filter(dsl::id.eq_any([
+            to_db_typed_uuid(src_propolis_id),
+            to_db_typed_uuid(dst_propolis_id),
+        ]))
+        .select(SledResourceVmm::as_select())
+        .get_results_async(conn)
+        .await
+        .expect("querying for sled_resource_vmm records should not fail");
+
+    let find = |propolis_id: PropolisUuid| {
+        records.iter().find(|record| record.id() == propolis_id).cloned()
+    };
+    (find(src_propolis_id), find(dst_propolis_id))
+}
+
 #[nexus_test(extra_sled_agents = 1)]
 async fn test_instance_migrate(cptestctx: &ControlPlaneTestContext) {
-    use nexus_db_model::Migration;
-    use omicron_common::api::internal::nexus::MigrationState;
+    use nexus_db_model::{Migration, MigrationState};
     async fn migration_fetch(
         cptestctx: &ControlPlaneTestContext,
         migration_id: Uuid,
     ) -> Migration {
-        use async_bb8_diesel::AsyncRunQueryDsl;
-        use diesel::prelude::*;
         use nexus_db_schema::schema::migration::dsl;
 
         let datastore =
@@ -786,9 +826,9 @@ async fn test_instance_migrate(cptestctx: &ControlPlaneTestContext) {
         client,
         PROJECT_NAME,
         instance_name,
-        &params::InstanceNetworkInterfaceAttachment::DefaultIpv4,
-        Vec::<params::InstanceDiskAttachment>::new(),
-        Vec::<params::ExternalIpCreate>::new(),
+        &instance::InstanceNetworkInterfaceAttachment::DefaultIpv4,
+        Vec::<instance::InstanceDiskAttachment>::new(),
+        Vec::<ExternalIpCreate>::new(),
         true,
         Default::default(),
         None,
@@ -854,13 +894,12 @@ async fn test_instance_migrate(cptestctx: &ControlPlaneTestContext) {
             .instance_refetch(&opctx, &authz_instance)
             .await
             .unwrap()
-            .runtime_state
             .migration_id
             .expect("since we've started a migration, the instance record must have a migration id!")
     };
     let migration = dbg!(migration_fetch(cptestctx, migration_id).await);
-    assert_eq!(migration.target_state, MigrationState::Pending.into());
-    assert_eq!(migration.source_state, MigrationState::Pending.into());
+    assert_eq!(migration.target_state, MigrationState::PENDING);
+    assert_eq!(migration.source_state, MigrationState::PENDING);
 
     let info = nexus
         .active_instance_info(&instance_id, None)
@@ -890,8 +929,8 @@ async fn test_instance_migrate(cptestctx: &ControlPlaneTestContext) {
         .await;
 
     let migration = dbg!(migration_fetch(cptestctx, migration_id).await);
-    assert_eq!(migration.source_state, MigrationState::InProgress.into());
-    assert_eq!(migration.target_state, MigrationState::Pending.into());
+    assert_eq!(migration.source_state, MigrationState::IN_PROGRESS);
+    assert_eq!(migration.target_state, MigrationState::PENDING);
     let instance = instance_get(&client, &instance_url).await;
     assert_eq!(instance.runtime.run_state, InstanceState::Migrating);
 
@@ -902,8 +941,8 @@ async fn test_instance_migrate(cptestctx: &ControlPlaneTestContext) {
         .await;
 
     let migration = dbg!(migration_fetch(cptestctx, migration_id).await);
-    assert_eq!(migration.source_state, MigrationState::InProgress.into());
-    assert_eq!(migration.target_state, MigrationState::InProgress.into());
+    assert_eq!(migration.source_state, MigrationState::IN_PROGRESS);
+    assert_eq!(migration.target_state, MigrationState::IN_PROGRESS);
     let instance = instance_get(&client, &instance_url).await;
     assert_eq!(instance.runtime.run_state, InstanceState::Migrating);
 
@@ -912,8 +951,8 @@ async fn test_instance_migrate(cptestctx: &ControlPlaneTestContext) {
         .await;
 
     let migration = dbg!(migration_fetch(cptestctx, migration_id).await);
-    assert_eq!(migration.source_state, MigrationState::Completed.into());
-    assert_eq!(migration.target_state, MigrationState::InProgress.into());
+    assert_eq!(migration.source_state, MigrationState::COMPLETED);
+    assert_eq!(migration.target_state, MigrationState::IN_PROGRESS);
     let instance = dbg!(instance_get(&client, &instance_url).await);
     assert_eq!(instance.runtime.run_state, InstanceState::Migrating);
 
@@ -932,8 +971,482 @@ async fn test_instance_migrate(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(current_sled, dst_sled_id);
 
     let migration = dbg!(migration_fetch(cptestctx, migration_id).await);
-    assert_eq!(migration.target_state, MigrationState::Completed.into());
-    assert_eq!(migration.source_state, MigrationState::Completed.into());
+    assert_eq!(migration.target_state, MigrationState::COMPLETED);
+    assert_eq!(migration.source_state, MigrationState::COMPLETED);
+
+    // Wait for the source sled_resource_vmm record to be cleaned up and the
+    // target record to switch to active.
+    //
+    // Both changes happen after the saga node that commits the instance's new
+    // runtime state (which is what makes the instance externally `Running`), so
+    // we must wait until the condition is true (level-triggered) rather than
+    // assert immediately.
+    //
+    // However, if an update saga commits the active-VMM swap before the
+    // source VMM's `Destroyed` state is observed, no update saga ever cleans
+    // up the source record: the source becomes an *abandoned* VMM, whose
+    // record is instead deleted by the `abandoned_vmm_reaper` background
+    // task. Activate that task on each poll so this test does not have to
+    // wait out the task's periodic activation interval. (See "Relying on
+    // periodic background-task activation" in docs/flake-patterns.adoc.)
+    {
+        use nexus_db_model::SledResourceVmmState;
+
+        wait_for_condition(
+            || async {
+                nexus_test_utils::background::run_abandoned_vmm_reaper(
+                    &cptestctx.lockstep_client,
+                )
+                .await;
+
+                let datastore = apictx.nexus.datastore();
+                let conn = datastore.pool_connection_for_tests().await.unwrap();
+
+                let (maybe_source_record, maybe_target_record) =
+                    fetch_sled_resource_vmm_records(
+                        src_propolis_id,
+                        dst_propolis_id,
+                        &conn,
+                    )
+                    .await;
+
+                let target_record = maybe_target_record.expect(
+                    "sled_resource_vmm record for the migration target \
+                     VMM record should exist, since the instance is running \
+                     on that VMM",
+                );
+
+                let source_state =
+                    maybe_source_record.map(|record| record.state);
+                match (source_state, target_record.state) {
+                    (None, SledResourceVmmState::Active) => Ok(()),
+
+                    // Not done yet. The valid transient states are:
+                    //
+                    // * `(Some(Active), Target)`: the swap node has not run
+                    //   yet, so the reservation records still show the
+                    //   pre-swap state even though the instance record
+                    //   already points at the target VMM.
+                    //
+                    // * `(None, Target)`: the instance stops referencing the
+                    //   source VMM at the instance-record commit, which runs
+                    //   before the `sled_resource_vmm` swap, so the reaper
+                    //   may delete the source record before the later swap
+                    //   node activates the target record.
+                    //
+                    // * `(Some(Tombstoned), Active)`: the swap has committed,
+                    //   but the source record has not yet been deleted (by
+                    //   either the destroy-VMM subsaga or the reaper).
+                    (
+                        None | Some(SledResourceVmmState::Active),
+                        SledResourceVmmState::Target,
+                    )
+                    | (
+                        Some(SledResourceVmmState::Tombstoned),
+                        SledResourceVmmState::Active,
+                    ) => {
+                        let source_record_status = match source_state {
+                            Some(state) => format!("still present ({state})"),
+                            None => "deleted".to_string(),
+                        };
+                        Err(CondCheckError::<()>::NotYet {
+                            status: Some(format!(
+                                "source record: {}, target record state: {}",
+                                source_record_status, target_record.state,
+                            )),
+                        })
+                    }
+
+                    // States that should never occur.
+                    (Some(SledResourceVmmState::Target), _) => panic!(
+                        "source sled_resource_vmm record should never be in \
+                         the `target` state: its VMM was never a migration \
+                         target",
+                    ),
+                    (_, SledResourceVmmState::Tombstoned) => panic!(
+                        "target sled_resource_vmm record should never be \
+                         tombstoned: the instance is running on its VMM",
+                    ),
+                    (
+                        Some(SledResourceVmmState::Active),
+                        SledResourceVmmState::Active,
+                    ) => panic!(
+                        "source and target sled_resource_vmm records should \
+                         never both be `active`",
+                    ),
+                    (
+                        Some(SledResourceVmmState::Tombstoned),
+                        SledResourceVmmState::Target,
+                    ) => panic!(
+                        "source sled_resource_vmm record should never be \
+                         `tombstoned` while the target is still `target`",
+                    ),
+                }
+            },
+            &Duration::from_millis(50),
+            &Duration::from_secs(60),
+        )
+        .await
+        .expect(
+            "source sled_resource_vmm record should be deleted and target \
+             record should become active",
+        );
+    }
+}
+
+#[nexus_test(extra_sled_agents = 1)]
+async fn test_instance_migrate_target_finishes_first(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    use nexus_db_model::{Migration, MigrationState};
+    async fn migration_fetch(
+        cptestctx: &ControlPlaneTestContext,
+        migration_id: Uuid,
+    ) -> Migration {
+        use nexus_db_schema::schema::migration::dsl;
+
+        let datastore =
+            cptestctx.server.server_context().nexus.datastore().clone();
+        let db_state = dsl::migration
+            // N.B. that for the purposes of this test, we explicitly should
+            // *not* filter out migrations that are marked as deleted, as the
+            // migration record is marked as deleted once the migration completes.
+            .filter(dsl::id.eq(migration_id))
+            .select(Migration::as_select())
+            .get_results_async::<Migration>(
+                &*datastore.pool_connection_for_tests().await.unwrap(),
+            )
+            .await
+            .unwrap();
+
+        info!(&cptestctx.logctx.log, "refetched migration info from db";
+                "migration" => ?db_state);
+
+        db_state.into_iter().next().unwrap()
+    }
+
+    let client = &cptestctx.external_client;
+    let lockstep_client = &cptestctx.lockstep_client;
+    let apictx = &cptestctx.server.server_context();
+    let nexus = &apictx.nexus;
+    let instance_name = "bird-ecology";
+
+    // Get the second sled to migrate to/from.
+    let default_sled_id = cptestctx.first_sled_id();
+    let other_sled_id = cptestctx.second_sled_id();
+
+    create_project_and_pool(&client).await;
+    let instance_url = get_instance_url(instance_name);
+
+    // Explicitly create an instance with no disks. Simulated sled agent assumes
+    // that disks are co-located with their instances.
+    let instance = nexus_test_utils::resource_helpers::create_instance_with(
+        client,
+        PROJECT_NAME,
+        instance_name,
+        &instance::InstanceNetworkInterfaceAttachment::DefaultIpv4,
+        Vec::<instance::InstanceDiskAttachment>::new(),
+        Vec::<ExternalIpCreate>::new(),
+        true,
+        Default::default(),
+        None,
+        Vec::new(),
+    )
+    .await;
+    let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
+
+    // Poke the instance into an active state.
+    instance_simulate(nexus, &instance_id).await;
+    let instance_next = instance_get(&client, &instance_url).await;
+    assert_eq!(instance_next.runtime.run_state, InstanceState::Running);
+
+    let sled_info = nexus
+        .active_instance_info(&instance_id, None)
+        .await
+        .unwrap()
+        .expect("running instance should have a sled");
+
+    let original_sled = sled_info.sled_id;
+    let dst_sled_id = if original_sled == default_sled_id {
+        other_sled_id
+    } else {
+        default_sled_id
+    };
+
+    let migrate_url =
+        format!("/instances/{}/migrate", &instance_id.to_string());
+    let instance = NexusRequest::new(
+        RequestBuilder::new(lockstep_client, Method::POST, &migrate_url)
+            .body(Some(&InstanceMigrateRequest { dst_sled_id }))
+            .expect_status(Some(StatusCode::OK)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body::<Instance>()
+    .unwrap();
+
+    let new_sled_info = nexus
+        .active_instance_info(&instance_id, None)
+        .await
+        .unwrap()
+        .expect("running instance should have a sled");
+
+    let current_sled = new_sled_info.sled_id;
+    assert_eq!(current_sled, original_sled);
+
+    // Ensure that both sled agents report that the migration is in progress.
+    let migration_id = {
+        let datastore = apictx.nexus.datastore();
+        let opctx = OpContext::for_tests(
+            cptestctx.logctx.log.new(o!()),
+            datastore.clone(),
+        );
+        let (.., authz_instance) = LookupPath::new(&opctx, datastore)
+            .instance_id(instance.identity.id)
+            .lookup_for(nexus_db_queries::authz::Action::Read)
+            .await
+            .unwrap();
+        datastore
+            .instance_refetch(&opctx, &authz_instance)
+            .await
+            .unwrap()
+            .migration_id
+            .expect(
+                "since we've started a migration, the instance record must \
+                have a migration id!",
+            )
+    };
+    let migration = dbg!(migration_fetch(cptestctx, migration_id).await);
+    assert_eq!(migration.target_state, MigrationState::PENDING);
+    assert_eq!(migration.source_state, MigrationState::PENDING);
+
+    let info = nexus
+        .active_instance_info(&instance_id, None)
+        .await
+        .unwrap()
+        .expect("instance should be on a sled");
+    let src_propolis_id = info.propolis_id;
+    let dst_propolis_id =
+        info.dst_propolis_id.expect("instance should have a migration target");
+
+    // Simulate the migration. We will use `instance_single_step_on_sled` to
+    // single-step both sled-agents through the migration state machine and
+    // ensure that the migration state looks nice at each step.
+    instance_simulate_migration_source(
+        cptestctx,
+        nexus,
+        original_sled,
+        src_propolis_id,
+        migration_id,
+    )
+    .await;
+
+    // Move source to "migrating".
+    vmm_single_step_on_sled(cptestctx, nexus, original_sled, src_propolis_id)
+        .await;
+    vmm_single_step_on_sled(cptestctx, nexus, original_sled, src_propolis_id)
+        .await;
+
+    let migration = dbg!(migration_fetch(cptestctx, migration_id).await);
+    assert_eq!(migration.source_state, MigrationState::IN_PROGRESS);
+    assert_eq!(migration.target_state, MigrationState::PENDING);
+    let instance = instance_get(&client, &instance_url).await;
+    assert_eq!(instance.runtime.run_state, InstanceState::Migrating);
+
+    // Move target to "migrating".
+    vmm_single_step_on_sled(cptestctx, nexus, dst_sled_id, dst_propolis_id)
+        .await;
+    vmm_single_step_on_sled(cptestctx, nexus, dst_sled_id, dst_propolis_id)
+        .await;
+
+    let migration = dbg!(migration_fetch(cptestctx, migration_id).await);
+    assert_eq!(migration.source_state, MigrationState::IN_PROGRESS);
+    assert_eq!(migration.target_state, MigrationState::IN_PROGRESS);
+    let instance = instance_get(&client, &instance_url).await;
+    assert_eq!(instance.runtime.run_state, InstanceState::Migrating);
+
+    // Move the target to "completed" before the source.
+    vmm_simulate_on_sled(cptestctx, nexus, dst_sled_id, dst_propolis_id).await;
+
+    instance_wait_for_state(&client, instance_id, InstanceState::Running).await;
+
+    let current_sled = nexus
+        .active_instance_info(&instance_id, None)
+        .await
+        .unwrap()
+        .expect("migrated instance should still have a sled")
+        .sled_id;
+
+    assert_eq!(current_sled, dst_sled_id);
+
+    let migration = dbg!(migration_fetch(cptestctx, migration_id).await);
+    assert_eq!(migration.target_state, MigrationState::COMPLETED);
+    assert_eq!(migration.source_state, MigrationState::IN_PROGRESS);
+
+    // Wait for the source sled_resource_vmm record to be tombstoned and the
+    // target record to switch to active.
+    //
+    // Both changes are made by an instance-update saga node that runs *after*
+    // the node that commits the instance's new runtime state (which is what
+    // makes the instance externally `Running`), so we must wait until the
+    // condition is true (level-triggered) rather than assert immediately. The
+    // source record cannot be deleted outright at this point: its VMM is still
+    // migrating, so it is neither cleaned up by a destroy-VMM subsaga nor
+    // eligible for the `abandoned_vmm_reaper`.
+    {
+        use nexus_db_model::SledResourceVmmState;
+
+        wait_for_condition(
+            || async {
+                let datastore = apictx.nexus.datastore();
+                let conn = datastore.pool_connection_for_tests().await.unwrap();
+
+                let (maybe_source_record, maybe_target_record) =
+                    fetch_sled_resource_vmm_records(
+                        src_propolis_id,
+                        dst_propolis_id,
+                        &conn,
+                    )
+                    .await;
+
+                let source_record = maybe_source_record.expect(
+                    "source sled_resource_vmm record should exist: \
+                     its VMM is still migrating, so nothing may delete \
+                     it yet",
+                );
+                let target_record = maybe_target_record.expect(
+                    "sled_resource_vmm record for the migration target \
+                     VMM record should exist: the instance is running \
+                     on that VMM",
+                );
+
+                match (source_record.state, target_record.state) {
+                    (
+                        SledResourceVmmState::Tombstoned,
+                        SledResourceVmmState::Active,
+                    ) => Ok(()),
+
+                    // Not done yet: the swap node has not run yet, so the
+                    // reservation records still show the pre-swap state even
+                    // though the instance record already points at the target
+                    // VMM. The source record cannot be deleted here (its VMM
+                    // is still migrating), and the tombstone-and-activate swap
+                    // is a single transaction, so the only retryable state is
+                    // `(Active, Target)`.
+                    (
+                        SledResourceVmmState::Active,
+                        SledResourceVmmState::Target,
+                    ) => Err(CondCheckError::<()>::NotYet {
+                        status: Some(format!(
+                            "source record state: {}, target record state: {}",
+                            source_record.state, target_record.state,
+                        )),
+                    }),
+
+                    // States that should never occur.
+                    (SledResourceVmmState::Target, _) => panic!(
+                        "source sled_resource_vmm record should never be in \
+                         the `target` state: its VMM was never a migration \
+                         target",
+                    ),
+                    (_, SledResourceVmmState::Tombstoned) => panic!(
+                        "target sled_resource_vmm record should never be \
+                         tombstoned: the instance is running on its VMM",
+                    ),
+                    (
+                        SledResourceVmmState::Active,
+                        SledResourceVmmState::Active,
+                    ) => panic!(
+                        "source and target sled_resource_vmm records should \
+                         never both be `active`",
+                    ),
+                    (
+                        SledResourceVmmState::Tombstoned,
+                        SledResourceVmmState::Target,
+                    ) => panic!(
+                        "source sled_resource_vmm record should never be \
+                         `tombstoned` while the target is still `target`",
+                    ),
+                }
+            },
+            &Duration::from_millis(50),
+            &Duration::from_secs(60),
+        )
+        .await
+        .expect(
+            "source sled_resource_vmm record should be tombstoned and target \
+             record should become active",
+        );
+    }
+
+    // Now, move the source to "completed"
+
+    vmm_simulate_on_sled(cptestctx, nexus, original_sled, src_propolis_id)
+        .await;
+
+    let migration = dbg!(migration_fetch(cptestctx, migration_id).await);
+    assert_eq!(migration.source_state, MigrationState::COMPLETED);
+    assert_eq!(migration.target_state, MigrationState::COMPLETED);
+
+    // Wait for the source sled_resource_vmm record to be cleaned up.
+    //
+    // Now that the source VMM is destroyed and no longer referenced by the
+    // instance, it is an *abandoned* VMM: its (tombstoned) record is deleted
+    // by the `abandoned_vmm_reaper` background task. Activate that task on
+    // each poll so this test does not have to wait out the task's periodic
+    // activation interval. (See "Relying on periodic background-task
+    // activation" in docs/flake-patterns.adoc.) Until the reaper deletes the
+    // record, it must remain tombstoned; any other state is a bug, so fail
+    // fast rather than timing out.
+
+    wait_for_condition(
+        || async {
+            use nexus_db_model::SledResourceVmmState;
+
+            nexus_test_utils::background::run_abandoned_vmm_reaper(
+                &cptestctx.lockstep_client,
+            )
+            .await;
+
+            let datastore = apictx.nexus.datastore();
+            let conn = datastore.pool_connection_for_tests().await.unwrap();
+
+            // We're just waiting for the source record to be cleaned up, so we
+            // don't care about the target record.
+            let (maybe_source_record, _) = fetch_sled_resource_vmm_records(
+                src_propolis_id,
+                dst_propolis_id,
+                &conn,
+            )
+            .await;
+
+            match maybe_source_record.map(|record| record.state) {
+                None => Ok(()),
+                Some(SledResourceVmmState::Tombstoned) => {
+                    Err(CondCheckError::<()>::NotYet {
+                        status: Some(
+                            "source record still tombstoned; the reaper has \
+                             not deleted it"
+                                .to_string(),
+                        ),
+                    })
+                }
+                Some(
+                    state @ (SledResourceVmmState::Active
+                    | SledResourceVmmState::Target),
+                ) => panic!(
+                    "source sled_resource_vmm record should be tombstoned \
+                     until the reaper deletes it, but its state is {state}",
+                ),
+            }
+        },
+        &Duration::from_millis(50),
+        &Duration::from_secs(60),
+    )
+    .await
+    .expect("source sled_resource_vmm record should be deleted");
 }
 
 #[nexus_test(extra_sled_agents = 3)]
@@ -959,11 +1472,11 @@ async fn test_instance_migrate_v2p_and_routes(
         client,
         PROJECT_NAME,
         instance_name,
-        &params::InstanceNetworkInterfaceAttachment::DefaultIpv4,
+        &instance::InstanceNetworkInterfaceAttachment::DefaultIpv4,
         // Omit disks: simulated sled agent assumes that disks are always co-
         // located with their instances.
-        Vec::<params::InstanceDiskAttachment>::new(),
-        Vec::<params::ExternalIpCreate>::new(),
+        Vec::<instance::InstanceDiskAttachment>::new(),
+        Vec::<ExternalIpCreate>::new(),
         true,
         Default::default(),
         None,
@@ -1047,7 +1560,6 @@ async fn test_instance_migrate_v2p_and_routes(
             .instance_refetch(&opctx, &authz_instance)
             .await
             .unwrap()
-            .runtime_state
             .migration_id
             .expect("since we've started a migration, the instance record must have a migration id!")
     };
@@ -1112,8 +1624,7 @@ async fn test_instance_migrate_v2p_and_routes(
 async fn test_instance_migration_compatible_cpu_platforms(
     cptestctx: &ControlPlaneTestContext,
 ) {
-    use nexus_db_model::Migration;
-    use omicron_common::api::internal::nexus::MigrationState;
+    use nexus_db_model::{Migration, MigrationState};
     async fn migration_fetch(
         cptestctx: &ControlPlaneTestContext,
         migration_id: Uuid,
@@ -1176,9 +1687,9 @@ async fn test_instance_migration_compatible_cpu_platforms(
         client,
         PROJECT_NAME,
         instance_name,
-        &params::InstanceNetworkInterfaceAttachment::DefaultIpv4,
-        Vec::<params::InstanceDiskAttachment>::new(),
-        Vec::<params::ExternalIpCreate>::new(),
+        &instance::InstanceNetworkInterfaceAttachment::DefaultIpv4,
+        Vec::<instance::InstanceDiskAttachment>::new(),
+        Vec::<ExternalIpCreate>::new(),
         true,
         Default::default(),
         Some(InstanceCpuPlatform::AmdMilan),
@@ -1244,13 +1755,12 @@ async fn test_instance_migration_compatible_cpu_platforms(
             .instance_refetch(&opctx, &authz_instance)
             .await
             .unwrap()
-            .runtime_state
             .migration_id
             .expect("since we've started a migration, the instance record must have a migration id!")
     };
     let migration = dbg!(migration_fetch(cptestctx, migration_id).await);
-    assert_eq!(migration.target_state, MigrationState::Pending.into());
-    assert_eq!(migration.source_state, MigrationState::Pending.into());
+    assert_eq!(migration.target_state, MigrationState::PENDING);
+    assert_eq!(migration.source_state, MigrationState::PENDING);
 
     let info = nexus
         .active_instance_info(&instance_id, None)
@@ -1280,8 +1790,8 @@ async fn test_instance_migration_compatible_cpu_platforms(
         .await;
 
     let migration = dbg!(migration_fetch(cptestctx, migration_id).await);
-    assert_eq!(migration.source_state, MigrationState::InProgress.into());
-    assert_eq!(migration.target_state, MigrationState::Pending.into());
+    assert_eq!(migration.source_state, MigrationState::IN_PROGRESS);
+    assert_eq!(migration.target_state, MigrationState::PENDING);
     let instance = instance_get(&client, &instance_url).await;
     assert_eq!(instance.runtime.run_state, InstanceState::Migrating);
 
@@ -1292,8 +1802,8 @@ async fn test_instance_migration_compatible_cpu_platforms(
         .await;
 
     let migration = dbg!(migration_fetch(cptestctx, migration_id).await);
-    assert_eq!(migration.source_state, MigrationState::InProgress.into());
-    assert_eq!(migration.target_state, MigrationState::InProgress.into());
+    assert_eq!(migration.source_state, MigrationState::IN_PROGRESS);
+    assert_eq!(migration.target_state, MigrationState::IN_PROGRESS);
     let instance = instance_get(&client, &instance_url).await;
     assert_eq!(instance.runtime.run_state, InstanceState::Migrating);
 
@@ -1302,8 +1812,8 @@ async fn test_instance_migration_compatible_cpu_platforms(
         .await;
 
     let migration = dbg!(migration_fetch(cptestctx, migration_id).await);
-    assert_eq!(migration.source_state, MigrationState::Completed.into());
-    assert_eq!(migration.target_state, MigrationState::InProgress.into());
+    assert_eq!(migration.source_state, MigrationState::COMPLETED);
+    assert_eq!(migration.target_state, MigrationState::IN_PROGRESS);
     let instance = dbg!(instance_get(&client, &instance_url).await);
     assert_eq!(instance.runtime.run_state, InstanceState::Migrating);
 
@@ -1322,8 +1832,8 @@ async fn test_instance_migration_compatible_cpu_platforms(
     assert_eq!(current_sled, dst_sled_id);
 
     let migration = dbg!(migration_fetch(cptestctx, migration_id).await);
-    assert_eq!(migration.target_state, MigrationState::Completed.into());
-    assert_eq!(migration.source_state, MigrationState::Completed.into());
+    assert_eq!(migration.target_state, MigrationState::COMPLETED);
+    assert_eq!(migration.source_state, MigrationState::COMPLETED);
 }
 
 // An instance that requires a Turin CPU will be placed on the Turin sled, and
@@ -1365,9 +1875,9 @@ async fn test_instance_migration_incompatible_cpu_platforms(
         client,
         PROJECT_NAME,
         instance_name,
-        &params::InstanceNetworkInterfaceAttachment::DefaultIpv4,
-        Vec::<params::InstanceDiskAttachment>::new(),
-        Vec::<params::ExternalIpCreate>::new(),
+        &instance::InstanceNetworkInterfaceAttachment::DefaultIpv4,
+        Vec::<instance::InstanceDiskAttachment>::new(),
+        Vec::<ExternalIpCreate>::new(),
         true,
         Default::default(),
         Some(InstanceCpuPlatform::AmdTurin),
@@ -1442,9 +1952,9 @@ async fn test_instance_migration_unknown_sled_type(
         client,
         PROJECT_NAME,
         instance_name,
-        &params::InstanceNetworkInterfaceAttachment::DefaultIpv4,
-        Vec::<params::InstanceDiskAttachment>::new(),
-        Vec::<params::ExternalIpCreate>::new(),
+        &instance::InstanceNetworkInterfaceAttachment::DefaultIpv4,
+        Vec::<instance::InstanceDiskAttachment>::new(),
+        Vec::<ExternalIpCreate>::new(),
         true,
         Default::default(),
         None,
@@ -1681,7 +2191,7 @@ async fn test_instance_failed_when_on_expunged_sled(
         .sled_set_provision_policy(
             &opctx,
             &authz_sled,
-            views::SledProvisionPolicy::NonProvisionable,
+            SledProvisionPolicy::NonProvisionable,
         )
         .await
         .expect("set sled provision policy");
@@ -1698,11 +2208,11 @@ async fn test_instance_failed_when_on_expunged_sled(
                 client,
                 PROJECT_NAME,
                 name,
-                &params::InstanceNetworkInterfaceAttachment::DefaultIpv4,
+                &instance::InstanceNetworkInterfaceAttachment::DefaultIpv4,
                 // Disks=
-                Vec::<params::InstanceDiskAttachment>::new(),
+                Vec::<instance::InstanceDiskAttachment>::new(),
                 // External IPs=
-                Vec::<params::ExternalIpCreate>::new(),
+                Vec::<ExternalIpCreate>::new(),
                 true,
                 Some(auto_restart),
                 None,
@@ -1742,7 +2252,7 @@ async fn test_instance_failed_when_on_expunged_sled(
         .sled_set_provision_policy(
             &opctx,
             &authz_sled,
-            views::SledProvisionPolicy::Provisionable,
+            SledProvisionPolicy::Provisionable,
         )
         .await
         .expect("set sled provision policy");
@@ -1759,7 +2269,7 @@ async fn test_instance_failed_when_on_expunged_sled(
         .make_request(
             Method::POST,
             "/sleds/expunge",
-            Some(params::SledSelector { sled: default_sled_id }),
+            Some(sled::SledSelector { sled: default_sled_id }),
             StatusCode::OK,
         )
         .await
@@ -2049,11 +2559,11 @@ async fn make_forgotten_instance(
         client,
         PROJECT_NAME,
         instance_name,
-        &params::InstanceNetworkInterfaceAttachment::DefaultIpv4,
+        &instance::InstanceNetworkInterfaceAttachment::DefaultIpv4,
         // Disks=
-        Vec::<params::InstanceDiskAttachment>::new(),
+        Vec::<instance::InstanceDiskAttachment>::new(),
         // External IPs=
-        Vec::<params::ExternalIpCreate>::new(),
+        Vec::<ExternalIpCreate>::new(),
         true,
         Some(auto_restart),
         None,
@@ -2282,9 +2792,9 @@ async fn test_instance_metrics_with_migration(
         client,
         PROJECT_NAME,
         instance_name,
-        &params::InstanceNetworkInterfaceAttachment::DefaultIpv4,
-        Vec::<params::InstanceDiskAttachment>::new(),
-        Vec::<params::ExternalIpCreate>::new(),
+        &instance::InstanceNetworkInterfaceAttachment::DefaultIpv4,
+        Vec::<instance::InstanceDiskAttachment>::new(),
+        Vec::<ExternalIpCreate>::new(),
         true,
         Default::default(),
         None,
@@ -2367,7 +2877,6 @@ async fn test_instance_metrics_with_migration(
             .instance_refetch(&opctx, &authz_instance)
             .await
             .unwrap()
-            .runtime_state
             .migration_id
             .expect("since we've started a migration, the instance record must have a migration id!")
     };
@@ -2440,7 +2949,7 @@ async fn test_instances_create_stopped_start(
     let instance: Instance = object_create(
         client,
         &get_instances_url(),
-        &params::InstanceCreate {
+        &instance::InstanceCreate {
             identity: IdentityMetadataCreateParams {
                 name: instance_name.parse().unwrap(),
                 description: format!("instance {}", instance_name),
@@ -2451,7 +2960,7 @@ async fn test_instances_create_stopped_start(
             user_data: vec![],
             ssh_public_keys: None,
             network_interfaces:
-                params::InstanceNetworkInterfaceAttachment::DefaultIpv4,
+                instance::InstanceNetworkInterfaceAttachment::DefaultIpv4,
             external_ips: vec![],
             disks: vec![],
             boot_disk: None,
@@ -2460,6 +2969,7 @@ async fn test_instances_create_stopped_start(
             multicast_groups: Vec::new(),
             auto_restart_policy: Default::default(),
             anti_affinity_groups: Vec::new(),
+            enable_jumbo_frames: false,
         },
     )
     .await;
@@ -2588,26 +3098,11 @@ async fn test_instance_using_image_from_other_project_fails(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
+    DiskTest::new(&cptestctx).await;
     create_project_and_pool(&client).await;
 
     // Create an image in springfield-squidport.
-    let images_url = format!("/v1/images?project={}", PROJECT_NAME);
-    let image_create_params = params::ImageCreate {
-        identity: IdentityMetadataCreateParams {
-            name: "alpine-edge".parse().unwrap(),
-            description: String::from(
-                "you can boot any image, as long as it's alpine",
-            ),
-        },
-        os: "alpine".to_string(),
-        version: "edge".to_string(),
-        source: params::ImageSource::YouCanBootAnythingAsLongAsItsAlpine,
-    };
-    let image =
-        NexusRequest::objects_post(client, &images_url, &image_create_params)
-            .authn_as(AuthnMode::PrivilegedUser)
-            .execute_and_parse_unwrap::<views::Image>()
-            .await;
+    let image = create_project_image(client, PROJECT_NAME, "not-alpine").await;
 
     // Try and fail to create an instance in another project.
     let project = create_project(client, "moes-tavern").await;
@@ -2615,7 +3110,7 @@ async fn test_instance_using_image_from_other_project_fails(
         format!("/v1/instances?project={}", project.identity.name);
     let error: HttpErrorResponseBody = NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &instances_url)
-            .body(Some(&params::InstanceCreate {
+            .body(Some(&instance::InstanceCreate {
                 identity: IdentityMetadataCreateParams {
                     name: "stolen".parse().unwrap(),
                     description: "i stole an image".into(),
@@ -2626,17 +3121,18 @@ async fn test_instance_using_image_from_other_project_fails(
                 user_data: vec![],
                 ssh_public_keys: None,
                 network_interfaces:
-                    params::InstanceNetworkInterfaceAttachment::DefaultIpv4,
+                    instance::InstanceNetworkInterfaceAttachment::DefaultIpv4,
                 external_ips: vec![],
-                disks: vec![params::InstanceDiskAttachment::Create(
-                    params::DiskCreate {
+                disks: vec![instance::InstanceDiskAttachment::Create(
+                    disk::DiskCreate {
                         identity: IdentityMetadataCreateParams {
                             name: "stolen".parse().unwrap(),
                             description: "i stole an image".into(),
                         },
-                        disk_backend: params::DiskBackend::Distributed {
-                            disk_source: params::DiskSource::Image {
+                        disk_backend: disk::DiskBackend::Distributed {
+                            disk_source: disk::DiskSource::Image {
                                 image_id: image.identity.id,
+                                read_only: false,
                             },
                         },
                         size: ByteCount::from_gibibytes_u32(4),
@@ -2648,6 +3144,7 @@ async fn test_instance_using_image_from_other_project_fails(
                 auto_restart_policy: Default::default(),
                 anti_affinity_groups: Vec::new(),
                 multicast_groups: Vec::new(),
+                enable_jumbo_frames: false,
             }))
             .expect_status(Some(StatusCode::BAD_REQUEST)),
     )
@@ -2683,7 +3180,7 @@ async fn test_instance_create_saga_removes_instance_database_record(
     let default_name = "default".parse::<Name>().unwrap();
     let requested_address =
         "172.30.0.10".parse::<std::net::Ipv4Addr>().unwrap();
-    let if0_params = params::InstanceNetworkInterfaceCreate {
+    let if0_params = instance::InstanceNetworkInterfaceCreate {
         identity: IdentityMetadataCreateParams {
             name: Name::try_from(String::from("if0")).unwrap(),
             description: String::from("first custom interface"),
@@ -2693,12 +3190,12 @@ async fn test_instance_create_saga_removes_instance_database_record(
         ip_config: PrivateIpStackCreate::from_ipv4(requested_address),
     };
     let interface_params =
-        params::InstanceNetworkInterfaceAttachment::Create(vec![
+        instance::InstanceNetworkInterfaceAttachment::Create(vec![
             if0_params.clone(),
         ]);
 
     // Create the parameters for the instance itself, and create it.
-    let instance_params = params::InstanceCreate {
+    let instance_params = instance::InstanceCreate {
         identity: IdentityMetadataCreateParams {
             name: Name::try_from(String::from("unwind-test-inst")).unwrap(),
             description: String::from("instance to test saga unwind"),
@@ -2717,6 +3214,7 @@ async fn test_instance_create_saga_removes_instance_database_record(
         auto_restart_policy: Default::default(),
         anti_affinity_groups: Vec::new(),
         multicast_groups: Vec::new(),
+        enable_jumbo_frames: false,
     };
     let response = NexusRequest::objects_post(
         client,
@@ -2731,7 +3229,7 @@ async fn test_instance_create_saga_removes_instance_database_record(
 
     // Try to create a _new_ instance, with the same IP address. Note that the
     // other data does not conflict yet.
-    let instance_params = params::InstanceCreate {
+    let instance_params = instance::InstanceCreate {
         identity: IdentityMetadataCreateParams {
             name: Name::try_from(String::from("unwind-test-inst2")).unwrap(),
             description: String::from("instance to test saga unwind 2"),
@@ -2750,6 +3248,7 @@ async fn test_instance_create_saga_removes_instance_database_record(
         auto_restart_policy: Default::default(),
         anti_affinity_groups: Vec::new(),
         multicast_groups: Vec::new(),
+        enable_jumbo_frames: false,
     };
     let _ = NexusRequest::objects_post(
         client,
@@ -2769,7 +3268,7 @@ async fn test_instance_create_saga_removes_instance_database_record(
     // fully unwind the saga and delete the instance database record.
     let requested_address =
         "172.30.0.11".parse::<std::net::Ipv4Addr>().unwrap();
-    let if0_params = params::InstanceNetworkInterfaceCreate {
+    let if0_params = instance::InstanceNetworkInterfaceCreate {
         identity: IdentityMetadataCreateParams {
             name: Name::try_from(String::from("if0")).unwrap(),
             description: String::from("first custom interface"),
@@ -2779,10 +3278,10 @@ async fn test_instance_create_saga_removes_instance_database_record(
         ip_config: PrivateIpStackCreate::from_ipv4(requested_address),
     };
     let interface_params =
-        params::InstanceNetworkInterfaceAttachment::Create(vec![
+        instance::InstanceNetworkInterfaceAttachment::Create(vec![
             if0_params.clone(),
         ]);
-    let instance_params = params::InstanceCreate {
+    let instance_params = instance::InstanceCreate {
         network_interfaces: interface_params,
         ..instance_params.clone()
     };
@@ -2871,7 +3370,7 @@ async fn test_instance_with_single_explicit_ip_address_impl(
 ) {
     // Create the parameters for the interface.
     let default_name = "default".parse::<Name>().unwrap();
-    let if0_params = params::InstanceNetworkInterfaceCreate {
+    let if0_params = instance::InstanceNetworkInterfaceCreate {
         identity: IdentityMetadataCreateParams {
             name: Name::try_from(String::from("if0")).unwrap(),
             description: String::from("first custom interface"),
@@ -2881,12 +3380,12 @@ async fn test_instance_with_single_explicit_ip_address_impl(
         ip_config: ip_config.clone(),
     };
     let interface_params =
-        params::InstanceNetworkInterfaceAttachment::Create(vec![
+        instance::InstanceNetworkInterfaceAttachment::Create(vec![
             if0_params.clone(),
         ]);
 
     // Create the parameters for the instance itself, and create it.
-    let instance_params = params::InstanceCreate {
+    let instance_params = instance::InstanceCreate {
         identity: IdentityMetadataCreateParams {
             name: Name::try_from(String::from("nic-test-inst")).unwrap(),
             description: String::from("instance to test multiple nics"),
@@ -2906,6 +3405,7 @@ async fn test_instance_with_single_explicit_ip_address_impl(
         auto_restart_policy: Default::default(),
         anti_affinity_groups: Vec::new(),
         multicast_groups: Vec::new(),
+        enable_jumbo_frames: false,
     };
     let response = NexusRequest::objects_post(
         client,
@@ -3019,7 +3519,7 @@ async fn test_instance_with_new_custom_network_interfaces(
     let default_name = Name::try_from(String::from("default")).unwrap();
     let non_default_subnet_name =
         Name::try_from(String::from("non-default-subnet")).unwrap();
-    let vpc_subnet_params = params::VpcSubnetCreate {
+    let vpc_subnet_params = vpc::VpcSubnetCreate {
         identity: IdentityMetadataCreateParams {
             name: non_default_subnet_name.clone(),
             description: String::from("A non-default subnet"),
@@ -3037,12 +3537,12 @@ async fn test_instance_with_new_custom_network_interfaces(
     .execute()
     .await
     .expect("Failed to create custom VPC Subnet")
-    .parsed_body::<views::VpcSubnet>()
+    .parsed_body::<vpc::VpcSubnet>()
     .unwrap();
 
     // Create the parameters for the interfaces. These will be created during
     // the saga for instance creation.
-    let if0_params = params::InstanceNetworkInterfaceCreate {
+    let if0_params = instance::InstanceNetworkInterfaceCreate {
         identity: IdentityMetadataCreateParams {
             name: Name::try_from(String::from("if0")).unwrap(),
             description: String::from("first custom interface"),
@@ -3051,7 +3551,7 @@ async fn test_instance_with_new_custom_network_interfaces(
         subnet_name: default_name.clone(),
         ip_config: PrivateIpStackCreate::auto_ipv4(),
     };
-    let if1_params = params::InstanceNetworkInterfaceCreate {
+    let if1_params = instance::InstanceNetworkInterfaceCreate {
         identity: IdentityMetadataCreateParams {
             name: Name::try_from(String::from("if1")).unwrap(),
             description: String::from("second custom interface"),
@@ -3061,13 +3561,13 @@ async fn test_instance_with_new_custom_network_interfaces(
         ip_config: PrivateIpStackCreate::auto_dual_stack(),
     };
     let interface_params =
-        params::InstanceNetworkInterfaceAttachment::Create(vec![
+        instance::InstanceNetworkInterfaceAttachment::Create(vec![
             if0_params.clone(),
             if1_params.clone(),
         ]);
 
     // Create the parameters for the instance itself, and create it.
-    let instance_params = params::InstanceCreate {
+    let instance_params = instance::InstanceCreate {
         identity: IdentityMetadataCreateParams {
             name: Name::try_from(String::from("nic-test-inst")).unwrap(),
             description: String::from("instance to test multiple nics"),
@@ -3086,6 +3586,7 @@ async fn test_instance_with_new_custom_network_interfaces(
         auto_restart_policy: Default::default(),
         anti_affinity_groups: Vec::new(),
         multicast_groups: Vec::new(),
+        enable_jumbo_frames: false,
     };
     let response = NexusRequest::objects_post(
         client,
@@ -3179,7 +3680,7 @@ async fn test_instance_create_delete_network_interface(
     create_project_and_pool(&client).await;
 
     // Create the VPC Subnet for the secondary interface
-    let secondary_subnet = params::VpcSubnetCreate {
+    let secondary_subnet = vpc::VpcSubnetCreate {
         identity: IdentityMetadataCreateParams {
             name: Name::try_from(String::from("secondary")).unwrap(),
             description: String::from("A secondary VPC subnet"),
@@ -3199,7 +3700,7 @@ async fn test_instance_create_delete_network_interface(
     .expect("Failed to create secondary VPC Subnet");
 
     // Create an instance with no network interfaces
-    let instance_params = params::InstanceCreate {
+    let instance_params = instance::InstanceCreate {
         identity: IdentityMetadataCreateParams {
             name: instance_name.parse().unwrap(),
             description: String::from("instance to test attaching new nic"),
@@ -3209,7 +3710,7 @@ async fn test_instance_create_delete_network_interface(
         hostname: "nic-test".parse().unwrap(),
         user_data: vec![],
         ssh_public_keys: None,
-        network_interfaces: params::InstanceNetworkInterfaceAttachment::None,
+        network_interfaces: instance::InstanceNetworkInterfaceAttachment::None,
         external_ips: vec![],
         disks: vec![],
         boot_disk: None,
@@ -3218,6 +3719,7 @@ async fn test_instance_create_delete_network_interface(
         auto_restart_policy: Default::default(),
         anti_affinity_groups: Vec::new(),
         multicast_groups: Vec::new(),
+        enable_jumbo_frames: false,
     };
     let response = NexusRequest::objects_post(
         client,
@@ -3247,7 +3749,7 @@ async fn test_instance_create_delete_network_interface(
 
     // Parameters for the interfaces to create/attach
     let if_params = [
-        params::InstanceNetworkInterfaceCreate {
+        instance::InstanceNetworkInterfaceCreate {
             identity: IdentityMetadataCreateParams {
                 name: "if0".parse().unwrap(),
                 description: String::from("a new nic"),
@@ -3262,7 +3764,7 @@ async fn test_instance_create_delete_network_interface(
                 ],
             }),
         },
-        params::InstanceNetworkInterfaceCreate {
+        instance::InstanceNetworkInterfaceCreate {
             identity: IdentityMetadataCreateParams {
                 name: "if1".parse().unwrap(),
                 description: String::from("a new nic"),
@@ -3457,7 +3959,7 @@ async fn test_instance_update_network_interfaces(
     create_project_and_pool(&client).await;
 
     // Create the VPC Subnet for the secondary interface
-    let secondary_subnet = params::VpcSubnetCreate {
+    let secondary_subnet = vpc::VpcSubnetCreate {
         identity: IdentityMetadataCreateParams {
             name: Name::try_from(String::from("secondary")).unwrap(),
             description: String::from("A secondary VPC subnet"),
@@ -3477,7 +3979,7 @@ async fn test_instance_update_network_interfaces(
     .expect("Failed to create secondary VPC Subnet");
 
     // Create an instance with no network interfaces
-    let instance_params = params::InstanceCreate {
+    let instance_params = instance::InstanceCreate {
         identity: IdentityMetadataCreateParams {
             name: instance_name.parse().unwrap(),
             description: String::from("instance to test updatin nics"),
@@ -3487,7 +3989,7 @@ async fn test_instance_update_network_interfaces(
         hostname: "nic-test".parse().unwrap(),
         user_data: vec![],
         ssh_public_keys: None,
-        network_interfaces: params::InstanceNetworkInterfaceAttachment::None,
+        network_interfaces: instance::InstanceNetworkInterfaceAttachment::None,
         external_ips: vec![],
         disks: vec![],
         boot_disk: None,
@@ -3496,6 +3998,7 @@ async fn test_instance_update_network_interfaces(
         auto_restart_policy: Default::default(),
         anti_affinity_groups: Vec::new(),
         multicast_groups: Vec::new(),
+        enable_jumbo_frames: false,
     };
     let response = NexusRequest::objects_post(
         client,
@@ -3514,7 +4017,7 @@ async fn test_instance_update_network_interfaces(
 
     // Parameters for each interface to try to modify.
     let if_params = [
-        params::InstanceNetworkInterfaceCreate {
+        instance::InstanceNetworkInterfaceCreate {
             identity: IdentityMetadataCreateParams {
                 name: "if0".parse().unwrap(),
                 description: String::from("a new nic"),
@@ -3525,7 +4028,7 @@ async fn test_instance_update_network_interfaces(
                 "172.30.0.10".parse().unwrap(),
             ),
         },
-        params::InstanceNetworkInterfaceCreate {
+        instance::InstanceNetworkInterfaceCreate {
             identity: IdentityMetadataCreateParams {
                 name: "if1".parse().unwrap(),
                 description: String::from("a new nic"),
@@ -3577,7 +4080,7 @@ async fn test_instance_update_network_interfaces(
     // We'll change the interface's name and description
     let new_name = Name::try_from(String::from("new-if0")).unwrap();
     let new_description = String::from("new description");
-    let updates = params::InstanceNetworkInterfaceUpdate {
+    let updates = instance::InstanceNetworkInterfaceUpdate {
         identity: IdentityMetadataUpdateParams {
             name: Some(new_name.clone()),
             description: Some(new_description.clone()),
@@ -3664,7 +4167,7 @@ async fn test_instance_update_network_interfaces(
 
     // Try with the same request again, but this time only changing
     // `primary`. This should have no effect.
-    let updates = params::InstanceNetworkInterfaceUpdate {
+    let updates = instance::InstanceNetworkInterfaceUpdate {
         identity: IdentityMetadataUpdateParams {
             name: None,
             description: None,
@@ -3762,7 +4265,7 @@ async fn test_instance_update_network_interfaces(
 
     // Verify that we can set the secondary as the new primary, and that nothing
     // else changes about the NICs.
-    let updates = params::InstanceNetworkInterfaceUpdate {
+    let updates = instance::InstanceNetworkInterfaceUpdate {
         identity: IdentityMetadataUpdateParams {
             name: None,
             description: None,
@@ -3875,7 +4378,7 @@ async fn cannot_make_new_primary_nic_lacking_ip_stack_for_external_addresses(
     let _ = create_project(client, PROJECT_NAME).await;
 
     // Create the VPC Subnet for the secondary interface.
-    let secondary_subnet = params::VpcSubnetCreate {
+    let secondary_subnet = vpc::VpcSubnetCreate {
         identity: IdentityMetadataCreateParams {
             name: Name::try_from(String::from("secondary")).unwrap(),
             description: String::from("A secondary VPC subnet"),
@@ -3896,7 +4399,7 @@ async fn cannot_make_new_primary_nic_lacking_ip_stack_for_external_addresses(
 
     // Create an instance with one single-stack IPv4 NIC and one external IPv4
     // address.
-    let instance_params = params::InstanceCreate {
+    let instance_params = instance::InstanceCreate {
         identity: IdentityMetadataCreateParams {
             name: instance_name.parse().unwrap(),
             description: String::from("instance to test updatin nics"),
@@ -3907,10 +4410,11 @@ async fn cannot_make_new_primary_nic_lacking_ip_stack_for_external_addresses(
         user_data: vec![],
         ssh_public_keys: None,
         network_interfaces:
-            params::InstanceNetworkInterfaceAttachment::DefaultIpv4,
-        external_ips: vec![params::ExternalIpCreate::Ephemeral {
-            pool: Some(v4_pool.identity.id.into()),
-            ip_version: None,
+            instance::InstanceNetworkInterfaceAttachment::DefaultIpv4,
+        external_ips: vec![ExternalIpCreate::Ephemeral {
+            pool_selector: PoolSelector::Explicit {
+                pool: v4_pool.identity.id.into(),
+            },
         }],
         disks: vec![],
         boot_disk: None,
@@ -3919,6 +4423,7 @@ async fn cannot_make_new_primary_nic_lacking_ip_stack_for_external_addresses(
         auto_restart_policy: Default::default(),
         anti_affinity_groups: Vec::new(),
         multicast_groups: Vec::new(),
+        enable_jumbo_frames: false,
     };
     let response = NexusRequest::objects_post(
         client,
@@ -3936,7 +4441,7 @@ async fn cannot_make_new_primary_nic_lacking_ip_stack_for_external_addresses(
     );
 
     // Create a second NIC, with an auto-assigned IPv6 address only.
-    let if_params = params::InstanceNetworkInterfaceCreate {
+    let if_params = instance::InstanceNetworkInterfaceCreate {
         identity: IdentityMetadataCreateParams {
             name: "if0".parse().unwrap(),
             description: String::from("a new nic"),
@@ -3973,7 +4478,7 @@ async fn cannot_make_new_primary_nic_lacking_ip_stack_for_external_addresses(
     //
     // This should fail, because the instance has an external IPv4 address, but
     // this NIC has only an IPv6 address.
-    let updates = params::InstanceNetworkInterfaceUpdate {
+    let updates = instance::InstanceNetworkInterfaceUpdate {
         identity: IdentityMetadataUpdateParams {
             name: None,
             description: None,
@@ -4011,7 +4516,7 @@ async fn test_instance_update_network_interface_transit_ips(
         &client,
         PROJECT_NAME,
         instance_name,
-        &params::InstanceNetworkInterfaceAttachment::DefaultIpv4,
+        &instance::InstanceNetworkInterfaceAttachment::DefaultIpv4,
         vec![],
         vec![],
         false,
@@ -4026,7 +4531,7 @@ async fn test_instance_update_network_interface_transit_ips(
         instance.identity.id
     );
 
-    let base_update = params::InstanceNetworkInterfaceUpdate {
+    let base_update = instance::InstanceNetworkInterfaceUpdate {
         identity: IdentityMetadataUpdateParams {
             name: None,
             description: None,
@@ -4051,7 +4556,7 @@ async fn test_instance_update_network_interface_transit_ips(
 
     // Non-canonical form (e.g., host identifier is nonzero) subnets should
     // be rejected.
-    let with_extra_bits = params::InstanceNetworkInterfaceUpdate {
+    let with_extra_bits = instance::InstanceNetworkInterfaceUpdate {
         transit_ips: vec![
             "10.0.0.0/9".parse().unwrap(),
             "10.128.0.0/9".parse().unwrap(),
@@ -4073,7 +4578,7 @@ async fn test_instance_update_network_interface_transit_ips(
     );
 
     // Multicast IP blocks should be rejected.
-    let with_mc1 = params::InstanceNetworkInterfaceUpdate {
+    let with_mc1 = instance::InstanceNetworkInterfaceUpdate {
         transit_ips: vec![
             "10.0.0.0/9".parse().unwrap(),
             "10.128.0.0/9".parse().unwrap(),
@@ -4093,7 +4598,7 @@ async fn test_instance_update_network_interface_transit_ips(
         "transit IP block 224.0.0.0/4 is a multicast network",
     );
 
-    let with_mc2 = params::InstanceNetworkInterfaceUpdate {
+    let with_mc2 = instance::InstanceNetworkInterfaceUpdate {
         transit_ips: vec![
             "10.0.0.0/9".parse().unwrap(),
             "10.128.0.0/9".parse().unwrap(),
@@ -4114,7 +4619,7 @@ async fn test_instance_update_network_interface_transit_ips(
     );
 
     // Loopback ranges.
-    let with_lo1 = params::InstanceNetworkInterfaceUpdate {
+    let with_lo1 = instance::InstanceNetworkInterfaceUpdate {
         transit_ips: vec![
             "10.0.0.0/9".parse().unwrap(),
             "10.128.0.0/9".parse().unwrap(),
@@ -4134,7 +4639,7 @@ async fn test_instance_update_network_interface_transit_ips(
         "transit IP block 127.42.77.0/24 is a loopback network",
     );
 
-    let with_lo2 = params::InstanceNetworkInterfaceUpdate {
+    let with_lo2 = instance::InstanceNetworkInterfaceUpdate {
         transit_ips: vec![
             "10.0.0.0/9".parse().unwrap(),
             "10.128.0.0/9".parse().unwrap(),
@@ -4152,7 +4657,7 @@ async fn test_instance_update_network_interface_transit_ips(
     assert_eq!(err.message, "transit IP 127.0.0.1/32 is a loopback address");
 
     // Overlapping IP ranges should be rejected, as should identical ranges.
-    let with_dup1 = params::InstanceNetworkInterfaceUpdate {
+    let with_dup1 = instance::InstanceNetworkInterfaceUpdate {
         transit_ips: vec![
             "10.0.0.0/9".parse().unwrap(),
             "10.128.0.0/9".parse().unwrap(),
@@ -4172,7 +4677,7 @@ async fn test_instance_update_network_interface_transit_ips(
         "transit IP block 10.0.0.0/9 overlaps with 10.0.0.0/9",
     );
 
-    let with_dup2 = params::InstanceNetworkInterfaceUpdate {
+    let with_dup2 = instance::InstanceNetworkInterfaceUpdate {
         transit_ips: vec![
             "10.0.0.0/9".parse().unwrap(),
             "10.128.0.0/9".parse().unwrap(),
@@ -4193,7 +4698,7 @@ async fn test_instance_update_network_interface_transit_ips(
     );
 
     // Verify that we also catch more specific CIDRs appearing sooner in the list.
-    let with_dup3 = params::InstanceNetworkInterfaceUpdate {
+    let with_dup3 = instance::InstanceNetworkInterfaceUpdate {
         transit_ips: vec![
             "10.20.20.0/30".parse().unwrap(),
             "10.0.0.0/8".parse().unwrap(),
@@ -4222,7 +4727,7 @@ async fn test_instance_update_network_interface_transit_ips(
 
     // As a final sanity test, we can still effectively remove spoof checking
     // using the unspecified network address.
-    let allow_all = params::InstanceNetworkInterfaceUpdate {
+    let allow_all = instance::InstanceNetworkInterfaceUpdate {
         transit_ips: vec!["0.0.0.0/0".parse().unwrap()],
         ..base_update.clone()
     };
@@ -4252,7 +4757,7 @@ async fn test_instance_with_multiple_nics_unwinds_completely(
     // error on creation of the second NIC, and we'll make sure that both are
     // deleted.
     let default_name = "default".parse::<Name>().unwrap();
-    let if0_params = params::InstanceNetworkInterfaceCreate {
+    let if0_params = instance::InstanceNetworkInterfaceCreate {
         identity: IdentityMetadataCreateParams {
             name: Name::try_from(String::from("if0")).unwrap(),
             description: String::from("first custom interface"),
@@ -4263,7 +4768,7 @@ async fn test_instance_with_multiple_nics_unwinds_completely(
             "172.30.0.6".parse().unwrap(),
         ),
     };
-    let if1_params = params::InstanceNetworkInterfaceCreate {
+    let if1_params = instance::InstanceNetworkInterfaceCreate {
         identity: IdentityMetadataCreateParams {
             name: Name::try_from(String::from("if1")).unwrap(),
             description: String::from("second custom interface"),
@@ -4275,13 +4780,13 @@ async fn test_instance_with_multiple_nics_unwinds_completely(
         ),
     };
     let interface_params =
-        params::InstanceNetworkInterfaceAttachment::Create(vec![
+        instance::InstanceNetworkInterfaceAttachment::Create(vec![
             if0_params.clone(),
             if1_params.clone(),
         ]);
 
     // Create the parameters for the instance itself, and create it.
-    let instance_params = params::InstanceCreate {
+    let instance_params = instance::InstanceCreate {
         identity: IdentityMetadataCreateParams {
             name: Name::try_from(String::from("nic-fail-test-inst")).unwrap(),
             description: String::from("instance to test multiple bad nics"),
@@ -4300,6 +4805,7 @@ async fn test_instance_with_multiple_nics_unwinds_completely(
         auto_restart_policy: Default::default(),
         anti_affinity_groups: Vec::new(),
         multicast_groups: Vec::new(),
+        enable_jumbo_frames: false,
     };
     let builder =
         RequestBuilder::new(client, http::Method::POST, &get_instances_url())
@@ -4354,7 +4860,7 @@ async fn test_attach_one_disk_to_instance(cptestctx: &ControlPlaneTestContext) {
     let disk_name = Name::try_from(String::from("probablydata")).unwrap();
 
     // Create the instance
-    let instance_params = params::InstanceCreate {
+    let instance_params = instance::InstanceCreate {
         identity: IdentityMetadataCreateParams {
             name: instance_name.parse().unwrap(),
             description: String::from("probably serving data"),
@@ -4365,10 +4871,10 @@ async fn test_attach_one_disk_to_instance(cptestctx: &ControlPlaneTestContext) {
         user_data: vec![],
         ssh_public_keys: None,
         network_interfaces:
-            params::InstanceNetworkInterfaceAttachment::DefaultIpv4,
+            instance::InstanceNetworkInterfaceAttachment::DefaultIpv4,
         external_ips: vec![],
-        boot_disk: Some(params::InstanceDiskAttachment::Attach(
-            params::InstanceDiskAttach { name: disk_name.clone() },
+        boot_disk: Some(instance::InstanceDiskAttachment::Attach(
+            instance::InstanceDiskAttach { name: disk_name.clone() },
         )),
         cpu_platform: None,
         disks: Vec::new(),
@@ -4376,6 +4882,7 @@ async fn test_attach_one_disk_to_instance(cptestctx: &ControlPlaneTestContext) {
         auto_restart_policy: Default::default(),
         anti_affinity_groups: Vec::new(),
         multicast_groups: Vec::new(),
+        enable_jumbo_frames: false,
     };
 
     let builder =
@@ -4418,7 +4925,7 @@ async fn test_instance_create_attach_disks(
     let attachable_disk =
         create_disk(&client, PROJECT_NAME, "attachable-disk").await;
 
-    let instance_params = params::InstanceCreate {
+    let instance_params = instance::InstanceCreate {
         identity: IdentityMetadataCreateParams {
             name: Name::try_from(String::from("nfs")).unwrap(),
             description: String::from("probably serving data"),
@@ -4429,10 +4936,10 @@ async fn test_instance_create_attach_disks(
         user_data: vec![],
         ssh_public_keys: None,
         network_interfaces:
-            params::InstanceNetworkInterfaceAttachment::DefaultIpv4,
+            instance::InstanceNetworkInterfaceAttachment::DefaultIpv4,
         external_ips: vec![],
-        boot_disk: Some(params::InstanceDiskAttachment::Create(
-            params::DiskCreate {
+        boot_disk: Some(instance::InstanceDiskAttachment::Create(
+            disk::DiskCreate {
                 identity: IdentityMetadataCreateParams {
                     name: Name::try_from(String::from("created-disk")).unwrap(),
                     description: String::from(
@@ -4440,15 +4947,15 @@ async fn test_instance_create_attach_disks(
                     ),
                 },
                 size: ByteCount::from_gibibytes_u32(4),
-                disk_backend: params::DiskBackend::Distributed {
-                    disk_source: params::DiskSource::Blank {
-                        block_size: params::BlockSize::try_from(512).unwrap(),
+                disk_backend: disk::DiskBackend::Distributed {
+                    disk_source: disk::DiskSource::Blank {
+                        block_size: disk::BlockSize::try_from(512).unwrap(),
                     },
                 },
             },
         )),
         disks: vec![
-            params::InstanceDiskAttachment::Create(params::DiskCreate {
+            instance::InstanceDiskAttachment::Create(disk::DiskCreate {
                 identity: IdentityMetadataCreateParams {
                     name: Name::try_from(String::from("created-disk2"))
                         .unwrap(),
@@ -4457,14 +4964,14 @@ async fn test_instance_create_attach_disks(
                     ),
                 },
                 size: ByteCount::from_gibibytes_u32(4),
-                disk_backend: params::DiskBackend::Distributed {
-                    disk_source: params::DiskSource::Blank {
-                        block_size: params::BlockSize::try_from(512).unwrap(),
+                disk_backend: disk::DiskBackend::Distributed {
+                    disk_source: disk::DiskSource::Blank {
+                        block_size: disk::BlockSize::try_from(512).unwrap(),
                     },
                 },
             }),
-            params::InstanceDiskAttachment::Attach(
-                params::InstanceDiskAttach {
+            instance::InstanceDiskAttachment::Attach(
+                instance::InstanceDiskAttach {
                     name: attachable_disk.identity.name.clone(),
                 },
             ),
@@ -4474,6 +4981,7 @@ async fn test_instance_create_attach_disks(
         auto_restart_policy: Default::default(),
         anti_affinity_groups: Vec::new(),
         multicast_groups: Vec::new(),
+        enable_jumbo_frames: false,
     };
 
     let builder =
@@ -4538,7 +5046,7 @@ async fn test_instance_create_attach_disks_undo(
     assert_eq!(disks[1].identity.id, faulted_disk.identity.id);
     assert_eq!(disks[1].state, DiskState::Faulted);
 
-    let instance_params = params::InstanceCreate {
+    let instance_params = instance::InstanceCreate {
         identity: IdentityMetadataCreateParams {
             name: Name::try_from(String::from("nfs")).unwrap(),
             description: String::from("probably serving data"),
@@ -4549,26 +5057,30 @@ async fn test_instance_create_attach_disks_undo(
         user_data: vec![],
         ssh_public_keys: None,
         network_interfaces:
-            params::InstanceNetworkInterfaceAttachment::DefaultIpv4,
+            instance::InstanceNetworkInterfaceAttachment::DefaultIpv4,
         external_ips: vec![],
         disks: vec![
-            params::InstanceDiskAttachment::Create(params::DiskCreate {
+            instance::InstanceDiskAttachment::Create(disk::DiskCreate {
                 identity: IdentityMetadataCreateParams {
                     name: Name::try_from(String::from("probablydata")).unwrap(),
                     description: String::from("probably data"),
                 },
                 size: ByteCount::from_gibibytes_u32(4),
-                disk_backend: params::DiskBackend::Distributed {
-                    disk_source: params::DiskSource::Blank {
-                        block_size: params::BlockSize::try_from(512).unwrap(),
+                disk_backend: disk::DiskBackend::Distributed {
+                    disk_source: disk::DiskSource::Blank {
+                        block_size: disk::BlockSize::try_from(512).unwrap(),
                     },
                 },
             }),
-            params::InstanceDiskAttachment::Attach(
-                params::InstanceDiskAttach { name: regular_disk.identity.name },
+            instance::InstanceDiskAttachment::Attach(
+                instance::InstanceDiskAttach {
+                    name: regular_disk.identity.name,
+                },
             ),
-            params::InstanceDiskAttachment::Attach(
-                params::InstanceDiskAttach { name: faulted_disk.identity.name },
+            instance::InstanceDiskAttachment::Attach(
+                instance::InstanceDiskAttach {
+                    name: faulted_disk.identity.name,
+                },
             ),
         ],
         boot_disk: None,
@@ -4577,6 +5089,7 @@ async fn test_instance_create_attach_disks_undo(
         auto_restart_policy: Default::default(),
         anti_affinity_groups: Vec::new(),
         multicast_groups: Vec::new(),
+        enable_jumbo_frames: false,
     };
 
     let builder =
@@ -4631,7 +5144,7 @@ async fn test_attach_eight_disks_to_instance(
     assert_eq!(disks.len(), 8);
 
     // Try to boot an instance that has 8 disks attached
-    let instance_params = params::InstanceCreate {
+    let instance_params = instance::InstanceCreate {
         identity: IdentityMetadataCreateParams {
             name: Name::try_from(String::from("nfs")).unwrap(),
             description: String::from("probably serving data"),
@@ -4642,17 +5155,17 @@ async fn test_attach_eight_disks_to_instance(
         user_data: vec![],
         ssh_public_keys: None,
         network_interfaces:
-            params::InstanceNetworkInterfaceAttachment::DefaultIpv4,
+            instance::InstanceNetworkInterfaceAttachment::DefaultIpv4,
         external_ips: vec![],
-        boot_disk: Some(params::InstanceDiskAttachment::Attach(
-            params::InstanceDiskAttach {
+        boot_disk: Some(instance::InstanceDiskAttachment::Attach(
+            instance::InstanceDiskAttach {
                 name: Name::try_from("probablydata0".to_string()).unwrap(),
             },
         )),
         disks: (1..8)
             .map(|i| {
-                params::InstanceDiskAttachment::Attach(
-                    params::InstanceDiskAttach {
+                instance::InstanceDiskAttachment::Attach(
+                    instance::InstanceDiskAttach {
                         name: Name::try_from(format!("probablydata{}", i))
                             .unwrap(),
                     },
@@ -4664,6 +5177,7 @@ async fn test_attach_eight_disks_to_instance(
         auto_restart_policy: Default::default(),
         anti_affinity_groups: Vec::new(),
         multicast_groups: Vec::new(),
+        enable_jumbo_frames: false,
     };
 
     let builder =
@@ -4728,8 +5242,7 @@ async fn test_disk_attach_limit(cptestctx: &ControlPlaneTestContext) {
             .all_items;
     assert_eq!(disks.len(), 13);
 
-    // Try to boot an instance that has 13 disks attached
-    let instance_params = params::InstanceCreate {
+    let instance_params = instance::InstanceCreate {
         identity: IdentityMetadataCreateParams {
             name: Name::try_from(String::from("nfs")).unwrap(),
             description: String::from("probably serving data"),
@@ -4740,17 +5253,17 @@ async fn test_disk_attach_limit(cptestctx: &ControlPlaneTestContext) {
         user_data: vec![],
         ssh_public_keys: None,
         network_interfaces:
-            params::InstanceNetworkInterfaceAttachment::DefaultIpv4,
+            instance::InstanceNetworkInterfaceAttachment::DefaultIpv4,
         external_ips: vec![],
-        boot_disk: Some(params::InstanceDiskAttachment::Attach(
-            params::InstanceDiskAttach {
+        boot_disk: Some(instance::InstanceDiskAttachment::Attach(
+            instance::InstanceDiskAttach {
                 name: Name::try_from("probablydata0".to_string()).unwrap(),
             },
         )),
         disks: (0..13)
             .map(|i| {
-                params::InstanceDiskAttachment::Attach(
-                    params::InstanceDiskAttach {
+                instance::InstanceDiskAttachment::Attach(
+                    instance::InstanceDiskAttach {
                         name: Name::try_from(format!("probablydata{}", i))
                             .unwrap(),
                     },
@@ -4762,6 +5275,7 @@ async fn test_disk_attach_limit(cptestctx: &ControlPlaneTestContext) {
         auto_restart_policy: Default::default(),
         anti_affinity_groups: Vec::new(),
         multicast_groups: Vec::new(),
+        enable_jumbo_frames: false,
     };
 
     let url_instances = format!("/v1/instances?project={}", project_name);
@@ -4834,7 +5348,7 @@ async fn test_cannot_attach_faulted_disks(cptestctx: &ControlPlaneTestContext) {
     }
 
     // Try to boot the instance
-    let instance_params = params::InstanceCreate {
+    let instance_params = instance::InstanceCreate {
         identity: IdentityMetadataCreateParams {
             name: Name::try_from(String::from("nfs")).unwrap(),
             description: String::from("probably serving data"),
@@ -4845,17 +5359,17 @@ async fn test_cannot_attach_faulted_disks(cptestctx: &ControlPlaneTestContext) {
         user_data: vec![],
         ssh_public_keys: None,
         network_interfaces:
-            params::InstanceNetworkInterfaceAttachment::DefaultIpv4,
+            instance::InstanceNetworkInterfaceAttachment::DefaultIpv4,
         external_ips: vec![],
-        boot_disk: Some(params::InstanceDiskAttachment::Attach(
-            params::InstanceDiskAttach {
+        boot_disk: Some(instance::InstanceDiskAttachment::Attach(
+            instance::InstanceDiskAttach {
                 name: Name::try_from("probablydata0".to_string()).unwrap(),
             },
         )),
         disks: (1..8)
             .map(|i| {
-                params::InstanceDiskAttachment::Attach(
-                    params::InstanceDiskAttach {
+                instance::InstanceDiskAttachment::Attach(
+                    instance::InstanceDiskAttach {
                         name: Name::try_from(format!("probablydata{}", i))
                             .unwrap(),
                     },
@@ -4867,6 +5381,7 @@ async fn test_cannot_attach_faulted_disks(cptestctx: &ControlPlaneTestContext) {
         auto_restart_policy: Default::default(),
         anti_affinity_groups: Vec::new(),
         multicast_groups: Vec::new(),
+        enable_jumbo_frames: false,
     };
 
     let builder =
@@ -4928,7 +5443,7 @@ async fn test_disks_detached_when_instance_destroyed(
     }
 
     // Boot the instance
-    let instance_params = params::InstanceCreate {
+    let instance_params = instance::InstanceCreate {
         identity: IdentityMetadataCreateParams {
             name: instance_name.parse().unwrap(),
             description: String::from("probably serving data"),
@@ -4939,17 +5454,17 @@ async fn test_disks_detached_when_instance_destroyed(
         user_data: vec![],
         ssh_public_keys: None,
         network_interfaces:
-            params::InstanceNetworkInterfaceAttachment::DefaultIpv4,
+            instance::InstanceNetworkInterfaceAttachment::DefaultIpv4,
         external_ips: vec![],
-        boot_disk: Some(params::InstanceDiskAttachment::Attach(
-            params::InstanceDiskAttach {
+        boot_disk: Some(instance::InstanceDiskAttachment::Attach(
+            instance::InstanceDiskAttach {
                 name: Name::try_from("probablydata0".to_string()).unwrap(),
             },
         )),
         disks: (1..8)
             .map(|i| {
-                params::InstanceDiskAttachment::Attach(
-                    params::InstanceDiskAttach {
+                instance::InstanceDiskAttachment::Attach(
+                    instance::InstanceDiskAttach {
                         name: Name::try_from(format!("probablydata{}", i))
                             .unwrap(),
                     },
@@ -4961,6 +5476,7 @@ async fn test_disks_detached_when_instance_destroyed(
         auto_restart_policy: Default::default(),
         anti_affinity_groups: Vec::new(),
         multicast_groups: Vec::new(),
+        enable_jumbo_frames: false,
     };
 
     let builder =
@@ -4994,12 +5510,12 @@ async fn test_disks_detached_when_instance_destroyed(
     let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
     let apictx = &cptestctx.server.server_context();
     let nexus = &apictx.nexus;
-    let sa = nexus
+
+    nexus
         .active_instance_info(&instance_id, None)
         .await
         .unwrap()
-        .expect("instance should be on a sled while it's running")
-        .sled_client;
+        .expect("instance should be on a sled while it's running");
 
     // Stop and delete instance
     instance_post(&client, instance_name, InstanceOp::Stop).await;
@@ -5023,13 +5539,10 @@ async fn test_disks_detached_when_instance_destroyed(
     assert_eq!(disks.len(), 8);
     for disk in &disks {
         assert_eq!(disk.state, DiskState::Detached);
-
-        // Simulate each one of the disks to move from "Detaching" to "Detached"
-        sa.disk_finish_transition(disk.identity.id).await;
     }
 
     // Ensure that the disks can be attached to another instance
-    let instance_params = params::InstanceCreate {
+    let instance_params = instance::InstanceCreate {
         identity: IdentityMetadataCreateParams {
             name: "nfsv2".parse().unwrap(),
             description: String::from("probably serving data too!"),
@@ -5040,17 +5553,17 @@ async fn test_disks_detached_when_instance_destroyed(
         user_data: vec![],
         ssh_public_keys: None,
         network_interfaces:
-            params::InstanceNetworkInterfaceAttachment::DefaultIpv4,
+            instance::InstanceNetworkInterfaceAttachment::DefaultIpv4,
         external_ips: vec![],
-        boot_disk: Some(params::InstanceDiskAttachment::Attach(
-            params::InstanceDiskAttach {
+        boot_disk: Some(instance::InstanceDiskAttachment::Attach(
+            instance::InstanceDiskAttach {
                 name: Name::try_from("probablydata0".to_string()).unwrap(),
             },
         )),
         disks: (1..8)
             .map(|i| {
-                params::InstanceDiskAttachment::Attach(
-                    params::InstanceDiskAttach {
+                instance::InstanceDiskAttachment::Attach(
+                    instance::InstanceDiskAttach {
                         name: Name::try_from(format!("probablydata{}", i))
                             .unwrap(),
                     },
@@ -5062,6 +5575,7 @@ async fn test_disks_detached_when_instance_destroyed(
         auto_restart_policy: Default::default(),
         anti_affinity_groups: Vec::new(),
         multicast_groups: Vec::new(),
+        enable_jumbo_frames: false,
     };
 
     let builder =
@@ -5118,7 +5632,7 @@ async fn test_duplicate_disk_attach_requests_ok(
     assert_eq!(disks[1].state, DiskState::Detached);
 
     // Create the instance with a duplicate disks entry
-    let instance_params = params::InstanceCreate {
+    let instance_params = instance::InstanceCreate {
         identity: IdentityMetadataCreateParams {
             name: "nfs".parse().unwrap(),
             description: String::from("probably serving data"),
@@ -5129,16 +5643,16 @@ async fn test_duplicate_disk_attach_requests_ok(
         user_data: vec![],
         ssh_public_keys: None,
         network_interfaces:
-            params::InstanceNetworkInterfaceAttachment::DefaultIpv4,
+            instance::InstanceNetworkInterfaceAttachment::DefaultIpv4,
         external_ips: vec![],
         disks: vec![
-            params::InstanceDiskAttachment::Attach(
-                params::InstanceDiskAttach {
+            instance::InstanceDiskAttachment::Attach(
+                instance::InstanceDiskAttach {
                     name: Name::try_from(String::from("probablydata")).unwrap(),
                 },
             ),
-            params::InstanceDiskAttachment::Attach(
-                params::InstanceDiskAttach {
+            instance::InstanceDiskAttachment::Attach(
+                instance::InstanceDiskAttach {
                     name: Name::try_from(String::from("probablydata")).unwrap(),
                 },
             ),
@@ -5149,6 +5663,7 @@ async fn test_duplicate_disk_attach_requests_ok(
         auto_restart_policy: Default::default(),
         anti_affinity_groups: Vec::new(),
         multicast_groups: Vec::new(),
+        enable_jumbo_frames: false,
     };
 
     let builder =
@@ -5168,7 +5683,7 @@ async fn test_duplicate_disk_attach_requests_ok(
 
     // Create the instance with a disk mentioned both as a data disk and a boot
     // disk
-    let instance_params = params::InstanceCreate {
+    let instance_params = instance::InstanceCreate {
         identity: IdentityMetadataCreateParams {
             name: "nfs2".parse().unwrap(),
             description: String::from("probably serving data"),
@@ -5179,15 +5694,15 @@ async fn test_duplicate_disk_attach_requests_ok(
         user_data: vec![],
         ssh_public_keys: None,
         network_interfaces:
-            params::InstanceNetworkInterfaceAttachment::DefaultIpv4,
+            instance::InstanceNetworkInterfaceAttachment::DefaultIpv4,
         external_ips: vec![],
-        boot_disk: Some(params::InstanceDiskAttachment::Attach(
-            params::InstanceDiskAttach {
+        boot_disk: Some(instance::InstanceDiskAttachment::Attach(
+            instance::InstanceDiskAttach {
                 name: Name::try_from(String::from("alsodata")).unwrap(),
             },
         )),
-        disks: vec![params::InstanceDiskAttachment::Attach(
-            params::InstanceDiskAttach {
+        disks: vec![instance::InstanceDiskAttachment::Attach(
+            instance::InstanceDiskAttach {
                 name: Name::try_from(String::from("alsodata")).unwrap(),
             },
         )],
@@ -5196,6 +5711,7 @@ async fn test_duplicate_disk_attach_requests_ok(
         auto_restart_policy: Default::default(),
         anti_affinity_groups: Vec::new(),
         multicast_groups: Vec::new(),
+        enable_jumbo_frames: false,
     };
 
     let builder =
@@ -5232,7 +5748,7 @@ async fn test_cannot_detach_boot_disk(cptestctx: &ControlPlaneTestContext) {
     create_disk(&client, PROJECT_NAME, "probablydata0").await;
 
     // Create the instance
-    let instance_params = params::InstanceCreate {
+    let instance_params = instance::InstanceCreate {
         identity: IdentityMetadataCreateParams {
             name: instance_name.parse().unwrap(),
             description: String::from("probably serving data"),
@@ -5243,10 +5759,10 @@ async fn test_cannot_detach_boot_disk(cptestctx: &ControlPlaneTestContext) {
         user_data: vec![],
         ssh_public_keys: None,
         network_interfaces:
-            params::InstanceNetworkInterfaceAttachment::DefaultIpv4,
+            instance::InstanceNetworkInterfaceAttachment::DefaultIpv4,
         external_ips: vec![],
-        boot_disk: Some(params::InstanceDiskAttachment::Attach(
-            params::InstanceDiskAttach {
+        boot_disk: Some(instance::InstanceDiskAttachment::Attach(
+            instance::InstanceDiskAttach {
                 name: Name::try_from(String::from("probablydata0")).unwrap(),
             },
         )),
@@ -5256,6 +5772,7 @@ async fn test_cannot_detach_boot_disk(cptestctx: &ControlPlaneTestContext) {
         multicast_groups: Vec::new(),
         auto_restart_policy: Default::default(),
         anti_affinity_groups: Vec::new(),
+        enable_jumbo_frames: false,
     };
 
     let builder =
@@ -5295,7 +5812,7 @@ async fn test_cannot_detach_boot_disk(cptestctx: &ControlPlaneTestContext) {
         http::Method::POST,
         &url_instance_detach_disk,
     )
-    .body(Some(&params::DiskPath { disk: disks[0].identity.id.into() }))
+    .body(Some(&path_params::DiskPath { disk: disks[0].identity.id.into() }))
     .expect_status(Some(http::StatusCode::CONFLICT));
     let response = NexusRequest::new(builder)
         .authn_as(AuthnMode::PrivilegedUser)
@@ -5312,13 +5829,14 @@ async fn test_cannot_detach_boot_disk(cptestctx: &ControlPlaneTestContext) {
     let instance = expect_instance_reconfigure_ok(
         &client,
         &instance.identity.id,
-        params::InstanceUpdate {
+        instance::InstanceUpdate {
             boot_disk: Nullable(None),
             auto_restart_policy: Nullable(None),
             cpu_platform: Nullable(None),
             ncpus: InstanceCpuCount::try_from(2).unwrap(),
             memory: ByteCount::from_gibibytes_u32(4),
             multicast_groups: None,
+            enable_jumbo_frames: false,
         },
     )
     .await;
@@ -5330,7 +5848,7 @@ async fn test_cannot_detach_boot_disk(cptestctx: &ControlPlaneTestContext) {
         http::Method::POST,
         &url_instance_detach_disk,
     )
-    .body(Some(&params::DiskPath { disk: disks[0].identity.id.into() }))
+    .body(Some(&path_params::DiskPath { disk: disks[0].identity.id.into() }))
     .expect_status(Some(http::StatusCode::ACCEPTED));
     NexusRequest::new(builder)
         .authn_as(AuthnMode::PrivilegedUser)
@@ -5366,7 +5884,7 @@ async fn test_updating_running_instance_boot_disk_is_conflict(
     let probablydata = Name::try_from(String::from("probablydata")).unwrap();
     let alsodata = Name::try_from(String::from("alsodata")).unwrap();
 
-    let instance_params = params::InstanceCreate {
+    let instance_params = instance::InstanceCreate {
         identity: IdentityMetadataCreateParams {
             name: Name::try_from(String::from(instance_name)).unwrap(),
             description: String::from("instance to run and fail to update"),
@@ -5377,24 +5895,25 @@ async fn test_updating_running_instance_boot_disk_is_conflict(
         user_data: vec![],
         ssh_public_keys: None,
         network_interfaces:
-            params::InstanceNetworkInterfaceAttachment::DefaultIpv4,
+            instance::InstanceNetworkInterfaceAttachment::DefaultIpv4,
         external_ips: vec![],
         disks: vec![
-            params::InstanceDiskAttachment::Attach(
-                params::InstanceDiskAttach { name: probablydata.clone() },
+            instance::InstanceDiskAttachment::Attach(
+                instance::InstanceDiskAttach { name: probablydata.clone() },
             ),
-            params::InstanceDiskAttachment::Attach(
-                params::InstanceDiskAttach { name: alsodata.clone() },
+            instance::InstanceDiskAttachment::Attach(
+                instance::InstanceDiskAttach { name: alsodata.clone() },
             ),
         ],
-        boot_disk: Some(params::InstanceDiskAttachment::Attach(
-            params::InstanceDiskAttach { name: probablydata.clone() },
+        boot_disk: Some(instance::InstanceDiskAttachment::Attach(
+            instance::InstanceDiskAttach { name: probablydata.clone() },
         )),
         cpu_platform: None,
         start: true,
         auto_restart_policy: Default::default(),
         anti_affinity_groups: Vec::new(),
         multicast_groups: Vec::new(),
+        enable_jumbo_frames: false,
     };
 
     let builder =
@@ -5420,13 +5939,14 @@ async fn test_updating_running_instance_boot_disk_is_conflict(
     let error = expect_instance_reconfigure_err(
         &client,
         &instance_id.into_untyped_uuid(),
-        params::InstanceUpdate {
+        instance::InstanceUpdate {
             boot_disk: Nullable(Some(alsodata.clone().into())),
             auto_restart_policy: Nullable(None),
             cpu_platform: Nullable(None),
             ncpus: InstanceCpuCount::try_from(2).unwrap(),
             memory: ByteCount::from_gibibytes_u32(4),
             multicast_groups: None,
+            enable_jumbo_frames: false,
         },
         http::StatusCode::CONFLICT,
     )
@@ -5438,7 +5958,7 @@ async fn test_updating_running_instance_boot_disk_is_conflict(
     expect_instance_reconfigure_ok(
         &client,
         &instance_id.into_untyped_uuid(),
-        params::InstanceUpdate {
+        instance::InstanceUpdate {
             // Leave the boot disk the same as the one with which the instance
             // was created.
             boot_disk: Nullable(Some(probablydata.clone().into())),
@@ -5449,6 +5969,7 @@ async fn test_updating_running_instance_boot_disk_is_conflict(
             ncpus: InstanceCpuCount::try_from(2).unwrap(),
             memory: ByteCount::from_gibibytes_u32(4),
             multicast_groups: None,
+            enable_jumbo_frames: false,
         },
     )
     .await;
@@ -5466,13 +5987,14 @@ async fn test_updating_missing_instance_is_not_found(
     let error = expect_instance_reconfigure_err(
         &client,
         &UUID_THAT_DOESNT_EXIST,
-        params::InstanceUpdate {
+        instance::InstanceUpdate {
             boot_disk: Nullable(None),
             auto_restart_policy: Nullable(None),
             cpu_platform: Nullable(None),
             ncpus: InstanceCpuCount::try_from(0).unwrap(),
             memory: ByteCount::from_gibibytes_u32(0),
             multicast_groups: None,
+            enable_jumbo_frames: false,
         },
         http::StatusCode::NOT_FOUND,
     )
@@ -5486,7 +6008,7 @@ async fn test_updating_missing_instance_is_not_found(
 async fn expect_instance_reconfigure_ok(
     external_client: &ClientTestContext,
     instance_id: &Uuid,
-    update: params::InstanceUpdate,
+    update: instance::InstanceUpdate,
 ) -> Instance {
     let url_instance_update = format!("/v1/instances/{instance_id}");
 
@@ -5512,7 +6034,7 @@ async fn expect_instance_reconfigure_ok(
 async fn expect_instance_reconfigure_err(
     external_client: &ClientTestContext,
     instance_id: &Uuid,
-    update: params::InstanceUpdate,
+    update: instance::InstanceUpdate,
     status: http::StatusCode,
 ) -> HttpErrorResponseBody {
     let url_instance_update = format!("/v1/instances/{instance_id}");
@@ -5547,7 +6069,7 @@ async fn test_size_can_be_changed(cptestctx: &ControlPlaneTestContext) {
     let initial_ncpus = InstanceCpuCount::try_from(2).unwrap();
     let initial_memory = ByteCount::from_gibibytes_u32(4);
 
-    let instance_params = params::InstanceCreate {
+    let instance_params = instance::InstanceCreate {
         identity: IdentityMetadataCreateParams {
             name: instance_name.parse().unwrap(),
             description: String::from("stuff"),
@@ -5558,7 +6080,7 @@ async fn test_size_can_be_changed(cptestctx: &ControlPlaneTestContext) {
         user_data: vec![],
         ssh_public_keys: None,
         network_interfaces:
-            params::InstanceNetworkInterfaceAttachment::DefaultIpv4,
+            instance::InstanceNetworkInterfaceAttachment::DefaultIpv4,
         external_ips: vec![],
         boot_disk: None,
         cpu_platform: None,
@@ -5568,6 +6090,7 @@ async fn test_size_can_be_changed(cptestctx: &ControlPlaneTestContext) {
         auto_restart_policy: None,
         anti_affinity_groups: Vec::new(),
         multicast_groups: Vec::new(),
+        enable_jumbo_frames: false,
     };
 
     let builder =
@@ -5588,20 +6111,21 @@ async fn test_size_can_be_changed(cptestctx: &ControlPlaneTestContext) {
     let new_ncpus = InstanceCpuCount::try_from(4).unwrap();
     let new_memory = ByteCount::from_gibibytes_u32(8);
 
-    let base_update = params::InstanceUpdate {
+    let base_update = instance::InstanceUpdate {
         auto_restart_policy: Nullable(auto_restart_policy),
         boot_disk: Nullable(boot_disk_nameorid.clone()),
         cpu_platform: Nullable(None),
         ncpus: initial_ncpus,
         memory: initial_memory,
         multicast_groups: None,
+        enable_jumbo_frames: false,
     };
 
     // Resizing the instance immediately will error; the instance is running.
     let err = expect_instance_reconfigure_err(
         client,
         &instance.identity.id,
-        params::InstanceUpdate {
+        instance::InstanceUpdate {
             ncpus: new_ncpus,
             memory: new_memory,
             multicast_groups: None,
@@ -5623,7 +6147,7 @@ async fn test_size_can_be_changed(cptestctx: &ControlPlaneTestContext) {
     let instance = expect_instance_reconfigure_ok(
         client,
         &instance.identity.id,
-        params::InstanceUpdate {
+        instance::InstanceUpdate {
             ncpus: new_ncpus,
             memory: new_memory,
             multicast_groups: None,
@@ -5638,7 +6162,7 @@ async fn test_size_can_be_changed(cptestctx: &ControlPlaneTestContext) {
     let instance = expect_instance_reconfigure_ok(
         client,
         &instance.identity.id,
-        params::InstanceUpdate {
+        instance::InstanceUpdate {
             ncpus: initial_ncpus,
             memory: new_memory,
             multicast_groups: None,
@@ -5652,7 +6176,7 @@ async fn test_size_can_be_changed(cptestctx: &ControlPlaneTestContext) {
     let instance = expect_instance_reconfigure_ok(
         client,
         &instance.identity.id,
-        params::InstanceUpdate {
+        instance::InstanceUpdate {
             ncpus: initial_ncpus,
             memory: initial_memory,
             multicast_groups: None,
@@ -5670,7 +6194,7 @@ async fn test_size_can_be_changed(cptestctx: &ControlPlaneTestContext) {
     let err = expect_instance_reconfigure_err(
         client,
         &instance.identity.id,
-        params::InstanceUpdate {
+        instance::InstanceUpdate {
             ncpus: InstanceCpuCount(MAX_VCPU_PER_INSTANCE + 1),
             memory: instance.memory,
             multicast_groups: None,
@@ -5691,7 +6215,7 @@ async fn test_size_can_be_changed(cptestctx: &ControlPlaneTestContext) {
     let err = expect_instance_reconfigure_err(
         client,
         &instance.identity.id,
-        params::InstanceUpdate {
+        instance::InstanceUpdate {
             ncpus: instance.ncpus,
             memory: ByteCount::from_mebibytes_u32(0),
             multicast_groups: None,
@@ -5706,7 +6230,7 @@ async fn test_size_can_be_changed(cptestctx: &ControlPlaneTestContext) {
     let err = expect_instance_reconfigure_err(
         client,
         &instance.identity.id,
-        params::InstanceUpdate {
+        instance::InstanceUpdate {
             ncpus: instance.ncpus,
             memory: ByteCount::try_from(MAX_MEMORY_BYTES_PER_INSTANCE - 1)
                 .unwrap(),
@@ -5723,7 +6247,7 @@ async fn test_size_can_be_changed(cptestctx: &ControlPlaneTestContext) {
     let err = expect_instance_reconfigure_err(
         client,
         &instance.identity.id,
-        params::InstanceUpdate {
+        instance::InstanceUpdate {
             ncpus: instance.ncpus,
             memory: ByteCount::from_mebibytes_u32(
                 (max_mib + 1024).try_into().unwrap(),
@@ -5745,7 +6269,7 @@ async fn test_size_can_be_changed(cptestctx: &ControlPlaneTestContext) {
     expect_instance_reconfigure_err(
         client,
         &instance.identity.id,
-        params::InstanceUpdate {
+        instance::InstanceUpdate {
             ncpus: new_ncpus,
             memory: new_memory,
             multicast_groups: None,
@@ -5766,7 +6290,7 @@ async fn test_auto_restart_policy_can_be_changed(
 
     create_project_and_pool(&client).await;
 
-    let instance_params = params::InstanceCreate {
+    let instance_params = instance::InstanceCreate {
         identity: IdentityMetadataCreateParams {
             name: instance_name.parse().unwrap(),
             description: String::from("stuff"),
@@ -5777,7 +6301,7 @@ async fn test_auto_restart_policy_can_be_changed(
         user_data: vec![],
         ssh_public_keys: None,
         network_interfaces:
-            params::InstanceNetworkInterfaceAttachment::DefaultIpv4,
+            instance::InstanceNetworkInterfaceAttachment::DefaultIpv4,
         external_ips: vec![],
         boot_disk: None,
         cpu_platform: None,
@@ -5787,6 +6311,7 @@ async fn test_auto_restart_policy_can_be_changed(
         auto_restart_policy: None,
         anti_affinity_groups: Vec::new(),
         multicast_groups: Vec::new(),
+        enable_jumbo_frames: false,
     };
 
     let builder =
@@ -5808,13 +6333,14 @@ async fn test_auto_restart_policy_can_be_changed(
         let instance = expect_instance_reconfigure_ok(
             client,
             &instance.identity.id,
-            dbg!(params::InstanceUpdate {
+            dbg!(instance::InstanceUpdate {
                 auto_restart_policy: Nullable(auto_restart_policy),
                 boot_disk: Nullable(None),
                 cpu_platform: Nullable(None),
                 ncpus: InstanceCpuCount::try_from(2).unwrap(),
                 memory: ByteCount::from_gibibytes_u32(4),
                 multicast_groups: None,
+                enable_jumbo_frames: false,
             }),
         )
         .await;
@@ -5842,7 +6368,7 @@ async fn test_cpu_platform_can_be_changed(cptestctx: &ControlPlaneTestContext) {
 
     create_project_and_pool(&client).await;
 
-    let instance_params = params::InstanceCreate {
+    let instance_params = instance::InstanceCreate {
         identity: IdentityMetadataCreateParams {
             name: instance_name.parse().unwrap(),
             description: String::from("stuff"),
@@ -5853,7 +6379,7 @@ async fn test_cpu_platform_can_be_changed(cptestctx: &ControlPlaneTestContext) {
         user_data: vec![],
         ssh_public_keys: None,
         network_interfaces:
-            params::InstanceNetworkInterfaceAttachment::DefaultIpv4,
+            instance::InstanceNetworkInterfaceAttachment::DefaultIpv4,
         external_ips: vec![],
         boot_disk: None,
         // Start out with None
@@ -5863,6 +6389,7 @@ async fn test_cpu_platform_can_be_changed(cptestctx: &ControlPlaneTestContext) {
         auto_restart_policy: None,
         anti_affinity_groups: Vec::new(),
         multicast_groups: vec![],
+        enable_jumbo_frames: false,
     };
 
     let builder =
@@ -5884,13 +6411,14 @@ async fn test_cpu_platform_can_be_changed(cptestctx: &ControlPlaneTestContext) {
         let instance = expect_instance_reconfigure_ok(
             client,
             &instance.identity.id,
-            dbg!(params::InstanceUpdate {
+            dbg!(instance::InstanceUpdate {
                 auto_restart_policy: Nullable(None),
                 boot_disk: Nullable(None),
                 cpu_platform: Nullable(cpu_platform),
                 ncpus: InstanceCpuCount::try_from(2).unwrap(),
                 memory: ByteCount::from_gibibytes_u32(4),
                 multicast_groups: None,
+                enable_jumbo_frames: false,
             }),
         )
         .await;
@@ -5905,6 +6433,127 @@ async fn test_cpu_platform_can_be_changed(cptestctx: &ControlPlaneTestContext) {
 
     // Reconfigure back to None.
     assert_reconfigured(None).await;
+}
+
+// Test reconfiguring an instance's `enable_jumbo_frames` field. Enabling the
+// per-instance opt-in is gated on the fleet-wide opt-in; disabling it is always
+// permitted.
+#[nexus_test]
+async fn test_enable_jumbo_frames_can_be_changed(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    let instance_name = "got-the-big-mtu";
+
+    create_project_and_pool(&client).await;
+
+    let instance_params = instance::InstanceCreate {
+        identity: IdentityMetadataCreateParams {
+            name: instance_name.parse().unwrap(),
+            description: String::from("stuff"),
+        },
+        ncpus: InstanceCpuCount::try_from(2).unwrap(),
+        memory: ByteCount::from_gibibytes_u32(4),
+        hostname: instance_name.parse().unwrap(),
+        user_data: vec![],
+        ssh_public_keys: None,
+        network_interfaces:
+            instance::InstanceNetworkInterfaceAttachment::DefaultIpv4,
+        external_ips: vec![],
+        boot_disk: None,
+        cpu_platform: None,
+        disks: Vec::new(),
+        start: false,
+        auto_restart_policy: None,
+        anti_affinity_groups: Vec::new(),
+        multicast_groups: vec![],
+        // Start out opted out.
+        enable_jumbo_frames: false,
+    };
+
+    let builder =
+        RequestBuilder::new(client, http::Method::POST, &get_instances_url())
+            .body(Some(&instance_params))
+            .expect_status(Some(http::StatusCode::CREATED));
+    let response = NexusRequest::new(builder)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("Expected instance creation to work!");
+
+    let instance = response.parsed_body::<Instance>().unwrap();
+    assert!(!instance.enable_jumbo_frames);
+
+    let base_update = || instance::InstanceUpdate {
+        boot_disk: Nullable(None),
+        auto_restart_policy: Nullable(None),
+        cpu_platform: Nullable(None),
+        ncpus: InstanceCpuCount::try_from(2).unwrap(),
+        memory: ByteCount::from_gibibytes_u32(4),
+        multicast_groups: None,
+        enable_jumbo_frames: false,
+    };
+
+    // Without the fleet-wide opt-in, requesting `enable_jumbo_frames: true` is
+    // rejected.
+    let err = expect_instance_reconfigure_err(
+        &client,
+        &instance.identity.id,
+        instance::InstanceUpdate { enable_jumbo_frames: true, ..base_update() },
+        http::StatusCode::BAD_REQUEST,
+    )
+    .await;
+    assert!(
+        err.message.contains("fleet-wide jumbo-frames opt-in"),
+        "unexpected error message: {}",
+        err.message,
+    );
+
+    // Setting it (or leaving it) to false is always allowed, even without the
+    // fleet-wide opt-in.
+    let reconfigured = expect_instance_reconfigure_ok(
+        client,
+        &instance.identity.id,
+        base_update(),
+    )
+    .await;
+    assert!(!reconfigured.enable_jumbo_frames);
+
+    // Enable the fleet-wide opt-in.
+    let settings: system_networking::SystemNetworkingSettings = object_put(
+        client,
+        "/v1/system/networking/settings",
+        &system_networking::SystemNetworkingSettingsUpdate {
+            external_jumbo_frames_opt_in_enabled: true,
+        },
+    )
+    .await;
+    assert!(settings.external_jumbo_frames_opt_in_enabled);
+
+    // With the fleet-wide opt-in enabled, the per-instance bit can be set to
+    // true.
+    let reconfigured = expect_instance_reconfigure_ok(
+        client,
+        &instance.identity.id,
+        instance::InstanceUpdate { enable_jumbo_frames: true, ..base_update() },
+    )
+    .await;
+    assert!(reconfigured.enable_jumbo_frames);
+
+    // The new value is persisted and observed by subsequent reads.
+    let fetched: Instance =
+        object_get(client, &format!("/v1/instances/{}", instance.identity.id))
+            .await;
+    assert!(fetched.enable_jumbo_frames);
+
+    // Opting back out succeeds.
+    let reconfigured = expect_instance_reconfigure_ok(
+        client,
+        &instance.identity.id,
+        base_update(),
+    )
+    .await;
+    assert!(!reconfigured.enable_jumbo_frames);
 }
 
 // Create an instance with boot disk set to one of its attached disks, then set
@@ -5933,7 +6582,7 @@ async fn test_boot_disk_can_be_changed(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(disks[1].state, DiskState::Detached);
 
     // Create the instance
-    let instance_params = params::InstanceCreate {
+    let instance_params = instance::InstanceCreate {
         identity: IdentityMetadataCreateParams {
             name: instance_name.parse().unwrap(),
             description: String::from("probably serving data"),
@@ -5944,15 +6593,15 @@ async fn test_boot_disk_can_be_changed(cptestctx: &ControlPlaneTestContext) {
         user_data: vec![],
         ssh_public_keys: None,
         network_interfaces:
-            params::InstanceNetworkInterfaceAttachment::DefaultIpv4,
+            instance::InstanceNetworkInterfaceAttachment::DefaultIpv4,
         external_ips: vec![],
-        boot_disk: Some(params::InstanceDiskAttachment::Attach(
-            params::InstanceDiskAttach {
+        boot_disk: Some(instance::InstanceDiskAttachment::Attach(
+            instance::InstanceDiskAttach {
                 name: Name::try_from(String::from("probablydata0")).unwrap(),
             },
         )),
-        disks: vec![params::InstanceDiskAttachment::Attach(
-            params::InstanceDiskAttach {
+        disks: vec![instance::InstanceDiskAttachment::Attach(
+            instance::InstanceDiskAttach {
                 name: Name::try_from(String::from("probablydata1")).unwrap(),
             },
         )],
@@ -5961,6 +6610,7 @@ async fn test_boot_disk_can_be_changed(cptestctx: &ControlPlaneTestContext) {
         auto_restart_policy: Default::default(),
         anti_affinity_groups: Vec::new(),
         multicast_groups: Vec::new(),
+        enable_jumbo_frames: false,
     };
 
     let builder =
@@ -5982,13 +6632,14 @@ async fn test_boot_disk_can_be_changed(cptestctx: &ControlPlaneTestContext) {
     let instance = expect_instance_reconfigure_ok(
         &client,
         &instance.identity.id,
-        params::InstanceUpdate {
+        instance::InstanceUpdate {
             boot_disk: Nullable(Some(disks[1].identity.id.into())),
             auto_restart_policy: Nullable(None),
             cpu_platform: Nullable(None),
             ncpus: InstanceCpuCount::try_from(2).unwrap(),
             memory: ByteCount::from_gibibytes_u32(4),
             multicast_groups: None,
+            enable_jumbo_frames: false,
         },
     )
     .await;
@@ -6016,7 +6667,7 @@ async fn test_boot_disk_must_be_attached(cptestctx: &ControlPlaneTestContext) {
             .all_items;
 
     // Create the instance
-    let instance_params = params::InstanceCreate {
+    let instance_params = instance::InstanceCreate {
         identity: IdentityMetadataCreateParams {
             name: instance_name.parse().unwrap(),
             description: String::from("probably serving data"),
@@ -6027,7 +6678,7 @@ async fn test_boot_disk_must_be_attached(cptestctx: &ControlPlaneTestContext) {
         user_data: vec![],
         ssh_public_keys: None,
         network_interfaces:
-            params::InstanceNetworkInterfaceAttachment::DefaultIpv4,
+            instance::InstanceNetworkInterfaceAttachment::DefaultIpv4,
         external_ips: vec![],
         disks: vec![],
         boot_disk: None,
@@ -6036,6 +6687,7 @@ async fn test_boot_disk_must_be_attached(cptestctx: &ControlPlaneTestContext) {
         auto_restart_policy: Default::default(),
         anti_affinity_groups: Vec::new(),
         multicast_groups: Vec::new(),
+        enable_jumbo_frames: false,
     };
 
     let builder =
@@ -6054,13 +6706,14 @@ async fn test_boot_disk_must_be_attached(cptestctx: &ControlPlaneTestContext) {
     let error = expect_instance_reconfigure_err(
         &client,
         &instance.identity.id,
-        params::InstanceUpdate {
+        instance::InstanceUpdate {
             boot_disk: Nullable(Some(disks[0].identity.id.into())),
             auto_restart_policy: Nullable(None),
             cpu_platform: Nullable(None),
             ncpus: InstanceCpuCount::try_from(2).unwrap(),
             memory: ByteCount::from_gibibytes_u32(4),
             multicast_groups: None,
+            enable_jumbo_frames: false,
         },
         http::StatusCode::CONFLICT,
     )
@@ -6077,7 +6730,7 @@ async fn test_boot_disk_must_be_attached(cptestctx: &ControlPlaneTestContext) {
         http::Method::POST,
         &url_instance_detach_disk,
     )
-    .body(Some(&params::DiskPath { disk: disks[0].identity.id.into() }))
+    .body(Some(&path_params::DiskPath { disk: disks[0].identity.id.into() }))
     .expect_status(Some(http::StatusCode::ACCEPTED));
     NexusRequest::new(builder)
         .authn_as(AuthnMode::PrivilegedUser)
@@ -6089,13 +6742,14 @@ async fn test_boot_disk_must_be_attached(cptestctx: &ControlPlaneTestContext) {
     let instance = expect_instance_reconfigure_ok(
         &client,
         &instance.identity.id,
-        params::InstanceUpdate {
+        instance::InstanceUpdate {
             boot_disk: Nullable(Some(disks[0].identity.id.into())),
             auto_restart_policy: Nullable(None),
             cpu_platform: Nullable(None),
             ncpus: InstanceCpuCount::try_from(2).unwrap(),
             memory: ByteCount::from_gibibytes_u32(4),
             multicast_groups: None,
+            enable_jumbo_frames: false,
         },
     )
     .await;
@@ -6113,7 +6767,7 @@ async fn test_instances_memory_rejected_less_than_min_memory_size(
 
     // Attempt to create the instance, observe a server error.
     let instance_name = "just-rainsticks";
-    let instance = params::InstanceCreate {
+    let instance = instance::InstanceCreate {
         identity: IdentityMetadataCreateParams {
             name: instance_name.parse().unwrap(),
             description: format!("instance {:?}", &instance_name),
@@ -6126,7 +6780,7 @@ async fn test_instances_memory_rejected_less_than_min_memory_size(
                 .to_vec(),
         ssh_public_keys: None,
         network_interfaces:
-            params::InstanceNetworkInterfaceAttachment::DefaultIpv4,
+            instance::InstanceNetworkInterfaceAttachment::DefaultIpv4,
         external_ips: vec![],
         disks: vec![],
         boot_disk: None,
@@ -6135,6 +6789,7 @@ async fn test_instances_memory_rejected_less_than_min_memory_size(
         auto_restart_policy: Default::default(),
         anti_affinity_groups: Vec::new(),
         multicast_groups: Vec::new(),
+        enable_jumbo_frames: false,
     };
 
     let error = NexusRequest::new(
@@ -6169,7 +6824,7 @@ async fn test_instances_memory_not_divisible_by_min_memory_size(
 
     // Attempt to create the instance, observe a server error.
     let instance_name = "just-rainsticks";
-    let instance = params::InstanceCreate {
+    let instance = instance::InstanceCreate {
         identity: IdentityMetadataCreateParams {
             name: instance_name.parse().unwrap(),
             description: format!("instance {:?}", &instance_name),
@@ -6182,7 +6837,7 @@ async fn test_instances_memory_not_divisible_by_min_memory_size(
                 .to_vec(),
         ssh_public_keys: None,
         network_interfaces:
-            params::InstanceNetworkInterfaceAttachment::DefaultIpv4,
+            instance::InstanceNetworkInterfaceAttachment::DefaultIpv4,
         external_ips: vec![],
         disks: vec![],
         boot_disk: None,
@@ -6191,6 +6846,7 @@ async fn test_instances_memory_not_divisible_by_min_memory_size(
         auto_restart_policy: Default::default(),
         anti_affinity_groups: Vec::new(),
         multicast_groups: Vec::new(),
+        enable_jumbo_frames: false,
     };
 
     let error = NexusRequest::new(
@@ -6224,7 +6880,7 @@ async fn test_instances_memory_greater_than_max_size(
 
     // Attempt to create the instance, observe a server error.
     let instance_name = "just-rainsticks";
-    let instance = params::InstanceCreate {
+    let instance = instance::InstanceCreate {
         identity: IdentityMetadataCreateParams {
             name: instance_name.parse().unwrap(),
             description: format!("instance {:?}", &instance_name),
@@ -6238,7 +6894,7 @@ async fn test_instances_memory_greater_than_max_size(
                 .to_vec(),
         ssh_public_keys: None,
         network_interfaces:
-            params::InstanceNetworkInterfaceAttachment::DefaultIpv4,
+            instance::InstanceNetworkInterfaceAttachment::DefaultIpv4,
         external_ips: vec![],
         disks: vec![],
         boot_disk: None,
@@ -6247,6 +6903,7 @@ async fn test_instances_memory_greater_than_max_size(
         auto_restart_policy: Default::default(),
         anti_affinity_groups: Vec::new(),
         multicast_groups: Vec::new(),
+        enable_jumbo_frames: false,
     };
 
     let error = NexusRequest::new(
@@ -6269,16 +6926,16 @@ async fn create_anti_affinity_groups(
     groups: &[&str],
 ) {
     for name in groups {
-        let _: views::AntiAffinityGroup = object_create(
+        let _: affinity::AntiAffinityGroup = object_create(
             client,
             &anti_affinity_groups_url(),
-            &params::AntiAffinityGroupCreate {
+            &affinity::AntiAffinityGroupCreate {
                 identity: IdentityMetadataCreateParams {
                     name: name.parse().unwrap(),
                     description: String::from("This is a description"),
                 },
-                policy: AffinityPolicy::Allow,
-                failure_domain: FailureDomain::Sled,
+                policy: affinity::AffinityPolicy::Allow,
+                failure_domain: affinity::FailureDomain::Sled,
             },
         )
         .await;
@@ -6293,7 +6950,7 @@ async fn ensure_anti_affinity_groups_match(
     let mut expected_groups = expected_groups.to_vec();
     expected_groups.sort();
 
-    let groups = objects_list_page_authz::<views::AntiAffinityGroup>(
+    let groups = objects_list_page_authz::<affinity::AntiAffinityGroup>(
         client,
         &format!(
             "/v1/instances/{instance_name}/anti-affinity-groups?{}&sort_by=name_ascending",
@@ -6336,7 +6993,7 @@ async fn test_instance_create_with_anti_affinity_groups(
         .collect();
 
     // Create an instance belonging to all the groups
-    let instance_params = params::InstanceCreate {
+    let instance_params = instance::InstanceCreate {
         identity: IdentityMetadataCreateParams {
             name: instance_name.parse().unwrap(),
             description: String::from("probably serving data"),
@@ -6349,13 +7006,14 @@ async fn test_instance_create_with_anti_affinity_groups(
         hostname: instance_name.parse().unwrap(),
         user_data: vec![],
         network_interfaces:
-            params::InstanceNetworkInterfaceAttachment::DefaultIpv4,
+            instance::InstanceNetworkInterfaceAttachment::DefaultIpv4,
         external_ips: vec![],
         disks: vec![],
         boot_disk: None,
         cpu_platform: None,
         auto_restart_policy: Default::default(),
         anti_affinity_groups: anti_affinity_groups_param,
+        enable_jumbo_frames: false,
     };
 
     let builder =
@@ -6408,7 +7066,7 @@ async fn test_instance_create_with_duplicate_anti_affinity_groups(
     anti_affinity_groups_param.append(&mut anti_affinity_groups_param.clone());
 
     // Create an instance belonging to all the groups
-    let instance_params = params::InstanceCreate {
+    let instance_params = instance::InstanceCreate {
         identity: IdentityMetadataCreateParams {
             name: instance_name.parse().unwrap(),
             description: String::from("probably serving data"),
@@ -6421,13 +7079,14 @@ async fn test_instance_create_with_duplicate_anti_affinity_groups(
         hostname: instance_name.parse().unwrap(),
         user_data: vec![],
         network_interfaces:
-            params::InstanceNetworkInterfaceAttachment::DefaultIpv4,
+            instance::InstanceNetworkInterfaceAttachment::DefaultIpv4,
         external_ips: vec![],
         disks: vec![],
         boot_disk: None,
         cpu_platform: None,
         auto_restart_policy: Default::default(),
         anti_affinity_groups: anti_affinity_groups_param,
+        enable_jumbo_frames: false,
     };
 
     let builder =
@@ -6481,7 +7140,7 @@ async fn test_instance_create_with_anti_affinity_groups_that_do_not_exist(
         .collect();
 
     // Create an instance belonging to all the groups
-    let instance_params = params::InstanceCreate {
+    let instance_params = instance::InstanceCreate {
         identity: IdentityMetadataCreateParams {
             name: instance_name.parse().unwrap(),
             description: String::from("probably serving data"),
@@ -6494,13 +7153,14 @@ async fn test_instance_create_with_anti_affinity_groups_that_do_not_exist(
         hostname: instance_name.parse().unwrap(),
         user_data: vec![],
         network_interfaces:
-            params::InstanceNetworkInterfaceAttachment::DefaultIpv4,
+            instance::InstanceNetworkInterfaceAttachment::DefaultIpv4,
         external_ips: vec![],
         disks: vec![],
         boot_disk: None,
         cpu_platform: None,
         auto_restart_policy: Default::default(),
         anti_affinity_groups: anti_affinity_groups_param,
+        enable_jumbo_frames: false,
     };
 
     let error = object_create_error(
@@ -6566,7 +7226,7 @@ async fn test_instance_create_with_ssh_keys(
     }
 
     // Create an instance
-    let instance_params = params::InstanceCreate {
+    let instance_params = instance::InstanceCreate {
         identity: IdentityMetadataCreateParams {
             name: instance_name.parse().unwrap(),
             description: String::from("probably serving data"),
@@ -6580,13 +7240,14 @@ async fn test_instance_create_with_ssh_keys(
         hostname: instance_name.parse().unwrap(),
         user_data: vec![],
         network_interfaces:
-            params::InstanceNetworkInterfaceAttachment::DefaultIpv4,
+            instance::InstanceNetworkInterfaceAttachment::DefaultIpv4,
         external_ips: vec![],
         disks: vec![],
         boot_disk: None,
         cpu_platform: None,
         auto_restart_policy: Default::default(),
         anti_affinity_groups: Vec::new(),
+        enable_jumbo_frames: false,
     };
 
     let builder =
@@ -6618,7 +7279,7 @@ async fn test_instance_create_with_ssh_keys(
 
     let instance_name = "ssh-keys-2";
     // Create an instance
-    let instance_params = params::InstanceCreate {
+    let instance_params = instance::InstanceCreate {
         identity: IdentityMetadataCreateParams {
             name: instance_name.parse().unwrap(),
             description: String::from("probably serving data"),
@@ -6632,13 +7293,14 @@ async fn test_instance_create_with_ssh_keys(
         hostname: instance_name.parse().unwrap(),
         user_data: vec![],
         network_interfaces:
-            params::InstanceNetworkInterfaceAttachment::DefaultIpv4,
+            instance::InstanceNetworkInterfaceAttachment::DefaultIpv4,
         external_ips: vec![],
         disks: vec![],
         boot_disk: None,
         cpu_platform: None,
         auto_restart_policy: Default::default(),
         anti_affinity_groups: Vec::new(),
+        enable_jumbo_frames: false,
     };
 
     let builder =
@@ -6669,7 +7331,7 @@ async fn test_instance_create_with_ssh_keys(
 
     let instance_name = "ssh-keys-3";
     // Create an instance
-    let instance_params = params::InstanceCreate {
+    let instance_params = instance::InstanceCreate {
         identity: IdentityMetadataCreateParams {
             name: instance_name.parse().unwrap(),
             description: String::from("probably serving data"),
@@ -6683,13 +7345,14 @@ async fn test_instance_create_with_ssh_keys(
         hostname: instance_name.parse().unwrap(),
         user_data: vec![],
         network_interfaces:
-            params::InstanceNetworkInterfaceAttachment::DefaultIpv4,
+            instance::InstanceNetworkInterfaceAttachment::DefaultIpv4,
         external_ips: vec![],
         disks: vec![],
         boot_disk: None,
         cpu_platform: None,
         auto_restart_policy: Default::default(),
         anti_affinity_groups: Vec::new(),
+        enable_jumbo_frames: false,
     };
 
     let builder =
@@ -6775,7 +7438,7 @@ async fn expect_instance_stop_ok(
 async fn expect_instance_creation_ok(
     client: &ClientTestContext,
     url_instances: &str,
-    instance_params: &params::InstanceCreate,
+    instance_params: &instance::InstanceCreate,
 ) {
     let builder =
         RequestBuilder::new(client, http::Method::POST, &url_instances)
@@ -6814,7 +7477,7 @@ async fn test_cannot_provision_instance_beyond_cpu_capacity(
     for config in &configs {
         let name = Name::try_from(config.0.to_string()).unwrap();
         let ncpus = InstanceCpuCount::try_from(i64::from(config.1)).unwrap();
-        let params = params::InstanceCreate {
+        let params = instance::InstanceCreate {
             identity: IdentityMetadataCreateParams {
                 name,
                 description: String::from("probably serving data"),
@@ -6825,7 +7488,7 @@ async fn test_cannot_provision_instance_beyond_cpu_capacity(
             user_data: vec![],
             ssh_public_keys: None,
             network_interfaces:
-                params::InstanceNetworkInterfaceAttachment::DefaultIpv4,
+                instance::InstanceNetworkInterfaceAttachment::DefaultIpv4,
             external_ips: vec![],
             disks: vec![],
             boot_disk: None,
@@ -6834,6 +7497,7 @@ async fn test_cannot_provision_instance_beyond_cpu_capacity(
             multicast_groups: Vec::new(),
             auto_restart_policy: Default::default(),
             anti_affinity_groups: Vec::new(),
+            enable_jumbo_frames: false,
         };
 
         let url_instances = get_instances_url();
@@ -6876,7 +7540,7 @@ async fn test_cannot_provision_instance_beyond_cpu_limit(
 
     // Try to boot an instance that uses more CPUs than the limit
     let name1 = Name::try_from(String::from("test")).unwrap();
-    let instance_params = params::InstanceCreate {
+    let instance_params = instance::InstanceCreate {
         identity: IdentityMetadataCreateParams {
             name: name1.clone(),
             description: String::from("probably serving data"),
@@ -6887,7 +7551,7 @@ async fn test_cannot_provision_instance_beyond_cpu_limit(
         user_data: vec![],
         ssh_public_keys: None,
         network_interfaces:
-            params::InstanceNetworkInterfaceAttachment::DefaultIpv4,
+            instance::InstanceNetworkInterfaceAttachment::DefaultIpv4,
         external_ips: vec![],
         disks: vec![],
         boot_disk: None,
@@ -6896,6 +7560,7 @@ async fn test_cannot_provision_instance_beyond_cpu_limit(
         multicast_groups: Vec::new(),
         auto_restart_policy: Default::default(),
         anti_affinity_groups: Vec::new(),
+        enable_jumbo_frames: false,
     };
     let url_instances = get_instances_url();
 
@@ -6934,7 +7599,7 @@ async fn test_cannot_provision_instance_beyond_ram_capacity(
     let mut instances = Vec::new();
     for config in &configs {
         let name = Name::try_from(config.0.to_string()).unwrap();
-        let params = params::InstanceCreate {
+        let params = instance::InstanceCreate {
             identity: IdentityMetadataCreateParams {
                 name,
                 description: String::from("probably serving data"),
@@ -6945,7 +7610,7 @@ async fn test_cannot_provision_instance_beyond_ram_capacity(
             user_data: vec![],
             ssh_public_keys: None,
             network_interfaces:
-                params::InstanceNetworkInterfaceAttachment::DefaultIpv4,
+                instance::InstanceNetworkInterfaceAttachment::DefaultIpv4,
             external_ips: vec![],
             disks: vec![],
             boot_disk: None,
@@ -6954,6 +7619,7 @@ async fn test_cannot_provision_instance_beyond_ram_capacity(
             multicast_groups: Vec::new(),
             auto_restart_policy: Default::default(),
             anti_affinity_groups: Vec::new(),
+            enable_jumbo_frames: false,
         };
 
         let url_instances = get_instances_url();
@@ -7018,7 +7684,7 @@ async fn start_sled_and_wait(
             if items.len() == initial_sled_count + 1 {
                 Ok(())
             } else {
-                Err(CondCheckError::<()>::NotYet)
+                Err(CondCheckError::<()>::NotYet { status: None })
             }
         },
         &Duration::from_secs(5),
@@ -7038,7 +7704,7 @@ async fn test_can_start_instance_with_cpu_platform(
     create_project_and_pool(client).await;
 
     let name1 = Name::try_from(String::from("test")).unwrap();
-    let instance_params = params::InstanceCreate {
+    let instance_params = instance::InstanceCreate {
         identity: IdentityMetadataCreateParams {
             name: name1.clone(),
             description: String::from("probably serving data"),
@@ -7049,7 +7715,7 @@ async fn test_can_start_instance_with_cpu_platform(
         user_data: vec![],
         ssh_public_keys: None,
         network_interfaces:
-            params::InstanceNetworkInterfaceAttachment::DefaultIpv4,
+            instance::InstanceNetworkInterfaceAttachment::DefaultIpv4,
         external_ips: vec![],
         disks: vec![],
         boot_disk: None,
@@ -7059,6 +7725,7 @@ async fn test_can_start_instance_with_cpu_platform(
         auto_restart_policy: Default::default(),
         anti_affinity_groups: Vec::new(),
         multicast_groups: vec![],
+        enable_jumbo_frames: false,
     };
     let url_instances = get_instances_url();
 
@@ -7093,13 +7760,14 @@ async fn test_can_start_instance_with_cpu_platform(
     let instance = expect_instance_reconfigure_ok(
         &client,
         &instance.identity.id,
-        params::InstanceUpdate {
+        instance::InstanceUpdate {
             boot_disk: Nullable(None),
             auto_restart_policy: Nullable(None),
             cpu_platform: Nullable(Some(InstanceCpuPlatform::AmdTurin)),
             ncpus: InstanceCpuCount::try_from(1).unwrap(),
             memory: ByteCount::from_gibibytes_u32(4),
             multicast_groups: None,
+            enable_jumbo_frames: false,
         },
     )
     .await;
@@ -7141,6 +7809,39 @@ async fn test_can_start_instance_with_cpu_platform(
         .sled_id;
 
     assert_eq!(instance_sled, new_sled_id);
+
+    // We're free to switch this instance from the initial AmdTurin to AmdTurinV2, which has
+    // identical placement constraints and should land on the same simulated Turin sled.
+    expect_instance_stop_ok(client, instance.identity.name.as_str()).await;
+    instance_simulate(nexus, &instance_id).await;
+    instance_wait_for_state(client, instance_id, InstanceState::Stopped).await;
+
+    let instance = expect_instance_reconfigure_ok(
+        &client,
+        &instance.identity.id,
+        instance::InstanceUpdate {
+            boot_disk: Nullable(None),
+            auto_restart_policy: Nullable(None),
+            cpu_platform: Nullable(Some(InstanceCpuPlatform::AmdTurinV2)),
+            ncpus: InstanceCpuCount::try_from(1).unwrap(),
+            memory: ByteCount::from_gibibytes_u32(4),
+            multicast_groups: None,
+            enable_jumbo_frames: false,
+        },
+    )
+    .await;
+
+    expect_instance_start_ok(client, instance.identity.name.as_str()).await;
+
+    // The VMM should still be on our new fake Turin sled.
+    let instance_sled = nexus
+        .active_instance_info(&instance_id, None)
+        .await
+        .unwrap()
+        .expect("running instance should have a sled")
+        .sled_id;
+
+    assert_eq!(instance_sled, new_sled_id);
 }
 
 #[nexus_test]
@@ -7151,7 +7852,7 @@ async fn test_cannot_start_instance_with_unsatisfiable_cpu_platform(
     create_project_and_pool(client).await;
 
     let name1 = Name::try_from(String::from("test")).unwrap();
-    let instance_params = params::InstanceCreate {
+    let instance_params = instance::InstanceCreate {
         identity: IdentityMetadataCreateParams {
             name: name1.clone(),
             description: String::from("probably serving data"),
@@ -7162,7 +7863,7 @@ async fn test_cannot_start_instance_with_unsatisfiable_cpu_platform(
         user_data: vec![],
         ssh_public_keys: None,
         network_interfaces:
-            params::InstanceNetworkInterfaceAttachment::DefaultIpv4,
+            instance::InstanceNetworkInterfaceAttachment::DefaultIpv4,
         external_ips: vec![],
         disks: vec![],
         boot_disk: None,
@@ -7174,6 +7875,7 @@ async fn test_cannot_start_instance_with_unsatisfiable_cpu_platform(
         auto_restart_policy: Default::default(),
         anti_affinity_groups: Vec::new(),
         multicast_groups: vec![],
+        enable_jumbo_frames: false,
     };
     let url_instances = get_instances_url();
 
@@ -7245,7 +7947,7 @@ async fn test_instance_serial(cptestctx: &ControlPlaneTestContext) {
             if instance_next.runtime.run_state == InstanceState::Running {
                 Ok(instance_next)
             } else {
-                Err(CondCheckError::<()>::NotYet)
+                Err(CondCheckError::<()>::NotYet { status: None })
             }
         },
         &Duration::from_secs(5),
@@ -7289,7 +7991,7 @@ async fn test_instance_serial(cptestctx: &ControlPlaneTestContext) {
     let expected = "This is simulated serial console output for ".as_bytes();
     let mut actual = Vec::new();
     while actual.len() < expected.len() {
-        let serial_data: params::InstanceSerialConsoleData =
+        let serial_data: instance::InstanceSerialConsoleData =
             NexusRequest::object_get(
                 client,
                 &format!("{}&from_start={}", instance_serial_url, actual.len()),
@@ -7402,10 +8104,10 @@ async fn test_instance_ephemeral_ip_from_correct_pool(
     assert_ip_pool_utilization(client, "pool2", 1, capacity2).await;
 
     // make pool2 default and create instance with default pool. check that it now it comes from pool2
-    let _: views::IpPoolSiloLink = object_put(
+    let _: ip_pool::IpPoolSiloLink = object_put(
         client,
         &format!("/v1/system/ip-pools/pool2/silos/{}", DEFAULT_SILO.id()),
-        &params::IpPoolSiloUpdate { is_default: true },
+        &ip_pool::IpPoolSiloUpdate { is_default: true },
     )
     .await;
 
@@ -7451,7 +8153,7 @@ async fn test_instance_ephemeral_ip_from_correct_pool(
     // create instance with pool1, expecting allocation to fail
     let instance_name = "pool1-inst-fail";
     let url = format!("/v1/instances?project={}", PROJECT_NAME);
-    let instance_params = params::InstanceCreate {
+    let instance_params = instance::InstanceCreate {
         identity: IdentityMetadataCreateParams {
             name: instance_name.parse().unwrap(),
             description: format!("instance {:?}", instance_name),
@@ -7461,10 +8163,11 @@ async fn test_instance_ephemeral_ip_from_correct_pool(
         hostname: "the-host".parse().unwrap(),
         user_data: vec![],
         network_interfaces:
-            params::InstanceNetworkInterfaceAttachment::DefaultIpv4,
-        external_ips: vec![params::ExternalIpCreate::Ephemeral {
-            pool: Some("pool1".parse::<Name>().unwrap().into()),
-            ip_version: None,
+            instance::InstanceNetworkInterfaceAttachment::DefaultIpv4,
+        external_ips: vec![ExternalIpCreate::Ephemeral {
+            pool_selector: PoolSelector::Explicit {
+                pool: "pool1".parse::<Name>().unwrap().into(),
+            },
         }],
         ssh_public_keys: None,
         disks: vec![],
@@ -7474,6 +8177,7 @@ async fn test_instance_ephemeral_ip_from_correct_pool(
         auto_restart_policy: Default::default(),
         anti_affinity_groups: Vec::new(),
         multicast_groups: Vec::new(),
+        enable_jumbo_frames: false,
     };
     let error = object_create_error(
         client,
@@ -7525,7 +8229,7 @@ async fn test_instance_ephemeral_ip_from_orphan_pool(
     create_ip_pool(&client, "orphan-pool", Some(orphan_pool_range)).await;
 
     let instance_name = "orphan-pool-inst";
-    let body = params::InstanceCreate {
+    let body = instance::InstanceCreate {
         identity: IdentityMetadataCreateParams {
             name: instance_name.parse().unwrap(),
             description: format!("instance {:?}", instance_name),
@@ -7535,10 +8239,11 @@ async fn test_instance_ephemeral_ip_from_orphan_pool(
         hostname: "the-host".parse().unwrap(),
         user_data: vec![],
         network_interfaces:
-            params::InstanceNetworkInterfaceAttachment::DefaultIpv4,
-        external_ips: vec![params::ExternalIpCreate::Ephemeral {
-            pool: Some("orphan-pool".parse::<Name>().unwrap().into()),
-            ip_version: None,
+            instance::InstanceNetworkInterfaceAttachment::DefaultIpv4,
+        external_ips: vec![ExternalIpCreate::Ephemeral {
+            pool_selector: PoolSelector::Explicit {
+                pool: "orphan-pool".parse::<Name>().unwrap().into(),
+            },
         }],
         ssh_public_keys: None,
         disks: vec![],
@@ -7548,6 +8253,7 @@ async fn test_instance_ephemeral_ip_from_orphan_pool(
         auto_restart_policy: Default::default(),
         anti_affinity_groups: Vec::new(),
         multicast_groups: Vec::new(),
+        enable_jumbo_frames: false,
     };
 
     // instance create 404s
@@ -7563,11 +8269,11 @@ async fn test_instance_ephemeral_ip_from_orphan_pool(
 
     // associate the pool with a different silo and we should get the same
     // error on instance create
-    let params = params::IpPoolLinkSilo {
+    let params = ip_pool::IpPoolLinkSilo {
         silo: NameOrId::Name(cptestctx.silo_name.clone()),
         is_default: false,
     };
-    let _: views::IpPoolSiloLink =
+    let _: ip_pool::IpPoolSiloLink =
         object_create(client, "/v1/system/ip-pools/orphan-pool/silos", &params)
             .await;
 
@@ -7593,7 +8299,7 @@ async fn test_instance_ephemeral_ip_no_default_pool_error(
 
     // important: no pool create, so there is no pool
 
-    let body = params::InstanceCreate {
+    let body = instance::InstanceCreate {
         identity: IdentityMetadataCreateParams {
             name: "no-default-pool".parse().unwrap(),
             description: "".to_string(),
@@ -7603,10 +8309,9 @@ async fn test_instance_ephemeral_ip_no_default_pool_error(
         hostname: "the-host".parse().unwrap(),
         user_data: vec![],
         network_interfaces:
-            params::InstanceNetworkInterfaceAttachment::DefaultIpv4,
-        external_ips: vec![params::ExternalIpCreate::Ephemeral {
-            pool: None, // <--- the only important thing here
-            ip_version: None,
+            instance::InstanceNetworkInterfaceAttachment::DefaultIpv4,
+        external_ips: vec![ExternalIpCreate::Ephemeral {
+            pool_selector: PoolSelector::Auto { ip_version: None },
         }],
         ssh_public_keys: None,
         disks: vec![],
@@ -7616,6 +8321,7 @@ async fn test_instance_ephemeral_ip_no_default_pool_error(
         auto_restart_policy: Default::default(),
         anti_affinity_groups: Vec::new(),
         multicast_groups: Vec::new(),
+        enable_jumbo_frames: false,
     };
 
     let url = format!("/v1/instances?project={}", PROJECT_NAME);
@@ -7625,17 +8331,41 @@ async fn test_instance_ephemeral_ip_no_default_pool_error(
         "not found: default unicast IPv4 pool for current silo".to_string();
     assert_eq!(error.message, msg);
 
-    // same deal if you specify a pool that doesn't exist
-    let body = params::InstanceCreate {
-        external_ips: vec![params::ExternalIpCreate::Ephemeral {
-            pool: Some("nonexistent-pool".parse::<Name>().unwrap().into()),
-            ip_version: None,
+    // Specifying a nonexistent pool also fails with 404, but we need to
+    // avoid SNAT allocation (which uses the default pool) to actually
+    // exercise the explicit pool lookup. Use network_interfaces: None.
+    let body = instance::InstanceCreate {
+        identity: IdentityMetadataCreateParams {
+            name: "nonexistent-pool-inst".parse().unwrap(),
+            description: "".to_string(),
+        },
+        ncpus: InstanceCpuCount(4),
+        memory: ByteCount::from_gibibytes_u32(1),
+        hostname: "the-host".parse().unwrap(),
+        user_data: vec![],
+        network_interfaces: instance::InstanceNetworkInterfaceAttachment::None,
+        external_ips: vec![ExternalIpCreate::Ephemeral {
+            pool_selector: PoolSelector::Explicit {
+                pool: "nonexistent-pool".parse::<Name>().unwrap().into(),
+            },
         }],
-        ..body
+        ssh_public_keys: None,
+        disks: vec![],
+        boot_disk: None,
+        cpu_platform: None,
+        start: true,
+        auto_restart_policy: Default::default(),
+        anti_affinity_groups: Vec::new(),
+        multicast_groups: Vec::new(),
+        enable_jumbo_frames: false,
     };
     let error =
         object_create_error(client, &url, &body, StatusCode::NOT_FOUND).await;
-    assert_eq!(error.message, msg);
+    assert_eq!(error.error_code.unwrap(), "ObjectNotFound".to_string());
+    assert_eq!(
+        error.message,
+        "not found: ip-pool with name \"nonexistent-pool\"".to_string()
+    );
 }
 
 #[nexus_test]
@@ -7660,17 +8390,22 @@ async fn test_instance_attach_several_external_ips(
     assert_ip_pool_utilization(client, "default", 0, capacity).await;
 
     // Create several floating IPs for the instance, totalling 8 IPs.
-    let mut external_ip_create = vec![params::ExternalIpCreate::Ephemeral {
-        pool: None,
-        ip_version: None,
-    }];
     let mut fips = vec![];
+    let mut external_ip_create = vec![ExternalIpCreate::Ephemeral {
+        pool_selector: PoolSelector::Auto { ip_version: None },
+    }];
     for i in 1..8 {
         let name = format!("fip-{i}");
         fips.push(
-            create_floating_ip(&client, &name, PROJECT_NAME, None, None).await,
+            create_floating_ip(
+                &client,
+                &name,
+                PROJECT_NAME,
+                floating_ip::AddressAllocator::default(),
+            )
+            .await,
         );
-        external_ip_create.push(params::ExternalIpCreate::Floating {
+        external_ip_create.push(ExternalIpCreate::Floating {
             floating_ip: name.parse::<Name>().unwrap().into(),
         });
     }
@@ -7681,7 +8416,7 @@ async fn test_instance_attach_several_external_ips(
         &client,
         PROJECT_NAME,
         instance_name,
-        &params::InstanceNetworkInterfaceAttachment::DefaultIpv4,
+        &instance::InstanceNetworkInterfaceAttachment::DefaultIpv4,
         vec![],
         external_ip_create,
         true,
@@ -7731,7 +8466,7 @@ async fn test_instance_attach_several_external_ips(
 }
 
 #[nexus_test]
-async fn test_instance_allow_only_one_ephemeral_ip(
+async fn test_instance_rejects_three_ephemeral_ips(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
@@ -7739,12 +8474,10 @@ async fn test_instance_allow_only_one_ephemeral_ip(
     let _ = create_project(&client, PROJECT_NAME).await;
 
     // don't need any IP pools because request fails at parse time
-
-    let ephemeral_create = params::ExternalIpCreate::Ephemeral {
-        pool: Some("default".parse::<Name>().unwrap().into()),
-        ip_version: None,
+    let ephemeral_create = ExternalIpCreate::Ephemeral {
+        pool_selector: PoolSelector::Auto { ip_version: None },
     };
-    let create_params = params::InstanceCreate {
+    let create_params = instance::InstanceCreate {
         identity: IdentityMetadataCreateParams {
             name: "default-pool-inst".parse().unwrap(),
             description: "instance default-pool-inst".into(),
@@ -7757,8 +8490,12 @@ async fn test_instance_allow_only_one_ephemeral_ip(
                 .to_vec(),
         ssh_public_keys: None,
         network_interfaces:
-            params::InstanceNetworkInterfaceAttachment::DefaultIpv4,
-        external_ips: vec![ephemeral_create.clone(), ephemeral_create],
+            instance::InstanceNetworkInterfaceAttachment::DefaultIpv4,
+        external_ips: vec![
+            ephemeral_create.clone(),
+            ephemeral_create.clone(),
+            ephemeral_create,
+        ],
         disks: vec![],
         boot_disk: None,
         cpu_platform: None,
@@ -7766,6 +8503,7 @@ async fn test_instance_allow_only_one_ephemeral_ip(
         auto_restart_policy: Default::default(),
         anti_affinity_groups: Vec::new(),
         multicast_groups: Vec::new(),
+        enable_jumbo_frames: false,
     };
     let error = object_create_error(
         client,
@@ -7777,7 +8515,175 @@ async fn test_instance_allow_only_one_ephemeral_ip(
 
     assert_eq!(
         error.message,
-        "An instance may not have more than 1 ephemeral IP address"
+        "An instance may not have more than 2 ephemeral IP addresses"
+    );
+}
+
+#[nexus_test]
+async fn test_instance_rejects_two_ephemeral_auto_without_version(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+
+    let _ = create_project(&client, PROJECT_NAME).await;
+
+    let external_ips = vec![
+        ExternalIpCreate::Ephemeral {
+            pool_selector: PoolSelector::Auto { ip_version: None },
+        },
+        ExternalIpCreate::Ephemeral {
+            pool_selector: PoolSelector::Auto { ip_version: None },
+        },
+    ];
+    let create_params = instance::InstanceCreate {
+        identity: IdentityMetadataCreateParams {
+            name: "two-auto-ephemeral".parse().unwrap(),
+            description: "instance two-auto-ephemeral".into(),
+        },
+        ncpus: InstanceCpuCount(4),
+        memory: ByteCount::from_gibibytes_u32(1),
+        hostname: "the-host".parse().unwrap(),
+        user_data: vec![],
+        ssh_public_keys: None,
+        network_interfaces:
+            instance::InstanceNetworkInterfaceAttachment::DefaultIpv4,
+        external_ips,
+        disks: vec![],
+        boot_disk: None,
+        cpu_platform: None,
+        start: true,
+        auto_restart_policy: Default::default(),
+        anti_affinity_groups: Vec::new(),
+        multicast_groups: Vec::new(),
+        enable_jumbo_frames: false,
+    };
+    let error = object_create_error(
+        client,
+        &get_instances_url(),
+        &create_params,
+        StatusCode::BAD_REQUEST,
+    )
+    .await;
+
+    assert_eq!(
+        error.message,
+        "when requesting two ephemeral IPs, IP version or explicit \
+         pool name must be specified on each"
+    );
+}
+
+#[nexus_test]
+async fn test_instance_rejects_two_ephemeral_auto_none_with_explicit(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+
+    create_project(&client, PROJECT_NAME).await;
+    create_default_ip_pools(client).await;
+
+    // One explicit pool, one auto without version: rejected because the auto
+    // selector doesn't specify ip_version.
+    let external_ips = vec![
+        ExternalIpCreate::Ephemeral {
+            pool_selector: PoolSelector::Auto { ip_version: None },
+        },
+        ExternalIpCreate::Ephemeral {
+            pool_selector: PoolSelector::Explicit {
+                pool: "default-v4".parse::<Name>().unwrap().into(),
+            },
+        },
+    ];
+    let create_params = instance::InstanceCreate {
+        identity: IdentityMetadataCreateParams {
+            name: "explicit-plus-auto-ephemeral".parse().unwrap(),
+            description: "instance explicit-plus-auto-ephemeral".into(),
+        },
+        ncpus: InstanceCpuCount(4),
+        memory: ByteCount::from_gibibytes_u32(1),
+        hostname: "the-host".parse().unwrap(),
+        user_data: vec![],
+        ssh_public_keys: None,
+        network_interfaces:
+            instance::InstanceNetworkInterfaceAttachment::DefaultDualStack,
+        external_ips,
+        disks: vec![],
+        boot_disk: None,
+        cpu_platform: None,
+        start: true,
+        auto_restart_policy: Default::default(),
+        anti_affinity_groups: Vec::new(),
+        multicast_groups: Vec::new(),
+        enable_jumbo_frames: false,
+    };
+    let error = object_create_error(
+        client,
+        &get_instances_url(),
+        &create_params,
+        StatusCode::BAD_REQUEST,
+    )
+    .await;
+
+    assert_eq!(
+        error.message,
+        "when requesting two ephemeral IPs, IP version or explicit \
+         pool name must be specified on each"
+    );
+}
+
+#[nexus_test]
+async fn test_instance_rejects_two_ephemeral_same_pool(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+
+    create_project(&client, PROJECT_NAME).await;
+    create_default_ip_pools(client).await;
+
+    let external_ips = vec![
+        ExternalIpCreate::Ephemeral {
+            pool_selector: PoolSelector::Explicit {
+                pool: "default-v4".parse::<Name>().unwrap().into(),
+            },
+        },
+        ExternalIpCreate::Ephemeral {
+            pool_selector: PoolSelector::Explicit {
+                pool: "default-v4".parse::<Name>().unwrap().into(),
+            },
+        },
+    ];
+    let create_params = instance::InstanceCreate {
+        identity: IdentityMetadataCreateParams {
+            name: "same-pool-ephemeral".parse().unwrap(),
+            description: "instance same-pool-ephemeral".into(),
+        },
+        ncpus: InstanceCpuCount(4),
+        memory: ByteCount::from_gibibytes_u32(1),
+        hostname: "the-host".parse().unwrap(),
+        user_data: vec![],
+        ssh_public_keys: None,
+        network_interfaces:
+            instance::InstanceNetworkInterfaceAttachment::DefaultIpv4,
+        external_ips,
+        disks: vec![],
+        boot_disk: None,
+        cpu_platform: None,
+        start: true,
+        auto_restart_policy: Default::default(),
+        anti_affinity_groups: Vec::new(),
+        multicast_groups: Vec::new(),
+        enable_jumbo_frames: false,
+    };
+    let error = object_create_error(
+        client,
+        &get_instances_url(),
+        &create_params,
+        StatusCode::BAD_REQUEST,
+    )
+    .await;
+
+    assert_eq!(
+        error.message,
+        "cannot request two ephemeral IPs from the same pool"
     );
 }
 
@@ -7790,11 +8696,15 @@ async fn create_instance_with_pool(
         client,
         PROJECT_NAME,
         instance_name,
-        &params::InstanceNetworkInterfaceAttachment::DefaultIpv4,
+        &instance::InstanceNetworkInterfaceAttachment::DefaultIpv4,
         vec![],
-        vec![params::ExternalIpCreate::Ephemeral {
-            pool: pool_name.map(|name| name.parse::<Name>().unwrap().into()),
-            ip_version: None,
+        vec![ExternalIpCreate::Ephemeral {
+            pool_selector: match pool_name {
+                Some(name) => PoolSelector::Explicit {
+                    pool: name.parse::<Name>().unwrap().into(),
+                },
+                None => PoolSelector::Auto { ip_version: None },
+            },
         }],
         true,
         Default::default(),
@@ -7804,11 +8714,29 @@ async fn create_instance_with_pool(
     .await
 }
 
+pub async fn fetch_instance_network_interfaces(
+    client: &ClientTestContext,
+    instance_name: &str,
+    project_name: &str,
+) -> Vec<InstanceNetworkInterface> {
+    let url = format!(
+        "/v1/network-interfaces?project={project_name}&instance={instance_name}"
+    );
+    let nics = NexusRequest::object_get(client, &url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("Failed to fetch instance NICs")
+        .parsed_body::<ResultsPage<InstanceNetworkInterface>>()
+        .expect("Failed to parse NICs");
+    nics.items
+}
+
 pub async fn fetch_instance_external_ips(
     client: &ClientTestContext,
     instance_name: &str,
     project_name: &str,
-) -> Vec<views::ExternalIp> {
+) -> Vec<ExternalIp> {
     let ips_url = format!(
         "/v1/instances/{instance_name}/external-ips?project={project_name}",
     );
@@ -7817,7 +8745,7 @@ pub async fn fetch_instance_external_ips(
         .execute()
         .await
         .expect("Failed to fetch external IPs")
-        .parsed_body::<ResultsPage<views::ExternalIp>>()
+        .parsed_body::<ResultsPage<ExternalIp>>()
         .expect("Failed to parse external IPs");
     ips.items
 }
@@ -7825,7 +8753,7 @@ pub async fn fetch_instance_external_ips(
 async fn fetch_instance_ephemeral_ip(
     client: &ClientTestContext,
     instance_name: &str,
-) -> views::ExternalIp {
+) -> ExternalIp {
     fetch_instance_external_ips(client, instance_name, PROJECT_NAME)
         .await
         .into_iter()
@@ -7868,7 +8796,7 @@ async fn test_instance_create_in_silo(cptestctx: &ControlPlaneTestContext) {
     NexusRequest::objects_post(
         client,
         "/v1/projects",
-        &params::ProjectCreate {
+        &project::ProjectCreate {
             identity: IdentityMetadataCreateParams {
                 name: PROJECT_NAME.parse().unwrap(),
                 description: String::new(),
@@ -7879,13 +8807,13 @@ async fn test_instance_create_in_silo(cptestctx: &ControlPlaneTestContext) {
     .execute()
     .await
     .expect("failed to create Project")
-    .parsed_body::<views::Project>()
+    .parsed_body::<project::Project>()
     .expect("failed to parse new Project");
 
     // Create an instance using the authorization granted to the collaborator
     // Silo User.
     let instance_name = "collaborate-with-me";
-    let instance_params = params::InstanceCreate {
+    let instance_params = instance::InstanceCreate {
         identity: IdentityMetadataCreateParams {
             name: Name::try_from(String::from(instance_name)).unwrap(),
             description: String::from("instance to test creation in a silo"),
@@ -7896,11 +8824,8 @@ async fn test_instance_create_in_silo(cptestctx: &ControlPlaneTestContext) {
         user_data: vec![],
         ssh_public_keys: None,
         network_interfaces:
-            params::InstanceNetworkInterfaceAttachment::DefaultIpv4,
-        external_ips: vec![params::ExternalIpCreate::Ephemeral {
-            pool: Some("default".parse::<Name>().unwrap().into()),
-            ip_version: None,
-        }],
+            instance::InstanceNetworkInterfaceAttachment::DefaultIpv4,
+        external_ips: vec![],
         disks: vec![],
         boot_disk: None,
         cpu_platform: None,
@@ -7908,6 +8833,7 @@ async fn test_instance_create_in_silo(cptestctx: &ControlPlaneTestContext) {
         auto_restart_policy: Default::default(),
         anti_affinity_groups: Vec::new(),
         multicast_groups: Vec::new(),
+        enable_jumbo_frames: false,
     };
     let url_instances = format!("/v1/instances?project={}", PROJECT_NAME);
     NexusRequest::objects_post(client, &url_instances, &instance_params)
@@ -8026,7 +8952,7 @@ async fn test_instance_create_with_cross_project_subnet(
     .await;
 
     // Get the default silo
-    let silo: views::Silo = NexusRequest::object_get(
+    let silo: silo::Silo = NexusRequest::object_get(
         client,
         &format!("/v1/system/silos/{}", DEFAULT_SILO.name()),
     )
@@ -8056,7 +8982,7 @@ async fn test_instance_create_with_cross_project_subnet(
 
     // Test: Limited collaborator CANNOT create an instance in project A
     // with a NIC that references a subnet from project B (where they have no access)
-    let if0_params = params::InstanceNetworkInterfaceCreate {
+    let if0_params = instance::InstanceNetworkInterfaceCreate {
         identity: IdentityMetadataCreateParams {
             name: Name::try_from(String::from("cross-project-nic")).unwrap(),
             description: String::from(
@@ -8068,7 +8994,7 @@ async fn test_instance_create_with_cross_project_subnet(
         ip_config: PrivateIpStackCreate::auto_ipv4(),
     };
 
-    let instance_params = params::InstanceCreate {
+    let instance_params = instance::InstanceCreate {
         identity: IdentityMetadataCreateParams {
             name: Name::try_from(String::from("cross-project-instance"))
                 .unwrap(),
@@ -8081,9 +9007,10 @@ async fn test_instance_create_with_cross_project_subnet(
         hostname: "inst-cross".parse().unwrap(),
         user_data: vec![],
         ssh_public_keys: None,
-        network_interfaces: params::InstanceNetworkInterfaceAttachment::Create(
-            vec![if0_params],
-        ),
+        network_interfaces:
+            instance::InstanceNetworkInterfaceAttachment::Create(vec![
+                if0_params,
+            ]),
         external_ips: vec![],
         multicast_groups: vec![],
         disks: vec![],
@@ -8092,6 +9019,7 @@ async fn test_instance_create_with_cross_project_subnet(
         start: false,
         auto_restart_policy: None,
         anti_affinity_groups: Vec::new(),
+        enable_jumbo_frames: false,
     };
 
     let instances_url_a = format!("/v1/instances?project={}", project_a_name);
@@ -8158,7 +9086,7 @@ async fn test_silo_limited_collaborator_cross_project_subnet(
     .await;
 
     // Get the default silo
-    let silo: views::Silo = NexusRequest::object_get(
+    let silo: silo::Silo = NexusRequest::object_get(
         client,
         &format!("/v1/system/silos/{}", DEFAULT_SILO.name()),
     )
@@ -8188,7 +9116,7 @@ async fn test_silo_limited_collaborator_cross_project_subnet(
 
     // Test 1: Silo limited collaborator CAN create an instance in project A
     // with a NIC using project A's own subnet (success case)
-    let if_same_project = params::InstanceNetworkInterfaceCreate {
+    let if_same_project = instance::InstanceNetworkInterfaceCreate {
         identity: IdentityMetadataCreateParams {
             name: Name::try_from(String::from("nic-a")).unwrap(),
             description: String::from("NIC using same project's subnet"),
@@ -8198,7 +9126,7 @@ async fn test_silo_limited_collaborator_cross_project_subnet(
         ip_config: PrivateIpStackCreate::auto_ipv4(),
     };
 
-    let instance_same_project = params::InstanceCreate {
+    let instance_same_project = instance::InstanceCreate {
         identity: IdentityMetadataCreateParams {
             name: Name::try_from(String::from("instance-same-project"))
                 .unwrap(),
@@ -8209,9 +9137,10 @@ async fn test_silo_limited_collaborator_cross_project_subnet(
         hostname: "inst-same".parse().unwrap(),
         user_data: vec![],
         ssh_public_keys: None,
-        network_interfaces: params::InstanceNetworkInterfaceAttachment::Create(
-            vec![if_same_project],
-        ),
+        network_interfaces:
+            instance::InstanceNetworkInterfaceAttachment::Create(vec![
+                if_same_project,
+            ]),
         external_ips: vec![],
         multicast_groups: vec![],
         disks: vec![],
@@ -8220,6 +9149,7 @@ async fn test_silo_limited_collaborator_cross_project_subnet(
         start: false,
         auto_restart_policy: None,
         anti_affinity_groups: Vec::new(),
+        enable_jumbo_frames: false,
     };
 
     let instances_url_a = format!("/v1/instances?project={}", project_a_name);
@@ -8250,7 +9180,7 @@ async fn test_silo_limited_collaborator_cross_project_subnet(
 
     // Test 2: Silo limited collaborator CANNOT create an instance in project A
     // with a NIC that references a subnet from project B (failure case)
-    let if_cross_project = params::InstanceNetworkInterfaceCreate {
+    let if_cross_project = instance::InstanceNetworkInterfaceCreate {
         identity: IdentityMetadataCreateParams {
             name: Name::try_from(String::from("cross-project-nic")).unwrap(),
             description: String::from(
@@ -8262,7 +9192,7 @@ async fn test_silo_limited_collaborator_cross_project_subnet(
         ip_config: PrivateIpStackCreate::auto_ipv4(),
     };
 
-    let instance_cross_project = params::InstanceCreate {
+    let instance_cross_project = instance::InstanceCreate {
         identity: IdentityMetadataCreateParams {
             name: Name::try_from(String::from("instance-cross-project"))
                 .unwrap(),
@@ -8275,9 +9205,10 @@ async fn test_silo_limited_collaborator_cross_project_subnet(
         hostname: "inst-cross".parse().unwrap(),
         user_data: vec![],
         ssh_public_keys: None,
-        network_interfaces: params::InstanceNetworkInterfaceAttachment::Create(
-            vec![if_cross_project],
-        ),
+        network_interfaces:
+            instance::InstanceNetworkInterfaceAttachment::Create(vec![
+                if_cross_project,
+            ]),
         external_ips: vec![],
         multicast_groups: vec![],
         disks: vec![],
@@ -8286,6 +9217,7 @@ async fn test_silo_limited_collaborator_cross_project_subnet(
         start: false,
         auto_restart_policy: None,
         anti_affinity_groups: Vec::new(),
+        enable_jumbo_frames: false,
     };
 
     // Should get 404 Not Found because VPC/subnet lookups are scoped to the
@@ -8377,7 +9309,7 @@ async fn test_instance_v2p_mappings(cptestctx: &ControlPlaneTestContext) {
             if v2p_mappings.is_empty() {
                 Ok(())
             } else {
-                Err(CondCheckError::NotYet::<()>)
+                Err(CondCheckError::<()>::NotYet { status: None })
             }
         };
         wait_for_condition(
@@ -8431,7 +9363,7 @@ pub enum InstanceOp {
 pub async fn instance_wait_for_state(
     client: &ClientTestContext,
     instance_id: InstanceUuid,
-    state: omicron_common::api::external::InstanceState,
+    state: instance::InstanceState,
 ) -> Instance {
     instance_wait_for_state_as(
         client,
@@ -8448,7 +9380,7 @@ pub async fn instance_wait_for_state_as(
     client: &ClientTestContext,
     authn_as: AuthnMode,
     instance_id: InstanceUuid,
-    state: omicron_common::api::external::InstanceState,
+    state: instance::InstanceState,
 ) -> Instance {
     const MAX_WAIT: Duration = Duration::from_secs(320);
 
@@ -8473,7 +9405,7 @@ pub async fn instance_wait_for_state_as(
                     "instance_id" => %instance.identity.id,
                     "instance_runtime_state" => ?instance.runtime,
                 );
-                Err(CondCheckError::<anyhow::Error>::NotYet)
+                Err(CondCheckError::<anyhow::Error>::NotYet { status: None })
             }
         },
         &Duration::from_secs(1),
@@ -8542,24 +9474,24 @@ pub async fn instance_wait_for_vmm_registration(
                             it will soon...";
                         "instance_id" => %instance_id,
                     );
-                    return Err(CondCheckError::<Error>::NotYet);
+                    return Err(CondCheckError::<Error>::NotYet { status: None });
                 }
             };
 
-            if vmm.runtime.state == nexus_db_model::VmmState::Creating {
+            if vmm.state == nexus_db_model::VmmState::Creating {
                 debug!(
                     log,
                     "instance's active VMM is still Creating";
                     "instance_id" => %instance_id,
                 );
-                Err(poll::CondCheckError::<Error>::NotYet)
+                Err(poll::CondCheckError::<Error>::NotYet { status: None })
             } else {
                 info!(
                     log,
                     "instance's active VMM is no longer Creating";
                     "instance_id" => %instance_id,
                     "vmm_id" => %vmm.id,
-                    "vmm_state" => ?vmm.runtime.state,
+                    "vmm_state" => ?vmm.state,
                 );
                 Ok(())
             }
@@ -8667,7 +9599,7 @@ async fn assert_sled_v2p_mappings(
         if have_needed_ipv4_mappings && have_needed_ipv6_mappings {
             Ok(())
         } else {
-            Err(CondCheckError::NotYet::<()>)
+            Err(CondCheckError::<()>::NotYet { status: None })
         }
     };
     wait_for_condition(
@@ -8767,7 +9699,7 @@ pub async fn assert_sled_vpc_routes(
                 "custom diff (+): {:?}\n-----",
                 found_custom.routes.difference(&custom_routes)
             );
-            Err(CondCheckError::NotYet::<()>)
+            Err(CondCheckError::<()>::NotYet { status: None })
         }
     };
     wait_for_condition(
@@ -8795,6 +9727,35 @@ pub async fn instance_simulate(nexus: &Arc<Nexus>, id: &InstanceUuid) {
         .expect("instance must be on a sled to simulate a state change");
 
     sled_info.sled_client.vmm_finish_transition(sled_info.propolis_id).await;
+}
+
+/// Fallible version of instance_simulate for test cleanup.
+///
+/// Returns an error instead of panicking if the sled agent communication fails.
+/// This is useful during test cleanup where the sled agent may be unavailable.
+// This is currently only consumed by tests behind the multicast feature gate.
+// If/when it has another consumer, this cfg can be removed.
+#[cfg(feature = "multicast")]
+pub async fn try_instance_simulate(
+    nexus: &Arc<Nexus>,
+    id: &InstanceUuid,
+) -> Result<(), anyhow::Error> {
+    let sled_info = nexus
+        .active_instance_info(id, None)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("instance not on a sled"))?;
+
+    sled_info
+        .sled_client
+        .try_vmm_finish_transition(sled_info.propolis_id)
+        .await
+        .map_err(|e| {
+            anyhow::anyhow!(
+                "sled agent communication failed for VMM {}: {e}",
+                sled_info.propolis_id
+            )
+        })?;
+    Ok(())
 }
 
 /// Simulate one step of an ongoing instance state transition.  To do this, we
@@ -8866,7 +9827,7 @@ async fn instance_wait_for_simulated_transition(
                 );
                 instance_simulate(&cptestctx.server.server_context().nexus, id)
                     .await;
-                Err(CondCheckError::<anyhow::Error>::NotYet)
+                Err(CondCheckError::<anyhow::Error>::NotYet { status: None })
             }
         },
         &Duration::from_secs(1),
@@ -8891,7 +9852,7 @@ async fn instance_wait_for_simulated_transition(
 /// Simulates state transitions for the incarnation of the instance on the
 /// supplied sled (which may not be the sled ID currently stored in the
 /// instance's CRDB record).
-async fn vmm_simulate_on_sled(
+pub async fn vmm_simulate_on_sled(
     cptestctx: &ControlPlaneTestContext,
     nexus: &Arc<Nexus>,
     sled_id: SledUuid,
@@ -8955,14 +9916,14 @@ async fn test_instance_with_max_disks(cptestctx: &ControlPlaneTestContext) {
     let disks_url = get_disks_url();
 
     for n in 0..MAX_DISKS_PER_INSTANCE {
-        let new_disk = params::DiskCreate {
+        let new_disk = disk::DiskCreate {
             identity: IdentityMetadataCreateParams {
                 name: format!("disk{n:02}").parse().unwrap(),
                 description: String::from("sells rainsticks"),
             },
-            disk_backend: params::DiskBackend::Distributed {
-                disk_source: params::DiskSource::Blank {
-                    block_size: params::BlockSize::try_from(512).unwrap(),
+            disk_backend: disk::DiskBackend::Distributed {
+                disk_source: disk::DiskSource::Blank {
+                    block_size: disk::BlockSize::try_from(512).unwrap(),
                 },
             },
             size: ByteCount::from_gibibytes_u32(1),
@@ -8979,7 +9940,7 @@ async fn test_instance_with_max_disks(cptestctx: &ControlPlaneTestContext) {
         .unwrap();
     }
 
-    let create_params = params::InstanceCreate {
+    let create_params = instance::InstanceCreate {
         identity: IdentityMetadataCreateParams {
             name: "lots-of-disks".parse().unwrap(),
             description: "alan hates descriptions".into(),
@@ -8991,12 +9952,12 @@ async fn test_instance_with_max_disks(cptestctx: &ControlPlaneTestContext) {
             b"#cloud-config\nsystem_info:\n  default_user:\n    name: oxide"
                 .to_vec(),
         ssh_public_keys: None,
-        network_interfaces: params::InstanceNetworkInterfaceAttachment::None,
+        network_interfaces: instance::InstanceNetworkInterfaceAttachment::None,
         external_ips: vec![],
         disks: (0..MAX_DISKS_PER_INSTANCE)
             .map(|n| {
-                params::InstanceDiskAttachment::Attach(
-                    params::InstanceDiskAttach {
+                instance::InstanceDiskAttachment::Attach(
+                    instance::InstanceDiskAttach {
                         name: format!("disk{n:02}").parse().unwrap(),
                     },
                 )
@@ -9008,6 +9969,7 @@ async fn test_instance_with_max_disks(cptestctx: &ControlPlaneTestContext) {
         auto_restart_policy: Default::default(),
         anti_affinity_groups: Vec::new(),
         multicast_groups: Vec::new(),
+        enable_jumbo_frames: false,
     };
 
     let instance: Instance =
@@ -9030,4 +9992,78 @@ async fn test_instance_with_max_disks(cptestctx: &ControlPlaneTestContext) {
     // Ensure that each disk attached ok
     let disks = get_instance_disks(&client, name).await;
     assert_eq!(disks.len(), MAX_DISKS_PER_INSTANCE as usize);
+}
+
+// Regression for https://github.com/oxidecomputer/omicron/issues/9775.
+#[nexus_test]
+async fn can_create_instance_with_multiple_nics_and_ephemeral_ip(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    create_project_and_pool(&client).await;
+    let second_vpc_subnet_name = "second";
+    create_vpc_subnet(
+        &client,
+        PROJECT_NAME,
+        "default",
+        second_vpc_subnet_name,
+        "10.2.0.0/24".parse().unwrap(),
+        None,
+        None,
+    )
+    .await;
+    let nics = instance::InstanceNetworkInterfaceAttachment::Create(vec![
+        instance::InstanceNetworkInterfaceCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "net0".parse().unwrap(),
+                description: String::new(),
+            },
+            vpc_name: "default".parse().unwrap(),
+            subnet_name: "default".parse().unwrap(),
+            ip_config: PrivateIpStackCreate::DualStack {
+                v4: PrivateIpv4StackCreate {
+                    ip: instance::Ipv4Assignment::Auto,
+                    transit_ips: vec![],
+                },
+                v6: PrivateIpv6StackCreate {
+                    ip: instance::Ipv6Assignment::Auto,
+                    transit_ips: vec![],
+                },
+            },
+        },
+        instance::InstanceNetworkInterfaceCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "net1".parse().unwrap(),
+                description: String::new(),
+            },
+            vpc_name: "default".parse().unwrap(),
+            subnet_name: second_vpc_subnet_name.parse().unwrap(),
+            ip_config: PrivateIpStackCreate::DualStack {
+                v4: PrivateIpv4StackCreate {
+                    ip: instance::Ipv4Assignment::Auto,
+                    transit_ips: vec![],
+                },
+                v6: PrivateIpv6StackCreate {
+                    ip: instance::Ipv6Assignment::Auto,
+                    transit_ips: vec![],
+                },
+            },
+        },
+    ]);
+    let external_ips = vec![ExternalIpCreate::Ephemeral {
+        pool_selector: PoolSelector::Auto { ip_version: Some(IpVersion::V4) },
+    }];
+    let _ = create_instance_with(
+        client,
+        PROJECT_NAME,
+        "multi-niccy",
+        &nics,
+        vec![],
+        external_ips,
+        false,
+        None,
+        None,
+        vec![],
+    )
+    .await;
 }

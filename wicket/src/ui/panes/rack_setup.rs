@@ -20,9 +20,6 @@ use crate::ui::widgets::PopupScrollOffset;
 use itertools::Itertools;
 use omicron_common::address::IpRange;
 use omicron_common::api::internal::shared::AllowedSourceIps;
-use omicron_common::api::internal::shared::BgpConfig;
-use omicron_common::api::internal::shared::LldpPortConfig;
-use omicron_common::api::internal::shared::RouteConfig;
 use ratatui::Frame;
 use ratatui::layout::Constraint;
 use ratatui::layout::Direction;
@@ -35,14 +32,22 @@ use ratatui::widgets::Block;
 use ratatui::widgets::BorderType;
 use ratatui::widgets::Borders;
 use ratatui::widgets::Paragraph;
+use sled_agent_types::early_networking::BgpConfig;
+use sled_agent_types::early_networking::LldpAdminStatus;
+use sled_agent_types::early_networking::LldpPortConfig;
+use sled_agent_types::early_networking::RouteConfig;
+use sled_agent_types::early_networking::SwitchSlot;
+use sled_agent_types::early_networking::UplinkAddress;
 use std::borrow::Cow;
 use wicket_common::rack_setup::BgpAuthKeyInfo;
 use wicket_common::rack_setup::BgpAuthKeyStatus;
 use wicket_common::rack_setup::CurrentRssUserConfigInsensitive;
+use wicket_common::rack_setup::ManualPortConfig;
 use wicket_common::rack_setup::UserSpecifiedBgpPeerConfig;
 use wicket_common::rack_setup::UserSpecifiedImportExportPolicy;
-use wicket_common::rack_setup::UserSpecifiedPortConfig;
 use wicket_common::rack_setup::UserSpecifiedRackNetworkConfig;
+use wicket_common::rack_setup::UserSpecifiedRouterPeerAddr;
+use wicket_common::rack_setup::UserSpecifiedUplinkAddressConfig;
 use wicketd_client::types::CurrentRssUserConfig;
 use wicketd_client::types::CurrentRssUserConfigSensitive;
 use wicketd_client::types::RackOperationStatus;
@@ -687,6 +692,7 @@ fn rss_config_text<'a>(
         external_dns_zone_name,
         rack_network_config,
         allowed_source_ips,
+        external_jumbo_frames_opt_in_enabled,
     } = &config.insensitive;
 
     // Special single-line values, where we convert some kind of condition into
@@ -702,6 +708,10 @@ fn rss_config_text<'a>(
         Span::styled("Recovery password set: ", label_style),
         dyn_span(*recovery_silo_password_set, "Yes", "No"),
     ]));
+    spans.push(Line::from(vec![
+        Span::styled("External jumbo frames opt-in: ", label_style),
+        dyn_span(*external_jumbo_frames_opt_in_enabled, "Enabled", "Disabled"),
+    ]));
 
     // List of single-line values, each of which may or may not be set; if it's
     // set we show its value, and if not we show "Not set" in bad_style.
@@ -709,6 +719,19 @@ fn rss_config_text<'a>(
         (
             "External DNS zone name: ",
             Cow::from(external_dns_zone_name.as_str()),
+        ),
+        (
+            "Rack subnet address (IPv6 /56): ",
+            rack_network_config.as_ref().map_or(
+                "(will be chosen randomly)".into(),
+                |c| {
+                    match c.rack_subnet_address {
+                        Some(v) => v.to_string(),
+                        None => "(chosen randomly)".to_string(),
+                    }
+                    .into()
+                },
+            ),
         ),
         (
             "Infrastructure first IP: ",
@@ -755,7 +778,9 @@ fn rss_config_text<'a>(
         // This style ensures that if a new field is added to the struct, it
         // fails to compile.
         let UserSpecifiedRackNetworkConfig {
-            // infra_ip_first and infra_ip_last have already been handled above.
+            // rack_subnet_address, infra_ip_first, and infra_ip_last
+            // have already been handled above.
+            rack_subnet_address: _,
             infra_ip_first: _,
             infra_ip_last: _,
             // switch0 and switch1 re handled via the iter_uplinks iterator.
@@ -765,7 +790,7 @@ fn rss_config_text<'a>(
         } = cfg;
 
         for (i, (switch, port, uplink)) in cfg.iter_uplinks().enumerate() {
-            let UserSpecifiedPortConfig {
+            let ManualPortConfig {
                 routes,
                 addresses,
                 uplink_port_speed,
@@ -776,12 +801,17 @@ fn rss_config_text<'a>(
                 tx_eq,
             } = uplink;
 
+            let switch_description = match switch {
+                SwitchSlot::Switch0 => "0",
+                SwitchSlot::Switch1 => "1",
+            };
+
             let mut items = vec![
                 vec![
                     Span::styled("  • Port          : ", label_style),
                     Span::styled(port.to_string(), ok_style),
                     Span::styled(" on switch ", label_style),
-                    Span::styled(switch.to_string(), ok_style),
+                    Span::styled(switch_description, ok_style),
                 ],
                 vec![
                     Span::styled("  • Speed         : ", label_style),
@@ -845,11 +875,19 @@ fn rss_config_text<'a>(
                 });
 
             let addresses = addresses.iter().map(|a| {
-                let mut items = vec![
-                    Span::styled("  • Address       : ", label_style),
-                    Span::styled(a.address.to_string(), ok_style),
-                ];
-                if let Some(vlan_id) = a.vlan_id {
+                let UserSpecifiedUplinkAddressConfig { address, vlan_id } = a;
+                let addr_description = match address {
+                    UplinkAddress::AddrConf => Cow::Borrowed(
+                        UserSpecifiedUplinkAddressConfig::ADDR_CONF,
+                    ),
+                    UplinkAddress::Static { ip_net } => {
+                        Cow::Owned(ip_net.to_string())
+                    }
+                };
+                let mut items =
+                    vec![Span::styled("  • Address       : ", label_style)];
+                items.push(Span::styled(addr_description, ok_style));
+                if let Some(vlan_id) = vlan_id {
                     items.extend([
                         Span::styled(" (vlan_id=", label_style),
                         Span::styled(vlan_id.to_string(), ok_style),
@@ -884,12 +922,22 @@ fn rss_config_text<'a>(
                     allowed_import,
                     allowed_export,
                     vlan_id,
+                    router_lifetime,
                 } = p;
+
+                let addr_string = match addr {
+                    UserSpecifiedRouterPeerAddr::Unnumbered => Cow::Borrowed(
+                        UserSpecifiedRouterPeerAddr::UNNUMBERED_PEER,
+                    ),
+                    UserSpecifiedRouterPeerAddr::Numbered(ip) => {
+                        Cow::Owned(ip.to_string())
+                    }
+                };
 
                 let mut lines = vec![
                     vec![
                         Span::styled("  • BGP peer      : ", label_style),
-                        Span::styled(addr.to_string(), ok_style),
+                        Span::styled(addr_string, ok_style),
                         Span::styled(" asn=", label_style),
                         Span::styled(asn.to_string(), ok_style),
                         Span::styled(" port=", label_style),
@@ -968,6 +1016,15 @@ fn rss_config_text<'a>(
                         settings.extend([
                             Span::styled(" vlan_id=", label_style),
                             Span::styled(vlan_id.to_string(), ok_style),
+                        ]);
+                    }
+                    if router_lifetime.as_u16() != 0 {
+                        settings.extend([
+                            Span::styled(" router_lifetime=", label_style),
+                            Span::styled(
+                                format!("{}s", router_lifetime),
+                                ok_style,
+                            ),
                         ]);
                     }
 
@@ -1091,11 +1148,18 @@ fn rss_config_text<'a>(
                     management_addrs,
                 } = lp;
 
+                let status_description = match status {
+                    LldpAdminStatus::Enabled => "enabled",
+                    LldpAdminStatus::Disabled => "disabled",
+                    LldpAdminStatus::RxOnly => "rx only",
+                    LldpAdminStatus::TxOnly => "tx only",
+                };
+
                 let mut lldp = vec![
                     vec![Span::styled("  • LLDP port settings: ", label_style)],
                     vec![
                         Span::styled("    • Admin status      : ", label_style),
-                        Span::styled(status.to_string(), ok_style),
+                        Span::styled(status_description, ok_style),
                     ],
                 ];
 
@@ -1188,27 +1252,40 @@ fn rss_config_text<'a>(
             );
         }
 
-        // Show BGP configuration.
-        for cfg in bgp {
+        // Show BGP configurations.
+        for (i, cfg) in bgp.iter().enumerate() {
             let BgpConfig {
                 asn,
                 originate,
                 // The shaper and checker are not currently used.
                 shaper: _,
                 checker: _,
+                max_paths,
             } = cfg;
             let mut items = vec![
-                Span::styled("  • BGP config    :", label_style),
-                Span::styled(" asn=", label_style),
-                Span::styled(asn.to_string(), ok_style),
-                Span::styled(" originate=", label_style),
+                vec![
+                    Span::styled("  • asn       : ", label_style),
+                    Span::styled(asn.to_string(), ok_style),
+                ],
+                vec![
+                    Span::styled("  • max_paths : ", label_style),
+                    Span::styled(max_paths.to_string(), ok_style),
+                ],
             ];
+            let mut originate_spans =
+                vec![Span::styled("  • originate : ", label_style)];
             if originate.is_empty() {
-                items.push(Span::styled("None", warn_style));
+                originate_spans.push(Span::styled("None", warn_style));
             } else {
-                items.push(Span::styled(originate.iter().join(","), ok_style));
+                originate_spans
+                    .push(Span::styled(originate.iter().join(","), ok_style));
             }
-            spans.push(Line::from(items));
+            items.push(originate_spans);
+            append_list(
+                &mut spans,
+                Cow::from(format!("BGP config {}:", i + 1)),
+                items,
+            );
         }
     } else {
         append_list(&mut spans, "Uplinks: ".into(), vec![]);

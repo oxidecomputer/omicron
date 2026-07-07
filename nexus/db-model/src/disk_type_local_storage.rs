@@ -28,6 +28,9 @@ pub struct DiskTypeLocalStorage {
     required_dataset_overhead: ByteCount,
 
     local_storage_dataset_allocation_id: Option<DbTypedUuid<DatasetKind>>,
+
+    local_storage_unencrypted_dataset_allocation_id:
+        Option<DbTypedUuid<DatasetKind>>,
 }
 
 impl DiskTypeLocalStorage {
@@ -46,6 +49,8 @@ impl DiskTypeLocalStorage {
         let overhead: u64 =
             external::ByteCount::from_mebibytes_u32(70).to_bytes() * gbs;
 
+        // XXX revisit, tracked by oxidecomputer/omicron#9591
+
         // Don't unwrap this - the size of this disk is a parameter set by an
         // API call, and we don't want to panic on out of range input.
         let required_dataset_overhead =
@@ -55,6 +60,7 @@ impl DiskTypeLocalStorage {
             disk_id,
             required_dataset_overhead: required_dataset_overhead.into(),
             local_storage_dataset_allocation_id: None,
+            local_storage_unencrypted_dataset_allocation_id: None,
         })
     }
 
@@ -64,5 +70,11 @@ impl DiskTypeLocalStorage {
 
     pub fn local_storage_dataset_allocation_id(&self) -> Option<DatasetUuid> {
         self.local_storage_dataset_allocation_id.map(Into::into)
+    }
+
+    pub fn local_storage_unencrypted_dataset_allocation_id(
+        &self,
+    ) -> Option<DatasetUuid> {
+        self.local_storage_unencrypted_dataset_allocation_id.map(Into::into)
     }
 }

@@ -7,9 +7,9 @@
 use crate::addrobj::AddrObject;
 use crate::dladm;
 use camino::Utf8Path;
-use omicron_common::api::internal::shared::NetworkInterfaceKind;
 use opte_ioctl::Error as OpteError;
 use opte_ioctl::OpteHdl;
+use sled_agent_types::inventory::NetworkInterfaceKind;
 use slog::Logger;
 use slog::info;
 use std::net::IpAddr;
@@ -43,8 +43,8 @@ pub enum Error {
     #[error(transparent)]
     ResetLinkpropError(#[from] crate::dladm::ResetLinkpropError),
 
-    #[error("Invalid IP configuration for port")]
-    InvalidPortIpConfig,
+    #[error("Invalid IP configuration for port: {0}")]
+    InvalidPortIpConfig(String),
 
     #[error("Tried to release non-existent port ({0}, {1:?})")]
     ReleaseMissingPort(uuid::Uuid, NetworkInterfaceKind),
@@ -65,6 +65,11 @@ pub enum Error {
 
     #[error("No matching NIC found for port {0} at slot {1}.")]
     NoNicforPort(String, u32),
+
+    #[error(
+        "Tried to update attached subnets on non-existent port ({0}, {1:?})"
+    )]
+    AttachedSubnetUpdateMissingPort(uuid::Uuid, NetworkInterfaceKind),
 }
 
 /// Delete all xde devices on the system.

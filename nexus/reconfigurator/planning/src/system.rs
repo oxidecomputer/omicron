@@ -9,9 +9,9 @@ use anyhow::{Context, anyhow, bail, ensure};
 use chrono::DateTime;
 use chrono::Utc;
 use clickhouse_admin_types::keeper::ClickhouseKeeperClusterMembership;
-use gateway_client::types::RotState;
 use gateway_client::types::SpComponentCaboose;
-use gateway_client::types::SpState;
+use gateway_types::component::SpState;
+use gateway_types::rot::RotState;
 use indexmap::IndexMap;
 use ipnet::Ipv6Net;
 use ipnet::Ipv6Subnets;
@@ -22,6 +22,7 @@ use nexus_types::deployment::CockroachDbClusterVersion;
 use nexus_types::deployment::CockroachDbSettings;
 use nexus_types::deployment::ExpectedVersion;
 use nexus_types::deployment::ExternalIpPolicy;
+use nexus_types::deployment::ExternalServiceNetworkingPolicy;
 use nexus_types::deployment::OximeterReadPolicy;
 use nexus_types::deployment::PlannerConfig;
 use nexus_types::deployment::PlanningInputBuilder;
@@ -31,11 +32,11 @@ use nexus_types::deployment::SledDisk;
 use nexus_types::deployment::SledResources;
 use nexus_types::deployment::TargetReleaseDescription;
 use nexus_types::deployment::TufRepoPolicy;
-use nexus_types::external_api::views::PhysicalDiskPolicy;
-use nexus_types::external_api::views::PhysicalDiskState;
-use nexus_types::external_api::views::SledPolicy;
-use nexus_types::external_api::views::SledProvisionPolicy;
-use nexus_types::external_api::views::SledState;
+use nexus_types::external_api::physical_disk::PhysicalDiskPolicy;
+use nexus_types::external_api::physical_disk::PhysicalDiskState;
+use nexus_types::external_api::sled::SledPolicy;
+use nexus_types::external_api::sled::SledProvisionPolicy;
+use nexus_types::external_api::sled::SledState;
 use nexus_types::inventory::Caboose;
 use nexus_types::inventory::CabooseWhich;
 use nexus_types::inventory::PowerState;
@@ -61,18 +62,20 @@ use omicron_uuid_kinds::ZpoolUuid;
 use sled_agent_types::inventory::Baseboard;
 use sled_agent_types::inventory::ConfigReconcilerInventory;
 use sled_agent_types::inventory::ConfigReconcilerInventoryStatus;
-use sled_agent_types::inventory::HealthMonitorInventory;
+use sled_agent_types::inventory::FmdInventory;
 use sled_agent_types::inventory::Inventory;
 use sled_agent_types::inventory::InventoryDataset;
 use sled_agent_types::inventory::InventoryDisk;
 use sled_agent_types::inventory::InventoryZpool;
 use sled_agent_types::inventory::ManifestBootInventory;
 use sled_agent_types::inventory::MupdateOverrideBootInventory;
+use sled_agent_types::inventory::OmicronFileSourceResolverInventory;
 use sled_agent_types::inventory::OmicronSledConfig;
 use sled_agent_types::inventory::SledCpuFamily;
 use sled_agent_types::inventory::SledRole;
-use sled_agent_types::inventory::ZoneImageResolverInventory;
+use sled_agent_types::inventory::SvcsEnabledNotOnlineResult;
 use sled_agent_types::inventory::ZoneKind;
+use sled_agent_types::inventory::ZpoolHealth;
 use sled_hardware_types::BaseboardId;
 use sled_hardware_types::GIMLET_SLED_MODEL;
 use std::collections::BTreeMap;
@@ -122,7 +125,7 @@ pub struct SystemDescription {
     target_cockroachdb_zone_count: usize,
     target_cockroachdb_cluster_version: CockroachDbClusterVersion,
     target_crucible_pantry_zone_count: usize,
-    external_ip_policy: ExternalIpPolicy,
+    external_service_networking: ExternalServiceNetworkingPolicy,
     internal_dns_version: Generation,
     external_dns_version: Generation,
     clickhouse_policy: Option<ClickhousePolicy>,
@@ -168,8 +171,8 @@ impl SystemDescription {
         let rack_subnet =
             ipnet::Ipv6Net::new(rack_subnet_base, RACK_PREFIX).unwrap();
         // Skip the initial DNS subnet.
-        // (The same behavior is replicated in RSS in `Plan::create()` in
-        // sled-agent/src/rack_setup/plan/sled.rs.)
+        // (The same behavior is replicated in RSS in `SledPlan::create()` in
+        // sled-agent/rack-setup/src/plan/sled.rs.)
         let sled_subnets = SubnetIterator::new(rack_subnet);
 
         // Policy defaults
@@ -191,7 +194,7 @@ impl SystemDescription {
         // Nexus / Boundary NTPs IPs from TEST-NET-1 (RFC 5737).
         //
         // This policy doesn't configure any external DNS IPs.
-        let external_ip_policy = {
+        let external_ips = {
             let mut builder = ExternalIpPolicy::builder();
             builder
                 .push_service_pool_ipv4_range(
@@ -203,6 +206,18 @@ impl SystemDescription {
                 )
                 .unwrap();
             builder.build()
+        };
+
+        // Upstream networking policy for an example system. This mirrors the
+        // values used in `ExampleSystemBuilder`, so that a new
+        // `SystemDescription` produces a `PlanningInput` whose policy matches
+        // the zones that it would build.
+        let external_service_networking = ExternalServiceNetworkingPolicy {
+            external_ips,
+            upstream_ntp_servers: vec!["ntp.example.com".to_string()],
+            upstream_ntp_domain: Some("example.com".to_string()),
+            upstream_dns_servers: vec!["8.8.8.8".parse().unwrap()],
+            nexus_external_tls: false,
         };
 
         SystemDescription {
@@ -218,7 +233,7 @@ impl SystemDescription {
             target_cockroachdb_zone_count,
             target_cockroachdb_cluster_version,
             target_crucible_pantry_zone_count,
-            external_ip_policy,
+            external_service_networking,
             internal_dns_version: Generation::new(),
             external_dns_version: Generation::new(),
             clickhouse_policy: None,
@@ -320,15 +335,41 @@ impl SystemDescription {
         self.target_internal_dns_zone_count
     }
 
+    pub fn set_target_oximeter_zone_count(
+        &mut self,
+        count: usize,
+    ) -> &mut Self {
+        self.target_oximeter_zone_count = count;
+        self
+    }
+
+    pub fn target_oximeter_zone_count(&self) -> usize {
+        self.target_oximeter_zone_count
+    }
+
+    pub fn external_service_networking_policy(
+        &self,
+    ) -> &ExternalServiceNetworkingPolicy {
+        &self.external_service_networking
+    }
+
+    pub fn set_external_service_networking_policy(
+        &mut self,
+        policy: ExternalServiceNetworkingPolicy,
+    ) -> &mut Self {
+        self.external_service_networking = policy;
+        self
+    }
+
     pub fn external_ip_policy(&self) -> &ExternalIpPolicy {
-        &self.external_ip_policy
+        &self.external_service_networking.external_ips
     }
 
     pub fn set_external_ip_policy(
         &mut self,
         policy: ExternalIpPolicy,
     ) -> &mut Self {
-        self.external_ip_policy = policy;
+        self.external_service_networking.external_ips = policy;
         self
     }
 
@@ -344,6 +385,10 @@ impl SystemDescription {
     ) -> &mut Self {
         self.clickhouse_keeper_cluster_membership.insert(membership);
         self
+    }
+
+    pub fn get_cockroachdb_settings(&self) -> &CockroachDbSettings {
+        &self.cockroachdb_settings
     }
 
     pub fn set_cockroachdb_settings(
@@ -683,6 +728,17 @@ impl SystemDescription {
         Ok(self)
     }
 
+    /// Set the measurement manifest for a sled from a provided `TufRepoDescription`.
+    pub fn sled_set_measurement_manifest(
+        &mut self,
+        sled_id: SledUuid,
+        boot_inventory: Result<ManifestBootInventory, String>,
+    ) -> anyhow::Result<&mut Self> {
+        let sled = self.get_sled_mut(sled_id)?;
+        sled.set_measurement_manifest(boot_inventory);
+        Ok(self)
+    }
+
     pub fn sled_sp_active_version(
         &self,
         sled_id: SledUuid,
@@ -867,33 +923,6 @@ impl SystemDescription {
     }
 
     pub fn set_target_release(
-        &mut self,
-        description: TargetReleaseDescription,
-    ) -> &mut Self {
-        // Create a new TufRepoPolicy by bumping the generation.
-        let new_repo = TufRepoPolicy {
-            target_release_generation: self
-                .tuf_repo
-                .target_release_generation
-                .next(),
-            description,
-        };
-
-        let _old_repo = self.set_tuf_repo_inner(new_repo);
-
-        // It's tempting to consider setting old_repo to the current tuf_repo,
-        // but that requires the invariant that old_repo is always the current
-        // target release and that an update isn't currently in progress. See
-        // https://github.com/oxidecomputer/omicron/issues/8056 for some
-        // discussion.
-        //
-        // We provide a method to set the old repo explicitly with these
-        // assumptions in mind: `set_target_release_and_old_repo`.
-
-        self
-    }
-
-    pub fn set_target_release_and_old_repo(
         &mut self,
         description: TargetReleaseDescription,
     ) -> &mut Self {
@@ -1120,12 +1149,37 @@ impl SystemDescription {
                         ).unwrap();
                     }
 
-                    // TODO: We may want to include responses from Boundary NTP
-                    // and CockroachDb zones here too - but neither of those are
-                    // currently part of the example system, so their synthetic
-                    // responses to inventory collection aren't necessary yet.
+                    // Synthesize time-sync responses from NTP zones.
+                    if zone.zone_type.is_ntp() {
+                        builder
+                            .found_ntp_timesync(
+                                nexus_types::inventory::TimeSync {
+                                    zone_id: zone.id,
+                                    synced: true,
+                                },
+                            )
+                            .unwrap();
+                    }
                 }
             }
+        }
+
+        // Synthesize CockroachDb status: every running CockroachDb zone
+        // reports healthy metrics.  We assign sequential node IDs and report
+        // the total cluster size as liveness_live_nodes.
+        let cockroach_zone_count =
+            builder.ledgered_zones_of_kind(ZoneKind::CockroachDb).count();
+        let live_nodes = cockroach_zone_count as u64;
+        for i in 0..cockroach_zone_count {
+            builder.found_cockroach_status(
+                cockroach_admin_types::node::InternalNodeId::new(
+                    (i + 1).to_string(),
+                ),
+                nexus_types::inventory::CockroachStatus {
+                    ranges_underreplicated: Some(0),
+                    liveness_live_nodes: Some(live_nodes),
+                },
+            );
         }
 
         for membership in &self.clickhouse_keeper_cluster_membership {
@@ -1145,7 +1199,9 @@ impl SystemDescription {
         parent_blueprint: Arc<Blueprint>,
     ) -> anyhow::Result<PlanningInputBuilder> {
         let policy = Policy {
-            external_ips: self.external_ip_policy.clone(),
+            external_service_networking: self
+                .external_service_networking
+                .clone(),
             target_boundary_ntp_zone_count: self.target_boundary_ntp_zone_count,
             target_nexus_zone_count: self.target_nexus_zone_count,
             target_internal_dns_zone_count: self.target_internal_dns_zone_count,
@@ -1459,6 +1515,7 @@ impl Sled {
                     .map(|id| InventoryZpool {
                         id: *id,
                         total_size: ByteCount::from_gibibytes_u32(100),
+                        health: ZpoolHealth::Online,
                     })
                     .collect(),
                 datasets: vec![],
@@ -1473,8 +1530,12 @@ impl Sled {
                     ),
                 ),
                 // XXX: return something more reasonable here?
-                zone_image_resolver: ZoneImageResolverInventory::new_fake(),
-                health_monitor: HealthMonitorInventory::new(),
+                file_source_resolver:
+                    OmicronFileSourceResolverInventory::new_fake(),
+                smf_services_enabled_not_online:
+                    SvcsEnabledNotOnlineResult::DataUnavailable,
+                reference_measurements: iddqd::IdOrdMap::new(),
+                fmd: Ok(FmdInventory::default()),
             }
         };
 
@@ -1652,8 +1713,14 @@ impl Sled {
             ledgered_sled_config: inv_sled_agent.ledgered_sled_config.clone(),
             reconciler_status: inv_sled_agent.reconciler_status.clone(),
             last_reconciliation: inv_sled_agent.last_reconciliation.clone(),
-            zone_image_resolver: inv_sled_agent.zone_image_resolver.clone(),
-            health_monitor: HealthMonitorInventory::new(),
+            file_source_resolver: inv_sled_agent.file_source_resolver.clone(),
+            smf_services_enabled_not_online: inv_sled_agent
+                .smf_services_enabled_not_online
+                .clone(),
+            reference_measurements: inv_sled_agent
+                .reference_measurements
+                .clone(),
+            fmd: Ok(FmdInventory::default()),
         };
 
         Sled {
@@ -1747,8 +1814,18 @@ impl Sled {
         boot_inventory: Result<ManifestBootInventory, String>,
     ) {
         self.inventory_sled_agent
-            .zone_image_resolver
+            .file_source_resolver
             .zone_manifest
+            .boot_inventory = boot_inventory;
+    }
+
+    fn set_measurement_manifest(
+        &mut self,
+        boot_inventory: Result<ManifestBootInventory, String>,
+    ) {
+        self.inventory_sled_agent
+            .file_source_resolver
+            .measurement_manifest
             .boot_inventory = boot_inventory;
     }
 
@@ -2045,7 +2122,7 @@ impl Sled {
         let prev = mem::replace(
             &mut self
                 .inventory_sled_agent
-                .zone_image_resolver
+                .file_source_resolver
                 .mupdate_override
                 .boot_override,
             inv,
@@ -2093,8 +2170,8 @@ impl SubnetIterator {
     fn new(rack_subnet: Ipv6Net) -> Self {
         let mut subnets = rack_subnet.subnets(SLED_PREFIX).unwrap();
         // Skip the initial DNS subnet.
-        // (The same behavior is replicated in RSS in `Plan::create()` in
-        // sled-agent/src/rack_setup/plan/sled.rs.)
+        // (The same behavior is replicated in RSS in `SledPlan::create()` in
+        // sled-agent/rack-setup/src/plan/sled.rs.)
         subnets.next();
         Self { subnets }
     }

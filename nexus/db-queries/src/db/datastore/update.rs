@@ -24,7 +24,7 @@ use nexus_db_model::{
     ArtifactHash, TargetRelease, TufArtifact, TufRepo, TufRepoDescription,
     TufRepoUpload, TufTrustRoot, to_db_typed_uuid,
 };
-use nexus_types::external_api::views::TufRepoUploadStatus;
+use nexus_types::external_api::update::TufRepoUploadStatus;
 use omicron_common::api::external::{
     self, CreateResult, DataPageParams, DeleteResult, Generation,
     ListResultVec, LookupResult, LookupType, ResourceType, UpdateResult,

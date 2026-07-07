@@ -1,3 +1,7 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 use anyhow::Result;
 use end_to_end_tests::helpers::ctx::{ClientParams, Context};
 use end_to_end_tests::helpers::{
@@ -29,11 +33,11 @@ async fn run_test() -> Result<()> {
     eprintln!("waiting for nexus to come up...");
     wait_for_condition(
         || async {
-            client
-                .project_list()
-                .send()
-                .await
-                .map_err(|_| CondCheckError::<oxide_client::Error>::NotYet)
+            client.project_list().send().await.map_err(|_| CondCheckError::<
+                oxide_client::Error,
+            >::NotYet {
+                status: None,
+            })
         },
         &Duration::from_secs(1),
         &Duration::from_secs(300),
@@ -48,7 +52,7 @@ async fn run_test() -> Result<()> {
     eprintln!("creating IP{} IP pool... {:?} - {:?}", ip_version, first, last);
     let pool_name = "default";
     client
-        .ip_pool_create()
+        .system_ip_pool_create()
         .body(IpPoolCreate {
             name: pool_name.parse().unwrap(),
             description: "Default IP pool".to_string(),
@@ -58,7 +62,7 @@ async fn run_test() -> Result<()> {
         .send()
         .await?;
     client
-        .ip_pool_silo_link()
+        .system_ip_pool_silo_link()
         .pool(pool_name)
         .body(IpPoolLinkSilo {
             silo: NameOrId::Name(params.silo_name().parse().unwrap()),
@@ -67,7 +71,7 @@ async fn run_test() -> Result<()> {
         .send()
         .await?;
     client
-        .ip_pool_range_add()
+        .system_ip_pool_range_add()
         .pool(pool_name)
         .body(try_create_ip_range(first, last)?)
         .send()
@@ -86,7 +90,7 @@ async fn run_test() -> Result<()> {
     eprintln!("creating IP{} IP pool... {:?} - {:?}", ip_version, first, last);
     let pool_name = "default-v6";
     client
-        .ip_pool_create()
+        .system_ip_pool_create()
         .body(IpPoolCreate {
             name: pool_name.parse().unwrap(),
             description: "Default IPv6 pool".to_string(),
@@ -96,7 +100,7 @@ async fn run_test() -> Result<()> {
         .send()
         .await?;
     client
-        .ip_pool_silo_link()
+        .system_ip_pool_silo_link()
         .pool(pool_name)
         .body(IpPoolLinkSilo {
             silo: NameOrId::Name(params.silo_name().parse().unwrap()),
@@ -105,7 +109,7 @@ async fn run_test() -> Result<()> {
         .send()
         .await?;
     client
-        .ip_pool_range_add()
+        .system_ip_pool_range_add()
         .pool(pool_name)
         .body(try_create_ip_range(first, last)?)
         .send()
@@ -143,7 +147,9 @@ async fn run_test() -> Result<()> {
                 })
                 .send()
                 .await
-                .map_err(|_| CondCheckError::<oxide_client::Error>::NotYet)
+                .map_err(|_| CondCheckError::<oxide_client::Error>::NotYet {
+                    status: None,
+                })
         },
         &Duration::from_secs(1),
         &Duration::from_secs(120),

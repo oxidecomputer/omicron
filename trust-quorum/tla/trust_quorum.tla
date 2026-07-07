@@ -404,7 +404,6 @@ CommittedNodesHaveShares ==
   \A id \in DOMAIN nodes:
     \/ nodes[id] = NONE
     \/ /\ nodes[id] # NONE
-    \/ /\ nodes[id] # NONE
        /\ \/ /\ nodes[id].is_committed
              /\  nodes[id].has_share
           \/ ~nodes[id].is_committed

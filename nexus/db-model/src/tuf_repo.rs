@@ -11,8 +11,8 @@ use diesel::{deserialize::FromSql, serialize::ToSql};
 use nexus_db_schema::schema::{
     tuf_artifact, tuf_repo, tuf_repo_artifact, tuf_trust_root,
 };
-use nexus_types::external_api::shared::TufSignedRootRole;
-use nexus_types::external_api::views::{self, TufRepoUploadStatus};
+use nexus_types::external_api::update as update_types;
+use nexus_types::external_api::update::TufSignedRootRole;
 use omicron_common::{api::external, update::ArtifactId};
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::TufArtifactKind;
@@ -150,9 +150,9 @@ impl TufRepo {
     }
 }
 
-impl From<TufRepo> for views::TufRepo {
-    fn from(repo: TufRepo) -> views::TufRepo {
-        views::TufRepo {
+impl From<TufRepo> for update_types::TufRepo {
+    fn from(repo: TufRepo) -> update_types::TufRepo {
+        update_types::TufRepo {
             hash: repo.sha256.into(),
             system_version: repo.system_version.into(),
             file_name: repo.file_name,
@@ -379,9 +379,9 @@ impl TufTrustRoot {
     }
 }
 
-impl From<TufTrustRoot> for views::UpdatesTrustRoot {
-    fn from(trust_root: TufTrustRoot) -> views::UpdatesTrustRoot {
-        views::UpdatesTrustRoot {
+impl From<TufTrustRoot> for update_types::UpdatesTrustRoot {
+    fn from(trust_root: TufTrustRoot) -> update_types::UpdatesTrustRoot {
+        update_types::UpdatesTrustRoot {
             id: trust_root.id.into_untyped_uuid(),
             time_created: trust_root.time_created,
             root_role: trust_root.root_role.0,
@@ -428,12 +428,12 @@ impl FromSql<Jsonb, diesel::pg::Pg> for DbTufSignedRootRole {
 /// The return value of the tuf repo insert function
 pub struct TufRepoUpload {
     pub recorded: TufRepoDescription,
-    pub status: TufRepoUploadStatus,
+    pub status: update_types::TufRepoUploadStatus,
 }
 
-impl From<TufRepoUpload> for views::TufRepoUpload {
+impl From<TufRepoUpload> for update_types::TufRepoUpload {
     fn from(upload: TufRepoUpload) -> Self {
-        views::TufRepoUpload {
+        update_types::TufRepoUpload {
             repo: upload.recorded.repo.into(),
             status: upload.status,
         }

@@ -11,14 +11,14 @@
 use super::OmicronZoneExternalIp;
 use daft::Diffable;
 use omicron_common::api::internal::shared::DatasetKind;
-use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_common::disk::DatasetName;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
-use sled_agent_types_versions::latest::inventory::OmicronZoneDataset;
-use sled_agent_types_versions::latest::inventory::OmicronZoneType;
-use sled_agent_types_versions::latest::inventory::ZoneKind;
+use sled_agent_types::inventory::NetworkInterface;
+use sled_agent_types::inventory::OmicronZoneDataset;
+use sled_agent_types::inventory::OmicronZoneType;
+use sled_agent_types::inventory::ZoneKind;
 use std::net::Ipv6Addr;
 
 #[derive(
@@ -349,11 +349,11 @@ pub mod blueprint_zone_type {
     use crate::deployment::OmicronZoneExternalSnatIp;
     use daft::Diffable;
     use omicron_common::api::external::Generation;
-    use omicron_common::api::internal::shared::NetworkInterface;
     use schemars::JsonSchema;
     use serde::Deserialize;
     use serde::Serialize;
-    use sled_agent_types_versions::latest::inventory::OmicronZoneDataset;
+    use sled_agent_types::inventory::NetworkInterface;
+    use sled_agent_types::inventory::OmicronZoneDataset;
     use std::net::IpAddr;
     use std::net::Ipv6Addr;
     use std::net::SocketAddrV6;

@@ -356,6 +356,7 @@ mod test {
     use diesel::prelude::*;
     use nexus_db_queries::db;
     use nexus_test_utils_macros::nexus_test;
+    use nexus_types::alert::test_alerts;
     use omicron_common::api::external::IdentityMetadataCreateParams;
     use omicron_uuid_kinds::AlertReceiverUuid;
     use omicron_uuid_kinds::AlertUuid;
@@ -452,13 +453,15 @@ mod test {
         // activates the dispatcher task, and for this test, we would like to be
         // responsible for activating it.
         let alert_id = AlertUuid::new_v4();
+        let alert = db::model::Alert::new(
+            alert_id,
+            &test_alerts::QuuxBar(serde_json::json!(
+                {"msg": "help im trapped in a webhook event factory"}
+            )),
+        )
+        .expect("alert payload should serialize");
         datastore
-            .alert_create(
-                &opctx,
-                alert_id,
-                db::model::AlertClass::TestQuuxBar,
-                serde_json::json!({"msg": "help im trapped in a webhook event factory"}),
-            )
+            .alert_create(&opctx, alert)
             .await
             .expect("creating the event should work");
 

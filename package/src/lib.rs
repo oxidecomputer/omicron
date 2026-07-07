@@ -1,3 +1,7 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 //! Common code shared between `omicron-package` and `thing-flinger` binaries.
 
 use camino::{Utf8Path, Utf8PathBuf};
@@ -15,10 +19,18 @@ pub mod target;
 /// Errors which may be returned when parsing the server configuration.
 #[derive(Error, Debug)]
 pub enum ParseError {
-    #[error("Error deserializing toml from {path}: {err}")]
-    Toml { path: Utf8PathBuf, err: toml::de::Error },
-    #[error("IO error: {message}: {err}")]
-    Io { message: String, err: std::io::Error },
+    #[error("Error deserializing toml from {path}")]
+    Toml {
+        path: Utf8PathBuf,
+        #[source]
+        err: toml::de::Error,
+    },
+    #[error("IO error: {message}")]
+    Io {
+        message: String,
+        #[source]
+        err: std::io::Error,
+    },
 }
 
 pub fn parse<P: AsRef<Utf8Path>, C: DeserializeOwned>(

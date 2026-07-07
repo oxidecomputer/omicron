@@ -20,10 +20,10 @@ use tokio::sync::watch;
 
 pub struct SitrepLoader {
     datastore: Arc<DataStore>,
-    tx: watch::Sender<CurrentSitrep>,
+    tx: watch::Sender<Option<CurrentSitrep>>,
 }
 
-pub type CurrentSitrep = Option<Arc<(SitrepVersion, Sitrep)>>;
+pub type CurrentSitrep = Arc<(SitrepVersion, Sitrep)>;
 
 impl BackgroundTask for SitrepLoader {
     fn activate<'a>(
@@ -49,13 +49,13 @@ impl BackgroundTask for SitrepLoader {
 impl SitrepLoader {
     pub fn new(
         datastore: Arc<DataStore>,
-        tx: watch::Sender<CurrentSitrep>,
+        tx: watch::Sender<Option<CurrentSitrep>>,
     ) -> Self {
         Self { datastore, tx }
     }
 
     #[allow(dead_code)] // subsequent PRs will consume this
-    pub fn watcher(&self) -> watch::Receiver<CurrentSitrep> {
+    pub fn watcher(&self) -> watch::Receiver<Option<CurrentSitrep>> {
         self.tx.subscribe()
     }
 
@@ -193,6 +193,7 @@ mod test {
     use crate::app::background::BackgroundTask;
     use nexus_db_queries::db::pub_test_utils::TestDatabase;
     use nexus_types::fm::SitrepMetadata;
+    use omicron_common::api::external::Generation;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::CollectionUuid;
     use omicron_uuid_kinds::OmicronZoneUuid;
@@ -223,11 +224,15 @@ mod test {
                 creator_id: OmicronZoneUuid::new_v4(),
                 comment: "test sitrep 1".to_string(),
                 time_created: Utc::now(),
+                next_inv_min_time_started: Utc::now(),
+                alert_generation: Generation::new(),
+                support_bundle_generation: Generation::new(),
             },
             cases: Default::default(),
+            ereports_by_id: Default::default(),
         };
         datastore
-            .fm_sitrep_insert(&opctx, sitrep1.clone())
+            .fm_sitrep_insert(&opctx, sitrep1.clone(), None)
             .await
             .expect("sitrep should be inserted successfully");
 
@@ -288,11 +293,15 @@ mod test {
                 creator_id: OmicronZoneUuid::new_v4(),
                 comment: "test sitrep 2".to_string(),
                 time_created: Utc::now(),
+                next_inv_min_time_started: Utc::now(),
+                alert_generation: Generation::new(),
+                support_bundle_generation: Generation::new(),
             },
             cases: Default::default(),
+            ereports_by_id: Default::default(),
         };
         datastore
-            .fm_sitrep_insert(&opctx, sitrep2.clone())
+            .fm_sitrep_insert(&opctx, sitrep2.clone(), None)
             .await
             .expect("sitrep2 should be inserted successfully");
 

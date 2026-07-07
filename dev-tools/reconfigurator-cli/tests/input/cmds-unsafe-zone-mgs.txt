@@ -21,6 +21,16 @@ sled-update-install-dataset serial0 --to-target-release
 sled-update-install-dataset serial1 --to-target-release
 sled-update-install-dataset serial2 --to-target-release
 
+# Measurements will block further planning progress, run a planning step
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
+
+# Make sure the measurements are up to date for inventory
+sled-set serial0 omicron-config latest
+sled-set serial1 omicron-config latest
+sled-set serial2 omicron-config latest
+
 # Generate inventory, then do a planning run to ensure that all zones
 # are set to Artifact.
 inventory-generate
@@ -55,8 +65,15 @@ blueprint-show latest
 #
 # Note that since we are not running the command to emulate the sled-agent
 # performing an inventory collection and seeing the DNS zone has gone away, the
-# planner will not attemt to restore the internal DNS zone. This is intentional
-# as we want the zone to stay in this state for the purposes of this test
+# planner will not attempt to restore the internal DNS zone. This is intentional
+# as we want the zone to stay in this state for the purposes of this test.
+#
+# A secondary effect of pinning inventory this way is that the noop image source
+# check on serial1 will be skipped with reason "inventory stale" for the rest
+# of this test: the expunge bumps serial1's blueprint sled-agent generation,
+# but inventory still reports the prior generation. That's the correct
+# behavior; see `cmds-noop-stale-inventory.txt` for a focused test of the
+# inventory-staleness guarantee.
 blueprint-edit latest expunge-zones 99e2f30b-3174-40bf-a78a-90da8abba8ca
 blueprint-diff latest
 
@@ -98,8 +115,8 @@ blueprint-diff latest
 sled-update-sp serial0 --active 1.0.0
 sled-update-sp serial1 --active 1.0.0
 sled-update-sp serial2 --active 1.0.0
-sled-update-host-phase2 serial1 --boot-disk B --slot-b d944ae205b61ccf4322448f7d0311a819c53d9844769de066c5307c1682abb47 
-sled-update-host-phase1 serial1 --active B --slot-b b99d5273ba1418bebb19d74b701d716896409566d41de76ada71bded4c9b166b 
+sled-update-host-phase2 serial1 --boot-disk B --slot-b d944ae205b61ccf4322448f7d0311a819c53d9844769de066c5307c1682abb47
+sled-update-host-phase1 serial1 --active B --slot-b b99d5273ba1418bebb19d74b701d716896409566d41de76ada71bded4c9b166b
 inventory-generate
 blueprint-plan latest latest
 blueprint-diff latest

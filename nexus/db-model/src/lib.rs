@@ -2,7 +2,115 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Structures stored to the database.
+// We only use rustdoc for internal documentation, including private items, so
+// it's expected that we'll have links to private items in the docs.
+#![allow(rustdoc::private_intra_doc_links)]
+
+//! Rust types that represent rows in the Omicron database (CockroachDB).
+//!
+//! Each struct in this crate maps to a database table. The table's columns and
+//! SQL types are declared in [`nexus_db_schema`] via Diesel's
+//! [`table!`](diesel::table) macro; the struct here provides the corresponding
+//! Rust types. `nexus_db_queries` then uses both to build and execute
+//! queries in its `DataStore` methods.
+//!
+//! ## How the mapping works
+//!
+//! See also the [Diesel getting started guide][diesel-guide] and the
+//! [`diesel::Queryable`] and [`diesel::Selectable`] derive docs.
+//!
+//! [diesel-guide]: https://diesel.rs/guides/getting-started.html
+//!
+//! Consider the `vmm` table. The schema declares columns and SQL types:
+//!
+//! ```
+//! # use diesel::table;
+//! // in nexus-db-schema (nexus/db-schema/src/schema.rs)
+//! // (in the real file, `nexus_db_schema::enums` is just `crate::enums`)
+//! table! {
+//!     vmm (id) {
+//!         id -> Uuid,
+//!         time_created -> Timestamptz,
+//!         time_deleted -> Nullable<Timestamptz>,
+//!         instance_id -> Uuid,
+//!         time_state_updated -> Timestamptz,
+//!         state_generation -> Int8,
+//!         sled_id -> Uuid,
+//!         propolis_ip -> Inet,
+//!         propolis_port -> Int4,
+//!         state -> nexus_db_schema::enums::VmmStateEnum,
+//!         cpu_platform -> nexus_db_schema::enums::VmmCpuPlatformEnum,
+//!     }
+//! }
+//! ```
+//!
+//! The model struct provides the Rust representation of a row:
+//!
+//! ```
+//! # use nexus_db_schema::schema::vmm;
+//! # use nexus_db_model::{Generation, SqlU16, VmmState, VmmCpuPlatform};
+//! # use omicron_uuid_kinds::SledKind;
+//! # use chrono::{DateTime, Utc};
+//! # use uuid::Uuid;
+//! # use diesel::prelude::*;
+//! # use nexus_db_model::DbTypedUuid;
+//! // in nexus-db-model (nexus/db-model/src/vmm.rs)
+//! #[derive(Queryable, Selectable, Insertable)]
+//! #[diesel(table_name = vmm)]
+//! pub struct Vmm {
+//!     pub id: Uuid,
+//!     pub time_created: DateTime<Utc>,
+//!     pub time_deleted: Option<DateTime<Utc>>,
+//!     pub instance_id: Uuid,
+//!     pub time_state_updated: DateTime<Utc>,
+//!     #[diesel(column_name = state_generation)]
+//!     pub generation: Generation,
+//!     pub sled_id: DbTypedUuid<SledKind>,
+//!     pub propolis_ip: ipnetwork::IpNetwork,
+//!     pub propolis_port: SqlU16,
+//!     pub state: VmmState,
+//!     pub cpu_platform: VmmCpuPlatform,
+//! }
+//! ```
+//!
+//! A few things to note:
+//!
+//! ### Type translation
+//!
+//! Each field's Rust type must implement Diesel's
+//! [`FromSql`](diesel::deserialize::FromSql) and
+//! [`ToSql`](diesel::serialize::ToSql) traits for the corresponding column's
+//! SQL type. Diesel provides these impls for common types (`Uuid`,
+//! `DateTime<Utc>`, `String`, etc.); this crate defines wrapper types like
+//! [`DbTypedUuid`] for domain-specific conversions
+//! (e.g. distinguishing a sled UUID from any other UUID).
+//!
+//! ### Column renaming
+//!
+//! Field names must match column names by default, but
+//! `#[diesel(column_name = ...)]` allows the Rust name to differ (e.g.
+//! `generation` for the `state_generation` column).
+//!
+//! ### Positional mapping
+//!
+//! [`diesel::Queryable`] maps SQL result columns to struct fields by position,
+//! not by name. If the field order doesn't match the column order in the query,
+//! fields will silently receive wrong values. Deriving [`diesel::Selectable`]
+//! mitigates this by generating an explicit column list, so the result columns
+//! are always in the order `Queryable` expects. **Always derive both.**
+//!
+//! ## Field ordering convention
+//!
+//! Fields in `Queryable`/`Insertable` structs should be ordered to match the
+//! column order in `dbinit.sql`. This keeps the Rust types easy to
+//! cross-reference with the schema definition and prevents subtle bugs if a
+//! query ever omits `Selectable`.
+//!
+//! ## Representing enums
+//!
+//! For types that map to database enum columns, see the [`impl_enum_type!`]
+//! and [`impl_enum_wrapper!`] macros defined below. For string-backed enums,
+//! see the [`DatabaseString`] trait.
 
 #[macro_use]
 extern crate diesel;
@@ -40,8 +148,10 @@ mod disk_type_local_storage;
 mod dns;
 mod downstairs;
 pub mod ereport;
+mod ereporter_restart;
 mod ereporter_type;
 mod external_ip;
+mod external_subnet;
 pub mod fm;
 mod generation;
 mod identity_provider;
@@ -86,6 +196,7 @@ mod serde_time_delta;
 mod silo_auth_settings;
 mod switch_interface;
 mod switch_port;
+mod system_networking_settings;
 mod target_release;
 mod trust_quorum;
 mod v2p_mapping;
@@ -137,6 +248,7 @@ mod virtual_provisioning_collection;
 mod virtual_provisioning_resource;
 mod vmm;
 mod vmm_cpu_platform;
+mod vmm_failure_reason;
 mod vni;
 mod volume;
 mod volume_repair;
@@ -190,8 +302,10 @@ pub use disk_type_local_storage::*;
 pub use dns::*;
 pub use downstairs::*;
 pub use ereport::Ereport;
+pub use ereporter_restart::*;
 pub use ereporter_type::*;
 pub use external_ip::*;
+pub use external_subnet::*;
 pub use fm::{SitrepMetadata, SitrepVersion};
 pub use generation::*;
 pub use identity_provider::*;
@@ -262,6 +376,7 @@ pub use support_bundle::*;
 pub use switch::*;
 pub use switch_interface::*;
 pub use switch_port::*;
+pub use system_networking_settings::*;
 pub use target_release::*;
 pub use trust_quorum::*;
 pub use tuf_repo::*;
@@ -276,6 +391,7 @@ pub use virtual_provisioning_collection::*;
 pub use virtual_provisioning_resource::*;
 pub use vmm::*;
 pub use vmm_cpu_platform::*;
+pub use vmm_failure_reason::*;
 pub use vmm_state::*;
 pub use vni::*;
 pub use volume::*;
@@ -356,6 +472,7 @@ pub(crate) use impl_enum_wrapper;
 /// our database into our model types. See [`VpcRouterKind`] for a sample usage.
 macro_rules! impl_enum_type {
     (
+        $(#[doc = $doc:expr])*
         $diesel_type:ident:
 
         $(#[$model_meta:meta])*
@@ -363,6 +480,7 @@ macro_rules! impl_enum_type {
 
         $($enum_item:ident => $sql_value:literal)+
     ) => {
+        $(#[doc = $doc])*
         $(#[$model_meta])*
         #[diesel(sql_type = ::nexus_db_schema::enums::$diesel_type)]
         pub enum $model_type {
@@ -463,9 +581,7 @@ pub trait DatabaseString: Sized {
 }
 
 use anyhow::anyhow;
-use nexus_types::external_api::shared::FleetRole;
-use nexus_types::external_api::shared::ProjectRole;
-use nexus_types::external_api::shared::SiloRole;
+use nexus_types::external_api::policy::{FleetRole, ProjectRole, SiloRole};
 use std::borrow::Cow;
 
 impl DatabaseString for FleetRole {

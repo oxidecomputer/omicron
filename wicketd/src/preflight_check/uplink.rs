@@ -24,13 +24,16 @@ use illumos_utils::PFEXEC;
 use illumos_utils::zone::SVCCFG;
 use omicron_common::OMICRON_DPD_TAG;
 use omicron_common::address::DENDRITE_PORT;
-use omicron_common::api::internal::shared::PortFec as OmicronPortFec;
-use omicron_common::api::internal::shared::PortSpeed as OmicronPortSpeed;
-use omicron_common::api::internal::shared::SwitchLocation;
 use oxnet::IpNet;
+use sled_agent_types::early_networking::LinkFec;
+use sled_agent_types::early_networking::LinkSpeed;
+use sled_agent_types::early_networking::SwitchSlot;
+use sled_agent_types::early_networking::UplinkAddress;
+use sled_agent_types::early_networking::UplinkAddressConfig;
 use slog::Logger;
 use slog::error;
 use slog::o;
+use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeSet;
 use std::collections::HashMap;
 use std::net::IpAddr;
@@ -50,6 +53,7 @@ use wicket_common::preflight_check::StepWarning;
 use wicket_common::preflight_check::UpdateEngine;
 use wicket_common::preflight_check::UplinkPreflightStepId;
 use wicket_common::preflight_check::UplinkPreflightTerminalError;
+use wicket_common::rack_setup::ManualPortConfig;
 use wicket_common::rack_setup::UserSpecifiedPortConfig;
 use wicket_common::rack_setup::UserSpecifiedRackNetworkConfig;
 
@@ -74,7 +78,7 @@ pub(super) async fn run_local_uplink_preflight_check(
     network_config: UserSpecifiedRackNetworkConfig,
     dns_servers: Vec<IpAddr>,
     ntp_servers: Vec<String>,
-    our_switch_location: SwitchLocation,
+    our_switch_slot: SwitchSlot,
     dns_name_to_query: Option<String>,
     event_buffer: Arc<Mutex<Option<EventBuffer>>>,
     log: &Logger,
@@ -91,7 +95,12 @@ pub(super) async fn run_local_uplink_preflight_check(
     let (sender, mut receiver) = update_engine::channel();
     let mut engine = UpdateEngine::new(log, sender);
 
-    for (port, uplink) in network_config.port_map(our_switch_location) {
+    for (port, uplink) in network_config.port_map(our_switch_slot) {
+        let UserSpecifiedPortConfig::Manual(uplink) = uplink else {
+            error!(log, "DdmAutoPortConfig not supported for uplinks",);
+            continue;
+        };
+
         add_steps_for_single_local_uplink_preflight_check(
             &mut engine,
             &dpd_client,
@@ -131,7 +140,7 @@ fn add_steps_for_single_local_uplink_preflight_check<'a>(
     engine: &mut UpdateEngine<'a>,
     dpd_client: &'a DpdClient,
     port: &'a str,
-    uplink: &'a UserSpecifiedPortConfig,
+    uplink: &'a ManualPortConfig,
     dns_servers: &'a [IpAddr],
     ntp_servers: &'a [String],
     dns_name_to_query: Option<&'a str>,
@@ -307,11 +316,37 @@ fn add_steps_for_single_local_uplink_preflight_check<'a>(
                 let uplink_property =
                     UplinkProperty(format!("uplinks/{}_0", port));
 
-                for addr in &uplink.addresses {
-                    // This includes the CIDR only
-                    let uplink_cidr = addr.address.to_string();
+                for &addr in &uplink.addresses {
+                    let addr = UplinkAddressConfig::from(addr);
+
+                    // count current number of link-local addresses
+                    let addrconf_count = match execute_command(&[
+                        IPADM,
+                        "show-addr",
+                        "-p",
+                        "-o",
+                        "type",
+                    ])
+                    .await
+                    {
+                        Ok(stdout) => stdout,
+                        Err(err) => {
+                            return StepWarning::new(
+                                Err(L2Failure::RunIpadm(
+                                    level1,
+                                    uplink_property,
+                                )),
+                                format!("failed running ipadm: {err}"),
+                            )
+                            .into();
+                        }
+                    }
+                    .split('\n')
+                    .filter(|i| i.to_lowercase() == "addrconf")
+                    .count();
+
                     // This includes the VLAN ID, if any
-                    let uplink_cfg = addr.to_string();
+                    let uplink_cfg = addr.to_uplinkd_smf_property();
                     if let Err(err) = execute_command(&[
                         SVCCFG,
                         "-s",
@@ -351,31 +386,74 @@ fn add_steps_for_single_local_uplink_preflight_check<'a>(
                     // Wait for the `uplink` service to create the IP address.
                     let start_waiting_addr = Instant::now();
                     'waiting_for_addr: loop {
-                        let ipadm_out = match execute_command(&[
-                            IPADM,
-                            "show-addr",
-                            "-p",
-                            "-o",
-                            "addr",
-                        ])
-                        .await
-                        {
-                            Ok(stdout) => stdout,
-                            Err(err) => {
-                                return StepWarning::new(
-                                    Err(L2Failure::RunIpadm(
-                                        level1,
-                                        uplink_property,
-                                    )),
-                                    format!("failed running ipadm: {err}"),
-                                )
-                                .into();
-                            }
-                        };
+                        match addr.address {
+                            // When we are using numbered uplinks
+                            UplinkAddress::Static { ip_net: uplink_cidr } => {
+                                let ipadm_out = match execute_command(&[
+                                    IPADM,
+                                    "show-addr",
+                                    "-p",
+                                    "-o",
+                                    "addr",
+                                ])
+                                .await
+                                {
+                                    Ok(stdout) => stdout,
+                                    Err(err) => {
+                                        return StepWarning::new(
+                                            Err(L2Failure::RunIpadm(
+                                                level1,
+                                                uplink_property,
+                                            )),
+                                            format!(
+                                                "failed running ipadm: {err}"
+                                            ),
+                                        )
+                                        .into();
+                                    }
+                                };
 
-                        for line in ipadm_out.split('\n') {
-                            if line == uplink_cidr {
-                                break 'waiting_for_addr;
+                                for line in ipadm_out.split('\n') {
+                                    if line == uplink_cidr.to_string() {
+                                        break 'waiting_for_addr;
+                                    }
+                                }
+                            }
+                            // unnumbered uplinks
+                            UplinkAddress::AddrConf => {
+                                // look for a new unnumbered uplink
+                                let new_count = match execute_command(&[
+                                    IPADM,
+                                    "show-addr",
+                                    "-p",
+                                    "-o",
+                                    "type",
+                                ])
+                                .await
+                                {
+                                    Ok(stdout) => stdout,
+                                    Err(err) => {
+                                        return StepWarning::new(
+                                            Err(L2Failure::RunIpadm(
+                                                level1,
+                                                uplink_property,
+                                            )),
+                                            format!(
+                                                "failed running ipadm: {err}"
+                                            ),
+                                        )
+                                        .into();
+                                    }
+                                }
+                                .split('\n')
+                                .filter(|i| i.to_lowercase() == "addrconf")
+                                .count();
+
+                                // If we have a new addrconf address, we have our new link-local
+                                // address
+                                if new_count == addrconf_count + 1 {
+                                    break 'waiting_for_addr;
+                                }
                             }
                         }
 
@@ -394,7 +472,7 @@ fn add_steps_for_single_local_uplink_preflight_check<'a>(
                                 )),
                                 format!(
                                     "timed out waiting for `uplink` to \
-                                 create {uplink_cidr}"
+                                     create {uplink_cfg}"
                                 ),
                             )
                             .into();
@@ -747,30 +825,34 @@ fn add_steps_for_single_local_uplink_preflight_check<'a>(
 }
 
 fn build_port_settings(
-    uplink: &UserSpecifiedPortConfig,
+    uplink: &ManualPortConfig,
     link_id: &LinkId,
 ) -> PortSettings {
     // Map from omicron_common types to dpd_client types
     let fec = uplink.uplink_port_fec.map(|fec| match fec {
-        OmicronPortFec::Firecode => DpdPortFec::Firecode,
-        OmicronPortFec::None => DpdPortFec::None,
-        OmicronPortFec::Rs => DpdPortFec::Rs,
+        LinkFec::Firecode => DpdPortFec::Firecode,
+        LinkFec::None => DpdPortFec::None,
+        LinkFec::Rs => DpdPortFec::Rs,
     });
     let speed = match uplink.uplink_port_speed {
-        OmicronPortSpeed::Speed0G => DpdPortSpeed::Speed0G,
-        OmicronPortSpeed::Speed1G => DpdPortSpeed::Speed1G,
-        OmicronPortSpeed::Speed10G => DpdPortSpeed::Speed10G,
-        OmicronPortSpeed::Speed25G => DpdPortSpeed::Speed25G,
-        OmicronPortSpeed::Speed40G => DpdPortSpeed::Speed40G,
-        OmicronPortSpeed::Speed50G => DpdPortSpeed::Speed50G,
-        OmicronPortSpeed::Speed100G => DpdPortSpeed::Speed100G,
-        OmicronPortSpeed::Speed200G => DpdPortSpeed::Speed200G,
-        OmicronPortSpeed::Speed400G => DpdPortSpeed::Speed400G,
+        LinkSpeed::Speed0G => DpdPortSpeed::Speed0G,
+        LinkSpeed::Speed1G => DpdPortSpeed::Speed1G,
+        LinkSpeed::Speed10G => DpdPortSpeed::Speed10G,
+        LinkSpeed::Speed25G => DpdPortSpeed::Speed25G,
+        LinkSpeed::Speed40G => DpdPortSpeed::Speed40G,
+        LinkSpeed::Speed50G => DpdPortSpeed::Speed50G,
+        LinkSpeed::Speed100G => DpdPortSpeed::Speed100G,
+        LinkSpeed::Speed200G => DpdPortSpeed::Speed200G,
+        LinkSpeed::Speed400G => DpdPortSpeed::Speed400G,
     };
 
     let mut port_settings = PortSettings { links: HashMap::new() };
 
-    let addrs = uplink.addresses.iter().map(|a| a.addr()).collect();
+    let addrs = uplink
+        .addresses
+        .iter()
+        .map(|a| a.address.ip_squashing_addrconf_to_unspecified())
+        .collect();
 
     port_settings.links.insert(
         link_id.to_string(),
@@ -801,10 +883,9 @@ fn build_port_settings(
 async fn execute_command(args: &[&str]) -> Result<String, String> {
     let mut command = Command::new(PFEXEC);
     command.env_clear().args(args);
-    let output = command
-        .output()
-        .await
-        .map_err(|err| format!("failed to execute command: {err}"))?;
+    let output = command.output().await.map_err(|err| {
+        format!("failed to execute command: {}", InlineErrorChain::new(&err))
+    })?;
 
     let stdout = String::from_utf8_lossy(&output.stdout);
 
@@ -829,10 +910,9 @@ async fn execute_command_ignoring_status(
 ) -> Result<CommandOutput, String> {
     let mut command = Command::new(PFEXEC);
     command.env_clear().args(args);
-    let output = command
-        .output()
-        .await
-        .map_err(|err| format!("failed to execute command: {err}"))?;
+    let output = command.output().await.map_err(|err| {
+        format!("failed to execute command: {}", InlineErrorChain::new(&err))
+    })?;
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);

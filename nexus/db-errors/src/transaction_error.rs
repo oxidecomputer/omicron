@@ -14,7 +14,7 @@ use omicron_common::api::external::{
 use crate::OptionalError;
 
 /// Wrapper around an error which may be returned from a Diesel transaction.
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, PartialEq, thiserror::Error)]
 pub enum TransactionError<T> {
     /// The customizable error type.
     ///

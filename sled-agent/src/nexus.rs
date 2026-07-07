@@ -2,17 +2,16 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use omicron_common::api::external::Generation;
-use omicron_common::disk::DiskVariant;
-use omicron_uuid_kinds::SledUuid;
-
 use crate::vmm_reservoir::VmmReservoirManagerHandle;
 use internal_dns_resolver::Resolver;
 use internal_dns_types::names::ServiceName;
 use nexus_client::types::SledAgentInfo;
 use omicron_common::address::NEXUS_INTERNAL_PORT;
+use omicron_common::api::external::Generation;
+use omicron_uuid_kinds::SledUuid;
 use sled_hardware::HardwareManager;
 use slog::Logger;
+use slog_error_chain::InlineErrorChain;
 use std::net::SocketAddrV6;
 use std::sync::Arc;
 use tokio::sync::{Notify, broadcast, mpsc, oneshot};
@@ -52,19 +51,6 @@ pub(crate) fn make_nexus_client_with_port(
 
 pub(crate) trait ConvertInto<T>: Sized {
     fn convert(self) -> T;
-}
-
-impl ConvertInto<nexus_lockstep_client::types::PhysicalDiskKind>
-    for DiskVariant
-{
-    fn convert(self) -> nexus_lockstep_client::types::PhysicalDiskKind {
-        use nexus_lockstep_client::types::PhysicalDiskKind;
-
-        match self {
-            DiskVariant::U2 => PhysicalDiskKind::U2,
-            DiskVariant::M2 => PhysicalDiskKind::M2,
-        }
-    }
 }
 
 impl ConvertInto<nexus_client::types::Baseboard>
@@ -554,7 +540,8 @@ impl NexusNotifierTask {
                 self.nexus_known_info = None;
                 warn!(
                     self.log,
-                    "Received Error from Nexus for Get request: {:?}", e
+                    "Received Error from Nexus for Get request";
+                    InlineErrorChain::new(&e),
                 );
             }
             (NexusOp::Put, Err(e)) => {
@@ -562,7 +549,8 @@ impl NexusNotifierTask {
                 self.nexus_known_info = None;
                 warn!(
                     self.log,
-                    "Received Error from Nexus for Put request: {:?}", e
+                    "Received Error from Nexus for Put request";
+                    InlineErrorChain::new(&e),
                 );
             }
         }
@@ -712,7 +700,7 @@ mod test {
                 if status.nexus_known_info.is_some() {
                     Ok(status)
                 } else {
-                    Err(CondCheckError::NotYet)
+                    Err(CondCheckError::NotYet { status: None })
                 }
             },
             &Duration::from_millis(2),
@@ -732,7 +720,7 @@ mod test {
                 if !status.has_pending_notification {
                     Ok(status)
                 } else {
-                    Err(CondCheckError::NotYet)
+                    Err(CondCheckError::NotYet { status: None })
                 }
             },
             &Duration::from_millis(2),
@@ -764,7 +752,7 @@ mod test {
                 if status.cancelled_pending_notifications == 2 {
                     Ok(status)
                 } else {
-                    Err(CondCheckError::NotYet)
+                    Err(CondCheckError::NotYet { status: None })
                 }
             },
             &Duration::from_millis(2),
@@ -798,7 +786,7 @@ mod test {
                 if !status.has_pending_notification {
                     Ok(status)
                 } else {
-                    Err(CondCheckError::NotYet)
+                    Err(CondCheckError::NotYet { status: None })
                 }
             },
             &Duration::from_millis(2),
@@ -838,7 +826,7 @@ mod test {
                 {
                     Ok(status)
                 } else {
-                    Err(CondCheckError::NotYet)
+                    Err(CondCheckError::NotYet { status: None })
                 }
             },
             &Duration::from_millis(2),
@@ -882,7 +870,7 @@ mod test {
                 {
                     Ok(status)
                 } else {
-                    Err(CondCheckError::NotYet)
+                    Err(CondCheckError::NotYet { status: None })
                 }
             },
             &Duration::from_millis(2),
@@ -924,7 +912,7 @@ mod test {
                 {
                     Ok(status)
                 } else {
-                    Err(CondCheckError::NotYet)
+                    Err(CondCheckError::NotYet { status: None })
                 }
             },
             &Duration::from_millis(2),

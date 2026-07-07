@@ -1,8 +1,6 @@
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
-// file, You can obtain one at https://mozilla.org/MPL/5.0/.
-
-// Copyright 2024 Oxide Computer Company
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 //! Database representation of allowed source IP address, for implementing basic
 //! IP allowlisting.
@@ -11,8 +9,7 @@ use chrono::DateTime;
 use chrono::Utc;
 use ipnetwork::IpNetwork;
 use nexus_db_schema::schema::allow_list;
-use nexus_types::external_api::params;
-use nexus_types::external_api::views;
+use nexus_types::external_api::system;
 use omicron_common::api::external;
 use omicron_common::api::external::Error;
 use serde::Deserialize;
@@ -68,8 +65,8 @@ pub struct AllowListUpdate {
     pub allowed_ips: Option<Vec<IpNetwork>>,
 }
 
-impl From<params::AllowListUpdate> for AllowListUpdate {
-    fn from(params: params::AllowListUpdate) -> Self {
+impl From<system::AllowListUpdate> for AllowListUpdate {
+    fn from(params: system::AllowListUpdate) -> Self {
         let allowed_ips = match params.allowed_ips {
             external::AllowedSourceIps::Any => None,
             external::AllowedSourceIps::List(list) => {
@@ -80,7 +77,7 @@ impl From<params::AllowListUpdate> for AllowListUpdate {
     }
 }
 
-impl TryFrom<AllowList> for views::AllowList {
+impl TryFrom<AllowList> for system::AllowList {
     type Error = Error;
 
     fn try_from(db: AllowList) -> Result<Self, Self::Error> {

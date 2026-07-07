@@ -16,6 +16,7 @@ tufaceous-artifact.workspace = true
 thiserror.workspace = true
 omicron-workspace-hack.workspace = true
 libipcc.workspace = true
+slog-error-chain.workspace = true
 
 [dev-dependencies]
 omicron-common = { workspace = true, features = ["testing"] }

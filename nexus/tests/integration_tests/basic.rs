@@ -10,8 +10,9 @@
 use dropshot::HttpErrorResponseBody;
 use http::StatusCode;
 use http::method::Method;
-use nexus_types::external_api::params;
-use nexus_types::external_api::views::{self, Project};
+use nexus_types::external_api::project;
+use nexus_types::external_api::project::Project;
+use nexus_types::external_api::system;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::IdentityMetadataUpdateParams;
 use omicron_common::api::external::Name;
@@ -159,7 +160,7 @@ async fn test_projects_basic(cptestctx: &ControlPlaneTestContext) {
             let new_project: Project = NexusRequest::objects_post(
                 client,
                 projects_url,
-                &params::ProjectCreate {
+                &project::ProjectCreate {
                     identity: IdentityMetadataCreateParams {
                         name: project_name.parse().unwrap(),
                         description: String::from(
@@ -258,7 +259,7 @@ async fn test_projects_basic(cptestctx: &ControlPlaneTestContext) {
     }
     NexusRequest::new(
         RequestBuilder::new(client, Method::PUT, "/v1/projects/simproject2")
-            .body(Some(&params::ProjectUpdate {
+            .body(Some(&project::ProjectUpdate {
                 identity: IdentityMetadataUpdateParams {
                     name: None,
                     description: None,
@@ -299,7 +300,7 @@ async fn test_projects_basic(cptestctx: &ControlPlaneTestContext) {
 
     // Update "simproject3".  We'll make sure that's reflected in the other
     // requests.
-    let project_update = params::ProjectUpdate {
+    let project_update = project::ProjectUpdate {
         identity: IdentityMetadataUpdateParams {
             name: None,
             description: Some("Li'l lightnin'".to_string()),
@@ -329,7 +330,7 @@ async fn test_projects_basic(cptestctx: &ControlPlaneTestContext) {
     // Update "simproject3" in a way that changes its name.  This is a deeper
     // operation under the hood.  This case also exercises changes to multiple
     // fields in one request.
-    let project_update = params::ProjectUpdate {
+    let project_update = project::ProjectUpdate {
         identity: IdentityMetadataUpdateParams {
             name: Some("lil-lightnin".parse().unwrap()),
             description: Some("little lightning".to_string()),
@@ -362,7 +363,7 @@ async fn test_projects_basic(cptestctx: &ControlPlaneTestContext) {
     .expect("expected success");
 
     // Try to create a project with a name that conflicts with an existing one.
-    let project_create = params::ProjectCreate {
+    let project_create = project::ProjectCreate {
         identity: IdentityMetadataCreateParams {
             name: "simproject1".parse().unwrap(),
             description: "a duplicate of simproject1".to_string(),
@@ -410,7 +411,7 @@ async fn test_projects_basic(cptestctx: &ControlPlaneTestContext) {
     ));
 
     // Now, really do create another project.
-    let project_create = params::ProjectCreate {
+    let project_create = project::ProjectCreate {
         identity: IdentityMetadataCreateParams {
             name: "honor-roller".parse().unwrap(),
             description: "a soapbox racer".to_string(),
@@ -552,7 +553,101 @@ async fn test_ping(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
     let health = NexusRequest::object_get(client, "/v1/ping")
-        .execute_and_parse_unwrap::<views::Ping>()
+        .execute_and_parse_unwrap::<system::Ping>()
         .await;
-    assert_eq!(health.status, views::PingStatus::Ok);
+    assert_eq!(health.status, system::PingStatus::Ok);
+}
+
+/// Test that the external API returns gzip-compressed responses when the
+/// client sends Accept-Encoding: gzip.
+#[nexus_test]
+async fn test_gzip_compression(cptestctx: &ControlPlaneTestContext) {
+    let client = &cptestctx.external_client;
+
+    // Create several projects so the response body exceeds the minimum
+    // compression threshold (512 bytes).
+    for i in 0..10 {
+        create_project(&client, &format!("project-{i}")).await;
+    }
+
+    // With Accept-Encoding: gzip, response should be compressed.
+    let response = NexusRequest::new(
+        RequestBuilder::new(client, Method::GET, "/v1/projects")
+            .header(http::header::ACCEPT_ENCODING, "gzip")
+            .expect_status(Some(StatusCode::OK)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
+
+    assert_eq!(
+        response.headers.get(http::header::CONTENT_ENCODING).unwrap(),
+        "gzip",
+    );
+
+    // Decompress and verify the body is valid JSON.
+    let compressed_len = response.body.len();
+    let mut decoder = flate2::read::GzDecoder::new(&response.body[..]);
+    let mut decompressed = String::new();
+    std::io::Read::read_to_string(&mut decoder, &mut decompressed).unwrap();
+    let page: dropshot::ResultsPage<Project> =
+        serde_json::from_str(&decompressed).unwrap();
+    assert_eq!(page.items.len(), 10);
+
+    // Without Accept-Encoding: gzip, response should not be compressed.
+    let response = NexusRequest::object_get(client, "/v1/projects")
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .unwrap();
+    assert!(response.headers.get(http::header::CONTENT_ENCODING).is_none());
+
+    let uncompressed_len = response.body.len();
+    assert!(
+        compressed_len < uncompressed_len,
+        "compressed body ({compressed_len} bytes) should be smaller \
+         than uncompressed body ({uncompressed_len} bytes)"
+    );
+
+    // Accept-Encoding: gzip;q=0 explicitly refuses gzip, so the response
+    // should not be compressed even though the client mentions gzip. This
+    // verifies that q-value parsing is wired up correctly through the
+    // dropshot config.
+    let response = NexusRequest::new(
+        RequestBuilder::new(client, Method::GET, "/v1/projects")
+            .header(http::header::ACCEPT_ENCODING, "gzip;q=0")
+            .expect_status(Some(StatusCode::OK)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
+    assert!(response.headers.get(http::header::CONTENT_ENCODING).is_none());
+
+    // Even when a response is too small to compress, dropshot should still
+    // set Vary: Accept-Encoding on a compressible content type so caches
+    // behave correctly. /v1/ping returns a tiny JSON body well under the
+    // 512-byte compression threshold.
+    let response = NexusRequest::new(
+        RequestBuilder::new(client, Method::GET, "/v1/ping")
+            .header(http::header::ACCEPT_ENCODING, "gzip")
+            .expect_status(Some(StatusCode::OK)),
+    )
+    .execute()
+    .await
+    .unwrap();
+    assert!(response.headers.get(http::header::CONTENT_ENCODING).is_none());
+    let vary_values: Vec<_> = response
+        .headers
+        .get_all(http::header::VARY)
+        .iter()
+        .filter_map(|v| v.to_str().ok())
+        .collect();
+    assert!(
+        vary_values.iter().any(|v| v
+            .split(',')
+            .any(|entry| entry.trim().eq_ignore_ascii_case("accept-encoding"))),
+        "expected Vary: Accept-Encoding on small uncompressed response, got {vary_values:?}",
+    );
 }

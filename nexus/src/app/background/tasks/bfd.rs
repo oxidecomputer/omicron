@@ -5,12 +5,8 @@
 //! Background task for managing switch bidirectional forwarding detection
 //! (BFD) sessions.
 
-use crate::app::{
-    background::tasks::networking::build_mgd_clients,
-    switch_zone_address_mappings,
-};
-
 use crate::app::background::BackgroundTask;
+use crate::app::background::tasks::networking::resolve_mgd_clients;
 use futures::FutureExt;
 use futures::future::BoxFuture;
 use internal_dns_resolver::Resolver;
@@ -18,8 +14,10 @@ use mg_admin_client::ClientInfo;
 use mg_admin_client::types::{BfdPeerConfig, SessionMode};
 use nexus_db_model::{BfdMode, BfdSession};
 use nexus_db_queries::{context::OpContext, db::DataStore};
-use omicron_common::api::external::{DataPageParams, SwitchLocation};
+use omicron_common::api::external::DataPageParams;
 use serde_json::json;
+use sled_agent_types::early_networking::SwitchSlot;
+use slog_error_chain::InlineErrorChain;
 use std::{
     collections::HashSet,
     hash::Hash,
@@ -39,7 +37,7 @@ impl BfdManager {
 }
 
 struct BfdSessionKey {
-    switch: SwitchLocation,
+    switch: SwitchSlot,
     local: Option<IpAddr>,
     remote: IpAddr,
     detection_threshold: u8,
@@ -57,7 +55,7 @@ impl BfdSessionKey {
 
 impl Hash for BfdSessionKey {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.switch.to_string().hash(state);
+        self.switch.hash(state);
         self.remote.hash(state);
     }
 }
@@ -73,7 +71,7 @@ impl Eq for BfdSessionKey {}
 impl From<BfdSession> for BfdSessionKey {
     fn from(value: BfdSession) -> Self {
         Self {
-            switch: value.switch.parse().unwrap(), //TODO unwrap
+            switch: value.switch_slot.into(),
             remote: value.remote.ip(),
             local: value.local.map(|x| x.ip()),
             detection_threshold: value
@@ -118,21 +116,19 @@ impl BackgroundTask for BfdManager {
 
             let mut current: HashSet<BfdSessionKey> = HashSet::new();
 
-            let mappings = match switch_zone_address_mappings(&self.resolver, log).await {
-                Ok(mappings) => mappings,
-                Err(e) => {
-                    error!(log, "failed to resolve addresses for Dendrite services"; "error" => %e);
-                    return json!({
-                        "error":
-                            format!(
-                                "failed to resolve addresses for Dendrite services: {:#}",
-                                e
-                            )
-                    });
-                },
-            };
-
-            let mgd_clients = build_mgd_clients(mappings, log, &self.resolver).await;
+            let mgd_clients =
+                match resolve_mgd_clients(&self.resolver, log).await {
+                    Ok(clients) => clients,
+                    Err(e) => {
+                        let e = InlineErrorChain::new(&e);
+                        error!(
+                            log,
+                            "failed to resolve addresses for MGD services";
+                            &e,
+                        );
+                        return json!({ "error": e.to_string() });
+                    }
+                };
 
             for (location, c) in &mgd_clients {
                 let client_current = match c.get_bfd_peers().await {
@@ -140,7 +136,7 @@ impl BackgroundTask for BfdManager {
                     Err(e) => {
                         error!(&log, "failed to get bfd sessions from mgd: {}",
                             c.baseurl();
-                            "error" => e.to_string()
+                            InlineErrorChain::new(&e),
                         );
                         continue;
                     }
@@ -182,8 +178,9 @@ impl BackgroundTask for BfdManager {
                 let mg = match mgd_clients.get(&x.switch) {
                     Some(mg) => mg,
                     None => {
-                        error!(&log, "failed to get mg client";
-                            "switch" => x.switch.to_string(),
+                        error!(
+                            log, "failed to get mg client";
+                            "switch" => ?x.switch,
                         );
                         continue;
                     }
@@ -201,9 +198,10 @@ impl BackgroundTask for BfdManager {
                     })
                     .await
                 {
-                    error!(&log, "failed to add bfd peer to switch daemon";
-                        "error" => e.to_string(),
-                        "switch" => x.switch.to_string(),
+                    error!(
+                        log, "failed to add bfd peer to switch daemon";
+                        "switch" => ?x.switch,
+                        InlineErrorChain::new(&e),
                     );
                 }
             }
@@ -212,16 +210,18 @@ impl BackgroundTask for BfdManager {
                 let mg = match mgd_clients.get(&x.switch) {
                     Some(mg) => mg,
                     None => {
-                        error!(&log, "failed to get mg client";
-                            "switch" => x.switch.to_string(),
+                        error!(
+                            log, "failed to get mg client";
+                            "switch" => ?x.switch,
                         );
                         continue;
                     }
                 };
                 if let Err(e) = mg.remove_bfd_peer(&x.remote).await {
-                    error!(&log, "failed to remove bfd peer from switch daemon";
-                        "error" => e.to_string(),
-                        "switch" => x.switch.to_string(),
+                    error!(
+                        log, "failed to remove bfd peer from switch daemon";
+                        "switch" => ?x.switch,
+                        InlineErrorChain::new(&e),
                     );
                 }
             }

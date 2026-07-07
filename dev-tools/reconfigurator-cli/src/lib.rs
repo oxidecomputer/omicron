@@ -7,7 +7,7 @@
 use anyhow::{Context, anyhow, bail, ensure};
 use camino::Utf8PathBuf;
 use chrono::{DateTime, Utc};
-use clap::{ArgAction, ValueEnum};
+use clap::ValueEnum;
 use clap::{Args, Parser, Subcommand};
 use daft::Diffable;
 use gateway_types::rot::RotSlot;
@@ -34,23 +34,22 @@ use nexus_reconfigurator_simulation::{
 };
 use nexus_reconfigurator_simulation::{SimStateBuilder, SimTufRepoSource};
 use nexus_reconfigurator_simulation::{SimTufRepoDescription, Simulator};
-use nexus_types::deployment::execution;
+use nexus_types::deployment::BlueprintHostPhase2DesiredContents;
+use nexus_types::deployment::BlueprintMeasurements;
+use nexus_types::deployment::CockroachDbSettings;
+use nexus_types::deployment::ExpectedVersion;
 use nexus_types::deployment::execution::blueprint_external_dns_config;
 use nexus_types::deployment::execution::blueprint_internal_dns_config;
 use nexus_types::deployment::{Blueprint, UnstableReconfiguratorState};
 use nexus_types::deployment::{BlueprintArtifactVersion, PendingMgsUpdate};
-use nexus_types::deployment::{
-    BlueprintHostPhase2DesiredContents, PlannerConfig,
-};
+use nexus_types::deployment::{BlueprintExpungedZoneAccessReason, execution};
 use nexus_types::deployment::{BlueprintSource, SledFilter};
-use nexus_types::deployment::{BlueprintZoneDisposition, ExpectedVersion};
 use nexus_types::deployment::{
     BlueprintZoneImageSource, PendingMgsUpdateDetails,
 };
 use nexus_types::deployment::{OmicronZoneNic, TargetReleaseDescription};
 use nexus_types::deployment::{PendingMgsUpdateSpDetails, PlanningInput};
-use nexus_types::external_api::views::SledPolicy;
-use nexus_types::external_api::views::SledProvisionPolicy;
+use nexus_types::external_api::sled::{SledPolicy, SledProvisionPolicy};
 use nexus_types::inventory::CollectionDisplayCliFilter;
 use omicron_common::address::REPO_DEPOT_PORT;
 use omicron_common::api::external::Generation;
@@ -153,9 +152,7 @@ impl ReconfiguratorSim {
         builder.set_external_dns_version(parent_blueprint.external_dns_version);
 
         // Handle zone networking setup first
-        for (_, zone) in parent_blueprint
-            .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
-        {
+        for (_, zone) in parent_blueprint.in_service_zones() {
             if let Some((external_ip, nic)) =
                 zone.zone_type.external_networking()
             {
@@ -207,9 +204,7 @@ impl ReconfiguratorSim {
             let active_nexus_gen =
                 state.config().active_nexus_zone_generation();
             let mut active_nexus_zones = BTreeSet::new();
-            for (_, zone, nexus) in parent_blueprint
-                .all_nexus_zones(BlueprintZoneDisposition::is_in_service)
-            {
+            for (_, zone, nexus) in parent_blueprint.in_service_nexus_zones() {
                 if nexus.nexus_generation == active_nexus_gen {
                     active_nexus_zones.insert(zone.id);
                 }
@@ -226,9 +221,7 @@ impl ReconfiguratorSim {
             let active_nexus_gen =
                 state.config().active_nexus_zone_generation();
             let mut not_yet_nexus_zones = BTreeSet::new();
-            for (_, zone) in parent_blueprint
-                .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
-            {
+            for (_, zone) in parent_blueprint.in_service_zones() {
                 match &zone.zone_type {
                     nexus_types::deployment::BlueprintZoneType::Nexus(
                         nexus,
@@ -468,6 +461,7 @@ fn process_command(
         Commands::BlueprintDiffDns(args) => cmd_blueprint_diff_dns(sim, args),
         Commands::BlueprintHistory(args) => cmd_blueprint_history(sim, args),
         Commands::BlueprintSave(args) => cmd_blueprint_save(sim, args),
+        Commands::BlueprintLoad(args) => cmd_blueprint_load(sim, args),
         Commands::Show => cmd_show(sim),
         Commands::Set(args) => cmd_set(sim, args),
         Commands::TufAssemble(args) => cmd_tuf_assemble(sim, args),
@@ -564,6 +558,8 @@ enum Commands {
     BlueprintHistory(BlueprintHistoryArgs),
     /// write one blueprint to a file
     BlueprintSave(BlueprintSaveArgs),
+    /// load one blueprint from a file
+    BlueprintLoad(BlueprintLoadArgs),
 
     /// show system properties
     Show,
@@ -727,8 +723,12 @@ struct SledMupdateSource {
     mupdate_id: Option<MupdateUuid>,
 
     /// simulate an error reading the zone manifest
-    #[clap(long, conflicts_with = "sled-mupdate-valid-source")]
+    #[clap(long, conflicts_with_all = ["sled-mupdate-valid-source", "with_measurement_manifest_error"])]
     with_manifest_error: bool,
+
+    /// simulate an error reading the measurement manifest
+    #[clap(long, conflicts_with = "with_manifest_error")]
+    with_measurement_manifest_error: bool,
 
     /// simulate an error validating zones by this artifact ID name
     ///
@@ -1021,6 +1021,25 @@ enum BlueprintEditCommands {
     /// This initiates a handoff from the current generation of Nexus zones to
     /// the next generation of Nexus zones.
     BumpNexusGeneration,
+    /// make a new blueprint from an existing one without any changes
+    Noop,
+    /// Set a sled's measurements to either `unknown` or `install-dataset`
+    SetMeasurements {
+        /// sled to set the field on
+        sled_id: SledOpt,
+        #[command(subcommand)]
+        command: SledMeasurementTarget,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum SledMeasurementTarget {
+    /// Set the blueprint to unknown measurements
+    Unknown,
+    /// Set the blueprint to install dataset
+    InstallDataset,
+    // Unlike Omicron zones we don't have a need for the
+    // `Artifact` kind for now
 }
 
 #[derive(Debug, Subcommand)]
@@ -1492,6 +1511,12 @@ struct BlueprintSaveArgs {
 }
 
 #[derive(Debug, Args)]
+struct BlueprintLoadArgs {
+    /// input file
+    filename: Utf8PathBuf,
+}
+
+#[derive(Debug, Args)]
 struct BlueprintDiffArgs {
     /// id of the first blueprint, "latest", or "target"
     blueprint1_id: BlueprintIdOpt,
@@ -1527,12 +1552,12 @@ enum SetArgs {
         /// TUF repo containing release artifacts
         filename: Utf8PathBuf,
     },
-    /// planner config
-    PlannerConfig(SetPlannerConfigArgs),
     /// timestamp for ignoring impossible MGS updates
     IgnoreImpossibleMgsUpdatesSince {
         since: SetIgnoreImpossibleMgsUpdatesSinceArgs,
     },
+    /// CockroachDB settings
+    CockroachdbSettings(SetCockroachdbSettingsArgs),
 }
 
 #[derive(Debug, Clone)]
@@ -1553,29 +1578,44 @@ impl FromStr for SetIgnoreImpossibleMgsUpdatesSinceArgs {
 }
 
 #[derive(Debug, Args)]
-struct SetPlannerConfigArgs {
+struct SetCockroachdbSettingsArgs {
     #[clap(flatten)]
-    planner_config: PlannerConfigOpts,
+    opts: CockroachdbSettingsOpts,
 }
 
-// Define the config fields separately so we can use `group(required = true,
-// multiple = true).`
 #[derive(Debug, Clone, Args)]
 #[group(required = true, multiple = true)]
-pub struct PlannerConfigOpts {
-    #[clap(long, action = ArgAction::Set)]
-    add_zones_with_mupdate_override: Option<bool>,
+struct CockroachdbSettingsOpts {
+    /// state fingerprint (a 40-hex-digit hash)
+    #[clap(long)]
+    fingerprint: Option<String>,
+    /// cluster version (e.g. "22.1")
+    #[clap(long)]
+    version: Option<String>,
+    /// cluster.preserve_downgrade_option value (e.g. "22.1", empty string
+    /// means unset)
+    #[clap(long)]
+    preserve_downgrade: Option<String>,
 }
 
-impl PlannerConfigOpts {
+impl CockroachdbSettingsOpts {
     fn update_if_modified(
         &self,
-        current: &PlannerConfig,
-    ) -> Option<PlannerConfig> {
-        let new = PlannerConfig {
-            add_zones_with_mupdate_override: self
-                .add_zones_with_mupdate_override
-                .unwrap_or(current.add_zones_with_mupdate_override),
+        current: &CockroachDbSettings,
+    ) -> Option<CockroachDbSettings> {
+        let new = CockroachDbSettings {
+            state_fingerprint: self
+                .fingerprint
+                .clone()
+                .unwrap_or_else(|| current.state_fingerprint.clone()),
+            version: self
+                .version
+                .clone()
+                .unwrap_or_else(|| current.version.clone()),
+            preserve_downgrade: self
+                .preserve_downgrade
+                .clone()
+                .unwrap_or_else(|| current.preserve_downgrade.clone()),
         };
         (new != *current).then_some(new)
     }
@@ -2091,9 +2131,15 @@ fn cmd_sled_update_install_dataset(
     let mut state = sim.current_state().to_mut();
     let system = state.system_mut();
     let sled_id = args.sled_id.to_sled_id(system.description())?;
-    system
-        .description_mut()
-        .sled_set_zone_manifest(sled_id, description.to_boot_inventory())?;
+    system.description_mut().sled_set_zone_manifest(
+        sled_id,
+        description.to_zone_boot_inventory(),
+    )?;
+
+    system.description_mut().sled_set_measurement_manifest(
+        sled_id,
+        description.to_measurement_boot_inventory(),
+    )?;
 
     sim.commit_and_bump(
         format!(
@@ -2560,12 +2606,16 @@ fn cmd_blueprint_edit(
             .context("failed to construct external networking allocator")?
             .for_new_nexus()
             .context("failed to pick an external IP for Nexus")?;
+            let nexus_config = planning_input
+                .external_service_networking_policy()
+                .operator_nexus_config();
             builder
                 .sled_add_zone_nexus(
                     sled_id,
                     image_source,
                     external_ip,
                     nexus_generation,
+                    &nexus_config,
                 )
                 .context("failed to add Nexus zone")?;
             format!("added Nexus zone to sled {}", sled_id)
@@ -2584,17 +2634,12 @@ fn cmd_blueprint_edit(
         }
         BlueprintEditCommands::BumpNexusGeneration => {
             let current_generation = builder.nexus_generation();
-            let current_max = blueprint
-                .all_nexus_zones(BlueprintZoneDisposition::is_in_service)
-                .fold(
-                    current_generation,
-                    |current_max, (_sled_id, _zone_config, nexus_config)| {
-                        std::cmp::max(
-                            nexus_config.nexus_generation,
-                            current_max,
-                        )
-                    },
-                );
+            let current_max = blueprint.in_service_nexus_zones().fold(
+                current_generation,
+                |current_max, (_sled_id, _zone_config, nexus_config)| {
+                    std::cmp::max(nexus_config.nexus_generation, current_max)
+                },
+            );
             ensure!(
                 current_max > current_generation,
                 "cannot bump blueprint generation (currently \
@@ -2732,6 +2777,22 @@ fn cmd_blueprint_edit(
             builder.pending_mgs_update_delete(baseboard_id);
             format!("deleted configured update for serial {serial}")
         }
+        BlueprintEditCommands::SetMeasurements { sled_id, command } => {
+            let sled_id = sled_id.to_sled_id(system.description())?;
+            builder.sled_set_measurements(
+                sled_id,
+                match command {
+                    SledMeasurementTarget::InstallDataset => {
+                        BlueprintMeasurements::InstallDataset
+                    }
+                    SledMeasurementTarget::Unknown => {
+                        BlueprintMeasurements::Unknown
+                    }
+                },
+            )?;
+            format!("set sled measurements to '{command:?}' {sled_id}")
+        }
+
         BlueprintEditCommands::Debug {
             command: BlueprintEditDebugCommands::RemoveSled { sled },
         } => {
@@ -2747,19 +2808,10 @@ fn cmd_blueprint_edit(
             builder.debug_sled_force_generation_bump(sled_id)?;
             format!("debug: forced sled {sled_id} generation bump")
         }
+        BlueprintEditCommands::Noop => "noop".to_owned(),
     };
 
-    let mut new_blueprint =
-        builder.build(BlueprintSource::ReconfiguratorCliEdit);
-
-    // Normally `builder.build()` would construct the cockroach fingerprint
-    // based on what we read from CRDB and put into the planning input, but
-    // since we don't have a CRDB we had to make something up for our planning
-    // input's CRDB fingerprint. In the absense of a better alternative, we'll
-    // just copy our parent's CRDB fingerprint and carry it forward.
-    new_blueprint
-        .cockroachdb_fingerprint
-        .clone_from(&blueprint.cockroachdb_fingerprint);
+    let new_blueprint = builder.build(BlueprintSource::ReconfiguratorCliEdit);
 
     let rv = format!(
         "blueprint {} created from {}: {}",
@@ -2777,9 +2829,12 @@ fn sled_with_zone(
 ) -> anyhow::Result<SledUuid> {
     let mut parent_sled_id = None;
 
-    for sled_id in builder.sled_ids_with_zones() {
+    for sled_id in builder.current_commissioned_sleds() {
         if builder
-            .current_sled_zones(sled_id, BlueprintZoneDisposition::any)
+            .current_in_service_and_expunged_sled_zones(
+                sled_id,
+                BlueprintExpungedZoneAccessReason::ReconfiguratorCli,
+            )
             .any(|z| z.id == *zone_id)
         {
             parent_sled_id = Some(sled_id);
@@ -3066,6 +3121,28 @@ fn cmd_blueprint_save(
     Ok(Some(format!("saved {} to {:?}", resolved_id, output_path)))
 }
 
+fn cmd_blueprint_load(
+    sim: &mut ReconfiguratorSim,
+    args: BlueprintLoadArgs,
+) -> anyhow::Result<Option<String>> {
+    let filename = args.filename;
+    let blueprint: Blueprint = {
+        let contents = std::fs::read(&filename)
+            .with_context(|| format!("failed to read {filename}"))?;
+        serde_json::from_slice(&contents).with_context(|| {
+            format!("failed to parse {filename} as a blueprint")
+        })?
+    };
+    let blueprint_id = blueprint.id;
+
+    let mut state = sim.current_state().to_mut();
+    let system = state.system_mut();
+    system.add_blueprint(blueprint).context("failed to load blueprint")?;
+    sim.commit_and_bump("reconfigurator-cli blueprint-load".to_owned(), state);
+
+    Ok(Some(format!("loaded blueprint {blueprint_id} from {filename}")))
+}
+
 fn cmd_save(
     sim: &mut ReconfiguratorSim,
     args: SaveArgs,
@@ -3330,6 +3407,13 @@ fn cmd_show(sim: &mut ReconfiguratorSim) -> anyhow::Result<Option<String>> {
         swriteln!(s, "not-yet nexus zones: inferred from generation");
     }
 
+    swriteln!(s, "cockroachdb settings:");
+    swrite!(
+        s,
+        "{}",
+        state.system().description().get_cockroachdb_settings().display()
+    );
+
     swriteln!(s, "planner config:");
     // No need for swriteln! here because .display() adds its own newlines at
     // the end.
@@ -3429,17 +3513,6 @@ fn cmd_set(
             );
             format!("set target release based on {}", filename)
         }
-        SetArgs::PlannerConfig(args) => {
-            let current = state.system_mut().description().get_planner_config();
-            if let Some(new) = args.planner_config.update_if_modified(&current)
-            {
-                state.system_mut().description_mut().set_planner_config(new);
-                let diff = current.diff(&new);
-                format!("planner config updated:\n{}", diff.display())
-            } else {
-                format!("no changes to planner config:\n{}", current.display())
-            }
-        }
         SetArgs::IgnoreImpossibleMgsUpdatesSince { since } => {
             state
                 .system_mut()
@@ -3449,6 +3522,29 @@ fn cmd_set(
                 "ignoring impossible MGS updates since {}",
                 humantime::format_rfc3339_millis(since.0.into())
             )
+        }
+        SetArgs::CockroachdbSettings(args) => {
+            let current = state
+                .system_mut()
+                .description()
+                .get_cockroachdb_settings()
+                .clone();
+            if let Some(new) = args.opts.update_if_modified(&current) {
+                let rv = format!(
+                    "cockroachdb settings updated:\n{}",
+                    current.diff(&new).display()
+                );
+                state
+                    .system_mut()
+                    .description_mut()
+                    .set_cockroachdb_settings(new);
+                rv
+            } else {
+                format!(
+                    "no changes to cockroachdb settings:\n{}",
+                    current.display()
+                )
+            }
         }
     };
 
@@ -3471,10 +3567,18 @@ fn mupdate_source_to_description(
         let description = extract_tuf_repo_description(&sim.log, repo_path)?;
         let mut sim_source = SimTufRepoSource::new(
             description,
+            // We might consider having these be different for testing purposes
+            // but for now having them be the same is fine
+            manifest_source,
             manifest_source,
             format!("from repo at {repo_path}"),
         )?;
         sim_source.simulate_zone_errors(&source.with_zone_error)?;
+        if source.with_measurement_manifest_error {
+            sim_source.simulate_measurement_error(
+                "simulated error with measurement manifest",
+            );
+        }
         Ok(SimTufRepoDescription::new(sim_source))
     } else if source.valid.to_target_release {
         let description = sim
@@ -3494,9 +3598,15 @@ fn mupdate_source_to_description(
                 let mut sim_source = SimTufRepoSource::new(
                     desc.clone(),
                     manifest_source,
+                    manifest_source,
                     "to target release".to_owned(),
                 )?;
                 sim_source.simulate_zone_errors(&source.with_zone_error)?;
+                if source.with_measurement_manifest_error {
+                    sim_source.simulate_measurement_error(
+                        "simulated error with measurement manifest",
+                    );
+                }
                 Ok(SimTufRepoDescription::new(sim_source))
             }
         }

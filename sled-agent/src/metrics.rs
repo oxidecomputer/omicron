@@ -8,12 +8,21 @@ use illumos_utils::running_zone::RunningZone;
 use omicron_common::api::internal::nexus::ProducerEndpoint;
 use omicron_common::api::internal::nexus::ProducerKind;
 use omicron_common::api::internal::shared::SledIdentifiers;
+use omicron_uuid_kinds::GenericUuid;
+use oximeter_instruments::http::HttpService;
+use oximeter_instruments::http::LatencyTracker;
+use oximeter_instruments::kstat;
 use oximeter_instruments::kstat::CollectionDetails;
 use oximeter_instruments::kstat::Error as KstatError;
 use oximeter_instruments::kstat::KstatSampler;
 use oximeter_instruments::kstat::TargetId;
+use oximeter_instruments::kstat::cpu::SledCpu;
+use oximeter_instruments::kstat::cpu::SledCpuTarget;
 use oximeter_instruments::kstat::link::SledDataLink;
 use oximeter_instruments::kstat::link::SledDataLinkTarget;
+use oximeter_instruments::kstat::zone::Zone;
+use oximeter_instruments::kstat::zone::ZoneTarget;
+use oximeter_instruments::zfs::usage::ZfsUsageProducer;
 use oximeter_producer::LogConfig;
 use oximeter_producer::Server as ProducerServer;
 use slog::Logger;
@@ -40,6 +49,29 @@ const METRIC_COLLECTION_INTERVAL: Duration = Duration::from_secs(30);
 // links could lead to quite large requests. Or we can eat the memory cost for
 // now.
 const LINK_SAMPLE_INTERVAL: Duration = Duration::from_secs(10);
+
+/// The maximum number of samples retained for links.
+const N_MAX_LINK_SAMPLES: usize = 512;
+
+const CPU_SAMPLE_INTERVAL: Duration = Duration::from_secs(10);
+
+/// The maximum number of CPU usage samples.
+fn n_max_cpu_samples() -> usize {
+    // Enough for 10 collection intervals before dropping.
+    kstat::cpu::max_cardinality()
+        * samples_per_collection(CPU_SAMPLE_INTERVAL)
+        * 10
+}
+
+const ZONE_SAMPLE_INTERVAL: Duration = Duration::from_secs(10);
+
+/// The maximum number of zone CPU usage samples.
+fn n_max_zone_cpu_samples() -> usize {
+    // Enough for 10 collection intervals before dropping.
+    kstat::zone::max_cardinality()
+        * samples_per_collection(ZONE_SAMPLE_INTERVAL)
+        * 10
+}
 
 /// The interval after which we expire kstat-based collection of transient
 /// links.
@@ -81,8 +113,12 @@ pub enum Error {
 pub enum Message {
     /// Start tracking the named physical link.
     ///
-    /// This is only use on startup, to track the underlays.
+    /// This is only used on startup, to track the underlays.
     TrackPhysical { zone_name: String, name: String },
+    /// Start tracking sled-level stats (CPU, zones).
+    ///
+    /// This is only used on startup.
+    TrackSledStats,
     /// Track the named VNIC.
     TrackVnic { zone_name: String, name: String },
     /// Stop tracking the named VNIC.
@@ -119,9 +155,10 @@ fn get_collection_details(kind: &str) -> CollectionDetails {
         CollectionDetails::duration(
             LINK_SAMPLE_INTERVAL,
             TRANSIENT_LINK_EXPIRATION_INTERVAL,
+            N_MAX_LINK_SAMPLES,
         )
     } else {
-        CollectionDetails::never(LINK_SAMPLE_INTERVAL)
+        CollectionDetails::never(LINK_SAMPLE_INTERVAL, N_MAX_LINK_SAMPLES)
     }
 }
 
@@ -129,11 +166,13 @@ fn get_collection_details(kind: &str) -> CollectionDetails {
 async fn metrics_task(
     sled_identifiers: SledIdentifiers,
     kstat_sampler: KstatSampler,
-    _server: ProducerServer,
+    server: ProducerServer,
     log: Logger,
     mut rx: mpsc::Receiver<Message>,
 ) {
     let mut tracked_links: TrackedLinks = HashMap::new();
+    let mut tracked_zone: Option<Zone> = None;
+    let mut tracked_sled_cpu: Option<SledCpu> = None;
     let mut sled_time_synced: bool = false;
 
     // Main polling loop, waiting for messages from other pieces of the code to
@@ -160,6 +199,24 @@ async fn metrics_task(
                 let link = SledDataLink::new(target, sled_time_synced);
                 add_datalink(&log, &mut tracked_links, &kstat_sampler, link)
                     .await;
+            }
+            Message::TrackSledStats => {
+                add_zone(
+                    &log,
+                    &sled_identifiers,
+                    &mut tracked_zone,
+                    &kstat_sampler,
+                    sled_time_synced,
+                )
+                .await;
+                add_sled_cpu(
+                    &log,
+                    &sled_identifiers,
+                    &mut tracked_sled_cpu,
+                    &kstat_sampler,
+                    sled_time_synced,
+                )
+                .await;
             }
             Message::TrackVnic { zone_name, name } => {
                 let target = SledDataLinkTarget {
@@ -211,7 +268,17 @@ async fn metrics_task(
                         &mut tracked_links,
                         &kstat_sampler,
                     )
-                    .await
+                    .await;
+                    sync_zone(&log, &mut tracked_zone, &kstat_sampler).await;
+                    sync_sled_cpu(&log, &mut tracked_sled_cpu, &kstat_sampler)
+                        .await;
+
+                    let zfs_producer =
+                        ZfsUsageProducer::new(log.clone(), &sled_identifiers);
+                    server
+                        .registry()
+                        .register_producer(zfs_producer.clone())
+                        .expect("actually infallible");
                 }
             }
         }
@@ -339,6 +406,146 @@ fn is_transient_link(kind: &str) -> bool {
     kind == LinkKind::VNIC || kind == LinkKind::OPTE
 }
 
+/// Start tracking zone metrics for the sled.
+async fn add_zone(
+    log: &Logger,
+    sled_identifiers: &SledIdentifiers,
+    tracked_zone: &mut Option<Zone>,
+    kstat_sampler: &KstatSampler,
+    time_synced: bool,
+) {
+    if tracked_zone.is_some() {
+        debug!(log, "zone metrics already being tracked");
+        return;
+    }
+
+    let target = ZoneTarget {
+        rack_id: sled_identifiers.rack_id,
+        sled_id: sled_identifiers.sled_id,
+        sled_model: sled_identifiers.model.clone().into(),
+        sled_revision: sled_identifiers.revision,
+        sled_serial: sled_identifiers.serial.clone().into(),
+    };
+    let zone = Zone::new(target, time_synced);
+
+    // We have one target per sled that samples all zones, so there's no
+    // need to expire it.
+    let details = CollectionDetails::never(
+        ZONE_SAMPLE_INTERVAL,
+        n_max_zone_cpu_samples(),
+    );
+    match kstat_sampler.add_target(zone.clone(), details).await {
+        Ok(_id) => {
+            debug!(log, "added zone metrics to kstat sampler");
+            *tracked_zone = Some(zone);
+        }
+        Err(err) => {
+            error!(
+                log,
+                "failed to add zone metrics to kstat sampler";
+                "error" => ?err,
+            );
+        }
+    }
+}
+
+/// Update zone tracking when the sled is synced with NTP.
+async fn sync_zone(
+    log: &Logger,
+    tracked_zone: &mut Option<Zone>,
+    kstat_sampler: &KstatSampler,
+) {
+    let Some(zone) = tracked_zone.as_mut() else {
+        return;
+    };
+
+    zone.time_synced = true;
+    let details = CollectionDetails::never(
+        ZONE_SAMPLE_INTERVAL,
+        n_max_zone_cpu_samples(),
+    );
+    match kstat_sampler.update_target(zone.clone(), details).await {
+        Ok(_) => {
+            debug!(log, "updated zone metrics after time sync");
+        }
+        Err(err) => {
+            error!(
+                log,
+                "failed to update zone metrics after time sync";
+                "error" => ?err,
+            );
+        }
+    }
+}
+
+/// Start tracking sled CPU metrics for the sled.
+async fn add_sled_cpu(
+    log: &Logger,
+    sled_identifiers: &SledIdentifiers,
+    tracked_cpu: &mut Option<SledCpu>,
+    kstat_sampler: &KstatSampler,
+    time_synced: bool,
+) {
+    if tracked_cpu.is_some() {
+        debug!(log, "CPU metrics already being tracked");
+        return;
+    }
+
+    let target = SledCpuTarget {
+        rack_id: sled_identifiers.rack_id,
+        sled_id: sled_identifiers.sled_id,
+        sled_model: sled_identifiers.model.clone().into(),
+        sled_revision: sled_identifiers.revision,
+        sled_serial: sled_identifiers.serial.clone().into(),
+    };
+    let cpu = SledCpu::new(target, time_synced);
+
+    // We have one target per sled that samples all CPUs, so there's no
+    // need to expire it.
+    let details =
+        CollectionDetails::never(CPU_SAMPLE_INTERVAL, n_max_cpu_samples());
+    match kstat_sampler.add_target(cpu.clone(), details).await {
+        Ok(_id) => {
+            debug!(log, "added CPU metrics to kstat sampler");
+            *tracked_cpu = Some(cpu);
+        }
+        Err(err) => {
+            error!(
+                log,
+                "failed to add CPU metrics to kstat sampler";
+                "error" => ?err,
+            );
+        }
+    }
+}
+
+/// Update sled CPU tracking when the sled is synced with NTP.
+async fn sync_sled_cpu(
+    log: &Logger,
+    tracked_cpu: &mut Option<SledCpu>,
+    kstat_sampler: &KstatSampler,
+) {
+    let Some(cpu) = tracked_cpu.as_mut() else {
+        return;
+    };
+
+    cpu.time_synced = true;
+    let details =
+        CollectionDetails::never(CPU_SAMPLE_INTERVAL, n_max_cpu_samples());
+    match kstat_sampler.update_target(cpu.clone(), details).await {
+        Ok(_) => {
+            debug!(log, "updated sled CPU metrics after time sync");
+        }
+        Err(err) => {
+            error!(
+                log,
+                "failed to update sled CPU metrics after time sync";
+                "error" => ?err,
+            );
+        }
+    }
+}
+
 /// Manages sled-based metrics reported to Oximeter.
 ///
 /// This object is used to sample kernel statistics and produce other Oximeter
@@ -352,6 +559,8 @@ pub struct MetricsManager {
     tx: mpsc::Sender<Message>,
     /// The background task itself.
     _task: tokio::task::JoinHandle<()>,
+    /// HTTP request latency tracker.
+    pub latencies: LatencyTracker,
 }
 
 impl MetricsManager {
@@ -363,10 +572,29 @@ impl MetricsManager {
     ) -> Result<Self, Error> {
         let sampler = KstatSampler::new(log).map_err(Error::Kstat)?;
         let server = start_producer_server(&log, identifiers.sled_id, address)?;
+
+        let http_target = HttpService {
+            name: "sled-agent".into(),
+            id: identifiers.sled_id.into_untyped_uuid(),
+        };
+        const LATENCY_START_POWER: u16 = 3;
+        const LATENCY_END_POWER: u16 = 12;
+        let http_tracker = LatencyTracker::with_log_linear_bins(
+            http_target,
+            LATENCY_START_POWER,
+            LATENCY_END_POWER,
+        )
+        .unwrap();
+
         server
             .registry()
             .register_producer(sampler.clone())
             .expect("actually infallible");
+        server
+            .registry()
+            .register_producer(http_tracker.clone())
+            .expect("actually infallible");
+
         let (tx, rx) = mpsc::channel(QUEUE_SIZE);
         let task_log = log.new(o!("component" => "metrics-task"));
         let _task = tokio::task::spawn(metrics_task(
@@ -376,7 +604,7 @@ impl MetricsManager {
             task_log,
             rx,
         ));
-        Ok(Self { tx, _task })
+        Ok(Self { tx, _task, latencies: http_tracker })
     }
 
     /// Return a queue that can be used to send requests to the metrics task.
@@ -418,6 +646,16 @@ impl MetricsRequestQueue {
                 zone_name: zone_name.into(),
                 name: name.into(),
             })
+            .map_err(|e| Error::SendFailed(e))
+    }
+
+    /// Ask the task to start tracking sled-level stats (CPU, zones).
+    ///
+    /// This is non-blocking, and returns an error if the task is currently
+    /// unavailable.
+    pub fn track_sled_stats(&self) -> Result<(), Error> {
+        self.0
+            .try_send(Message::TrackSledStats)
             .map_err(|e| Error::SendFailed(e))
     }
 
@@ -579,4 +817,34 @@ fn start_producer_server(
         log: LogConfig::Logger(log),
     };
     ProducerServer::start(&config).map_err(Error::ProducerServer)
+}
+
+// Compute the number of samples expected per collection interval,
+// per-timeseries.
+//
+// # Panics
+//
+// This panics if the sample interval is more than 10k times smaller than the
+// metric collection interval. That should be enough for anybody...
+fn samples_per_collection(sample_interval: Duration) -> usize {
+    let collection = METRIC_COLLECTION_INTERVAL.as_secs_f64();
+    let sample = sample_interval.as_secs_f64();
+    let ratio = (collection / sample).ceil();
+    assert!(ratio > 0.0);
+    assert!(
+        ratio <= 10000.0,
+        "Sample interval is too small to appropriately buffer"
+    );
+    ratio as usize
+}
+
+#[cfg(test)]
+#[test]
+fn test_samples_per_collection() {
+    assert_eq!(samples_per_collection(CPU_SAMPLE_INTERVAL), 3);
+    assert_eq!(samples_per_collection(ZONE_SAMPLE_INTERVAL), 3);
+    assert_eq!(samples_per_collection(METRIC_COLLECTION_INTERVAL), 1);
+    // Edge case, but if we're generating samples less often than each
+    // collection interval, just pin that at 1.
+    assert_eq!(samples_per_collection(METRIC_COLLECTION_INTERVAL * 2), 1);
 }

@@ -71,6 +71,7 @@ nexus-db-model.workspace = true
 nexus-db-lookup.workspace = true
 nexus-db-schema.workspace = true
 nexus-types.workspace = true
+nexus-types-versions.workspace = true
 sled-agent-types.workspace = true
 sled-hardware-types.workspace = true
 trust-quorum-types.workspace = true
@@ -83,6 +84,10 @@ omicron-workspace-hack.workspace = true
 
 # only enabled during tests or via the `testing` feature
 omicron-test-utils = { workspace = true, optional = true }
+
+[target.'cfg(target_os = "illumos")'.dependencies]
+# See omicron-rpaths for more about the "fmd-adm-sys" dependency.
+fmd-adm-sys.workspace = true
 
 [features]
 # Enable to export `TestDatabase`
@@ -102,8 +107,9 @@ itertools.workspace = true
 nexus-inventory.workspace = true
 nexus-reconfigurator-planning.workspace = true
 nexus-test-utils.workspace = true
+once_cell.workspace = true
 omicron-sled-agent.workspace = true
-omicron-test-utils = { workspace = true, features = ["seed-gen"] }
+omicron-test-utils.workspace = true
 openapiv3.workspace = true
 oso.workspace = true
 pem.workspace = true

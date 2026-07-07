@@ -4,61 +4,50 @@
 
 //! Support for user-provided RSS configuration options.
 
-use crate::bootstrap_addrs::BootstrapPeers;
+use crate::RssOrMultirackJoinConfigCommon;
+use crate::bgp_auth_keys::BgpAuthKeys;
+use crate::bootstrap_addrs::BootstrapPeersFromDdm;
+use crate::context::CommonConfigContainer;
 use anyhow::Context;
 use anyhow::Result;
 use anyhow::anyhow;
 use anyhow::bail;
-use bootstrap_agent_client::types::BootstrapAddressDiscovery;
-use bootstrap_agent_client::types::Certificate;
-use bootstrap_agent_client::types::Name;
-use bootstrap_agent_client::types::PortConfigV2 as BaPortConfigV2;
-use bootstrap_agent_client::types::RackInitializeRequest;
-use bootstrap_agent_client::types::RecoverySiloConfig;
-use bootstrap_agent_client::types::UserId;
+use bootstrap_agent_lockstep_client::types::BootstrapAddressDiscovery;
+use bootstrap_agent_lockstep_client::types::Certificate;
+use bootstrap_agent_lockstep_client::types::Name;
+use bootstrap_agent_lockstep_client::types::RackInitializeRequest;
+use bootstrap_agent_lockstep_client::types::RecoverySiloConfig;
+use bootstrap_agent_lockstep_client::types::UserId;
 use display_error_chain::DisplayErrorChain;
 use omicron_certificates::CertificateError;
 use omicron_common::address;
+use omicron_common::address::IpRange;
 use omicron_common::address::Ipv4Range;
-use omicron_common::address::Ipv6Subnet;
-use omicron_common::address::RACK_PREFIX;
+use omicron_common::address::Ipv6Range;
 use omicron_common::api::external::AllowedSourceIps;
-use omicron_common::api::external::SwitchLocation;
+use oxnet::Ipv6Net;
+use sled_agent_types::early_networking::PortConfig;
+use sled_agent_types::early_networking::RouterLifetimeConfig;
+use sled_agent_types::early_networking::RouterPeerType;
+use sled_agent_types::early_networking::SwitchSlot;
+use sled_agent_types::early_networking::UplinkAddress;
+use sled_agent_types::early_networking::UplinkPorts;
 use sled_hardware_types::Baseboard;
-use slog::debug;
 use slog::warn;
 use std::collections::BTreeMap;
-use std::collections::BTreeSet;
-use std::collections::btree_map;
-use std::mem;
 use std::net::IpAddr;
 use std::net::Ipv6Addr;
-use std::sync::LazyLock;
-use thiserror::Error;
 use wicket_common::inventory::MgsV1Inventory;
-use wicket_common::inventory::SpType;
 use wicket_common::rack_setup::BgpAuthKey;
-use wicket_common::rack_setup::BgpAuthKeyId;
-use wicket_common::rack_setup::BgpAuthKeyStatus;
-use wicket_common::rack_setup::BootstrapSledDescription;
 use wicket_common::rack_setup::CurrentRssUserConfigInsensitive;
-use wicket_common::rack_setup::DisplaySlice;
 use wicket_common::rack_setup::GetBgpAuthKeyInfoResponse;
+use wicket_common::rack_setup::ManualPortConfig;
 use wicket_common::rack_setup::PutRssUserConfigInsensitive;
-use wicket_common::rack_setup::UserSpecifiedPortConfig;
 use wicket_common::rack_setup::UserSpecifiedRackNetworkConfig;
+use wicket_common::rack_setup::UserSpecifiedRouterPeerAddr;
 use wicketd_api::CertificateUploadResponse;
 use wicketd_api::CurrentRssUserConfig;
 use wicketd_api::CurrentRssUserConfigSensitive;
-use wicketd_api::SetBgpAuthKeyStatus;
-
-// TODO-correctness For now, we always use the same rack subnet when running
-// RSS. When we get to multirack, this will be wrong, but there are many other
-// RSS-related things that need to change then too.
-static RACK_SUBNET: LazyLock<Ipv6Subnet<RACK_PREFIX>> = LazyLock::new(|| {
-    let ip = Ipv6Addr::new(0xfd00, 0x1122, 0x3344, 0x0100, 0, 0, 0, 0);
-    Ipv6Subnet::new(ip)
-});
 
 const RECOVERY_SILO_NAME: &str = "recovery";
 const RECOVERY_SILO_USERNAME: &str = "recovery";
@@ -73,9 +62,7 @@ struct PartialCertificate {
 /// the user to fill it in piecemeal.
 #[derive(Default)]
 pub(crate) struct CurrentRssConfig {
-    inventory: BTreeSet<BootstrapSledDescription>,
-
-    bootstrap_sleds: BTreeSet<BootstrapSledDescription>,
+    pub common: RssOrMultirackJoinConfigCommon,
     ntp_servers: Vec<String>,
     dns_servers: Vec<IpAddr>,
     internal_services_ip_pool_ranges: Vec<address::IpRange>,
@@ -84,12 +71,8 @@ pub(crate) struct CurrentRssConfig {
     external_certificates: Vec<Certificate>,
     recovery_silo_password_hash: Option<omicron_passwords::NewPasswordHash>,
     rack_network_config: Option<UserSpecifiedRackNetworkConfig>,
-    // BGP auth keys are identified by the key ID. It is an invariant that any
-    // key IDs defined in `rack_network_config` exist here.
-    //
-    // Currently these are always TCP-MD5 keys,
-    bgp_auth_keys: BTreeMap<BgpAuthKeyId, Option<BgpAuthKey>>,
     allowed_source_ips: Option<AllowedSourceIps>,
+    external_jumbo_frames_opt_in_enabled: bool,
     // External certificates are uploaded in two separate actions (cert then
     // key, or vice versa). Here we store a partial certificate; once we have
     // both parts, we validate it and promote it to be a member of
@@ -112,61 +95,9 @@ impl CurrentRssConfig {
         self.rack_network_config.as_ref()
     }
 
-    pub(crate) fn update_with_inventory_and_bootstrap_peers(
-        &mut self,
-        inventory: &MgsV1Inventory,
-        bootstrap_peers: &BootstrapPeers,
-        log: &slog::Logger,
-    ) {
-        let bootstrap_sleds = bootstrap_peers.sleds();
-
-        self.inventory = inventory
-            .sps
-            .iter()
-            .filter_map(|sp| {
-                if sp.id.type_ != SpType::Sled {
-                    return None;
-                }
-
-                let Some(state) = sp.state.as_ref() else {
-                    debug!(
-                        log,
-                        "in update_with_inventory_and_bootstrap_peers, \
-                         filtering out SP with no state";
-                        "sp" => ?sp,
-                    );
-                    return None;
-                };
-                let baseboard = Baseboard::new_gimlet(
-                    state.serial_number.clone(),
-                    state.model.clone(),
-                    state.revision,
-                );
-                let bootstrap_ip = bootstrap_sleds.get(&baseboard).copied();
-                Some(BootstrapSledDescription {
-                    id: sp.id,
-                    baseboard,
-                    bootstrap_ip,
-                })
-            })
-            .collect();
-
-        // If the user has already uploaded a config specifying bootstrap_sleds,
-        // also update our knowledge of those sleds' bootstrap addresses.
-        let our_bootstrap_sleds = mem::take(&mut self.bootstrap_sleds);
-        self.bootstrap_sleds = our_bootstrap_sleds
-            .into_iter()
-            .map(|mut sled_desc| {
-                sled_desc.bootstrap_ip =
-                    bootstrap_sleds.get(&sled_desc.baseboard).copied();
-                sled_desc
-            })
-            .collect();
-    }
-
     pub(crate) fn start_rss_request(
         &mut self,
-        bootstrap_peers: &BootstrapPeers,
+        bootstrap_peers: &BootstrapPeersFromDdm,
         log: &slog::Logger,
     ) -> Result<RackInitializeRequest> {
         // Basic "client-side" checks.
@@ -174,7 +105,7 @@ impl CurrentRssConfig {
         // TODO: Instead, we should collect a list of failed checks that we can
         // send down to the client, and that the client can then display as
         // action items.
-        if self.bootstrap_sleds.is_empty() {
+        if self.common.bootstrap_sleds.is_empty() {
             bail!("bootstrap_sleds is empty (have you uploaded a config?)");
         }
         if self.ntp_servers.is_empty() {
@@ -228,12 +159,12 @@ impl CurrentRssConfig {
         };
         let rack_network_config = validate_rack_network_config(
             rack_network_config,
-            &self.bgp_auth_keys,
+            &self.common.bgp_auth_keys,
         )?;
 
         let known_bootstrap_sleds = bootstrap_peers.sleds();
         let mut bootstrap_ips = Vec::new();
-        for sled in &self.bootstrap_sleds {
+        for sled in &self.common.bootstrap_sleds {
             let Some(ip) = known_bootstrap_sleds.get(&sled.baseboard).copied()
             else {
                 bail!(
@@ -251,35 +182,36 @@ impl CurrentRssConfig {
         // a small rack cluster that does not support trust quorum.
         // https://github.com/oxidecomputer/omicron/issues/3690
         const TRUST_QUORUM_MIN_SIZE: usize = 3;
-        let trust_quorum_peers: Option<
-            Vec<bootstrap_agent_client::types::Baseboard>,
-        > = if self.bootstrap_sleds.len() >= TRUST_QUORUM_MIN_SIZE {
-            Some(
-                self.bootstrap_sleds
-                    .iter()
-                    .map(|sled| sled.baseboard.clone().into())
-                    .collect(),
-            )
-        } else {
-            warn!(
-                log,
-                "Trust quorum disabled: requires at least {} sleds",
-                TRUST_QUORUM_MIN_SIZE
-            );
-            None
-        };
+        let trust_quorum_peers: Option<Vec<Baseboard>> =
+            if self.common.bootstrap_sleds.len() >= TRUST_QUORUM_MIN_SIZE {
+                Some(
+                    self.common
+                        .bootstrap_sleds
+                        .iter()
+                        .map(|sled| sled.baseboard.clone())
+                        .collect(),
+                )
+            } else {
+                warn!(
+                    log,
+                    "Trust quorum disabled: requires at least {} sleds",
+                    TRUST_QUORUM_MIN_SIZE
+                );
+                None
+            };
 
         // Convert between internal and progenitor types.
-        let user_password_hash = bootstrap_agent_client::types::NewPasswordHash(
-            recovery_silo_password_hash.to_string(),
-        );
+        let user_password_hash =
+            bootstrap_agent_lockstep_client::types::NewPasswordHash(
+                recovery_silo_password_hash.to_string(),
+            );
         let internal_services_ip_pool_ranges = self
             .internal_services_ip_pool_ranges
             .iter()
             .map(|pool| {
-                use bootstrap_agent_client::types::IpRange;
-                use bootstrap_agent_client::types::Ipv4Range;
-                use bootstrap_agent_client::types::Ipv6Range;
+                use bootstrap_agent_lockstep_client::types::IpRange;
+                use bootstrap_agent_lockstep_client::types::Ipv4Range;
+                use bootstrap_agent_lockstep_client::types::Ipv6Range;
                 match pool {
                     address::IpRange::V4(range) => IpRange::V4(Ipv4Range {
                         first: range.first,
@@ -314,6 +246,8 @@ impl CurrentRssConfig {
                 .allowed_source_ips
                 .clone()
                 .unwrap_or(AllowedSourceIps::Any),
+            external_jumbo_frames_opt_in_enabled: self
+                .external_jumbo_frames_opt_in_enabled,
         };
 
         Ok(request)
@@ -394,171 +328,40 @@ impl CurrentRssConfig {
         Ok(CertificateUploadResponse::CertKeyAccepted)
     }
 
-    pub(crate) fn check_bgp_auth_keys_valid<'a>(
-        &self,
-        check_valid: impl IntoIterator<Item = &'a BgpAuthKeyId>,
-    ) -> Result<(), BgpAuthKeyError> {
-        if self.rack_network_config.is_none() {
-            return Err(BgpAuthKeyError::RackNetworkConfigNotSet);
-        }
-
-        let not_found: Vec<_> = check_valid
-            .into_iter()
-            .filter(|key_id| !self.bgp_auth_keys.contains_key(key_id))
-            .cloned()
-            .collect();
-        if !not_found.is_empty() {
-            return Err(self.make_bgp_key_ids_not_found_error(not_found));
-        }
-
-        Ok(())
-    }
-
-    pub(crate) fn get_bgp_auth_key_data(
-        &self,
-    ) -> BTreeMap<BgpAuthKeyId, BgpAuthKeyStatus> {
-        self.bgp_auth_keys
-            .iter()
-            .map(|(key_id, key)| {
-                let status = key
-                    .as_ref()
-                    .map(|key| BgpAuthKeyStatus::Set { info: key.info() })
-                    .unwrap_or(BgpAuthKeyStatus::Unset);
-                (key_id.clone(), status)
-            })
-            .collect()
-    }
-
-    pub(crate) fn set_bgp_auth_key(
-        &mut self,
-        key_id: BgpAuthKeyId,
-        key: BgpAuthKey,
-    ) -> Result<SetBgpAuthKeyStatus, BgpAuthKeyError> {
-        if self.rack_network_config.is_none() {
-            return Err(BgpAuthKeyError::RackNetworkConfigNotSet);
-        }
-
-        match self.bgp_auth_keys.entry(key_id.clone()) {
-            btree_map::Entry::Occupied(mut entry) => {
-                match entry.get() {
-                    Some(old_key) if old_key == &key => {
-                        Ok(SetBgpAuthKeyStatus::Unchanged)
-                    }
-                    Some(_) => {
-                        entry.insert(Some(key));
-                        Ok(SetBgpAuthKeyStatus::Replaced)
-                    }
-                    None => {
-                        // This is a new key; we don't have it yet.
-                        entry.insert(Some(key));
-                        Ok(SetBgpAuthKeyStatus::Added)
-                    }
-                }
-            }
-            btree_map::Entry::Vacant(_) => {
-                Err(self.make_bgp_key_ids_not_found_error(vec![key_id]))
-            }
-        }
-    }
-
-    #[must_use]
-    fn make_bgp_key_ids_not_found_error(
-        &self,
-        key_ids: Vec<BgpAuthKeyId>,
-    ) -> BgpAuthKeyError {
-        let valid_key_ids = self.bgp_auth_keys.keys().cloned().collect();
-        BgpAuthKeyError::KeyIdsNotFound {
-            not_found: key_ids,
-            valid_keys: valid_key_ids,
-        }
-    }
-
     pub(crate) fn update(
         &mut self,
-        value: PutRssUserConfigInsensitive,
+        config: PutRssUserConfigInsensitive,
         our_baseboard: Option<&Baseboard>,
+        inventory: &MgsV1Inventory,
+        ddm_discovered_sleds: &BTreeMap<Baseboard, Ipv6Addr>,
+        log: &slog::Logger,
     ) -> Result<(), String> {
-        // Updating can only fail in two ways:
-        //
-        // 1. If we have a real gimlet baseboard, that baseboard must be present
-        //    in our inventory and in `value`'s list of sleds: we cannot exclude
-        //    ourself from the rack.
-        // 2. `value`'s bootstrap sleds includes sleds that aren't in our
-        //    `inventory`.
-
-        // First, confirm we have ourself in the inventory _and_ the user didn't
-        // remove us from the list.
-        if let Some(our_baseboard @ Baseboard::Gimlet { .. }) = our_baseboard {
-            let our_slot = self
-                .inventory
-                .iter()
-                .find_map(|sled| {
-                    if sled.baseboard == *our_baseboard {
-                        Some(sled.id.slot)
-                    } else {
-                        None
-                    }
-                })
-                .ok_or_else(|| {
-                    format!(
-                        "Inventory is missing the scrimlet where wicketd is \
-                         running ({our_baseboard:?})",
-                    )
-                })?;
-            if !value.bootstrap_sleds.contains(&our_slot) {
-                return Err(format!(
-                    "Cannot remove the scrimlet where wicketd is running \
-                     (sled {our_slot}: {our_baseboard:?}) \
-                     from bootstrap_sleds"
-                ));
-            }
-        }
-
-        // Next, confirm the user's list only consists of sleds in our
-        // inventory.
-        let mut bootstrap_sleds = BTreeSet::new();
-        for slot in value.bootstrap_sleds {
-            let sled =
-                self.inventory
-                    .iter()
-                    .find(|sled| sled.id.slot == slot)
-                    .ok_or_else(|| {
-                        format!(
-                            "cannot add unknown sled {slot} to bootstrap_sleds",
-                        )
-                    })?;
-            bootstrap_sleds.insert(sled.clone());
-        }
-
-        self.bootstrap_sleds = bootstrap_sleds;
-        self.ntp_servers = value.ntp_servers;
-        self.dns_servers = value.dns_servers;
+        self.common.update(
+            &config.bootstrap_sleds,
+            config.rack_network_config.get_bgp_auth_key_ids(),
+            our_baseboard,
+            inventory,
+            ddm_discovered_sleds,
+            log,
+        )?;
+        self.ntp_servers = config.ntp_servers;
+        self.dns_servers = config.dns_servers;
         self.internal_services_ip_pool_ranges =
-            value.internal_services_ip_pool_ranges;
-        self.external_dns_ips = value.external_dns_ips;
-        self.external_dns_zone_name = value.external_dns_zone_name;
-        self.allowed_source_ips = Some(value.allowed_source_ips);
-
-        // Build a new auth key map, dropping all old keys from the map.
-        let new_bgp_auth_key_ids =
-            value.rack_network_config.get_bgp_auth_key_ids();
-        let mut old_bgp_auth_keys = std::mem::take(&mut self.bgp_auth_keys);
-        let new_bgp_auth_keys = new_bgp_auth_key_ids
-            .into_iter()
-            .map(|key_id| {
-                (
-                    key_id.clone(),
-                    // For each new key, either grab the corresponding old key,
-                    // or initialize to None.
-                    old_bgp_auth_keys.remove(&key_id).unwrap_or_else(|| None),
-                )
-            })
-            .collect();
-        self.bgp_auth_keys = new_bgp_auth_keys;
-
-        self.rack_network_config = Some(value.rack_network_config);
+            config.internal_services_ip_pool_ranges;
+        self.external_dns_ips = config.external_dns_ips;
+        self.external_dns_zone_name = config.external_dns_zone_name;
+        self.allowed_source_ips = Some(config.allowed_source_ips);
+        self.rack_network_config = Some(config.rack_network_config);
+        self.external_jumbo_frames_opt_in_enabled =
+            config.external_jumbo_frames_opt_in_enabled;
 
         Ok(())
+    }
+}
+
+impl CommonConfigContainer for CurrentRssConfig {
+    fn common_mut(&mut self) -> &mut RssOrMultirackJoinConfigCommon {
+        &mut self.common
     }
 }
 
@@ -566,10 +369,10 @@ impl From<&'_ CurrentRssConfig> for CurrentRssUserConfig {
     fn from(rss: &CurrentRssConfig) -> Self {
         // If the user has selected bootstrap sleds, use those; otherwise,
         // default to the full inventory list.
-        let bootstrap_sleds = if !rss.bootstrap_sleds.is_empty() {
-            rss.bootstrap_sleds.clone()
+        let bootstrap_sleds = if !rss.common.bootstrap_sleds.is_empty() {
+            rss.common.bootstrap_sleds.clone()
         } else {
-            rss.inventory.clone()
+            rss.common.inventory.sleds.clone()
         };
 
         Self {
@@ -579,7 +382,7 @@ impl From<&'_ CurrentRssConfig> for CurrentRssUserConfig {
                     .recovery_silo_password_hash
                     .is_some(),
                 bgp_auth_keys: GetBgpAuthKeyInfoResponse {
-                    data: rss.get_bgp_auth_key_data(),
+                    data: rss.common.get_bgp_auth_key_data(),
                 },
             },
             insensitive: CurrentRssUserConfigInsensitive {
@@ -593,84 +396,110 @@ impl From<&'_ CurrentRssConfig> for CurrentRssUserConfig {
                 external_dns_zone_name: rss.external_dns_zone_name.clone(),
                 rack_network_config: rss.rack_network_config.clone(),
                 allowed_source_ips: rss.allowed_source_ips.clone(),
+                external_jumbo_frames_opt_in_enabled: rss
+                    .external_jumbo_frames_opt_in_enabled,
             },
         }
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Error)]
-pub(crate) enum BgpAuthKeyError {
-    #[error(
-        "rack network config not set (upload the config before setting a key)"
-    )]
-    RackNetworkConfigNotSet,
-
-    #[error(
-        "key IDs not found: {} (valid key IDs: {})",
-        DisplaySlice(.not_found),
-        DisplaySlice(.valid_keys),
-    )]
-    KeyIdsNotFound {
-        not_found: Vec<BgpAuthKeyId>,
-        valid_keys: Vec<BgpAuthKeyId>,
-    },
-}
-
 fn validate_rack_network_config(
     config: &UserSpecifiedRackNetworkConfig,
-    bgp_auth_keys: &BTreeMap<BgpAuthKeyId, Option<BgpAuthKey>>,
-) -> Result<bootstrap_agent_client::types::RackNetworkConfigV2> {
-    use bootstrap_agent_client::types::BgpConfig as BaBgpConfig;
+    bgp_auth_keys: &BgpAuthKeys,
+) -> Result<bootstrap_agent_lockstep_client::types::RackNetworkConfig> {
+    use bootstrap_agent_lockstep_client::types::BgpConfig as BaBgpConfig;
+    use bootstrap_agent_lockstep_client::types::MaxPathConfig as BaMaxPathConfig;
 
     // Ensure that there is at least one uplink
     if !config.has_any_uplinks() {
         return Err(anyhow!("Must have at least one port configured"));
     }
 
-    // Make sure `infra_ip_first`..`infra_ip_last` is a well-defined range...
-    let infra_ip_range =
-        Ipv4Range::new(config.infra_ip_first, config.infra_ip_last).map_err(
-            |s: String| {
+    // Make sure `infra_ip_first`..`infra_ip_last` is a well-defined range.
+    let infra_ip_range = match (config.infra_ip_first, config.infra_ip_last) {
+        (IpAddr::V4(first), IpAddr::V4(last)) => Ipv4Range::new(first, last)
+            .map_err(|s: String| {
                 anyhow!("invalid `infra_ip_first`, `infra_ip_last` range: {s}")
-            },
-        )?;
+            })
+            .map(|v| IpRange::V4(v)),
+        (IpAddr::V6(first), IpAddr::V6(last)) => Ipv6Range::new(first, last)
+            .map_err(|s: String| {
+                anyhow!("invalid `infra_ip_first`, `infra_ip_last` range: {s}")
+            })
+            .map(|v| IpRange::V6(v)),
+        _ => Err(anyhow!(
+            "`infra_ip_first` and `infra_ip_last` must be of the same type"
+        )),
+    }?;
 
-    // TODO this implies a single contiguous range for port IPs which is over
-    // constraining
-    // iterate through each port config
     for (_, _, port_config) in config.iter_uplinks() {
+        // Check that `infra_ip_{first...last}` contains every `uplink_ip`.
+        //
+        // TODO this implies a single contiguous range for port IPs which is
+        // over constraining
         for addr in &port_config.addresses {
-            // ... and check that it contains `uplink_ip`.
-            if addr.addr() < infra_ip_range.first
-                || addr.addr() > infra_ip_range.last
+            let addr: IpAddr = match addr.address {
+                UplinkAddress::AddrConf => continue,
+                UplinkAddress::Static { ip_net } => ip_net.addr(),
+            };
+            if addr < infra_ip_range.first_address()
+                || addr > infra_ip_range.last_address()
             {
                 bail!(
-                    "`uplink_cidr`'s IP address must be in the range defined by \
-                `infra_ip_first` and `infra_ip_last`"
+                    "`uplink_cidr` IP address {addr} is not covered by the \
+                     range defined by `infra_ip_first` ({}) and \
+                     `infra_ip_last` ({})",
+                    infra_ip_range.first_address(),
+                    infra_ip_range.last_address(),
                 );
+            }
+        }
+
+        // Check that router_lifetime is only specified for unnumbered peers
+        for peer in &port_config.bgp_peers {
+            match peer.addr {
+                UserSpecifiedRouterPeerAddr::Unnumbered => (),
+                UserSpecifiedRouterPeerAddr::Numbered(ip) => {
+                    if peer.router_lifetime != RouterLifetimeConfig::default() {
+                        bail!(
+                            "numbered BGP peer {ip} specifies a \
+                             router_lifetime, but router_lifetime is only \
+                             supported for unnumbered BGP peers"
+                        );
+                    }
+                }
             }
         }
     }
 
     // Check that all auth keys are present.
-    for (key_id, key) in bgp_auth_keys {
+    for (key_id, key) in bgp_auth_keys.iter() {
         if key.is_none() {
             bail!("No BGP MD5 auth key provided for key ID {key_id}");
         }
     }
 
+    let rack_subnet = match validate_rack_subnet(config.rack_subnet_address) {
+        Ok(v) => v,
+        Err(e) => bail!(e),
+    };
+
     // TODO Add more client side checks on `rack_network_config` contents?
 
-    Ok(bootstrap_agent_client::types::RackNetworkConfigV2 {
-        rack_subnet: RACK_SUBNET.net(),
+    let ports = config
+        .iter_uplinks()
+        .map(|(switch, port, config)| {
+            build_port_config(switch, port, config, bgp_auth_keys)
+        })
+        .collect::<Vec<_>>();
+    let ports = UplinkPorts::new(ports)
+        .context("rack network config must specify at least one uplink port")?;
+
+    Ok(bootstrap_agent_lockstep_client::types::RackNetworkConfig {
+        rack_subnet,
         infra_ip_first: config.infra_ip_first,
         infra_ip_last: config.infra_ip_last,
-        ports: config
-            .iter_uplinks()
-            .map(|(switch, port, config)| {
-                build_port_config(switch, port, config, bgp_auth_keys)
-            })
-            .collect(),
+        ports,
         bgp: config
             .bgp
             .iter()
@@ -679,6 +508,7 @@ fn validate_rack_network_config(
                 originate: config.originate.clone(),
                 checker: config.checker.clone(),
                 shaper: config.shaper.clone(),
+                max_paths: BaMaxPathConfig(config.max_paths.as_nonzero_u8()),
             })
             .collect(),
         //TODO bfd config in wicket
@@ -686,48 +516,65 @@ fn validate_rack_network_config(
     })
 }
 
-/// Builds a `BaPortConfigV2` from a `UserSpecifiedPortConfig`.
+pub fn validate_rack_subnet(
+    subnet_address: Option<Ipv6Addr>,
+) -> Result<Ipv6Net, String> {
+    use rand::prelude::*;
+
+    let rack_subnet_address = match subnet_address {
+        Some(addr) => addr,
+        None => {
+            let mut rng = rand::rng();
+            let a: u16 = 0xfd00 + Into::<u16>::into(rng.random::<u8>());
+            Ipv6Addr::new(
+                a,
+                rng.random::<u16>(),
+                rng.random::<u16>(),
+                0x0100,
+                0,
+                0,
+                0,
+                0,
+            )
+        }
+    };
+
+    // first octet must be fd
+    if rack_subnet_address.octets()[0] != 0xfd {
+        return Err("rack subnet address must begin with 0xfd".into());
+    };
+
+    // Do not allow rack0
+    if rack_subnet_address.octets()[6] == 0x00 {
+        return Err("rack number (seventh octet) cannot be 0".into());
+    };
+
+    // Do not allow addresses more specific than /56
+    if rack_subnet_address.octets()[7..].iter().any(|x| *x != 0x00) {
+        return Err("rack subnet address is /56, \
+                   but a more specific prefix was provided"
+            .into());
+    };
+
+    Ipv6Net::new(rack_subnet_address, 56).map_err(|e| e.to_string())
+}
+
+/// Builds a [`PortConfig`] from a
+/// [`wicket_common::rack_setup::UserSpecifiedPortConfig`].
 ///
 /// Assumes that all auth keys are present in `bgp_auth_keys`.
 fn build_port_config(
-    switch: SwitchLocation,
+    switch: SwitchSlot,
     port: &str,
-    config: &UserSpecifiedPortConfig,
-    bgp_auth_keys: &BTreeMap<BgpAuthKeyId, Option<BgpAuthKey>>,
-) -> BaPortConfigV2 {
-    use bootstrap_agent_client::types::BgpPeerConfig as BaBgpPeerConfig;
-    use bootstrap_agent_client::types::LldpAdminStatus as BaLldpAdminStatus;
-    use bootstrap_agent_client::types::LldpPortConfig as BaLldpPortConfig;
-    use bootstrap_agent_client::types::PortFec as BaPortFec;
-    use bootstrap_agent_client::types::PortSpeed as BaPortSpeed;
-    use bootstrap_agent_client::types::RouteConfig as BaRouteConfig;
-    use bootstrap_agent_client::types::SwitchLocation as BaSwitchLocation;
-    use bootstrap_agent_client::types::TxEqConfig as BaTxEqConfig;
-    use bootstrap_agent_client::types::UplinkAddressConfig as BaUplinkAddressConfig;
-    use omicron_common::api::internal::shared::LldpAdminStatus;
-    use omicron_common::api::internal::shared::PortFec;
-    use omicron_common::api::internal::shared::PortSpeed;
+    config: &ManualPortConfig,
+    bgp_auth_keys: &BgpAuthKeys,
+) -> PortConfig {
+    use sled_agent_types::early_networking::BgpPeerConfig;
 
-    BaPortConfigV2 {
+    PortConfig {
         port: port.to_owned(),
-        routes: config
-            .routes
-            .iter()
-            .map(|r| BaRouteConfig {
-                destination: r.destination,
-                nexthop: r.nexthop,
-                vlan_id: r.vlan_id,
-                rib_priority: r.rib_priority,
-            })
-            .collect(),
-        addresses: config
-            .addresses
-            .iter()
-            .map(|a| BaUplinkAddressConfig {
-                address: a.address,
-                vlan_id: a.vlan_id,
-            })
-            .collect(),
+        routes: config.routes.clone(),
+        addresses: config.addresses.iter().copied().map(From::from).collect(),
         bgp_peers: config
             .bgp_peers
             .iter()
@@ -751,8 +598,19 @@ fn build_port_config(
                     key
                 });
 
-                BaBgpPeerConfig {
-                    addr: p.addr,
+                let addr = match p.addr {
+                    UserSpecifiedRouterPeerAddr::Unnumbered => {
+                        RouterPeerType::Unnumbered {
+                            router_lifetime: p.router_lifetime,
+                        }
+                    }
+                    UserSpecifiedRouterPeerAddr::Numbered(ip) => {
+                        RouterPeerType::Numbered { ip }
+                    }
+                };
+
+                BgpPeerConfig {
+                    addr,
                     asn: p.asn,
                     port: p.port.clone(),
                     hold_time: p.hold_time,
@@ -773,48 +631,12 @@ fn build_port_config(
                 }
             })
             .collect(),
-        switch: match switch {
-            SwitchLocation::Switch0 => BaSwitchLocation::Switch0,
-            SwitchLocation::Switch1 => BaSwitchLocation::Switch1,
-        },
-        uplink_port_speed: match config.uplink_port_speed {
-            PortSpeed::Speed0G => BaPortSpeed::Speed0G,
-            PortSpeed::Speed1G => BaPortSpeed::Speed1G,
-            PortSpeed::Speed10G => BaPortSpeed::Speed10G,
-            PortSpeed::Speed25G => BaPortSpeed::Speed25G,
-            PortSpeed::Speed40G => BaPortSpeed::Speed40G,
-            PortSpeed::Speed50G => BaPortSpeed::Speed50G,
-            PortSpeed::Speed100G => BaPortSpeed::Speed100G,
-            PortSpeed::Speed200G => BaPortSpeed::Speed200G,
-            PortSpeed::Speed400G => BaPortSpeed::Speed400G,
-        },
-        uplink_port_fec: config.uplink_port_fec.map(|fec| match fec {
-            PortFec::Firecode => BaPortFec::Firecode,
-            PortFec::None => BaPortFec::None,
-            PortFec::Rs => BaPortFec::Rs,
-        }),
+        switch,
+        uplink_port_speed: config.uplink_port_speed,
+        uplink_port_fec: config.uplink_port_fec,
         autoneg: config.autoneg,
-        lldp: config.lldp.as_ref().map(|c| BaLldpPortConfig {
-            status: match c.status {
-                LldpAdminStatus::Enabled => BaLldpAdminStatus::Enabled,
-                LldpAdminStatus::Disabled => BaLldpAdminStatus::Disabled,
-                LldpAdminStatus::TxOnly => BaLldpAdminStatus::TxOnly,
-                LldpAdminStatus::RxOnly => BaLldpAdminStatus::RxOnly,
-            },
-            chassis_id: c.chassis_id.clone(),
-            port_id: c.port_id.clone(),
-            system_name: c.system_name.clone(),
-            system_description: c.system_description.clone(),
-            port_description: c.port_description.clone(),
-            management_addrs: c.management_addrs.clone(),
-        }),
-        tx_eq: config.tx_eq.as_ref().map(|c| BaTxEqConfig {
-            pre1: c.pre1,
-            pre2: c.pre2,
-            main: c.main,
-            post2: c.post2,
-            post1: c.post1,
-        }),
+        lldp: config.lldp.clone(),
+        tx_eq: config.tx_eq,
     }
 }
 
@@ -863,29 +685,130 @@ impl CertificateValidator {
 
 #[cfg(test)]
 mod tests {
+    use crate::bgp_auth_keys::BgpAuthKeyError;
+    use omicron_test_utils::dev;
     use wicket_common::example::ExampleRackSetupData;
+    use wicket_common::rack_setup::BgpAuthKeyId;
+    use wicket_common::rack_setup::BgpAuthKeyStatus;
+    use wicketd_api::SetBgpAuthKeyStatus;
 
     use super::*;
 
     #[test]
+    fn test_router_lifetime_unnumbered_only() {
+        // Default should be okay and have at least one BGP peer.
+        let example = ExampleRackSetupData::non_empty();
+        let bgp_auth_keys = {
+            let mut keys = BgpAuthKeys::default();
+            for id in example.bgp_auth_keys {
+                keys.insert(
+                    id,
+                    Some(BgpAuthKey::TcpMd5 { key: "dummy".to_owned() }),
+                );
+            }
+            keys
+        };
+        let rack_network_config = example.put_insensitive.rack_network_config;
+        validate_rack_network_config(&rack_network_config, &bgp_auth_keys)
+            .expect("base config is valid");
+        assert!(
+            !rack_network_config
+                .switch0
+                .first_key_value()
+                .expect("at least one switch0 port")
+                .1
+                .manual()
+                .unwrap()
+                .bgp_peers
+                .is_empty()
+        );
+
+        // Combine unnumbered with a non-default router_lifetime - fine.
+        let mut valid_router_lifetime = rack_network_config.clone();
+        {
+            let peer = valid_router_lifetime
+                .switch0
+                .first_entry()
+                .unwrap()
+                .into_mut()
+                .manual_mut()
+                .unwrap()
+                .bgp_peers
+                .get_mut(0)
+                .unwrap();
+            peer.addr = UserSpecifiedRouterPeerAddr::Unnumbered;
+            peer.router_lifetime = RouterLifetimeConfig::new(1234).unwrap();
+        }
+        validate_rack_network_config(&valid_router_lifetime, &bgp_auth_keys)
+            .expect("unnumbered with non-zero router_lifetime is ok");
+
+        // Keep non-default router_lifetime but change to a numbered peer -
+        // should fail with a reasonable error.
+        let mut invalid_router_lifetime = valid_router_lifetime.clone();
+        {
+            let peer = invalid_router_lifetime
+                .switch0
+                .first_entry()
+                .unwrap()
+                .into_mut()
+                .manual_mut()
+                .unwrap()
+                .bgp_peers
+                .get_mut(0)
+                .unwrap();
+            peer.addr = UserSpecifiedRouterPeerAddr::Numbered(
+                "1.2.3.4".parse().unwrap(),
+            );
+        }
+        let err = validate_rack_network_config(
+            &invalid_router_lifetime,
+            &bgp_auth_keys,
+        )
+        .expect_err("numbered with non-zero router_lifetime is not ok");
+        assert_eq!(
+            format!("{err:#}"),
+            "numbered BGP peer 1.2.3.4 specifies a router_lifetime, but \
+             router_lifetime is only supported for unnumbered BGP peers"
+        );
+
+        // Keep numbered peer but switch router_lifetime back to default - fine.
+        let mut valid_router_lifetime = invalid_router_lifetime.clone();
+        {
+            let peer = valid_router_lifetime
+                .switch0
+                .first_entry()
+                .unwrap()
+                .into_mut()
+                .manual_mut()
+                .unwrap()
+                .bgp_peers
+                .get_mut(0)
+                .unwrap();
+            peer.router_lifetime = RouterLifetimeConfig::default()
+        }
+        validate_rack_network_config(&valid_router_lifetime, &bgp_auth_keys)
+            .expect("numbered with zero router_lifetime is ok");
+    }
+
+    #[test]
     fn test_bgp_auth_key_states() {
+        let logctx = dev::test_setup_log("test_bgp_auth_key_states");
         let example = ExampleRackSetupData::non_empty();
 
         let mut current_config = CurrentRssConfig::default();
-
-        // XXX: This is a hack -- ideally we'd go through the front door of
-        // update_with_inventory_and_bootstrap_peers. But it works for now.
-        current_config.inventory = example.inventory;
 
         current_config
             .update(
                 example.put_insensitive.clone(),
                 example.our_baseboard.as_ref(),
+                &example.inventory,
+                &example.ddm_discovered_sleds,
+                &logctx.log,
             )
             .expect("update of example data should succeed");
 
         // At this point, both BGP keys should be unset.
-        let key_data = current_config.get_bgp_auth_key_data();
+        let key_data = current_config.common.get_bgp_auth_key_data();
         assert_eq!(key_data.len(), 2);
 
         let key1 = example.bgp_auth_keys[0].clone();
@@ -901,12 +824,13 @@ mod tests {
         // Add a key for the first key ID.
         {
             let status = current_config
+                .common
                 .set_bgp_auth_key(key1.clone(), shared_key.clone())
                 .expect("setting key1 succeeded");
             assert_eq!(status, SetBgpAuthKeyStatus::Added);
 
             // Check that the key is now set.
-            let key_data = current_config.get_bgp_auth_key_data();
+            let key_data = current_config.common.get_bgp_auth_key_data();
             assert_eq!(
                 key_data.get(&key1),
                 Some(&BgpAuthKeyStatus::Set { info: shared_key.info() })
@@ -916,10 +840,11 @@ mod tests {
         // Try replacing the key with the same one.
         {
             let status = current_config
+                .common
                 .set_bgp_auth_key(key1.clone(), shared_key.clone())
                 .expect("replacing key1 succeeded");
             assert_eq!(status, SetBgpAuthKeyStatus::Unchanged);
-            let key_data = current_config.get_bgp_auth_key_data();
+            let key_data = current_config.common.get_bgp_auth_key_data();
             assert_eq!(
                 key_data.get(&key1),
                 Some(&BgpAuthKeyStatus::Set { info: shared_key.info() })
@@ -929,10 +854,11 @@ mod tests {
         // Replace the key with a different one.
         {
             let status = current_config
+                .common
                 .set_bgp_auth_key(key1.clone(), new_key.clone())
                 .expect("replacing key1 succeeded");
             assert_eq!(status, SetBgpAuthKeyStatus::Replaced);
-            let key_data = current_config.get_bgp_auth_key_data();
+            let key_data = current_config.common.get_bgp_auth_key_data();
             assert_eq!(
                 key_data.get(&key1),
                 Some(&BgpAuthKeyStatus::Set { info: new_key.info() })
@@ -943,8 +869,9 @@ mod tests {
         {
             let does_not_exist: BgpAuthKeyId =
                 "does-not-exist".parse().unwrap();
-            let err =
-                current_config.check_bgp_auth_keys_valid([&does_not_exist]);
+            let err = current_config
+                .common
+                .check_bgp_auth_keys_valid([&does_not_exist]);
             assert_eq!(
                 err,
                 Err(BgpAuthKeyError::KeyIdsNotFound {
@@ -953,6 +880,7 @@ mod tests {
                 })
             );
             let err = current_config
+                .common
                 .set_bgp_auth_key(does_not_exist.clone(), shared_key.clone())
                 .expect_err("setting a non-existent key should fail");
             assert_key_ids_not_found(
@@ -965,10 +893,12 @@ mod tests {
         // Set key2 as well.
         {
             let status = current_config
+                .common
                 .set_bgp_auth_key(key2.clone(), shared_key.clone())
                 .expect("setting key2 succeeded");
             assert_eq!(status, SetBgpAuthKeyStatus::Added);
-            let key_data = current_config.get_bgp_auth_key_data();
+            let key_data = current_config.common.get_bgp_auth_key_data();
+
             assert_eq!(
                 key_data.get(&key2),
                 Some(&BgpAuthKeyStatus::Set { info: shared_key.info() })
@@ -981,11 +911,14 @@ mod tests {
             .update(
                 example_data_2.put_insensitive,
                 example_data_2.our_baseboard.as_ref(),
+                &example_data_2.inventory,
+                &example_data_2.ddm_discovered_sleds,
+                &logctx.log,
             )
             .expect("update of example data 2 should succeed");
 
         // key1 should have been retained, but key2 should have been dropped.
-        let key_data = current_config.get_bgp_auth_key_data();
+        let key_data = current_config.common.get_bgp_auth_key_data();
         assert_eq!(key_data.len(), 1);
         assert_eq!(
             key_data.get(&key1),
@@ -995,17 +928,25 @@ mod tests {
 
         // Update the old data again.
         current_config
-            .update(example.put_insensitive, example.our_baseboard.as_ref())
+            .update(
+                example.put_insensitive,
+                example.our_baseboard.as_ref(),
+                &example.inventory,
+                &example.ddm_discovered_sleds,
+                &logctx.log,
+            )
             .expect("update of example data should succeed");
 
         // key1 should stay set, but not key2.
-        let key_data = current_config.get_bgp_auth_key_data();
+        let key_data = current_config.common.get_bgp_auth_key_data();
         assert_eq!(key_data.len(), 2);
         assert_eq!(
             key_data.get(&key1),
             Some(&BgpAuthKeyStatus::Set { info: new_key.info() })
         );
         assert_eq!(key_data.get(&key2), Some(&BgpAuthKeyStatus::Unset));
+
+        logctx.cleanup_successful();
     }
 
     fn assert_key_ids_not_found(
@@ -1018,7 +959,6 @@ mod tests {
                 assert_eq!(not_found, expected_not_found);
                 assert_eq!(valid_keys, expected_valid_keys);
             }
-            _ => panic!("expected KeyIdsNotFound, got {:?}", err),
         }
     }
 }

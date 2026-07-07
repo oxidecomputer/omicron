@@ -15,10 +15,19 @@ sled-update-install-dataset serial0 --to-target-release
 # Set one of sled 0's zone's image sources to a specific artifact, and
 # also set MGS and host phase 2 updates on the sled. Both should be
 # reset as part of this process.
+#
+# Note that this isn't quite a typical blueprint, since it'll have
+# some image sources set to Artifact and others to InstallDataset.
+# (Typically, all zones on a sled are one or the other.) We consider that
+# to be okay for this test: we want to ensure that any zones with Artifact
+# image sources are converted over to InstallDataset.
 blueprint-edit latest set-zone-image 0c71b3b2-6ceb-4e8f-b020-b08675e83038 artifact 1.2.3 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
 blueprint-edit latest set-sp-update serial0 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855 1.1.0 sp 1.0.0 1.0.1
 blueprint-edit latest set-host-phase2 serial0 A artifact 1.0.0 3a9607047b03ccaab6d222249d890e93ca51b94ad631c7ca38be74cba60802ff
 blueprint-edit latest set-host-phase2 serial0 B artifact 1.0.0 044d45ad681b44e89c10e056cabdedf19fd8b1e54bc95e6622bcdd23f16bc8f2
+
+# Apply the blueprint edits to sled 0.
+sled-set serial0 omicron-config latest
 
 # Simulate a mupdate on sled 0 by setting the mupdate override field to a
 # new UUID (generated using uuidgen).
@@ -72,10 +81,18 @@ inventory-generate
 blueprint-plan latest latest
 blueprint-diff latest
 
-# Now simulate the new config being applied to sled 0, which would
-# cause the mupdate override to be removed.
+# Now simulate the new config being applied to sled 0, which would cause the
+# mupdate override to be removed. Apply the latest blueprint to inventory
+# too, so that the sled's reported sled-agent generation advances to match
+# the blueprint's; the sled clearing the override and bumping its generation
+# happen together when the sled processes the new blueprint config.
 sled-set serial0 mupdate-override unset
 sled-set serial0 inventory-visible
+sled-set serial0 omicron-config latest
+
+# Apply this config (which sets remove_mupdate_override to 203fa72c)
+# on sled 2.
+sled-set serial2 omicron-config latest
 
 # But simulate a second mupdate on sled 2. This should invalidate the existing
 # mupdate override on sled 2 and cause another target release minimum
@@ -89,17 +106,32 @@ inventory-generate
 blueprint-plan latest latest
 
 # Diff the blueprints. This diff should show:
-# * on sled 0:
-#   * the "remove mupdate override" line going away
-#   * no-op image source switches from install dataset to artifact
-# * on sled 1, no changes
-# * on sled 2, a _change_ in the will-remove-mupdate-override field
-# * another bump to the target release minimum generation, this time to 4.
+#
+# * for sled 0:
+#   * "+ will remove mupdate override"
+#   * for zone 0c71b3b2-6ceb-4e8f-b020-b08675e83038, a change from artifact to install-dataset
+#   * measurements changed from unknown to install dataset
+#   * host phase 2 contents reset to current contents
+#   * the pending MGS update cleared
+# * for sled 1 (which has the mupdate override error): the planner cannot
+#   record the override id, but it still clears the pending MGS update and
+#   resets host phase 2 contents to current contents
+# * for sled 2:
+#   * "+ will remove mupdate override"
+#   * measurements changed from unknown to install dataset
+# * the target release's minimum generation bumped from 1 to 3
+#   (the 3 is because generation 2 is repo-1.0.0.zip)
 blueprint-diff latest
 
 # Clear the mupdate override on sled 2, signifying that the config has been
-# applied.
+# applied. Also advance the sled's reported sled-agent generation to match,
+# since the sled clearing the override and bumping its generation happen
+# together when it processes the new blueprint config. Likewise advance
+# serial0's reported sled-agent generation: the previous plan did noop
+# conversions on serial0 that the sled would have applied by now in production.
 sled-set serial2 mupdate-override unset
+sled-set serial0 omicron-config latest
+sled-set serial2 omicron-config latest
 
 # Run the planner again. This will cause sled 2's blueprint
 # remove_mupdate_override to be unset. But no further planning steps will
@@ -108,6 +140,13 @@ inventory-generate
 blueprint-plan latest latest
 blueprint-show latest
 blueprint-diff latest
+
+# Model sled-agents applying the latest blueprint between plans (this happens
+# automatically in production), advancing reported sled-agent generations to
+# match.
+sled-set serial0 omicron-config latest
+sled-set serial2 omicron-config latest
+inventory-generate
 
 # Now set the target release -- at this point, we're still waiting on the
 # sled with the mupdate override error to be cleared.
@@ -119,6 +158,7 @@ blueprint-diff latest
 # Now clear the mupdate override error. At this point, we're *still* blocked
 # on serial1's install dataset not being known (so cannot be noop converted).
 sled-set serial1 mupdate-override unset
+sled-set serial1 omicron-config latest
 inventory-generate
 blueprint-plan latest latest
 blueprint-diff latest
@@ -128,6 +168,17 @@ blueprint-diff latest
 # steps within the same blueprint. In other words, the code that considers
 # whether add/update are blocked takes into account noop conversions.)
 sled-update-install-dataset serial1 --to-target-release
+inventory-generate
+
+# Measurements will block further planning progress, run a planning step
+blueprint-plan latest latest
+blueprint-show latest
+blueprint-diff latest
+
+# Make sure the measurements are up to date for inventory
+sled-set serial0 omicron-config latest
+sled-set serial1 omicron-config latest
+sled-set serial2 omicron-config latest
 inventory-generate
 
 # This will attempt to update the RoT bootloader on the first sled.
@@ -169,25 +220,24 @@ inventory-generate
 blueprint-plan latest latest
 blueprint-diff latest
 
-# Test that the add-zones-with-mupdate-override planner config works as
-# expected. We do this by:
+# Test that adding a new sled while a mupdate override is active does not
+# cause the planner to add new zones to it. We do this by:
 # * setting the mupdate override on a sled
 # * adding a new sled
 #
-# With the option disabled (the current state), the planner will
-# not proceed with adding new zones. But with the option enabled,
-# new zones will be added.
+# The planner will not proceed with adding new zones while any sled has an
+# active mupdate override.
+
+# Apply the blueprint edits to sled 0. This also lets the planner see
+# that the internal_dns zone is expunged, setting up a replacement
+# internal_dns zone.
+sled-set serial0 omicron-config latest
 sled-set serial0 mupdate-override c8fba912-63ae-473a-9115-0495d10fb3bc
 sled-add c3bc4c6d-fdde-4fc4-8493-89d2a1e5ee6b
 inventory-generate
 
 # This will *not* generate the datasets and internal NTP zone on the new
-# sled.
-blueprint-plan latest latest
-blueprint-diff latest
-
-# This *will* generate the datasets and internal NTP zone on the new sled.
-set planner-config --add-zones-with-mupdate-override true
+# sled, because zone adds are blocked while a mupdate override is present.
 blueprint-plan latest latest
 blueprint-diff latest
 
@@ -195,6 +245,9 @@ blueprint-diff latest
 # test that the planner bails if it attempts a rollback of the target release
 # minimum generation.
 blueprint-edit latest set-target-release-min-gen 1000
+
+# Apply this config to sled 1 before the new MUPdate below.
+sled-set serial1 omicron-config latest
 sled-set serial1 mupdate-override cc724abe-80c1-47e6-9771-19e6540531a9
 inventory-generate
 blueprint-plan latest latest

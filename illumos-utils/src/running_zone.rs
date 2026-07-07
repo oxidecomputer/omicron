@@ -13,19 +13,21 @@ use crate::contract;
 use crate::dladm::Etherstub;
 use crate::link::{Link, VnicAllocator};
 use crate::opte::{Port, PortTicket};
-use crate::zone::AddressRequest;
 use crate::zone::Zones;
+use crate::zone::{AddressRequest, ROUTE};
 use crate::zpool::{PathInPool, ZpoolOrRamdisk};
 use camino::{Utf8Path, Utf8PathBuf};
 use camino_tempfile::Utf8TempDir;
 use debug_ignore::DebugIgnore;
 use ipnetwork::IpNetwork;
+use omicron_common::address::{AZ_PREFIX, Ipv6Subnet};
 use omicron_common::backoff;
-use omicron_common::zone_images::ZoneImageFileSource;
+use omicron_common::resolvable_files::ResolvableFileSource;
 use omicron_uuid_kinds::OmicronZoneUuid;
 pub use oxlog::is_oxide_smf_log_file;
 use slog::{Logger, error, info, o, warn};
-use std::net::{Ipv4Addr, Ipv6Addr};
+use slog_error_chain::SlogInlineError;
+use std::net::Ipv6Addr;
 use std::sync::Arc;
 #[cfg(target_os = "illumos")]
 use std::sync::OnceLock;
@@ -44,7 +46,7 @@ pub enum ServiceError {
 
 /// Errors returned from [`RunningZone::run_cmd`].
 #[derive(thiserror::Error, Debug)]
-#[error("Error running command in zone '{zone}': {err}")]
+#[error("Error running command in zone '{zone}'")]
 pub struct RunCommandError {
     zone: String,
     #[source]
@@ -54,7 +56,7 @@ pub struct RunCommandError {
 /// Errors returned from [`RunningZone::boot`].
 #[derive(thiserror::Error, Debug)]
 pub enum BootError {
-    #[error("Error booting zone: {0}")]
+    #[error("Error booting zone")]
     Booting(#[from] crate::zone::AdmError),
 
     #[error("Zone booted, but timed out waiting for {service} in {zone}")]
@@ -63,19 +65,20 @@ pub enum BootError {
     #[error("Zone booted, but failed to find zone ID for zone {zone}")]
     NoZoneId { zone: String },
 
-    #[error("Zone booted, but running a command experienced an error: {0}")]
+    #[error("Zone booted, but running a command experienced an error")]
     RunCommandError(#[from] RunCommandError),
 }
 
 /// Errors returned from [`RunningZone::ensure_address`].
-#[derive(thiserror::Error, Debug)]
+#[derive(thiserror::Error, Debug, SlogInlineError)]
 pub enum EnsureAddressError {
     #[error(
-        "Failed ensuring address {request:?} in {zone}: could not construct addrobj name: {err}"
+        "Failed ensuring address {request:?} in {zone}: could not construct addrobj name"
     )]
     AddrObject {
         request: AddressRequest,
         zone: String,
+        #[source]
         err: crate::addrobj::ParseError,
     },
 
@@ -85,8 +88,12 @@ pub enum EnsureAddressError {
     #[error(transparent)]
     GetAddressesError(#[from] crate::zone::GetAddressesError),
 
-    #[error("Failed ensuring link-local address in {zone}: {err}")]
-    LinkLocal { zone: String, err: crate::ExecutionError },
+    #[error("Failed ensuring link-local address in {zone}")]
+    LinkLocal {
+        zone: String,
+        #[source]
+        err: crate::ExecutionError,
+    },
 
     #[error("Failed to find non-link-local address in {zone}")]
     NoDhcpV6Addr { zone: String },
@@ -353,30 +360,30 @@ impl RunningZone {
         Ok(network)
     }
 
-    // TODO-completeness: Handle dual-stack OPTE ports here. This works for
-    // either IPv4 or IPv6 addresses, but not both.
-    // See https://github.com/oxidecomputer/omicron/issues/9247.
     pub async fn ensure_address_for_port(
         &self,
         name: &str,
         port_idx: usize,
-    ) -> Result<IpNetwork, EnsureAddressError> {
+    ) -> Result<(), EnsureAddressError> {
         info!(self.inner.log, "Ensuring address for OPTE port");
+
         let port = self.opte_ports().nth(port_idx).ok_or_else(|| {
             EnsureAddressError::MissingOptePort {
                 zone: self.inner.name.clone(),
                 port_idx,
             }
         })?;
-        let addrobj = AddrObject::new(port.name(), name).map_err(|err| {
-            EnsureAddressError::AddrObject {
-                request: AddressRequest::Dhcp,
-                zone: self.inner.name.clone(),
-                err,
-            }
-        })?;
         let zone = Some(self.inner.name.as_ref());
         if let Some(gateway) = port.gateway().ipv4_addr() {
+            let v4_name = format!("{}4", name);
+            let addrobj =
+                AddrObject::new(port.name(), &v4_name).map_err(|err| {
+                    EnsureAddressError::AddrObject {
+                        request: AddressRequest::Dhcp,
+                        zone: self.inner.name.clone(),
+                        err,
+                    }
+                })?;
             let addr =
                 Zones::ensure_address(zone, &addrobj, AddressRequest::Dhcp)
                     .await?;
@@ -387,7 +394,7 @@ impl RunningZone {
             let gateway_ip = gateway.to_string();
             let private_ip = addr.ip();
             self.run_cmd(&[
-                "/usr/sbin/route",
+                ROUTE,
                 "add",
                 "-host",
                 &gateway_ip,
@@ -396,15 +403,18 @@ impl RunningZone {
                 "-ifp",
                 port.name(),
             ])?;
-            self.run_cmd(&[
-                "/usr/sbin/route",
-                "add",
-                "-inet",
-                "default",
-                &gateway_ip,
-            ])?;
-            Ok(addr)
-        } else {
+            self.run_cmd(&[ROUTE, "add", "-inet", "default", &gateway_ip])?;
+        }
+        if port.gateway().ipv6_addr().is_some() {
+            let v6_name = format!("{}6", name);
+            let addrobj =
+                AddrObject::new(port.name(), &v6_name).map_err(|err| {
+                    EnsureAddressError::AddrObject {
+                        request: AddressRequest::Dhcp,
+                        zone: self.inner.name.clone(),
+                        err,
+                    }
+                })?;
             // If the port is using IPv6 addressing we still want it to use
             // DHCP(v6) which requires first creating a link-local address.
             Zones::ensure_has_link_local_v6_address(zone, &addrobj)
@@ -430,15 +440,13 @@ impl RunningZone {
                             )
                         })?;
 
-                    // Ipv6Addr::is_unicast_link_local is sadly not stable
-                    let is_ll =
-                        |ip: Ipv6Addr| (ip.segments()[0] & 0xffc0) == 0xfe80;
-
                     // Look for a non link-local addr
                     addrs
                         .into_iter()
                         .find(|addr| match addr {
-                            IpNetwork::V6(ip) => !is_ll(ip.ip()),
+                            IpNetwork::V6(ip) => {
+                                !ip.ip().is_unicast_link_local()
+                            }
                             _ => false,
                         })
                         .ok_or_else(|| {
@@ -454,58 +462,31 @@ impl RunningZone {
                         self.inner.log,
                         "No non link-local address yet (retrying in {:?})",
                         delay;
-                        "error" => ?error
+                        error
                     );
                 },
             )
-            .await
+            .await?;
         }
+        Ok(())
     }
 
-    pub fn add_default_route(
+    pub fn add_underlay_route(
         &self,
         gateway: Ipv6Addr,
     ) -> Result<(), RunCommandError> {
+        // Route to the underlay AZ's /48 by deriving it from the gateway IP.
+        let underlay_az: Ipv6Subnet<AZ_PREFIX> = Ipv6Subnet::new(gateway);
         self.run_cmd([
-            "/usr/sbin/route",
+            ROUTE,
             "add",
             "-inet6",
-            "default",
+            &underlay_az.to_string(),
             "-inet6",
             &gateway.to_string(),
-        ])?;
-        Ok(())
-    }
-
-    pub fn add_default_route4(
-        &self,
-        gateway: Ipv4Addr,
-    ) -> Result<(), RunCommandError> {
-        self.run_cmd([
-            "/usr/sbin/route",
-            "add",
-            "default",
-            &gateway.to_string(),
-        ])?;
-        Ok(())
-    }
-
-    pub fn add_bootstrap_route(
-        &self,
-        bootstrap_prefix: u16,
-        gz_bootstrap_addr: Ipv6Addr,
-        zone_vnic_name: &str,
-    ) -> Result<(), RunCommandError> {
-        let args = [
-            "/usr/sbin/route",
-            "add",
-            "-inet6",
-            &format!("{bootstrap_prefix:x}::/16"),
-            &gz_bootstrap_addr.to_string(),
             "-ifp",
-            zone_vnic_name,
-        ];
-        self.run_cmd(args)?;
+            self.inner.control_vnic.name(),
+        ])?;
         Ok(())
     }
 
@@ -701,7 +682,7 @@ pub enum InstallZoneError {
         file_source.file_name,
         file_source.search_paths,
     )]
-    ImageNotFound { file_source: ZoneImageFileSource },
+    ImageNotFound { file_source: ResolvableFileSource },
     #[error("Attempted to call install() on underspecified ZoneBuilder")]
     IncompleteBuilder,
 }
@@ -738,23 +719,6 @@ pub struct InstalledZone {
 impl InstalledZone {
     /// The path to the zone's root filesystem (i.e., `/`), within zonepath.
     pub const ROOT_FS_PATH: &'static str = "root";
-
-    /// Returns the name of a zone, based on the base zone name plus any unique
-    /// identifying info.
-    ///
-    /// The zone name is based on:
-    /// - A unique Oxide prefix ("oxz_")
-    /// - The name of the zone type being hosted (e.g., "nexus")
-    /// - An optional, zone-unique UUID
-    ///
-    /// This results in a zone name which is distinct across different zpools,
-    /// but stable and predictable across reboots.
-    pub fn get_zone_name(
-        zone_type: &str,
-        unique_name: Option<OmicronZoneUuid>,
-    ) -> String {
-        crate::zone::zone_name(zone_type, unique_name)
-    }
 
     /// Get the name of the bootstrap VNIC in the zone, if any.
     pub fn get_bootstrap_vnic_name(&self) -> Option<&str> {
@@ -867,7 +831,7 @@ pub struct ZoneBuilder<'a> {
     /// Filesystem path at which the installed zone will reside.
     zone_root_path: Option<PathInPool>,
     /// The file source.
-    file_source: Option<&'a ZoneImageFileSource>,
+    file_source: Option<&'a ResolvableFileSource>,
     /// The name of the type of zone being created (e.g. "propolis-server")
     zone_type: Option<&'a str>,
     /// Unique ID of the instance of the zone being created. (optional)
@@ -927,7 +891,7 @@ impl<'a> ZoneBuilder<'a> {
     /// The file name and image source.
     pub fn with_file_source(
         mut self,
-        file_source: &'a ZoneImageFileSource,
+        file_source: &'a ResolvableFileSource,
     ) -> Self {
         self.file_source = Some(file_source);
         self
@@ -1011,7 +975,7 @@ impl<'a> ZoneBuilder<'a> {
         let temp_dir = fake_cfg.temp_dir;
         (|| {
             let zone_type = self.zone_type?;
-            let full_zone_name = InstalledZone::get_zone_name(
+            let full_zone_name = crate::zone::zone_name(
                 zone_type,
                 self.unique_name,
             );
@@ -1077,8 +1041,7 @@ impl<'a> ZoneBuilder<'a> {
                 err,
             })?;
 
-        let full_zone_name =
-            InstalledZone::get_zone_name(zone_type, unique_name);
+        let full_zone_name = crate::zone::zone_name(zone_type, unique_name);
 
         // Look for the image within `file_source.search_paths`, in order.
         let zone_image_path = file_source

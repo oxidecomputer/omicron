@@ -8,7 +8,7 @@ use nexus_db_lookup::lookup;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
-use nexus_types::external_api::params;
+use nexus_types::external_api::silo;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
@@ -38,7 +38,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         silo_lookup: &lookup::Silo<'_>,
-        updates: &params::SiloQuotasUpdate,
+        updates: &silo::SiloQuotasUpdate,
     ) -> UpdateResult<db::model::SiloQuotas> {
         let (.., authz_silo) =
             silo_lookup.lookup_for(authz::Action::Modify).await?;

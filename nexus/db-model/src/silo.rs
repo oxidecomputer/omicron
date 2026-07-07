@@ -7,11 +7,11 @@ use crate::collection::DatastoreCollectionConfig;
 use crate::{DatabaseString, Image, impl_enum_type};
 use db_macros::Resource;
 use nexus_db_schema::schema::{image, project, silo};
-use nexus_types::external_api::shared::{
-    FleetRole, SiloIdentityMode, SiloRole,
+use nexus_types::external_api::policy::{FleetRole, SiloRole};
+use nexus_types::external_api::silo::{
+    self as silo_types, AuthenticationMode as SharedAuthenticationMode,
+    SiloIdentityMode, UserProvisionType as SharedUserProvisionType,
 };
-use nexus_types::external_api::views;
-use nexus_types::external_api::{params, shared};
 use nexus_types::identity::Resource;
 use omicron_common::api::external::Error;
 use std::collections::BTreeMap;
@@ -29,16 +29,16 @@ impl_enum_type!(
     Saml => b"saml"
 );
 
-impl From<shared::AuthenticationMode> for AuthenticationMode {
-    fn from(params: shared::AuthenticationMode) -> Self {
+impl From<SharedAuthenticationMode> for AuthenticationMode {
+    fn from(params: SharedAuthenticationMode) -> Self {
         match params {
-            shared::AuthenticationMode::Local => AuthenticationMode::Local,
-            shared::AuthenticationMode::Saml => AuthenticationMode::Saml,
+            SharedAuthenticationMode::Local => AuthenticationMode::Local,
+            SharedAuthenticationMode::Saml => AuthenticationMode::Saml,
         }
     }
 }
 
-impl From<AuthenticationMode> for shared::AuthenticationMode {
+impl From<AuthenticationMode> for SharedAuthenticationMode {
     fn from(model: AuthenticationMode) -> Self {
         match model {
             AuthenticationMode::Local => Self::Local,
@@ -59,17 +59,17 @@ impl_enum_type!(
     Scim => b"scim"
 );
 
-impl From<shared::UserProvisionType> for UserProvisionType {
-    fn from(params: shared::UserProvisionType) -> Self {
+impl From<SharedUserProvisionType> for UserProvisionType {
+    fn from(params: SharedUserProvisionType) -> Self {
         match params {
-            shared::UserProvisionType::ApiOnly => UserProvisionType::ApiOnly,
-            shared::UserProvisionType::Jit => UserProvisionType::Jit,
-            shared::UserProvisionType::Scim => UserProvisionType::Scim,
+            SharedUserProvisionType::ApiOnly => UserProvisionType::ApiOnly,
+            SharedUserProvisionType::Jit => UserProvisionType::Jit,
+            SharedUserProvisionType::Scim => UserProvisionType::Scim,
         }
     }
 }
 
-impl From<UserProvisionType> for shared::UserProvisionType {
+impl From<UserProvisionType> for SharedUserProvisionType {
     fn from(model: UserProvisionType) -> Self {
         match model {
             UserProvisionType::ApiOnly => Self::ApiOnly,
@@ -169,13 +169,13 @@ impl<'a> From<&'a BTreeMap<SiloRole, BTreeSet<FleetRole>>>
 
 impl Silo {
     /// Creates a new database Silo object.
-    pub fn new(params: params::SiloCreate) -> Result<Self, Error> {
+    pub fn new(params: silo_types::SiloCreate) -> Result<Self, Error> {
         Self::new_with_id(Uuid::new_v4(), params)
     }
 
     pub fn new_with_id(
         id: Uuid,
-        params: params::SiloCreate,
+        params: silo_types::SiloCreate,
     ) -> Result<Self, Error> {
         let mapped_fleet_roles = serde_json::to_value(
             &SerializedMappedFleetRoles::from(&params.mapped_fleet_roles).0,
@@ -215,7 +215,7 @@ impl Silo {
     }
 }
 
-impl TryFrom<Silo> for views::Silo {
+impl TryFrom<Silo> for silo_types::Silo {
     type Error = Error;
     fn try_from(silo: Silo) -> Result<Self, Self::Error> {
         let authn_mode = &silo.authentication_mode;

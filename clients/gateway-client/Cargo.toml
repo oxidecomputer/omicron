@@ -17,7 +17,7 @@ gateway-types.workspace = true
 omicron-uuid-kinds.workspace = true
 progenitor.workspace = true
 rand.workspace = true
-reqwest = { workspace = true, features = ["rustls-tls", "stream"] }
+reqwest = { workspace = true, features = ["rustls", "stream"] }
 serde.workspace = true
 serde_json.workspace = true
 schemars.workspace = true

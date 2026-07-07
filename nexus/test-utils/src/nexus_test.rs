@@ -24,21 +24,21 @@ use nexus_test_interface::NexusServer;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::UserId;
 use omicron_common::api::internal::nexus::Certificate;
-use omicron_common::api::internal::shared::SwitchLocation;
 use omicron_sled_agent::sim;
 use omicron_test_utils::dev;
 use omicron_test_utils::dev::poll;
-use omicron_test_utils::dev::poll::CondCheckError;
+use omicron_test_utils::dev::poll::wait_for_condition;
 use omicron_test_utils::dev::poll::wait_for_watch_channel_condition;
 use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::SledUuid;
 use oximeter_collector::Oximeter;
 use oximeter_producer::Server as ProducerServer;
-use slog::debug;
+use sled_agent_types::early_networking::SwitchSlot;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
+use transient_dns_server::TransientDnsServer;
 
 pub struct ControlPlaneBuilder<'a> {
     // required
@@ -112,13 +112,15 @@ pub struct ControlPlaneTestContext<N> {
     pub sled_agents: Vec<ControlPlaneTestContextSledAgent>,
     pub oximeter: Oximeter,
     pub producer: ProducerServer,
-    pub gateway: BTreeMap<SwitchLocation, GatewayTestContext>,
-    pub dendrite:
-        RwLock<HashMap<SwitchLocation, dev::dendrite::DendriteInstance>>,
-    pub mgd: HashMap<SwitchLocation, dev::maghemite::MgdInstance>,
+    pub gateway: BTreeMap<SwitchSlot, GatewayTestContext>,
+    /// All dpd instances, whether currently running or not, indexed by switch
+    /// slot.
+    pub dendrite: RwLock<HashMap<SwitchSlot, dev::dendrite::DendriteInstance>>,
+    pub mgd: HashMap<SwitchSlot, dev::maghemite::MgdInstance>,
+    pub ddm: HashMap<SwitchSlot, dev::maghemite::DdmInstance>,
     pub external_dns_zone_name: String,
-    pub external_dns: dns_server::TransientServer,
-    pub internal_dns: dns_server::TransientServer,
+    pub external_dns: TransientDnsServer,
+    pub internal_dns: TransientDnsServer,
     pub initial_blueprint_id: BlueprintUuid,
     pub silo_name: Name,
     pub user_name: UserId,
@@ -165,7 +167,7 @@ impl<N: NexusServer> ControlPlaneTestContext<N> {
     }
 
     /// Wait until at least one inventory collection has been inserted into the
-    /// datastore.
+    /// datastore, and the inventory watch channel is populated.
     ///
     /// # Panics
     ///
@@ -178,23 +180,20 @@ impl<N: NexusServer> ControlPlaneTestContext<N> {
 
         match wait_for_watch_channel_condition(
             &mut inv_rx,
-            async |inv| {
-                if inv.is_some() {
-                    Ok(())
-                } else {
-                    Err(CondCheckError::<()>::NotYet)
-                }
-            },
+            |inv| inv.is_some(),
             timeout,
         )
         .await
         {
             Ok(()) => (),
-            Err(poll::Error::TimedOut(elapsed)) => {
+            Err(poll::WatchChannelError::TimedOut(elapsed)) => {
                 panic!("no inventory collection found within {elapsed:?}");
             }
-            Err(poll::Error::PermanentError(())) => {
-                unreachable!("check can only fail via timeout")
+            Err(poll::WatchChannelError::SenderDropped) => {
+                panic!(
+                    "inventory watch channel sender dropped before a \
+                     collection was available"
+                );
             }
         }
     }
@@ -214,19 +213,100 @@ impl<N: NexusServer> ControlPlaneTestContext<N> {
     }
 
     /// Stop a Dendrite instance for testing failure scenarios.
-    pub async fn stop_dendrite(
-        &self,
-        switch_location: omicron_common::api::external::SwitchLocation,
-    ) {
+    ///
+    /// Panics if no Dendrite was found for the given switch slot, or it was
+    /// already stopped. (But note that the Dendrite instance is temporarily
+    /// removed from the switch slot while it is being stopped, so trying to
+    /// call this function with the same switch slot concurrently may panic.)
+    pub async fn stop_dendrite(&self, switch_slot: SwitchSlot) {
         use slog::debug;
         let log = &self.logctx.log;
-        debug!(log, "Stopping Dendrite for {switch_location}");
+        debug!(log, "Stopping Dendrite"; "switch_slot" => ?switch_slot);
 
-        let dendrite_opt =
-            { self.dendrite.write().unwrap().remove(&switch_location) };
-        if let Some(mut dendrite) = dendrite_opt {
-            dendrite.cleanup().await.unwrap();
-        }
+        // Extract from mutex first to avoid holding lock across await
+        let mut dendrite =
+            self.dendrite.write().unwrap().remove(&switch_slot).unwrap_or_else(
+                || {
+                    panic!(
+                        "a dendrite instance should exist \
+                         for switch slot {switch_slot:?}"
+                    );
+                },
+            );
+
+        let prior_dpd_state = dendrite.stop_dpd().await.unwrap();
+        assert_eq!(
+            prior_dpd_state,
+            dev::dendrite::PriorDpdState::Running,
+            "dendrite should have been running before stop_dendrite"
+        );
+        self.dendrite.write().unwrap().insert(switch_slot, dendrite);
+    }
+
+    /// Restart a Dendrite instance for testing drift correction scenarios.
+    ///
+    /// Simulates a switch restart where DPD loses its programmed state.
+    /// Restarts on the same port so test DNS stays valid.
+    ///
+    /// Works both when Dendrite is currently running (will stop and restart) or
+    /// when it was previously stopped via [`Self::stop_dendrite`].
+    ///
+    /// Panics if no Dendrite was found for the given switch slot. (But note
+    /// that the Dendrite instance is temporarily removed from the internal map
+    /// while it is being restarted, so trying to call this function with the
+    /// same switch slot concurrently may panic.)
+    pub async fn restart_dendrite(&self, switch_slot: SwitchSlot) {
+        use slog::debug;
+        let log = self.logctx.log.new(slog::o!(
+            "switch_slot" => format!("{switch_slot:?}"),
+        ));
+        debug!(log, "Restarting Dendrite");
+
+        // Extract from mutex first to avoid holding the lock across an await
+        // point. This does mean that while restart_dendrite is running, other
+        // code wouldn't be able to find the dpd instance via the switch slot.
+        let mut dendrite =
+            self.dendrite.write().unwrap().remove(&switch_slot).unwrap_or_else(
+                || {
+                    panic!(
+                        "a dendrite instance should exist \
+                         for switch slot {switch_slot:?}"
+                    );
+                },
+            );
+        let port = dendrite.port();
+        debug!(log, "Restarting dpd behind its proxy"; "port" => port);
+
+        let prior_dpd_state = dendrite.restart_dpd().await.unwrap();
+        debug!(log, "Restarted dpd"; "prior_dpd_state" => ?prior_dpd_state);
+
+        // Wait for Dendrite to be ready before returning.
+        // We check `switch_identifiers()` rather than just `dpd_uptime()`
+        // because Nexus needs switch_identifiers to work to determine which
+        // switch to program.
+        let dpd_client = dpd_client::Client::new(
+            &format!("http://[::1]:{port}"),
+            dpd_client::ClientState {
+                tag: String::from("test-restart-wait"),
+                log: self.logctx.log.clone(),
+            },
+        );
+        wait_for_condition(
+            || async {
+                match dpd_client.switch_identifiers().await {
+                    Ok(_) => Ok(()),
+                    Err(_) => Err(dev::poll::CondCheckError::<()>::NotYet {
+                        status: None,
+                    }),
+                }
+            },
+            &Duration::from_millis(50),
+            &Duration::from_secs(60),
+        )
+        .await
+        .expect("contacted dpd within timeout after restart");
+
+        self.dendrite.write().unwrap().insert(switch_slot, dendrite);
     }
 
     pub async fn teardown(mut self) {
@@ -243,11 +323,14 @@ impl<N: NexusServer> ControlPlaneTestContext<N> {
         for (_, gateway) in self.gateway {
             gateway.teardown().await;
         }
-        for (_, mut dendrite) in self.dendrite.into_inner().unwrap() {
+        for (_, dendrite) in self.dendrite.into_inner().unwrap() {
             dendrite.cleanup().await.unwrap();
         }
         for (_, mut mgd) in self.mgd {
             mgd.cleanup().await.unwrap();
+        }
+        for (_, mut ddm) in self.ddm {
+            ddm.cleanup().await.unwrap();
         }
         self.logctx.cleanup_successful();
     }
@@ -287,7 +370,7 @@ pub async fn omicron_dev_setup_with_config<N: NexusServer>(
     let starter = ControlPlaneStarter::<N>::new("omicron-dev", config);
 
     let log = &starter.logctx.log;
-    debug!(log, "Ensuring seed tarball exists");
+    slog::debug!(log, "Ensuring seed tarball exists");
 
     // Start up a ControlPlaneTestContext, which tautologically sets up
     // everything needed for a simulated control plane.

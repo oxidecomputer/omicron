@@ -10,6 +10,7 @@ use super::{ActionRegistry, NexusActionContext, NexusSaga, SagaInitError};
 use crate::app::sagas::declare_saga_actions;
 use crate::app::sagas::volume_delete;
 use crate::app::{authn, db};
+use nexus_types::saga::saga_action_failed;
 use omicron_uuid_kinds::VolumeUuid;
 use serde::Deserialize;
 use serde::Serialize;
@@ -116,7 +117,7 @@ async fn srsgs_update_request_record(
             params.request.id,
         )
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     Ok(())
 }

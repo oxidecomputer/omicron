@@ -8,8 +8,7 @@ use crate::{DatastoreAttachTargetConfig, VpcSubnet};
 use chrono::{DateTime, Utc};
 use db_macros::Resource;
 use nexus_db_schema::schema::{router_route, vpc_router, vpc_subnet};
-use nexus_types::external_api::params;
-use nexus_types::external_api::views;
+use nexus_types::external_api::vpc;
 use nexus_types::identity::Resource;
 use uuid::Uuid;
 
@@ -24,7 +23,7 @@ impl_enum_type!(
     Custom => b"custom"
 );
 
-impl From<VpcRouterKind> for views::VpcRouterKind {
+impl From<VpcRouterKind> for vpc::VpcRouterKind {
     fn from(kind: VpcRouterKind) -> Self {
         match kind {
             VpcRouterKind::Custom => Self::Custom,
@@ -50,7 +49,7 @@ impl VpcRouter {
         router_id: Uuid,
         vpc_id: Uuid,
         kind: VpcRouterKind,
-        params: params::VpcRouterCreate,
+        params: vpc::VpcRouterCreate,
     ) -> Self {
         let identity = VpcRouterIdentity::new(router_id, params.identity);
         Self {
@@ -63,7 +62,7 @@ impl VpcRouter {
     }
 }
 
-impl From<VpcRouter> for views::VpcRouter {
+impl From<VpcRouter> for vpc::VpcRouter {
     fn from(router: VpcRouter) -> Self {
         Self {
             identity: router.identity(),
@@ -88,8 +87,8 @@ pub struct VpcRouterUpdate {
     pub time_modified: DateTime<Utc>,
 }
 
-impl From<params::VpcRouterUpdate> for VpcRouterUpdate {
-    fn from(params: params::VpcRouterUpdate) -> Self {
+impl From<vpc::VpcRouterUpdate> for VpcRouterUpdate {
+    fn from(params: vpc::VpcRouterUpdate) -> Self {
         Self {
             name: params.identity.name.map(Name),
             description: params.identity.description,

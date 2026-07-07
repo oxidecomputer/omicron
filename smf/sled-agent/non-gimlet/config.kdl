@@ -85,7 +85,7 @@ key-pair "test-platformid-1" {
 entity "test-platformid-1" {
     country-name "US"
     organization-name "Oxide Computer Company"
-    common-name "PDV2:PPP-PPPPPPP:RRR:SSSSSSSSSS1"
+    common-name "PDV2:913-0000019:RRR:20000001"
 }
 
 certificate "test-platformid-1" {
@@ -97,7 +97,7 @@ certificate "test-platformid-1" {
 
     digest-algorithm "sha-384"
     not-after "9999-12-31T23:59:59Z"
-    serial-number "02"
+    serial-number "1001"
 
     extensions {
         subject-key-identifier critical=false
@@ -138,7 +138,7 @@ certificate "test-deviceid-1" {
 
     digest-algorithm "sha-512"
     not-after "9999-12-31T23:59:59Z"
-    serial-number "03"
+    serial-number "2001"
 
     extensions {
         subject-key-identifier critical=false
@@ -179,7 +179,7 @@ certificate "test-sprockets-auth-1" {
 
     digest-algorithm "sha-512"
     not-after "9999-12-31T23:59:59Z"
-    serial-number "04"
+    serial-number "3001"
 
     extensions {
         subject-key-identifier critical=false
@@ -201,12 +201,11 @@ certificate "test-sprockets-auth-1" {
     }
 }
 
-// TODO: sprockets reverses this cert chain before passing it to rustls
 certificate-list "test-sprockets-auth-1" \
-    "test-signer-a1" \
-    "test-platformid-1" \
+    "test-sprockets-auth-1" \
     "test-deviceid-1" \
-    "test-sprockets-auth-1"
+    "test-platformid-1" \
+    "test-signer-a1"
 
 key-pair "test-alias-1" {
     ed25519
@@ -262,7 +261,7 @@ key-pair "test-platformid-2" {
 entity "test-platformid-2" {
     country-name "US"
     organization-name "Oxide Computer Company"
-    common-name "PDV2:PPP-PPPPPPP:RRR:SSSSSSSSSS2"
+    common-name "PDV2:913-0000019:RRR:20000002"
 }
 
 certificate "test-platformid-2" {
@@ -274,7 +273,7 @@ certificate "test-platformid-2" {
 
     digest-algorithm "sha-384"
     not-after "9999-12-31T23:59:59Z"
-    serial-number "05"
+    serial-number "1002"
 
     extensions {
         subject-key-identifier critical=false
@@ -315,7 +314,7 @@ certificate "test-deviceid-2" {
 
     digest-algorithm "sha-512"
     not-after "9999-12-31T23:59:59Z"
-    serial-number "06"
+    serial-number "2002"
 
     extensions {
         subject-key-identifier critical=false
@@ -356,7 +355,7 @@ certificate "test-sprockets-auth-2" {
 
     digest-algorithm "sha-512"
     not-after "9999-12-31T23:59:59Z"
-    serial-number "07"
+    serial-number "3002"
 
     extensions {
         subject-key-identifier critical=false
@@ -378,12 +377,11 @@ certificate "test-sprockets-auth-2" {
     }
 }
 
-// TODO: sprockets reverses this cert chain before passing it to rustls
 certificate-list "test-sprockets-auth-2" \
-    "test-signer-a1" \
-    "test-platformid-2" \
+    "test-sprockets-auth-2" \
     "test-deviceid-2" \
-    "test-sprockets-auth-2"
+    "test-platformid-2" \
+    "test-signer-a1"
 
 key-pair "test-alias-2" {
     ed25519

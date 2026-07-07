@@ -2,8 +2,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-// Copyright 2024 Oxide Computer Company
-
 //! Generate Rust types and code from oximeter schema definitions.
 
 use crate::ir::find_schema_version;
@@ -517,6 +515,7 @@ fn quote_units(units: Units) -> TokenStream {
             quote! { ::oximeter::schema::Units::DegreesCelsius }
         }
         Units::Rpm => quote! { ::oximeter::schema::Units::Rpm },
+        Units::Joules => quote! { ::oximeter::schema::Units::Joules },
     }
 }
 

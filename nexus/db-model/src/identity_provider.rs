@@ -7,7 +7,7 @@ use db_macros::Resource;
 use nexus_db_schema::schema::{identity_provider, saml_identity_provider};
 use nexus_types::identity::Resource;
 
-use nexus_types::external_api::views;
+use nexus_types::external_api::identity_provider as idp_types;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -21,10 +21,10 @@ impl_enum_type!(
     Saml => b"saml"
 );
 
-impl From<IdentityProviderType> for views::IdentityProviderType {
+impl From<IdentityProviderType> for idp_types::IdentityProviderType {
     fn from(idp_type: IdentityProviderType) -> Self {
         match idp_type {
-            IdentityProviderType::Saml => views::IdentityProviderType::Saml,
+            IdentityProviderType::Saml => idp_types::IdentityProviderType::Saml,
         }
     }
 }
@@ -40,7 +40,7 @@ pub struct IdentityProvider {
     pub provider_type: IdentityProviderType,
 }
 
-impl From<IdentityProvider> for views::IdentityProvider {
+impl From<IdentityProvider> for idp_types::IdentityProvider {
     fn from(idp: IdentityProvider) -> Self {
         Self {
             identity: idp.identity(),
@@ -84,7 +84,7 @@ pub struct SamlIdentityProvider {
     pub group_attribute_name: Option<String>,
 }
 
-impl From<SamlIdentityProvider> for views::SamlIdentityProvider {
+impl From<SamlIdentityProvider> for idp_types::SamlIdentityProvider {
     fn from(saml_idp: SamlIdentityProvider) -> Self {
         Self {
             identity: saml_idp.identity(),

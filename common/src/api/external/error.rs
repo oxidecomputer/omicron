@@ -241,8 +241,8 @@ impl Error {
     /// happen but that we cannot reasonably handle at runtime (e.g.,
     /// deserializing a value from the database, or finding two records for
     /// something that is supposed to be unique).
-    pub fn internal_error(internal_message: &str) -> Error {
-        Error::InternalError { internal_message: internal_message.to_owned() }
+    pub fn internal_error(internal_message: impl Into<String>) -> Error {
+        Error::InternalError { internal_message: internal_message.into() }
     }
 
     /// Generates an [`Error::InvalidRequest`] error with the specific message
@@ -559,8 +559,7 @@ impl<T: ClientError> From<progenitor_client::Error<T>> for Error {
             | progenitor_client::Error::UnexpectedResponse(_)
             | progenitor_client::Error::InvalidUpgrade(_)
             | progenitor_client::Error::ResponseBodyError(_)
-            | progenitor_client::Error::PreHookError(_)
-            | progenitor_client::Error::PostHookError(_) => {
+            | progenitor_client::Error::Custom(_) => {
                 Error::internal_error(&e.to_string())
             }
             // This error represents an expected error from the remote service.

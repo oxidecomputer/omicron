@@ -61,7 +61,7 @@ pub async fn start_server(server_config: Config) -> Result<Server, StartError> {
     .version_policy(dropshot::VersionPolicy::Dynamic(Box::new(
         dropshot::ClientSpecifiesVersionInHeader::new(
             omicron_common::api::VERSION_HEADER,
-            ntp_admin_api::VERSION_INITIAL,
+            ntp_admin_api::latest_version(),
         ),
     )))
     .start()

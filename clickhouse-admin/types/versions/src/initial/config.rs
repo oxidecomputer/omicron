@@ -47,7 +47,7 @@ pub struct ReplicaConfig {
     pub tcp_port: u16,
     /// Port for interserver HTTP connections
     pub interserver_http_port: u16,
-    /// Configuration of clusters used by the Distributed table engine and by the cluster
+    /// Configuration of clusters used by the Distributed table engine and bythe cluster
     /// table function
     pub remote_servers: RemoteServers,
     /// Contains settings that allow ClickHouse servers to interact with a Keeper cluster

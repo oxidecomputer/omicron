@@ -14,4 +14,5 @@ pub mod instance;
 pub mod inventory;
 pub mod sled;
 pub mod support_bundle;
+pub mod uplink;
 pub mod zone_bundle;

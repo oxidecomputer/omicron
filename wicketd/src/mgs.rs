@@ -6,7 +6,7 @@
 //! runtime state.
 
 use futures::StreamExt;
-use gateway_client::types::SpIgnition;
+use gateway_types::ignition::SpIgnition;
 use slog::{Logger, info, o, warn};
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::SocketAddrV6;
@@ -350,11 +350,11 @@ impl MgsManager {
             // (potentially) adjust its polling frequency.
             if let Some(sp_handle) = sp_handles.get(&id) {
                 match &ignition {
-                    SpIgnition::No => {
+                    SpIgnition::Absent => {
                         sp_handle
                             .set_ignition_presence(IgnitionPresence::Absent);
                     }
-                    SpIgnition::Yes { .. } => {
+                    SpIgnition::Present { .. } => {
                         sp_handle
                             .set_ignition_presence(IgnitionPresence::Present);
                     }

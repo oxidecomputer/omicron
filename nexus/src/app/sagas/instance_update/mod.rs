@@ -342,8 +342,9 @@
 
 use super::{
     ACTION_GENERATE_ID, ActionRegistry, NexusActionContext, NexusSaga,
-    SagaInitError,
+    SagaContext, SagaInitError,
 };
+use crate::app::db::datastore;
 use crate::app::db::datastore::InstanceGestalt;
 use crate::app::db::datastore::VmmStateUpdateResult;
 use crate::app::db::datastore::instance;
@@ -355,14 +356,17 @@ use crate::app::db::model::InstanceState;
 use crate::app::db::model::MigrationState;
 use crate::app::db::model::Vmm;
 use crate::app::db::model::VmmState;
+use crate::app::instance_network::InstanceNetworkFilters;
 use crate::app::sagas::declare_saga_actions;
 use anyhow::Context;
 use chrono::Utc;
 use nexus_db_lookup::LookupPath;
 use nexus_db_queries::{authn, authz};
 use nexus_types::identity::Resource;
+use nexus_types::instance::SledVmmState;
+use nexus_types::saga::saga_action_failed;
 use omicron_common::api::external::Error;
-use omicron_common::api::internal::nexus::SledVmmState;
+use omicron_common::backoff;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
 use omicron_uuid_kinds::PropolisUuid;
@@ -471,13 +475,24 @@ struct UpdatesRequired {
     new_intent: Option<InstanceIntendedState>,
 
     /// If this is [`Some`], the instance's active VMM with this UUID has
-    /// transitioned to [`VmmState::Destroyed`], and its resources must be
-    /// cleaned up by a [`destroyed`] subsaga.
+    /// transitioned to a terminal state ([`VmmState::Destroyed`] or
+    /// [`VmmState::Failed`]), and its resources must be cleaned up by a
+    /// [`destroyed`] subsaga.
     destroy_active_vmm: Option<PropolisUuid>,
 
+    /// If this is [`Some`], then a migration finished successfully, and the
+    /// associated sled resource reservation records for the instance have to be
+    /// updated:
+    ///
+    /// - the previously active record has to have its state set to `tombstoned`
+    /// - the migration target record has to have its state set to `active`
+    update_sled_reservations_for_migration_success:
+        Option<MigrateSuccessUpdate>,
+
     /// If this is [`Some`], the instance's migration target VMM with this UUID
-    /// has transitioned to [`VmmState::Destroyed`], and its resources must be
-    /// cleaned up by a [`destroyed`] subsaga.
+    /// has transitioned to a terminal state ([`VmmState::Destroyed`] or
+    /// [`VmmState::Failed`]), and its resources must be cleaned up by a
+    /// [`destroyed`] subsaga.
     destroy_target_vmm: Option<PropolisUuid>,
 
     /// If this is [`Some`], the instance no longer has an active VMM, and its
@@ -490,6 +505,12 @@ struct UpdatesRequired {
     /// instance has moved to a new sled, or deleting them if it is no longer
     /// incarnated.
     network_config: Option<NetworkConfigUpdate>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct MigrateSuccessUpdate {
+    active_vmm_id: Uuid,
+    target_vmm_id: Uuid,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -521,11 +542,12 @@ impl UpdatesRequired {
         let mut update_required = false;
         let mut active_vmm_failed = false;
         let mut network_config = None;
+        let mut update_sled_reservations_for_migration_success = None;
 
         // Has the active VMM been destroyed?
         let destroy_active_vmm =
             snapshot.active_vmm.as_ref().and_then(|active_vmm| {
-                if active_vmm.runtime.state.is_terminal() {
+                if active_vmm.state.is_terminal() {
                     let id = PropolisUuid::from_untyped_uuid(active_vmm.id);
                     // Unlink the active VMM ID. If the active VMM was destroyed
                     // because a migration out completed, the next block, which
@@ -536,7 +558,7 @@ impl UpdatesRequired {
 
                     // If the active VMM's state is `Failed`, move the
                     // instance's new state to `Failed` rather than to `NoVmm`.
-                    if active_vmm.runtime.state == VmmState::Failed {
+                    if active_vmm.state == VmmState::Failed {
                         active_vmm_failed = true;
                     } else if snapshot.instance.intended_state
                         == InstanceIntendedState::Running
@@ -567,7 +589,7 @@ impl UpdatesRequired {
             snapshot.target_vmm.as_ref().and_then(|target_vmm| {
                 // XXX(eliza): AFAIK, target VMMs don't go to `Failed` until
                 // they become active, but...IDK. double-check that.
-                if target_vmm.runtime.state.is_terminal() {
+                if target_vmm.state.is_terminal() {
                     // Unlink the target VMM ID.
                     new_runtime.dst_propolis_id = None;
                     update_required = true;
@@ -594,6 +616,7 @@ impl UpdatesRequired {
                 new_runtime.migration_id = None;
                 new_runtime.dst_propolis_id = None;
                 update_required = true;
+
                 // If the active VMM was destroyed, the network config must be
                 // deleted (which was determined above). Otherwise, if the
                 // migration failed but the active VMM was still there, we must
@@ -683,8 +706,16 @@ impl UpdatesRequired {
                         "src_propolis_id" => %migration.source_propolis_id,
                         "target_propolis_id" => %migration.target_propolis_id,
                     );
+
                     new_runtime.migration_id = None;
                     new_runtime.dst_propolis_id = None;
+
+                    update_sled_reservations_for_migration_success =
+                        Some(MigrateSuccessUpdate {
+                            active_vmm_id: migration.source_propolis_id,
+                            target_vmm_id: migration.target_propolis_id,
+                        });
+
                     update_required = true;
                 }
             }
@@ -736,6 +767,7 @@ impl UpdatesRequired {
             new_intent,
             new_runtime,
             destroy_active_vmm,
+            update_sled_reservations_for_migration_success,
             destroy_target_vmm,
             deprovision,
             network_config,
@@ -828,6 +860,13 @@ declare_saga_actions! {
         + siu_commit_instance_updates
     }
 
+    // If a migration was successfully completed, update the target VMM's
+    // `sled_resource_vmm` record to be the active one, and tombstone the source
+    // record.
+    UPDATE_SLED_RESERVATIONS_FOR_MIGRATION_SUCCESS -> "update_active_vmm" {
+        + siu_update_sled_reservations_for_migration_success
+    }
+
     // Check if the VMM or migration state has changed while the update saga was
     // running and whether an additional update saga is now required. If one is
     // required, try to start it.
@@ -879,15 +918,25 @@ impl NexusSaga for SagaDoActualInstanceUpdate {
         ));
         builder.append(become_updater_action());
 
+        let UpdatesRequired {
+            new_runtime: _,
+            new_intent: _,
+            destroy_active_vmm,
+            update_sled_reservations_for_migration_success,
+            destroy_target_vmm,
+            deprovision,
+            network_config,
+        } = &params.update;
+
         // If a network config update is required, do that.
-        if let Some(ref update) = params.update.network_config {
+        if let Some(update) = network_config {
             builder.append(const_node(NETWORK_CONFIG_UPDATE, update)?);
             builder.append(update_network_config_action());
         }
 
         // If the instance now has no active VMM, release its virtual
         // provisioning resources and unassign its Oximeter producer.
-        if params.update.deprovision.is_some() {
+        if deprovision.is_some() {
             builder.append(release_virtual_provisioning_action());
             builder.append(unassign_oximeter_producer_action());
         }
@@ -895,6 +944,18 @@ impl NexusSaga for SagaDoActualInstanceUpdate {
         // Once we've finished mutating everything owned by the instance, we can
         // write back the updated state and release the instance lock.
         builder.append(commit_instance_updates_action());
+
+        // If a migration succeeded, we need to set the destination propolis'
+        // associated sled_resource_vmm record's state to active, and the
+        // source's to tombstoned.
+        if update_sled_reservations_for_migration_success.is_some() {
+            // Only perform this update if the target VMM is not to be destroyed.
+            if destroy_target_vmm.is_none() {
+                builder.append(
+                    update_sled_reservations_for_migration_success_action(),
+                );
+            }
+        }
 
         // If either VMM linked to this instance has been destroyed, append
         // subsagas to clean up the VMMs resources and mark them as deleted.
@@ -937,12 +998,12 @@ impl NexusSaga for SagaDoActualInstanceUpdate {
                 Ok::<(), SagaInitError>(())
             };
 
-        if let Some(vmm_id) = params.update.destroy_active_vmm {
-            append_destroyed_vmm_subsaga(vmm_id, "active")?;
+        if let Some(vmm_id) = destroy_active_vmm {
+            append_destroyed_vmm_subsaga(*vmm_id, "active")?;
         }
 
-        if let Some(vmm_id) = params.update.destroy_target_vmm {
-            append_destroyed_vmm_subsaga(vmm_id, "target")?;
+        if let Some(vmm_id) = destroy_target_vmm {
+            append_destroyed_vmm_subsaga(*vmm_id, "target")?;
         }
 
         // Finally, check if any additional updates are required to reconcile
@@ -983,7 +1044,17 @@ async fn siu_become_updater(
             saga_id,
         )
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(|e| match e {
+            // The `AlreadyLocked` variant must be serialized as
+            // `UpdaterLockError` so that the parent `start-instance-update`
+            // saga can identify this specific failure mode and handle it
+            // gracefully.
+            #[expect(clippy::disallowed_methods)]
+            instance::UpdaterLockError::AlreadyLocked => {
+                ActionError::action_failed(e)
+            }
+            instance::UpdaterLockError::Query(err) => saga_action_failed(err),
+        })?;
 
     info!(
         log,
@@ -1046,7 +1117,7 @@ async fn siu_update_network_config(
             nexus
                 .instance_delete_dpd_config(&opctx, authz_instance)
                 .await
-                .map_err(ActionError::action_failed)?;
+                .map_err(saga_action_failed)?;
         }
         NetworkConfigUpdate::Update { active_propolis_id, new_sled_id } => {
             info!(
@@ -1061,17 +1132,17 @@ async fn siu_update_network_config(
                 .sled_id(new_sled_id)
                 .fetch()
                 .await
-                .map_err(ActionError::action_failed)?;
+                .map_err(saga_action_failed)?;
 
             nexus
                 .instance_ensure_dpd_config(
                     &opctx,
                     instance_id,
                     &sled.address(),
-                    None,
+                    InstanceNetworkFilters::all(),
                 )
                 .await
-                .map_err(ActionError::action_failed)?;
+                .map_err(saga_action_failed)?;
         }
     }
 
@@ -1088,12 +1159,11 @@ async fn siu_release_virtual_provisioning(
     let Some(Deprovision { project_id, cpus_diff, ram_diff }) =
         update.deprovision
     else {
-        return Err(ActionError::action_failed(
+        return Err(saga_action_failed(Error::internal_error(
             "a `siu_release_virtual_provisioning` action should never have \
              been added to the DAG if the update does not contain virtual \
-             resources to deprovision"
-                .to_string(),
-        ));
+             resources to deprovision",
+        )));
     };
     let instance_id = InstanceUuid::from_untyped_uuid(authz_instance.id());
 
@@ -1131,7 +1201,7 @@ async fn siu_release_virtual_provisioning(
                 "instance_id" => %instance_id,
             );
         }
-        Err(err) => return Err(ActionError::action_failed(err)),
+        Err(err) => return Err(saga_action_failed(err)),
     };
 
     Ok(())
@@ -1160,7 +1230,7 @@ async fn siu_unassign_oximeter_producer(
         &authz_instance.id(),
     )
     .await
-    .map_err(ActionError::action_failed)
+    .map_err(saga_action_failed)
 }
 
 async fn siu_commit_instance_updates(
@@ -1197,7 +1267,7 @@ async fn siu_commit_instance_updates(
             update.new_intent,
         )
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     info!(
         log,
@@ -1241,19 +1311,91 @@ async fn siu_commit_instance_updates(
                 {
                     // The reconciler will fix this later
                     info!(log,
-                          "instance update: failed to update multicast member sled_id after migration, reconciler will fix";
+                          "instance update: failed to update multicast \
+                           member sled_id after migration, reconciler \
+                           will fix";
                           "instance_id" => %instance_id,
                           "new_sled_id" => %new_sled_id,
                           "error" => ?e);
                 } else {
                     info!(log,
-                          "instance update: updated multicast member sled_id after migration";
+                          "instance update: updated multicast member \
+                           sled_id after migration";
                           "instance_id" => %instance_id,
                           "new_sled_id" => %new_sled_id);
                 }
             }
         }
     }
+
+    // Detach all multicast members once the active VMM has reached a terminal
+    // state, which avoids tearing down M2P/forwarding while the guest is still
+    // running on its sled. Covers graceful stop and failure paths alike.
+    if update.deprovision.is_some() && nexus.multicast_enabled() {
+        if let Err(e) = osagactx
+            .datastore()
+            .multicast_group_members_detach_by_instance(
+                &opctx,
+                InstanceUuid::from_untyped_uuid(instance_id),
+            )
+            .await
+        {
+            info!(log,
+                  "instance update: failed to detach multicast members \
+                   on deprovision, next reconciler pass will retry";
+                  "instance_id" => %instance_id,
+                  "error" => ?e);
+        } else {
+            info!(log,
+                  "instance update: detached multicast members on deprovision";
+                  "instance_id" => %instance_id);
+            nexus.background_tasks.task_multicast_reconciler.activate();
+        }
+    }
+
+    Ok(())
+}
+
+async fn siu_update_sled_reservations_for_migration_success(
+    sagactx: NexusActionContext,
+) -> Result<(), ActionError> {
+    let osagactx = sagactx.user_data();
+    let RealParams { serialized_authn, authz_instance, ref update, .. } =
+        sagactx.saga_params::<RealParams>()?;
+
+    let opctx =
+        crate::context::op_context_for_saga_action(&sagactx, &serialized_authn);
+    let log = osagactx.log();
+    let instance_id = authz_instance.id();
+
+    let Some(update) = &update.update_sled_reservations_for_migration_success
+    else {
+        return Err(saga_action_failed(Error::internal_error(
+            "saga node called with None update_active_vmm_for_migration_success",
+        )));
+    };
+
+    let MigrateSuccessUpdate { active_vmm_id, target_vmm_id } = &update;
+
+    osagactx
+        .datastore()
+        .sled_reservation_update_for_migrate_success(
+            &opctx,
+            datastore::sled::MigrateSuccessUpdate {
+                active_vmm_id: *active_vmm_id,
+                target_vmm_id: *target_vmm_id,
+                instance_id,
+            },
+        )
+        .await
+        .map_err(saga_action_failed)?;
+
+    info!(
+        log,
+        "instance update: set sled reservation record {active_vmm_id} to \
+        state 'tombstoned' and reservation {target_vmm_id} to state 'active'";
+        "instance_id" => %instance_id,
+    );
 
     Ok(())
 }
@@ -1338,37 +1480,7 @@ async fn siu_chain_successor_saga(
                 "instance_id" => %instance_id,
             );
         } else {
-            // If the instance has transitioned to the `Failed` state and no
-            // additional update saga is required, check if the instance's
-            // auto-restart policy allows it to be automatically restarted. If
-            // it does, activate the instance-reincarnation background task to
-            // automatically restart it.
-            let karmic_state = new_state
-                .instance
-                .auto_restart_status(new_state.active_vmm.as_ref());
-            if karmic_state.should_reincarnate() {
-                info!(
-                    log,
-                    "instance update: instance transitioned to Failed, \
-                     but can be automatically restarted; activating \
-                     reincarnation.";
-                    "instance_id" => %instance_id,
-                    "auto_restart_config" => ?new_state.instance.auto_restart,
-                    "runtime_state" => ?new_state.instance.runtime_state,
-                    "intended_state" => %new_state.instance.intended_state,
-                );
-                nexus.background_tasks.task_instance_reincarnation.activate();
-            } else {
-                debug!(
-                    log,
-                    "instance update: instance will not reincarnate";
-                    "instance_id" => %instance_id,
-                    "auto_restart_config" => ?new_state.instance.auto_restart,
-                    "needs_reincarnation" => karmic_state.needs_reincarnation,
-                    "karmic_state" => ?karmic_state.can_reincarnate,
-                    "intended_state" => %new_state.instance.intended_state,
-                )
-            }
+            reincarnate_if_needed(osagactx, &new_state)
         }
 
         Ok::<(), anyhow::Error>(())
@@ -1391,6 +1503,46 @@ async fn siu_chain_successor_saga(
 
     Ok(())
 }
+
+fn reincarnate_if_needed(osagactx: &SagaContext, state: &InstanceGestalt) {
+    // If the instance has transitioned to the `Failed` state and no
+    // additional update saga is required, check if the instance's
+    // auto-restart policy allows it to be automatically restarted. If
+    // it does, activate the instance-reincarnation background task to
+    // automatically restart it.
+    let karmic_state =
+        state.instance.auto_restart_status(state.active_vmm.as_ref());
+    if karmic_state.should_reincarnate() {
+        info!(
+            &osagactx.log(),
+            "instance update: instance transitioned to Failed, \
+             but can be automatically restarted; activating \
+             reincarnation.";
+            "instance_id" => %state.instance.id(),
+            "auto_restart_config" => ?state.instance.auto_restart,
+            "runtime_state" => ?state.instance.runtime(),
+            "intended_state" => %state.instance.intended_state,
+        );
+        osagactx
+            .nexus()
+            .background_tasks
+            .task_instance_reincarnation
+            .activate();
+    } else {
+        debug!(
+            &osagactx.log(),
+            "instance update: instance will not reincarnate";
+            "instance_id" => %state.instance.id(),
+            "auto_restart_config" => ?state.instance.auto_restart,
+            "needs_reincarnation" => karmic_state.needs_reincarnation,
+            "karmic_state" => ?karmic_state.can_reincarnate,
+            "intended_state" => %state.instance.intended_state,
+        )
+    }
+}
+
+const RETRY_WARN_AFTER: std::time::Duration =
+    std::time::Duration::from_secs(20);
 
 /// Unlock the instance record while unwinding.
 ///
@@ -1430,7 +1582,6 @@ async fn unwind_instance_lock(
     //   happily because it doesn't matter if the instance is actually unlocked.
     use dropshot::HttpError;
     use futures::{TryFutureExt, future};
-    use omicron_common::backoff;
 
     let osagactx = sagactx.user_data();
     let log = osagactx.log();
@@ -1444,9 +1595,6 @@ async fn unwind_instance_lock(
         "instance_id" => %instance_id,
         "lock" => ?lock,
     );
-
-    const WARN_DURATION: std::time::Duration =
-        std::time::Duration::from_secs(20);
 
     let did_unlock = backoff::retry_notify_ext(
         // This is an internal service query to CockroachDB.
@@ -1487,7 +1635,7 @@ async fn unwind_instance_lock(
                     "call_count" => call_count,
                     "total_duration" => ?total_duration,
                 );
-            } else if total_duration > WARN_DURATION {
+            } else if total_duration > RETRY_WARN_AFTER {
                 warn!(
                     log,
                     "instance update: server error while unlocking instance, \
@@ -1528,27 +1676,41 @@ async fn unwind_instance_lock(
 mod test {
     use super::*;
     use crate::app::OpContext;
+    use crate::app::db;
     use crate::app::db::model::Instance;
-    use crate::app::db::model::VmmRuntimeState;
     use crate::app::saga::create_saga_dag;
     use crate::app::sagas::test_helpers;
-    use crate::external_api::params;
+    use anyhow::Context;
     use chrono::Utc;
     use dropshot::test_util::ClientTestContext;
     use nexus_db_lookup::LookupPath;
     use nexus_db_queries::db::datastore::InstanceAndActiveVmm;
+    use nexus_test_utils;
     use nexus_test_utils::resource_helpers::{
         create_default_ip_pools, create_project, object_create,
     };
     use nexus_test_utils_macros::nexus_test;
-    use nexus_types::internal_api::params::InstanceMigrateRequest;
-    use omicron_common::api::internal::nexus::{
-        MigrationRuntimeState, MigrationState, Migrations,
+    use nexus_types::external_api::instance::InstanceCpuCount;
+    use nexus_types::external_api::{
+        instance as instance_types, networking as networking_types,
     };
+    use nexus_types::identity::Asset as _;
+    use nexus_types::instance::Migrations;
+    use nexus_types::instance::VmmFailureReason;
+    use nexus_types::instance::VmmState as NexusVmmState;
+    use nexus_types::internal_api::params::InstanceMigrateRequest;
+    use omicron_common::api::external::{
+        ByteCount, DataPageParams, IdentityMetadataCreateParams, Name,
+    };
+    use omicron_test_utils::dev::poll;
     use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::PropolisUuid;
+    use sled_agent_types::early_networking::SwitchSlot;
+    use sled_agent_types::instance::{MigrationRuntimeState, MigrationState};
+    use slog_error_chain::InlineErrorChain;
     use std::sync::Arc;
     use std::sync::Mutex;
+    use std::time::Duration;
     use uuid::Uuid;
 
     type ControlPlaneTestContext =
@@ -1585,15 +1747,12 @@ mod test {
 
     async fn create_instance(
         client: &ClientTestContext,
-    ) -> omicron_common::api::external::Instance {
-        use omicron_common::api::external::{
-            ByteCount, IdentityMetadataCreateParams, InstanceCpuCount,
-        };
+    ) -> nexus_types_versions::latest::instance::Instance {
         let instances_url = format!("/v1/instances?project={}", PROJECT_NAME);
         object_create(
             client,
             &instances_url,
-            &params::InstanceCreate {
+            &instance_types::InstanceCreate {
                 identity: IdentityMetadataCreateParams {
                     name: INSTANCE_NAME.parse().unwrap(),
                     description: format!("instance {:?}", INSTANCE_NAME),
@@ -1603,8 +1762,10 @@ mod test {
                 hostname: INSTANCE_NAME.parse().unwrap(),
                 user_data: b"#cloud-config".to_vec(),
                 ssh_public_keys: Some(Vec::new()),
+                // The instance should have one IPv4 NIC in order for the tests
+                // for networking state to work.
                 network_interfaces:
-                    params::InstanceNetworkInterfaceAttachment::None,
+                    instance_types::InstanceNetworkInterfaceAttachment::DefaultIpv4,
                 external_ips: vec![],
                 disks: vec![],
                 boot_disk: None,
@@ -1613,6 +1774,7 @@ mod test {
                 auto_restart_policy: Default::default(),
                 anti_affinity_groups: Vec::new(),
                 multicast_groups: Vec::new(),
+                enable_jumbo_frames: false,
             },
         )
         .await
@@ -1949,11 +2111,8 @@ mod test {
         datastore
             .vmm_update_runtime(
                 &vmm_id,
-                &VmmRuntimeState {
-                    time_state_updated: Utc::now(),
-                    generation: Generation(vmm.runtime.generation.0.next()),
-                    state: VmmState::Destroyed,
-                },
+                &vmm.runtime()
+                    .transition(nexus_types::instance::VmmState::Destroyed),
             )
             .await
             .unwrap();
@@ -2009,7 +2168,7 @@ mod test {
     ) {
         let _project_id = setup_test_project(&cptestctx.external_client).await;
         MigrationOutcome::default()
-            .source(MigrationState::Completed, VmmState::Stopping)
+            .source(MigrationState::Completed, NexusVmmState::Stopping)
             .setup_test(cptestctx)
             .await
             .run_saga_basic_usage_succeeds_test(cptestctx)
@@ -2023,7 +2182,7 @@ mod test {
         let _project_id = setup_test_project(&cptestctx.external_client).await;
 
         MigrationOutcome::default()
-            .source(MigrationState::Completed, VmmState::Stopping)
+            .source(MigrationState::Completed, NexusVmmState::Stopping)
             .setup_test(cptestctx)
             .await
             .run_actions_succeed_idempotently_test(cptestctx)
@@ -2035,7 +2194,7 @@ mod test {
         cptestctx: &ControlPlaneTestContext,
     ) {
         MigrationOutcome::default()
-            .source(MigrationState::Completed, VmmState::Stopping)
+            .source(MigrationState::Completed, NexusVmmState::Stopping)
             .run_unwinding_test(cptestctx)
             .await;
     }
@@ -2049,7 +2208,7 @@ mod test {
         let _project_id = setup_test_project(&cptestctx.external_client).await;
 
         MigrationOutcome::default()
-            .target(MigrationState::Completed, VmmState::Running)
+            .target(MigrationState::Completed, NexusVmmState::Running)
             .setup_test(cptestctx)
             .await
             .run_saga_basic_usage_succeeds_test(cptestctx)
@@ -2063,7 +2222,7 @@ mod test {
         let _project_id = setup_test_project(&cptestctx.external_client).await;
 
         MigrationOutcome::default()
-            .target(MigrationState::Completed, VmmState::Running)
+            .target(MigrationState::Completed, NexusVmmState::Running)
             .setup_test(cptestctx)
             .await
             .run_actions_succeed_idempotently_test(cptestctx)
@@ -2075,7 +2234,7 @@ mod test {
         cptestctx: &ControlPlaneTestContext,
     ) {
         MigrationOutcome::default()
-            .target(MigrationState::Completed, VmmState::Running)
+            .target(MigrationState::Completed, NexusVmmState::Running)
             .run_unwinding_test(cptestctx)
             .await;
     }
@@ -2089,8 +2248,8 @@ mod test {
         let _project_id = setup_test_project(&cptestctx.external_client).await;
 
         MigrationOutcome::default()
-            .target(MigrationState::Completed, VmmState::Running)
-            .source(MigrationState::Completed, VmmState::Destroyed)
+            .target(MigrationState::Completed, NexusVmmState::Running)
+            .source(MigrationState::Completed, NexusVmmState::Destroyed)
             .setup_test(cptestctx)
             .await
             .run_saga_basic_usage_succeeds_test(cptestctx)
@@ -2104,8 +2263,8 @@ mod test {
         let _project_id = setup_test_project(&cptestctx.external_client).await;
 
         MigrationOutcome::default()
-            .target(MigrationState::Completed, VmmState::Running)
-            .source(MigrationState::Completed, VmmState::Destroyed)
+            .target(MigrationState::Completed, NexusVmmState::Running)
+            .source(MigrationState::Completed, NexusVmmState::Destroyed)
             .setup_test(cptestctx)
             .await
             .run_actions_succeed_idempotently_test(cptestctx)
@@ -2117,8 +2276,8 @@ mod test {
         cptestctx: &ControlPlaneTestContext,
     ) {
         MigrationOutcome::default()
-            .target(MigrationState::Completed, VmmState::Running)
-            .source(MigrationState::Completed, VmmState::Destroyed)
+            .target(MigrationState::Completed, NexusVmmState::Running)
+            .source(MigrationState::Completed, NexusVmmState::Destroyed)
             .run_unwinding_test(cptestctx)
             .await;
     }
@@ -2132,8 +2291,11 @@ mod test {
         let _project_id = setup_test_project(&cptestctx.external_client).await;
 
         MigrationOutcome::default()
-            .target(MigrationState::Failed, VmmState::Failed)
-            .source(MigrationState::Failed, VmmState::Running)
+            .target(
+                MigrationState::Failed,
+                NexusVmmState::Failed(VmmFailureReason::FromSledAgent),
+            )
+            .source(MigrationState::Failed, NexusVmmState::Running)
             .setup_test(cptestctx)
             .await
             .run_saga_basic_usage_succeeds_test(cptestctx)
@@ -2147,8 +2309,11 @@ mod test {
         let _project_id = setup_test_project(&cptestctx.external_client).await;
 
         MigrationOutcome::default()
-            .target(MigrationState::Failed, VmmState::Failed)
-            .source(MigrationState::Failed, VmmState::Running)
+            .target(
+                MigrationState::Failed,
+                NexusVmmState::Failed(VmmFailureReason::FromSledAgent),
+            )
+            .source(MigrationState::Failed, NexusVmmState::Running)
             .setup_test(cptestctx)
             .await
             .run_actions_succeed_idempotently_test(cptestctx)
@@ -2160,8 +2325,11 @@ mod test {
         cptestctx: &ControlPlaneTestContext,
     ) {
         MigrationOutcome::default()
-            .target(MigrationState::Failed, VmmState::Failed)
-            .source(MigrationState::Failed, VmmState::Running)
+            .target(
+                MigrationState::Failed,
+                NexusVmmState::Failed(VmmFailureReason::FromSledAgent),
+            )
+            .source(MigrationState::Failed, NexusVmmState::Running)
             .run_unwinding_test(cptestctx)
             .await;
     }
@@ -2175,8 +2343,8 @@ mod test {
         let _project_id = setup_test_project(&cptestctx.external_client).await;
 
         MigrationOutcome::default()
-            .target(MigrationState::Failed, VmmState::Destroyed)
-            .source(MigrationState::Failed, VmmState::Running)
+            .target(MigrationState::Failed, NexusVmmState::Destroyed)
+            .source(MigrationState::Failed, NexusVmmState::Running)
             .setup_test(cptestctx)
             .await
             .run_saga_basic_usage_succeeds_test(cptestctx)
@@ -2190,8 +2358,8 @@ mod test {
         let _project_id = setup_test_project(&cptestctx.external_client).await;
 
         MigrationOutcome::default()
-            .target(MigrationState::Failed, VmmState::Destroyed)
-            .source(MigrationState::Failed, VmmState::Running)
+            .target(MigrationState::Failed, NexusVmmState::Destroyed)
+            .source(MigrationState::Failed, NexusVmmState::Running)
             .setup_test(cptestctx)
             .await
             .run_actions_succeed_idempotently_test(cptestctx)
@@ -2203,8 +2371,8 @@ mod test {
         cptestctx: &ControlPlaneTestContext,
     ) {
         MigrationOutcome::default()
-            .target(MigrationState::Failed, VmmState::Destroyed)
-            .source(MigrationState::Failed, VmmState::Running)
+            .target(MigrationState::Failed, NexusVmmState::Destroyed)
+            .source(MigrationState::Failed, NexusVmmState::Running)
             .run_unwinding_test(cptestctx)
             .await;
     }
@@ -2218,8 +2386,8 @@ mod test {
         let _project_id = setup_test_project(&cptestctx.external_client).await;
 
         MigrationOutcome::default()
-            .target(MigrationState::InProgress, VmmState::Running)
-            .source(MigrationState::Failed, VmmState::Destroyed)
+            .target(MigrationState::InProgress, NexusVmmState::Running)
+            .source(MigrationState::Failed, NexusVmmState::Destroyed)
             .setup_test(cptestctx)
             .await
             .run_saga_basic_usage_succeeds_test(cptestctx)
@@ -2233,8 +2401,8 @@ mod test {
         let _project_id = setup_test_project(&cptestctx.external_client).await;
 
         MigrationOutcome::default()
-            .target(MigrationState::InProgress, VmmState::Running)
-            .source(MigrationState::Failed, VmmState::Destroyed)
+            .target(MigrationState::InProgress, NexusVmmState::Running)
+            .source(MigrationState::Failed, NexusVmmState::Destroyed)
             .setup_test(cptestctx)
             .await
             .run_actions_succeed_idempotently_test(cptestctx)
@@ -2246,8 +2414,8 @@ mod test {
         cptestctx: &ControlPlaneTestContext,
     ) {
         MigrationOutcome::default()
-            .target(MigrationState::InProgress, VmmState::Running)
-            .source(MigrationState::Failed, VmmState::Destroyed)
+            .target(MigrationState::InProgress, NexusVmmState::Running)
+            .source(MigrationState::Failed, NexusVmmState::Destroyed)
             .run_unwinding_test(cptestctx)
             .await;
     }
@@ -2261,8 +2429,8 @@ mod test {
         let _project_id = setup_test_project(&cptestctx.external_client).await;
 
         MigrationOutcome::default()
-            .target(MigrationState::Failed, VmmState::Destroyed)
-            .source(MigrationState::Failed, VmmState::Destroyed)
+            .target(MigrationState::Failed, NexusVmmState::Destroyed)
+            .source(MigrationState::Failed, NexusVmmState::Destroyed)
             .setup_test(cptestctx)
             .await
             .run_saga_basic_usage_succeeds_test(cptestctx)
@@ -2276,8 +2444,8 @@ mod test {
         let _project_id = setup_test_project(&cptestctx.external_client).await;
 
         MigrationOutcome::default()
-            .target(MigrationState::Failed, VmmState::Destroyed)
-            .source(MigrationState::Failed, VmmState::Destroyed)
+            .target(MigrationState::Failed, NexusVmmState::Destroyed)
+            .source(MigrationState::Failed, NexusVmmState::Destroyed)
             .setup_test(cptestctx)
             .await
             .run_actions_succeed_idempotently_test(cptestctx)
@@ -2289,8 +2457,8 @@ mod test {
         cptestctx: &ControlPlaneTestContext,
     ) {
         MigrationOutcome::default()
-            .target(MigrationState::Failed, VmmState::Destroyed)
-            .source(MigrationState::Failed, VmmState::Destroyed)
+            .target(MigrationState::Failed, NexusVmmState::Destroyed)
+            .source(MigrationState::Failed, NexusVmmState::Destroyed)
             .run_unwinding_test(cptestctx)
             .await;
     }
@@ -2304,8 +2472,8 @@ mod test {
         let _project_id = setup_test_project(&cptestctx.external_client).await;
 
         MigrationOutcome::default()
-            .target(MigrationState::Completed, VmmState::Destroyed)
-            .source(MigrationState::Completed, VmmState::Stopping)
+            .target(MigrationState::Completed, NexusVmmState::Destroyed)
+            .source(MigrationState::Completed, NexusVmmState::Stopping)
             .setup_test(cptestctx)
             .await
             .run_saga_basic_usage_succeeds_test(cptestctx)
@@ -2319,8 +2487,8 @@ mod test {
         let _project_id = setup_test_project(&cptestctx.external_client).await;
 
         MigrationOutcome::default()
-            .target(MigrationState::Completed, VmmState::Destroyed)
-            .source(MigrationState::Completed, VmmState::Stopping)
+            .target(MigrationState::Completed, NexusVmmState::Destroyed)
+            .source(MigrationState::Completed, NexusVmmState::Stopping)
             .setup_test(cptestctx)
             .await
             .run_actions_succeed_idempotently_test(cptestctx)
@@ -2332,31 +2500,440 @@ mod test {
         cptestctx: &ControlPlaneTestContext,
     ) {
         MigrationOutcome::default()
-            .target(MigrationState::Completed, VmmState::Destroyed)
-            .source(MigrationState::Completed, VmmState::Stopping)
+            .target(MigrationState::Completed, NexusVmmState::Destroyed)
+            .source(MigrationState::Completed, NexusVmmState::Stopping)
             .run_unwinding_test(cptestctx)
             .await;
     }
 
+    // === dead-switch tests ===
+
+    /// Tests that instance update sagas can complete successfully if one switch
+    /// zone is not available.
+    /// This reproduces <https://github.com/oxidecomputer/omicron/issues/10343>
+    #[tokio::test]
+    async fn destroyed_update_can_complete_with_dead_switch() {
+        let cptestctx = nexus_test_utils::ControlPlaneBuilder::new(
+            "destroyed_update_can_complete_with_dead_switch",
+        )
+        .with_extra_sled_agents(3)
+        .start::<crate::Server>()
+        .await;
+
+        let nexus = &cptestctx.server.server_context().nexus;
+        let opctx = test_helpers::test_opctx(&cptestctx);
+        let log = &cptestctx.logctx.log;
+
+        setup_dendrite(&cptestctx).await;
+
+        // Before we make one of the switch zones go away, start a test
+        // instance, and simulate it into the `Running` state so that its
+        // network config is propagated.
+        let _project_id = setup_test_project(&cptestctx.external_client).await;
+        let (state, params) = setup_active_vmm_destroyed_test(&cptestctx).await;
+        let instance_id = state.instance.id();
+
+        let switch0_dpd_client = mk_dpd_client(&cptestctx, SwitchSlot::Switch0);
+        let switch1_dpd_client = mk_dpd_client(&cptestctx, SwitchSlot::Switch1);
+
+        wait_for_n_nat_entries(
+            &log,
+            &switch0_dpd_client,
+            SwitchSlot::Switch0,
+            1,
+        )
+        .await
+        .unwrap();
+        wait_for_n_nat_entries(
+            &log,
+            &switch1_dpd_client,
+            SwitchSlot::Switch1,
+            1,
+        )
+        .await
+        .unwrap();
+
+        // Shutdown switch 0.
+        cptestctx.stop_dendrite(SwitchSlot::Switch0).await;
+        assert!(switch0_dpd_client.dpd_uptime().await.is_err());
+
+        // Okay, now that we've taken down one of the simulated switches, we
+        // should be able to run an instance-update saga to destroy the VMM.
+        //
+        // Build the saga DAG with the provided test parameters
+        let real_params = make_real_params(&cptestctx, &opctx, params).await;
+        let dag =
+            create_saga_dag::<SagaDoActualInstanceUpdate>(real_params).unwrap();
+
+        let saga_done =
+            crate::app::sagas::test_helpers::actions_succeed_idempotently(
+                &nexus, dag,
+            );
+        tokio::time::timeout(Duration::from_secs(60), saga_done)
+            .await
+            .expect("instance update saga did not complete within 60 seconds");
+
+        // Check that the VMM's resources were torn down properly.
+        verify_active_vmm_destroyed(&cptestctx, instance_id).await;
+
+        // The still-alive switch should have had the NAT entries removed.
+        wait_for_n_nat_entries(
+            &log,
+            &switch1_dpd_client,
+            SwitchSlot::Switch1,
+            0,
+        )
+        .await
+        .unwrap();
+
+        // Since the expected state after destroying a VMM is "no NAT entries",
+        // we can't meaningfully distinguish "propagated" from "never set" on
+        // the dead switch. The migration variant of this test (below) is also
+        // able to assert that the proper state is synced to the dead switch
+        // when it comes back to life.
+
+        cptestctx.teardown().await;
+    }
+
+    /// Tests that instance update sagas for a completed migration can complete
+    /// successfully if one switch zone is not available, and that the NAT
+    /// entries for the instance are propagated to both switches once the
+    /// missing one has come back.
+    #[tokio::test]
+    async fn migration_update_can_complete_with_dead_switch() {
+        let cptestctx = nexus_test_utils::ControlPlaneBuilder::new(
+            "migration_update_can_complete_with_dead_switch",
+        )
+        .with_extra_sled_agents(3)
+        .start::<crate::Server>()
+        .await;
+
+        let nexus = &cptestctx.server.server_context().nexus;
+        let opctx = test_helpers::test_opctx(&cptestctx);
+        let log = &cptestctx.logctx.log;
+
+        setup_dendrite(&cptestctx).await;
+
+        // Create a running instance and start migrating it.
+        setup_test_project(&cptestctx.external_client).await;
+        let migration_test =
+            MigrationTest::setup(MigrationOutcome::default(), &cptestctx).await;
+
+        let switch0_dpd_client = mk_dpd_client(&cptestctx, SwitchSlot::Switch0);
+        let switch1_dpd_client = mk_dpd_client(&cptestctx, SwitchSlot::Switch1);
+
+        wait_for_n_nat_entries(
+            &log,
+            &switch0_dpd_client,
+            SwitchSlot::Switch0,
+            1,
+        )
+        .await
+        .unwrap();
+        wait_for_n_nat_entries(
+            &log,
+            &switch1_dpd_client,
+            SwitchSlot::Switch1,
+            1,
+        )
+        .await
+        .unwrap();
+
+        // Simulate the migration completing.
+        migration_test
+            .update_src_state(
+                &cptestctx,
+                NexusVmmState::Destroyed,
+                MigrationState::Completed,
+            )
+            .await;
+        migration_test
+            .update_target_state(
+                &cptestctx,
+                NexusVmmState::Running,
+                MigrationState::Completed,
+            )
+            .await;
+
+        // Shut down switch 0.
+        cptestctx.stop_dendrite(SwitchSlot::Switch0).await;
+        assert!(switch0_dpd_client.dpd_uptime().await.is_err());
+
+        // Run the instance-update saga to complete the migration.
+        let real_params = make_real_params(
+            &cptestctx,
+            &opctx,
+            migration_test.start_saga_params(),
+        )
+        .await;
+        let dag =
+            create_saga_dag::<SagaDoActualInstanceUpdate>(real_params).unwrap();
+
+        let saga_done =
+            crate::app::sagas::test_helpers::actions_succeed_idempotently(
+                &nexus, dag,
+            );
+        tokio::time::timeout(Duration::from_secs(60), saga_done)
+            .await
+            .expect("instance update saga did not complete within 60 seconds");
+
+        // In real life, the NAT entries on the alive switch should *change* to
+        // point at the new sled. However, in this test, the NAT entry for both
+        // the source and destination sleds will both point at localhost, since
+        // both "sleds" are actually just processes running on that computer.
+        // So, we're just asserting that there is one NAT entry before and after
+        // the migration...which would catch a bug where we delete the old NAT
+        // entry for the source sled but don't create the new one for the target
+        // sled, I guess, but doesn't actually validate that they have
+        // *changed*...since they *haven't*. Oh well.
+        wait_for_n_nat_entries(
+            &log,
+            &switch1_dpd_client,
+            SwitchSlot::Switch1,
+            1,
+        )
+        .await
+        .unwrap();
+
+        // Restart switch 0 and verify it also gets the new entries.
+        cptestctx.restart_dendrite(SwitchSlot::Switch0).await;
+        wait_for_n_nat_entries(
+            log,
+            &switch0_dpd_client,
+            SwitchSlot::Switch0,
+            1,
+        )
+        .await
+        .unwrap();
+
+        cptestctx.teardown().await;
+    }
+
+    // === dead-switch test helpers ===
+
+    async fn setup_dendrite(cptestctx: &ControlPlaneTestContext) {
+        let opctx = test_helpers::test_opctx(cptestctx);
+        let datastore =
+            cptestctx.server.server_context().nexus.datastore().clone();
+
+        let mut uplink0_params =
+            networking_types::SwitchPortSettingsCreate::new(
+                IdentityMetadataCreateParams {
+                    name: "test-uplink0".parse().unwrap(),
+                    description: "test uplink".into(),
+                },
+            );
+
+        uplink0_params.routes = vec![networking_types::RouteConfig {
+            link_name: "phy0".parse().unwrap(),
+            routes: vec![networking_types::Route {
+                dst: "0.0.0.0/0".parse().unwrap(),
+                gw: "1.1.1.1".parse().unwrap(),
+                vid: None,
+                rib_priority: None,
+            }],
+        }];
+
+        let mut uplink1_params =
+            networking_types::SwitchPortSettingsCreate::new(
+                IdentityMetadataCreateParams {
+                    name: "test-uplink1".parse().unwrap(),
+                    description: "test uplink".into(),
+                },
+            );
+
+        uplink1_params.routes = vec![networking_types::RouteConfig {
+            link_name: "phy0".parse().unwrap(),
+            routes: vec![networking_types::Route {
+                dst: "0.0.0.0/0".parse().unwrap(),
+                gw: "2.2.2.2".parse().unwrap(),
+                vid: None,
+                rib_priority: None,
+            }],
+        }];
+
+        let uplink0_settings = datastore
+            .switch_port_settings_create(&opctx, &uplink0_params, None)
+            .await
+            .expect("should be able to create configuration for uplink0");
+
+        let uplink1_settings = datastore
+            .switch_port_settings_create(&opctx, &uplink1_params, None)
+            .await
+            .expect("should be able to create configuration for uplink1");
+
+        let rack_id = datastore
+            .rack_list(&opctx, &DataPageParams::max_page())
+            .await
+            .unwrap()
+            .pop()
+            .unwrap()
+            .id();
+
+        let uplink0 = datastore
+            .switch_port_get_id(
+                &opctx,
+                rack_id,
+                SwitchSlot::Switch0,
+                Name::try_from("qsfp0".to_string()).unwrap().into(),
+            )
+            .await
+            .expect("there should be a switch port for switch0");
+
+        let uplink1 = datastore
+            .switch_port_get_id(
+                &opctx,
+                rack_id,
+                SwitchSlot::Switch1,
+                Name::try_from("qsfp0".to_string()).unwrap().into(),
+            )
+            .await
+            .expect("there should be a switch port for switch1");
+
+        datastore
+            .switch_port_set_settings_id(
+                &opctx,
+                uplink0,
+                Some(uplink0_settings.settings.id()),
+                db::datastore::UpdatePrecondition::DontCare,
+            )
+            .await
+            .expect("unable to update switch0 settings");
+
+        datastore
+            .switch_port_set_settings_id(
+                &opctx,
+                uplink1,
+                Some(uplink1_settings.settings.id()),
+                db::datastore::UpdatePrecondition::DontCare,
+            )
+            .await
+            .expect("unable to update switch1 settings");
+    }
+
+    fn mk_dpd_client(
+        cptestctx: &ControlPlaneTestContext,
+        switch_slot: SwitchSlot,
+    ) -> dpd_client::Client {
+        let dendrite_guard = cptestctx.dendrite.read().unwrap();
+        let port = dendrite_guard
+            .get(&switch_slot)
+            .expect("dendrite should be present for this switch slot")
+            .port();
+        let client_state = dpd_client::ClientState {
+            tag: String::from("nexus"),
+            log: cptestctx.logctx.log.new(o!(
+                "component" => "DpdClient",
+                "switch" => format!("{switch_slot:?}"),
+            )),
+        };
+        let addr = std::net::Ipv6Addr::LOCALHOST;
+        dpd_client::Client::new(
+            &format!("http://[{addr}]:{port}"),
+            client_state.clone(),
+        )
+    }
+
+    /// The NAT subnet used for polling NAT entries in tests.
+    const NAT_SUBNET: std::net::Ipv4Addr = std::net::Ipv4Addr::new(10, 0, 0, 0);
+
+    /// Poll a switch zone until it has `n` NAT entries, or 60 seconds elapse.
+    /// This returns a `Result` so that it can be `unwrap()`ed and panic with a
+    /// useful source location.
+    async fn wait_for_n_nat_entries(
+        log: &slog::Logger,
+        client: &dpd_client::Client,
+        switch: SwitchSlot,
+        n: usize,
+    ) -> anyhow::Result<()> {
+        let max_wait = Duration::from_secs(60);
+
+        poll::wait_for_condition(
+            async || {
+                // Force dendrite's NAT to reconcile against Nexus now. (See
+                // "Relying on periodic background-task activation" in
+                // docs/flake-patterns.adoc.)
+                //
+                // (Triggering reconciliation is idempotent, so it is safe to do
+                // on every iteration.)
+                if let Err(error) = client.nat_trigger_update().await {
+                    slog::info!(
+                        log,
+                        "failed to trigger NAT reconciliation, will retry";
+                        "switch" => ?switch,
+                        InlineErrorChain::new(&error),
+                    );
+                    return Err(poll::CondCheckError::<&'static str>::NotYet {
+                        status: None,
+                    });
+                }
+
+                let result =
+                    client.nat_ipv4_list(&NAT_SUBNET, None, None).await;
+
+                slog::info!(log,
+                    "nat_ipv4_list";
+                    "switch" => ?switch,
+                    "result" => ?result,
+                );
+
+                let data = result.map_err(|_| {
+                    // Use `&'static str` as the permanent error type so that it
+                    // implements `Display`, which is necessary for the
+                    // `poll::Error` to be `Display`...even though we never
+                    // return a `Permanent` error here. I love types.
+                    poll::CondCheckError::<&'static str>::NotYet {
+                        status: None,
+                    }
+                })?;
+                let len = data.items.len();
+                if len != n {
+                    slog::info!(
+                        log,
+                        "{switch:?} still has {len} NAT entries";
+                        "switch" => ?switch,
+                        "entries" => ?data.items,
+                        "expected_len" => n,
+                    );
+                    return Err(poll::CondCheckError::<&'static str>::NotYet {
+                        status: None,
+                    });
+                }
+
+                Ok(())
+            },
+            &Duration::from_millis(100),
+            &max_wait,
+        )
+        .await
+        .with_context(|| {
+            format!(
+                "{switch:?} did not have {n} NAT entries after {max_wait:?}"
+            )
+        })
+    }
+
+    // === migration test helpers ===
+
     #[derive(Clone, Copy, Default)]
     struct MigrationOutcome {
-        source: Option<(MigrationState, VmmState)>,
-        target: Option<(MigrationState, VmmState)>,
+        source: Option<(MigrationState, NexusVmmState)>,
+        target: Option<(MigrationState, NexusVmmState)>,
         failed: bool,
     }
 
     impl MigrationOutcome {
-        fn source(self, migration: MigrationState, vmm: VmmState) -> Self {
+        fn source(self, migration: MigrationState, vmm: NexusVmmState) -> Self {
             let failed = self.failed
                 || migration == MigrationState::Failed
-                || vmm == VmmState::Failed;
+                || vmm.is_failed();
             Self { source: Some((migration, vmm)), failed, ..self }
         }
 
-        fn target(self, migration: MigrationState, vmm: VmmState) -> Self {
+        fn target(self, migration: MigrationState, vmm: NexusVmmState) -> Self {
             let failed = self.failed
                 || migration == MigrationState::Failed
-                || vmm == VmmState::Failed;
+                || vmm.is_failed();
             Self { target: Some((migration, vmm)), failed, ..self }
         }
 
@@ -2600,7 +3177,7 @@ mod test {
         async fn update_src_state(
             &self,
             cptestctx: &ControlPlaneTestContext,
-            vmm_state: VmmState,
+            vmm_state: NexusVmmState,
             migration_state: MigrationState,
         ) {
             let src_vmm = self
@@ -2609,11 +3186,7 @@ mod test {
                 .as_ref()
                 .expect("must have an active VMM");
             let vmm_id = PropolisUuid::from_untyped_uuid(src_vmm.id);
-            let new_runtime = nexus_db_model::VmmRuntimeState {
-                time_state_updated: Utc::now(),
-                generation: Generation(src_vmm.runtime.generation.0.next()),
-                state: vmm_state,
-            };
+            let new_runtime = src_vmm.runtime().transition(vmm_state);
 
             let migration = self
                 .initial_state
@@ -2657,7 +3230,7 @@ mod test {
         async fn update_target_state(
             &self,
             cptestctx: &ControlPlaneTestContext,
-            vmm_state: VmmState,
+            vmm_state: NexusVmmState,
             migration_state: MigrationState,
         ) {
             let target_vmm = self
@@ -2666,11 +3239,7 @@ mod test {
                 .as_ref()
                 .expect("must have a target VMM");
             let vmm_id = PropolisUuid::from_untyped_uuid(target_vmm.id);
-            let new_runtime = nexus_db_model::VmmRuntimeState {
-                time_state_updated: Utc::now(),
-                generation: Generation(target_vmm.runtime.generation.0.next()),
-                state: vmm_state,
-            };
+            let new_runtime = target_vmm.runtime().transition(vmm_state);
 
             let migration = self
                 .initial_state
@@ -2745,7 +3314,7 @@ mod test {
                 .target
                 .as_ref()
                 .map(|&(_, state)| state)
-                .unwrap_or(VmmState::Migrating);
+                .unwrap_or(NexusVmmState::Migrating);
 
             if self.outcome.failed {
                 assert_eq!(
@@ -2814,7 +3383,8 @@ mod test {
                 .source
                 .as_ref()
                 .map(|&(_, state)| state)
-                .unwrap_or(VmmState::Migrating);
+                .unwrap_or(NexusVmmState::Migrating);
+
             assert_eq!(
                 self.src_resource_records_exist(cptestctx).await,
                 !dbg!(src_vmm_state).is_terminal(),
@@ -2829,11 +3399,13 @@ mod test {
                  source VMM is not in a terminal state (Destroyed/Failed)",
             );
 
-            fn expected_instance_state(vmm: VmmState) -> InstanceState {
-                match vmm {
-                    VmmState::Destroyed => InstanceState::NoVmm,
-                    VmmState::Failed => InstanceState::Failed,
-                    _ => InstanceState::Vmm,
+            fn expected_instance_state(vmm: NexusVmmState) -> InstanceState {
+                if vmm.is_failed() {
+                    InstanceState::Failed
+                } else if vmm.is_terminal() {
+                    InstanceState::NoVmm
+                } else {
+                    InstanceState::Vmm
                 }
             }
 

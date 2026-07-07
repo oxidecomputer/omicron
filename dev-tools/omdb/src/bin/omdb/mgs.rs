@@ -11,16 +11,16 @@ use anyhow::Context;
 use clap::Args;
 use clap::Subcommand;
 use futures::StreamExt;
-use gateway_client::types::PowerState;
-use gateway_client::types::RotState;
 use gateway_client::types::SpComponentCaboose;
 use gateway_client::types::SpComponentInfo;
 use gateway_client::types::SpIdentifier;
-use gateway_client::types::SpIgnition;
 use gateway_client::types::SpIgnitionInfo;
-use gateway_client::types::SpIgnitionSystemType;
-use gateway_client::types::SpState;
+use gateway_types::component::PowerState;
+use gateway_types::component::SpState;
+use gateway_types::ignition::SpIgnition;
+use gateway_types::ignition::SpIgnitionSystemType;
 use gateway_types::rot::RotSlot;
+use gateway_types::rot::RotState;
 use internal_dns_types::names::ServiceName;
 use nexus_types::inventory::SpType;
 use tabled::Tabled;
@@ -132,7 +132,7 @@ async fn cmd_mgs_inventory(
         .await
         .context("listing ignition")?
         .into_inner();
-    sp_list_ignition.sort_by(|a, b| a.id.cmp(&b.id));
+    sp_list_ignition.sort_by_key(|a| a.id);
     show_sps_from_ignition(&sp_list_ignition)?;
     println!("");
 
@@ -142,7 +142,11 @@ async fn cmd_mgs_inventory(
     let c = &mgs_client;
     let mut sp_infos =
         futures::stream::iter(sp_list_ignition.iter().filter_map(|ignition| {
-            if matches!(ignition.details, SpIgnition::Yes { .. }) {
+            // Skip slots for which nothing is present, and SPs which are not
+            // powered on --- if there is something in the slot but the SP is
+            // off, we aren't going to be able to get any more details about it,
+            // and we already noted that it's there above...
+            if ignition.details.is_sp_running() {
                 Some(ignition.id)
             } else {
                 None
@@ -223,34 +227,33 @@ fn show_sps_from_ignition(
         type_: &'static str,
         slot: u16,
         system_type: String,
+        #[tabled(rename = "SP")]
+        power: &'static str,
     }
 
     impl From<&SpIgnitionInfo> for IgnitionRow {
         fn from(value: &SpIgnitionInfo) -> Self {
+            let (system_type, power) = match value.details {
+                SpIgnition::Absent => ("-".to_string(), ""),
+                SpIgnition::Present { id, power, .. } => {
+                    let system_type = match id {
+                        SpIgnitionSystemType::Gimlet => "Gimlet".to_string(),
+                        SpIgnitionSystemType::Cosmo => "Cosmo".to_string(),
+                        SpIgnitionSystemType::Sidecar => "Sidecar".to_string(),
+                        SpIgnitionSystemType::Psc => "PSC".to_string(),
+                        SpIgnitionSystemType::Unknown { id } => {
+                            format!("unknown: type {id}")
+                        }
+                    };
+                    let power = if power { "on" } else { "off" };
+                    (system_type, power)
+                }
+            };
             IgnitionRow {
                 type_: sp_type_to_str(&value.id.type_),
                 slot: value.id.slot,
-                system_type: match value.details {
-                    SpIgnition::No => "-".to_string(),
-                    SpIgnition::Yes {
-                        id: SpIgnitionSystemType::Gimlet,
-                        ..
-                    } => "Gimlet".to_string(),
-                    SpIgnition::Yes {
-                        id: SpIgnitionSystemType::Cosmo, ..
-                    } => "Cosmo".to_string(),
-                    SpIgnition::Yes {
-                        id: SpIgnitionSystemType::Sidecar,
-                        ..
-                    } => "Sidecar".to_string(),
-                    SpIgnition::Yes {
-                        id: SpIgnitionSystemType::Psc, ..
-                    } => "PSC".to_string(),
-                    SpIgnition::Yes {
-                        id: SpIgnitionSystemType::Unknown(v),
-                        ..
-                    } => format!("unknown: type {}", v),
-                },
+                system_type,
+                power,
             }
         }
     }

@@ -10,13 +10,14 @@ workspace = true
 
 [dependencies]
 anyhow.workspace = true
-async-recursion = "1.1.1"
+async-recursion.workspace = true
 async-trait.workspace = true
 bcs.workspace = true
 camino.workspace = true
 chrono.workspace = true
 chrono-tz.workspace = true
 clap.workspace = true
+clickhouse-admin-types.workspace = true
 const_format.workspace = true
 clickward.workspace = true
 debug-ignore.workspace = true
@@ -25,6 +26,7 @@ futures.workspace = true
 gethostname.workspace = true
 highway.workspace = true
 iana-time-zone.workspace = true
+iddqd.workspace = true
 indexmap.workspace = true
 libc.workspace = true
 nom.workspace = true
@@ -112,11 +114,11 @@ expectorate.workspace = true
 itertools.workspace = true
 omicron-test-utils.workspace = true
 oximeter-test-utils.workspace = true
+rand.workspace = true
 slog-dtrace.workspace = true
 sqlformat.workspace = true
 sqlparser.workspace = true
 strum.workspace = true
-tempfile.workspace = true
 
 [features]
 default = [ "native-sql-shell", "oxql", "sql" ]
@@ -149,4 +151,12 @@ doc = false
 
 [[bench]]
 name = "protocol"
+harness = false
+
+[[bench]]
+name = "oxql_field"
+harness = false
+
+[[bench]]
+name = "oxql_measurement"
 harness = false

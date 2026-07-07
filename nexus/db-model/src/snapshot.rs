@@ -8,7 +8,7 @@ use crate::Generation;
 use crate::typed_uuid::DbTypedUuid;
 use db_macros::Resource;
 use nexus_db_schema::schema::snapshot;
-use nexus_types::external_api::views;
+use nexus_types::external_api::snapshot as snapshot_types;
 use nexus_types::identity::Resource;
 use omicron_uuid_kinds::VolumeKind;
 use omicron_uuid_kinds::VolumeUuid;
@@ -60,7 +60,7 @@ pub struct Snapshot {
     pub size: ByteCount,
 }
 
-impl From<Snapshot> for views::Snapshot {
+impl From<Snapshot> for snapshot_types::Snapshot {
     fn from(snapshot: Snapshot) -> Self {
         Self {
             identity: snapshot.identity(),
@@ -72,7 +72,7 @@ impl From<Snapshot> for views::Snapshot {
     }
 }
 
-impl From<SnapshotState> for views::SnapshotState {
+impl From<SnapshotState> for snapshot_types::SnapshotState {
     fn from(state: SnapshotState) -> Self {
         match state {
             SnapshotState::Creating => Self::Creating,

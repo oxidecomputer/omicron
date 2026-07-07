@@ -6,7 +6,6 @@ use super::{ByteCount, Generation, SledState, SqlU16, SqlU32};
 use crate::DbTypedUuid;
 use crate::collection::DatastoreCollectionConfig;
 use crate::ipv6;
-use crate::sled::shared::Baseboard;
 use crate::sled_cpu_family::SledCpuFamily;
 use crate::sled_policy::DbSledPolicy;
 use chrono::{DateTime, Utc};
@@ -14,16 +13,18 @@ use db_macros::Asset;
 use nexus_db_schema::schema::{physical_disk, sled, zpool};
 use nexus_types::deployment::execution;
 use nexus_types::{
-    external_api::{shared, views},
+    external_api::{hardware, sled as sled_types},
     identity::Asset,
     internal_api::params,
 };
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::RackKind;
+use omicron_uuid_kinds::RackUuid;
 use omicron_uuid_kinds::SledKind;
 use omicron_uuid_kinds::SledUuid;
 use sled_agent_types::inventory::SledRole;
 use std::net::Ipv6Addr;
 use std::net::SocketAddrV6;
-use uuid::Uuid;
 
 /// Baseboard information about a sled.
 ///
@@ -57,7 +58,7 @@ pub struct Sled {
     time_deleted: Option<DateTime<Utc>>,
     pub rcgen: Generation,
 
-    pub rack_id: Uuid,
+    pub rack_id: DbTypedUuid<RackKind>,
 
     is_scrimlet: bool,
     serial_number: String,
@@ -122,13 +123,17 @@ impl Sled {
         &self.serial_number
     }
 
+    pub fn revision(&self) -> u32 {
+        self.revision.into()
+    }
+
     pub fn part_number(&self) -> &str {
         &self.part_number
     }
 
-    /// The policy here is the `views::SledPolicy` because we expect external
+    /// The policy here is the `sled_types::SledPolicy` because we expect external
     /// users to always use that.
-    pub fn policy(&self) -> views::SledPolicy {
+    pub fn policy(&self) -> sled_types::SledPolicy {
         self.policy.into()
     }
 
@@ -140,14 +145,18 @@ impl Sled {
     pub fn time_modified(&self) -> DateTime<Utc> {
         self.identity.time_modified
     }
+
+    pub fn rack_id(&self) -> RackUuid {
+        self.rack_id.into()
+    }
 }
 
-impl From<Sled> for views::Sled {
+impl From<Sled> for sled_types::Sled {
     fn from(sled: Sled) -> Self {
         Self {
             identity: sled.identity(),
-            rack_id: sled.rack_id,
-            baseboard: shared::Baseboard {
+            rack_id: sled.rack_id.into_untyped_uuid(),
+            baseboard: hardware::Baseboard {
                 serial: sled.serial_number,
                 part: sled.part_number,
                 revision: *sled.revision,
@@ -191,7 +200,7 @@ impl From<Sled> for params::SledAgentInfo {
             sa_address: sled.address(),
             repo_depot_port: sled.repo_depot_port.into(),
             role,
-            baseboard: Baseboard {
+            baseboard: hardware::Baseboard {
                 serial: sled.serial_number.clone(),
                 part: sled.part_number.clone(),
                 revision: *sled.revision,
@@ -227,7 +236,7 @@ impl DatastoreCollectionConfig<super::Zpool> for Sled {
 pub struct SledUpdate {
     id: SledUuid,
 
-    pub rack_id: Uuid,
+    pub rack_id: DbTypedUuid<RackKind>,
 
     is_scrimlet: bool,
     serial_number: String,
@@ -258,12 +267,12 @@ impl SledUpdate {
         repo_depot_port: u16,
         baseboard: SledBaseboard,
         hardware: SledSystemHardware,
-        rack_id: Uuid,
+        rack_id: RackUuid,
         sled_agent_gen: Generation,
     ) -> Self {
         Self {
             id,
-            rack_id,
+            rack_id: rack_id.into(),
             is_scrimlet: hardware.is_scrimlet,
             serial_number: baseboard.serial_number,
             part_number: baseboard.part_number,
@@ -422,10 +431,7 @@ mod diesel_util {
         query_dsl::methods::FilterDsl,
     };
     use nexus_db_schema::schema::sled::{sled_policy, sled_state};
-    use nexus_types::{
-        deployment::SledFilter,
-        external_api::views::{SledPolicy, SledState},
-    };
+    use nexus_types::deployment::SledFilter;
 
     /// An extension trait to apply a [`SledFilter`] to a Diesel expression.
     ///
@@ -451,11 +457,10 @@ mod diesel_util {
             use nexus_db_schema::schema::sled::dsl as sled_dsl;
 
             // These are only boxed for ease of reference above.
-            let all_matching_policies: BoxedIterator<DbSledPolicy> = Box::new(
-                SledPolicy::all_matching(filter).map(to_db_sled_policy),
-            );
+            let all_matching_policies: BoxedIterator<DbSledPolicy> =
+                Box::new(filter.all_matching_policies().map(to_db_sled_policy));
             let all_matching_states: BoxedIterator<crate::SledState> =
-                Box::new(SledState::all_matching(filter).map(Into::into));
+                Box::new(filter.all_matching_states().map(Into::into));
 
             FilterDsl::filter(
                 self,

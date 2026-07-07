@@ -4,9 +4,6 @@
 
 //! Types for serving produced metric data to an Oximeter collector server.
 
-// Copyright 2024 Oxide Computer Company
-
-use dropshot::ApiDescription;
 use dropshot::ConfigDropshot;
 use dropshot::HttpError;
 use dropshot::HttpResponseOk;
@@ -14,7 +11,7 @@ use dropshot::HttpServer;
 use dropshot::Path;
 use dropshot::RequestContext;
 use dropshot::ServerBuilder;
-use dropshot::endpoint;
+use either::Either;
 use internal_dns_resolver::ResolveError;
 use internal_dns_resolver::Resolver;
 use internal_dns_types::names::ServiceName;
@@ -25,9 +22,8 @@ use omicron_common::backoff;
 use omicron_common::backoff::BackoffError;
 use oximeter::types::ProducerRegistry;
 use oximeter::types::ProducerResults;
-use schemars::JsonSchema;
-use serde::Deserialize;
-use serde::Serialize;
+use oximeter_producer_api::ProducerApi;
+use oximeter_producer_api::producer_api_mod;
 use slog::Drain;
 use slog::Logger;
 use slog::debug;
@@ -35,11 +31,11 @@ use slog::error;
 use slog::info;
 use slog::o;
 use slog::warn;
+use slog_error_chain::InlineErrorChain;
 use std::net::IpAddr;
 use std::net::SocketAddr;
 use std::time::Duration;
 use thiserror::Error;
-use uuid::Uuid;
 
 // Our public interface depends directly or indirectly on these types; we
 // export them so that consumers need not depend on dropshot themselves and
@@ -171,9 +167,11 @@ impl Server {
         // clone of the provided logger, and then add the DTrace and Dropshot
         // loggers on top of it.
         let base_logger = match log {
-            LogConfig::Config(conf) => conf
-                .to_logger("metric-server")
-                .map_err(|msg| Error::Server(msg.to_string()))?,
+            LogConfig::Config(conf) => {
+                conf.to_logger("metric-server").map_err(|msg| {
+                    Error::Server(InlineErrorChain::new(&msg).to_string())
+                })?
+            }
             LogConfig::Logger(log) => log.clone(),
         };
         let (drain, registration) = slog_dtrace::with_drain(base_logger);
@@ -219,6 +217,7 @@ impl Server {
             default_request_body_max_bytes,
             default_handler_task_mode: dropshot::HandlerTaskMode::Detached,
             log_headers: vec![],
+            compression: dropshot::CompressionConfig::None,
         };
         let server = Self::build_dropshot_server(&log, &registry, &dropshot)?;
 
@@ -346,12 +345,16 @@ async fn resolve_nexus_and_register(
 ) -> Duration {
     let resolve_nexus_and_register_once = || async {
         // Resolve Nexus, or use the provided address directly.
+        //
+        // We wrap errors in `Either` because we have two distinct types, but
+        // both implement `std::error::Error`. This allows the `Either` to
+        // _also_ implement `std::error::Error`, so we can log it as such below.
         let address = match find_nexus {
             FindNexus::ByAddr(addr) => *addr,
             FindNexus::WithResolver(resolver) => resolver
                 .lookup_socket_v6(ServiceName::Nexus)
                 .await
-                .map_err(|e| BackoffError::transient(e.to_string()))
+                .map_err(|e| BackoffError::transient(Either::Left(e)))
                 .map(Into::into)?,
         };
         debug!(log, "will register with Nexus at {}", address);
@@ -362,10 +365,10 @@ async fn resolve_nexus_and_register(
             log.clone(),
         );
         client
-            .cpapi_producers_post(&endpoint.into())
+            .cpapi_producers_post(endpoint)
             .await
             .map(|response| response.into_inner().lease_duration.into())
-            .map_err(|e| BackoffError::transient(e.to_string()))
+            .map_err(|e| BackoffError::transient(Either::Right(e)))
     };
     let log_failure = |error, count, delay| {
         warn!(
@@ -373,7 +376,7 @@ async fn resolve_nexus_and_register(
             "failed to register with Nexus, will retry";
             "count" => %count,
             "delay" => ?delay,
-            "error" => ?error,
+            InlineErrorChain::new(&error),
         );
     };
     backoff::retry_notify_ext(
@@ -386,40 +389,34 @@ async fn resolve_nexus_and_register(
 }
 
 // Register API endpoints of the `Server`.
-fn metric_server_api() -> ApiDescription<ProducerRegistry> {
-    let mut api = ApiDescription::new();
-    api.register(collect).expect("Failed to register handler for collect");
-    api
+fn metric_server_api() -> dropshot::ApiDescription<ProducerRegistry> {
+    producer_api_mod::api_description::<ProducerApiImpl>()
+        .expect("registered entrypoints")
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, JsonSchema, Serialize)]
-pub struct ProducerIdPathParams {
-    /// The ID of the producer to be polled.
-    pub producer_id: Uuid,
-}
+enum ProducerApiImpl {}
 
-/// Collect metric data from this producer.
-#[endpoint {
-    method = GET,
-    path = "/{producer_id}",
-}]
-async fn collect(
-    request_context: RequestContext<ProducerRegistry>,
-    path_params: Path<ProducerIdPathParams>,
-) -> Result<HttpResponseOk<ProducerResults>, HttpError> {
-    let registry = request_context.context();
-    let producer_id = path_params.into_inner().producer_id;
-    if producer_id == registry.producer_id() {
-        Ok(HttpResponseOk(registry.collect()))
-    } else {
-        Err(HttpError::for_not_found(
-            None,
-            format!(
-                "Producer ID {} is not valid, expected {}",
-                producer_id,
-                registry.producer_id()
-            ),
-        ))
+impl ProducerApi for ProducerApiImpl {
+    type Context = ProducerRegistry;
+
+    async fn collect(
+        request_context: RequestContext<ProducerRegistry>,
+        path_params: Path<oximeter::producer::ProducerIdPathParams>,
+    ) -> Result<HttpResponseOk<ProducerResults>, HttpError> {
+        let registry = request_context.context();
+        let producer_id = path_params.into_inner().producer_id;
+        if producer_id == registry.producer_id() {
+            Ok(HttpResponseOk(registry.collect()))
+        } else {
+            Err(HttpError::for_not_found(
+                None,
+                format!(
+                    "Producer ID {} is not valid, expected {}",
+                    producer_id,
+                    registry.producer_id()
+                ),
+            ))
+        }
     }
 }
 
@@ -532,7 +529,7 @@ mod tests {
                 {
                     Ok(())
                 } else {
-                    Err(CondCheckError::<()>::NotYet)
+                    Err(CondCheckError::<()>::NotYet { status: None })
                 }
             },
             &POLL_INTERVAL,

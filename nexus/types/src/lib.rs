@@ -29,13 +29,19 @@
 //! rules, so our model layer knows about our views. That seems to be a
 //! relatively minor offense, so it's the way we leave things for now.
 
+pub mod alert;
 pub mod authn;
 pub mod deployment;
 pub mod external_api;
 pub mod fm;
 pub mod identity;
+pub mod in_service_disk;
+pub mod instance;
 pub mod internal_api;
 pub mod inventory;
+pub mod multicast;
 pub mod quiesce;
+pub mod saga;
 pub mod silo;
+pub mod support_bundle;
 pub mod trust_quorum;

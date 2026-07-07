@@ -20,6 +20,7 @@ use nexus_db_queries::db::model;
 use nexus_types::fm;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::PaginationOrder;
+use omicron_git_version::GitVersion;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SitrepUuid;
 use tabled::Tabled;
@@ -42,7 +43,7 @@ enum Commands {
     /// Show the current situation report.
     ///
     /// This is an alias for `omdb db sitrep info current`.
-    Current(ShowArgs),
+    Current(ShowOptions),
 
     /// Show details on a situation report.
     #[clap(alias = "show")]
@@ -52,8 +53,11 @@ enum Commands {
         sitrep: SitrepIdOrCurrent,
 
         #[clap(flatten)]
-        args: ShowArgs,
+        opts: ShowOptions,
     },
+
+    /// Show the analysis report for the requested sitrep, if one exists.
+    AnalysisReport(AnalysisReportArgs),
 }
 
 #[derive(Debug, Args, Clone)]
@@ -68,7 +72,20 @@ pub(super) struct SitrepHistoryArgs {
 }
 
 #[derive(Debug, Args, Clone)]
-struct ShowArgs {}
+struct AnalysisReportArgs {
+    /// The UUID of the sitrep to show, or "current" to show the current
+    /// sitrep.
+    sitrep: SitrepIdOrCurrent,
+
+    #[clap(flatten)]
+    opts: ShowOptions,
+}
+
+#[derive(Debug, Args, Clone)]
+struct ShowOptions {
+    #[clap(long, short)]
+    json: bool,
+}
 
 #[derive(Debug, Clone, Copy)]
 enum SitrepIdOrCurrent {
@@ -100,7 +117,7 @@ pub(super) async fn cmd_db_sitrep(
         Commands::History(ref args) => {
             cmd_db_sitrep_history(opctx, datastore, fetch_opts, args).await
         }
-        Commands::Info { sitrep, ref args } => {
+        Commands::Info { sitrep, opts: ref args } => {
             cmd_db_sitrep_show(opctx, datastore, fetch_opts, args, sitrep).await
         }
         Commands::Current(ref args) => {
@@ -112,6 +129,10 @@ pub(super) async fn cmd_db_sitrep(
                 SitrepIdOrCurrent::Current,
             )
             .await
+        }
+        Commands::AnalysisReport(ref args) => {
+            cmd_db_sitrep_analysis_report(opctx, datastore, fetch_opts, args)
+                .await
         }
     }
 }
@@ -193,7 +214,7 @@ async fn cmd_db_sitrep_show(
     opctx: &OpContext,
     datastore: &DataStore,
     _fetch_opts: &DbFetchOptions,
-    _args: &ShowArgs,
+    opts: &ShowOptions,
     sitrep: SitrepIdOrCurrent,
 ) -> anyhow::Result<()> {
     let ctx = || match sitrep {
@@ -238,7 +259,13 @@ async fn cmd_db_sitrep_show(
         }
     };
 
-    let fm::Sitrep { metadata, cases } = sitrep;
+    if opts.json {
+        serde_json::to_writer_pretty(std::io::stdout(), &sitrep)
+            .context("failed to serialize sitrep")?;
+        return Ok(());
+    }
+
+    let fm::Sitrep { metadata, cases, ereports_by_id } = sitrep;
     let fm::SitrepMetadata {
         id,
         creator_id,
@@ -246,6 +273,9 @@ async fn cmd_db_sitrep_show(
         parent_sitrep_id,
         inv_collection_id,
         comment,
+        next_inv_min_time_started,
+        alert_generation,
+        support_bundle_generation,
     } = metadata;
 
     const ID: &'static str = "ID";
@@ -259,6 +289,11 @@ async fn cmd_db_sitrep_show(
     const INV_COLLECTION_ID: &'static str = "inventory collection ID";
     const INV_STARTED_AT: &'static str = "  started at";
     const INV_FINISHED_AT: &'static str = "  finished at";
+    const NEXT_INV_MIN_START: &'static str =
+        "  next inventory minimum start time";
+    const ALERT_GEN: &'static str = "alert generation";
+    const SUPPORT_BUNDLE_GEN: &'static str = "support bundle generation";
+    const TOTAL_EREPORTS: &'static str = "ereports in this sitrep";
 
     const WIDTH: usize = const_max_len(&[
         ID,
@@ -272,6 +307,10 @@ async fn cmd_db_sitrep_show(
         INV_COLLECTION_ID,
         INV_STARTED_AT,
         INV_FINISHED_AT,
+        NEXT_INV_MIN_START,
+        ALERT_GEN,
+        SUPPORT_BUNDLE_GEN,
+        TOTAL_EREPORTS,
     ]);
 
     println!("\n{:=<80}", "== FAULT MANAGEMENT SITUATION REPORT ");
@@ -317,7 +356,7 @@ async fn cmd_db_sitrep_show(
         }
     }
 
-    println!("\n{:-<80}", "== DIAGNOSIS INPUTS ");
+    println!("\n{:=<80}", "== DIAGNOSIS INPUTS ");
     println!("    {INV_COLLECTION_ID:>WIDTH$}: {inv_collection_id:?}");
     let inv_collection = inv_collection_dsl::inv_collection
         .filter(
@@ -344,13 +383,146 @@ async fn cmd_db_sitrep_show(
             )
         }
     }
+    println!("    {NEXT_INV_MIN_START:>WIDTH$}: {next_inv_min_time_started}");
+    println!("    ");
+    println!("    rendezvous resource generation numbers:");
+    println!("    {ALERT_GEN:>WIDTH$}: {alert_generation}");
+    println!("    {SUPPORT_BUNDLE_GEN:>WIDTH$}: {support_bundle_generation}");
+    println!("    ");
+    println!("    {TOTAL_EREPORTS}: {}", ereports_by_id.len());
+    // TODO(eliza): perhaps display a table summarizing those ereports? possibly
+    // behind a verbose flag?
 
     if !cases.is_empty() {
-        println!("\n{:-<80}\n", "== CASES");
+        println!("\n{:=<80}\n", "== CASES ");
         for case in cases {
             println!("{}", case.display_indented(4, Some(id)));
         }
     }
 
     Ok(())
+}
+
+async fn cmd_db_sitrep_analysis_report(
+    opctx: &OpContext,
+    datastore: &DataStore,
+    _fetch_opts: &DbFetchOptions,
+    args: &AnalysisReportArgs,
+) -> anyhow::Result<()> {
+    let &AnalysisReportArgs { sitrep, ref opts } = args;
+    let id = match sitrep {
+        SitrepIdOrCurrent::Current => {
+            datastore
+                .fm_current_sitrep_version(&opctx)
+                .await
+                .context("failed to look up the current sitrep version")?
+                .ok_or_else(|| {
+                    anyhow::anyhow!("no current sitrep exists at this time")
+                })?
+                .id
+        }
+        SitrepIdOrCurrent::Id(id) => id,
+    };
+
+    let ctx = || match sitrep {
+        SitrepIdOrCurrent::Current => {
+            "looking up analysis report for the current fault management \
+             sitrep"
+                .to_string()
+        }
+        SitrepIdOrCurrent::Id(id) => {
+            format!(
+                "looking up analysis report for fault management sitrep {id}"
+            )
+        }
+    };
+
+    let report = load_analysis_report(datastore, id).await.with_context(ctx)?;
+    print_analysis_report(&report, opts.json)?;
+
+    Ok(())
+}
+
+fn print_analysis_report(
+    report: &model::fm::SitrepAnalysisReport,
+    json: bool,
+) -> anyhow::Result<()> {
+    use nexus_types::fm::analysis_reports::{AnalysisReport, InputReport};
+
+    let model::fm::SitrepAnalysisReport {
+        sitrep_id: _,
+        git_commit,
+        input_report,
+        analysis_report,
+    } = report;
+
+    let our_git_commit = GitVersion::current();
+    let git_commit = git_commit.parse::<GitVersion>().expect("infallible");
+    if our_git_commit != git_commit {
+        eprintln!(
+            "note: this sitrep analysis report was produced by a Nexus \
+             on git commit {git_commit}. this omdb was built from \
+             {our_git_commit}."
+        );
+        if our_git_commit.is_dirty() || git_commit.is_dirty() {
+            eprintln!(
+                "note: dirty repositories (those with uncommitted changes) \
+                 will never be considered equal, even if the SHA is the same."
+            );
+        }
+    }
+
+    if json {
+        let value = serde_json::json!({
+            "git_commit": &git_commit,
+            "input_report": input_report,
+            "analysis_report": analysis_report,
+        });
+        serde_json::to_writer_pretty(std::io::stdout(), &value)
+            .context("failed to serialize analysis report as JSON")?;
+        return Ok(());
+    }
+
+    println!("\n{:=<80}", "== ANALYSIS INPUT REPORT ");
+    match serde_json::from_value::<InputReport>(input_report.clone()) {
+        Ok(report) => println!("{}", report.display_multiline(0)),
+        Err(e) => {
+            eprintln!(
+                "WARNING: failed to parse input report; falling back to \
+                less structured output: {e}"
+            );
+            let displayer =
+                nexus_types::fm::json_display::Displayer::new(&input_report);
+            println!("{displayer}",);
+        }
+    }
+
+    println!("\n{:=<80}", "== ANALYSIS REPORT ");
+    match serde_json::from_value::<AnalysisReport>(analysis_report.clone()) {
+        Ok(report) => println!("{}", report.display_multiline(0)),
+        Err(e) => {
+            eprintln!(
+                "WARNING: failed to parse analysis report; falling back to \
+                less structured output: {e}"
+            );
+            let displayer =
+                nexus_types::fm::json_display::Displayer::new(&analysis_report);
+            println!("{displayer}",);
+        }
+    }
+
+    Ok(())
+}
+
+async fn load_analysis_report(
+    datastore: &DataStore,
+    sitrep: SitrepUuid,
+) -> anyhow::Result<model::fm::SitrepAnalysisReport> {
+    use nexus_db_schema::schema::fm_sitrep_analysis_report::dsl;
+
+    Ok(dsl::fm_sitrep_analysis_report
+        .filter(dsl::sitrep_id.eq(sitrep.into_untyped_uuid()))
+        .select(model::fm::SitrepAnalysisReport::as_select())
+        .first_async(&*datastore.pool_connection_for_tests().await?)
+        .await?)
 }

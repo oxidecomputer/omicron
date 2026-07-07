@@ -20,6 +20,10 @@ use omicron_common::disk::M2Slot;
 use omicron_uuid_kinds::{
     DatasetUuid, OmicronZoneUuid, PhysicalDiskUuid, ZpoolUuid,
 };
+use sled_agent_types::inventory::{
+    SvcEnabledNotOnlineState, SvcsEnabledNotOnline, SvcsEnabledNotOnlineResult,
+    SvcsError,
+};
 use sled_agent_types_versions::latest::inventory::{
     BootImageHeader, BootPartitionContents, BootPartitionDetails,
     ConfigReconcilerInventory, ConfigReconcilerInventoryResult,
@@ -618,8 +622,10 @@ fn display_sleds(
             ledgered_sled_config,
             reconciler_status,
             last_reconciliation,
-            zone_image_resolver,
-            health_monitor,
+            file_source_resolver,
+            smf_services_enabled_not_online,
+            reference_measurements,
+            fmd,
         } = sled;
 
         writeln!(
@@ -669,9 +675,12 @@ fn display_sleds(
             writeln!(indented, "zpools")?;
         }
         for zpool in zpools {
-            let Zpool { id, total_size, .. } = zpool;
+            let Zpool { id, total_size, health, .. } = zpool;
             let mut indent2 = IndentWriter::new("  ", &mut indented);
-            writeln!(indent2, "{id}: total size: {total_size}")?;
+            writeln!(
+                indent2,
+                "{id}: total size: {total_size} health: {health}"
+            )?;
         }
 
         if !datasets.is_empty() {
@@ -722,9 +731,9 @@ fn display_sleds(
         writeln!(indented, "zone image resolver status:")?;
         {
             let mut indent2 = IndentWriter::new("    ", &mut indented);
-            // Use write! rather than writeln! since zone_image_resolver.display()
+            // Use write! rather than writeln! since file_source_resolver.display()
             // always produces a newline at the end.
-            write!(indent2, "{}", zone_image_resolver.display())?;
+            write!(indent2, "{}", file_source_resolver.display())?;
         }
 
         if let Some(last_reconciliation) = &last_reconciliation {
@@ -795,7 +804,7 @@ fn display_sleds(
                         remove_mupdate_override.non_boot_message
                     )?;
                 } else {
-                    match &zone_image_resolver.mupdate_override.boot_override {
+                    match &file_source_resolver.mupdate_override.boot_override {
                         Ok(Some(_)) => {
                             writeln!(
                                 indent2,
@@ -896,42 +905,99 @@ fn display_sleds(
             }
         }
 
-        // TODO-K[omicron#9516]: This is temporarily hidden until we add the
-        // health monitor types to the DB. Once those have been integrated,
-        // we'll show health monitor status when everything is healthy as well.
-        if !health_monitor.is_empty() {
-            writeln!(indented, "HEALTH MONITOR")?;
-            let mut indent2 = IndentWriter::new("  ", &mut indented);
-            match &health_monitor.smf_services_in_maintenance {
-                Ok(svcs) => {
-                    if !svcs.is_empty() {
-                        if let Some(time_of_status) = &svcs.time_of_status {
-                            writeln!(
-                                indent2,
-                                "SMF services in maintenance at {}:",
-                                time_of_status.to_rfc3339_opts(
-                                    SecondsFormat::Millis,
-                                    /* use_z */ true,
-                                )
-                            )?;
-                        }
-                        let mut indent3 = IndentWriter::new("  ", &mut indent2);
-                        for svc in &svcs.services {
-                            writeln!(indent3, "{svc}")?;
-                        }
-                    }
-                }
-                Err(e) => {
-                    writeln!(
-                        indent2,
-                        "failed to retrieve SMF services in maintenance: {e}"
-                    )?;
-                }
+        writeln!(indented, "reference measurements:")?;
+        let mut indent2 = IndentWriter::new("    ", &mut indented);
+        if reference_measurements.is_empty() {
+            writeln!(indent2, "(measurement set is empty)")?;
+        } else {
+            for m in reference_measurements {
+                writeln!(indent2, "{}", m.display())?;
             }
         }
 
+        writeln!(indented, "fmd:")?;
+        let mut indent2 = IndentWriter::new("    ", &mut indented);
+        write!(
+            indent2,
+            "{}",
+            sled_agent_types_versions::latest::inventory::FmdInventoryResultDisplay::new(fmd),
+        )?;
+
         f = indented.into_inner();
+        display_svcs_enabled_not_online(smf_services_enabled_not_online, f)?;
     }
+    Ok(())
+}
+
+fn display_svcs_enabled_not_online(
+    svcs_enabled_not_online: &SvcsEnabledNotOnlineResult,
+    f: &mut dyn fmt::Write,
+) -> fmt::Result {
+    writeln!(f, "\nSMF SERVICES STATUS")?;
+
+    let mut indented = IndentWriter::new("    ", f);
+
+    match &svcs_enabled_not_online {
+        SvcsEnabledNotOnlineResult::SvcsEnabledNotOnline(svcs) => {
+            let SvcsEnabledNotOnline { services, errors, time_of_status } =
+                svcs;
+
+            let time = time_of_status
+                .to_rfc3339_opts(SecondsFormat::Millis, /* use_z */ true);
+
+            writeln!(
+                indented,
+                "{} SMF services enabled but not online at {}",
+                services.len(),
+                time
+            )?;
+
+            if !services.is_empty() {
+                #[derive(Tabled)]
+                #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+                struct SvcRow {
+                    fmri: String,
+                    zone: String,
+                    state: SvcEnabledNotOnlineState,
+                }
+                let rows = services.iter().map(|s| SvcRow {
+                    fmri: s.fmri.clone(),
+                    zone: s.zone.clone(),
+                    state: s.state,
+                });
+                let table = tabled::Table::new(rows)
+                    .with(tabled::settings::Style::empty())
+                    .with(tabled::settings::Padding::new(4, 1, 0, 0))
+                    .to_string();
+                writeln!(indented, "{table}")?;
+            };
+            if !errors.is_empty() {
+                writeln!(
+                    indented,
+                    "\nfound errors when retrieving SMF services:"
+                )?;
+                let mut indent2 = IndentWriter::new("    ", &mut indented);
+                for e in errors {
+                    writeln!(indent2, "{e}")?;
+                }
+            }
+        }
+        SvcsEnabledNotOnlineResult::SvcsCmdError(e) => {
+            let SvcsError { error, time_of_status } = e;
+
+            let time = time_of_status
+                .to_rfc3339_opts(SecondsFormat::Millis, /* use_z */ true);
+
+            writeln!(
+                indented,
+                "failed to retrieve SMF services at {time}: {error}",
+            )?;
+        }
+        SvcsEnabledNotOnlineResult::DataUnavailable => {
+            writeln!(indented, "no data on SMF services has been collected")?;
+        }
+    };
+
     Ok(())
 }
 
@@ -1134,6 +1200,7 @@ fn display_sled_config(
         zones,
         remove_mupdate_override,
         host_phase_2,
+        measurements,
     } = config;
 
     writeln!(f, "\n{label} SLED CONFIG")?;
@@ -1253,6 +1320,26 @@ fn display_sled_config(
             .with(tabled::settings::Padding::new(4, 1, 0, 0))
             .to_string();
         writeln!(indented, "ZONES: {}", zones.len())?;
+        writeln!(indented, "{table}")?;
+    }
+
+    if measurements.is_empty() {
+        writeln!(indented, "measurement empty")?;
+    } else {
+        #[derive(Tabled)]
+        #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+        struct MeasurementRow {
+            hash: String,
+        }
+
+        let rows = measurements
+            .iter()
+            .map(|m| MeasurementRow { hash: format!("artifact {}", m.hash) });
+        let table = tabled::Table::new(rows)
+            .with(tabled::settings::Style::empty())
+            .with(tabled::settings::Padding::new(2, 1, 0, 0))
+            .to_string();
+        writeln!(indented, "MEASUREMENTS: {}", measurements.len())?;
         writeln!(indented, "{table}")?;
     }
 

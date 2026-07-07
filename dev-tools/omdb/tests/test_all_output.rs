@@ -9,17 +9,19 @@
 
 use dropshot::Method;
 use expectorate::assert_contents;
+use gateway_client::ClientInfo as _;
 use http::StatusCode;
+use nexus_test_utils::background::activate_background_task;
 use nexus_test_utils::wait_for_producer;
 use nexus_test_utils::{OXIMETER_UUID, PRODUCER_UUID};
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::SledFilter;
 use nexus_types::deployment::UnstableReconfiguratorState;
-use omicron_common::api::external::SwitchLocation;
 use omicron_test_utils::dev::test_cmds::Redactor;
 use omicron_test_utils::dev::test_cmds::path_to_executable;
 use omicron_test_utils::dev::test_cmds::run_command;
+use sled_agent_types::early_networking::SwitchSlot;
 use slog_error_chain::InlineErrorChain;
 use std::fmt::Write;
 use std::net::IpAddr;
@@ -130,18 +132,29 @@ async fn test_omdb_usage_errors() {
     assert_contents("tests/usage_errors.out", &output);
 }
 
-#[nexus_test(extra_sled_agents = 1)]
-async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
+#[tokio::test]
+async fn test_omdb_success_cases() {
+    // Use a custom ControlPlaneBuilder so we can enable background tasks
+    // which might otherwise be disabled.
+    // We want it enabled here so the omdb is realistic.
+    let cptestctx =
+        nexus_test_utils::ControlPlaneBuilder::new("test_omdb_success_cases")
+            .with_extra_sled_agents(1)
+            .customize_nexus_config(&|config| {
+                config.pkg.background_tasks.sp_ereport_ingester.disable = false;
+            })
+            .start::<omicron_nexus::Server>()
+            .await;
     clear_omdb_env();
 
     let cmd_path = path_to_executable(CMD_OMDB);
 
-    let postgres_url = cptestctx.database.listen_url();
+    let postgres_url = cptestctx.database.listen_url().to_string();
     let nexus_lockstep_url =
         format!("http://{}/", cptestctx.lockstep_client.bind_address);
     let mgs_url = cptestctx
         .gateway
-        .get(&SwitchLocation::Switch0)
+        .get(&SwitchSlot::Switch0)
         .expect("nexus_test always sets up MGS on switch 0")
         .client
         .baseurl();
@@ -174,6 +187,27 @@ async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
     cptestctx
         .wait_for_at_least_one_inventory_collection(Duration::from_secs(60))
         .await;
+
+    // Drive the FM task pipeline to its steady state, so that the omdb
+    // snapshot of each task's last completed activation is deterministic
+    // rather than racing the tasks' watch-channel triggers:
+    //
+    // 1. `fm_analysis` commits the first sitrep (unless its natural cadence
+    //    already has). This run reports "committed new sitrep".
+    // 2. `fm_sitrep_loader` loads that sitrep and publishes it on the sitrep
+    //    watch channel.
+    // 3. `fm_analysis` re-runs with the loaded sitrep as its parent and
+    //    reports "no changes" -- the steady-state output asserted below.
+    //    (No later activation ever commits another sitrep here: this
+    //    environment has no in-service control plane disks and no
+    //    consumable ereports, so every post-load analysis is a no-op.)
+    // 4. `fm_rendezvous` runs against the loaded sitrep, so its status shows
+    //    the executed operations rather than "no FM situation report loaded".
+    let lockstep_client = &cptestctx.lockstep_client;
+    activate_background_task(lockstep_client, "fm_analysis").await;
+    activate_background_task(lockstep_client, "fm_sitrep_loader").await;
+    activate_background_task(lockstep_client, "fm_analysis").await;
+    activate_background_task(lockstep_client, "fm_rendezvous").await;
 
     let mut output = String::new();
 
@@ -283,8 +317,8 @@ async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
             "nexus",
             "reconfigurator-config",
             "set",
-            "--add-zones-with-mupdate-override",
-            "true",
+            "--disruption-policy",
+            "migrate-or-terminate",
         ],
         &["nexus", "reconfigurator-config", "show", "current"],
         &["reconfigurator", "export", tmppath.as_str()],
@@ -332,6 +366,10 @@ async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
         redactor.extra_variable_length("cockroachdb_version", &crdb_version);
     }
 
+    // The `reconfigurator_config_watcher` task's output depends on
+    // whether it has had time to complete an activation.
+    redactor.field("config updated:", r"\w+");
+
     // The `tuf_artifact_replication` task's output depends on how
     // many sleds happened to register with Nexus before its first
     // execution. These redactions work around the issue described in
@@ -342,6 +380,28 @@ async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
         .field("triggered by", r"[\w ]+")
         .section(&["task: \"tuf_artifact_replication\"", "request ringbuf:"]);
 
+    // The `fm_analysis` task's input report includes a line comparing the
+    // current inventory collection against the parent sitrep's collection,
+    // which can be either "same" or "different" depending on whether a new
+    // inventory was collected between sitreps. Collapse both forms.
+    redactor.variable_regex(
+        "fm_input_inv_comparison",
+        r" --> (same collection as parent sitrep|different from parent sitrep \(collection [-a-f0-9]+\))",
+    );
+
+    // The `fm_sitrep_gc` task's orphan counts are racy. When two `fm_analysis`
+    // activations overlap (e.g. the boot-time activation and the explicit drive
+    // above), both can insert a first sitrep before either is made current; the
+    // loser's sitrep and its stashed analysis report are inserted but orphaned
+    // (see `DataStore::fm_sitrep_insert`'s `ParentNotCurrent` path), and a
+    // later GC pass deletes them. Whether that race happened before this
+    // snapshot is timing-dependent, so redact both counts. Other child tables
+    // stay zero: with no faults, orphaned sitreps carry no cases, facts,
+    // ereports, or bundles.
+    redactor
+        .field("orphaned sitreps deleted:", r"\d+")
+        .field("orphaned fm_sitrep_analysis_report rows deleted:", r"\d+");
+
     // The `sp_ereport_ingester` task's output depends on how many simulated
     // sled agents ahppen to register with Nexus before its first execution.
     // These redactions work around the issue described in
@@ -351,8 +411,11 @@ async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
         .field("new ereports ingested:", r"\d+")
         .field("total HTTP requests sent:", r"\d+")
         .field("total collection errors:", r"\d+")
-        .field("reporters with ereports:", r"\d+")
-        .field("reporters with collection errors:", r"\d+")
+        .field("total reporters:", r"\d+")
+        .field("contacted successfully:", r"\d+")
+        .field("with ereports:", r"\d+")
+        .field("without ereports:", r"\d+")
+        .field("with collection errors:", r"\d+")
         .totally_annihilate_section(&[
             "task: \"sp_ereport_ingester\"",
             "errors listing reporters:",
@@ -364,9 +427,9 @@ async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
 
     for args in invocations {
         println!("running commands with args: {:?}", args);
-        let p = postgres_url.to_string();
+        let p = postgres_url.clone();
         let u = nexus_lockstep_url.clone();
-        let g = mgs_url.clone();
+        let g = mgs_url.to_owned();
         let ox = ox_url.clone();
         let ch = ch_url.clone();
         do_run_extra(
@@ -417,6 +480,110 @@ async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
     );
     assert!(!parsed.collections.is_empty());
 
+    // Exercise `omdb support-bundle collect` end-to-end. We don't add this
+    // to the `successes.out` snapshot because the output includes a
+    // randomly-generated bundle UUID, timing-dependent step durations,
+    // and per-sled step names that would all need redaction. Instead we
+    // run the command and verify the resulting zip is well-formed and
+    // contains the expected metadata files.
+    let bundle_path = tmpdir.path().join("bundle.zip");
+    let bundle_args: &[&str] = &[
+        "-w",
+        "support-bundle",
+        "collect",
+        "--output",
+        bundle_path.as_str(),
+        "--tempdir",
+        tmpdir.path().as_str(),
+        "--reason",
+        "integration test",
+    ];
+    let mut bundle_output = String::new();
+    let p = postgres_url.clone();
+    let dns = cptestctx.internal_dns.dns_server.local_address().to_string();
+    do_run_no_redactions(
+        &mut bundle_output,
+        move |exec| exec.env("OMDB_DB_URL", &p).env("OMDB_DNS_SERVER", &dns),
+        &cmd_path,
+        bundle_args,
+    )
+    .await;
+    let zip_file = std::fs::File::open(&bundle_path).unwrap_or_else(|err| {
+        panic!(
+            "bundle zip not produced at {bundle_path}: {}\n\
+             omdb output was:\n{bundle_output}",
+            InlineErrorChain::new(&err),
+        )
+    });
+    let mut archive =
+        zip::ZipArchive::new(zip_file).expect("bundle is a valid zip archive");
+    for required in [
+        "bundle_id.txt",
+        "meta/reason_for_creation.txt",
+        "meta/trace.json",
+        "sp_task_dumps/sled_0/dump-0.zip",
+        "sp_task_dumps/sled_1/dump-0.zip",
+        "sp_task_dumps/switch_0/dump-0.zip",
+        "sp_task_dumps/switch_1/dump-0.zip",
+    ] {
+        assert!(
+            archive.by_name(required).is_ok(),
+            "bundle zip is missing expected entry {required}",
+        );
+    }
+
+    // Now exercise the stdout-streaming path: omit `--output` and
+    // capture stdout as bytes. Verifies the data-descriptor zip variant
+    // produced by `bundle_to_stream` is well-formed and contains the
+    // expected metadata.
+    let stdout_path = tmpdir.path().join("bundle-stdout.zip");
+    let stdout_file =
+        std::fs::File::create(&stdout_path).expect("create stdout capture");
+    let cmd_path_owned = cmd_path.to_path_buf();
+    let p = postgres_url.clone();
+    let dns = cptestctx.internal_dns.dns_server.local_address().to_string();
+    let stream_tempdir = tmpdir.path().to_owned();
+    let exit_status = tokio::task::spawn_blocking(move || {
+        Exec::cmd(&cmd_path_owned)
+            .env("OMDB_DB_URL", &p)
+            .env("OMDB_DNS_SERVER", &dns)
+            .env("RUST_BACKTRACE", "1")
+            .env("RUST_LIB_BACKTRACE", "0")
+            .args(&[
+                "-w",
+                "support-bundle",
+                "collect",
+                "--tempdir",
+                stream_tempdir.as_str(),
+                "--reason",
+                "integration test (stdout)",
+            ])
+            .stdout(subprocess::Redirection::File(stdout_file))
+            .join()
+            .expect("running omdb to stream a bundle")
+    })
+    .await
+    .expect("spawn_blocking");
+    assert!(exit_status.success(), "stdout streaming failed: {exit_status:?}");
+    let zip_file = std::fs::File::open(&stdout_path)
+        .expect("captured stdout file should exist");
+    let mut archive = zip::ZipArchive::new(zip_file)
+        .expect("streamed bundle is a valid zip archive");
+    for required in [
+        "bundle_id.txt",
+        "meta/reason_for_creation.txt",
+        "meta/trace.json",
+        "sp_task_dumps/sled_0/dump-0.zip",
+        "sp_task_dumps/sled_1/dump-0.zip",
+        "sp_task_dumps/switch_0/dump-0.zip",
+        "sp_task_dumps/switch_1/dump-0.zip",
+    ] {
+        assert!(
+            archive.by_name(required).is_ok(),
+            "streamed bundle zip is missing expected entry {required}",
+        );
+    }
+
     let ox_invocation = &["oximeter", "list-producers"];
     let mut ox_output = String::new();
     let ox = ox_url.clone();
@@ -438,6 +605,8 @@ async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
         &ox_url,
         ox_test_producer,
     );
+
+    cptestctx.teardown().await;
 }
 
 /// Verify that we properly deal with cases where:

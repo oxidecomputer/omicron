@@ -1,1 +1,0 @@
-ALTER TABLE omicron.public.region ADD COLUMN IF NOT EXISTS deleting BOOLEAN NOT NULL DEFAULT false;

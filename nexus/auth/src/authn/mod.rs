@@ -34,15 +34,15 @@ pub use nexus_db_fixed_data::user_builtin::USER_DB_INIT;
 pub use nexus_db_fixed_data::user_builtin::USER_EXTERNAL_AUTHN;
 pub use nexus_db_fixed_data::user_builtin::USER_INTERNAL_API;
 pub use nexus_db_fixed_data::user_builtin::USER_INTERNAL_READ;
+pub use nexus_db_fixed_data::user_builtin::USER_OMDB;
 pub use nexus_db_fixed_data::user_builtin::USER_SAGA_RECOVERY;
 pub use nexus_db_fixed_data::user_builtin::USER_SERVICE_BALANCER;
 
 use crate::authz;
 use chrono::{DateTime, Utc};
-use newtype_derive::NewtypeDisplay;
 use nexus_db_fixed_data::silo::DEFAULT_SILO;
-use nexus_types::external_api::shared::FleetRole;
-use nexus_types::external_api::shared::SiloRole;
+use nexus_types::external_api::policy::FleetRole;
+use nexus_types::external_api::policy::SiloRole;
 use nexus_types::identity::Asset;
 use omicron_common::api::external::LookupType;
 use omicron_uuid_kinds::BuiltInUserUuid;
@@ -105,6 +105,20 @@ impl Context {
                 Details { device_token_expiration, .. },
                 ..,
             ) => *device_token_expiration,
+            Kind::Unauthenticated => None,
+        }
+    }
+
+    /// Returns the ID of the credential used to authenticate, if any.
+    ///
+    /// For session auth, this is the session ID. For access token auth, this is
+    /// the token ID. For SCIM auth, this is the SCIM token ID.
+    /// Not set for spoof auth, built-in users, or unauthenticated requests.
+    pub fn credential_id(&self) -> Option<Uuid> {
+        match &self.kind {
+            Kind::Authenticated(Details { credential_id, .. }, ..) => {
+                *credential_id
+            }
             Kind::Unauthenticated => None,
         }
     }
@@ -229,12 +243,18 @@ impl Context {
         Context::context_for_builtin_user(USER_SERVICE_BALANCER.id)
     }
 
+    /// Returns an authenticated context for omdb
+    pub fn omdb() -> Context {
+        Context::context_for_builtin_user(USER_OMDB.id)
+    }
+
     fn context_for_builtin_user(user_builtin_id: BuiltInUserUuid) -> Context {
         Context {
             kind: Kind::Authenticated(
                 Details {
                     actor: Actor::UserBuiltin { user_builtin_id },
                     device_token_expiration: None,
+                    credential_id: None,
                 },
                 None,
             ),
@@ -254,6 +274,7 @@ impl Context {
                         silo_id: USER_TEST_PRIVILEGED.silo_id,
                     },
                     device_token_expiration: None,
+                    credential_id: None,
                 },
                 Some(SiloAuthnPolicy::try_from(&*DEFAULT_SILO).unwrap()),
             ),
@@ -284,6 +305,7 @@ impl Context {
                 Details {
                     actor: Actor::SiloUser { silo_user_id, silo_id },
                     device_token_expiration: None,
+                    credential_id: None,
                 },
                 Some(silo_authn_policy),
             ),
@@ -299,6 +321,7 @@ impl Context {
                 Details {
                     actor: Actor::Scim { silo_id },
                     device_token_expiration: None,
+                    credential_id: None,
                 },
                 // This should never be non-empty, we don't want the SCIM user
                 // to ever have associated roles.
@@ -349,6 +372,7 @@ mod test {
     use super::USER_DB_INIT;
     use super::USER_INTERNAL_API;
     use super::USER_INTERNAL_READ;
+    use super::USER_OMDB;
     use super::USER_SAGA_RECOVERY;
     use super::USER_SERVICE_BALANCER;
     use super::USER_TEST_PRIVILEGED;
@@ -396,6 +420,10 @@ mod test {
         let authn = Context::internal_api();
         let actor = authn.actor().unwrap();
         assert_eq!(actor.built_in_user_id(), Some(USER_INTERNAL_API.id));
+
+        let authn = Context::omdb();
+        let actor = authn.actor().unwrap();
+        assert_eq!(actor.built_in_user_id(), Some(USER_OMDB.id));
     }
 }
 
@@ -416,12 +444,15 @@ enum Kind {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Details {
     /// the actor performing the request
-    actor: Actor,
+    pub actor: Actor,
     /// When the device token expires. Present only when authenticating via
     /// a device token. This is a slightly awkward fit but is included here
     /// because we need to use this to clamp the expiration time when device
     /// tokens are confirmed using an existing device token.
-    device_token_expiration: Option<DateTime<Utc>>,
+    pub device_token_expiration: Option<DateTime<Utc>>,
+    /// ID of the credential used to authenticate (session ID, access token ID,
+    /// or SCIM token ID). Not set for spoof auth or built-in users.
+    pub credential_id: Option<Uuid>,
 }
 
 /// Who is performing an operation
@@ -513,11 +544,8 @@ pub struct ConsoleSessionWithSiloId {
     pub silo_id: Uuid,
 }
 
-/// Label for a particular authentication scheme (used in log messages and
-/// internal error messages)
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct SchemeName(&'static str);
-NewtypeDisplay! { () pub struct SchemeName(&'static str); }
+// Re-export SchemeName from nexus-types.
+pub use nexus_types::authn::SchemeName;
 
 /// Describes why authentication failed
 ///

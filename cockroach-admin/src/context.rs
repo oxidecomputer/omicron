@@ -113,7 +113,7 @@ impl ServerContext {
         // crdb instance.
         let node_statuses = self
             .cockroach_cli()
-            .node_status()
+            .node_status(&self.log)
             .await
             .context("failed to get node status")?;
 

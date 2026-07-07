@@ -12,7 +12,6 @@ use omicron_common::api::external::VpcFirewallRuleDirection;
 use omicron_common::api::external::VpcFirewallRuleProtocol;
 use omicron_common::api::external::VpcFirewallRuleStatus;
 use omicron_common::api::internal::nexus::HostIdentifier;
-use omicron_common::api::internal::shared::ResolvedVpcFirewallRule;
 use oxide_vpc::api::Address;
 use oxide_vpc::api::Direction;
 use oxide_vpc::api::Filters;
@@ -22,6 +21,7 @@ use oxide_vpc::api::IpAddr;
 use oxide_vpc::api::Ports;
 use oxide_vpc::api::ProtoFilter;
 use oxnet::IpNet;
+use sled_agent_types::instance::ResolvedVpcFirewallRule;
 
 trait FromVpcFirewallRule {
     fn action(&self) -> FirewallAction;
@@ -104,6 +104,14 @@ impl FromVpcFirewallRule for ResolvedVpcFirewallRule {
                     VpcFirewallRuleProtocol::Udp => ProtoFilter::Udp,
                     VpcFirewallRuleProtocol::Icmp(v) => {
                         ProtoFilter::Icmp(v.map(|v| {
+                            oxide_vpc::api::IcmpFilter {
+                                ty: v.icmp_type,
+                                codes: v.code.map(Into::into),
+                            }
+                        }))
+                    }
+                    VpcFirewallRuleProtocol::Icmp6(v) => {
+                        ProtoFilter::Icmpv6(v.map(|v| {
                             oxide_vpc::api::IcmpFilter {
                                 ty: v.icmp_type,
                                 codes: v.code.map(Into::into),

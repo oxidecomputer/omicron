@@ -28,7 +28,10 @@ mod v1_client {
     use std::collections::HashMap;
 
     progenitor::generate_api!(
-        spec = "../openapi/dns-server/dns-server-1.0.0-49359e.json",
+        spec = {
+            path = "git-stub-vcs/openapi/dns-server/dns-server-1.0.0-49359e.json",
+            relative_to = OutDir,
+        },
         interface = Positional,
         inner_type = slog::Logger,
         derives = [schemars::JsonSchema, Clone, Eq, PartialEq],
@@ -70,7 +73,7 @@ mod v1_client {
         assert!(our_zones.len() <= 1);
         let zone_records = if let Some(our_zone) = our_zones.into_iter().next()
         {
-            our_zone.records.into_iter().chain(records.into_iter()).collect()
+            our_zone.records.into_iter().chain(records).collect()
         } else {
             records
         };
@@ -273,6 +276,7 @@ fn test_config(
         default_request_body_max_bytes: 1024,
         default_handler_task_mode: HandlerTaskMode::Detached,
         log_headers: vec![],
+        compression: dropshot::CompressionConfig::None,
     };
 
     Ok((tmp_dir, config_storage, config_dropshot, logctx))
@@ -296,7 +300,7 @@ async fn dns_records_create(
 
     assert!(our_zones.len() <= 1);
     let zone_records = if let Some(our_zone) = our_zones.into_iter().next() {
-        our_zone.records.into_iter().chain(records.into_iter()).collect()
+        our_zone.records.into_iter().chain(records).collect()
     } else {
         records
     };

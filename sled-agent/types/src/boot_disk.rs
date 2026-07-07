@@ -25,10 +25,9 @@ pub struct BootDiskWriteStartQueryParams {
     pub update_id: Uuid,
     // TODO do we already have sha2-256 hashes of the OS images, and if so
     // should we use that instead? Another option is to use the external API
-    // `Digest` type, although it predates `serde_human_bytes` so just stores
+    // `Digest` type, although it predates `byte-wrapper` so just stores
     // the hash as a `String`.
-    #[serde(with = "serde_human_bytes::hex_array")]
-    #[schemars(schema_with = "omicron_common::hex_schema::<32>")]
+    #[serde(with = "byte_wrapper::HexArray::<32>")]
     pub sha3_256_digest: [u8; 32],
 }
 

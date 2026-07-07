@@ -15,7 +15,7 @@ use chrono::Utc;
 use clickhouse_admin_types::keeper::ClickhouseKeeperClusterMembership;
 use cockroach_admin_types::node::InternalNodeId;
 use gateway_client::types::SpComponentCaboose;
-use gateway_client::types::SpState;
+use gateway_types::component::SpState;
 use iddqd::IdOrdMap;
 use nexus_types::inventory::Caboose;
 use nexus_types::inventory::CabooseFound;
@@ -245,7 +245,7 @@ impl CollectionBuilder {
         });
 
         match sp_state.rot {
-            gateway_client::types::RotState::V2 {
+            gateway_types::rot::RotState::V2 {
                 active,
                 pending_persistent_boot_preference,
                 persistent_boot_preference,
@@ -273,9 +273,7 @@ impl CollectionBuilder {
                         }
                     });
             }
-            gateway_client::types::RotState::CommunicationFailed {
-                message,
-            } => {
+            gateway_types::rot::RotState::CommunicationFailed { message } => {
                 self.found_error(InventoryError::from(anyhow!(
                     "MGS {:?}: reading RoT state for {:?}: {}",
                     source,
@@ -283,7 +281,7 @@ impl CollectionBuilder {
                     message
                 )));
             }
-            gateway_client::types::RotState::V3 {
+            gateway_types::rot::RotState::V3 {
                 active,
                 pending_persistent_boot_preference,
                 persistent_boot_preference,
@@ -674,8 +672,11 @@ impl CollectionBuilder {
             ledgered_sled_config: inventory.ledgered_sled_config,
             reconciler_status: inventory.reconciler_status,
             last_reconciliation: inventory.last_reconciliation,
-            zone_image_resolver: inventory.zone_image_resolver,
-            health_monitor: inventory.health_monitor,
+            file_source_resolver: inventory.file_source_resolver,
+            smf_services_enabled_not_online: inventory
+                .smf_services_enabled_not_online,
+            reference_measurements: inventory.reference_measurements,
+            fmd: inventory.fmd,
         };
 
         self.sleds
@@ -717,6 +718,15 @@ impl CollectionBuilder {
             metrics.get_metric_unsigned(CockroachMetric::RangesUnderreplicated);
         status.liveness_live_nodes =
             metrics.get_metric_unsigned(CockroachMetric::LivenessLiveNodes);
+        self.found_cockroach_status(node_id, status);
+    }
+
+    /// Record pre-built status for a CockroachDB node
+    pub fn found_cockroach_status(
+        &mut self,
+        node_id: InternalNodeId,
+        status: CockroachStatus,
+    ) {
         self.cockroach_status.insert(node_id, status);
     }
 
@@ -771,18 +781,7 @@ impl CollectionBuilder {
     }
 }
 
-/// Returns the current time, truncated to the previous microsecond.
-///
-/// This exists because the database doesn't store nanosecond-precision, so if
-/// we store nanosecond-precision timestamps, then DateTime conversion is lossy
-/// when round-tripping through the database.  That's rather inconvenient.
-pub fn now_db_precision() -> DateTime<Utc> {
-    let ts = Utc::now();
-    let nanosecs = ts.timestamp_subsec_nanos();
-    let micros = ts.timestamp_subsec_micros();
-    let only_nanos = nanosecs - micros * 1000;
-    ts - std::time::Duration::from_nanos(u64::from(only_nanos))
-}
+pub use omicron_common::now_db_precision;
 
 #[cfg(test)]
 mod test {
@@ -792,11 +791,11 @@ mod test {
     use crate::examples::representative;
     use base64::Engine;
     use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
-    use gateway_client::types::PowerState;
-    use gateway_client::types::RotState;
     use gateway_client::types::SpComponentCaboose;
-    use gateway_client::types::SpState;
+    use gateway_types::component::PowerState;
+    use gateway_types::component::SpState;
     use gateway_types::rot::RotSlot;
+    use gateway_types::rot::RotState;
     use nexus_types::inventory::Caboose;
     use nexus_types::inventory::CabooseWhich;
     use nexus_types::inventory::RotPage;

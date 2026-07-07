@@ -787,6 +787,9 @@ where
             &self.scope_key,
         )?;
         out.push_sql(" AND ");
+        out.push_identifier(ItemColumn::NAME)?;
+        out.push_sql(" IS NOT NULL ");
+        out.push_sql(" AND ");
         out.push_identifier(TIME_DELETED_COLUMN_IDENT)?;
         out.push_sql(" IS NULL LIMIT 1)");
         Ok(())

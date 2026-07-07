@@ -24,7 +24,10 @@ use dpd_client::types::{
 use nexus_db_lookup::LookupDataStore;
 use nexus_db_model::{MulticastGroup, UnderlayMulticastGroup};
 use nexus_db_queries::authn;
+use nexus_db_queries::db::datastore::multicast::members::SourceFilterState;
 use nexus_types::identity::Resource;
+use nexus_types::saga::saga_action_failed;
+use omicron_common::api::external::Error;
 use omicron_uuid_kinds::{GenericUuid, MulticastGroupUuid};
 
 use super::{ActionRegistry, NexusActionContext, NexusSaga, SagaInitError};
@@ -45,6 +48,14 @@ pub(crate) struct Params {
 pub struct DataplaneUpdateResponse {
     underlay: MulticastGroupUnderlayResponse,
     external: MulticastGroupExternalResponse,
+}
+
+/// Fetched multicast group data for dataplane programming.
+#[derive(Debug, Deserialize, Serialize)]
+struct GroupData {
+    external_group: MulticastGroup,
+    underlay_group: UnderlayMulticastGroup,
+    source_filter: SourceFilterState,
 }
 
 declare_saga_actions! {
@@ -98,10 +109,13 @@ impl NexusSaga for SagaMulticastGroupDpdEnsure {
     }
 }
 
-/// Fetch multicast group data from database.
+/// Fetch multicast group data and member source filter state from database.
+///
+/// Returns the external group, underlay group, and source filter state.
+/// SSM addresses (232.x.x.x) require sources; ASM allows any source.
 async fn mgde_fetch_group_data(
     sagactx: NexusActionContext,
-) -> Result<(MulticastGroup, UnderlayMulticastGroup), ActionError> {
+) -> Result<GroupData, ActionError> {
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
     let opctx = crate::context::op_context_for_saga_action(
@@ -120,7 +134,7 @@ async fn mgde_fetch_group_data(
         .datastore()
         .pool_connection_authorized(&opctx)
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     // Fetch both groups on same connection for consistent state view
     // (sequential fetches since using same connection)
@@ -128,13 +142,13 @@ async fn mgde_fetch_group_data(
         .datastore()
         .multicast_group_fetch_on_conn(&conn, params.external_group_id)
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     let underlay_group = osagactx
         .datastore()
         .underlay_multicast_group_fetch_on_conn(&conn, params.underlay_group_id)
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     // Validate groups are in correct state
     match external_group.state {
@@ -147,12 +161,27 @@ async fn mgde_fetch_group_data(
                 "external_group_name" => external_group.name().as_str(),
                 "current_state" => ?other_state
             );
-            return Err(ActionError::action_failed(format!(
+            return Err(saga_action_failed(Error::internal_error(&format!(
                 "External group {} is in state {other_state:?}, expected 'Creating'",
                 params.external_group_id
-            )));
+            ))));
         }
     }
+
+    // Fetch member source filter state for DPD.
+    // SSM addresses (232.x.x.x, ff3x::/32) require at least one source.
+    // ASM addresses can have empty sources (any source allowed).
+    let group_id =
+        MulticastGroupUuid::from_untyped_uuid(params.external_group_id);
+    let filter_state_map = osagactx
+        .datastore()
+        .multicast_groups_source_filter_state(&opctx, &[group_id])
+        .await
+        .map_err(saga_action_failed)?;
+    let source_filter = filter_state_map
+        .get(&params.external_group_id)
+        .cloned()
+        .unwrap_or_default();
 
     debug!(
         osagactx.log(),
@@ -162,10 +191,12 @@ async fn mgde_fetch_group_data(
         "external_ip" => %external_group.multicast_ip,
         "underlay_group_id" => %underlay_group.id,
         "underlay_ip" => %underlay_group.multicast_ip,
-        "vni" => %u32::from(external_group.vni.0)
+        "vni" => %u32::from(external_group.vni.0),
+        "source_ips_count" => source_filter.specific_sources.len(),
+        "has_any_source_member" => source_filter.has_any_source_member
     );
 
-    Ok((external_group, underlay_group))
+    Ok(GroupData { external_group, underlay_group, source_filter })
 }
 
 /// Apply external and underlay groups in dataplane atomically.
@@ -173,8 +204,8 @@ async fn mgde_update_dataplane(
     sagactx: NexusActionContext,
 ) -> Result<DataplaneUpdateResponse, ActionError> {
     let osagactx = sagactx.user_data();
-    let (external_group, underlay_group) = sagactx
-        .lookup::<(MulticastGroup, UnderlayMulticastGroup)>("group_data")?;
+    let GroupData { external_group, underlay_group, source_filter } =
+        sagactx.lookup::<GroupData>("group_data")?;
 
     // Use MulticastDataplaneClient for consistent DPD operations
     let dataplane = MulticastDataplaneClient::new(
@@ -182,7 +213,7 @@ async fn mgde_update_dataplane(
         osagactx.log().clone(),
     )
     .await
-    .map_err(ActionError::action_failed)?;
+    .map_err(saga_action_failed)?;
 
     debug!(
         osagactx.log(),
@@ -193,12 +224,14 @@ async fn mgde_update_dataplane(
         "external_ip" => %external_group.multicast_ip,
         "underlay_group_id" => %underlay_group.id,
         "underlay_ip" => %underlay_group.multicast_ip,
+        "source_ips_count" => source_filter.specific_sources.len(),
+        "has_any_source_member" => source_filter.has_any_source_member,
     );
 
     let (underlay_response, external_response) = dataplane
-        .create_groups(&external_group, &underlay_group)
+        .create_groups(&external_group, &underlay_group, &source_filter)
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     debug!(
         osagactx.log(),
@@ -222,10 +255,12 @@ async fn mgde_rollback_dataplane(
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
 
-    let (external_group, _) = sagactx
-        .lookup::<(MulticastGroup, UnderlayMulticastGroup)>("group_data")?;
+    let GroupData { external_group, .. } =
+        sagactx.lookup::<GroupData>("group_data")?;
 
-    let multicast_tag = external_group.name().to_string();
+    let multicast_tag = external_group.tag.clone().ok_or_else(|| {
+        saga_action_failed(Error::internal_error("multicast group missing tag"))
+    })?;
 
     // Use MulticastDataplaneClient for consistent cleanup
     let dataplane = MulticastDataplaneClient::new(
@@ -233,7 +268,7 @@ async fn mgde_rollback_dataplane(
         osagactx.log().clone(),
     )
     .await
-    .map_err(ActionError::action_failed)?;
+    .map_err(saga_action_failed)?;
 
     debug!(
         osagactx.log(),
@@ -268,8 +303,8 @@ async fn mgde_update_group_state(
         &sagactx,
         &params.serialized_authn,
     );
-    let (external_group, _) = sagactx
-        .lookup::<(MulticastGroup, UnderlayMulticastGroup)>("group_data")?;
+    let GroupData { external_group, .. } =
+        sagactx.lookup::<GroupData>("group_data")?;
 
     debug!(
         osagactx.log(),
@@ -281,13 +316,12 @@ async fn mgde_update_group_state(
     // Transition the group from "Creating" -> "Active"
     osagactx
         .datastore()
-        .multicast_group_set_state(
+        .multicast_group_set_active(
             &opctx,
             MulticastGroupUuid::from_untyped_uuid(params.external_group_id),
-            nexus_db_model::MulticastGroupState::Active,
         )
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     debug!(
         osagactx.log(),
@@ -312,14 +346,12 @@ mod test {
         create_default_ip_pools, link_ip_pool, object_create,
     };
     use nexus_test_utils_macros::nexus_test;
-    use nexus_types::external_api::params::{
-        IpPoolCreate, MulticastGroupCreate,
+    use nexus_types::external_api::ip_pool::{
+        IpPool, IpPoolCreate, IpPoolRange,
     };
-    use nexus_types::external_api::shared::{IpRange, Ipv4Range};
-    use nexus_types::external_api::views::{IpPool, IpPoolRange, IpVersion};
-    use omicron_common::api::external::{
-        IdentityMetadataCreateParams, NameOrId,
-    };
+    use nexus_types::multicast::MulticastGroupCreate;
+    use omicron_common::address::{IpRange, IpVersion, Ipv4Range};
+    use omicron_common::api::external::IdentityMetadataCreateParams;
 
     use crate::app::saga::create_saga_dag;
     use crate::app::sagas::test_helpers;
@@ -409,7 +441,7 @@ mod test {
             underlay_group_id: Uuid::new_v4(), // Non-existent
         };
 
-        // Execute the saga - should fail gracefully when fetching non-existent groups
+        // Execute the saga: should fail gracefully when fetching non-existent groups
         let result = nexus
             .sagas
             .saga_execute::<SagaMulticastGroupDpdEnsure>(params)
@@ -464,55 +496,53 @@ mod test {
         // Link pool to silo
         link_ip_pool(client, pool_name, &DEFAULT_SILO.id(), false).await;
 
-        // Create multicast group via API (starts in Creating state)
         let group_params = MulticastGroupCreate {
             identity: IdentityMetadataCreateParams {
                 name: "saga-reject-test".parse().unwrap(),
                 description: "Test saga state validation".to_string(),
             },
             multicast_ip: Some(IpAddr::V4(Ipv4Addr::new(224, 70, 0, 100))),
-            source_ips: None,
-            pool: Some(NameOrId::Name("saga-state-pool".parse().unwrap())),
-            mvlan: None,
+            has_sources: false,
+            ip_version: None,
         };
 
-        let group: nexus_types::external_api::views::MulticastGroup =
-            object_create(client, "/v1/multicast-groups", &group_params).await;
-
-        // Fetch the external group from database to get full model
+        let external_group = datastore
+            .multicast_group_create(&opctx, &group_params)
+            .await
+            .expect("Multicast group should be created");
         let group_id =
             omicron_uuid_kinds::MulticastGroupUuid::from_untyped_uuid(
-                group.identity.id,
+                external_group.id(),
             );
-        let external_group = datastore
-            .multicast_group_fetch(&opctx, group_id)
-            .await
-            .expect("Failed to fetch external group");
 
         // Manually create underlay group (normally done by reconciler)
-        let underlay_group = datastore
+        use nexus_db_queries::db::datastore::multicast::EnsureUnderlayResult;
+        let underlay_group = match datastore
             .ensure_underlay_multicast_group(
                 &opctx,
                 external_group.clone(),
                 "ff04::1:2:3:4".parse().unwrap(),
             )
             .await
-            .expect("Failed to create underlay group");
+            .expect("Underlay group should be created")
+        {
+            EnsureUnderlayResult::Created(g)
+            | EnsureUnderlayResult::Existing(g) => g,
+            EnsureUnderlayResult::Collision => {
+                panic!("unexpected collision in test")
+            }
+        };
 
         // Manually transition the group to "Active" state in the database
         datastore
-            .multicast_group_set_state(
-                &opctx,
-                MulticastGroupUuid::from_untyped_uuid(group.identity.id),
-                nexus_db_model::MulticastGroupState::Active,
-            )
+            .multicast_group_set_active(&opctx, group_id)
             .await
-            .expect("Failed to set group to Active state");
+            .expect("Group should transition to Active state");
 
         // Try to run saga on Active group - should fail
         let params = Params {
             serialized_authn: Serialized::for_opctx(&opctx),
-            external_group_id: group.identity.id,
+            external_group_id: external_group.id(),
             underlay_group_id: underlay_group.id,
         };
 
@@ -523,12 +553,5 @@ mod test {
 
         // Saga should reject Active group
         assert!(result.is_err(), "Saga should reject group in Active state");
-
-        // Cleanup
-        nexus_test_utils::resource_helpers::object_delete(
-            client,
-            &format!("/v1/multicast-groups/{}", group.identity.name),
-        )
-        .await;
     }
 }

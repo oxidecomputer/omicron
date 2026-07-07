@@ -2,6 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use crate::IpVersion;
 use diesel::backend::Backend;
 use diesel::deserialize;
 use diesel::deserialize::FromSql;
@@ -30,11 +31,33 @@ pub enum IpNet {
     V6(crate::Ipv6Net),
 }
 
+impl IpNet {
+    pub fn ip_version(&self) -> IpVersion {
+        match self {
+            IpNet::V4(_) => IpVersion::V4,
+            IpNet::V6(_) => IpVersion::V6,
+        }
+    }
+}
+
 impl ::std::fmt::Display for IpNet {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             IpNet::V4(inner) => inner.fmt(f),
             IpNet::V6(inner) => inner.fmt(f),
+        }
+    }
+}
+
+impl From<::std::net::IpAddr> for IpNet {
+    fn from(value: ::std::net::IpAddr) -> Self {
+        match value {
+            ::std::net::IpAddr::V4(v4) => {
+                Self::from(oxnet::Ipv4Net::host_net(v4))
+            }
+            ::std::net::IpAddr::V6(v6) => {
+                Self::from(oxnet::Ipv6Net::host_net(v6))
+            }
         }
     }
 }
@@ -78,6 +101,15 @@ impl From<oxnet::IpNet> for IpNet {
             oxnet::IpNet::V6(ipv6_net) => {
                 Self::V6(crate::Ipv6Net::from(ipv6_net))
             }
+        }
+    }
+}
+
+impl From<IpNet> for oxnet::IpNet {
+    fn from(value: IpNet) -> Self {
+        match value {
+            IpNet::V4(ipv4_net) => Self::V4(oxnet::Ipv4Net::from(ipv4_net)),
+            IpNet::V6(ipv6_net) => Self::V6(oxnet::Ipv6Net::from(ipv6_net)),
         }
     }
 }

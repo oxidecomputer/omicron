@@ -2,8 +2,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-// Copyright 2022 Oxide Computer Company
-
 //! HTTP entrypoint functions for the gateway service
 
 use crate::ServerContext;
@@ -65,6 +63,8 @@ use gateway_types::update::SpComponentResetError;
 use gateway_types::update::SpUpdateStatus;
 use gateway_types::update::UpdateAbortBody;
 use omicron_uuid_kinds::GenericUuid;
+use slog::warn;
+use slog_error_chain::InlineErrorChain;
 use std::io::Cursor;
 use std::num::NonZeroU8;
 use std::str;
@@ -215,8 +215,29 @@ impl GatewayApi for GatewayImpl {
                 details
                     .entries
                     .into_iter()
-                    .map(SpComponentDetails::try_from)
-                    .collect::<Result<Vec<_>, _>>()?,
+                    .filter_map(|sp_details| {
+                        match SpComponentDetails::try_from(sp_details) {
+                            Ok(details) => Some(details),
+                            Err(err) => {
+                                // Once omicron#9708 is addressed, we should
+                                // update the API type to turn the
+                                // `try_from()` into a `from()` and remove
+                                // this branch entirely.
+                                warn!(
+                                    apictx.log,
+                                    "skipping some component details \
+                                     that we can't convert to the MGS \
+                                     API type (yet)";
+                                    "sp_type" => ?sp_id.typ,
+                                    "sp_slot" => sp_id.slot,
+                                    "component" => %component,
+                                    InlineErrorChain::new(&err)
+                                );
+                                None
+                            }
+                        }
+                    })
+                    .collect(),
             ))
         };
 
@@ -822,7 +843,9 @@ impl GatewayApi for GatewayImpl {
 
             let mut cursor = Cursor::new(Vec::new());
             raw_dump.write_zip(&mut cursor).map_err(|err| {
-                HttpError::for_internal_error(err.to_string())
+                HttpError::for_internal_error(
+                    InlineErrorChain::new(&err).to_string(),
+                )
             })?;
 
             let base64_zip = base64::engine::general_purpose::STANDARD

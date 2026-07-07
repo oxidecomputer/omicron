@@ -10,6 +10,7 @@ use common::LiveTestContext;
 use common::reconfigurator::blueprint_edit_current_target;
 use futures::TryStreamExt;
 use live_tests_macros::live_test;
+use nexus_lockstep_client::ClientInfo as _;
 use nexus_lockstep_client::types::BlueprintTargetSet;
 use nexus_lockstep_client::types::QuiesceState;
 use nexus_lockstep_client::types::Saga;
@@ -19,10 +20,12 @@ use nexus_reconfigurator_planning::blueprint_editor::ExternalNetworkingAllocator
 use nexus_reconfigurator_planning::planner::Planner;
 use nexus_reconfigurator_planning::planner::PlannerRng;
 use nexus_reconfigurator_preparation::PlanningInputFromDb;
+use nexus_types::deployment::BlueprintExpungedZoneAccessReason;
 use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::PlannerConfig;
 use nexus_types::deployment::SledFilter;
+use nexus_types::deployment::ZoneRunningStatus;
 use nexus_types::deployment::blueprint_zone_type;
 use omicron_common::address::NEXUS_LOCKSTEP_PORT;
 use omicron_test_utils::dev::poll::CondCheckError;
@@ -91,12 +94,8 @@ async fn test_nexus_add_remove(lc: &LiveTestContext) {
             let (image_source, nexus_generation) = commissioned_sled_ids
                 .iter()
                 .find_map(|&sled_id| {
-                    builder
-                        .current_sled_zones(
-                            sled_id,
-                            BlueprintZoneDisposition::is_in_service,
-                        )
-                        .find_map(|zone| {
+                    builder.current_in_service_sled_zones(sled_id).find_map(
+                        |zone| {
                             if let BlueprintZoneType::Nexus(
                                 blueprint_zone_type::Nexus {
                                     nexus_generation,
@@ -111,7 +110,8 @@ async fn test_nexus_add_remove(lc: &LiveTestContext) {
                             } else {
                                 None
                             }
-                        })
+                        },
+                    )
                 })
                 .context(
                     "could not find in-service Nexus in parent blueprint",
@@ -124,12 +124,16 @@ async fn test_nexus_add_remove(lc: &LiveTestContext) {
             .context("failed to construct external networking allocator")?
             .for_new_nexus()
             .context("failed to pick an external IP for Nexus")?;
+            let nexus_config = planning_input
+                .external_service_networking_policy()
+                .operator_nexus_config();
             builder
                 .sled_add_zone_nexus(
                     sled_id,
                     image_source,
                     external_ip,
                     *nexus_generation,
+                    &nexus_config,
                 )
                 .context("adding Nexus zone")?;
 
@@ -157,7 +161,7 @@ async fn test_nexus_add_remove(lc: &LiveTestContext) {
                 debug!(log,
                     "waiting for new Nexus to be available: listing sagas: {e:#}"
                 );
-                CondCheckError::<()>::NotYet
+                CondCheckError::<()>::NotYet { status: None }
             })?;
             debug!(log, "new Nexus: listing sagas: ok");
 
@@ -167,7 +171,7 @@ async fn test_nexus_add_remove(lc: &LiveTestContext) {
                 .expect("fetching quiesce state from new zone");
             debug!(log, "new Nexus: quiesce state"; "state" => ?qq);
             if let QuiesceState::Undetermined = qq.state {
-                Err(CondCheckError::<()>::NotYet)
+                Err(CondCheckError::<()>::NotYet { status: None })
             } else {
                 Ok(list)
             }
@@ -207,7 +211,10 @@ async fn test_nexus_add_remove(lc: &LiveTestContext) {
     .await
     .expect("editing blueprint to expunge zone");
     let (_, expunged_zone_config) = blueprint3
-        .all_omicron_zones(|_| true)
+        .expunged_zones(
+            ZoneRunningStatus::MaybeRunning,
+            BlueprintExpungedZoneAccessReason::Test,
+        )
         .find(|(_sled_id, zone_config)| zone_config.id == new_zone.id)
         .expect("expunged zone in new blueprint");
     let BlueprintZoneDisposition::Expunged {
@@ -215,7 +222,7 @@ async fn test_nexus_add_remove(lc: &LiveTestContext) {
         ..
     } = expunged_zone_config.disposition
     else {
-        panic!("expected expunged zone to have disposition Expunged");
+        unreachable!("expunged_zones() returned a non-expunged zone");
     };
 
     // At some point, we should be unable to reach this Nexus any more.
@@ -230,13 +237,13 @@ async fn test_nexus_add_remove(lc: &LiveTestContext) {
                 }
                 Ok(_) => {
                     debug!(log, "expunged Nexus is still reachable");
-                    Err(CondCheckError::<()>::NotYet)
+                    Err(CondCheckError::<()>::NotYet { status: None })
                 }
                 Err(error) => {
                     debug!(log, "expunged Nexus is still reachable";
                         "error" => slog_error_chain::InlineErrorChain::new(&error),
                     );
-                    Err(CondCheckError::NotYet)
+                    Err(CondCheckError::NotYet { status: None })
                 }
             }
         },
@@ -306,7 +313,10 @@ async fn test_nexus_add_remove(lc: &LiveTestContext) {
     // We don't need to check this here.  It just provides a better error
     // message if something has gone wrong up to this point.
     let (_, expunged_zone_config) = new_blueprint
-        .all_omicron_zones(|_| true)
+        .expunged_zones(
+            ZoneRunningStatus::Shutdown,
+            BlueprintExpungedZoneAccessReason::Test,
+        )
         .find(|(_sled_id, zone_config)| zone_config.id == new_zone.id)
         .expect("expunged zone in new blueprint");
     assert!(expunged_zone_config.disposition.is_ready_for_cleanup());
@@ -346,7 +356,7 @@ async fn test_nexus_add_remove(lc: &LiveTestContext) {
                 }
             }
 
-            return Err(CondCheckError::<()>::NotYet);
+            return Err(CondCheckError::<()>::NotYet { status: None });
         },
         &Duration::from_millis(1000),
         &Duration::from_secs(120),
@@ -375,7 +385,7 @@ async fn test_nexus_add_remove(lc: &LiveTestContext) {
             if matches!(found.state, SagaState::Succeeded) {
                 Ok(found)
             } else {
-                Err(CondCheckError::<()>::NotYet)
+                Err(CondCheckError::<()>::NotYet { status: None })
             }
         },
         &Duration::from_millis(50),

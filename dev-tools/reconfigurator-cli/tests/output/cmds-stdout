@@ -871,6 +871,7 @@ result:
     loaded collections: 6e066695-94bc-4250-bd63-fd799c166cc1
     loaded blueprints: 00000000-0000-0000-0000-000000000000
     loaded external IP policy: ExternalIpPolicy { service_pool_ipv4_ranges: [Ipv4Range { first: 192.0.2.2, last: 192.0.2.20 }], service_pool_ipv6_ranges: [], external_dns_ips: {} }
+    loaded cockroachdb settings: fingerprint = (none), version = (none), preserve downgrade = (not set)
     loaded internal DNS generations: (none)
     loaded external DNS generations: (none)
   config:

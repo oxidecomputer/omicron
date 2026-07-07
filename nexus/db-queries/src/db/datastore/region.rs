@@ -27,7 +27,7 @@ use nexus_config::RegionAllocationStrategy;
 use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::public_error_from_diesel;
 use nexus_db_lookup::LookupPath;
-use nexus_types::external_api::params;
+use nexus_types::external_api::disk as disk_types;
 use omicron_common::api::external;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
@@ -52,7 +52,7 @@ pub enum RegionAllocationFor {
 /// Describe the region(s) to be allocated
 pub enum RegionAllocationParameters<'a> {
     FromDiskSource {
-        disk_source: &'a params::DiskSource,
+        disk_source: &'a disk_types::DiskSource,
         size: external::ByteCount,
     },
 
@@ -126,14 +126,14 @@ impl DataStore {
     async fn get_block_size_from_disk_source(
         &self,
         opctx: &OpContext,
-        disk_source: &params::DiskSource,
+        disk_source: &disk_types::DiskSource,
     ) -> Result<db::model::BlockSize, Error> {
         match &disk_source {
-            params::DiskSource::Blank { block_size } => {
+            disk_types::DiskSource::Blank { block_size } => {
                 Ok(db::model::BlockSize::try_from(*block_size)
                     .map_err(|e| Error::invalid_request(&e.to_string()))?)
             }
-            params::DiskSource::Snapshot { snapshot_id } => {
+            disk_types::DiskSource::Snapshot { snapshot_id, read_only: _ } => {
                 let (.., db_snapshot) = LookupPath::new(opctx, self)
                     .snapshot_id(*snapshot_id)
                     .fetch()
@@ -141,7 +141,7 @@ impl DataStore {
 
                 Ok(db_snapshot.block_size)
             }
-            params::DiskSource::Image { image_id } => {
+            disk_types::DiskSource::Image { image_id, read_only: _ } => {
                 let (.., db_image) = LookupPath::new(opctx, self)
                     .image_id(*image_id)
                     .fetch()
@@ -149,7 +149,7 @@ impl DataStore {
 
                 Ok(db_image.block_size)
             }
-            params::DiskSource::ImportingBlocks { block_size } => {
+            disk_types::DiskSource::ImportingBlocks { block_size } => {
                 Ok(db::model::BlockSize::try_from(*block_size)
                     .map_err(|e| Error::invalid_request(&e.to_string()))?)
             }
@@ -184,7 +184,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         volume_id: VolumeUuid,
-        disk_source: &params::DiskSource,
+        disk_source: &disk_types::DiskSource,
         size: external::ByteCount,
         allocation_strategy: &RegionAllocationStrategy,
     ) -> Result<Vec<(CrucibleDataset, Region)>, Error> {

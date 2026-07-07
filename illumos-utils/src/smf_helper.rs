@@ -3,11 +3,12 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::running_zone::RunningZone;
+use crate::zone::SVCADM;
 use crate::zone::SVCCFG;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
-    #[error("Failed to do '{intent}' by running command in zone: {err}")]
+    #[error("Failed to do '{intent}' by running command in zone")]
     ZoneCommand {
         intent: String,
         #[source]
@@ -16,7 +17,7 @@ pub enum Error {
 }
 
 pub trait Service {
-    fn service_name(&self) -> String;
+    fn service_name(&self) -> &str;
     fn smf_name(&self) -> String;
 }
 
@@ -24,6 +25,14 @@ pub struct SmfHelper<'t> {
     running_zone: &'t RunningZone,
     smf_name: String,
     default_smf_name: String,
+}
+
+fn matches_no_such_property(e: &dyn std::error::Error) -> bool {
+    e.to_string().contains("No such property")
+        || match e.source() {
+            Some(source) => matches_no_such_property(source),
+            None => false,
+        }
 }
 
 impl<'t> SmfHelper<'t> {
@@ -188,7 +197,7 @@ impl<'t> SmfHelper<'t> {
             Err(e) => {
                 // If a property already doesn't exist we don't need to
                 // return an error
-                if !e.to_string().contains("No such property") {
+                if !matches_no_such_property(&e) {
                     return Err(e);
                 }
             }
@@ -224,7 +233,7 @@ impl<'t> SmfHelper<'t> {
             Err(e) => {
                 // If a property already doesn't exist we don't need to
                 // return an error
-                if !e.to_string().contains("No such property") {
+                if !matches_no_such_property(&e) {
                     return Err(e);
                 }
             }
@@ -241,6 +250,16 @@ impl<'t> SmfHelper<'t> {
                     "Refresh SMF manifest {}",
                     self.default_smf_name
                 ),
+                err,
+            })?;
+        Ok(())
+    }
+
+    pub fn enable(&self) -> Result<(), Error> {
+        self.running_zone
+            .run_cmd(&[SVCADM, "enable", &self.smf_name])
+            .map_err(|err| Error::ZoneCommand {
+                intent: format!("Enable SMF service {}", self.default_smf_name),
                 err,
             })?;
         Ok(())

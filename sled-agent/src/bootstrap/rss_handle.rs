@@ -5,23 +5,27 @@
 //! sled-agent's handle to the Rack Setup Service it spawns
 
 use super::client as bootstrap_agent_client;
-use crate::rack_setup::service::RackSetupService;
-use crate::rack_setup::service::SetupServiceError;
 use ::bootstrap_agent_client::Client as BootstrapAgentClient;
 use bootstore::schemes::v0 as bootstore;
+use bootstrap_agent_lockstep_types::RssStep;
 use futures::StreamExt;
 use futures::stream::FuturesUnordered;
 use omicron_common::backoff::BackoffError;
 use omicron_common::backoff::retry_notify;
 use omicron_common::backoff::retry_policy_local;
 use sled_agent_config_reconciler::InternalDisksReceiver;
-use sled_agent_types::rack_init::RackInitializeRequestParams;
-use sled_agent_types::rack_ops::RssStep;
+use sled_agent_measurements::MeasurementsHandle;
+use sled_agent_rack_setup::LocalBootstrapAgent;
+use sled_agent_rack_setup::RackInitializeRequestParams;
+use sled_agent_rack_setup::RackSetupService;
+use sled_agent_rack_setup::SetupServiceError;
 use sled_agent_types::sled::StartSledAgentRequest;
 use slog::Logger;
+use slog_error_chain::InlineErrorChain;
 use sprockets_tls::keys::SprocketsConfig;
 use std::net::Ipv6Addr;
 use std::net::SocketAddrV6;
+use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
 use tokio::sync::watch;
@@ -52,17 +56,19 @@ impl RssHandle {
         config: RackInitializeRequestParams,
         our_bootstrap_address: Ipv6Addr,
         internal_disks_rx: InternalDisksReceiver,
+        measurements: Arc<MeasurementsHandle>,
         bootstore: bootstore::NodeHandle,
         trust_quorum: trust_quorum::NodeTaskHandle,
         step_tx: watch::Sender<RssStep>,
     ) -> Result<(), SetupServiceError> {
-        let (tx, rx) = rss_channel(our_bootstrap_address, sprockets);
+        let (tx, rx) = rss_channel(sprockets, measurements.clone());
 
         let rss = RackSetupService::new(
             log.new(o!("component" => "RSS")),
             config,
             internal_disks_rx,
             tx,
+            our_bootstrap_address,
             bootstore,
             trust_quorum,
             step_tx,
@@ -77,12 +83,14 @@ impl RssHandle {
         log: &Logger,
         our_bootstrap_address: Ipv6Addr,
         sprockets: SprocketsConfig,
+        measurements: Arc<MeasurementsHandle>,
     ) -> Result<(), SetupServiceError> {
-        let (tx, rx) = rss_channel(our_bootstrap_address, sprockets);
+        let (tx, rx) = rss_channel(sprockets, measurements);
 
         let rss = RackSetupService::new_reset_rack(
             log.new(o!("component" => "RSS")),
             tx,
+            our_bootstrap_address,
         );
         let log = log.new(o!("component" => "BootstrapAgentRssHandler"));
         rx.await_local_rss_request(&log).await;
@@ -95,11 +103,13 @@ async fn initialize_sled_agent(
     log: &Logger,
     bootstrap_addr: SocketAddrV6,
     sprockets: SprocketsConfig,
+    measurements: Arc<MeasurementsHandle>,
     request: &StartSledAgentRequest,
 ) -> Result<(), bootstrap_agent_client::Error> {
     let client = bootstrap_agent_client::Client::new(
         bootstrap_addr,
         sprockets,
+        measurements,
         log.new(o!("BootstrapAgentClient" => bootstrap_addr.to_string())),
     );
 
@@ -129,13 +139,13 @@ async fn initialize_sled_agent(
 // leave a breadcrumb for where the work will need to be done to switch the
 // communication mechanism.
 fn rss_channel(
-    our_bootstrap_address: Ipv6Addr,
     sprockets: SprocketsConfig,
+    measurements: Arc<MeasurementsHandle>,
 ) -> (BootstrapAgentHandle, BootstrapAgentHandleReceiver) {
     let (tx, rx) = mpsc::channel(32);
     (
-        BootstrapAgentHandle { inner: tx, our_bootstrap_address },
-        BootstrapAgentHandleReceiver { inner: rx, sprockets },
+        BootstrapAgentHandle { inner: tx },
+        BootstrapAgentHandleReceiver { inner: rx, sprockets, measurements },
     )
 }
 
@@ -156,19 +166,10 @@ enum RequestKind {
 
 pub(crate) struct BootstrapAgentHandle {
     inner: mpsc::Sender<Request>,
-    our_bootstrap_address: Ipv6Addr,
 }
 
-impl BootstrapAgentHandle {
-    /// Instruct the local bootstrap-agent to initialize sled-agents based on
-    /// the contents of `requests`.
-    ///
-    /// This function takes `self` and can only be called once with the full set
-    /// of sleds to initialize. Returns `Ok(())` if initializing all sleds
-    /// succeeds; if any sled fails to initialize, an error is returned
-    /// immediately (i.e., the error message will pertain only to the first sled
-    /// that failed to initialize).
-    pub(crate) async fn initialize_sleds(
+impl LocalBootstrapAgent for BootstrapAgentHandle {
+    async fn initialize_sleds(
         self,
         requests: Vec<(SocketAddrV6, StartSledAgentRequest)>,
     ) -> Result<(), String> {
@@ -187,7 +188,7 @@ impl BootstrapAgentHandle {
         rx.await.unwrap()
     }
 
-    pub(crate) async fn reset_sleds(
+    async fn reset_sleds(
         self,
         requests: Vec<SocketAddrV6>,
     ) -> Result<(), String> {
@@ -198,15 +199,12 @@ impl BootstrapAgentHandle {
             .unwrap();
         rx.await.unwrap()
     }
-
-    pub(crate) fn our_address(&self) -> Ipv6Addr {
-        self.our_bootstrap_address
-    }
 }
 
 struct BootstrapAgentHandleReceiver {
     inner: mpsc::Receiver<Request>,
     sprockets: SprocketsConfig,
+    measurements: Arc<MeasurementsHandle>,
 }
 
 impl BootstrapAgentHandleReceiver {
@@ -227,10 +225,12 @@ impl BootstrapAgentHandleReceiver {
                 // of the initialization requests, allowing them to run concurrently.
 
                 let s = self.sprockets.clone();
+                let m = self.measurements.clone();
                 let mut futs = requests
                     .into_iter()
                     .map(|(bootstrap_addr, request)| {
                         let value = s.clone();
+                        let measurements_value = m.clone();
                         async move {
                             info!(
                                 log, "Received initialization request from RSS";
@@ -242,6 +242,7 @@ impl BootstrapAgentHandleReceiver {
                                 log,
                                 bootstrap_addr,
                                 value,
+                                measurements_value,
                                 &request,
                             )
                             .await
@@ -294,7 +295,7 @@ impl BootstrapAgentHandleReceiver {
                             .connect_timeout(dur)
                             .timeout(dur)
                             .build()
-                            .map_err(|e| e.to_string())?;
+                            .map_err(|e| InlineErrorChain::new(&e).to_string())?;
                         let client = BootstrapAgentClient::new_with_client(
                             &format!("http://{}", bootstrap_addr),
                             client,

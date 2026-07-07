@@ -14,6 +14,7 @@ use diesel::{
 use futures::future::BoxFuture;
 use nexus_db_lookup::LookupPath;
 use nexus_db_model::InstanceState;
+use nexus_db_model::SagaState;
 use nexus_db_queries::{
     authz,
     context::OpContext,
@@ -29,11 +30,27 @@ use omicron_test_utils::dev::poll;
 use omicron_uuid_kinds::{GenericUuid, InstanceUuid, PropolisUuid, SledUuid};
 use sled_agent_client::TestInterfaces as _;
 use slog::{Logger, info, warn};
+use std::collections::HashSet;
 use std::{num::NonZeroU32, sync::Arc, time::Duration};
 use steno::SagaDag;
+use uuid::Uuid;
 
 type ControlPlaneTestContext =
     nexus_test_utils::ControlPlaneTestContext<crate::Server>;
+
+/// Return a test context builder for instance start saga tests.
+///
+/// These tests effectively disable the instance_watcher background task to
+/// avoid colliding with it.
+pub(crate) fn instance_saga_test_builder(
+    test_name: &str,
+) -> nexus_test_utils::ControlPlaneBuilder<'_> {
+    nexus_test_utils::ControlPlaneBuilder::new(test_name)
+        .customize_nexus_config(&|config| {
+            config.pkg.background_tasks.instance_watcher.period_secs =
+                Duration::from_secs(86_400);
+        })
+}
 
 pub fn test_opctx(cptestctx: &ControlPlaneTestContext) -> OpContext {
     OpContext::for_tests(
@@ -49,7 +66,7 @@ pub(crate) async fn instance_start(
     let nexus = &cptestctx.server.server_context().nexus;
     let opctx = test_opctx(&cptestctx);
     let instance_selector =
-        nexus_types::external_api::params::InstanceSelector {
+        nexus_types::external_api::instance::InstanceSelector {
             project: None,
             instance: NameOrId::from(id.into_untyped_uuid()),
         };
@@ -69,7 +86,7 @@ pub(crate) async fn instance_stop(
     let nexus = &cptestctx.server.server_context().nexus;
     let opctx = test_opctx(&cptestctx);
     let instance_selector =
-        nexus_types::external_api::params::InstanceSelector {
+        nexus_types::external_api::instance::InstanceSelector {
             project: None,
             instance: NameOrId::from(id.into_untyped_uuid()),
         };
@@ -90,7 +107,7 @@ pub(crate) async fn instance_stop_by_name(
     let nexus = &cptestctx.server.server_context().nexus;
     let opctx = test_opctx(&cptestctx);
     let instance_selector =
-        nexus_types::external_api::params::InstanceSelector {
+        nexus_types::external_api::instance::InstanceSelector {
             project: Some(project_name.to_string().try_into().unwrap()),
             instance: name.to_string().try_into().unwrap(),
         };
@@ -111,7 +128,7 @@ pub(crate) async fn instance_delete_by_name(
     let nexus = &cptestctx.server.server_context().nexus;
     let opctx = test_opctx(&cptestctx);
     let instance_selector =
-        nexus_types::external_api::params::InstanceSelector {
+        nexus_types::external_api::instance::InstanceSelector {
             project: Some(project_name.to_string().try_into().unwrap()),
             instance: name.to_string().try_into().unwrap(),
         };
@@ -175,7 +192,7 @@ pub(crate) async fn instance_simulate_by_name(
     let nexus = &cptestctx.server.server_context().nexus;
     let opctx = test_opctx(&cptestctx);
     let instance_selector =
-        nexus_types::external_api::params::InstanceSelector {
+        nexus_types::external_api::instance::InstanceSelector {
             project: Some(project_name.to_string().try_into().unwrap()),
             instance: name.to_string().try_into().unwrap(),
         };
@@ -268,7 +285,7 @@ pub async fn instance_fetch_by_name(
     let datastore = nexus.datastore();
     let opctx = test_opctx(&cptestctx);
     let instance_selector =
-        nexus_types::external_api::params::InstanceSelector {
+        nexus_types::external_api::instance::InstanceSelector {
             project: Some(project_name.to_string().try_into().unwrap()),
             instance: name.to_string().try_into().unwrap(),
         };
@@ -316,7 +333,7 @@ pub async fn instance_wait_for_state_by_name(
     let nexus = &cptestctx.server.server_context().nexus;
     let opctx = test_opctx(&cptestctx);
     let instance_selector =
-        nexus_types::external_api::params::InstanceSelector {
+        nexus_types::external_api::instance::InstanceSelector {
             project: Some(project_name.to_string().try_into().unwrap()),
             instance: name.to_string().try_into().unwrap(),
         };
@@ -369,7 +386,7 @@ async fn instance_poll_state(
                     "instance" => ?db_state.instance(),
                     "active_vmm" => ?db_state.vmm(),
                 );
-                Err(poll::CondCheckError::<Error>::NotYet)
+                Err(poll::CondCheckError::<Error>::NotYet { status: None })
             }
         },
         &Duration::from_secs(1),
@@ -514,6 +531,74 @@ pub async fn sled_resource_vmms_exist_for_vmm(
         "results" => ?results,
     );
     !results.is_empty()
+}
+
+pub async fn wait_for_running_sagas(cptestctx: &ControlPlaneTestContext) {
+    const MAX_WAIT: Duration = Duration::from_secs(120);
+
+    let datastore = cptestctx.server.server_context().nexus.datastore();
+    let log = &cptestctx.logctx.log;
+
+    let conn = datastore.pool_connection_for_tests().await.unwrap();
+
+    // wait for only sagas are running or unwinding right now
+    let waiting_for: HashSet<Uuid> = {
+        use nexus_db_schema::schema::saga::dsl;
+
+        dsl::saga
+            .filter(
+                dsl::saga_state
+                    .eq(SagaState::Running)
+                    .or(dsl::saga_state.eq(SagaState::Unwinding)),
+            )
+            .select(dsl::id)
+            .load_async(&*conn)
+            .await
+            .unwrap()
+            .into_iter()
+            .collect()
+    };
+
+    if waiting_for.is_empty() {
+        return;
+    }
+
+    info!(log, "waiting for sagas: {waiting_for:?}");
+
+    let result = poll::wait_for_condition(
+        || async {
+            use nexus_db_schema::schema::saga::dsl;
+
+            let list: Vec<Uuid> = dsl::saga
+                .filter(dsl::id.eq_any(waiting_for.clone()))
+                .filter(
+                    dsl::saga_state
+                        .eq(SagaState::Running)
+                        .or(dsl::saga_state.eq(SagaState::Unwinding)),
+                )
+                .select(dsl::id)
+                .load_async(&*conn)
+                .await
+                .unwrap();
+
+            if list.is_empty() {
+                info!(log, "done waiting for sagas");
+
+                Ok(())
+            } else {
+                info!(log, "still waiting for sagas: {list:?}");
+
+                Err(poll::CondCheckError::<Error>::NotYet { status: None })
+            }
+        },
+        &Duration::from_secs(1),
+        &MAX_WAIT,
+    )
+    .await;
+
+    if let Err(e) = result {
+        panic!("sagas still running or unwinding after {MAX_WAIT:?}: {e}");
+    }
 }
 
 /// Tests that the saga described by `dag` succeeds if each of its nodes is

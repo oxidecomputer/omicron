@@ -17,8 +17,9 @@ use nexus_test_utils::resource_helpers::create_project;
 use nexus_test_utils::resource_helpers::objects_list_page_authz;
 use nexus_test_utils::start_sled_agent;
 use nexus_test_utils_macros::nexus_test;
-use nexus_types::external_api::views::SledInstance;
-use nexus_types::external_api::views::{PhysicalDisk, Sled};
+use nexus_types::external_api::physical_disk::PhysicalDisk;
+use nexus_types::external_api::sled::Sled;
+use nexus_types::external_api::sled::SledInstance;
 use omicron_sled_agent::sim;
 use omicron_test_utils::dev::poll::{CondCheckError, wait_for_condition};
 use omicron_uuid_kinds::GenericUuid;
@@ -120,7 +121,7 @@ async fn test_physical_disk_create_list_delete(
     let nexus = &cptestctx.server.server_context().nexus;
     let datastore = nexus.datastore();
     let sled_id = SledUuid::from_str(&SLED_AGENT_UUID).unwrap();
-    let physical_disk = DbPhysicalDisk::new(
+    let physical_disk = DbPhysicalDisk::from_parts(
         PhysicalDiskUuid::new_v4(),
         "v".into(),
         "s".into(),
@@ -213,7 +214,7 @@ async fn test_sled_instance_list(cptestctx: &ControlPlaneTestContext) {
                 if total_instances.len() == 1 {
                     Ok(total_instances)
                 } else {
-                    Err(CondCheckError::<()>::NotYet)
+                    Err(CondCheckError::<()>::NotYet { status: None })
                 }
             }
         },

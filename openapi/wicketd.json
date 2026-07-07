@@ -608,6 +608,56 @@
         }
       }
     },
+    "/rack-setup/config/multirack": {
+      "get": {
+        "summary": "Get the current status of the multirack join configuration.",
+        "operationId": "get_multirack_join_config",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CurrentMultirackJoinUserConfig"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "put": {
+        "summary": "Upload a configuration for joining this rack into an existing regional",
+        "description": "cluster.\n\nA multirack join configuration is mutually exclusive with an RSS config.",
+        "operationId": "put_multirack_join_config",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MultirackJoinConfigBaseUserInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/rack-setup/config/recovery-user-password-hash": {
       "put": {
         "summary": "Update the RSS config recovery silo user password hash.",
@@ -1249,11 +1299,20 @@
             "default": null,
             "type": "string"
           },
+          "max_paths": {
+            "description": "Maximum number of paths to use when multiple \"best paths\" exist",
+            "default": 1,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/MaxPathConfig"
+              }
+            ]
+          },
           "originate": {
             "description": "The set of prefixes for the BGP router to originate.",
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/Ipv4Net"
+              "$ref": "#/components/schemas/IpNet"
             }
           },
           "shaper": {
@@ -1576,6 +1635,30 @@
           "tx_output_status"
         ]
       },
+      "CurrentMultirackJoinUserConfig": {
+        "description": "A version of the multirack join configuration which contains learned bootstrap sleds and a redacted form of BGP auth keys if they exist.\n\nThis is returned to the user via wicketd and displayed in wicket.\n\nNote that there are no optional fields here unlike in `CurrentRssUserConfigInsensitive`. This is because wicketd defaults to filling in an empty RSS config for backwards compatibility and allows uploading BGP auth keys before actually uploading the RSS config. However, since we never default to an empty version of the `CurrentMultirackJoinConfig`, we can only fill in the BGP auth keys for this structure after the `MultirackJoinConfigBaseUserInput` is uploaded from a user.",
+        "type": "object",
+        "properties": {
+          "bgp_auth_keys": {
+            "$ref": "#/components/schemas/GetBgpAuthKeyInfoResponse"
+          },
+          "bootstrap_sleds": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BootstrapSledDescription"
+            },
+            "uniqueItems": true
+          },
+          "rack_network_config": {
+            "$ref": "#/components/schemas/UserSpecifiedRackNetworkConfig"
+          }
+        },
+        "required": [
+          "bgp_auth_keys",
+          "bootstrap_sleds",
+          "rack_network_config"
+        ]
+      },
       "CurrentRssUserConfig": {
         "type": "object",
         "properties": {
@@ -1626,6 +1709,11 @@
           },
           "external_dns_zone_name": {
             "type": "string"
+          },
+          "external_jumbo_frames_opt_in_enabled": {
+            "description": "Enable the fleet-wide jumbo-frames opt-in. Operators can also toggle this at runtime via the Nexus API after handoff.",
+            "default": false,
+            "type": "boolean"
           },
           "internal_services_ip_pool_ranges": {
             "type": "array",
@@ -2190,6 +2278,100 @@
           "flipped"
         ]
       },
+      "LinkFec": {
+        "description": "The forward error correction mode of a link.",
+        "oneOf": [
+          {
+            "description": "Firecode forward error correction.",
+            "type": "string",
+            "enum": [
+              "firecode"
+            ]
+          },
+          {
+            "description": "No forward error correction.",
+            "type": "string",
+            "enum": [
+              "none"
+            ]
+          },
+          {
+            "description": "Reed-Solomon forward error correction.",
+            "type": "string",
+            "enum": [
+              "rs"
+            ]
+          }
+        ]
+      },
+      "LinkSpeed": {
+        "description": "The speed of a link.",
+        "oneOf": [
+          {
+            "description": "Zero gigabits per second.",
+            "type": "string",
+            "enum": [
+              "speed0_g"
+            ]
+          },
+          {
+            "description": "1 gigabit per second.",
+            "type": "string",
+            "enum": [
+              "speed1_g"
+            ]
+          },
+          {
+            "description": "10 gigabits per second.",
+            "type": "string",
+            "enum": [
+              "speed10_g"
+            ]
+          },
+          {
+            "description": "25 gigabits per second.",
+            "type": "string",
+            "enum": [
+              "speed25_g"
+            ]
+          },
+          {
+            "description": "40 gigabits per second.",
+            "type": "string",
+            "enum": [
+              "speed40_g"
+            ]
+          },
+          {
+            "description": "50 gigabits per second.",
+            "type": "string",
+            "enum": [
+              "speed50_g"
+            ]
+          },
+          {
+            "description": "100 gigabits per second.",
+            "type": "string",
+            "enum": [
+              "speed100_g"
+            ]
+          },
+          {
+            "description": "200 gigabits per second.",
+            "type": "string",
+            "enum": [
+              "speed200_g"
+            ]
+          },
+          {
+            "description": "400 gigabits per second.",
+            "type": "string",
+            "enum": [
+              "speed400_g"
+            ]
+          }
+        ]
+      },
       "LldpAdminStatus": {
         "description": "To what extent should this port participate in LLDP",
         "type": "string",
@@ -2250,6 +2432,76 @@
         "required": [
           "status"
         ]
+      },
+      "ManualPortConfig": {
+        "description": "User-specified version of `PortConfig`.\n\nAll of `PortConfig` is user-specified. But we expect the port name to be a key, rather than a field as in `PortConfig`. So this has all of the fields other than the port name.",
+        "type": "object",
+        "properties": {
+          "addresses": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UserSpecifiedUplinkAddressConfig"
+            }
+          },
+          "autoneg": {
+            "type": "boolean"
+          },
+          "bgp_peers": {
+            "default": [],
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UserSpecifiedBgpPeerConfig"
+            }
+          },
+          "lldp": {
+            "nullable": true,
+            "default": null,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/LldpPortConfig"
+              }
+            ]
+          },
+          "routes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RouteConfig"
+            }
+          },
+          "tx_eq": {
+            "nullable": true,
+            "default": null,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TxEqConfig"
+              }
+            ]
+          },
+          "uplink_port_fec": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/LinkFec"
+              }
+            ]
+          },
+          "uplink_port_speed": {
+            "$ref": "#/components/schemas/LinkSpeed"
+          }
+        },
+        "required": [
+          "addresses",
+          "autoneg",
+          "routes",
+          "uplink_port_speed"
+        ],
+        "additionalProperties": false
+      },
+      "MaxPathConfig": {
+        "type": "integer",
+        "format": "uint8",
+        "minimum": 1,
+        "maximum": 32
       },
       "MediaInterfaceId": {
         "oneOf": [
@@ -2434,6 +2686,29 @@
           }
         }
       },
+      "MultirackJoinConfigBaseUserInput": {
+        "description": "Input from a user for adopting an uninitialized rack into an existing regional cluster.\n\nThis type is provided in the form of a TOML file uploaded via the wicket CLI. It does not contain sensitive user input such as BGP keys. Those are input separately.",
+        "type": "object",
+        "properties": {
+          "bootstrap_slots": {
+            "description": "List of slot numbers only.",
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "uint16",
+              "minimum": 0
+            },
+            "uniqueItems": true
+          },
+          "rack_network_config": {
+            "$ref": "#/components/schemas/UserSpecifiedRackNetworkConfig"
+          }
+        },
+        "required": [
+          "bootstrap_slots",
+          "rack_network_config"
+        ]
+      },
       "Name": {
         "title": "A name unique within the parent collection",
         "description": "Names must begin with a lower case ASCII letter, be composed exclusively of lowercase ASCII, uppercase ASCII, numbers, and '-', and may not end with a '-'. Names cannot be a UUID, but they may contain a UUID. They can be at most 63 characters long.",
@@ -2465,30 +2740,6 @@
           "invalid"
         ]
       },
-      "PortFec": {
-        "description": "Switchport FEC options",
-        "type": "string",
-        "enum": [
-          "firecode",
-          "none",
-          "rs"
-        ]
-      },
-      "PortSpeed": {
-        "description": "Switchport Speed options",
-        "type": "string",
-        "enum": [
-          "speed0_g",
-          "speed1_g",
-          "speed10_g",
-          "speed25_g",
-          "speed40_g",
-          "speed50_g",
-          "speed100_g",
-          "speed200_g",
-          "speed400_g"
-        ]
-      },
       "PowerMode": {
         "description": "The power mode of a module.",
         "type": "object",
@@ -2502,7 +2753,7 @@
             "description": "The actual power state.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/PowerState2"
+                "$ref": "#/components/schemas/PowerState3"
               }
             ]
           }
@@ -2521,6 +2772,15 @@
         ]
       },
       "PowerState2": {
+        "description": "See RFD 81.\n\nThis enum only lists power states the SP is able to control; higher power states are controlled by ignition.",
+        "type": "string",
+        "enum": [
+          "A0",
+          "A1",
+          "A2"
+        ]
+      },
+      "PowerState3": {
         "description": "An allowed power state for the module.",
         "oneOf": [
           {
@@ -3318,6 +3578,11 @@
           "external_dns_zone_name": {
             "type": "string"
           },
+          "external_jumbo_frames_opt_in_enabled": {
+            "description": "Enable the fleet-wide jumbo-frames opt-in.",
+            "default": false,
+            "type": "boolean"
+          },
           "internal_services_ip_pool_ranges": {
             "type": "array",
             "items": {
@@ -3591,7 +3856,6 @@
         ]
       },
       "RotImageError": {
-        "description": "`RotImageError`\n\n<details><summary>JSON schema</summary>\n\n```json { \"type\": \"string\", \"enum\": [ \"unchecked\", \"first_page_erased\", \"partially_programmed\", \"invalid_length\", \"header_not_programmed\", \"bootloader_too_small\", \"bad_magic\", \"header_image_size\", \"unaligned_length\", \"unsupported_type\", \"reset_vector_not_thumb2\", \"reset_vector\", \"signature\" ] } ``` </details>",
         "type": "string",
         "enum": [
           "unchecked",
@@ -3686,7 +3950,6 @@
         ]
       },
       "RotState": {
-        "description": "`RotState`\n\n<details><summary>JSON schema</summary>\n\n```json { \"oneOf\": [ { \"type\": \"object\", \"required\": [ \"active\", \"persistent_boot_preference\", \"state\" ], \"properties\": { \"active\": { \"$ref\": \"#/components/schemas/RotSlot\" }, \"pending_persistent_boot_preference\": { \"oneOf\": [ { \"type\": \"null\" }, { \"allOf\": [ { \"$ref\": \"#/components/schemas/RotSlot\" } ] } ] }, \"persistent_boot_preference\": { \"$ref\": \"#/components/schemas/RotSlot\" }, \"slot_a_sha3_256_digest\": { \"type\": [ \"string\", \"null\" ] }, \"slot_b_sha3_256_digest\": { \"type\": [ \"string\", \"null\" ] }, \"state\": { \"type\": \"string\", \"enum\": [ \"v2\" ] }, \"transient_boot_preference\": { \"oneOf\": [ { \"type\": \"null\" }, { \"allOf\": [ { \"$ref\": \"#/components/schemas/RotSlot\" } ] } ] } } }, { \"type\": \"object\", \"required\": [ \"message\", \"state\" ], \"properties\": { \"message\": { \"type\": \"string\" }, \"state\": { \"type\": \"string\", \"enum\": [ \"communication_failed\" ] } } }, { \"type\": \"object\", \"required\": [ \"active\", \"persistent_boot_preference\", \"slot_a_fwid\", \"slot_b_fwid\", \"stage0_fwid\", \"stage0next_fwid\", \"state\" ], \"properties\": { \"active\": { \"$ref\": \"#/components/schemas/RotSlot\" }, \"pending_persistent_boot_preference\": { \"oneOf\": [ { \"type\": \"null\" }, { \"allOf\": [ { \"$ref\": \"#/components/schemas/RotSlot\" } ] } ] }, \"persistent_boot_preference\": { \"$ref\": \"#/components/schemas/RotSlot\" }, \"slot_a_error\": { \"oneOf\": [ { \"type\": \"null\" }, { \"allOf\": [ { \"$ref\": \"#/components/schemas/RotImageError\" } ] } ] }, \"slot_a_fwid\": { \"type\": \"string\" }, \"slot_b_error\": { \"oneOf\": [ { \"type\": \"null\" }, { \"allOf\": [ { \"$ref\": \"#/components/schemas/RotImageError\" } ] } ] }, \"slot_b_fwid\": { \"type\": \"string\" }, \"stage0_error\": { \"oneOf\": [ { \"type\": \"null\" }, { \"allOf\": [ { \"$ref\": \"#/components/schemas/RotImageError\" } ] } ] }, \"stage0_fwid\": { \"type\": \"string\" }, \"stage0next_error\": { \"oneOf\": [ { \"type\": \"null\" }, { \"allOf\": [ { \"$ref\": \"#/components/schemas/RotImageError\" } ] } ] }, \"stage0next_fwid\": { \"type\": \"string\" }, \"state\": { \"type\": \"string\", \"enum\": [ \"v3\" ] }, \"transient_boot_preference\": { \"oneOf\": [ { \"type\": \"null\" }, { \"allOf\": [ { \"$ref\": \"#/components/schemas/RotSlot\" } ] } ] } } } ] } ``` </details>",
         "oneOf": [
           {
             "type": "object",
@@ -3878,8 +4141,15 @@
           "nexthop"
         ]
       },
+      "RouterLifetimeConfig": {
+        "description": "Router lifetime in seconds for unnumbered BGP peers",
+        "type": "integer",
+        "format": "uint16",
+        "minimum": 0,
+        "maximum": 9000
+      },
       "RssStep": {
-        "description": "Steps we go through during initial rack setup. Keep this list in order that they happen.\n\n<details><summary>JSON schema</summary>\n\n```json { \"description\": \"Steps we go through during initial rack setup. Keep this list in order that they happen.\", \"oneOf\": [ { \"type\": \"object\", \"required\": [ \"status\" ], \"properties\": { \"status\": { \"type\": \"string\", \"enum\": [ \"requested\" ] } } }, { \"type\": \"object\", \"required\": [ \"status\" ], \"properties\": { \"status\": { \"type\": \"string\", \"enum\": [ \"starting\" ] } } }, { \"type\": \"object\", \"required\": [ \"status\" ], \"properties\": { \"status\": { \"type\": \"string\", \"enum\": [ \"load_existing_plan\" ] } } }, { \"type\": \"object\", \"required\": [ \"status\" ], \"properties\": { \"status\": { \"type\": \"string\", \"enum\": [ \"create_sled_plan\" ] } } }, { \"type\": \"object\", \"required\": [ \"status\" ], \"properties\": { \"status\": { \"type\": \"string\", \"enum\": [ \"init_trust_quorum\" ] } } }, { \"type\": \"object\", \"required\": [ \"status\" ], \"properties\": { \"status\": { \"type\": \"string\", \"enum\": [ \"network_config_update\" ] } } }, { \"type\": \"object\", \"required\": [ \"status\" ], \"properties\": { \"status\": { \"type\": \"string\", \"enum\": [ \"sled_init\" ] } } }, { \"type\": \"object\", \"required\": [ \"status\" ], \"properties\": { \"status\": { \"type\": \"string\", \"enum\": [ \"init_dns\" ] } } }, { \"type\": \"object\", \"required\": [ \"status\" ], \"properties\": { \"status\": { \"type\": \"string\", \"enum\": [ \"configure_dns\" ] } } }, { \"type\": \"object\", \"required\": [ \"status\" ], \"properties\": { \"status\": { \"type\": \"string\", \"enum\": [ \"init_ntp\" ] } } }, { \"type\": \"object\", \"required\": [ \"status\" ], \"properties\": { \"status\": { \"type\": \"string\", \"enum\": [ \"wait_for_time_sync\" ] } } }, { \"type\": \"object\", \"required\": [ \"status\" ], \"properties\": { \"status\": { \"type\": \"string\", \"enum\": [ \"wait_for_database\" ] } } }, { \"type\": \"object\", \"required\": [ \"status\" ], \"properties\": { \"status\": { \"type\": \"string\", \"enum\": [ \"cluster_init\" ] } } }, { \"type\": \"object\", \"required\": [ \"status\" ], \"properties\": { \"status\": { \"type\": \"string\", \"enum\": [ \"zones_init\" ] } } }, { \"type\": \"object\", \"required\": [ \"status\" ], \"properties\": { \"status\": { \"type\": \"string\", \"enum\": [ \"nexus_handoff\" ] } } } ] } ``` </details>",
+        "description": "Steps we go through during initial rack setup. Keep this list in order that they happen.\n\n<details><summary>JSON schema</summary>\n\n```json { \"description\": \"Steps we go through during initial rack setup. Keep this list in order that they happen.\", \"oneOf\": [ { \"type\": \"object\", \"required\": [ \"status\" ], \"properties\": { \"status\": { \"type\": \"string\", \"enum\": [ \"requested\" ] } } }, { \"type\": \"object\", \"required\": [ \"status\" ], \"properties\": { \"status\": { \"type\": \"string\", \"enum\": [ \"starting\" ] } } }, { \"type\": \"object\", \"required\": [ \"status\" ], \"properties\": { \"status\": { \"type\": \"string\", \"enum\": [ \"load_existing_plan\" ] } } }, { \"type\": \"object\", \"required\": [ \"status\" ], \"properties\": { \"status\": { \"type\": \"string\", \"enum\": [ \"create_sled_plan\" ] } } }, { \"type\": \"object\", \"required\": [ \"status\" ], \"properties\": { \"status\": { \"type\": \"string\", \"enum\": [ \"init_trust_quorum\" ] } } }, { \"type\": \"object\", \"required\": [ \"status\" ], \"properties\": { \"status\": { \"type\": \"string\", \"enum\": [ \"initial_network_config_update\" ] } } }, { \"type\": \"object\", \"required\": [ \"status\" ], \"properties\": { \"status\": { \"type\": \"string\", \"enum\": [ \"sled_init\" ] } } }, { \"type\": \"object\", \"required\": [ \"status\" ], \"properties\": { \"status\": { \"type\": \"string\", \"enum\": [ \"final_network_config_update\" ] } } }, { \"type\": \"object\", \"required\": [ \"status\" ], \"properties\": { \"status\": { \"type\": \"string\", \"enum\": [ \"init_dns\" ] } } }, { \"type\": \"object\", \"required\": [ \"status\" ], \"properties\": { \"status\": { \"type\": \"string\", \"enum\": [ \"configure_dns\" ] } } }, { \"type\": \"object\", \"required\": [ \"status\" ], \"properties\": { \"status\": { \"type\": \"string\", \"enum\": [ \"init_ntp\" ] } } }, { \"type\": \"object\", \"required\": [ \"status\" ], \"properties\": { \"status\": { \"type\": \"string\", \"enum\": [ \"wait_for_time_sync\" ] } } }, { \"type\": \"object\", \"required\": [ \"status\" ], \"properties\": { \"status\": { \"type\": \"string\", \"enum\": [ \"wait_for_database\" ] } } }, { \"type\": \"object\", \"required\": [ \"status\" ], \"properties\": { \"status\": { \"type\": \"string\", \"enum\": [ \"cluster_init\" ] } } }, { \"type\": \"object\", \"required\": [ \"status\" ], \"properties\": { \"status\": { \"type\": \"string\", \"enum\": [ \"zones_init\" ] } } }, { \"type\": \"object\", \"required\": [ \"status\" ], \"properties\": { \"status\": { \"type\": \"string\", \"enum\": [ \"nexus_handoff\" ] } } } ] } ``` </details>",
         "oneOf": [
           {
             "type": "object",
@@ -3957,7 +4227,7 @@
               "status": {
                 "type": "string",
                 "enum": [
-                  "network_config_update"
+                  "initial_network_config_update"
                 ]
               }
             },
@@ -3972,6 +4242,20 @@
                 "type": "string",
                 "enum": [
                   "sled_init"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "final_network_config_update"
                 ]
               }
             },
@@ -4356,7 +4640,7 @@
         ]
       },
       "SpIgnition": {
-        "description": "State of an ignition target.\n\n<details><summary>JSON schema</summary>\n\n```json { \"description\": \"State of an ignition target.\", \"oneOf\": [ { \"type\": \"object\", \"required\": [ \"present\" ], \"properties\": { \"present\": { \"type\": \"string\", \"enum\": [ \"no\" ] } } }, { \"type\": \"object\", \"required\": [ \"ctrl_detect_0\", \"ctrl_detect_1\", \"flt_a2\", \"flt_a3\", \"flt_rot\", \"flt_sp\", \"id\", \"power\", \"present\" ], \"properties\": { \"ctrl_detect_0\": { \"type\": \"boolean\" }, \"ctrl_detect_1\": { \"type\": \"boolean\" }, \"flt_a2\": { \"description\": \"Fault from the A2 power domain\", \"type\": \"boolean\" }, \"flt_a3\": { \"description\": \"Fault from the A3 power domain\", \"type\": \"boolean\" }, \"flt_rot\": { \"description\": \"Fault from the RoT\", \"type\": \"boolean\" }, \"flt_sp\": { \"description\": \"Fault from the SP\", \"type\": \"boolean\" }, \"id\": { \"$ref\": \"#/components/schemas/SpIgnitionSystemType\" }, \"power\": { \"type\": \"boolean\" }, \"present\": { \"type\": \"string\", \"enum\": [ \"yes\" ] } } } ] } ``` </details>",
+        "description": "State of an ignition target.",
         "oneOf": [
           {
             "type": "object",
@@ -4425,7 +4709,6 @@
         ]
       },
       "SpIgnitionSystemType": {
-        "description": "`SpIgnitionSystemType`\n\n<details><summary>JSON schema</summary>\n\n```json { \"oneOf\": [ { \"type\": \"object\", \"required\": [ \"system_type\" ], \"properties\": { \"system_type\": { \"type\": \"string\", \"enum\": [ \"gimlet\" ] } } }, { \"type\": \"object\", \"required\": [ \"system_type\" ], \"properties\": { \"system_type\": { \"type\": \"string\", \"enum\": [ \"sidecar\" ] } } }, { \"type\": \"object\", \"required\": [ \"system_type\" ], \"properties\": { \"system_type\": { \"type\": \"string\", \"enum\": [ \"psc\" ] } } }, { \"type\": \"object\", \"required\": [ \"id\", \"system_type\" ], \"properties\": { \"id\": { \"type\": \"integer\", \"format\": \"uint16\", \"minimum\": 0.0 }, \"system_type\": { \"type\": \"string\", \"enum\": [ \"unknown\" ] } } }, { \"type\": \"object\", \"required\": [ \"system_type\" ], \"properties\": { \"system_type\": { \"type\": \"string\", \"enum\": [ \"cosmo\" ] } } } ] } ``` </details>",
         "oneOf": [
           {
             "type": "object",
@@ -4565,7 +4848,6 @@
         ]
       },
       "SpState": {
-        "description": "`SpState`\n\n<details><summary>JSON schema</summary>\n\n```json { \"type\": \"object\", \"required\": [ \"base_mac_address\", \"hubris_archive_id\", \"model\", \"power_state\", \"revision\", \"rot\", \"serial_number\" ], \"properties\": { \"base_mac_address\": { \"type\": \"array\", \"items\": { \"type\": \"integer\", \"format\": \"uint8\", \"minimum\": 0.0 }, \"maxItems\": 6, \"minItems\": 6 }, \"hubris_archive_id\": { \"type\": \"string\" }, \"model\": { \"type\": \"string\" }, \"power_state\": { \"$ref\": \"#/components/schemas/PowerState\" }, \"revision\": { \"type\": \"integer\", \"format\": \"uint32\", \"minimum\": 0.0 }, \"rot\": { \"$ref\": \"#/components/schemas/RotState\" }, \"serial_number\": { \"type\": \"string\" } } } ``` </details>",
         "type": "object",
         "properties": {
           "base_mac_address": {
@@ -4585,7 +4867,7 @@
             "type": "string"
           },
           "power_state": {
-            "$ref": "#/components/schemas/PowerState"
+            "$ref": "#/components/schemas/PowerState2"
           },
           "revision": {
             "type": "integer",
@@ -7401,25 +7683,6 @@
           }
         ]
       },
-      "UplinkAddressConfig": {
-        "type": "object",
-        "properties": {
-          "address": {
-            "$ref": "#/components/schemas/IpNet"
-          },
-          "vlan_id": {
-            "nullable": true,
-            "description": "The VLAN id (if any) associated with this address.",
-            "default": null,
-            "type": "integer",
-            "format": "uint16",
-            "minimum": 0
-          }
-        },
-        "required": [
-          "address"
-        ]
-      },
       "UplinkPreflightStepId": {
         "oneOf": [
           {
@@ -7551,13 +7814,16 @@
         ]
       },
       "UserSpecifiedBgpPeerConfig": {
-        "description": "User-specified version of [`BgpPeerConfig`].\n\nThis is similar to [`BgpPeerConfig`], except it doesn't have the sensitive `md5_auth_key` parameter, instead requiring that the user provide the key separately.\n\n[`BgpPeerConfig`]: omicron_common::api::internal::shared::BgpPeerConfig",
+        "description": "User-specified version of [`BgpPeerConfig`].\n\nThis is similar to [`BgpPeerConfig`], except it doesn't have the sensitive `md5_auth_key` parameter, instead requiring that the user provide the key separately.",
         "type": "object",
         "properties": {
           "addr": {
             "description": "Address of the peer.",
-            "type": "string",
-            "format": "ipv4"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/UserSpecifiedRouterPeerAddr"
+              }
+            ]
           },
           "allowed_export": {
             "description": "Apply export policy to this peer with an allow list.",
@@ -7679,6 +7945,15 @@
             "format": "uint32",
             "minimum": 0
           },
+          "router_lifetime": {
+            "description": "Router lifetime in seconds for unnumbered BGP peers.",
+            "default": 0,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/RouterLifetimeConfig"
+              }
+            ]
+          },
           "vlan_id": {
             "nullable": true,
             "description": "Associate a VLAN ID with a BGP peer session.",
@@ -7703,71 +7978,17 @@
         }
       },
       "UserSpecifiedPortConfig": {
-        "description": "User-specified version of [`PortConfigV2`].\n\nAll of [`PortConfigV2`] is user-specified. But we expect the port name to be a key, rather than a field as in [`PortConfigV2`]. So this has all of the fields other than the port name.\n\n[`PortConfigV2`]: omicron_common::api::internal::shared::PortConfigV2",
-        "type": "object",
-        "properties": {
-          "addresses": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/UplinkAddressConfig"
-            }
+        "anyOf": [
+          {
+            "$ref": "#/components/schemas/ManualPortConfig"
           },
-          "autoneg": {
-            "type": "boolean"
-          },
-          "bgp_peers": {
-            "default": [],
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/UserSpecifiedBgpPeerConfig"
-            }
-          },
-          "lldp": {
-            "nullable": true,
-            "default": null,
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/LldpPortConfig"
-              }
-            ]
-          },
-          "routes": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/RouteConfig"
-            }
-          },
-          "tx_eq": {
-            "nullable": true,
-            "default": null,
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/TxEqConfig"
-              }
-            ]
-          },
-          "uplink_port_fec": {
-            "nullable": true,
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/PortFec"
-              }
-            ]
-          },
-          "uplink_port_speed": {
-            "$ref": "#/components/schemas/PortSpeed"
+          {
+            "type": "object"
           }
-        },
-        "required": [
-          "addresses",
-          "autoneg",
-          "routes",
-          "uplink_port_speed"
-        ],
-        "additionalProperties": false
+        ]
       },
       "UserSpecifiedRackNetworkConfig": {
-        "description": "User-specified parts of [`RackNetworkConfig`](omicron_common::api::internal::shared::RackNetworkConfig).",
+        "description": "User-specified parts of `RackNetworkConfig`.",
         "type": "object",
         "properties": {
           "bgp": {
@@ -7778,11 +7999,16 @@
           },
           "infra_ip_first": {
             "type": "string",
-            "format": "ipv4"
+            "format": "ip"
           },
           "infra_ip_last": {
             "type": "string",
-            "format": "ipv4"
+            "format": "ip"
+          },
+          "rack_subnet_address": {
+            "nullable": true,
+            "type": "string",
+            "format": "ipv6"
           },
           "switch0": {
             "type": "object",
@@ -7803,6 +8029,31 @@
           "infra_ip_last",
           "switch0",
           "switch1"
+        ],
+        "additionalProperties": false
+      },
+      "UserSpecifiedRouterPeerAddr": {
+        "type": "string"
+      },
+      "UserSpecifiedUplinkAddressConfig": {
+        "description": "User-specified version of [`sled_agent_types::early_networking::UplinkAddressConfig`].\n\nThis allows us to have a nicer TOML representation of [`UplinkAddress`].",
+        "type": "object",
+        "properties": {
+          "address": {
+            "description": "The address to be used on the uplink.",
+            "type": "string"
+          },
+          "vlan_id": {
+            "nullable": true,
+            "description": "The VLAN id (if any) associated with this address.",
+            "default": null,
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "address"
         ],
         "additionalProperties": false
       },

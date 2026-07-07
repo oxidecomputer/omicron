@@ -17,7 +17,7 @@ use nexus_db_lookup::lookup;
 use nexus_db_queries::authn::{Actor, Reason};
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::datastore::CrdbScimProviderStore;
-use nexus_types::external_api::views;
+use nexus_types::external_api::scim;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
@@ -33,7 +33,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         silo_lookup: &lookup::Silo<'_>,
-    ) -> ListResultVec<views::ScimClientBearerToken> {
+    ) -> ListResultVec<scim::ScimClientBearerToken> {
         let (.., authz_silo, _) = silo_lookup.fetch().await?;
 
         let tokens =
@@ -46,7 +46,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         silo_lookup: &lookup::Silo<'_>,
-    ) -> CreateResult<views::ScimClientBearerTokenValue> {
+    ) -> CreateResult<scim::ScimClientBearerTokenValue> {
         let (.., authz_silo, _) = silo_lookup.fetch().await?;
 
         let token =
@@ -60,7 +60,7 @@ impl super::Nexus {
         opctx: &OpContext,
         silo_lookup: &lookup::Silo<'_>,
         token_id: Uuid,
-    ) -> LookupResult<views::ScimClientBearerToken> {
+    ) -> LookupResult<scim::ScimClientBearerToken> {
         let (.., authz_silo, _) = silo_lookup.fetch().await?;
 
         let token = self
@@ -92,7 +92,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         token: String,
-    ) -> Result<Actor, Reason> {
+    ) -> Result<(Actor, Uuid), Reason> {
         let Some(bearer_token) = self
             .datastore()
             .scim_lookup_token_by_bearer(opctx, token.clone())
@@ -137,7 +137,8 @@ impl super::Nexus {
             });
         }
 
-        Ok(Actor::Scim { silo_id: bearer_token.silo_id })
+        let token_id = bearer_token.id;
+        Ok((Actor::Scim { silo_id: bearer_token.silo_id }, token_id))
     }
 
     /// For an authenticataed Actor::Scim, return a scim2_rs::Provider

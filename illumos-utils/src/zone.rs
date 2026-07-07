@@ -8,6 +8,7 @@ use anyhow::anyhow;
 use camino::Utf8Path;
 use ipnetwork::IpNetwork;
 use ipnetwork::IpNetworkError;
+use sled_agent_types::inventory::OmicronZoneConfig;
 use slog::Logger;
 use slog::info;
 use std::net::{IpAddr, Ipv6Addr};
@@ -33,6 +34,16 @@ pub const ROUTE: &str = "/usr/sbin/route";
 pub const ZONE_PREFIX: &str = "oxz_";
 pub const PROPOLIS_ZONE_PREFIX: &str = "oxz_propolis-server_";
 
+/// Returns the name of a zone, based on the base zone name plus any unique
+/// identifying info.
+///
+/// The zone name is based on:
+/// - A unique Oxide prefix ("oxz_")
+/// - The name of the zone type being hosted (e.g., "nexus")
+/// - An optional, zone-unique UUID
+///
+/// This results in a zone name which is distinct across different zpools,
+/// but stable and predictable across reboots.
 pub fn zone_name(prefix: &str, id: Option<OmicronZoneUuid>) -> String {
     if let Some(id) = id {
         format!("{ZONE_PREFIX}{}_{}", prefix, id)
@@ -41,9 +52,28 @@ pub fn zone_name(prefix: &str, id: Option<OmicronZoneUuid>) -> String {
     }
 }
 
+pub trait OmicronZoneConfigExt {
+    /// Returns the name of a zone, based on the zone type plus its unique ID.
+    ///
+    /// The zone name is based on:
+    /// - A unique Oxide prefix ("oxz_")
+    /// - The zone type being hosted (e.g., "nexus")
+    /// - The zone's ID.
+    ///
+    /// This results in a zone name which is distinct across different zpools,
+    /// but stable and predictable across reboots.
+    fn zone_name(&self) -> String;
+}
+
+impl OmicronZoneConfigExt for OmicronZoneConfig {
+    fn zone_name(&self) -> String {
+        zone_name(self.zone_type.kind().zone_prefix(), Some(self.id))
+    }
+}
+
 #[derive(thiserror::Error, Debug)]
 enum Error {
-    #[error("Zone execution error: {0}")]
+    #[error("Zone execution error")]
     Execution(#[from] crate::ExecutionError),
 
     #[error(transparent)]
@@ -95,7 +125,7 @@ impl AdmError {
 
 /// Errors which may be encountered when deleting addresses.
 #[derive(thiserror::Error, Debug)]
-#[error("Failed to delete address '{addrobj}' in zone '{zone}': {err}")]
+#[error("Failed to delete address '{addrobj}' in zone '{zone}'")]
 pub struct DeleteAddressError {
     zone: String,
     addrobj: AddrObject,
@@ -107,7 +137,7 @@ pub struct DeleteAddressError {
 /// Error which may be returned accessing the control interface of a zone.
 #[derive(thiserror::Error, Debug)]
 pub enum GetControlInterfaceError {
-    #[error("Failed to query zone '{zone}' for control interface: {err}")]
+    #[error("Failed to query zone '{zone}' for control interface")]
     Execution {
         zone: String,
         #[source]
@@ -122,7 +152,7 @@ pub enum GetControlInterfaceError {
 /// Error which may be returned accessing the bootstrap interface of a zone.
 #[derive(thiserror::Error, Debug)]
 pub enum GetBootstrapInterfaceError {
-    #[error("Failed to query zone '{zone}' for control interface: {err}")]
+    #[error("Failed to query zone '{zone}' for control interface")]
     Execution {
         zone: String,
         #[source]

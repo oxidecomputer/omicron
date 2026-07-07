@@ -68,16 +68,14 @@ pub enum ServiceName {
     OximeterReader,
     ManagementGatewayService,
     RepoDepot,
-    Wicketd,
     Dendrite,
-    Tfport,
     CruciblePantry,
     SledAgent(SledUuid),
     Crucible(OmicronZoneUuid),
     BoundaryNtp,
     InternalNtp,
-    Maghemite, //TODO change to Dpd - maghemite has several services.
     Mgd,
+    Ddm,
 }
 
 impl ServiceName {
@@ -112,16 +110,14 @@ impl ServiceName {
             ServiceName::OximeterReader => "oximeter-reader",
             ServiceName::ManagementGatewayService => "mgs",
             ServiceName::RepoDepot => "repo-depot",
-            ServiceName::Wicketd => "wicketd",
             ServiceName::Dendrite => "dendrite",
-            ServiceName::Tfport => "tfport",
             ServiceName::CruciblePantry => "crucible-pantry",
             ServiceName::SledAgent(_) => "sledagent",
             ServiceName::Crucible(_) => "crucible",
             ServiceName::BoundaryNtp => "boundary-ntp",
             ServiceName::InternalNtp => "internal-ntp",
-            ServiceName::Maghemite => "maghemite",
             ServiceName::Mgd => "mgd",
+            ServiceName::Ddm => "ddm",
         }
     }
 
@@ -146,14 +142,12 @@ impl ServiceName {
             | ServiceName::OximeterReader
             | ServiceName::ManagementGatewayService
             | ServiceName::RepoDepot
-            | ServiceName::Wicketd
             | ServiceName::Dendrite
-            | ServiceName::Tfport
             | ServiceName::CruciblePantry
             | ServiceName::BoundaryNtp
             | ServiceName::InternalNtp
-            | ServiceName::Maghemite
-            | ServiceName::Mgd => {
+            | ServiceName::Mgd
+            | ServiceName::Ddm => {
                 format!("_{}._tcp", self.service_kind())
             }
             ServiceName::SledAgent(id) => {

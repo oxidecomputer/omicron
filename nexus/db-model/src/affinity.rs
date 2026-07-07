@@ -1,8 +1,6 @@
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
-// file, You can obtain one at https://mozilla.org/MPL/5.0/.
-
-// Copyright 2025 Oxide Computer Company
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 //! Database representation of affinity and anti-affinity groups
 
@@ -15,8 +13,8 @@ use nexus_db_schema::schema::affinity_group;
 use nexus_db_schema::schema::affinity_group_instance_membership;
 use nexus_db_schema::schema::anti_affinity_group;
 use nexus_db_schema::schema::anti_affinity_group_instance_membership;
-use nexus_types::external_api::params;
-use nexus_types::external_api::views;
+use nexus_types::external_api::affinity;
+use nexus_types::external_api::instance;
 use omicron_common::api::external;
 use omicron_common::api::external::IdentityMetadata;
 use omicron_uuid_kinds::AffinityGroupKind;
@@ -38,7 +36,7 @@ impl_enum_type!(
     Allow => b"allow"
 );
 
-impl From<AffinityPolicy> for external::AffinityPolicy {
+impl From<AffinityPolicy> for affinity::AffinityPolicy {
     fn from(policy: AffinityPolicy) -> Self {
         match policy {
             AffinityPolicy::Fail => Self::Fail,
@@ -47,11 +45,11 @@ impl From<AffinityPolicy> for external::AffinityPolicy {
     }
 }
 
-impl From<external::AffinityPolicy> for AffinityPolicy {
-    fn from(policy: external::AffinityPolicy) -> Self {
+impl From<affinity::AffinityPolicy> for AffinityPolicy {
+    fn from(policy: affinity::AffinityPolicy) -> Self {
         match policy {
-            external::AffinityPolicy::Fail => Self::Fail,
-            external::AffinityPolicy::Allow => Self::Allow,
+            affinity::AffinityPolicy::Fail => Self::Fail,
+            affinity::AffinityPolicy::Allow => Self::Allow,
         }
     }
 }
@@ -66,7 +64,7 @@ impl_enum_type!(
     Sled => b"sled"
 );
 
-impl From<FailureDomain> for external::FailureDomain {
+impl From<FailureDomain> for affinity::FailureDomain {
     fn from(domain: FailureDomain) -> Self {
         match domain {
             FailureDomain::Sled => Self::Sled,
@@ -74,10 +72,10 @@ impl From<FailureDomain> for external::FailureDomain {
     }
 }
 
-impl From<external::FailureDomain> for FailureDomain {
-    fn from(domain: external::FailureDomain) -> Self {
+impl From<affinity::FailureDomain> for FailureDomain {
+    fn from(domain: affinity::FailureDomain) -> Self {
         match domain {
-            external::FailureDomain::Sled => Self::Sled,
+            affinity::FailureDomain::Sled => Self::Sled,
         }
     }
 }
@@ -95,7 +93,10 @@ pub struct AffinityGroup {
 }
 
 impl AffinityGroup {
-    pub fn new(project_id: Uuid, params: params::AffinityGroupCreate) -> Self {
+    pub fn new(
+        project_id: Uuid,
+        params: affinity::AffinityGroupCreate,
+    ) -> Self {
         Self {
             identity: AffinityGroupIdentity::new(
                 Uuid::new_v4(),
@@ -108,7 +109,7 @@ impl AffinityGroup {
     }
 }
 
-impl From<AffinityGroup> for views::AffinityGroup {
+impl From<AffinityGroup> for affinity::AffinityGroup {
     fn from(group: AffinityGroup) -> Self {
         let identity = IdentityMetadata {
             id: group.identity.id,
@@ -135,8 +136,8 @@ pub struct AffinityGroupUpdate {
     pub time_modified: DateTime<Utc>,
 }
 
-impl From<params::AffinityGroupUpdate> for AffinityGroupUpdate {
-    fn from(params: params::AffinityGroupUpdate) -> Self {
+impl From<affinity::AffinityGroupUpdate> for AffinityGroupUpdate {
+    fn from(params: affinity::AffinityGroupUpdate) -> Self {
         Self {
             name: params.identity.name.map(Name),
             description: params.identity.description,
@@ -160,7 +161,7 @@ pub struct AntiAffinityGroup {
 impl AntiAffinityGroup {
     pub fn new(
         project_id: Uuid,
-        params: params::AntiAffinityGroupCreate,
+        params: affinity::AntiAffinityGroupCreate,
     ) -> Self {
         Self {
             identity: AntiAffinityGroupIdentity::new(
@@ -174,7 +175,7 @@ impl AntiAffinityGroup {
     }
 }
 
-impl From<AntiAffinityGroup> for views::AntiAffinityGroup {
+impl From<AntiAffinityGroup> for affinity::AntiAffinityGroup {
     fn from(group: AntiAffinityGroup) -> Self {
         let identity = IdentityMetadata {
             id: group.identity.id,
@@ -201,8 +202,8 @@ pub struct AntiAffinityGroupUpdate {
     pub time_modified: DateTime<Utc>,
 }
 
-impl From<params::AntiAffinityGroupUpdate> for AntiAffinityGroupUpdate {
-    fn from(params: params::AntiAffinityGroupUpdate) -> Self {
+impl From<affinity::AntiAffinityGroupUpdate> for AntiAffinityGroupUpdate {
+    fn from(params: affinity::AntiAffinityGroupUpdate) -> Self {
         Self {
             name: params.identity.name.map(Name),
             description: params.identity.description,
@@ -226,9 +227,9 @@ impl AffinityGroupInstanceMembership {
     pub fn to_external(
         self,
         member_name: external::Name,
-        run_state: external::InstanceState,
-    ) -> external::AffinityGroupMember {
-        external::AffinityGroupMember::Instance {
+        run_state: instance::InstanceState,
+    ) -> affinity::AffinityGroupMember {
+        affinity::AffinityGroupMember::Instance {
             id: self.instance_id.into(),
             name: member_name,
             run_state,
@@ -254,9 +255,9 @@ impl AntiAffinityGroupInstanceMembership {
     pub fn to_external(
         self,
         member_name: external::Name,
-        run_state: external::InstanceState,
-    ) -> external::AntiAffinityGroupMember {
-        external::AntiAffinityGroupMember::Instance {
+        run_state: instance::InstanceState,
+    ) -> affinity::AntiAffinityGroupMember {
+        affinity::AntiAffinityGroupMember::Instance {
             id: self.instance_id.into(),
             name: member_name,
             run_state,

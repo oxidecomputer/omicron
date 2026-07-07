@@ -235,18 +235,20 @@ mod test {
     use nexus_db_queries::context::OpContext;
     use nexus_db_queries::db::DataStore;
     use nexus_test_utils_macros::nexus_test;
+    use nexus_types::deployment::LastAllocatedSubnetIpOffset;
     use nexus_types::deployment::execution::{
         EventBuffer, EventReport, ExecutionComponent, ExecutionStepId,
         StepOutcome, StepStatus,
     };
     use nexus_types::deployment::{
-        Blueprint, BlueprintHostPhase2DesiredSlots, BlueprintSledConfig,
-        BlueprintSource, BlueprintTarget, BlueprintZoneConfig,
-        BlueprintZoneDisposition, BlueprintZoneImageSource, BlueprintZoneType,
+        Blueprint, BlueprintHostPhase2DesiredSlots, BlueprintMeasurements,
+        BlueprintSledConfig, BlueprintSource, BlueprintTarget,
+        BlueprintZoneConfig, BlueprintZoneDisposition,
+        BlueprintZoneImageSource, BlueprintZoneType,
         CockroachDbPreserveDowngrade, OximeterReadMode, PendingMgsUpdates,
         blueprint_zone_type,
     };
-    use nexus_types::external_api::views::SledState;
+    use nexus_types::external_api::sled::SledState;
     use omicron_common::address::Ipv6Subnet;
     use omicron_common::api::external;
     use omicron_common::api::external::Generation;
@@ -254,6 +256,7 @@ mod test {
     use omicron_uuid_kinds::BlueprintUuid;
     use omicron_uuid_kinds::OmicronZoneUuid;
     use omicron_uuid_kinds::PhysicalDiskUuid;
+    use omicron_uuid_kinds::RackUuid;
     use omicron_uuid_kinds::SledUuid;
     use omicron_uuid_kinds::ZpoolUuid;
     use serde_json::json;
@@ -264,7 +267,6 @@ mod test {
     use std::sync::Arc;
     use tokio::sync::watch;
     use update_engine::{CompletionReason, NestedError, TerminalKind};
-    use uuid::Uuid;
 
     type ControlPlaneTestContext =
         nexus_test_utils::ControlPlaneTestContext<crate::Server>;
@@ -285,6 +287,8 @@ mod test {
                     BlueprintSledConfig {
                         state: SledState::Active,
                         subnet: Ipv6Subnet::new(Ipv6Addr::LOCALHOST),
+                        last_allocated_ip_subnet_offset:
+                            LastAllocatedSubnetIpOffset::initial(),
                         sled_agent_generation: Generation::new().next(),
                         disks: IdOrdMap::new(),
                         datasets: IdOrdMap::new(),
@@ -292,6 +296,7 @@ mod test {
                         remove_mupdate_override: None,
                         host_phase_2:
                             BlueprintHostPhase2DesiredSlots::current_contents(),
+                        measurements: BlueprintMeasurements::InstallDataset,
                     },
                 )
             })
@@ -321,6 +326,7 @@ mod test {
             external_dns_version: dns_version,
             target_release_minimum_generation: Generation::new(),
             nexus_generation: Generation::new(),
+            external_networking_generation: Generation::new(),
             cockroachdb_fingerprint: String::new(),
             clickhouse_cluster_config: None,
             oximeter_read_version: Generation::new(),
@@ -390,7 +396,7 @@ mod test {
 
         let sled_id1 = SledUuid::new_v4();
         let sled_id2 = SledUuid::new_v4();
-        let rack_id = Uuid::new_v4();
+        let rack_id = RackUuid::new_v4();
         for (i, (sled_id, server)) in
             [(sled_id1, &s1), (sled_id2, &s2)].iter().enumerate()
         {
@@ -520,9 +526,7 @@ mod test {
         .await;
 
         // Insert records for the zpools backing the datasets in these zones.
-        for (sled_id, config) in
-            loaded.blueprint.all_omicron_zones(BlueprintZoneDisposition::any)
-        {
+        for (sled_id, config) in loaded.blueprint.in_service_zones() {
             let Some(dataset) = config.zone_type.durable_dataset() else {
                 continue;
             };

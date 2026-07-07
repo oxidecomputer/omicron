@@ -4,28 +4,16 @@
 
 //! Atomic database operations for multicast group members.
 //!
-//! Different operations need different concurrency patterns:
-//!
 //! ## Operations
 //!
 //! - **member_attach**: Atomic CTE for attaching instances to groups
-//!   - Used by instance create saga and reconfiguration
-//!   - Idempotent reactivation from "Left" state
-//!   - Validates group is "Active" before attaching
-//!   - Single CTE atomically validates group + instance + upserts member
+//!   - Validates group is "Creating" or "Active" (rejects "Deleting"/"Deleted" groups)
+//!   - Performs member upsert (insert or reactivate from "Left")
+//!   - TOCTOU-safe: single atomic database operation
 //!
 //! - **member_reconcile**: CAS operations for RPW reconciler
 //!   - Background sled_id updates during migration
 //!   - Transitions to "Left" when instance stops
-//!
-//! ## Design
-//!
-//! **member_attach uses CTE**: Prevents Time-of-Check-to-Time-of-Use (TOCTOU)
-//! races where group or instance state changes between validation and member
-//! creation.
-//!
-//! **member_reconcile uses CAS**: Reconciler already has instance state from
-//! batch fetches, so simpler CAS is sufficient.
 //!
 //! ## Common Utils
 //!

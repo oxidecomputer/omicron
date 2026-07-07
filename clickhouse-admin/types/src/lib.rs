@@ -10,7 +10,9 @@
 
 pub mod config;
 pub mod keeper;
+pub mod retention;
 pub mod server;
+pub mod usage;
 
 // Constants for file paths - not API-published
 pub const CLICKHOUSE_SERVER_CONFIG_DIR: &str =

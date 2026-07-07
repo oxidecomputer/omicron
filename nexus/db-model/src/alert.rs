@@ -3,9 +3,17 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::AlertClass;
+use crate::DbTypedUuid;
+use crate::SqlU32;
 use chrono::{DateTime, Utc};
 use db_macros::Asset;
 use nexus_db_schema::schema::alert;
+use nexus_types::alert::AlertPayload;
+use nexus_types::fm::case;
+use omicron_common::api::external::Error;
+use omicron_uuid_kinds::AlertUuid;
+use omicron_uuid_kinds::CaseKind;
+use omicron_uuid_kinds::CaseUuid;
 use serde::{Deserialize, Serialize};
 
 /// A webhook event.
@@ -40,10 +48,80 @@ pub struct Alert {
     pub payload: serde_json::Value,
 
     pub num_dispatched: i64,
+
+    /// The ID of the fault management case that created this alert, if any.
+    pub case_id: Option<DbTypedUuid<CaseKind>>,
+
+    /// The version of the alert class' schema that this alert's payload
+    /// conforms to.
+    #[diesel(column_name = alert_version)]
+    pub version: SqlU32,
 }
 
 impl Alert {
     /// UUID of the singleton event entry for alert receiver liveness probes.
     pub const PROBE_ALERT_ID: uuid::Uuid =
         uuid::Uuid::from_u128(0x001de000_7768_4000_8000_000000000001);
+
+    /// Returns an `Alert` model representing a newly-created alert with the
+    /// provided ID.
+    ///
+    /// The alert's class and schema version are taken from the [`AlertPayload`]
+    /// trait implementation of the provided `alert` value, and the value itself
+    /// is serialized to form the alert's JSON data payload.
+    pub fn new<A: AlertPayload>(
+        id: impl Into<AlertUuid>,
+        alert: &A,
+    ) -> Result<Self, Error> {
+        let class = A::CLASS;
+        let version = A::VERSION;
+        let payload =
+            serde_json::to_value(alert).map_err(|e| Error::InternalError {
+                internal_message: format!(
+                    "failed to serialize {class} v{version} alert payload \
+                     (Rust type {}): {e}",
+                    std::any::type_name::<A>(),
+                ),
+            })?;
+        Ok(Self {
+            identity: AlertIdentity::new(id.into()),
+            time_dispatched: None,
+            class: class.into(),
+            version: SqlU32::new(version),
+            payload,
+            num_dispatched: 0,
+            case_id: None,
+        })
+    }
+
+    /// Returns an `Alert` model representing the alert requested by a fault
+    /// management alert request.
+    ///
+    /// The alert's class, version, and payload are determined from the provided
+    /// alert request record.
+    pub fn for_fm_alert_request(
+        req: &case::AlertRequest,
+        case_id: CaseUuid,
+    ) -> Self {
+        let &case::AlertRequest {
+            id,
+            class,
+            version,
+            ref payload,
+            // Ignore the sitrep ID and comment fields, as they are not
+            // included in the alert model.
+            requested_sitrep_id: _,
+            comment: _,
+        } = req;
+
+        Self {
+            identity: AlertIdentity::new(id),
+            time_dispatched: None,
+            class: class.into(),
+            version: SqlU32::new(version),
+            payload: payload.clone(),
+            num_dispatched: 0,
+            case_id: Some(case_id.into()),
+        }
+    }
 }

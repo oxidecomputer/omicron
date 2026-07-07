@@ -91,9 +91,9 @@ impl reqwest::dns::Resolve for CustomDnsResolver {
 
 #[derive(Debug, Error)]
 pub enum LoginError {
-    #[error("logging in: {0:#}")]
+    #[error("logging in")]
     RequestError(#[from] reqwest::Error),
-    #[error("logging in: {0:#}")]
+    #[error("logging in")]
     CatchAll(#[from] anyhow::Error),
 }
 

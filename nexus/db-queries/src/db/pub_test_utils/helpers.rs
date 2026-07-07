@@ -32,7 +32,9 @@ use nexus_db_model::Snapshot;
 use nexus_db_model::SnapshotIdentity;
 use nexus_db_model::SnapshotState;
 use nexus_db_model::Vmm;
-use nexus_types::external_api::params;
+use nexus_types::external_api::affinity;
+use nexus_types::external_api::instance as instance_types;
+use nexus_types::external_api::project;
 use nexus_types::identity::Resource;
 use omicron_common::api::external;
 use omicron_common::api::external::{
@@ -42,6 +44,7 @@ use omicron_common::update::ArtifactId;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
 use omicron_uuid_kinds::PropolisUuid;
+use omicron_uuid_kinds::RackUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::TufRepoUuid;
 use omicron_uuid_kinds::VolumeUuid;
@@ -62,7 +65,7 @@ pub async fn create_project(
 
     let project = Project::new(
         authz_silo.id(),
-        params::ProjectCreate {
+        project::ProjectCreate {
             identity: external::IdentityMetadataCreateParams {
                 name: name.parse().unwrap(),
                 description: "desc".to_string(),
@@ -154,7 +157,7 @@ pub struct SledUpdateBuilder {
     sled_id: SledUuid,
     addr: SocketAddrV6,
     repo_depot_port: u16,
-    rack_id: Uuid,
+    rack_id: RackUuid,
     sled_hardware: SledSystemHardwareBuilder,
 }
 
@@ -164,7 +167,7 @@ impl Default for SledUpdateBuilder {
             sled_id: SledUuid::new_v4(),
             addr: SocketAddrV6::new(Ipv6Addr::LOCALHOST, 0, 0, 0),
             repo_depot_port: 0,
-            rack_id: Uuid::new_v4(),
+            rack_id: RackUuid::new_v4(),
             sled_hardware: SledSystemHardwareBuilder::default(),
         }
     }
@@ -190,7 +193,7 @@ impl SledUpdateBuilder {
         self
     }
 
-    pub fn rack_id(&mut self, rack_id: Uuid) -> &mut Self {
+    pub fn rack_id(&mut self, rack_id: RackUuid) -> &mut Self {
         self.rack_id = rack_id;
         self
     }
@@ -231,7 +234,7 @@ pub async fn create_stopped_instance_record(
     let instance = Instance::new(
         InstanceUuid::new_v4(),
         authz_project.id(),
-        &params::InstanceCreate {
+        &instance_types::InstanceCreate {
             identity: external::IdentityMetadataCreateParams {
                 name: name.parse().unwrap(),
                 description: "".to_string(),
@@ -241,7 +244,7 @@ pub async fn create_stopped_instance_record(
             hostname: "myhostname".try_into().unwrap(),
             user_data: Vec::new(),
             network_interfaces:
-                params::InstanceNetworkInterfaceAttachment::DefaultDualStack,
+                instance_types::InstanceNetworkInterfaceAttachment::DefaultDualStack,
             external_ips: Vec::new(),
             disks: Vec::new(),
             boot_disk: None,
@@ -251,6 +254,7 @@ pub async fn create_stopped_instance_record(
             auto_restart_policy: Default::default(),
             anti_affinity_groups: Vec::new(),
             multicast_groups: Vec::new(),
+            enable_jumbo_frames: false,
         },
     );
 
@@ -297,20 +301,20 @@ pub async fn create_affinity_group(
     db: &DataStore,
     authz_project: &authz::Project,
     group_name: &'static str,
-    policy: external::AffinityPolicy,
+    policy: affinity::AffinityPolicy,
 ) -> AffinityGroup {
     db.affinity_group_create(
         &opctx,
         &authz_project,
         nexus_db_model::AffinityGroup::new(
             authz_project.id(),
-            params::AffinityGroupCreate {
+            affinity::AffinityGroupCreate {
                 identity: external::IdentityMetadataCreateParams {
                     name: group_name.parse().unwrap(),
                     description: "desc".to_string(),
                 },
                 policy,
-                failure_domain: external::FailureDomain::Sled,
+                failure_domain: affinity::FailureDomain::Sled,
             },
         ),
     )
@@ -341,20 +345,20 @@ pub async fn create_anti_affinity_group(
     db: &DataStore,
     authz_project: &authz::Project,
     group_name: &'static str,
-    policy: external::AffinityPolicy,
+    policy: affinity::AffinityPolicy,
 ) -> AntiAffinityGroup {
     db.anti_affinity_group_create(
         &opctx,
         &authz_project,
         nexus_db_model::AntiAffinityGroup::new(
             authz_project.id(),
-            params::AntiAffinityGroupCreate {
+            affinity::AntiAffinityGroupCreate {
                 identity: external::IdentityMetadataCreateParams {
                     name: group_name.parse().unwrap(),
                     description: "desc".to_string(),
                 },
                 policy,
-                failure_domain: external::FailureDomain::Sled,
+                failure_domain: affinity::FailureDomain::Sled,
             },
         ),
     )

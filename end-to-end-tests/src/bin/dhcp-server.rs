@@ -1,3 +1,7 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 //! This is a dirt simple DHCP server for handing out addresses in a given
 //! range. Leases do not expire. If the server runs out of addresses, it
 //! panics. This is a stopgap program to hand out addresses to VMs in CI. It's
@@ -14,6 +18,7 @@ use dhcproto::{
 };
 use end_to_end_tests::helpers::cli::oxide_cli_style;
 use macaddr::MacAddr6;
+use slog_error_chain::InlineErrorChain;
 use std::{
     collections::HashMap,
     net::{Ipv4Addr, SocketAddrV4, UdpSocket},
@@ -119,7 +124,7 @@ pub fn main() -> Result<()> {
         let dst =
             SocketAddrV4::new(Ipv4Addr::new(255, 255, 255, 255), src.port());
         if let Err(e) = sock.send_to(&buf, dst) {
-            eprintln!("send reply error: {e}");
+            eprintln!("send reply error: {}", InlineErrorChain::new(&e));
         }
     }
 }

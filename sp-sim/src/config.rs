@@ -207,10 +207,18 @@ impl Config {
 // - should we centralize on something?
 #[derive(Debug, Error)]
 pub enum LoadError {
-    #[error("error reading \"{}\": {}", path.display(), err)]
-    Io { path: PathBuf, err: std::io::Error },
-    #[error("error parsing \"{}\": {}", path.display(), err)]
-    Parse { path: PathBuf, err: toml::de::Error },
+    #[error("error reading \"{}\"", path.display())]
+    Io {
+        path: PathBuf,
+        #[source]
+        err: std::io::Error,
+    },
+    #[error("error parsing \"{}\"", path.display())]
+    Parse {
+        path: PathBuf,
+        #[source]
+        err: toml::de::Error,
+    },
 }
 
 impl From<(PathBuf, std::io::Error)> for LoadError {

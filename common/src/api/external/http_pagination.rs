@@ -281,7 +281,7 @@ pub struct ScanByName {
 #[derive(Copy, Clone, Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum NameSortMode {
-    /// sort in increasing order of "name"
+    /// Sort in increasing order of "name"
     NameAscending,
 }
 
@@ -327,7 +327,7 @@ pub struct ScanById<Selector = ()> {
 #[derive(Copy, Clone, Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum IdSortMode {
-    /// sort in increasing order of "id"
+    /// Sort in increasing order of "id"
     IdAscending,
 }
 
@@ -416,11 +416,11 @@ pub struct ScanByNameOrId<Selector> {
 #[derive(Copy, Clone, Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum NameOrIdSortMode {
-    /// sort in increasing order of "name"
+    /// Sort in increasing order of "name"
     NameAscending,
-    /// sort in decreasing order of "name"
+    /// Sort in decreasing order of "name"
     NameDescending,
-    /// sort in increasing order of "id"
+    /// Sort in increasing order of "id"
     IdAscending,
 }
 
@@ -502,9 +502,9 @@ pub struct ScanByTimeAndId<Selector = ()> {
 #[derive(Copy, Clone, Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TimeAndIdSortMode {
-    /// sort in increasing order of timestamp and ID, i.e., earliest first
+    /// Sort in increasing order of timestamp and ID, i.e., earliest first
     TimeAndIdAscending,
-    /// sort in increasing order of timestamp and ID, i.e., most recent first
+    /// Sort in increasing order of timestamp and ID, i.e., most recent first
     TimeAndIdDescending,
 }
 

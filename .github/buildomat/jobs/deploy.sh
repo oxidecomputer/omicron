@@ -1,8 +1,11 @@
 #!/bin/bash
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
 #:
 #: name = "helios / deploy"
 #: variety = "basic"
-#: target = "lab-2.0-opte-0.37"
+#: target = "lab-3.0-opte-0.41"
 #: output_rules = [
 #:  "%/var/svc/log/oxide-*.log*",
 #:  "%/zone/oxz_*/root/var/svc/log/oxide-*.log*",
@@ -33,6 +36,10 @@ _exit_trap() {
 	local status=$?
 	set +o errexit
 
+	# Restore the override opteadm from /tmp before debug-evidence
+	# collection runs, in case anything earlier in this trap or any
+	# downstream tooling has overwritten the installed binary. The
+	# /tmp copy is saved by the OPTE_COMMIT install block below.
 	if [[ "x$OPTE_COMMIT" != "x" ]]; then
 		pfexec cp /tmp/opteadm /opt/oxide/opte/bin/opteadm
 	fi
@@ -134,19 +141,6 @@ z_swadm () {
 	pfexec zlogin oxz_switch /opt/oxide/dendrite/bin/swadm $@
 }
 
-# only set this if you want to override the version of opte/xde installed by the
-# install_opte.sh script
-OPTE_COMMIT=""
-if [[ "x$OPTE_COMMIT" != "x" ]]; then
-	curl  -sSfOL https://buildomat.eng.oxide.computer/public/file/oxidecomputer/opte/module/$OPTE_COMMIT/xde
-	pfexec rem_drv xde || true
-	pfexec mv xde /kernel/drv/amd64/xde
-	pfexec add_drv xde || true
-	curl  -sSfOL https://buildomat.eng.oxide.computer/public/file/oxidecomputer/opte/release/$OPTE_COMMIT/opteadm
-	chmod +x opteadm
-	cp opteadm /tmp/opteadm
-	pfexec mv opteadm /opt/oxide/opte/bin/opteadm
-fi
 
 #
 # XXX work around 14537 (UFS should not allow directories to be unlinked) which
@@ -197,6 +191,24 @@ ptime -m tar xvzf /input/package/work/package.tar.gz
 # shellcheck source=/dev/null
 source .github/buildomat/ci-env.sh
 
+# Source the OPTE override (if any) from the canonical location and apply it.
+#
+# When set, download the xde driver and opteadm directly from buildomat and
+# swap them in. The deploy target is a ramdisk image without pkg(5), so we
+# use rem_drv/add_drv instead of the p5p approach used by install_opte.sh
+# and releng.
+source tools/opte_version_override
+if [[ "x$OPTE_COMMIT" != "x" ]]; then
+	curl -sSfOL "https://buildomat.eng.oxide.computer/public/file/oxidecomputer/opte/module/$OPTE_COMMIT/xde"
+	pfexec rem_drv xde || true
+	pfexec mv xde /kernel/drv/amd64/xde
+	pfexec add_drv xde || true
+	curl -sSfOL "https://buildomat.eng.oxide.computer/public/file/oxidecomputer/opte/release/$OPTE_COMMIT/opteadm"
+	chmod +x opteadm
+	cp opteadm /tmp/opteadm
+	pfexec mv opteadm /opt/oxide/opte/bin/opteadm
+fi
+
 # Ask buildomat for the range of extra addresses that we're allowed to use, and
 # break them up into the ranges we need.
 
@@ -246,7 +258,15 @@ routeadm -e ipv4-forwarding -u
 PXA_START="$EXTRA_IP_START"
 PXA_END="$EXTRA_IP_END"
 
-pfexec zpool create -f scratch c1t1d0 c2t1d0
+# Enumerate the names of NVMe devices on on which one might place a zpool.
+#
+# N.B. that it is fine to do use "every NVMe device on the box" since this
+# script only runs on buildomat workers which do not have any disks used for
+# storing anything persistently, and which are PXE-booted...so we're not gonna
+# clobber anything that anyone might have cared about on sock and buskin, at
+# least.
+DISKS=( $(pfexec nvmeadm list -p -o disk) )
+pfexec zpool create -f scratch "${DISKS[@]}"
 
 ptime -m \
     pfexec ./target/release/xtask virtual-hardware \
@@ -294,7 +314,7 @@ infra_ip_last = \"$UPLINK_IP\"
 		/^routes/c\\
 routes = \\[{nexthop = \"$GATEWAY_IP\", destination = \"0.0.0.0/0\"}\\]
 		/^addresses/c\\
-addresses = \\[{address = \"$UPLINK_IP/24\"} \\]
+addresses = \\[{address = {type = \"static\", ip_net = \"$UPLINK_IP/24\"} }\\]
 	}
 " pkg/config-rss.toml
 diff -u pkg/config-rss.toml{~,} || true
@@ -359,10 +379,10 @@ OMICRON_NO_UNINSTALL=1 \
 
 # Wait for switch zone to come up
 retry=0
-until curl --head --silent -o /dev/null "http://[fd00:1122:3344:101::2]:12224/"
+until curl --max-time 1 --head --silent --show-error -o /dev/null "http://[fd00:1122:3344:101::2]:12224/"
 do
 	if [[ $retry -gt 30 ]]; then
-		echo "Failed to reach switch zone after 30 seconds"
+		echo "Failed to reach switch zone after 30 attempts"
 		exit 1
 	fi
 	sleep 1

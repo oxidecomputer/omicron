@@ -899,7 +899,7 @@ mod tests {
     use nexus_db_model::IncompleteIpPoolResource;
     use nexus_db_model::Instance;
     use nexus_db_model::InstanceCpuCount;
-    use nexus_db_model::IpPoolReservationType;
+    use nexus_db_model::IpPoolAssignment;
     use nexus_db_model::IpPoolResourceType;
     use nexus_db_model::Name;
     use nexus_db_model::NetworkInterfaceKind;
@@ -907,10 +907,10 @@ mod tests {
     use nexus_types::deployment::OmicronZoneExternalFloatingIp;
     use nexus_types::deployment::OmicronZoneExternalIp;
     use nexus_types::deployment::OmicronZoneExternalSnatIp;
-    use nexus_types::external_api::params::InstanceCreate;
-    use nexus_types::external_api::params::InstanceNetworkInterfaceAttachment;
-    use nexus_types::external_api::shared::IpRange;
-    use nexus_types::inventory::SourceNatConfigGeneric;
+    use nexus_types::external_api::instance;
+    use nexus_types::external_api::instance::InstanceCreate;
+    use nexus_types::external_api::instance::InstanceNetworkInterfaceAttachment;
+    use omicron_common::address::IpRange;
     use omicron_common::address::NUM_SOURCE_NAT_PORTS;
     use omicron_common::api::external::Error;
     use omicron_common::api::external::IdentityMetadataCreateParams;
@@ -919,6 +919,7 @@ mod tests {
     use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::InstanceUuid;
     use omicron_uuid_kinds::OmicronZoneUuid;
+    use sled_agent_types::inventory::SourceNatConfigGeneric;
     use sled_agent_types::inventory::ZoneKind;
     use std::net::IpAddr;
     use std::net::Ipv4Addr;
@@ -952,7 +953,7 @@ mod tests {
                     description: format!("ip pool {}", name),
                 },
                 ip_version.into(),
-                IpPoolReservationType::ExternalSilos,
+                IpPoolAssignment::Silos,
             );
 
             let db_pool = self
@@ -1030,7 +1031,7 @@ mod tests {
                     name: String::from(name).parse().unwrap(),
                     description: format!("instance {}", name)
                 },
-                ncpus: InstanceCpuCount(omicron_common::api::external::InstanceCpuCount(1)).into(),
+                ncpus: InstanceCpuCount(instance::InstanceCpuCount(1)).into(),
                 memory: ByteCount(omicron_common::api::external::ByteCount::from_gibibytes_u32(1)).into(),
                 hostname: "test".parse().unwrap(),
                 ssh_public_keys: None,
@@ -1044,6 +1045,7 @@ mod tests {
                 auto_restart_policy: Default::default(),
                 anti_affinity_groups: Vec::new(),
                 multicast_groups: Vec::new(),
+                enable_jumbo_frames: false,
             });
 
             let conn = self
@@ -1110,9 +1112,12 @@ mod tests {
             let (.., pool) = self
                 .db
                 .datastore()
-                .ip_pools_fetch_default(self.db.opctx())
+                .ip_pools_fetch_default_by_version(
+                    self.db.opctx(),
+                    nexus_db_model::IpVersion::V4,
+                )
                 .await
-                .expect("Failed to lookup default ip pool");
+                .expect("Failed to lookup default IPv4 ip pool");
             pool.identity.id
         }
 
@@ -2409,7 +2414,7 @@ mod tests {
                 name: String::from("inst").parse().unwrap(),
                 description: String::from("test instance"),
             },
-            ncpus: InstanceCpuCount(omicron_common::api::external::InstanceCpuCount(1)).into(),
+            ncpus: InstanceCpuCount(instance::InstanceCpuCount(1)).into(),
             memory: ByteCount(omicron_common::api::external::ByteCount::from_gibibytes_u32(1)).into(),
             hostname: "test".parse().unwrap(),
             ssh_public_keys: None,
@@ -2423,6 +2428,7 @@ mod tests {
             auto_restart_policy: Default::default(),
             anti_affinity_groups: Vec::new(),
             multicast_groups: Vec::new(),
+            enable_jumbo_frames: false,
         });
 
         let conn = context

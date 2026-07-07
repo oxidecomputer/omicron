@@ -14,15 +14,18 @@ mod audit_log;
 mod authn_http;
 mod authz;
 mod basic;
+mod bfd;
 mod certificates;
 mod cockroach;
 mod commands;
 mod console_api;
 mod crucible_replacements;
+mod data_migrations;
 mod demo_saga;
 mod device_auth;
 mod disks;
 mod external_ips;
+mod external_subnets;
 mod images;
 mod initialization;
 mod instances;
@@ -32,6 +35,7 @@ mod ip_pools;
 mod local_storage;
 mod metrics;
 mod metrics_querier;
+#[cfg(feature = "multicast")]
 mod multicast;
 mod oximeter;
 mod pantry;
@@ -52,6 +56,7 @@ mod sleds;
 mod snapshots;
 mod ssh_keys;
 mod subnet_allocation;
+mod subnet_pools;
 mod support_bundles;
 mod switch_port;
 mod target_release;
@@ -67,5 +72,6 @@ mod vpc_subnets;
 mod vpcs;
 mod webhooks;
 
-// This module is used only for shared data, not test cases.
+// These modules are used only for shared data/utilities, not test cases.
+mod endpoint_coverage;
 mod endpoints;

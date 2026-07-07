@@ -42,11 +42,11 @@ use clap::Parser;
 use clap::Subcommand;
 use futures::StreamExt;
 use internal_dns_types::names::ServiceName;
-use omicron_common::address::Ipv6Subnet;
 use std::net::SocketAddr;
 use std::net::SocketAddrV6;
 use tokio::net::TcpSocket;
 
+mod clickhouse_admin;
 mod crucible_agent;
 mod crucible_pantry;
 mod db;
@@ -58,6 +58,8 @@ mod oxql;
 mod reconfigurator;
 mod sled_agent;
 mod support_bundle;
+mod support_bundle_collect;
+mod timesync;
 
 fn main() -> Result<(), anyhow::Error> {
     sigpipe::reset();
@@ -83,8 +85,11 @@ async fn main_impl() -> Result<(), anyhow::Error> {
             reconfig.run_cmd(&args, &log).await
         }
         OmdbCommands::SledAgent(sled) => sled.run_cmd(&args, &log).await,
+        OmdbCommands::SupportBundle(sb) => sb.run_cmd(&args, &log).await,
         OmdbCommands::CrucibleAgent(crucible) => crucible.run_cmd(&args).await,
         OmdbCommands::CruciblePantry(crucible) => crucible.run_cmd(&args).await,
+        OmdbCommands::ClickhouseAdmin(ch) => ch.run_cmd(&args, &log).await,
+        OmdbCommands::Timesync(timesync) => timesync.run_cmd(&args, &log).await,
     }
 }
 
@@ -249,34 +254,25 @@ impl Omdb {
                 })
             }
             None => {
-                // In principle, we should look at /etc/resolv.conf to find the
-                // DNS servers.  In practice, this usually isn't populated
-                // today.  See oxidecomputer/omicron#2122.
-                //
-                // However, the address selected below should work for most
-                // existing Omicron deployments today.  That's because while the
-                // base subnet is in principle configurable in config-rss.toml,
-                // it's very uncommon to change it from the default value used
-                // here.
-                //
-                // Yet another option would be to find a local IP address that
-                // looks like it's probably on the underlay network and use that
-                // to find the subnet to use.  But again, this is unlikely to be
-                // wrong and it's easy to override.
-                let subnet =
-                    Ipv6Subnet::new("fd00:1122:3344:0100::".parse().unwrap());
-                eprintln!("note: using DNS server for subnet {}", subnet.net());
+                // We now populate the internal DNS servers in /etc/resolv.conf
+                // within the switch zone (the primary location for running
+                // omdb). Notify the user that we're going to attempt DNS
+                // resolution via the default system path. This will be wrong if
+                // the rack is not set up yet (although omdb is useless at that
+                // point anyway) or if we're running somewhere where
+                // /etc/resolv.conf does not point to our internal DNS servers
+                // (a non-switch zone without DNS configured, a development
+                // system, etc.).
+                eprintln!(
+                    "note: using DNS from system config \
+                     (typically /etc/resolv.conf)"
+                );
                 eprintln!(
                     "note: (if this is not right, use --dns-server \
                     to specify an alternate DNS server)",
                 );
-                internal_dns_resolver::Resolver::new_from_subnet(log, subnet)
-                    .with_context(|| {
-                        format!(
-                            "creating DNS resolver for subnet {}",
-                            subnet.net()
-                        )
-                    })
+                internal_dns_resolver::Resolver::new_from_system_conf(log)
+                    .context("creating DNS resolver from system config")
             }
         }
     }
@@ -285,6 +281,8 @@ impl Omdb {
 #[derive(Debug, Subcommand)]
 #[allow(clippy::large_enum_variant)]
 enum OmdbCommands {
+    /// Operate on a single-node ClickHouse admin server
+    ClickhouseAdmin(clickhouse_admin::ClickHouseAdminArgs),
     /// Debug a specific crucible-agent
     CrucibleAgent(crucible_agent::CrucibleAgentArgs),
     /// Query a specific crucible-pantry
@@ -303,6 +301,10 @@ enum OmdbCommands {
     Reconfigurator(reconfigurator::ReconfiguratorArgs),
     /// Debug a specific Sled
     SledAgent(sled_agent::SledAgentArgs),
+    /// Collect or inspect a support bundle
+    SupportBundle(support_bundle_collect::SupportBundleArgs),
+    /// Monitor time synchronization
+    Timesync(timesync::TimesyncArgs),
 }
 
 fn parse_dropshot_log_level(

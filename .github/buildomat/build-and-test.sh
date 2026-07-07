@@ -1,8 +1,20 @@
 #!/bin/bash
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 
 set -o errexit
 set -o pipefail
 set -o xtrace
+
+#
+# Set up a custom temporary directory within whatever one we were given so that
+# we can check later whether we left detritus around.
+#
+TEST_TMPDIR='/var/tmp/omicron_tmp'
+echo "tests will store ephemeral output in $TEST_TMPDIR" >&2
+mkdir "$TEST_TMPDIR"
 
 #
 # Set up our PATH for the test suite.
@@ -18,19 +30,12 @@ target_os=$1
 # NOTE: This version should be in sync with the recommended version in
 # .config/nextest.toml. (Maybe build an automated way to pull the recommended
 # version in the future.)
-NEXTEST_VERSION='0.9.110'
+NEXTEST_VERSION='0.9.131'
 
 cargo --version
 rustc --version
 curl -sSfL --retry 10 https://get.nexte.st/"$NEXTEST_VERSION"/"$1" | gunzip | tar -xvf - -C ~/.cargo/bin
 
-#
-# Set up a custom temporary directory within whatever one we were given so that
-# we can check later whether we left detritus around.
-#
-TEST_TMPDIR='/var/tmp/omicron_tmp'
-echo "tests will store ephemeral output in $TEST_TMPDIR" >&2
-mkdir "$TEST_TMPDIR"
 
 OUTPUT_DIR='/work'
 echo "tests will store non-ephemeral output in $OUTPUT_DIR" >&2
@@ -105,25 +110,15 @@ export TMPDIR="$TEST_TMPDIR"
 export RUST_BACKTRACE=1
 # We're building once, so there's no need to incur the overhead of an incremental build.
 export CARGO_INCREMENTAL=0
-# This allows us to build with unstable options, which gives us access to some
-# timing information.
-#
-# If we remove "--timings=json" below, this would no longer be needed.
+# This allows us to use -Zbuild-analysis to collect per-crate build timing
+# data in JSONL format.
 export RUSTC_BOOTSTRAP=1
 
 # Build all the packages and tests, and keep track of how long each took to build.
-# We report build progress to stderr, and the "--timings=json" output goes to stdout.
-#
-# The build graph ends up building several bin/test targets that depend on
-# omicron-nexus at the same time, which uses significant memory to compile on
-# illumos. To mitigate this we build everything except omicron-nexus's bin/test
-# targets first, then finish the build after.
-ptime -m cargo build -Z unstable-options --timings=json \
-    --workspace --exclude=omicron-nexus --tests --locked --verbose \
-    1>> "$OUTPUT_DIR/crate-build-timings.json"
-ptime -m cargo build -Z unstable-options --timings=json \
-    --workspace --tests --locked --verbose \
-    1>> "$OUTPUT_DIR/crate-build-timings.json"
+ptime -m cargo --config 'build.analysis.enabled=true' build -Zbuild-analysis \
+    --workspace --tests --locked --verbose
+cp "$(ls -t "${CARGO_HOME:-$HOME/.cargo}/log/"*.jsonl | head -1)" \
+    "$OUTPUT_DIR/cargo-build-analysis.jsonl"
 
 #
 # We apply our own timeout to ensure that we get a normal failure on timeout
@@ -132,15 +127,58 @@ ptime -m cargo build -Z unstable-options --timings=json \
 # 2 less (negative 2) than the default.  This avoids many test flakes where
 # the test would have worked but the system was too overloaded and tests
 # take longer than their default timeouts.
+
+# Create a user config file that enables test recording.
+RECORDING_CONFIG_DIR="/tmp/nextest-recording-config"
+RECORDING_CONFIG="$RECORDING_CONFIG_DIR/config.toml"
+NEXTEST_STATE_DIR="$(mktemp -d /tmp/nextest-state.XXXXXX)"
+ARCHIVE_PATH="/tmp/nextest-run-archive.zip"
+CHROME_TRACE_PATH="/tmp/nextest-chrome-trace.json"
+
+mkdir -p "$RECORDING_CONFIG_DIR"
+printf '[experimental]\nrecord = true\n\n[record]\nenabled = true\n' \
+    > "$RECORDING_CONFIG"
+
+export NEXTEST_STATE_DIR
+
 banner test
-ptime -m timeout 2h cargo nextest run --profile ci --locked --verbose \
-    --test-threads -2
+
+# Export an archive even on test failure.
+NEXTEST_EXIT=0
+ptime -m timeout 2h cargo nextest run --profile ci --locked \
+    --test-threads -2 \
+    --user-config-file "$RECORDING_CONFIG" \
+    || NEXTEST_EXIT=$?
+
+if ! ptime -m cargo nextest store export latest \
+    --user-config-file "$RECORDING_CONFIG" \
+    --archive-file "$ARCHIVE_PATH"; then
+    echo "warning: failed to export recording archive" >&2
+fi
+
+if ! ptime -m cargo nextest store export-chrome-trace latest \
+    --user-config-file "$RECORDING_CONFIG" \
+    --output "$CHROME_TRACE_PATH"; then
+    echo "warning: failed to export Chrome trace" >&2
+fi
+
+if [[ "$NEXTEST_EXIT" -ne 0 ]]; then
+    echo "error: cargo nextest run failed with exit code $NEXTEST_EXIT" >&2
+    exit "$NEXTEST_EXIT"
+fi
 
 #
 # https://github.com/nextest-rs/nextest/issues/16
 #
 banner doctest
 ptime -m timeout 1h cargo test --doc --locked --verbose --no-fail-fast
+
+# Verify that old migrations have been removed.
+#
+# We do this after the main build, so the dependencies of "cargo xtask schema"
+# have already been built, which makes this cheap(er).
+banner "check schema migration cleanup"
+ptime -m cargo xtask schema old-migrations
 
 # Build the live-tests.  This is only supported on illumos.
 # We also can't actually run them here.  See the README for more details.

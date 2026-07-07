@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 #
 # Small tool to install OPTE and the xde kernel driver and ONU bits.
 
@@ -51,6 +55,12 @@ fi
 # Grab the version of the opte package to install
 OPTE_VERSION="$(cat "$OMICRON_TOP/tools/opte_version")"
 
+# Source the OPTE override (if any). When OPTE_COMMIT is set, the desired
+# OPTE version isn't published to the helios pkg repo yet, so we install
+# directly from the override p5p built by OPTE CI on buildomat (see the
+# branch on $OPTE_COMMIT below).
+source "$OMICRON_TOP/tools/opte_version_override"
+
 OMICRON_FROZEN_PKG_COMMENT="OMICRON-PINNED-PACKAGE"
 
 # Once we install, we mark the package as frozen at that particular version.
@@ -71,22 +81,48 @@ if PKG_FROZEN=$(pkg freeze | grep driver/network/opte); then
     pfexec pkg unfreeze driver/network/opte
 fi
 
-# Actually install the xde kernel module and opteadm tool
-RC=0
-pfexec pkg install -v pkg://helios-dev/driver/network/opte@"$OPTE_VERSION" || RC=$?
-if [[ "$RC" -eq 0 ]]; then
-    echo "xde driver installed successfully"
-elif [[ "$RC" -eq 4 ]]; then
-    echo "Correct xde driver already installed"
+if [[ "x$OPTE_COMMIT" != "x" ]]; then
+    # Install from the override p5p archive built by OPTE CI. The p5p
+    # contains exactly one version (built from $OPTE_COMMIT), which
+    # generally won't match the canonical $OPTE_VERSION, so we let pkg
+    # pick the version from the p5p rather than pinning here.
+    P5P_URL="https://buildomat.eng.oxide.computer/public/file/oxidecomputer/opte/repo/$OPTE_COMMIT/opte.p5p"
+    P5P_PATH="/tmp/opte-override.p5p"
+    echo "Downloading override p5p from $P5P_URL"
+    curl -fL -o "$P5P_PATH" "$P5P_URL"
+
+    RC=0
+    pfexec pkg install -g "$P5P_PATH" pkg://helios-dev/driver/network/opte || RC=$?
+    if [[ "$RC" -eq 0 ]]; then
+        echo "xde driver installed from override p5p"
+    elif [[ "$RC" -eq 4 ]]; then
+        echo "Correct xde driver already installed"
+    else
+        echo "Installing xde driver from override p5p failed"
+        exit "$RC"
+    fi
+    rm -f "$P5P_PATH"
 else
-    echo "Installing xde driver failed"
-    exit "$RC"
+    # Install the published version from the helios pkg repo.
+    RC=0
+    pfexec pkg install -v pkg://helios/driver/network/opte@"$OPTE_VERSION" || RC=$?
+    if [[ "$RC" -eq 0 ]]; then
+        echo "xde driver installed successfully"
+    elif [[ "$RC" -eq 4 ]]; then
+        echo "Correct xde driver already installed"
+    else
+        echo "Installing xde driver failed"
+        exit "$RC"
+    fi
 fi
 
+# Discover the actually-installed version (may differ from $OPTE_VERSION
+# when an override is active) and freeze at that.
+INSTALLED_VERSION=$(pkg info -l driver/network/opte | awk '/^[[:space:]]*Version:/ {print $2}')
 RC=0
-pfexec pkg freeze -c "$OMICRON_FROZEN_PKG_COMMENT" driver/network/opte@"$OPTE_VERSION" || RC=$?
+pfexec pkg freeze -c "$OMICRON_FROZEN_PKG_COMMENT" "driver/network/opte@$INSTALLED_VERSION" || RC=$?
 if [[ "$RC" -ne 0 ]]; then
-    echo "Failed to pin opte package to $OPTE_VERSION"
+    echo "Failed to pin opte package to $INSTALLED_VERSION"
     exit $RC
 fi
 
@@ -96,14 +132,4 @@ which opteadm > /dev/null || RC=$?
 if [[ "$RC" -ne 0 ]]; then
     echo "The \`opteadm\` administration tool is not on your path."
     echo "You may add \"/opt/oxide/opte/bin\" to your path to access it."
-fi
-
-source $OMICRON_TOP/tools/opte_version_override
-
-if [[ "x$OPTE_COMMIT" != "x" ]]; then
-    set +x
-    curl -fOL https://buildomat.eng.oxide.computer/public/file/oxidecomputer/opte/module/$OPTE_COMMIT/xde
-    pfexec rem_drv xde || true
-    pfexec mv xde /kernel/drv/amd64/xde
-    pfexec add_drv xde || true
 fi

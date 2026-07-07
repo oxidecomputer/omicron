@@ -3,11 +3,15 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use super::Generation;
+use crate::DbTypedUuid;
 use crate::SqlU32;
 use chrono::{DateTime, Utc};
 use db_macros::Asset;
 use nexus_db_schema::schema::switch;
-use nexus_types::{external_api::shared, external_api::views, identity::Asset};
+use nexus_types::external_api::hardware as hardware_types;
+use nexus_types::external_api::switch as switch_types;
+use nexus_types::identity::Asset;
+use omicron_uuid_kinds::{GenericUuid, RackKind, RackUuid};
 use uuid::Uuid;
 
 /// Baseboard information about a switch.
@@ -29,7 +33,7 @@ pub struct Switch {
     time_deleted: Option<DateTime<Utc>>,
     rcgen: Generation,
 
-    pub rack_id: Uuid,
+    pub rack_id: DbTypedUuid<RackKind>,
 
     serial_number: String,
     part_number: String,
@@ -43,26 +47,30 @@ impl Switch {
         serial_number: String,
         part_number: String,
         revision: u32,
-        rack_id: Uuid,
+        rack_id: RackUuid,
     ) -> Self {
         Self {
             identity: SwitchIdentity::new(id),
             time_deleted: None,
             rcgen: Generation::new(),
-            rack_id,
+            rack_id: rack_id.into(),
             serial_number,
             part_number,
             revision: SqlU32(revision),
         }
     }
+
+    pub fn rack_id(&self) -> RackUuid {
+        self.rack_id.into()
+    }
 }
 
-impl From<Switch> for views::Switch {
+impl From<Switch> for switch_types::Switch {
     fn from(switch: Switch) -> Self {
         Self {
             identity: switch.identity(),
-            rack_id: switch.rack_id,
-            baseboard: shared::Baseboard {
+            rack_id: switch.rack_id.into_untyped_uuid(),
+            baseboard: hardware_types::Baseboard {
                 serial: switch.serial_number,
                 part: switch.part_number,
                 revision: *switch.revision,

@@ -77,18 +77,23 @@ use std::collections::HashMap;
 use crate::app::instance::InstanceRegisterReason;
 use crate::cidata::InstanceCiData;
 
+use super::LOCAL_STORAGE_WORKERS;
 use crate::db::datastore::Disk;
 use nexus_db_queries::db;
 use omicron_common::api::external::Error;
-use omicron_common::api::internal::shared::NetworkInterface;
+use sled_agent_client::types::VirtioSocket;
 use sled_agent_client::types::{
     BlobStorageBackend, Board, BootOrderEntry, BootSettings, Chipset,
-    ComponentV0, Cpuid, CpuidVendor, CrucibleStorageBackend,
-    FileStorageBackend, I440Fx, InstanceSpecV0, NvmeDisk, PciPath, QemuPvpanic,
-    SerialPort, SerialPortNumber, SpecKey, VirtioDisk, VirtioNetworkBackend,
-    VirtioNic, VmmSpec,
+    Component, Cpuid, CpuidVendor, CrucibleStorageBackend, FileStorageBackend,
+    I440Fx, InstanceSpec, NvmeDisk, PciPath, QemuPvpanic, SerialPort,
+    SerialPortNumber, SpecKey, VirtioDisk, VirtioNetworkBackend, VirtioNic,
+    VmmSpec,
 };
+use sled_agent_types::inventory::NetworkInterface;
 use uuid::Uuid;
+
+/// Default `guest_cid` for a propolis guest.
+const VSOCK_GUEST_CID: u64 = 16;
 
 /// Constants and functions used to assign names to assorted VM components.
 mod component_names {
@@ -100,6 +105,7 @@ mod component_names {
     pub(super) const BOOT_SETTINGS: &'static str = "boot-settings";
     pub(super) const CLOUD_INIT_DEVICE: &'static str = "cloud-init-dev";
     pub(super) const CLOUD_INIT_BACKEND: &'static str = "cloud-init-backend";
+    pub(super) const VSOCK: &'static str = "vsock";
 
     /// Given an object ID, derives a name for the "device" half of the
     /// device/backend component pair that describes that object.
@@ -112,6 +118,7 @@ enum PciDeviceKind {
     Disk,
     Nic,
     CloudInitDisk,
+    Vsock,
 }
 
 impl std::fmt::Display for PciDeviceKind {
@@ -123,6 +130,7 @@ impl std::fmt::Display for PciDeviceKind {
                 Self::Disk => "disk",
                 Self::Nic => "network interface",
                 Self::CloudInitDisk => "cloud-init data disk",
+                Self::Vsock => "vsock",
             }
         )
     }
@@ -141,11 +149,12 @@ fn slot_to_pci_bdf(
 ) -> Result<PciPath, Error> {
     // Use the mappings Propolis used when it was responsible for converting
     // slot numbers to device numbers: NICs get device numbers 8 through 15,
-    // disks get 16 through 23, and the cloud-init disk is device 24:
+    // disks get 16 through 23, cloud-init disk is device 24, and the vsock
+    // device is 25:
     //
     // 0               1
     // 0123456789ABCDEF0123456789ABCDEF
-    //         NNNNNNNNDDDDDDDDC DDDD
+    //         NNNNNNNNDDDDDDDDCVDDDD
     //                           ^^^^
     //
     // The additional disks at the end (marked with ^) were added to support up
@@ -159,6 +168,9 @@ fn slot_to_pci_bdf(
         PciDeviceKind::Disk if (8..12).contains(&logical_slot) => {
             (logical_slot - 8) + 0x1A
         }
+        // NB: This will eventually become our first multi function device, but
+        // for now it will be the only device at this device num
+        PciDeviceKind::Vsock if logical_slot == 0 => 0x19,
         _ => {
             return Err(Error::invalid_value(
                 format!("{kind} with slot {logical_slot}"),
@@ -193,8 +205,8 @@ pub fn zero_padded_nvme_serial_from_str(s: &str) -> [u8; 20] {
 /// instance specification.
 pub struct DiskComponents {
     device_name: String,
-    device: ComponentV0,
-    backend: ComponentV0,
+    device: Component,
+    backend: Component,
 }
 
 /// Stores a mapping from Nexus disk IDs to disk component descriptors. This
@@ -216,7 +228,7 @@ impl DisksByIdBuilder {
     fn add_generic_disk(
         &mut self,
         disk: &Disk,
-        backend: ComponentV0,
+        backend: Component,
     ) -> Result<(), Error> {
         let slot = disk.slot().ok_or(Error::internal_error(&format!(
             "disk {} is attached but has no PCI slot assignment",
@@ -234,7 +246,7 @@ impl DisksByIdBuilder {
 
         let pci_path = slot_to_pci_bdf(slot, PciDeviceKind::Disk)?;
 
-        let device = ComponentV0::NvmeDisk(NvmeDisk {
+        let device = Component::NvmeDisk(NvmeDisk {
             backend_id: SpecKey::Uuid(disk.id()),
             pci_path,
             serial_number: zero_padded_nvme_serial_from_str(
@@ -262,8 +274,8 @@ impl DisksByIdBuilder {
         volume: &db::model::Volume,
     ) -> Result<(), Error> {
         let backend =
-            ComponentV0::CrucibleStorageBackend(CrucibleStorageBackend {
-                readonly: false,
+            Component::CrucibleStorageBackend(CrucibleStorageBackend {
+                readonly: disk.is_read_only(),
                 request_json: volume.data().to_owned(),
             });
 
@@ -275,11 +287,13 @@ impl DisksByIdBuilder {
         disk: &Disk,
         path: String,
     ) -> Result<(), Error> {
-        let backend = ComponentV0::FileStorageBackend(FileStorageBackend {
+        let backend = Component::FileStorageBackend(FileStorageBackend {
             path,
-            readonly: false,
+            // Presently, this will always be false for local storage disks, but
+            // we may as well ask the disk rather than hard-coding it...
+            readonly: disk.is_read_only(),
             block_size: disk.block_size().to_bytes(),
-            workers: None,
+            workers: Some(LOCAL_STORAGE_WORKERS),
         });
 
         self.add_generic_disk(disk, backend)
@@ -296,7 +310,7 @@ impl From<DisksByIdBuilder> for DisksById {
 //
 // This is a HashMap so that it can be moved directly into a sled-agent instance
 // spec (Progenitor generates HashMaps when it needs a map type).
-struct Components(HashMap<String, ComponentV0>);
+struct Components(HashMap<String, Component>);
 
 impl Default for Components {
     /// Adds the default set of VM components that are expected to exist for all
@@ -306,31 +320,39 @@ impl Default for Components {
         let map = [
             (
                 component_names::COM1,
-                ComponentV0::SerialPort(SerialPort {
+                Component::SerialPort(SerialPort {
                     num: SerialPortNumber::Com1,
                 }),
             ),
             (
                 component_names::COM2,
-                ComponentV0::SerialPort(SerialPort {
+                Component::SerialPort(SerialPort {
                     num: SerialPortNumber::Com2,
                 }),
             ),
             (
                 component_names::COM3,
-                ComponentV0::SerialPort(SerialPort {
+                Component::SerialPort(SerialPort {
                     num: SerialPortNumber::Com3,
                 }),
             ),
             (
                 component_names::COM4,
-                ComponentV0::SerialPort(SerialPort {
+                Component::SerialPort(SerialPort {
                     num: SerialPortNumber::Com4,
                 }),
             ),
             (
                 component_names::PVPANIC,
-                ComponentV0::QemuPvpanic(QemuPvpanic { enable_isa: true }),
+                Component::QemuPvpanic(QemuPvpanic { enable_isa: true }),
+            ),
+            (
+                component_names::VSOCK,
+                Component::VirtioSocket(VirtioSocket {
+                    guest_cid: VSOCK_GUEST_CID,
+                    pci_path: slot_to_pci_bdf(0, PciDeviceKind::Vsock)
+                        .expect("vsock bdf (0, 25, 0)"),
+                }),
             ),
         ]
         .into_iter()
@@ -344,11 +366,7 @@ impl Default for Components {
 impl Components {
     /// Adds a named component to this component list. Returns a 500 error if
     /// the component name was already present in the list.
-    fn add(
-        &mut self,
-        key: String,
-        component: ComponentV0,
-    ) -> Result<(), Error> {
+    fn add(&mut self, key: String, component: Component) -> Result<(), Error> {
         use std::collections::hash_map::Entry;
 
         // Component names are an implementation detail internal to this module,
@@ -392,7 +410,7 @@ impl Components {
         self.0.reserve(nics.len() * 2);
         for nic in nics.iter() {
             let device_name = component_names::device_name_from_id(&nic.id);
-            let device = ComponentV0::VirtioNic(VirtioNic {
+            let device = Component::VirtioNic(VirtioNic {
                 backend_id: SpecKey::Uuid(nic.id),
                 interface_id: nic.id,
                 pci_path: slot_to_pci_bdf(nic.slot, PciDeviceKind::Nic)?,
@@ -402,7 +420,7 @@ impl Components {
             // per-sled port allocator, so it needs to (and will) fill in the
             // correct port name once one is assigned.
             let backend =
-                ComponentV0::VirtioNetworkBackend(VirtioNetworkBackend {
+                Component::VirtioNetworkBackend(VirtioNetworkBackend {
                     vnic_name: "".to_string(),
                 });
 
@@ -430,7 +448,7 @@ impl Components {
             instance.generate_cidata(&keys)?,
         );
 
-        let device = ComponentV0::VirtioDisk(VirtioDisk {
+        let device = Component::VirtioDisk(VirtioDisk {
             backend_id: SpecKey::Name(
                 component_names::CLOUD_INIT_BACKEND.to_string(),
             ),
@@ -438,7 +456,7 @@ impl Components {
                 .expect("slot 0 is always valid for cloud-init disks"),
         });
 
-        let backend = ComponentV0::BlobStorageBackend(BlobStorageBackend {
+        let backend = Component::BlobStorageBackend(BlobStorageBackend {
             base64,
             readonly: true,
         });
@@ -462,7 +480,10 @@ impl super::Nexus {
         nics: &[NetworkInterface],
         ssh_keys: &[db::model::SshKey],
     ) -> Result<VmmSpec, Error> {
-        let cpus = u8::try_from(instance.ncpus.0.0).map_err(|c| {
+        let cpus = instance.ncpus.0.0;
+        // TODO: we should be able to pass the u16 directly to Propolis, but
+        // we'll need to adjust propolis-server's Board for the wider cpu count.
+        let cpus_u8 = u8::try_from(cpus).map_err(|c| {
             Error::invalid_value(
                 c.to_string(),
                 "failed to convert instance CPU count to a u8",
@@ -530,7 +551,7 @@ impl super::Nexus {
 
                 components.add(
                     component_names::BOOT_SETTINGS.to_owned(),
-                    ComponentV0::BootSettings(BootSettings {
+                    Component::BootSettings(BootSettings {
                         order: vec![entry],
                     }),
                 )?;
@@ -545,15 +566,25 @@ impl super::Nexus {
         components.add_nics(nics)?;
         components.add_cloud_init(instance, ssh_keys)?;
 
-        let spec = InstanceSpecV0 {
+        let cpuid = cpuid_from_vmm_cpu_platform(vmm.cpu_platform, cpus)
+            .map_err(|e| {
+                let message = format!(
+                    "failed to instantiate CPU platform {}",
+                    vmm.cpu_platform
+                );
+                Error::invalid_value(e.to_string(), message)
+            })?;
+
+        let spec = InstanceSpec {
             board: Board {
                 chipset: Chipset::I440Fx(I440Fx { enable_pcie: false }),
-                cpuid: cpuid_from_vmm_cpu_platform(vmm.cpu_platform),
-                cpus,
+                cpuid,
+                cpus: cpus_u8,
                 guest_hv_interface: None,
                 memory_mb: instance.memory.to_whole_mebibytes(),
             },
             components: components.0,
+            smbios: None,
         };
 
         Ok(VmmSpec(spec))
@@ -568,9 +599,10 @@ impl super::Nexus {
 // type.
 fn cpuid_from_vmm_cpu_platform(
     platform: db::model::VmmCpuPlatform,
-) -> Option<Cpuid> {
+    ncpu: u16,
+) -> Result<Option<Cpuid>, cpu_platform::CpuPlatformError> {
     let cpuid = match platform {
-        db::model::VmmCpuPlatform::SledDefault => return None,
+        db::model::VmmCpuPlatform::SledDefault => return Ok(None),
         db::model::VmmCpuPlatform::AmdMilan => Cpuid {
             entries: cpu_platform::dump_to_cpuid_entries(
                 cpu_platform::milan_rfd314(),
@@ -583,7 +615,13 @@ fn cpuid_from_vmm_cpu_platform(
             ),
             vendor: CpuidVendor::Amd,
         },
+        db::model::VmmCpuPlatform::AmdTurinV2 => Cpuid {
+            entries: cpu_platform::dump_to_cpuid_entries(
+                cpu_platform::turin_v2(ncpu)?,
+            ),
+            vendor: CpuidVendor::Amd,
+        },
     };
 
-    Some(cpuid)
+    Ok(Some(cpuid))
 }

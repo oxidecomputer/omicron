@@ -4,7 +4,6 @@
 
 //! Built-ins and roles
 
-use crate::external_api::shared;
 use anyhow::Context;
 use nexus_db_lookup::LookupPath;
 use nexus_db_lookup::lookup;
@@ -14,7 +13,8 @@ use nexus_db_queries::db;
 use nexus_db_queries::db::datastore::SiloGroup;
 use nexus_db_queries::db::datastore::SiloUser;
 use nexus_db_queries::db::model::Name;
-use nexus_types::external_api::params;
+use nexus_types::external_api::policy;
+use nexus_types::external_api::user;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::InternalContext;
@@ -34,7 +34,7 @@ impl super::Nexus {
     pub(crate) async fn fleet_fetch_policy(
         &self,
         opctx: &OpContext,
-    ) -> LookupResult<shared::Policy<shared::FleetRole>> {
+    ) -> LookupResult<policy::Policy<policy::FleetRole>> {
         let role_assignments = self
             .db_datastore
             .role_assignment_fetch_visible(opctx, &authz::FLEET)
@@ -43,14 +43,14 @@ impl super::Nexus {
             .map(|r| r.try_into().context("parsing database role assignment"))
             .collect::<Result<Vec<_>, _>>()
             .map_err(|error| Error::internal_error(&format!("{:#}", error)))?;
-        Ok(shared::Policy { role_assignments })
+        Ok(policy::Policy { role_assignments })
     }
 
     pub(crate) async fn fleet_update_policy(
         &self,
         opctx: &OpContext,
-        policy: &shared::Policy<shared::FleetRole>,
-    ) -> UpdateResult<shared::Policy<shared::FleetRole>> {
+        policy: &policy::Policy<policy::FleetRole>,
+    ) -> UpdateResult<policy::Policy<policy::FleetRole>> {
         let role_assignments = self
             .db_datastore
             .role_assignment_replace_visible(
@@ -62,7 +62,7 @@ impl super::Nexus {
             .into_iter()
             .map(|r| r.try_into())
             .collect::<Result<Vec<_>, _>>()?;
-        Ok(shared::Policy { role_assignments })
+        Ok(policy::Policy { role_assignments })
     }
 
     // Silo users
@@ -166,15 +166,13 @@ impl super::Nexus {
     pub fn user_builtin_lookup<'a>(
         &'a self,
         opctx: &'a OpContext,
-        user_selector: &'a params::UserBuiltinSelector,
+        user_selector: &'a user::UserBuiltinSelector,
     ) -> LookupResult<lookup::UserBuiltin<'a>> {
         let lookup_path = LookupPath::new(opctx, &self.db_datastore);
         let user = match user_selector {
-            params::UserBuiltinSelector { user: NameOrId::Id(id) } => {
-                lookup_path
-                    .user_builtin_id(BuiltInUserUuid::from_untyped_uuid(*id))
-            }
-            params::UserBuiltinSelector { user: NameOrId::Name(name) } => {
+            user::UserBuiltinSelector { user: NameOrId::Id(id) } => lookup_path
+                .user_builtin_id(BuiltInUserUuid::from_untyped_uuid(*id)),
+            user::UserBuiltinSelector { user: NameOrId::Name(name) } => {
                 lookup_path.user_builtin_name(Name::ref_cast(name))
             }
         };

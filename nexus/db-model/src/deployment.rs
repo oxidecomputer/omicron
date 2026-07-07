@@ -25,10 +25,12 @@ use nexus_db_schema::schema::{
     bp_omicron_physical_disk, bp_omicron_zone, bp_omicron_zone_nic,
     bp_oximeter_read_policy, bp_pending_mgs_update_host_phase_1,
     bp_pending_mgs_update_rot, bp_pending_mgs_update_rot_bootloader,
-    bp_pending_mgs_update_sp, bp_sled_metadata, bp_target,
-    debug_log_blueprint_planning,
+    bp_pending_mgs_update_sp, bp_single_measurements, bp_sled_metadata,
+    bp_target, debug_log_blueprint_planning,
 };
+use nexus_types::deployment::BlueprintMeasurements;
 use nexus_types::deployment::BlueprintPhysicalDiskDisposition;
+use nexus_types::deployment::BlueprintSingleMeasurement;
 use nexus_types::deployment::BlueprintTarget;
 use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::BlueprintZoneDisposition;
@@ -59,7 +61,6 @@ use nexus_types::deployment::{
 };
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::SLED_PREFIX;
-use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_common::disk::DiskIdentity;
 use omicron_common::zpool_name::ZpoolName;
 use omicron_uuid_kinds::{
@@ -67,7 +68,9 @@ use omicron_uuid_kinds::{
     GenericUuid, MupdateOverrideKind, OmicronZoneKind, OmicronZoneUuid,
     PhysicalDiskKind, SledKind, SledUuid, ZpoolKind, ZpoolUuid,
 };
+use sled_agent_types::inventory::NetworkInterface;
 use sled_agent_types::inventory::OmicronZoneDataset;
+use sled_agent_types::inventory::SourceNatConfigGeneric;
 use sled_hardware_types::BaseboardId;
 use std::net::{IpAddr, SocketAddrV6};
 use std::sync::Arc;
@@ -89,6 +92,7 @@ pub struct Blueprint {
     pub target_release_minimum_generation: Generation,
     pub nexus_generation: Generation,
     pub source: DbBpSource,
+    pub external_networking_generation: Generation,
 }
 
 impl From<&'_ nexus_types::deployment::Blueprint> for Blueprint {
@@ -110,6 +114,9 @@ impl From<&'_ nexus_types::deployment::Blueprint> for Blueprint {
             ),
             nexus_generation: Generation(bp.nexus_generation),
             source: DbBpSource::from(&bp.source),
+            external_networking_generation: Generation(
+                bp.external_networking_generation,
+            ),
         }
     }
 }
@@ -134,6 +141,8 @@ impl From<Blueprint> for nexus_types::deployment::BlueprintMetadata {
             creator: value.creator,
             comment: value.comment,
             source: value.source.into(),
+            external_networking_generation: *value
+                .external_networking_generation,
         }
     }
 }
@@ -209,6 +218,28 @@ impl From<BpTarget> for nexus_types::deployment::BlueprintTarget {
     }
 }
 
+impl_enum_type!(
+    BpSledMeasurementsEnum:
+
+    #[derive(Clone, Copy, Debug, AsExpression, FromSqlRow, PartialEq)]
+    pub enum DbBpSledMeasurements;
+
+    // Enum values
+    Unknown => b"unknown"
+    InstallDataset => b"install_dataset"
+    Artifacts => b"artifacts"
+);
+
+impl From<&BlueprintMeasurements> for DbBpSledMeasurements {
+    fn from(value: &BlueprintMeasurements) -> Self {
+        match value {
+            BlueprintMeasurements::InstallDataset => Self::InstallDataset,
+            BlueprintMeasurements::Unknown => Self::Unknown,
+            BlueprintMeasurements::Artifacts { .. } => Self::Artifacts,
+        }
+    }
+}
+
 /// See [`nexus_types::deployment::BlueprintSledConfig::state`].
 #[derive(Queryable, Clone, Debug, Selectable, Insertable)]
 #[diesel(table_name = bp_sled_metadata)]
@@ -223,6 +254,8 @@ pub struct BpSledMetadata {
     /// Public only for easy of writing queries; consumers should prefer the
     /// `subnet()` method.
     pub subnet: IpNetwork,
+    pub last_allocated_ip_subnet_offset: SqlU16,
+    pub measurements: DbBpSledMeasurements,
 }
 
 impl BpSledMetadata {
@@ -897,7 +930,7 @@ impl BpOmicronZone {
                     self.snat_last_port,
                 ) {
                     (Some(ip), Some(first_port), Some(last_port)) => {
-                        nexus_types::inventory::SourceNatConfigGeneric::new(
+                        SourceNatConfigGeneric::new(
                             ip.ip(),
                             *first_port,
                             *last_port,
@@ -1214,6 +1247,44 @@ impl TryFrom<DbBpZoneImageSourceColumns> for BlueprintZoneImageSource {
             (DbBpZoneImageSource::InstallDataset, None) => {
                 Ok(Self::InstallDataset)
             }
+        }
+    }
+}
+
+#[derive(Queryable, Clone, Debug, Selectable, Insertable)]
+#[diesel(table_name = bp_single_measurements)]
+pub struct BpSingleMeasurement {
+    pub blueprint_id: DbTypedUuid<BlueprintKind>,
+    pub sled_id: DbTypedUuid<SledKind>,
+
+    pub image_artifact_sha256: ArtifactHash,
+}
+
+impl BpSingleMeasurement {
+    pub fn new(
+        blueprint_id: BlueprintUuid,
+        sled_id: SledUuid,
+        measurement: &BlueprintSingleMeasurement,
+    ) -> Self {
+        Self {
+            blueprint_id: blueprint_id.into(),
+            sled_id: sled_id.into(),
+            image_artifact_sha256: measurement.hash.into(),
+        }
+    }
+
+    pub fn to_measurement(
+        self,
+        artifact: Option<TufArtifact>,
+    ) -> BlueprintSingleMeasurement {
+        BlueprintSingleMeasurement {
+            version: match artifact {
+                Some(a) => {
+                    BlueprintArtifactVersion::Available { version: a.version.0 }
+                }
+                None => BlueprintArtifactVersion::Unknown,
+            },
+            hash: *self.image_artifact_sha256,
         }
     }
 }
@@ -1610,14 +1681,8 @@ impl DebugLogBlueprintPlanning {
         // `debug_blob`, because we don't want anyone to attempt to parse it. It
         // should only be useful to humans, potentially via omdb, and they (and
         // omdb) can duplicate these fields to understand it.
-        let git_commit = if env!("VERGEN_GIT_DIRTY") == "true" {
-            concat!(env!("VERGEN_GIT_SHA"), "-dirty")
-        } else {
-            env!("VERGEN_GIT_SHA")
-        };
-
         let debug_blob = serde_json::json!({
-            "git-commit": git_commit,
+            "git-commit": omicron_git_version::GitVersion::current(),
             "report": report,
         });
 

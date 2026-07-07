@@ -11,6 +11,7 @@ use std::{
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use slog_error_chain::InlineErrorChain;
 use thiserror::Error;
 use tokio::io::AsyncReadExt;
 
@@ -62,24 +63,46 @@ pub enum SledDiagnosticsQueryOutput {
 
 #[derive(Error, Debug)]
 pub enum SledDiagnosticsCmdError {
-    #[error("libcontract error: {0}")]
+    #[error("libcontract error")]
     Contract(#[from] ContractError),
-    #[error("Failed to duplicate pipe for command [{command}]: {error}")]
-    Dup { command: String, error: std::io::Error },
-    #[error("Failed to proccess output for command [{command}]: {error}")]
-    Output { command: String, error: std::io::Error },
-    #[error(
-        "Failed to convert pipe for command [{command}] to owned fd: {error}"
-    )]
-    OwnedFd { command: String, error: std::io::Error },
-    #[error("Failed to create pipe for command [{command}]: {error}")]
-    Pipe { command: String, error: std::io::Error },
-    #[error("Failed to spawn command [{command}]: {error}")]
-    Spawn { command: String, error: std::io::Error },
+    #[error("Failed to duplicate pipe for command [{command}]")]
+    Dup {
+        command: String,
+        #[source]
+        error: std::io::Error,
+    },
+    #[error("Failed to proccess output for command [{command}]")]
+    Output {
+        command: String,
+        #[source]
+        error: std::io::Error,
+    },
+    #[error("Failed to convert pipe for command [{command}] to owned fd")]
+    OwnedFd {
+        command: String,
+        #[source]
+        error: std::io::Error,
+    },
+    #[error("Failed to create pipe for command [{command}]")]
+    Pipe {
+        command: String,
+        #[source]
+        error: std::io::Error,
+    },
+    #[error("Failed to spawn command [{command}]")]
+    Spawn {
+        command: String,
+        #[source]
+        error: std::io::Error,
+    },
     #[error("Failed to execute command [{command}] in {duration:?}")]
     Timeout { command: String, duration: Duration },
-    #[error("Failed to wait on command [{command}]: {error}")]
-    Wait { command: String, error: std::io::Error },
+    #[error("Failed to wait on command [{command}]")]
+    Wait {
+        command: String,
+        #[source]
+        error: std::io::Error,
+    },
 }
 
 #[derive(Debug)]
@@ -100,9 +123,9 @@ impl SledDiagnosticsCommandHttpOutput
                 exit_status: output.exit_status.to_string(),
                 exit_code: output.exit_status.code(),
             },
-            Err(error) => {
-                SledDiagnosticsQueryOutput::Failure { error: error.to_string() }
-            }
+            Err(error) => SledDiagnosticsQueryOutput::Failure {
+                error: InlineErrorChain::new(&error).to_string(),
+            },
         }
     }
 }

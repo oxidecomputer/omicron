@@ -10,7 +10,7 @@ use internal_dns_resolver::Resolver;
 use nexus_db_queries::{context::OpContext, db::DataStore};
 use nexus_types::{
     deployment::{
-        Blueprint, BlueprintZoneDisposition, PendingMgsUpdates,
+        Blueprint, PendingMgsUpdates,
         execution::{EventBuffer, Overridables},
     },
     quiesce::SagaQuiesceHandle,
@@ -44,7 +44,7 @@ pub(crate) async fn realize_blueprint_and_expect(
     // Act on behalf of one of the Nexus instances that could be currently
     // active in the blueprint.
     let nexus_id = blueprint
-        .all_nexus_zones(BlueprintZoneDisposition::is_in_service)
+        .in_service_nexus_zones()
         .find_map(|(_sled_id, zone_config, nexus_config)| {
             (nexus_config.nexus_generation == blueprint.nexus_generation)
                 .then_some(zone_config.id)
@@ -99,29 +99,31 @@ pub fn overridables_for_test(
         omicron_nexus::Server,
     >,
 ) -> Overridables {
-    use omicron_common::api::external::SwitchLocation;
+    use sled_agent_types::early_networking::SwitchSlot;
 
     let mut overrides = Overridables::default();
     let scrimlets = [
-        (nexus_test_utils::SLED_AGENT_UUID, SwitchLocation::Switch0),
-        (nexus_test_utils::SLED_AGENT2_UUID, SwitchLocation::Switch1),
+        (nexus_test_utils::SLED_AGENT_UUID, SwitchSlot::Switch0),
+        (nexus_test_utils::SLED_AGENT2_UUID, SwitchSlot::Switch1),
     ];
-    for (id_str, switch_location) in scrimlets {
+    for (id_str, switch_slot) in scrimlets {
         let sled_id = id_str.parse().unwrap();
         let ip = Ipv6Addr::LOCALHOST;
-        let mgs_port = cptestctx.gateway.get(&switch_location).unwrap().port;
+        let mgs_port = cptestctx.gateway.get(&switch_slot).unwrap().port;
         let dendrite_port = cptestctx
             .dendrite
             .read()
             .unwrap()
-            .get(&switch_location)
+            .get(&switch_slot)
             .unwrap()
-            .port;
-        let mgd_port = cptestctx.mgd.get(&switch_location).unwrap().port;
+            .port();
+        let mgd_port = cptestctx.mgd.get(&switch_slot).unwrap().port;
+        let ddm_port = cptestctx.ddm.get(&switch_slot).unwrap().port;
         overrides.override_switch_zone_ip(sled_id, ip);
         overrides.override_dendrite_port(sled_id, dendrite_port);
         overrides.override_mgs_port(sled_id, mgs_port);
         overrides.override_mgd_port(sled_id, mgd_port);
+        overrides.override_ddm_port(sled_id, ddm_port);
     }
     overrides
 }

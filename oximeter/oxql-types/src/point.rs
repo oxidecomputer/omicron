@@ -4,8 +4,6 @@
 
 //! Definition of data points for OxQL.
 
-// Copyright 2024 Oxide Computer Company
-
 use anyhow::Context;
 use anyhow::Error;
 use chrono::DateTime;
@@ -223,32 +221,51 @@ pub struct Point<'a> {
     pub values: Vec<(Datum<'a>, MetricType)>,
 }
 
-impl fmt::Display for Point<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        const TIMESTAMP_FMT: &str = "%Y-%m-%d %H:%M:%S.%f";
-        match &self.start_time {
-            Some(start_time) => write!(
-                f,
+impl Point<'_> {
+    // Timestamp format used for printing.
+    const TIMESTAMP_FMT: &'static str = "%Y-%m-%d %H:%M:%S.%f";
+
+    /// Return the dimensionality of this point.
+    pub fn dimensionality(&self) -> usize {
+        self.values.len()
+    }
+
+    /// Format this point as a prettified string.
+    pub fn to_string_pretty(&self) -> String {
+        let timestamp = match &self.start_time {
+            Some(start_time) => format!(
                 "[{}, {}]: ",
-                start_time.format(TIMESTAMP_FMT),
-                self.timestamp.format(TIMESTAMP_FMT)
-            )?,
-            None => write!(f, "{}: ", self.timestamp.format(TIMESTAMP_FMT))?,
-        }
+                start_time.format(Self::TIMESTAMP_FMT),
+                self.timestamp.format(Self::TIMESTAMP_FMT)
+            ),
+            None => format!("{}: ", self.timestamp.format(Self::TIMESTAMP_FMT)),
+        };
         let values = self
             .values
             .iter()
             .map(|(datum, _)| datum.to_string())
             .collect::<Vec<_>>()
             .join(",");
-        write!(f, "[{}]", values)
+        format!("{}[{}]", timestamp, values)
     }
-}
 
-impl Point<'_> {
-    /// Return the dimensionality of this point.
-    pub fn dimensionality(&self) -> usize {
-        self.values.len()
+    /// Write this point as a simple, unadorned string.
+    pub fn to_string_simple(&self) -> String {
+        let timestamp = match &self.start_time {
+            Some(start_time) => format!(
+                "{} - {}: ",
+                start_time.format(Self::TIMESTAMP_FMT),
+                self.timestamp.format(Self::TIMESTAMP_FMT)
+            ),
+            None => format!("{}: ", self.timestamp.format(Self::TIMESTAMP_FMT)),
+        };
+        let values = self
+            .values
+            .iter()
+            .map(|(datum, _)| datum.to_string())
+            .collect::<Vec<_>>()
+            .join(",");
+        format!("{}{}", timestamp, values)
     }
 }
 
@@ -2022,7 +2039,7 @@ mod tests {
         let expected = vec![now, meas0.timestamp()];
         let actual = points.start_times.as_ref().unwrap();
         assert_eq!(expected.len(), actual.len());
-        for (x, y) in expected.into_iter().zip(actual.into_iter()) {
+        for (x, y) in expected.into_iter().zip(actual) {
             assert!((*y - x).num_nanoseconds().unwrap() <= 1);
         }
     }

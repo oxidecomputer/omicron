@@ -43,6 +43,7 @@ use omicron_uuid_kinds::ZpoolUuid;
 use propolis_client::VolumeConstructionRequest;
 use serde::Serialize;
 use sled_agent_types::dataset::LocalStorageDatasetEnsureRequest;
+use sled_agent_types::inventory::ZpoolHealth;
 use sled_agent_types::support_bundle::NESTED_DATASET_NOT_FOUND;
 use sled_storage::nested_dataset::NestedDatasetConfig;
 use sled_storage::nested_dataset::NestedDatasetListOptions;
@@ -51,6 +52,7 @@ use slog::Logger;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::collections::VecDeque;
 use std::net::{IpAddr, SocketAddr};
 use std::str::FromStr;
 use std::sync::Arc;
@@ -1139,7 +1141,7 @@ pub(crate) struct PhysicalDisk {
 /// Describes data being simulated within a dataset.
 pub(crate) enum DatasetContents {
     Crucible(CrucibleServer),
-    LocalStorage(LocalStorageDatasetEnsureRequest),
+    LocalStorageUnencrypted(LocalStorageDatasetEnsureRequest),
 }
 
 pub(crate) struct Zpool {
@@ -1147,6 +1149,7 @@ pub(crate) struct Zpool {
     physical_disk_id: PhysicalDiskUuid,
     total_size: u64,
     datasets: HashMap<DatasetUuid, DatasetContents>,
+    health: ZpoolHealth,
 }
 
 impl Zpool {
@@ -1154,8 +1157,15 @@ impl Zpool {
         id: ZpoolUuid,
         physical_disk_id: PhysicalDiskUuid,
         total_size: u64,
+        health: ZpoolHealth,
     ) -> Self {
-        Zpool { id, physical_disk_id, total_size, datasets: HashMap::new() }
+        Zpool {
+            id,
+            physical_disk_id,
+            total_size,
+            datasets: HashMap::new(),
+            health,
+        }
     }
 
     fn insert_crucible_dataset(
@@ -1181,6 +1191,10 @@ impl Zpool {
         };
 
         crucible
+    }
+
+    pub fn health(&self) -> ZpoolHealth {
+        self.health
     }
 
     pub fn total_size(&self) -> u64 {
@@ -1234,12 +1248,13 @@ impl Zpool {
         let _ = self.datasets.remove(&id).expect("Failed to get the dataset");
     }
 
-    fn insert_local_storage_dataset(
+    fn insert_local_storage_unencrypted_dataset(
         &mut self,
         id: DatasetUuid,
         request: LocalStorageDatasetEnsureRequest,
     ) {
-        self.datasets.insert(id, DatasetContents::LocalStorage(request));
+        self.datasets
+            .insert(id, DatasetContents::LocalStorageUnencrypted(request));
     }
 }
 
@@ -1418,6 +1433,7 @@ impl StorageInner {
                     quota: dataset.inner.quota,
                     reservation: dataset.inner.reservation,
                     compression: dataset.inner.compression.to_string(),
+                    epoch: None,
                 });
             }
         }
@@ -1437,6 +1453,7 @@ impl StorageInner {
                     quota: config.quota,
                     reservation: config.reservation,
                     compression: config.compression.to_string(),
+                    epoch: None,
                 });
             }
         }
@@ -1774,9 +1791,11 @@ impl StorageInner {
         zpool_id: ZpoolUuid,
         disk_id: PhysicalDiskUuid,
         size: u64,
+        health: ZpoolHealth,
     ) {
         // Update our local data
-        self.zpools.insert(zpool_id, Zpool::new(zpool_id, disk_id, size));
+        self.zpools
+            .insert(zpool_id, Zpool::new(zpool_id, disk_id, size, health));
     }
 
     /// Returns an immutable reference to all zpools
@@ -1873,7 +1892,7 @@ impl StorageInner {
                 DatasetContents::Crucible(server) => {
                     Some((*id, server.address()))
                 }
-                DatasetContents::LocalStorage(_) => None,
+                DatasetContents::LocalStorageUnencrypted(_) => None,
             })
             .collect()
     }
@@ -1902,8 +1921,8 @@ impl StorageInner {
     ) -> Arc<CrucibleData> {
         match self.get_dataset(zpool_id, dataset_id) {
             DatasetContents::Crucible(crucible) => crucible.data.clone(),
-            DatasetContents::LocalStorage(_) => {
-                panic!("asked for Crucible, got LocalStorage!")
+            DatasetContents::LocalStorageUnencrypted(_) => {
+                panic!("asked for Crucible, got LocalStorageUnencrypted!")
             }
         }
     }
@@ -1946,7 +1965,7 @@ impl StorageInner {
             .drop_dataset(dataset_id)
     }
 
-    pub fn ensure_local_storage_dataset(
+    pub fn ensure_local_storage_unencrypted_dataset(
         &mut self,
         zpool_id: ExternalZpoolUuid,
         dataset_id: DatasetUuid,
@@ -1957,20 +1976,22 @@ impl StorageInner {
         self.zpools
             .get_mut(&zpool_id)
             .expect("Zpool does not exist")
-            .insert_local_storage_dataset(dataset_id, request);
+            .insert_local_storage_unencrypted_dataset(dataset_id, request);
     }
 
-    pub fn get_local_storage_dataset(
+    pub fn get_local_storage_unencrypted_dataset(
         &self,
         zpool_id: ZpoolUuid,
         dataset_id: DatasetUuid,
     ) -> LocalStorageDatasetEnsureRequest {
         match self.get_dataset(zpool_id, dataset_id) {
             DatasetContents::Crucible(_) => {
-                panic!("asked for LocalStorage, got Crucible!")
+                panic!("asked for LocalStorageUnencrypted, got Crucible!")
             }
 
-            DatasetContents::LocalStorage(request) => request.clone(),
+            DatasetContents::LocalStorageUnencrypted(request) => {
+                request.clone()
+            }
         }
     }
 }
@@ -1996,6 +2017,137 @@ pub struct Pantry {
     pub id: OmicronZoneUuid,
     simulated_upstairs: Arc<SimulatedUpstairs>,
     inner: Mutex<PantryInner>,
+}
+
+/// Based on the argument VolumeConstructionRequest, return simulated VolumeInfo
+/// in the same shape that describes a fully active Volume.
+fn generate_new_volume_info(
+    value: &VolumeConstructionRequest,
+) -> crucible_client_types::VolumeInfo {
+    let mut traverse: VecDeque<&VolumeConstructionRequest> = VecDeque::new();
+    let mut flattened: VecDeque<&VolumeConstructionRequest> = VecDeque::new();
+    let mut output: VecDeque<crucible_client_types::VolumeInfo> =
+        VecDeque::new();
+
+    traverse.push_back(value);
+
+    while let Some(part) = traverse.pop_back() {
+        flattened.push_back(part);
+
+        match part {
+            VolumeConstructionRequest::Volume {
+                id: _,
+                block_size: _,
+                sub_volumes,
+                read_only_parent,
+            } => {
+                for sub_volume in sub_volumes {
+                    traverse.push_back(sub_volume);
+                }
+
+                if let Some(read_only_parent) = read_only_parent {
+                    traverse.push_back(read_only_parent);
+                }
+            }
+
+            VolumeConstructionRequest::Url { .. }
+            | VolumeConstructionRequest::File { .. }
+            | VolumeConstructionRequest::Region { .. } => {}
+        }
+    }
+
+    while let Some(part) = flattened.pop_back() {
+        match part {
+            VolumeConstructionRequest::Volume {
+                id: _,
+                block_size: _,
+                sub_volumes,
+                read_only_parent,
+            } => {
+                let mut subs = Vec::with_capacity(sub_volumes.len());
+                let mut rop = None;
+
+                if read_only_parent.is_some() {
+                    rop = Some(Box::new(output.pop_back().unwrap()));
+                }
+
+                for _ in 0..sub_volumes.len() {
+                    subs.push(output.pop_back().unwrap());
+                }
+
+                subs.reverse();
+
+                let info = crucible_client_types::VolumeInfo::Volume {
+                    sub_volumes: subs,
+                    read_only_parent: rop,
+                };
+
+                output.push_back(info);
+            }
+
+            VolumeConstructionRequest::Region {
+                block_size,
+                blocks_per_extent: _,
+                extent_count: _,
+                opts:
+                    crucible_client_types::CrucibleOpts {
+                        id,
+                        target,
+                        lossy: _,
+                        flush_timeout: _,
+                        key,
+                        cert_pem: _,
+                        key_pem: _,
+                        root_cert_pem: _,
+                        control: _,
+                        read_only,
+                    },
+                generation,
+            } => {
+                let info = crucible_client_types::VolumeInfo::Upstairs {
+                    state: crucible_client_types::UpstairsInfoStatus::Active,
+                    block_size: Some(*block_size),
+                    upstairs_id: *id,
+                    session_id: Uuid::new_v4(),
+                    generation: *generation,
+                    read_only: *read_only,
+                    encrypted: key.is_some(),
+                    reconcile_in_progress: false,
+                    live_repair_in_progress: false,
+                    targets: target.iter().map(|target|
+                        crucible_client_types::DownstairsInfo {
+                            // TODO update this when region id is part of the
+                            // construction request
+                            region_id: Some(Uuid::new_v4()),
+
+                            target_addr: Some(*target),
+
+                            repair_addr: Some({
+                                // TODO update this when repair address is part
+                                // of the construction request
+                                let mut target: SocketAddr = *target;
+                                target.set_port(target.port() + 4000);
+                                target
+                            }),
+
+                            state:
+                                crucible_client_types::DownstairsInfoStatus::Active,
+                        }
+                    ).collect(),
+                };
+
+                output.push_back(info);
+            }
+
+            VolumeConstructionRequest::Url { .. }
+            | VolumeConstructionRequest::File { .. } => {
+                panic!("should not see variant {part:?}");
+            }
+        }
+    }
+
+    assert_eq!(output.len(), 1);
+    output.pop_front().unwrap()
 }
 
 impl Pantry {
@@ -2039,6 +2191,8 @@ impl Pantry {
     ) -> Result<()> {
         let mut inner = self.inner.lock().unwrap();
 
+        let info = generate_new_volume_info(&volume_construction_request);
+
         inner.volumes.insert(
             volume_id,
             PantryVolume {
@@ -2047,6 +2201,7 @@ impl Pantry {
                     active: true,
                     seen_active: true,
                     num_job_handles: 0,
+                    info,
                 },
                 activate_job: None,
             },
@@ -2069,6 +2224,8 @@ impl Pantry {
 
         let auto_activate_volumes = inner.auto_activate_volumes;
 
+        let info = generate_new_volume_info(&volume_construction_request);
+
         inner.volumes.insert(
             volume_id,
             PantryVolume {
@@ -2077,6 +2234,7 @@ impl Pantry {
                     active: auto_activate_volumes,
                     seen_active: auto_activate_volumes,
                     num_job_handles: 1,
+                    info,
                 },
                 activate_job: Some(activate_job_id.clone()),
             },
@@ -2297,6 +2455,7 @@ impl PantryServer {
             default_request_body_max_bytes: 8192 * 1024,
             default_handler_task_mode: HandlerTaskMode::Detached,
             log_headers: vec![],
+            compression: dropshot::CompressionConfig::None,
         })
         .start()
         .expect("Could not initialize pantry server");

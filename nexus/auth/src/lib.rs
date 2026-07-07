@@ -1,10 +1,11 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 pub mod authn;
 pub mod authz;
 pub mod context;
 pub mod storage;
-
-#[macro_use]
-extern crate newtype_derive;
 
 #[allow(unused_imports)]
 #[macro_use]

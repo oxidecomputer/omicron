@@ -11,12 +11,19 @@ use super::BlueprintZoneImageSource;
 use super::OmicronZoneExternalIp;
 use super::OmicronZoneNetworkResources;
 use super::OmicronZoneNic;
+use super::OperatorNexusConfig;
+use super::UpstreamNtpConfig;
+use super::blueprint_display::BpDiffState;
+use super::blueprint_display::KvList;
+use super::blueprint_display::KvPair;
+use super::blueprint_display::linear_table_modified;
+use super::blueprint_display::linear_table_unchanged;
 use crate::deployment::PlannerConfig;
-use crate::external_api::views::PhysicalDiskPolicy;
-use crate::external_api::views::PhysicalDiskState;
-use crate::external_api::views::SledPolicy;
-use crate::external_api::views::SledProvisionPolicy;
-use crate::external_api::views::SledState;
+use crate::external_api::physical_disk::PhysicalDiskPolicy;
+use crate::external_api::physical_disk::PhysicalDiskState;
+use crate::external_api::sled::SledPolicy;
+use crate::external_api::sled::SledProvisionPolicy;
+use crate::external_api::sled::SledState;
 use chrono::DateTime;
 use chrono::TimeDelta;
 use chrono::Utc;
@@ -30,7 +37,6 @@ use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::SLED_PREFIX;
 use omicron_common::api::external::Generation;
 use omicron_common::api::external::TufRepoDescription;
-use omicron_common::api::internal::shared::SourceNatConfigError;
 use omicron_common::disk::DiskIdentity;
 use omicron_common::policy::SINGLE_NODE_CLICKHOUSE_REDUNDANCY;
 use omicron_common::update::ArtifactId;
@@ -41,6 +47,7 @@ use omicron_uuid_kinds::ZpoolUuid;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
+use sled_agent_types_versions::latest::inventory::SourceNatConfigError;
 use sled_agent_types_versions::latest::inventory::ZoneKind;
 use sled_hardware_types::BaseboardId;
 use std::collections::BTreeMap;
@@ -236,8 +243,14 @@ impl PlanningInput {
         &self.policy.planner_config
     }
 
+    pub fn external_service_networking_policy(
+        &self,
+    ) -> &ExternalServiceNetworkingPolicy {
+        &self.policy.external_service_networking
+    }
+
     pub fn external_ip_policy(&self) -> &ExternalIpPolicy {
-        &self.policy.external_ips
+        &self.policy.external_service_networking.external_ips
     }
 
     pub fn clickhouse_cluster_enabled(&self) -> bool {
@@ -422,7 +435,7 @@ pub enum SledLookupErrorKind {
 
 /// Describes the current values for any CockroachDB settings that we care
 /// about.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Diffable, Serialize, Deserialize)]
 pub struct CockroachDbSettings {
     /// A fingerprint representing the current state of the cluster. This must
     /// be recorded in a blueprint and passed to the `DataStore` function when
@@ -447,6 +460,116 @@ impl CockroachDbSettings {
             preserve_downgrade: String::new(),
         }
     }
+
+    pub fn display(&self) -> CockroachDbSettingsDisplay<'_> {
+        CockroachDbSettingsDisplay { settings: self }
+    }
+}
+
+pub struct CockroachDbSettingsDisplay<'a> {
+    settings: &'a CockroachDbSettings,
+}
+
+impl fmt::Display for CockroachDbSettingsDisplay<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let list = KvList::new(
+            None,
+            vec![
+                KvPair::new_unchanged(
+                    "state fingerprint",
+                    display_none_if_empty(&self.settings.state_fingerprint),
+                ),
+                KvPair::new_unchanged(
+                    "version",
+                    display_none_if_empty(&self.settings.version),
+                ),
+                KvPair::new_unchanged(
+                    "preserve downgrade",
+                    display_not_set_if_empty(&self.settings.preserve_downgrade),
+                ),
+            ],
+        );
+        write!(f, "{list}")
+    }
+}
+
+impl fmt::Display for CockroachDbSettings {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "fingerprint = {}, version = {}, preserve downgrade = {}",
+            display_none_if_empty(&self.state_fingerprint),
+            display_none_if_empty(&self.version),
+            display_not_set_if_empty(&self.preserve_downgrade),
+        )
+    }
+}
+
+impl<'a> CockroachDbSettingsDiff<'a> {
+    pub fn display<'b>(&'b self) -> CockroachDbSettingsDiffDisplay<'a, 'b> {
+        CockroachDbSettingsDiffDisplay { diff: self }
+    }
+}
+
+pub struct CockroachDbSettingsDiffDisplay<'a, 'b> {
+    diff: &'b CockroachDbSettingsDiff<'a>,
+}
+
+impl fmt::Display for CockroachDbSettingsDiffDisplay<'_, '_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        macro_rules! diff_row {
+            ($diff:expr, $label:expr, $display_fn:expr) => {
+                if $diff.before == $diff.after {
+                    KvPair::new(
+                        BpDiffState::Unchanged,
+                        $label,
+                        linear_table_unchanged(&$display_fn($diff.before)),
+                    )
+                } else {
+                    KvPair::new(
+                        BpDiffState::Modified,
+                        $label,
+                        linear_table_modified(
+                            &$display_fn($diff.before),
+                            &$display_fn($diff.after),
+                        ),
+                    )
+                }
+            };
+        }
+
+        let CockroachDbSettingsDiff {
+            state_fingerprint,
+            version,
+            preserve_downgrade,
+        } = self.diff;
+
+        let list = KvList::new(
+            None,
+            vec![
+                diff_row!(
+                    state_fingerprint,
+                    "state fingerprint",
+                    display_none_if_empty
+                ),
+                diff_row!(version, "version", display_none_if_empty),
+                diff_row!(
+                    preserve_downgrade,
+                    "preserve downgrade",
+                    display_not_set_if_empty
+                ),
+            ],
+        );
+        write!(f, "{list}")
+    }
+}
+
+fn display_none_if_empty(s: &str) -> &str {
+    if s.is_empty() { "(none)" } else { s }
+}
+
+fn display_not_set_if_empty(s: &str) -> &str {
+    if s.is_empty() { "(not set)" } else { s }
 }
 
 /// CockroachDB cluster versions we are aware of.
@@ -629,24 +752,37 @@ pub enum DiskFilter {
 }
 
 impl DiskFilter {
-    fn matches_policy_and_state(
+    /// Returns true if the given policy and state match this filter
+    pub fn matches_policy_and_state(
         self,
         policy: PhysicalDiskPolicy,
         state: PhysicalDiskState,
     ) -> bool {
-        policy.matches(self) && state.matches(self)
+        self.matches_policy(policy) && self.matches_state(state)
     }
-}
 
-impl PhysicalDiskPolicy {
-    /// Returns true if self matches the filter
-    pub fn matches(self, filter: DiskFilter) -> bool {
-        match self {
-            PhysicalDiskPolicy::InService => match filter {
+    /// Returns true if the given policy matches this filter
+    pub fn matches_policy(self, policy: PhysicalDiskPolicy) -> bool {
+        match policy {
+            PhysicalDiskPolicy::InService => match self {
                 DiskFilter::All => true,
                 DiskFilter::InService => true,
             },
-            PhysicalDiskPolicy::Expunged => match filter {
+            PhysicalDiskPolicy::Expunged => match self {
+                DiskFilter::All => true,
+                DiskFilter::InService => false,
+            },
+        }
+    }
+
+    /// Returns true if the given state matches this filter
+    pub fn matches_state(self, state: PhysicalDiskState) -> bool {
+        match state {
+            PhysicalDiskState::Active => match self {
+                DiskFilter::All => true,
+                DiskFilter::InService => true,
+            },
+            PhysicalDiskState::Decommissioned => match self {
                 DiskFilter::All => true,
                 DiskFilter::InService => false,
             },
@@ -656,35 +792,25 @@ impl PhysicalDiskPolicy {
     /// Returns all policies matching the given filter.
     ///
     /// This is meant for database access, and is generally paired with
-    /// [`PhysicalDiskState::all_matching`]. See `ApplyPhysicalDiskFilterExt` in
+    /// [`DiskFilter::all_matching_states`]. See `ApplyPhysicalDiskFilterExt` in
     /// nexus-db-model.
-    pub fn all_matching(filter: DiskFilter) -> impl Iterator<Item = Self> {
-        Self::iter().filter(move |state| state.matches(filter))
-    }
-}
-
-impl PhysicalDiskState {
-    /// Returns true if self matches the filter
-    pub fn matches(self, filter: DiskFilter) -> bool {
-        match self {
-            PhysicalDiskState::Active => match filter {
-                DiskFilter::All => true,
-                DiskFilter::InService => true,
-            },
-            PhysicalDiskState::Decommissioned => match filter {
-                DiskFilter::All => true,
-                DiskFilter::InService => false,
-            },
-        }
+    pub fn all_matching_policies(
+        self,
+    ) -> impl Iterator<Item = PhysicalDiskPolicy> {
+        PhysicalDiskPolicy::iter()
+            .filter(move |policy| self.matches_policy(*policy))
     }
 
-    /// Returns all state matching the given filter.
+    /// Returns all states matching the given filter.
     ///
     /// This is meant for database access, and is generally paired with
-    /// [`PhysicalDiskPolicy::all_matching`]. See `ApplyPhysicalDiskFilterExt` in
+    /// [`DiskFilter::all_matching_policies`]. See `ApplyPhysicalDiskFilterExt` in
     /// nexus-db-model.
-    pub fn all_matching(filter: DiskFilter) -> impl Iterator<Item = Self> {
-        Self::iter().filter(move |state| state.matches(filter))
+    pub fn all_matching_states(
+        self,
+    ) -> impl Iterator<Item = PhysicalDiskState> {
+        PhysicalDiskState::iter()
+            .filter(move |state| self.matches_state(*state))
     }
 }
 
@@ -826,32 +952,30 @@ pub enum SledFilter {
 }
 
 impl SledFilter {
-    /// Returns true if self matches the provided policy and state.
+    /// Returns true if the provided policy and state match this filter.
     pub fn matches_policy_and_state(
         self,
         policy: SledPolicy,
         state: SledState,
     ) -> bool {
-        policy.matches(self) && state.matches(self)
+        self.matches_policy(policy) && self.matches_state(state)
     }
-}
 
-impl SledPolicy {
-    /// Returns true if self matches the filter.
+    /// Returns true if the given policy matches this filter.
     ///
     /// Any users of this must also compare against the [`SledState`], if
     /// relevant: a sled filter is fully matched when it matches both the
     /// policy and the state. See [`SledFilter::matches_policy_and_state`].
-    pub fn matches(self, filter: SledFilter) -> bool {
+    pub fn matches_policy(self, policy: SledPolicy) -> bool {
         // Some notes:
         //
         // # Match style
         //
         // This code could be written in three ways:
         //
-        // 1. match self { match filter { ... } }
-        // 2. match filter { match self { ... } }
-        // 3. match (self, filter) { ... }
+        // 1. match policy { match self { ... } }
+        // 2. match self { match policy { ... } }
+        // 3. match (self, policy) { ... }
         //
         // We choose 1 here because we expect many filters and just a few
         // policies, and 1 is the easiest form to represent that.
@@ -863,12 +987,12 @@ impl SledPolicy {
         // have a policy+state combo where the policy says the sled is in
         // service but the state is decommissioned, for example, but the two
         // separate types let us represent that. Code that ANDs
-        // policy.matches(filter) and state.matches(filter) naturally guards
-        // against those states.
-        match self {
+        // filter.matches_policy(policy) and filter.matches_state(state)
+        // naturally guards against those states.
+        match policy {
             SledPolicy::InService {
                 provision_policy: SledProvisionPolicy::Provisionable,
-            } => match filter {
+            } => match self {
                 SledFilter::All => true,
                 SledFilter::Commissioned => true,
                 SledFilter::Decommissioned => false,
@@ -883,7 +1007,7 @@ impl SledPolicy {
             },
             SledPolicy::InService {
                 provision_policy: SledProvisionPolicy::NonProvisionable,
-            } => match filter {
+            } => match self {
                 SledFilter::All => true,
                 SledFilter::Commissioned => true,
                 SledFilter::Decommissioned => false,
@@ -896,7 +1020,7 @@ impl SledPolicy {
                 SledFilter::TufArtifactReplication => true,
                 SledFilter::SpsUpdatedByReconfigurator => true,
             },
-            SledPolicy::Expunged => match filter {
+            SledPolicy::Expunged => match self {
                 SledFilter::All => true,
                 SledFilter::Commissioned => true,
                 SledFilter::Decommissioned => true,
@@ -912,26 +1036,15 @@ impl SledPolicy {
         }
     }
 
-    /// Returns all policies matching the given filter.
-    ///
-    /// This is meant for database access, and is generally paired with
-    /// [`SledState::all_matching`]. See `ApplySledFilterExt` in
-    /// nexus-db-model.
-    pub fn all_matching(filter: SledFilter) -> impl Iterator<Item = Self> {
-        Self::iter().filter(move |policy| policy.matches(filter))
-    }
-}
-
-impl SledState {
-    /// Returns true if self matches the filter.
+    /// Returns true if the given state matches this filter.
     ///
     /// Any users of this must also compare against the [`SledPolicy`], if
     /// relevant: a sled filter is fully matched when both the policy and the
     /// state match. See [`SledFilter::matches_policy_and_state`].
-    pub fn matches(self, filter: SledFilter) -> bool {
-        // See `SledFilter::matches` above for some notes.
-        match self {
-            SledState::Active => match filter {
+    pub fn matches_state(self, state: SledState) -> bool {
+        // See `matches_policy` above for some notes.
+        match state {
+            SledState::Active => match self {
                 SledFilter::All => true,
                 SledFilter::Commissioned => true,
                 SledFilter::Decommissioned => false,
@@ -944,7 +1057,7 @@ impl SledState {
                 SledFilter::TufArtifactReplication => true,
                 SledFilter::SpsUpdatedByReconfigurator => true,
             },
-            SledState::Decommissioned => match filter {
+            SledState::Decommissioned => match self {
                 SledFilter::All => true,
                 SledFilter::Commissioned => false,
                 SledFilter::Decommissioned => true,
@@ -960,13 +1073,22 @@ impl SledState {
         }
     }
 
-    /// Returns all policies matching the given filter.
+    /// Returns all policies matching this filter.
     ///
     /// This is meant for database access, and is generally paired with
-    /// [`SledPolicy::all_matching`]. See `ApplySledFilterExt` in
+    /// [`SledFilter::all_matching_states`]. See `ApplySledFilterExt` in
     /// nexus-db-model.
-    pub fn all_matching(filter: SledFilter) -> impl Iterator<Item = Self> {
-        Self::iter().filter(move |state| state.matches(filter))
+    pub fn all_matching_policies(self) -> impl Iterator<Item = SledPolicy> {
+        SledPolicy::iter().filter(move |policy| self.matches_policy(*policy))
+    }
+
+    /// Returns all states matching this filter.
+    ///
+    /// This is meant for database access, and is generally paired with
+    /// [`SledFilter::all_matching_policies`]. See `ApplySledFilterExt` in
+    /// nexus-db-model.
+    pub fn all_matching_states(self) -> impl Iterator<Item = SledState> {
+        SledState::iter().filter(move |state| self.matches_state(*state))
     }
 }
 
@@ -988,9 +1110,12 @@ impl SledState {
 /// sled additionally has non-policy [`SledResources`] needed for planning.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Policy {
-    /// description of IP addresses for externally-visible control plane
-    /// services (e.g., external DNS, Nexus, boundary NTP)
-    pub external_ips: ExternalIpPolicy,
+    /// configuration for externally-visible control plane services (IP
+    /// pools, upstream NTP / DNS servers, Nexus TLS).
+    ///
+    /// Fleet-scoped today; tracked at #8255, #10574, #3732 for future
+    /// operator-updatable storage.
+    pub external_service_networking: ExternalServiceNetworkingPolicy,
 
     /// desired total number of deployed Boundary NTP zones
     pub target_boundary_ntp_zone_count: usize,
@@ -1347,6 +1472,85 @@ pub enum ExternalIpPolicyError {
     OverlappingRanges { new_range: IpRange, existing_range: IpRange },
     #[error("external DNS IP {0} is not a member of any service IP pool")]
     ExternalDnsOutsideServiceIpPools(IpAddr),
+}
+
+/// Operator-supplied configuration for the rack's externally-facing service
+/// networking.
+///
+/// This includes the [`ExternalIpPolicy`], upstream NTP / DNS servers, and
+/// whether Nexus serves its API over TLS.
+///
+/// This is fleet-scoped today. It's lifted from the parent blueprint's
+/// boundary NTP and Nexus zones at `PlanningInput` construction time, since
+/// those values are still effectively set once at rack setup and never
+/// changed. Operator-updatable storage is tracked at
+/// <https://github.com/oxidecomputer/omicron/issues/8255> (external DNS
+/// configurability), <https://github.com/oxidecomputer/omicron/issues/10574>
+/// (per-service IP pool assignment), and
+/// <https://github.com/oxidecomputer/omicron/issues/3732> (upstream NTP /
+/// DNS server lists).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExternalServiceNetworkingPolicy {
+    /// IP pools available for Oxide-managed services, plus the addresses that
+    /// external DNS zones listen on.
+    pub external_ips: ExternalIpPolicy,
+
+    /// Upstream NTP servers used by boundary NTP zones as time sources.
+    pub upstream_ntp_servers: Vec<String>,
+
+    /// Optional resolver search-suffix for the boundary NTP zone, used when
+    /// `upstream_ntp_servers` contains bare (unqualified) hostnames.
+    //
+    // NOTE: This is always `None` in production today. There is no way to
+    // specify it at RSS-time, and the sled-agent hard-codes it to `None` when
+    // implementing the service plan.
+    //
+    // The fate of this is tracked by:
+    // https://github.com/oxidecomputer/omicron/issues/10588.
+    pub upstream_ntp_domain: Option<String>,
+
+    /// Operator-supplied upstream DNS servers. Used by boundary NTP zones to
+    /// resolve upstream NTP server names, and surfaced to Nexus zones as
+    /// their `external_dns_servers`.
+    pub upstream_dns_servers: Vec<IpAddr>,
+
+    /// Whether Nexus serves its external API over TLS.
+    pub nexus_external_tls: bool,
+}
+
+impl ExternalServiceNetworkingPolicy {
+    /// Construct an empty policy with no IP pools, no upstream servers, and
+    /// TLS disabled. Primarily for tests.
+    pub fn empty() -> Self {
+        Self {
+            external_ips: ExternalIpPolicy::empty(),
+            upstream_ntp_servers: Vec::new(),
+            upstream_ntp_domain: None,
+            upstream_dns_servers: Vec::new(),
+            nexus_external_tls: false,
+        }
+    }
+
+    /// Configuration values for constructing a new boundary NTP zone.
+    ///
+    /// Always returns a value. In real systems the underlying data is
+    /// populated at rack setup. In tests, the lists it contains may be empty,
+    /// but we still return a value so the callers have the same shape.
+    pub fn upstream_ntp_config(&self) -> UpstreamNtpConfig<'_> {
+        UpstreamNtpConfig {
+            ntp_servers: self.upstream_ntp_servers.as_slice(),
+            dns_servers: self.upstream_dns_servers.as_slice(),
+            domain: self.upstream_ntp_domain.as_deref(),
+        }
+    }
+
+    /// Configuration values for constructing a new Nexus zone.
+    pub fn operator_nexus_config(&self) -> OperatorNexusConfig<'_> {
+        OperatorNexusConfig {
+            external_tls: self.nexus_external_tls,
+            external_dns_servers: self.upstream_dns_servers.as_slice(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]

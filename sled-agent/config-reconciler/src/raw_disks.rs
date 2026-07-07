@@ -6,7 +6,6 @@
 //! [`RawDisk`]s sled-agent is aware of.
 
 use iddqd::IdOrdMap;
-use omicron_common::disk::DiskIdentity;
 use sled_agent_types::inventory::InventoryDisk;
 use sled_storage::disk::RawDisk;
 use slog::Logger;
@@ -55,10 +54,15 @@ impl RawDisksSender {
             // disks that shouldn't be removed even if they're not present in
             // `new_disks`; check for that first.
             for old_disk in disks.iter() {
-                if !new_disks.contains_key(old_disk.identity())
-                    && !can_remove_disk(old_disk, log)
-                {
-                    new_disks.insert_overwrite(old_disk.clone());
+                if !new_disks.contains_key(old_disk.identity()) {
+                    if can_remove_disk(old_disk, log) {
+                        info!(
+                            log, "Removing disk";
+                            "identity" => ?old_disk.identity(),
+                        );
+                    } else {
+                        new_disks.insert_overwrite(old_disk.clone());
+                    }
                 }
             }
 
@@ -94,31 +98,6 @@ impl RawDisksSender {
             }
 
             Arc::make_mut(disks).insert_overwrite(disk);
-            true
-        })
-    }
-
-    /// Remove a raw disk that is no longer visible to sled-agent.
-    pub fn remove_raw_disk(
-        &self,
-        identity: &DiskIdentity,
-        log: &Logger,
-    ) -> bool {
-        self.0.send_if_modified(|disks| {
-            let Some(disk) = disks.get(identity) else {
-                info!(
-                    log, "Ignoring request to remove nonexistent disk";
-                    "identity" => ?identity,
-                );
-                return false;
-            };
-
-            if !can_remove_disk(disk, log) {
-                return false;
-            }
-
-            info!(log, "Removing disk"; "identity" => ?identity);
-            Arc::make_mut(disks).remove(identity);
             true
         })
     }
@@ -163,6 +142,7 @@ fn can_remove_disk(disk: &RawDisk, log: &Logger) -> bool {
 mod tests {
     use super::*;
     use camino::Utf8PathBuf;
+    use omicron_common::disk::DiskIdentity;
     use omicron_common::disk::DiskVariant;
     use omicron_test_utils::dev;
     use proptest::collection::btree_map;
@@ -252,9 +232,6 @@ mod tests {
         // Change the active firmware slot of the disk at the given index, then
         // pass it to `RawDisksSender::add_or_update_raw_disk`
         Update(Index),
-        // Call `RawDisksSender::remove_raw_disk` with the disk at the given
-        // index
-        Remove(Index),
         // Call `RawDisksSender::set_raw_disks` using the set of disks in the
         // range `[start, start + num)`
         Set { start: Index, num: usize },
@@ -304,19 +281,6 @@ mod tests {
                     tx.add_or_update_raw_disk(disks[index].clone(), log);
                     states[index].present = true;
                     true
-                }
-                Operation::Remove(index) => {
-                    let index = index.index(states.len());
-                    eprintln!("removing disk {index}");
-                    let was_present = states[index].present;
-                    tx.remove_raw_disk(disks[index].identity(), log);
-                    // Synthetic disks should never be removed
-                    if disks[index].is_synthetic() {
-                        false
-                    } else {
-                        states[index].present = false;
-                        was_present
-                    }
                 }
                 Operation::Set { start, num } => {
                     let start = start.index(states.len());
@@ -381,7 +345,7 @@ mod tests {
             assert_eq!(rx.has_changed().expect("channel open"), expect_changes);
 
             // After this operation, check that the disk is either present or
-            // not (the thing changed by our add/remove/set operations) and has
+            // not (the thing changed by our add or set operations) and has
             // the expected firmware slot (the thing changed by our update
             // operation).
             let current = rx.borrow_and_update();

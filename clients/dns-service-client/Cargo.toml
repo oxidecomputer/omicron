@@ -13,7 +13,7 @@ expectorate.workspace = true
 http.workspace = true
 internal-dns-types-versions.workspace = true
 progenitor.workspace = true
-reqwest = { workspace = true, features = ["json", "rustls-tls", "stream"] }
+reqwest = { workspace = true, features = ["json", "rustls", "stream"] }
 schemars.workspace = true
 serde.workspace = true
 slog.workspace = true

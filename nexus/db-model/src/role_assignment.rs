@@ -5,7 +5,7 @@
 use super::{DatabaseString, impl_enum_type};
 use anyhow::anyhow;
 use nexus_db_schema::schema::role_assignment;
-use nexus_types::external_api::shared;
+use nexus_types::external_api::policy;
 use omicron_common::api::external::Error;
 use omicron_uuid_kinds::BuiltInUserUuid;
 use omicron_uuid_kinds::GenericUuid;
@@ -33,16 +33,16 @@ impl_enum_type!(
     SiloGroup => b"silo_group"
 );
 
-impl From<shared::IdentityType> for IdentityType {
-    fn from(other: shared::IdentityType) -> Self {
+impl From<policy::IdentityType> for IdentityType {
+    fn from(other: policy::IdentityType) -> Self {
         match other {
-            shared::IdentityType::SiloUser => IdentityType::SiloUser,
-            shared::IdentityType::SiloGroup => IdentityType::SiloGroup,
+            policy::IdentityType::SiloUser => IdentityType::SiloUser,
+            policy::IdentityType::SiloGroup => IdentityType::SiloGroup,
         }
     }
 }
 
-impl TryFrom<IdentityType> for shared::IdentityType {
+impl TryFrom<IdentityType> for policy::IdentityType {
     type Error = anyhow::Error;
 
     fn try_from(other: IdentityType) -> Result<Self, Self::Error> {
@@ -50,8 +50,8 @@ impl TryFrom<IdentityType> for shared::IdentityType {
             IdentityType::UserBuiltin => {
                 Err(anyhow!("unsupported db identity type: {:?}", other))
             }
-            IdentityType::SiloUser => Ok(shared::IdentityType::SiloUser),
-            IdentityType::SiloGroup => Ok(shared::IdentityType::SiloGroup),
+            IdentityType::SiloUser => Ok(policy::IdentityType::SiloUser),
+            IdentityType::SiloGroup => Ok(policy::IdentityType::SiloGroup),
         }
     }
 }
@@ -119,7 +119,7 @@ impl RoleAssignment {
 }
 
 impl<AllowedRoles> TryFrom<RoleAssignment>
-    for shared::RoleAssignment<AllowedRoles>
+    for policy::RoleAssignment<AllowedRoles>
 where
     AllowedRoles: DatabaseString,
 {
@@ -127,7 +127,7 @@ where
 
     fn try_from(role_asgn: RoleAssignment) -> Result<Self, Self::Error> {
         Ok(Self {
-            identity_type: shared::IdentityType::try_from(
+            identity_type: policy::IdentityType::try_from(
                 role_asgn.identity_type,
             )
             .map_err(|error| {
@@ -203,7 +203,7 @@ mod tests {
         };
 
         let error =
-            <shared::RoleAssignment<DummyRoles>>::try_from(bad_input_role)
+            <policy::RoleAssignment<DummyRoles>>::try_from(bad_input_role)
                 .expect_err("unexpectedly succeeding parsing database role");
         println!("error: {:#}", error);
         if let Error::InternalError { internal_message } = error {
@@ -221,7 +221,7 @@ mod tests {
         }
 
         let error =
-            <shared::RoleAssignment<DummyRoles>>::try_from(bad_input_idtype)
+            <policy::RoleAssignment<DummyRoles>>::try_from(bad_input_idtype)
                 .expect_err("unexpectedly succeeding parsing database role");
         println!("error: {:#}", error);
         if let Error::InternalError { internal_message } = error {
@@ -238,10 +238,10 @@ mod tests {
             );
         }
 
-        let success = <shared::RoleAssignment<DummyRoles>>::try_from(ok_input)
+        let success = <policy::RoleAssignment<DummyRoles>>::try_from(ok_input)
             .expect("parsing valid role assignment from database");
         println!("success: {:?}", success);
-        assert_eq!(success.identity_type, shared::IdentityType::SiloUser);
+        assert_eq!(success.identity_type, policy::IdentityType::SiloUser);
         assert_eq!(success.identity_id, identity_id);
         assert_eq!(success.role_name, DummyRoles::Bogus);
     }

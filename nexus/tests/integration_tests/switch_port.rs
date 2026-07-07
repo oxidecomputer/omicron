@@ -4,26 +4,32 @@
 
 //! Integration tests for operating on Ports
 
-use std::str::FromStr;
-
 use http::StatusCode;
 use http::method::Method;
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
 use nexus_test_utils_macros::nexus_test;
-use nexus_types::external_api::params::{
+use nexus_types::external_api::networking::{
     Address, AddressConfig, AddressLotBlockCreate, AddressLotCreate,
-    BgpAnnounceSetCreate, BgpAnnouncementCreate, BgpConfigCreate,
-    BgpPeerConfig, LinkConfigCreate, LldpLinkConfigCreate, Route, RouteConfig,
-    SwitchInterfaceConfigCreate, SwitchInterfaceKind, SwitchPortApplySettings,
-    SwitchPortSettingsCreate,
+    AddressLotKind, BgpAnnounceSetCreate, BgpAnnouncementCreate, BgpConfig,
+    BgpConfigCreate, BgpConfigUpdate, BgpPeer, BgpPeerConfig, LinkConfigCreate,
+    LldpLinkConfigCreate, Route, RouteConfig, SwitchInterfaceConfigCreate,
+    SwitchInterfaceKind, SwitchPort, SwitchPortApplySettings,
+    SwitchPortSettings, SwitchPortSettingsCreate,
 };
-use nexus_types::external_api::views::Rack;
+use nexus_types::external_api::rack::Rack;
+use omicron_common::api::external::Name;
 use omicron_common::api::external::{
-    self, AddressLotKind, BgpPeer, IdentityMetadataCreateParams, LinkFec,
-    LinkSpeed, NameOrId, SwitchLocation, SwitchPort, SwitchPortSettings,
+    IdentityMetadataCreateParams, IdentityMetadataUpdateParams, NameOrId,
 };
-use omicron_common::api::external::{ImportExportPolicy, Name};
 use oxnet::IpNet;
+use sled_agent_types::early_networking::ImportExportPolicy;
+use sled_agent_types::early_networking::LinkFec;
+use sled_agent_types::early_networking::LinkSpeed;
+use sled_agent_types::early_networking::MaxPathConfig;
+use sled_agent_types::early_networking::RouterLifetimeConfig;
+use sled_agent_types::early_networking::RouterPeerType;
+use sled_agent_types::early_networking::SwitchSlot;
+use std::str::FromStr;
 
 type ControlPlaneTestContext =
     nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
@@ -94,6 +100,7 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
         vrf: None,
         checker: None,
         shaper: None,
+        max_paths: Default::default(),
     };
 
     NexusRequest::objects_post(
@@ -227,7 +234,7 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
     let ifx0 = &created.interfaces[0];
     assert_eq!(&ifx0.interface_name.to_string(), "phy0");
     assert_eq!(ifx0.v6_enabled, true);
-    assert_eq!(ifx0.kind, external::SwitchInterfaceKind::Primary);
+    assert_eq!(ifx0.kind, SwitchInterfaceKind::Primary);
 
     let route0 = &created.routes[0];
     assert_eq!(route0.dst, IpNet::from_str("1.2.3.0/24").unwrap());
@@ -269,7 +276,7 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
     let ifx0 = &roundtrip.interfaces[0];
     assert_eq!(&ifx0.interface_name.to_string(), "phy0");
     assert_eq!(ifx0.v6_enabled, true);
-    assert_eq!(ifx0.kind, external::SwitchInterfaceKind::Primary);
+    assert_eq!(ifx0.kind, SwitchInterfaceKind::Primary);
 
     let route0 = &roundtrip.routes[0];
     assert_eq!(route0.dst, IpNet::from_str("1.2.3.0/24").unwrap());
@@ -305,30 +312,61 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
     .unwrap();
 
     // Update port settings. Should not see conflict.
+    // Add a numbered BGP peer (with explicit address)
     settings.bgp_peers.push(BgpPeerConfig {
         link_name: link0_name.clone(),
-        peers: vec![BgpPeer {
-            bgp_config: NameOrId::Name("as47".parse().unwrap()),
-            interface_name: "phy0".parse().unwrap(),
-            addr: "1.2.3.4".parse().unwrap(),
-            hold_time: 6,
-            idle_hold_time: 6,
-            delay_open: 0,
-            connect_retry: 3,
-            keepalive: 2,
-            remote_asn: None,
-            min_ttl: None,
-            md5_auth_key: None,
-            multi_exit_discriminator: None,
-            communities: Vec::new(),
-            local_pref: None,
-            enforce_first_as: false,
-            allowed_export: ImportExportPolicy::NoFiltering,
-            allowed_import: ImportExportPolicy::NoFiltering,
-            vlan_id: None,
-        }],
+        peers: vec![
+            // Numbered peer - identified by address
+            BgpPeer {
+                bgp_config: NameOrId::Name("as47".parse().unwrap()),
+                addr: RouterPeerType::Numbered {
+                    ip: "1.2.3.4".parse().unwrap(),
+                },
+                hold_time: 6,
+                idle_hold_time: 6,
+                delay_open: 0,
+                connect_retry: 3,
+                keepalive: 2,
+                remote_asn: None,
+                min_ttl: None,
+                md5_auth_key: None,
+                multi_exit_discriminator: None,
+                communities: Vec::new(),
+                local_pref: None,
+                enforce_first_as: false,
+                allowed_export: ImportExportPolicy::NoFiltering,
+                allowed_import: ImportExportPolicy::NoFiltering,
+                vlan_id: None,
+            },
+            // Unnumbered peer - identified by link from parent `BgpPeerConfig`
+            BgpPeer {
+                bgp_config: NameOrId::Name("as47".parse().unwrap()),
+                addr: RouterPeerType::Unnumbered {
+                    router_lifetime: RouterLifetimeConfig::new(123).unwrap(),
+                },
+                hold_time: 6,
+                idle_hold_time: 6,
+                delay_open: 0,
+                connect_retry: 3,
+                keepalive: 2,
+                remote_asn: Some(65000),
+                min_ttl: None,
+                md5_auth_key: None,
+                multi_exit_discriminator: None,
+                communities: vec![65000],
+                local_pref: Some(100),
+                enforce_first_as: false,
+                allowed_export: ImportExportPolicy::Allow(vec![
+                    "10.0.0.0/8".parse().unwrap(),
+                ]),
+                allowed_import: ImportExportPolicy::Allow(vec![
+                    "192.168.0.0/16".parse().unwrap(),
+                ]),
+                vlan_id: None,
+            },
+        ],
     });
-    let _created: SwitchPortSettings = NexusRequest::objects_post(
+    let created: SwitchPortSettings = NexusRequest::objects_post(
         client,
         "/v1/system/networking/switch-port-settings",
         &settings,
@@ -339,6 +377,96 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
     .unwrap()
     .parsed_body()
     .unwrap();
+
+    // Verify BGP peers were correctly stored
+    assert_eq!(created.bgp_peers.len(), 2, "Expected 2 BGP peers");
+
+    // Find the numbered peer (has an address)
+    let numbered_peer = created
+        .bgp_peers
+        .iter()
+        .find(|p| p.addr.is_numbered())
+        .expect("Should have a numbered peer");
+    assert_eq!(
+        numbered_peer.addr,
+        RouterPeerType::Numbered { ip: "1.2.3.4".parse().unwrap() },
+        "Numbered peer should have addr 1.2.3.4"
+    );
+
+    // Find the unnumbered peer (no address)
+    let unnumbered_peer = created
+        .bgp_peers
+        .iter()
+        .find(|p| p.addr.is_unnumbered())
+        .expect("Should have an unnumbered peer");
+    assert_eq!(
+        unnumbered_peer.addr,
+        RouterPeerType::Unnumbered {
+            router_lifetime: RouterLifetimeConfig::new(123).unwrap(),
+        }
+    );
+    assert_eq!(
+        unnumbered_peer.remote_asn,
+        Some(65000),
+        "Unnumbered peer should have remote_asn 65000"
+    );
+    assert_eq!(
+        unnumbered_peer.local_pref,
+        Some(100),
+        "Unnumbered peer should have local_pref 100"
+    );
+    assert_eq!(
+        unnumbered_peer.communities,
+        vec![65000],
+        "Unnumbered peer should have community 65000"
+    );
+    assert!(
+        matches!(
+            &unnumbered_peer.allowed_export,
+            ImportExportPolicy::Allow(prefixes) if prefixes.len() == 1
+        ),
+        "Unnumbered peer should have 1 allowed export prefix"
+    );
+    assert!(
+        matches!(
+            &unnumbered_peer.allowed_import,
+            ImportExportPolicy::Allow(prefixes) if prefixes.len() == 1
+        ),
+        "Unnumbered peer should have 1 allowed import prefix"
+    );
+
+    // Verify round-trip by fetching the settings again
+    let roundtrip: SwitchPortSettings = NexusRequest::object_get(
+        client,
+        "/v1/system/networking/switch-port-settings/portofino",
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body()
+    .unwrap();
+
+    assert_eq!(
+        roundtrip.bgp_peers.len(),
+        2,
+        "Roundtrip should have 2 BGP peers"
+    );
+
+    // Verify the unnumbered peer survived the round-trip
+    let roundtrip_unnumbered = roundtrip
+        .bgp_peers
+        .iter()
+        .find(|p| p.addr.is_unnumbered())
+        .expect("Roundtrip should have an unnumbered peer");
+    assert_eq!(
+        roundtrip_unnumbered.addr,
+        RouterPeerType::Unnumbered {
+            router_lifetime: RouterLifetimeConfig::new(123).unwrap(),
+        }
+    );
+    assert_eq!(roundtrip_unnumbered.remote_asn, Some(65000));
+    assert_eq!(roundtrip_unnumbered.communities, vec![65000]);
 
     // There should be one switch port to begin with, see
     // Server::start_and_populate in nexus/src/lib.rs
@@ -374,7 +502,7 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
         RequestBuilder::new(
             client,
             Method::POST,
-            &format!("/v1/system/hardware/switch-port/qsfp0/settings?rack_id={rack_id}&switch_location=switch0"),
+            &format!("/v1/system/hardware/switch-port/qsfp0/settings?rack_id={rack_id}&switch_slot=switch0"),
         )
         .body(Some(&apply_settings))
         .expect_status(Some(StatusCode::NO_CONTENT)),
@@ -390,7 +518,7 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
         RequestBuilder::new(
             client,
             Method::DELETE,
-            &format!("/v1/system/hardware/switch-port/qsfp0/settings?rack_id={rack_id}&switch_location=switch0"),
+            &format!("/v1/system/hardware/switch-port/qsfp0/settings?rack_id={rack_id}&switch_slot=switch0"),
         )
         .expect_status(Some(StatusCode::NO_CONTENT)),
     )
@@ -502,7 +630,7 @@ async fn test_port_settings_basic_v6_crud(ctx: &ControlPlaneTestContext) {
     assert_eq!(route.dst, IpNet::from_str("2000::/64").unwrap());
     assert_eq!(&route.gw.to_string(), "2000::1");
 
-    let mgd = &ctx.mgd[&SwitchLocation::Switch0];
+    let mgd = &ctx.mgd[&SwitchSlot::Switch0];
     let mgd_client = mg_admin_client::Client::new(
         &format!("http://[::1]:{}", mgd.port),
         ctx.logctx.log.clone(),
@@ -526,7 +654,7 @@ async fn test_port_settings_basic_v6_crud(ctx: &ControlPlaneTestContext) {
         RequestBuilder::new(
             client,
             Method::POST,
-            &format!("/v1/system/hardware/switch-port/qsfp0/settings?rack_id={rack_id}&switch_location=switch0"),
+            &format!("/v1/system/hardware/switch-port/qsfp0/settings?rack_id={rack_id}&switch_slot=switch0"),
         )
         .body(Some(&apply_settings))
         .expect_status(Some(StatusCode::NO_CONTENT)),
@@ -554,4 +682,146 @@ async fn test_port_settings_basic_v6_crud(ctx: &ControlPlaneTestContext) {
         }
     }
     panic!("expected number of routes not found");
+}
+
+#[nexus_test]
+async fn test_bgp_config_update(ctx: &ControlPlaneTestContext) {
+    let client = &ctx.external_client;
+
+    let parkinglot: Name = "parkinglot".parse().unwrap();
+    let as47: Name = "as47".parse().unwrap();
+    let instances = NameOrId::Name("instances".parse().unwrap());
+
+    // Create an address lot for the announce set blocks.
+    let lot_params = AddressLotCreate {
+        identity: IdentityMetadataCreateParams {
+            name: parkinglot.clone(),
+            description: "an address parking lot".into(),
+        },
+        kind: AddressLotKind::Infra,
+        blocks: vec![AddressLotBlockCreate {
+            first_address: "1.2.3.0".parse().unwrap(),
+            last_address: "1.2.3.255".parse().unwrap(),
+        }],
+    };
+    NexusRequest::objects_post(
+        client,
+        "/v1/system/networking/address-lot",
+        &lot_params,
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
+
+    // Create two announce sets so the config can be moved between them.
+    for name in ["instances", "instances2"] {
+        let announce_set = BgpAnnounceSetCreate {
+            identity: IdentityMetadataCreateParams {
+                name: name.parse().unwrap(),
+                description: "an announce set".into(),
+            },
+            announcement: vec![BgpAnnouncementCreate {
+                address_lot_block: NameOrId::Name(parkinglot.clone()),
+                network: "1.2.3.0/24".parse().unwrap(),
+            }],
+        };
+        NexusRequest::object_put(
+            client,
+            "/v1/system/networking/bgp-announce-set",
+            Some(&announce_set),
+        )
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .unwrap();
+    }
+
+    // Create the BGP config.
+    let bgp_config = BgpConfigCreate {
+        identity: IdentityMetadataCreateParams {
+            name: as47.clone(),
+            description: "autonomous system 47".into(),
+        },
+        bgp_announce_set_id: instances.clone(),
+        asn: 47,
+        vrf: None,
+        checker: None,
+        shaper: None,
+        max_paths: Default::default(),
+    };
+    NexusRequest::objects_post(
+        client,
+        "/v1/system/networking/bgp",
+        &bgp_config,
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
+
+    let valid_update = BgpConfigUpdate {
+        identity: IdentityMetadataUpdateParams {
+            name: Some(as47),
+            description: Some("autonomous system 47".into()),
+        },
+        bgp_announce_set_id: Some(instances),
+        max_paths: Some(MaxPathConfig::new(1).unwrap()),
+    };
+
+    // Updating a config that doesn't exist is a 404.
+    NexusRequest::expect_failure_with_body(
+        client,
+        StatusCode::NOT_FOUND,
+        Method::PUT,
+        "/v1/system/networking/bgp?name_or_id=does-not-exist",
+        &valid_update,
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
+
+    // Referencing an announce set that doesn't exist is a 404.
+    NexusRequest::expect_failure_with_body(
+        client,
+        StatusCode::NOT_FOUND,
+        Method::PUT,
+        "/v1/system/networking/bgp?name_or_id=as47",
+        &BgpConfigUpdate {
+            bgp_announce_set_id: Some(NameOrId::Name(
+                "does-not-exist".parse().unwrap(),
+            )),
+            ..valid_update.clone()
+        },
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
+
+    // A valid update returns the updated configuration.
+    let update = BgpConfigUpdate {
+        identity: IdentityMetadataUpdateParams {
+            name: Some("as47-renamed".parse().unwrap()),
+            description: Some("renamed config".into()),
+        },
+        bgp_announce_set_id: Some(NameOrId::Name(
+            "instances2".parse().unwrap(),
+        )),
+        max_paths: Some(MaxPathConfig::new(3).unwrap()),
+    };
+    let updated: BgpConfig = NexusRequest::object_put(
+        client,
+        "/v1/system/networking/bgp?name_or_id=as47",
+        Some(&update),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute_and_parse_unwrap()
+    .await;
+
+    assert_eq!(updated.identity.name.to_string(), "as47-renamed");
+    assert_eq!(updated.identity.description, "renamed config");
+    assert_eq!(updated.asn, 47);
+    assert_eq!(updated.max_paths, MaxPathConfig::new(3).unwrap());
 }

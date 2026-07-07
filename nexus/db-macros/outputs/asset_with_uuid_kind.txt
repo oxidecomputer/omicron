@@ -19,7 +19,7 @@ impl AssetWithUuidKindIdentity {
     pub fn new(
         id: ::omicron_uuid_kinds::TypedUuid<::omicron_uuid_kinds::CustomKind>,
     ) -> Self {
-        let now = ::chrono::Utc::now();
+        let now = ::omicron_common::now_db_precision();
         Self {
             id: crate::to_db_typed_uuid(id),
             time_created: now,

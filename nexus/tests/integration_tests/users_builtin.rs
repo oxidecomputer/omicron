@@ -1,3 +1,7 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 //! Sanity-tests for built-in users
 
 use dropshot::ResultsPage;
@@ -5,7 +9,7 @@ use nexus_db_queries::authn;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils_macros::nexus_test;
-use nexus_types::external_api::views::UserBuiltin;
+use nexus_types::external_api::user::UserBuiltin;
 use omicron_uuid_kinds::GenericUuid;
 use std::collections::BTreeMap;
 
@@ -53,6 +57,9 @@ async fn test_users_builtin(cptestctx: &ControlPlaneTestContext) {
 
     let u = users.remove(&authn::USER_SAGA_RECOVERY.name.to_string()).unwrap();
     assert_eq!(u.identity.id, authn::USER_SAGA_RECOVERY.id.into_untyped_uuid());
+
+    let u = users.remove(&authn::USER_OMDB.name.to_string()).unwrap();
+    assert_eq!(u.identity.id, authn::USER_OMDB.id.into_untyped_uuid());
 
     assert!(users.is_empty(), "found unexpected built-in users");
 

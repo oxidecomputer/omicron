@@ -19,6 +19,10 @@ omicron-workspace-hack.workspace = true
 pq-sys = "*"
 reconfigurator-cli.workspace = true
 
+[target.'cfg(target_os = "illumos")'.dependencies]
+# See omicron-rpaths for more about the "fmd-adm-sys" dependency.
+fmd-adm-sys.workspace = true
+
 [dev-dependencies]
 camino.workspace = true
 camino-tempfile.workspace = true

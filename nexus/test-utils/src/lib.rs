@@ -9,6 +9,7 @@ use omicron_common::api::external::IdentityMetadata;
 use omicron_sled_agent::sim;
 use omicron_test_utils::dev::poll::{CondCheckError, wait_for_condition};
 use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::RackUuid;
 use std::fmt::Debug;
 use std::net::Ipv6Addr;
 use std::time::Duration;
@@ -38,14 +39,19 @@ pub use starter::start_producer_server;
 pub use starter::start_sled_agent;
 pub use starter::start_sled_agent_with_config;
 
+// TODO: Convert all the UUIDs here to be (typed) constants, similar to
+// RACK_UUID, and using the pattern
+// RackUuid::from_u128(0xc19a698f_c6f9_4a17_ae30_20d711b8f7dc).
 pub const SLED_AGENT_UUID: &str = "b6d65341-167c-41df-9b5c-41cded99c229";
 pub const SLED_AGENT2_UUID: &str = "039be560-54cc-49e3-88df-1a29dadbf913";
-pub const RACK_UUID: &str = nexus_db_queries::db::pub_test_utils::RACK_UUID;
+pub const RACK_UUID: RackUuid = nexus_db_queries::db::pub_test_utils::RACK_UUID;
 pub const SWITCH_UUID: &str = "dae4e1f1-410e-4314-bff1-fec0504be07e";
 pub const PHYSICAL_DISK_UUID: &str = "fbf4e1f1-410e-4314-bff1-fec0504be07e";
 pub const OXIMETER_UUID: &str = "39e6175b-4df2-4730-b11d-cbc1e60a2e78";
 pub const PRODUCER_UUID: &str = "a6458b7d-87c3-4483-be96-854d814c20de";
 pub const RACK_SUBNET: &str = "fd00:1122:3344:0100::/56";
+pub const PHYSICAL_DISK_ADOPTION_REQ_UUID: &str =
+    "f6944257-9799-4e3e-89b1-c2297b67c16f";
 
 /// Password for the user created by the test suite
 ///
@@ -53,6 +59,16 @@ pub const RACK_SUBNET: &str = "fd00:1122:3344:0100::/56";
 /// which uses the test suite setup code for most of its operation).   These are
 /// both transient deployments with no sensitive data.
 pub const TEST_SUITE_PASSWORD: &str = "oxide";
+
+/// Hash for [`TEST_SUITE_PASSWORD`]
+///
+/// This is hardcoded because it's used in many integration tests and
+/// recomputing it a ton of times wastes a lot of time.
+// You can recompute this with: `cargo run --example=argon2 -- --input oxide`
+// (where `oxide` here is TEST_SUITE_PASSWORD (above)).  The tool will output
+// the password hash before proceeding to measure how long it takes to hash.
+pub const TEST_SUITE_PASSWORD_HASH: &str = "$argon2id$v=19$m=98304,t=23,p=1$\
+     R/bEz3yhItskrgbhagyJvg$n3Df2hJDW29A66y//h4LBRrKXC2jfrn2wUsf0k6O10g";
 
 /// Returns whether the two identity metadata objects are identical.
 pub fn identity_eq(ident1: &IdentityMetadata, ident2: &IdentityMetadata) {
@@ -97,7 +113,7 @@ async fn wait_for_producer_impl(
             {
                 Ok(())
             } else {
-                Err(CondCheckError::<()>::NotYet)
+                Err(CondCheckError::<()>::NotYet { status: None })
             }
         },
         &Duration::from_secs(1),
@@ -113,24 +129,49 @@ pub fn dpd_client<N: NexusServer>(
 ) -> dpd_client::Client {
     // Get the first available dendrite instance and extract the values we need
     let dendrite_guard = cptestctx.dendrite.read().unwrap();
-    let (switch_location, dendrite_instance) = dendrite_guard
+    let (switch_slot, dendrite_instance) = dendrite_guard
         .iter()
-        .next()
+        .find(|(_, instance)| instance.is_dpd_running())
         .expect("No dendrite instances running for test");
 
     // Copy the values we need while the guard is still alive
-    let switch_location = *switch_location;
-    let port = dendrite_instance.port;
+    let switch_slot = *switch_slot;
+    let port = dendrite_instance.port();
     drop(dendrite_guard);
 
     let client_state = dpd_client::ClientState {
         tag: String::from("nexus-test"),
         log: cptestctx.logctx.log.new(slog::o!(
             "component" => "DpdClient",
-            "switch" => switch_location.to_string()
+            "switch_slot" => format!("{switch_slot:?}"),
         )),
     };
 
     let addr = Ipv6Addr::LOCALHOST;
     dpd_client::Client::new(&format!("http://[{addr}]:{port}"), client_state)
+}
+
+#[cfg(test)]
+mod test {
+    use crate::TEST_SUITE_PASSWORD;
+    use crate::TEST_SUITE_PASSWORD_HASH;
+    use omicron_passwords::Password;
+    use omicron_passwords::PasswordHashString;
+
+    // Verify that the hardcoded test suite password hash matches the hardcoded
+    // test suite password.  Obviously it would be less brittle to just compute
+    // the hash each time we needed it, but that uses a lot of CPU time (by
+    // design) and has to be done for every single test.  That adds up.
+    #[test]
+    fn test_suite_password_matches_hash() {
+        let hasher = omicron_passwords::Hasher::default();
+        let password: Password = Password::new(TEST_SUITE_PASSWORD).unwrap();
+        let hash: PasswordHashString =
+            TEST_SUITE_PASSWORD_HASH.parse().unwrap();
+        let okay = hasher.verify_password(&password, &hash).unwrap();
+        assert!(
+            okay,
+            "TEST_SUITE_PASSWORD does not match TEST_SUITE_PASSWORD_HASH"
+        );
+    }
 }

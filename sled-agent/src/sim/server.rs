@@ -9,14 +9,9 @@ use super::http_entrypoints::api as http_api;
 use super::sled_agent::SledAgent;
 use super::storage::PantryServer;
 use crate::nexus::{ConvertInto, NexusClient};
-use crate::rack_setup::SledConfig;
-use crate::rack_setup::service::{PlannedSledDescription, ServicePlan};
-use crate::rack_setup::{
-    from_ipaddr_to_external_floating_ip,
-    from_sockaddr_to_external_floating_addr,
-};
 use crate::sim::SimulatedUpstairs;
-use anyhow::{Context as _, anyhow, bail};
+use anyhow::{Context, anyhow, bail};
+use bootstrap_agent_lockstep_types::RecoverySiloConfig;
 use crucible_agent_client::types::State as RegionState;
 use iddqd::IdOrdMap;
 use illumos_utils::zpool::ZpoolName;
@@ -26,18 +21,16 @@ use internal_dns_types::names::ServiceName;
 use nexus_client::types as NexusTypes;
 use nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
 use nexus_lockstep_client::types::{
-    AllowedSourceIps, CrucibleDatasetCreateRequest, ExternalPortDiscovery,
-    IpRange, Ipv4Range, Ipv6Range, RackInitializationRequest,
-    RackNetworkConfigV2,
+    AllowedSourceIps, CrucibleDatasetCreateRequest, IpRange, Ipv4Range,
+    Ipv6Range, RackInitializationRequest, RackNetworkConfig,
 };
 use nexus_types::deployment::{
     BlueprintPhysicalDiskConfig, BlueprintPhysicalDiskDisposition,
-    BlueprintZoneImageSource, blueprint_zone_type,
+    BlueprintZoneImageSource, LastAllocatedSubnetIpOffset, blueprint_zone_type,
 };
 use nexus_types::deployment::{
     BlueprintZoneConfig, BlueprintZoneDisposition, BlueprintZoneType,
 };
-use nexus_types::inventory::NetworkInterfaceKind;
 use omicron_common::FileKv;
 use omicron_common::address::NEXUS_OPTE_IPV4_SUBNET;
 use omicron_common::address::{DNS_OPTE_IPV4_SUBNET, Ipv6Subnet};
@@ -57,16 +50,24 @@ use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use oxnet::Ipv6Net;
 use rand::seq::IndexedRandom;
+use sled_agent_rack_setup::{
+    PlannedSledDescription, ServicePlan, SledConfig,
+    from_ipaddr_to_external_floating_ip,
+    from_sockaddr_to_external_floating_addr,
+};
+use sled_agent_types::early_networking::PortConfig;
+use sled_agent_types::early_networking::UplinkPorts;
+use sled_agent_types::inventory::NetworkInterface;
+use sled_agent_types::inventory::NetworkInterfaceKind;
 use sled_agent_types::inventory::OmicronZoneDataset;
-use sled_agent_types::rack_init::RecoverySiloConfig;
 use slog::{Drain, Logger, info};
-use std::collections::HashMap;
 use std::net::IpAddr;
 use std::net::Ipv4Addr;
 use std::net::Ipv6Addr;
 use std::net::SocketAddr;
 use std::net::SocketAddrV6;
 use std::sync::Arc;
+use transient_dns_server::TransientDnsServer;
 use uuid::Uuid;
 
 /// Packages up a [`SledAgent`], running the sled agent API under a Dropshot
@@ -110,7 +111,6 @@ impl Server {
         let sled_agent = SledAgent::new_simulated_with_id(
             &config,
             sa_log,
-            config.nexus_address,
             Arc::clone(&nexus_client),
             simulated_upstairs.clone(),
             sled_index,
@@ -226,7 +226,12 @@ impl Server {
                 },
             );
 
-            sled_agent.create_zpool(zpool_id, physical_disk_id, zpool.size);
+            sled_agent.create_zpool(
+                zpool_id,
+                physical_disk_id,
+                zpool.size,
+                zpool.health,
+            );
             let dataset_id = DatasetUuid::new_v4();
             let address =
                 sled_agent.create_crucible_dataset(zpool_id, dataset_id);
@@ -338,9 +343,7 @@ pub async fn run_standalone_server(
     rss_args: &RssArgs,
 ) -> Result<(), anyhow::Error> {
     let (drain, registration) = slog_dtrace::with_drain(
-        logging
-            .to_logger("sled-agent")
-            .map_err(|message| anyhow!("initializing logger: {}", message))?,
+        logging.to_logger("sled-agent").context("initializing logger")?,
     );
     let log = slog::Logger::root(drain.fuse(), slog::o!(FileKv));
     if let slog_dtrace::ProbeRegistration::Failed(e) = registration {
@@ -359,9 +362,9 @@ pub async fn run_standalone_server(
 
     // Start the Internal DNS server
     let dns = if let Some(addr) = rss_args.internal_dns_dns_addr {
-        dns_server::TransientServer::new_with_address(&log, addr.into()).await?
+        TransientDnsServer::new_with_address(&log, addr.into()).await?
     } else {
-        dns_server::TransientServer::new(&log).await?
+        TransientDnsServer::new(&log).await?
     };
     let mut dns_config_builder = DnsConfigBuilder::new();
 
@@ -460,7 +463,7 @@ pub async fn run_standalone_server(
                         external_ip: from_ipaddr_to_external_floating_ip(
                             external_ip,
                         ),
-                        nic: nexus_types::inventory::NetworkInterface {
+                        nic: NetworkInterface {
                             id: Uuid::new_v4(),
                             kind: NetworkInterfaceKind::Service {
                                 id: id.into_untyped_uuid(),
@@ -515,7 +518,7 @@ pub async fn run_standalone_server(
                         dns_address: from_sockaddr_to_external_floating_addr(
                             SocketAddr::V6(external_dns_internal_addr),
                         ),
-                        nic: nexus_types::inventory::NetworkInterface {
+                        nic: NetworkInterface {
                             id: Uuid::new_v4(),
                             kind: NetworkInterfaceKind::Service {
                                 id: id.into_untyped_uuid(),
@@ -590,12 +593,25 @@ pub async fn run_standalone_server(
             }
             SocketAddr::V6(addr) => addr,
         };
+
+        let subnet = Ipv6Subnet::new(*underlay_address.ip());
+        let last_allocated_ip_subnet_offset = LastAllocatedSubnetIpOffset::new(
+            zones
+                .iter()
+                .map(|zone| zone.zone_type.underlay_ip())
+                .filter(|ip| subnet.net().contains(*ip))
+                .map(|ip| ip.segments()[7])
+                .max()
+                .expect("no zones are included in the plan"),
+        );
+
         let inventory = server.sled_agent.inventory(underlay_address.into())?;
         let mut all_sleds = IdOrdMap::new();
         all_sleds.insert_overwrite(PlannedSledDescription {
             underlay_address,
             sled_id: config.id,
-            subnet: Ipv6Subnet::new(*underlay_address.ip()),
+            subnet,
+            last_allocated_ip_subnet_offset,
             config: SledConfig {
                 disks: omicron_physical_disks_config
                     .disks
@@ -634,16 +650,20 @@ pub async fn run_standalone_server(
         internal_dns_zone_config: dns_config,
         external_dns_zone_name: DNS_ZONE_EXTERNAL_TESTING.to_owned(),
         recovery_silo,
-        external_port_count: ExternalPortDiscovery::Static(HashMap::new()),
-        rack_network_config: RackNetworkConfigV2 {
+        rack_network_config: RackNetworkConfig {
             rack_subnet: Ipv6Net::host_net(Ipv6Addr::LOCALHOST),
-            infra_ip_first: Ipv4Addr::LOCALHOST,
-            infra_ip_last: Ipv4Addr::LOCALHOST,
-            ports: Vec::new(),
+            infra_ip_first: IpAddr::V4(Ipv4Addr::LOCALHOST),
+            infra_ip_last: IpAddr::V4(Ipv4Addr::LOCALHOST),
+            // `UplinkPorts` must be non-empty; the simulated rack doesn't
+            // exercise uplinks, so use a single placeholder port.
+            ports: UplinkPorts::new(vec![PortConfig::empty_for_tests("qsfp0")])
+                .expect("placeholder port list is non-empty"),
             bgp: Vec::new(),
             bfd: Vec::new(),
         },
         allowed_source_ips: AllowedSourceIps::Any,
+        initial_trust_quorum_configuration: None,
+        external_jumbo_frames_opt_in_enabled: false,
     };
 
     let mut nexus_lockstep_address = config.nexus_address;

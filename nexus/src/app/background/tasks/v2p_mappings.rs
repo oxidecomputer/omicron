@@ -72,26 +72,27 @@ impl BackgroundTask for V2PManager {
             // create a set of updates from the v2p mappings
             let desired_v2p: HashSet<_> = v2p_mappings
                 .into_iter()
-                .filter_map(|mapping| {
-                    // TODO-completeness: Support dual-stack in the
-                    // `VirtualNetworkInterfaceHost` type. See
-                    // https://github.com/oxidecomputer/omicron/issues/9246.
-                    let Some(virtual_ip) = mapping.ipv4.map(IpAddr::from) else {
-                        error!(
-                            &log,
-                            "No IPv4 address in V2P mapping";
-                            "nic_id" => %mapping.nic_id,
-                            "sled_id" => %mapping.sled_id,
-                        );
-                        return None;
-                    };
-                    Some(VirtualNetworkInterfaceHost {
-                        virtual_ip,
-                        virtual_mac: *mapping.mac,
-                        physical_host_ip: *mapping.sled_ip,
-                        vni: mapping.vni.0,
-                    })
+                .flat_map(|mapping| {
+                    [
+                        mapping.ipv4.map(|x| {
+                            VirtualNetworkInterfaceHost {
+                                virtual_ip: IpAddr::from(x),
+                                virtual_mac: *mapping.mac,
+                                physical_host_ip: *mapping.sled_ip,
+                                vni: mapping.vni.0,
+                            }
+                        }),
+                        mapping.ipv6.map(|x| {
+                            VirtualNetworkInterfaceHost {
+                                virtual_ip: IpAddr::from(x),
+                                virtual_mac: *mapping.mac,
+                                physical_host_ip: *mapping.sled_ip,
+                                vni: mapping.vni.0,
+                            }
+                        }),
+                    ]
                 })
+                .flatten()
                 .collect();
 
             for (sled, client) in sled_clients {

@@ -62,3 +62,11 @@ where
             .map_err(|e| e.into())
     }
 }
+
+impl TryFrom<i64> for Generation {
+    type Error = external::GenerationNegativeError;
+
+    fn try_from(value: i64) -> Result<Self, Self::Error> {
+        Ok(Self(external::Generation::try_from(value)?))
+    }
+}

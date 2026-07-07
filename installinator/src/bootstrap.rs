@@ -2,8 +2,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-// Copyright 2023 Oxide Computer Company
-
 //! Perform "bootstrap-agent lite" sled setup.
 
 use anyhow::Context;
@@ -18,8 +16,9 @@ use omicron_common::address::SLED_PREFIX;
 use omicron_common::backoff::retry_notify;
 use omicron_common::backoff::retry_policy_internal_service_aggressive;
 use omicron_ddm_admin_client::Client as DdmAdminClient;
+use sled_hardware::DataLinks;
 use sled_hardware::underlay;
-use sled_hardware_types::underlay::BootstrapInterface;
+use sled_hardware::underlay::BootstrapInterface;
 use slog::Logger;
 use slog::info;
 use slog_error_chain::InlineErrorChain;
@@ -31,11 +30,11 @@ const MG_DDM_MANIFEST_PATH: &str = "/opt/oxide/mg-ddm/pkg/ddm/manifest.xml";
 // `sled_agent::bootstrap::server::Server::start()`; consider whether we could
 // find a way for them to share it.
 pub(crate) async fn bootstrap_sled(
-    data_links: &[String; 2],
+    links: &DataLinks,
     log: Logger,
 ) -> Result<()> {
     // Find address objects to pass to maghemite.
-    let links = underlay::find_chelsio_links(data_links)
+    let links = underlay::find_chelsio_links(links)
         .await
         .context("failed to find chelsio links")?;
     ensure!(
@@ -70,9 +69,11 @@ pub(crate) async fn bootstrap_sled(
             .context("failed to ensure bootstrap etherstub vnic existence")?;
 
     // Use the mac address of the first link to derive our bootstrap address.
-    let ip = BootstrapInterface::GlobalZone.ip(&links[0]).await.with_context(
-        || format!("failed to derive a bootstrap prefix from {:?}", links[0]),
-    )?;
+    let ip = underlay::bootstrap_ip(BootstrapInterface::GlobalZone, &links[0])
+        .await
+        .with_context(|| {
+            format!("failed to derive a bootstrap prefix from {:?}", links[0])
+        })?;
 
     Zones::ensure_has_global_zone_v6_address(
         bootstrap_etherstub_vnic,

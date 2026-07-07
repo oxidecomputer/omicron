@@ -493,15 +493,11 @@ has_permission(actor: AuthenticatedActor, "create_child", ip_pool: IpPool)
 	if actor.is_user and silo in actor.silo and silo.fleet = ip_pool.fleet;
 
 # Describes the policy for accessing "/v1/multicast-groups" in the API
+# Groups are created when the first instance joins and deleted when the last leaves.
 resource MulticastGroupList {
-	permissions = [
-	    "list_children",
-	    "create_child",
-	];
+	permissions = [ "list_children" ];
 
 	relations = { parent_fleet: Fleet };
-	# Fleet Administrators can create multicast groups
-	"create_child" if "admin" on "parent_fleet";
 
 	# Fleet Viewers can list multicast groups
 	"list_children" if "viewer" on "parent_fleet";
@@ -509,29 +505,28 @@ resource MulticastGroupList {
 has_relation(fleet: Fleet, "parent_fleet", multicast_group_list: MulticastGroupList)
 	if multicast_group_list.fleet = fleet;
 
-# Any authenticated user can create multicast groups in their fleet.
-# This is necessary to allow silo users to create multicast groups for
-# cross-project and cross-silo communication without requiring Fleet::Admin.
-has_permission(actor: AuthenticatedActor, "create_child", multicast_group_list: MulticastGroupList)
-	if silo in actor.silo and silo.fleet = multicast_group_list.fleet;
-
 # Any authenticated user can list multicast groups in their fleet.
-# This is necessary because multicast groups are fleet-scoped resources that
-# silo users need to discover and attach their instances to, without requiring
-# Fleet::Viewer role.
+# This enables silo users to discover groups for attaching instances,
+# without requiring the Fleet::Viewer role.
 has_permission(actor: AuthenticatedActor, "list_children", multicast_group_list: MulticastGroupList)
-	if silo in actor.silo and silo.fleet = multicast_group_list.fleet;
+	if actor.is_user and silo in actor.silo and silo.fleet = multicast_group_list.fleet;
 
-# Any authenticated user can read and modify individual multicast groups in their fleet.
-# Users can create, modify, and consume (attach instances to) multicast groups.
-# This enables cross-project and cross-silo multicast while maintaining
-# appropriate security boundaries via API authorization and underlay group
-# membership validation.
+# MulticastGroup is a fleet-level discovery resource.
+# Join/leave authorization is gated by Instance::Modify, not the group itself.
+resource MulticastGroup {
+	permissions = [ "read", "list_children" ];
+	relations = { parent_fleet: Fleet };
+}
+has_relation(fleet: Fleet, "parent_fleet", multicast_group: MulticastGroup)
+	if multicast_group.fleet = fleet;
+
+# Any authenticated user can read multicast groups in their fleet
 has_permission(actor: AuthenticatedActor, "read", multicast_group: MulticastGroup)
-	if silo in actor.silo and silo.fleet = multicast_group.fleet;
+	if actor.is_user and silo in actor.silo and silo.fleet = multicast_group.fleet;
 
-has_permission(actor: AuthenticatedActor, "modify", multicast_group: MulticastGroup)
-	if silo in actor.silo and silo.fleet = multicast_group.fleet;
+# Any authenticated user can list members of multicast groups in their fleet
+has_permission(actor: AuthenticatedActor, "list_children", multicast_group: MulticastGroup)
+	if actor.is_user and silo in actor.silo and silo.fleet = multicast_group.fleet;
 
 # Describes the policy for reading and writing the audit log
 resource AuditLog {
@@ -615,6 +610,17 @@ resource DeviceAuthRequestList {
 }
 has_relation(fleet: Fleet, "parent_fleet", collection: DeviceAuthRequestList)
 	if collection.fleet = fleet;
+
+# Describes the policy for creating and managing trust quorum configurations
+# This may change in a multirack future to a per rack parent
+resource TrustQuorumConfig {
+    permissions = [ "read", "modify" ];
+	relations = { parent_fleet: Fleet };
+	"read" if "viewer" on "parent_fleet";
+	"modify" if "admin" on "parent_fleet";
+}
+has_relation(fleet: Fleet, "parent_fleet", config: TrustQuorumConfig)
+	if config.rack.fleet = fleet;
 
 # Describes the policy for creating and managing Silo certificates
 resource SiloCertificateList {
@@ -895,3 +901,22 @@ has_relation(silo: Silo, "containing_silo", collection: SiloImageList)
 # similar to InProjectLimited and InProjectFull.
 has_permission(actor: Actor, "modify", silo_image: SiloImage) if
     has_role(actor, "limited-collaborator", silo_image.silo);
+
+# Describes the policy for accessing "/v1/system/subnet-pools" in the API
+resource SubnetPoolList {
+	permissions = [
+	    "list_children",
+	    "modify",
+	    "create_child",
+	];
+
+	# Fleet Administrators can create or modify the Subnet Pools list.
+	relations = { parent_fleet: Fleet };
+	"modify" if "admin" on "parent_fleet";
+	"create_child" if "admin" on "parent_fleet";
+
+	# Fleet Viewers can list External Subnet Pools
+	"list_children" if "viewer" on "parent_fleet";
+}
+has_relation(fleet: Fleet, "parent_fleet", subnet_pool_list: SubnetPoolList)
+	if subnet_pool_list.fleet = fleet;

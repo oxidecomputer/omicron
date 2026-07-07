@@ -9,10 +9,10 @@ use super::messages::Identify;
 use super::storage::NetworkConfig;
 use crate::schemes::Hello;
 use bytes::Buf;
-use derive_more::From;
 use serde::{Deserialize, Serialize};
 use sled_hardware_types::Baseboard;
 use slog::{Logger, debug, error, info, o, warn};
+use slog_error_chain::InlineErrorChain;
 use std::collections::VecDeque;
 use std::io::Cursor;
 use std::net::SocketAddrV6;
@@ -48,9 +48,11 @@ pub enum Msg {
 /// An error returned from an EstablishedConn
 ///
 /// Also a great movie
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 enum ConnErr {
+    #[error("connection closed (will retry)")]
     Retry,
+    #[error("connection closed (closing due to shutdown request)")]
     Close,
 }
 
@@ -218,7 +220,10 @@ impl EstablishedConn {
             };
 
             if let Err(err) = res {
-                warn!(self.log, "Connection error: {err:?}");
+                warn!(
+                    self.log, "Connection error";
+                    InlineErrorChain::new(&err),
+                );
                 return err;
             }
         }
@@ -249,7 +254,10 @@ impl EstablishedConn {
                 Ok(())
             }
             Err(e) => {
-                warn!(self.log, "Closing connection: Failed to write: {e}");
+                warn!(
+                    self.log, "Closing connection: Failed to write";
+                    InlineErrorChain::new(&e),
+                );
                 self.close().await
             }
         }
@@ -264,7 +272,10 @@ impl EstablishedConn {
                 self.total_read += n;
             }
             Err(e) => {
-                warn!(self.log, "Closing connection: failed to read: {e}");
+                warn!(
+                    self.log, "Closing connection: failed to read";
+                    InlineErrorChain::new(&e),
+                );
                 return self.close().await;
             }
         }
@@ -295,8 +306,8 @@ impl EstablishedConn {
                 }
                 Err(e) => {
                     warn!(
-                        self.log,
-                        "Closing connection: failed to deserialize: {e}",
+                        self.log, "Closing connection: failed to deserialize";
+                        InlineErrorChain::new(&e),
                     );
                     return self.close().await;
                 }
@@ -318,7 +329,8 @@ impl EstablishedConn {
                     {
                         warn!(
                             self.log,
-                            "Failed to send received fsm msg to main task: {e:?}"
+                            "Failed to send received fsm msg to main task";
+                            InlineErrorChain::new(&e),
                         );
                     }
                 }
@@ -341,8 +353,9 @@ impl EstablishedConn {
                     {
                         warn!(
                             self.log,
-                            "Failed to send received NetworkConfig with
-                             generation {generation} to main task: {e:?}"
+                            "Failed to send received NetworkConfig with \
+                             generation {generation} to main task";
+                            InlineErrorChain::new(&e),
                         );
                     }
                 }
@@ -353,7 +366,7 @@ impl EstablishedConn {
     // Send ping messages and check for inactivity timeouts
     async fn ping(&mut self) -> Result<(), ConnErr> {
         if Instant::now() - self.last_received_msg > INACTIVITY_TIMEOUT {
-            warn!(self.log, "Closing connection: inactivity timeout",);
+            warn!(self.log, "Closing connection: inactivity timeout");
             return self.close().await;
         }
         self.write_framed_to_queue(Msg::Ping).await
@@ -372,7 +385,8 @@ impl EstablishedConn {
                 Err(e) => {
                     warn!(
                         self.log,
-                        "Closing connection: Failed to serialize msg: {}", e
+                        "Closing connection: Failed to serialize msg";
+                        InlineErrorChain::new(&e),
                     );
                     self.close().await
                 }
@@ -392,7 +406,10 @@ impl EstablishedConn {
             })
             .await
         {
-            warn!(self.log, "Failed to send to main task: {e:?}");
+            warn!(
+                self.log, "Failed to send to main task";
+                InlineErrorChain::new(&e),
+            );
         }
         let _ = self.write_sock.shutdown().await;
         Err(ConnErr::Retry)
@@ -417,7 +434,11 @@ pub async fn spawn_connection_initiator_task(
                 Ok(sock) => sock,
                 Err(err) => {
                     // TODO: Throttle this?
-                    warn!(log, "Failed to connect: {err:?}"; "addr" => addr.to_string());
+                    warn!(
+                        log, "Failed to connect";
+                        "addr" => addr.to_string(),
+                        InlineErrorChain::new(&err),
+                    );
                     sleep(CONNECTION_RETRY_TIMEOUT).await;
                     continue;
                 }
@@ -425,20 +446,19 @@ pub async fn spawn_connection_initiator_task(
 
             info!(log, "Connected to peer"; "addr" => addr.to_string());
 
-            let (read_sock, write_sock, identify) = match perform_handshake(
-                sock,
-                &my_peer_id,
-                my_addr,
-            )
-            .await
-            {
-                Ok(val) => val,
-                Err(e) => {
-                    warn!(log, "Handshake error: {:?}", e; "addr" => addr.to_string());
-                    sleep(CONNECTION_RETRY_TIMEOUT).await;
-                    continue;
-                }
-            };
+            let (read_sock, write_sock, identify) =
+                match perform_handshake(sock, &my_peer_id, my_addr).await {
+                    Ok(val) => val,
+                    Err(e) => {
+                        warn!(
+                            log, "Handshake error";
+                            "addr" => addr.to_string(),
+                            InlineErrorChain::new(&e),
+                        );
+                        sleep(CONNECTION_RETRY_TIMEOUT).await;
+                        continue;
+                    }
+                };
 
             let log = log.new(o!("remote_peer_id" => identify.id.to_string()));
 
@@ -493,29 +513,28 @@ pub async fn spawn_accepted_connection_management_task(
     let (tx, rx) = mpsc::channel(2);
     let log = log.clone();
     let handle = tokio::spawn(async move {
-        let (read_sock, write_sock, identify) = match perform_handshake(
-            sock,
-            &my_peer_id,
-            my_addr,
-        )
-        .await
-        {
-            Ok(val) => val,
-            Err(e) => {
-                warn!(log, "Handshake error: {:?}", e; "addr" => client_addr.to_string());
-                // This is a server so we bail and wait for a new connection.
-                // We must inform the main task so it can clean up any metadata.
-                let _ = main_tx
-                    .send(ConnToMainMsg {
-                        handle_unique_id: unique_id,
-                        msg: ConnToMainMsgInner::FailedAcceptorHandshake {
-                            addr: client_addr,
-                        },
-                    })
-                    .await;
-                return;
-            }
-        };
+        let (read_sock, write_sock, identify) =
+            match perform_handshake(sock, &my_peer_id, my_addr).await {
+                Ok(val) => val,
+                Err(e) => {
+                    warn!(
+                        log, "Handshake error";
+                        "addr" => client_addr.to_string(),
+                        InlineErrorChain::new(&e),
+                    );
+                    // This is a server so we bail and wait for a new connection.
+                    // We must inform the main task so it can clean up any metadata.
+                    let _ = main_tx
+                        .send(ConnToMainMsg {
+                            handle_unique_id: unique_id,
+                            msg: ConnToMainMsgInner::FailedAcceptorHandshake {
+                                addr: client_addr,
+                            },
+                        })
+                        .await;
+                    return;
+                }
+            };
 
         // Connections are only supposed to come from peers with `ip:port`
         // values that sort higher than the peer they are connecting to. We
@@ -602,15 +621,19 @@ fn read_frame_size(buf: [u8; FRAME_HEADER_SIZE]) -> usize {
     u32::from_be_bytes(buf) as usize
 }
 
-#[derive(Debug, From)]
+#[derive(Debug, thiserror::Error)]
 enum HandshakeError {
-    // Rust 1.77 warns on tuple variants not being used, but in reality these are
-    // used for their Debug impl.
-    Serialization(#[allow(dead_code)] ciborium::ser::Error<std::io::Error>),
-    Deserialization(#[allow(dead_code)] ciborium::de::Error<std::io::Error>),
-    Io(#[allow(dead_code)] tokio::io::Error),
+    #[error("serialization failed")]
+    Serialization(#[from] ciborium::ser::Error<std::io::Error>),
+    #[error("deserialization failed")]
+    Deserialization(#[from] ciborium::de::Error<std::io::Error>),
+    #[error("I/O error")]
+    Io(#[from] tokio::io::Error),
+    #[error("unsupported scheme")]
     UnsupportedScheme,
+    #[error("unsupported version")]
     UnsupportedVersion,
+    #[error("timeout")]
     Timeout,
 }
 

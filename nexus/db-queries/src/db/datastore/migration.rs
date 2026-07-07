@@ -24,10 +24,10 @@ use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::UpdateResult;
-use omicron_common::api::internal::nexus;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
 use omicron_uuid_kinds::PropolisUuid;
+use sled_agent_types::instance;
 use uuid::Uuid;
 
 impl DataStore {
@@ -87,7 +87,7 @@ impl DataStore {
         opctx: &OpContext,
         migration_id: Uuid,
     ) -> UpdateResult<bool> {
-        let failed = MigrationState(nexus::MigrationState::Failed);
+        let failed = MigrationState::FAILED;
         diesel::update(dsl::migration)
             .filter(dsl::id.eq(migration_id))
             .filter(dsl::time_deleted.is_null())
@@ -133,7 +133,7 @@ impl DataStore {
         &self,
         conn: &async_bb8_diesel::Connection<DbConnection>,
         vmm_id: &PropolisUuid,
-        migration: &nexus::MigrationRuntimeState,
+        migration: &instance::MigrationRuntimeState,
     ) -> Result<UpdateAndQueryResult<Migration>, diesel::result::Error> {
         let generation = Generation(migration.generation);
         diesel::update(dsl::migration)
@@ -155,7 +155,7 @@ impl DataStore {
         &self,
         conn: &async_bb8_diesel::Connection<DbConnection>,
         vmm_id: &PropolisUuid,
-        migration: &nexus::MigrationRuntimeState,
+        migration: &instance::MigrationRuntimeState,
     ) -> Result<UpdateAndQueryResult<Migration>, diesel::result::Error> {
         let generation = Generation(migration.generation);
         diesel::update(dsl::migration)
@@ -182,7 +182,8 @@ mod tests {
     use crate::db::pub_test_utils::TestDatabase;
     use nexus_db_lookup::LookupPath;
     use nexus_db_model::Project;
-    use nexus_types::external_api::params;
+    use nexus_types::external_api::instance as instance_types;
+    use nexus_types::external_api::project;
     use nexus_types::silo::DEFAULT_SILO_ID;
     use omicron_common::api::external::ByteCount;
     use omicron_common::api::external::IdentityMetadataCreateParams;
@@ -204,7 +205,7 @@ mod tests {
                 Project::new_with_id(
                     project_id,
                     silo_id,
-                    params::ProjectCreate {
+                    project::ProjectCreate {
                         identity: IdentityMetadataCreateParams {
                             name: "stuff".parse().unwrap(),
                             description: "Where I keep my stuff".into(),
@@ -221,7 +222,7 @@ mod tests {
                 Instance::new(
                     instance_id,
                     project_id,
-                    &params::InstanceCreate {
+                    &instance_types::InstanceCreate {
                         identity: IdentityMetadataCreateParams {
                             name: "myinstance".parse().unwrap(),
                             description: "It's an instance".into(),
@@ -231,7 +232,7 @@ mod tests {
                         hostname: "myhostname".try_into().unwrap(),
                         user_data: Vec::new(),
                         network_interfaces:
-                            params::InstanceNetworkInterfaceAttachment::None,
+                            instance_types::InstanceNetworkInterfaceAttachment::None,
                         external_ips: Vec::new(),
                         disks: Vec::new(),
                         boot_disk: None,
@@ -241,6 +242,7 @@ mod tests {
                         auto_restart_policy: Default::default(),
                         anti_affinity_groups: Vec::new(),
                         multicast_groups: Vec::new(),
+                        enable_jumbo_frames: false,
                     },
                 ),
             )

@@ -2,8 +2,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-// Copyright 2023 Oxide Computer Company
-
 use anyhow::Context;
 use anyhow::Result;
 use anyhow::anyhow;
@@ -25,6 +23,7 @@ use slog::Drain;
 use slog::Level;
 use slog::Logger;
 use slog::o;
+use slog_error_chain::InlineErrorChain;
 use std::fs;
 use std::io;
 use std::net::SocketAddrV6;
@@ -533,7 +532,12 @@ async fn main_impl() -> Result<()> {
                     SERIAL_CONSOLE_COMPONENT,
                 )
                 .await
-                .map_err(|err| anyhow!("{err}"))?;
+                .map_err(|err| {
+                    anyhow!(
+                        "Failed to connect to MGS websocket: {}",
+                        InlineErrorChain::new(&err)
+                    )
+                })?;
 
             let ws = WebSocketStream::from_raw_socket(
                 upgraded.into_inner(),

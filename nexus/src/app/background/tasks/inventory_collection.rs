@@ -13,6 +13,7 @@ use internal_dns_types::names::ServiceName;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_inventory::InventoryError;
+use nexus_networking::GatewayClient;
 use nexus_types::deployment::SledFilter;
 use nexus_types::inventory::Collection;
 use omicron_cockroach_metrics::CockroachClusterAdminClient;
@@ -136,16 +137,9 @@ async fn inventory_activate(
         .context("pruning old collections")?;
 
     // Find MGS clients.
-    let mgs_clients = resolver
-        .lookup_all_socket_v6(ServiceName::ManagementGatewayService)
-        .await
-        .context("looking up MGS addresses")?
-        .into_iter()
-        .map(|sockaddr| {
-            let url = format!("http://{}", sockaddr);
-            let log = opctx.log.new(o!("gateway_url" => url.clone()));
-            gateway_client::Client::new(&url, log)
-        })
+    let mgs_clients = GatewayClient::resolve_all_gateways(&opctx.log, resolver)
+        .await?
+        .map(|GatewayClient { client, .. }| client)
         .collect::<Vec<_>>();
 
     // Find clickhouse-admin-keeper servers if there are any.
@@ -278,11 +272,11 @@ mod test {
     use omicron_common::api::external::ByteCount;
     use omicron_common::api::external::LookupType;
     use omicron_uuid_kinds::CollectionUuid;
+    use omicron_uuid_kinds::RackUuid;
     use omicron_uuid_kinds::SledUuid;
     use std::collections::BTreeSet;
     use std::net::Ipv6Addr;
     use std::net::SocketAddrV6;
-    use uuid::Uuid;
 
     type ControlPlaneTestContext =
         nexus_test_utils::ControlPlaneTestContext<crate::Server>;
@@ -427,7 +421,7 @@ mod test {
         assert_eq!(initial_found_urls.len(), 2);
 
         // Insert some sleds.
-        let rack_id = Uuid::new_v4();
+        let rack_id = RackUuid::new_v4();
         let mut sleds = Vec::new();
         for i in 0..64 {
             let sled = SledUpdate::new(

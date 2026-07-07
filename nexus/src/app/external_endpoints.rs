@@ -436,7 +436,7 @@ impl TryFrom<Certificate> for TlsCertificate {
                 .expect("parsing private key PEM")
                 .expect("no private keys found");
             let rustls_signing_key =
-                rustls::crypto::ring::sign::any_supported_type(
+                rustls::crypto::aws_lc_rs::sign::any_supported_type(
                     &rustls_private_key,
                 )
                 .context("parsing DER private key")?;
@@ -513,7 +513,7 @@ pub(crate) async fn read_all_endpoints(
             )
             .await?;
         paginator = p.found_batch(&batch, &|s: &Silo| s.id());
-        silos.extend(batch.into_iter());
+        silos.extend(batch);
     }
 
     // Fetch all external DNS zones.  We should really only ever have one, but
@@ -526,7 +526,7 @@ pub(crate) async fn read_all_endpoints(
             .dns_zones_list(opctx, DnsGroup::External, &p.current_pagparams())
             .await?;
         paginator = p.found_batch(&batch, &|z: &DnsZone| z.zone_name.clone());
-        external_dns_zones.extend(batch.into_iter());
+        external_dns_zones.extend(batch);
     }
     bail_unless!(
         !external_dns_zones.is_empty(),
@@ -805,8 +805,8 @@ mod test {
     use nexus_db_model::DnsZone;
     use nexus_db_model::ServiceKind;
     use nexus_db_model::Silo;
-    use nexus_types::external_api::params;
-    use nexus_types::external_api::shared;
+    use nexus_types::external_api::certificate;
+    use nexus_types::external_api::silo;
     use nexus_types::identity::Resource;
     use omicron_common::api::external::Error;
     use omicron_common::api::external::IdentityMetadataCreateParams;
@@ -818,16 +818,16 @@ mod test {
 
     fn create_silo(silo_id: Option<Uuid>, name: &str, saml: bool) -> Silo {
         let identity_mode = if saml {
-            shared::SiloIdentityMode::SamlJit
+            silo::SiloIdentityMode::SamlJit
         } else {
-            shared::SiloIdentityMode::LocalOnly
+            silo::SiloIdentityMode::LocalOnly
         };
-        let params = params::SiloCreate {
+        let params = silo::SiloCreate {
             identity: IdentityMetadataCreateParams {
                 name: name.parse().unwrap(),
                 description: String::new(),
             },
-            quotas: params::SiloQuotasCreate::empty(),
+            quotas: silo::SiloQuotasCreate::empty(),
             discoverable: false,
             identity_mode,
             admin_group_name: None,
@@ -846,7 +846,7 @@ mod test {
     fn create_certificate(
         domain: &str,
         expired: bool,
-    ) -> params::CertificateCreate {
+    ) -> certificate::CertificateCreate {
         let mut cert_params =
             rcgen::CertificateParams::new(vec![domain.to_string()]);
         if expired {
@@ -857,14 +857,14 @@ mod test {
             cert.serialize_pem().expect("serializing certificate as PEM");
         let key_pem = cert.serialize_private_key_pem();
         let namestr = format!("cert-for-{}", domain.replace('.', "-"));
-        params::CertificateCreate {
+        certificate::CertificateCreate {
             identity: IdentityMetadataCreateParams {
                 name: namestr.parse().unwrap(),
                 description: String::new(),
             },
             cert: cert_pem,
             key: key_pem,
-            service: shared::ServiceUsingCertificate::ExternalApi,
+            service: certificate::ServiceUsingCertificate::ExternalApi,
         }
     }
 

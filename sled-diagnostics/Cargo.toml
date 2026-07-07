@@ -25,6 +25,7 @@ regex.workspace = true
 schemars.workspace = true
 serde.workspace = true
 slog.workspace = true
+slog-error-chain.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["full"] }
 zfs-test-harness.workspace = true

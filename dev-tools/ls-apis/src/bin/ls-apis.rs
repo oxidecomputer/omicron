@@ -38,6 +38,8 @@ enum Cmds {
     Apis(ShowDepsArgs),
     /// check the update DAG and propose changes
     Check,
+    /// print deployment unit DAG edges as TOML
+    DagEdges,
     /// print out APIs exported and consumed by each deployment unit
     DeploymentUnits(DotArgs),
     /// print out APIs exported and consumed, by server component
@@ -86,9 +88,24 @@ fn main() -> Result<()> {
         Cmds::Adoc => run_adoc(&apis),
         Cmds::Apis(args) => run_apis(&apis, args),
         Cmds::Check => run_check(&apis),
+        Cmds::DagEdges => run_dag_edges(&apis),
         Cmds::DeploymentUnits(args) => run_deployment_units(&apis, args),
         Cmds::Servers(args) => run_servers(&apis, args),
     }
+}
+
+fn run_dag_edges(apis: &SystemApis) -> Result<()> {
+    let output = apis.deployment_unit_dag()?;
+    let toml_str = toml::to_string_pretty(&output)
+        .context("serializing DAG edges as TOML")?;
+    print!(
+        "# BEGIN @generated server-side deployment unit DAG edges.\n\
+         # To regenerate, run `EXPECTORATE=overwrite cargo nextest run -p omicron-ls-apis`.\n\
+         # YOU SHOULD STILL REVIEW CHANGES TO THIS FILE FOR CORRECTNESS.\n\
+         \n\
+         {toml_str}"
+    );
+    Ok(())
 }
 
 fn run_adoc(apis: &SystemApis) -> Result<()> {
@@ -155,13 +172,21 @@ fn run_apis(apis: &SystemApis, args: ShowDepsArgs) -> Result<()> {
         for c in apis.api_consumers(&api.client_package_name, args.filter)? {
             let (repo_name, package_path) =
                 apis.package_label(c.server_pkgname)?;
+            let note = match metadata
+                .server_component(c.server_pkgname)
+                .and_then(|component| component.display_note())
+            {
+                Some(note) => format!(" [{note}]"),
+                None => String::new(),
+            };
             println!(
-                "    consumed by: {} ({}/{}) via {} path{}",
+                "    consumed by: {} ({}/{}) via {} path{}{}",
                 c.server_pkgname,
                 repo_name,
                 package_path,
                 c.dep_paths.len(),
                 if c.dep_paths.len() == 1 { "" } else { "s" },
+                note,
             );
             if args.show_deps {
                 for (i, dep_path) in c.dep_paths.iter().enumerate() {
@@ -212,9 +237,17 @@ fn run_deployment_units(apis: &SystemApis, args: DotArgs) -> Result<()> {
         OutputFormat::Dot => println!("{}", apis.dot_by_unit(args.filter)?),
         OutputFormat::Text => {
             let metadata = apis.api_metadata();
-            for unit in apis.deployment_units() {
-                let server_components = apis.deployment_unit_servers(unit)?;
-                println!("{}", unit);
+            for unit_id in apis.deployment_units() {
+                let info = metadata
+                    .deployment_unit_info(unit_id)
+                    .unwrap_or_else(|| {
+                        panic!(
+                            "deployment unit info for {unit_id:?} should exist"
+                        )
+                    });
+                let server_components =
+                    apis.deployment_unit_servers(unit_id)?;
+                println!("{}", info.name);
                 print_server_components(
                     apis,
                     metadata,
@@ -241,7 +274,15 @@ fn print_server_components<'a>(
 ) -> Result<()> {
     for s in server_components.into_iter() {
         let (repo_name, pkg_path) = apis.package_label(s)?;
-        println!("{}{} ({}/{})", prefix, s, repo_name, pkg_path);
+        match metadata.server_component(s).and_then(|c| c.display_note()) {
+            Some(note) => println!(
+                "{}{} ({}/{}) [{}]",
+                prefix, s, repo_name, pkg_path, note,
+            ),
+            None => {
+                println!("{}{} ({}/{})", prefix, s, repo_name, pkg_path)
+            }
+        }
         for api in metadata
             .apis()
             .filter(|a| apis.is_producer_of(s, &a.client_package_name))
@@ -252,7 +293,14 @@ fn print_server_components<'a>(
             );
         }
         for (c, path) in apis.component_apis_consumed(s, filter)? {
-            println!("{}    consumes: {}", prefix, c);
+            if apis.idu_only_edge_note(s, c).is_some() {
+                println!(
+                    "{}    consumes: {} (intra-deployment-unit-only)",
+                    prefix, c
+                );
+            } else {
+                println!("{}    consumes: {}", prefix, c);
+            }
             if show_deps {
                 for p in path.nodes() {
                     println!("{}        via: {}", prefix, p);
@@ -275,7 +323,7 @@ fn run_servers(apis: &SystemApis, args: DotArgs) -> Result<()> {
             print_server_components(
                 apis,
                 metadata,
-                metadata.server_components(),
+                metadata.server_components().map(|c| c.name()),
                 "",
                 args.show_deps,
                 args.filter,

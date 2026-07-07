@@ -24,10 +24,10 @@ omicron-zone-package.workspace = true
 oxide-tokio-rt.workspace = true
 petgraph.workspace = true
 rayon.workspace = true
-reqwest = { workspace = true, features = [ "rustls-tls" ] }
-ring.workspace = true
+reqwest = { workspace = true, features = [ "rustls" ] }
 semver.workspace = true
 serde.workspace = true
+sha2.workspace = true
 shell-words.workspace = true
 sled-hardware.workspace = true
 slog.workspace = true

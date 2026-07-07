@@ -4,15 +4,13 @@
 
 //! Test-only support code for testing MGS update planning.
 
-use std::collections::BTreeMap;
-
 use chrono::Utc;
-use gateway_client::types::PowerState;
-use gateway_client::types::RotState;
 use gateway_client::types::SpComponentCaboose;
 use gateway_client::types::SpIdentifier;
-use gateway_client::types::SpState;
+use gateway_types::component::PowerState;
+use gateway_types::component::SpState;
 use gateway_types::rot::RotSlot;
+use gateway_types::rot::RotState;
 use iddqd::IdOrdItem;
 use iddqd::IdOrdMap;
 use nexus_types::deployment::BlueprintArtifactVersion;
@@ -41,16 +39,19 @@ use sled_agent_types::inventory::BootPartitionContents;
 use sled_agent_types::inventory::BootPartitionDetails;
 use sled_agent_types::inventory::ConfigReconcilerInventory;
 use sled_agent_types::inventory::ConfigReconcilerInventoryStatus;
-use sled_agent_types::inventory::HealthMonitorInventory;
+use sled_agent_types::inventory::FmdInventory;
 use sled_agent_types::inventory::HostPhase2DesiredSlots;
 use sled_agent_types::inventory::Inventory;
+use sled_agent_types::inventory::OmicronFileSourceResolverInventory;
 use sled_agent_types::inventory::OmicronSledConfig;
 use sled_agent_types::inventory::SledCpuFamily;
 use sled_agent_types::inventory::SledRole;
-use sled_agent_types::inventory::ZoneImageResolverInventory;
+use sled_agent_types::inventory::SvcsEnabledNotOnlineResult;
 use sled_hardware_types::COSMO_SLED_MODEL;
 use sled_hardware_types::GIMLET_SLED_MODEL;
 use sled_hardware_types::OxideSled;
+use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use tufaceous_artifact::ArtifactHash;
 use tufaceous_artifact::ArtifactKind;
 use tufaceous_artifact::ArtifactVersion;
@@ -1302,6 +1303,7 @@ impl<'a> TestBoardCollectionBuilder<'a> {
                     zones: IdOrdMap::new(),
                     remove_mupdate_override: None,
                     host_phase_2: HostPhase2DesiredSlots::current_contents(),
+                    measurements: BTreeSet::new(),
                 };
 
                 // The only sled-agent fields that matter for the purposes of
@@ -1368,9 +1370,12 @@ impl<'a> TestBoardCollectionBuilder<'a> {
                             ledgered_sled_config: Some(fake_sled_config),
                             reconciler_status:
                                 ConfigReconcilerInventoryStatus::NotYetRun,
-                            zone_image_resolver:
-                                ZoneImageResolverInventory::new_fake(),
-                            health_monitor: HealthMonitorInventory::new(),
+                            file_source_resolver:
+                                OmicronFileSourceResolverInventory::new_fake(),
+                            smf_services_enabled_not_online:
+                                SvcsEnabledNotOnlineResult::DataUnavailable,
+                            reference_measurements: IdOrdMap::new(),
+                            fmd: Ok(FmdInventory::default()),
                         },
                     )
                     .unwrap();

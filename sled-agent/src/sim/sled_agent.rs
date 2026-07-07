@@ -7,7 +7,6 @@
 use super::artifact_store::SimArtifactStorage;
 use super::collection::{PokeMode, SimCollection};
 use super::config::Config;
-use super::disk::SimDisk;
 use super::instance::{self, SimInstance};
 use super::storage::CrucibleData;
 use super::storage::Storage;
@@ -19,31 +18,30 @@ use crate::support_bundle::storage::SupportBundleQueryType;
 use crate::updates::UpdateManager;
 use anyhow::Context;
 use anyhow::bail;
+use bootstore::schemes::v0 as bootstore;
 use bytes::Bytes;
 use chrono::Utc;
 use dropshot::Body;
 use dropshot::HttpError;
 use futures::Stream;
+use iddqd::IdOrdMap;
 use omicron_common::api::external::{
-    ByteCount, DiskState, Error, Generation, ResourceType,
+    ByteCount, Error, Generation, ResourceType,
 };
-use omicron_common::api::internal::nexus::{
-    DiskRuntimeState, MigrationRuntimeState, MigrationState, SledVmmState,
-};
+use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::shared::{
-    RackNetworkConfig, ResolvedVpcRoute, ResolvedVpcRouteSet,
-    ResolvedVpcRouteState, RouterId, RouterKind, RouterVersion,
-    VirtualNetworkInterfaceHost,
+    ResolvedVpcRoute, ResolvedVpcRouteSet, ResolvedVpcRouteState, RouterId,
+    RouterKind, RouterVersion, VirtualNetworkInterfaceHost,
 };
 use omicron_common::disk::{
     DatasetsConfig, DatasetsManagementResult, DiskIdentity, DiskVariant,
     DisksManagementResult, OmicronPhysicalDisksConfig,
 };
 use omicron_uuid_kinds::{
-    DatasetUuid, ExternalZpoolUuid, GenericUuid, PhysicalDiskUuid,
-    PropolisUuid, SledUuid, SupportBundleUuid, ZpoolUuid,
+    DatasetUuid, GenericUuid, PhysicalDiskUuid, PropolisUuid, SledUuid,
+    SupportBundleUuid, ZpoolUuid,
 };
-use oxnet::Ipv6Net;
+use oxnet::{IpNet, Ipv6Net};
 use propolis_client::instance_spec::FileStorageBackend;
 use propolis_client::instance_spec::SpecKey;
 use propolis_client::{
@@ -51,28 +49,34 @@ use propolis_client::{
 };
 use range_requests::PotentialRange;
 use sled_agent_health_monitor::HealthMonitorHandle;
+use sled_agent_types::attached_subnet::{AttachedSubnet, AttachedSubnets};
 use sled_agent_types::dataset::LocalStorageDatasetEnsureRequest;
 use sled_agent_types::disk::DiskStateRequested;
-use sled_agent_types::early_networking::{
-    EarlyNetworkConfig, EarlyNetworkConfigBody,
-};
+use sled_agent_types::early_networking::EarlyNetworkConfigEnvelope;
+use sled_agent_types::early_networking::PortConfig;
+use sled_agent_types::early_networking::RackNetworkConfig;
+use sled_agent_types::early_networking::UplinkPorts;
 use sled_agent_types::instance::{
     InstanceEnsureBody, InstanceExternalIpBody, InstanceMulticastMembership,
-    VmmPutStateResponse, VmmStateRequested, VmmUnregisterResponse,
+    MigrationRuntimeState, MigrationState, SledVmmState, VmmPutStateResponse,
+    VmmStateRequested, VmmUnregisterResponse,
 };
 use sled_agent_types::inventory::{
-    ConfigReconcilerInventory, ConfigReconcilerInventoryStatus,
-    HostPhase2DesiredSlots, Inventory, InventoryDataset, InventoryDisk,
-    InventoryZpool, OmicronSledConfig, OmicronZonesConfig, SledRole,
-    ZoneImageResolverInventory,
+    ConfigReconcilerInventory, ConfigReconcilerInventoryResult,
+    ConfigReconcilerInventoryStatus, FmdInventory, HostPhase2DesiredSlots,
+    Inventory, InventoryDataset, InventoryDisk, InventoryZpool,
+    OmicronFileSourceResolverInventory, OmicronSledConfig, OmicronZonesConfig,
+    SingleMeasurementInventory, SledRole, ZpoolHealth,
 };
 use sled_agent_types::support_bundle::SupportBundleMetadata;
+use sled_agent_types::system_networking::SystemNetworkingConfig;
 
 use slog::Logger;
 use std::collections::{HashMap, HashSet};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::sync::Arc;
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
 use tufaceous_artifact::ArtifactHash;
 use uuid::Uuid;
@@ -89,11 +93,8 @@ pub struct SledAgent {
     pub ip: IpAddr,
     /// collection of simulated VMMs, indexed by Propolis uuid
     vmms: Arc<SimCollection<SimInstance>>,
-    /// collection of simulated disks, indexed by disk uuid
-    disks: Arc<SimCollection<SimDisk>>,
     storage: Storage,
     updates: UpdateManager,
-    nexus_address: SocketAddr,
     pub nexus_client: Arc<NexusClient>,
     pub simulated_upstairs: Arc<SimulatedUpstairs>,
     pub v2p_mappings: Mutex<HashSet<VirtualNetworkInterfaceHost>>,
@@ -103,6 +104,9 @@ pub struct SledAgent {
     /// lists of external IPs assigned to instances
     pub external_ips:
         Mutex<HashMap<PropolisUuid, HashSet<InstanceExternalIpBody>>>,
+    /// subnets attached to instances.
+    pub attached_subnets:
+        Mutex<HashMap<PropolisUuid, IdOrdMap<AttachedSubnet>>>,
     /// multicast group memberships for instances
     pub multicast_groups:
         Mutex<HashMap<PropolisUuid, HashSet<InstanceMulticastMembership>>>,
@@ -110,7 +114,11 @@ pub struct SledAgent {
     config: Config,
     fake_zones: Mutex<OmicronZonesConfig>,
     instance_ensure_state_error: Mutex<Option<Error>>,
-    pub bootstore_network_config: Mutex<EarlyNetworkConfig>,
+    /// Number of remaining local storage operation failures to inject.
+    /// When > 0, local storage ensure/delete operations decrement this
+    /// counter and return 503 Service Unavailable.
+    local_storage_error_count: AtomicU32,
+    pub bootstore_network_config: Mutex<bootstore::NetworkConfig>,
     pub(super) repo_depot:
         dropshot::HttpServer<ArtifactStore<SimArtifactStorage>>,
     pub log: Logger,
@@ -124,7 +132,6 @@ impl SledAgent {
     pub async fn new_simulated_with_id(
         config: &Config,
         log: Logger,
-        nexus_address: SocketAddr,
         nexus_client: Arc<NexusClient>,
         simulated_upstairs: Arc<SimulatedUpstairs>,
         sled_index: u16,
@@ -134,25 +141,31 @@ impl SledAgent {
         info!(&log, "created simulated sled agent"; "sim_mode" => ?sim_mode);
 
         let instance_log = log.new(o!("kind" => "instances"));
-        let disk_log = log.new(o!("kind" => "disks"));
         let storage_log = log.new(o!("kind" => "storage"));
 
-        let bootstore_network_config = Mutex::new(EarlyNetworkConfig {
-            generation: 0,
-            schema_version: 1,
-            body: EarlyNetworkConfigBody {
-                ntp_servers: Vec::new(),
-                rack_network_config: Some(RackNetworkConfig {
+        let bootstore_network_config = Mutex::new(
+            EarlyNetworkConfigEnvelope::from(&SystemNetworkingConfig {
+                rack_network_config: RackNetworkConfig {
                     rack_subnet: Ipv6Net::new(Ipv6Addr::UNSPECIFIED, 56)
                         .unwrap(),
-                    infra_ip_first: Ipv4Addr::UNSPECIFIED,
-                    infra_ip_last: Ipv4Addr::UNSPECIFIED,
-                    ports: Vec::new(),
+                    infra_ip_first: IpAddr::V4(Ipv4Addr::UNSPECIFIED),
+                    infra_ip_last: IpAddr::V4(Ipv4Addr::UNSPECIFIED),
+                    // The simulated sled-agent doesn't do real uplink setup,
+                    // but `UplinkPorts` must be non-empty, so use a single
+                    // placeholder port.
+                    ports: UplinkPorts::new(vec![PortConfig::empty_for_tests(
+                        "qsfp0",
+                    )])
+                    .expect("placeholder port list is non-empty"),
                     bgp: Vec::new(),
                     bfd: Vec::new(),
-                }),
-            },
-        });
+                },
+                // TODO-correctness Can we fill this in for the simulated
+                // sled-agent?
+                blueprint_external_networking_config: None,
+            })
+            .serialize_to_bootstore_with_generation(0),
+        );
 
         let storage = Storage::new(
             id.into_untyped_uuid(),
@@ -178,18 +191,13 @@ impl SledAgent {
                 instance_log,
                 sim_mode,
             )),
-            disks: Arc::new(SimCollection::new(
-                Arc::clone(&nexus_client),
-                disk_log,
-                sim_mode,
-            )),
             storage,
             updates: UpdateManager::new(config.updates.clone()),
-            nexus_address,
             nexus_client,
             simulated_upstairs,
             v2p_mappings: Mutex::new(HashSet::new()),
             external_ips: Mutex::new(HashMap::new()),
+            attached_subnets: Mutex::new(HashMap::new()),
             multicast_groups: Mutex::new(HashMap::new()),
             vpc_routes: Mutex::new(HashMap::new()),
             mock_propolis: futures::lock::Mutex::new(None),
@@ -199,6 +207,7 @@ impl SledAgent {
                 zones: vec![],
             }),
             instance_ensure_state_error: Mutex::new(None),
+            local_storage_error_count: AtomicU32::new(0),
             repo_depot,
             log,
             bootstore_network_config,
@@ -220,12 +229,13 @@ impl SledAgent {
             metadata,
             ..
         } = instance;
+        let spec = vmm_spec.0.clone();
         // respond with a fake 500 level failure if asked to ensure an instance
         // with more than 16 CPUs.
-        let ncpus = vmm_spec.0.board.cpus;
+        let ncpus = spec.board.cpus;
         if ncpus > 16 {
             return Err(Error::internal_error(
-                &"could not allocate an instance: ran out of CPUs!",
+                "could not allocate an instance: ran out of CPUs!",
             ));
         };
 
@@ -238,46 +248,23 @@ impl SledAgent {
             // pool name.
             let dataset = path.strip_prefix("/dev/zvol/rdsk/oxp_").unwrap();
 
-            // what remains is: UUID/crypt/local_storage/UUID/vol
+            // what remains is: UUID/local_storage_unencrypted/UUID/vol
             let parts: Vec<&str> = dataset.split("/").collect();
             let zpool_id: ZpoolUuid = parts[0].parse().unwrap();
-            let dataset_id: DatasetUuid = parts[3].parse().unwrap();
+            let dataset_id: DatasetUuid = parts[2].parse().unwrap();
 
             // This panics if this dataset was not already created
-            self.storage.lock().get_local_storage_dataset(zpool_id, dataset_id);
+            self.storage
+                .lock()
+                .get_local_storage_unencrypted_dataset(zpool_id, dataset_id);
         }
 
-        for (id, _disk) in vmm_spec.crucible_backends() {
-            let SpecKey::Uuid(id) = id else {
-                return Err(Error::invalid_value(
-                    id.to_string(),
-                    "Crucible disks in a Propolis spec must have UUID keys",
-                ));
-            };
-
-            let initial_state = DiskRuntimeState {
-                disk_state: DiskState::Attached(
-                    instance_id.into_untyped_uuid(),
-                ),
-                generation: omicron_common::api::external::Generation::new(),
-                time_updated: chrono::Utc::now(),
-            };
-
-            // Ensure that any disks that are in this request are attached to
-            // this instance.
-            self.disks
-                .sim_ensure(
-                    &id,
-                    initial_state,
-                    Some(DiskStateRequested::Attached(
-                        instance_id.into_untyped_uuid(),
-                    )),
-                )
-                .await?;
-            self.disks
-                .sim_ensure_producer(id, (self.nexus_address, *id))
-                .await?;
-        }
+        // There's no way to verify that the downstairs targetted in a volume
+        // construction request are valid from a single simulated sled agent
+        // unless those simulated sled agents share the simulated storage state,
+        // which they don't. In tests where there are many simulated sled agents
+        // it may even be true that none of the downstairs referenced in the
+        // construction request are hosted on this one.
 
         // If the user of this simulated agent previously requested a mock
         // Propolis server, start that server.
@@ -289,36 +276,41 @@ impl SledAgent {
         let mock_lock = self.mock_propolis.lock().await;
         if let Some((_srv, client)) = mock_lock.as_ref() {
             if !self.vmms.contains_key(&instance_id.into_untyped_uuid()).await {
-                let metadata = propolis_client::types::InstanceMetadata {
-                    project_id: metadata.project_id,
-                    silo_id: metadata.silo_id,
-                    sled_id: self.id.into_untyped_uuid(),
-                    sled_model: self
-                        .config
-                        .hardware
-                        .baseboard
-                        .model()
-                        .to_string(),
-                    sled_revision: self.config.hardware.baseboard.revision(),
-                    sled_serial: self
-                        .config
-                        .hardware
-                        .baseboard
-                        .identifier()
-                        .to_string(),
-                };
-                let properties = propolis_client::types::InstanceProperties {
-                    id: propolis_id.into_untyped_uuid(),
-                    name: local_config.hostname.to_string(),
-                    description: "sled-agent-sim created instance".to_string(),
-                    metadata,
-                };
+                let metadata =
+                    propolis_client::instance_spec::InstanceMetadata {
+                        project_id: metadata.project_id,
+                        silo_id: metadata.silo_id,
+                        sled_id: self.id.into_untyped_uuid(),
+                        sled_model: self
+                            .config
+                            .hardware
+                            .baseboard
+                            .model()
+                            .to_string(),
+                        sled_revision: self
+                            .config
+                            .hardware
+                            .baseboard
+                            .revision(),
+                        sled_serial: self
+                            .config
+                            .hardware
+                            .baseboard
+                            .identifier()
+                            .to_string(),
+                    };
+                let properties =
+                    propolis_client::instance_spec::InstanceProperties {
+                        id: propolis_id.into_untyped_uuid(),
+                        name: local_config.hostname.to_string(),
+                        description: "sled-agent-sim created instance"
+                            .to_string(),
+                        metadata,
+                    };
 
                 let body = propolis_client::types::InstanceEnsureRequest {
                     properties,
-                    init: InstanceInitializationMethod::Spec {
-                        spec: vmm_spec.0.clone(),
-                    },
+                    init: InstanceInitializationMethod::Spec { spec },
                 };
 
                 // Try to create the instance
@@ -526,16 +518,49 @@ impl SledAgent {
         *self.instance_ensure_state_error.lock().unwrap() = error;
     }
 
-    /// Idempotently ensures that the given API Disk (described by `api_disk`)
-    /// is attached (or not) as specified.  This simulates disk attach and
-    /// detach, similar to instance boot and halt.
+    /// Set the number of times local storage operations should fail with 503
+    /// before succeeding. Each failure decrements the counter.
+    pub fn set_local_storage_error_count(&self, count: u32) {
+        self.local_storage_error_count.store(count, Ordering::Relaxed);
+    }
+
+    /// Returns the number of remaining local storage errors to inject.
+    pub fn local_storage_error_remaining(&self) -> u32 {
+        self.local_storage_error_count.load(Ordering::Relaxed)
+    }
+
+    pub(super) fn check_local_storage_error(&self) -> Result<(), HttpError> {
+        let prev = self.local_storage_error_count.fetch_update(
+            Ordering::Relaxed,
+            Ordering::Relaxed,
+            |n| {
+                // checked_sub returns None if there's an underflow, which only
+                // happens if the counter was already 0.
+                n.checked_sub(1)
+            },
+        );
+        // fetch_update returns Ok(prev) if the value was updated.
+        if let Ok(prev) = prev {
+            // prev was at least 1.
+            let remaining = prev - 1;
+            return Err(HttpError::for_unavail(
+                None,
+                format!(
+                    "injected local storage error ({} remaining after this)",
+                    remaining
+                ),
+            ));
+        }
+        Ok(())
+    }
+
     pub async fn disk_ensure(
         self: &Arc<Self>,
-        disk_id: Uuid,
-        initial_state: DiskRuntimeState,
-        target: DiskStateRequested,
+        _disk_id: Uuid,
+        _initial_state: DiskRuntimeState,
+        _target: DiskStateRequested,
     ) -> Result<DiskRuntimeState, Error> {
-        self.disks.sim_ensure(&disk_id, initial_state, Some(target)).await
+        unimplemented!("Disk attachment not yet implemented");
     }
 
     pub fn updates(&self) -> &UpdateManager {
@@ -550,16 +575,8 @@ impl SledAgent {
         self.vmms.size().await
     }
 
-    pub async fn disk_count(&self) -> usize {
-        self.disks.size().await
-    }
-
     pub async fn vmm_poke(&self, id: PropolisUuid, mode: PokeMode) {
         self.vmms.sim_poke(id.into_untyped_uuid(), mode).await;
-    }
-
-    pub async fn disk_poke(&self, id: Uuid) {
-        self.disks.sim_poke(id, PokeMode::SingleStep).await;
     }
 
     /// Adds a Physical Disk to the simulated sled agent.
@@ -597,8 +614,9 @@ impl SledAgent {
         id: ZpoolUuid,
         physical_disk_id: PhysicalDiskUuid,
         size: u64,
+        health: ZpoolHealth,
     ) {
-        self.storage.lock().insert_zpool(id, physical_disk_id, size);
+        self.storage.lock().insert_zpool(id, physical_disk_id, size, health);
     }
 
     pub fn has_zpool(&self, id: ZpoolUuid) -> bool {
@@ -720,6 +738,75 @@ impl SledAgent {
         Ok(())
     }
 
+    pub async fn instance_put_attached_subnets(
+        &self,
+        propolis_id: PropolisUuid,
+        subnets: AttachedSubnets,
+    ) -> Result<(), Error> {
+        if !self.vmms.contains_key(&propolis_id.into_untyped_uuid()).await {
+            return Err(Error::internal_error(
+                "can't alter subnet state for VMM that's not registered",
+            ));
+        }
+        self.attached_subnets
+            .lock()
+            .unwrap()
+            .insert(propolis_id, subnets.subnets);
+        Ok(())
+    }
+
+    pub async fn instance_delete_attached_subnets(
+        &self,
+        propolis_id: PropolisUuid,
+    ) -> Result<(), Error> {
+        if !self.vmms.contains_key(&propolis_id.into_untyped_uuid()).await {
+            return Err(Error::internal_error(
+                "can't alter subnet state for VMM that's not registered",
+            ));
+        }
+        self.attached_subnets
+            .lock()
+            .unwrap()
+            .entry(propolis_id)
+            .or_default()
+            .clear();
+        Ok(())
+    }
+
+    pub async fn instance_post_attached_subnet(
+        &self,
+        propolis_id: PropolisUuid,
+        subnet: AttachedSubnet,
+    ) -> Result<(), Error> {
+        if !self.vmms.contains_key(&propolis_id.into_untyped_uuid()).await {
+            return Err(Error::internal_error(
+                "can't alter subnet state for VMM that's not registered",
+            ));
+        }
+        let mut subnets = self.attached_subnets.lock().unwrap();
+        let instance_subnets = subnets.entry(propolis_id).or_default();
+        instance_subnets
+            .insert_unique(subnet)
+            .map_err(|_| Error::conflict("Subnet already attached"))
+    }
+
+    pub async fn instance_delete_attached_subnet(
+        &self,
+        propolis_id: PropolisUuid,
+        subnet: IpNet,
+    ) -> Result<(), Error> {
+        if !self.vmms.contains_key(&propolis_id.into_untyped_uuid()).await {
+            return Err(Error::internal_error(
+                "can't alter subnet state for VMM that's not registered",
+            ));
+        }
+        let mut subnets = self.attached_subnets.lock().unwrap();
+        if let Some(instance_subnets) = subnets.get_mut(&propolis_id) {
+            instance_subnets.remove(&subnet);
+        }
+        Ok(())
+    }
+
     pub async fn instance_join_multicast_group(
         &self,
         propolis_id: PropolisUuid,
@@ -811,7 +898,8 @@ impl SledAgent {
         let datasets_config =
             storage.datasets_config_list().unwrap_or_default();
         let zones_config = self.fake_zones.lock().unwrap().clone();
-        let health_monitor = self.health_monitor.to_inventory();
+        let smf_services_enabled_not_online =
+            self.health_monitor.to_inventory();
 
         let sled_config = OmicronSledConfig {
             generation: zones_config.generation,
@@ -820,7 +908,23 @@ impl SledAgent {
             zones: zones_config.zones.into_iter().collect(),
             remove_mupdate_override: None,
             host_phase_2: HostPhase2DesiredSlots::current_contents(),
+            measurements: Default::default(),
         };
+
+        let reference_measurements = vec![
+            SingleMeasurementInventory {
+                path: "this/is/fake1".into(),
+                result: ConfigReconcilerInventoryResult::Ok,
+            },
+            SingleMeasurementInventory {
+                path: "this/is/fake2".into(),
+                result: ConfigReconcilerInventoryResult::Err {
+                    message: "this is an error".to_string(),
+                },
+            },
+        ]
+        .into_iter()
+        .collect();
 
         Ok(Inventory {
             sled_id: self.id,
@@ -858,6 +962,7 @@ impl SledAgent {
                     Ok(InventoryZpool {
                         id: *id,
                         total_size: ByteCount::try_from(zpool.total_size())?,
+                        health: zpool.health(),
                     })
                 })
                 .collect::<Result<Vec<_>, anyhow::Error>>()?,
@@ -892,9 +997,12 @@ impl SledAgent {
             last_reconciliation: Some(
                 ConfigReconcilerInventory::debug_assume_success(sled_config),
             ),
-            // TODO: simulate the zone image resolver with greater fidelity
-            zone_image_resolver: ZoneImageResolverInventory::new_fake(),
-            health_monitor,
+            // TODO: simulate the file source resolver with greater fidelity
+            file_source_resolver: OmicronFileSourceResolverInventory::new_fake(
+            ),
+            smf_services_enabled_not_online,
+            reference_measurements,
+            fmd: Ok(FmdInventory::default()),
         })
     }
 
@@ -1102,13 +1210,15 @@ impl SledAgent {
 
     pub fn ensure_local_storage_dataset(
         &self,
-        zpool_id: ExternalZpoolUuid,
-        dataset_id: DatasetUuid,
         request: LocalStorageDatasetEnsureRequest,
     ) {
-        self.storage
-            .lock()
-            .ensure_local_storage_dataset(zpool_id, dataset_id, request);
+        assert!(!request.encrypted_at_rest);
+
+        self.storage.lock().ensure_local_storage_unencrypted_dataset(
+            request.zpool_id,
+            request.dataset_id,
+            request,
+        );
     }
 }
 

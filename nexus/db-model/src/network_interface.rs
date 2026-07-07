@@ -17,9 +17,10 @@ use itertools::Itertools;
 use nexus_db_schema::schema::instance_network_interface;
 use nexus_db_schema::schema::network_interface;
 use nexus_db_schema::schema::service_network_interface;
-use nexus_types::external_api::params;
-use nexus_types::external_api::params::PrivateIpStackCreate;
+use nexus_types::external_api::instance::InstanceNetworkInterfaceUpdate;
+use nexus_types::external_api::instance::PrivateIpStackCreate;
 use nexus_types::identity::Resource;
+use omicron_common::api::external;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::PrivateIpStack;
 use omicron_common::api::external::PrivateIpv4Stack;
@@ -27,7 +28,6 @@ use omicron_common::api::external::PrivateIpv6Stack;
 use omicron_common::api::internal::shared::PrivateIpConfig;
 use omicron_common::api::internal::shared::PrivateIpv4Config;
 use omicron_common::api::internal::shared::PrivateIpv6Config;
-use omicron_common::api::{external, internal};
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
@@ -115,7 +115,7 @@ impl NetworkInterface {
         self,
         ipv4_subnet: oxnet::Ipv4Net,
         ipv6_subnet: oxnet::Ipv6Net,
-    ) -> Result<internal::shared::NetworkInterface, Error> {
+    ) -> Result<sled_agent_types::inventory::NetworkInterface, Error> {
         let ip_config = match (self.ipv4, self.ipv6) {
             (None, None) => {
                 return Err(Error::internal_error(&format!(
@@ -177,21 +177,21 @@ impl NetworkInterface {
                 PrivateIpConfig::DualStack { v4, v6 }
             }
         };
-        Ok(internal::shared::NetworkInterface {
+        Ok(sled_agent_types::inventory::NetworkInterface {
             id: self.id(),
             kind: match self.kind {
                 NetworkInterfaceKind::Instance => {
-                    internal::shared::NetworkInterfaceKind::Instance {
+                    sled_agent_types::inventory::NetworkInterfaceKind::Instance {
                         id: self.parent_id,
                     }
                 }
                 NetworkInterfaceKind::Service => {
-                    internal::shared::NetworkInterfaceKind::Service {
+                    sled_agent_types::inventory::NetworkInterfaceKind::Service {
                         id: self.parent_id,
                     }
                 }
                 NetworkInterfaceKind::Probe => {
-                    internal::shared::NetworkInterfaceKind::Probe {
+                    sled_agent_types::inventory::NetworkInterfaceKind::Probe {
                         id: self.parent_id,
                     }
                 }
@@ -628,8 +628,8 @@ impl TryFrom<InstanceNetworkInterface> for external::InstanceNetworkInterface {
     }
 }
 
-impl From<params::InstanceNetworkInterfaceUpdate> for NetworkInterfaceUpdate {
-    fn from(params: params::InstanceNetworkInterfaceUpdate) -> Self {
+impl From<InstanceNetworkInterfaceUpdate> for NetworkInterfaceUpdate {
+    fn from(params: InstanceNetworkInterfaceUpdate) -> Self {
         let primary = if params.primary { Some(true) } else { None };
         let (transit_ips_v4, transit_ips_v6): (Vec<_>, Vec<_>) =
             params.transit_ips.into_iter().partition_map(|net| match net {

@@ -16,7 +16,7 @@ use nexus_auth::authz::ApiResourceWithRolesType;
 use nexus_auth::authz::AuthorizedResource;
 use nexus_auth::context::OpContext;
 use nexus_db_model::DatabaseString;
-use nexus_types::external_api::shared;
+use nexus_types::external_api::policy;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::LookupType;
 use omicron_uuid_kinds::SiloUserUuid;
@@ -74,6 +74,16 @@ impl<'a> ResourceBuilder<'a> {
         self.resources.push(Arc::new(resource));
     }
 
+    /// Register a user as a test actor without granting it any role.
+    ///
+    /// Unlike [`Self::new_resource_with_users`], this creates no role
+    /// assignment. Bind `user_id` to the owning user of a resource already in
+    /// the set (e.g. a `SiloUser`'s own id) to exercise identity-based
+    /// self-access, which role assignments alone can't reach.
+    pub fn push_user(&mut self, username: &str, user_id: SiloUserUuid) {
+        self.users.push((username.to_string(), user_id));
+    }
+
     /// Register a new resource for later testing and also: for each supported
     /// role on this resource, create a user that has that role on this resource
     pub async fn new_resource_with_users<T>(&mut self, resource: T)
@@ -126,7 +136,7 @@ impl<'a> ResourceBuilder<'a> {
             let new_role_assignments = old_role_assignments
                 .into_iter()
                 .map(|r| r.try_into().unwrap())
-                .chain(std::iter::once(shared::RoleAssignment::for_silo_user(
+                .chain(std::iter::once(policy::RoleAssignment::for_silo_user(
                     user_id, role,
                 )))
                 .collect::<Vec<_>>();
@@ -244,11 +254,15 @@ macro_rules! impl_dyn_authorized_resource_for_resource {
 impl_dyn_authorized_resource_for_resource!(authz::AddressLot);
 impl_dyn_authorized_resource_for_resource!(authz::AffinityGroup);
 impl_dyn_authorized_resource_for_resource!(authz::AntiAffinityGroup);
+impl_dyn_authorized_resource_for_resource!(authz::BgpAnnounceSet);
+impl_dyn_authorized_resource_for_resource!(authz::BgpConfig);
 impl_dyn_authorized_resource_for_resource!(authz::Blueprint);
 impl_dyn_authorized_resource_for_resource!(authz::Certificate);
+impl_dyn_authorized_resource_for_resource!(authz::ConsoleSession);
 impl_dyn_authorized_resource_for_resource!(authz::DeviceAccessToken);
 impl_dyn_authorized_resource_for_resource!(authz::DeviceAuthRequest);
 impl_dyn_authorized_resource_for_resource!(authz::Disk);
+impl_dyn_authorized_resource_for_resource!(authz::ExternalSubnet);
 impl_dyn_authorized_resource_for_resource!(authz::Fleet);
 impl_dyn_authorized_resource_for_resource!(authz::FloatingIp);
 impl_dyn_authorized_resource_for_resource!(authz::IdentityProvider);
@@ -258,11 +272,13 @@ impl_dyn_authorized_resource_for_resource!(authz::InstanceNetworkInterface);
 impl_dyn_authorized_resource_for_resource!(authz::InternetGateway);
 impl_dyn_authorized_resource_for_resource!(authz::InternetGatewayIpAddress);
 impl_dyn_authorized_resource_for_resource!(authz::InternetGatewayIpPool);
+impl_dyn_authorized_resource_for_resource!(authz::IpPool);
 impl_dyn_authorized_resource_for_resource!(authz::LoopbackAddress);
 impl_dyn_authorized_resource_for_resource!(authz::Rack);
 impl_dyn_authorized_resource_for_resource!(authz::PhysicalDisk);
 impl_dyn_authorized_resource_for_resource!(authz::Project);
 impl_dyn_authorized_resource_for_resource!(authz::ProjectImage);
+impl_dyn_authorized_resource_for_resource!(authz::RouterRoute);
 impl_dyn_authorized_resource_for_resource!(authz::SamlIdentityProvider);
 impl_dyn_authorized_resource_for_resource!(authz::ScimClientBearerToken);
 impl_dyn_authorized_resource_for_resource!(authz::Service);
@@ -273,11 +289,14 @@ impl_dyn_authorized_resource_for_resource!(authz::SiloUser);
 impl_dyn_authorized_resource_for_resource!(authz::Sled);
 impl_dyn_authorized_resource_for_resource!(authz::Snapshot);
 impl_dyn_authorized_resource_for_resource!(authz::SshKey);
+impl_dyn_authorized_resource_for_resource!(authz::SubnetPool);
 impl_dyn_authorized_resource_for_resource!(authz::SupportBundle);
 impl_dyn_authorized_resource_for_resource!(authz::TufArtifact);
 impl_dyn_authorized_resource_for_resource!(authz::TufRepo);
 impl_dyn_authorized_resource_for_resource!(authz::TufTrustRoot);
+impl_dyn_authorized_resource_for_resource!(authz::UserBuiltin);
 impl_dyn_authorized_resource_for_resource!(authz::Vpc);
+impl_dyn_authorized_resource_for_resource!(authz::VpcRouter);
 impl_dyn_authorized_resource_for_resource!(authz::VpcSubnet);
 impl_dyn_authorized_resource_for_resource!(authz::Alert);
 impl_dyn_authorized_resource_for_resource!(authz::AlertReceiver);
@@ -296,8 +315,26 @@ impl_dyn_authorized_resource_for_global!(authz::MulticastGroupList);
 impl_dyn_authorized_resource_for_global!(authz::AuditLog);
 impl_dyn_authorized_resource_for_global!(authz::Inventory);
 impl_dyn_authorized_resource_for_global!(authz::QuiesceState);
-impl_dyn_authorized_resource_for_global!(authz::UpdateTrustRootList);
+impl_dyn_authorized_resource_for_global!(authz::SubnetPoolList);
 impl_dyn_authorized_resource_for_global!(authz::TargetReleaseConfig);
+impl_dyn_authorized_resource_for_global!(authz::UpdateTrustRootList);
+
+impl DynAuthorizedResource for authz::TrustQuorumConfig {
+    fn do_authorize<'a, 'b>(
+        &'a self,
+        opctx: &'b OpContext,
+        action: authz::Action,
+    ) -> BoxFuture<'a, Result<(), Error>>
+    where
+        'b: 'a,
+    {
+        opctx.authorize(action, self).boxed()
+    }
+
+    fn resource_name(&self) -> String {
+        format!("{}: trust quorum configuration", self.rack().resource_name())
+    }
+}
 
 impl DynAuthorizedResource for authz::SiloCertificateList {
     fn do_authorize<'a, 'b>(

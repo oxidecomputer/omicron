@@ -44,7 +44,7 @@ pub const OPTE_LINK_PREFIX: &str = "opte";
 /// Errors returned from [`Dladm::find_physical`].
 #[derive(thiserror::Error, Debug)]
 pub enum FindPhysicalLinkError {
-    #[error("Failed to find physical link: {0}")]
+    #[error("Failed to find physical link")]
     Execution(#[from] ExecutionError),
 
     #[error("No Physical Link devices found")]
@@ -60,10 +60,10 @@ pub enum GetMacError {
     #[error("Mac Address cannot be looked up; Link not found: {0:?}")]
     NotFound(PhysicalLink),
 
-    #[error("Failed to get MAC address: {0}")]
+    #[error("Failed to get MAC address")]
     Execution(#[from] ExecutionError),
 
-    #[error("Failed to parse MAC: {0}")]
+    #[error("Failed to parse MAC")]
     ParseMac(#[from] macaddr::ParseError),
 }
 

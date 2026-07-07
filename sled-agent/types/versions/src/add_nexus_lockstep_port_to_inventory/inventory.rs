@@ -12,10 +12,9 @@ use iddqd::IdOrdMap;
 use iddqd::id_upcast;
 use omicron_common::address::NEXUS_LOCKSTEP_PORT;
 use omicron_common::api::external::{ByteCount, Generation};
-use omicron_common::api::internal::shared::external_ip::v1::SourceNatConfig;
-use omicron_common::api::internal::shared::network_interface::v1::NetworkInterface;
 use omicron_common::disk::{DatasetConfig, OmicronPhysicalDiskConfig};
 use omicron_common::zpool_name::ZpoolName;
+use omicron_ledger::Ledgerable;
 use omicron_uuid_kinds::{DatasetUuid, MupdateOverrideUuid, OmicronZoneUuid};
 use omicron_uuid_kinds::{PhysicalDiskUuid, SledUuid};
 use schemars::JsonSchema;
@@ -25,8 +24,9 @@ use crate::v1;
 use crate::v1::inventory::{
     BootPartitionContents, ConfigReconcilerInventoryResult,
     HostPhase2DesiredSlots, InventoryDataset, InventoryDisk, InventoryZpool,
-    OmicronZoneDataset, OmicronZoneImageSource, OrphanedDataset,
-    RemoveMupdateOverrideInventory, SledRole, ZoneImageResolverInventory,
+    NetworkInterface, OmicronZoneDataset, OmicronZoneImageSource,
+    OrphanedDataset, RemoveMupdateOverrideInventory, SledRole, SourceNatConfig,
+    ZoneImageResolverInventory,
 };
 use sled_hardware_types::{Baseboard, SledCpuFamily};
 
@@ -67,6 +67,28 @@ pub struct OmicronSledConfig {
     pub remove_mupdate_override: Option<MupdateOverrideUuid>,
     #[serde(default = "HostPhase2DesiredSlots::current_contents")]
     pub host_phase_2: HostPhase2DesiredSlots,
+}
+
+// NOTE: Most trait impls live in the `impls` module of this crate and are only
+// implemented for the `latest` version of each type. However,
+// `OmicronSledConfig` is special: it's not only used in the sled-agent API
+// (which would only require trait impls on `latest`); it's also ledgered to
+// disk to support cold boot of the rack. In the ledgering case, we have to be
+// able to handle reading older versions, which means all the old versions we
+// support also need to implement `Ledgerable`. Therefore, we implement this
+// trait for this specific version (and do so for every other version of
+// `OmicronSledConfig` too).
+impl Ledgerable for OmicronSledConfig {
+    fn is_newer_than(&self, other: &Self) -> bool {
+        self.generation > other.generation
+    }
+
+    fn generation_bump(&mut self) {
+        // DO NOTHING!
+        //
+        // Generation bumps must only ever come from nexus and will be encoded
+        // in the struct itself
+    }
 }
 
 /// Describes one Omicron-managed zone running on a sled

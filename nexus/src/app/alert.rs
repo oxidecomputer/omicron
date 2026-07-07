@@ -156,9 +156,7 @@ use nexus_db_queries::db::model::AlertDeliveryState;
 use nexus_db_queries::db::model::AlertDeliveryTrigger;
 use nexus_db_queries::db::model::WebhookDelivery;
 use nexus_db_queries::db::model::WebhookReceiverConfig;
-use nexus_types::external_api::params;
-use nexus_types::external_api::shared;
-use nexus_types::external_api::views;
+use nexus_types::external_api::alert;
 use nexus_types::identity::Asset;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
@@ -175,7 +173,11 @@ use omicron_uuid_kinds::WebhookDeliveryUuid;
 use uuid::Uuid;
 
 impl Nexus {
-    /// Publish a new alert, with the provided `id`, `alert_class`, and
+    /// Publish a new alert, with the provided `id`.
+    ///
+    /// The alert's class and schema version are determined by the
+    /// [`nexus_types::alert::AlertPayload`] trait implementation of the
+    /// provided `alert` value, and the value is serialized to form the alert's
     /// JSON data payload.
     ///
     /// If this method returns `Ok`, the event has been durably recorded in
@@ -184,22 +186,14 @@ impl Nexus {
     /// event to receivers.  However, if (for whatever reason) this Nexus fails
     /// to do that, the event remains durably in the database to be dispatched
     /// and delivered by someone else.
-    pub async fn alert_publish(
+    pub async fn alert_publish<A: nexus_types::alert::AlertPayload>(
         &self,
         opctx: &OpContext,
         id: AlertUuid,
-        class: AlertClass,
-        event: serde_json::Value,
+        alert: &A,
     ) -> Result<Alert, Error> {
-        let alert =
-            self.datastore().alert_create(opctx, id, class, event).await?;
-        slog::debug!(
-            &opctx.log,
-            "published alert";
-            "alert_id" => ?id,
-            "alert_class" => %alert.class,
-            "time_created" => ?alert.identity.time_created,
-        );
+        let alert = Alert::new(id, alert)?;
+        let alert = self.datastore().alert_create(opctx, alert).await?;
 
         // Once the alert has been inserted, activate the dispatcher task to
         // ensure its propagated to receivers.
@@ -215,7 +209,7 @@ impl Nexus {
     pub fn alert_receiver_lookup<'a>(
         &'a self,
         opctx: &'a OpContext,
-        rx_selector: params::AlertReceiverSelector,
+        rx_selector: alert::AlertReceiverSelector,
     ) -> LookupResult<lookup::AlertReceiver<'a>> {
         match rx_selector.receiver {
             NameOrId::Id(id) => {
@@ -236,7 +230,7 @@ impl Nexus {
     pub fn alert_lookup<'a>(
         &'a self,
         opctx: &'a OpContext,
-        params::AlertSelector { alert_id }: params::AlertSelector,
+        alert::AlertSelector { alert_id }: alert::AlertSelector,
     ) -> LookupResult<lookup::Alert<'a>> {
         let event = LookupPath::new(opctx, &self.db_datastore)
             .alert_id(AlertUuid::from_untyped_uuid(alert_id));
@@ -249,9 +243,9 @@ impl Nexus {
     pub async fn alert_class_list(
         &self,
         opctx: &OpContext,
-        filter: params::AlertClassFilter,
-        pagparams: DataPageParams<'_, params::AlertClassPage>,
-    ) -> ListResultVec<views::AlertClass> {
+        filter: alert::AlertClassFilter,
+        pagparams: DataPageParams<'_, alert::AlertClassPage>,
+    ) -> ListResultVec<alert::AlertClass> {
         opctx
             .authorize(authz::Action::ListChildren, &authz::ALERT_CLASS_LIST)
             .await?;
@@ -260,9 +254,9 @@ impl Nexus {
 
     // This is factored out to avoid having to make a whole Nexus to test it.
     fn actually_list_alert_classes(
-        params::AlertClassFilter { filter }: params::AlertClassFilter,
-        pagparams: DataPageParams<'_, params::AlertClassPage>,
-    ) -> ListResultVec<views::AlertClass> {
+        alert::AlertClassFilter { filter }: alert::AlertClassFilter,
+        pagparams: DataPageParams<'_, alert::AlertClassPage>,
+    ) -> ListResultVec<alert::AlertClass> {
         use nexus_db_model::AlertSubscriptionKind;
 
         let regex = if let Some(filter) = filter {
@@ -287,7 +281,7 @@ impl Nexus {
         };
 
         // If we're resuming a previous scan, figure out where to start.
-        let start = if let Some(params::AlertClassPage { last_seen }) =
+        let start = if let Some(alert::AlertClassPage { last_seen }) =
             pagparams.marker
         {
             let start = AlertClass::ALL_CLASSES.iter().enumerate().find_map(
@@ -322,7 +316,7 @@ impl Nexus {
                         return None;
                     }
                 }
-                Some(class.into())
+                Some(nexus_types::alert::AlertClass::from(class).into())
             })
             .take(pagparams.limit.get() as usize)
             .collect::<Vec<_>>();
@@ -357,9 +351,9 @@ impl Nexus {
         &self,
         opctx: &OpContext,
         rx: lookup::AlertReceiver<'_>,
-        filter: params::AlertDeliveryStateFilter,
+        filter: alert::AlertDeliveryStateFilter,
         pagparams: &DataPageParams<'_, (DateTime<Utc>, Uuid)>,
-    ) -> ListResultVec<views::AlertDelivery> {
+    ) -> ListResultVec<alert::AlertDelivery> {
         let (authz_rx,) = rx.lookup_for(authz::Action::ListChildren).await?;
         let only_states = if filter.include_all() {
             Vec::new()
@@ -403,8 +397,8 @@ impl Nexus {
         &self,
         opctx: &OpContext,
         rx: lookup::AlertReceiver<'_>,
-        params::AlertSubscriptionCreate { subscription}: params::AlertSubscriptionCreate,
-    ) -> CreateResult<views::AlertSubscriptionCreated> {
+        alert::AlertSubscriptionCreate { subscription}: alert::AlertSubscriptionCreate,
+    ) -> CreateResult<alert::AlertSubscriptionCreated> {
         let (authz_rx,) = rx.lookup_for(authz::Action::Modify).await?;
         let db_subscription = nexus_db_model::AlertSubscriptionKind::try_from(
             subscription.clone(),
@@ -413,14 +407,14 @@ impl Nexus {
             .datastore()
             .alert_subscription_add(opctx, &authz_rx, db_subscription)
             .await?;
-        Ok(views::AlertSubscriptionCreated { subscription })
+        Ok(alert::AlertSubscriptionCreated { subscription })
     }
 
     pub async fn alert_receiver_subscription_remove(
         &self,
         opctx: &OpContext,
         rx: lookup::AlertReceiver<'_>,
-        subscription: shared::AlertSubscription,
+        subscription: alert::AlertSubscription,
     ) -> DeleteResult {
         let (authz_rx,) = rx.lookup_for(authz::Action::Modify).await?;
         let db_subscription =
@@ -503,11 +497,11 @@ mod tests {
             last_seen: Option<&str>,
             limit: u32,
         ) -> Vec<String> {
-            let filter = params::AlertClassFilter {
+            let filter = alert::AlertClassFilter {
                 filter: dbg!(filter).map(|f| f.parse().unwrap()),
             };
             let marker = dbg!(last_seen).map(|last_seen| {
-                params::AlertClassPage { last_seen: last_seen.to_string() }
+                alert::AlertClassPage { last_seen: last_seen.to_string() }
             });
             let result = Nexus::actually_list_alert_classes(
                 filter,

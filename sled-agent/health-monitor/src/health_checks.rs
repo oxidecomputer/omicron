@@ -4,18 +4,21 @@
 
 //! Helpers for running health checks from the sled agent
 
+use chrono::Utc;
 use illumos_utils::svcs::Svcs;
-use illumos_utils::svcs::SvcsInMaintenanceResult;
+use sled_agent_types::inventory::SvcsEnabledNotOnlineResult;
+use sled_agent_types::inventory::SvcsError;
 use slog::Logger;
+use slog_error_chain::InlineErrorChain;
 use tokio::sync::watch;
 use tokio::time::Duration;
 use tokio::time::MissedTickBehavior;
 use tokio::time::interval;
 
-pub(crate) async fn poll_smf_services_in_maintenance(
+pub(crate) async fn poll_smf_services_enabled_not_online(
     log: Logger,
-    smf_services_in_maintenance_tx: watch::Sender<
-        Result<SvcsInMaintenanceResult, String>,
+    smf_services_enabled_not_online_tx: watch::Sender<
+        SvcsEnabledNotOnlineResult,
     >,
 ) {
     // We poll every minute to verify the health of all services. This interval
@@ -29,17 +32,27 @@ pub(crate) async fn poll_smf_services_in_maintenance(
 
     loop {
         interval.tick().await;
-        match Svcs::in_maintenance(&log).await {
+        match Svcs::enabled_not_online(&log).await {
             // There isn't anything waiting for changes because we only look at
             // the health check status when an inventory request comes in. This
             // means we can safely use `send_modify` instead of
             // `send_if_modified()`.
-            Err(e) => smf_services_in_maintenance_tx.send_modify(|status| {
-                *status = Err(e.to_string());
-            }),
-            Ok(svcs) => smf_services_in_maintenance_tx.send_modify(|status| {
-                *status = Ok(svcs);
-            }),
+            Err(e) => {
+                smf_services_enabled_not_online_tx.send_modify(|status| {
+                    *status =
+                        SvcsEnabledNotOnlineResult::SvcsCmdError(SvcsError {
+                            error: InlineErrorChain::new(&e).to_string(),
+                            time_of_status: Utc::now(),
+                        })
+                })
+            }
+            Ok(svcs) => {
+                smf_services_enabled_not_online_tx.send_modify(|status| {
+                    *status = SvcsEnabledNotOnlineResult::SvcsEnabledNotOnline(
+                        svcs.into(),
+                    );
+                })
+            }
         };
     }
 }

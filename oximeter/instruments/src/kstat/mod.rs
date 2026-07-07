@@ -2,8 +2,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-// Copyright 2024 Oxide Computer Company
-
 //! Types for publishing kernel statistics via oximeter.
 //!
 //! # illumos kernel statistics
@@ -87,9 +85,13 @@ use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::time::Duration;
 
+#[cfg(any(feature = "cpu", test))]
+pub mod cpu;
 #[cfg(any(feature = "datalink", test))]
 pub mod link;
 mod sampler;
+#[cfg(any(feature = "zone", test))]
+pub mod zone;
 
 pub use sampler::CollectionDetails;
 pub use sampler::ExpirationBehavior;
@@ -139,13 +141,16 @@ pub enum Error {
     #[error("Could not find kstat with the expected name")]
     NoSuchKstat,
 
-    #[error("Kstat does not have the expected data type")]
+    #[error(
+        "Kstat does not have the expected data type: \
+         expected {expected:?} but found {found:?}"
+    )]
     UnexpectedDataType { expected: NamedType, found: NamedType },
 
     #[error("Expected a named kstat")]
     ExpectedNamedKstat,
 
-    #[error("Duplicate target instance")]
+    #[error("Duplicate target instance: {target_name}")]
     DuplicateTarget {
         target_name: String,
         fields: BTreeMap<String, FieldValue>,
@@ -176,7 +181,11 @@ pub enum Error {
     Expired(Expiration),
 
     #[error("Expired after unsucessfull collections for {duration:?}")]
-    ExpiredAfterDuration { duration: Duration, error: Box<Error> },
+    ExpiredAfterDuration {
+        duration: Duration,
+        #[source]
+        error: Box<Error>,
+    },
 }
 
 /// Type alias for a list of kstats.
@@ -227,6 +236,7 @@ pub trait ConvertNamedData {
     fn as_u32(&self) -> Result<u32, Error>;
     fn as_i64(&self) -> Result<i64, Error>;
     fn as_u64(&self) -> Result<u64, Error>;
+    fn as_str(&self) -> Result<&str, Error>;
 }
 
 impl ConvertNamedData for NamedData<'_> {
@@ -273,6 +283,17 @@ impl ConvertNamedData for NamedData<'_> {
             })
         }
     }
+
+    fn as_str(&self) -> Result<&str, Error> {
+        if let NamedData::String(x) = self {
+            Ok(*x)
+        } else {
+            Err(Error::UnexpectedDataType {
+                expected: NamedType::String,
+                found: self.data_type(),
+            })
+        }
+    }
 }
 
 /// Return a high-resolution monotonic timestamp, in nanoseconds since an
@@ -298,4 +319,10 @@ pub fn get_hires_time() -> i64 {
     } else {
         0
     }
+}
+
+/// Return the number of online processors on the system, or None on error.
+pub(crate) fn n_processors() -> Option<usize> {
+    let ret = unsafe { libc::sysconf(libc::_SC_NPROCESSORS_ONLN) };
+    if ret < 1 { None } else { usize::try_from(ret).ok() }
 }

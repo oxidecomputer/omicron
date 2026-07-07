@@ -13,8 +13,7 @@ use omicron_common::api::external::{Generation, Name};
 
 use crate::{
     deployment::{
-        Blueprint, BlueprintZoneDisposition, BlueprintZoneType, SledFilter,
-        blueprint_zone_type,
+        Blueprint, BlueprintZoneType, SledFilter, blueprint_zone_type,
     },
     internal_api::params::{DnsConfigZone, DnsRecord},
     silo::{default_silo_name, silo_dns_name},
@@ -40,9 +39,7 @@ pub fn blueprint_internal_dns_config(
     // the details.
     let mut dns_builder = DnsConfigBuilder::new();
 
-    'all_zones: for (_, zone) in
-        blueprint.all_omicron_zones(BlueprintZoneDisposition::is_in_service)
-    {
+    'all_zones: for (_, zone) in blueprint.in_service_zones() {
         let (service_name, &address) = match &zone.zone_type {
             BlueprintZoneType::BoundaryNtp(
                 blueprint_zone_type::BoundaryNtp { address, .. },
@@ -158,9 +155,7 @@ pub fn blueprint_internal_dns_config(
         dns_builder.host_zone_switch(
             scrimlet.id(),
             switch_zone_ip,
-            overrides.dendrite_port(scrimlet.id()),
-            overrides.mgs_port(scrimlet.id()),
-            overrides.mgd_port(scrimlet.id()),
+            overrides.host_switch_zone_ports(scrimlet.id()),
         )?;
     }
 
@@ -180,7 +175,7 @@ pub fn blueprint_internal_dns_config(
     // names.
     let mut nrepo_depots = 6;
     for sled in sleds_by_id {
-        if !sled.policy().matches(SledFilter::TufArtifactReplication) {
+        if !SledFilter::TufArtifactReplication.matches_policy(sled.policy()) {
             continue;
         }
 

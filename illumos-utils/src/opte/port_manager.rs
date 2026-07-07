@@ -5,6 +5,8 @@
 //! Manager for all OPTE ports on a Helios system
 
 use crate::dladm::OPTE_LINK_PREFIX;
+use crate::opte::AttachedSubnet;
+use crate::opte::EnsureAttachedSubnetResult;
 use crate::opte::Error;
 use crate::opte::Gateway;
 use crate::opte::Handle;
@@ -18,17 +20,11 @@ use macaddr::MacAddr6;
 use omicron_common::address::IPV4_MULTICAST_RANGE;
 use omicron_common::address::IPV6_MULTICAST_RANGE;
 use omicron_common::api::external;
-use omicron_common::api::internal::shared::ExternalIpConfig;
 use omicron_common::api::internal::shared::ExternalIpGatewayMap;
-use omicron_common::api::internal::shared::ExternalIpv4Config;
-use omicron_common::api::internal::shared::ExternalIpv6Config;
 use omicron_common::api::internal::shared::InternetGatewayRouterTarget;
-use omicron_common::api::internal::shared::NetworkInterface;
-use omicron_common::api::internal::shared::NetworkInterfaceKind;
 use omicron_common::api::internal::shared::PrivateIpConfig;
 use omicron_common::api::internal::shared::PrivateIpv4Config;
 use omicron_common::api::internal::shared::PrivateIpv6Config;
-use omicron_common::api::internal::shared::ResolvedVpcFirewallRule;
 use omicron_common::api::internal::shared::ResolvedVpcRoute;
 use omicron_common::api::internal::shared::ResolvedVpcRouteSet;
 use omicron_common::api::internal::shared::ResolvedVpcRouteState;
@@ -38,11 +34,13 @@ use omicron_common::api::internal::shared::RouterTarget as ApiRouterTarget;
 use omicron_common::api::internal::shared::RouterVersion;
 use omicron_common::api::internal::shared::VirtualNetworkInterfaceHost;
 use oxide_vpc::api::AddRouterEntryReq;
+use oxide_vpc::api::AttachedSubnetConfig;
 use oxide_vpc::api::DelRouterEntryReq;
+use oxide_vpc::api::DetachSubnetResp;
 use oxide_vpc::api::DhcpCfg;
-use oxide_vpc::api::Direction;
 use oxide_vpc::api::ExternalIpCfg;
 use oxide_vpc::api::IpCfg;
+use oxide_vpc::api::IpCidr;
 use oxide_vpc::api::Ipv4Cfg;
 use oxide_vpc::api::Ipv4Cidr;
 use oxide_vpc::api::Ipv6Cfg;
@@ -52,14 +50,23 @@ use oxide_vpc::api::RouterClass;
 use oxide_vpc::api::SNat4Cfg;
 use oxide_vpc::api::SNat6Cfg;
 use oxide_vpc::api::SetExternalIpsReq;
+use oxide_vpc::api::TransitIpConfig;
 use oxide_vpc::api::VpcCfg;
 use oxnet::IpNet;
 use oxnet::Ipv4Net;
 use oxnet::Ipv6Net;
+use sled_agent_types::instance::ExternalIpConfig;
+use sled_agent_types::instance::ExternalIpv4Config;
+use sled_agent_types::instance::ExternalIpv6Config;
+use sled_agent_types::instance::ResolvedVpcFirewallRule;
+use sled_agent_types::inventory::NetworkInterface;
+use sled_agent_types::inventory::NetworkInterfaceKind;
 use slog::Logger;
 use slog::debug;
 use slog::error;
 use slog::info;
+use slog::warn;
+use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -71,6 +78,8 @@ use std::sync::Mutex;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
 use uuid::Uuid;
+
+use super::AttachedSubnetKind;
 
 /// Stored routes (and usage count) for a given VPC/subnet.
 #[derive(Debug, Default, Clone)]
@@ -91,7 +100,8 @@ struct RouteSet {
 pub struct MulticastGroupCfg {
     /// The multicast group IP address (IPv4 or IPv6).
     pub group_ip: IpAddr,
-    /// For Source-Specific Multicast (SSM), list of source addresses.
+    /// Source addresses for source-filtered multicast (optional for ASM,
+    /// required for SSM).
     pub sources: Vec<IpAddr>,
 }
 
@@ -133,90 +143,70 @@ impl PortManagerInner {
 /// Parameters needed to create and configure an OPTE port.
 pub struct PortCreateParams<'a> {
     pub nic: &'a NetworkInterface,
-    pub external_ips: &'a Option<ExternalIpConfig>,
+    pub external_ips: &'a ExternalIpConfig,
     pub firewall_rules: &'a [ResolvedVpcFirewallRule],
     pub dhcp_config: DhcpCfg,
+    pub attached_subnets: Vec<AttachedSubnet>,
+    /// MTU to set on the xde device, in bytes. If `None`, OPTE applies its
+    /// default (1500). Used by jumbo-frame opt-in.
+    pub mtu: Option<u32>,
 }
 
 impl<'a> TryFrom<&PortCreateParams<'a>> for IpCfg {
     type Error = Error;
 
     fn try_from(params: &PortCreateParams) -> Result<IpCfg, Error> {
-        omicron_to_opte_ip_config(&params.nic.ip_config, params.external_ips)
+        omicron_to_opte_ip_config(
+            &params.nic.ip_config,
+            params.external_ips,
+            &params.attached_subnets,
+        )
     }
 }
 
 fn omicron_to_opte_ip_config(
     private_ips: &PrivateIpConfig,
-    external_ips: &Option<ExternalIpConfig>,
+    external_ips: &ExternalIpConfig,
+    attached_subnets: &[AttachedSubnet],
 ) -> Result<IpCfg, Error> {
-    let cfg = match (private_ips, external_ips) {
-        // Private and public IPv4 configuration
-        (
-            PrivateIpConfig::V4(private_v4),
-            Some(ExternalIpConfig::V4(external_v4)),
-        ) => IpCfg::Ipv4(build_opte_ipv4_config(private_v4, Some(external_v4))),
-        // Only private IPv4 configuration
-        (PrivateIpConfig::V4(private_v4), None) => {
-            IpCfg::Ipv4(build_opte_ipv4_config(private_v4, None))
+    let cfg = match private_ips {
+        PrivateIpConfig::V4(private_v4) => {
+            if external_ips.v6.is_some() {
+                return Err(Error::InvalidPortIpConfig(String::from(
+                    "No private IPv6 stack for external IPv6 IP config",
+                )));
+            }
+            IpCfg::Ipv4(build_opte_ipv4_config(
+                private_v4,
+                external_ips.v4.as_ref(),
+                attached_subnets,
+            ))
         }
-        // Private and public IPv6 configuration
-        (
-            PrivateIpConfig::V6(private_v6),
-            Some(ExternalIpConfig::V6(external_v6)),
-        ) => IpCfg::Ipv6(build_opte_ipv6_config(private_v6, Some(external_v6))),
-        // Only private IPv6 configuration
-        (PrivateIpConfig::V6(private_v6), None) => {
-            IpCfg::Ipv6(build_opte_ipv6_config(private_v6, None))
+        PrivateIpConfig::V6(private_v6) => {
+            if external_ips.v4.is_some() {
+                return Err(Error::InvalidPortIpConfig(String::from(
+                    "No private IPv4 stack for external IPv4 IP config",
+                )));
+            }
+            IpCfg::Ipv6(build_opte_ipv6_config(
+                private_v6,
+                external_ips.v6.as_ref(),
+                attached_subnets,
+            ))
         }
-        // Private and public dual-stack configuration
-        (
-            PrivateIpConfig::DualStack { v4: private_v4, v6: private_v6 },
-            Some(ExternalIpConfig::DualStack {
-                v4: external_v4,
-                v6: external_v6,
-            }),
-        ) => {
-            let ipv4 = build_opte_ipv4_config(private_v4, Some(external_v4));
-            let ipv6 = build_opte_ipv6_config(private_v6, Some(external_v6));
+        PrivateIpConfig::DualStack { v4: private_v4, v6: private_v6 } => {
+            let ipv4 = build_opte_ipv4_config(
+                private_v4,
+                external_ips.v4.as_ref(),
+                attached_subnets,
+            );
+            let ipv6 = build_opte_ipv6_config(
+                private_v6,
+                external_ips.v6.as_ref(),
+                attached_subnets,
+            );
             IpCfg::DualStack { ipv4, ipv6 }
         }
-        // Only private dual-stack configuration.
-        (
-            PrivateIpConfig::DualStack { v4: private_v4, v6: private_v6 },
-            None,
-        ) => {
-            let ipv4 = build_opte_ipv4_config(private_v4, None);
-            let ipv6 = build_opte_ipv6_config(private_v6, None);
-            IpCfg::DualStack { ipv4, ipv6 }
-        }
-        // Private dual-stack, public IPv4 configuration.
-        (
-            PrivateIpConfig::DualStack { v4: private_v4, v6: private_v6 },
-            Some(ExternalIpConfig::V4(external_v4)),
-        ) => {
-            let ipv4 = build_opte_ipv4_config(private_v4, Some(external_v4));
-            let ipv6 = build_opte_ipv6_config(private_v6, None);
-            IpCfg::DualStack { ipv4, ipv6 }
-        }
-        // Private dual-stack, public IPv6 configuration.
-        (
-            PrivateIpConfig::DualStack { v4: private_v4, v6: private_v6 },
-            Some(ExternalIpConfig::V6(external_v6)),
-        ) => {
-            let ipv4 = build_opte_ipv4_config(private_v4, None);
-            let ipv6 = build_opte_ipv6_config(private_v6, Some(external_v6));
-            IpCfg::DualStack { ipv4, ipv6 }
-        }
-        // Cannot have external config of a different version, either
-        // because we are single-stack but of the wrong version, or
-        // dual-stack public, but single-stack private.
-        (PrivateIpConfig::V6(_), Some(ExternalIpConfig::V4(_)))
-        | (PrivateIpConfig::V4(_), Some(ExternalIpConfig::V6(_)))
-        | (
-            PrivateIpConfig::V6(_) | PrivateIpConfig::V4(_),
-            Some(ExternalIpConfig::DualStack { .. }),
-        ) => return Err(Error::InvalidPortIpConfig),
     };
     Ok(cfg)
 }
@@ -224,23 +214,85 @@ fn omicron_to_opte_ip_config(
 fn build_opte_ipv4_config(
     private_v4: &PrivateIpv4Config,
     external_v4: Option<&ExternalIpv4Config>,
+    attached_subnets: &[AttachedSubnet],
 ) -> Ipv4Cfg {
     let gateway_ip = private_v4.opte_gateway().into();
     let vpc_subnet = Ipv4Cidr::from(Ipv4Network::from(*private_v4.subnet()));
     let private_ip = (*private_v4.ip()).into();
     let external_ips = build_external_ipv4_config(external_v4);
-    Ipv4Cfg { vpc_subnet, private_ip, gateway_ip, external_ips }
+    let transit_ips = private_v4
+        .transit_ips
+        .iter()
+        .map(|ip| {
+            let cidr =
+                Ipv4Cidr::new(ip.addr().into(), ip.width().try_into().unwrap());
+            let cfg = TransitIpConfig { allow_in: true, allow_out: true };
+            (cidr, cfg)
+        })
+        .collect();
+    let attached_subnets = attached_subnets
+        .iter()
+        .filter_map(|subnet| match subnet.cidr {
+            IpCidr::Ip4(ipv4) => {
+                let is_external = match subnet.kind {
+                    AttachedSubnetKind::Vpc => false,
+                    AttachedSubnetKind::External => true,
+                };
+                Some((ipv4, AttachedSubnetConfig { is_external }))
+            }
+            IpCidr::Ip6(_) => None,
+        })
+        .collect();
+    Ipv4Cfg {
+        vpc_subnet,
+        private_ip,
+        gateway_ip,
+        external_ips,
+        attached_subnets,
+        transit_ips,
+    }
 }
 
 fn build_opte_ipv6_config(
     private_v6: &PrivateIpv6Config,
     external_v6: Option<&ExternalIpv6Config>,
+    attached_subnets: &[AttachedSubnet],
 ) -> Ipv6Cfg {
     let gateway_ip = private_v6.opte_gateway().into();
     let vpc_subnet = Ipv6Cidr::from(Ipv6Network::from(*private_v6.subnet()));
     let private_ip = (*private_v6.ip()).into();
     let external_ips = build_external_ipv6_config(external_v6);
-    Ipv6Cfg { vpc_subnet, private_ip, gateway_ip, external_ips }
+    let transit_ips = private_v6
+        .transit_ips
+        .iter()
+        .map(|ip| {
+            let cidr =
+                Ipv6Cidr::new(ip.addr().into(), ip.width().try_into().unwrap());
+            let cfg = TransitIpConfig { allow_in: true, allow_out: true };
+            (cidr, cfg)
+        })
+        .collect();
+    let attached_subnets = attached_subnets
+        .iter()
+        .filter_map(|subnet| match subnet.cidr {
+            IpCidr::Ip4(_) => None,
+            IpCidr::Ip6(ipv6) => {
+                let is_external = match subnet.kind {
+                    AttachedSubnetKind::Vpc => false,
+                    AttachedSubnetKind::External => true,
+                };
+                Some((ipv6, AttachedSubnetConfig { is_external }))
+            }
+        })
+        .collect();
+    Ipv6Cfg {
+        vpc_subnet,
+        private_ip,
+        gateway_ip,
+        external_ips,
+        attached_subnets,
+        transit_ips,
+    }
 }
 
 // Build an ExternalIpCfg from parameters.
@@ -254,13 +306,13 @@ fn build_external_ipv4_config(
             floating_ips: vec![],
         };
     };
-    let snat = v4.source_nat().map(|snat| SNat4Cfg {
+    let snat = v4.source_nat.map(|snat| SNat4Cfg {
         external_ip: snat.ip.into(),
         ports: snat.port_range(),
     });
-    let ephemeral_ip = v4.ephemeral_ip().as_ref().copied().map(Into::into);
+    let ephemeral_ip = v4.ephemeral_ip.map(Into::into);
     let floating_ips =
-        v4.floating_ips().iter().copied().map(Into::into).collect();
+        v4.floating_ips.iter().copied().map(Into::into).collect();
     ExternalIpCfg { snat, ephemeral_ip, floating_ips }
 }
 
@@ -275,13 +327,13 @@ fn build_external_ipv6_config(
             floating_ips: vec![],
         };
     };
-    let snat = v6.source_nat().map(|snat| SNat6Cfg {
+    let snat = v6.source_nat.map(|snat| SNat6Cfg {
         external_ip: snat.ip.into(),
         ports: snat.port_range(),
     });
-    let ephemeral_ip = v6.ephemeral_ip().as_ref().copied().map(Into::into);
+    let ephemeral_ip = v6.ephemeral_ip.map(Into::into);
     let floating_ips =
-        v6.floating_ips().iter().copied().map(Into::into).collect();
+        v6.floating_ips.iter().copied().map(Into::into).collect();
     ExternalIpCfg { snat, ephemeral_ip, floating_ips }
 }
 
@@ -316,8 +368,14 @@ impl PortManager {
         params: PortCreateParams,
     ) -> Result<(Port, PortTicket), Error> {
         let ip_cfg = IpCfg::try_from(&params)?;
-        let PortCreateParams { nic, external_ips, firewall_rules, dhcp_config } =
-            params;
+        let PortCreateParams {
+            nic,
+            external_ips,
+            firewall_rules,
+            dhcp_config,
+            attached_subnets: _,
+            mtu,
+        } = params;
         let is_service =
             matches!(nic.kind, NetworkInterfaceKind::Service { .. });
         let is_instance =
@@ -331,6 +389,7 @@ impl PortManager {
             gateway_mac: MacAddr::from(gateway.mac.into_array()),
             vni,
             phys_ip: self.inner.underlay_ip.into(),
+            dhcp: dhcp_config,
         };
 
         // Create the xde device.
@@ -352,20 +411,13 @@ impl PortManager {
             "Creating xde device";
             "port_name" => &port_name,
             "vpc_cfg" => ?&vpc_cfg,
-            "dhcp_config" => ?&dhcp_config,
         );
         let hdl = {
             let hdl = Handle::new()?;
-            hdl.create_xde(
-                &port_name,
-                vpc_cfg,
-                dhcp_config,
-                /* passthru = */ false,
-            )?;
+            hdl.create_xde(&port_name, vpc_cfg, mtu)?;
             hdl
         };
         let (port, ticket) = {
-            let mut ports = self.inner.ports.lock().unwrap();
             let ticket = PortTicket::new(nic.id, nic.kind, self.inner.clone());
             let port = Port::new(PortData {
                 name: port_name.clone(),
@@ -375,7 +427,18 @@ impl PortManager {
                 vni,
                 gateway,
             });
-            let old = ports.insert((nic.id, nic.kind), port.clone());
+
+            // NOTE: We may add external IPs below, which can fail. If that
+            // does, we drop the `ticket` on the way out of this block. That
+            // attempts to acquire this lock, in order to remove itself on drop.
+            // We need to drop the lock before that, to avoid a deadlock, so
+            // let's do it right away, after inserting.
+            let old = self
+                .inner
+                .ports
+                .lock()
+                .unwrap()
+                .insert((nic.id, nic.kind), port.clone());
             assert!(
                 old.is_none(),
                 "Duplicate OPTE port detected: interface_id = {}, kind = {:?}",
@@ -394,9 +457,7 @@ impl PortManager {
                 // `Instance::refresh_external_ips_inner`), and to prevent updates
                 // racing with nexus before an instance/port are reachable from their
                 // respective managers.
-                if let Some(eips) = external_ips {
-                    self.external_ips_ensure_port(&port, nic.id, eips)?;
-                }
+                self.external_ips_ensure_port(&port, nic.id, external_ips)?;
             }
             (port, ticket)
         };
@@ -495,36 +556,6 @@ impl PortManager {
             add_routes(&mut route_map, key)?;
         }
         drop(route_map);
-
-        // If there are any transit IPs set, allow them through.
-        // TODO: Currently set only in initial state.
-        //       This, external IPs, and cfg'able state
-        //       (DHCP?) are probably worth being managed by an RPW.
-        for block in nic.ip_config.all_transit_ips() {
-            // In principle if this were an operation on an existing
-            // port, we would explicitly undo the In addition if the
-            // Out addition fails.
-            // However, failure here will just destroy the port
-            // outright -- this should only happen if an excessive
-            // number of rules are specified.
-            hdl.allow_cidr(
-                &port_name,
-                super::net_to_cidr(block),
-                Direction::In,
-            )?;
-            hdl.allow_cidr(
-                &port_name,
-                super::net_to_cidr(block),
-                Direction::Out,
-            )?;
-
-            debug!(
-                self.inner.log,
-                "Added CIDR to in/out allowlist";
-                "port_name" => &port_name,
-                "cidr" => ?block,
-            );
-        }
 
         info!(
             self.inner.log,
@@ -710,16 +741,18 @@ impl PortManager {
         // The `SetExternalIpsReq` type uses an `Option` around the IP
         // configuration. However, `build_external_ipv{4,6}_config` accept an
         // option and "push" that into the returned configuration type, i.e.,
-        // it's fields are optional rather than returning an option.
+        // its fields are optional rather than returning an option.
         //
         // We map the option so we can get the `None` we need for the
         // `SetExternalIpsReq`. But that does mean we always call
         // `build_external_ipv{4,6}_config` with `Some(_)`.
         let external_ips_v4 = external_ips
-            .ipv4_config()
+            .v4
+            .as_ref()
             .map(|v4| build_external_ipv4_config(Some(v4)));
         let external_ips_v6 = external_ips
-            .ipv6_config()
+            .v6
+            .as_ref()
             .map(|v6| build_external_ipv6_config(Some(v6)));
         let inet_gw_map = if let Some(map) = inet_gw_map {
             Some(
@@ -752,7 +785,7 @@ impl PortManager {
     ///
     /// TODO: Once OPTE kernel module supports multicast group APIs, this
     /// method should be updated to configure OPTE port-level multicast
-    /// group membership. Note: multicast groups are fleet-wide and can span
+    /// group membership. Note: multicast groups are fleet-scoped and can span
     /// across VPCs.
     pub fn multicast_groups_ensure(
         &self,
@@ -782,7 +815,9 @@ impl PortManager {
                     "group_ip" => %group.group_ip,
                     "port_name" => port.name(),
                 );
-                return Err(Error::InvalidPortIpConfig);
+                return Err(Error::InvalidPortIpConfig(String::from(
+                    "invalid multicast IP address",
+                )));
             }
         }
 
@@ -929,6 +964,171 @@ impl PortManager {
 
         Ok(())
     }
+
+    pub fn attached_subnets_ensure(
+        &self,
+        nic_id: Uuid,
+        nic_kind: NetworkInterfaceKind,
+        ensure_removed: Vec<IpCidr>,
+        ensure_added: Vec<AttachedSubnet>,
+    ) -> EnsureAttachedSubnetResult {
+        let ports = self.inner.ports.lock().unwrap();
+        let Some(port) = ports.get(&(nic_id, nic_kind)) else {
+            return EnsureAttachedSubnetResult {
+                diff: Default::default(),
+                error: Some(Error::AttachedSubnetUpdateMissingPort(
+                    nic_id, nic_kind,
+                )),
+            };
+        };
+        self.attached_subnets_ensure_port(port, ensure_removed, ensure_added)
+    }
+
+    fn attached_subnets_ensure_port(
+        &self,
+        port: &Port,
+        ensure_removed: Vec<IpCidr>,
+        ensure_added: Vec<AttachedSubnet>,
+    ) -> EnsureAttachedSubnetResult {
+        debug!(
+            self.inner.log,
+            "ensuring attached subnets for port";
+            "port_name" => %port.name(),
+        );
+        let hdl = match Handle::new() {
+            Ok(h) => h,
+            Err(e) => {
+                return EnsureAttachedSubnetResult {
+                    diff: Default::default(),
+                    error: Some(e.into()),
+                };
+            }
+        };
+        let mut result = EnsureAttachedSubnetResult::default();
+        for cidr in ensure_removed.into_iter() {
+            match hdl.detach_subnet(port.name(), cidr) {
+                Ok(_) => result.diff.detached.push(cidr),
+                Err(e) => {
+                    assert!(result.error.replace(e.into()).is_none());
+                    return result;
+                }
+            }
+        }
+        for subnet in ensure_added.into_iter() {
+            match self.attach_subnet_port(port, subnet) {
+                Ok(_) => result.diff.attached.push(subnet),
+                Err(e) => {
+                    assert!(result.error.replace(e).is_none());
+                    return result;
+                }
+            }
+        }
+        result
+    }
+
+    pub fn attach_subnet(
+        &self,
+        nic_id: Uuid,
+        nic_kind: NetworkInterfaceKind,
+        subnet: AttachedSubnet,
+    ) -> Result<(), Error> {
+        let ports = self.inner.ports.lock().unwrap();
+        let port = ports.get(&(nic_id, nic_kind)).ok_or_else(|| {
+            Error::AttachedSubnetUpdateMissingPort(nic_id, nic_kind)
+        })?;
+        self.attach_subnet_port(port, subnet)
+    }
+
+    fn attach_subnet_port(
+        &self,
+        port: &Port,
+        subnet: AttachedSubnet,
+    ) -> Result<(), Error> {
+        let hdl = Handle::new()?;
+        let AttachedSubnet { cidr, kind } = subnet;
+        let is_external = match kind {
+            AttachedSubnetKind::Vpc => false,
+            AttachedSubnetKind::External => true,
+        };
+        match hdl.attach_subnet(port.name(), cidr, is_external) {
+            Ok(_) => {
+                debug!(
+                    self.inner.log,
+                    "attached subnet";
+                    "port_name" => %port.name(),
+                    "subnet" => %cidr,
+                    "kind" => ?kind,
+                );
+                Ok(())
+            }
+            Err(e) => {
+                error!(
+                    self.inner.log,
+                    "failed to attach subnet";
+                    "port_name" => %port.name(),
+                    "subnet" => %cidr,
+                    "kind" => ?kind,
+                    InlineErrorChain::new(&e),
+                );
+                Err(Error::from(e))
+            }
+        }
+    }
+
+    pub fn detach_subnet(
+        &self,
+        nic_id: Uuid,
+        nic_kind: NetworkInterfaceKind,
+        subnet: IpCidr,
+    ) -> Result<(), Error> {
+        let ports = self.inner.ports.lock().unwrap();
+        let port = ports.get(&(nic_id, nic_kind)).ok_or_else(|| {
+            Error::AttachedSubnetUpdateMissingPort(nic_id, nic_kind)
+        })?;
+        self.detach_subnet_port(port, subnet)
+    }
+
+    fn detach_subnet_port(
+        &self,
+        port: &Port,
+        subnet: IpCidr,
+    ) -> Result<(), Error> {
+        let hdl = Handle::new()?;
+        // This returns an Error if the actual request failed. The
+        // `DetachSubnetResp` it returns in the Ok(_) variant is either
+        // `NotFound` or `Ok(IpCidr)`, so in both cases we've "detached" it. We
+        // return success either way.
+        match hdl.detach_subnet(port.name(), subnet) {
+            Ok(DetachSubnetResp::Ok(_)) => {
+                debug!(
+                    self.inner.log,
+                    "detached subnet";
+                    "port_name" => %port.name(),
+                    "subnet" => %subnet,
+                );
+                Ok(())
+            }
+            Ok(DetachSubnetResp::NotFound) => {
+                warn!(
+                    self.inner.log,
+                    "subnet is already detached";
+                    "port_name" => %port.name(),
+                    "subnet" => %subnet,
+                );
+                Ok(())
+            }
+            Err(e) => {
+                error!(
+                    self.inner.log,
+                    "failed to detach subnet";
+                    "port_name" => %port.name(),
+                    "subnet" => %subnet,
+                    InlineErrorChain::new(&e),
+                );
+                Err(Error::from(e))
+            }
+        }
+    }
 }
 
 pub struct PortTicket {
@@ -1036,11 +1236,7 @@ mod tests {
     use crate::opte::Handle;
     use macaddr::MacAddr6;
     use omicron_common::api::external::{MacAddr, Vni};
-    use omicron_common::api::internal::shared::ExternalIpConfig;
-    use omicron_common::api::internal::shared::ExternalIpConfigBuilder;
     use omicron_common::api::internal::shared::InternetGatewayRouterTarget;
-    use omicron_common::api::internal::shared::NetworkInterface;
-    use omicron_common::api::internal::shared::NetworkInterfaceKind;
     use omicron_common::api::internal::shared::PrivateIpConfig;
     use omicron_common::api::internal::shared::PrivateIpv4Config;
     use omicron_common::api::internal::shared::PrivateIpv6Config;
@@ -1048,8 +1244,6 @@ mod tests {
     use omicron_common::api::internal::shared::ResolvedVpcRouteSet;
     use omicron_common::api::internal::shared::RouterTarget;
     use omicron_common::api::internal::shared::RouterVersion;
-    use omicron_common::api::internal::shared::SourceNatConfigV4;
-    use omicron_common::api::internal::shared::SourceNatConfigV6;
     use omicron_test_utils::dev::test_setup_log;
     use oxide_vpc::api::DhcpCfg;
     use oxide_vpc::api::IpCfg;
@@ -1058,6 +1252,13 @@ mod tests {
     use oxnet::IpNet;
     use oxnet::Ipv4Net;
     use oxnet::Ipv6Net;
+    use sled_agent_types::instance::ExternalIpConfig;
+    use sled_agent_types::instance::ExternalIpv4Config;
+    use sled_agent_types::instance::ExternalIpv6Config;
+    use sled_agent_types::inventory::NetworkInterface;
+    use sled_agent_types::inventory::NetworkInterfaceKind;
+    use sled_agent_types::inventory::SourceNatConfigV4;
+    use sled_agent_types::inventory::SourceNatConfigV6;
     use std::collections::HashSet;
     use std::net::Ipv4Addr;
     use std::net::Ipv6Addr;
@@ -1103,16 +1304,16 @@ mod tests {
                 .unwrap();
         let public_ipv4_addr0 = Ipv4Addr::new(10, 0, 0, 4);
         let public_ipv4_addr1 = Ipv4Addr::new(10, 0, 0, 5);
-        let external_ip_config0 = Some(
-            ExternalIpConfigBuilder::new()
-                .with_source_nat(
+        let external_ip_config0 = ExternalIpConfig {
+            v4: Some(ExternalIpv4Config {
+                source_nat: Some(
                     SourceNatConfigV4::new(public_ipv4_addr0, 0, MAX_PORT)
                         .unwrap(),
-                )
-                .build()
-                .unwrap()
-                .into(),
-        );
+                ),
+                ..Default::default()
+            }),
+            v6: None,
+        };
         const MAX_PORT: u16 = (1 << 14) - 1;
         let (port0, _ticket0) = manager
             .create_port(PortCreateParams {
@@ -1137,6 +1338,8 @@ mod tests {
                     dns4_servers: Vec::new(),
                     dns6_servers: Vec::new(),
                 },
+                attached_subnets: vec![],
+                mtu: None,
             })
             .unwrap();
 
@@ -1282,16 +1485,16 @@ mod tests {
         // this point on creation, but not the other port since we don't modify
         // it when we create this second port. That happens when we call
         // `vpc_routes_ensure` below.
-        let external_ip_config1 = Some(
-            ExternalIpConfigBuilder::new()
-                .with_source_nat(
+        let external_ip_config1 = ExternalIpConfig {
+            v4: Some(ExternalIpv4Config {
+                source_nat: Some(
                     SourceNatConfigV4::new(public_ipv4_addr1, 0, MAX_PORT)
                         .unwrap(),
-                )
-                .build()
-                .unwrap()
-                .into(),
-        );
+                ),
+                ..Default::default()
+            }),
+            v6: None,
+        };
         let (port1, _ticket1) = manager
             .create_port(PortCreateParams {
                 nic: &NetworkInterface {
@@ -1315,6 +1518,8 @@ mod tests {
                     dns4_servers: Vec::new(),
                     dns6_servers: Vec::new(),
                 },
+                attached_subnets: vec![],
+                mtu: None,
             })
             .unwrap();
 
@@ -1467,13 +1672,13 @@ mod tests {
             slot: 0,
         };
         let source_nat = SourceNatConfigV4::new(ext_ip, 0, 16383).unwrap();
-        let external_ips = Some(
-            ExternalIpConfigBuilder::new()
-                .with_source_nat(source_nat)
-                .build()
-                .unwrap()
-                .into(),
-        );
+        let external_ips = ExternalIpConfig {
+            v4: Some(ExternalIpv4Config {
+                source_nat: Some(source_nat),
+                ..Default::default()
+            }),
+            v6: None,
+        };
         let prs = PortCreateParams {
             nic: &nic,
             external_ips: &external_ips,
@@ -1485,6 +1690,8 @@ mod tests {
                 dns4_servers: vec![],
                 dns6_servers: vec![],
             },
+            attached_subnets: vec![],
+            mtu: None,
         };
         let IpCfg::Ipv4(oxide_vpc::api::Ipv4Cfg {
             vpc_subnet,
@@ -1492,6 +1699,8 @@ mod tests {
             gateway_ip,
             external_ips:
                 oxide_vpc::api::ExternalIpCfg { snat, ephemeral_ip, floating_ips },
+            attached_subnets,
+            transit_ips,
         }) = IpCfg::try_from(&prs).unwrap()
         else {
             panic!("Expected IPv4 config")
@@ -1512,6 +1721,8 @@ mod tests {
         assert_eq!(ports, source_nat.port_range());
         assert!(ephemeral_ip.is_none());
         assert!(floating_ips.is_empty());
+        assert!(attached_subnets.is_empty());
+        assert!(transit_ips.is_empty());
     }
 
     #[test]
@@ -1535,13 +1746,13 @@ mod tests {
             slot: 0,
         };
         let source_nat = SourceNatConfigV6::new(ext_ip, 0, 16383).unwrap();
-        let external_ips = Some(
-            ExternalIpConfigBuilder::new()
-                .with_source_nat(source_nat)
-                .build()
-                .unwrap()
-                .into(),
-        );
+        let external_ips = ExternalIpConfig {
+            v4: None,
+            v6: Some(ExternalIpv6Config {
+                source_nat: Some(source_nat),
+                ..Default::default()
+            }),
+        };
         let prs = PortCreateParams {
             nic: &nic,
             external_ips: &external_ips,
@@ -1553,6 +1764,8 @@ mod tests {
                 dns4_servers: vec![],
                 dns6_servers: vec![],
             },
+            attached_subnets: vec![],
+            mtu: None,
         };
         let IpCfg::Ipv6(oxide_vpc::api::Ipv6Cfg {
             vpc_subnet,
@@ -1560,6 +1773,8 @@ mod tests {
             gateway_ip,
             external_ips:
                 oxide_vpc::api::ExternalIpCfg { snat, ephemeral_ip, floating_ips },
+            attached_subnets: _,
+            transit_ips: _,
         }) = IpCfg::try_from(&prs).unwrap()
         else {
             panic!("Expected IPv4 config")
@@ -1613,18 +1828,16 @@ mod tests {
 
         // Ipv4 source NAT, Ipv6 ephemeral
         let source_nat = SourceNatConfigV4::new(ext_ipv4, 0, 16383).unwrap();
-        let external_ipv4 = ExternalIpConfigBuilder::new()
-            .with_source_nat(source_nat)
-            .build()
-            .unwrap();
-        let external_ipv6 = ExternalIpConfigBuilder::new()
-            .with_ephemeral_ip(ext_ipv6)
-            .build()
-            .unwrap();
-        let external_ips = Some(ExternalIpConfig::DualStack {
-            v4: external_ipv4,
-            v6: external_ipv6,
-        });
+        let external_ips = ExternalIpConfig {
+            v4: Some(ExternalIpv4Config {
+                source_nat: Some(source_nat),
+                ..Default::default()
+            }),
+            v6: Some(ExternalIpv6Config {
+                ephemeral_ip: Some(ext_ipv6),
+                ..Default::default()
+            }),
+        };
         let prs = PortCreateParams {
             nic: &nic,
             external_ips: &external_ips,
@@ -1636,6 +1849,8 @@ mod tests {
                 dns4_servers: vec![],
                 dns6_servers: vec![],
             },
+            attached_subnets: vec![],
+            mtu: None,
         };
         let IpCfg::DualStack { ipv4, ipv6 } = IpCfg::try_from(&prs).unwrap()
         else {
@@ -1707,13 +1922,13 @@ mod tests {
             slot: 0,
         };
         let source_nat = SourceNatConfigV6::new(ext_ip, 0, 16383).unwrap();
-        let external_ips = Some(
-            ExternalIpConfigBuilder::new()
-                .with_source_nat(source_nat)
-                .build()
-                .unwrap()
-                .into(),
-        );
+        let external_ips = ExternalIpConfig {
+            v4: None,
+            v6: Some(ExternalIpv6Config {
+                source_nat: Some(source_nat),
+                ..Default::default()
+            }),
+        };
         let prs = PortCreateParams {
             nic: &nic,
             external_ips: &external_ips,
@@ -1725,6 +1940,8 @@ mod tests {
                 dns4_servers: vec![],
                 dns6_servers: vec![],
             },
+            attached_subnets: vec![],
+            mtu: None,
         };
         let _ = IpCfg::try_from(&prs).expect_err(
             "Should fail to convert with public IPv6 and private IPv4",
@@ -1752,13 +1969,13 @@ mod tests {
             slot: 0,
         };
         let source_nat = SourceNatConfigV4::new(ext_ip, 0, 16383).unwrap();
-        let external_ips = Some(
-            ExternalIpConfigBuilder::new()
-                .with_source_nat(source_nat)
-                .build()
-                .unwrap()
-                .into(),
-        );
+        let external_ips = ExternalIpConfig {
+            v4: Some(ExternalIpv4Config {
+                source_nat: Some(source_nat),
+                ..Default::default()
+            }),
+            v6: None,
+        };
         let prs = PortCreateParams {
             nic: &nic,
             external_ips: &external_ips,
@@ -1770,6 +1987,8 @@ mod tests {
                 dns4_servers: vec![],
                 dns6_servers: vec![],
             },
+            attached_subnets: vec![],
+            mtu: None,
         };
         let _ = IpCfg::try_from(&prs).expect_err(
             "Should fail to convert with public IPv4 and private IPv6",

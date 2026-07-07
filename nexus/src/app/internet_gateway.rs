@@ -4,12 +4,13 @@
 
 //! Internet gateways
 
-use crate::external_api::params;
 use nexus_auth::authz;
 use nexus_auth::context::OpContext;
 use nexus_db_lookup::LookupPath;
 use nexus_db_lookup::lookup;
 use nexus_db_queries::db;
+use nexus_types::external_api::internet_gateway;
+use nexus_types::external_api::vpc;
 use nexus_types::identity::Resource;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DeleteResult;
@@ -27,10 +28,10 @@ impl super::Nexus {
     pub fn internet_gateway_lookup<'a>(
         &'a self,
         opctx: &'a OpContext,
-        igw_selector: params::InternetGatewaySelector,
+        igw_selector: internet_gateway::InternetGatewaySelector,
     ) -> LookupResult<lookup::InternetGateway<'a>> {
         match igw_selector {
-            params::InternetGatewaySelector {
+            internet_gateway::InternetGatewaySelector {
                 gateway: NameOrId::Id(id),
                 vpc: None,
                 project: None,
@@ -39,17 +40,20 @@ impl super::Nexus {
                     .internet_gateway_id(id);
                 Ok(gw)
             }
-            params::InternetGatewaySelector {
+            internet_gateway::InternetGatewaySelector {
                 gateway: NameOrId::Name(name),
-                vpc: Some(vpc),
+                vpc: Some(igw_vpc),
                 project,
             } => {
                 let gw = self
-                    .vpc_lookup(opctx, params::VpcSelector { project, vpc })?
+                    .vpc_lookup(
+                        opctx,
+                        vpc::VpcSelector { project, vpc: igw_vpc },
+                    )?
                     .internet_gateway_name_owned(name.into());
                 Ok(gw)
             }
-            params::InternetGatewaySelector {
+            internet_gateway::InternetGatewaySelector {
                 gateway: NameOrId::Id(_),
                 ..
             } => Err(Error::invalid_request(
@@ -66,7 +70,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         vpc_lookup: &lookup::Vpc<'_>,
-        params: &params::InternetGatewayCreate,
+        params: &internet_gateway::InternetGatewayCreate,
     ) -> CreateResult<db::model::InternetGateway> {
         let (.., authz_vpc) =
             vpc_lookup.lookup_for(authz::Action::CreateChild).await?;
@@ -148,10 +152,10 @@ impl super::Nexus {
     pub fn internet_gateway_ip_pool_lookup<'a>(
         &'a self,
         opctx: &'a OpContext,
-        pool_selector: params::InternetGatewayIpPoolSelector,
+        pool_selector: internet_gateway::InternetGatewayIpPoolSelector,
     ) -> LookupResult<lookup::InternetGatewayIpPool<'a>> {
         match pool_selector {
-            params::InternetGatewayIpPoolSelector {
+            internet_gateway::InternetGatewayIpPoolSelector {
                 pool: NameOrId::Id(id),
                 gateway: None,
                 vpc: None,
@@ -161,25 +165,25 @@ impl super::Nexus {
                     .internet_gateway_ip_pool_id(id);
                 Ok(route)
             }
-            params::InternetGatewayIpPoolSelector {
+            internet_gateway::InternetGatewayIpPoolSelector {
                 pool: NameOrId::Name(name),
                 gateway: Some(gateway),
-                vpc,
+                vpc: igw_vpc,
                 project,
             } => {
                 let route = self
                     .internet_gateway_lookup(
                         opctx,
-                        params::InternetGatewaySelector {
+                        internet_gateway::InternetGatewaySelector {
                             project,
-                            vpc,
+                            vpc: igw_vpc,
                             gateway,
                         },
                     )?
                     .internet_gateway_ip_pool_name_owned(name.into());
                 Ok(route)
             }
-            params::InternetGatewayIpPoolSelector {
+            internet_gateway::InternetGatewayIpPoolSelector {
                 pool: NameOrId::Id(_),
                 ..
             } => Err(Error::invalid_request(
@@ -196,7 +200,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         lookup: &lookup::InternetGateway<'_>,
-        params: &params::InternetGatewayIpPoolCreate,
+        params: &internet_gateway::InternetGatewayIpPoolCreate,
     ) -> CreateResult<db::model::InternetGatewayIpPool> {
         let (.., authz_igw, _) =
             lookup.fetch_for(authz::Action::CreateChild).await?;
@@ -278,10 +282,10 @@ impl super::Nexus {
     pub fn internet_gateway_ip_address_lookup<'a>(
         &'a self,
         opctx: &'a OpContext,
-        address_selector: params::InternetGatewayIpAddressSelector,
+        address_allocator: internet_gateway::InternetGatewayIpAddressSelector,
     ) -> LookupResult<lookup::InternetGatewayIpAddress<'a>> {
-        match address_selector {
-            params::InternetGatewayIpAddressSelector {
+        match address_allocator {
+            internet_gateway::InternetGatewayIpAddressSelector {
                 address: NameOrId::Id(id),
                 gateway: None,
                 vpc: None,
@@ -291,25 +295,25 @@ impl super::Nexus {
                     .internet_gateway_ip_address_id(id);
                 Ok(route)
             }
-            params::InternetGatewayIpAddressSelector {
+            internet_gateway::InternetGatewayIpAddressSelector {
                 address: NameOrId::Name(name),
                 gateway: Some(gateway),
-                vpc,
+                vpc: igw_vpc,
                 project,
             } => {
                 let route = self
                     .internet_gateway_lookup(
                         opctx,
-                        params::InternetGatewaySelector {
+                        internet_gateway::InternetGatewaySelector {
                             project,
-                            vpc,
+                            vpc: igw_vpc,
                             gateway,
                         },
                     )?
                     .internet_gateway_ip_address_name_owned(name.into());
                 Ok(route)
             }
-            params::InternetGatewayIpAddressSelector {
+            internet_gateway::InternetGatewayIpAddressSelector {
                 address: NameOrId::Id(_),
                 ..
             } => Err(Error::invalid_request(
@@ -326,7 +330,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         lookup: &lookup::InternetGateway<'_>,
-        params: &params::InternetGatewayIpAddressCreate,
+        params: &internet_gateway::InternetGatewayIpAddressCreate,
     ) -> CreateResult<db::model::InternetGatewayIpAddress> {
         let (.., authz_igw, _) =
             lookup.fetch_for(authz::Action::CreateChild).await?;

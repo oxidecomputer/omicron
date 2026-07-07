@@ -8,7 +8,7 @@ use super::roles::RoleSet;
 use crate::authn;
 use crate::authz::SiloUser;
 use nexus_db_model::DatabaseString;
-use nexus_types::external_api::shared::FleetRole;
+use nexus_types::external_api::policy::FleetRole;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
 use uuid::Uuid;

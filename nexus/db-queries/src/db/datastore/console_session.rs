@@ -12,9 +12,12 @@ use crate::db::model::ConsoleSession;
 use crate::db::model::to_db_typed_uuid;
 use crate::db::pagination::paginated;
 use async_bb8_diesel::AsyncRunQueryDsl;
+use chrono::DateTime;
 use chrono::TimeDelta;
 use chrono::Utc;
+use diesel::dsl::sql_query;
 use diesel::prelude::*;
+use diesel::sql_types;
 use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::public_error_from_diesel;
 use nexus_db_lookup::LookupPath;
@@ -217,5 +220,28 @@ impl DataStore {
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
             .map(|_x| ())
+    }
+
+    /// Hard-delete up to `limit` console sessions whose `time_created` is
+    /// older than `cutoff`, returning the number deleted.
+    pub async fn session_cleanup_batch(
+        &self,
+        opctx: &OpContext,
+        cutoff: DateTime<Utc>,
+        limit: u32,
+    ) -> Result<usize, Error> {
+        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
+
+        sql_query(
+            "DELETE FROM omicron.public.console_session \
+             WHERE time_created < $1 \
+             ORDER BY time_created \
+             LIMIT $2",
+        )
+        .bind::<sql_types::Timestamptz, _>(cutoff)
+        .bind::<sql_types::BigInt, _>(i64::from(limit))
+        .execute_async(&*self.pool_connection_authorized(opctx).await?)
+        .await
+        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 }

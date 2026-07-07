@@ -23,14 +23,16 @@ use nexus_test_utils::resource_helpers::object_put;
 use nexus_test_utils::resource_helpers::object_put_error;
 use nexus_test_utils::resource_helpers::objects_list_page_authz;
 use nexus_test_utils_macros::nexus_test;
-use nexus_types::external_api::params;
-use nexus_types::external_api::views::AffinityGroup;
-use nexus_types::external_api::views::AntiAffinityGroup;
-use nexus_types::external_api::views::Sled;
-use nexus_types::external_api::views::SledInstance;
+use nexus_types::external_api::affinity;
+use nexus_types::external_api::affinity::AffinityGroup;
+use nexus_types::external_api::affinity::AffinityGroupMember;
+use nexus_types::external_api::affinity::AntiAffinityGroup;
+use nexus_types::external_api::affinity::AntiAffinityGroupMember;
+use nexus_types::external_api::instance;
+use nexus_types::external_api::sled::Sled;
+use nexus_types::external_api::sled::SledInstance;
+use nexus_types_versions::latest;
 use omicron_common::api::external;
-use omicron_common::api::external::AffinityGroupMember;
-use omicron_common::api::external::AntiAffinityGroupMember;
 use omicron_common::api::external::ObjectIdentity;
 use std::collections::BTreeSet;
 use std::marker::PhantomData;
@@ -57,16 +59,16 @@ impl<T: AffinityGroupish> ProjectScopedApiHelper<'_, T> {
     async fn create_stopped_instance(
         &self,
         instance_name: &str,
-    ) -> external::Instance {
+    ) -> latest::instance::Instance {
         create_instance_with(
             &self.client,
             &self.project.as_ref().expect("Need to specify project name"),
             instance_name,
-            &params::InstanceNetworkInterfaceAttachment::None,
+            &instance::InstanceNetworkInterfaceAttachment::None,
             // Disks=
-            Vec::<params::InstanceDiskAttachment>::new(),
+            Vec::<instance::InstanceDiskAttachment>::new(),
             // External IPs=
-            Vec::<params::ExternalIpCreate>::new(),
+            Vec::<instance::ExternalIpCreate>::new(),
             // Start=
             false,
             // Auto-restart policy=
@@ -287,8 +289,8 @@ impl<'a> ApiHelper<'a> {
 
     async fn start_instance(
         &self,
-        instance: &external::Instance,
-    ) -> external::Instance {
+        instance: &latest::instance::Instance,
+    ) -> latest::instance::Instance {
         let uri = format!("/v1/instances/{}/start", instance.identity.id);
 
         NexusRequest::new(
@@ -351,25 +353,25 @@ struct AffinityType;
 impl AffinityGroupish for AffinityType {
     type Group = AffinityGroup;
     type Member = AffinityGroupMember;
-    type CreateParams = params::AffinityGroupCreate;
-    type UpdateParams = params::AffinityGroupUpdate;
+    type CreateParams = affinity::AffinityGroupCreate;
+    type UpdateParams = affinity::AffinityGroupUpdate;
 
     const URL_COMPONENT: &'static str = "affinity-groups";
     const RESOURCE_NAME: &'static str = "affinity-group";
 
     fn make_create_params(group_name: &str) -> Self::CreateParams {
-        params::AffinityGroupCreate {
+        affinity::AffinityGroupCreate {
             identity: external::IdentityMetadataCreateParams {
                 name: group_name.parse().unwrap(),
                 description: String::from("This is a description"),
             },
-            policy: external::AffinityPolicy::Fail,
-            failure_domain: external::FailureDomain::Sled,
+            policy: affinity::AffinityPolicy::Fail,
+            failure_domain: affinity::FailureDomain::Sled,
         }
     }
 
     fn make_update_params() -> Self::UpdateParams {
-        params::AffinityGroupUpdate {
+        affinity::AffinityGroupUpdate {
             identity: external::IdentityMetadataUpdateParams {
                 name: None,
                 description: Some(NEW_DESCRIPTION.to_string()),
@@ -383,25 +385,25 @@ struct AntiAffinityType;
 impl AffinityGroupish for AntiAffinityType {
     type Group = AntiAffinityGroup;
     type Member = AntiAffinityGroupMember;
-    type CreateParams = params::AntiAffinityGroupCreate;
-    type UpdateParams = params::AntiAffinityGroupUpdate;
+    type CreateParams = affinity::AntiAffinityGroupCreate;
+    type UpdateParams = affinity::AntiAffinityGroupUpdate;
 
     const URL_COMPONENT: &'static str = "anti-affinity-groups";
     const RESOURCE_NAME: &'static str = "anti-affinity-group";
 
     fn make_create_params(group_name: &str) -> Self::CreateParams {
-        params::AntiAffinityGroupCreate {
+        affinity::AntiAffinityGroupCreate {
             identity: external::IdentityMetadataCreateParams {
                 name: group_name.parse().unwrap(),
                 description: String::from("This is a description"),
             },
-            policy: external::AffinityPolicy::Fail,
-            failure_domain: external::FailureDomain::Sled,
+            policy: affinity::AffinityPolicy::Fail,
+            failure_domain: affinity::FailureDomain::Sled,
         }
     }
 
     fn make_update_params() -> Self::UpdateParams {
-        params::AntiAffinityGroupUpdate {
+        affinity::AntiAffinityGroupUpdate {
             identity: external::IdentityMetadataUpdateParams {
                 name: None,
                 description: Some(NEW_DESCRIPTION.to_string()),

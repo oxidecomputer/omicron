@@ -53,5 +53,13 @@ pub static BUILTIN_ROLE_ASSIGNMENTS: LazyLock<Vec<RoleAssignment>> =
                 *FLEET_ID,
                 "external-authenticator",
             ),
+            // The "omdb" user gets the "admin" role on the sole Fleet.
+            // It has all privileges for debugging purposes.
+            RoleAssignment::new_for_builtin_user(
+                user_builtin::USER_OMDB.id,
+                ResourceType::Fleet,
+                *FLEET_ID,
+                "admin",
+            ),
         ]
     });

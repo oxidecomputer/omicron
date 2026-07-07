@@ -237,6 +237,7 @@ mod test {
                 OK => SchemeResult::Authenticated(authn::Details {
                     actor: self.actor,
                     device_token_expiration: None,
+                    credential_id: None,
                 }),
                 FAIL => SchemeResult::Failed(Reason::BadCredentials {
                     actor: self.actor,
@@ -264,7 +265,7 @@ mod test {
         let flag1 = Arc::new(AtomicU8::new(SKIP));
         let count1 = Arc::new(AtomicU8::new(0));
         let mut expected_count1 = 0;
-        let name1 = authn::SchemeName("grunt1");
+        let name1 = authn::SchemeName::Spoof;
         let actor1 = authn::Actor::UserBuiltin {
             user_builtin_id: "1c91bab2-4841-669f-cc32-de80da5bbf39"
                 .parse()
@@ -280,7 +281,7 @@ mod test {
         let flag2 = Arc::new(AtomicU8::new(SKIP));
         let count2 = Arc::new(AtomicU8::new(0));
         let mut expected_count2 = 0;
-        let name2 = authn::SchemeName("grunt2");
+        let name2 = authn::SchemeName::AccessToken;
         let actor2 = authn::Actor::UserBuiltin {
             user_builtin_id: "799684af-533a-cb66-b5ac-ab55a791d5ef"
                 .parse()
@@ -391,7 +392,7 @@ mod test {
         expected_count1 += 1;
         assert_eq!(
             error.to_string(),
-            "authentication failed (tried schemes: [SchemeName(\"grunt1\")])"
+            "authentication failed (tried schemes: [Spoof])"
         );
         assert_eq!(expected_count1, count1.load(Ordering::SeqCst));
         assert_eq!(expected_count2, count2.load(Ordering::SeqCst));
@@ -439,8 +440,7 @@ mod test {
             .expect_err("expected authn to fail");
         assert_eq!(
             error.to_string(),
-            "authentication failed (tried schemes: \
-            [SchemeName(\"grunt1\"), SchemeName(\"grunt2\")])"
+            "authentication failed (tried schemes: [Spoof, AccessToken])"
         );
         assert_eq!(expected_count1, count1.load(Ordering::SeqCst));
         assert_eq!(expected_count2, count2.load(Ordering::SeqCst));

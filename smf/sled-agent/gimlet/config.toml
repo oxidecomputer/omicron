@@ -59,7 +59,8 @@ vmm_reservoir_percentage = 86.3
 # allocated.
 swap_device_size_gb = 256
 
-data_links = ["cxgbe0", "cxgbe1"]
+[data_links]
+kind = "physical"
 
 [dropshot]
 default_request_body_max_bytes = 1048576
@@ -74,3 +75,4 @@ if_exists = "append"
 resolve = { which = "ipcc" }
 attest = { which = "ipcc" }
 roots = ["/usr/share/oxide/idcerts/staging.pem", "/usr/share/oxide/idcerts/production.pem"]
+enforce = "Enforced"

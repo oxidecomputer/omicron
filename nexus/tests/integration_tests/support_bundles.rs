@@ -10,17 +10,22 @@ use dropshot::HttpErrorResponseBody;
 use dropshot::test_util::ClientTestContext;
 use http::StatusCode;
 use http::method::Method;
+use nexus_db_model::SupportBundleState as DbSupportBundleState;
+use nexus_db_queries::authz;
+use nexus_db_queries::context::OpContext;
 use nexus_lockstep_client::types::LastResult;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
 use nexus_test_utils_macros::nexus_test;
-use nexus_types::external_api::shared::SupportBundleInfo;
-use nexus_types::external_api::shared::SupportBundleState;
+use nexus_types::external_api::support_bundle::SupportBundleInfo;
+use nexus_types::external_api::support_bundle::SupportBundleState;
+use nexus_types::internal_api::background::SupportBundleActivationReport;
 use nexus_types::internal_api::background::SupportBundleCleanupReport;
-use nexus_types::internal_api::background::SupportBundleCollectionReport;
 use nexus_types::internal_api::background::SupportBundleCollectionStep;
+use nexus_types::internal_api::background::SupportBundleCollectionStepStatus;
 use nexus_types::internal_api::background::SupportBundleEreportStatus;
+use omicron_common::api::external::LookupType;
 use omicron_uuid_kinds::SupportBundleUuid;
 use serde::Deserialize;
 use std::io::Cursor;
@@ -152,7 +157,7 @@ async fn bundle_create_with_comment(
     client: &ClientTestContext,
     user_comment: Option<String>,
 ) -> Result<SupportBundleInfo> {
-    use nexus_types::external_api::params::SupportBundleCreate;
+    use nexus_types::external_api::support_bundle::SupportBundleCreate;
 
     let create_params = SupportBundleCreate { user_comment };
 
@@ -174,7 +179,7 @@ async fn bundle_create_expect_fail(
     expected_status: StatusCode,
     expected_message: &str,
 ) -> Result<()> {
-    use nexus_types::external_api::params::SupportBundleCreate;
+    use nexus_types::external_api::support_bundle::SupportBundleCreate;
 
     let create_params = SupportBundleCreate { user_comment: None };
     let error = NexusRequest::new(
@@ -302,7 +307,7 @@ async fn bundle_update_comment(
     id: SupportBundleUuid,
     comment: Option<String>,
 ) -> Result<SupportBundleInfo> {
-    use nexus_types::external_api::params::SupportBundleUpdate;
+    use nexus_types::external_api::support_bundle::SupportBundleUpdate;
 
     let url = format!("{BUNDLES_URL}/{id}");
     let update = SupportBundleUpdate { user_comment: comment };
@@ -330,7 +335,7 @@ struct TaskOutput {
     cleanup_err: Option<String>,
     collection_err: Option<String>,
     cleanup_report: Option<SupportBundleCleanupReport>,
-    collection_report: Option<SupportBundleCollectionReport>,
+    collection_report: Option<SupportBundleActivationReport>,
 }
 
 async fn activate_bundle_collection_background_task(
@@ -350,6 +355,23 @@ async fn activate_bundle_collection_background_task(
     serde_json::from_value(result.details).expect(
         "Should have been able to deserialize TaskOutput from background task",
     )
+}
+
+fn assert_ereport_details_eq(
+    collection: &nexus_types::internal_api::background::SupportBundleCollectionReport,
+    expected: SupportBundleEreportStatus,
+) {
+    let step = collection
+        .steps
+        .iter()
+        .find(|s| s.name == SupportBundleCollectionStep::STEP_EREPORTS)
+        .expect("should have ereports step");
+    assert_eq!(step.status, SupportBundleCollectionStepStatus::Ok);
+    let details: SupportBundleEreportStatus = serde_json::from_value(
+        step.details.clone().expect("ereports step should have details"),
+    )
+    .expect("ereports step details should deserialize");
+    assert_eq!(details, expected);
 }
 
 // Test accessing support bundle interfaces when the bundle does not exist,
@@ -489,20 +511,28 @@ async fn test_support_bundle_lifecycle(cptestctx: &ControlPlaneTestContext) {
     );
 
     let report = output.collection_report.as_ref().expect("Missing report");
-    assert_eq!(report.bundle, bundle.id);
+    assert_eq!(report.collection.bundle, bundle.id);
     assert!(report.activated_in_db_ok);
-    assert_eq!(
-        report.ereports,
-        Some(SupportBundleEreportStatus {
+    // This assertion expects 0 ereports in the database. This depends on
+    // the sp_ereport_ingester background task being disabled in the test
+    // config (config.test.toml). If that task runs before bundle collection,
+    // it will ingest ereports from the simulated SPs into the database,
+    // causing this assertion to fail nondeterministically.
+    assert_ereport_details_eq(
+        &report.collection,
+        SupportBundleEreportStatus {
             n_collected: 0,
             n_found: 0,
-            errors: Vec::new()
-        })
+            errors: Vec::new(),
+        },
     );
 
     // Verify that steps were recorded with reasonable timing data
-    assert!(!report.steps.is_empty(), "Should have recorded some steps");
-    for step in &report.steps {
+    assert!(
+        !report.collection.steps.is_empty(),
+        "Should have recorded some steps"
+    );
+    for step in &report.collection.steps {
         assert!(
             step.end >= step.start,
             "Step '{}' end time should be >= start time",
@@ -512,7 +542,7 @@ async fn test_support_bundle_lifecycle(cptestctx: &ControlPlaneTestContext) {
 
     // Verify that we successfully spawned steps to query sleds and SPs
     let step_names: Vec<_> =
-        report.steps.iter().map(|s| s.name.as_str()).collect();
+        report.collection.steps.iter().map(|s| s.name.as_str()).collect();
     assert!(
         step_names.contains(&SupportBundleCollectionStep::STEP_SPAWN_SLEDS),
         "Should have attempted to list in-service sleds"
@@ -531,6 +561,8 @@ async fn test_support_bundle_lifecycle(cptestctx: &ControlPlaneTestContext) {
     let mut names = archive.file_names();
     assert_eq!(names.next(), Some("bundle_id.txt"));
     assert_eq!(names.next(), Some("meta/"));
+    assert_eq!(names.next(), Some("meta/reason_for_creation.txt"));
+    assert_eq!(names.next(), Some("meta/report.json"));
     assert_eq!(names.next(), Some("meta/trace.json"));
     assert_eq!(names.next(), Some("rack/"));
     assert!(names.any(|n| n == "sp_task_dumps/"));
@@ -613,20 +645,25 @@ async fn test_support_bundle_range_requests(
     let output = activate_bundle_collection_background_task(&cptestctx).await;
     assert_eq!(output.collection_err, None);
     let report = output.collection_report.as_ref().expect("Missing report");
-    assert_eq!(report.bundle, bundle.id);
+    assert_eq!(report.collection.bundle, bundle.id);
     assert!(report.activated_in_db_ok);
-    assert_eq!(
-        report.ereports,
-        Some(SupportBundleEreportStatus {
+    // See comment above — this depends on sp_ereport_ingester being disabled
+    // in config.test.toml.
+    assert_ereport_details_eq(
+        &report.collection,
+        SupportBundleEreportStatus {
             n_collected: 0,
             n_found: 0,
-            errors: Vec::new()
-        })
+            errors: Vec::new(),
+        },
     );
 
     // Verify that steps were recorded with reasonable timing data
-    assert!(!report.steps.is_empty(), "Should have recorded some steps");
-    for step in &report.steps {
+    assert!(
+        !report.collection.steps.is_empty(),
+        "Should have recorded some steps"
+    );
+    for step in &report.collection.steps {
         assert!(
             step.end >= step.start,
             "Step '{}' end time should be >= start time",
@@ -636,7 +673,7 @@ async fn test_support_bundle_range_requests(
 
     // Verify that we successfully spawned steps to query sleds and SPs
     let step_names: Vec<_> =
-        report.steps.iter().map(|s| s.name.as_str()).collect();
+        report.collection.steps.iter().map(|s| s.name.as_str()).collect();
     assert!(
         step_names.contains(&SupportBundleCollectionStep::STEP_SPAWN_SLEDS),
         "Should have attempted to list in-service sleds"
@@ -781,9 +818,10 @@ async fn test_support_bundle_update_comment(
     // Test exceeding maximum length (4097 bytes)
     let too_long_comment = "a".repeat(4097);
     let url = format!("{BUNDLES_URL}/{}", bundle.id);
-    let update = nexus_types::external_api::params::SupportBundleUpdate {
-        user_comment: Some(too_long_comment),
-    };
+    let update =
+        nexus_types::external_api::support_bundle::SupportBundleUpdate {
+            user_comment: Some(too_long_comment),
+        };
 
     let error = NexusRequest::new(
         RequestBuilder::new(client, Method::PUT, &url)
@@ -838,4 +876,91 @@ async fn test_support_bundle_create_with_comment(
     bundle_delete(&client, bundle_no_comment.id).await.unwrap();
     bundle_delete(&client, bundle_with_comment.id).await.unwrap();
     bundle_delete(&client, bundle_empty_comment.id).await.unwrap();
+}
+
+fn authz_support_bundle_from_id(id: SupportBundleUuid) -> authz::SupportBundle {
+    authz::SupportBundle::new(authz::FLEET, id, LookupType::by_id(id))
+}
+
+// Test that bundles in "Failed" state can be deleted.
+//
+// This is a regression test for https://github.com/oxidecomputer/omicron/issues/9558
+// where bundles that had transitioned to the Failed state could not be deleted
+// via the API because the delete operation incorrectly tried to transition
+// Failed -> Destroying, which is not a valid state transition.
+#[nexus_test]
+async fn test_support_bundle_delete_failed_bundle(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    let nexus = &cptestctx.server.server_context().nexus;
+    let datastore = nexus.datastore();
+    let opctx =
+        OpContext::for_tests(cptestctx.logctx.log.clone(), datastore.clone());
+
+    let _disk_test =
+        DiskTestBuilder::new(&cptestctx).with_zpool_count(1).build().await;
+
+    // Create a bundle via the external API
+    let bundle = bundle_create(&client).await.unwrap();
+    assert_eq!(bundle.state, SupportBundleState::Collecting);
+
+    // Mark the bundle as "Failing" via the datastore.
+    // This simulates what happens when a Nexus managing the bundle is expunged
+    // or the underlying storage is removed.
+    let authz_bundle = authz_support_bundle_from_id(bundle.id);
+    datastore
+        .support_bundle_update(
+            &opctx,
+            &authz_bundle,
+            DbSupportBundleState::Failing,
+        )
+        .await
+        .expect("Should be able to mark bundle as failing");
+
+    // Run the background task to clean up storage and transition Failing -> Failed
+    let output = activate_bundle_collection_background_task(&cptestctx).await;
+    assert_eq!(output.cleanup_err, None);
+    assert_eq!(
+        output.cleanup_report,
+        Some(SupportBundleCleanupReport {
+            // The bundle hadn't been collected yet, so sled agent returns not found
+            sled_bundles_deleted_not_found: 1,
+            // The bundle transitioned from Failing to Failed
+            db_failing_bundles_updated: 1,
+            ..Default::default()
+        })
+    );
+
+    // Verify the bundle is now in Failed state via the external API
+    let bundle = bundle_get(&client, bundle.id).await.unwrap();
+    assert_eq!(
+        bundle.state,
+        SupportBundleState::Failed,
+        "Bundle should be in Failed state after cleanup"
+    );
+
+    // This is the key assertion: we should be able to delete a Failed bundle.
+    // Before the fix for #9558, this would fail with:
+    // "Cannot update support bundle state from Failed to Destroying"
+    bundle_delete(&client, bundle.id).await.unwrap();
+
+    // For Failed bundles, the storage has already been cleaned up by the
+    // background task, so deletion removes the database record immediately
+    // (no need for a subsequent background task run).
+    bundle_get_expect_fail(
+        &client,
+        bundle.id,
+        StatusCode::NOT_FOUND,
+        &format!("not found: support-bundle with id \"{}\"", bundle.id),
+    )
+    .await
+    .unwrap();
+
+    // Verify bundle is not in the list
+    let bundles = bundles_list(&client).await.unwrap();
+    assert!(
+        !bundles.iter().any(|b| b.id == bundle.id),
+        "Deleted bundle should not appear in bundle list"
+    );
 }

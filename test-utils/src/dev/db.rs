@@ -8,6 +8,10 @@ use crate::dev::poll;
 use anyhow::Context;
 use anyhow::anyhow;
 use anyhow::bail;
+use camino::Utf8Path;
+use camino::Utf8PathBuf;
+use camino_tempfile::Utf8TempDir;
+use camino_tempfile::tempdir;
 use nexus_config::PostgresConfigWithUrl;
 use std::collections::BTreeMap;
 use std::ffi::{OsStr, OsString};
@@ -15,12 +19,8 @@ use std::fmt;
 use std::net::SocketAddr;
 use std::ops::Deref;
 use std::os::unix::process::ExitStatusExt;
-use std::path::Path;
-use std::path::PathBuf;
 use std::process::Stdio;
 use std::time::Duration;
-use tempfile::TempDir;
-use tempfile::tempdir;
 use thiserror::Error;
 use tokio::io::AsyncWriteExt;
 use tokio_postgres::config::Host;
@@ -75,11 +75,13 @@ const COCKROACHDB_VERSION: &str =
 #[derive(Debug)]
 pub struct CockroachStarterBuilder {
     /// optional value for the --store-dir option
-    store_dir: Option<PathBuf>,
+    store_dir: Option<Utf8PathBuf>,
     /// optional value for the listening port
     listen_port: u16,
     /// environment variables, mirrored here for reporting
     env: BTreeMap<String, String>,
+    /// the maximum SQL memory, in MiB
+    max_sql_memory_mib: u16,
     /// command-line arguments, mirrored here for reporting
     args: Vec<String>,
     /// describes the command line that we're going to execute
@@ -89,6 +91,14 @@ pub struct CockroachStarterBuilder {
 }
 
 impl CockroachStarterBuilder {
+    /// The default maximum SQL memory, in MiB.
+    ///
+    /// This matches the value set in smf/cockroachdb/method_script.sh.
+    ///
+    /// See <https://github.com/oxidecomputer/omicron-9874-findings> for
+    // why we set the max SQL memory to be 256MiB by default.
+    pub const DEFAULT_MAX_SQL_MEMORY_MIB: u16 = 256;
+
     pub fn new() -> CockroachStarterBuilder {
         let mut builder = CockroachStarterBuilder::new_raw(COCKROACHDB_BIN);
 
@@ -136,6 +146,7 @@ impl CockroachStarterBuilder {
             store_dir: None,
             listen_port: COCKROACHDB_DEFAULT_LISTEN_PORT,
             env: BTreeMap::new(),
+            max_sql_memory_mib: Self::DEFAULT_MAX_SQL_MEMORY_MIB,
             args: vec![String::from(cmd)],
             cmd_builder: tokio::process::Command::new(cmd),
             start_timeout: COCKROACHDB_START_TIMEOUT_DEFAULT,
@@ -153,7 +164,7 @@ impl CockroachStarterBuilder {
     /// isn't specified, CockroachDB will be configured to store data into a
     /// temporary directory that will be cleaned up on Drop of
     /// [`CockroachStarter`] or [`CockroachInstance`].
-    pub fn store_dir<P: AsRef<Path>>(mut self, store_dir: P) -> Self {
+    pub fn store_dir<P: AsRef<Utf8Path>>(mut self, store_dir: P) -> Self {
         self.store_dir.replace(store_dir.as_ref().to_owned());
         self
     }
@@ -166,9 +177,18 @@ impl CockroachStarterBuilder {
         self
     }
 
+    /// Overrides the maximum SQL memory for CockroachDB
+    ///
+    /// The default is [`Self::DEFAULT_MAX_SQL_MEMORY_MIB`]. There's no need to
+    /// set this unless you're testing memory-constrained operations.
+    pub fn max_sql_memory_mib(mut self, max_sql_memory_mib: u16) -> Self {
+        self.max_sql_memory_mib = max_sql_memory_mib;
+        self
+    }
+
     fn redirect_file(
         &self,
-        temp_dir_path: &Path,
+        temp_dir_path: &Utf8Path,
         label: &str,
     ) -> Result<std::fs::File, anyhow::Error> {
         let out_path = temp_dir_path.join(label);
@@ -176,7 +196,7 @@ impl CockroachStarterBuilder {
             .write(true)
             .create_new(true)
             .open(&out_path)
-            .with_context(|| format!("open \"{}\"", out_path.display()))
+            .with_context(|| format!("open \"{out_path}\""))
     }
 
     /// Starts CockroachDB using the configured command-line arguments
@@ -197,14 +217,9 @@ impl CockroachStarterBuilder {
         // shutdowns.
         let temp_dir =
             tempdir().with_context(|| "creating temporary directory")?;
-        let store_dir = self
-            .store_dir
-            .as_ref()
-            .map(|s| s.as_os_str().to_owned())
-            .unwrap_or_else(|| {
-                CockroachStarterBuilder::temp_path(&temp_dir, "data")
-                    .into_os_string()
-            });
+        let store_dir = self.store_dir.clone().unwrap_or_else(|| {
+            CockroachStarterBuilder::temp_path(&temp_dir, "data")
+        });
 
         // Disable the CockroachDB automatic emergency ballast file. By default
         // CockroachDB creates a 1 GiB ballast file on startup; because we start
@@ -219,11 +234,14 @@ impl CockroachStarterBuilder {
         let listen_url_file =
             CockroachStarterBuilder::temp_path(&temp_dir, "listen-url");
         let listen_arg = format!("[::1]:{}", self.listen_port);
+        let max_sql_memory_arg = format!("{}MiB", self.max_sql_memory_mib);
         self.arg(&store_arg)
             .arg("--listen-addr")
             .arg(&listen_arg)
             .arg("--listening-url-file")
-            .arg(listen_url_file.as_os_str());
+            .arg(listen_url_file.as_os_str())
+            .arg("--max-sql-memory")
+            .arg(max_sql_memory_arg);
 
         let temp_dir_path = temp_dir.path();
         self.cmd_builder.stdout(Stdio::from(
@@ -235,7 +253,7 @@ impl CockroachStarterBuilder {
 
         Ok(CockroachStarter {
             temp_dir,
-            store_dir: store_dir.into(),
+            store_dir,
             listen_url_file,
             args: self.args,
             env: self.env,
@@ -270,7 +288,7 @@ impl CockroachStarterBuilder {
     }
 
     /// Convenience for constructing a path name in a given temporary directory
-    fn temp_path<S: AsRef<str>>(tempdir: &TempDir, file: S) -> PathBuf {
+    fn temp_path<S: AsRef<str>>(tempdir: &Utf8TempDir, file: S) -> Utf8PathBuf {
         let mut pathbuf = tempdir.path().to_owned();
         pathbuf.push(file.as_ref());
         pathbuf
@@ -284,11 +302,11 @@ impl CockroachStarterBuilder {
 #[derive(Debug)]
 pub struct CockroachStarter {
     /// temporary directory used for URL file and potentially data storage
-    temp_dir: TempDir,
+    temp_dir: Utf8TempDir,
     /// path to storage directory
-    store_dir: PathBuf,
+    store_dir: Utf8PathBuf,
     /// path to listen URL file (inside temp_dir)
-    listen_url_file: PathBuf,
+    listen_url_file: Utf8PathBuf,
     /// environment variables, mirrored here for reporting
     env: BTreeMap<String, String>,
     /// command-line arguments, mirrored here for reporting to the user
@@ -312,18 +330,18 @@ impl CockroachStarter {
     }
 
     /// Returns the path to the temporary directory created for this execution
-    pub fn temp_dir(&self) -> &Path {
+    pub fn temp_dir(&self) -> &Utf8Path {
         self.temp_dir.path()
     }
 
     /// Returns the path to the listen-url file for this execution
     #[cfg(test)]
-    pub fn listen_url_file(&self) -> &Path {
+    pub fn listen_url_file(&self) -> &Utf8Path {
         &self.listen_url_file
     }
 
     /// Returns the path to the storage directory created for this execution.
-    pub fn store_dir(&self) -> &Path {
+    pub fn store_dir(&self) -> &Utf8Path {
         self.store_dir.as_path()
     }
 
@@ -398,7 +416,9 @@ impl CockroachStarter {
                             Ok(_) => {
                                 // The file hasn't been fully written yet.
                                 // Keep waiting.
-                                return Err(poll::CondCheckError::NotYet);
+                                return Err(poll::CondCheckError::NotYet {
+                                    status: None,
+                                });
                             }
 
                             Err(error)
@@ -407,7 +427,9 @@ impl CockroachStarter {
                             {
                                 // The file doesn't exist yet.
                                 // Keep waiting.
-                                return Err(poll::CondCheckError::NotYet);
+                                return Err(poll::CondCheckError::NotYet {
+                                    status: None,
+                                });
                             }
 
                             Err(error) => {
@@ -436,7 +458,7 @@ impl CockroachStarter {
                         }
                         Ok(None) => {
                             // HTTP address not available yet, keep waiting
-                            Err(poll::CondCheckError::NotYet)
+                            Err(poll::CondCheckError::NotYet { status: None })
                         }
                         Err(source) => {
                             // Error parsing HTTP address
@@ -470,7 +492,7 @@ impl CockroachStarter {
 
                 Err(match poll_error {
                     poll::Error::PermanentError(e) => e,
-                    poll::Error::TimedOut(time_waited) => {
+                    poll::Error::TimedOut { elapsed: time_waited, .. } => {
                         CockroachStartError::TimedOut { pid, time_waited }
                     }
                 })
@@ -571,9 +593,9 @@ pub struct CockroachInstance {
     /// handle to child process, if it hasn't been cleaned up already
     child_process: Option<tokio::process::Child>,
     /// handle to temporary directory, if it hasn't been cleaned up already
-    temp_dir: Option<TempDir>,
+    temp_dir: Option<Utf8TempDir>,
     /// path to temporary directory
-    temp_dir_path: PathBuf,
+    temp_dir_path: Utf8PathBuf,
 }
 
 impl CockroachInstance {
@@ -604,7 +626,7 @@ impl CockroachInstance {
     }
 
     /// Returns the path to the temporary directory created for this execution
-    pub fn temp_dir(&self) -> &Path {
+    pub fn temp_dir(&self) -> &Utf8Path {
         &self.temp_dir_path
     }
 
@@ -710,13 +732,19 @@ impl CockroachInstance {
 
 impl Drop for CockroachInstance {
     fn drop(&mut self) {
-        // TODO-cleanup Ideally at this point we would run self.cleanup() to
-        // kill the child process, wait for it to exit, and then clean up the
-        // temporary directory.  However, we don't have an executor here with
-        // which to run async/await code.  We could create one here, but it's
-        // not clear how safe or sketchy that would be.  Instead, we expect that
-        // the caller has done the cleanup already.  This won't always happen,
-        // particularly for ungraceful failures.
+        // NOTE: Ideally, we'd share this logic with self.cleanup() to tear down
+        // the child process. However, there are a couple distinctions from that
+        // pathway we must consider here:
+        //
+        // 1. drop is not asynchronous, so we don't have the benefits of using
+        //    our tokio executor to run async/await code.
+        // 2. If self.cleanup() has not been invoked, we want to gracefully
+        //    preserve the database for post-mortem debugging. This is often
+        //    the case for e.g. a test which has failed before invoking cleanup,
+        //    and which is bailing out. We can also take this pathway when the
+        //    calling code has forgotten to call "cleanup", and is leaking the
+        //    database, but that's a bug - and choosing to flush and terminate
+        //    via SIGTERM wouldn't be wrong in that case either.
         if self.child_process.is_some() || self.temp_dir.is_some() {
             eprintln!(
                 "WARN: dropped CockroachInstance without cleaning it up first \
@@ -724,10 +752,35 @@ impl Drop for CockroachInstance {
                 temporary directory leaked)"
             );
 
-            // Still, make a best effort.
-            #[allow(unused_must_use)]
+            // Send SIGTERM so CockroachDB can flush its WAL to disk, making the
+            // leaked temp directory useful for post-mortem debugging.
+            //
+            // Background: test CRDB instances might set
+            // `kv.raft_log.disable_synchronization_unsafe = true`
+            // which skips per-commit fdatasync for performance. Data is still
+            // written to the WAL but may only exist in Pebble's user-space
+            // write buffer. SIGTERM triggers Pebble's DB.Close() which flushes
+            // and fsyncs the WAL before exiting.
+            //
+            // See also:
+            // - https://github.com/oxidecomputer/cockroach/blob/release-22.1-oxide/pkg/cli/start_unix.go#L37
+            // - https://github.com/oxidecomputer/omicron/issues/10085
             if let Some(child_process) = self.child_process.as_mut() {
-                child_process.start_kill();
+                let pid = self.pid as libc::pid_t;
+                unsafe { libc::kill(pid, libc::SIGTERM) };
+
+                // Poll the child_process until it exits.
+                //
+                // Note that nextest has a timeout for tests
+                // with the filter 'rdeps(omicron-test-utils)'.
+                //
+                // As a consequence, we can loop "as long as the test runner
+                // lets us" waiting for CockroachDB to gracefully terminate. In
+                // reality, this is typically on the order of ~one second after
+                // a test failure.
+                while let Ok(None) = child_process.try_wait() {
+                    std::thread::sleep(std::time::Duration::from_millis(50));
+                }
             }
             #[allow(unused_must_use)]
             if let Some(temp_dir) = self.temp_dir.take() {
@@ -909,7 +962,7 @@ pub async fn wipe(
 /// Looks for a line like "webui: http://127.0.0.1:39953"
 /// and extracts the socket address.
 async fn parse_http_addr_from_stdout(
-    stdout_path: &std::path::Path,
+    stdout_path: &Utf8Path,
 ) -> Result<Option<SocketAddr>, anyhow::Error> {
     use std::str::FromStr;
 
@@ -1187,13 +1240,14 @@ mod test {
     use crate::dev::db::process_exited;
     use crate::dev::poll;
     use crate::dev::process_running;
+    use camino::Utf8PathBuf;
+    use camino_tempfile::tempdir;
+    use slog_error_chain::InlineErrorChain;
     use std::collections::BTreeMap;
     use std::env;
     use std::path::Path;
-    use std::path::PathBuf;
     use std::process::Stdio;
     use std::time::Duration;
-    use tempfile::tempdir;
     use tokio::fs;
 
     fn new_builder() -> CockroachStarterBuilder {
@@ -1268,7 +1322,7 @@ mod test {
     // expected behavior depends on the failure mode.
     async fn test_database_start_failure(
         starter: CockroachStarter,
-    ) -> (PathBuf, CockroachStartError) {
+    ) -> (Utf8PathBuf, CockroachStartError) {
         let temp_dir = starter.temp_dir().to_owned();
         eprintln!("will run: {}", starter.cmdline());
         eprintln!("environment:");
@@ -1292,7 +1346,7 @@ mod test {
         builder.start_timeout(&Duration::from_millis(0));
         let starter = builder.build().expect("failed to build starter");
         let directory = starter.temp_dir().to_owned();
-        eprintln!("temporary directory: {}", directory.display());
+        eprintln!("temporary directory: {directory}");
         let error =
             starter.start().await.expect_err("unexpectedly started database");
         eprintln!("(expected) error starting database: {:?}", error);
@@ -1325,7 +1379,7 @@ mod test {
         poll::wait_for_condition::<(), std::convert::Infallible, _, _>(
             || async {
                 if process_running(pid) {
-                    Err(poll::CondCheckError::NotYet)
+                    Err(poll::CondCheckError::NotYet { status: None })
                 } else {
                     Ok(())
                 }
@@ -1336,10 +1390,8 @@ mod test {
         .await
         .unwrap_or_else(|_| {
             panic!(
-                "timed out waiting for pid {} to exit \
-                    (leaving temporary directory {})",
-                pid,
-                directory.display()
+                "timed out waiting for pid {pid} to exit \
+                    (leaving temporary directory {directory})"
             );
         });
         assert!(!process_running(pid));
@@ -1354,16 +1406,14 @@ mod test {
         if !directory.starts_with(env::temp_dir()) {
             panic!(
                 "refusing to remove temporary directory not under
-                std::env::temp_dir(): {}",
-                directory.display()
+                std::env::temp_dir(): {directory}"
             )
         }
 
         fs::remove_dir_all(&directory).await.unwrap_or_else(|e| {
             panic!(
-                "failed to remove temporary directory {}: {:?}",
-                directory.display(),
-                e
+                "failed to remove temporary directory {directory}: {}",
+                InlineErrorChain::new(&e)
             )
         });
     }
@@ -1877,6 +1927,92 @@ mod test {
             ))
         );
         assert_eq!(addr.port(), 12345);
+    }
+
+    // Test that data written to CockroachDB survives when the instance is
+    // dropped without calling cleanup(). This exercises the Drop impl path
+    // that fires during test failures (when cleanup is unreachable due to
+    // a panic) or when cleanup is accidentally omitted.
+    //
+    // With `disable_synchronization_unsafe = true`, committed data may
+    // only exist in Pebble's user-space write buffer (not yet write()-ed
+    // to the WAL file on disk). A graceful shutdown (SIGTERM) triggers
+    // Pebble's DB.Close() which flushes and fsyncs the WAL, making data
+    // durable. SIGKILL destroys the process immediately, losing any
+    // buffered WAL data.
+    //
+    // See: https://github.com/oxidecomputer/omicron/issues/10085
+    #[tokio::test]
+    async fn test_data_survives_drop_without_cleanup() {
+        let store_dir = tempdir().expect("failed to create temp dir");
+        let data_dir = store_dir.path().join("data");
+
+        // Start CRDB with a persistent store directory
+        let starter = new_builder()
+            .store_dir(&data_dir)
+            .build()
+            .expect("failed to build starter");
+        let database = starter.start().await.expect("failed to start CRDB");
+
+        // Enable the unsafe sync setting (as setup_database does)
+        database
+            .disable_synchronization()
+            .await
+            .expect("failed to disable sync");
+
+        // Write a single canary row — this is the value we check after restart.
+        let client = database.connect().await.expect("failed to connect");
+        client
+            .batch_execute(
+                "CREATE DATABASE test_db; \
+                 USE test_db; \
+                 CREATE TABLE test_data (id INT PRIMARY KEY, payload STRING); \
+                 INSERT INTO test_data (id, payload) \
+                 VALUES (99999, 'canary');",
+            )
+            .await
+            .expect("canary insert failed");
+
+        // Drop without cleanup — this triggers the Drop impl.
+        // Save the temp dir path so we can clean it up after
+        // verification (the Drop impl intentionally leaks it).
+        let leaked_temp_dir = database.temp_dir().to_owned();
+        drop(client);
+        drop(database);
+
+        // Restart CRDB on the same store directory.
+        let starter2 = new_builder()
+            .store_dir(&data_dir)
+            .build()
+            .expect("failed to build second starter");
+        let mut database2 =
+            starter2.start().await.expect("failed to restart CRDB");
+
+        let client2 = database2.connect().await.expect("failed to reconnect");
+
+        // Check that the canary row survived.
+        let rows = client2
+            .query(
+                "SELECT payload FROM test_db.test_data WHERE id = 99999",
+                &[],
+            )
+            .await
+            .expect("canary query failed");
+        assert_eq!(
+            rows.len(),
+            1,
+            "canary row (id=99999) did not survive shutdown"
+        );
+        let payload: String = rows[0].get(0);
+        assert_eq!(payload, "canary", "canary row has wrong payload");
+
+        client2.cleanup().await.expect("client2 cleanup failed");
+        database2.cleanup().await.expect("database2 cleanup failed");
+
+        // Clean up the temp dir leaked by the first instance's Drop.
+        fs::remove_dir_all(&leaked_temp_dir)
+            .await
+            .expect("failed to clean up leaked temp dir");
     }
 
     // Tests the way `process_exited()` checks and interprets the exit status

@@ -91,17 +91,33 @@ WITH
       SELECT
         1
       WHERE
-        EXISTS(SELECT 1 FROM sled_has_space)
-        AND NOT (EXISTS(SELECT 1 FROM banned_sleds WHERE sled_id = $9))
-        AND (
-            EXISTS(SELECT 1 FROM required_sleds WHERE sled_id = $10)
-            OR NOT EXISTS(SELECT 1 FROM required_sleds)
+        CAST(IF((EXISTS(SELECT 1 FROM sled_has_space)), 'TRUE', 'SLED_HAS_SPACE') AS BOOL)
+        AND CAST(
+            IF(
+              (NOT (EXISTS(SELECT 1 FROM banned_sleds WHERE sled_id = $9))),
+              'TRUE',
+              'BANNED_SLEDS'
+            )
+              AS BOOL
+          )
+        AND CAST(
+            IF(
+              (
+                (
+                  EXISTS(SELECT 1 FROM required_sleds WHERE sled_id = $10)
+                  OR NOT EXISTS(SELECT 1 FROM required_sleds)
+                )
+              ),
+              'TRUE',
+              'REQUIRED_SLEDS'
+            )
+              AS BOOL
           )
     )
 INSERT
 INTO
-  sled_resource_vmm (id, sled_id, hardware_threads, rss_ram, reservoir_ram, instance_id)
+  sled_resource_vmm (id, sled_id, hardware_threads, rss_ram, reservoir_ram, instance_id, state)
 SELECT
-  $11, $12, $13, $14, $15, $16
+  $11, $12, $13, $14, $15, $16, $17
 WHERE
   EXISTS(SELECT 1 FROM insert_valid)

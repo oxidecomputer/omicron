@@ -25,12 +25,11 @@ use dropshot::StreamingBody;
 use dropshot::TypedBody;
 use dropshot::endpoint;
 use omicron_common::api::internal::nexus::DiskRuntimeState;
-use omicron_common::api::internal::nexus::SledVmmState;
 use omicron_common::api::internal::shared::ExternalIpGatewayMap;
 use omicron_common::api::internal::shared::SledIdentifiers;
 use omicron_common::api::internal::shared::VirtualNetworkInterfaceHost;
 use omicron_common::api::internal::shared::{
-    ResolvedVpcRouteSet, ResolvedVpcRouteState, SwitchPorts,
+    ResolvedVpcRouteSet, ResolvedVpcRouteState,
 };
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::ZpoolUuid;
@@ -41,17 +40,21 @@ use sled_agent_types::artifact::{
     ArtifactListResponse, ArtifactPathParam, ArtifactPutResponse,
     ArtifactQueryParam,
 };
+use sled_agent_types::attached_subnet::AttachedSubnet;
+use sled_agent_types::attached_subnet::AttachedSubnets;
+use sled_agent_types::attached_subnet::VmmSubnetPathParam;
 use sled_agent_types::bootstore::BootstoreStatus;
 use sled_agent_types::dataset::{
-    LocalStorageDatasetEnsureRequest, LocalStoragePathParam,
+    LocalStorageDatasetDeleteRequest, LocalStorageDatasetEnsureRequest,
 };
 use sled_agent_types::debug::OperatorSwitchZonePolicy;
 use sled_agent_types::diagnostics::{
     SledDiagnosticsLogsDownloadPathParam, SledDiagnosticsLogsDownloadQueryParam,
 };
 use sled_agent_types::disk::{DiskEnsureBody, DiskPathParam};
-use sled_agent_types::early_networking::EarlyNetworkConfig;
+use sled_agent_types::early_networking::EarlyNetworkConfigEnvelope;
 use sled_agent_types::firewall_rules::VpcFirewallRulesEnsureBody;
+use sled_agent_types::instance::SledVmmState;
 use sled_agent_types::instance::{
     InstanceEnsureBody, InstanceExternalIpBody, InstanceMulticastBody,
     VmmIssueDiskSnapshotRequestBody, VmmIssueDiskSnapshotRequestPathParam,
@@ -60,6 +63,9 @@ use sled_agent_types::instance::{
 };
 use sled_agent_types::inventory::{Inventory, OmicronSledConfig};
 use sled_agent_types::probes::ProbeSet;
+use sled_agent_types::rot::{
+    Attestation, CertificateChain, MeasurementLog, Nonce, RotPathParams,
+};
 use sled_agent_types::sled::AddSledRequest;
 use sled_agent_types::support_bundle::{
     RangeRequestHeaders, SupportBundleFilePathParam,
@@ -68,8 +74,9 @@ use sled_agent_types::support_bundle::{
     SupportBundleTransferQueryParams,
 };
 use sled_agent_types::trust_quorum::{
-    ProxyCommitRequest, ProxyPrepareAndCommitRequest,
+    ProxyCommitRequest, ProxyPrepareAndCommitRequest, TrustQuorumNetworkConfig,
 };
+use sled_agent_types::uplink::SwitchPorts;
 use sled_agent_types::zone_bundle::{
     BundleUtilization, CleanupContext, CleanupContextUpdate, CleanupCount,
     ZoneBundleFilter, ZoneBundleId, ZoneBundleMetadata, ZonePathParam,
@@ -77,7 +84,15 @@ use sled_agent_types::zone_bundle::{
 use sled_hardware_types::BaseboardId;
 // Fixed identifiers for prior versions only
 use sled_agent_types_versions::v1;
+use sled_agent_types_versions::v20;
+use sled_agent_types_versions::v25;
+use sled_agent_types_versions::v26;
+use sled_agent_types_versions::v30;
+use sled_agent_types_versions::v33;
+use sled_agent_types_versions::v39;
+use sled_agent_types_versions::v42;
 use sled_diagnostics::SledDiagnosticsQueryOutput;
+use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use trust_quorum_types::messages::{
@@ -100,7 +115,6 @@ pub fn api() -> SledApiDescription {
         api.register(instance_poke_post)?;
         api.register(instance_poke_single_step_post)?;
         api.register(instance_post_sim_migration_source)?;
-        api.register(disk_poke_post)?;
         Ok(api)
     }
 
@@ -387,20 +401,152 @@ impl SledAgentApi for SledAgentSimImpl {
 
     async fn read_network_bootstore_config_cache(
         rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<EarlyNetworkConfig>, HttpError> {
+    ) -> Result<
+        HttpResponseOk<v20::early_networking::EarlyNetworkConfig>,
+        HttpError,
+    > {
+        // Read the current envelope, then convert it back down to the version
+        // we have to report for this (now-removed!) API endpoint.
+        use v20::early_networking::EarlyNetworkConfigBody as BodyV20;
+        use v26::early_networking::EarlyNetworkConfigBody as BodyV26;
+        use v30::early_networking::EarlyNetworkConfigBody as BodyV30;
+        use v33::system_networking::SystemNetworkingConfig as BodyV33;
+        use v39::system_networking::SystemNetworkingConfig as BodyV39;
+
         let config =
             rqctx.context().bootstore_network_config.lock().unwrap().clone();
-        Ok(HttpResponseOk(config))
+
+        let envelope =
+            EarlyNetworkConfigEnvelope::deserialize_from_bootstore(&config)
+                .map_err(|err| {
+                    HttpError::for_internal_error(format!(
+                        "could not deserialize bootstore contents: {}",
+                        InlineErrorChain::new(&err)
+                    ))
+                })?;
+        let latest_version_body =
+            envelope.deserialize_body().map_err(|err| {
+                HttpError::for_internal_error(format!(
+                    "could not deserialize early network config body: {}",
+                    InlineErrorChain::new(&err)
+                ))
+            })?;
+
+        // Downconvert from the current version to the v20 version we have to
+        // return from this endpoint.
+        let body = BodyV20::from(BodyV26::from(BodyV30::from(BodyV33::from(
+            BodyV39::from(latest_version_body),
+        ))));
+
+        Ok(HttpResponseOk(v20::early_networking::EarlyNetworkConfig {
+            generation: config.generation,
+            schema_version: BodyV20::SCHEMA_VERSION,
+            body,
+        }))
     }
 
-    async fn write_network_bootstore_config(
+    async fn write_network_bootstore_config_v42(
         rqctx: RequestContext<Self::Context>,
-        body: TypedBody<EarlyNetworkConfig>,
+        body: TypedBody<v42::system_networking::WriteNetworkConfigRequest>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let mut config =
             rqctx.context().bootstore_network_config.lock().unwrap();
-        *config = body.into_inner();
+        let body = body.into_inner();
+
+        *config = EarlyNetworkConfigEnvelope::from(&body.body)
+            .serialize_to_bootstore_with_generation(body.generation);
         Ok(HttpResponseUpdatedNoContent())
+    }
+
+    async fn write_network_bootstore_config_v39(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<v39::system_networking::WriteNetworkConfigRequest>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let mut config =
+            rqctx.context().bootstore_network_config.lock().unwrap();
+        let body = body.into_inner();
+
+        *config = EarlyNetworkConfigEnvelope::from(&body.body)
+            .serialize_to_bootstore_with_generation(body.generation);
+        Ok(HttpResponseUpdatedNoContent())
+    }
+
+    async fn write_network_bootstore_config_v33(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<v33::system_networking::WriteNetworkConfigRequest>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let mut config =
+            rqctx.context().bootstore_network_config.lock().unwrap();
+        let body = body.into_inner();
+
+        *config = EarlyNetworkConfigEnvelope::from(&body.body)
+            .serialize_to_bootstore_with_generation(body.generation);
+        Ok(HttpResponseUpdatedNoContent())
+    }
+
+    async fn write_network_bootstore_config_v30(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<v30::early_networking::WriteNetworkConfigRequest>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let mut config =
+            rqctx.context().bootstore_network_config.lock().unwrap();
+        let body = body.into_inner();
+
+        *config = EarlyNetworkConfigEnvelope::from(&body.body)
+            .serialize_to_bootstore_with_generation(body.generation);
+        Ok(HttpResponseUpdatedNoContent())
+    }
+
+    async fn write_network_bootstore_config_v26(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<v26::early_networking::WriteNetworkConfigRequest>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let mut config =
+            rqctx.context().bootstore_network_config.lock().unwrap();
+        let body = body.into_inner();
+
+        *config = EarlyNetworkConfigEnvelope::from(&body.body)
+            .serialize_to_bootstore_with_generation(body.generation);
+        Ok(HttpResponseUpdatedNoContent())
+    }
+
+    async fn write_network_bootstore_config_v25(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<v25::early_networking::WriteNetworkConfigRequest>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let mut config =
+            rqctx.context().bootstore_network_config.lock().unwrap();
+        let body = body.into_inner();
+
+        *config = EarlyNetworkConfigEnvelope::from(&body.body)
+            .serialize_to_bootstore_with_generation(body.generation);
+        Ok(HttpResponseUpdatedNoContent())
+    }
+
+    async fn write_network_bootstore_config_v20(
+        _rqctx: RequestContext<Self::Context>,
+        _body: TypedBody<v20::early_networking::EarlyNetworkConfig>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        // Real sled-agent has to support this endpoint for backwards
+        // compatibility during an update; sim-sled-agent doesn't.
+        Err(HttpError::for_bad_request(
+            None,
+            "old bootstore APIs not supported in simulated sled-agent"
+                .to_string(),
+        ))
+    }
+
+    async fn write_network_bootstore_config_v1(
+        _rqctx: RequestContext<Self::Context>,
+        _body: TypedBody<v1::early_networking::EarlyNetworkConfig>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        // Real sled-agent has to support this endpoint for backwards
+        // compatibility during an update; sim-sled-agent doesn't.
+        Err(HttpError::for_bad_request(
+            None,
+            "old bootstore APIs not supported in simulated sled-agent"
+                .to_string(),
+        ))
     }
 
     /// Fetch basic information about this sled
@@ -689,32 +835,31 @@ impl SledAgentApi for SledAgentSimImpl {
 
     async fn local_storage_dataset_ensure(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<LocalStoragePathParam>,
         body: TypedBody<LocalStorageDatasetEnsureRequest>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let sa = rqctx.context();
 
-        let LocalStoragePathParam { zpool_id, dataset_id } =
-            path_params.into_inner();
-
-        sa.ensure_local_storage_dataset(
-            zpool_id,
-            dataset_id,
-            body.into_inner(),
-        );
+        sa.check_local_storage_error()?;
+        sa.ensure_local_storage_dataset(body.into_inner());
 
         Ok(HttpResponseUpdatedNoContent())
     }
 
     async fn local_storage_dataset_delete(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<LocalStoragePathParam>,
+        body: TypedBody<LocalStorageDatasetDeleteRequest>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let sa = rqctx.context();
 
-        let LocalStoragePathParam { zpool_id, dataset_id } =
-            path_params.into_inner();
+        let LocalStorageDatasetDeleteRequest {
+            zpool_id,
+            dataset_id,
+            // Ignored for now: dataset uuids will be unique enough to delete
+            // the correct thing
+            encrypted_at_rest: _,
+        } = body.into_inner();
 
+        sa.check_local_storage_error()?;
         sa.drop_dataset(
             ZpoolUuid::from_untyped_uuid(zpool_id.into_untyped_uuid()),
             dataset_id,
@@ -987,6 +1132,101 @@ impl SledAgentApi for SledAgentSimImpl {
     ) -> Result<HttpResponseOk<NodeStatus>, HttpError> {
         method_unimplemented()
     }
+
+    async fn trust_quorum_status(
+        _request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<NodeStatus>, HttpError> {
+        method_unimplemented()
+    }
+
+    async fn trust_quorum_network_config_get(
+        _request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<Option<TrustQuorumNetworkConfig>>, HttpError>
+    {
+        method_unimplemented()
+    }
+
+    async fn trust_quorum_network_config_put(
+        _request_context: RequestContext<Self::Context>,
+        _body: TypedBody<TrustQuorumNetworkConfig>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        method_unimplemented()
+    }
+
+    async fn vmm_put_attached_subnets(
+        request_context: RequestContext<Self::Context>,
+        path_params: Path<VmmPathParam>,
+        body: TypedBody<AttachedSubnets>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let sa = request_context.context();
+        let id = path_params.into_inner().propolis_id;
+        let subnets = body.into_inner();
+        sa.instance_put_attached_subnets(id, subnets)
+            .await
+            .map(|_| HttpResponseUpdatedNoContent())
+            .map_err(HttpError::from)
+    }
+
+    async fn vmm_delete_attached_subnets(
+        request_context: RequestContext<Self::Context>,
+        path_params: Path<VmmPathParam>,
+    ) -> Result<HttpResponseDeleted, HttpError> {
+        let sa = request_context.context();
+        let propolis_id = path_params.into_inner().propolis_id;
+        sa.instance_delete_attached_subnets(propolis_id)
+            .await
+            .map(|_| HttpResponseDeleted())
+            .map_err(HttpError::from)
+    }
+
+    async fn vmm_post_attached_subnet(
+        request_context: RequestContext<Self::Context>,
+        path_params: Path<VmmPathParam>,
+        body: TypedBody<AttachedSubnet>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let sa = request_context.context();
+        let id = path_params.into_inner().propolis_id;
+        let subnet = body.into_inner();
+        sa.instance_post_attached_subnet(id, subnet)
+            .await
+            .map(|_| HttpResponseUpdatedNoContent())
+            .map_err(HttpError::from)
+    }
+
+    async fn vmm_delete_attached_subnet(
+        request_context: RequestContext<Self::Context>,
+        path_params: Path<VmmSubnetPathParam>,
+    ) -> Result<HttpResponseDeleted, HttpError> {
+        let sa = request_context.context();
+        let VmmSubnetPathParam { propolis_id, subnet } =
+            path_params.into_inner();
+        sa.instance_delete_attached_subnet(propolis_id, subnet)
+            .await
+            .map(|_| HttpResponseDeleted())
+            .map_err(HttpError::from)
+    }
+
+    async fn rot_measurement_log(
+        _request_context: RequestContext<Self::Context>,
+        _path_params: Path<RotPathParams>,
+    ) -> Result<HttpResponseOk<MeasurementLog>, HttpError> {
+        method_unimplemented()
+    }
+
+    async fn rot_certificate_chain(
+        _request_context: RequestContext<Self::Context>,
+        _path_params: Path<RotPathParams>,
+    ) -> Result<HttpResponseOk<CertificateChain>, HttpError> {
+        method_unimplemented()
+    }
+
+    async fn rot_attest(
+        _request_context: RequestContext<Self::Context>,
+        _path_params: Path<RotPathParams>,
+        _body: TypedBody<Nonce>,
+    ) -> Result<HttpResponseOk<Attestation>, HttpError> {
+        method_unimplemented()
+    }
 }
 
 fn method_unimplemented<T>() -> Result<T, HttpError> {
@@ -1046,19 +1286,5 @@ async fn instance_post_sim_migration_source(
     let sa = rqctx.context();
     let id = path_params.into_inner().propolis_id;
     sa.instance_simulate_migration_source(id, body.into_inner()).await?;
-    Ok(HttpResponseUpdatedNoContent())
-}
-
-#[endpoint {
-    method = POST,
-    path = "/disks/{disk_id}/poke",
-}]
-async fn disk_poke_post(
-    rqctx: RequestContext<Arc<SledAgent>>,
-    path_params: Path<DiskPathParam>,
-) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-    let sa = rqctx.context();
-    let disk_id = path_params.into_inner().disk_id;
-    sa.disk_poke(disk_id).await;
     Ok(HttpResponseUpdatedNoContent())
 }

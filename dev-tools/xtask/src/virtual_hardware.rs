@@ -117,8 +117,8 @@ const ZPOOL: &'static str = "/usr/sbin/zpool";
 const ZONEADM: &'static str = "/usr/sbin/zoneadm";
 
 const SIDECAR_LITE_COMMIT: &'static str =
-    "a95b7a9f78c08125f4e34106f5c885c7e9f2e8d5";
-const SOFTNPU_COMMIT: &'static str = "3203c51cf4473d30991b522062ac0df2e045c2f2";
+    "69fae2ac230cd29f4ea2bf3bcbd6d99554c7bc47";
+const SOFTNPU_COMMIT: &'static str = "e4c3130538b192988737161f4a4dc97272f02b9c";
 const PXA_MAC_DEFAULT: &'static str = "a8:e1:de:01:70:1d";
 
 const PXA_WARNING: &'static str = r#"  You have not set up the proxy-ARP environment variables

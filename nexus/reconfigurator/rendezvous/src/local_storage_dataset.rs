@@ -45,7 +45,7 @@ pub(crate) async fn reconcile_local_storage_datasets(
     for bp_dataset in blueprint_datasets {
         // Filter down to LocalStorage datasets...
         let dataset = match (&bp_dataset.kind, bp_dataset.address) {
-            (DatasetKind::LocalStorage, None) => {
+            (DatasetKind::LocalStorage, _) => {
                 RendezvousLocalStorageDataset::new(
                     bp_dataset.id,
                     bp_dataset.pool.id(),
@@ -172,11 +172,11 @@ mod tests {
     use omicron_common::disk::CompressionAlgorithm;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::PhysicalDiskUuid;
+    use omicron_uuid_kinds::RackUuid;
     use omicron_uuid_kinds::SledUuid;
     use omicron_uuid_kinds::ZpoolUuid;
     use proptest::prelude::*;
     use proptest::proptest;
-    use uuid::Uuid;
 
     async fn proptest_do_prep(
         opctx: &OpContext,
@@ -235,7 +235,7 @@ mod tests {
                         reservoir_size: (16 << 30).try_into().unwrap(),
                         cpu_family: SledCpuFamily::Unknown,
                     },
-                    Uuid::new_v4(),
+                    RackUuid::new_v4(),
                     Generation::new(),
                 ))
                 .await
@@ -332,7 +332,7 @@ mod tests {
                     &inventory_datasets,
                 )
                 .await
-                .expect("reconciled debug dataset");
+                .expect("reconciled local storage dataset");
 
                  let datastore_datasets = datastore
                     .local_storage_dataset_list_all_batched(opctx)

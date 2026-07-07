@@ -20,6 +20,10 @@ pub struct OximeterInfo {
     pub time_created: DateTime<Utc>,
     /// When this resource was last modified.
     pub time_modified: DateTime<Utc>,
+    /// The address on which this `oximeter` instance listens for requests.
+    pub ip: ipnetwork::IpNetwork,
+    /// The port on which this `oximeter` instance listens for requests.
+    pub port: SqlU16,
     /// When this resource was expunged.
     //
     // We typically refer to _zones_ as expunged; this isn't quite the same
@@ -31,10 +35,6 @@ pub struct OximeterInfo {
     // producers (and will result in any producers it had been assigned being
     // reassigned to some other collector).
     pub time_expunged: Option<DateTime<Utc>>,
-    /// The address on which this `oximeter` instance listens for requests.
-    pub ip: ipnetwork::IpNetwork,
-    /// The port on which this `oximeter` instance listens for requests.
-    pub port: SqlU16,
 }
 
 impl OximeterInfo {

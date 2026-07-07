@@ -4,8 +4,6 @@
 
 //! Integration tests for operating on IP Pools
 
-use std::net::Ipv4Addr;
-
 use crate::integration_tests::instances::create_project_and_pool;
 use crate::integration_tests::instances::instance_wait_for_state;
 use dropshot::HttpErrorResponseBody;
@@ -40,27 +38,28 @@ use nexus_test_utils::resource_helpers::object_put_error;
 use nexus_test_utils::resource_helpers::objects_list_page_authz;
 use nexus_test_utils::resource_helpers::test_params;
 use nexus_test_utils_macros::nexus_test;
-use nexus_types::external_api::params;
-use nexus_types::external_api::params::IpPoolCreate;
-use nexus_types::external_api::params::IpPoolLinkSilo;
-use nexus_types::external_api::params::IpPoolSiloUpdate;
-use nexus_types::external_api::params::IpPoolUpdate;
-use nexus_types::external_api::shared::IpPoolType;
-use nexus_types::external_api::shared::IpRange;
-use nexus_types::external_api::shared::Ipv4Range;
-use nexus_types::external_api::shared::SiloIdentityMode;
-use nexus_types::external_api::shared::SiloRole;
-use nexus_types::external_api::views::IpPool;
-use nexus_types::external_api::views::IpPoolRange;
-use nexus_types::external_api::views::IpPoolSiloLink;
-use nexus_types::external_api::views::IpVersion;
-use nexus_types::external_api::views::Silo;
-use nexus_types::external_api::views::SiloIpPool;
+use nexus_types::external_api::floating_ip;
+use nexus_types::external_api::instance::InstanceState;
+use nexus_types::external_api::ip_pool;
+use nexus_types::external_api::ip_pool::IpPool;
+use nexus_types::external_api::ip_pool::IpPoolCreate;
+use nexus_types::external_api::ip_pool::IpPoolLinkSilo;
+use nexus_types::external_api::ip_pool::IpPoolRange;
+use nexus_types::external_api::ip_pool::IpPoolSiloLink;
+use nexus_types::external_api::ip_pool::IpPoolSiloUpdate;
+use nexus_types::external_api::ip_pool::IpPoolType;
+use nexus_types::external_api::ip_pool::IpPoolUpdate;
+use nexus_types::external_api::ip_pool::IpRange;
+use nexus_types::external_api::ip_pool::IpVersion;
+use nexus_types::external_api::ip_pool::Ipv4Range;
+use nexus_types::external_api::ip_pool::SiloIpPool;
+use nexus_types::external_api::policy::SiloRole;
+use nexus_types::external_api::silo::Silo;
+use nexus_types::external_api::silo::SiloIdentityMode;
 use nexus_types::identity::Resource;
 use nexus_types::silo::INTERNAL_SILO_ID;
 use omicron_common::address::Ipv6Range;
 use omicron_common::api::external::IdentityMetadataUpdateParams;
-use omicron_common::api::external::InstanceState;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::SimpleIdentityOrName;
 use omicron_common::api::external::{IdentityMetadataCreateParams, Name};
@@ -128,7 +127,7 @@ async fn test_ip_pool_basic_crud(cptestctx: &ControlPlaneTestContext) {
     let error = object_create_error(
         client,
         ip_pools_url,
-        &params::IpPoolCreate::new(
+        &ip_pool::IpPoolCreate::new(
             IdentityMetadataCreateParams {
                 name: pool_name.parse().unwrap(),
                 description: String::new(),
@@ -380,7 +379,7 @@ async fn test_ip_pool_service_no_cud(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(error.message, not_found_id);
 
     // Update not allowed
-    let put_body = params::IpPoolUpdate {
+    let put_body = ip_pool::IpPoolUpdate {
         identity: IdentityMetadataUpdateParams {
             name: Some("test".parse().unwrap()),
             description: Some("test".to_string()),
@@ -434,7 +433,7 @@ async fn test_ip_pool_service_no_cud(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(error.message, not_found_name);
 
     // linking not allowed by name or ID
-    let body = params::IpPoolLinkSilo {
+    let body = ip_pool::IpPoolLinkSilo {
         silo: NameOrId::Name(cptestctx.silo_name.clone()),
         is_default: false,
     };
@@ -475,7 +474,7 @@ async fn test_ip_pool_silo_link(cptestctx: &ControlPlaneTestContext) {
 
     // expect 404 on association if the specified silo doesn't exist
     let nonexistent_silo_id = Uuid::new_v4();
-    let params = params::IpPoolLinkSilo {
+    let params = ip_pool::IpPoolLinkSilo {
         silo: NameOrId::Id(nonexistent_silo_id),
         is_default: false,
     };
@@ -497,7 +496,7 @@ async fn test_ip_pool_silo_link(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(error.message, not_found);
 
     // associate by name with silo that exists
-    let params = params::IpPoolLinkSilo {
+    let params = ip_pool::IpPoolLinkSilo {
         silo: NameOrId::Name(silo.name().clone()),
         is_default: false,
     };
@@ -533,7 +532,7 @@ async fn test_ip_pool_silo_link(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(silo_pools[0].is_default, false);
 
     // associate same silo to other pool by ID instead of name
-    let link_params = params::IpPoolLinkSilo {
+    let link_params = ip_pool::IpPoolLinkSilo {
         silo: NameOrId::Id(silo_id),
         is_default: true,
     };
@@ -660,8 +659,11 @@ async fn cannot_unlink_ip_pool_with_outstanding_floating_ips(
         client,
         "fip",
         proj.name().as_str(),
-        None,
-        Some(POOL_NAME),
+        floating_ip::AddressAllocator::Auto {
+            pool_selector: ip_pool::PoolSelector::Explicit {
+                pool: NameOrId::Name(POOL_NAME.parse().unwrap()),
+            },
+        },
     )
     .await;
 
@@ -730,19 +732,31 @@ async fn test_ip_pool_update_default(cptestctx: &ControlPlaneTestContext) {
     let silo =
         create_silo(&client, "my-silo", true, SiloIdentityMode::SamlJit).await;
 
-    // put 404s if link doesn't exist yet
+    // put 404s if link doesn't exist yet (is_default: true path)
     let params = IpPoolSiloUpdate { is_default: true };
     let p0_silo_url = format!("/v1/system/ip-pools/p0/silos/{}", silo.name());
     let error =
         object_put_error(client, &p0_silo_url, &params, StatusCode::NOT_FOUND)
             .await;
-    assert_eq!(
+    assert!(
+        error.message.starts_with("not found: ip-pool-resource with id"),
+        "unexpected error: {}",
         error.message,
-        "not found: ip-pool-resource with id \"(pool, silo)\""
+    );
+
+    // same for is_default: false path (different code path, no transaction)
+    let params = IpPoolSiloUpdate { is_default: false };
+    let error =
+        object_put_error(client, &p0_silo_url, &params, StatusCode::NOT_FOUND)
+            .await;
+    assert!(
+        error.message.starts_with("not found: ip-pool-resource with id"),
+        "unexpected error: {}",
+        error.message,
     );
 
     // associate both pools with the test silo
-    let params = params::IpPoolLinkSilo {
+    let params = ip_pool::IpPoolLinkSilo {
         silo: NameOrId::Name(silo.name().clone()),
         is_default: false,
     };
@@ -986,7 +1000,7 @@ async fn test_ipv6_ip_pool_utilization_total(
             nexus_db_model::IpPool::new(
                 &identity,
                 nexus_db_model::IpVersion::V6,
-                nexus_db_model::IpPoolReservationType::ExternalSilos,
+                nexus_db_model::IpPoolAssignment::Silos,
             ),
         )
         .await
@@ -1155,12 +1169,109 @@ async fn test_bad_ip_ranges(
         .parsed_body()
         .unwrap();
         let expected_message = format!(
-            "The provided IP range {}-{} overlaps with an existing range",
+            "The provided IP range {}-{} overlaps with an existing \
+            IP pool range or subnet pool member",
             bad_range.first_address(),
             bad_range.last_address(),
         );
         assert_eq!(error.message, expected_message);
     }
+}
+
+/// Test that multicast pools reject reserved IPv4 multicast address ranges.
+///
+/// This test ensures operators receive immediate feedback when configuring
+/// IP pools, preventing users from encountering Dendrite errors later when
+/// allocating addresses for multicast groups.
+///
+/// TODO: Add IPv6 reserved range tests (ff00::/16 reserved-scope, ff01::/16
+/// interface-local, ff02::/16 link-local) once IPv6 multicast support is
+/// enabled. The validation code exists and matches Dendrite's validation
+/// (see dendrite/dpd/src/mcast/validate.rs).
+#[nexus_test]
+async fn test_ip_pool_multicast_rejects_reserved_ranges(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+
+    // Create a multicast pool
+    let pool_params = IpPoolCreate::new_multicast(
+        IdentityMetadataCreateParams {
+            name: "mcast-reserved-test".parse().unwrap(),
+            description: "Test rejection of reserved multicast ranges"
+                .to_string(),
+        },
+        IpVersion::V4,
+    );
+    object_create::<_, IpPool>(client, "/v1/system/ip-pools", &pool_params)
+        .await;
+
+    let add_url = "/v1/system/ip-pools/mcast-reserved-test/ranges/add";
+
+    // IPv4 link-local multicast (224.0.0.0/24) should be rejected
+    let link_local_range = IpRange::V4(
+        Ipv4Range::new(
+            std::net::Ipv4Addr::new(224, 0, 0, 10),
+            std::net::Ipv4Addr::new(224, 0, 0, 20),
+        )
+        .unwrap(),
+    );
+    let error = object_create_error(
+        client,
+        add_url,
+        &link_local_range,
+        StatusCode::BAD_REQUEST,
+    )
+    .await;
+    assert!(error.message.contains("link-local multicast"));
+
+    // IPv4 GLOP multicast (233.0.0.0/8) is allowed (customer may have use case)
+    let glop_range = IpRange::V4(
+        Ipv4Range::new(
+            std::net::Ipv4Addr::new(233, 1, 0, 1),
+            std::net::Ipv4Addr::new(233, 1, 0, 10),
+        )
+        .unwrap(),
+    );
+    object_create::<_, IpPoolRange>(client, add_url, &glop_range).await;
+
+    // IPv4 admin-scoped multicast (239.0.0.0/8) is allowed (customer may have use case)
+    let admin_scoped_range = IpRange::V4(
+        Ipv4Range::new(
+            std::net::Ipv4Addr::new(239, 10, 0, 1),
+            std::net::Ipv4Addr::new(239, 10, 0, 10),
+        )
+        .unwrap(),
+    );
+    object_create::<_, IpPoolRange>(client, add_url, &admin_scoped_range).await;
+
+    // Valid ASM range (225.0.0.0 - 231.255.255.255) should succeed
+    let valid_asm_range = IpRange::V4(
+        Ipv4Range::new(
+            std::net::Ipv4Addr::new(225, 1, 0, 1),
+            std::net::Ipv4Addr::new(225, 1, 0, 10),
+        )
+        .unwrap(),
+    );
+    object_create::<_, IpPoolRange>(client, add_url, &valid_asm_range).await;
+
+    // Ranges that touch reserved boundaries should be rejected
+    // Range starting in valid space but ending in link-local
+    let boundary_range_low = IpRange::V4(
+        Ipv4Range::new(
+            std::net::Ipv4Addr::new(224, 0, 0, 0),
+            std::net::Ipv4Addr::new(224, 0, 1, 0),
+        )
+        .unwrap(),
+    );
+    let error = object_create_error(
+        client,
+        add_url,
+        &boundary_range_low,
+        StatusCode::BAD_REQUEST,
+    )
+    .await;
+    assert!(error.message.contains("link-local multicast"));
 }
 
 #[nexus_test]
@@ -1228,8 +1339,7 @@ async fn test_ip_pool_range_pagination(cptestctx: &ControlPlaneTestContext) {
         assert_eq!(range.last_address(), created_range.range.last_address());
         expected_ranges.push(created_range);
     }
-    expected_ranges
-        .sort_by(|a, b| a.range.first_address().cmp(&b.range.first_address()));
+    expected_ranges.sort_by_key(|a| a.range.first_address());
 
     // List the first 2 results, then the last. These should appear sorted by
     // their first address.
@@ -1270,8 +1380,11 @@ async fn test_ip_pool_list_in_silo(cptestctx: &ControlPlaneTestContext) {
 
     // create other pool and link to silo
     let other_pool_range = IpRange::V4(
-        Ipv4Range::new(Ipv4Addr::new(10, 1, 0, 1), Ipv4Addr::new(10, 1, 0, 5))
-            .unwrap(),
+        Ipv4Range::new(
+            std::net::Ipv4Addr::new(10, 1, 0, 1),
+            std::net::Ipv4Addr::new(10, 1, 0, 5),
+        )
+        .unwrap(),
     );
     let other_name = "other-pool";
     create_ip_pool(&client, other_name, Some(other_pool_range)).await;
@@ -1279,8 +1392,11 @@ async fn test_ip_pool_list_in_silo(cptestctx: &ControlPlaneTestContext) {
 
     // create third pool and don't link to silo
     let unlinked_pool_range = IpRange::V4(
-        Ipv4Range::new(Ipv4Addr::new(10, 2, 0, 1), Ipv4Addr::new(10, 2, 0, 5))
-            .unwrap(),
+        Ipv4Range::new(
+            std::net::Ipv4Addr::new(10, 2, 0, 1),
+            std::net::Ipv4Addr::new(10, 2, 0, 5),
+        )
+        .unwrap(),
     );
     let unlinked_name = "unlinked-pool";
     create_ip_pool(&client, unlinked_name, Some(unlinked_pool_range)).await;
@@ -1535,8 +1651,7 @@ async fn test_ip_pool_service(cptestctx: &ControlPlaneTestContext) {
         assert_eq!(range.last_address(), created_range.range.last_address());
         expected_ranges.push(created_range);
     }
-    expected_ranges
-        .sort_by(|a, b| a.range.first_address().cmp(&b.range.first_address()));
+    expected_ranges.sort_by_key(|a| a.range.first_address());
 
     // List the ranges.
     let first_page =

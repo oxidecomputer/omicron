@@ -7,14 +7,19 @@ license = "MPL-2.0"
 [lints]
 workspace = true
 
+[features]
+multicast = []
+
 [build-dependencies]
 omicron-rpaths.workspace = true
 
 [dependencies]
 anyhow.workspace = true
+async-bb8-diesel.workspace = true
 assert_matches.workspace = true
 async-trait.workspace = true
 base64.workspace = true
+bootstrap-agent-lockstep-types.workspace = true
 buf-list.workspace = true
 bytes.workspace = true
 cancel-safe-futures.workspace = true
@@ -31,6 +36,7 @@ crucible-pantry-client.workspace = true
 crucible-common.workspace = true
 dns-service-client.workspace = true
 dpd-client.workspace = true
+diesel.workspace = true
 ereport-types.workspace = true
 mg-admin-client.workspace = true
 dropshot.workspace = true
@@ -57,7 +63,10 @@ jiff.workspace = true
 lldpd_client.workspace = true
 macaddr.workspace = true
 maplit.workspace = true
+mg-api-types.workspace = true
 nexus-background-task-interface.workspace = true
+nexus-switch-config.workspace = true
+nexus-switch-config-preparation.workspace = true
 # Not under "dev-dependencies"; these also need to be implemented for
 # integration tests.
 nexus-config.workspace = true
@@ -84,15 +93,14 @@ paste.workspace = true
 # See omicron-rpaths for more about the "pq-sys" dependency.
 pq-sys = "*"
 progenitor-client.workspace = true
+progenitor-extras.workspace = true
 propolis-client.workspace = true
 qorb.workspace = true
 rand.workspace = true
 range-requests.workspace = true
 ref-cast.workspace = true
-rdb-types.workspace = true
 regex.workspace = true
-reqwest = { workspace = true, features = ["json"] }
-ring.workspace = true
+reqwest = { workspace = true, features = ["http2", "json"] }
 samael.workspace = true
 schemars = { workspace = true, features = ["chrono", "uuid1"] }
 semver.workspace = true
@@ -104,21 +112,24 @@ serde_with.workspace = true
 sha2.workspace = true
 sled-agent-client.workspace = true
 sled-agent-types.workspace = true
+sled-agent-types-versions.workspace = true
 sled-hardware-types.workspace = true
 slog.workspace = true
 slog-async.workspace = true
 slog-dtrace.workspace = true
 slog-error-chain.workspace = true
+strum.workspace = true
+swrite.workspace = true
 display-error-chain.workspace = true
 slog-term.workspace = true
 static_assertions.workspace = true
 steno.workspace = true
-tempfile.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["full"] }
 tokio-postgres = { workspace = true, features = ["with-serde_json-1"] }
 tokio-util = { workspace = true, features = ["codec", "rt"] }
 tough.workspace = true
+trust-quorum-types.workspace = true
 tufaceous-artifact.workspace = true
 usdt.workspace = true
 uuid.workspace = true
@@ -129,6 +140,7 @@ nexus-db-lookup.workspace = true
 nexus-db-model.workspace = true
 nexus-db-queries.workspace = true
 nexus-db-schema.workspace = true
+nexus-fm.workspace = true
 nexus-inventory.workspace = true
 nexus-metrics-producer-gc.workspace = true
 nexus-reconfigurator-execution.workspace = true
@@ -136,6 +148,7 @@ nexus-reconfigurator-planning.workspace = true
 nexus-reconfigurator-preparation.workspace = true
 nexus-reconfigurator-rendezvous.workspace = true
 nexus-types.workspace = true
+nexus-types-versions.workspace = true
 omicron-common.workspace = true
 omicron-passwords.workspace = true
 oxide-tokio-rt.workspace = true
@@ -146,11 +159,16 @@ raw-cpuid = { workspace = true, features = ["std"] }
 rustls = { workspace = true }
 rustls-pemfile = { workspace = true }
 scim2-rs.workspace = true
+support-bundle-collection.workspace = true
 update-common.workspace = true
 update-engine.workspace = true
 omicron-workspace-hack.workspace = true
 omicron-uuid-kinds.workspace = true
 zip = { workspace = true, features = ["jiff-02"] }
+
+[target.'cfg(target_os = "illumos")'.dependencies]
+# See omicron-rpaths for more about the "fmd-adm-sys" dependency.
+fmd-adm-sys.workspace = true
 
 [dev-dependencies]
 async-bb8-diesel.workspace = true
@@ -158,6 +176,7 @@ camino-tempfile.workspace = true
 criterion.workspace = true
 diesel.workspace = true
 dns-server.workspace = true
+flate2.workspace = true
 expectorate.workspace = true
 gateway-messages.workspace = true
 gateway-test-utils.workspace = true
@@ -166,8 +185,10 @@ httpmock.workspace = true
 httptest.workspace = true
 hubtools.workspace = true
 hyper-rustls.workspace = true
+nexus-background-task-interface = { workspace = true, features = ["testing"] }
 nexus-client.workspace = true
 nexus-db-queries = { workspace = true, features = ["testing"] }
+nexus-fm = { workspace = true, features = ["testing"] }
 nexus-lockstep-client.workspace = true
 nexus-test-utils.workspace = true
 nexus-test-utils-macros.workspace = true

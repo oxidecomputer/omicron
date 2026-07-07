@@ -4,15 +4,10 @@
 
 //! Identity-related traits which may be derived for DB structures.
 
-// Copyright 2021 Oxide Computer Company
-
 use chrono::{DateTime, Utc};
 use omicron_common::api::external::IdentityMetadata;
 use omicron_common::api::external::Name;
 use omicron_uuid_kinds::GenericUuid;
-use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 
 /// Identity-related accessors for resources.
 ///
@@ -44,17 +39,8 @@ pub trait Resource {
     }
 }
 
-/// Identity-related metadata that's included in "asset" public API objects
-/// (which generally have no name or description)
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
-pub struct AssetIdentityMetadata {
-    /// unique, immutable, system-controlled identifier for each resource
-    pub id: Uuid,
-    /// timestamp when this resource was created
-    pub time_created: DateTime<Utc>,
-    /// timestamp when this resource was last modified
-    pub time_modified: DateTime<Utc>,
-}
+// Re-export AssetIdentityMetadata from the versions crate
+pub use nexus_types_versions::latest::asset::AssetIdentityMetadata;
 
 /// Identity-related accessors for assets.
 ///

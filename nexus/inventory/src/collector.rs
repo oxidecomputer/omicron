@@ -9,6 +9,7 @@ use crate::builder::CollectionBuilder;
 use crate::builder::InventoryError;
 use anyhow::Context;
 use anyhow::anyhow;
+use clickhouse_admin_keeper_client::ClientInfo as _;
 use gateway_client::types::GetCfpaParams;
 use gateway_client::types::RotCfpaSlot;
 use gateway_messages::SpComponent;
@@ -138,16 +139,10 @@ impl<'a> Collector<'a> {
 
             Ok(targets) => {
                 targets.into_inner().into_iter().filter_map(|sp_ignition| {
-                    match sp_ignition.details {
-                        gateway_client::types::SpIgnition::No => None,
-                        gateway_client::types::SpIgnition::Yes {
-                            power: false,
-                            ..
-                        } => None,
-                        gateway_client::types::SpIgnition::Yes {
-                            power: true,
-                            ..
-                        } => Some(sp_ignition.id),
+                    if sp_ignition.details.is_sp_running() {
+                        Some(sp_ignition.id)
+                    } else {
+                        None
                     }
                 })
             }
@@ -737,6 +732,7 @@ mod test {
     use sled_agent_types::inventory::OmicronZoneType;
     use sled_agent_types::inventory::SledCpuFamily;
     use slog::o;
+    use std::collections::BTreeSet;
     use std::net::Ipv6Addr;
     use std::net::SocketAddrV6;
     use std::sync::Arc;
@@ -753,6 +749,7 @@ mod test {
             zones,
             remove_mupdate_override,
             host_phase_2,
+            measurements,
         } = config;
 
         swriteln!(s, "        generation: {generation}");
@@ -790,6 +787,14 @@ mod test {
                 zone.id,
                 zone.zone_type.kind().report_str(),
             );
+        }
+
+        swriteln!(s, "        measurements:");
+        for h in measurements {
+            swriteln!(s, "            artifact: {}", h.hash);
+        }
+        if measurements.is_empty() {
+            swriteln!(s, "            (empty)");
         }
     }
 
@@ -1004,6 +1009,7 @@ mod test {
                 },
                 remove_mupdate_override: None,
                 host_phase_2: HostPhase2DesiredSlots::current_contents(),
+                measurements: BTreeSet::new(),
             })
             .await
             .expect("failed to write initial zone version to fake sled agent");

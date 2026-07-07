@@ -90,7 +90,7 @@ provide a key for each dataset on day 1. The question then becomes where do we
 get the input key material from. We essentially had 4 options:
 
  . Hardcode it - this is what is currently committed as the
-`HardcodedSecretRetreiver`
+`HardcodedSecretRetriever`
  . Store random values constructed at RSS time on the M.2s and use them locally
  . Derive keys from VPD data unique to a sled
  . Build a simplified trust quorum scheme over untrusted channels on the

@@ -12,7 +12,7 @@ use super::{BlockSize, ByteCount, Digest};
 use crate::typed_uuid::DbTypedUuid;
 use db_macros::Resource;
 use nexus_db_schema::schema::{image, project_image, silo_image};
-use nexus_types::external_api::views;
+use nexus_types::external_api::image as image_types;
 use nexus_types::identity::Resource;
 use omicron_common::api::external::Error;
 use omicron_uuid_kinds::VolumeKind;
@@ -218,7 +218,7 @@ impl From<SiloImage> for Image {
     }
 }
 
-impl From<Image> for views::Image {
+impl From<Image> for image_types::Image {
     fn from(image: Image) -> Self {
         Self {
             identity: image.identity(),

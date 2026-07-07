@@ -5,20 +5,26 @@
 // Re-export these types from gateway_client, so that users are oblivious to
 // where these types come from.
 pub use gateway_client::types::{
-    RotState, SpComponentCaboose, SpComponentInfo, SpComponentPresence,
-    SpIdentifier, SpIgnition, SpIgnitionSystemType, SpState,
+    SpComponentCaboose, SpComponentInfo, SpComponentPresence, SpIdentifier,
 };
-pub use gateway_types::component::SpType;
-pub use gateway_types::rot::RotSlot;
-use omicron_common::api::external::SwitchLocation;
+pub use gateway_types::component::{SpState, SpType};
+pub use gateway_types::ignition::{SpIgnition, SpIgnitionSystemType};
+pub use gateway_types::rot::{RotSlot, RotState};
 use omicron_common::snake_case_result;
 use omicron_common::snake_case_result::SnakeCaseResult;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, time::Duration};
+use sled_agent_types::early_networking::SwitchSlot;
+use sled_hardware_types::Baseboard;
+use slog::debug;
+use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::net::Ipv6Addr;
+use std::time::Duration;
 use transceiver_controller::{
     Datapath, Monitors, PowerMode, VendorInfo, message::ExtendedStatus,
 };
+
+use crate::rack_setup::BootstrapSledDescription;
 
 /// The current state of the v1 Rack as known to wicketd
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
@@ -41,6 +47,118 @@ pub struct MgsV1InventorySnapshot {
 #[serde(tag = "mgs_inventory", rename_all = "snake_case")]
 pub struct MgsV1Inventory {
     pub sps: Vec<SpInventory>,
+}
+
+impl From<BTreeSet<BootstrapSledDescription>> for SledInventory {
+    fn from(sleds: BTreeSet<BootstrapSledDescription>) -> Self {
+        SledInventory { sleds }
+    }
+}
+
+// Inventory about sleds derived from MGS inventory and DDM
+#[derive(Default, Clone)]
+pub struct SledInventory {
+    pub sleds: BTreeSet<BootstrapSledDescription>,
+}
+
+impl SledInventory {
+    pub fn new(
+        inventory: &MgsV1Inventory,
+        ddm_discovered_sleds: &BTreeMap<Baseboard, Ipv6Addr>,
+        log: &slog::Logger,
+    ) -> Self {
+        let sleds = inventory
+            .sps
+            .iter()
+            .filter_map(|sp| {
+                if sp.id.type_ != SpType::Sled {
+                    return None;
+                }
+
+                let Some(state) = sp.state.as_ref() else {
+                    debug!(
+                        log,
+                        "sled inventory: filtering out SP with no state";
+                        "sp" => ?sp,
+                    );
+                    return None;
+                };
+                let baseboard = Baseboard::new_gimlet(
+                    state.serial_number.clone(),
+                    state.model.clone(),
+                    state.revision,
+                );
+                let bootstrap_ip =
+                    ddm_discovered_sleds.get(&baseboard).copied();
+                Some(BootstrapSledDescription {
+                    id: sp.id,
+                    baseboard,
+                    bootstrap_ip,
+                })
+            })
+            .collect();
+        SledInventory { sleds }
+    }
+
+    /// Ensure our baseboard is included in inventory, extract the slot for
+    /// our baseboard, and then ensure that the slot is included in the user
+    /// supplied `bootstrap_sled_slots`.
+    pub fn verify_our_baseboard_is_in_inventory_slot(
+        &self,
+        bootstrap_sled_slots: &BTreeSet<u16>,
+        our_baseboard: Option<&Baseboard>,
+    ) -> Result<(), String> {
+        if let Some(our_baseboard @ Baseboard::Gimlet { .. }) = our_baseboard {
+            let our_slot = self
+                .sleds
+                .iter()
+                .find_map(|sled| {
+                    if sled.baseboard == *our_baseboard {
+                        Some(sled.id.slot)
+                    } else {
+                        None
+                    }
+                })
+                .ok_or_else(|| {
+                    format!(
+                        "Inventory is missing the scrimlet where wicketd is \
+                         running ({our_baseboard:?})",
+                    )
+                })?;
+            if !bootstrap_sled_slots.contains(&our_slot) {
+                return Err(format!(
+                    "Cannot remove the scrimlet where wicketd is running \
+                     (sled {our_slot}: {our_baseboard:?}) \
+                     from bootstrap_sleds"
+                ));
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Find all bootstrap sleds in inventory with slots matching
+    /// `bootstrap_sled_slots` and return them. If the slot doesn't exist in
+    /// inventory, then return an error.
+    pub fn load_bootstrap_sleds_by_user_chosen_slots(
+        &self,
+        bootstrap_sled_slots: &BTreeSet<u16>,
+    ) -> Result<BTreeSet<BootstrapSledDescription>, String> {
+        let mut bootstrap_sleds = BTreeSet::new();
+        for slot in bootstrap_sled_slots {
+            let sled =
+                self.sleds
+                    .iter()
+                    .find(|sled| sled.id.slot == *slot)
+                    .ok_or_else(|| {
+                        format!(
+                            "cannot add unknown sled {slot} to bootstrap_sleds",
+                        )
+                    })?;
+            bootstrap_sleds.insert(sled.clone());
+        }
+        Ok(bootstrap_sleds)
+    }
 }
 
 /// SP-related data
@@ -91,7 +209,7 @@ pub struct RotInventory {
 #[serde(tag = "transceiver_inventory_snapshot", rename_all = "snake_case")]
 pub struct TransceiverInventorySnapshot {
     /// The transceivers in each switch.
-    pub inventory: HashMap<SwitchLocation, Vec<Transceiver>>,
+    pub inventory: HashMap<SwitchSlot, Vec<Transceiver>>,
     pub last_seen: Duration,
 }
 

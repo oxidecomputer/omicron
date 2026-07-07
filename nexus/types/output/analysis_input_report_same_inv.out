@@ -1,0 +1,8 @@
+parent sitrep:        aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa
+inventory collection: bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb
+ --> same collection as parent sitrep
+total known ereport restart IDs: 420
+no new ereports since the parent sitrep
+no cases copied forward
+
+no in-service control plane disks

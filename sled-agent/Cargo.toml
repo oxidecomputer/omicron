@@ -4,9 +4,13 @@ description = "Services for managing sled-local resources"
 version = "0.1.0"
 edition.workspace = true
 license = "MPL-2.0"
+build = "build.rs"
 
 [lints]
 workspace = true
+
+[build-dependencies]
+omicron-rpaths.workspace = true
 
 [dependencies]
 anyhow.workspace = true
@@ -16,6 +20,8 @@ base64.workspace = true
 bootstore.workspace = true
 bootstrap-agent-api.workspace = true
 bootstrap-agent-client.workspace = true
+bootstrap-agent-lockstep-api.workspace = true
+bootstrap-agent-lockstep-types.workspace = true
 bytes.workspace = true
 camino.workspace = true
 camino-tempfile.workspace = true
@@ -24,19 +30,17 @@ cfg-if.workspace = true
 chrono.workspace = true
 clap.workspace = true
 clickhouse-admin-types.workspace = true
-cockroach-admin-client.workspace = true
-# Only used by the simulated sled agent.
-crucible-agent-client.workspace = true
 derive_more.workspace = true
+dice-verifier = { workspace = true, features = ["ipcc", "mock"] }
 display-error-chain.workspace = true
-dns-server.workspace = true
-dns-service-client.workspace = true
-dpd-client.workspace = true
+# XXX NOTE this is due to https://github.com/oxidecomputer/omicron/issues/9704
+# This is the R20 dpd client
+# dpd-client.workspace = true
+dpd-client = { git = "https://github.com/oxidecomputer/dendrite", rev = "cc0c307c617f2988aafdca4e3bd35ea178b64801" }
 dropshot.workspace = true
 flate2.workspace = true
 flume.workspace = true
 futures.workspace = true
-gateway-client.workspace = true
 glob.workspace = true
 hex.workspace = true
 http.workspace = true
@@ -54,13 +58,13 @@ itertools.workspace = true
 key-manager.workspace = true
 libc.workspace = true
 macaddr.workspace = true
-mg-admin-client.workspace = true
 nexus-client.workspace = true
 nexus-config.workspace = true
 nexus-lockstep-client.workspace = true
 nexus-types.workspace = true
-ntp-admin-client.workspace = true
+nix = { workspace = true, features = ["signal"] }
 omicron-common.workspace = true
+omicron-ledger.workspace = true
 omicron-ddm-admin-client.workspace = true
 omicron-uuid-kinds.workspace = true
 omicron-workspace-hack.workspace = true
@@ -74,13 +78,11 @@ propolis-mock-server.workspace = true # Only used by the simulated sled agent
 propolis_api_types.workspace = true
 rand = { workspace = true, features = ["os_rng"] }
 range-requests.workspace = true
-rdb-types.workspace = true
 repo-depot-api.workspace = true
 repo-depot-client.workspace = true
-reqwest = { workspace = true, features = ["rustls-tls", "stream"] }
+reqwest = { workspace = true, features = ["rustls", "stream"] }
 schemars = { workspace = true, features = ["chrono", "uuid1"] }
 serde.workspace = true
-serde_human_bytes.workspace = true
 serde_json = { workspace = true, features = ["raw_value"] }
 sha2.workspace = true
 sha3.workspace = true
@@ -88,15 +90,19 @@ signal-hook.workspace = true
 sled-agent-api.workspace = true
 sled-agent-client.workspace = true
 sled-agent-config-reconciler.workspace = true
+sled-agent-early-networking.workspace = true
 sled-agent-health-monitor.workspace = true
+sled-agent-measurements.workspace = true
+sled-agent-rack-setup.workspace = true
 sled-agent-types.workspace = true
 sled-agent-types-versions.workspace = true
-sled-agent-zone-images.workspace = true
+sled-agent-resolvable-files.workspace = true
 sled-diagnostics.workspace = true
 sled-hardware.workspace = true
 sled-hardware-types.workspace = true
 sled-storage.workspace = true
 sp-sim.workspace = true
+secrecy.workspace = true
 slog.workspace = true
 slog-async.workspace = true
 slog-dtrace.workspace = true
@@ -104,7 +110,6 @@ slog-error-chain.workspace = true
 slog-term.workspace = true
 smf.workspace = true
 sprockets-tls.workspace = true
-static_assertions.workspace = true
 strum.workspace = true
 tar.workspace = true
 thiserror.workspace = true
@@ -115,17 +120,27 @@ tokio-util.workspace = true
 toml.workspace = true
 trust-quorum.workspace = true
 trust-quorum-protocol.workspace = true
+transient-dns-server.workspace = true
 trust-quorum-types.workspace = true
 tufaceous-artifact.workspace = true
 tufaceous-brand-metadata.workspace = true
 usdt.workspace = true
 uuid.workspace = true
 walkdir.workspace = true
+x509-cert.workspace = true
 zeroize.workspace = true
 zip.workspace = true
 zone.workspace = true
 
+# Only used by the simulated sled agent.
+crucible-agent-client.workspace = true
+crucible-client-types.workspace = true
+
 [target.'cfg(target_os = "illumos")'.dependencies]
+fmd-adm.workspace = true
+# Direct dep on fmd-adm-sys so this crate sees DEP_FMD_ADM_LIBDIRS in build.rs
+# and can configure RPATH via omicron-rpaths.
+fmd-adm-sys.workspace = true
 opte-ioctl.workspace = true
 
 [dev-dependencies]
@@ -135,17 +150,14 @@ guppy.workspace = true
 hex-literal.workspace = true
 http.workspace = true
 hyper.workspace = true
-nexus-reconfigurator-blippy.workspace = true
 omicron-test-utils.workspace = true
 progenitor.workspace = true
 pretty_assertions.workspace = true
-rcgen.workspace = true
 regress.workspace = true
 reqwest = { workspace = true, features = ["blocking"] }
 subprocess.workspace = true
 slog-async.workspace = true
 slog-term.workspace = true
-tempfile.workspace = true
 tokio-stream.workspace = true
 tokio-util.workspace = true
 zfs-test-harness.workspace = true

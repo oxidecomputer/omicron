@@ -46,9 +46,7 @@ impl Producer {
             .iter()
             .map(|provision| {
                 Sample::new_with_timestamp(
-                    provision
-                        .time_modified
-                        .expect("Should always have default value"),
+                    provision.time_modified,
                     &CollectionTarget { id: provision.id },
                     &VirtualDiskSpaceProvisioned {
                         datum: provision.virtual_disk_bytes_provisioned.into(),
@@ -69,18 +67,14 @@ impl Producer {
             .iter()
             .map(|provision| {
                 Sample::new_with_timestamp(
-                    provision
-                        .time_modified
-                        .expect("Should always have default value"),
+                    provision.time_modified,
                     &CollectionTarget { id: provision.id },
                     &CpusProvisioned { datum: provision.cpus_provisioned },
                 )
             })
             .chain(provisions.iter().map(|provision| {
                 Sample::new_with_timestamp(
-                    provision
-                        .time_modified
-                        .expect("Should always have default value"),
+                    provision.time_modified,
                     &CollectionTarget { id: provision.id },
                     &RamProvisioned { datum: provision.ram_provisioned.into() },
                 )

@@ -263,6 +263,23 @@ async fn test_cluster() -> anyhow::Result<()> {
     // Ensure the samples are correct on this replica
     assert_input_and_output(&input, &samples, &oxql_res1);
 
+    // Assert that at least one query summary and at least one known profile
+    // type are present.
+    assert!(
+        !oxql_res1.query_summaries.is_empty(),
+        "expected at least one query summary"
+    );
+    let total_user_cpu: i64 = oxql_res1
+        .query_summaries
+        .iter()
+        .filter_map(|s| s.profile_summary.get("UserTimeMicroseconds"))
+        .sum();
+    assert!(
+        total_user_cpu > 0,
+        "expected non-zero UserTimeMicroseconds in profile summaries, got {}",
+        total_user_cpu,
+    );
+
     let start = tokio::time::Instant::now();
     wait_for_num_points(&log, &client2, samples.len())
         .await
@@ -474,7 +491,7 @@ async fn wait_for_num_points(
                     QueryAuthzScope::Fleet)
                 .await
                 .map_err(|_| {
-                    poll::CondCheckError::<oximeter_db::Error>::NotYet
+                    poll::CondCheckError::<oximeter_db::Error>::NotYet { status: None }
                 })?;
             if total_points(&oxql_res) != n_samples {
                 info!(
@@ -483,7 +500,7 @@ async fn wait_for_num_points(
                     total_points(&oxql_res),
                     n_samples
                 );
-                Err(poll::CondCheckError::<oximeter_db::Error>::NotYet)
+                Err(poll::CondCheckError::<oximeter_db::Error>::NotYet { status: None })
             } else {
                 Ok(())
             }
@@ -501,10 +518,11 @@ async fn wait_for_num_points(
 async fn wait_for_ping(log: &Logger, client: &Client) -> anyhow::Result<()> {
     poll::wait_for_condition(
         || async {
-            client
-                .ping()
-                .await
-                .map_err(|_| poll::CondCheckError::<oximeter_db::Error>::NotYet)
+            client.ping().await.map_err(|_| poll::CondCheckError::<
+                oximeter_db::Error,
+            >::NotYet {
+                status: None,
+            })
         },
         &Duration::from_millis(100),
         &Duration::from_secs(30),
@@ -523,10 +541,11 @@ async fn wait_for_insert(
 ) -> anyhow::Result<()> {
     poll::wait_for_condition(
         || async {
-            client
-                .insert_samples(&samples)
-                .await
-                .map_err(|_| poll::CondCheckError::<oximeter_db::Error>::NotYet)
+            client.insert_samples(&samples).await.map_err(|_| {
+                poll::CondCheckError::<oximeter_db::Error>::NotYet {
+                    status: None,
+                }
+            })
         },
         &Duration::from_millis(1000),
         &Duration::from_secs(60),

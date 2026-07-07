@@ -98,7 +98,7 @@ async fn test_oximeter_reregistration() {
         result
             .into_iter()
             .find(|row| row.get::<&str, Uuid>("id") == producer_id)
-            .ok_or_else(|| CondCheckError::<()>::NotYet)
+            .ok_or_else(|| CondCheckError::<()>::NotYet { status: None })
     };
 
     // Get the original time modified, for comparison later.
@@ -141,13 +141,13 @@ async fn test_oximeter_reregistration() {
         {
             Ok(maybe_series) => {
                 if maybe_series.is_empty() {
-                    Err(CondCheckError::NotYet)
+                    Err(CondCheckError::NotYet { status: None })
                 } else {
                     Ok(maybe_series)
                 }
             }
             Err(oximeter_db::Error::TimeseriesNotFound(_)) => {
-                Err(CondCheckError::NotYet)
+                Err(CondCheckError::NotYet { status: None })
             }
             Err(e) => Err(CondCheckError::from(e)),
         }
@@ -245,7 +245,7 @@ async fn test_oximeter_reregistration() {
                     {
                         Ok(new_timeseries)
                     } else {
-                        Err(CondCheckError::NotYet)
+                        Err(CondCheckError::NotYet { status: None })
                     }
                 }
                 e => e,
@@ -320,7 +320,7 @@ async fn test_oximeter_reregistration() {
                     {
                         Ok(new_timeseries)
                     } else {
-                        Err(CondCheckError::NotYet)
+                        Err(CondCheckError::NotYet { status: None })
                     }
                 }
                 e => e,

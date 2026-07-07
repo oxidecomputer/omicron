@@ -18,32 +18,50 @@
 //! - Forwarding decisions happen at the underlay layer
 //! - Security relies on underlay group membership validation
 //!
+//! The underlay IPv6 addresses live within the fixed admin-local prefix
+//! [`UNDERLAY_MULTICAST_SUBNET`] (ff04::/64).
+//!
 //! This enables cross-project and cross-silo multicast while maintaining
 //! security through API authorization and underlay membership control.
+//!
+//! ## Source Filtering (IGMPv3/MLDv2)
+//!
+//! Source IPs are stored **per-member** in the control plane, allowing each
+//! receiver to subscribe to different sources within a group. DPD enforces
+//! source filtering at the **group level** using the union of all member
+//! sources.
+//!
+//! - **SSM addresses** (232/8, ff3x::/32): Sources are **required** per-member.
+//!   Each member must specify at least one source IP.
+//! - **ASM addresses**: Sources are **optional** per-member. Empty sources
+//!   means receive from any source; non-empty enables source filtering.
+//!
+//! [`UNDERLAY_MULTICAST_SUBNET`]: omicron_common::address::UNDERLAY_MULTICAST_SUBNET
 
 use std::collections::HashMap;
 use std::net::IpAddr;
 
 use futures::future::try_join_all;
-use ipnetwork::IpNetwork;
 use oxnet::MulticastMac;
 use slog::{Logger, debug, error, info};
 
 use dpd_client::Error as DpdError;
 use dpd_client::types::{
-    AdminScopedIpv6, ExternalForwarding, InternalForwarding, IpSrc, MacAddr,
+    ExternalForwarding, InternalForwarding, IpSrc, MacAddr,
     MulticastGroupCreateExternalEntry, MulticastGroupCreateUnderlayEntry,
     MulticastGroupExternalResponse, MulticastGroupMember,
     MulticastGroupResponse, MulticastGroupUnderlayResponse,
     MulticastGroupUpdateExternalEntry, MulticastGroupUpdateUnderlayEntry,
-    NatTarget, Vni,
+    MulticastTag, NatTarget, UnderlayMulticastIpv6, Vni,
 };
 use internal_dns_resolver::Resolver;
 
 use nexus_db_model::{ExternalMulticastGroup, UnderlayMulticastGroup};
+use nexus_db_queries::db::datastore::multicast::members::SourceFilterState;
 use nexus_types::identity::Resource;
-use omicron_common::api::external::{Error, SwitchLocation};
-use omicron_common::vlan::VlanID;
+use omicron_common::address::is_ssm_address;
+use omicron_common::api::external::Error;
+use sled_agent_types::early_networking::SwitchSlot;
 
 use crate::app::dpd_clients;
 
@@ -82,17 +100,20 @@ impl IntoExternalResponse for MulticastGroupResponse {
     }
 }
 
-/// Trait for converting database IPv6 types into DPD's
-/// [`AdminScopedIpv6`] type.
-trait IntoAdminScoped {
-    /// Convert to [`AdminScopedIpv6`], rejecting IPv4 addresses.
-    fn into_admin_scoped(self) -> Result<AdminScopedIpv6, Error>;
+/// Convert an [`IpAddr`] into a DPD [`UnderlayMulticastIpv6`],
+/// rejecting IPv4.
+///
+/// Note: named without the `Ipv6` suffix because the input type is the general
+/// `IpAddr`.
+trait IntoUnderlayMulticast {
+    /// Convert to [`UnderlayMulticastIpv6`], rejecting IPv4 addresses.
+    fn into_underlay_multicast(self) -> Result<UnderlayMulticastIpv6, Error>;
 }
 
-impl IntoAdminScoped for IpAddr {
-    fn into_admin_scoped(self) -> Result<AdminScopedIpv6, Error> {
+impl IntoUnderlayMulticast for IpAddr {
+    fn into_underlay_multicast(self) -> Result<UnderlayMulticastIpv6, Error> {
         match self {
-            IpAddr::V6(ipv6) => Ok(AdminScopedIpv6(ipv6)),
+            IpAddr::V6(ipv6) => Ok(UnderlayMulticastIpv6(ipv6)),
             IpAddr::V4(_) => Err(Error::invalid_request(
                 "underlay multicast groups must use IPv6 addresses",
             )),
@@ -119,7 +140,7 @@ pub(crate) type MulticastDataplaneResult<T> = Result<T, Error>;
 ///   underlay groups
 /// - Integration with existing `switch_ports_with_uplinks()` for port discovery
 pub(crate) struct MulticastDataplaneClient {
-    dpd_clients: HashMap<SwitchLocation, dpd_client::Client>,
+    dpd_clients: HashMap<SwitchSlot, dpd_client::Client>,
     log: Logger,
 }
 
@@ -129,7 +150,7 @@ pub(crate) struct GroupUpdateParams<'a> {
     pub external_group: &'a ExternalMulticastGroup,
     pub underlay_group: &'a UnderlayMulticastGroup,
     pub new_name: &'a str,
-    pub new_sources: &'a [IpNetwork],
+    pub source_filter: &'a SourceFilterState,
 }
 
 impl MulticastDataplaneClient {
@@ -157,7 +178,7 @@ impl MulticastDataplaneClient {
     /// for consistency across invocations.
     fn select_one_switch(
         &self,
-    ) -> MulticastDataplaneResult<(&SwitchLocation, &dpd_client::Client)> {
+    ) -> MulticastDataplaneResult<(&SwitchSlot, &dpd_client::Client)> {
         let mut switches: Vec<_> = self.dpd_clients.iter().collect();
         switches.sort_by_key(|(loc, _)| *loc);
         switches
@@ -169,9 +190,9 @@ impl MulticastDataplaneClient {
     async fn dpd_ensure_underlay_created(
         &self,
         client: &dpd_client::Client,
-        ip: AdminScopedIpv6,
+        ip: UnderlayMulticastIpv6,
         tag: &str,
-        switch: &SwitchLocation,
+        switch: &SwitchSlot,
     ) -> MulticastDataplaneResult<MulticastGroupUnderlayResponse> {
         let create = MulticastGroupCreateUnderlayEntry {
             group_ip: ip.clone(),
@@ -187,7 +208,7 @@ impl MulticastDataplaneClient {
                     self.log,
                     "underlay exists; fetching";
                     "underlay_ip" => %ip,
-                    "switch" => %switch,
+                    "switch" => ?switch,
                     "dpd_operation" => "dpd_ensure_underlay_created"
                 );
                 Ok(client
@@ -198,7 +219,7 @@ impl MulticastDataplaneClient {
                             self.log,
                             "underlay fetch failed";
                             "underlay_ip" => %ip,
-                            "switch" => %switch,
+                            "switch" => ?switch,
                             "error" => %e,
                             "dpd_operation" => "dpd_ensure_underlay_created"
                         );
@@ -211,7 +232,7 @@ impl MulticastDataplaneClient {
                     self.log,
                     "underlay create failed";
                     "underlay_ip" => %ip,
-                    "switch" => %switch,
+                    "switch" => ?switch,
                     "error" => %e,
                     "dpd_operation" => "dpd_ensure_underlay_created"
                 );
@@ -224,7 +245,7 @@ impl MulticastDataplaneClient {
         &self,
         client: &dpd_client::Client,
         create: &MulticastGroupCreateExternalEntry,
-        switch: &SwitchLocation,
+        switch: &SwitchSlot,
     ) -> MulticastDataplaneResult<MulticastGroupExternalResponse> {
         match client.multicast_group_create_external(create).await {
             Ok(r) => Ok(r.into_inner()),
@@ -235,7 +256,7 @@ impl MulticastDataplaneClient {
                     self.log,
                     "external exists; fetching";
                     "external_ip" => %create.group_ip,
-                    "switch" => %switch,
+                    "switch" => ?switch,
                     "dpd_operation" => "dpd_ensure_external_created"
                 );
                 let response = client
@@ -246,7 +267,7 @@ impl MulticastDataplaneClient {
                             self.log,
                             "external fetch failed";
                             "external_ip" => %create.group_ip,
-                            "switch" => %switch,
+                            "switch" => ?switch,
                             "error" => %e,
                             "dpd_operation" => "dpd_ensure_external_created"
                         );
@@ -259,7 +280,7 @@ impl MulticastDataplaneClient {
                     self.log,
                     "external create failed";
                     "external_ip" => %create.group_ip,
-                    "switch" => %switch,
+                    "switch" => ?switch,
                     "error" => %e,
                     "dpd_operation" => "dpd_ensure_external_created"
                 );
@@ -272,11 +293,15 @@ impl MulticastDataplaneClient {
         &self,
         client: &dpd_client::Client,
         group_ip: IpAddr,
+        tag: &MulticastTag,
         update: &MulticastGroupUpdateExternalEntry,
         create: &MulticastGroupCreateExternalEntry,
-        switch: &SwitchLocation,
+        switch: &SwitchSlot,
     ) -> MulticastDataplaneResult<MulticastGroupExternalResponse> {
-        match client.multicast_group_update_external(&group_ip, update).await {
+        match client
+            .multicast_group_update_external(&group_ip, tag, update)
+            .await
+        {
             Ok(r) => Ok(r.into_inner()),
             Err(DpdError::ErrorResponse(resp))
                 if resp.status() == reqwest::StatusCode::NOT_FOUND =>
@@ -295,7 +320,7 @@ impl MulticastDataplaneClient {
                                     self.log,
                                     "external fetch after conflict failed";
                                     "external_ip" => %group_ip,
-                                    "switch" => %switch,
+                                    "switch" => ?switch,
                                     "error" => %e,
                                     "dpd_operation" => "dpd_update_external_or_create"
                                 );
@@ -310,7 +335,7 @@ impl MulticastDataplaneClient {
                             self.log,
                             "external ensure failed";
                             "external_ip" => %group_ip,
-                            "switch" => %switch,
+                            "switch" => ?switch,
                             "error" => %e,
                             "dpd_operation" => "dpd_update_external_or_create"
                         );
@@ -323,7 +348,7 @@ impl MulticastDataplaneClient {
                     self.log,
                     "external update failed";
                     "external_ip" => %group_ip,
-                    "switch" => %switch,
+                    "switch" => ?switch,
                     "error" => %e,
                     "dpd_operation" => "dpd_update_external_or_create"
                 );
@@ -338,10 +363,15 @@ impl MulticastDataplaneClient {
     }
 
     /// Apply multicast group configuration across switches (via DPD).
+    ///
+    /// The `source_filter` contains the aggregated source filtering state from
+    /// all members. If any member wants "any source", switch-level filtering
+    /// is disabled.
     pub(crate) async fn create_groups(
         &self,
         external_group: &ExternalMulticastGroup,
         underlay_group: &UnderlayMulticastGroup,
+        source_filter: &SourceFilterState,
     ) -> MulticastDataplaneResult<(
         MulticastGroupUnderlayResponse,
         MulticastGroupExternalResponse,
@@ -356,24 +386,19 @@ impl MulticastDataplaneClient {
             "vni" => ?external_group.vni,
             "switch_count" => self.switch_count(),
             "multicast_scope" => if external_group.multicast_ip.ip().is_ipv4() { "IPv4_External" } else { "IPv6_External" },
-            "source_mode" => if external_group.source_ips.is_empty() { "ASM" } else { "SSM" },
+            "address_mode" => if is_ssm_address(external_group.multicast_ip.ip()) { "SSM" } else { "ASM" },
+            "has_any_source_member" => source_filter.has_any_source_member,
+            "specific_sources_count" => source_filter.specific_sources.len(),
             "dpd_operation" => "create_groups"
         );
 
         let dpd_clients = &self.dpd_clients;
-        let tag = external_group.name().to_string();
+        let tag = external_group.tag.as_ref().ok_or_else(|| {
+            Error::internal_error("multicast group missing tag")
+        })?;
 
-        // Convert MVLAN to u16 for DPD, validating through VlanID
-        let vlan_id = external_group
-            .mvlan
-            .map(|v| VlanID::new(v as u16))
-            .transpose()
-            .map_err(|e| {
-                Error::internal_error(&format!("invalid VLAN ID: {e:#}"))
-            })?
-            .map(u16::from);
         let underlay_ip_admin =
-            underlay_group.multicast_ip.ip().into_admin_scoped()?;
+            underlay_group.multicast_ip.ip().into_underlay_multicast()?;
         let underlay_ipv6 = match underlay_group.multicast_ip.ip() {
             IpAddr::V6(ipv6) => ipv6,
             IpAddr::V4(_) => {
@@ -389,16 +414,35 @@ impl MulticastDataplaneClient {
             vni: Vni::from(u32::from(external_group.vni.0)),
         };
 
-        let sources_dpd = external_group
-            .source_ips
-            .iter()
-            .map(|ip| IpSrc::Exact(ip.ip()))
-            .collect::<Vec<_>>();
-
         let external_group_ip = external_group.multicast_ip.ip();
 
+        // Source filtering per RFC 4607:
+        // - SSM (232/8, ff3x::/32): always use specific sources. API
+        //   validation prevents SSM joins without sources.
+        // - ASM: use specific sources when all members specify sources,
+        //   otherwise None to allow any source at the switch level.
+        let sources_dpd = if is_ssm_address(external_group_ip) {
+            Some(
+                source_filter
+                    .specific_sources
+                    .iter()
+                    .map(|ip| IpSrc::Exact(*ip))
+                    .collect::<Vec<_>>(),
+            )
+        } else if source_filter.has_any_source_member {
+            None
+        } else {
+            Some(
+                source_filter
+                    .specific_sources
+                    .iter()
+                    .map(|ip| IpSrc::Exact(*ip))
+                    .collect::<Vec<_>>(),
+            )
+        };
+
         let create_operations =
-            dpd_clients.into_iter().map(|(switch_location, client)| {
+            dpd_clients.into_iter().map(|(switch_slot, client)| {
                 let tag = tag.clone();
                 let nat_target = nat_target.clone();
                 let sources = sources_dpd.clone();
@@ -410,30 +454,35 @@ impl MulticastDataplaneClient {
                             client,
                             underlay_ip_admin,
                             &tag,
-                            switch_location,
+                            switch_slot,
                         )
                         .await?;
 
+                    // TODO: `vlan_id` is `None` because egress VLAN tagging is not
+                    // yet supported. When egress support is added, this should
+                    // be populated from group configuration.
                     let external_entry = MulticastGroupCreateExternalEntry {
                         group_ip: external_group_ip,
-                        external_forwarding: ExternalForwarding { vlan_id },
+                        external_forwarding: ExternalForwarding {
+                            vlan_id: None,
+                        },
                         internal_forwarding: InternalForwarding {
                             nat_target: Some(nat_target),
                         },
                         tag: Some(tag.clone()),
-                        sources: Some(sources),
+                        sources,
                     };
 
                     let external_response = self
                         .dpd_ensure_external_created(
                             client,
                             &external_entry,
-                            switch_location,
+                            switch_slot,
                         )
                         .await?;
 
                     Ok::<_, Error>((
-                        switch_location,
+                        switch_slot,
                         underlay_response,
                         external_response,
                     ))
@@ -459,7 +508,7 @@ impl MulticastDataplaneClient {
         })?;
 
         // Collect results
-        let programmed_switches: Vec<SwitchLocation> =
+        let programmed_switches: Vec<SwitchSlot> =
             results.iter().map(|(loc, _, _)| **loc).collect();
         let (_, underlay_last, external_last) =
             results.into_iter().last().ok_or_else(|| {
@@ -502,18 +551,11 @@ impl MulticastDataplaneClient {
         let dpd_clients = &self.dpd_clients;
 
         // Pre-compute shared data once
-        // Convert MVLAN to u16 for DPD, validating through VlanID
-        let vlan_id = params
-            .external_group
-            .mvlan
-            .map(|v| VlanID::new(v as u16))
-            .transpose()
-            .map_err(|e| {
-                Error::internal_error(&format!("invalid VLAN ID: {e:#}"))
-            })?
-            .map(u16::from);
-        let underlay_ip_admin =
-            params.underlay_group.multicast_ip.ip().into_admin_scoped()?;
+        let underlay_ip_admin = params
+            .underlay_group
+            .multicast_ip
+            .ip()
+            .into_underlay_multicast()?;
         let underlay_ipv6 = match params.underlay_group.multicast_ip.ip() {
             IpAddr::V6(ipv6) => ipv6,
             IpAddr::V4(_) => {
@@ -532,46 +574,79 @@ impl MulticastDataplaneClient {
         let new_name_str = params.new_name.to_string();
         let external_group_ip = params.external_group.multicast_ip.ip();
 
-        let sources_dpd = params
-            .new_sources
-            .iter()
-            .map(|ip| IpSrc::Exact(ip.ip()))
-            .collect::<Vec<_>>();
+        // Source filtering per RFC 4607:
+        // - SSM (232/8, ff3x::/32): always use specific sources. API
+        //   validation prevents SSM joins without sources.
+        // - ASM: use specific sources when all members specify sources,
+        //   otherwise None to allow any source at the switch level.
+        let sources_dpd = if is_ssm_address(external_group_ip) {
+            Some(
+                params
+                    .source_filter
+                    .specific_sources
+                    .iter()
+                    .map(|ip| IpSrc::Exact(*ip))
+                    .collect::<Vec<_>>(),
+            )
+        } else if params.source_filter.has_any_source_member {
+            None
+        } else {
+            Some(
+                params
+                    .source_filter
+                    .specific_sources
+                    .iter()
+                    .map(|ip| IpSrc::Exact(*ip))
+                    .collect::<Vec<_>>(),
+            )
+        };
 
         let update_operations =
-            dpd_clients.into_iter().map(|(switch_location, client)| {
+            dpd_clients.into_iter().map(|(switch_slot, client)| {
                 let new_name = new_name_str.clone();
                 let nat_target = nat_target.clone();
                 let sources = sources_dpd.clone();
                 let underlay_ip_admin = underlay_ip_admin.clone();
                 async move {
                     // Ensure/get underlay members, create if missing
-                    let members = match client
+                    let (members, existing_tag) = match client
                         .multicast_group_get_underlay(&underlay_ip_admin)
                         .await
                     {
-                        Ok(r) => r.into_inner().members,
+                        Ok(r) => {
+                            let inner = r.into_inner();
+                            (inner.members, inner.tag)
+                        }
                         Err(DpdError::ErrorResponse(resp))
                             if resp.status()
                                 == reqwest::StatusCode::NOT_FOUND =>
                         {
-                            // Create missing underlay group with new tag and empty members
+                            // Create missing underlay group with DB tag and empty members
+                            let db_tag = params
+                                .underlay_group
+                                .tag
+                                .as_deref()
+                                .ok_or_else(|| {
+                                Error::internal_error(
+                                    "underlay multicast group missing tag",
+                                )
+                            })?;
                             let created = self
                                 .dpd_ensure_underlay_created(
                                     client,
                                     underlay_ip_admin.clone(),
-                                    &new_name,
-                                    switch_location,
+                                    db_tag,
+                                    switch_slot,
                                 )
                                 .await?;
-                            created.members
+                            (created.members, created.tag)
                         }
                         Err(e) => {
                             error!(
                                 self.log,
                                 "failed to fetch underlay for update";
                                 "underlay_ip" => %underlay_ip_admin,
-                                "switch" => %switch_location,
+                                "switch" => ?switch_slot,
                                 "error" => %e
                             );
                             return Err(Error::internal_error(
@@ -580,14 +655,20 @@ impl MulticastDataplaneClient {
                         }
                     };
 
-                    // Update underlay tag preserving members
-                    let underlay_entry = MulticastGroupUpdateUnderlayEntry {
-                        members,
-                        tag: Some(new_name.clone()),
-                    };
+                    // Update underlay preserving members, using existing
+                    // tag for authorization
+                    let underlay_entry =
+                        MulticastGroupUpdateUnderlayEntry { members };
+                    let tag: MulticastTag =
+                        existing_tag.try_into().map_err(|e| {
+                            Error::internal_error(&format!(
+                                "invalid multicast tag: {e}"
+                            ))
+                        })?;
                     let underlay_response = client
                         .multicast_group_update_underlay(
                             &underlay_ip_admin,
+                            &tag,
                             &underlay_entry,
                         )
                         .await
@@ -596,43 +677,48 @@ impl MulticastDataplaneClient {
                                 self.log,
                                 "failed to update underlay";
                                 "underlay_ip" => %underlay_ip_admin,
-                                "switch" => %switch_location,
+                                "switch" => ?switch_slot,
                                 "error" => %e
                             );
                             Error::internal_error("failed to update underlay")
                         })?;
 
-                    // Prepare external update/create entries with pre-computed data
-                    let external_forwarding = ExternalForwarding { vlan_id };
+                    // Prepare external update/create entries with pre-computed data.
+                    //
+                    // TODO: `vlan_id` is `None` because egress VLAN tagging is not
+                    // yet supported. When egress support is added, this should
+                    // be populated from group configuration.
+                    let external_forwarding =
+                        ExternalForwarding { vlan_id: None };
                     let internal_forwarding =
                         InternalForwarding { nat_target: Some(nat_target) };
 
                     let update_entry = MulticastGroupUpdateExternalEntry {
                         external_forwarding: external_forwarding.clone(),
                         internal_forwarding: internal_forwarding.clone(),
-                        tag: Some(new_name.clone()),
-                        sources: Some(sources.clone()),
+                        sources: sources.clone(),
                     };
                     let create_entry = MulticastGroupCreateExternalEntry {
                         group_ip: external_group_ip,
                         external_forwarding,
                         internal_forwarding,
                         tag: Some(new_name.clone()),
-                        sources: Some(sources),
+                        sources,
                     };
 
                     let external_response = self
                         .dpd_update_external_or_create(
                             client,
                             external_group_ip,
+                            &tag,
                             &update_entry,
                             &create_entry,
-                            switch_location,
+                            switch_slot,
                         )
                         .await?;
 
                     Ok::<_, Error>((
-                        switch_location,
+                        switch_slot,
                         underlay_response.into_inner(),
                         external_response,
                     ))
@@ -693,7 +779,7 @@ impl MulticastDataplaneClient {
         let dpd_clients = &self.dpd_clients;
         let operation_name = operation_name.to_string();
 
-        let modify_ops = dpd_clients.iter().map(|(location, client)| {
+        let modify_ops = dpd_clients.iter().map(|(switch_slot, client)| {
             let underlay_ip = underlay_group.multicast_ip.ip();
             let member = member.clone();
             let log = self.log.clone();
@@ -701,57 +787,161 @@ impl MulticastDataplaneClient {
             let operation_name = operation_name.clone();
 
             async move {
-                // Get current underlay group state
-                let current_group = client
-                    .multicast_group_get_underlay(&underlay_ip.into_admin_scoped()?)
-                    .await
-                    .map_err(|e| {
+                let underlay_ip_admin = underlay_ip.into_underlay_multicast()?;
+
+                // Get current underlay group state, create if missing
+                let current_group_res = client
+                    .multicast_group_get_underlay(&underlay_ip_admin)
+                    .await;
+
+                let (current_members, current_tag) = match current_group_res {
+                    Ok(response) => {
+                        let inner = response.into_inner();
+                        (inner.members, inner.tag)
+                    }
+                    Err(DpdError::ErrorResponse(ref resp))
+                        if resp.status() == reqwest::StatusCode::NOT_FOUND =>
+                    {
+                        // Underlay group doesn't exist -> recreate it with empty members.
+                        // This can happen when all members have left and the group was
+                        // cleaned up by DPD, yet the external group still exists.
+                        info!(
+                            log,
+                            "underlay group not found, creating before member operation";
+                            "underlay_ip" => %underlay_ip,
+                            "switch" => ?switch_slot,
+                            "operation" => %operation_name,
+                            "dpd_operation" => "modify_group_membership_recreate"
+                        );
+
+                        let create_entry = MulticastGroupCreateUnderlayEntry {
+                            group_ip: underlay_ip_admin.clone(),
+                            members: Vec::new(),
+                            tag: underlay_group.tag.clone(),
+                        };
+
+                        match client
+                            .multicast_group_create_underlay(&create_entry)
+                            .await
+                        {
+                            Ok(response) => {
+                                let created = response.into_inner();
+                                (created.members, created.tag)
+                            }
+                            Err(DpdError::ErrorResponse(ref resp))
+                                if resp.status() == reqwest::StatusCode::CONFLICT =>
+                            {
+                                // Race condition: another request created the group
+                                // between our GET (404) and CREATE. Re-fetch it.
+                                debug!(
+                                    log,
+                                    "underlay group created by concurrent request, fetching";
+                                    "underlay_ip" => %underlay_ip,
+                                    "switch" => ?switch_slot,
+                                    "dpd_operation" => "modify_group_membership_recreate"
+                                );
+
+                                let fetched = client
+                                    .multicast_group_get_underlay(&underlay_ip_admin)
+                                    .await
+                                    .map_err(|e| {
+                                        error!(
+                                            log,
+                                            "underlay re-fetch after conflict failed";
+                                            "underlay_ip" => %underlay_ip,
+                                            "switch" => ?switch_slot,
+                                            "error" => %e,
+                                            "dpd_operation" => "modify_group_membership_recreate"
+                                        );
+                                        Error::internal_error(&format!(
+                                            "underlay re-fetch after conflict failed on {switch_slot:?}: {e}"
+                                        ))
+                                    })?
+                                    .into_inner();
+
+                                (fetched.members, fetched.tag)
+                            }
+                            Err(e) => {
+                                error!(
+                                    log,
+                                    "underlay recreate failed";
+                                    "underlay_ip" => %underlay_ip,
+                                    "switch" => ?switch_slot,
+                                    "error" => %e,
+                                    "dpd_operation" => "modify_group_membership_recreate"
+                                );
+                                return Err(Error::internal_error(&format!(
+                                    "underlay recreate failed on {switch_slot:?}: {e}"
+                                )));
+                            }
+                        }
+                    }
+                    Err(e) => {
                         error!(
                             log,
                             "underlay get failed";
                             "underlay_ip" => %underlay_ip,
-                            "switch" => %location,
+                            "switch" => ?switch_slot,
                             "error" => %e,
                             "dpd_operation" => "modify_group_membership_get"
                         );
-                        Error::internal_error("underlay get failed")
-                    })?;
+                        return Err(Error::internal_error(&format!(
+                            "underlay get failed on {switch_slot:?}: {e}"
+                        )));
+                    }
+                };
+
+                // Extract member info for logging before consuming member
+                let member_port_id = member.port_id.clone();
+                let member_link_id = member.link_id;
+                let member_direction = member.direction;
+
+                // Pre-compute dpd_operation for logging
+                let dpd_operation_done =
+                    format!("{operation_name}_member_in_underlay_group");
 
                 // Apply the modification function
-                let current_group_inner = current_group.into_inner();
-                let updated_members = modify_fn(current_group_inner.members, member.clone());
+                let updated_members = modify_fn(current_members, member);
 
                 let update_entry = MulticastGroupUpdateUnderlayEntry {
                     members: updated_members,
-                    tag: current_group_inner.tag,
                 };
 
-                client
-                    .multicast_group_update_underlay(&underlay_ip.into_admin_scoped()?, &update_entry)
-                    .await
-                    .map_err(|e| {
-                        error!(
-                            log,
-                            "underlay member modify failed";
-                            "operation_name" => operation_name.as_str(),
-                            "underlay_ip" => %underlay_ip,
-                            "switch" => %location,
-                            "error" => %e,
-                            "dpd_operation" => "modify_group_membership_update"
-                        );
-                        Error::internal_error("underlay member modify failed")
-                    })?;
+                let tag: MulticastTag = current_tag.clone().try_into()
+                    .map_err(|e| Error::internal_error(
+                        &format!("invalid multicast tag: {e}")
+                    ))?;
+
+                let update_res = client
+                    .multicast_group_update_underlay(
+                        &underlay_ip_admin, &tag, &update_entry)
+                    .await;
+
+                update_res.map_err(|e| {
+                    error!(
+                        log,
+                        "underlay member modify failed";
+                        "operation_name" => %operation_name,
+                        "underlay_ip" => %underlay_ip,
+                        "switch" => ?switch_slot,
+                        "error" => %e,
+                        "dpd_operation" => "modify_group_membership_update"
+                    );
+                    Error::internal_error(&format!(
+                        "underlay member modify failed on {switch_slot:?}: {e}"
+                    ))
+                })?;
 
                 info!(
                     log,
                     "DPD multicast member operation completed on switch";
-                    "operation_name" => operation_name.as_str(),
+                    "operation_name" => %operation_name,
                     "underlay_group_ip" => %underlay_ip,
-                    "member_port_id" => %member.port_id,
-                    "member_link_id" => %member.link_id,
-                    "member_direction" => ?member.direction,
-                    "switch_location" => %location,
-                    "dpd_operation" => %format!("{}_member_in_underlay_group", operation_name.as_str())
+                    "member_port_id" => %member_port_id,
+                    "member_link_id" => %member_link_id,
+                    "member_direction" => ?member_direction,
+                    "switch_slot" => ?switch_slot,
+                    "dpd_operation" => %dpd_operation_done
                 );
 
                 Ok::<(), Error>(())
@@ -844,10 +1034,10 @@ impl MulticastDataplaneClient {
     fn log_drift_issues<'a>(
         &self,
         group_ip: IpAddr,
-        first_location: &SwitchLocation,
+        first_location: &SwitchSlot,
         first_config: &MulticastGroupResponse,
         found_results: &[&'a (
-            &'a SwitchLocation,
+            &'a SwitchSlot,
             Option<MulticastGroupResponse>,
         )],
         not_found_count: usize,
@@ -872,13 +1062,13 @@ impl MulticastDataplaneClient {
             .iter()
             .filter_map(|(loc, resp)| resp.as_ref().map(|r| (loc, r)))
             .filter(|(_, cfg)| *cfg != first_config)
-            .for_each(|(location, _)| {
+            .for_each(|(switch_slot, _)| {
                 error!(
                     self.log,
                     "cross-switch drift detected: different configs on switches";
                     "group_ip" => %group_ip,
-                    "first_switch" => %first_location,
-                    "mismatched_switch" => %location,
+                    "first_switch" => ?first_location,
+                    "mismatched_switch" => ?switch_slot,
                     "dpd_operation" => "fetch_external_group_for_drift_check"
                 );
             });
@@ -888,7 +1078,7 @@ impl MulticastDataplaneClient {
     ///
     /// Queries all switches to detect configuration drift. If any switch has
     /// different state (missing group, different config), it will return the
-    /// found state, so the reconciler can trigger an UPDATE
+    /// found state, so the reconciler can initiate an UPDATE
     /// saga that will fix all switches atomically.
     pub(crate) async fn fetch_external_group_for_drift_check(
         &self,
@@ -902,12 +1092,12 @@ impl MulticastDataplaneClient {
             "dpd_operation" => "fetch_external_group_for_drift_check"
         );
 
-        let fetch_ops = self.dpd_clients.iter().map(|(location, client)| {
+        let fetch_ops = self.dpd_clients.iter().map(|(switch_slot, client)| {
             let log = self.log.clone();
             async move {
                 match client.multicast_group_get(&group_ip).await {
                     Ok(response) => {
-                        Ok((location, Some(response.into_inner())))
+                        Ok((switch_slot, Some(response.into_inner())))
                     }
                     Err(DpdError::ErrorResponse(resp))
                         if resp.status() == reqwest::StatusCode::NOT_FOUND =>
@@ -916,17 +1106,17 @@ impl MulticastDataplaneClient {
                             log,
                             "external group not found on switch";
                             "group_ip" => %group_ip,
-                            "switch" => %location,
+                            "switch" => ?switch_slot,
                             "dpd_operation" => "fetch_external_group_for_drift_check"
                         );
-                        Ok((location, None))
+                        Ok((switch_slot, None))
                     }
                     Err(e) => {
                         error!(
                             log,
                             "external group fetch failed";
                             "group_ip" => %group_ip,
-                            "switch" => %location,
+                            "switch" => ?switch_slot,
                             "error" => %e,
                             "dpd_operation" => "fetch_external_group_for_drift_check"
                         );
@@ -1000,12 +1190,12 @@ impl MulticastDataplaneClient {
             dpd_client::types::BackplaneLink,
         >,
     > {
-        let (switch_location, client) = self.select_one_switch()?;
+        let (switch_slot, client) = self.select_one_switch()?;
 
         debug!(
             self.log,
             "fetching backplane map from DPD for topology validation";
-            "switch" => %switch_location,
+            "switch" => ?switch_slot,
             "query_scope" => "single_switch",
             "dpd_operation" => "fetch_backplane_map"
         );
@@ -1038,7 +1228,7 @@ impl MulticastDataplaneClient {
                 debug!(
                     self.log,
                     "backplane map fetched from DPD";
-                    "switch" => %switch_location,
+                    "switch" => ?switch_slot,
                     "port_count" => backplane_map.len(),
                     "dpd_operation" => "fetch_backplane_map"
                 );
@@ -1048,7 +1238,7 @@ impl MulticastDataplaneClient {
                 error!(
                     self.log,
                     "backplane map fetch failed";
-                    "switch" => %switch_location,
+                    "switch" => ?switch_slot,
                     "error" => %e,
                     "dpd_operation" => "fetch_backplane_map"
                 );
@@ -1071,18 +1261,20 @@ impl MulticastDataplaneClient {
         &self,
         underlay_ip: IpAddr,
     ) -> MulticastDataplaneResult<Option<Vec<MulticastGroupMember>>> {
-        let (switch_location, client) = self.select_one_switch()?;
+        let (switch_slot, client) = self.select_one_switch()?;
 
         debug!(
             self.log,
             "fetching underlay group members from DPD for drift detection";
             "underlay_ip" => %underlay_ip,
-            "switch" => %switch_location,
+            "switch" => ?switch_slot,
             "dpd_operation" => "fetch_underlay_members"
         );
 
         match client
-            .multicast_group_get_underlay(&underlay_ip.into_admin_scoped()?)
+            .multicast_group_get_underlay(
+                &underlay_ip.into_underlay_multicast()?,
+            )
             .await
         {
             Ok(response) => {
@@ -1091,7 +1283,7 @@ impl MulticastDataplaneClient {
                     self.log,
                     "underlay group members fetched from DPD";
                     "underlay_ip" => %underlay_ip,
-                    "switch" => %switch_location,
+                    "switch" => ?switch_slot,
                     "member_count" => members.len(),
                     "dpd_operation" => "fetch_underlay_members"
                 );
@@ -1104,7 +1296,7 @@ impl MulticastDataplaneClient {
                     self.log,
                     "underlay group not found on switch";
                     "underlay_ip" => %underlay_ip,
-                    "switch" => %switch_location,
+                    "switch" => ?switch_slot,
                     "dpd_operation" => "fetch_underlay_members"
                 );
                 Ok(None)
@@ -1114,7 +1306,7 @@ impl MulticastDataplaneClient {
                     self.log,
                     "underlay group fetch failed";
                     "underlay_ip" => %underlay_ip,
-                    "switch" => %switch_location,
+                    "switch" => ?switch_slot,
                     "error" => %e,
                     "dpd_operation" => "fetch_underlay_members"
                 );
@@ -1136,18 +1328,21 @@ impl MulticastDataplaneClient {
         );
 
         let dpd_clients = &self.dpd_clients;
+        let dpd_tag: MulticastTag = tag
+            .parse()
+            .map_err(|_| Error::internal_error("invalid multicast tag"))?;
 
         // Execute cleanup operations on all switches in parallel
-        let cleanup_ops = dpd_clients.iter().map(|(location, client)| {
-            let tag = tag.to_string();
+        let cleanup_ops = dpd_clients.iter().map(|(switch_slot, client)| {
             let log = self.log.clone();
+            let dpd_tag = dpd_tag.clone();
             async move {
-                match client.multicast_reset_by_tag(&tag).await {
+                match client.multicast_reset_by_tag(&dpd_tag).await {
                     Ok(_) => {
                         debug!(
                             log,
                             "cleaned up multicast groups";
-                            "switch" => %location,
+                            "switch" => ?switch_slot,
                             "tag" => %tag
                         );
                         Ok::<(), Error>(())
@@ -1159,7 +1354,7 @@ impl MulticastDataplaneClient {
                         debug!(
                             log,
                             "no multicast groups found with tag on switch (expected)";
-                            "switch" => %location,
+                            "switch" => ?switch_slot,
                             "tag" => %tag
                         );
                         Ok::<(), Error>(())
@@ -1168,7 +1363,7 @@ impl MulticastDataplaneClient {
                         error!(
                             log,
                             "failed to clean up multicast groups by tag";
-                            "switch" => %location,
+                            "switch" => ?switch_slot,
                             "tag" => %tag,
                             "error" => %e,
                             "dpd_operation" => "remove_groups"

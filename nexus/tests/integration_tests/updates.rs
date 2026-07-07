@@ -21,8 +21,9 @@ use nexus_test_utils::resource_helpers::object_get;
 use nexus_test_utils::resource_helpers::object_get_error;
 use nexus_test_utils::resource_helpers::objects_list_page_authz;
 use nexus_test_utils_macros::nexus_test;
-use nexus_types::external_api::views;
-use nexus_types::external_api::views::{TufRepoUpload, TufRepoUploadStatus};
+use nexus_types::external_api::update;
+use nexus_types::external_api::update::TufRepoUpload;
+use nexus_types::external_api::update::TufRepoUploadStatus;
 use omicron_common::api::external::TufArtifactMeta;
 use pretty_assertions::assert_eq;
 use semver::Version;
@@ -37,7 +38,7 @@ use tufaceous_lib::Key;
 use tufaceous_lib::assemble::{ArtifactManifest, OmicronRepoAssembler};
 use tufaceous_lib::assemble::{DeserializedManifest, ManifestTweak};
 
-use crate::integration_tests::target_release::set_target_release;
+use crate::integration_tests::target_release::set_target_release_for_mupdate_recovery;
 
 const TRUST_ROOTS_URL: &str = "/v1/system/update/trust-roots";
 
@@ -353,7 +354,7 @@ async fn test_repo_upload() -> Result<()> {
     );
 
     // Now get the repository that was just uploaded.
-    let repo = object_get::<views::TufRepo>(
+    let repo = object_get::<update::TufRepo>(
         client,
         "/v1/system/update/repositories/1.0.0",
     )
@@ -529,7 +530,7 @@ async fn test_repo_upload() -> Result<()> {
         );
 
         // Now get the repository that was just uploaded.
-        let get_repo = object_get::<views::TufRepo>(
+        let get_repo = object_get::<update::TufRepo>(
             client,
             "/v1/system/update/repositories/2.0.0",
         )
@@ -656,7 +657,7 @@ async fn test_trust_root_operations(cptestctx: &ControlPlaneTestContext) {
         TestTrustRoot::generate().await.expect("trust root generation failed");
 
     // POST /v1/system/update/trust-roots
-    let trust_root_view: views::UpdatesTrustRoot = trust_root
+    let trust_root_view: update::UpdatesTrustRoot = trust_root
         .to_upload_request(client, StatusCode::CREATED)
         .execute()
         .await
@@ -667,7 +668,7 @@ async fn test_trust_root_operations(cptestctx: &ControlPlaneTestContext) {
     // GET /v1/system/update/trust-roots
     let request = RequestBuilder::new(client, Method::GET, TRUST_ROOTS_URL)
         .expect_status(Some(StatusCode::OK));
-    let response: ResultsPage<views::UpdatesTrustRoot> =
+    let response: ResultsPage<update::UpdatesTrustRoot> =
         NexusRequest::new(request)
             .authn_as(AuthnMode::PrivilegedUser)
             .execute()
@@ -681,7 +682,7 @@ async fn test_trust_root_operations(cptestctx: &ControlPlaneTestContext) {
     let id_url = format!("{TRUST_ROOTS_URL}/{}", trust_root_view.id);
     let request = RequestBuilder::new(client, Method::GET, &id_url)
         .expect_status(Some(StatusCode::OK));
-    let response: views::UpdatesTrustRoot = NexusRequest::new(request)
+    let response: update::UpdatesTrustRoot = NexusRequest::new(request)
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
         .await
@@ -700,7 +701,7 @@ async fn test_trust_root_operations(cptestctx: &ControlPlaneTestContext) {
         .expect("trust root delete failed");
     let request = RequestBuilder::new(client, Method::GET, TRUST_ROOTS_URL)
         .expect_status(Some(StatusCode::OK));
-    let response: ResultsPage<views::UpdatesTrustRoot> =
+    let response: ResultsPage<update::UpdatesTrustRoot> =
         NexusRequest::new(request)
             .authn_as(AuthnMode::PrivilegedUser)
             .execute()
@@ -720,8 +721,18 @@ async fn test_update_status() -> Result<()> {
     let client = &cptestctx.external_client;
     let logctx = &cptestctx.logctx;
 
+    // During high contention the inventory might not be ready yet, which will
+    // cause the call to /v1/system/update/status to 500. Ensure the inventory
+    // watch channel is populated. (Do not query the database directly, since
+    // update status uses the watch channel.)
+    cptestctx
+        .wait_for_at_least_one_inventory_collection(
+            std::time::Duration::from_secs(60),
+        )
+        .await;
+
     // initial status
-    let status: views::UpdateStatus =
+    let status: update::UpdateStatus =
         object_get(client, "/v1/system/update/status").await;
     assert_eq!(status.target_release.0, None);
     // does not start suspended because the DB migration initialized the
@@ -746,9 +757,9 @@ async fn test_update_status() -> Result<()> {
         .execute()
         .await?;
     let v1 = Version::new(1, 0, 0);
-    set_target_release(client, &v1).await?;
+    set_target_release_for_mupdate_recovery(client, &v1).await?;
 
-    let status: views::UpdateStatus =
+    let status: update::UpdateStatus =
         object_get(client, "/v1/system/update/status").await;
     assert_eq!(status.target_release.0.unwrap().version, v1);
     assert!(!status.suspended, "should not be suspended after setting v1");
@@ -777,9 +788,9 @@ async fn test_update_status() -> Result<()> {
         .to_upload_request(client, StatusCode::OK)
         .execute()
         .await?;
-    set_target_release(client, &v2).await?;
+    set_target_release_for_mupdate_recovery(client, &v2).await?;
 
-    let status: views::UpdateStatus =
+    let status: update::UpdateStatus =
         object_get(client, "/v1/system/update/status").await;
 
     assert_eq!(status.target_release.0.unwrap().version, v2);
@@ -791,6 +802,16 @@ async fn test_update_status() -> Result<()> {
     let counts = status.components_by_release_version;
     assert_eq!(counts.get("install dataset").unwrap(), &7);
     assert_eq!(counts.get("unknown").unwrap(), &11);
+
+    // `set_target_release_for_mupdate_recovery` only updates the target_release
+    // row, but the blueprint stays in its initial
+    // `WaitingForMupdateToBeCleared` state. This state is not treated as an
+    // update in progress, so `contact_support()` runs the full health checks
+    // instead of skipping them due to an "update in-progress".
+    //
+    // The task that checks for enabled not online SMF services isn't running on
+    // a simulated system; the contact_support field should be true
+    assert!(status.contact_support, "should need to contact support");
 
     cptestctx.teardown().await;
     Ok(())
@@ -876,7 +897,7 @@ async fn test_repo_list() -> Result<()> {
     let logctx = &cptestctx.logctx;
 
     // Initially, list should be empty
-    let initial_list: ResultsPage<views::TufRepo> =
+    let initial_list: ResultsPage<update::TufRepo> =
         objects_list_page_authz(client, "/v1/system/update/repositories").await;
 
     assert_eq!(initial_list.items.len(), 0);
@@ -925,7 +946,7 @@ async fn test_repo_list() -> Result<()> {
     assert_eq!(response3.status, TufRepoUploadStatus::Inserted);
 
     // List repositories - should return all 3, ordered by system version (newest first)
-    let list: ResultsPage<views::TufRepo> =
+    let list: ResultsPage<update::TufRepo> =
         objects_list_page_authz(client, "/v1/system/update/repositories").await;
 
     assert_eq!(list.items.len(), 3);
@@ -947,7 +968,7 @@ async fn test_repo_list() -> Result<()> {
     }
 
     // Request ascending order and expect the versions oldest-first
-    let ascending_list: ResultsPage<views::TufRepo> = objects_list_page_authz(
+    let ascending_list: ResultsPage<update::TufRepo> = objects_list_page_authz(
         client,
         "/v1/system/update/repositories?sort_by=version_ascending",
     )
@@ -963,7 +984,7 @@ async fn test_repo_list() -> Result<()> {
     assert_eq!(ascending_versions, vec!["1.0.0", "2.0.0", "3.0.0"]);
 
     // Test pagination by setting a small limit
-    let paginated_list = objects_list_page_authz::<views::TufRepo>(
+    let paginated_list = objects_list_page_authz::<update::TufRepo>(
         client,
         "/v1/system/update/repositories?limit=2",
     )
@@ -985,7 +1006,7 @@ async fn test_repo_list() -> Result<()> {
         "/v1/system/update/repositories?limit=2&page_token={}",
         paginated_list.next_page.clone().expect("expected next page token"),
     );
-    let next_page: ResultsPage<views::TufRepo> =
+    let next_page: ResultsPage<update::TufRepo> =
         objects_list_page_authz(client, &next_page_url).await;
     assert_eq!(next_page.items.len(), 1);
     assert_eq!(next_page.items[0].system_version.to_string(), "1.0.0");
@@ -993,7 +1014,7 @@ async fn test_repo_list() -> Result<()> {
     // Test filtering out pruned repos
 
     // Confirm that GET works for 1.0.0 before pruning
-    let _repo_before_prune: views::TufRepo =
+    let _repo_before_prune: update::TufRepo =
         object_get(client, "/v1/system/update/repositories/1.0.0").await;
 
     // Mark the 1.0.0 repo as pruned (use datastore methods since there's no API
@@ -1027,7 +1048,7 @@ async fn test_repo_list() -> Result<()> {
     .await;
 
     // List repositories again - the pruned repo should not appear
-    let list_after_prune: ResultsPage<views::TufRepo> =
+    let list_after_prune: ResultsPage<update::TufRepo> =
         objects_list_page_authz(client, "/v1/system/update/repositories").await;
 
     assert_eq!(list_after_prune.items.len(), 2);
@@ -1054,6 +1075,17 @@ async fn test_request_without_api_version(cptestctx: &ControlPlaneTestContext) {
     let server_addr = cptestctx.server.get_http_server_external_address();
     let test_cx =
         ClientTestContext::new(server_addr, cptestctx.logctx.log.clone());
+
+    // During high contention the inventory might not be ready yet, which will
+    // cause the call to /v1/system/update/status to 500. Ensure the inventory
+    // watch channel is populated. (Do not query the database directly, since
+    // update status uses the watch channel.)
+    cptestctx
+        .wait_for_at_least_one_inventory_collection(
+            std::time::Duration::from_secs(60),
+        )
+        .await;
+
     let req_builder = RequestBuilder::new(
         &test_cx,
         http::Method::GET,
@@ -1066,6 +1098,6 @@ async fn test_request_without_api_version(cptestctx: &ControlPlaneTestContext) {
     );
     let req =
         NexusRequest::new(req_builder).authn_as(AuthnMode::PrivilegedUser);
-    let status: views::UpdateStatus = req.execute_and_parse_unwrap().await;
+    let status: update::UpdateStatus = req.execute_and_parse_unwrap().await;
     assert_eq!(status.target_release.0, None);
 }

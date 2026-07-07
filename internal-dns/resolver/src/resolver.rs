@@ -388,7 +388,7 @@ impl Resolver {
     ) -> impl Iterator<Item = SocketAddrV6> + Send + use<> {
         let futures =
             std::iter::repeat((self.log.clone(), self.resolver.clone()))
-                .zip(service_lookup.into_iter())
+                .zip(service_lookup)
                 .map(|((log, resolver), srv)| async move {
                     let target = srv.target();
                     let port = srv.port();
@@ -457,6 +457,7 @@ mod test {
     use super::ResolveError;
     use super::Resolver;
     use anyhow::Context;
+    use camino_tempfile::Utf8TempDir;
     use dropshot::{
         ApiDescription, HandlerTaskMode, HttpError, HttpResponseOk,
         RequestContext, endpoint,
@@ -474,13 +475,13 @@ mod test {
     use std::net::SocketAddr;
     use std::net::SocketAddrV6;
     use std::str::FromStr;
-    use tempfile::TempDir;
+    use std::sync::Arc;
 
     struct DnsServer {
         // We hang onto the storage_path even though it's never used because
         // dropping it causes it to be cleaned up.
         #[allow(dead_code)]
-        storage_path: Option<TempDir>,
+        storage_path: Option<Utf8TempDir>,
         // Similarly, we hang onto the Dropshot server to keep it running.
         #[allow(dead_code)]
         dropshot_server: dropshot::HttpServer<dns_server::http_server::Context>,
@@ -493,15 +494,11 @@ mod test {
 
     impl DnsServer {
         async fn create(log: &Logger) -> Self {
-            let storage_path =
-                TempDir::new().expect("Failed to create temporary directory");
+            let storage_path = Utf8TempDir::new()
+                .expect("Failed to create temporary directory");
             let config_store = dns_server::storage::Config {
                 keep_old_generations: 3,
-                storage_path: storage_path
-                    .path()
-                    .to_string_lossy()
-                    .into_owned()
-                    .into(),
+                storage_path: storage_path.path().to_owned(),
             };
             let store = dns_server::storage::Store::new(
                 log.new(o!("component" => "DnsStore")),
@@ -520,6 +517,7 @@ mod test {
                     default_request_body_max_bytes: 8 * 1024,
                     default_handler_task_mode: HandlerTaskMode::Detached,
                     log_headers: vec![],
+                    compression: dropshot::CompressionConfig::None,
                 },
             )
             .await
@@ -915,7 +913,9 @@ mod test {
         // standalone test server.
         let dns_name = ServiceName::Nexus.srv_name();
         let reqwest_client = reqwest::ClientBuilder::new()
-            .dns_resolver(resolver.clone().into())
+            .dns_resolver(
+                Arc::new(resolver.clone()) as Arc<dyn reqwest::dns::Resolve>
+            )
             .build()
             .expect("Failed to build client");
 
@@ -995,7 +995,9 @@ mod test {
         // standalone test server.
         let dns_name = ServiceName::Nexus.srv_name();
         let reqwest_client = reqwest::ClientBuilder::new()
-            .dns_resolver(resolver.clone().into())
+            .dns_resolver(
+                Arc::new(resolver.clone()) as Arc<dyn reqwest::dns::Resolve>
+            )
             .build()
             .expect("Failed to build client");
 

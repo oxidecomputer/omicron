@@ -3,10 +3,14 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 //! Trust quorum related queries
+//!
+//! All methods that end with `_conn` in this module take a connection as a
+//! parameter that is already authorized, so there is no need to reauthorize.
 
 use super::DataStore;
 use crate::authz;
 use crate::context::OpContext;
+use crate::db::pagination::paginated;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
@@ -21,11 +25,15 @@ use nexus_db_model::DbTypedUuid;
 use nexus_db_model::HwBaseboardId;
 use nexus_db_model::TrustQuorumConfiguration as DbTrustQuorumConfiguration;
 use nexus_db_model::TrustQuorumMember as DbTrustQuorumMember;
+use nexus_types::trust_quorum::IsLrtqUpgrade;
 use nexus_types::trust_quorum::ProposedTrustQuorumConfig;
 use nexus_types::trust_quorum::{
-    TrustQuorumConfig, TrustQuorumMemberData, TrustQuorumMemberState,
+    TrustQuorumConfig, TrustQuorumConfigState, TrustQuorumMemberData,
+    TrustQuorumMemberState,
 };
+use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
+use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::OptionalLookupResult;
 use omicron_common::bail_unless;
 use omicron_uuid_kinds::RackKind;
@@ -129,22 +137,23 @@ impl DataStore {
     ///
     /// For reconfiguration and lrtq upgrade we always call
     /// `tq_insert_latest_config`.
-    pub async fn insert_rss_config_after_handoff(
+    pub async fn tq_insert_rss_config_after_handoff(
         opctx: &OpContext,
         conn: &async_bb8_diesel::Connection<DbConnection>,
-        rack_id: RackUuid,
+        authz_tq: authz::TrustQuorumConfig,
         initial_members: BTreeSet<BaseboardId>,
         coordinator: BaseboardId,
     ) -> Result<(), Error> {
-        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
+        opctx.authorize(authz::Action::Modify, &authz_tq).await?;
 
+        let rack_id = authz_tq.rack().id();
         let initial_config = TrustQuorumConfig::new_rss_committed_config(
             rack_id,
             initial_members,
             coordinator,
         );
 
-        Self::insert_tq_config_conn(opctx, conn, initial_config)
+        Self::insert_tq_config_conn(conn, initial_config)
             .await
             .map_err(|err| err.into_public_ignore_retries())
     }
@@ -153,43 +162,75 @@ impl DataStore {
     pub async fn tq_get_latest_config(
         &self,
         opctx: &OpContext,
-        rack_id: RackUuid,
+        authz_tq: authz::TrustQuorumConfig,
     ) -> OptionalLookupResult<TrustQuorumConfig> {
-        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+        opctx.authorize(authz::Action::Read, &authz_tq).await?;
+        let conn = &*self.pool_connection_authorized(opctx).await?;
+        let rack_id = authz_tq.rack().id();
+
+        Self::tq_get_latest_config_with_members_conn(conn, rack_id)
+            .await
+            .map_err(|err| err.into_public_ignore_retries())
+    }
+
+    pub async fn tq_list_config(
+        &self,
+        opctx: &OpContext,
+        authz_tq: authz::TrustQuorumConfig,
+        pagparams: &DataPageParams<'_, i64>,
+    ) -> ListResultVec<DbTrustQuorumConfiguration> {
+        opctx.authorize(authz::Action::Read, &authz_tq).await?;
         let conn = &*self.pool_connection_authorized(opctx).await?;
 
-        Self::tq_get_latest_config_with_members_conn(opctx, conn, rack_id)
+        let rack_id = authz_tq.rack().id();
+        use nexus_db_schema::schema::trust_quorum_configuration::dsl;
+        paginated(dsl::trust_quorum_configuration, dsl::epoch, pagparams)
+            .filter(dsl::rack_id.eq(DbTypedUuid::<RackKind>::from(rack_id)))
+            .select(DbTrustQuorumConfiguration::as_select())
+            .load_async(conn)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    /// Get the trust quorum configuration from the database for the given Epoch
+    pub async fn tq_get_config(
+        &self,
+        opctx: &OpContext,
+        authz_tq: authz::TrustQuorumConfig,
+        epoch: Epoch,
+    ) -> OptionalLookupResult<TrustQuorumConfig> {
+        opctx.authorize(authz::Action::Read, &authz_tq).await?;
+        let conn = &*self.pool_connection_authorized(opctx).await?;
+        let rack_id = authz_tq.rack().id();
+
+        Self::tq_get_config_with_members_from_epoch_conn(conn, rack_id, epoch)
             .await
             .map_err(|err| err.into_public_ignore_retries())
     }
 
     async fn tq_get_latest_config_with_members_conn(
-        opctx: &OpContext,
         conn: &async_bb8_diesel::Connection<DbConnection>,
         rack_id: RackUuid,
     ) -> Result<Option<TrustQuorumConfig>, TransactionError<Error>> {
         // First, retrieve our configuration if there is one.
         let Some(latest) =
-            Self::tq_get_latest_config_conn(opctx, conn, rack_id).await?
+            Self::tq_get_latest_config_conn(conn, rack_id).await?
         else {
             return Ok(None);
         };
 
         // Then fill in our members
-        Self::tq_get_config_with_members_conn(opctx, conn, rack_id, latest)
-            .await
+        Self::tq_get_config_with_members_conn(conn, rack_id, latest).await
     }
 
     async fn tq_get_config_with_members_conn(
-        opctx: &OpContext,
         conn: &async_bb8_diesel::Connection<DbConnection>,
         rack_id: RackUuid,
         config: DbTrustQuorumConfiguration,
     ) -> Result<Option<TrustQuorumConfig>, TransactionError<Error>> {
         // Then get any members associated with the configuration
         let members =
-            Self::tq_get_members_conn(opctx, conn, rack_id, config.epoch)
-                .await?;
+            Self::tq_get_members_conn(conn, rack_id, config.epoch).await?;
 
         let mut tq_members: BTreeMap<BaseboardId, TrustQuorumMemberData> =
             BTreeMap::new();
@@ -290,21 +331,19 @@ impl DataStore {
     }
 
     async fn tq_get_config_with_members_from_epoch_conn(
-        opctx: &OpContext,
         conn: &async_bb8_diesel::Connection<DbConnection>,
         rack_id: RackUuid,
         epoch: Epoch,
     ) -> Result<Option<TrustQuorumConfig>, TransactionError<Error>> {
         // First, retrieve our configuration if there is one.
         let Some(latest) =
-            Self::tq_get_config_conn(opctx, conn, rack_id, epoch).await?
+            Self::tq_get_config_conn(conn, rack_id, epoch).await?
         else {
             return Ok(None);
         };
 
         // Then fill in our members
-        Self::tq_get_config_with_members_conn(opctx, conn, rack_id, latest)
-            .await
+        Self::tq_get_config_with_members_conn(conn, rack_id, latest).await
     }
 
     /// Insert a new trust quorum configuration, if the proposed configuration
@@ -314,7 +353,8 @@ impl DataStore {
         opctx: &OpContext,
         proposed: ProposedTrustQuorumConfig,
     ) -> Result<(), Error> {
-        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
+        let authz_tq = authz::TrustQuorumConfig::for_rack_id(proposed.rack_id);
+        opctx.authorize(authz::Action::Modify, &authz_tq).await?;
         let conn = &*self.pool_connection_authorized(opctx).await?;
 
         let err = OptionalError::new();
@@ -326,7 +366,7 @@ impl DataStore {
 
                 async move {
                     let validated =
-                        Self::validate_new_config_conn(opctx, &c, proposed)
+                        Self::validate_new_config_conn(&c, proposed)
                             .await
                             .map_err(|txn_error| txn_error.into_diesel(&err))?;
 
@@ -346,7 +386,7 @@ impl DataStore {
                     }
 
                     // Save the new config
-                    Self::insert_tq_config_conn(opctx, &c, validated.config)
+                    Self::insert_tq_config_conn(&c, validated.config)
                         .await
                         .map_err(|txn_error| txn_error.into_diesel(&err))
                 }
@@ -359,7 +399,6 @@ impl DataStore {
     }
 
     async fn validate_new_config_conn(
-        opctx: &OpContext,
         conn: &async_bb8_diesel::Connection<DbConnection>,
         proposed: ProposedTrustQuorumConfig,
     ) -> Result<ValidatedConfig, TransactionError<Error>> {
@@ -377,7 +416,6 @@ impl DataStore {
 
         // Ensure all baseboards actually exist
         let hw_baseboard_ids = Self::lookup_hw_baseboard_ids_conn(
-            opctx,
             conn,
             proposed.members.iter().cloned(),
         )
@@ -411,16 +449,22 @@ impl DataStore {
         // Check that there is not an in progress reconfiguration:
         //
         let latest_config = Self::tq_get_latest_config_with_members_conn(
-            opctx,
             conn,
             proposed.rack_id,
         )
         .await?;
 
-        // Ensure that epochs are sequential
+        // Ensure that epochs are sequential or this is the inital attempt at an
+        // LRTQ upgrade.
+        //
+        // In the latter case the proposed epoch will be 2, as LRTQ has an epoch
+        // of 1 that is encoded as a ZFS dataset property.
         let latest_epoch = latest_config.as_ref().map(|c| c.epoch);
         bail_unless!(
-            latest_epoch == proposed.epoch.previous(),
+            latest_epoch == proposed.epoch.previous()
+                || (latest_epoch.is_none()
+                    && proposed.is_lrtq_upgrade == IsLrtqUpgrade::Yes
+                    && proposed.epoch == Epoch(2)),
             "Epochs for trust quorum configurations must be sequential. \
             Current epoch = {:?}, Proposed Epoch = {:?}",
             latest_epoch,
@@ -482,7 +526,6 @@ impl DataStore {
             // Do we need to load the last committed config?
             if let Some(epoch) = proposed.last_committed_epoch() {
                 let config = Self::tq_get_config_with_members_from_epoch_conn(
-                    opctx,
                     conn,
                     proposed.rack_id,
                     epoch,
@@ -522,9 +565,9 @@ impl DataStore {
 
                 if last_committed_config.state.is_committing() {
                     let acked = last_committed_config.acked_commits();
-                    // N - Z
-                    let min = last_committed_config.members.len()
-                        - last_committed_config.commit_crash_tolerance as usize;
+                    // K + Z
+                    let min = last_committed_config.threshold.0 as usize
+                        + last_committed_config.commit_crash_tolerance as usize;
                     bail_unless!(
                         acked >= min,
                         "Trust quorum reconfiguration in progress: not enough \
@@ -591,8 +634,9 @@ impl DataStore {
         opctx: &OpContext,
         config: trust_quorum_types::configuration::Configuration,
         acked_prepares: BTreeSet<BaseboardId>,
-    ) -> Result<(), Error> {
-        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
+    ) -> Result<TrustQuorumConfigState, Error> {
+        let authz_tq = authz::TrustQuorumConfig::for_rack_id(config.rack_id);
+        opctx.authorize(authz::Action::Modify, &authz_tq).await?;
         let conn = &*self.pool_connection_authorized(opctx).await?;
 
         let epoch = epoch_to_i64(config.epoch)?;
@@ -607,10 +651,9 @@ impl DataStore {
                 let acked_prepares = acked_prepares.clone();
                 async move {
                     // First, retrieve our configuration if there is one.
-                    let latest =
-                        Self::tq_get_latest_config_conn(opctx, &c, rack_id)
-                            .await
-                            .map_err(|txn_error| txn_error.into_diesel(&err))?;
+                    let latest = Self::tq_get_latest_config_conn(&c, rack_id)
+                        .await
+                        .map_err(|txn_error| txn_error.into_diesel(&err))?;
 
                     let Some(db_config) = latest else {
                         bail_txn!(
@@ -652,14 +695,10 @@ impl DataStore {
                     }
 
                     // Then get any members associated with the configuration
-                    let db_members = Self::tq_get_members_conn(
-                        opctx,
-                        &c,
-                        rack_id,
-                        db_config.epoch,
-                    )
-                    .await
-                    .map_err(|txn_error| txn_error.into_diesel(&err))?;
+                    let db_members =
+                        Self::tq_get_members_conn(&c, rack_id, db_config.epoch)
+                            .await
+                            .map_err(|txn_error| txn_error.into_diesel(&err))?;
 
                     let mut total_acks = 0;
                     for (mut member, hw_id) in db_members {
@@ -679,7 +718,6 @@ impl DataStore {
                             };
                             member.share_digest = Some(hex::encode(digest.0));
                             Self::update_tq_member_share_digest_conn(
-                                opctx,
                                 &c,
                                 member.clone(),
                             )
@@ -693,7 +731,6 @@ impl DataStore {
                         {
                             total_acks += 1;
                             Self::update_tq_member_state_prepared_conn(
-                                opctx,
                                 &c,
                                 member.clone(),
                             )
@@ -711,15 +748,15 @@ impl DataStore {
                     //  2. We are transitioning from preparing to committed state.
 
                     // Should we write secrets?
-                    if db_config.encrypted_rack_secrets_salt.is_none()
-                        && config.encrypted_rack_secrets.is_some()
-                    {
+                    if let (None, Some(encrypted_rack_secrets)) = (
+                        &db_config.encrypted_rack_secrets_salt,
+                        config.encrypted_rack_secrets,
+                    ) {
                         Self::update_tq_encrypted_rack_secrets_conn(
-                            opctx,
                             &c,
                             db_config.rack_id,
                             db_config.epoch,
-                            config.encrypted_rack_secrets.unwrap(),
+                            encrypted_rack_secrets,
                         )
                         .await
                         .map_err(|txn_error| txn_error.into_diesel(&err))?;
@@ -732,16 +769,17 @@ impl DataStore {
                             as usize
                     {
                         Self::update_tq_state_committing_conn(
-                            opctx,
                             &c,
                             db_config.rack_id,
                             db_config.epoch,
                         )
                         .await
                         .map_err(|txn_error| txn_error.into_diesel(&err))?;
+
+                        return Ok(TrustQuorumConfigState::Committing);
                     }
 
-                    Ok(())
+                    Ok(db_config.state.into())
                 }
             })
             .await
@@ -756,13 +794,14 @@ impl DataStore {
     pub async fn tq_update_commit_status(
         &self,
         opctx: &OpContext,
-        rack_id: RackUuid,
+        authz_tq: authz::TrustQuorumConfig,
         epoch: Epoch,
         acked_commits: BTreeSet<BaseboardId>,
-    ) -> Result<(), Error> {
-        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
+    ) -> Result<TrustQuorumConfigState, Error> {
+        opctx.authorize(authz::Action::Modify, &authz_tq).await?;
         let conn = &*self.pool_connection_authorized(opctx).await?;
 
+        let rack_id = authz_tq.rack().id();
         let epoch = epoch_to_i64(epoch)?;
 
         let err = OptionalError::new();
@@ -773,10 +812,9 @@ impl DataStore {
                 let acked_commits = acked_commits.clone();
                 async move {
                     // First, retrieve our configuration if there is one.
-                    let latest =
-                        Self::tq_get_latest_config_conn(opctx, &c, rack_id)
-                            .await
-                            .map_err(|txn_error| txn_error.into_diesel(&err))?;
+                    let latest = Self::tq_get_latest_config_conn(&c, rack_id)
+                        .await
+                        .map_err(|txn_error| txn_error.into_diesel(&err))?;
 
                     let Some(db_config) = latest else {
                         bail_txn!(
@@ -813,7 +851,6 @@ impl DataStore {
                     }
 
                     Self::update_tq_members_state_commit_conn(
-                        opctx,
                         &c,
                         rack_id.into(),
                         epoch,
@@ -823,14 +860,10 @@ impl DataStore {
                     .map_err(|txn_error| txn_error.into_diesel(&err))?;
 
                     // Then get any members associated with the configuration
-                    let db_members = Self::tq_get_members_conn(
-                        opctx,
-                        &c,
-                        rack_id,
-                        db_config.epoch,
-                    )
-                    .await
-                    .map_err(|txn_error| txn_error.into_diesel(&err))?;
+                    let db_members =
+                        Self::tq_get_members_conn(&c, rack_id, db_config.epoch)
+                            .await
+                            .map_err(|txn_error| txn_error.into_diesel(&err))?;
 
                     // If all members have acked their commits then mark the
                     // configuration as committed.
@@ -838,16 +871,17 @@ impl DataStore {
                         m.state == DbTrustQuorumMemberState::Committed
                     }) {
                         Self::update_tq_state_committed_conn(
-                            opctx,
                             &c,
                             db_config.rack_id,
                             db_config.epoch,
                         )
                         .await
                         .map_err(|txn_error| txn_error.into_diesel(&err))?;
+
+                        return Ok(TrustQuorumConfigState::Committed);
                     }
 
-                    Ok(())
+                    Ok(TrustQuorumConfigState::Committing)
                 }
             })
             .await
@@ -865,13 +899,14 @@ impl DataStore {
     pub async fn tq_abort_config(
         &self,
         opctx: &OpContext,
-        rack_id: RackUuid,
+        authz_tq: authz::TrustQuorumConfig,
         epoch: Epoch,
         abort_reason: String,
     ) -> Result<(), Error> {
-        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
+        opctx.authorize(authz::Action::Modify, &authz_tq).await?;
         let conn = &*self.pool_connection_authorized(opctx).await?;
 
+        let rack_id = authz_tq.rack().id();
         let epoch = epoch_to_i64(epoch)?;
 
         let err = OptionalError::new();
@@ -882,10 +917,9 @@ impl DataStore {
                 let abort_reason = abort_reason.clone();
                 async move {
                     // First, retrieve our configuration if there is one.
-                    let latest =
-                        Self::tq_get_latest_config_conn(opctx, &c, rack_id)
-                            .await
-                            .map_err(|txn_error| txn_error.into_diesel(&err))?;
+                    let latest = Self::tq_get_latest_config_conn(&c, rack_id)
+                        .await
+                        .map_err(|txn_error| txn_error.into_diesel(&err))?;
 
                     let Some(db_config) = latest else {
                         bail_txn!(
@@ -930,7 +964,6 @@ impl DataStore {
                     }
 
                     Self::update_tq_abort_state_conn(
-                        opctx,
                         &c,
                         db_config.rack_id,
                         db_config.epoch,
@@ -951,14 +984,10 @@ impl DataStore {
 
     // Unconditional insert
     async fn insert_tq_config_conn(
-        opctx: &OpContext,
         conn: &async_bb8_diesel::Connection<DbConnection>,
         config: TrustQuorumConfig,
     ) -> Result<(), TransactionError<Error>> {
-        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
-
         let hw_baseboard_ids = Self::lookup_hw_baseboard_ids_conn(
-            opctx,
             conn,
             config.members.keys().cloned(),
         )
@@ -1070,24 +1099,19 @@ impl DataStore {
     }
 
     async fn update_tq_members_state_commit_conn(
-        opctx: &OpContext,
         conn: &async_bb8_diesel::Connection<DbConnection>,
         rack_id: DbTypedUuid<RackKind>,
         epoch: i64,
         acked_commits: BTreeSet<BaseboardId>,
     ) -> Result<(), TransactionError<Error>> {
-        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
         use nexus_db_schema::schema::trust_quorum_member::dsl;
 
-        let hw_baseboard_ids: Vec<_> = Self::lookup_hw_baseboard_ids_conn(
-            opctx,
-            conn,
-            acked_commits.into_iter(),
-        )
-        .await?
-        .into_iter()
-        .map(|hw| hw.id)
-        .collect();
+        let hw_baseboard_ids: Vec<_> =
+            Self::lookup_hw_baseboard_ids_conn(conn, acked_commits.into_iter())
+                .await?
+                .into_iter()
+                .map(|hw| hw.id)
+                .collect();
 
         let num_members = hw_baseboard_ids.len();
 
@@ -1096,10 +1120,6 @@ impl DataStore {
             .filter(dsl::epoch.eq(epoch))
             .filter(dsl::hw_baseboard_id.eq_any(hw_baseboard_ids))
             .filter(dsl::share_digest.is_not_null())
-            .filter(dsl::state.eq_any(vec![
-                DbTrustQuorumMemberState::Unacked,
-                DbTrustQuorumMemberState::Prepared,
-            ]))
             .set((
                 dsl::state.eq(DbTrustQuorumMemberState::Committed),
                 dsl::time_committed.eq(Some(Utc::now())),
@@ -1119,11 +1139,9 @@ impl DataStore {
     }
 
     async fn update_tq_member_share_digest_conn(
-        opctx: &OpContext,
         conn: &async_bb8_diesel::Connection<DbConnection>,
         member: DbTrustQuorumMember,
     ) -> Result<(), TransactionError<Error>> {
-        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
         use nexus_db_schema::schema::trust_quorum_member::dsl;
 
         let rows_updated = diesel::update(dsl::trust_quorum_member)
@@ -1149,11 +1167,9 @@ impl DataStore {
     }
 
     async fn update_tq_member_state_prepared_conn(
-        opctx: &OpContext,
         conn: &async_bb8_diesel::Connection<DbConnection>,
         member: DbTrustQuorumMember,
     ) -> Result<(), TransactionError<Error>> {
-        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
         use nexus_db_schema::schema::trust_quorum_member::dsl;
 
         let rows_updated = diesel::update(dsl::trust_quorum_member)
@@ -1182,13 +1198,11 @@ impl DataStore {
     }
 
     async fn update_tq_encrypted_rack_secrets_conn(
-        opctx: &OpContext,
         conn: &async_bb8_diesel::Connection<DbConnection>,
         rack_id: DbTypedUuid<RackKind>,
         epoch: i64,
         encrypted_rack_secrets: EncryptedRackSecrets,
     ) -> Result<(), TransactionError<Error>> {
-        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
         let salt = Some(hex::encode(encrypted_rack_secrets.salt.0));
         let secrets: Option<Vec<u8>> = Some(encrypted_rack_secrets.data.into());
 
@@ -1219,12 +1233,10 @@ impl DataStore {
 
     /// Returns the number of rows update
     async fn update_tq_state_committing_conn(
-        opctx: &OpContext,
         conn: &async_bb8_diesel::Connection<DbConnection>,
         rack_id: DbTypedUuid<RackKind>,
         epoch: i64,
     ) -> Result<(), TransactionError<Error>> {
-        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
         use nexus_db_schema::schema::trust_quorum_configuration::dsl;
 
         let rows_updated = diesel::update(dsl::trust_quorum_configuration)
@@ -1254,12 +1266,10 @@ impl DataStore {
 
     /// Returns the number of rows update
     async fn update_tq_state_committed_conn(
-        opctx: &OpContext,
         conn: &async_bb8_diesel::Connection<DbConnection>,
         rack_id: DbTypedUuid<RackKind>,
         epoch: i64,
     ) -> Result<(), TransactionError<Error>> {
-        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
         use nexus_db_schema::schema::trust_quorum_configuration::dsl;
 
         let rows_updated = diesel::update(dsl::trust_quorum_configuration)
@@ -1318,13 +1328,11 @@ impl DataStore {
     }
 
     async fn update_tq_abort_state_conn(
-        opctx: &OpContext,
         conn: &async_bb8_diesel::Connection<DbConnection>,
         rack_id: DbTypedUuid<RackKind>,
         epoch: i64,
         abort_reason: String,
     ) -> Result<(), TransactionError<Error>> {
-        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
         use nexus_db_schema::schema::trust_quorum_configuration::dsl;
 
         let rows_updated = diesel::update(dsl::trust_quorum_configuration)
@@ -1354,11 +1362,9 @@ impl DataStore {
     }
 
     async fn lookup_hw_baseboard_ids_conn(
-        opctx: &OpContext,
         conn: &async_bb8_diesel::Connection<DbConnection>,
         members: impl Iterator<Item = BaseboardId>,
     ) -> Result<Vec<HwBaseboardId>, TransactionError<Error>> {
-        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
         use nexus_db_schema::schema::hw_baseboard_id::dsl;
 
         let (parts, serials): (Vec<_>, Vec<_>) = members
@@ -1376,12 +1382,10 @@ impl DataStore {
     }
 
     async fn tq_get_latest_config_conn(
-        opctx: &OpContext,
         conn: &async_bb8_diesel::Connection<DbConnection>,
         rack_id: RackUuid,
     ) -> Result<Option<DbTrustQuorumConfiguration>, TransactionError<Error>>
     {
-        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
         use nexus_db_schema::schema::trust_quorum_configuration::dsl;
 
         let latest = dsl::trust_quorum_configuration
@@ -1396,13 +1400,11 @@ impl DataStore {
     }
 
     async fn tq_get_config_conn(
-        opctx: &OpContext,
         conn: &async_bb8_diesel::Connection<DbConnection>,
         rack_id: RackUuid,
         epoch: Epoch,
     ) -> Result<Option<DbTrustQuorumConfiguration>, TransactionError<Error>>
     {
-        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
         use nexus_db_schema::schema::trust_quorum_configuration::dsl;
 
         let epoch =
@@ -1420,7 +1422,6 @@ impl DataStore {
     }
 
     async fn tq_get_members_conn(
-        opctx: &OpContext,
         conn: &async_bb8_diesel::Connection<DbConnection>,
         rack_id: RackUuid,
         epoch: i64,
@@ -1428,7 +1429,6 @@ impl DataStore {
         Vec<(DbTrustQuorumMember, HwBaseboardId)>,
         TransactionError<Error>,
     > {
-        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
         use nexus_db_schema::schema::hw_baseboard_id::dsl as hw_baseboard_id_dsl;
         use nexus_db_schema::schema::trust_quorum_member::dsl;
 
@@ -1462,6 +1462,10 @@ mod tests {
     use omicron_test_utils::dev::test_setup_log;
     use omicron_uuid_kinds::RackUuid;
     use uuid::Uuid;
+
+    fn make_authz_tq(rack_id: RackUuid) -> authz::TrustQuorumConfig {
+        authz::TrustQuorumConfig::for_rack_id(rack_id)
+    }
 
     async fn insert_hw_baseboard_ids(db: &TestDatabase) -> Vec<HwBaseboardId> {
         let (_, datastore) = (db.opctx(), db.datastore());
@@ -1507,17 +1511,17 @@ mod tests {
         let coordinator = members.first().unwrap().clone();
 
         // Insert an initial config
-        DataStore::insert_rss_config_after_handoff(
+        DataStore::tq_insert_rss_config_after_handoff(
             opctx,
             &conn,
-            rack_id,
+            make_authz_tq(rack_id),
             members.clone(),
             coordinator,
         )
         .await
         .unwrap();
 
-        // Last committed epoch is incoreect (should be 1)
+        // Last committed epoch is incorrect (should be 1)
         let bad_config = ProposedTrustQuorumConfig {
             rack_id,
             epoch: Epoch(2),
@@ -1576,6 +1580,51 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_tq_insert_initial_lrtq_upgrade() {
+        let logctx = test_setup_log("test_tq_insert_initial_lrtq_upgrade");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let hw_ids = insert_hw_baseboard_ids(&db).await;
+        let rack_id = RackUuid::new_v4();
+        let members: BTreeSet<_> =
+            hw_ids.iter().cloned().map(BaseboardId::from).collect();
+
+        // Propse a an LRTQ upgrade and successfully insert it
+        let config = ProposedTrustQuorumConfig {
+            rack_id,
+            epoch: Epoch(2),
+            is_lrtq_upgrade: IsLrtqUpgrade::Yes,
+            members: members.clone(),
+        };
+
+        // Insert should succeed
+        datastore.tq_insert_latest_config(opctx, config.clone()).await.unwrap();
+
+        // Read the config back and check that it's preparing for LRTQ upgrade
+        // with no acks.
+        let read_config = datastore
+            .tq_get_latest_config(opctx, make_authz_tq(rack_id))
+            .await
+            .expect("no error")
+            .expect("returned config");
+
+        // The read config should be preparing
+        assert_eq!(read_config.epoch, config.epoch);
+        assert_eq!(
+            read_config.state,
+            TrustQuorumConfigState::PreparingLrtqUpgrade
+        );
+        assert!(read_config.encrypted_rack_secrets.is_none());
+        assert!(read_config.members.iter().all(|(_, info)| {
+            info.state == TrustQuorumMemberState::Unacked
+        }));
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
     async fn test_tq_update_prepare_and_commit() {
         let logctx = test_setup_log("test_tq_update_prepare_and_commit");
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
@@ -1590,10 +1639,10 @@ mod tests {
         let coordinator = members.first().unwrap().clone();
 
         // Insert an initial config
-        DataStore::insert_rss_config_after_handoff(
+        DataStore::tq_insert_rss_config_after_handoff(
             opctx,
             &conn,
-            rack_id,
+            make_authz_tq(rack_id),
             members.clone(),
             coordinator,
         )
@@ -1613,7 +1662,7 @@ mod tests {
 
         // Read the config back and check that it's preparing with no acks
         let read_config = datastore
-            .tq_get_latest_config(opctx, rack_id)
+            .tq_get_latest_config(opctx, make_authz_tq(rack_id))
             .await
             .expect("no error")
             .expect("returned config");
@@ -1647,7 +1696,7 @@ mod tests {
         let e = datastore
             .tq_update_commit_status(
                 opctx,
-                rack_id,
+                make_authz_tq(rack_id),
                 config.epoch,
                 acked_commits,
             )
@@ -1682,7 +1731,7 @@ mod tests {
             .unwrap();
 
         let read_config = datastore
-            .tq_get_latest_config(opctx, rack_id)
+            .tq_get_latest_config(opctx, make_authz_tq(rack_id))
             .await
             .expect("no error")
             .expect("returned config");
@@ -1718,7 +1767,7 @@ mod tests {
             .unwrap();
 
         let read_config = datastore
-            .tq_get_latest_config(opctx, rack_id)
+            .tq_get_latest_config(opctx, make_authz_tq(rack_id))
             .await
             .expect("no error")
             .expect("returned config");
@@ -1760,7 +1809,7 @@ mod tests {
             .unwrap();
 
         let read_config = datastore
-            .tq_get_latest_config(opctx, rack_id)
+            .tq_get_latest_config(opctx, make_authz_tq(rack_id))
             .await
             .expect("no error")
             .expect("returned config");
@@ -1800,7 +1849,7 @@ mod tests {
         datastore
             .tq_update_commit_status(
                 opctx,
-                rack_id,
+                make_authz_tq(rack_id),
                 config.epoch,
                 coordinator_config.members.keys().cloned().collect(),
             )
@@ -1808,7 +1857,7 @@ mod tests {
             .unwrap();
 
         let read_config = datastore
-            .tq_get_latest_config(opctx, rack_id)
+            .tq_get_latest_config(opctx, make_authz_tq(rack_id))
             .await
             .expect("no error")
             .expect("returned config");
@@ -1822,6 +1871,237 @@ mod tests {
             read_config.members.iter().all(
                 |(_, info)| info.state == TrustQuorumMemberState::Committed
             )
+        );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_tq_update_prepare_and_commit_partially() {
+        let logctx =
+            test_setup_log("test_tq_update_prepare_and_commit_partially");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let hw_ids = insert_hw_baseboard_ids(&db).await;
+        let rack_id = RackUuid::new_v4();
+        let members: BTreeSet<_> =
+            hw_ids.iter().cloned().map(BaseboardId::from).collect();
+
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
+        let coordinator = members.first().unwrap().clone();
+
+        // Insert an initial config
+        DataStore::tq_insert_rss_config_after_handoff(
+            opctx,
+            &conn,
+            make_authz_tq(rack_id),
+            members.clone(),
+            coordinator,
+        )
+        .await
+        .unwrap();
+
+        // Propse a second configuration and successfully insert it
+        let config = ProposedTrustQuorumConfig {
+            rack_id,
+            epoch: Epoch(2),
+            is_lrtq_upgrade: IsLrtqUpgrade::No {
+                last_committed_epoch: Epoch(1),
+            },
+            members: members.clone(),
+        };
+        datastore.tq_insert_latest_config(opctx, config.clone()).await.unwrap();
+
+        // A configuration returned from a coordinator is part of the trust
+        // quorum protocol
+        let coordinator_config =
+            trust_quorum_types::configuration::Configuration {
+                rack_id: config.rack_id,
+                epoch: config.epoch,
+                coordinator: hw_ids.first().unwrap().clone().into(),
+                members: members
+                    .clone()
+                    .into_iter()
+                    .map(|id| (id, Sha3_256Digest([0u8; 32])))
+                    .collect(),
+                threshold: TrustQuorumConfig::threshold(members.len() as u8),
+                encrypted_rack_secrets: None,
+            };
+
+        let read_config = datastore
+            .tq_get_latest_config(opctx, make_authz_tq(rack_id))
+            .await
+            .expect("no error")
+            .expect("returned config");
+
+        // Ack enough nodes to go to the committing state
+        let min_acks = coordinator_config.threshold.0 as usize
+            + read_config.commit_crash_tolerance as usize;
+
+        datastore
+            .tq_update_prepare_status(
+                opctx,
+                coordinator_config.clone(),
+                coordinator_config
+                    .members
+                    .keys()
+                    .take(min_acks)
+                    .cloned()
+                    .collect(),
+            )
+            .await
+            .unwrap();
+
+        let read_config = datastore
+            .tq_get_latest_config(opctx, make_authz_tq(rack_id))
+            .await
+            .expect("no error")
+            .expect("returned config");
+
+        // We've acked enough nodes and should have written our status to the DB
+        assert_eq!(read_config.epoch, config.epoch);
+        assert_eq!(read_config.state, TrustQuorumConfigState::Committing);
+        assert!(read_config.encrypted_rack_secrets.is_none());
+        assert_eq!(
+            min_acks,
+            read_config
+                .members
+                .iter()
+                .filter(
+                    |(_, info)| info.state == TrustQuorumMemberState::Prepared
+                )
+                .count()
+        );
+
+        // Try to start a new configuration with not enough nodes committed
+        //
+        // Trying to insert a new config should fail since we haven't committed
+        // enough nodes.
+        let next_config = ProposedTrustQuorumConfig {
+            rack_id,
+            epoch: Epoch(3),
+            is_lrtq_upgrade: IsLrtqUpgrade::No {
+                last_committed_epoch: Epoch(2),
+            },
+            members: members.clone(),
+        };
+        let e = datastore
+            .tq_insert_latest_config(opctx, next_config.clone())
+            .await
+            .unwrap_err();
+        println!("{e}");
+
+        // Commit at K + Z - 1 nodes
+        datastore
+            .tq_update_commit_status(
+                opctx,
+                make_authz_tq(rack_id),
+                config.epoch,
+                coordinator_config
+                    .members
+                    .keys()
+                    .take(min_acks - 1)
+                    .cloned()
+                    .collect(),
+            )
+            .await
+            .unwrap();
+
+        let read_config = datastore
+            .tq_get_latest_config(opctx, make_authz_tq(rack_id))
+            .await
+            .expect("no error")
+            .expect("returned config");
+
+        assert_eq!(read_config.epoch, config.epoch);
+        assert_eq!(read_config.state, TrustQuorumConfigState::Committing);
+        assert!(read_config.encrypted_rack_secrets.is_none());
+        assert_eq!(
+            min_acks - 1,
+            read_config
+                .members
+                .iter()
+                .filter(
+                    |(_, info)| info.state == TrustQuorumMemberState::Committed
+                )
+                .count()
+        );
+
+        // Insert should fail since again, there is not enough nodes:
+        //
+        // We have acked K+Z - 1 and not K+Z
+        let e = datastore
+            .tq_insert_latest_config(opctx, next_config.clone())
+            .await
+            .unwrap_err();
+        println!("{e}");
+
+        // Commit at K + Z
+        datastore
+            .tq_update_commit_status(
+                opctx,
+                make_authz_tq(rack_id),
+                config.epoch,
+                coordinator_config
+                    .members
+                    .keys()
+                    .take(min_acks)
+                    .cloned()
+                    .collect(),
+            )
+            .await
+            .unwrap();
+
+        let read_config = datastore
+            .tq_get_latest_config(opctx, make_authz_tq(rack_id))
+            .await
+            .expect("no error")
+            .expect("returned config");
+
+        assert_eq!(read_config.epoch, config.epoch);
+        // Even though K+Z nodes have committed, we should still see the state
+        // at `Committing`, since a new config has not yet been proposed.
+        assert_eq!(read_config.state, TrustQuorumConfigState::Committing);
+        assert!(read_config.encrypted_rack_secrets.is_none());
+        assert_eq!(
+            min_acks,
+            read_config
+                .members
+                .iter()
+                .filter(
+                    |(_, info)| info.state == TrustQuorumMemberState::Committed
+                )
+                .count()
+        );
+
+        // Now create a new config. This should succeed and we should
+        // see the state of the old config move from `Committing` to
+        // `CommittedPartially`.
+        datastore.tq_insert_latest_config(opctx, next_config).await.unwrap();
+
+        let read_config = datastore
+            .tq_get_config(opctx, make_authz_tq(rack_id), Epoch(2))
+            .await
+            .expect("no error")
+            .expect("returned config");
+
+        assert_eq!(read_config.epoch, config.epoch);
+        assert_eq!(
+            read_config.state,
+            TrustQuorumConfigState::CommittedPartially
+        );
+        assert!(read_config.encrypted_rack_secrets.is_none());
+        assert_eq!(
+            min_acks,
+            read_config
+                .members
+                .iter()
+                .filter(
+                    |(_, info)| info.state == TrustQuorumMemberState::Committed
+                )
+                .count()
         );
 
         db.terminate().await;
@@ -1843,10 +2123,10 @@ mod tests {
         let coordinator = members.first().unwrap().clone();
 
         // Insert an initial config
-        DataStore::insert_rss_config_after_handoff(
+        DataStore::tq_insert_rss_config_after_handoff(
             opctx,
             &conn,
-            rack_id,
+            make_authz_tq(rack_id),
             members.clone(),
             coordinator,
         )
@@ -1866,13 +2146,23 @@ mod tests {
 
         // Aborting should succeed, since we haven't committed
         datastore
-            .tq_abort_config(opctx, config.rack_id, config.epoch, "test".into())
+            .tq_abort_config(
+                opctx,
+                make_authz_tq(config.rack_id),
+                config.epoch,
+                "test".into(),
+            )
             .await
             .unwrap();
 
         // Aborting is idempotent
         datastore
-            .tq_abort_config(opctx, config.rack_id, config.epoch, "test".into())
+            .tq_abort_config(
+                opctx,
+                make_authz_tq(config.rack_id),
+                config.epoch,
+                "test".into(),
+            )
             .await
             .unwrap();
 
@@ -1881,7 +2171,6 @@ mod tests {
         {
             let conn = datastore.pool_connection_for_tests().await.unwrap();
             DataStore::update_tq_state_committing_conn(
-                opctx,
                 &conn,
                 config.rack_id.into(),
                 config.epoch.0 as i64,
@@ -1926,7 +2215,7 @@ mod tests {
 
         // Retrieve the configuration and ensure it is actually aborted
         let read_config = datastore
-            .tq_get_latest_config(opctx, rack_id)
+            .tq_get_latest_config(opctx, make_authz_tq(rack_id))
             .await
             .expect("no error")
             .expect("returned config");
@@ -1948,7 +2237,12 @@ mod tests {
 
         // Trying to abort the old config will fail because it's stale
         datastore
-            .tq_abort_config(opctx, config.rack_id, config.epoch, "test".into())
+            .tq_abort_config(
+                opctx,
+                make_authz_tq(config.rack_id),
+                config.epoch,
+                "test".into(),
+            )
             .await
             .unwrap_err();
 
@@ -1979,7 +2273,7 @@ mod tests {
         datastore
             .tq_abort_config(
                 opctx,
-                config2.rack_id,
+                make_authz_tq(config2.rack_id),
                 config2.epoch,
                 "test".into(),
             )
@@ -2015,10 +2309,10 @@ mod tests {
                 rack2_members = members.clone();
             }
             let coordinator = members.first().unwrap().clone();
-            DataStore::insert_rss_config_after_handoff(
+            DataStore::tq_insert_rss_config_after_handoff(
                 opctx,
                 &conn,
-                rack_id,
+                make_authz_tq(rack_id),
                 members.clone(),
                 coordinator,
             )

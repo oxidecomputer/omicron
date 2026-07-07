@@ -61,14 +61,22 @@ impl std::fmt::Display for CommandFailureInfo {
 
 #[derive(thiserror::Error, Debug, SlogInlineError)]
 pub enum ExecutionError {
-    #[error("Failed to start execution of [{command}]: {err}")]
-    ExecutionStart { command: String, err: std::io::Error },
+    #[error("Failed to start execution of [{command}]")]
+    ExecutionStart {
+        command: String,
+        #[source]
+        err: std::io::Error,
+    },
 
     #[error("{0}")]
     CommandFailure(Box<CommandFailureInfo>),
 
-    #[error("contract error: {msg}: {err}")]
-    ContractFailure { msg: String, err: std::io::Error },
+    #[error("contract error: {msg}")]
+    ContractFailure {
+        msg: String,
+        #[source]
+        err: std::io::Error,
+    },
 
     #[error("Failed to parse command output")]
     ParseFailure(String),

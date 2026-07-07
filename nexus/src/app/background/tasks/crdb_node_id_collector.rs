@@ -34,7 +34,6 @@ use futures::stream;
 use nexus_auth::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_types::deployment::Blueprint;
-use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::blueprint_zone_type;
 use omicron_common::address::COCKROACH_ADMIN_PORT;
@@ -143,23 +142,21 @@ impl CockroachAdminFromBlueprint for CockroachAdminFromBlueprintViaFixedPort {
         &'a self,
         blueprint: &'a Blueprint,
     ) -> impl Iterator<Item = (OmicronZoneUuid, SocketAddrV6)> + 'a {
-        // We can only actively collect from zones that should be running; if
+        // We can only actively collect from zones that should be in-service; if
         // there are CRDB zones in other states that still need their node ID
         // collected, we have to wait until they're running.
-        let zone_filter = BlueprintZoneDisposition::is_in_service;
-
-        blueprint.all_omicron_zones(zone_filter).filter_map(
-            |(_sled_id, zone)| match &zone.zone_type {
-                BlueprintZoneType::CockroachDb(
-                    blueprint_zone_type::CockroachDb { address, .. },
-                ) => {
-                    let mut admin_addr = *address;
-                    admin_addr.set_port(COCKROACH_ADMIN_PORT);
-                    Some((zone.id, admin_addr))
-                }
-                _ => None,
-            },
-        )
+        blueprint.in_service_zones().filter_map(|(_sled_id, zone)| match &zone
+            .zone_type
+        {
+            BlueprintZoneType::CockroachDb(
+                blueprint_zone_type::CockroachDb { address, .. },
+            ) => {
+                let mut admin_addr = *address;
+                admin_addr.set_port(COCKROACH_ADMIN_PORT);
+                Some((zone.id, admin_addr))
+            }
+            _ => None,
+        })
     }
 }
 
@@ -269,7 +266,7 @@ mod tests {
         // `ExampleSystemBuilder` doesn't place any cockroach nodes; assert so
         // we bail out early if that changes.
         let ncockroach = bp0
-            .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+            .in_service_zones()
             .filter(|(_, z)| z.zone_type.is_cockroach())
             .count();
         assert_eq!(ncockroach, 0);

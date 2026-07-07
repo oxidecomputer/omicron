@@ -17,17 +17,21 @@ use crate::blueprint_builder::Operation;
 use crate::blueprint_editor::DisksEditError;
 use crate::blueprint_editor::ExternalNetworkingAllocator;
 use crate::blueprint_editor::SledEditError;
+use crate::measurements::plan_measurement_updates;
 use crate::mgs_updates::ImpossibleUpdatePolicy;
 use crate::mgs_updates::MgsUpdatePlanner;
 use crate::mgs_updates::PlannedMgsUpdates;
 use crate::mgs_updates::UpdateableBoard;
 use crate::planner::image_source::NoopConvertHostPhase2Contents;
+use crate::planner::image_source::NoopConvertMeasurements;
 use crate::planner::image_source::NoopConvertZoneStatus;
 use crate::planner::omicron_zone_placement::PlacementError;
 use iddqd::IdOrdMap;
 use itertools::Either;
 use itertools::Itertools;
 use nexus_types::deployment::Blueprint;
+use nexus_types::deployment::BlueprintExpungedZoneAccessReason;
+use nexus_types::deployment::BlueprintMeasurements;
 use nexus_types::deployment::BlueprintPhysicalDiskDisposition;
 use nexus_types::deployment::BlueprintSource;
 use nexus_types::deployment::BlueprintZoneConfig;
@@ -47,14 +51,15 @@ use nexus_types::deployment::ZpoolFilter;
 use nexus_types::deployment::{
     NexusGenerationBumpWaitingOn, PlanningAddStepReport,
     PlanningCockroachdbSettingsStepReport, PlanningDecommissionStepReport,
-    PlanningExpungeStepReport, PlanningMgsUpdatesStepReport,
-    PlanningNexusGenerationBumpReport, PlanningNoopImageSourceStepReport,
-    PlanningReport, PlanningZoneUpdatesStepReport, ZoneAddWaitingOn,
-    ZoneUpdatesWaitingOn, ZoneWaitingToExpunge,
+    PlanningExpungeStepReport, PlanningMeasurementUpdatesStepReport,
+    PlanningMgsUpdatesStepReport, PlanningNexusGenerationBumpReport,
+    PlanningNoopImageSourceStepReport, PlanningReport,
+    PlanningZoneUpdatesStepReport, ZoneAddWaitingOn, ZoneUpdatesWaitingOn,
+    ZoneWaitingToExpunge,
 };
-use nexus_types::external_api::views::PhysicalDiskPolicy;
-use nexus_types::external_api::views::SledPolicy;
-use nexus_types::external_api::views::SledState;
+use nexus_types::external_api::physical_disk::PhysicalDiskPolicy;
+use nexus_types::external_api::sled::SledPolicy;
+use nexus_types::external_api::sled::SledState;
 use nexus_types::inventory::Collection;
 use nexus_types::inventory::SpType;
 use omicron_common::api::external::Generation;
@@ -63,6 +68,7 @@ use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;
 use sled_agent_types::inventory::ConfigReconcilerInventoryResult;
+use sled_agent_types::inventory::OmicronSingleMeasurement;
 use sled_agent_types::inventory::OmicronZoneImageSource;
 use sled_agent_types::inventory::OmicronZoneType;
 use sled_agent_types::inventory::ZoneKind;
@@ -263,17 +269,25 @@ impl<'a> Planner<'a> {
         let add_update_blocked_reasons =
             self.should_plan_add_or_update(&actions_by_sled)?;
 
-        // Only plan MGS-based updates updates if there are no outstanding
-        // MUPdate overrides.
-        let mgs_updates = if add_update_blocked_reasons.is_empty() {
+        // We need to finish mupdate overrides before updating measurements
+        // This also ensures we do not plan measurement updates until
+        // all measurements are artifacts
+        let measurement_updates = if add_update_blocked_reasons.is_empty() {
+            self.do_plan_measurements()?
+        } else {
+            PlanningMeasurementUpdatesStepReport::BlockedAddUpdate
+        };
+
+        // Only plan MGS-based updates once we've finished updating our
+        // measurements.
+        let mgs_updates = if measurement_updates.all_sleds_updated() {
             self.do_plan_mgs_updates(&zone_safety_checks)?
         } else {
             PlanningMgsUpdatesStepReport::new()
         };
 
-        // Likewise for zone additions, unless overridden by the config, or
-        // unless a target release has never been set (i.e. we're effectively in
-        // a pre-Nexus-driven-update world).
+        // Likewise for zone additions, unless a target release has never been
+        // set (i.e. we're effectively in a pre-Nexus-driven-update world).
         //
         // We don't have to check for the minimum target release generation in
         // this case. On a freshly-installed or MUPdated system, Nexus will find
@@ -281,21 +295,18 @@ impl<'a> Planner<'a> {
         // overrides always sets the minimum generation to the current target
         // release generation plus one, so the minimum generation will always be
         // exactly 2.
-        let add_zones_with_mupdate_override =
-            self.input.planner_config().add_zones_with_mupdate_override;
         let target_release_generation_is_one =
             self.input.tuf_repo().target_release_generation
                 == Generation::from_u32(1);
         let mut add = if add_update_blocked_reasons.is_empty()
-            || add_zones_with_mupdate_override
             || target_release_generation_is_one
+            || measurement_updates.all_sleds_updated()
         {
             self.do_plan_add(&mgs_updates)?
         } else {
             PlanningAddStepReport::waiting_on(ZoneAddWaitingOn::Blockers)
         };
         add.add_update_blocked_reasons = add_update_blocked_reasons;
-        add.add_zones_with_mupdate_override = add_zones_with_mupdate_override;
         add.target_release_generation_is_one = target_release_generation_is_one;
 
         let zone_updates = if add.any_discretionary_zones_placed() {
@@ -320,6 +331,11 @@ impl<'a> Planner<'a> {
             // ... or if there are pending zone add blockers.
             PlanningZoneUpdatesStepReport::waiting_on(
                 ZoneUpdatesWaitingOn::ZoneAddBlockers,
+            )
+        } else if !measurement_updates.all_sleds_updated() {
+            // ... or if there are pending measurement updates
+            PlanningZoneUpdatesStepReport::waiting_on(
+                ZoneUpdatesWaitingOn::Measurements,
             )
         } else {
             self.do_plan_zone_updates(&mgs_updates, &zone_safety_checks)?
@@ -350,6 +366,7 @@ impl<'a> Planner<'a> {
             zone_updates,
             nexus_generation_bump,
             cockroachdb_settings,
+            measurement_updates,
         })
     }
 
@@ -417,13 +434,9 @@ impl<'a> Planner<'a> {
             // we ourselves have made this change, which is fine.
             let all_zones_expunged = self
                 .blueprint
-                .current_sled_zones(sled_id, BlueprintZoneDisposition::any)
-                .all(|zone| {
-                    matches!(
-                        zone.disposition,
-                        BlueprintZoneDisposition::Expunged { .. }
-                    )
-                });
+                .current_in_service_sled_zones(sled_id)
+                .next()
+                .is_none();
 
             // Check 3: Are there any instances assigned to this sled? See
             // comment above; while we wait for omicron#4872, we just assume
@@ -503,31 +516,15 @@ impl<'a> Planner<'a> {
             )?;
         }
 
-        // Check for any decommissioned sleds (i.e., sleds for which our
-        // blueprint has zones, but are not in the input sled list). Any zones
-        // for decommissioned sleds must have already be expunged for
-        // decommissioning to have happened; fail if we find non-expunged zones
-        // associated with a decommissioned sled.
-        for sled_id in self.blueprint.sled_ids_with_zones() {
+        // Check for any decommissioned sled mismatches: If our blueprint says a
+        // sled is commissioned, our input must still too. A sled can only be
+        // dropped from the input if we've decommissioned it via a prior
+        // blueprint.
+        for sled_id in self.blueprint.current_commissioned_sleds() {
             if !commissioned_sled_ids.contains(&sled_id) {
-                let num_zones = self
-                    .blueprint
-                    .current_sled_zones(sled_id, BlueprintZoneDisposition::any)
-                    .filter(|zone| {
-                        !matches!(
-                            zone.disposition,
-                            BlueprintZoneDisposition::Expunged { .. }
-                        )
-                    })
-                    .count();
-                if num_zones > 0 {
-                    return Err(
-                        Error::DecommissionedSledWithNonExpungedZones {
-                            sled_id,
-                            num_zones,
-                        },
-                    );
-                }
+                return Err(Error::CommissionedSledMissingFromInput {
+                    sled_id,
+                });
             }
         }
 
@@ -642,10 +639,10 @@ impl<'a> Planner<'a> {
         };
 
         let mut zones_ready_for_cleanup = Vec::new();
-        for zone in self
-            .blueprint
-            .current_sled_zones(sled_id, BlueprintZoneDisposition::is_expunged)
-        {
+        for zone in self.blueprint.current_expunged_sled_zones(
+            sled_id,
+            BlueprintExpungedZoneAccessReason::PlannerCheckReadyForCleanup,
+        ) {
             // If this is a zone still waiting for cleanup, grab the generation
             // in which it was expunged. Otherwise, move on.
             let as_of_generation = match zone.disposition {
@@ -689,6 +686,77 @@ impl<'a> Planner<'a> {
         Ok(())
     }
 
+    fn do_plan_measurements(
+        &mut self,
+    ) -> Result<PlanningMeasurementUpdatesStepReport, Error> {
+        // The measurements are a property of the sled agent which
+        // we look up via sled_id
+        let included_sled_ids: BTreeSet<_> = self
+            .input
+            .all_sleds(SledFilter::InService)
+            .map(|(s, _)| s)
+            .collect();
+
+        // Measurements reflect what we expect to be running on the
+        // system at any given time. In the course of an update
+        // we expect to be running a mixture of old and new code
+        // based on the blueprints. Running anything else means
+        // a modification happened outside of Nexus!
+        let current_artifacts = self.input.tuf_repo().description();
+        let previous_artifacts = self.input.old_repo().description();
+
+        match plan_measurement_updates(&current_artifacts, &previous_artifacts)
+        {
+            Ok(m) => {
+                let measurements =
+                    BlueprintMeasurements::Artifacts { artifacts: m };
+
+                let mut count = 0;
+                for sled_id in &included_sled_ids {
+                    count += self.blueprint.sled_set_measurements(
+                        *sled_id,
+                        measurements.clone(),
+                    )?;
+                }
+
+                // If we've modified sleds just return
+                if count != 0 {
+                    return Ok(
+                        PlanningMeasurementUpdatesStepReport::Modified {
+                            count,
+                        },
+                    );
+                }
+
+                let measurements: BTreeSet<OmicronSingleMeasurement> =
+                    measurements.into();
+
+                // We intentionally check all sleds here. We only want to
+                // continue planning updates one we are confident all
+                // sleds have the measurements we expect.
+                for sled_id in &included_sled_ids {
+                    let Some(inv_sled) =
+                        self.inventory.sled_agents.get(sled_id)
+                    else {
+                        return Ok(PlanningMeasurementUpdatesStepReport::NoSledAgentInInventory { sled_id: *sled_id });
+                    };
+                    let Some(ref sled_config) = inv_sled.ledgered_sled_config
+                    else {
+                        return Ok(PlanningMeasurementUpdatesStepReport::NoSledConfig { sled_id: *sled_id });
+                    };
+                    if sled_config.measurements.is_empty() {
+                        return Ok(PlanningMeasurementUpdatesStepReport::StillInstallDataset { sled_id: *sled_id });
+                    }
+                    if sled_config.measurements != measurements {
+                        return Ok(PlanningMeasurementUpdatesStepReport::WaitingOnInventory);
+                    }
+                }
+                Ok(PlanningMeasurementUpdatesStepReport::MatchesInventory)
+            }
+            Err(e) => Err(Error::Planner(e.into())),
+        }
+    }
+
     fn do_plan_noop_image_source(
         &mut self,
         noop_info: NoopConvertInfo,
@@ -722,7 +790,15 @@ impl<'a> Planner<'a> {
                     false
                 };
 
-            if skipped_zones && skipped_host_phase_2 {
+            let skipped_measurements =
+                if eligible.measurements.is_already_artifact() {
+                    report.sled_measurements_already_artifact(sled.sled_id);
+                    true
+                } else {
+                    false
+                };
+
+            if skipped_zones && skipped_host_phase_2 && skipped_measurements {
                 // Nothing to do, continue to the next sled.
                 continue;
             }
@@ -730,6 +806,7 @@ impl<'a> Planner<'a> {
             if zone_counts.num_eligible > 0
                 || eligible.host_phase_2.slot_a.is_eligible()
                 || eligible.host_phase_2.slot_b.is_eligible()
+                || eligible.measurements.is_eligible()
             {
                 report.converted(
                     sled.sled_id,
@@ -737,6 +814,28 @@ impl<'a> Planner<'a> {
                     zone_counts.num_install_dataset(),
                     eligible.host_phase_2.slot_a.is_eligible(),
                     eligible.host_phase_2.slot_b.is_eligible(),
+                    eligible.measurements.is_eligible(),
+                );
+            }
+
+            match &eligible.measurements {
+                NoopConvertMeasurements::Eligible(contents) => {
+                    self.blueprint.sled_set_measurements(
+                        sled.sled_id,
+                        BlueprintMeasurements::Artifacts {
+                            artifacts: contents.clone(),
+                        },
+                    )?;
+                }
+                NoopConvertMeasurements::AlreadyArtifact { .. }
+                | NoopConvertMeasurements::Ineligible(_) => {}
+            }
+
+            if eligible.measurements.is_eligible() {
+                self.blueprint.record_operation(
+                    Operation::SledNoopMeasurementsUpdated {
+                        sled_id: sled.sled_id,
+                    },
                 );
             }
 
@@ -909,17 +1008,12 @@ impl<'a> Planner<'a> {
                 // If the sled is still running some other control plane
                 // services (which is evidence it previously had an NTP zone!),
                 // we can go ahead and consider it eligible for new ones.
-                if self
-                    .blueprint
-                    .current_sled_zones(
-                        sled_id,
-                        BlueprintZoneDisposition::is_in_service,
-                    )
-                    .any(|z| {
+                if self.blueprint.current_in_service_sled_zones(sled_id).any(
+                    |z| {
                         OmicronZoneType::from(z.zone_type.clone())
                             .requires_timesync()
-                    })
-                {
+                    },
+                ) {
                     report
                         .sleds_getting_ntp_and_discretionary_zones
                         .insert(sled_id);
@@ -1162,10 +1256,7 @@ impl<'a> Planner<'a> {
                                     .count(),
                                 discretionary_zones: self
                                     .blueprint
-                                    .current_sled_zones(
-                                        sled_id,
-                                        BlueprintZoneDisposition::is_in_service,
-                                    )
+                                    .current_in_service_sled_zones(sled_id)
                                     .filter_map(|zone| {
                                         DiscretionaryOmicronZone::from_zone_type(
                                             &zone.zone_type,
@@ -1229,14 +1320,16 @@ impl<'a> Planner<'a> {
             // reuse its subnet until it's ready for cleanup. For all other
             // services, we want to go ahead and replace them if they're below
             // the desired count based on purely "in service vs expunged".
-            let disposition_filter = if zone_kind == ZoneKind::InternalDns {
-                BlueprintZoneDisposition::could_be_running
+            let zones_iter = if zone_kind == ZoneKind::InternalDns {
+                Either::Left(
+                    self.blueprint.current_could_be_running_sled_zones(sled_id),
+                )
             } else {
-                BlueprintZoneDisposition::is_in_service
+                Either::Right(
+                    self.blueprint.current_in_service_sled_zones(sled_id),
+                )
             };
-            num_existing_kind_zones += self
-                .blueprint
-                .current_sled_zones(sled_id, disposition_filter)
+            num_existing_kind_zones += zones_iter
                 .filter(|z| {
                     let matches_kind = z.zone_type.kind() == zone_kind;
                     match discretionary_zone_kind {
@@ -1273,16 +1366,10 @@ impl<'a> Planner<'a> {
                 self.input.target_internal_dns_zone_count()
             }
             DiscretionaryOmicronZone::ExternalDns => {
-                // TODO-cleanup: When external DNS addresses are
-                // in the policy, this can use the input, too.
-                //
                 // The target number of external DNS zones is exactly equal to
                 // the number of distinct external DNS IPs we're supposed to
                 // service.
-                self.input
-                    .parent_blueprint()
-                    .all_external_dns_external_ips()
-                    .len()
+                self.input.external_ip_policy().external_dns_ips().len()
             }
             DiscretionaryOmicronZone::Nexus => {
                 self.input.target_nexus_zone_count()
@@ -1359,6 +1446,10 @@ impl<'a> Planner<'a> {
                         sled_id,
                         image,
                         external_ip,
+                        &self
+                            .input
+                            .external_service_networking_policy()
+                            .upstream_ntp_config(),
                     )?
                 }
                 DiscretionaryOmicronZone::Clickhouse => {
@@ -1403,6 +1494,10 @@ impl<'a> Planner<'a> {
                         image,
                         external_ip,
                         nexus_generation,
+                        &self
+                            .input
+                            .external_service_networking_policy()
+                            .operator_nexus_config(),
                     )?
                 }
                 DiscretionaryOmicronZone::Oximeter => {
@@ -1424,7 +1519,8 @@ impl<'a> Planner<'a> {
     // Nexus zones.
     //
     // The logic is:
-    // - If any existing Nexus zone has the same image source, reuse its generation
+    // - If any existing Nexus zone has the same image source, reuse its
+    //   generation
     // - Otherwise, use the highest existing generation + 1
     // - If no existing zones exist, return an error
     //
@@ -1439,10 +1535,11 @@ impl<'a> Planner<'a> {
         let mut highest_seen_generation = None;
         let mut same_image_nexus_generation = None;
 
-        // Iterate over both existing zones and ones that are actively being placed.
+        // Iterate over both existing zones and ones that are actively being
+        // placed.
         for (zone, nexus) in self
             .blueprint
-            .current_zones(BlueprintZoneDisposition::any)
+            .current_in_service_zones()
             .filter_map(|(_sled_id, z)| match &z.zone_type {
                 BlueprintZoneType::Nexus(nexus) => Some((z, nexus)),
                 _ => None,
@@ -1599,10 +1696,7 @@ impl<'a> Planner<'a> {
             // https://github.com/oxidecomputer/omicron/issues/8589.
             let mut zones_currently_updating = self
                 .blueprint
-                .current_sled_zones(
-                    sled_id,
-                    BlueprintZoneDisposition::is_in_service,
-                )
+                .current_in_service_sled_zones(sled_id)
                 .filter_map(|zone| {
                     let bp_image_source =
                         OmicronZoneImageSource::from(zone.image_source.clone());
@@ -1780,10 +1874,7 @@ impl<'a> Planner<'a> {
             .flat_map(|sled_id| {
                 let log = &self.log;
                 self.blueprint
-                    .current_sled_zones(
-                        sled_id,
-                        BlueprintZoneDisposition::is_in_service,
-                    )
+                    .current_in_service_sled_zones(sled_id)
                     .filter_map(move |zone| {
                         let desired_image_source = match target_release
                             .zone_image_source(zone.zone_type.kind())
@@ -1891,7 +1982,7 @@ impl<'a> Planner<'a> {
                 sled_id,
                 &sled_details.baseboard_id,
                 inv_sled
-                    .zone_image_resolver
+                    .file_source_resolver
                     .mupdate_override
                     .boot_override
                     .as_ref(),
@@ -2096,14 +2187,12 @@ impl<'a> Planner<'a> {
 
         // Condition 4 above.
         {
-            let mut sleds_with_non_artifact = BTreeMap::new();
+            let mut sleds_with_zone_non_artifact = BTreeMap::new();
+            let mut sleds_with_measurements_non_artifact = BTreeSet::new();
             for sled_id in self.input.all_sled_ids(SledFilter::InService) {
                 let mut zones_with_non_artifact = IdOrdMap::new();
                 // Are all zone image sources set to Artifact?
-                for z in self.blueprint.current_sled_zones(
-                    sled_id,
-                    BlueprintZoneDisposition::is_in_service,
-                ) {
+                for z in self.blueprint.current_in_service_sled_zones(sled_id) {
                     match &z.image_source {
                         BlueprintZoneImageSource::InstallDataset => {
                             zones_with_non_artifact.insert_overwrite(z);
@@ -2112,6 +2201,20 @@ impl<'a> Planner<'a> {
                     }
                 }
 
+                match self.blueprint.current_sled_measurements(sled_id)? {
+                    BlueprintMeasurements::InstallDataset => {
+                        sleds_with_measurements_non_artifact
+                            .insert((sled_id, "install dataset"));
+                    }
+                    BlueprintMeasurements::Unknown => {
+                        // We cannot consider this a hard error because
+                        // `unknown` can represent the case where we are upgrading
+                        // from an old reconfigurator based system. We cannot
+                        // force a MUPdate so an upgrade with measurements at
+                        // unknown must proceed.
+                    }
+                    BlueprintMeasurements::Artifacts { .. } => {}
+                }
                 // TODO: (https://github.com/oxidecomputer/omicron/issues/8918)
                 // We should also check that the boot disk's host phase 2
                 // image is a known version.
@@ -2131,18 +2234,18 @@ impl<'a> Planner<'a> {
                 // is known, though!
 
                 if !zones_with_non_artifact.is_empty() {
-                    sleds_with_non_artifact
+                    sleds_with_zone_non_artifact
                         .insert(sled_id, zones_with_non_artifact);
                 }
             }
 
-            if !sleds_with_non_artifact.is_empty() {
+            if !sleds_with_zone_non_artifact.is_empty() {
                 let mut reason =
                     "sleds have deployment units with image sources \
                      not set to Artifact:\n"
                         .to_owned();
                 for (sled_id, zones_with_non_artifact) in
-                    &sleds_with_non_artifact
+                    &sleds_with_zone_non_artifact
                 {
                     swriteln!(
                         reason,
@@ -2154,6 +2257,17 @@ impl<'a> Planner<'a> {
                             "zones"
                         }
                     );
+                }
+                reasons.push(reason);
+            }
+
+            if !sleds_with_measurements_non_artifact.is_empty() {
+                let mut reason = "sleds have measurements with image sources \
+                     not set to Artifact:\n"
+                    .to_owned();
+
+                for (sled_id, which) in &sleds_with_measurements_non_artifact {
+                    swriteln!(reason, "- sled {sled_id} set to {which}");
                 }
 
                 reasons.push(reason);
@@ -2202,26 +2316,20 @@ impl<'a> Planner<'a> {
         let mut old_nexuses_at_current_gen = 0;
         let mut nexuses_at_proposed_gen = 0;
         let mut nexuses_at_proposed_gen_missing_metadata_record = 0;
-        for sled_id in self.blueprint.sled_ids_with_zones() {
-            for z in self.blueprint.current_sled_zones(
-                sled_id,
-                BlueprintZoneDisposition::is_in_service,
-            ) {
-                if let BlueprintZoneType::Nexus(nexus_zone) = &z.zone_type {
-                    if nexus_zone.nexus_generation == proposed_generation {
-                        nexuses_at_proposed_gen += 1;
-                        if !self.input.not_yet_nexus_zones().contains(&z.id) {
-                            nexuses_at_proposed_gen_missing_metadata_record +=
-                                1;
-                        }
+        for (_sled_id, z) in self.blueprint.current_in_service_zones() {
+            if let BlueprintZoneType::Nexus(nexus_zone) = &z.zone_type {
+                if nexus_zone.nexus_generation == proposed_generation {
+                    nexuses_at_proposed_gen += 1;
+                    if !self.input.not_yet_nexus_zones().contains(&z.id) {
+                        nexuses_at_proposed_gen_missing_metadata_record += 1;
                     }
+                }
 
-                    if nexus_zone.nexus_generation == current_generation
-                        && z.image_source
-                            != new_repo.zone_image_source(z.zone_type.kind())?
-                    {
-                        old_nexuses_at_current_gen += 1;
-                    }
+                if nexus_zone.nexus_generation == current_generation
+                    && z.image_source
+                        != new_repo.zone_image_source(z.zone_type.kind())?
+                {
+                    old_nexuses_at_current_gen += 1;
                 }
             }
         }
@@ -2477,17 +2585,12 @@ impl<'a> Planner<'a> {
 
     fn all_non_nexus_zones_using_new_image(&self) -> Result<bool, Error> {
         let new_repo = self.input.tuf_repo().description();
-        for sled_id in self.blueprint.sled_ids_with_zones() {
-            for z in self.blueprint.current_sled_zones(
-                sled_id,
-                BlueprintZoneDisposition::is_in_service,
-            ) {
-                let kind = z.zone_type.kind();
-                if kind != ZoneKind::Nexus
-                    && z.image_source != new_repo.zone_image_source(kind)?
-                {
-                    return Ok(false);
-                }
+        for (_sled_id, z) in self.blueprint.current_in_service_zones() {
+            let kind = z.zone_type.kind();
+            if kind != ZoneKind::Nexus
+                && z.image_source != new_repo.zone_image_source(kind)?
+            {
+                return Ok(false);
             }
         }
         return Ok(true);
@@ -2503,10 +2606,7 @@ impl<'a> Planner<'a> {
         // conversions can change the image source.
         let mut image_source = None;
         for sled_id in self.input.all_sled_ids(SledFilter::InService) {
-            for zone in self.blueprint.current_sled_zones(
-                sled_id,
-                BlueprintZoneDisposition::is_in_service,
-            ) {
+            for zone in self.blueprint.current_in_service_sled_zones(sled_id) {
                 if self.input.active_nexus_zones().contains(&zone.id) {
                     image_source = Some(zone.image_source.clone());
                     break;

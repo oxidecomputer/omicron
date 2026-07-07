@@ -6,35 +6,30 @@
 //! at deployment time.
 
 use crate::PostgresConfigWithUrl;
-use anyhow::anyhow;
 use camino::{Utf8Path, Utf8PathBuf};
 use dropshot::ConfigDropshot;
 use dropshot::ConfigLogging;
-use ipnet::Ipv6Net;
 use nexus_types::deployment::ReconfiguratorConfig;
-use omicron_common::address::IPV6_ADMIN_SCOPED_MULTICAST_PREFIX;
 use omicron_common::address::Ipv6Subnet;
 pub use omicron_common::address::MAX_VPC_IPV4_SUBNET_PREFIX;
 pub use omicron_common::address::MIN_VPC_IPV4_SUBNET_PREFIX;
 use omicron_common::address::NEXUS_TECHPORT_EXTERNAL_PORT;
 pub use omicron_common::address::NUM_INITIAL_RESERVED_IP_ADDRESSES;
 use omicron_common::address::RACK_PREFIX;
-use omicron_common::api::internal::shared::SwitchLocation;
 use omicron_uuid_kinds::OmicronZoneUuid;
+use omicron_uuid_kinds::RackUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use serde_with::DeserializeFromStr;
 use serde_with::DisplayFromStr;
 use serde_with::DurationSeconds;
-use serde_with::SerializeDisplay;
 use serde_with::serde_as;
+use sled_agent_types::early_networking::SwitchSlot;
 use std::collections::HashMap;
 use std::fmt;
 use std::net::IpAddr;
-use std::net::Ipv6Addr;
 use std::net::SocketAddr;
+use std::num::NonZeroU32;
 use std::time::Duration;
-use uuid::Uuid;
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct NexusConfig {
@@ -160,7 +155,7 @@ pub struct DeploymentConfig {
     /// Uuid of the Nexus instance
     pub id: OmicronZoneUuid,
     /// Uuid of the Rack where Nexus is executing.
-    pub rack_id: Uuid,
+    pub rack_id: RackUuid,
     /// Port on which the "techport external" dropshot server should listen.
     /// This dropshot server copies _most_ of its config from
     /// `dropshot_external` (so that it matches TLS, etc.), but builds its
@@ -437,6 +432,71 @@ pub struct BackgroundTaskConfig {
     pub probe_distributor: ProbeDistributorConfig,
     /// configuration for multicast reconciler (group+members) task
     pub multicast_reconciler: MulticastGroupReconcilerConfig,
+    /// configuration for trust quorum manager task
+    pub trust_quorum: TrustQuorumConfig,
+    /// configuration for the attached subnet manager
+    pub attached_subnet_manager: AttachedSubnetManagerConfig,
+    /// configuration for console session cleanup task
+    pub session_cleanup: SessionCleanupConfig,
+    /// configuration for audit log incomplete timeout task
+    pub audit_log_timeout_incomplete: AuditLogTimeoutIncompleteConfig,
+    /// configuration for audit log cleanup (retention) task
+    pub audit_log_cleanup: AuditLogCleanupConfig,
+    /// configuration for populate switch ports task
+    pub populate_switch_ports: PopulateSwitchPortsConfig,
+}
+
+#[serde_as]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct SessionCleanupConfig {
+    /// period (in seconds) for periodic activations of the session cleanup task
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub period_secs: Duration,
+
+    /// maximum rows hard-deleted per activation
+    pub max_delete_per_activation: u32,
+}
+
+#[serde_as]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct AuditLogTimeoutIncompleteConfig {
+    /// period (in seconds) for periodic activations of this task
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub period_secs: Duration,
+
+    /// how old an incomplete entry must be before it is timed out
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub timeout_secs: Duration,
+
+    /// max rows per SQL statement
+    pub max_timed_out_per_activation: u32,
+}
+
+#[serde_as]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct AuditLogCleanupConfig {
+    /// period (in seconds) for periodic activations of this task
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub period_secs: Duration,
+
+    /// retention period in days; must be at least 1
+    ///
+    /// This should be much longer than the `audit_log_timeout_incomplete`
+    /// timeout so orphaned entries are completed before they become eligible
+    /// for cleanup.
+    pub retention_days: NonZeroU32,
+
+    /// maximum rows hard-deleted per activation
+    pub max_deleted_per_activation: u32,
+}
+
+#[serde_as]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct PopulateSwitchPortsConfig {
+    /// period (in seconds) for periodic activations of the background task that
+    /// attempts to populate the `switch_port` table.
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub period_secs: Duration,
 }
 
 #[serde_as]
@@ -919,9 +979,21 @@ impl Default for MulticastGroupReconcilerConfig {
     }
 }
 
+/// Default for [`FmTasksConfig::analysis_enabled`].
+fn default_fm_analysis_enabled() -> bool {
+    true
+}
+
 #[serde_as]
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct FmTasksConfig {
+    /// whether the fault management analysis background task runs.
+    #[serde(default = "default_fm_analysis_enabled")]
+    pub analysis_enabled: bool,
+    /// period (in seconds) for periodic activations of the background task that
+    /// drives fault management analysis.
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub analysis_period_secs: Duration,
     /// period (in seconds) for periodic activations of the background task that
     /// reads the latest fault management sitrep from the database.
     #[serde_as(as = "DurationSeconds<u64>")]
@@ -930,28 +1002,32 @@ pub struct FmTasksConfig {
     /// garbage collects unneeded fault management sitreps in the database.
     #[serde_as(as = "DurationSeconds<u64>")]
     pub sitrep_gc_period_secs: Duration,
+    /// period (in seconds) for periodic activations of the background task that
+    /// updates externally-visible database tables to match the current situation
+    /// report.
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub rendezvous_period_secs: Duration,
 }
 
 impl Default for FmTasksConfig {
     fn default() -> Self {
         Self {
+            analysis_enabled: default_fm_analysis_enabled(),
+            // Analysis is generally triggered by changes in the current sitrep,
+            // inventory, or by the ereport ingester(s), so it need not be
+            // periodically activated all that frequently.
+            analysis_period_secs: Duration::from_secs(60),
             sitrep_load_period_secs: Duration::from_secs(15),
             // This need not be activated very frequently, as it's triggered any
             // time the current sitrep changes, and activating it more
             // frequently won't make things more responsive.
             sitrep_gc_period_secs: Duration::from_secs(600),
+            // This, too, is activated whenever a new sitrep is loaded, so we
+            // need not set the periodic activation interval too high.
+            rendezvous_period_secs: Duration::from_secs(300),
         }
     }
 }
-
-/// Fixed underlay admin-scoped IPv6 multicast network (ff04::/64) used for
-/// internal multicast group allocation and external→underlay mapping.
-/// This /64 subnet within the admin-scoped space provides 2^64 host addresses
-/// (ample for collision resistance) and is not configurable.
-pub const DEFAULT_UNDERLAY_MULTICAST_NET: Ipv6Net = Ipv6Net::new_assert(
-    Ipv6Addr::new(IPV6_ADMIN_SCOPED_MULTICAST_PREFIX, 0, 0, 0, 0, 0, 0, 0),
-    64,
-);
 
 /// Configuration for multicast options.
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
@@ -973,6 +1049,15 @@ pub struct MulticastConfig {
 pub struct ProbeDistributorConfig {
     /// period (in seconds) for periodic activations of the background task that
     /// distributes networking probe zones to sled-agents.
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub period_secs: Duration,
+}
+
+#[serde_as]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct TrustQuorumConfig {
+    /// period (in seconds) for periodic activations of the background task that
+    /// completes trust quorum reconfigurations.
     #[serde_as(as = "DurationSeconds<u64>")]
     pub period_secs: Duration,
 }
@@ -1002,10 +1087,10 @@ pub struct PackageConfig {
     pub tunables: Tunables,
     /// `Dendrite` dataplane daemon configuration
     #[serde(default)]
-    pub dendrite: HashMap<SwitchLocation, DpdConfig>,
+    pub dendrite: HashMap<SwitchSlot, DpdConfig>,
     /// Maghemite mgd daemon configuration
     #[serde(default)]
-    pub mgd: HashMap<SwitchLocation, MgdConfig>,
+    pub mgd: HashMap<SwitchSlot, MgdConfig>,
     /// Initial reconfigurator config
     ///
     /// We use this hook to disable reconfigurator automation in the test suite
@@ -1020,45 +1105,17 @@ pub struct PackageConfig {
     pub default_region_allocation_strategy: RegionAllocationStrategy,
 }
 
-/// List of supported external authn schemes
-///
-/// Note that the authn subsystem doesn't know about this type.  It allows
-/// schemes to be called whatever they want.  This is just to provide a set of
-/// allowed values for configuration.
-#[derive(
-    Clone, Copy, Debug, DeserializeFromStr, Eq, PartialEq, SerializeDisplay,
-)]
-pub enum SchemeName {
-    Spoof,
-    SessionCookie,
-    AccessToken,
-    ScimToken,
+#[serde_as]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct AttachedSubnetManagerConfig {
+    /// period (in seconds) for periodic activations of the background task that
+    /// pushes attached subnets to the switches and sleds.
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub period_secs: Duration,
 }
 
-impl std::str::FromStr for SchemeName {
-    type Err = anyhow::Error;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "spoof" => Ok(SchemeName::Spoof),
-            "session_cookie" => Ok(SchemeName::SessionCookie),
-            "access_token" => Ok(SchemeName::AccessToken),
-            "scim_token" => Ok(SchemeName::ScimToken),
-            _ => Err(anyhow!("unsupported authn scheme: {:?}", s)),
-        }
-    }
-}
-
-impl std::fmt::Display for SchemeName {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(match self {
-            SchemeName::Spoof => "spoof",
-            SchemeName::SessionCookie => "session_cookie",
-            SchemeName::AccessToken => "access_token",
-            SchemeName::ScimToken => "scim",
-        })
-    }
-}
+// Re-export SchemeName from nexus-types for use in config parsing.
+pub use nexus_types::authn::SchemeName;
 
 impl WebhookDeliveratorConfig {
     const fn default_lease_timeout_secs() -> u64 {
@@ -1079,10 +1136,10 @@ mod test {
     use super::*;
 
     use nexus_types::deployment::PlannerConfig;
+    use nexus_types::deployment::ReconfiguratorDisruptionPolicy;
     use omicron_common::address::{
         CLICKHOUSE_TCP_PORT, Ipv6Subnet, RACK_PREFIX,
     };
-    use omicron_common::api::internal::shared::SwitchLocation;
 
     use camino::{Utf8Path, Utf8PathBuf};
     use dropshot::ConfigDropshot;
@@ -1219,8 +1276,8 @@ mod test {
             address = "[::1]:4676"
             [initial_reconfigurator_config]
             planner_enabled = true
-            planner_config.add_zones_with_mupdate_override = true
             tuf_repo_pruner_enabled = false
+            disruption_policy = "terminate"
             [background_tasks]
             dns_internal.period_secs_config = 1
             dns_internal.period_secs_servers = 2
@@ -1281,6 +1338,19 @@ mod test {
             fm.sitrep_gc_period_secs = 49
             probe_distributor.period_secs = 50
             multicast_reconciler.period_secs = 60
+            fm.rendezvous_period_secs = 51
+            fm.analysis_period_secs = 52
+            trust_quorum.period_secs = 60
+            attached_subnet_manager.period_secs = 60
+            session_cleanup.period_secs = 300
+            session_cleanup.max_delete_per_activation = 10000
+            audit_log_timeout_incomplete.period_secs = 600
+            audit_log_timeout_incomplete.timeout_secs = 14400
+            audit_log_timeout_incomplete.max_timed_out_per_activation = 1000
+            audit_log_cleanup.period_secs = 600
+            audit_log_cleanup.retention_days = 90
+            audit_log_cleanup.max_deleted_per_activation = 10000
+            populate_switch_ports.period_secs = 31
             [default_region_allocation_strategy]
             type = "random"
             seed = 0
@@ -1364,14 +1434,14 @@ mod test {
                         load_timeout: None
                     },
                     dendrite: HashMap::from([(
-                        SwitchLocation::Switch0,
+                        SwitchSlot::Switch0,
                         DpdConfig {
                             address: SocketAddr::from_str("[::1]:12224")
                                 .unwrap(),
                         }
                     )]),
                     mgd: HashMap::from([(
-                        SwitchLocation::Switch0,
+                        SwitchSlot::Switch0,
                         MgdConfig {
                             address: SocketAddr::from_str("[::1]:4676")
                                 .unwrap(),
@@ -1379,10 +1449,9 @@ mod test {
                     )]),
                     initial_reconfigurator_config: Some(ReconfiguratorConfig {
                         planner_enabled: true,
-                        planner_config: PlannerConfig {
-                            add_zones_with_mupdate_override: true,
-                        },
+                        planner_config: PlannerConfig::default(),
                         tuf_repo_pruner_enabled: false,
+                        disruption_policy: ReconfiguratorDisruptionPolicy::Terminate,
                     }),
                     background_tasks: BackgroundTaskConfig {
                         dns_internal: DnsTasksConfig {
@@ -1527,8 +1596,11 @@ mod test {
                             disable: false,
                         },
                         fm: FmTasksConfig {
+                            analysis_enabled: default_fm_analysis_enabled(),
+                            analysis_period_secs: Duration::from_secs(52),
                             sitrep_load_period_secs: Duration::from_secs(48),
                             sitrep_gc_period_secs: Duration::from_secs(49),
+                            rendezvous_period_secs: Duration::from_secs(51),
                         },
                         probe_distributor: ProbeDistributorConfig {
                             period_secs: Duration::from_secs(50),
@@ -1537,6 +1609,30 @@ mod test {
                             period_secs: Duration::from_secs(60),
                             sled_cache_ttl_secs: MulticastGroupReconcilerConfig::default_sled_cache_ttl_secs(),
                             backplane_cache_ttl_secs: MulticastGroupReconcilerConfig::default_backplane_cache_ttl_secs(),
+                        },
+                        trust_quorum: TrustQuorumConfig {
+                            period_secs: Duration::from_secs(60),
+                        },
+                        attached_subnet_manager: AttachedSubnetManagerConfig {
+                            period_secs: Duration::from_secs(60),
+                        },
+                        session_cleanup: SessionCleanupConfig {
+                            period_secs: Duration::from_secs(300),
+                            max_delete_per_activation: 10_000,
+                        },
+                        audit_log_timeout_incomplete:
+                            AuditLogTimeoutIncompleteConfig {
+                                period_secs: Duration::from_secs(600),
+                                timeout_secs: Duration::from_secs(14400),
+                                max_timed_out_per_activation: 1000,
+                            },
+                        audit_log_cleanup: AuditLogCleanupConfig {
+                            period_secs: Duration::from_secs(600),
+                            retention_days: NonZeroU32::new(90).unwrap(),
+                            max_deleted_per_activation: 10_000,
+                        },
+                        populate_switch_ports: PopulateSwitchPortsConfig {
+                            period_secs: Duration::from_secs(31),
                         },
                     },
                     multicast: MulticastConfig { enabled: false },
@@ -1640,7 +1736,20 @@ mod test {
             fm.sitrep_load_period_secs = 45
             fm.sitrep_gc_period_secs = 46
             probe_distributor.period_secs = 47
+            fm.rendezvous_period_secs = 48
+            fm.analysis_period_secs = 49
             multicast_reconciler.period_secs = 60
+            trust_quorum.period_secs = 60
+            attached_subnet_manager.period_secs = 60
+            session_cleanup.period_secs = 300
+            session_cleanup.max_delete_per_activation = 10000
+            audit_log_timeout_incomplete.period_secs = 600
+            audit_log_timeout_incomplete.timeout_secs = 14400
+            audit_log_timeout_incomplete.max_timed_out_per_activation = 1000
+            audit_log_cleanup.period_secs = 600
+            audit_log_cleanup.retention_days = 90
+            audit_log_cleanup.max_deleted_per_activation = 10000
+            populate_switch_ports.period_secs = 31
 
             [default_region_allocation_strategy]
             type = "random"
@@ -1762,6 +1871,19 @@ mod test {
         } else {
             panic!("Got an unexpected error, expected Parse but got {error:?}");
         }
+    }
+
+    #[test]
+    fn test_invalid_audit_log_cleanup_retention_days() {
+        let error = toml::from_str::<AuditLogCleanupConfig>(
+            r##"
+            period_secs = 600
+            retention_days = 0
+            max_deleted_per_activation = 10000
+            "##,
+        )
+        .expect_err("retention_days = 0 should be rejected");
+        assert!(error.message().contains("nonzero"), "error = {}", error);
     }
 
     #[test]

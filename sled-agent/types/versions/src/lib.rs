@@ -29,8 +29,6 @@
 //! [detailed guide]: https://github.com/oxidecomputer/dropshot-api-manager/blob/main/guides/new-version.md
 //! [RFD 619]: https://rfd.shared.oxide.computer/rfd/619
 
-#[path = "bootstrap_initial/mod.rs"]
-pub mod bootstrap_v1;
 mod impls;
 pub mod latest;
 #[path = "initial/mod.rs"]
@@ -43,10 +41,56 @@ pub mod v11;
 pub mod v12;
 #[path = "add_trust_quorum/mod.rs"]
 pub mod v13;
+#[path = "measurements/mod.rs"]
+pub mod v14;
+#[path = "add_trust_quorum_status/mod.rs"]
+pub mod v15;
+#[path = "measurement_proper_inventory/mod.rs"]
+pub mod v16;
+#[path = "two_types_of_delegated_zvol/mod.rs"]
+pub mod v17;
+#[path = "add_attached_subnets/mod.rs"]
+pub mod v18;
+#[path = "add_rot_attestation/mod.rs"]
+pub mod v19;
+#[path = "bgp_v6/mod.rs"]
+pub mod v20;
+#[path = "remove_health_monitor_keep_checks/mod.rs"]
+pub mod v22;
+#[path = "add_zpool_health_to_inventory/mod.rs"]
+pub mod v24;
+#[path = "bootstore_versioning/mod.rs"]
+pub mod v25;
+#[path = "rack_network_config_not_optional/mod.rs"]
+pub mod v26;
+#[path = "modify_services_in_inventory/mod.rs"]
+pub mod v28;
+#[path = "add_vsock_component/mod.rs"]
+pub mod v29;
 #[path = "add_switch_zone_operator_policy/mod.rs"]
 pub mod v3;
+#[path = "stronger_bgp_unnumbered_types/mod.rs"]
+pub mod v30;
+#[path = "add_icmpv6_firewall_support/mod.rs"]
+pub mod v31;
+#[path = "make_all_external_ip_fields_optional/mod.rs"]
+pub mod v32;
+#[path = "bootstore_service_nat/mod.rs"]
+pub mod v33;
+#[path = "modify_svcs_types/mod.rs"]
+pub mod v34;
+#[path = "modify_svc_enabled_not_online_state/mod.rs"]
+pub mod v37;
+#[path = "bootstore_service_nat_generation/mod.rs"]
+pub mod v39;
 #[path = "add_nexus_lockstep_port_to_inventory/mod.rs"]
 pub mod v4;
+#[path = "add_fmd_to_inventory/mod.rs"]
+pub mod v40;
+#[path = "add_instance_primary_nic_mtu/mod.rs"]
+pub mod v41;
+#[path = "non_empty_uplink_ports/mod.rs"]
+pub mod v42;
 #[path = "add_probe_put_endpoint/mod.rs"]
 pub mod v6;
 #[path = "multicast_support/mod.rs"]

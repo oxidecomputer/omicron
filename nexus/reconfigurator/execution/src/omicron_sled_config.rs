@@ -85,16 +85,18 @@ mod tests {
     use nexus_types::deployment::BlueprintDatasetConfig;
     use nexus_types::deployment::BlueprintDatasetDisposition;
     use nexus_types::deployment::BlueprintHostPhase2DesiredSlots;
+    use nexus_types::deployment::BlueprintMeasurements;
     use nexus_types::deployment::BlueprintPhysicalDiskConfig;
     use nexus_types::deployment::BlueprintPhysicalDiskDisposition;
     use nexus_types::deployment::BlueprintZoneConfig;
     use nexus_types::deployment::BlueprintZoneDisposition;
     use nexus_types::deployment::BlueprintZoneImageSource;
     use nexus_types::deployment::BlueprintZoneType;
+    use nexus_types::deployment::LastAllocatedSubnetIpOffset;
     use nexus_types::deployment::blueprint_zone_type;
-    use nexus_types::external_api::views::SledPolicy;
-    use nexus_types::external_api::views::SledProvisionPolicy;
-    use nexus_types::external_api::views::SledState;
+    use nexus_types::external_api::sled::SledPolicy;
+    use nexus_types::external_api::sled::SledProvisionPolicy;
+    use nexus_types::external_api::sled::SledState;
     use omicron_common::address::Ipv6Subnet;
     use omicron_common::address::REPO_DEPOT_PORT;
     use omicron_common::api::external::Generation;
@@ -262,12 +264,15 @@ mod tests {
         let sled_config = BlueprintSledConfig {
             state: SledState::Active,
             subnet: Ipv6Subnet::new(Ipv6Addr::LOCALHOST),
+            last_allocated_ip_subnet_offset:
+                LastAllocatedSubnetIpOffset::initial(),
             sled_agent_generation: sim_sled_agent_config_generation.next(),
             disks,
             datasets,
             zones,
             remove_mupdate_override: None,
             host_phase_2: BlueprintHostPhase2DesiredSlots::current_contents(),
+            measurements: BlueprintMeasurements::InstallDataset,
         };
         let sled_configs =
             [(sim_sled_agent.id, sled_config.clone())].into_iter().collect();

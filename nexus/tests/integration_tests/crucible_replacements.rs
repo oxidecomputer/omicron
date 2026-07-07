@@ -30,8 +30,7 @@ use nexus_test_utils::resource_helpers::create_snapshot;
 use nexus_test_utils::resource_helpers::delete_snapshot;
 use nexus_test_utils::resource_helpers::object_create;
 use nexus_test_utils_macros::nexus_test;
-use nexus_types::external_api::params;
-use nexus_types::external_api::views;
+use nexus_types::external_api::snapshot;
 use nexus_types::identity::Asset;
 use nexus_types::identity::Resource;
 use nexus_types::internal_api::background::*;
@@ -150,7 +149,7 @@ pub(crate) async fn wait_for_all_replacements(
                         rs_left_to_do,
                     );
 
-                    return Err(CondCheckError::<()>::NotYet);
+                    return Err(CondCheckError::<()>::NotYet { status: None });
                 }
 
                 // Now that all resources have been moved, wait for the requests
@@ -196,7 +195,7 @@ pub(crate) async fn wait_for_all_replacements(
                         region_snapshot_replacement_left,
                     );
 
-                    return Err(CondCheckError::<()>::NotYet);
+                    return Err(CondCheckError::<()>::NotYet { status: None });
                 }
 
                 Ok(())
@@ -458,7 +457,9 @@ mod region_replacement {
                                 Ok(())
                             } else if state == expected_intermediate_state.0 {
                                 // The saga is still running
-                                Err(CondCheckError::<()>::NotYet)
+                                Err(CondCheckError::<()>::NotYet {
+                                    status: None,
+                                })
                             } else {
                                 // Any other state is not expected
                                 panic!("unexpected state {state:?}!");
@@ -472,7 +473,9 @@ mod region_replacement {
                             {
                                 // The saga is still running, or hasn't started
                                 // yet.
-                                Err(CondCheckError::<()>::NotYet)
+                                Err(CondCheckError::<()>::NotYet {
+                                    status: None,
+                                })
                             } else {
                                 // Any other state is not expected
                                 panic!("unexpected state {state:?}!");
@@ -590,14 +593,18 @@ mod region_replacement {
                                     // The replacement step is in progress, but
                                     // not done yet. We're still waiting, but
                                     // probably not for long.
-                                    Err(CondCheckError::<()>::NotYet)
+                                    Err(CondCheckError::<()>::NotYet {
+                                        status: None,
+                                    })
                                 }
                             }
 
                             None => {
                                 // The saga has not started, so we're not done
                                 // waiting.
-                                Err(CondCheckError::<()>::NotYet)
+                                Err(CondCheckError::<()>::NotYet {
+                                    status: None,
+                                })
                             }
                         }
                     }
@@ -778,10 +785,10 @@ async fn test_racing_replacements_for_soft_deleted_disk_volume(
 
     let snapshots_url = format!("/v1/snapshots?project={}", PROJECT_NAME);
 
-    let snapshot: views::Snapshot = object_create(
+    let snapshot: snapshot::Snapshot = object_create(
         client,
         &snapshots_url,
-        &params::SnapshotCreate {
+        &snapshot::SnapshotCreate {
             identity: IdentityMetadataCreateParams {
                 name: "snapshot".parse().unwrap(),
                 description: String::from("a snapshot"),
@@ -922,7 +929,7 @@ async fn test_racing_replacements_for_soft_deleted_disk_volume(
                     Ok(())
                 } else {
                     // The saga is still running
-                    Err(CondCheckError::<()>::NotYet)
+                    Err(CondCheckError::<()>::NotYet { status: None })
                 }
             }
         },
@@ -972,7 +979,7 @@ async fn test_racing_replacements_for_soft_deleted_disk_volume(
                     Ok(())
                 } else {
                     // The saga is still running
-                    Err(CondCheckError::<()>::NotYet)
+                    Err(CondCheckError::<()>::NotYet { status: None })
                 }
             }
         },
@@ -1051,7 +1058,7 @@ async fn test_racing_replacements_for_soft_deleted_disk_volume(
                 match region_snapshot {
                     Some(_) => {
                         // Region snapshot not garbage collected yet
-                        Err(CondCheckError::<()>::NotYet)
+                        Err(CondCheckError::<()>::NotYet { status: None })
                     }
 
                     None => {
@@ -1150,10 +1157,10 @@ async fn test_racing_replacements_for_soft_deleted_disk_volume(
                     Ok(())
                 } else if state == RegionReplacementState::Driving {
                     // The drive saga is still running
-                    Err(CondCheckError::<()>::NotYet)
+                    Err(CondCheckError::<()>::NotYet { status: None })
                 } else if state == RegionReplacementState::Running {
                     // The drive saga hasn't started yet
-                    Err(CondCheckError::<()>::NotYet)
+                    Err(CondCheckError::<()>::NotYet { status: None })
                 } else if state == RegionReplacementState::Completing {
                     // The saga transitioned the request ok, and it's now being
                     // finished by the region replacement finish saga
@@ -1226,7 +1233,7 @@ async fn test_racing_replacements_for_soft_deleted_disk_volume(
                     Ok(())
                 } else {
                     // Any other state is not expected
-                    Err(CondCheckError::<()>::NotYet)
+                    Err(CondCheckError::<()>::NotYet { status: None })
                 }
             }
         },
@@ -1255,7 +1262,9 @@ async fn test_racing_replacements_for_soft_deleted_disk_volume(
 
     let snapshots_url = get_snapshots_url();
     assert_eq!(
-        collection_list::<views::Snapshot>(&client, &snapshots_url).await.len(),
+        collection_list::<snapshot::Snapshot>(&client, &snapshots_url)
+            .await
+            .len(),
         0
     );
 
@@ -1276,7 +1285,7 @@ async fn test_racing_replacements_for_soft_deleted_disk_volume(
                 if volume.is_none() {
                     Ok(())
                 } else {
-                    Err(CondCheckError::<()>::NotYet)
+                    Err(CondCheckError::<()>::NotYet { status: None })
                 }
             }
         },
@@ -1358,7 +1367,8 @@ mod region_snapshot_replacement {
                 &client,
                 PROJECT_NAME,
                 "disk-from-snapshot",
-                snapshot.identity.id,
+                &snapshot,
+                false,
             )
             .await;
 
@@ -1586,10 +1596,10 @@ mod region_snapshot_replacement {
                             Ok(())
                         } else if state == expected_intermediate_state.0 {
                             // The saga is still running
-                            Err(CondCheckError::<()>::NotYet)
+                            Err(CondCheckError::<()>::NotYet { status: None })
                         } else if state == expected_start_state.0 {
                             // The saga hasn't started yet
-                            Err(CondCheckError::<()>::NotYet)
+                            Err(CondCheckError::<()>::NotYet { status: None })
                         } else {
                             // Any other state is not expected
                             panic!("unexpected state {state:?}!");
@@ -2069,7 +2079,8 @@ async fn test_replacement_sanity(cptestctx: &ControlPlaneTestContext) {
         &client,
         PROJECT_NAME,
         "disk-from-snap",
-        snapshot.identity.id,
+        &snapshot,
+        false,
     )
     .await;
 
@@ -2180,7 +2191,8 @@ async fn test_region_replacement_triple_sanity(
         &client,
         PROJECT_NAME,
         "disk-from-snap",
-        snapshot.identity.id,
+        &snapshot,
+        false,
     )
     .await;
 
@@ -2306,7 +2318,8 @@ async fn test_region_replacement_triple_sanity_2(
         &client,
         PROJECT_NAME,
         "disk-from-snap",
-        snapshot.identity.id,
+        &snapshot,
+        false,
     )
     .await;
 
@@ -2466,7 +2479,8 @@ async fn test_replacement_sanity_twice(cptestctx: &ControlPlaneTestContext) {
         &client,
         PROJECT_NAME,
         "disk-from-snap",
-        snapshot.identity.id,
+        &snapshot,
+        false,
     )
     .await;
 
@@ -2569,11 +2583,23 @@ async fn test_read_only_replacement_sanity(
 
     let disk = create_disk(&client, PROJECT_NAME, "disk").await;
     let snapshot = create_snapshot(&client, PROJECT_NAME, "disk", "snap").await;
-    let _disk_from_snapshot = create_disk_from_snapshot(
+    // Create both read/write and read-only disks from the snapshot. These will
+    // behave differently, as the read-only disk is backed by the snapshot
+    // directly.
+    let _rw_disk_from_snapshot = create_disk_from_snapshot(
         &client,
         PROJECT_NAME,
-        "disk-from-snap",
-        snapshot.identity.id,
+        "read-write-disk-from-snap",
+        &snapshot,
+        false,
+    )
+    .await;
+    let _ro_disk_from_snapshot = create_disk_from_snapshot(
+        &client,
+        PROJECT_NAME,
+        "readonly-disk-from-snap",
+        &snapshot,
+        true,
     )
     .await;
 
@@ -2705,21 +2731,24 @@ async fn test_replacement_sanity_twice_after_snapshot_delete(
         &client,
         PROJECT_NAME,
         "snap-disk-1",
-        snapshot.identity.id,
+        &snapshot,
+        false,
     )
     .await;
     create_disk_from_snapshot(
         &client,
         PROJECT_NAME,
         "snap-disk-2",
-        snapshot.identity.id,
+        &snapshot,
+        false,
     )
     .await;
     create_disk_from_snapshot(
         &client,
         PROJECT_NAME,
         "snap-disk-3",
-        snapshot.identity.id,
+        &snapshot,
+        false,
     )
     .await;
 

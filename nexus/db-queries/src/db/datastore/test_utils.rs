@@ -15,8 +15,7 @@ use anyhow::ensure;
 use futures::future::try_join_all;
 use nexus_db_lookup::LookupPath;
 use nexus_db_model::SledState;
-use nexus_types::external_api::views::SledPolicy;
-use nexus_types::external_api::views::SledProvisionPolicy;
+use nexus_types::external_api::sled::{SledPolicy, SledProvisionPolicy};
 use omicron_uuid_kinds::SledUuid;
 use strum::EnumCount;
 

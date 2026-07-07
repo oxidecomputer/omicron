@@ -112,6 +112,7 @@ use nexus_db_model::VolumeResourceUsage;
 use nexus_db_model::VpcSubnet;
 use nexus_db_model::Zpool;
 use nexus_db_model::to_db_typed_uuid;
+use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
 use nexus_db_queries::db::DataStore;
@@ -119,27 +120,30 @@ use nexus_db_queries::db::datastore::CrucibleDisk;
 use nexus_db_queries::db::datastore::CrucibleTargets;
 use nexus_db_queries::db::datastore::Disk;
 use nexus_db_queries::db::datastore::InstanceAndActiveVmm;
-use nexus_db_queries::db::datastore::InstanceStateComputer;
+use nexus_db_queries::db::datastore::LocalStorageAllocation;
 use nexus_db_queries::db::datastore::LocalStorageDisk;
 use nexus_db_queries::db::datastore::SQL_BATCH_SIZE;
 use nexus_db_queries::db::datastore::VolumeCookedResult;
 use nexus_db_queries::db::datastore::read_only_resources_associated_with_volume;
 use nexus_db_queries::db::identity::Asset;
+use nexus_db_queries::db::model::InstanceStateComputer;
 use nexus_db_queries::db::model::ServiceKind;
 use nexus_db_queries::db::pagination::Paginator;
 use nexus_db_queries::db::pagination::paginated;
 use nexus_db_queries::db::queries::ALLOW_FULL_TABLE_SCAN_SQL;
 use nexus_db_queries::db::queries::region_allocation;
 use nexus_types::deployment::Blueprint;
+use nexus_types::deployment::BlueprintExpungedZoneAccessReason;
 use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::DiskFilter;
 use nexus_types::deployment::SledFilter;
-use nexus_types::external_api::params;
-use nexus_types::external_api::views::PhysicalDiskPolicy;
-use nexus_types::external_api::views::PhysicalDiskState;
-use nexus_types::external_api::views::SledPolicy;
-use nexus_types::external_api::views::SledState;
+use nexus_types::external_api::disk::BlockSize;
+use nexus_types::external_api::instance::InstanceState;
+use nexus_types::external_api::physical_disk::{
+    PhysicalDiskPolicy, PhysicalDiskState,
+};
+use nexus_types::external_api::sled::{SledPolicy, SledState};
 use nexus_types::identity::Resource;
 use nexus_types::internal_api::params::DnsRecord;
 use nexus_types::internal_api::params::Srv;
@@ -148,7 +152,6 @@ use nexus_types::inventory::CollectionDisplayCliFilter;
 use omicron_common::api::external;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Generation;
-use omicron_common::api::external::InstanceState;
 use omicron_common::api::external::MacAddr;
 use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::DatasetUuid;
@@ -159,6 +162,7 @@ use omicron_uuid_kinds::InstanceUuid;
 use omicron_uuid_kinds::ParseError;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::PropolisUuid;
+use omicron_uuid_kinds::RackUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::VolumeUuid;
 use omicron_uuid_kinds::ZpoolUuid;
@@ -173,6 +177,8 @@ use std::future::Future;
 use std::net::Ipv4Addr;
 use std::net::Ipv6Addr;
 use std::num::NonZeroU32;
+use std::os::unix::process::CommandExt;
+use std::process::Command;
 use std::str::FromStr;
 use std::sync::Arc;
 use tabled::Tabled;
@@ -184,6 +190,7 @@ mod db_metadata;
 mod ereport;
 mod saga;
 mod sitrep;
+mod target_release;
 mod user_data_export;
 mod whatis;
 
@@ -294,9 +301,8 @@ impl DbUrlOptions {
         let db_url = self.resolve_pg_url(omdb, log).await?;
         eprintln!("note: using database URL {}", &db_url);
 
-        let db_config = db::Config { url: db_url.clone() };
-        let pool =
-            Arc::new(db::Pool::new_single_host(&log.clone(), &db_config));
+        let addrs = db_url.all_addresses()?;
+        let pool = Arc::new(db::Pool::new_fixed_hosts(log, addrs));
 
         // Being a dev tool, we want to try this operation even if the schema
         // doesn't match what we expect.  So we use `DataStore::new_unchecked()`
@@ -318,7 +324,7 @@ impl DbUrlOptions {
         Fut: Future<Output = anyhow::Result<T>>,
     {
         let datastore = self.connect(omdb, log).await?;
-        let opctx = OpContext::for_tests(log.clone(), datastore.clone());
+        let opctx = OpContext::for_omdb(log.clone(), datastore.clone());
         let result = f(opctx, datastore.clone()).await;
         datastore.terminate().await;
         result
@@ -351,6 +357,12 @@ pub struct DbFetchOptions {
 /// Subcommands that query or update the database
 #[derive(Debug, Subcommand, Clone)]
 enum DbCommands {
+    /// Launch `cockroach-sql`
+    ///
+    /// This launches with the session variable `default_transaction_read_only`
+    /// to on. Because this variable can be disabled, it is required to use
+    /// `--destructive` with this command.
+    Sql,
     /// Print information about blueprints
     ///
     /// Most blueprint information is available via `omdb nexus`, not `omdb db`.
@@ -392,6 +404,10 @@ enum DbCommands {
     Sitreps(sitrep::SitrepHistoryArgs),
     /// Print information about sleds
     Sleds(SledsArgs),
+    /// Show instances grouped by the sled they are running on
+    SledInstances(SledInstancesArgs),
+    /// Print the current target release and the update date
+    TargetRelease(target_release::TargetReleaseArgs),
     /// Print information about customer instances.
     Instance(InstanceArgs),
     /// Alias to `omdb instance list`.
@@ -425,6 +441,8 @@ enum DbCommands {
     /// More precisely, `omdb db whatis` reports tables containing a unique UUID
     /// column with the specified value.
     Whatis(whatis::WhatisArgs),
+    /// Print information about trust quorum configurations
+    TrustQuorum(TrustQuorumArgs),
 }
 
 #[derive(Debug, Args, Clone)]
@@ -479,7 +497,7 @@ enum DiskCommands {
     /// Get info for a specific disk
     Info(DiskInfoArgs),
     /// Summarize current disks
-    List,
+    List(DiskListArgs),
     /// Determine what crucible resources are on the given physical disk.
     Physical(DiskPhysicalArgs),
 }
@@ -488,6 +506,13 @@ enum DiskCommands {
 struct DiskInfoArgs {
     /// The UUID of the disk
     uuid: Uuid,
+}
+
+#[derive(Debug, Args, Clone)]
+struct DiskListArgs {
+    /// Include only disks of a given type.
+    #[clap(long = "type", short = 't', value_enum)]
+    disk_type: Option<DiskType>,
 }
 
 #[derive(Debug, Args, Clone)]
@@ -714,6 +739,72 @@ struct SledsArgs {
     /// Show sleds that match the given filter
     #[clap(short = 'F', long, value_enum)]
     filter: Option<SledFilter>,
+}
+
+#[derive(Debug, Args, Clone)]
+struct SledInstancesArgs {
+    /// Filter by sled number(s). Comma-separated, ranges allowed
+    /// (e.g. "0,3,14-16")
+    #[clap(long = "sled")]
+    sled_numbers: Option<SledNumbers>,
+
+    /// Filter by sled serial number(s). Comma-separated
+    /// (e.g. "BRM44220010,BRM44220022")
+    #[clap(long = "serial", use_value_delimiter = true)]
+    serials: Option<Vec<String>>,
+
+    /// Filter by sled UUID(s). Comma-separated
+    #[clap(long = "sled-id", use_value_delimiter = true)]
+    sled_ids: Option<Vec<SledUuid>>,
+}
+
+/// A comma-separated list of sled numbers with range support
+/// (e.g. "0,3,14-16" -> [0, 3, 14, 15, 16]).
+#[derive(Debug, Clone)]
+struct SledNumbers(Vec<u16>);
+
+const MAX_SLED_NUMBER: u16 = 31;
+
+impl FromStr for SledNumbers {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let mut result = Vec::new();
+        for part in s.split(',') {
+            let part = part.trim();
+            if let Some((start, end)) = part.split_once('-') {
+                let start: u16 = start.trim().parse().map_err(|e| {
+                    format!("invalid sled number '{start}': {e}")
+                })?;
+                let end: u16 = end
+                    .trim()
+                    .parse()
+                    .map_err(|e| format!("invalid sled number '{end}': {e}"))?;
+                if end < start {
+                    return Err(format!("invalid range '{part}': end < start"));
+                }
+                if end > MAX_SLED_NUMBER {
+                    return Err(format!(
+                        "sled number {end} exceeds maximum \
+                         ({MAX_SLED_NUMBER})"
+                    ));
+                }
+                result.extend(start..=end);
+            } else {
+                let n: u16 = part.parse().map_err(|e| {
+                    format!("invalid sled number '{part}': {e}")
+                })?;
+                if n > MAX_SLED_NUMBER {
+                    return Err(format!(
+                        "sled number {n} exceeds maximum \
+                         ({MAX_SLED_NUMBER})"
+                    ));
+                }
+                result.push(n);
+            }
+        }
+        Ok(SledNumbers(result))
+    }
 }
 
 #[derive(Debug, Args, Clone)]
@@ -1145,6 +1236,25 @@ struct SetStorageBufferArgs {
     storage_buffer: i64,
 }
 
+#[derive(Debug, Args, Clone)]
+struct TrustQuorumArgs {
+    #[command(subcommand)]
+    command: TrustQuorumCommands,
+}
+
+#[derive(Debug, Subcommand, Clone)]
+enum TrustQuorumCommands {
+    /// List trust quorum configurations for a rack
+    ListConfigs(TrustQuorumListConfigsArgs),
+}
+
+#[derive(Debug, Args, Clone)]
+struct TrustQuorumListConfigsArgs {
+    /// Rack ID to list configurations for
+    #[arg(long)]
+    rack_id: RackUuid,
+}
+
 impl DbArgs {
     /// Run a `omdb db` subcommand.
     ///
@@ -1155,10 +1265,25 @@ impl DbArgs {
         omdb: &Omdb,
         log: &slog::Logger,
     ) -> Result<(), anyhow::Error> {
+        if let DbCommands::Sql = &self.command {
+            let _token = omdb.check_allow_destructive()?;
+            let url = self.db_url_opts.resolve_pg_url(omdb, log).await?;
+            let url = format!(
+                "postgresql://root@{}/omicron?sslmode=disable",
+                url.address()
+            );
+            let mut command =
+                Command::new("/opt/oxide/cockroachdb/bin/cockroach-sql");
+            let error = command.args(["--read-only", "--url", &url]).exec();
+            return Err(error)
+                .with_context(|| format!("failed to exec {command:?}"));
+        }
+
         let fetch_opts = &self.fetch_opts;
         self.db_url_opts.with_datastore(omdb, log, |opctx, datastore| {
             async move {
                 match &self.command {
+                    DbCommands::Sql => unreachable!(),
                     DbCommands::Blueprints(args) => {
                         cmd_db_blueprints(&opctx, &datastore, &fetch_opts, &args).await
                     }
@@ -1210,8 +1335,8 @@ impl DbArgs {
                     DbCommands::Disks(DiskArgs {
                         command: DiskCommands::Info(uuid),
                     }) => cmd_db_disk_info(&opctx, &datastore, uuid).await,
-                    DbCommands::Disks(DiskArgs { command: DiskCommands::List }) => {
-                        cmd_db_disk_list(&datastore, &fetch_opts).await
+                    DbCommands::Disks(DiskArgs { command: DiskCommands::List(args) }) => {
+                        cmd_db_disk_list(&datastore, &fetch_opts, args).await
                     }
                     DbCommands::Disks(DiskArgs {
                         command: DiskCommands::Physical(uuid),
@@ -1322,6 +1447,17 @@ impl DbArgs {
                     }
                     DbCommands::Sleds(args) => {
                         cmd_db_sleds(&opctx, &datastore, &fetch_opts, args).await
+                    }
+                    DbCommands::SledInstances(args) => {
+                        cmd_db_sled_instances(
+                            &opctx,
+                            &datastore,
+                            args,
+                        )
+                        .await
+                    }
+                    DbCommands::TargetRelease(args) => {
+                        target_release::cmd_db_target_release(&opctx, &datastore, &fetch_opts, args).await
                     }
                     DbCommands::Instance(InstanceArgs {
                         command: InstanceCommands::List(args),
@@ -1492,13 +1628,18 @@ impl DbArgs {
                         ).await
                     },
                     DbCommands::Ereport(args) => {
-                        cmd_db_ereport(&datastore, &fetch_opts, &args).await
+                        cmd_db_ereport(omdb, log, &datastore, &fetch_opts, &args).await
                     }
                     DbCommands::UserDataExport(args) => {
                         args.exec(&omdb, &opctx, &datastore).await
                     }
                     DbCommands::Whatis(args) => {
                         whatis::cmd_db_whatis(&datastore, args).await
+                    }
+                    DbCommands::TrustQuorum(TrustQuorumArgs {
+                        command: TrustQuorumCommands::ListConfigs(args),
+                    }) => {
+                        cmd_db_trust_quorum_list_configs(&opctx, &datastore, &fetch_opts, &args).await
                     }
                 }
             }
@@ -1622,16 +1763,19 @@ async fn lookup_service_info(
     service_id: Uuid,
     blueprint: &Blueprint,
 ) -> anyhow::Result<Option<ServiceInfo>> {
-    let Some(zone_config) = blueprint
-        .all_omicron_zones(BlueprintZoneDisposition::any)
-        .find_map(|(_sled_id, zone_config)| {
-            if zone_config.id.into_untyped_uuid() == service_id {
-                Some(zone_config)
-            } else {
-                None
-            }
-        })
-    else {
+    // We don't know anything about `service_id`; it may be in-service or it may
+    // be expunged. Check all the zone states.
+    let mut all_zones = blueprint.all_in_service_and_expunged_zones(
+        BlueprintExpungedZoneAccessReason::Omdb,
+    );
+
+    let Some(zone_config) = all_zones.find_map(|(_sled_id, zone_config)| {
+        if zone_config.id.into_untyped_uuid() == service_id {
+            Some(zone_config)
+        } else {
+            None
+        }
+    }) else {
         return Ok(None);
     };
 
@@ -1886,8 +2030,38 @@ async fn cmd_crucible_dataset_mark_provisionable(
 struct DiskIdentity {
     id: Uuid,
     size: String,
+    #[tabled(rename = "TYPE")]
+    disk_type: DiskType,
     state: String,
     name: String,
+}
+
+#[derive(
+    Debug, Copy, Clone, PartialEq, Eq, clap::ValueEnum, strum::Display,
+)]
+#[clap(rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
+enum DiskType {
+    Crucible,
+    Local,
+}
+
+impl From<db::model::DiskType> for DiskType {
+    fn from(disk_type: db::model::DiskType) -> Self {
+        match disk_type {
+            db::model::DiskType::Crucible => DiskType::Crucible,
+            db::model::DiskType::LocalStorage => DiskType::Local,
+        }
+    }
+}
+
+impl From<DiskType> for db::model::DiskType {
+    fn from(disk_type: DiskType) -> Self {
+        match disk_type {
+            DiskType::Crucible => db::model::DiskType::Crucible,
+            DiskType::Local => db::model::DiskType::LocalStorage,
+        }
+    }
 }
 
 impl From<&'_ db::model::Disk> for DiskIdentity {
@@ -1895,6 +2069,7 @@ impl From<&'_ db::model::Disk> for DiskIdentity {
         Self {
             name: disk.name().to_string(),
             id: disk.id(),
+            disk_type: disk.disk_type.into(),
             size: disk.size.to_string(),
             state: disk.runtime().disk_state,
         }
@@ -1905,6 +2080,7 @@ impl From<&'_ db::model::Disk> for DiskIdentity {
 async fn cmd_db_disk_list(
     datastore: &DataStore,
     fetch_opts: &DbFetchOptions,
+    args: &DiskListArgs,
 ) -> Result<(), anyhow::Error> {
     let ctx = || "listing disks".to_string();
 
@@ -1912,6 +2088,11 @@ async fn cmd_db_disk_list(
     let mut query = dsl::disk.into_boxed();
     if !fetch_opts.include_deleted {
         query = query.filter(dsl::time_deleted.is_null());
+    }
+
+    if let Some(disk_type) = args.disk_type {
+        let disk_type = db::model::DiskType::from(disk_type);
+        query = query.filter(dsl::disk_type.eq(disk_type));
     }
 
     #[derive(Tabled)]
@@ -2089,7 +2270,6 @@ async fn cmd_db_rack_list(
     struct RackRow {
         id: String,
         initialized: bool,
-        tuf_base_url: String,
         rack_subnet: String,
     }
 
@@ -2105,7 +2285,6 @@ async fn cmd_db_rack_list(
     let rows = rack_list.into_iter().map(|rack| RackRow {
         id: rack.id().to_string(),
         initialized: rack.initialized,
-        tuf_base_url: rack.tuf_base_url.unwrap_or_else(|| "-".to_string()),
         rack_subnet: rack
             .rack_subnet
             .map(|subnet| subnet.to_string())
@@ -2138,6 +2317,7 @@ async fn crucible_disk_info(
         volume_id: String,
         disk_state: String,
         import_address: String,
+        readonly: bool,
     }
 
     // The rows describing the downstairs regions for this disk/volume
@@ -2157,6 +2337,8 @@ async fn crucible_disk_info(
     let volume_id = disk.volume_id().to_string();
 
     let disk_state = disk.runtime().disk_state.to_string();
+
+    let readonly = disk.is_read_only();
 
     let import_address = match disk.pantry_address() {
         Some(ref pa) => pa.clone().to_string(),
@@ -2214,6 +2396,7 @@ async fn crucible_disk_info(
                 volume_id,
                 disk_state,
                 import_address,
+                readonly,
             }
         } else {
             UpstairsRow {
@@ -2224,6 +2407,7 @@ async fn crucible_disk_info(
                 volume_id,
                 disk_state,
                 import_address,
+                readonly,
             }
         }
     } else {
@@ -2236,6 +2420,7 @@ async fn crucible_disk_info(
             volume_id,
             disk_state,
             import_address,
+            readonly,
         }
     };
     rows.push(usr);
@@ -2388,6 +2573,8 @@ async fn local_storage_disk_info(
         #[tabled(display_with = "display_option_blank")]
         time_deleted: Option<DateTime<Utc>>,
 
+        allocation_type: String,
+
         dataset_id: DatasetUuid,
         pool_id: ExternalZpoolUuid,
         sled_id: SledUuid,
@@ -2396,18 +2583,39 @@ async fn local_storage_disk_info(
     }
 
     if let Some(allocation) = &disk.local_storage_dataset_allocation {
-        let rows = vec![Row {
-            disk_name: disk.name().to_string(),
+        let row = match allocation {
+            LocalStorageAllocation::Unencrypted(allocation) => Row {
+                disk_name: disk.name().to_string(),
 
-            time_created: allocation.time_created,
-            time_deleted: allocation.time_deleted,
+                time_created: allocation.time_created,
+                time_deleted: allocation.time_deleted,
 
-            dataset_id: allocation.local_storage_dataset_id(),
-            pool_id: allocation.pool_id(),
-            sled_id: allocation.sled_id(),
+                allocation_type: String::from("unencrypted"),
 
-            dataset_size: allocation.dataset_size.to_bytes(),
-        }];
+                dataset_id: allocation.local_storage_unencrypted_dataset_id(),
+                pool_id: allocation.pool_id(),
+                sled_id: allocation.sled_id(),
+
+                dataset_size: allocation.dataset_size.to_bytes(),
+            },
+
+            LocalStorageAllocation::Encrypted(allocation) => Row {
+                disk_name: disk.name().to_string(),
+
+                time_created: allocation.time_created,
+                time_deleted: allocation.time_deleted,
+
+                allocation_type: String::from("encrypted"),
+
+                dataset_id: allocation.local_storage_dataset_id(),
+                pool_id: allocation.pool_id(),
+                sled_id: allocation.sled_id(),
+
+                dataset_size: allocation.dataset_size.to_bytes(),
+            },
+        };
+
+        let rows = vec![row];
 
         let table = tabled::Table::new(rows)
             .with(tabled::settings::Style::empty())
@@ -2428,7 +2636,20 @@ async fn cmd_db_disk_info(
     datastore: &DataStore,
     args: &DiskInfoArgs,
 ) -> Result<(), anyhow::Error> {
-    match datastore.disk_get(opctx, args.uuid).await? {
+    let disk = {
+        use nexus_db_schema::schema::disk::dsl;
+
+        let conn = datastore.pool_connection_for_tests().await?;
+
+        dsl::disk
+            .filter(dsl::id.eq(args.uuid))
+            .select(nexus_db_model::Disk::as_select())
+            .get_result_async(&*conn)
+            .await
+            .context("failed to find disk")?
+    };
+
+    match datastore.disk_get_with_model(opctx, disk).await? {
         Disk::Crucible(disk) => {
             crucible_disk_info(opctx, datastore, disk).await
         }
@@ -3859,7 +4080,7 @@ async fn cmd_db_region_used_by(
 
     let rows: Vec<_> = regions
         .into_iter()
-        .zip(volumes_used_by.into_iter())
+        .zip(volumes_used_by)
         .map(|(region, volume_used_by)| RegionRow {
             id: region.id(),
             volume_id: volume_used_by.volume_id,
@@ -3946,7 +4167,7 @@ async fn cmd_db_dry_run_region_allocation(
     };
 
     let size: external::ByteCount = args.size.try_into()?;
-    let block_size: params::BlockSize = args.block_size.try_into()?;
+    let block_size: BlockSize = args.block_size.try_into()?;
 
     let (blocks_per_extent, extent_count) = DataStore::get_crucible_allocation(
         &block_size.try_into().unwrap(),
@@ -4481,6 +4702,171 @@ async fn cmd_db_sleds(
     Ok(())
 }
 
+/// Run `omdb db sled-instances`: show instances grouped by sled.
+async fn cmd_db_sled_instances(
+    opctx: &OpContext,
+    datastore: &DataStore,
+    args: &SledInstancesArgs,
+) -> Result<(), anyhow::Error> {
+    use nexus_db_schema::schema::instance::dsl;
+    use nexus_db_schema::schema::vmm::dsl as vmm_dsl;
+
+    // Step 1: Fetch the latest inventory collection to get
+    // sled -> (MGS slot, serial) mappings.
+    let collection =
+        CollectionIdOrLatest::Latest.to_collection(opctx, datastore).await?;
+
+    // Build a map: sled_id -> (sp_slot, serial). We only care
+    // about SpType::Sled SPs since instances only run on sleds.
+    struct SledInfo {
+        sp_slot: Option<u16>,
+        serial: String,
+    }
+
+    impl SledInfo {
+        fn slot_label(&self) -> String {
+            match self.sp_slot {
+                Some(sp_slot) => format!("Sled {}", sp_slot),
+                None => "Sled ???".to_string(),
+            }
+        }
+    }
+
+    let mut sled_info: BTreeMap<SledUuid, SledInfo> = BTreeMap::new();
+
+    for sled_agent in &collection.sled_agents {
+        let info = match &sled_agent.baseboard_id {
+            Some(baseboard_id) => {
+                let serial = baseboard_id.serial_number.clone();
+                match collection.sps.get(baseboard_id) {
+                    Some(sp)
+                        if sp.sp_type
+                            == nexus_types::inventory::SpType::Sled =>
+                    {
+                        SledInfo { sp_slot: Some(sp.sp_slot), serial }
+                    }
+                    Some(_) => continue, // not a sled, skip
+                    None => {
+                        eprintln!(
+                            "WARN: no SP found for baseboard \
+                                 {} (sled {})",
+                            baseboard_id.serial_number, sled_agent.sled_id,
+                        );
+                        SledInfo { sp_slot: None, serial }
+                    }
+                }
+            }
+            None => {
+                eprintln!(
+                    "WARN: sled {} has no baseboard ID in \
+                     inventory",
+                    sled_agent.sled_id,
+                );
+                SledInfo { sp_slot: None, serial: "unknown".to_string() }
+            }
+        };
+        sled_info.insert(sled_agent.sled_id, info);
+    }
+
+    // Apply filters: keep only sleds matching the requested
+    // --sled, --serial, or --sled-id criteria.
+    if args.sled_numbers.is_some()
+        || args.serials.is_some()
+        || args.sled_ids.is_some()
+    {
+        sled_info.retain(|sled_id, info| {
+            if let Some(ref nums) = args.sled_numbers {
+                if let Some(sp_slot) = info.sp_slot {
+                    if nums.0.contains(&sp_slot) {
+                        return true;
+                    }
+                }
+            }
+            if let Some(ref serials) = args.serials {
+                if serials.iter().any(|s| s == &info.serial) {
+                    return true;
+                }
+            }
+            if let Some(ref ids) = args.sled_ids {
+                if ids.contains(sled_id) {
+                    return true;
+                }
+            }
+            false
+        });
+    }
+
+    // Step 2: Sort sleds by slot number so that Sled 2 comes
+    // before Sled 10.
+    let mut sorted_sleds: Vec<_> = sled_info.iter().collect();
+    sorted_sleds.sort_by_key(|(_, a)| a.sp_slot);
+
+    // Step 3: For each sled, query for instances running on it
+    // and print the results.
+    for (sled_id, info) in &sorted_sleds {
+        let instances: Vec<InstanceAndActiveVmm> = dsl::instance
+            .filter(dsl::time_deleted.is_null())
+            .inner_join(
+                vmm_dsl::vmm.on(vmm_dsl::id
+                    .nullable()
+                    .eq(dsl::active_propolis_id)
+                    .and(vmm_dsl::time_deleted.is_null())
+                    .and(vmm_dsl::sled_id.eq(sled_id.into_untyped_uuid()))),
+            )
+            .select((Instance::as_select(), Option::<Vmm>::as_select()))
+            .load_async(&*datastore.pool_connection_for_tests().await?)
+            .await
+            .context("loading instances")?
+            .into_iter()
+            .map(|i: (Instance, Option<Vmm>)| i.into())
+            .collect();
+
+        println!(
+            "{} (serial: {})  sled_id: {}",
+            info.slot_label(),
+            info.serial,
+            sled_id,
+        );
+        if !instances.is_empty() {
+            print_instance_table(&instances);
+        }
+        println!();
+    }
+
+    Ok(())
+}
+
+fn print_instance_table(instances: &[InstanceAndActiveVmm]) {
+    #[derive(Tabled)]
+    #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+    struct SledInstanceRow {
+        instance_id: String,
+        propolis_id: MaybePropolisId,
+        state: String,
+        name: String,
+    }
+
+    let rows: Vec<SledInstanceRow> = instances
+        .iter()
+        .map(|inst| {
+            let f = instance_fields(inst);
+            SledInstanceRow {
+                instance_id: f.id,
+                propolis_id: f.propolis_id,
+                state: f.state,
+                name: f.name,
+            }
+        })
+        .collect();
+
+    let table = tabled::Table::new(rows)
+        .with(tabled::settings::Style::empty())
+        .with(tabled::settings::Padding::new(0, 1, 0, 0))
+        .to_string();
+
+    println!("{}", table);
+}
+
 // INSTANCES
 
 /// Run `omdb db instance info`: show details about a customer VM.
@@ -4511,7 +4897,7 @@ async fn cmd_db_instance_info(
         .next()
         .ok_or_else(|| anyhow::anyhow!("no instance found with ID {id}"))?;
 
-    let active_vmm = if let Some(id) = instance.runtime_state.propolis_id {
+    let active_vmm = if let Some(id) = instance.propolis_id {
         let fetch_result = vmm_dsl::vmm
             .filter(vmm_dsl::id.eq(id))
             .select(Vmm::as_select())
@@ -4635,7 +5021,7 @@ async fn cmd_db_instance_info(
         nexus_state,
         generation,
         time_last_auto_restarted,
-    } = instance.runtime_state;
+    } = instance.runtime();
     println!("    {STATE:>WIDTH$}: {nexus_state:?}");
     let effective_state =
         InstanceStateComputer::new(&instance, active_vmm.as_ref())
@@ -4668,15 +5054,29 @@ async fn cmd_db_instance_info(
                 "    {KARMIC_STATUS:>WIDTH$}: nirvāṇa (reincarnation disabled)"
             );
         }
-        Reincarnatability::CoolingDown(remaining) => {
+        Reincarnatability::CoolingDown { until } => {
             println!(
-                "/!\\ {KARMIC_STATUS:>WIDTH$}: cooling down \
-                 ({remaining:?} remaining)"
+                "    {KARMIC_STATUS:>WIDTH$}: cooling down \
+                 (until {until})"
             );
+
+            if let Some(last) = time_last_auto_restarted {
+                let icon = if needs_reincarnation { "/!\\" } else { "(i)" };
+                println!("{icon}  this instance last restarted at {last}.");
+                if needs_reincarnation {
+                    println!(
+                        "     it will not be permitted to restart until {until}"
+                    );
+                } else {
+                    println!(
+                        "     if it fails, it will not be permitted to \
+                        restart again until {until}"
+                    );
+                }
+            }
         }
     }
     println!("    {LAST_AUTO_RESTART:>WIDTH$}: {time_last_auto_restarted:?}");
-
     println!("    {ACTIVE_VMM:>WIDTH$}: {propolis_id:?}");
     println!("    {TARGET_VMM:>WIDTH$}: {dst_propolis_id:?}");
 
@@ -4878,9 +5278,7 @@ async fn cmd_db_instance_info(
                 println!("    {VCPUS:>WIDTH$}: {cpus_provisioned}");
                 println!("    {RAM:>WIDTH$}: {ram}");
                 println!("    {DISK:>WIDTH$}: {disk}");
-                if let Some(modified) = time_modified {
-                    println!("    {LAST_UPDATED:>WIDTH$}: {modified}")
-                }
+                println!("    {LAST_UPDATED:>WIDTH$}: {time_modified}");
             }
         }
     }
@@ -4949,7 +5347,7 @@ async fn cmd_db_instance_info(
 
             let table = tabled::Table::new(vmms.iter().map(|vmm| {
                 let &Vmm {
-                    id,
+                    id: _,
                     sled_id,
                     propolis_ip: _,
                     propolis_port: _,
@@ -4957,19 +5355,13 @@ async fn cmd_db_instance_info(
                     cpu_platform: _,
                     time_created,
                     time_deleted,
-                    runtime:
-                        db::model::VmmRuntimeState {
-                            time_state_updated: _,
-                            generation,
-                            state,
-                        },
+                    time_state_updated: _,
+                    generation: _,
+                    state: _,
+                    failure_reason: _,
                 } = vmm;
                 VmmRow {
-                    state: VmmStateRow {
-                        id,
-                        state,
-                        generation: generation.0.into(),
-                    },
+                    state: VmmStateRow::from(vmm),
                     sled_id: sled_id.into(),
                     time_created,
                     time_deleted,
@@ -4990,8 +5382,39 @@ async fn cmd_db_instance_info(
 struct VmmStateRow {
     id: Uuid,
     state: db::model::VmmState,
+    #[tabled(display_with = "display_option_blank")]
+    failure_reason: Option<db::model::VmmFailureReason>,
     #[tabled(rename = "GEN")]
     generation: u64,
+}
+
+impl From<&'_ db::model::Vmm> for VmmStateRow {
+    fn from(vmm: &db::model::Vmm) -> Self {
+        Self {
+            id: vmm.id,
+            state: vmm.state,
+            failure_reason: vmm.failure_reason,
+            generation: vmm.generation.0.into(),
+        }
+    }
+}
+
+/// Common fields extracted from an InstanceAndActiveVmm, shared by
+/// both `CustomerInstanceRow` and `SledInstanceRow`.
+struct InstanceFields {
+    id: String,
+    propolis_id: MaybePropolisId,
+    state: String,
+    name: String,
+}
+
+fn instance_fields(inst: &InstanceAndActiveVmm) -> InstanceFields {
+    InstanceFields {
+        id: inst.instance().id().to_string(),
+        propolis_id: inst.into(),
+        state: inst.effective_state().to_string(),
+        name: inst.instance().name().to_string(),
+    }
 }
 
 #[derive(Tabled)]
@@ -5073,14 +5496,15 @@ async fn cmd_db_instances(
             continue;
         }
 
+        let f = instance_fields(&i);
         let cir = CustomerInstanceRow {
-            id: i.instance().id().to_string(),
-            name: i.instance().name().to_string(),
-            state: i.effective_state().to_string(),
+            id: f.id,
+            state: f.state,
             intent: i.instance().intended_state,
-            propolis_id: (&i).into(),
+            propolis_id: f.propolis_id,
             sled_id: (&i).into(),
             host_serial,
+            name: f.name,
         };
 
         rows.push(cir);
@@ -5511,7 +5935,7 @@ async fn cmd_db_eips(
         rows.push(row);
     }
 
-    rows.sort_by(|a, b| a.ip.cmp(&b.ip));
+    rows.sort_by_key(|a| a.ip);
     let table = tabled::Table::new(rows)
         .with(tabled::settings::Style::empty())
         .to_string();
@@ -7244,20 +7668,19 @@ async fn cmd_db_migrations_list(
     args: &MigrationsListArgs,
 ) -> Result<(), anyhow::Error> {
     use nexus_db_schema::schema::migration::dsl;
-    use omicron_common::api::internal::nexus;
 
     let mut state_filters = Vec::new();
     if args.completed {
-        state_filters.push(MigrationState(nexus::MigrationState::Completed));
+        state_filters.push(MigrationState::COMPLETED);
     }
     if args.failed {
-        state_filters.push(MigrationState(nexus::MigrationState::Failed));
+        state_filters.push(MigrationState::FAILED);
     }
     if args.in_progress {
-        state_filters.push(MigrationState(nexus::MigrationState::InProgress));
+        state_filters.push(MigrationState::IN_PROGRESS);
     }
     if args.pending {
-        state_filters.push(MigrationState(nexus::MigrationState::Pending));
+        state_filters.push(MigrationState::PENDING);
     }
 
     let mut query = dsl::migration.into_boxed();
@@ -7472,18 +7895,25 @@ async fn cmd_db_vmm_info(
                     reservoir_ram: ByteCount(reservoir),
                 },
             instance_id: _,
+            state,
         } = resource;
+
         const SLED_ID: &'static str = "sled ID";
         const THREADS: &'static str = "hardware threads";
         const RSS: &'static str = "RSS RAM";
         const RESERVOIR: &'static str = "reservoir RAM";
-        const WIDTH: usize = const_max_len(&[SLED_ID, THREADS, RSS, RESERVOIR]);
+        const STATE: &'static str = "state";
+        const WIDTH: usize =
+            const_max_len(&[SLED_ID, THREADS, RSS, RESERVOIR, STATE]);
+
         if include_sled_id {
             println!("    {SLED_ID:>WIDTH$}: {sled_id}");
         }
+
         println!("    {THREADS:>WIDTH$}: {hardware_threads}");
         println!("    {RSS:>WIDTH$}: {rss}");
         println!("    {RESERVOIR:>WIDTH$}: {reservoir}");
+        println!("    {STATE:>WIDTH$}: {state}");
     }
 
     let reservations = resource_dsl::sled_resource_vmm
@@ -7572,6 +8002,8 @@ fn prettyprint_vmm(
     const CPU_PLATFORM: &'static str = "CPU platform";
     const ADDRESS: &'static str = "propolis address";
     const STATE: &'static str = "state";
+    const FAILURE_REASON: &'static str = "  failure reason";
+    const FAILURE_NOTE: &'static str = "  note";
     const WIDTH: usize = const_max_len(&[
         ID,
         CREATED,
@@ -7583,6 +8015,8 @@ fn prettyprint_vmm(
         CPU_PLATFORM,
         STATE,
         ADDRESS,
+        FAILURE_REASON,
+        FAILURE_NOTE,
     ]);
 
     let width = std::cmp::max(width, Some(WIDTH)).unwrap_or(WIDTH);
@@ -7595,8 +8029,10 @@ fn prettyprint_vmm(
         propolis_ip,
         propolis_port,
         cpu_platform,
-        runtime:
-            db::model::VmmRuntimeState { state, generation, time_state_updated },
+        state,
+        generation,
+        time_state_updated,
+        failure_reason,
     } = vmm;
 
     println!("{indent}{ID:>width$}: {id}");
@@ -7608,6 +8044,31 @@ fn prettyprint_vmm(
         println!("{indent}{DELETED:width$}: {deleted}");
     }
     println!("{indent}{STATE:>width$}: {state}");
+    if let Some(reason) = failure_reason {
+        println!("{indent}{FAILURE_REASON:>width$}: {reason}");
+
+        if state == &db::model::VmmState::Failed {
+            println!(
+                "{indent}{FAILURE_NOTE:>width$}: {}",
+                reason.description()
+            );
+        } else {
+            println!(
+                "{:<width$}weird: VMMs should only have non-NULL failure \
+                     reasons if they are in the failed state",
+                "/!\\",
+                width = indent.len(),
+            );
+        }
+    } else if state == &db::model::VmmState::Failed {
+        println!(
+            "{:<width$}weird: VMMs in the 'failed' state should have a \
+             non-NULL failure reason",
+            "/!\\",
+            width = indent.len(),
+        );
+    }
+
     let g = u64::from(generation.0);
     println!(
         "{indent}{UPDATED:>width$}: {time_state_updated:?} (generation {g})"
@@ -7691,7 +8152,7 @@ async fn cmd_db_vmm_list(
     impl<'a> From<&'a (Vmm, Option<Sled>)> for VmmRow<'a> {
         fn from((vmm, sled): &'a (Vmm, Option<Sled>)) -> Self {
             let &Vmm {
-                id,
+                id: _,
                 time_created: _,
                 time_deleted: _,
                 instance_id,
@@ -7699,12 +8160,10 @@ async fn cmd_db_vmm_list(
                 propolis_ip: _,
                 propolis_port: _,
                 cpu_platform: _,
-                runtime:
-                    db::model::VmmRuntimeState {
-                        state,
-                        generation,
-                        time_state_updated: _,
-                    },
+                time_state_updated: _,
+                generation: _,
+                state: _,
+                failure_reason: _,
             } = vmm;
             let sled = match sled {
                 Some(sled) => sled.serial_number(),
@@ -7713,15 +8172,7 @@ async fn cmd_db_vmm_list(
                     "<unknown>"
                 }
             };
-            VmmRow {
-                instance_id,
-                state: VmmStateRow {
-                    id,
-                    state,
-                    generation: generation.0.into(),
-                },
-                sled,
-            }
+            VmmRow { instance_id, state: VmmStateRow::from(vmm), sled }
         }
     }
 
@@ -7746,7 +8197,7 @@ async fn cmd_db_vmm_list(
                 sled_id,
                 propolis_ip,
                 propolis_port,
-                ref runtime,
+                time_state_updated,
                 ..
             } = it.0;
             VerboseVmmRow {
@@ -7757,7 +8208,7 @@ async fn cmd_db_vmm_list(
                     propolis_port.into(),
                 ),
                 time_created,
-                time_updated: runtime.time_state_updated,
+                time_updated: time_state_updated,
             }
         }
     }
@@ -7991,6 +8442,73 @@ async fn cmd_db_zpool_set_storage_buffer(
         "set pool {} control plane storage buffer bytes to {}",
         args.id, args.storage_buffer,
     );
+
+    Ok(())
+}
+
+/// Run `omdb db trust-quorum list-configs`.
+async fn cmd_db_trust_quorum_list_configs(
+    opctx: &OpContext,
+    datastore: &DataStore,
+    fetch_opts: &DbFetchOptions,
+    args: &TrustQuorumListConfigsArgs,
+) -> Result<(), anyhow::Error> {
+    #[derive(Tabled)]
+    #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+    struct TqConfigRow {
+        epoch: i64,
+        #[tabled(display_with = "option_impl_display")]
+        last_committed_epoch: Option<i64>,
+        state: String,
+        threshold: u8,
+        commit_crash_tolerance: u8,
+        coordinator_hardware_baseboard_id: Uuid,
+        #[tabled(display_with = "datetime_rfc3339_concise")]
+        time_created: DateTime<Utc>,
+        #[tabled(display_with = "option_datetime_rfc3339_concise")]
+        time_committing: Option<DateTime<Utc>>,
+        #[tabled(display_with = "option_datetime_rfc3339_concise")]
+        time_committed: Option<DateTime<Utc>>,
+        #[tabled(display_with = "option_datetime_rfc3339_concise")]
+        time_aborted: Option<DateTime<Utc>>,
+        #[tabled(display_with = "display_option_blank")]
+        abort_reason: Option<String>,
+    }
+
+    let limit = fetch_opts.fetch_limit;
+    let authz_tq = authz::TrustQuorumConfig::for_rack_id(args.rack_id);
+    let configs = datastore
+        .tq_list_config(opctx, authz_tq, &first_page::<i64>(limit))
+        .await
+        .context("listing trust quorum configurations")?;
+
+    check_limit(&configs, limit, || {
+        String::from("listing trust quorum configurations")
+    });
+
+    let rows: Vec<TqConfigRow> = configs
+        .into_iter()
+        .map(|config| TqConfigRow {
+            epoch: config.epoch,
+            last_committed_epoch: config.last_committed_epoch,
+            state: format!("{:?}", config.state),
+            threshold: config.threshold.into(),
+            commit_crash_tolerance: config.commit_crash_tolerance.into(),
+            coordinator_hardware_baseboard_id: config.coordinator,
+            time_created: config.time_created,
+            time_committing: config.time_committing,
+            time_committed: config.time_committed,
+            time_aborted: config.time_aborted,
+            abort_reason: config.abort_reason,
+        })
+        .collect();
+
+    let table = tabled::Table::new(rows)
+        .with(tabled::settings::Style::empty())
+        .with(tabled::settings::Padding::new(0, 1, 0, 0))
+        .to_string();
+
+    println!("{}", table);
 
     Ok(())
 }

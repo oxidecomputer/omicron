@@ -6,5 +6,9 @@
 
 pub use sled_agent_types_versions::latest::early_networking::*;
 
-// Re-export back_compat module for bootstore serialization
-pub use sled_agent_types_versions::v1::early_networking::back_compat;
+// Early network serialization/deserialization is complex enough we stash it off
+// in its own module.
+mod serialization;
+
+pub use self::serialization::EarlyNetworkConfigEnvelope;
+pub use self::serialization::EarlyNetworkConfigEnvelopeError;

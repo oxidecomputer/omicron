@@ -15,7 +15,7 @@ use nexus_test_utils::resource_helpers::{
     create_project, create_vpc, object_get, object_put, object_put_error,
 };
 use nexus_test_utils_macros::nexus_test;
-use nexus_types::external_api::views::Vpc;
+use nexus_types::external_api::vpc::Vpc;
 use omicron_common::api::external::{
     IcmpParamRange, IdentityMetadata, L4Port, L4PortRange, ServiceIcmpConfig,
     VpcFirewallIcmpFilter, VpcFirewallRule, VpcFirewallRuleAction,
@@ -331,6 +331,67 @@ async fn test_firewall_rules_same_name(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(
         error.message,
         "unsupported value for \"rules\": Rule names must be unique. Duplicates: [\"dupe\"]"
+    );
+}
+
+// Regression test for https://github.com/oxidecomputer/omicron/issues/10561.
+//
+// A firewall rule update that references another VPC (here, via a host filter)
+// is rejected because cross-VPC references are unsupported. That rejection must
+// happen *before* the rules are written to the database; otherwise the update
+// fails but the rules are modified anyway.
+#[nexus_test]
+async fn test_firewall_rules_cross_vpc_rejected_before_write(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+
+    let project_name = "my-project";
+    create_project(&client, &project_name).await;
+
+    let firewall_url =
+        format!("/v1/vpc-firewall-rules?vpc=default&project={}", project_name);
+
+    // default VPC starts with the default rules.
+    let rules =
+        object_get::<VpcFirewallRules>(client, &firewall_url).await.rules;
+    assert!(is_default_firewall_rules("default", &rules));
+
+    // Attempt to replace the rules with a single rule whose host filter
+    // references a different VPC. This is unsupported and must be rejected.
+    let bad_rule = VpcFirewallRuleUpdate {
+        name: "cross-vpc".parse().unwrap(),
+        description: "references another VPC".to_string(),
+        status: VpcFirewallRuleStatus::Enabled,
+        direction: VpcFirewallRuleDirection::Inbound,
+        targets: vec![VpcFirewallRuleTarget::Vpc("default".parse().unwrap())],
+        filters: VpcFirewallRuleFilter {
+            hosts: Some(vec![VpcFirewallRuleHostFilter::Vpc(
+                "some-other-vpc".parse().unwrap(),
+            )]),
+            protocols: None,
+            ports: None,
+        },
+        action: VpcFirewallRuleAction::Allow,
+        priority: VpcFirewallRulePriority(100),
+    };
+
+    let error = object_put_error(
+        client,
+        &firewall_url,
+        &VpcFirewallRuleUpdateParams { rules: vec![bad_rule] },
+        StatusCode::BAD_REQUEST,
+    )
+    .await;
+    assert_eq!(error.error_code, Some("InvalidRequest".to_string()));
+    assert_eq!(error.message, "cross-VPC firewall host filter unsupported");
+
+    // The rejected update must not have modified the stored rules.
+    let rules =
+        object_get::<VpcFirewallRules>(client, &firewall_url).await.rules;
+    assert!(
+        is_default_firewall_rules("default", &rules),
+        "firewall rules were modified despite the update being rejected: {rules:#?}"
     );
 }
 

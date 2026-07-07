@@ -12,14 +12,14 @@ use super::SagaInitError;
 use super::declare_saga_actions;
 use crate::app::sagas::common_storage::call_pantry_detach;
 use crate::app::sagas::snapshot_create;
-use crate::external_api::params;
 use nexus_db_lookup::LookupPath;
 use nexus_db_model::Generation;
 use nexus_db_queries::{authn, authz, db::datastore};
+use nexus_types::external_api::snapshot;
+use nexus_types::saga::saga_action_failed;
 use omicron_common::api::external;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::Name;
-use omicron_common::progenitor_operation_retry::ProgenitorOperationRetryError;
 use serde::Deserialize;
 use serde::Serialize;
 use slog_error_chain::InlineErrorChain;
@@ -83,7 +83,7 @@ impl NexusSaga for SagaFinalizeDisk {
                 disk: params.disk.clone(),
                 attach_instance_id: None,
                 use_the_pantry: true,
-                create_params: params::SnapshotCreate {
+                create_params: snapshot::SnapshotCreate {
                     identity: external::IdentityMetadataCreateParams {
                         name: snapshot_name.clone(),
                         description: format!(
@@ -149,7 +149,7 @@ async fn sfd_set_finalizing_state(
             .disk_id(params.disk.id())
             .fetch_for(authz::Action::Modify)
             .await
-            .map_err(ActionError::action_failed)?;
+            .map_err(saga_action_failed)?;
 
     match db_disk.state().into() {
         external::DiskState::ImportReady => {
@@ -163,7 +163,7 @@ async fn sfd_set_finalizing_state(
                     &db_disk.runtime().finalizing(),
                 )
                 .await
-                .map_err(ActionError::action_failed)?;
+                .map_err(saga_action_failed)?;
 
             // Record the disk's new generation number as this saga node's output. It
             // will be important later to *only* transition this disk out of finalizing
@@ -172,12 +172,12 @@ async fn sfd_set_finalizing_state(
                 .disk_id(params.disk.id())
                 .fetch_for(authz::Action::Read)
                 .await
-                .map_err(ActionError::action_failed)?;
+                .map_err(saga_action_failed)?;
 
             Ok(db_disk.runtime().generation)
         }
 
-        _ => Err(ActionError::action_failed(Error::invalid_request(&format!(
+        _ => Err(saga_action_failed(Error::invalid_request(&format!(
             "cannot finalize disk in state {:?}",
             db_disk.state()
         )))),
@@ -200,7 +200,7 @@ async fn sfd_set_finalizing_state_undo(
             .disk_id(params.disk.id())
             .fetch_for(authz::Action::Modify)
             .await
-            .map_err(ActionError::action_failed)?;
+            .map_err(saga_action_failed)?;
 
     let expected_disk_generation_number =
         sagactx.lookup::<Generation>("disk_generation_number")?;
@@ -226,7 +226,7 @@ async fn sfd_set_finalizing_state_undo(
                         &db_disk.runtime().import_ready(),
                     )
                     .await
-                    .map_err(ActionError::action_failed)?;
+                    .map_err(saga_action_failed)?;
             } else {
                 info!(
                     log,
@@ -267,13 +267,13 @@ async fn sfd_get_pantry_address(
         .disk_id(params.disk.id())
         .fetch_for(authz::Action::Modify)
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     let disk = match osagactx
         .datastore()
         .disk_get(&opctx, params.disk.id())
         .await
-        .map_err(ActionError::action_failed)?
+        .map_err(saga_action_failed)?
     {
         datastore::Disk::Crucible(disk) => disk,
 
@@ -290,7 +290,9 @@ async fn sfd_get_pantry_address(
     // as part of the saga state, and requests sent to that Pantry with the
     // disk's id will fail.
     let pantry_address = disk.pantry_address().ok_or_else(|| {
-        ActionError::action_failed(String::from("disk not attached to pantry!"))
+        saga_action_failed(Error::internal_error(
+            "disk not attached to pantry!",
+        ))
     })?;
 
     info!(log, "disk {} is using pantry at {}", db_disk.id(), pantry_address);
@@ -313,18 +315,21 @@ async fn sfd_call_pantry_detach_for_disk(
     )
     .await
     {
-        // If the detach succeeds, then proceed with finalization. If the detach
-        // fails because the associated pantry is gone, then we have to be able
-        // to proceed with finalization in order to be able to eventually delete
-        // the disk. The associated pantry may have been expunged at any time
-        // during the import and this part of the code doesn't know the state of
-        // the disk, but we can't fail and leave the disk un-deleteable.
-        Ok(()) | Err(ProgenitorOperationRetryError::Gone) => Ok(()),
+        // If the detach succeeds, then proceed with finalization.
+        Ok(()) => Ok(()),
 
-        Err(e) => Err(ActionError::action_failed(format!(
+        // If the detach fails because the associated pantry is gone, then we
+        // have to be able to proceed with finalization in order to be able to
+        // eventually delete the disk. The associated pantry may have been
+        // expunged at any time during the import and this part of the code
+        // doesn't know the state of the disk, but we can't fail and leave the
+        // disk un-deleteable.
+        Err(e) if e.is_gone() => Ok(()),
+
+        Err(e) => Err(saga_action_failed(Error::internal_error(&format!(
             "pantry detach failed: {}",
             InlineErrorChain::new(&e)
-        ))),
+        )))),
     }
 }
 
@@ -346,12 +351,12 @@ async fn sfd_clear_pantry_address(
         .disk_id(params.disk.id())
         .lookup_for(authz::Action::Modify)
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     datastore
         .disk_clear_pantry(&opctx, &authz_disk)
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     Ok(())
 }
@@ -372,7 +377,7 @@ async fn sfd_set_detached_state(
             .disk_id(params.disk.id())
             .fetch_for(authz::Action::Modify)
             .await
-            .map_err(ActionError::action_failed)?;
+            .map_err(saga_action_failed)?;
 
     let expected_disk_generation_number =
         sagactx.lookup::<Generation>("disk_generation_number")?;
@@ -394,7 +399,7 @@ async fn sfd_set_detached_state(
                         &db_disk.runtime().detach(),
                     )
                     .await
-                    .map_err(ActionError::action_failed)?;
+                    .map_err(saga_action_failed)?;
             } else {
                 info!(
                     log,

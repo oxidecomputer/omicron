@@ -141,7 +141,7 @@ impl DataStore {
         let igw = db::model::InternetGateway::new(
             *SERVICES_INTERNET_GATEWAY_ID,
             authz_vpc.id(),
-            nexus_types::external_api::params::InternetGatewayCreate {
+            nexus_types::external_api::internet_gateway::InternetGatewayCreate {
                 identity: IdentityMetadataCreateParams {
                     name: "default".parse().unwrap(),
                     description: String::from("Default VPC gateway"),
@@ -170,7 +170,7 @@ impl DataStore {
                 SERVICES_VPC.system_router_id,
                 *SERVICES_VPC_ID,
                 VpcRouterKind::System,
-                nexus_types::external_api::params::VpcRouterCreate {
+                nexus_types::external_api::vpc::VpcRouterCreate {
                     identity: IdentityMetadataCreateParams {
                         name: "system".parse().unwrap(),
                         description: "Built-in VPC Router for Oxide Services"
@@ -187,7 +187,7 @@ impl DataStore {
             *SERVICES_INTERNET_GATEWAY_DEFAULT_ROUTE_V4,
             SERVICES_VPC.system_router_id,
             ExternalRouteKind::Default,
-            nexus_types::external_api::params::RouterRouteCreate {
+            nexus_types::external_api::vpc::RouterRouteCreate {
                 identity: IdentityMetadataCreateParams {
                     name: "default-v4".parse().unwrap(),
                     description: String::from("Default IPv4 route"),
@@ -205,7 +205,7 @@ impl DataStore {
             *SERVICES_INTERNET_GATEWAY_DEFAULT_ROUTE_V6,
             SERVICES_VPC.system_router_id,
             ExternalRouteKind::Default,
-            nexus_types::external_api::params::RouterRouteCreate {
+            nexus_types::external_api::vpc::RouterRouteCreate {
                 identity: IdentityMetadataCreateParams {
                     name: "default-v6".parse().unwrap(),
                     description: String::from("Default IPv6 route"),
@@ -242,7 +242,6 @@ impl DataStore {
     ) -> Result<(), Error> {
         use nexus_db_fixed_data::vpc_firewall_rule::DNS_VPC_FW_RULE;
         use nexus_db_fixed_data::vpc_firewall_rule::NEXUS_ICMP_FW_RULE;
-        use nexus_db_fixed_data::vpc_firewall_rule::NEXUS_VPC_FW_RULE;
 
         debug!(opctx.log, "attempting to create built-in VPC firewall rules");
 
@@ -269,15 +268,6 @@ impl DataStore {
                 &DNS_VPC_FW_RULE,
             )?;
             fw_rules.insert(DNS_VPC_FW_RULE.name.clone(), rule);
-        }
-
-        if !fw_rules.contains_key(&NEXUS_VPC_FW_RULE.name) {
-            let rule = VpcFirewallRule::new(
-                Uuid::new_v4(),
-                *SERVICES_VPC_ID,
-                &NEXUS_VPC_FW_RULE,
-            )?;
-            fw_rules.insert(NEXUS_VPC_FW_RULE.name.clone(), rule);
         }
 
         if !fw_rules.contains_key(&NEXUS_ICMP_FW_RULE.name) {
@@ -2989,8 +2979,11 @@ mod tests {
     use nexus_types::deployment::BlueprintZoneConfig;
     use nexus_types::deployment::BlueprintZoneDisposition;
     use nexus_types::deployment::BlueprintZoneImageSource;
-    use nexus_types::external_api::params;
-    use nexus_types::external_api::params::PrivateIpStackCreate;
+    use nexus_types::deployment::OperatorNexusConfig;
+    use nexus_types::external_api::instance as instance_types;
+    use nexus_types::external_api::instance::PrivateIpStackCreate;
+    use nexus_types::external_api::project;
+    use nexus_types::external_api::vpc;
     use nexus_types::identity::Asset;
     use omicron_common::api::external;
     use omicron_common::api::external::Generation;
@@ -2998,6 +2991,7 @@ mod tests {
     use omicron_uuid_kinds::BlueprintUuid;
     use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::InstanceUuid;
+    use omicron_uuid_kinds::RackUuid;
     use oxnet::IpNet;
     use oxnet::Ipv4Net;
     use slog::info;
@@ -3021,7 +3015,7 @@ mod tests {
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
         // Create a project.
-        let project_params = params::ProjectCreate {
+        let project_params = project::ProjectCreate {
             identity: IdentityMetadataCreateParams {
                 name: "project".parse().unwrap(),
                 description: String::from("test project"),
@@ -3043,7 +3037,7 @@ mod tests {
                 Uuid::new_v4(),
                 authz_project.id(),
                 Uuid::new_v4(),
-                params::VpcCreate {
+                vpc::VpcCreate {
                     identity: IdentityMetadataCreateParams {
                         name: name.clone(),
                         description: description.clone(),
@@ -3084,7 +3078,7 @@ mod tests {
             Uuid::new_v4(),
             authz_project.id(),
             Uuid::new_v4(),
-            params::VpcCreate {
+            vpc::VpcCreate {
                 identity: IdentityMetadataCreateParams {
                     name: name.clone(),
                     description: description.clone(),
@@ -3126,7 +3120,7 @@ mod tests {
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
         // Create a project.
-        let project_params = params::ProjectCreate {
+        let project_params = project::ProjectCreate {
             identity: IdentityMetadataCreateParams {
                 name: "project".parse().unwrap(),
                 description: String::from("test project"),
@@ -3148,7 +3142,7 @@ mod tests {
                 Uuid::new_v4(),
                 authz_project.id(),
                 Uuid::new_v4(),
-                params::VpcCreate {
+                vpc::VpcCreate {
                     identity: IdentityMetadataCreateParams {
                         name: name.clone(),
                         description: description.clone(),
@@ -3190,7 +3184,7 @@ mod tests {
             Uuid::new_v4(),
             authz_project.id(),
             Uuid::new_v4(),
-            params::VpcCreate {
+            vpc::VpcCreate {
                 identity: IdentityMetadataCreateParams {
                     name: name.clone(),
                     description: description.clone(),
@@ -3270,7 +3264,7 @@ mod tests {
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
         // Set up our fake system with 5 sleds.
-        let rack_id = Uuid::new_v4();
+        let rack_id = RackUuid::new_v4();
         let mut system = SystemDescription::new();
         let mut sled_ids = Vec::new();
         for _ in 0..5 {
@@ -3360,13 +3354,15 @@ mod tests {
             .for_new_nexus()
             .expect("found external IP for Nexus");
             builder
-                .sled_add_zone_nexus_with_config(
+                .sled_add_zone_nexus(
                     sled_ids[2],
-                    false,
-                    Vec::new(),
                     BlueprintZoneImageSource::InstallDataset,
                     external_ip,
                     bp0.nexus_generation,
+                    &OperatorNexusConfig {
+                        external_tls: false,
+                        external_dns_servers: &[],
+                    },
                 )
                 .expect("added nexus to third sled");
             builder.build(BlueprintSource::Test)
@@ -3410,19 +3406,25 @@ mod tests {
         assert_service_sled_ids(&datastore, &[]).await;
 
         // Delete the service NIC record so we can reuse this IP later.
-        datastore
-            .service_delete_network_interface(
-                &opctx,
-                bp1.sleds[&sled_ids[2]]
-                    .zones
-                    .first()
-                    .unwrap()
-                    .id
-                    .into_untyped_uuid(),
-                bp1_nic.id(),
-            )
-            .await
-            .expect("deleted bp1 nic");
+        {
+            let conn = datastore
+                .pool_connection_for_tests()
+                .await
+                .expect("got connection for tests");
+            datastore
+                .service_delete_network_interface_on_connection(
+                    &conn,
+                    bp1.sleds[&sled_ids[2]]
+                        .zones
+                        .first()
+                        .unwrap()
+                        .id
+                        .into_untyped_uuid(),
+                    bp1_nic.id(),
+                )
+                .await
+                .expect("deleted bp1 nic");
+        }
 
         // Create a blueprint with Nexus on all our sleds.
         let bp3 = {
@@ -3444,13 +3446,15 @@ mod tests {
                     .for_new_nexus()
                     .expect("found external IP for Nexus");
                 builder
-                    .sled_add_zone_nexus_with_config(
+                    .sled_add_zone_nexus(
                         sled_id,
-                        false,
-                        Vec::new(),
                         BlueprintZoneImageSource::InstallDataset,
                         external_ip,
                         bp2.nexus_generation,
+                        &OperatorNexusConfig {
+                            external_tls: false,
+                            external_dns_servers: &[],
+                        },
                     )
                     .expect("added nexus to third sled");
             }
@@ -3541,7 +3545,7 @@ mod tests {
         datastore: &DataStore,
     ) -> (authz::Project, authz::Vpc, Vpc, authz::VpcRouter, VpcRouter) {
         // Create a project and VPC.
-        let project_params = params::ProjectCreate {
+        let project_params = project::ProjectCreate {
             identity: IdentityMetadataCreateParams {
                 name: "project".parse().unwrap(),
                 description: String::from("test project"),
@@ -3559,7 +3563,7 @@ mod tests {
             Uuid::new_v4(),
             authz_project.id(),
             Uuid::new_v4(),
-            params::VpcCreate {
+            vpc::VpcCreate {
                 identity: IdentityMetadataCreateParams {
                     name: vpc_name.clone(),
                     description: description.clone(),
@@ -3594,7 +3598,7 @@ mod tests {
             db_vpc.system_router_id,
             db_vpc.id(),
             VpcRouterKind::System,
-            nexus_types::external_api::params::VpcRouterCreate {
+            nexus_types::external_api::vpc::VpcRouterCreate {
                 identity: IdentityMetadataCreateParams {
                     name: "system".parse().unwrap(),
                     description: description.clone(),
@@ -3969,7 +3973,7 @@ mod tests {
                     Uuid::new_v4(),
                     authz_router.id(),
                     external::RouterRouteKind::Custom,
-                    params::RouterRouteCreate {
+                    vpc::RouterRouteCreate {
                         identity: IdentityMetadataCreateParams {
                             name: "to-vpn".parse().unwrap(),
                             description: "A rule...".into(),
@@ -4005,17 +4009,17 @@ mod tests {
                 db::model::Instance::new(
                     InstanceUuid::new_v4(),
                     authz_project.id(),
-                    &params::InstanceCreate {
+                    &instance_types::InstanceCreate {
                         identity: IdentityMetadataCreateParams {
                             name: inst_name.clone(),
                             description: "An instance...".into(),
                         },
-                        ncpus: external::InstanceCpuCount(1),
+                        ncpus: instance_types::InstanceCpuCount(1),
                         memory: 10.into(),
                         hostname: "insty".parse().unwrap(),
                         user_data: vec![],
                         network_interfaces:
-                            params::InstanceNetworkInterfaceAttachment::None,
+                            instance_types::InstanceNetworkInterfaceAttachment::None,
                         external_ips: vec![],
                         disks: vec![],
                         boot_disk: None,
@@ -4025,6 +4029,7 @@ mod tests {
                         auto_restart_policy: Default::default(),
                         anti_affinity_groups: Vec::new(),
                         multicast_groups: Vec::new(),
+                        enable_jumbo_frames: false,
                     },
                 ),
             )

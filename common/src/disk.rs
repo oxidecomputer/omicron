@@ -21,9 +21,9 @@ use std::str::FromStr;
 use crate::api::internal::shared::DatasetKindParseError;
 use crate::{
     api::external::{ByteCount, Generation},
-    ledger::Ledgerable,
     zpool_name::{ZpoolKind, ZpoolName},
 };
+use omicron_ledger::Ledgerable;
 
 pub use crate::api::internal::shared::DatasetKind;
 

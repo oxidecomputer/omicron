@@ -12,7 +12,6 @@ use nexus_db_model::DbMetadataNexusState;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
-use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::internal_api::views::QuiesceState;
 use nexus_types::internal_api::views::QuiesceStatus;
@@ -351,9 +350,8 @@ async fn check_all_sagas_drained(
     //
     // This doesn't ever change once we've determined it once.  But we don't
     // know what the value is until we see our first blueprint.
-    let Some(my_generation) = current_blueprint
-        .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
-        .find_map(|(_sled_id, zone)| {
+    let Some(my_generation) =
+        current_blueprint.in_service_zones().find_map(|(_sled_id, zone)| {
             if let BlueprintZoneType::Nexus(nexus) = &zone.zone_type {
                 (zone.id == my_nexus_id).then_some(nexus.nexus_generation)
             } else {
@@ -441,7 +439,7 @@ async fn check_all_sagas_drained(
     // were all drained up to the same point, which is good enough for us to
     // proceed, too.
     let our_gen_nexus_ids: BTreeSet<OmicronZoneUuid> = current_blueprint
-        .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+        .in_service_zones()
         .filter_map(|(_sled_id, zone)| {
             if let BlueprintZoneType::Nexus(nexus) = &zone.zone_type {
                 (nexus.nexus_generation == my_generation).then_some(zone.id)
@@ -522,7 +520,6 @@ mod test {
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::deployment::BlueprintTarget;
     use nexus_types::deployment::BlueprintTargetSet;
-    use nexus_types::deployment::BlueprintZoneDisposition;
     use nexus_types::quiesce::SagaReassignmentDone;
     use omicron_test_utils::dev::poll::CondCheckError;
     use omicron_test_utils::dev::poll::wait_for_condition;
@@ -557,7 +554,9 @@ mod test {
                 if matches!(rv.state, QuiesceState::Quiesced { .. }) {
                     Ok(rv)
                 } else {
-                    Err(CondCheckError::<NexusClientError>::NotYet)
+                    Err(CondCheckError::<NexusClientError>::NotYet {
+                        status: None,
+                    })
                 }
             },
             &Duration::from_millis(50),
@@ -753,7 +752,7 @@ mod test {
                 if saga_state == nexus_db_model::SagaState::Done {
                     Ok(())
                 } else {
-                    Err(CondCheckError::<()>::NotYet)
+                    Err(CondCheckError::<()>::NotYet { status: None })
                 }
             },
             &Duration::from_millis(50),
@@ -773,7 +772,9 @@ mod test {
                     .into_inner();
                 debug!(log, "found quiesce state"; "state" => ?rv);
                 if !matches!(rv.state, QuiesceState::DrainingDb { .. }) {
-                    return Err(CondCheckError::<NexusClientError>::NotYet);
+                    return Err(CondCheckError::<NexusClientError>::NotYet {
+                        status: None,
+                    });
                 }
                 assert!(rv.sagas.sagas_pending.is_empty());
                 // The database claim we took is still held.
@@ -854,7 +855,7 @@ mod test {
                 "test_quiesce_multi",
             );
         let nexus_ids = blueprint
-            .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+            .in_service_zones()
             .filter_map(|(_sled_id, z)| z.zone_type.is_nexus().then_some(z.id))
             .collect::<Vec<_>>();
         // The example system creates three sleds.  Each sled gets a Nexus zone.
@@ -998,7 +999,7 @@ mod test {
                     .iter()
                     .all(|q| matches!(q.state(), QuiesceState::Quiesced { .. }))
                 {
-                    return Err(CondCheckError::<()>::NotYet);
+                    return Err(CondCheckError::<()>::NotYet { status: None });
                 }
 
                 Ok(())

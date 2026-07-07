@@ -19,6 +19,7 @@ mod saga_interface;
 
 pub use app::Nexus;
 pub use app::test_interfaces::TestInterfaces;
+use async_bb8_diesel::AsyncRunQueryDsl;
 use context::ApiContext;
 use context::ServerContext;
 use dropshot::ConfigDropshot;
@@ -26,12 +27,14 @@ use external_api::http_entrypoints::external_api;
 use internal_api::http_entrypoints::internal_api;
 use lockstep_api::http_entrypoints::lockstep_api;
 use nexus_config::NexusConfig;
+use nexus_db_model::HwBaseboardId;
 use nexus_db_model::RendezvousDebugDataset;
+use nexus_db_model::RendezvousLocalStorageUnencryptedDataset;
 use nexus_db_queries::db;
 use nexus_types::deployment::Blueprint;
-use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::blueprint_zone_type;
+use nexus_types::internal_api::params::InitialTrustQuorumConfig;
 use nexus_types::internal_api::params::{
     PhysicalDiskPutRequest, ZpoolPutRequest,
 };
@@ -40,19 +43,25 @@ use omicron_common::FileKv;
 use omicron_common::address::IpRange;
 use omicron_common::api::external::Error;
 use omicron_common::api::internal::nexus::{ProducerEndpoint, ProducerKind};
-use omicron_common::api::internal::shared::{
-    AllowedSourceIps, ExternalPortDiscovery, RackNetworkConfig, SwitchLocation,
-};
+use omicron_common::api::internal::shared::AllowedSourceIps;
 use omicron_common::disk::DatasetKind;
 use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::DatasetUuid;
 use oximeter::types::ProducerRegistry;
 use oximeter_producer::Server as ProducerServer;
+use sled_agent_types::early_networking::PortConfig;
+use sled_agent_types::early_networking::RackNetworkConfig;
+use sled_agent_types::early_networking::SwitchSlot;
+use sled_agent_types::early_networking::UplinkPorts;
+use sled_hardware_types::BaseboardId;
 use slog::Logger;
-use std::collections::HashMap;
+use slog_error_chain::InlineErrorChain;
+use std::collections::BTreeSet;
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV6};
 use std::sync::Arc;
+use strum::IntoEnumIterator;
 use tokio::sync::watch;
+use uuid::Uuid;
 
 #[macro_use]
 extern crate slog;
@@ -181,10 +190,12 @@ impl Server {
         let opctx = apictx.context.nexus.opctx_for_service_balancer();
         apictx.context.nexus.await_rack_initialization(&opctx).await;
 
-        // While we've started our internal server, we need to wait until we've
-        // definitely implemented our source IP allowlist for making requests to
-        // the external server we're about to start.
-        apictx.context.nexus.await_ip_allowlist_plumbing().await;
+        // Make a best-effort attempt to push the IP allowlist as firewall rules
+        // to sled-agents before starting the external server. Because OPTE has
+        // a default-deny policy, Nexus will be unreachable until this succeeds;
+        // the background task that propagates service firewall rules will keep
+        // retrying if this attempt fails.
+        apictx.context.nexus.activate_service_firewall_propagation();
 
         // Wait until Nexus has determined if sagas are supposed to be quiesced.
         // This is not strictly necessary.  The goal here is to prevent 503
@@ -342,7 +353,7 @@ impl nexus_test_interface::NexusServer for Server {
         >,
         internal_dns_zone_config: nexus_types::internal_api::params::DnsConfigParams,
         external_dns_zone_name: &str,
-        recovery_silo: sled_agent_types::rack_init::RecoverySiloConfig,
+        recovery_silo: bootstrap_agent_lockstep_types::RecoverySiloConfig,
         certs: Vec<omicron_common::api::internal::nexus::Certificate>,
     ) -> Self {
         // Perform the "handoff from RSS".
@@ -350,6 +361,71 @@ impl nexus_test_interface::NexusServer for Server {
         // However, RSS isn't running, so we'll do the handoff ourselves.
         let opctx =
             internal_server.apictx.context.nexus.opctx_for_internal_api();
+        let datastore = internal_server.apictx.context.nexus.datastore();
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
+
+        // We need to insert hw_baseboard_ids that match the fake hardware we
+        // use for our fake trust quorum configuration.
+        let tq_members = BTreeSet::from([
+            BaseboardId {
+                part_number: "_test_fake_tq_9adfa".into(),
+                serial_number: "a1".into(),
+            },
+            BaseboardId {
+                part_number: "_test_fake_9adfa".into(),
+                serial_number: "a2".into(),
+            },
+            BaseboardId {
+                part_number: "_test_fake_tq_9adfa".into(),
+                serial_number: "a3".into(),
+            },
+        ]);
+
+        let hw_baseboard_ids: Vec<_> = tq_members
+            .iter()
+            .cloned()
+            .map(|id| HwBaseboardId {
+                id: Uuid::new_v4(),
+                part_number: id.part_number,
+                serial_number: id.serial_number,
+            })
+            .collect();
+        use nexus_db_schema::schema::hw_baseboard_id::dsl;
+        diesel::insert_into(dsl::hw_baseboard_id)
+            .values(hw_baseboard_ids.clone())
+            .execute_async(&*conn)
+            .await
+            .unwrap();
+
+        // In the real rack init handoff, the `rack_network_config` will contain
+        // at least one configured port, and handoff will only complete
+        // successfully if the `populate_switch_ports` background task has
+        // completed successfully to populate the corresponding qsfp* values in
+        // the `switch_port` table. We could block here until that task
+        // activates successfully, contacting whatever `dpd` instance has been
+        // stood up for this test, but in the interest of streamlining this
+        // handoff (which happens for _every_ Nexus test, including those
+        // completely uninterested in switch port interaction), we'll insert a
+        // single qsfp0 for each switch to the db directly.
+        for which_switch in SwitchSlot::iter() {
+            match datastore
+                .switch_port_create(
+                    &opctx,
+                    config.deployment.rack_id,
+                    which_switch,
+                    nexus_db_model::Name("qsfp0".parse().unwrap()),
+                )
+                .await
+            {
+                // We're racing with the background task - it may have already
+                // contacted dpd and inserted qsfp0. That's fine.
+                Ok(_) | Err(Error::ObjectAlreadyExists { .. }) => (),
+                Err(err) => panic!(
+                    "failed to insert qsfp0 for {which_switch:?}: {}",
+                    InlineErrorChain::new(&err)
+                ),
+            }
+        }
 
         // Allocation of initial external IP addresses is a little funny.  In
         // a real system, it'd be allocated by RSS and provided with the rack
@@ -358,7 +434,7 @@ impl nexus_test_interface::NexusServer for Server {
         // system services.  But here, we fake up IP pool ranges based on the
         // external addresses of services that we start or mock.
         let internal_services_ip_pool_ranges = blueprint
-            .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+            .in_service_zones()
             .filter_map(|(_, zc)| match &zc.zone_type {
                 BlueprintZoneType::BoundaryNtp(
                     blueprint_zone_type::BoundaryNtp { external_ip, .. },
@@ -391,29 +467,51 @@ impl nexus_test_interface::NexusServer for Server {
                     internal_dns_zone_config,
                     external_dns_zone_name: external_dns_zone_name.to_owned(),
                     recovery_silo,
-                    external_port_count: ExternalPortDiscovery::Static(
-                        HashMap::from([
-                            (
-                                SwitchLocation::Switch0,
-                                vec!["qsfp0".parse().unwrap()],
-                            ),
-                            (
-                                SwitchLocation::Switch1,
-                                vec!["qsfp0".parse().unwrap()],
-                            ),
-                        ]),
-                    ),
                     rack_network_config: RackNetworkConfig {
                         rack_subnet: "fd00:1122:3344:0100::/56"
                             .parse()
                             .unwrap(),
-                        infra_ip_first: Ipv4Addr::UNSPECIFIED,
-                        infra_ip_last: Ipv4Addr::UNSPECIFIED,
-                        ports: Vec::new(),
+                        infra_ip_first: std::net::IpAddr::V4(
+                            Ipv4Addr::UNSPECIFIED,
+                        ),
+                        infra_ip_last: std::net::IpAddr::V4(
+                            Ipv4Addr::UNSPECIFIED,
+                        ),
+                        // `UplinkPorts` must be non-empty; this test harness
+                        // doesn't exercise uplinks, so use a placeholder port.
+                        ports: UplinkPorts::new(vec![
+                            PortConfig::empty_for_tests("qsfp0"),
+                        ])
+                        .expect("placeholder port list is non-empty"),
                         bgp: Vec::new(),
                         bfd: Vec::new(),
                     },
                     allowed_source_ips: AllowedSourceIps::Any,
+                    external_jumbo_frames_opt_in_enabled: false,
+                    // Insert a fake trust quorum config such that existing
+                    // sleds will never be present.
+                    //
+                    // The purpose of this is solely for expunge testing. We
+                    // don't do any trust quorum testing in `NexusServer` based
+                    // tests, but we do test expunging sleds. The second part
+                    // of exunging a sled, as used in these tests, relies on
+                    // the sled not being part of the current trust quorum.
+                    // This gets checked in the production nexus code path. By
+                    // inserting an fake config as the latest committed config
+                    // we can ensure that no sled used by this test will every
+                    // be present in a trust quorum config and that the existing
+                    // expunge tests will pass.
+                    initial_trust_quorum_configuration: Some(
+                        InitialTrustQuorumConfig {
+                            // We need at least 3 members
+                            members: tq_members,
+                            // Coordinator must be one of the members
+                            coordinator: BaseboardId {
+                                part_number: "_test_fake_tq_9adfa".into(),
+                                serial_number: "a1".into(),
+                            },
+                        },
+                    ),
                 },
                 false, // blueprint_execution_enabled
             )
@@ -505,6 +603,22 @@ impl nexus_test_interface::NexusServer for Server {
                     .await
                     .unwrap();
             }
+            DatasetKind::LocalStorageUnencrypted => {
+                self.apictx
+                    .context
+                    .nexus
+                    .datastore()
+                    .local_storage_unencrypted_dataset_insert_if_not_exists(
+                        &opctx,
+                        RendezvousLocalStorageUnencryptedDataset::new(
+                            dataset_id,
+                            zpool_id,
+                            BlueprintUuid::new_v4(),
+                        ),
+                    )
+                    .await
+                    .unwrap();
+            }
             _ => panic!(
                 "upsert_test_dataset does not support \
                  datasets of kind {kind:?}"
@@ -536,12 +650,11 @@ impl nexus_test_interface::NexusServer for Server {
 /// Run an instance of the Nexus server.
 pub async fn run_server(config: &NexusConfig) -> Result<(), String> {
     use slog::Drain;
-    let (drain, registration) =
-        slog_dtrace::with_drain(
-            config.pkg.log.to_logger("nexus").map_err(|message| {
-                format!("initializing logger: {}", message)
-            })?,
-        );
+    let (drain, registration) = slog_dtrace::with_drain(
+        config.pkg.log.to_logger("nexus").map_err(|message| {
+            format!("initializing logger: {}", InlineErrorChain::new(&message))
+        })?,
+    );
     let log = slog::Logger::root(drain.fuse(), slog::o!(FileKv));
     if let slog_dtrace::ProbeRegistration::Failed(e) = registration {
         let msg = format!("failed to register DTrace probes: {}", e);

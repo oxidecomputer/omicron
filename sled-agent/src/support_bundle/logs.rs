@@ -145,7 +145,8 @@ impl<'a> SupportBundleLogs<'a> {
                                 warn!(
                                     &self.log,
                                     "failed to parse available size for the \
-                                    dataset at path {path}: {e}"
+                                    dataset at path {path}";
+                                    InlineErrorChain::new(&e),
                                 );
                                 None
                             }
@@ -154,7 +155,8 @@ impl<'a> SupportBundleLogs<'a> {
                             warn!(
                                 &self.log,
                                 "failed to get available size for the  dataset \
-                                at path {path}: {e}"
+                                at path {path}";
+                                InlineErrorChain::new(&e)
                             );
                             None
                         }

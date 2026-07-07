@@ -9,22 +9,19 @@
 //! nexus/inventory does not currently know about nexus/db-model and it's
 //! convenient to separate these concerns.)
 
-use crate::external_api::params::PhysicalDiskKind;
+use crate::external_api::physical_disk::PhysicalDiskKind;
 use chrono::DateTime;
 use chrono::Utc;
 use clickhouse_admin_types::keeper::ClickhouseKeeperClusterMembership;
 use daft::Diffable;
-pub use gateway_client::types::PowerState;
-pub use gateway_client::types::RotImageError;
+pub use gateway_types::component::PowerState;
 pub use gateway_types::component::SpType;
+pub use gateway_types::rot::RotImageError;
 pub use gateway_types::rot::RotSlot;
 use iddqd::IdOrdItem;
 use iddqd::IdOrdMap;
 use iddqd::id_upcast;
 use omicron_common::api::external::ByteCount;
-pub use omicron_common::api::internal::shared::NetworkInterface;
-pub use omicron_common::api::internal::shared::NetworkInterfaceKind;
-pub use omicron_common::api::internal::shared::SourceNatConfigGeneric;
 use omicron_common::disk::M2Slot;
 pub use omicron_common::zpool_name::ZpoolName;
 use omicron_uuid_kinds::CollectionUuid;
@@ -38,15 +35,19 @@ use serde_with::serde_as;
 use sled_agent_types_versions::latest::inventory::ConfigReconcilerInventory;
 use sled_agent_types_versions::latest::inventory::ConfigReconcilerInventoryResult;
 use sled_agent_types_versions::latest::inventory::ConfigReconcilerInventoryStatus;
-use sled_agent_types_versions::latest::inventory::HealthMonitorInventory;
+use sled_agent_types_versions::latest::inventory::FmdInventory;
+use sled_agent_types_versions::latest::inventory::FmdInventoryError;
 use sled_agent_types_versions::latest::inventory::InventoryDataset;
 use sled_agent_types_versions::latest::inventory::InventoryDisk;
 use sled_agent_types_versions::latest::inventory::InventoryZpool;
+use sled_agent_types_versions::latest::inventory::OmicronFileSourceResolverInventory;
 use sled_agent_types_versions::latest::inventory::OmicronSledConfig;
 use sled_agent_types_versions::latest::inventory::OmicronZoneConfig;
+use sled_agent_types_versions::latest::inventory::SingleMeasurementInventory;
 use sled_agent_types_versions::latest::inventory::SledCpuFamily;
 use sled_agent_types_versions::latest::inventory::SledRole;
-use sled_agent_types_versions::latest::inventory::ZoneImageResolverInventory;
+use sled_agent_types_versions::latest::inventory::SvcsEnabledNotOnlineResult;
+pub use sled_agent_types_versions::latest::inventory::ZpoolHealth;
 use sled_hardware_types::BaseboardId;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
@@ -281,6 +282,61 @@ impl Collection {
             .iter()
             .max_by_key(|membership| membership.leader_committed_log_index)
             .map(|membership| membership.clone())
+    }
+
+    /// Return all zpools across all sleds whose health is not `Online`,
+    /// grouped by the id of the sled that reported them. Sleds with no
+    /// unhealthy zpools are omitted.
+    pub fn unhealthy_zpools(&self) -> BTreeMap<SledUuid, Vec<&Zpool>> {
+        self.sled_agents
+            .iter()
+            .filter_map(|sled_agent| {
+                let unhealthy: Vec<&Zpool> = sled_agent
+                    .zpools
+                    .iter()
+                    .filter(|z| match z.health {
+                        ZpoolHealth::Online => false,
+                        ZpoolHealth::Degraded
+                        | ZpoolHealth::Faulted
+                        | ZpoolHealth::Offline
+                        | ZpoolHealth::Removed
+                        | ZpoolHealth::Unavailable => true,
+                    })
+                    .collect();
+                if unhealthy.is_empty() {
+                    None
+                } else {
+                    Some((sled_agent.sled_id, unhealthy))
+                }
+            })
+            .collect()
+    }
+
+    /// Return per-sled SMF service status for any sled that reports an issue:
+    /// either an enabled service not in the `online` state, or a failure to
+    /// determine status (`svcs` command error or data unavailable). Sleds
+    /// reporting no issues on this dimension are omitted.
+    pub fn enabled_smf_services_not_online(
+        &self,
+    ) -> BTreeMap<SledUuid, &SvcsEnabledNotOnlineResult> {
+        self.sled_agents
+            .iter()
+            .filter_map(|sled_agent| {
+                match &sled_agent.smf_services_enabled_not_online {
+                    SvcsEnabledNotOnlineResult::SvcsEnabledNotOnline(svcs)
+                        if svcs.services.is_empty() =>
+                    {
+                        None
+                    }
+                    SvcsEnabledNotOnlineResult::SvcsEnabledNotOnline(_)
+                    | SvcsEnabledNotOnlineResult::SvcsCmdError(_)
+                    | SvcsEnabledNotOnlineResult::DataUnavailable => Some((
+                        sled_agent.sled_id,
+                        &sled_agent.smf_services_enabled_not_online,
+                    )),
+                }
+            })
+            .collect()
     }
 
     /// Return a type which can be used to display a collection in a
@@ -562,16 +618,24 @@ impl From<InventoryDisk> for PhysicalDisk {
 }
 
 /// A zpool reported by a sled agent.
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize,
+)]
 pub struct Zpool {
     pub time_collected: DateTime<Utc>,
     pub id: ZpoolUuid,
     pub total_size: ByteCount,
+    pub health: ZpoolHealth,
 }
 
 impl Zpool {
     pub fn new(time_collected: DateTime<Utc>, pool: InventoryZpool) -> Zpool {
-        Zpool { time_collected, id: pool.id, total_size: pool.total_size }
+        Zpool {
+            time_collected,
+            id: pool.id,
+            total_size: pool.total_size,
+            health: pool.health,
+        }
     }
 }
 
@@ -641,8 +705,10 @@ pub struct SledAgent {
     pub ledgered_sled_config: Option<OmicronSledConfig>,
     pub reconciler_status: ConfigReconcilerInventoryStatus,
     pub last_reconciliation: Option<ConfigReconcilerInventory>,
-    pub zone_image_resolver: ZoneImageResolverInventory,
-    pub health_monitor: HealthMonitorInventory,
+    pub file_source_resolver: OmicronFileSourceResolverInventory,
+    pub smf_services_enabled_not_online: SvcsEnabledNotOnlineResult,
+    pub reference_measurements: IdOrdMap<SingleMeasurementInventory>,
+    pub fmd: Result<FmdInventory, FmdInventoryError>,
 }
 
 impl IdOrdItem for SledAgent {

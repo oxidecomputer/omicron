@@ -199,12 +199,11 @@ mod api_impl {
     use iddqd::IdOrdMap;
     use omicron_common::api::external::Generation;
     use omicron_common::api::internal::nexus::DiskRuntimeState;
-    use omicron_common::api::internal::nexus::SledVmmState;
     use omicron_common::api::internal::shared::ExternalIpGatewayMap;
     use omicron_common::api::internal::shared::SledIdentifiers;
     use omicron_common::api::internal::shared::VirtualNetworkInterfaceHost;
     use omicron_common::api::internal::shared::{
-        ResolvedVpcRouteSet, ResolvedVpcRouteState, SwitchPorts,
+        ResolvedVpcRouteSet, ResolvedVpcRouteState,
     };
     use sled_agent_types::artifact::ArtifactConfig;
     use sled_agent_types::artifact::ArtifactCopyFromDepotBody;
@@ -214,19 +213,19 @@ mod api_impl {
     use sled_agent_types::artifact::ArtifactPutResponse;
     use sled_agent_types::artifact::ArtifactQueryParam;
     use sled_agent_types::bootstore::BootstoreStatus;
+    use sled_agent_types::dataset::LocalStorageDatasetDeleteRequest;
     use sled_agent_types::dataset::LocalStorageDatasetEnsureRequest;
-    use sled_agent_types::dataset::LocalStoragePathParam;
     use sled_agent_types::debug::ChickenSwitchDestroyOrphanedDatasets;
     use sled_agent_types::debug::OperatorSwitchZonePolicy;
     use sled_agent_types::diagnostics::SledDiagnosticsLogsDownloadPathParm;
     use sled_agent_types::diagnostics::SledDiagnosticsLogsDownloadQueryParam;
     use sled_agent_types::disk::DiskEnsureBody;
     use sled_agent_types::disk::DiskPathParam;
-    use sled_agent_types::early_networking::EarlyNetworkConfig;
     use sled_agent_types::firewall_rules::VpcFirewallRulesEnsureBody;
     use sled_agent_types::instance::InstanceEnsureBody;
     use sled_agent_types::instance::InstanceExternalIpBody;
     use sled_agent_types::instance::InstanceMulticastBody;
+    use sled_agent_types::instance::SledVmmState;
     use sled_agent_types::instance::VmmIssueDiskSnapshotRequestBody;
     use sled_agent_types::instance::VmmIssueDiskSnapshotRequestPathParam;
     use sled_agent_types::instance::VmmIssueDiskSnapshotRequestResponse;
@@ -240,16 +239,17 @@ mod api_impl {
     use sled_agent_types::inventory::BootPartitionDetails;
     use sled_agent_types::inventory::ConfigReconcilerInventory;
     use sled_agent_types::inventory::ConfigReconcilerInventoryStatus;
-    use sled_agent_types::inventory::HealthMonitorInventory;
+    use sled_agent_types::inventory::FmdInventory;
     use sled_agent_types::inventory::HostPhase2DesiredContents;
     use sled_agent_types::inventory::HostPhase2DesiredSlots;
     use sled_agent_types::inventory::Inventory;
     use sled_agent_types::inventory::ManifestInventory;
     use sled_agent_types::inventory::MupdateOverrideInventory;
+    use sled_agent_types::inventory::OmicronFileSourceResolverInventory;
     use sled_agent_types::inventory::OmicronSledConfig;
     use sled_agent_types::inventory::SledCpuFamily;
     use sled_agent_types::inventory::SledRole;
-    use sled_agent_types::inventory::ZoneImageResolverInventory;
+    use sled_agent_types::inventory::SvcsEnabledNotOnlineResult;
     use sled_agent_types::probes::ProbeSet;
     use sled_agent_types::sled::AddSledRequest;
     use sled_agent_types::support_bundle::RangeRequestHeaders;
@@ -259,6 +259,7 @@ mod api_impl {
     use sled_agent_types::support_bundle::SupportBundleMetadata;
     use sled_agent_types::support_bundle::SupportBundlePathParam;
     use sled_agent_types::support_bundle::SupportBundleTransferQueryParams;
+    use sled_agent_types::uplink::SwitchPorts;
     use sled_agent_types::zone_bundle::BundleUtilization;
     use sled_agent_types::zone_bundle::CleanupContext;
     use sled_agent_types::zone_bundle::CleanupContextUpdate;
@@ -267,8 +268,17 @@ mod api_impl {
     use sled_agent_types::zone_bundle::ZoneBundleId;
     use sled_agent_types::zone_bundle::ZoneBundleMetadata;
     use sled_agent_types::zone_bundle::ZonePathParam;
+    use sled_agent_types_versions::v1;
+    use sled_agent_types_versions::v20;
+    use sled_agent_types_versions::v25;
+    use sled_agent_types_versions::v26;
+    use sled_agent_types_versions::v30;
+    use sled_agent_types_versions::v33;
+    use sled_agent_types_versions::v39;
+    use sled_agent_types_versions::v42;
     use sled_diagnostics::SledDiagnosticsQueryOutput;
     use std::collections::BTreeMap;
+    use std::collections::BTreeSet;
     use std::time::Duration;
 
     // We only implement endpoints required for testing host OS updates. All
@@ -340,6 +350,7 @@ mod api_impl {
                     slot_a: HostPhase2DesiredContents::CurrentContents,
                     slot_b: HostPhase2DesiredContents::CurrentContents,
                 },
+                measurements: BTreeSet::new(),
             };
 
             Ok(HttpResponseOk(Inventory {
@@ -368,8 +379,17 @@ mod api_impl {
                     remove_mupdate_override: None,
                     boot_partitions,
                 }),
-                zone_image_resolver: ZoneImageResolverInventory {
+                fmd: Ok(FmdInventory::default()),
+                file_source_resolver: OmicronFileSourceResolverInventory {
                     zone_manifest: ManifestInventory {
+                        boot_disk_path: Utf8PathBuf::new(),
+                        boot_inventory: Err(
+                            "not implemented by HostPhase2SledAgentImpl"
+                                .to_string(),
+                        ),
+                        non_boot_status: IdOrdMap::new(),
+                    },
+                    measurement_manifest: ManifestInventory {
                         boot_disk_path: Utf8PathBuf::new(),
                         boot_inventory: Err(
                             "not implemented by HostPhase2SledAgentImpl"
@@ -386,7 +406,9 @@ mod api_impl {
                         non_boot_status: IdOrdMap::new(),
                     },
                 },
-                health_monitor: HealthMonitorInventory::new(),
+                smf_services_enabled_not_online:
+                    SvcsEnabledNotOnlineResult::DataUnavailable,
+                reference_measurements: IdOrdMap::new(),
             }))
         }
 
@@ -748,13 +770,65 @@ mod api_impl {
 
         async fn read_network_bootstore_config_cache(
             _rqctx: RequestContext<Self::Context>,
-        ) -> Result<HttpResponseOk<EarlyNetworkConfig>, HttpError> {
+        ) -> Result<
+            HttpResponseOk<v20::early_networking::EarlyNetworkConfig>,
+            HttpError,
+        > {
             unimplemented!()
         }
 
-        async fn write_network_bootstore_config(
+        async fn write_network_bootstore_config_v42(
             _rqctx: RequestContext<Self::Context>,
-            _body: TypedBody<EarlyNetworkConfig>,
+            _body: TypedBody<v42::system_networking::WriteNetworkConfigRequest>,
+        ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+            unimplemented!()
+        }
+
+        async fn write_network_bootstore_config_v39(
+            _rqctx: RequestContext<Self::Context>,
+            _body: TypedBody<v39::system_networking::WriteNetworkConfigRequest>,
+        ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+            unimplemented!()
+        }
+
+        async fn write_network_bootstore_config_v33(
+            _rqctx: RequestContext<Self::Context>,
+            _body: TypedBody<v33::system_networking::WriteNetworkConfigRequest>,
+        ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+            unimplemented!()
+        }
+
+        async fn write_network_bootstore_config_v30(
+            _rqctx: RequestContext<Self::Context>,
+            _body: TypedBody<v30::early_networking::WriteNetworkConfigRequest>,
+        ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+            unimplemented!()
+        }
+
+        async fn write_network_bootstore_config_v26(
+            _rqctx: RequestContext<Self::Context>,
+            _body: TypedBody<v26::early_networking::WriteNetworkConfigRequest>,
+        ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+            unimplemented!()
+        }
+
+        async fn write_network_bootstore_config_v25(
+            _rqctx: RequestContext<Self::Context>,
+            _body: TypedBody<v25::early_networking::WriteNetworkConfigRequest>,
+        ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+            unimplemented!()
+        }
+
+        async fn write_network_bootstore_config_v20(
+            _rqctx: RequestContext<Self::Context>,
+            _body: TypedBody<v20::early_networking::EarlyNetworkConfig>,
+        ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+            unimplemented!()
+        }
+
+        async fn write_network_bootstore_config_v1(
+            _rqctx: RequestContext<Self::Context>,
+            _body: TypedBody<v1::early_networking::EarlyNetworkConfig>,
         ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
             unimplemented!()
         }
@@ -924,7 +998,6 @@ mod api_impl {
 
         async fn local_storage_dataset_ensure(
             _request_context: RequestContext<Self::Context>,
-            _path_params: Path<LocalStoragePathParam>,
             _body: TypedBody<LocalStorageDatasetEnsureRequest>,
         ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
             unimplemented!()
@@ -932,7 +1005,7 @@ mod api_impl {
 
         async fn local_storage_dataset_delete(
             _request_context: RequestContext<Self::Context>,
-            _path_params: Path<LocalStoragePathParam>,
+            _body: TypedBody<LocalStorageDatasetDeleteRequest>,
         ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
             unimplemented!()
         }
@@ -1009,6 +1082,100 @@ mod api_impl {
             HttpResponseOk<trust_quorum_types::status::NodeStatus>,
             HttpError,
         > {
+            unimplemented!()
+        }
+
+        async fn trust_quorum_status(
+            _request_context: RequestContext<Self::Context>,
+        ) -> Result<
+            HttpResponseOk<trust_quorum_types::status::NodeStatus>,
+            HttpError,
+        > {
+            unimplemented!()
+        }
+
+        async fn trust_quorum_network_config_get(
+            _request_context: RequestContext<Self::Context>,
+        ) -> Result<
+            HttpResponseOk<
+                Option<
+                    sled_agent_types::trust_quorum::TrustQuorumNetworkConfig,
+                >,
+            >,
+            HttpError,
+        > {
+            unimplemented!()
+        }
+
+        async fn trust_quorum_network_config_put(
+            _request_context: RequestContext<Self::Context>,
+            _body: TypedBody<
+                sled_agent_types::trust_quorum::TrustQuorumNetworkConfig,
+            >,
+        ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+            unimplemented!()
+        }
+
+        async fn vmm_put_attached_subnets(
+            _request_context: RequestContext<Self::Context>,
+            _path_params: Path<sled_agent_types::instance::VmmPathParam>,
+            _body: TypedBody<
+                sled_agent_types::attached_subnet::AttachedSubnets,
+            >,
+        ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+            unimplemented!()
+        }
+
+        async fn vmm_delete_attached_subnets(
+            _request_context: RequestContext<Self::Context>,
+            _path_params: Path<sled_agent_types::instance::VmmPathParam>,
+        ) -> Result<HttpResponseDeleted, HttpError> {
+            unimplemented!()
+        }
+
+        async fn vmm_post_attached_subnet(
+            _request_context: RequestContext<Self::Context>,
+            _path_params: Path<sled_agent_types::instance::VmmPathParam>,
+            _body: TypedBody<sled_agent_types::attached_subnet::AttachedSubnet>,
+        ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+            unimplemented!()
+        }
+
+        async fn vmm_delete_attached_subnet(
+            _request_context: RequestContext<Self::Context>,
+            _path_params: Path<
+                sled_agent_types::attached_subnet::VmmSubnetPathParam,
+            >,
+        ) -> Result<HttpResponseDeleted, HttpError> {
+            unimplemented!()
+        }
+
+        async fn rot_measurement_log(
+            _request_context: RequestContext<Self::Context>,
+            _path_params: Path<sled_agent_types::rot::RotPathParams>,
+        ) -> Result<
+            HttpResponseOk<sled_agent_types::rot::MeasurementLog>,
+            HttpError,
+        > {
+            unimplemented!()
+        }
+
+        async fn rot_certificate_chain(
+            _request_context: RequestContext<Self::Context>,
+            _path_params: Path<sled_agent_types::rot::RotPathParams>,
+        ) -> Result<
+            HttpResponseOk<sled_agent_types::rot::CertificateChain>,
+            HttpError,
+        > {
+            unimplemented!()
+        }
+
+        async fn rot_attest(
+            _request_context: RequestContext<Self::Context>,
+            _path_params: Path<sled_agent_types::rot::RotPathParams>,
+            _body: TypedBody<sled_agent_types::rot::Nonce>,
+        ) -> Result<HttpResponseOk<sled_agent_types::rot::Attestation>, HttpError>
+        {
             unimplemented!()
         }
     }

@@ -7,11 +7,11 @@
 
 use omicron_common::address::IpRange;
 use omicron_common::api::external::AllowedSourceIps;
-use omicron_common::api::internal::shared::BgpConfig;
-use omicron_common::api::internal::shared::LldpPortConfig;
-use omicron_common::api::internal::shared::RouteConfig;
-use omicron_common::api::internal::shared::UplinkAddressConfig;
 use serde::Serialize;
+use sled_agent_types::early_networking::BgpConfig;
+use sled_agent_types::early_networking::LldpPortConfig;
+use sled_agent_types::early_networking::RouteConfig;
+use sled_agent_types::early_networking::UplinkAddress;
 use sled_hardware_types::Baseboard;
 use std::borrow::Cow;
 use std::collections::BTreeSet;
@@ -27,10 +27,12 @@ use toml_edit::Value;
 use wicket_common::inventory::SpType;
 use wicket_common::rack_setup::BootstrapSledDescription;
 use wicket_common::rack_setup::CurrentRssUserConfigInsensitive;
+use wicket_common::rack_setup::ManualPortConfig;
 use wicket_common::rack_setup::UserSpecifiedBgpPeerConfig;
 use wicket_common::rack_setup::UserSpecifiedImportExportPolicy;
 use wicket_common::rack_setup::UserSpecifiedPortConfig;
 use wicket_common::rack_setup::UserSpecifiedRackNetworkConfig;
+use wicket_common::rack_setup::UserSpecifiedUplinkAddressConfig;
 
 static TEMPLATE: &str = include_str!("config_template.toml");
 
@@ -105,6 +107,13 @@ impl TomlTemplate {
             &mut doc,
             config.allowed_source_ips.as_ref(),
         );
+
+        *doc.get_mut("external_jumbo_frames_opt_in_enabled")
+            .unwrap()
+            .as_value_mut()
+            .unwrap() = Value::Boolean(Formatted::new(
+            config.external_jumbo_frames_opt_in_enabled,
+        ));
 
         *doc.get_mut("bootstrap_sleds").unwrap().as_array_mut().unwrap() =
             build_sleds_array(&config.bootstrap_sleds);
@@ -244,6 +253,19 @@ fn populate_network_table(
         return;
     };
 
+    if let Some(rack_subnet_address) = config.rack_subnet_address {
+        let value =
+            Value::String(Formatted::new(rack_subnet_address.to_string()));
+        match table.entry("rack_subnet_address") {
+            toml_edit::Entry::Occupied(mut entry) => {
+                entry.insert(Item::Value(value));
+            }
+            toml_edit::Entry::Vacant(entry) => {
+                entry.insert(Item::Value(value));
+            }
+        }
+    }
+
     for (property, value) in [
         ("infra_ip_first", config.infra_ip_first.to_string()),
         ("infra_ip_last", config.infra_ip_last.to_string()),
@@ -291,8 +313,13 @@ fn populate_network_table(
                     // This style ensures that if a new field is added, this
                     // fails at compile time.
                     // XXX: shaper and checker are going to go away
-                    let BgpConfig { asn, originate, shaper: _, checker: _ } =
-                        cfg;
+                    let BgpConfig {
+                        asn,
+                        originate,
+                        shaper: _,
+                        checker: _,
+                        max_paths,
+                    } = cfg;
 
                     let mut bgp = Table::new();
                     bgp.insert("asn", i64_item(i64::from(*asn)));
@@ -305,6 +332,12 @@ fn populate_network_table(
                         "originate",
                         Item::Value(Value::Array(originate_out)),
                     );
+
+                    bgp.insert(
+                        "max_paths",
+                        i64_item(i64::from(max_paths.as_u8())),
+                    );
+
                     bgp
                 })
                 .collect();
@@ -314,7 +347,15 @@ fn populate_network_table(
 #[must_use]
 fn populate_uplink_table(cfg: &UserSpecifiedPortConfig) -> Table {
     // This style ensures that if a new field is added, this fails loudly.
-    let UserSpecifiedPortConfig {
+    let manual_port_config = match cfg {
+        UserSpecifiedPortConfig::Manual(manual) => manual,
+        UserSpecifiedPortConfig::DdmAutoPortConfig {} => {
+            let mut uplink = Table::new();
+            uplink.insert("type", string_item("ddm_auto_port_config"));
+            return uplink;
+        }
+    };
+    let ManualPortConfig {
         routes,
         addresses,
         uplink_port_speed,
@@ -323,7 +364,7 @@ fn populate_uplink_table(cfg: &UserSpecifiedPortConfig) -> Table {
         bgp_peers,
         lldp,
         tx_eq,
-    } = cfg;
+    } = manual_port_config;
 
     let mut uplink = Table::new();
 
@@ -347,9 +388,17 @@ fn populate_uplink_table(cfg: &UserSpecifiedPortConfig) -> Table {
     // addresses = []
     let mut addresses_out = Array::new();
     for a in addresses {
-        let UplinkAddressConfig { address, vlan_id } = a;
+        let UserSpecifiedUplinkAddressConfig { address, vlan_id } = a;
         let mut x = InlineTable::new();
-        x.insert("address", string_value(address));
+        x.insert(
+            "address",
+            string_value(match address {
+                UplinkAddress::AddrConf => {
+                    UserSpecifiedUplinkAddressConfig::ADDR_CONF.to_owned()
+                }
+                UplinkAddress::Static { ip_net } => ip_net.to_string(),
+            }),
+        );
         if let Some(vlan_id) = vlan_id {
             x.insert("vlan_id", i64_value(i64::from(*vlan_id)));
         }
@@ -394,6 +443,7 @@ fn populate_uplink_table(cfg: &UserSpecifiedPortConfig) -> Table {
             allowed_import,
             allowed_export,
             vlan_id,
+            router_lifetime,
         } = p;
 
         let mut peer = Table::new();
@@ -405,7 +455,7 @@ fn populate_uplink_table(cfg: &UserSpecifiedPortConfig) -> Table {
         peer.insert("port", string_item(port));
 
         // addr = ""
-        peer.insert("addr", string_item(addr));
+        peer.insert("addr", string_item(enum_to_toml_string(addr)));
 
         // hold_time
         if let Some(x) = hold_time {
@@ -484,6 +534,14 @@ fn populate_uplink_table(cfg: &UserSpecifiedPortConfig) -> Table {
             peer.insert("vlan_id", i64_item(i64::from(*x)));
         }
 
+        // router_lifetime
+        if router_lifetime.as_u16() != 0 {
+            peer.insert(
+                "router_lifetime",
+                i64_item(i64::from(router_lifetime.as_u16())),
+            );
+        }
+
         // local_pref
         if let Some(x) = local_pref {
             peer.insert("local_pref", i64_item(i64::from(*x)));
@@ -508,7 +566,7 @@ fn populate_uplink_table(cfg: &UserSpecifiedPortConfig) -> Table {
             management_addrs,
         } = l;
         let mut lldp = Table::new();
-        lldp.insert("status", string_item(status));
+        lldp.insert("status", string_item(enum_to_toml_string(&status)));
         if let Some(x) = chassis_id {
             lldp.insert("chassis_id", string_item(x));
         }

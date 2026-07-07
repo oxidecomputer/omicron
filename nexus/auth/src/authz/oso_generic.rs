@@ -121,11 +121,13 @@ pub fn make_omicron_oso(log: &slog::Logger) -> Result<OsoInit, anyhow::Error> {
         SiloUserList::get_polar_class(),
         SiloUserSessionList::get_polar_class(),
         SiloUserTokenList::get_polar_class(),
+        SubnetPoolList::get_polar_class(),
         UpdateTrustRootList::get_polar_class(),
         TargetReleaseConfig::get_polar_class(),
         AlertClassList::get_polar_class(),
         ScimClientBearerTokenList::get_polar_class(),
         MulticastGroupList::get_polar_class(),
+        TrustQuorumConfig::get_polar_class(),
     ];
     for c in classes {
         oso_builder = oso_builder.register_class(c)?;
@@ -150,11 +152,14 @@ pub fn make_omicron_oso(log: &slog::Logger) -> Result<OsoInit, anyhow::Error> {
         RouterRoute::init(),
         VpcSubnet::init(),
         FloatingIp::init(),
+        ExternalSubnet::init(),
         // Silo-level resources
         Image::init(),
         SiloImage::init(),
         // Fleet-level resources
         AddressLot::init(),
+        BgpConfig::init(),
+        BgpAnnounceSet::init(),
         Blueprint::init(),
         LoopbackAddress::init(),
         Certificate::init(),
@@ -171,6 +176,7 @@ pub fn make_omicron_oso(log: &slog::Logger) -> Result<OsoInit, anyhow::Error> {
         IdentityProvider::init(),
         SamlIdentityProvider::init(),
         Sled::init(),
+        SubnetPool::init(),
         TufRepo::init(),
         TufArtifact::init(),
         TufTrustRoot::init(),

@@ -7,7 +7,6 @@
 mod artifact_store;
 mod collection;
 mod config;
-mod disk;
 mod http_entrypoints;
 mod http_entrypoints_pantry;
 mod http_entrypoints_storage;

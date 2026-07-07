@@ -5,8 +5,7 @@
 use db_macros::Resource;
 use nexus_db_schema::schema::instance_ssh_key;
 use nexus_db_schema::schema::ssh_key;
-use nexus_types::external_api::params;
-use nexus_types::external_api::views;
+use nexus_types::external_api::ssh_key as ssh_key_types;
 use nexus_types::identity::Resource;
 use omicron_uuid_kinds::SiloUserKind;
 use omicron_uuid_kinds::SiloUserUuid;
@@ -29,7 +28,7 @@ pub struct SshKey {
 impl SshKey {
     pub fn new(
         silo_user_id: SiloUserUuid,
-        params: params::SshKeyCreate,
+        params: ssh_key_types::SshKeyCreate,
     ) -> Self {
         Self::new_with_id(Uuid::new_v4(), silo_user_id, params)
     }
@@ -37,7 +36,7 @@ impl SshKey {
     pub fn new_with_id(
         id: Uuid,
         silo_user_id: SiloUserUuid,
-        params: params::SshKeyCreate,
+        params: ssh_key_types::SshKeyCreate,
     ) -> Self {
         Self {
             identity: SshKeyIdentity::new(id, params.identity),
@@ -51,7 +50,7 @@ impl SshKey {
     }
 }
 
-impl From<SshKey> for views::SshKey {
+impl From<SshKey> for ssh_key_types::SshKey {
     fn from(ssh_key: SshKey) -> Self {
         Self {
             identity: ssh_key.identity(),

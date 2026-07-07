@@ -5,6 +5,10 @@
 //! Background task for managing Support Bundles
 
 use crate::app::background::BackgroundTask;
+use anyhow::Context;
+use camino::Utf8Path;
+use camino_tempfile::Utf8TempDir;
+use camino_tempfile::tempdir_in;
 use futures::FutureExt;
 use futures::future::BoxFuture;
 use internal_dns_resolver::Resolver;
@@ -13,8 +17,8 @@ use nexus_db_model::SupportBundleState;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
+use nexus_types::internal_api::background::SupportBundleActivationReport;
 use nexus_types::internal_api::background::SupportBundleCleanupReport;
-use nexus_types::internal_api::background::SupportBundleCollectionReport;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::LookupType;
@@ -25,12 +29,29 @@ use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::SupportBundleUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use serde_json::json;
+use sha2::Digest;
+use sha2::Sha256;
 use sled_agent_types::support_bundle::NESTED_DATASET_NOT_FOUND;
 use slog_error_chain::InlineErrorChain;
+use std::io::Write;
+use std::num::NonZeroU64;
 use std::sync::Arc;
+use support_bundle_collection::BundleCollection;
+use support_bundle_collection::BundleInfo;
+use support_bundle_collection::zip::bundle_to_zipfile;
+use tokio::io::AsyncReadExt;
+use tokio::io::AsyncSeekExt;
+use tokio::io::SeekFrom;
+use tokio_util::sync::CancellationToken;
+use tufaceous_artifact::ArtifactHash;
 
-use super::support_bundle::collection::BundleCollection;
-use super::support_bundle::request::BundleRequest;
+/// We use "/var/tmp" to use Nexus' filesystem for temporary storage,
+/// rather than "/tmp", which would keep this collected data in-memory.
+pub const TEMPDIR: &str = "/var/tmp";
+
+/// The size of piece of a support bundle to transfer to the sled agent
+/// within a single streaming request.
+pub const CHUNK_SIZE: NonZeroU64 = NonZeroU64::new(1024 * 1024 * 1024).unwrap();
 
 fn authz_support_bundle_from_id(id: SupportBundleUuid) -> authz::SupportBundle {
     authz::SupportBundle::new(authz::FLEET, id, LookupType::by_id(id))
@@ -56,6 +77,7 @@ pub struct SupportBundleCollector {
     resolver: Resolver,
     disable: bool,
     nexus_id: OmicronZoneUuid,
+    transfer_chunk_size: NonZeroU64,
 }
 
 impl SupportBundleCollector {
@@ -65,7 +87,19 @@ impl SupportBundleCollector {
         disable: bool,
         nexus_id: OmicronZoneUuid,
     ) -> Self {
-        SupportBundleCollector { datastore, resolver, disable, nexus_id }
+        SupportBundleCollector {
+            datastore,
+            resolver,
+            disable,
+            nexus_id,
+            transfer_chunk_size: CHUNK_SIZE,
+        }
+    }
+
+    #[cfg(test)]
+    fn with_transfer_chunk_size(mut self, size: NonZeroU64) -> Self {
+        self.transfer_chunk_size = size;
+        self
     }
 
     // Tells a sled agent to delete a support bundle
@@ -311,8 +345,7 @@ impl SupportBundleCollector {
     async fn collect_bundle(
         &self,
         opctx: &OpContext,
-        request: &BundleRequest,
-    ) -> anyhow::Result<Option<SupportBundleCollectionReport>> {
+    ) -> anyhow::Result<Option<SupportBundleActivationReport>> {
         let pagparams = DataPageParams::max_page();
         let result = self
             .datastore
@@ -349,19 +382,67 @@ impl SupportBundleCollector {
             }
         };
 
+        let authz_bundle = authz_support_bundle_from_id(bundle.id.into());
+        let data_selection = self
+            .datastore
+            .support_bundle_data_selection_get(opctx, &authz_bundle)
+            .await
+            .context("failed to query bundle data selection")?;
+
+        let bundle_log =
+            opctx.log.new(slog::o!("bundle" => bundle.id.to_string()));
         let collection = Arc::new(BundleCollection::new(
             self.datastore.clone(),
             self.resolver.clone(),
-            opctx.log.new(slog::o!("bundle" => bundle.id.to_string())),
+            bundle_log.clone(),
             opctx.child(std::collections::BTreeMap::new()),
-            request.clone(),
-            bundle.clone(),
-            request.transfer_chunk_size,
+            data_selection,
+            BundleInfo {
+                id: bundle.id.into(),
+                reason_for_creation: bundle.reason_for_creation.clone(),
+            },
         ));
 
-        let authz_bundle = authz_support_bundle_from_id(bundle.id.into());
-        let mut report = collection.collect_bundle_and_store_on_sled().await?;
-        if let Err(err) = self
+        // Spawn a task that periodically polls the `support_bundle` row's
+        // state. If the bundle has been cancelled (or removed), it cancels
+        // the inner `CancellationToken`, prompting `collect_bundle_locally`
+        // to drain in-flight work and return.
+        //
+        // This is a separate task rather than a top-level
+        // `tokio::select!`: previous designs raced collection against an
+        // async DB check in the cancellation branch body, deadlocking
+        // when the collection branch held a connection pool claim. See
+        // https://github.com/oxidecomputer/omicron/issues/9259.
+        let cancel_task = tokio::spawn({
+            let datastore = self.datastore.clone();
+            let cancel_opctx = opctx.child(std::collections::BTreeMap::new());
+            let token = collection.cancellation_token().clone();
+            let log = bundle_log.clone();
+            let bundle_id = bundle.id;
+            async move {
+                check_for_cancellation(
+                    datastore,
+                    cancel_opctx,
+                    token,
+                    log,
+                    bundle_id.into(),
+                )
+                .await
+            }
+        });
+
+        // Create a temporary directory where we'll store the support bundle
+        // as it's being collected.
+        let dir = tempdir_in(TEMPDIR)?;
+        let collect_result = collection.collect_bundle_locally(&dir).await;
+
+        // Collection is done — stop the cancellation checker.
+        cancel_task.abort();
+        let _ = cancel_task.await;
+
+        let collection = collect_result?;
+        self.store_bundle_on_sled(&bundle_log, opctx, &bundle, dir).await?;
+        let activated_in_db_ok = match self
             .datastore
             .support_bundle_update(
                 &opctx,
@@ -370,15 +451,17 @@ impl SupportBundleCollector {
             )
             .await
         {
-            if matches!(err, Error::InvalidRequest { .. }) {
+            Ok(()) => true,
+            Err(err) if matches!(err, Error::InvalidRequest { .. }) => {
                 info!(
                     &opctx.log,
                     "SupportBundleCollector: Concurrent state change activating bundle";
                     "bundle" => %bundle.id,
                     "err" => ?err,
                 );
-                return Ok(Some(report));
-            } else {
+                false
+            }
+            Err(err) => {
                 warn!(
                     &opctx.log,
                     "SupportBundleCollector: Unexpected error activating bundle";
@@ -387,10 +470,197 @@ impl SupportBundleCollector {
                 );
                 anyhow::bail!("failed to activate bundle: {:#}", err);
             }
-        }
-        report.activated_in_db_ok = true;
-        Ok(Some(report))
+        };
+        Ok(Some(SupportBundleActivationReport {
+            collection,
+            activated_in_db_ok,
+        }))
     }
+
+    // Zip the collected bundle directory and stream it to the sled-agent
+    // that owns the target zpool/dataset for durable storage.
+    async fn store_bundle_on_sled(
+        &self,
+        log: &slog::Logger,
+        opctx: &OpContext,
+        bundle: &SupportBundle,
+        dir: Utf8TempDir,
+    ) -> anyhow::Result<()> {
+        // Create the zipfile as a temporary file
+        let mut zipfile = tokio::fs::File::from_std(bundle_to_zipfile(
+            &dir,
+            Utf8Path::new(TEMPDIR),
+        )?);
+        let total_len = zipfile.metadata().await?.len();
+
+        // Collect the hash locally before we send it over the network
+        //
+        // We'll use this later during finalization to confirm the bundle
+        // has been stored successfully.
+        zipfile.seek(SeekFrom::Start(0)).await?;
+        let hash = sha2_hash(&mut zipfile).await?;
+
+        // Find the sled where we're storing this bundle.
+        let sled_id = self
+            .datastore
+            .zpool_get_sled_if_in_service(opctx, bundle.zpool_id.into())
+            .await?;
+        let sled_client =
+            nexus_networking::sled_client(&self.datastore, opctx, sled_id, log)
+                .await?;
+
+        let zpool = ZpoolUuid::from(bundle.zpool_id);
+        let dataset = DatasetUuid::from(bundle.dataset_id);
+        let support_bundle = SupportBundleUuid::from(bundle.id);
+
+        // Tell this sled to create the bundle.
+        let creation_result = sled_client
+            .support_bundle_start_creation(&zpool, &dataset, &support_bundle)
+            .await
+            .with_context(|| "Support bundle failed to start creation")?;
+
+        if matches!(
+            creation_result.state,
+            sled_agent_client::types::SupportBundleState::Complete
+        ) {
+            // Early exit case: the bundle was already created -- we must have either
+            // crashed or failed between "finalizing" and "writing to the database that we
+            // finished".
+            info!(log, "Support bundle was already collected"; "bundle" => %bundle.id);
+            return Ok(());
+        }
+        info!(log, "Support bundle creation started"; "bundle" => %bundle.id);
+
+        let mut offset = 0;
+        while offset < total_len {
+            // Stream the zipfile to the sled where it should be kept
+            let mut file = zipfile
+                .try_clone()
+                .await
+                .with_context(|| "Failed to clone zipfile")?;
+            file.seek(SeekFrom::Start(offset)).await.with_context(|| {
+                format!("Failed to seek to offset {offset} / {total_len} within zipfile")
+            })?;
+
+            // Only stream at most "transfer_chunk_size" bytes at once
+            let chunk_size = std::cmp::min(
+                self.transfer_chunk_size.get(),
+                total_len - offset,
+            );
+
+            let limited_file = file.take(chunk_size);
+            let stream = tokio_util::io::ReaderStream::new(limited_file);
+            let body = reqwest::Body::wrap_stream(stream);
+
+            info!(
+                log,
+                "Streaming bundle chunk";
+                "bundle" => %bundle.id,
+                "offset" => offset,
+                "length" => chunk_size,
+            );
+
+            sled_client.support_bundle_transfer(
+                &zpool, &dataset, &support_bundle, offset, body
+            ).await.with_context(|| {
+                format!("Failed to transfer bundle: {chunk_size}@{offset} of {total_len} to sled")
+            })?;
+
+            offset += chunk_size;
+        }
+
+        sled_client
+            .support_bundle_finalize(
+                &zpool,
+                &dataset,
+                &support_bundle,
+                &hash.to_string(),
+            )
+            .await
+            .with_context(|| "Failed to finalize bundle")?;
+
+        // Returning from this method should drop all temporary storage
+        // allocated locally for this support bundle.
+        Ok(())
+    }
+}
+
+// Indefinitely poll the database for the bundle's state. Cancels the
+// supplied token when:
+//
+// - The bundle's state is no longer `Collecting` (typically because
+//   the bundle was explicitly cancelled by a user, or because its
+//   backing storage was expunged).
+// - The bundle row no longer exists.
+//
+// The mechanism layer is otherwise oblivious to the bundle lifecycle —
+// this is the management bridge that turns DB state changes into
+// cancellation.
+async fn check_for_cancellation(
+    datastore: Arc<DataStore>,
+    opctx: OpContext,
+    cancellation_token: CancellationToken,
+    log: slog::Logger,
+    bundle_id: SupportBundleUuid,
+) {
+    let work_duration = tokio::time::Duration::from_secs(5);
+    let mut yield_interval = tokio::time::interval_at(
+        tokio::time::Instant::now() + work_duration,
+        work_duration,
+    );
+
+    loop {
+        // Timer fired mid-collection - check if we should stop.
+        yield_interval.tick().await;
+        trace!(
+            log,
+            "Checking if Bundle Collection cancelled";
+            "bundle" => %bundle_id
+        );
+
+        match datastore.support_bundle_get(&opctx, bundle_id).await {
+            Ok(SupportBundle {
+                state: SupportBundleState::Collecting, ..
+            }) => {
+                // Bundle still collecting; continue...
+                continue;
+            }
+            Ok(_) => {
+                // Not collecting, for any reason: Time to exit
+                cancellation_token.cancel();
+                return;
+            }
+            Err(Error::ObjectNotFound { .. } | Error::NotFound { .. }) => {
+                cancellation_token.cancel();
+                return;
+            }
+            Err(err) => {
+                warn!(
+                    log,
+                    "Database error checking bundle cancellation";
+                    InlineErrorChain::new(&err)
+                );
+
+                // If we cannot contact the database, retry later
+                continue;
+            }
+        }
+    }
+}
+
+async fn sha2_hash(file: &mut tokio::fs::File) -> anyhow::Result<ArtifactHash> {
+    let mut buf = vec![0u8; 65536];
+    let mut ctx = Sha256::new();
+    loop {
+        let n = file.read(&mut buf).await?;
+        if n == 0 {
+            break;
+        }
+        ctx.write_all(&buf[0..n])?;
+    }
+
+    let digest = ctx.finalize();
+    Ok(ArtifactHash(digest.as_slice().try_into()?))
 }
 
 impl BackgroundTask for SupportBundleCollector {
@@ -416,8 +686,7 @@ impl BackgroundTask for SupportBundleCollector {
                 }
             };
 
-            let request = BundleRequest::default();
-            match self.collect_bundle(&opctx, &request).await {
+            match self.collect_bundle(&opctx).await {
                 Ok(report) => collection_report = Some(report),
                 Err(err) => {
                     collection_err =
@@ -440,21 +709,22 @@ impl BackgroundTask for SupportBundleCollector {
 mod test {
     use super::*;
 
-    use crate::app::background::tasks::support_bundle::perfetto;
-    use crate::app::background::tasks::support_bundle::request::BundleData;
     use crate::app::support_bundles::SupportBundleQueryType;
     use http_body_util::BodyExt;
     use nexus_db_model::PhysicalDisk;
     use nexus_db_model::PhysicalDiskKind;
     use nexus_db_model::RendezvousDebugDataset;
     use nexus_db_model::Zpool;
+    use nexus_db_queries::db::datastore::SupportBundleCreateParams;
     use nexus_test_utils::SLED_AGENT_UUID;
     use nexus_test_utils_macros::nexus_test;
-    use nexus_types::fm::ereport::{EreportData, EreportId, Reporter};
+    use nexus_types::fm::ereport::{EreportData, Reporter};
     use nexus_types::identity::Asset;
     use nexus_types::internal_api::background::SupportBundleCollectionStep;
+    use nexus_types::internal_api::background::SupportBundleCollectionStepStatus;
     use nexus_types::internal_api::background::SupportBundleEreportStatus;
     use nexus_types::inventory::SpType;
+    use nexus_types::support_bundle::BundleDataSelection;
     use omicron_common::api::external::ByteCount;
     use omicron_common::api::internal::shared::DatasetKind;
     use omicron_common::disk::DatasetConfig;
@@ -465,10 +735,11 @@ mod test {
     use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::{
         BlueprintUuid, DatasetUuid, EreporterRestartUuid, OmicronZoneUuid,
-        PhysicalDiskUuid, SledUuid,
+        PhysicalDiskUuid, RackUuid, SledUuid,
     };
-    use std::collections::HashSet;
+    use sled_agent_types::inventory::ZpoolHealth;
     use std::num::NonZeroU64;
+    use support_bundle_collection::perfetto;
     use uuid::Uuid;
 
     type ControlPlaneTestContext =
@@ -518,9 +789,8 @@ mod test {
             nexus.id(),
         );
 
-        let request = BundleRequest::default();
         let report = collector
-            .collect_bundle(&opctx, &request)
+            .collect_bundle(&opctx)
             .await
             .expect("Collection should succeed with no bundles");
         assert!(report.is_none());
@@ -568,7 +838,7 @@ mod test {
         sled_id: SledUuid,
     ) -> PhysicalDiskUuid {
         let id = PhysicalDiskUuid::new_v4();
-        let physical_disk = PhysicalDisk::new(
+        let physical_disk = PhysicalDisk::from_parts(
             id,
             "v".into(),
             format!("s-{i})"),
@@ -586,111 +856,135 @@ mod test {
     async fn make_fake_ereports(datastore: &DataStore, opctx: &OpContext) {
         const SP_SERIAL: &str = "BRM42000069";
         const HOST_SERIAL: &str = "BRM66600042";
+        const SLED_SLOT: u16 = 8;
         const GIMLET_PN: &str = "9130000019";
         // Make some SP ereports...
         let sp_restart_id = EreporterRestartUuid::new_v4();
-        datastore.ereports_insert(&opctx, Reporter::Sp { sp_type: SpType::Sled, slot: 8}, vec![
-            EreportData {
-                id: EreportId { restart_id: sp_restart_id, ena: ereport_types::Ena(1) },
-                time_collected: chrono::Utc::now(),
-                collector_id: OmicronZoneUuid::new_v4(),
+        let time_collected = chrono::Utc::now();
+        let collector_id = OmicronZoneUuid::new_v4();
+        let rack_id = RackUuid::new_v4();
+        datastore.ereports_insert(&opctx, sp_restart_id, time_collected, collector_id, rack_id, Reporter::Sp { sp_type: SpType::Sled, slot: SLED_SLOT}, vec![
+            (ereport_types::Ena(1), EreportData {
                 part_number: Some(GIMLET_PN.to_string()),
                 serial_number: Some(SP_SERIAL.to_string()),
                 class: Some("ereport.fake.whatever".to_string()),
                 report: serde_json::json!({"hello world": true})
-            },
-            EreportData {
-                id: EreportId { restart_id: sp_restart_id, ena: ereport_types::Ena(2) },
-                time_collected: chrono::Utc::now(),
-                collector_id: OmicronZoneUuid::new_v4(),
+            }),
+            (ereport_types::Ena(2), EreportData {
                 part_number: Some(GIMLET_PN.to_string()),
                 serial_number: Some(SP_SERIAL.to_string()),
                 class: Some("ereport.something.blah".to_string()),
                 report: serde_json::json!({"system_working": "seems to be",})
-            },
-            EreportData {
-                id: EreportId { restart_id: EreporterRestartUuid::new_v4(), ena: ereport_types::Ena(1) },
-                time_collected: chrono::Utc::now(),
-                collector_id: OmicronZoneUuid::new_v4(),
-                // Let's do a silly one! No VPD, to make sure that's also
-                // handled correctly.
-                part_number: None,
-                serial_number: None,
-                class: Some("ereport.fake.whatever".to_string()),
-                report: serde_json::json!({"hello_world": true})
-            },
+            }),
         ]).await.expect("failed to insert fake SP ereports");
-        // And one from a different serial. N.B. that I made sure the number of
-        // host-OS and SP ereports are different for when we make assertions
-        // about the bundle report.
+
+        // Let's do a silly one! No VPD, to make sure that's also
+        // handled correctly.
+        let sp_restart_id2 = EreporterRestartUuid::new_v4();
+        let time_collected = chrono::Utc::now();
         datastore
             .ereports_insert(
                 &opctx,
-                Reporter::Sp { sp_type: SpType::Switch, slot: 1 },
-                vec![EreportData {
-                    id: EreportId {
-                        restart_id: EreporterRestartUuid::new_v4(),
-                        ena: ereport_types::Ena(1),
+                sp_restart_id2,
+                time_collected,
+                collector_id,
+                rack_id,
+                Reporter::Sp { sp_type: SpType::Sled, slot: SLED_SLOT },
+                vec![(
+                    ereport_types::Ena(1),
+                    EreportData {
+                        part_number: None,
+                        serial_number: None,
+                        class: Some("ereport.fake.whatever".to_string()),
+                        report: serde_json::json!({"hello_world": true}),
                     },
-                    time_collected: chrono::Utc::now(),
-                    collector_id: OmicronZoneUuid::new_v4(),
-                    part_number: Some("9130000006".to_string()),
-                    serial_number: Some("BRM41000555".to_string()),
-                    class: Some("ereport.fake.whatever".to_string()),
-                    report: serde_json::json!({"im_a_sidecar": true}),
-                }],
+                )],
+            )
+            .await
+            .expect("failed to insert another fake SP ereport");
+
+        // And one from a different serial. N.B. that I made sure the number of
+        // host-OS and SP ereports are different for when we make assertions
+        // about the bundle report.
+        let sp2_restart_id = EreporterRestartUuid::new_v4();
+        let time_collected = chrono::Utc::now();
+        datastore
+            .ereports_insert(
+                &opctx,
+                sp2_restart_id,
+                time_collected,
+                OmicronZoneUuid::new_v4(),
+                rack_id,
+                Reporter::Sp { sp_type: SpType::Switch, slot: 1 },
+                vec![(
+                    ereport_types::Ena(1),
+                    EreportData {
+                        part_number: Some("9130000006".to_string()),
+                        serial_number: Some("BRM41000555".to_string()),
+                        class: Some("ereport.fake.whatever".to_string()),
+                        report: serde_json::json!({"im_a_sidecar": true}),
+                    },
+                )],
             )
             .await
             .expect("failed to insert another fake SP ereport");
         // And some host OS ones...
-        let restart_id = EreporterRestartUuid::new_v4();
+        let sled1_restart_id = EreporterRestartUuid::new_v4();
+        let time_collected = chrono::Utc::now();
+        let collector_id = OmicronZoneUuid::new_v4();
         datastore
             .ereports_insert(
                 &opctx,
-                Reporter::HostOs { sled: SledUuid::new_v4() },
+                sled1_restart_id,
+                time_collected,
+                collector_id,
+                rack_id,
+                Reporter::HostOs {
+                    sled: SledUuid::new_v4(),
+                    slot: Some(SLED_SLOT),
+                },
                 vec![
-                    EreportData {
-                        id: EreportId {
-                            restart_id,
-                            ena: ereport_types::Ena(1),
+                    (
+                        ereport_types::Ena(1),
+                        EreportData {
+                            serial_number: Some(HOST_SERIAL.to_string()),
+                            part_number: Some(GIMLET_PN.to_string()),
+                            class: Some("ereport.fake.whatever".to_string()),
+                            report: serde_json::json!({"hello_world": true}),
                         },
-                        time_collected: chrono::Utc::now(),
-                        collector_id: OmicronZoneUuid::new_v4(),
-                        serial_number: Some(HOST_SERIAL.to_string()),
-                        part_number: Some(GIMLET_PN.to_string()),
-                        class: Some("ereport.fake.whatever".to_string()),
-                        report: serde_json::json!({"hello_world": true}),
-                    },
-                    EreportData {
-                        id: EreportId {
-                            restart_id,
-                            ena: ereport_types::Ena(2),
+                    ),
+                    (
+                        ereport_types::Ena(2),
+                        EreportData {
+                            serial_number: Some(HOST_SERIAL.to_string()),
+                            part_number: Some(GIMLET_PN.to_string()),
+                            class: Some(
+                                "ereport.fake.whatever.thingy".to_string(),
+                            ),
+                            report: serde_json::json!({"goodbye_world": false}),
                         },
-                        time_collected: chrono::Utc::now(),
-                        collector_id: OmicronZoneUuid::new_v4(),
-                        serial_number: Some(HOST_SERIAL.to_string()),
-                        part_number: Some(GIMLET_PN.to_string()),
-                        class: Some("ereport.fake.whatever.thingy".to_string()),
-                        report: serde_json::json!({"goodbye_world": false}),
-                    },
+                    ),
                 ],
             )
             .await
             .expect("failed to insert fake host OS ereports");
+        let sled2_restart_id = EreporterRestartUuid::new_v4();
+        let time_collected = chrono::Utc::now();
         datastore
             .ereports_insert(
                 &opctx,
-                Reporter::HostOs { sled: SledUuid::new_v4() },
+                sled2_restart_id,
+                time_collected,
+                OmicronZoneUuid::new_v4(),
+                rack_id,
+                Reporter::HostOs { sled: SledUuid::new_v4(), slot: Some(SLED_SLOT) },
                 vec![
-                    EreportData {
-                        id: EreportId { restart_id: EreporterRestartUuid::new_v4(), ena:  ereport_types::Ena(1) },
-                        time_collected: chrono::Utc::now(),
-                        collector_id: OmicronZoneUuid::new_v4(),
+                    (ereport_types::Ena(1), EreportData {
                         serial_number: Some(HOST_SERIAL.to_string()),
                         part_number: Some(GIMLET_PN.to_string()),
                         class: Some("ereport.something.hostos_related".to_string()),
                         report: serde_json::json!({"illumos": "very yes", "whatever": 42}),
-                    },
+                    }),
                 ],
             )
             .await
@@ -742,6 +1036,7 @@ mod test {
                     zpool_id,
                     disk_id,
                     1 << 40,
+                    ZpoolHealth::Online,
                 );
                 disks.push(Self { zpool_id, dataset_id })
             }
@@ -810,9 +1105,16 @@ mod test {
         let bundle = datastore
             .support_bundle_create(
                 &opctx,
-                "For collection testing",
-                nexus.id(),
-                None,
+                SupportBundleCreateParams {
+                    reason: "For collection testing",
+                    nexus_id: nexus.id(),
+                    user_comment: None,
+                    // NOTE: The support bundle querying interface isn't
+                    // supported on the simulated sled agent (yet?) so we're
+                    // using an empty sled selection.
+                    data_selection: BundleDataSelection::all()
+                        .with_specific_sleds([]),
+                },
             )
             .await
             .expect("Couldn't allocate a support bundle");
@@ -826,19 +1128,15 @@ mod test {
         );
 
         // The bundle collection should complete successfully.
-        // NOTE: The support bundle querying interface isn't supported on
-        // the simulated sled agent (yet?) so we're using an empty sled selection.
-        let mut request = BundleRequest::default();
-        request.data_selection.insert(BundleData::HostInfo(HashSet::new()));
         let report = collector
-            .collect_bundle(&opctx, &request)
+            .collect_bundle(&opctx)
             .await
             .expect("Collection should have succeeded under test")
             .expect("Collecting the bundle should have generated a report");
-        assert_eq!(report.bundle, bundle.id.into());
+        assert_eq!(report.collection.bundle, bundle.id.into());
         // Verify that we spawned steps to query sleds and SPs
         let step_names: Vec<_> =
-            report.steps.iter().map(|s| s.name.as_str()).collect();
+            report.collection.steps.iter().map(|s| s.name.as_str()).collect();
         assert!(
             step_names.contains(&SupportBundleCollectionStep::STEP_SPAWN_SLEDS)
         );
@@ -847,13 +1145,28 @@ mod test {
                 .contains(&SupportBundleCollectionStep::STEP_SPAWN_SP_DUMPS)
         );
         assert!(report.activated_in_db_ok);
+        let ereport_step = report
+            .collection
+            .steps
+            .iter()
+            .find(|s| s.name == SupportBundleCollectionStep::STEP_EREPORTS)
+            .expect("should have ereports step");
+        assert_eq!(ereport_step.status, SupportBundleCollectionStepStatus::Ok);
+        let ereport_details: SupportBundleEreportStatus =
+            serde_json::from_value(
+                ereport_step
+                    .details
+                    .clone()
+                    .expect("ereports step should have details"),
+            )
+            .expect("ereports step details should deserialize");
         assert_eq!(
-            report.ereports,
-            Some(SupportBundleEreportStatus {
+            ereport_details,
+            SupportBundleEreportStatus {
                 n_collected: 7,
                 n_found: 7,
-                errors: Vec::new()
-            })
+                errors: Vec::new(),
+            }
         );
 
         let observed_bundle = datastore
@@ -865,7 +1178,7 @@ mod test {
         // If we retry bundle collection, nothing should happen.
         // The bundle has already been collected.
         let report = collector
-            .collect_bundle(&opctx, &request)
+            .collect_bundle(&opctx)
             .await
             .expect("Collection should be a no-op the second time");
         assert!(report.is_none());
@@ -890,9 +1203,13 @@ mod test {
         let bundle = datastore
             .support_bundle_create(
                 &opctx,
-                "For trace file testing",
-                nexus.id(),
-                None,
+                SupportBundleCreateParams {
+                    reason: "For trace file testing",
+                    nexus_id: nexus.id(),
+                    user_comment: None,
+                    data_selection: BundleDataSelection::all()
+                        .with_specific_sleds([]),
+                },
             )
             .await
             .expect("Couldn't allocate a support bundle");
@@ -905,10 +1222,8 @@ mod test {
         );
 
         // Collect the bundle
-        let mut request = BundleRequest::default();
-        request.data_selection.insert(BundleData::HostInfo(HashSet::new()));
         let report = collector
-            .collect_bundle(&opctx, &request)
+            .collect_bundle(&opctx)
             .await
             .expect("Collection should have succeeded")
             .expect("Should have generated a report");
@@ -967,7 +1282,7 @@ mod test {
         // Verify we have the same number of events as steps in the report
         assert_eq!(
             trace.trace_events.len(),
-            report.steps.len(),
+            report.collection.steps.len(),
             "Number of events should match number of steps"
         );
 
@@ -975,7 +1290,7 @@ mod test {
         let trace_names: std::collections::HashSet<_> =
             trace.trace_events.iter().map(|e| e.name.as_str()).collect();
         let report_names: std::collections::HashSet<_> =
-            report.steps.iter().map(|s| s.name.as_str()).collect();
+            report.collection.steps.iter().map(|s| s.name.as_str()).collect();
         assert_eq!(
             trace_names, report_names,
             "Trace event names should match report step names"
@@ -1000,9 +1315,13 @@ mod test {
         let bundle = datastore
             .support_bundle_create(
                 &opctx,
-                "For collection testing",
-                nexus.id(),
-                None,
+                SupportBundleCreateParams {
+                    reason: "For collection testing",
+                    nexus_id: nexus.id(),
+                    user_comment: None,
+                    data_selection: BundleDataSelection::all()
+                        .with_specific_sleds([]),
+                },
             )
             .await
             .expect("Couldn't allocate a support bundle");
@@ -1013,33 +1332,22 @@ mod test {
             resolver.clone(),
             false,
             nexus.id(),
-        );
+        )
+        .with_transfer_chunk_size(NonZeroU64::new(16).unwrap());
 
         // The bundle collection should complete successfully.
         //
         // We're going to use a really small chunk size here to force the bundle
         // to get split up.
-        let request = BundleRequest {
-            transfer_chunk_size: NonZeroU64::new(16).unwrap(),
-            data_selection: [
-                BundleData::Reconfigurator,
-                BundleData::HostInfo(HashSet::new()),
-                BundleData::SledCubbyInfo,
-                BundleData::SpDumps,
-            ]
-            .into_iter()
-            .collect(),
-        };
-
         let report = collector
-            .collect_bundle(&opctx, &request)
+            .collect_bundle(&opctx)
             .await
             .expect("Collection should have succeeded under test")
             .expect("Collecting the bundle should have generated a report");
-        assert_eq!(report.bundle, bundle.id.into());
+        assert_eq!(report.collection.bundle, bundle.id.into());
         // Verify that we spawned steps to query sleds and SPs
         let step_names: Vec<_> =
-            report.steps.iter().map(|s| s.name.as_str()).collect();
+            report.collection.steps.iter().map(|s| s.name.as_str()).collect();
         assert!(
             step_names.contains(&SupportBundleCollectionStep::STEP_SPAWN_SLEDS)
         );
@@ -1100,18 +1408,26 @@ mod test {
         let bundle1 = datastore
             .support_bundle_create(
                 &opctx,
-                "For collection testing",
-                nexus.id(),
-                None,
+                SupportBundleCreateParams {
+                    reason: "For collection testing",
+                    nexus_id: nexus.id(),
+                    user_comment: None,
+                    data_selection: BundleDataSelection::all()
+                        .with_specific_sleds([]),
+                },
             )
             .await
             .expect("Couldn't allocate a support bundle");
         let bundle2 = datastore
             .support_bundle_create(
                 &opctx,
-                "For collection testing",
-                nexus.id(),
-                None,
+                SupportBundleCreateParams {
+                    reason: "For collection testing",
+                    nexus_id: nexus.id(),
+                    user_comment: None,
+                    data_selection: BundleDataSelection::all()
+                        .with_specific_sleds([]),
+                },
             )
             .await
             .expect("Couldn't allocate a second support bundle");
@@ -1124,17 +1440,15 @@ mod test {
         );
 
         // Each time we call "collect_bundle", we collect a SINGLE bundle.
-        let mut request = BundleRequest::default();
-        request.data_selection.insert(BundleData::HostInfo(HashSet::new()));
         let report = collector
-            .collect_bundle(&opctx, &request)
+            .collect_bundle(&opctx)
             .await
             .expect("Collection should have succeeded under test")
             .expect("Collecting the bundle should have generated a report");
-        assert_eq!(report.bundle, bundle1.id.into());
+        assert_eq!(report.collection.bundle, bundle1.id.into());
         // Verify that we spawned steps to query sleds and SPs
         let step_names: Vec<_> =
-            report.steps.iter().map(|s| s.name.as_str()).collect();
+            report.collection.steps.iter().map(|s| s.name.as_str()).collect();
         assert!(
             step_names.contains(&SupportBundleCollectionStep::STEP_SPAWN_SLEDS)
         );
@@ -1158,14 +1472,14 @@ mod test {
         assert_eq!(observed_bundle.state, SupportBundleState::Collecting);
 
         let report = collector
-            .collect_bundle(&opctx, &request)
+            .collect_bundle(&opctx)
             .await
             .expect("Collection should have succeeded under test")
             .expect("Collecting the bundle should have generated a report");
-        assert_eq!(report.bundle, bundle2.id.into());
+        assert_eq!(report.collection.bundle, bundle2.id.into());
         // Verify that we spawned steps to query sleds and SPs
         let step_names: Vec<_> =
-            report.steps.iter().map(|s| s.name.as_str()).collect();
+            report.collection.steps.iter().map(|s| s.name.as_str()).collect();
         assert!(
             step_names.contains(&SupportBundleCollectionStep::STEP_SPAWN_SLEDS)
         );
@@ -1211,9 +1525,12 @@ mod test {
         let bundle = datastore
             .support_bundle_create(
                 &opctx,
-                "For collection testing",
-                nexus.id(),
-                None,
+                SupportBundleCreateParams {
+                    reason: "For collection testing",
+                    nexus_id: nexus.id(),
+                    user_comment: None,
+                    data_selection: BundleDataSelection::all(),
+                },
             )
             .await
             .expect("Couldn't allocate a support bundle");
@@ -1275,9 +1592,13 @@ mod test {
         let bundle = datastore
             .support_bundle_create(
                 &opctx,
-                "For collection testing",
-                nexus.id(),
-                None,
+                SupportBundleCreateParams {
+                    reason: "For collection testing",
+                    nexus_id: nexus.id(),
+                    user_comment: None,
+                    data_selection: BundleDataSelection::all()
+                        .with_specific_sleds([]),
+                },
             )
             .await
             .expect("Couldn't allocate a support bundle");
@@ -1289,17 +1610,15 @@ mod test {
             false,
             nexus.id(),
         );
-        let mut request = BundleRequest::default();
-        request.data_selection.insert(BundleData::HostInfo(HashSet::new()));
         let report = collector
-            .collect_bundle(&opctx, &request)
+            .collect_bundle(&opctx)
             .await
             .expect("Collection should have succeeded under test")
             .expect("Collecting the bundle should have generated a report");
-        assert_eq!(report.bundle, bundle.id.into());
+        assert_eq!(report.collection.bundle, bundle.id.into());
         // Verify that we spawned steps to query sleds and SPs
         let step_names: Vec<_> =
-            report.steps.iter().map(|s| s.name.as_str()).collect();
+            report.collection.steps.iter().map(|s| s.name.as_str()).collect();
         assert!(
             step_names.contains(&SupportBundleCollectionStep::STEP_SPAWN_SLEDS)
         );
@@ -1361,9 +1680,12 @@ mod test {
         let bundle = datastore
             .support_bundle_create(
                 &opctx,
-                "For collection testing",
-                nexus.id(),
-                None,
+                SupportBundleCreateParams {
+                    reason: "For collection testing",
+                    nexus_id: nexus.id(),
+                    user_comment: None,
+                    data_selection: BundleDataSelection::all(),
+                },
             )
             .await
             .expect("Couldn't allocate a support bundle");
@@ -1430,9 +1752,13 @@ mod test {
         let bundle = datastore
             .support_bundle_create(
                 &opctx,
-                "For collection testing",
-                nexus.id(),
-                None,
+                SupportBundleCreateParams {
+                    reason: "For collection testing",
+                    nexus_id: nexus.id(),
+                    user_comment: None,
+                    data_selection: BundleDataSelection::all()
+                        .with_specific_sleds([]),
+                },
             )
             .await
             .expect("Couldn't allocate a support bundle");
@@ -1444,14 +1770,12 @@ mod test {
             false,
             nexus.id(),
         );
-        let mut request = BundleRequest::default();
-        request.data_selection.insert(BundleData::HostInfo(HashSet::new()));
         let report = collector
-            .collect_bundle(&opctx, &request)
+            .collect_bundle(&opctx)
             .await
             .expect("Collection should have succeeded under test")
             .expect("Collecting the bundle should have generated a report");
-        assert_eq!(report.bundle, bundle.id.into());
+        assert_eq!(report.collection.bundle, bundle.id.into());
 
         // Mark the bundle as "failing" - this should be triggered
         // automatically by the blueprint executor if the corresponding
@@ -1515,9 +1839,13 @@ mod test {
         let bundle = datastore
             .support_bundle_create(
                 &opctx,
-                "For collection testing",
-                nexus.id(),
-                None,
+                SupportBundleCreateParams {
+                    reason: "For collection testing",
+                    nexus_id: nexus.id(),
+                    user_comment: None,
+                    data_selection: BundleDataSelection::all()
+                        .with_specific_sleds([]),
+                },
             )
             .await
             .expect("Couldn't allocate a support bundle");
@@ -1529,14 +1857,12 @@ mod test {
             false,
             nexus.id(),
         );
-        let mut request = BundleRequest::default();
-        request.data_selection.insert(BundleData::HostInfo(HashSet::new()));
         let report = collector
-            .collect_bundle(&opctx, &request)
+            .collect_bundle(&opctx)
             .await
             .expect("Collection should have succeeded under test")
             .expect("Collecting the bundle should have generated a report");
-        assert_eq!(report.bundle, bundle.id.into());
+        assert_eq!(report.collection.bundle, bundle.id.into());
 
         // Mark the bundle as "failing" - this should be triggered
         // automatically by the blueprint executor if the corresponding
@@ -1599,9 +1925,13 @@ mod test {
         let bundle = datastore
             .support_bundle_create(
                 &opctx,
-                "Testing reconfigurator state collection",
-                nexus.id(),
-                None,
+                SupportBundleCreateParams {
+                    reason: "Testing reconfigurator state collection",
+                    nexus_id: nexus.id(),
+                    user_comment: None,
+                    data_selection: BundleDataSelection::all()
+                        .with_specific_sleds([]),
+                },
             )
             .await
             .expect("Couldn't allocate a support bundle");
@@ -1615,14 +1945,12 @@ mod test {
         );
 
         // Collect the bundle
-        let mut request = BundleRequest::default();
-        request.data_selection.insert(BundleData::HostInfo(HashSet::new()));
         let report = collector
-            .collect_bundle(&opctx, &request)
+            .collect_bundle(&opctx)
             .await
             .expect("Collection should have succeeded under test")
             .expect("Collecting the bundle should have generated a report");
-        assert_eq!(report.bundle, bundle.id.into());
+        assert_eq!(report.collection.bundle, bundle.id.into());
 
         // Verify bundle is active
         let observed_bundle = datastore
@@ -1676,5 +2004,140 @@ mod test {
                 .is_empty(),
             "Should have blueprints"
         );
+    }
+
+    // Verify that a bundle created with a limited data selection only runs
+    // the corresponding collection steps (others are skipped).
+    #[nexus_test(server = crate::Server)]
+    async fn test_per_bundle_data_selection(
+        cptestctx: &ControlPlaneTestContext,
+    ) {
+        let nexus = &cptestctx.server.server_context().nexus;
+        let datastore = nexus.datastore();
+        let resolver = nexus.resolver();
+        let opctx = OpContext::for_tests(
+            cptestctx.logctx.log.clone(),
+            datastore.clone(),
+        );
+
+        let _datasets =
+            TestDataset::setup(cptestctx, &datastore, &opctx, 1).await;
+
+        // Create a bundle that only requests reconfigurator state -
+        // everything else should be skipped.
+        let bundle = datastore
+            .support_bundle_create(
+                &opctx,
+                SupportBundleCreateParams {
+                    reason: "Testing per-bundle data selection",
+                    nexus_id: nexus.id(),
+                    user_comment: None,
+                    data_selection: BundleDataSelection::new()
+                        .with_reconfigurator(),
+                },
+            )
+            .await
+            .expect("Couldn't allocate a support bundle");
+        assert_eq!(bundle.state, SupportBundleState::Collecting);
+
+        let collector = SupportBundleCollector::new(
+            datastore.clone(),
+            resolver.clone(),
+            false,
+            nexus.id(),
+        );
+
+        let report = collector
+            .collect_bundle(&opctx)
+            .await
+            .expect("Collection should have succeeded")
+            .expect("Should have generated a report");
+        assert_eq!(report.collection.bundle, bundle.id.into());
+        assert!(report.activated_in_db_ok);
+
+        // Reconfigurator state should have run successfully.
+        let reconfig_step = report
+            .collection
+            .steps
+            .iter()
+            .find(|s| {
+                s.name == SupportBundleCollectionStep::STEP_RECONFIGURATOR_STATE
+            })
+            .expect("should have reconfigurator state step");
+        assert_eq!(reconfig_step.status, SupportBundleCollectionStepStatus::Ok);
+
+        // Ereports should be skipped since we didn't request them.
+        let ereport_step = report
+            .collection
+            .steps
+            .iter()
+            .find(|s| s.name == SupportBundleCollectionStep::STEP_EREPORTS)
+            .expect("should have ereports step");
+        assert_eq!(
+            ereport_step.status,
+            SupportBundleCollectionStepStatus::Skipped
+        );
+
+        // Sled cubby info should be skipped.
+        let cubby_step = report
+            .collection
+            .steps
+            .iter()
+            .find(|s| {
+                s.name == SupportBundleCollectionStep::STEP_SLED_CUBBY_INFO
+            })
+            .expect("should have sled cubby info step");
+        assert_eq!(
+            cubby_step.status,
+            SupportBundleCollectionStepStatus::Skipped
+        );
+
+        // SP dumps should be skipped.
+        let sp_step = report
+            .collection
+            .steps
+            .iter()
+            .find(|s| {
+                s.name == SupportBundleCollectionStep::STEP_SPAWN_SP_DUMPS
+            })
+            .expect("should have SP dumps step");
+        assert_eq!(sp_step.status, SupportBundleCollectionStepStatus::Skipped);
+
+        // Sled queries should be skipped.
+        let sled_step = report
+            .collection
+            .steps
+            .iter()
+            .find(|s| s.name == SupportBundleCollectionStep::STEP_SPAWN_SLEDS)
+            .expect("should have sled query step");
+        assert_eq!(
+            sled_step.status,
+            SupportBundleCollectionStepStatus::Skipped
+        );
+    }
+
+    // Ensure that we can convert a temporary directory into a zipfile
+    #[test]
+    fn test_zipfile_creation() {
+        let dir = camino_tempfile::tempdir().unwrap();
+        let tempdir_for_zip = camino_tempfile::tempdir().unwrap();
+
+        std::fs::create_dir_all(dir.path().join("dir-a")).unwrap();
+        std::fs::create_dir_all(dir.path().join("dir-b")).unwrap();
+        std::fs::write(dir.path().join("dir-a").join("file-a"), "some data")
+            .unwrap();
+        std::fs::write(dir.path().join("file-b"), "more data").unwrap();
+
+        let zipfile = bundle_to_zipfile(&dir, tempdir_for_zip.path())
+            .expect("Should have been able to bundle zipfile");
+        let archive = zip::read::ZipArchive::new(zipfile).unwrap();
+
+        // We expect the order to be deterministically alphabetical
+        let mut names = archive.file_names();
+        assert_eq!(names.next(), Some("dir-a/"));
+        assert_eq!(names.next(), Some("dir-a/file-a"));
+        assert_eq!(names.next(), Some("dir-b/"));
+        assert_eq!(names.next(), Some("file-b"));
+        assert_eq!(names.next(), None);
     }
 }

@@ -6,7 +6,7 @@ use crate::HostFlashHashPolicy;
 use crate::Responsiveness;
 use crate::SimulatedSp;
 use crate::config::GimletConfig;
-use crate::config::SpComponentConfig;
+use crate::config::SpCommonConfig;
 use crate::ereport;
 use crate::ereport::EreportState;
 use crate::helpers::rot_state_v2;
@@ -50,6 +50,7 @@ use gateway_messages::{MessageKind, version};
 use gateway_types::component::SpState;
 use omicron_common::disk::M2Slot;
 use slog::{Logger, debug, error, info, warn};
+use slog_error_chain::InlineErrorChain;
 use std::cell::Cell;
 use std::collections::HashMap;
 use std::iter;
@@ -414,15 +415,13 @@ impl Gimlet {
             servers,
             ereport_servers,
             ereport_state,
-            gimlet.common.components.clone(),
+            gimlet.common.clone(),
             attached_mgs,
-            gimlet.common.serial_number.clone(),
             incoming_console_tx,
             power_state,
             commands_rx,
             Arc::clone(&last_request_handled),
             log,
-            gimlet.common.old_rot_state,
             update_state,
             Arc::clone(&power_state_changes),
         );
@@ -572,7 +571,7 @@ impl SerialConsoleTcpTask {
                         match try_conn {
                             Ok((conn, addr)) => break (conn, addr),
                             Err(err) => {
-                                warn!(self.log, "error accepting TCP connection: {}", err);
+                                warn!(self.log, "error accepting TCP connection"; InlineErrorChain::new(&err));
                                 continue;
                             }
                         }
@@ -665,27 +664,23 @@ impl UdpTask {
         servers: [UdpServer; 2],
         ereport_servers: Option<[UdpServer; 2]>,
         ereport_state: EreportState,
-        components: Vec<SpComponentConfig>,
+        common: SpCommonConfig,
         attached_mgs: AttachedMgsSerialConsole,
-        serial_number: String,
         incoming_serial_console: HashMap<SpComponent, UnboundedSender<Vec<u8>>>,
         power_state: watch::Sender<GimletPowerState>,
         commands: mpsc::UnboundedReceiver<Command>,
         last_request_handled: Arc<Mutex<Option<SimSpHandledRequest>>>,
         log: Logger,
-        old_rot_state: bool,
         update_state: SimSpUpdate,
         power_state_changes: Arc<AtomicUsize>,
     ) -> (Self, Arc<TokioMutex<Handler>>, watch::Receiver<usize>) {
         let [udp0, udp1] = servers;
         let handler = Arc::new(TokioMutex::new(Handler::new(
-            serial_number,
-            components,
+            common,
             attached_mgs,
             incoming_serial_console,
             power_state,
             log.clone(),
-            old_rot_state,
             update_state,
             power_state_changes,
         )));
@@ -817,9 +812,7 @@ impl UdpTask {
 
 struct Handler {
     log: Logger,
-    serial_number: String,
-
-    components: Vec<SpComponentConfig>,
+    common: SpCommonConfig,
     // `SpHandler` wants `&'static str` references when describing components;
     // this is fine on the real SP where the strings are baked in at build time,
     // but awkward here where we read them in at runtime. We'll leak the strings
@@ -845,23 +838,21 @@ struct Handler {
     // this, our caller will pass us a function to call if they should ignore
     // whatever result we return and fail to respond at all.
     should_fail_to_respond_signal: Option<Box<dyn FnOnce() + Send>>,
-    old_rot_state: bool,
     sp_dumps: HashMap<[u8; 16], u32>,
 }
 
 impl Handler {
     #[allow(clippy::too_many_arguments)]
     fn new(
-        serial_number: String,
-        components: Vec<SpComponentConfig>,
+        common: SpCommonConfig,
         attached_mgs: AttachedMgsSerialConsole,
         incoming_serial_console: HashMap<SpComponent, UnboundedSender<Vec<u8>>>,
         power_state: watch::Sender<GimletPowerState>,
         log: Logger,
-        old_rot_state: bool,
         update_state: SimSpUpdate,
         power_state_changes: Arc<AtomicUsize>,
     ) -> Self {
+        let components = common.components.clone();
         let mut leaked_component_device_strings =
             Vec::with_capacity(components.len());
         let mut leaked_component_description_strings =
@@ -880,11 +871,10 @@ impl Handler {
 
         Self {
             log,
-            components,
+            common,
             sensors,
             leaked_component_device_strings,
             leaked_component_description_strings,
-            serial_number,
             attached_mgs,
             incoming_serial_console,
             startup_options: StartupOptions::empty(),
@@ -893,7 +883,6 @@ impl Handler {
             power_state,
             last_request_handled: None,
             should_fail_to_respond_signal: None,
-            old_rot_state,
             sp_dumps,
             power_state_changes,
         }
@@ -902,12 +891,12 @@ impl Handler {
     fn sp_state_impl(&self) -> SpStateV2 {
         // Make the Baseboard a PC so that our testbeds work as expected.
         let mut model = [0; 32];
-        model[..FAKE_GIMLET_MODEL.len()]
-            .copy_from_slice(FAKE_GIMLET_MODEL.as_bytes());
+        model[..self.common.part_number.len()]
+            .copy_from_slice(self.common.part_number.as_bytes());
 
         SpStateV2 {
             hubris_archive_id: [0; 8],
-            serial_number: serial_number_padded(&self.serial_number),
+            serial_number: serial_number_padded(&self.common.serial_number),
             model,
             revision: 0,
             base_mac_address: [0; 6],
@@ -1372,7 +1361,7 @@ impl SpHandler for Handler {
     }
 
     fn num_devices(&mut self) -> u32 {
-        self.components.len().try_into().unwrap()
+        self.common.components.len().try_into().unwrap()
     }
 
     fn device_description(
@@ -1380,7 +1369,7 @@ impl SpHandler for Handler {
         index: BoundsChecked,
     ) -> DeviceDescription<'static> {
         let index = index.0 as usize;
-        let c = &self.components[index];
+        let c = &self.common.components[index];
         DeviceDescription {
             component: SpComponent::try_from(c.id.as_str()).unwrap(),
             device: self.leaked_component_device_strings[index],
@@ -1460,6 +1449,17 @@ impl SpHandler for Handler {
             "persist" => persist,
         );
         self.update_state.component_set_active_slot(component, slot, persist)
+    }
+
+    fn component_get_persistent_slot(
+        &mut self,
+        component: SpComponent,
+    ) -> std::result::Result<u16, SpError> {
+        debug!(
+            &self.log, "asked for component persistent slot";
+            "component" => ?component,
+        );
+        self.update_state.component_get_persistent_slot(component)
     }
 
     fn component_action(
@@ -1638,7 +1638,7 @@ impl SpHandler for Handler {
         &mut self,
         version: u8,
     ) -> Result<RotBootInfo, SpError> {
-        if self.old_rot_state {
+        if self.common.old_rot_state {
             Err(SpError::RequestUnsupportedForSp)
         } else {
             match version {

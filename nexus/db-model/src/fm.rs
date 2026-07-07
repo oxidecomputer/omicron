@@ -11,18 +11,30 @@
 //!
 //! These types are used when inserting and reading sitreps in CRDB; when in
 //! use, the sitrep is represented as a [`nexus_types::fm::Sitrep`]. See the
-//! documentation in [`nexus_types::fm`] for more information.
+//! documentation in [`nexus_types::fm`] for more information, and the
+//! [crate-level documentation](crate) for general conventions.
 
+use crate::Generation;
 use crate::SqlU32;
 use crate::typed_uuid::DbTypedUuid;
 use chrono::{DateTime, Utc};
 use nexus_db_schema::schema::{fm_sitrep, fm_sitrep_history};
 use omicron_uuid_kinds::{CollectionKind, OmicronZoneKind, SitrepKind};
 
+mod alert_request;
+pub use alert_request::*;
 mod case;
 pub use case::*;
 mod diagnosis_engine;
 pub use diagnosis_engine::*;
+mod rendezvous_created;
+pub use rendezvous_created::*;
+mod fact_physical_disk;
+pub use fact_physical_disk::*;
+mod support_bundle_request;
+pub use support_bundle_request::*;
+mod sitrep_analysis_report;
+pub use sitrep_analysis_report::*;
 
 #[derive(Queryable, Insertable, Clone, Debug, Selectable)]
 #[diesel(table_name = fm_sitrep)]
@@ -33,6 +45,9 @@ pub struct SitrepMetadata {
     pub time_created: DateTime<Utc>,
     pub creator_id: DbTypedUuid<OmicronZoneKind>,
     pub comment: String,
+    pub next_inv_min_time_started: DateTime<Utc>,
+    pub alert_generation: Generation,
+    pub support_bundle_generation: Generation,
 }
 
 impl From<SitrepMetadata> for nexus_types::fm::SitrepMetadata {
@@ -44,14 +59,20 @@ impl From<SitrepMetadata> for nexus_types::fm::SitrepMetadata {
             creator_id,
             comment,
             time_created,
+            next_inv_min_time_started,
+            alert_generation,
+            support_bundle_generation,
         } = db_meta;
         Self {
             id: id.into(),
             parent_sitrep_id: parent_sitrep_id.map(Into::into),
             inv_collection_id: inv_collection_id.into(),
             creator_id: creator_id.into(),
+            next_inv_min_time_started,
             comment,
             time_created,
+            alert_generation: alert_generation.into(),
+            support_bundle_generation: support_bundle_generation.into(),
         }
     }
 }
@@ -65,6 +86,9 @@ impl From<nexus_types::fm::SitrepMetadata> for SitrepMetadata {
             creator_id,
             comment,
             time_created,
+            next_inv_min_time_started,
+            alert_generation,
+            support_bundle_generation,
         } = db_meta;
         Self {
             id: id.into(),
@@ -73,6 +97,9 @@ impl From<nexus_types::fm::SitrepMetadata> for SitrepMetadata {
             creator_id: creator_id.into(),
             comment,
             time_created,
+            next_inv_min_time_started,
+            alert_generation: alert_generation.into(),
+            support_bundle_generation: support_bundle_generation.into(),
         }
     }
 }

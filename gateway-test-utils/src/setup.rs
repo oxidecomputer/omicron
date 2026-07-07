@@ -2,8 +2,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-// Copyright 2022 Oxide Computer Company
-
 use camino::Utf8Path;
 use camino::Utf8PathBuf;
 use dropshot::test_util::LogContext;
@@ -17,6 +15,7 @@ use omicron_test_utils::dev::poll::CondCheckError;
 use qorb::resolver::AllBackends;
 use qorb::resolver::Resolver;
 use qorb::resolvers::fixed::FixedResolver;
+use slog_error_chain::InlineErrorChain;
 use sp_sim::SimRack;
 use sp_sim::SimulatedSp;
 use std::collections::HashSet;
@@ -66,12 +65,18 @@ pub fn load_test_config(
     let config_path = manifest_dir.join("configs/config.test.toml");
     let server_config = omicron_gateway::Config::from_file(&config_path)
         .unwrap_or_else(|e| {
-            panic!("failed to load MGS config from {config_path}: {e}")
+            panic!(
+                "failed to load MGS config from {config_path}: {}",
+                InlineErrorChain::new(&e)
+            )
         });
 
     let sp_sim_config = match sp_sim::Config::from_file(sp_sim_config_file) {
         Ok(config) => config,
-        Err(e) => panic!("failed to load SP simulator config: {e}"),
+        Err(e) => panic!(
+            "failed to load SP simulator config: {}",
+            InlineErrorChain::new(&e)
+        ),
     };
     (server_config, sp_sim_config)
 }
@@ -239,7 +244,7 @@ pub async fn test_setup_with_config(
                 }) {
                 Ok(())
             } else {
-                Err(CondCheckError::NotYet)
+                Err(CondCheckError::NotYet { status: None })
             };
             future::ready(result)
         },

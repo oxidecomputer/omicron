@@ -3,7 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use super::impl_enum_type;
-use nexus_types::external_api;
+use nexus_types::external_api::physical_disk;
 use serde::{Deserialize, Serialize};
 
 impl_enum_type!(
@@ -17,20 +17,20 @@ impl_enum_type!(
     U2 => b"u2"
 );
 
-impl From<external_api::params::PhysicalDiskKind> for PhysicalDiskKind {
-    fn from(k: external_api::params::PhysicalDiskKind) -> Self {
+impl From<physical_disk::PhysicalDiskKind> for PhysicalDiskKind {
+    fn from(k: physical_disk::PhysicalDiskKind) -> Self {
         match k {
-            external_api::params::PhysicalDiskKind::M2 => PhysicalDiskKind::M2,
-            external_api::params::PhysicalDiskKind::U2 => PhysicalDiskKind::U2,
+            physical_disk::PhysicalDiskKind::M2 => PhysicalDiskKind::M2,
+            physical_disk::PhysicalDiskKind::U2 => PhysicalDiskKind::U2,
         }
     }
 }
 
-impl From<PhysicalDiskKind> for external_api::params::PhysicalDiskKind {
+impl From<PhysicalDiskKind> for physical_disk::PhysicalDiskKind {
     fn from(value: PhysicalDiskKind) -> Self {
         match value {
-            PhysicalDiskKind::M2 => external_api::params::PhysicalDiskKind::M2,
-            PhysicalDiskKind::U2 => external_api::params::PhysicalDiskKind::U2,
+            PhysicalDiskKind::M2 => physical_disk::PhysicalDiskKind::M2,
+            PhysicalDiskKind::U2 => physical_disk::PhysicalDiskKind::U2,
         }
     }
 }

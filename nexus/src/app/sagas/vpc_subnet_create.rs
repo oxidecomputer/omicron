@@ -7,10 +7,11 @@ use super::ActionRegistry;
 use super::NexusActionContext;
 use super::NexusSaga;
 use crate::app::sagas::declare_saga_actions;
-use crate::external_api::params;
 use nexus_db_lookup::LookupPath;
 use nexus_db_queries::db::queries::vpc_subnet::InsertVpcSubnetError;
 use nexus_db_queries::{authn, authz, db};
+use nexus_types::external_api::vpc;
+use nexus_types::saga::saga_action_failed;
 use omicron_common::api::external;
 use oxnet::IpNet;
 use oxnet::Ipv6Net;
@@ -25,7 +26,7 @@ use uuid::Uuid;
 #[derive(Debug, Deserialize, Serialize)]
 pub(crate) struct Params {
     pub serialized_authn: authn::saga::Serialized,
-    pub subnet_create: params::VpcSubnetCreate,
+    pub subnet_create: vpc::VpcSubnetCreate,
     /// We create at most one IPv6 block in the subnet, but have a retry loop
     /// in case of collisions when randomly generating a block. Our random
     /// choices are fixed ahead of saga start for idempotency.
@@ -187,7 +188,7 @@ async fn svsc_create_subnet(
         Some(Err(InsertVpcSubnetError::External(e))) => Err(e),
         Some(Ok(v)) => Ok(v),
     })
-    .map_err(ActionError::action_failed)
+    .map_err(saga_action_failed)
 }
 
 async fn svsc_create_subnet_undo(
@@ -251,10 +252,10 @@ async fn svsc_create_route(
                 .router_route_id(route_id)
                 .lookup_for(authz::Action::Read)
                 .await
-                .map_err(ActionError::action_failed)
+                .map_err(saga_action_failed)
                 .map(|(.., v)| v)
         }
-        Err(e) => Err(ActionError::action_failed(e)),
+        Err(e) => Err(saga_action_failed(e)),
     }
 }
 
@@ -293,7 +294,7 @@ async fn svsc_link_custom(
             .datastore()
             .vpc_subnet_set_custom_router(&opctx, &authz_subnet, &custom_router)
             .await
-            .map_err(ActionError::action_failed)
+            .map_err(saga_action_failed)
     } else {
         Ok(db_subnet)
     }
@@ -335,7 +336,7 @@ async fn svsc_notify_rpw(
         .datastore()
         .vpc_increment_rpw_version(&opctx, params.authz_vpc.id())
         .await
-        .map_err(ActionError::action_failed)
+        .map_err(saga_action_failed)
 }
 
 #[cfg(test)]
@@ -345,7 +346,6 @@ pub(crate) mod test {
     use crate::{
         app::sagas::vpc_subnet_create::Params,
         app::sagas::vpc_subnet_create::SagaVpcSubnetCreate,
-        external_api::params,
     };
     use async_bb8_diesel::AsyncRunQueryDsl;
     use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
@@ -360,7 +360,8 @@ pub(crate) mod test {
     use nexus_test_utils::resource_helpers::create_default_ip_pools;
     use nexus_test_utils::resource_helpers::create_project;
     use nexus_test_utils_macros::nexus_test;
-    use nexus_types::external_api::params::VpcSelector;
+    use nexus_types::external_api::vpc as vpc_types;
+    use nexus_types::external_api::vpc::VpcSelector;
     use omicron_common::api::external::NameOrId;
     use omicron_common::api::external::{
         self, IdentityMetadataCreateParams, Ipv6NetExt,
@@ -393,7 +394,7 @@ pub(crate) mod test {
 
         Params {
             serialized_authn: Serialized::for_opctx(opctx),
-            subnet_create: params::VpcSubnetCreate {
+            subnet_create: vpc_types::VpcSubnetCreate {
                 identity: IdentityMetadataCreateParams {
                     name: "my-subnet".parse().unwrap(),
                     description: "My New Subnet.".to_string(),

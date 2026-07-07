@@ -6,7 +6,9 @@ use async_trait::async_trait;
 use nexus_db_lookup::LookupPath;
 use nexus_db_queries::context::OpContext;
 use omicron_common::api::external::Error;
-use omicron_uuid_kinds::{GenericUuid, InstanceUuid, PropolisUuid, SledUuid};
+use omicron_uuid_kinds::{
+    GenericUuid, InstanceUuid, PropolisUuid, RackUuid, SledUuid,
+};
 use sled_agent_client::Client as SledAgentClient;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -31,7 +33,7 @@ pub struct InstanceSledAgentInfo {
 #[async_trait]
 pub trait TestInterfaces {
     /// Access the Rack ID of the currently executing Nexus.
-    fn rack_id(&self) -> Uuid;
+    fn rack_id(&self) -> RackUuid;
 
     /// Attempts to obtain the Propolis ID and sled agent information for an
     /// instance.
@@ -73,7 +75,7 @@ pub trait TestInterfaces {
 
 #[async_trait]
 impl TestInterfaces for super::Nexus {
-    fn rack_id(&self) -> Uuid {
+    fn rack_id(&self) -> RackUuid {
         self.rack_id
     }
 
@@ -159,7 +161,7 @@ impl TestInterfaces for super::Nexus {
                 .fetch()
                 .await?;
 
-        let new_runtime = db_disk.runtime_state.faulted();
+        let new_runtime = db_disk.runtime().faulted();
 
         self.db_datastore
             .disk_update_runtime(&opctx, &authz_disk, &new_runtime)
@@ -172,12 +174,9 @@ impl TestInterfaces for super::Nexus {
     }
 
     fn invalidate_multicast_caches(&self) {
-        if let Some(flag) =
-            &self.background_tasks_internal.multicast_invalidate_cache
-        {
-            flag.store(true, std::sync::atomic::Ordering::SeqCst);
-            self.background_tasks
-                .activate(&self.background_tasks.task_multicast_reconciler);
-        }
+        // Cache invalidation happens automatically when the reconciler detects
+        // sled location changes. Activating the reconciler is sufficient.
+        self.background_tasks
+            .activate(&self.background_tasks.task_multicast_reconciler);
     }
 }

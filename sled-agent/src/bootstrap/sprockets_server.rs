@@ -10,13 +10,16 @@ use crate::bootstrap::params::version;
 use crate::bootstrap::views::Response;
 use crate::bootstrap::views::ResponseEnvelope;
 use crate::bootstrap::views::SledAgentResponse;
+use sled_agent_measurements::MeasurementsHandle;
 use sled_agent_types::sled::StartSledAgentRequest;
 use slog::Logger;
+use slog_error_chain::InlineErrorChain;
 use sprockets_tls::Stream;
 use sprockets_tls::keys::SprocketsConfig;
 use sprockets_tls::server::Server;
 use std::io;
 use std::net::SocketAddrV6;
+use std::sync::Arc;
 use tokio::io::AsyncReadExt;
 use tokio::io::AsyncWriteExt;
 use tokio::io::BufStream;
@@ -33,12 +36,14 @@ pub(super) struct SprocketsServer {
     listener: Server,
     tx_requests: TxRequestsChannel,
     log: Logger,
+    measurements: Arc<MeasurementsHandle>,
 }
 
 impl SprocketsServer {
     pub(super) async fn bind(
         bind_addr: SocketAddrV6,
         tx_requests: TxRequestsChannel,
+        measurements: Arc<MeasurementsHandle>,
         sprockets_conf: SprocketsConfig,
         base_log: &Logger,
     ) -> io::Result<Self> {
@@ -49,7 +54,7 @@ impl SprocketsServer {
         let listener =
             Server::new(sprockets_conf, bind_addr, log.clone()).await.unwrap();
         info!(log, "Started listening"; "local_addr" => %bind_addr);
-        Ok(Self { listener, tx_requests, log })
+        Ok(Self { listener, tx_requests, log, measurements })
     }
 
     /// Run the sprockets server.
@@ -62,9 +67,16 @@ impl SprocketsServer {
     pub(super) async fn run(self) {
         loop {
             // Sprockets actually _uses_ the key here!
-            // TODO: Once we have a corpus, use it.
             // Will we ever have one at RSS time?
-            let corpus = vec![];
+            let corpus = match self.measurements.current_measurements() {
+                Ok(c) => c,
+                Err(e) => {
+                    // Not much we can do here besides log the error and use
+                    // an empty corpus
+                    error!(self.log, "measurement error; using empty corpus"; &e);
+                    vec![]
+                }
+            };
             let acceptor = match self.listener.accept(corpus).await {
                 Ok(acceptor) => acceptor,
                 Err(err) => {
@@ -160,10 +172,9 @@ async fn read_request(
     const MAX_REQUEST_LEN: u32 = 128 << 20;
 
     // Read request, length prefix first.
-    let request_length = stream
-        .read_u32()
-        .await
-        .map_err(|err| format!("Failed to read length prefix: {err}"))?;
+    let request_length = stream.read_u32().await.map_err(|err| {
+        format!("Failed to read length prefix: {}", InlineErrorChain::new(&err))
+    })?;
 
     // Sanity check / guard against malformed lengths
     if request_length > MAX_REQUEST_LEN {
@@ -174,7 +185,10 @@ async fn read_request(
 
     let mut buf = vec![0; request_length as usize];
     stream.read_exact(&mut buf).await.map_err(|err| {
-        format!("Failed to read message of length {request_length}: {err}")
+        format!(
+            "Failed to read message of length {request_length}: {}",
+            InlineErrorChain::new(&err)
+        )
     })?;
 
     // Deserialize request.
@@ -207,16 +221,23 @@ async fn write_response(
         .expect("serialized bootstrap-agent response length overflowed u32");
 
     stream.write_u32(response_length).await.map_err(|err| {
-        format!("Failed to write response length prefix: {err}")
+        format!(
+            "Failed to write response length prefix: {}",
+            InlineErrorChain::new(&err)
+        )
     })?;
-    stream
-        .write_all(&buf)
-        .await
-        .map_err(|err| format!("Failed to write response body: {err}"))?;
-    stream
-        .flush()
-        .await
-        .map_err(|err| format!("Failed to flush response body: {err}"))?;
+    stream.write_all(&buf).await.map_err(|err| {
+        format!(
+            "Failed to write response body: {}",
+            InlineErrorChain::new(&err)
+        )
+    })?;
+    stream.flush().await.map_err(|err| {
+        format!(
+            "Failed to flush response body: {}",
+            InlineErrorChain::new(&err)
+        )
+    })?;
 
     Ok(())
 }
