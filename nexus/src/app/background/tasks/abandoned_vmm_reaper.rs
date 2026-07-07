@@ -60,6 +60,15 @@ impl AbandonedVmmReaper {
         status: &mut AbandonedVmmReaperStatus,
         opctx: &OpContext,
     ) -> Result<(), anyhow::Error> {
+        self.reap_all_vmms(status, opctx).await
+    }
+
+    /// Reap all abandoned VMMs.
+    async fn reap_all_vmms(
+        &mut self,
+        status: &mut AbandonedVmmReaperStatus,
+        opctx: &OpContext,
+    ) -> Result<(), anyhow::Error> {
         let mut paginator = Paginator::new(
             SQL_BATCH_SIZE,
             dropshot::PaginationOrder::Ascending,
@@ -71,7 +80,7 @@ impl AbandonedVmmReaper {
                 .await
                 .context("failed to list abandoned VMMs")?;
             paginator = p.found_batch(&vmms, &|vmm| vmm.id);
-            self.reap_batch(status, opctx, &vmms).await;
+            self.reap_vmm_batch(status, opctx, &vmms).await;
         }
 
         Ok(())
@@ -85,7 +94,7 @@ impl AbandonedVmmReaper {
     /// query to list abandoned VMMs, ensure that the VMM record is deleted, and
     /// *then* perform the cleanup with the stale list of abandoned VMMs, rather
     /// than doing it all in one go. Thus, this is factored out.
-    async fn reap_batch(
+    async fn reap_vmm_batch(
         &mut self,
         status: &mut AbandonedVmmReaperStatus,
         opctx: &OpContext,
@@ -392,7 +401,7 @@ mod tests {
 
         let mut status = AbandonedVmmReaperStatus::default();
         let mut task = AbandonedVmmReaper::new(datastore.clone());
-        task.reap_batch(&mut status, &opctx, &abandoned_vmms).await;
+        task.reap_vmm_batch(&mut status, &opctx, &abandoned_vmms).await;
         dbg!(&status);
 
         assert_eq!(status.vmms_found, 1);
@@ -444,7 +453,7 @@ mod tests {
 
         let mut status = AbandonedVmmReaperStatus::default();
         let mut task = AbandonedVmmReaper::new(datastore.clone());
-        task.reap_batch(&mut status, &opctx, &abandoned_vmms).await;
+        task.reap_vmm_batch(&mut status, &opctx, &abandoned_vmms).await;
         dbg!(&status);
 
         assert_eq!(status.vmms_found, 1);
