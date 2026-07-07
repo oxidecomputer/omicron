@@ -644,14 +644,17 @@ async fn test_silo_collaborator_can_promote_demote_images(
     let silo_images_url = "/v1/images";
 
     // Create a project image as the unprivileged user (silo collaborator can do this)
-    let image_create_params = get_image_create(
-        params::ImageSource::YouCanBootAnythingAsLongAsItsAlpine,
-    );
+    create_disk(client, PROJECT_NAME, DISK_NAME).await;
+    let snapshot =
+        create_snapshot(client, PROJECT_NAME, DISK_NAME, DISK_NAME).await;
+    let image_create_params = get_image_create(image::ImageSource::Snapshot {
+        id: snapshot.identity.id,
+    });
 
     let image =
         NexusRequest::objects_post(client, &images_url, &image_create_params)
             .authn_as(AuthnMode::UnprivilegedUser)
-            .execute_and_parse_unwrap::<views::Image>()
+            .execute_and_parse_unwrap::<image::Image>()
             .await;
 
     let image_id = image.identity.id;
@@ -663,13 +666,13 @@ async fn test_silo_collaborator_can_promote_demote_images(
             .expect_status(Some(http::StatusCode::ACCEPTED)),
     )
     .authn_as(AuthnMode::UnprivilegedUser)
-    .execute_and_parse_unwrap::<views::Image>()
+    .execute_and_parse_unwrap::<image::Image>()
     .await;
 
     // Verify the image is now a silo image
     let silo_images = NexusRequest::object_get(client, &silo_images_url)
         .authn_as(AuthnMode::UnprivilegedUser)
-        .execute_and_parse_unwrap::<ResultsPage<views::Image>>()
+        .execute_and_parse_unwrap::<ResultsPage<image::Image>>()
         .await
         .items;
 
@@ -684,13 +687,13 @@ async fn test_silo_collaborator_can_promote_demote_images(
             .expect_status(Some(http::StatusCode::ACCEPTED)),
     )
     .authn_as(AuthnMode::UnprivilegedUser)
-    .execute_and_parse_unwrap::<views::Image>()
+    .execute_and_parse_unwrap::<image::Image>()
     .await;
 
     // Verify the image is back in the project
     let project_images = NexusRequest::object_get(client, &images_url)
         .authn_as(AuthnMode::UnprivilegedUser)
-        .execute_and_parse_unwrap::<ResultsPage<views::Image>>()
+        .execute_and_parse_unwrap::<ResultsPage<image::Image>>()
         .await
         .items;
 
@@ -705,7 +708,7 @@ async fn test_silo_collaborator_can_promote_demote_images(
             .expect_status(Some(http::StatusCode::ACCEPTED)),
     )
     .authn_as(AuthnMode::UnprivilegedUser)
-    .execute_and_parse_unwrap::<views::Image>()
+    .execute_and_parse_unwrap::<image::Image>()
     .await;
 
     // Delete the silo image as collaborator - should succeed
@@ -722,7 +725,7 @@ async fn test_silo_collaborator_can_promote_demote_images(
     // Verify no silo images remain
     let silo_images = NexusRequest::object_get(client, &silo_images_url)
         .authn_as(AuthnMode::UnprivilegedUser)
-        .execute_and_parse_unwrap::<ResultsPage<views::Image>>()
+        .execute_and_parse_unwrap::<ResultsPage<image::Image>>()
         .await
         .items;
 
@@ -753,14 +756,17 @@ async fn test_silo_limited_collaborator_can_promote_demote_images(
     let images_url = get_project_images_url(PROJECT_NAME);
     let silo_images_url = "/v1/images";
 
-    let image_create_params = get_image_create(
-        params::ImageSource::YouCanBootAnythingAsLongAsItsAlpine,
-    );
+    create_disk(client, PROJECT_NAME, DISK_NAME).await;
+    let snapshot =
+        create_snapshot(client, PROJECT_NAME, DISK_NAME, DISK_NAME).await;
+    let image_create_params = get_image_create(image::ImageSource::Snapshot {
+        id: snapshot.identity.id,
+    });
 
     let image =
         NexusRequest::objects_post(client, &images_url, &image_create_params)
             .authn_as(AuthnMode::UnprivilegedUser)
-            .execute_and_parse_unwrap::<views::Image>()
+            .execute_and_parse_unwrap::<image::Image>()
             .await;
 
     let image_id = image.identity.id;
@@ -768,7 +774,7 @@ async fn test_silo_limited_collaborator_can_promote_demote_images(
     // Verify the image is in the project
     let project_images = NexusRequest::object_get(client, &images_url)
         .authn_as(AuthnMode::UnprivilegedUser)
-        .execute_and_parse_unwrap::<ResultsPage<views::Image>>()
+        .execute_and_parse_unwrap::<ResultsPage<image::Image>>()
         .await
         .items;
 
@@ -782,13 +788,13 @@ async fn test_silo_limited_collaborator_can_promote_demote_images(
             .expect_status(Some(http::StatusCode::ACCEPTED)),
     )
     .authn_as(AuthnMode::UnprivilegedUser)
-    .execute_and_parse_unwrap::<views::Image>()
+    .execute_and_parse_unwrap::<image::Image>()
     .await;
 
     // Verify the image is now a silo image
     let silo_images = NexusRequest::object_get(client, &silo_images_url)
         .authn_as(AuthnMode::UnprivilegedUser)
-        .execute_and_parse_unwrap::<ResultsPage<views::Image>>()
+        .execute_and_parse_unwrap::<ResultsPage<image::Image>>()
         .await
         .items;
 
@@ -798,7 +804,7 @@ async fn test_silo_limited_collaborator_can_promote_demote_images(
     // Verify no project images remain
     let project_images = NexusRequest::object_get(client, &images_url)
         .authn_as(AuthnMode::UnprivilegedUser)
-        .execute_and_parse_unwrap::<ResultsPage<views::Image>>()
+        .execute_and_parse_unwrap::<ResultsPage<image::Image>>()
         .await
         .items;
 
@@ -812,13 +818,13 @@ async fn test_silo_limited_collaborator_can_promote_demote_images(
             .expect_status(Some(http::StatusCode::ACCEPTED)),
     )
     .authn_as(AuthnMode::UnprivilegedUser)
-    .execute_and_parse_unwrap::<views::Image>()
+    .execute_and_parse_unwrap::<image::Image>()
     .await;
 
     // Verify the image is back in the project
     let project_images = NexusRequest::object_get(client, &images_url)
         .authn_as(AuthnMode::UnprivilegedUser)
-        .execute_and_parse_unwrap::<ResultsPage<views::Image>>()
+        .execute_and_parse_unwrap::<ResultsPage<image::Image>>()
         .await
         .items;
 
@@ -828,7 +834,7 @@ async fn test_silo_limited_collaborator_can_promote_demote_images(
     // Verify no silo images remain
     let silo_images = NexusRequest::object_get(client, &silo_images_url)
         .authn_as(AuthnMode::UnprivilegedUser)
-        .execute_and_parse_unwrap::<ResultsPage<views::Image>>()
+        .execute_and_parse_unwrap::<ResultsPage<image::Image>>()
         .await
         .items;
 
@@ -842,13 +848,13 @@ async fn test_silo_limited_collaborator_can_promote_demote_images(
             .expect_status(Some(http::StatusCode::ACCEPTED)),
     )
     .authn_as(AuthnMode::UnprivilegedUser)
-    .execute_and_parse_unwrap::<views::Image>()
+    .execute_and_parse_unwrap::<image::Image>()
     .await;
 
     // Verify it's a silo image
     let silo_images = NexusRequest::object_get(client, &silo_images_url)
         .authn_as(AuthnMode::UnprivilegedUser)
-        .execute_and_parse_unwrap::<ResultsPage<views::Image>>()
+        .execute_and_parse_unwrap::<ResultsPage<image::Image>>()
         .await
         .items;
 
@@ -868,7 +874,7 @@ async fn test_silo_limited_collaborator_can_promote_demote_images(
     // Verify no silo images remain
     let silo_images = NexusRequest::object_get(client, &silo_images_url)
         .authn_as(AuthnMode::UnprivilegedUser)
-        .execute_and_parse_unwrap::<ResultsPage<views::Image>>()
+        .execute_and_parse_unwrap::<ResultsPage<image::Image>>()
         .await
         .items;
 
@@ -899,14 +905,17 @@ async fn test_silo_viewer_cannot_promote_demote_images(
     let images_url = get_project_images_url(PROJECT_NAME);
 
     // Create a project image as privileged user
-    let image_create_params = get_image_create(
-        params::ImageSource::YouCanBootAnythingAsLongAsItsAlpine,
-    );
+    create_disk(client, PROJECT_NAME, DISK_NAME).await;
+    let snapshot =
+        create_snapshot(client, PROJECT_NAME, DISK_NAME, DISK_NAME).await;
+    let image_create_params = get_image_create(image::ImageSource::Snapshot {
+        id: snapshot.identity.id,
+    });
 
     let image =
         NexusRequest::objects_post(client, &images_url, &image_create_params)
             .authn_as(AuthnMode::PrivilegedUser)
-            .execute_and_parse_unwrap::<views::Image>()
+            .execute_and_parse_unwrap::<image::Image>()
             .await;
 
     let image_id = image.identity.id;
@@ -928,7 +937,7 @@ async fn test_silo_viewer_cannot_promote_demote_images(
             .expect_status(Some(http::StatusCode::ACCEPTED)),
     )
     .authn_as(AuthnMode::PrivilegedUser)
-    .execute_and_parse_unwrap::<views::Image>()
+    .execute_and_parse_unwrap::<image::Image>()
     .await;
 
     // Attempt to demote the image as viewer - should fail
@@ -979,14 +988,17 @@ async fn test_project_collaborator_cannot_promote_demote_images(
     let images_url = get_project_images_url(PROJECT_NAME);
 
     // Create a project image as the unprivileged user (project collaborator can do this)
-    let image_create_params = get_image_create(
-        params::ImageSource::YouCanBootAnythingAsLongAsItsAlpine,
-    );
+    create_disk(client, PROJECT_NAME, DISK_NAME).await;
+    let snapshot =
+        create_snapshot(client, PROJECT_NAME, DISK_NAME, DISK_NAME).await;
+    let image_create_params = get_image_create(image::ImageSource::Snapshot {
+        id: snapshot.identity.id,
+    });
 
     let image =
         NexusRequest::objects_post(client, &images_url, &image_create_params)
             .authn_as(AuthnMode::UnprivilegedUser)
-            .execute_and_parse_unwrap::<views::Image>()
+            .execute_and_parse_unwrap::<image::Image>()
             .await;
 
     let image_id = image.identity.id;
@@ -1008,7 +1020,7 @@ async fn test_project_collaborator_cannot_promote_demote_images(
             .expect_status(Some(http::StatusCode::ACCEPTED)),
     )
     .authn_as(AuthnMode::PrivilegedUser)
-    .execute_and_parse_unwrap::<views::Image>()
+    .execute_and_parse_unwrap::<image::Image>()
     .await;
 
     // Attempt to demote the image as project collaborator - should fail
@@ -1062,14 +1074,17 @@ async fn test_project_limited_collaborator_cannot_promote_demote_images(
     let images_url = get_project_images_url(PROJECT_NAME);
 
     // Create a project image as the unprivileged user (project limited-collaborator can do this)
-    let image_create_params = get_image_create(
-        params::ImageSource::YouCanBootAnythingAsLongAsItsAlpine,
-    );
+    create_disk(client, PROJECT_NAME, DISK_NAME).await;
+    let snapshot =
+        create_snapshot(client, PROJECT_NAME, DISK_NAME, DISK_NAME).await;
+    let image_create_params = get_image_create(image::ImageSource::Snapshot {
+        id: snapshot.identity.id,
+    });
 
     let image =
         NexusRequest::objects_post(client, &images_url, &image_create_params)
             .authn_as(AuthnMode::UnprivilegedUser)
-            .execute_and_parse_unwrap::<views::Image>()
+            .execute_and_parse_unwrap::<image::Image>()
             .await;
 
     let image_id = image.identity.id;
@@ -1091,7 +1106,7 @@ async fn test_project_limited_collaborator_cannot_promote_demote_images(
             .expect_status(Some(http::StatusCode::ACCEPTED)),
     )
     .authn_as(AuthnMode::PrivilegedUser)
-    .execute_and_parse_unwrap::<views::Image>()
+    .execute_and_parse_unwrap::<image::Image>()
     .await;
 
     // Attempt to demote the image as project limited-collaborator - should fail
