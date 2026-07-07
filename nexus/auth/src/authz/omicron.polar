@@ -891,20 +891,6 @@ resource SiloImageList {
 has_relation(silo: Silo, "containing_silo", collection: SiloImageList)
 	if collection.silo = silo;
 
-# SiloImage modifications for limited-collaborator
-# By default, SiloImage uses the InSilo pattern where only "collaborator" can
-# modify. We extend this to also allow "limited-collaborator" to modify silo
-# images. Note that the "modify" permission gates the Modify, ModifyPolicy,
-# and Delete actions, so this rule is what allows limited-collaborators to
-# demote and delete silo images. Limited-collaborator is restricted from VPC
-# operations but should have full image management capabilities.
-#
-# Note: If more silo-level resources need limited-collaborator access in the
-# future, consider creating InSiloLimited and InSiloFull macro patterns,
-# similar to InProjectLimited and InProjectFull.
-has_permission(actor: Actor, "modify", silo_image: SiloImage) if
-	has_role(actor, "limited-collaborator", silo_image.silo);
-
 # Describes the policy for accessing "/v1/system/subnet-pools" in the API
 resource SubnetPoolList {
 	permissions = [

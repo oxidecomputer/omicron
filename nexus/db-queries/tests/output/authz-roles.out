@@ -573,7 +573,7 @@ resource: SiloImage "silo1-silo-image"
   fleet-viewer                      ∅  ∅  ∅  ∅  ∅  ∅  ∅  ∅
   silo1-admin                       ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
   silo1-collaborator                ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
-  silo1-limited-collaborator        ✘  ✔  ✔  ✔  ✔  ✔  ✘  ✔
+  silo1-limited-collaborator        ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
   silo1-viewer                      ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
   silo1-user-self                   ∅  ∅  ∅  ∅  ∅  ∅  ∅  ∅
   silo1-proj1-admin                 ∅  ∅  ∅  ∅  ∅  ∅  ∅  ∅
@@ -636,7 +636,7 @@ resource: Image "silo1-image"
   fleet-viewer                      ∅  ∅  ∅  ∅  ∅  ∅  ∅  ∅
   silo1-admin                       ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
   silo1-collaborator                ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
-  silo1-limited-collaborator        ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
+  silo1-limited-collaborator        ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
   silo1-viewer                      ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
   silo1-user-self                   ∅  ∅  ∅  ∅  ∅  ∅  ∅  ∅
   silo1-proj1-admin                 ∅  ∅  ∅  ∅  ∅  ∅  ∅  ∅
