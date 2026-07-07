@@ -203,6 +203,7 @@ pub use user_data_export::*;
 pub use virtual_provisioning_collection::StorageType;
 pub use vmm::VmmStateUpdateResult;
 pub use volume::*;
+pub use webhook_delivery::WebhookDeliveryFilters;
 
 // Number of unique datasets required to back a region.
 // TODO: This should likely turn into a configuration option.

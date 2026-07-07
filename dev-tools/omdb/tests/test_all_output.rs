@@ -83,6 +83,10 @@ async fn test_omdb_usage_errors() {
         &["db", "alert", "list", "--help"],
         // Nonexistent alert class
         &["db", "alert", "list", "--classes", "test.foo.bar", "test.foo.box"],
+        &["db", "alert", "webhook", "delivery", "list", "--help"],
+        // Nonexistent webhook delivery state and trigger
+        &["db", "alert", "webhook", "delivery", "list", "--state", "bogus"],
+        &["db", "alert", "webhook", "delivery", "list", "--trigger", "bogus"],
         &["db", "disks"],
         &["db", "dns"],
         &["db", "dns", "diff"],

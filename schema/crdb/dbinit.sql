@@ -7401,6 +7401,25 @@ ON omicron.public.webhook_delivery (
 ) WHERE
     time_completed IS NULL;
 
+
+-- Order/filter deliveries by creation time, regardless of completion state.
+CREATE INDEX IF NOT EXISTS lookup_webhook_deliveries_by_time_created
+ON omicron.public.webhook_delivery (
+    time_created, id
+);
+
+-- Filter deliveries by their delivery state.
+CREATE INDEX IF NOT EXISTS lookup_webhook_deliveries_by_state
+ON omicron.public.webhook_delivery (
+    state
+);
+
+-- Filter deliveries by their trigger.
+CREATE INDEX IF NOT EXISTS lookup_webhook_deliveries_by_trigger
+ON omicron.public.webhook_delivery (
+    triggered_by
+);
+
 CREATE TYPE IF NOT EXISTS omicron.public.webhook_delivery_attempt_result as ENUM (
     -- The delivery attempt failed with an HTTP error.
     'failed_http_error',
@@ -8992,7 +9011,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '275.0.0', NULL)
+    (TRUE, NOW(), NOW(), '276.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

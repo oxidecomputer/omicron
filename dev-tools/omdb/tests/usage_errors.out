@@ -397,6 +397,105 @@ error: invalid value 'test.foo.box' for '--classes <CLASSES>...'
 
 For more information, try '--help'.
 =============================================
+EXECUTING COMMAND: omdb ["db", "alert", "webhook", "delivery", "list", "--help"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+List webhook deliveries
+
+Usage: omdb db alert webhook delivery list [OPTIONS]
+
+Options:
+      --log-level <LOG_LEVEL>
+          log level filter
+          
+          [env: LOG_LEVEL=]
+          [default: warn]
+
+  -r, --receiver <RECEIVER>
+          If present, show only deliveries to this receiver
+
+  -A, --alert <ALERT>
+          If present, select only deliveries for the given alert
+
+  -s, --state <STATES>...
+          If present, select only deliveries in the provided state(s)
+          
+          If multiple values are provided, deliveries in any of those states will be included in the
+          output.
+          
+          [possible values: pending, delivered, failed]
+
+      --color <COLOR>
+          Color output
+          
+          [default: auto]
+          [possible values: auto, always, never]
+
+  -t, --trigger <TRIGGERS>...
+          If present, select only deliveries with the provided trigger(s)
+          
+          If multiple values are provided, deliveries with any of those triggers will be included in
+          the output.
+          
+          [possible values: alert, resend, probe]
+
+  -b, --before <BEFORE>
+          Include only delivery entries created before this timestamp
+
+  -a, --after <AFTER>
+          Include only delivery entries created after this timestamp
+
+  -h, --help
+          Print help (see a summary with '-h')
+
+Connection Options:
+      --db-url <DB_URL>
+          URL of the database SQL interface
+          
+          [env: OMDB_DB_URL=]
+
+      --dns-server <DNS_SERVER>
+          [env: OMDB_DNS_SERVER=]
+
+Database Options:
+      --fetch-limit <FETCH_LIMIT>
+          limit to apply to queries that fetch rows
+          
+          [env: OMDB_FETCH_LIMIT=]
+          [default: 500]
+
+      --include-deleted
+          whether to include soft-deleted records when enumerating objects that can be soft-deleted
+
+Safety Options:
+  -w, --destructive
+          Allow potentially-destructive subcommands
+---------------------------------------------
+stderr:
+=============================================
+EXECUTING COMMAND: omdb ["db", "alert", "webhook", "delivery", "list", "--state", "bogus"]
+termination: Exited(2)
+---------------------------------------------
+stdout:
+---------------------------------------------
+stderr:
+error: invalid value 'bogus' for '--state <STATES>...'
+  [possible values: pending, delivered, failed]
+
+For more information, try '--help'.
+=============================================
+EXECUTING COMMAND: omdb ["db", "alert", "webhook", "delivery", "list", "--trigger", "bogus"]
+termination: Exited(2)
+---------------------------------------------
+stdout:
+---------------------------------------------
+stderr:
+error: invalid value 'bogus' for '--trigger <TRIGGERS>...'
+  [possible values: alert, resend, probe]
+
+For more information, try '--help'.
+=============================================
 EXECUTING COMMAND: omdb ["db", "disks"]
 termination: Exited(2)
 ---------------------------------------------
