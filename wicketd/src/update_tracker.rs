@@ -16,6 +16,7 @@ use bytes::Bytes;
 use display_error_chain::DisplayErrorChain;
 use dropshot::HttpError;
 use futures::Stream;
+use futures::TryFutureExt;
 use gateway_client::types::GetRotBootInfoParams;
 use gateway_client::types::HostPhase2Progress;
 use gateway_client::types::HostPhase2RecoveryImageId;
@@ -43,6 +44,7 @@ use slog::warn;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::collections::btree_map::Entry;
+use std::error::Error as _;
 use std::net::SocketAddrV6;
 use std::sync::Arc;
 use std::sync::Mutex as StdMutex;
@@ -70,7 +72,6 @@ use tufaceous_v2::ArtifactHandle;
 use tufaceous_v2::ExpirationEnforcement;
 use tufaceous_v2::Repository;
 use tufaceous_v2::RepositoryLoader;
-use update_common::ErrorExt;
 use update_engine::AbortHandle;
 use update_engine::NestedSpec;
 use update_engine::StepSpec;
@@ -388,11 +389,34 @@ impl UpdateTracker {
             .unsafe_blindly_trust_repo()
             .v1_compatibility(true)
             .load_zip_stream(stream, None, &self.log)
+            .and_then(async |repo| {
+                repo.verify_targets(VERIFY_PARALLELISM).await?;
+                Ok(repo)
+            })
             .await
-            .map_err(|err| err.to_http_error())?;
-        repo.verify_targets(VERIFY_PARALLELISM)
-            .await
-            .map_err(|err| err.to_http_error())?;
+            .map_err(|err| {
+                if let Some(source) = err.source()
+                    && let Some(error) = source.downcast_ref::<HttpError>()
+                {
+                    // manual Clone::clone
+                    return HttpError {
+                        status_code: error.status_code,
+                        error_code: error.error_code.clone(),
+                        external_message: error.external_message.clone(),
+                        internal_message: error.internal_message.clone(),
+                        headers: error.headers.clone(),
+                    };
+                }
+
+                let message = DisplayErrorChain::new(&err).to_string();
+                if err.is_repository_error() {
+                    // This error is because of bad repository contents.
+                    HttpError::for_bad_request(None, message)
+                } else {
+                    // This error is likely not due to bad repository contents.
+                    HttpError::for_unavail(None, message)
+                }
+            })?;
         let mut update_data = self.sp_update_data.lock().await;
         update_data.set_repository(Arc::new(repo)).await
     }
