@@ -363,26 +363,24 @@ impl NtpAdminImpl {
                 }
             };
             info!(log, "dns lookup probe"; "name" => name, "ips" => format!("{:?}", ips));
-            ips_per_host.insert(name, ips);
+            ips_per_host.insert(name.to_string(), ips);
         }
-
-        let lookup_lines: Vec<String> =
-            ips_per_host.iter().map(|(n, r)| format!("{n} -> {r:?}")).collect();
 
         // For each configured name, resolve it and send one ICMP echo to
         // each resolved IP with a short timeout. Requires the raw socket
         // privileges available inside the NTP zone.
         let mut ping_results: Vec<(String, IpAddr, String)> = Vec::new();
-        for (host, ips) in ips_per_host {
+        for (host, ips) in &ips_per_host {
             // TODO-K: Should spawn tasks for this
             for ip in ips {
                 let outcome = match crate::ping::ping_once(
-                    ip,
+                    *ip,
                     // TODO-K: set this timeout as a constant
                     Duration::from_secs(3),
                 )
                 .await
                 {
+                    // TODO-K: represent this as a type
                     Ok(pong) => format!(
                         "reachable, rtt {:.2} ms",
                         pong.rtt.as_secs_f64() * 1000.0,
@@ -395,30 +393,33 @@ impl NtpAdminImpl {
                     log, "ping probe";
                     "host" => host, "ip" => %ip, "result" => &outcome,
                 );
-                ping_results.push((host.clone(), ip, outcome));
+                ping_results.push((host.clone(), *ip, outcome));
             }
         }
 
-        let ping_lines: Vec<String> = ping_results
-            .iter()
-            .map(|(n, ip, r)| format!("{n} ({ip}) -> {r}"))
-            .collect();
+        let is_boundary = match boundary {
+            Value::Bool(b) => b,
+            // TODO-K: Should I really return here? maybe just log? but with
+            // booleans this is annoying either way. If I just set as false,
+            // then it won't be seen as an error. If I have Option<bool> in
+            // the type then I can introduce bugs?
+            _ => {
+                return Err(HttpError::for_internal_error(format!(
+                    "the value for the boundary property should be boolean; \
+                    is {} instead",
+                    boundary.kind()
+                )));
+            }
+        };
 
         // TODO-K: Log the data too
 
         Ok(DebugInfo {
-            data: format!(
-                "IS BOUNDARY: {}\n
-                EXTERNAL NTP SERVER: {server_values:?}\n
-                BOUNDARY POOL: {}\n
-                NAME LOOKUPS:\n  {}\n
-                PINGS:\n  {}\n
-            ",
-                boundary.display_smf(),
-                boundary_pool.display_smf(),
-                lookup_lines.join("\n  "),
-                ping_lines.join("\n  "),
-            ),
+            is_boundary,
+            external_ntp_servers: server_values,
+            boundary_pool: boundary_pool.display_smf().to_string(),
+            dns_look_up_results: ips_per_host,
+            icmp_ping_results: ping_results,
         })
     }
 }
