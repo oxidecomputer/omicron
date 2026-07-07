@@ -23,9 +23,7 @@ use diesel::query_source::QuerySource;
 use nexus_db_schema::schema;
 
 /// The creation marker table corresponding to some [`FmRendezvousResource`]
-/// `R`.
-///
-/// This is the table that defines the column referenced by the
+/// `R`. This is the table that defines the column referenced by the
 /// [`FmRendezvousResource::IdColumn`] associated type.
 pub type MarkerTable<R> =
     <<R as FmRendezvousResource>::IdColumn as Column>::Table;
