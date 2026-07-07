@@ -496,19 +496,19 @@ impl DataStore {
             ref classes,
         } = filters;
         if let Some(before) = before {
-            query = query.filter(alert_dsl::time_created.lt(before));
+            query = query.filter(alert_dsl::time_created.lte(before));
         }
 
         if let Some(after) = after {
-            query = query.filter(alert_dsl::time_created.gt(after));
+            query = query.filter(alert_dsl::time_created.gte(after));
         }
 
         if let Some(before) = dispatched_before {
-            query = query.filter(alert_dsl::time_dispatched.lt(before));
+            query = query.filter(alert_dsl::time_dispatched.lte(before));
         }
 
         if let Some(after) = dispatched_after {
-            query = query.filter(alert_dsl::time_dispatched.gt(after));
+            query = query.filter(alert_dsl::time_dispatched.gte(after));
         }
 
         if let Some(dispatched) = dispatched {
