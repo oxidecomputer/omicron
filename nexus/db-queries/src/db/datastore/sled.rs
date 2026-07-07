@@ -4744,11 +4744,11 @@ pub(in crate::db::datastore) mod test {
 
     /// Validate that each local storage allocation maps back to an un-deleted
     /// local storage disk.
-    // Allow `transaction_async`; this is a test, and does not need to retry
-    #[allow(clippy::disallowed_methods)]
     async fn validate_no_zombie_allocation_records(datastore: &DataStore) {
         let conn = datastore.pool_connection_for_tests().await.unwrap();
 
+        // Allow `transaction_async`; this is a test, and does not need to retry
+        #[allow(clippy::disallowed_methods)]
         let disks_with_zombie_allocations: Vec<Uuid> =
             conn.transaction_async(async move |conn| {
                 conn.batch_execute_async(ALLOW_FULL_TABLE_SCAN_SQL).await?;
