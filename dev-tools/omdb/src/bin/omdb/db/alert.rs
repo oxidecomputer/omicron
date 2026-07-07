@@ -965,10 +965,9 @@ async fn cmd_db_alert_list(
     };
 
     let pagparams = DataPageParams {
-        marker: None,
         // Descending order shows the newest alerts first
         direction: dropshot::PaginationOrder::Descending,
-        limit: fetch_opts.fetch_limit,
+        ..first_page(fetch_opts.fetch_limit)
     };
 
     let ctx = || "loading alerts";
@@ -1165,8 +1164,11 @@ async fn cmd_db_alert_info(
 
     let ctx = || format!("listing deliveries for alert {id:?}");
 
-    let pagparams =
-        DataPageParams { marker: None, ..first_page(fetch_opts.fetch_limit) };
+    let pagparams = DataPageParams {
+        // Descending order shows the most recent delivery first
+        direction: dropshot::PaginationOrder::Descending,
+        ..first_page(fetch_opts.fetch_limit)
+    };
     let deliveries = datastore
         .alert_list_webhook_deliveries(opctx, &authz_alert, &pagparams)
         .await
