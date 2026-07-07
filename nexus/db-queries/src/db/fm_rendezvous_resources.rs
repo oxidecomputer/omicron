@@ -23,13 +23,36 @@ use diesel::query_source::QuerySource;
 use nexus_db_schema::schema;
 
 /// The creation marker table corresponding to some [`FmRendezvousResource`]
-/// `R`. The marker table is its [`FmRendezvousResource::IdColumn`]'s table.
+/// `R`.
+///
+/// This is the table that defines the column referenced by the
+/// [`FmRendezvousResource::IdColumn`] associated type.
 pub type MarkerTable<R> =
     <<R as FmRendezvousResource>::IdColumn as Column>::Table;
 
 /// A resource created by FM rendezvous, comprising the Diesel schema types
 /// required to generically construct useful queries / CTEs that operate on that
 /// resource.
+///
+/// Each resource type is backed by three pieces of schema:
+///
+/// - The resource's own table (e.g. `alert`, `support_bundle`), holding the
+///   resource rows themselves. This trait doesn't name that table; queries
+///   that create the resource take a caller-built `INSERT` into it as input.
+///
+/// - A per-resource-type generation column on the `fm_sitrep` table
+///   ([`Self::GenerationColumn`], e.g. `fm_sitrep.alert_generation`), bumped
+///   each time a sitrep's request set for this resource type changes.
+///   Comparing the executing sitrep's value against the latest sitrep's
+///   detects a rendezvous task executing a stale sitrep.
+///
+/// - A creation marker table (e.g. `rendezvous_alert_created`), recording
+///   each resource that FM rendezvous has ever created: the resource's id
+///   ([`Self::IdColumn`], the marker table's primary key) and the generation
+///   at which it was created. The marker is written atomically with the
+///   resource row and outlives it: if the resource is deleted while some
+///   sitrep still requests it, the marker's presence prevents the resource
+///   from being re-created.
 ///
 /// The common required trait bounds for building these queries are captured
 /// here, in the trait's `where` clause, so we don't have to repeat them at
