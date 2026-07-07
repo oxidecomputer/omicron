@@ -952,11 +952,11 @@ impl AuthorizedResource for SiloGroupList {
 
 /// Synthetic resource describing the list of Silo Images associated with a Silo
 ///
-/// This synthetic resource is used to control who can promote project images to
-/// silo images. By using a synthetic resource, we can grant limited-collaborators
-/// the ability to create silo images (via promotion) without giving them the
-/// broader create_child permission on Silo (which would allow creating projects,
-/// users, groups, etc.).
+/// This synthetic resource is used to control who can list silo images and who
+/// can create them, whether directly or by promoting project images. By using a
+/// synthetic resource, we can grant limited-collaborators the ability to create
+/// silo images without giving them the broader create_child permission on Silo
+/// (which would allow creating projects, users, groups, etc.).
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SiloImageList(Silo);
 

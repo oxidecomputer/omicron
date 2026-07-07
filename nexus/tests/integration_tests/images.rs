@@ -879,6 +879,21 @@ async fn test_silo_limited_collaborator_can_promote_demote_images(
         .items;
 
     assert_eq!(silo_images.len(), 0);
+
+    // Create a silo image directly (not via promotion) as limited-collaborator
+    // - should succeed
+    NexusRequest::objects_post(client, silo_images_url, &image_create_params)
+        .authn_as(AuthnMode::UnprivilegedUser)
+        .execute_and_parse_unwrap::<image::Image>()
+        .await;
+
+    let silo_images = NexusRequest::object_get(client, &silo_images_url)
+        .authn_as(AuthnMode::UnprivilegedUser)
+        .execute_and_parse_unwrap::<ResultsPage<image::Image>>()
+        .await
+        .items;
+
+    assert_eq!(silo_images.len(), 1);
 }
 
 #[nexus_test]
@@ -962,6 +977,17 @@ async fn test_silo_viewer_cannot_promote_demote_images(
     .execute()
     .await
     .expect("expected viewer to be blocked from deleting silo image");
+
+    // Attempt to create a silo image directly as viewer - should fail
+    NexusRequest::new(
+        RequestBuilder::new(client, http::Method::POST, "/v1/images")
+            .body(Some(&image_create_params))
+            .expect_status(Some(StatusCode::FORBIDDEN)),
+    )
+    .authn_as(AuthnMode::UnprivilegedUser)
+    .execute()
+    .await
+    .expect("expected viewer to be blocked from creating silo image");
 }
 
 #[nexus_test]

@@ -70,7 +70,11 @@ impl DataStore {
         authz_silo: &authz::Silo,
         pagparams: &PaginatedBy<'_>,
     ) -> ListResultVec<Image> {
-        opctx.authorize(authz::Action::ListChildren, authz_silo).await?;
+        let authz_silo_image_list =
+            authz::SiloImageList::new(authz_silo.clone());
+        opctx
+            .authorize(authz::Action::ListChildren, &authz_silo_image_list)
+            .await?;
 
         use nexus_db_schema::schema::silo_image::dsl;
         match pagparams {
@@ -101,7 +105,14 @@ impl DataStore {
         silo_image: SiloImage,
     ) -> CreateResult<Image> {
         let image: Image = silo_image.into();
-        opctx.authorize(authz::Action::CreateChild, authz_silo).await?;
+        // Check CreateChild on SiloImageList rather than the Silo itself so
+        // that limited-collaborators can create silo images without the
+        // broader create_child permission on the Silo.
+        let authz_silo_image_list =
+            authz::SiloImageList::new(authz_silo.clone());
+        opctx
+            .authorize(authz::Action::CreateChild, &authz_silo_image_list)
+            .await?;
 
         let name = image.name().clone();
         let silo_id = image.silo_id;

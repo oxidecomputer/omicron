@@ -100,7 +100,21 @@ impl super::Nexus {
 
             ImageParentLookup::Silo(silo) => {
                 let (.., authz_silo) =
-                    silo.lookup_for(authz::Action::CreateChild).await?;
+                    silo.lookup_for(authz::Action::Read).await?;
+
+                // Check CreateChild on SiloImageList rather than the Silo
+                // itself so that limited-collaborators can create silo images.
+                // The datastore checks this again when creating the image
+                // record, but we check here to avoid kicking off a saga that
+                // would fail partway through and have to unwind.
+                let authz_silo_image_list =
+                    authz::SiloImageList::new(authz_silo.clone());
+                opctx
+                    .authorize(
+                        authz::Action::CreateChild,
+                        &authz_silo_image_list,
+                    )
+                    .await?;
 
                 sagas::image_create::ImageType::Silo { authz_silo }
             }
@@ -140,8 +154,10 @@ impl super::Nexus {
                     .await
             }
             ImageParentLookup::Silo(silo) => {
+                // The ListChildren check happens against SiloImageList in the
+                // datastore; here we only need to be able to see the silo.
                 let (.., authz_silo) =
-                    silo.lookup_for(authz::Action::ListChildren).await?;
+                    silo.lookup_for(authz::Action::Read).await?;
                 self.db_datastore
                     .silo_image_list(opctx, &authz_silo, pagparams)
                     .await
