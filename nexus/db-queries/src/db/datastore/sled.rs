@@ -7458,6 +7458,11 @@ pub(in crate::db::datastore) mod test {
 
         eprintln!("{explanation}");
 
+        assert!(
+            !explanation.contains("FULL SCAN"),
+            "Found an unexpected FULL SCAN: {explanation}",
+        );
+
         db.terminate().await;
         logctx.cleanup_successful();
     }
