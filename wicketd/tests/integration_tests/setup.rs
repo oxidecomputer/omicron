@@ -41,6 +41,7 @@ impl WicketdTestContext {
 
         let args = wicketd::Args {
             address: LOCALHOST_PORT_0,
+            commission_address: LOCALHOST_PORT_0,
             artifact_address: LOCALHOST_PORT_0,
             mgs_address,
             nexus_proxy_address: LOCALHOST_PORT_0,

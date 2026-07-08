@@ -8932,6 +8932,7 @@ dependencies = [
  "serde_json",
  "sled-agent-api",
  "wicketd-api",
+ "wicketd-commission-api",
 ]
 
 [[package]]
@@ -17410,6 +17411,8 @@ dependencies = [
  "wicket-common",
  "wicketd-api",
  "wicketd-client",
+ "wicketd-commission-api",
+ "wicketd-commission-types",
 ]
 
 [[package]]
@@ -17454,6 +17457,44 @@ dependencies = [
  "slog",
  "update-engine",
  "uuid",
+ "wicket-common",
+]
+
+[[package]]
+name = "wicketd-commission-api"
+version = "0.1.0"
+dependencies = [
+ "bootstrap-agent-lockstep-client",
+ "dropshot",
+ "dropshot-api-manager-types",
+ "omicron-uuid-kinds",
+ "omicron-workspace-hack",
+ "wicket-common",
+ "wicketd-commission-types-versions",
+]
+
+[[package]]
+name = "wicketd-commission-types"
+version = "0.1.0"
+dependencies = [
+ "omicron-workspace-hack",
+ "wicketd-commission-types-versions",
+]
+
+[[package]]
+name = "wicketd-commission-types-versions"
+version = "0.1.0"
+dependencies = [
+ "bootstrap-agent-lockstep-client",
+ "omicron-common",
+ "omicron-passwords",
+ "omicron-uuid-kinds",
+ "omicron-workspace-hack",
+ "schemars 0.8.22",
+ "semver 1.0.28",
+ "serde",
+ "sled-hardware-types",
+ "tufaceous-artifact",
  "wicket-common",
 ]
 

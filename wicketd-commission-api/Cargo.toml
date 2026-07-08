@@ -1,0 +1,16 @@
+[package]
+name = "wicketd-commission-api"
+version = "0.1.0"
+edition.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+bootstrap-agent-lockstep-client.workspace = true
+dropshot.workspace = true
+dropshot-api-manager-types.workspace = true
+omicron-uuid-kinds.workspace = true
+omicron-workspace-hack.workspace = true
+wicket-common.workspace = true
+wicketd-commission-types-versions.workspace = true

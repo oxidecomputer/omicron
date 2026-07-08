@@ -2,34 +2,31 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! HTTP entrypoint functions for wicketd
+//! HTTP entrypoint functions for the wicketd "commission" API.
+//!
+//! This API is a stable version of the wicketd API that is used by external
+//! commissioning tools (such as `rkdeploy`). It is versioned independently of
+//! the main wicketd API.
 
-use crate::SmfConfigValues;
+use crate::ServerContext;
 use crate::context::CommonConfigContainer;
-use crate::context::RssOrMultirackJoinConfig;
 use crate::helpers::SpIdentifierDisplay;
 use crate::helpers::sps_to_string;
 use crate::mgs::GetInventoryError as GetMgsInventoryError;
 use crate::mgs::GetInventoryResponse as GetMgsInventoryResponse;
 use crate::mgs::MgsHandle;
 use crate::mgs::ShutdownInProgress;
-use crate::multirack_config::CurrentMultirackJoinConfig;
 use crate::transceivers::GetTransceiversResponse;
 use bootstrap_agent_lockstep_client::types::RackOperationStatus;
 use dropshot::ApiDescription;
 use dropshot::HttpError;
 use dropshot::HttpResponseOk;
 use dropshot::HttpResponseUpdatedNoContent;
-use dropshot::Path;
 use dropshot::RequestContext;
 use dropshot::StreamingBody;
 use dropshot::TypedBody;
-use internal_dns_resolver::Resolver;
 use omicron_uuid_kinds::RackInitUuid;
-use omicron_uuid_kinds::RackResetUuid;
-use sled_agent_types::early_networking::SwitchSlot;
 use sled_hardware_types::Baseboard;
-use slog::o;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
@@ -38,31 +35,38 @@ use wicket_common::WICKETD_TIMEOUT;
 use wicket_common::inventory::MgsV1Inventory;
 use wicket_common::inventory::MgsV1InventorySnapshot;
 use wicket_common::inventory::RackV1Inventory;
-use wicket_common::inventory::SpIdentifier;
 use wicket_common::inventory::SpType;
 use wicket_common::inventory::TransceiverInventorySnapshot;
-use wicket_common::multirack_setup::CurrentMultirackJoinUserConfig;
-use wicket_common::multirack_setup::MultirackJoinConfigBaseUserInput;
-use wicket_common::rack_setup::GetBgpAuthKeyInfoResponse;
 use wicket_common::rack_setup::PutRssUserConfigInsensitive;
-use wicket_common::rack_update::AbortUpdateOptions;
 use wicket_common::rack_update::ClearUpdateStateResponse;
-use wicket_common::update_events::EventReport;
-use wicketd_api::*;
+use wicketd_commission_api::WicketdCommissionApi;
+use wicketd_commission_api::wicketd_commission_api_mod;
+use wicketd_commission_types::artifacts::GetArtifactsAndEventReportsResponse;
+use wicketd_commission_types::artifacts::InstallableArtifacts;
+use wicketd_commission_types::bootstrap_sleds::BootstrapSledIp;
+use wicketd_commission_types::bootstrap_sleds::BootstrapSledIps;
+use wicketd_commission_types::inventory::GetInventoryParams;
+use wicketd_commission_types::inventory::GetInventoryResponse;
+use wicketd_commission_types::location::GetLocationResponse;
+use wicketd_commission_types::rss_config::CertificateUploadResponse;
+use wicketd_commission_types::rss_config::CurrentRssUserConfig;
+use wicketd_commission_types::rss_config::CurrentRssUserConfigSensitive;
+use wicketd_commission_types::rss_config::PutRssRecoveryUserPasswordHash;
+use wicketd_commission_types::update::ClearUpdateStateParams;
+use wicketd_commission_types::update::StartUpdateParams;
 
-use crate::ServerContext;
+type CommissionApiDescription = ApiDescription<Arc<ServerContext>>;
 
-type WicketdApiDescription = ApiDescription<Arc<ServerContext>>;
-
-/// Return a description of the wicketd api for use in generating an OpenAPI spec
-pub fn api() -> WicketdApiDescription {
-    wicketd_api_mod::api_description::<WicketdApiImpl>()
-        .expect("failed to register entrypoints")
+/// Return a description of the wicketd commission API for use in generating
+/// an OpenAPI spec.
+pub fn api() -> CommissionApiDescription {
+    wicketd_commission_api_mod::api_description::<WicketdCommissionApiImpl>()
+        .expect("failed to register commission entrypoints")
 }
 
-pub enum WicketdApiImpl {}
+pub enum WicketdCommissionApiImpl {}
 
-impl WicketdApi for WicketdApiImpl {
+impl WicketdCommissionApi for WicketdCommissionApiImpl {
     type Context = Arc<ServerContext>;
 
     async fn get_bootstrap_sleds(
@@ -85,8 +89,8 @@ impl WicketdApi for WicketdApiImpl {
     ) -> Result<HttpResponseOk<CurrentRssUserConfig>, HttpError> {
         let ctx = rqctx.context();
 
-        // We can't run RSS if we don't have an inventory from MGS yet; we always
-        // need to fill in the bootstrap sleds first.
+        // We can't run RSS if we don't have an inventory from MGS yet; we
+        // always need to fill in the bootstrap sleds first.
         let inventory = mgs_inventory_or_unavail(&ctx.mgs_handle).await?;
 
         let mut config = ctx.rss_or_multirack_join_config.lock().unwrap();
@@ -97,33 +101,20 @@ impl WicketdApi for WicketdApiImpl {
         let ddm_discovered_sleds = &ctx.bootstrap_peers.sleds();
         let config =
             rss_config.get_latest(&inventory, &ddm_discovered_sleds, &ctx.log);
+        let converted: wicketd_api::CurrentRssUserConfig = config.into();
 
-        Ok(HttpResponseOk(config.into()))
-    }
-
-    async fn get_multirack_join_config(
-        rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<CurrentMultirackJoinUserConfig>, HttpError> {
-        let ctx = rqctx.context();
-
-        // We can't join a multirack cluster if we don't have an inventory from
-        // MGS yet; we always need to fill in the bootstrap sleds first.
-        let inventory = mgs_inventory_or_unavail(&ctx.mgs_handle).await?;
-
-        let mut config = ctx.rss_or_multirack_join_config.lock().unwrap();
-        let join_config =
-            config.multirack_join_config_mut().ok_or_else(|| {
-                HttpError::for_not_found(
-                    None,
-                    "multirack join config not found".to_string(),
-                )
-            })?;
-
-        let ddm_discovered_sleds = &ctx.bootstrap_peers.sleds();
-        let config =
-            join_config.get_latest(&inventory, &ddm_discovered_sleds, &ctx.log);
-
-        Ok(HttpResponseOk(config.into()))
+        Ok(HttpResponseOk(CurrentRssUserConfig {
+            sensitive: CurrentRssUserConfigSensitive {
+                num_external_certificates: converted
+                    .sensitive
+                    .num_external_certificates,
+                recovery_silo_password_set: converted
+                    .sensitive
+                    .recovery_silo_password_set,
+                bgp_auth_keys: converted.sensitive.bgp_auth_keys,
+            },
+            insensitive: converted.insensitive,
+        }))
     }
 
     async fn put_rss_config(
@@ -132,8 +123,6 @@ impl WicketdApi for WicketdApiImpl {
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let ctx = rqctx.context();
 
-        // We can't run RSS if we don't have an inventory from MGS yet; we always
-        // need to fill in the bootstrap sleds first.
         let inventory = mgs_inventory_or_unavail(&ctx.mgs_handle).await?;
 
         let mut config = ctx.rss_or_multirack_join_config.lock().unwrap();
@@ -155,48 +144,6 @@ impl WicketdApi for WicketdApiImpl {
         Ok(HttpResponseUpdatedNoContent())
     }
 
-    async fn put_multirack_join_config(
-        rqctx: RequestContext<Self::Context>,
-        body: TypedBody<MultirackJoinConfigBaseUserInput>,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        let ctx = rqctx.context();
-
-        // We can't join a multirack cluster if we don't have an inventory from
-        // MGS yet; we always need to fill in the bootstrap sleds first.
-        let inventory = mgs_inventory_or_unavail(&ctx.mgs_handle).await?;
-
-        let ddm_discovered_sleds = &ctx.bootstrap_peers.sleds();
-        let mut config = ctx.rss_or_multirack_join_config.lock().unwrap();
-
-        // We don't have a default (empty) version of a `join_config` like we do
-        // with an `rss_config` so we have two different paths here.
-        if let Some(join_config) = config.multirack_join_config_mut() {
-            join_config
-                .update(
-                    body.into_inner(),
-                    ctx.baseboard.as_ref(),
-                    &inventory,
-                    &ddm_discovered_sleds,
-                    &ctx.log,
-                )
-                .map_err(|err| HttpError::for_bad_request(None, err))?;
-        } else {
-            // Overwrite any non-multirack-join config
-            *config = RssOrMultirackJoinConfig::MultirackJoin(
-                CurrentMultirackJoinConfig::new_with_inventory_and_peers(
-                    ctx.baseboard.as_ref(),
-                    body.into_inner(),
-                    &inventory,
-                    &ddm_discovered_sleds,
-                    &ctx.log,
-                )
-                .map_err(|err| HttpError::for_bad_request(None, err))?,
-            );
-        }
-
-        Ok(HttpResponseUpdatedNoContent())
-    }
-
     async fn post_rss_config_cert(
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<String>,
@@ -213,7 +160,7 @@ impl WicketdApi for WicketdApiImpl {
             .push_cert(body.into_inner())
             .map_err(|err| HttpError::for_bad_request(None, err))?;
 
-        Ok(HttpResponseOk(response))
+        Ok(HttpResponseOk(convert_cert_upload_response(response)))
     }
 
     async fn post_rss_config_key(
@@ -231,45 +178,11 @@ impl WicketdApi for WicketdApiImpl {
             .push_key(body.into_inner())
             .map_err(|err| HttpError::for_bad_request(None, err))?;
 
-        Ok(HttpResponseOk(response))
-    }
-
-    async fn get_bgp_auth_key_info(
-        rqctx: RequestContext<Arc<ServerContext>>,
-        // A bit weird for a GET request to have a TypedBody, but there's no other
-        // nice way to transmit this information as a batch.
-        params: TypedBody<GetBgpAuthKeyParams>,
-    ) -> Result<HttpResponseOk<GetBgpAuthKeyInfoResponse>, HttpError> {
-        let ctx = rqctx.context();
-        let params = params.into_inner();
-
-        let config = ctx.rss_or_multirack_join_config.lock().unwrap();
-        config
-            .check_bgp_auth_keys_valid(&params.check_valid)
-            .map_err(|err| HttpError::for_bad_request(None, err.to_string()))?;
-        let data = config.get_bgp_auth_key_data();
-
-        Ok(HttpResponseOk(GetBgpAuthKeyInfoResponse { data }))
-    }
-
-    async fn put_bgp_auth_key(
-        rqctx: RequestContext<Arc<ServerContext>>,
-        params: Path<PutBgpAuthKeyParams>,
-        body: TypedBody<PutBgpAuthKeyBody>,
-    ) -> Result<HttpResponseOk<PutBgpAuthKeyResponse>, HttpError> {
-        let ctx = rqctx.context();
-        let params = params.into_inner();
-
-        let mut config = ctx.rss_or_multirack_join_config.lock().unwrap();
-        let status = config
-            .set_bgp_auth_key(params.key_id, body.into_inner().key)
-            .map_err(|err| HttpError::for_bad_request(None, err.to_string()))?;
-
-        Ok(HttpResponseOk(PutBgpAuthKeyResponse { status }))
+        Ok(HttpResponseOk(convert_cert_upload_response(response)))
     }
 
     async fn put_rss_config_recovery_user_password_hash(
-        rqctx: RequestContext<Arc<ServerContext>>,
+        rqctx: RequestContext<Self::Context>,
         body: TypedBody<PutRssRecoveryUserPasswordHash>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let ctx = rqctx.context();
@@ -286,7 +199,7 @@ impl WicketdApi for WicketdApiImpl {
     }
 
     async fn delete_rss_config(
-        rqctx: RequestContext<Arc<ServerContext>>,
+        rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let ctx = rqctx.context();
 
@@ -301,7 +214,7 @@ impl WicketdApi for WicketdApiImpl {
     }
 
     async fn get_rack_setup_state(
-        rqctx: RequestContext<Arc<ServerContext>>,
+        rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<RackOperationStatus>, HttpError> {
         let ctx = rqctx.context();
 
@@ -347,7 +260,7 @@ impl WicketdApi for WicketdApiImpl {
     }
 
     async fn post_run_rack_setup(
-        rqctx: RequestContext<Arc<ServerContext>>,
+        rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<RackInitUuid>, HttpError> {
         let ctx = rqctx.context();
         let log = &rqctx.log;
@@ -410,55 +323,8 @@ impl WicketdApi for WicketdApiImpl {
         Ok(HttpResponseOk(init_id))
     }
 
-    async fn post_run_rack_reset(
-        rqctx: RequestContext<Arc<ServerContext>>,
-    ) -> Result<HttpResponseOk<RackResetUuid>, HttpError> {
-        let ctx = rqctx.context();
-
-        let lockstep_addr =
-            ctx.bootstrap_agent_lockstep_addr().map_err(|err| {
-                HttpError::for_bad_request(None, format!("{err:#}"))
-            })?;
-
-        slog::info!(ctx.log, "Sending RSS reset request to {}", lockstep_addr);
-        let client = bootstrap_agent_lockstep_client::Client::new(
-            &format!("http://{}", lockstep_addr),
-            ctx.log.new(slog::o!("component" => "bootstrap lockstep client")),
-        );
-
-        let reset_id = client
-            .rack_reset()
-            .await
-            .map_err(|err| {
-                use bootstrap_agent_lockstep_client::Error as BaError;
-                match err {
-                    BaError::CommunicationError(err) => {
-                        let message = format!(
-                            "Failed to send rack reset request: {}",
-                            InlineErrorChain::new(&err)
-                        );
-                        HttpError {
-                            status_code:
-                                dropshot::ErrorStatusCode::SERVICE_UNAVAILABLE,
-                            error_code: None,
-                            external_message: message.clone(),
-                            internal_message: message,
-                            headers: None,
-                        }
-                    }
-                    other => HttpError::for_bad_request(
-                        None,
-                        format!("Rack setup request failed: {other}"),
-                    ),
-                }
-            })?
-            .into_inner();
-
-        Ok(HttpResponseOk(reset_id))
-    }
-
     async fn get_inventory(
-        rqctx: RequestContext<Arc<ServerContext>>,
+        rqctx: RequestContext<Self::Context>,
         body_params: TypedBody<GetInventoryParams>,
     ) -> Result<HttpResponseOk<GetInventoryResponse>, HttpError> {
         let GetInventoryParams { force_refresh } = body_params.into_inner();
@@ -499,8 +365,6 @@ impl WicketdApi for WicketdApiImpl {
                 GetTransceiversResponse::Unavailable => None,
             };
 
-        // Return 503 if both MGS and transceiver inventory are missing,
-        // otherwise return what we can.
         if maybe_mgs_inventory.is_none()
             && maybe_transceiver_inventory.is_none()
         {
@@ -521,7 +385,7 @@ impl WicketdApi for WicketdApiImpl {
     }
 
     async fn put_repository(
-        rqctx: RequestContext<Arc<ServerContext>>,
+        rqctx: RequestContext<Self::Context>,
         body: StreamingBody,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let rqctx = rqctx.context();
@@ -532,25 +396,28 @@ impl WicketdApi for WicketdApiImpl {
     }
 
     async fn get_artifacts_and_event_reports(
-        rqctx: RequestContext<Arc<ServerContext>>,
+        rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<GetArtifactsAndEventReportsResponse>, HttpError>
     {
         let response =
             rqctx.context().update_tracker.artifacts_and_event_reports().await;
-        Ok(HttpResponseOk(response))
-    }
-
-    async fn get_baseboard(
-        rqctx: RequestContext<Arc<ServerContext>>,
-    ) -> Result<HttpResponseOk<GetBaseboardResponse>, HttpError> {
-        let rqctx = rqctx.context();
-        Ok(HttpResponseOk(GetBaseboardResponse {
-            baseboard: rqctx.baseboard.clone(),
+        Ok(HttpResponseOk(GetArtifactsAndEventReportsResponse {
+            system_version: response.system_version,
+            artifacts: response
+                .artifacts
+                .into_iter()
+                .map(|a| InstallableArtifacts {
+                    artifact_id: a.artifact_id,
+                    installable: a.installable,
+                    sign: a.sign,
+                })
+                .collect(),
+            event_reports: response.event_reports,
         }))
     }
 
     async fn get_location(
-        rqctx: RequestContext<Arc<ServerContext>>,
+        rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<GetLocationResponse>, HttpError> {
         let rqctx = rqctx.context();
         let inventory = mgs_inventory_or_unavail(&rqctx.mgs_handle).await?;
@@ -561,13 +428,9 @@ impl WicketdApi for WicketdApiImpl {
         let mut switch_baseboard = None;
         let mut sled_id = None;
 
-        // Safety: `inventory_or_unavail` returns an error if there is no
-        // MGS-derived inventory, so option is always `Some(_)`.
         for sp in &inventory.sps {
             if Some(sp.id) == switch_id {
                 switch_baseboard = sp.state.as_ref().map(|state| {
-                    // TODO-correctness `new_gimlet` isn't the right name: this is a
-                    // sidecar baseboard.
                     Baseboard::new_gimlet(
                         state.serial_number.clone(),
                         state.model.clone(),
@@ -595,7 +458,7 @@ impl WicketdApi for WicketdApiImpl {
     }
 
     async fn post_start_update(
-        rqctx: RequestContext<Arc<ServerContext>>,
+        rqctx: RequestContext<Self::Context>,
         params: TypedBody<StartUpdateParams>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let log = &rqctx.log;
@@ -609,22 +472,6 @@ impl WicketdApi for WicketdApiImpl {
             ));
         }
 
-        // Can we update the target SPs? We refuse to update if, for any target SP:
-        //
-        // 1. We haven't pulled its state in our inventory (most likely cause: the
-        //    cubby is empty; less likely cause: the SP is misbehaving, which will
-        //    make updating it very unlikely to work anyway)
-        // 2. We have pulled its state but our hardware manager says we can't
-        //    update it (most likely cause: the target is the sled we're currently
-        //    running on; less likely cause: our hardware manager failed to get our
-        //    local identifying information, and it refuses to update this target
-        //    out of an abundance of caution).
-        //
-        // First, get our most-recently-cached inventory view. (Only wait 80% of
-        // WICKETD_TIMEOUT for this: if even a cached inventory isn't available,
-        // it's because we've never established contact with MGS. In that case, we
-        // should produce a useful error message rather than timing out on the
-        // client.)
         let inventory = match tokio::time::timeout(
             WICKETD_TIMEOUT.mul_f32(0.8),
             rqctx.mgs_handle.get_cached_inventory(),
@@ -639,8 +486,6 @@ impl WicketdApi for WicketdApiImpl {
                 ));
             }
             Err(_) => {
-                // Have to construct an HttpError manually because
-                // HttpError::for_unavail doesn't accept an external message.
                 let message =
                     "Rack inventory not yet available (is MGS alive?)"
                         .to_owned();
@@ -654,12 +499,10 @@ impl WicketdApi for WicketdApiImpl {
             }
         };
 
-        // Error cases.
         let mut inventory_absent = BTreeSet::new();
         let mut self_update = None;
         let mut maybe_self_update = BTreeSet::new();
 
-        // Next, do we have the states of the target SP?
         let sp_states = match inventory {
             GetMgsInventoryResponse::Response { inventory, .. } => inventory
                 .sps
@@ -683,14 +526,11 @@ impl WicketdApi for WicketdApiImpl {
             let sp_state = match sp_states.get(target) {
                 Some(sp_state) => sp_state,
                 None => {
-                    // The state isn't present, so add to inventory_absent.
                     inventory_absent.insert(*target);
                     continue;
                 }
             };
 
-            // If we have the state of the SP, are we allowed to update it? We
-            // refuse to try to update our own sled.
             match &rqctx.baseboard {
                 Some(baseboard) => {
                     if baseboard.identifier() == sp_state.serial_number
@@ -702,10 +542,6 @@ impl WicketdApi for WicketdApiImpl {
                     }
                 }
                 None => {
-                    // We don't know our own baseboard, which is a very questionable
-                    // state to be in! For now, we will hard-code the possibly
-                    // locations where we could be running: scrimlets can only be in
-                    // cubbies 14 or 16, so we refuse to update either of those.
                     let target_is_scrimlet = matches!(
                         (target.type_, target.slot),
                         (SpType::Sled, 14 | 16)
@@ -718,7 +554,6 @@ impl WicketdApi for WicketdApiImpl {
             }
         }
 
-        // Do we have any errors?
         let mut errors = Vec::new();
         if !inventory_absent.is_empty() {
             errors.push(format!(
@@ -747,7 +582,6 @@ impl WicketdApi for WicketdApiImpl {
         }
 
         let start_update_errors = if errors.is_empty() {
-            // No errors: we can try and proceed with this update.
             match rqctx
                 .update_tracker
                 .start(params.targets, params.options)
@@ -757,8 +591,6 @@ impl WicketdApi for WicketdApiImpl {
                 Err(errors) => errors,
             }
         } else {
-            // We've already found errors, so all we want to do is to check whether
-            // the update tracker thinks there are any errors as well.
             match rqctx.update_tracker.update_pre_checks(params.targets).await {
                 Ok(()) => Vec::new(),
                 Err(errors) => errors,
@@ -768,72 +600,25 @@ impl WicketdApi for WicketdApiImpl {
         errors
             .extend(start_update_errors.iter().map(|error| error.to_string()));
 
-        // If we get here, we have errors to report.
-
         match errors.len() {
             0 => {
                 unreachable!(
                     "we already returned Ok(_) above if there were no errors"
                 )
             }
-            1 => {
-                return Err(HttpError::for_bad_request(
-                    None,
-                    errors.pop().unwrap(),
-                ));
-            }
-            _ => {
-                return Err(HttpError::for_bad_request(
-                    None,
-                    format!(
-                        "multiple errors encountered:\n - {}",
-                        itertools::join(errors, "\n - ")
-                    ),
-                ));
-            }
-        }
-    }
-
-    async fn get_update_sp(
-        rqctx: RequestContext<Arc<ServerContext>>,
-        target: Path<SpIdentifier>,
-    ) -> Result<HttpResponseOk<EventReport>, HttpError> {
-        let event_report = rqctx
-            .context()
-            .update_tracker
-            .event_report(target.into_inner())
-            .await;
-        Ok(HttpResponseOk(event_report))
-    }
-
-    async fn post_abort_update(
-        rqctx: RequestContext<Arc<ServerContext>>,
-        target: Path<SpIdentifier>,
-        opts: TypedBody<AbortUpdateOptions>,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        let log = &rqctx.log;
-        let target = target.into_inner();
-
-        let opts = opts.into_inner();
-        if let Some(test_error) = opts.test_error {
-            return Err(test_error
-                .into_http_error(log, "aborting update")
-                .await);
-        }
-
-        match rqctx
-            .context()
-            .update_tracker
-            .abort_update(target, opts.message)
-            .await
-        {
-            Ok(()) => Ok(HttpResponseUpdatedNoContent {}),
-            Err(err) => Err(err.to_http_error()),
+            1 => Err(HttpError::for_bad_request(None, errors.pop().unwrap())),
+            _ => Err(HttpError::for_bad_request(
+                None,
+                format!(
+                    "multiple errors encountered:\n - {}",
+                    itertools::join(errors, "\n - ")
+                ),
+            )),
         }
     }
 
     async fn post_clear_update_state(
-        rqctx: RequestContext<Arc<ServerContext>>,
+        rqctx: RequestContext<Self::Context>,
         params: TypedBody<ClearUpdateStateParams>,
     ) -> Result<HttpResponseOk<ClearUpdateStateResponse>, HttpError> {
         let log = &rqctx.log;
@@ -858,160 +643,9 @@ impl WicketdApi for WicketdApiImpl {
             Err(err) => Err(err.to_http_error()),
         }
     }
-
-    async fn post_ignition_command(
-        rqctx: RequestContext<Arc<ServerContext>>,
-        path: Path<PathSpIgnitionCommand>,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        let apictx = rqctx.context();
-        let PathSpIgnitionCommand { type_, slot, command } = path.into_inner();
-
-        apictx
-            .mgs_client
-            .ignition_command(&type_, slot, command)
-            .await
-            .map_err(http_error_from_client_error)?;
-
-        Ok(HttpResponseUpdatedNoContent())
-    }
-
-    async fn post_start_preflight_uplink_check(
-        rqctx: RequestContext<Arc<ServerContext>>,
-        body: TypedBody<PreflightUplinkCheckOptions>,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        let rqctx = rqctx.context();
-        let options = body.into_inner();
-
-        let our_switch_slot = match rqctx.local_switch_id().await {
-            Some(SpIdentifier { slot, type_: SpType::Switch }) => match slot {
-                0 => SwitchSlot::Switch0,
-                1 => SwitchSlot::Switch1,
-                _ => {
-                    return Err(HttpError::for_internal_error(format!(
-                        "unexpected switch slot {slot}"
-                    )));
-                }
-            },
-            Some(other) => {
-                return Err(HttpError::for_internal_error(format!(
-                    "unexpected switch SP identifier {other:?}"
-                )));
-            }
-            None => {
-                return Err(HttpError::for_unavail(
-                    Some("UnknownSwitchSlot".to_string()),
-                    "local switch slot not yet determined".to_string(),
-                ));
-            }
-        };
-
-        let (network_config, dns_servers, ntp_servers) = {
-            let mut config = rqctx.rss_or_multirack_join_config.lock().unwrap();
-
-            let rss_config = config.rss_config_mut_or_conflict(
-                "cannot run preflight when not preparing for RSS",
-            )?;
-            let network_config = rss_config
-                .user_specified_rack_network_config()
-                .cloned()
-                .ok_or_else(|| {
-                    HttpError::for_bad_request(
-                        None,
-                        "uplink preflight check requires setting \
-                     the uplink config for RSS"
-                            .to_string(),
-                    )
-                })?;
-
-            (
-                network_config,
-                rss_config.dns_servers().to_vec(),
-                rss_config.ntp_servers().to_vec(),
-            )
-        };
-
-        match rqctx
-            .preflight_checker
-            .uplink_start(
-                network_config,
-                dns_servers,
-                ntp_servers,
-                our_switch_slot,
-                options.dns_name_to_query,
-            )
-            .await
-        {
-            Ok(()) => Ok(HttpResponseUpdatedNoContent {}),
-            Err(err) => Err(HttpError::for_client_error(
-                None,
-                dropshot::ClientErrorStatusCode::TOO_MANY_REQUESTS,
-                err.to_string(),
-            )),
-        }
-    }
-
-    async fn get_preflight_uplink_report(
-        rqctx: RequestContext<Arc<ServerContext>>,
-    ) -> Result<
-        HttpResponseOk<wicket_common::preflight_check::EventReport>,
-        HttpError,
-    > {
-        let rqctx = rqctx.context();
-
-        match rqctx.preflight_checker.uplink_event_report() {
-        Some(report) => Ok(HttpResponseOk(report)),
-        None => Err(HttpError::for_bad_request(
-            None,
-            "no preflight uplink report available - have you started a check?"
-                .to_string(),
-        )),
-    }
-    }
-
-    async fn post_reload_config(
-        rqctx: RequestContext<Arc<ServerContext>>,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        let smf_values = SmfConfigValues::read_current().map_err(|err| {
-            HttpError::for_unavail(
-                None,
-                format!("failed to read SMF values: {err}"),
-            )
-        })?;
-
-        let rqctx = rqctx.context();
-
-        // We do not allow a config reload to change our bound address; return an
-        // error if the caller is attempting to do so.
-        if rqctx.bind_address != smf_values.address {
-            return Err(HttpError::for_bad_request(
-                None,
-                "listening address cannot be reconfigured".to_string(),
-            ));
-        }
-
-        if let Some(rack_subnet) = smf_values.rack_subnet {
-            let resolver = Resolver::new_from_subnet(
-                rqctx.log.new(o!("component" => "InternalDnsResolver")),
-                rack_subnet,
-            )
-            .map_err(|err| {
-                HttpError::for_unavail(
-                    None,
-                    format!("failed to create internal DNS resolver: {err}"),
-                )
-            })?;
-
-            *rqctx.internal_dns_resolver.lock().unwrap() = Some(resolver);
-        }
-
-        Ok(HttpResponseUpdatedNoContent())
-    }
 }
 
 // Get the current inventory or return a 503 Unavailable.
-//
-// Note that 503 is returned if we can't get the MGS-based inventory. If we fail
-// to get the transceivers, that's not considered a fatal 503.
 async fn mgs_inventory_or_unavail(
     mgs_handle: &MgsHandle,
 ) -> Result<MgsV1Inventory, HttpError> {
@@ -1020,39 +654,32 @@ async fn mgs_inventory_or_unavail(
             Ok(inventory)
         }
         Ok(GetMgsInventoryResponse::Unavailable) => {
-            return Err(HttpError::for_unavail(
+            Err(HttpError::for_unavail(
                 None,
                 "Rack inventory not yet available".into(),
-            ));
+            ))
         }
         Err(ShutdownInProgress) => {
-            return Err(HttpError::for_unavail(
-                None,
-                "Server is shutting down".into(),
-            ));
+            Err(HttpError::for_unavail(None, "Server is shutting down".into()))
         }
     }
 }
 
-fn http_error_from_client_error(
-    err: gateway_client::Error<gateway_client::types::Error>,
-) -> HttpError {
-    // Most errors have a status code; the only one that definitely doesn't is
-    // `Error::InvalidRequest`, for which we'll use `BAD_REQUEST`.
-    let status_code = err
-        .status()
-        .map(|status| {
-            status.try_into().expect("status code must be a client error")
-        })
-        .unwrap_or(dropshot::ErrorStatusCode::BAD_REQUEST);
-
-    let message = format!("request to MGS failed: {err}");
-
-    HttpError {
-        status_code,
-        error_code: None,
-        external_message: message.clone(),
-        internal_message: message,
-        headers: None,
+fn convert_cert_upload_response(
+    resp: wicketd_api::CertificateUploadResponse,
+) -> CertificateUploadResponse {
+    match resp {
+        wicketd_api::CertificateUploadResponse::WaitingOnCert => {
+            CertificateUploadResponse::WaitingOnCert
+        }
+        wicketd_api::CertificateUploadResponse::WaitingOnKey => {
+            CertificateUploadResponse::WaitingOnKey
+        }
+        wicketd_api::CertificateUploadResponse::CertKeyAccepted => {
+            CertificateUploadResponse::CertKeyAccepted
+        }
+        wicketd_api::CertificateUploadResponse::CertKeyDuplicateIgnored => {
+            CertificateUploadResponse::CertKeyDuplicateIgnored
+        }
     }
 }

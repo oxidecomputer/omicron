@@ -261,6 +261,9 @@ pub const NEXUS_TECHPORT_EXTERNAL_PORT: u16 = 12228;
 /// interface(s).
 pub const WICKETD_NEXUS_PROXY_PORT: u16 = 12229;
 
+/// The port on which `wicketd` serves its "commission" API
+pub const WICKETD_COMMISSION_PORT: u16 = 12230;
+
 /// The port on which NTP runs
 pub const NTP_PORT: u16 = 123;
 

@@ -5,6 +5,7 @@
 mod artifacts;
 mod bgp_auth_keys;
 mod bootstrap_addrs;
+pub mod commission_http_entrypoints;
 mod config;
 mod context;
 mod helpers;
@@ -52,6 +53,7 @@ use wicketd_client::ClientInfo as _;
 /// Command line arguments for wicketd
 pub struct Args {
     pub address: SocketAddrV6,
+    pub commission_address: SocketAddrV6,
     pub artifact_address: SocketAddrV6,
     pub mgs_address: SocketAddrV6,
     pub nexus_proxy_address: SocketAddrV6,
@@ -61,6 +63,7 @@ pub struct Args {
 
 pub struct SmfConfigValues {
     pub address: SocketAddrV6,
+    pub commission_address: SocketAddrV6,
     pub rack_subnet: Option<Ipv6Subnet<AZ_PREFIX>>,
 }
 
@@ -72,6 +75,7 @@ impl SmfConfigValues {
         const CONFIG_PG: &str = "config";
         const PROP_RACK_SUBNET: &str = "rack-subnet";
         const PROP_ADDRESS: &str = "address";
+        const PROP_COMMISSION_ADDRESS: &str = "commission-address";
 
         let scf = ScfHandle::new()?;
         let instance = scf.self_instance()?;
@@ -102,7 +106,17 @@ impl SmfConfigValues {
             })?
         };
 
-        Ok(Self { address, rack_subnet })
+        let commission_address = {
+            let addr = config.value_as_string(PROP_COMMISSION_ADDRESS)?;
+            addr.parse().with_context(|| {
+                format!(
+                    "failed to parse {CONFIG_PG}/{PROP_COMMISSION_ADDRESS} \
+                     value {addr:?} as a socket address"
+                )
+            })?
+        };
+
+        Ok(Self { address, commission_address, rack_subnet })
     }
 
     #[cfg(not(target_os = "illumos"))]
@@ -112,7 +126,8 @@ impl SmfConfigValues {
 }
 
 pub struct Server {
-    pub wicketd_server: HttpServer<ServerContext>,
+    pub wicketd_server: HttpServer<Arc<ServerContext>>,
+    pub commission_server: HttpServer<Arc<ServerContext>>,
     pub installinator_server: HttpServer<WicketdInstallinatorContext>,
     pub artifact_store: WicketdArtifactStore,
     pub update_tracker: Arc<UpdateTracker>,
@@ -191,30 +206,49 @@ impl Server {
             anyhow!(err).context("failed to start Nexus TCP proxy")
         })?;
 
+        let server_context = Arc::new(ServerContext {
+            bind_address: args.address,
+            mgs_handle,
+            mgs_client: make_mgs_client(log.clone(), args.mgs_address),
+            transceiver_handle,
+            log: log.clone(),
+            local_switch_id: OnceLock::new(),
+            bootstrap_peers,
+            update_tracker: update_tracker.clone(),
+            baseboard: args.baseboard,
+            rss_or_multirack_join_config: Default::default(),
+            preflight_checker: PreflightCheckerHandler::new(&log),
+            internal_dns_resolver,
+        });
+
         let wicketd_server = {
             let ds_log = log.new(o!("component" => "dropshot (wicketd)"));
-            let mgs_client = make_mgs_client(log.clone(), args.mgs_address);
             dropshot::ServerBuilder::new(
                 http_entrypoints::api(),
-                ServerContext {
-                    bind_address: args.address,
-                    mgs_handle,
-                    mgs_client,
-                    transceiver_handle,
-                    log: log.clone(),
-                    local_switch_id: OnceLock::new(),
-                    bootstrap_peers,
-                    update_tracker: update_tracker.clone(),
-                    baseboard: args.baseboard,
-                    rss_or_multirack_join_config: Default::default(),
-                    preflight_checker: PreflightCheckerHandler::new(&log),
-                    internal_dns_resolver,
-                },
+                Arc::clone(&server_context),
                 ds_log,
             )
-            .config(dropshot_config)
+            .config(dropshot_config.clone())
             .start()
             .map_err(|err| anyhow!(err).context("initializing http server"))?
+        };
+
+        let commission_server = {
+            let ds_log =
+                log.new(o!("component" => "dropshot (wicketd-commission)"));
+            let mut commission_config = dropshot_config;
+            commission_config.bind_address =
+                SocketAddr::V6(args.commission_address);
+            dropshot::ServerBuilder::new(
+                commission_http_entrypoints::api(),
+                Arc::clone(&server_context),
+                ds_log,
+            )
+            .config(commission_config)
+            .start()
+            .map_err(|err| {
+                anyhow!(err).context("initializing commission http server")
+            })?
         };
 
         let installinator_server = {
@@ -251,6 +285,7 @@ impl Server {
 
         Ok(Self {
             wicketd_server,
+            commission_server,
             installinator_server,
             artifact_store: store,
             update_tracker,
@@ -264,6 +299,9 @@ impl Server {
         self.wicketd_server.close().await.map_err(|error| {
             anyhow!("error closing wicketd server: {error}")
         })?;
+        self.commission_server.close().await.map_err(|error| {
+            anyhow!("error closing commission server: {error}")
+        })?;
         self.installinator_server.close().await.map_err(|error| {
             anyhow!("error closing artifact server: {error}")
         })?;
@@ -272,13 +310,19 @@ impl Server {
     }
 
     pub async fn wait_for_finish(self) -> Result<(), String> {
-        // Both servers should keep running indefinitely unless close() is
-        // called. Bail if either server exits.
+        // All servers should keep running indefinitely unless close() is
+        // called. Bail if any server exits.
         tokio::select! {
             res = self.wicketd_server => {
                 match res {
                     Ok(()) => Err("wicketd server exited unexpectedly".to_owned()),
                     Err(err) => Err(format!("running wicketd server: {err}")),
+                }
+            }
+            res = self.commission_server => {
+                match res {
+                    Ok(()) => Err("commission server exited unexpectedly".to_owned()),
+                    Err(err) => Err(format!("running commission server: {err}")),
                 }
             }
             res = self.installinator_server => {

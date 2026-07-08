@@ -28,6 +28,11 @@ enum Args {
         #[clap(short, long, action)]
         address: SocketAddrV6,
 
+        /// The address on which the wicketd "commission" dropshot server should
+        /// listen.
+        #[clap(long, action)]
+        commission_address: SocketAddrV6,
+
         /// The address on the bootstrap network to serve artifacts at
         #[clap(long, action)]
         artifact_address: SocketAddrV6,
@@ -83,6 +88,7 @@ async fn do_run() -> Result<(), CmdError> {
         Args::Run {
             config_file_path,
             address,
+            commission_address,
             artifact_address,
             mgs_address,
             nexus_proxy_address,
@@ -126,6 +132,7 @@ async fn do_run() -> Result<(), CmdError> {
 
             let args = wicketd::Args {
                 address,
+                commission_address,
                 artifact_address,
                 mgs_address,
                 nexus_proxy_address,
