@@ -29,7 +29,7 @@ use std::io::BufReader;
 use std::io::Read as _;
 use std::sync::Arc;
 use tokio::io::AsyncWrite;
-use tufaceous_artifact::ArtifactHash;
+use tufaceous_artifact_v2::ArtifactHash;
 
 #[derive(Debug, thiserror::Error)]
 #[error("boot disk not found")]

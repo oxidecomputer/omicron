@@ -18,8 +18,8 @@ use omicron_common::disk::M2Slot;
 use sled_hardware_types::BaseboardId;
 use slog_error_chain::InlineErrorChain;
 use std::time::Duration;
-use tufaceous_artifact::ArtifactHash;
-use tufaceous_artifact::ArtifactVersion;
+use tufaceous_artifact_v2::ArtifactHash;
+use tufaceous_artifact_v2::ArtifactVersion;
 
 pub type GatewayClientError =
     gateway_client::Error<gateway_client::types::Error>;

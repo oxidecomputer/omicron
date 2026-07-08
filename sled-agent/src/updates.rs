@@ -7,8 +7,8 @@
 use bootstrap_agent_api::Component;
 use camino::{Utf8Path, Utf8PathBuf};
 use serde::{Deserialize, Serialize};
-use tufaceous_artifact::ArtifactVersionError;
-use tufaceous_brand_metadata::Metadata;
+use tufaceous_artifact_v2::ArtifactVersionError;
+use tufaceous_brand_metadata_v2::Metadata;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -127,7 +127,7 @@ mod test {
     use flate2::write::GzEncoder;
     use std::io::Write;
     use tar::Builder;
-    use tufaceous_artifact::ArtifactVersion;
+    use tufaceous_artifact_v2::ArtifactVersion;
 
     #[tokio::test]
     async fn test_query_no_components() {

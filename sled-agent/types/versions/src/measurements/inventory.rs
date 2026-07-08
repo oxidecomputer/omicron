@@ -37,7 +37,7 @@ use camino::Utf8PathBuf;
 use schemars::SchemaGenerator;
 use schemars::schema::{Schema, SchemaObject};
 use std::fmt;
-use tufaceous_artifact::ArtifactHash;
+use tufaceous_artifact_v2::ArtifactHash;
 
 /// Identity and basic status information about this sled agent
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
@@ -312,6 +312,7 @@ pub struct OmicronSingleMeasurement {
     /// Measurements may also come from outside the TUF repo depot
     /// via the install dataset from MUPdate but are not explicitly
     /// tracked here
+    #[schemars(schema_with = "ArtifactHash::v1_json_schema")]
     pub hash: ArtifactHash,
 }
 

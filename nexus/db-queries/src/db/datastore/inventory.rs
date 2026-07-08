@@ -5432,7 +5432,7 @@ mod test {
     use sled_hardware_types::BaseboardId;
     use std::num::NonZeroU32;
     use std::time::Duration;
-    use tufaceous_artifact::ArtifactHash;
+    use tufaceous_artifact_v2::ArtifactHash;
 
     struct CollectionCounts {
         baseboards: usize,

@@ -26,7 +26,7 @@ use nexus_types::deployment::TargetReleaseDescription;
 use nexus_types::deployment::planning_report::BlockedMgsUpdate;
 use nexus_types::inventory::CabooseWhich;
 use nexus_types::inventory::Collection;
-use omicron_common::api::external::TufRepoDescription;
+use nexus_types::tuf_repo::TufRepoDescription;
 use omicron_common::disk::M2Slot;
 use omicron_uuid_kinds::SledUuid;
 use sled_hardware_types::BaseboardId;
@@ -35,8 +35,8 @@ use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeSet;
 use std::sync::Arc;
 use thiserror::Error;
-use tufaceous_artifact::ArtifactVersion;
-use tufaceous_artifact::ArtifactVersionError;
+use tufaceous_artifact_v2::ArtifactVersion;
+use tufaceous_artifact_v2::ArtifactVersionError;
 
 pub(crate) use host_phase_1::PendingHostPhase2Changes;
 

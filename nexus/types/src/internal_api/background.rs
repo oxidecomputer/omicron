@@ -32,7 +32,7 @@ use std::net::Ipv6Addr;
 use std::sync::Arc;
 use swrite::SWrite;
 use swrite::swriteln;
-use tufaceous_artifact::ArtifactHash;
+use tufaceous_artifact_v2::ArtifactHash;
 use uuid::Uuid;
 
 /// The status of a `region_replacement` background task activation

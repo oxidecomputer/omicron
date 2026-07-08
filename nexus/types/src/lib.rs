@@ -45,3 +45,4 @@ pub mod saga;
 pub mod silo;
 pub mod support_bundle;
 pub mod trust_quorum;
+pub mod tuf_repo;

@@ -780,8 +780,8 @@ mod tests {
     use omicron_test_utils::dev::test_setup_log;
     use omicron_uuid_kinds::MupdateOverrideUuid;
     use std::mem;
-    use tufaceous_artifact::ArtifactHash;
-    use tufaceous_artifact::ArtifactVersion;
+    use tufaceous_artifact_v2::ArtifactHash;
+    use tufaceous_artifact_v2::ArtifactVersion;
 
     // The tests below all take the example blueprint, mutate in some invalid
     // way, and confirm that blippy reports the invalidity. This test confirms
