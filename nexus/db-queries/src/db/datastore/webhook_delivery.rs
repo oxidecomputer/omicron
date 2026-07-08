@@ -65,6 +65,113 @@ pub struct DeliveryAndEvent {
     pub event: serde_json::Value,
 }
 
+/// Filters applied to [`DataStore::webhook_delivery_list`].
+#[derive(Debug, Default)]
+pub struct WebhookDeliveryFilters {
+    /// Include only deliveries created before this timestamp.
+    before: Option<DateTime<Utc>>,
+
+    /// Include only deliveries created after this timestamp.
+    after: Option<DateTime<Utc>>,
+
+    /// Include only deliveries to the receiver with this UUID.
+    rx_id: Option<AlertReceiverUuid>,
+
+    /// Include only deliveries for the alert with this UUID.
+    alert_id: Option<AlertUuid>,
+
+    /// Include only deliveries in the specified delivery states.
+    ///
+    /// If multiple states are provided, deliveries in any of those states are
+    /// included in the output.
+    states: Vec<AlertDeliveryState>,
+
+    /// Include only deliveries with the specified triggers.
+    ///
+    /// If multiple triggers are provided, deliveries with any of those triggers
+    /// are included in the output.
+    triggers: Vec<AlertDeliveryTrigger>,
+}
+
+impl WebhookDeliveryFilters {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Includes only deliveries created at or after `time`.
+    ///
+    /// Returns an error if `time` is after a previously set `before` time.
+    pub fn after(mut self, time: DateTime<Utc>) -> Result<Self, Error> {
+        if let Some(before) = self.before {
+            if time > before {
+                return Err(Error::invalid_request(
+                    "`after` timestamp must be earlier than `before` \
+                    timestamp",
+                ));
+            }
+        }
+        self.after = Some(time);
+        Ok(self)
+    }
+
+    /// Includes only deliveries created at or before `time`.
+    ///
+    /// Returns an error if `time` is before a previously set `after` time.
+    pub fn before(mut self, time: DateTime<Utc>) -> Result<Self, Error> {
+        if let Some(after) = self.after {
+            if after > time {
+                return Err(Error::invalid_request(
+                    "`before` timestamp must be later than `after` \
+                    timestamp",
+                ));
+            }
+        }
+        self.before = Some(time);
+        Ok(self)
+    }
+
+    /// Includes only deliveries to the provided alert receiver.
+    pub fn for_receiver(mut self, authz_rx: &authz::AlertReceiver) -> Self {
+        self.rx_id = Some(authz_rx.id());
+        self
+    }
+
+    /// Includes only deliveries for the provided alert.
+    pub fn for_alert(mut self, authz_alert: &authz::Alert) -> Self {
+        self.alert_id = Some(authz_alert.id());
+        self
+    }
+
+    /// Add a set of delivery states to filter by.
+    ///
+    /// Multiple calls to this method are additive; the filters will include
+    /// deliveries in any of the states provided by *any* time this method was
+    /// called on a given instance of `WebhookDeliveryFilters`.
+    pub fn with_states<I>(mut self, states: impl IntoIterator<Item = I>) -> Self
+    where
+        I: Into<AlertDeliveryState>,
+    {
+        self.states.extend(states.into_iter().map(Into::into));
+        self
+    }
+
+    /// Add a set of delivery triggers to filter by.
+    ///
+    /// Multiple calls to this method are additive; the filters will include
+    /// deliveries with any of the triggers provided by *any* time this method
+    /// was called on a given instance of `WebhookDeliveryFilters`.
+    pub fn with_triggers<I>(
+        mut self,
+        triggers: impl IntoIterator<Item = I>,
+    ) -> Self
+    where
+        I: Into<AlertDeliveryTrigger>,
+    {
+        self.triggers.extend(triggers.into_iter().map(Into::into));
+        self
+    }
+}
+
 impl DataStore {
     pub async fn webhook_delivery_create_batch(
         &self,
@@ -453,29 +560,68 @@ impl DataStore {
         Err(Error::internal_error(MSG))
     }
 
-    pub async fn alert_list_webhook_deliveries(
+    /// List webhook deliveries matching the provided [`WebhookDeliveryFilters`].
+    ///
+    /// This backs the `omdb db alert webhook delivery list` command.
+    pub async fn webhook_delivery_list(
         &self,
         opctx: &OpContext,
-        authz_alert: &authz::Alert,
+        filters: &WebhookDeliveryFilters,
         pagparams: &DataPageParams<'_, (DateTime<Utc>, Uuid)>,
     ) -> ListResultVec<WebhookDelivery> {
-        Self::alert_list_webhook_deliveries_query(authz_alert.id(), pagparams)
-            .load_async(&*self.pool_connection_authorized(&opctx).await?)
+        opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
+        Self::webhook_delivery_list_query(filters, pagparams)
+            .load_async(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
-    fn alert_list_webhook_deliveries_query(
-        alert_id: AlertUuid,
+    fn webhook_delivery_list_query(
+        filters: &WebhookDeliveryFilters,
         pagparams: &DataPageParams<'_, (DateTime<Utc>, Uuid)>,
     ) -> impl RunnableQuery<WebhookDelivery> + Send + use<> {
-        paginated_multicolumn(
+        let mut query = paginated_multicolumn(
             dsl::webhook_delivery,
             (dsl::time_created, dsl::id),
             pagparams,
         )
-        .filter(dsl::alert_id.eq(alert_id.into_untyped_uuid()))
-        .select(WebhookDelivery::as_select())
+        .select(WebhookDelivery::as_select());
+
+        let &WebhookDeliveryFilters {
+            before,
+            after,
+            rx_id,
+            alert_id,
+            ref states,
+            ref triggers,
+        } = filters;
+
+        if let Some(before) = before {
+            query = query.filter(dsl::time_created.le(before));
+        }
+
+        if let Some(after) = after {
+            query = query.filter(dsl::time_created.ge(after));
+        }
+
+        if let Some(rx_id) = rx_id {
+            query = query.filter(dsl::rx_id.eq(rx_id.into_untyped_uuid()));
+        }
+
+        if let Some(alert_id) = alert_id {
+            query =
+                query.filter(dsl::alert_id.eq(alert_id.into_untyped_uuid()));
+        }
+
+        if !states.is_empty() {
+            query = query.filter(dsl::state.eq_any(states.clone()));
+        }
+
+        if !triggers.is_empty() {
+            query = query.filter(dsl::triggered_by.eq_any(triggers.clone()));
+        }
+
+        query
     }
 }
 
@@ -660,32 +806,143 @@ mod test {
     }
 
     #[tokio::test]
-    async fn explain_alert_list_webhook_delivery() {
-        let logctx = dev::test_setup_log("explain_alert_list_webhook_delivery");
+    async fn explain_webhook_delivery_list_default() {
+        explain_delivery_list_query(
+            "explain_webhook_delivery_list_default",
+            WebhookDeliveryFilters::default(),
+        )
+        .await
+    }
+
+    #[tokio::test]
+    async fn explain_webhook_delivery_list_created_time() {
+        let now = Utc::now();
+        explain_delivery_list_query(
+            "explain_webhook_delivery_list_created_time",
+            WebhookDeliveryFilters::new()
+                .after(now - chrono::TimeDelta::hours(1))
+                .expect("`after` is before `before`")
+                .before(now)
+                .expect("`before` is after `after`"),
+        )
+        .await
+    }
+
+    #[tokio::test]
+    async fn explain_webhook_delivery_list_only_receiver() {
+        explain_delivery_list_query(
+            "explain_webhook_delivery_list_only_receiver",
+            // Build the filter struct directly rather than going through the
+            // `for_receiver` builder, which requires an `authz::AlertReceiver`
+            // for a receiver that doesn't exist in this empty test database.
+            WebhookDeliveryFilters {
+                rx_id: Some(AlertReceiverUuid::new_v4()),
+                ..Default::default()
+            },
+        )
+        .await
+    }
+
+    #[tokio::test]
+    async fn explain_webhook_delivery_list_only_alert() {
+        explain_delivery_list_query(
+            "explain_webhook_delivery_list_only_alert",
+            WebhookDeliveryFilters {
+                alert_id: Some(AlertUuid::new_v4()),
+                ..Default::default()
+            },
+        )
+        .await
+    }
+
+    #[tokio::test]
+    async fn explain_webhook_delivery_list_only_states() {
+        explain_delivery_list_query(
+            "explain_webhook_delivery_list_only_states",
+            WebhookDeliveryFilters::new().with_states([
+                model::AlertDeliveryState::Pending,
+                model::AlertDeliveryState::Failed,
+            ]),
+        )
+        .await
+    }
+
+    #[tokio::test]
+    async fn explain_webhook_delivery_list_only_triggers() {
+        explain_delivery_list_query(
+            "explain_webhook_delivery_list_only_triggers",
+            WebhookDeliveryFilters::new().with_triggers([
+                model::AlertDeliveryTrigger::Alert,
+                model::AlertDeliveryTrigger::Resend,
+            ]),
+        )
+        .await
+    }
+
+    #[tokio::test]
+    async fn explain_webhook_delivery_list_receiver_and_states() {
+        explain_delivery_list_query(
+            "explain_webhook_delivery_list_receiver_and_states",
+            WebhookDeliveryFilters {
+                rx_id: Some(AlertReceiverUuid::new_v4()),
+                states: vec![model::AlertDeliveryState::Pending],
+                ..Default::default()
+            },
+        )
+        .await
+    }
+
+    #[tokio::test]
+    async fn explain_webhook_delivery_list_all_filters() {
+        let now = Utc::now();
+        explain_delivery_list_query(
+            "explain_webhook_delivery_list_all_filters",
+            WebhookDeliveryFilters {
+                before: Some(now),
+                after: Some(now - chrono::TimeDelta::hours(2)),
+                rx_id: Some(AlertReceiverUuid::new_v4()),
+                alert_id: Some(AlertUuid::new_v4()),
+                states: vec![
+                    model::AlertDeliveryState::Pending,
+                    model::AlertDeliveryState::Failed,
+                ],
+                triggers: vec![
+                    model::AlertDeliveryTrigger::Alert,
+                    model::AlertDeliveryTrigger::Resend,
+                ],
+            },
+        )
+        .await
+    }
+
+    async fn explain_delivery_list_query(
+        test_name: &str,
+        filters: WebhookDeliveryFilters,
+    ) {
+        let logctx = dev::test_setup_log(test_name);
         let db = TestDatabase::new_with_pool(&logctx.log).await;
         let pool = db.pool();
         let conn = pool.claim().await.unwrap();
 
-        let pagparams = DataPageParams {
+        let pagparams = DataPageParams::<'_, (DateTime<Utc>, Uuid)> {
             marker: None,
             direction: dropshot::PaginationOrder::Ascending,
             limit: std::num::NonZeroU32::new(100).unwrap(),
         };
-        let query = DataStore::alert_list_webhook_deliveries_query(
-            AlertUuid::nil(),
-            &pagparams,
-        );
+        eprintln!("--- filters: {filters:#?}\n");
+
+        let query =
+            DataStore::webhook_delivery_list_query(&filters, &pagparams);
         let explanation = query
             .explain_async(&conn)
             .await
             .expect("Failed to explain query - is it valid SQL?");
 
-        eprintln!("{explanation}");
+        eprintln!("--- explanation: {explanation}");
 
         assert!(
             !explanation.contains("FULL SCAN"),
-            "Found an unexpected FULL SCAN: {}",
-            explanation
+            "Found an unexpected FULL SCAN: {explanation}",
         );
 
         db.terminate().await;

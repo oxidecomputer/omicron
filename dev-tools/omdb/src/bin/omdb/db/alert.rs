@@ -25,22 +25,29 @@ use diesel::query_dsl::QueryDsl;
 use nexus_db_lookup::LookupPath;
 use nexus_db_model::Alert;
 use nexus_db_model::AlertClass;
+use nexus_db_model::AlertDeliveryState;
+use nexus_db_model::AlertDeliveryTrigger;
 use nexus_db_model::AlertReceiver;
 use nexus_db_model::WebhookDelivery;
 use nexus_db_model::fm::RendezvousAlertCreated;
+use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
 use nexus_db_queries::db::DataStore;
+use nexus_db_queries::db::datastore::WebhookDeliveryFilters;
 use nexus_db_schema::schema::webhook_delivery::dsl as delivery_dsl;
 use nexus_db_schema::schema::webhook_delivery_attempt::dsl as attempt_dsl;
+use nexus_types::external_api::alert as types;
 use nexus_types::identity::Resource;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Generation;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::http_pagination::PaginatedBy;
+use omicron_uuid_kinds::AlertReceiverUuid;
 use omicron_uuid_kinds::AlertUuid;
 use omicron_uuid_kinds::CaseUuid;
 use omicron_uuid_kinds::GenericUuid;
+use std::sync::LazyLock;
 use tabled::Tabled;
 use uuid::Uuid;
 
@@ -126,8 +133,8 @@ struct ClapAlertClass(nexus_types::alert::AlertClass);
 
 impl clap::ValueEnum for ClapAlertClass {
     fn value_variants<'a>() -> &'a [Self] {
-        static VALUE_VARIANTS: std::sync::LazyLock<Vec<ClapAlertClass>> =
-            std::sync::LazyLock::new(|| {
+        static VALUE_VARIANTS: LazyLock<Vec<ClapAlertClass>> =
+            LazyLock::new(|| {
                 nexus_types::alert::AlertClass::ALL_CLASSES
                     .iter()
                     .copied()
@@ -224,17 +231,26 @@ struct WebhookDeliveryListArgs {
     #[clap(long, short, alias = "rx")]
     receiver: Option<NameOrId>,
 
-    /// If present, select only deliveries for the given event.
-    #[clap(long, short)]
-    event: Option<AlertUuid>,
+    /// If present, select only deliveries for the given alert.
+    #[clap(
+        long, short = 'A',
+        alias = "event", // backwards compatibility
+    )]
+    alert: Option<AlertUuid>,
 
     /// If present, select only deliveries in the provided state(s)
-    #[clap(long = "state", short)]
-    states: Vec<db::model::AlertDeliveryState>,
+    ///
+    /// If multiple values are provided, deliveries in any of those states will
+    /// be included in the output.
+    #[clap(long = "state", short, num_args(1..), value_enum)]
+    states: Vec<ClapAlertDeliveryState>,
 
     /// If present, select only deliveries with the provided trigger(s)
-    #[clap(long = "trigger", short)]
-    triggers: Vec<db::model::AlertDeliveryTrigger>,
+    ///
+    /// If multiple values are provided, deliveries with any of those triggers
+    /// will be included in the output.
+    #[clap(long = "trigger", short, num_args(1..), value_enum)]
+    triggers: Vec<ClapAlertDeliveryTrigger>,
 
     /// Include only delivery entries created before this timestamp
     #[clap(long, short)]
@@ -243,6 +259,78 @@ struct WebhookDeliveryListArgs {
     /// Include only delivery entries created after this timestamp
     #[clap(long, short)]
     after: Option<DateTime<Utc>>,
+}
+
+// Wrapper for implementing `clap::ValueEnum` for `nexus_types`'s version of
+// `AlertDeliveryState`.
+#[derive(Debug, Copy, Clone)]
+struct ClapAlertDeliveryState(types::AlertDeliveryState);
+
+impl clap::ValueEnum for ClapAlertDeliveryState {
+    fn value_variants<'a>() -> &'a [Self] {
+        static VALUE_VARIANTS: LazyLock<Vec<ClapAlertDeliveryState>> =
+            LazyLock::new(|| {
+                types::AlertDeliveryState::ALL
+                    .iter()
+                    .copied()
+                    .map(ClapAlertDeliveryState)
+                    .collect()
+            });
+        &VALUE_VARIANTS
+    }
+
+    fn to_possible_value(&self) -> Option<clap::builder::PossibleValue> {
+        Some(clap::builder::PossibleValue::new(self.0.as_str()))
+    }
+
+    fn from_str(input: &str, _ignore_case: bool) -> Result<Self, String> {
+        input
+            .parse::<types::AlertDeliveryState>()
+            .map(ClapAlertDeliveryState)
+            .map_err(|e| e.to_string())
+    }
+}
+
+impl From<&'_ ClapAlertDeliveryState> for AlertDeliveryState {
+    fn from(&ClapAlertDeliveryState(state): &ClapAlertDeliveryState) -> Self {
+        state.into()
+    }
+}
+
+#[derive(Debug, Copy, Clone)]
+struct ClapAlertDeliveryTrigger(types::AlertDeliveryTrigger);
+
+impl clap::ValueEnum for ClapAlertDeliveryTrigger {
+    fn value_variants<'a>() -> &'a [Self] {
+        static VALUE_VARIANTS: LazyLock<Vec<ClapAlertDeliveryTrigger>> =
+            LazyLock::new(|| {
+                types::AlertDeliveryTrigger::ALL
+                    .iter()
+                    .copied()
+                    .map(ClapAlertDeliveryTrigger)
+                    .collect()
+            });
+        &VALUE_VARIANTS
+    }
+
+    fn to_possible_value(&self) -> Option<clap::builder::PossibleValue> {
+        Some(clap::builder::PossibleValue::new(self.0.as_str()))
+    }
+
+    fn from_str(input: &str, _ignore_case: bool) -> Result<Self, String> {
+        input
+            .parse::<types::AlertDeliveryTrigger>()
+            .map(ClapAlertDeliveryTrigger)
+            .map_err(|e| e.to_string())
+    }
+}
+
+impl From<&'_ ClapAlertDeliveryTrigger> for AlertDeliveryTrigger {
+    fn from(
+        &ClapAlertDeliveryTrigger(trigger): &ClapAlertDeliveryTrigger,
+    ) -> Self {
+        trigger.into()
+    }
 }
 
 #[derive(Debug, Args, Clone)]
@@ -285,7 +373,10 @@ async fn cmd_db_webhook(
         }) => cmd_db_webhook_rx_list(opctx, datastore, fetch_opts, args).await,
         WebhookCommands::Delivery(WebhookDeliveryArgs {
             command: WebhookDeliveryCommands::List(args),
-        }) => cmd_db_webhook_delivery_list(datastore, fetch_opts, args).await,
+        }) => {
+            cmd_db_webhook_delivery_list(opctx, datastore, fetch_opts, args)
+                .await
+        }
         WebhookCommands::Delivery(WebhookDeliveryArgs {
             command: WebhookDeliveryCommands::Info(args),
         }) => cmd_db_webhook_delivery_info(datastore, fetch_opts, args).await,
@@ -558,6 +649,7 @@ async fn cmd_db_webhook_rx_info(
 }
 
 async fn cmd_db_webhook_delivery_list(
+    opctx: &OpContext,
     datastore: &DataStore,
     fetch_opts: &DbFetchOptions,
     args: &WebhookDeliveryListArgs,
@@ -568,56 +660,63 @@ async fn cmd_db_webhook_delivery_list(
         receiver,
         states,
         triggers,
-        event,
+        alert,
     } = args;
-    let conn = datastore.pool_connection_for_tests().await?;
-    let mut query = delivery_dsl::webhook_delivery
-        .limit(fetch_opts.fetch_limit.get().into())
-        .order_by(delivery_dsl::time_created.desc())
-        .into_boxed();
-
-    if let (Some(before), Some(after)) = (before, after) {
-        anyhow::ensure!(
-            after < before,
-            "if both `--after` and `--before` are included, after must be
-             earlier than before"
-        );
-    }
-
-    if let Some(before) = *before {
-        query = query.filter(delivery_dsl::time_created.lt(before));
-    }
-
-    if let Some(after) = *after {
-        query = query.filter(delivery_dsl::time_created.gt(after));
-    }
-
-    if let Some(receiver) = receiver {
-        let rx =
-            lookup_webhook_rx(datastore, receiver).await?.ok_or_else(|| {
-                anyhow::anyhow!("no webhook receiver {receiver} found")
-            })?;
-        query = query.filter(delivery_dsl::rx_id.eq(rx.identity.id));
-    }
-
-    if !states.is_empty() {
-        query = query.filter(delivery_dsl::state.eq_any(states.clone()));
-    }
-
-    if !triggers.is_empty() {
-        query =
-            query.filter(delivery_dsl::triggered_by.eq_any(triggers.clone()));
-    }
-
-    if let Some(id) = event {
-        query = query.filter(delivery_dsl::alert_id.eq(id.into_untyped_uuid()));
-    }
+    let filters = {
+        let mut filters = WebhookDeliveryFilters::new();
+        if let &Some(before) = before {
+            filters = filters.before(before)?;
+        }
+        if let &Some(after) = after {
+            filters = filters.after(after)?;
+        }
+        if let Some(receiver) = receiver {
+            // Resolve (and authorize access to) the receiver before filtering
+            // deliveries by it; `for_receiver` requires an `authz` resource.
+            let lookup = LookupPath::new(opctx, datastore);
+            let rx_lookup = match receiver {
+                NameOrId::Id(id) => lookup.alert_receiver_id(
+                    AlertReceiverUuid::from_untyped_uuid(*id),
+                ),
+                NameOrId::Name(name) => {
+                    lookup.alert_receiver_name_owned(name.clone().into())
+                }
+            };
+            let (authz_rx,) =
+                rx_lookup.lookup_for(authz::Action::Read).await.with_context(
+                    || format!("looking up alert receiver {receiver} failed"),
+                )?;
+            filters = filters.for_receiver(&authz_rx);
+        }
+        if let &Some(alert) = alert {
+            let (authz_alert,) = LookupPath::new(opctx, datastore)
+                .alert_id(alert)
+                .lookup_for(authz::Action::Read)
+                .await
+                .with_context(|| format!("looking up alert {alert} failed"))?;
+            filters = filters.for_alert(&authz_alert);
+        }
+        if !states.is_empty() {
+            filters = filters
+                .with_states(states.iter().map(AlertDeliveryState::from));
+        }
+        if !triggers.is_empty() {
+            filters = filters
+                .with_triggers(triggers.iter().map(AlertDeliveryTrigger::from));
+        }
+        filters
+    };
 
     let ctx = || "listing webhook deliveries";
 
-    let deliveries = query
-        .select(WebhookDelivery::as_select())
-        .load_async(&*conn)
+    let pagparams = DataPageParams {
+        // Descending order shows the most recent delivery first
+        direction: dropshot::PaginationOrder::Descending,
+        ..first_page(fetch_opts.fetch_limit)
+    };
+
+    let deliveries = datastore
+        .webhook_delivery_list(opctx, &filters, &pagparams)
         .await
         .with_context(ctx)?;
 
@@ -640,7 +739,7 @@ async fn cmd_db_webhook_delivery_list(
         }
     }
 
-    let mut table = match (args.receiver.as_ref(), args.event) {
+    let mut table = match (args.receiver.as_ref(), args.alert) {
         // Filtered by both receiver and event, so don't display either.
         (Some(_), Some(_)) => {
             tabled::Table::new(deliveries.iter().map(DeliveryRow::from))
@@ -693,8 +792,8 @@ impl From<&'_ WebhookDelivery> for DeliveryRow {
     fn from(d: &WebhookDelivery) -> Self {
         let WebhookDelivery {
             id,
-            // event and receiver UUIDs are toggled on and off based on
-            // whether or not we are filtering by receiver and event, so
+            // alert and receiver UUIDs are toggled on and off based on
+            // whether or not we are filtering by receiver and alert, so
             // ignore them here.
             alert_id: _,
             rx_id: _,
@@ -1170,7 +1269,11 @@ async fn cmd_db_alert_info(
         ..first_page(fetch_opts.fetch_limit)
     };
     let deliveries = datastore
-        .alert_list_webhook_deliveries(opctx, &authz_alert, &pagparams)
+        .webhook_delivery_list(
+            opctx,
+            &WebhookDeliveryFilters::default().for_alert(&authz_alert),
+            &pagparams,
+        )
         .await
         .with_context(ctx)?;
 
