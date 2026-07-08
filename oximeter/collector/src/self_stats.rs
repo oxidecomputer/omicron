@@ -21,6 +21,7 @@ use std::time::Duration;
 
 oximeter::use_timeseries!("oximeter-collector.toml");
 pub use self::oximeter_collector::Collections;
+pub use self::oximeter_collector::DatabaseInsertsFailed;
 pub use self::oximeter_collector::DatabaseQueueDepth;
 pub use self::oximeter_collector::DatabaseSamplesDropped;
 pub use self::oximeter_collector::FailedCollections;
@@ -102,6 +103,7 @@ pub struct CollectorSinkStats {
     pub label: String,
     pub samples_dropped: Mutex<Cumulative<u64>>,
     pub queue_depth: Mutex<Histogram<u64>>,
+    pub insert_errors: Mutex<Cumulative<u64>>,
 }
 
 impl CollectorSinkStats {
@@ -120,6 +122,9 @@ impl CollectorSinkStats {
                 start_time, 0,
             )),
             queue_depth: Mutex::new(queue_depth),
+            insert_errors: Mutex::new(Cumulative::with_start_time(
+                start_time, 0,
+            )),
         }
     }
 
@@ -135,9 +140,14 @@ impl CollectorSinkStats {
             datum: self.queue_depth.lock().unwrap().clone(),
             collector_sink: self.label.clone().into(),
         };
+        let insert_metric = DatabaseInsertsFailed {
+            datum: *self.insert_errors.lock().unwrap(),
+            collector_sink: self.label.clone().into(),
+        };
         Ok(vec![
             Sample::new(collection_target, &drop_metric)?,
             Sample::new(collection_target, &queue_metric)?,
+            Sample::new(collection_target, &insert_metric)?,
         ])
     }
 }

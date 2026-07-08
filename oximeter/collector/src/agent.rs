@@ -555,8 +555,6 @@ impl CollectionTaskSenderWrapper {
 // degraded. And because the relevant counters live in oximeter's
 // memory, even if ClickHouse becomes fully unavailable and then
 // recovers, the metrics will also eventually reach the database.
-//
-// TODO(#10552): Emit a metric about failed database writes as well.
 async fn emit_self_stats(
     collector_stats: self_stats::CollectorStats,
     collection_target: self_stats::OximeterCollector,
