@@ -52,6 +52,7 @@ use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
+use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::ResourceType;
@@ -590,6 +591,9 @@ impl<'a> CompleteLocalStorageAllocationLists<'a> {
                     .await
                     .map_err(|e| {
                         public_error_from_diesel(e, ErrorHandler::Server)
+                            .internal_context(
+                                "zpool_get_for_sled_reservation failed",
+                            )
                     })?;
 
                 disk.time_deleted().is_some()
@@ -606,7 +610,8 @@ impl<'a> CompleteLocalStorageAllocationLists<'a> {
             opctx,
             self.sled_target,
         )
-        .await?;
+        .await
+        .internal_context("zpool_get_for_sled_reservation failed")?;
 
         self.queue.retain(|incomplete_allocation_list| {
             // An incomplete allocation list has a set of local storage
