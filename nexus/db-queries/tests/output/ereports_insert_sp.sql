@@ -47,6 +47,7 @@ WITH
               ereporter_restart.time_latest_ereport_received,
               excluded.time_latest_ereport_received
             ),
+          time_first_seen = least(ereporter_restart.time_first_seen, excluded.time_first_seen),
           slot = COALESCE(ereporter_restart.slot, excluded.slot)
       RETURNING
         id

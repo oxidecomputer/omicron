@@ -22,11 +22,10 @@ pub struct EreporterRestart {
     /// was collected.
     ///
     /// This is set when inserting a tranche of ereports with a restart ID that
-    /// does not already exist in the database. Once a restart entry is
-    /// created, this field will not change.
-    // XXX(eliza): perhaps we should adjust this timestamp *backwards* if we are
-    // inserting a tranche of ereports from an already known restart ID that
-    // have an earlier collection time than this value? Think about this...
+    /// does not already exist in the database. If ereports with an *earlier*
+    /// time_collected timestamp are inserted, this timestamp may be adjusted
+    /// backwards in time to reflect that the restart ID was encountered earlier
+    /// than we believe it to have been.
     pub time_first_seen: DateTime<Utc>,
     pub reporter: EreporterType,
     pub slot_type: SpType,

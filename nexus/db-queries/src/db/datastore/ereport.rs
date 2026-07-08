@@ -266,8 +266,16 @@ impl DataStore {
     /// tracked, the entry is updated as follows:
     ///
     /// - The restart record's `time_latest_ereport_received` is set to the
-    ///   `time_collected` of the inserted ereports, if that time is more recent
-    ///   than the current value.
+    ///   `time_collected` of the inserted ereports, if that time is *more
+    ///   recent* than the current value. This tracks the latest time at which
+    ///   we saw activity from this reporter.
+    ///
+    /// - The restart record's `time_first_seen` is set to the `time_collected`
+    ///   of the inserted ereports, if that time is *earlier* than the current
+    ///   value. This allows us to adjust that timestamp backwards in  time, if
+    ///   a Nexus that encountered it earlier than the currently-recorded
+    ///   first-seen time but had not managed to insert anything into the
+    ///   database suddenly wakes up and tries to record those ereports.
     ///
     /// - If the restart record's `slot` is `NULL`, and the `slot` number of the
     ///   provided `reporter` is `Some`, the restart record's slot is set to the
@@ -414,6 +422,12 @@ impl DataStore {
             ) -> sql_types::Timestamptz;
         }
         define_sql_function! {
+            fn least(
+                a: sql_types::Timestamptz,
+                b: sql_types::Timestamptz,
+            ) -> sql_types::Timestamptz;
+        }
+        define_sql_function! {
             fn coalesce(
                 a: sql_types::Nullable<sql_types::Int4>,
                 b: sql_types::Nullable<sql_types::Int4>,
@@ -470,6 +484,18 @@ impl DataStore {
                         restart_dsl::time_latest_ereport_received,
                         excluded(restart_dsl::time_latest_ereport_received),
                     )),
+                    // - Updates the `time_first_seen` timestamp, if (and only
+                    //   if) the `time_collected` timestamp for this tranche is
+                    //   earlier than the previously recorded `time_first_seen`.
+                    //   This will scootch the "first seen" timestamp
+                    //   *backwards* in time, if a Nexus had encountered this
+                    //   restart ID earlier but didn't get around to inserting
+                    //   ereports from it until after another Nexus inserted
+                    //   some with a later timestamp.
+                    restart_dsl::time_first_seen.eq(least(
+                        restart_dsl::time_first_seen,
+                        excluded(restart_dsl::time_first_seen),
+                    )),
                     // - If we did not previously know the slot number for this
                     //   reporter, fill it in now. Using `COALESCE` here
                     //   ensures that we only update the slot number if the
@@ -479,11 +505,6 @@ impl DataStore {
                         restart_dsl::slot,
                         excluded(restart_dsl::slot),
                     )),
-                    // XXX(eliza): perhaps we also ought to attempt to scootch
-                    // the `time_first_seen` timestamp *backwards* in time, if
-                    // `time_collected` is earlier than the preexisting one?
-                    // This somehow feels both correct *and* sketchy at the same
-                    // time. Hmm. Ugh.
                 ));
         EreportInsertQuery { insert_ereports, insert_reporter }
     }
@@ -1642,8 +1663,9 @@ mod tests {
              previously non-NULL slot number",
         );
         assert_eq!(
-            restart.time_first_seen, t_first,
-            "time_first_seen is never updated",
+            restart.time_first_seen, t_belated,
+            "inserting ereports with a timestamp earlier than time_first_seen \
+             adjusts it backwards",
         );
 
         db.terminate().await;
