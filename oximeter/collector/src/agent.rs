@@ -21,6 +21,8 @@ use nexus_client::Client as NexusClient;
 use nexus_client::types::IdSortMode;
 use omicron_common::backoff;
 use omicron_common::backoff::BackoffError;
+use oximeter::Sample;
+use oximeter::types::ProducerResultsItem;
 use oximeter_db::Client;
 use oximeter_db::DbWrite;
 use oximeter_types::producer::ProducerDetails;
@@ -45,6 +47,7 @@ use std::sync::Mutex;
 use std::sync::MutexGuard;
 use std::time::Duration;
 use tokio::sync::mpsc;
+use tokio::time::interval;
 use uuid::Uuid;
 
 /// The internal agent the oximeter server uses to collect metrics from producers.
@@ -93,7 +96,7 @@ impl OximeterAgent {
             "collector_ip" => address.ip().to_string(),
         ));
         let insertion_log = log.new(o!("component" => "results-sink"));
-        let instertion_log_cluster =
+        let insertion_log_cluster =
             log.new(o!("component" => "results-sink-cluster"));
 
         // Determine the version of the database.
@@ -139,17 +142,23 @@ impl OximeterAgent {
             collector_port: address.port(),
         };
 
+        let collector_stats = self_stats::CollectorStats::new(Utc::now());
+
         // Spawn the task for aggregating and inserting all metrics to a
         // single node ClickHouse installation.
-        tokio::spawn(async move {
-            crate::results_sink::database_batcher(
-                insertion_log,
-                client,
-                db_config.batch_size,
-                Duration::from_secs(db_config.batch_interval),
-                collection_task_wrapper.single_rx,
-            )
-            .await
+        tokio::spawn({
+            let sink_stats = collector_stats.single_stats.clone();
+            async move {
+                crate::results_sink::database_batcher(
+                    insertion_log,
+                    client,
+                    db_config.batch_size,
+                    Duration::from_secs(db_config.batch_interval),
+                    collection_task_wrapper.single_rx,
+                    sink_stats,
+                )
+                .await
+            }
         });
 
         // Our internal testing rack will be running a ClickHouse cluster
@@ -184,27 +193,34 @@ impl OximeterAgent {
 
         // Spawn the task for aggregating and inserting all metrics to a
         // replicated cluster ClickHouse installation
-        tokio::spawn(async move {
+        tokio::spawn({
             results_sink::database_batcher(
-                instertion_log_cluster,
+                insertion_log_cluster,
                 cluster_client,
                 db_config.batch_size,
                 Duration::from_secs(db_config.batch_interval),
                 collection_task_wrapper.cluster_rx,
+                collector_stats.cluster_stats.clone(),
             )
-            .await
         });
 
         let self_ = Self {
             id,
-            log,
+            log: log.clone(),
             collection_target,
-            result_sender: collection_task_wrapper.wrapper_tx,
+            result_sender: collection_task_wrapper.wrapper_tx.clone(),
             collection_tasks: Arc::new(Mutex::new(BTreeMap::new())),
             refresh_interval,
             refresh_task: Arc::new(Mutex::new(None)),
             last_refresh_time: Arc::new(Mutex::new(None)),
         };
+
+        tokio::spawn(emit_self_stats(
+            collector_stats,
+            collection_target,
+            collection_task_wrapper.wrapper_tx,
+            log,
+        ));
 
         Ok(self_)
     }
@@ -269,6 +285,11 @@ impl OximeterAgent {
                 client.init_replicated_db().await?;
             }
 
+            let sink_stats = Arc::new(self_stats::CollectorSinkStats::new(
+                "standalone".into(),
+                Utc::now(),
+            ));
+
             // Spawn the task for aggregating and inserting all metrics
             tokio::spawn(async move {
                 results_sink::database_batcher(
@@ -277,6 +298,7 @@ impl OximeterAgent {
                     db_config.batch_size,
                     Duration::from_secs(db_config.batch_interval),
                     collection_task_wrapper.single_rx,
+                    sink_stats,
                 )
                 .await
             });
@@ -521,6 +543,55 @@ impl CollectionTaskSenderWrapper {
             );
         };
         Ok(())
+    }
+}
+
+// Emit stats about the collector agent.
+//
+// Note: If oximeter isn't able to write metrics to ClickHouse,
+// self-stats about oximeter's inability to write metrics will
+// also never reach ClickHouse. However, we may still be able to
+// emit these metrics if the write path to ClickHouse is partially
+// degraded. And because the relevant counters live in oximeter's
+// memory, even if ClickHouse becomes fully unavailable and then
+// recovers, the metrics will also eventually reach the database.
+//
+// TODO(#10552): Emit a metric about failed database writes as well.
+async fn emit_self_stats(
+    collector_stats: self_stats::CollectorStats,
+    collection_target: self_stats::OximeterCollector,
+    wrapper_tx: CollectionTaskSenderWrapper,
+    log: Logger,
+) {
+    let mut sink_stats_ticker = interval(self_stats::COLLECTION_INTERVAL);
+    loop {
+        sink_stats_ticker.tick().await;
+
+        let mut samples: Vec<Sample> = Vec::new();
+
+        for sink_stats in
+            [&collector_stats.single_stats, &collector_stats.cluster_stats]
+        {
+            match sink_stats.samples(&collection_target) {
+                Ok(s) => samples.extend(s),
+                Err(e) => error!(
+                    log,
+                    "failed to build database sink self-stats";
+                    "sink" => sink_stats.label.clone(),
+                    InlineErrorChain::new(&e),
+                ),
+            };
+        }
+
+        let _ = wrapper_tx
+            .send(
+                CollectionTaskOutput {
+                    results: vec![ProducerResultsItem::Ok(samples)],
+                    was_forced_collection: false,
+                },
+                &log,
+            )
+            .await;
     }
 }
 
