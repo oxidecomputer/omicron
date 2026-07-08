@@ -29,7 +29,8 @@ pub static KNOWN_VERSIONS: LazyLock<Vec<KnownVersion>> = LazyLock::new(|| {
         // v
         // KnownVersion::new(next_int, "unique-dirname-with-the-sql-files"),
         //
-        KnownVersion::new(277, "psu-presence-alert-classes"),
+        KnownVersion::new(278, "psu-presence-alert-classes"),
+        KnownVersion::new(277, "ereporter-restart-latest-ereport"),
         KnownVersion::new(276, "webhook-delivery-list-indices"),
         KnownVersion::new(275, "alert-list-matching-indices"),
         KnownVersion::new(274, "ereporter-restart-rack-id"),
