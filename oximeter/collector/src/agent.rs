@@ -758,7 +758,9 @@ mod tests {
     use omicron_test_utils::dev::poll::wait_for_condition;
     use omicron_test_utils::dev::poll::wait_for_watch_channel_condition;
     use omicron_test_utils::dev::test_setup_log;
+    use oximeter::Sample;
     use oximeter::types::ProducerResults;
+    use oximeter::types::ProducerResultsItem;
     use oximeter_types::producer::ProducerDetails;
     use reqwest::StatusCode;
     use std::net::Ipv6Addr;
@@ -909,6 +911,35 @@ mod tests {
         }
     }
 
+    /// A producer that always responds successfully with two samples.
+    struct LiveProducer;
+
+    impl ProducerApi for LiveProducer {
+        type Context = Arc<AtomicUsize>;
+
+        async fn collect(
+            request_context: RequestContext<Self::Context>,
+            _: Path<IdPath>,
+        ) -> Result<HttpResponseOk<ProducerResults>, HttpError> {
+            request_context.context().fetch_add(1, Ordering::SeqCst);
+
+            #[derive(oximeter::Target)]
+            struct TestTarget {
+                id: Uuid,
+            }
+            #[derive(oximeter::Metric)]
+            struct TestMetric {
+                datum: u64,
+            }
+
+            let target = TestTarget { id: Uuid::nil() };
+            Ok(HttpResponseOk(vec![ProducerResultsItem::Ok(vec![
+                Sample::new(&target, &TestMetric { datum: 1 }).unwrap(),
+                Sample::new(&target, &TestMetric { datum: 2 }).unwrap(),
+            ])]))
+        }
+    }
+
     /// A producer that always responds with a 500.
     struct DedProducer;
 
@@ -942,10 +973,10 @@ mod tests {
         .await
         .unwrap();
 
-        // Spawn the mock server that always reports empty statistics.
+        // Spawn the mock server that always reports dummy statistics.
         let collection_count = Arc::new(AtomicUsize::new(0));
         let server = ServerBuilder::new(
-            producer_api_mod::api_description::<EmptyProducer>().unwrap(),
+            producer_api_mod::api_description::<LiveProducer>().unwrap(),
             collection_count.clone(),
             log.new(slog::o!("component" => "dropshot")),
         )
@@ -977,6 +1008,7 @@ mod tests {
             .statistics();
         let stats = rx.await.unwrap();
         let count = stats.collections.datum.value() as usize;
+        let samples_collected = stats.samples_collected.datum.value();
 
         // Exactly `N_COLLECTIONS` collections ran: nothing is in flight when
         // `run_n_collections` returns, and the long collection interval
@@ -990,6 +1022,16 @@ mod tests {
             producer server itself ({server_count})"
         );
         assert!(stats.failed_collections.is_empty());
+
+        let producer_samples_collected = 2 * N_COLLECTIONS;
+        assert_eq!(
+            samples_collected, producer_samples_collected,
+            "number of samples collected by the collection \
+            task ({samples_collected}) differs from the expected count of \
+            {producer_samples_collected}; the dummy producer produces two \
+            samples per collection"
+        );
+
         logctx.cleanup_successful();
     }
 
