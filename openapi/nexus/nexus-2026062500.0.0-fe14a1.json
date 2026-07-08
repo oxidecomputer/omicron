@@ -20022,24 +20022,21 @@
         ]
       },
       "DiscoveredRouter": {
+        "description": "Information about a router discovered through router advertisements.",
         "type": "object",
         "properties": {
           "address": {
-            "description": "Peer IPv6 address",
+            "description": "Router IPv6 address",
             "type": "string",
             "format": "ipv6"
           },
-          "discovered_at": {
-            "description": "When the peer was first discovered (ISO 8601 timestamp)",
-            "type": "string"
-          },
-          "expired": {
-            "description": "Whether the peer entry has expired",
-            "type": "boolean"
-          },
-          "last_advertisement": {
-            "description": "When the most recent Router Advertisement was received (ISO 8601 timestamp)",
-            "type": "string"
+          "effective_reachable_time": {
+            "description": "Effective reachable time governing expiry of this entry",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Duration"
+              }
+            ]
           },
           "reachable_time": {
             "description": "Reachable time from RA (milliseconds)",
@@ -20059,20 +20056,31 @@
             "format": "uint16",
             "minimum": 0
           },
-          "time_until_expiry": {
-            "nullable": true,
-            "description": "Time until expiry (human-readable), or None if already expired",
-            "type": "string"
+          "time_since_discovered": {
+            "description": "Time elapsed since the router was first discovered",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Duration"
+              }
+            ]
+          },
+          "time_since_last_rx": {
+            "description": "Time elapsed since the most recent Router Advertisement was received",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Duration"
+              }
+            ]
           }
         },
         "required": [
           "address",
-          "discovered_at",
-          "expired",
-          "last_advertisement",
+          "effective_reachable_time",
           "reachable_time",
           "retrans_timer",
-          "router_lifetime"
+          "router_lifetime",
+          "time_since_discovered",
+          "time_since_last_rx"
         ]
       },
       "Disk": {
@@ -20693,6 +20701,25 @@
           "counts",
           "squared_mean",
           "sum_of_samples"
+        ]
+      },
+      "Duration": {
+        "type": "object",
+        "properties": {
+          "nanos": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "secs": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "nanos",
+          "secs"
         ]
       },
       "EphemeralIpCreate": {
@@ -25613,25 +25640,6 @@
         "type": "string",
         "maxLength": 512
       },
-      "PendingUnnumberedInterface": {
-        "type": "object",
-        "properties": {
-          "interface": {
-            "description": "Interface name",
-            "type": "string"
-          },
-          "router_lifetime": {
-            "description": "Configured router lifetime (seconds)",
-            "type": "integer",
-            "format": "uint16",
-            "minimum": 0
-          }
-        },
-        "required": [
-          "interface",
-          "router_lifetime"
-        ]
-      },
       "PhysicalDisk": {
         "description": "View of a Physical Disk\n\nPhysical disks reside in a particular sled and are used to store both Instance Disk data as well as internal metadata.",
         "type": "object",
@@ -30431,29 +30439,106 @@
           "router_lifetime"
         ]
       },
+      "UnnumberedInterfaceStatus": {
+        "description": "Status of an interface configured for unnumbered operation.",
+        "oneOf": [
+          {
+            "description": "Configured but not yet available on the system.",
+            "type": "object",
+            "properties": {
+              "pending": {
+                "type": "object",
+                "properties": {
+                  "router_lifetime": {
+                    "description": "Configured router lifetime (seconds)",
+                    "type": "integer",
+                    "format": "uint16",
+                    "minimum": 0
+                  }
+                },
+                "required": [
+                  "router_lifetime"
+                ]
+              }
+            },
+            "required": [
+              "pending"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "description": "Active for unnumbered operation.",
+            "type": "object",
+            "properties": {
+              "active": {
+                "type": "object",
+                "properties": {
+                  "discovered_peer": {
+                    "nullable": true,
+                    "description": "Information about the discovered peer. None if no peer has been discovered or the discovered entry has expired.",
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/DiscoveredRouter"
+                      }
+                    ]
+                  },
+                  "local_address": {
+                    "description": "Local IPv6 link-local address",
+                    "type": "string",
+                    "format": "ipv6"
+                  },
+                  "router_lifetime": {
+                    "description": "Router lifetime advertised by this router (seconds)",
+                    "type": "integer",
+                    "format": "uint16",
+                    "minimum": 0
+                  },
+                  "runtime_state": {
+                    "description": "Runtime state for router discovery on this interface",
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/RouterDiscoveryRuntimeState"
+                      }
+                    ]
+                  },
+                  "scope_id": {
+                    "description": "IPv6 scope ID (interface index)",
+                    "type": "integer",
+                    "format": "uint32",
+                    "minimum": 0
+                  }
+                },
+                "required": [
+                  "local_address",
+                  "router_lifetime",
+                  "runtime_state",
+                  "scope_id"
+                ]
+              }
+            },
+            "required": [
+              "active"
+            ],
+            "additionalProperties": false
+          }
+        ]
+      },
       "UnnumberedManagerState": {
         "type": "object",
         "properties": {
-          "active_interfaces": {
-            "type": "array",
-            "items": {
-              "type": "string"
+          "interfaces": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/UnnumberedInterfaceStatus"
             }
           },
           "monitor_running": {
             "type": "boolean"
-          },
-          "pending_interfaces": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/PendingUnnumberedInterface"
-            }
           }
         },
         "required": [
-          "active_interfaces",
-          "monitor_running",
-          "pending_interfaces"
+          "interfaces",
+          "monitor_running"
         ]
       },
       "UpdateStatus": {

@@ -338,6 +338,7 @@ pub mod networking {
     pub use crate::v2026_06_25_00::networking::SwitchUnnumberedManagerState;
     pub use crate::v2026_06_25_00::networking::UnnumberedInterface;
     pub use crate::v2026_06_25_00::networking::UnnumberedInterfacePath;
+    pub use crate::v2026_06_25_00::networking::UnnumberedInterfaceStatus;
     pub use crate::v2026_06_25_00::networking::UnnumberedManagerState;
 }
 

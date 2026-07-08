@@ -2,15 +2,17 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use std::collections::BTreeMap;
 use std::net::Ipv6Addr;
+use std::time::Duration;
 
 use mg_admin_client::types::{
-    DiscoveredRouter as MgDiscoveredRouter,
-    PendingUnnumberedInterface as MgPendingUnnumberedInterface,
     RouterDiscoveryRuntimeState as MgRouterDiscoveryRuntimeState,
     UnnumberedInterface as MgUnnumberedInterface,
+    UnnumberedInterfaceStatus as MgUnnumberedInterfaceStatus,
     UnnumberedManagerState as MgUnnumberedManagerState,
 };
+use mg_api_types::unnumbered::DiscoveredRouter as MgDiscoveredRouter;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sled_agent_types_versions::v1::early_networking::SwitchSlot;
@@ -33,36 +35,77 @@ pub struct UnnumberedInterfacePath {
 }
 
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
-pub struct UnnumberedManagerState {
-    pub monitor_running: bool,
-    pub pending_interfaces: Vec<PendingUnnumberedInterface>,
-    pub active_interfaces: Vec<String>,
-}
-
-#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
 pub struct SwitchUnnumberedManagerState {
     pub switch_slot: SwitchSlot,
     pub state: UnnumberedManagerState,
 }
 
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
+pub struct UnnumberedManagerState {
+    pub monitor_running: bool,
+    pub interfaces: BTreeMap<String, UnnumberedInterfaceStatus>,
+}
+
 impl From<MgUnnumberedManagerState> for UnnumberedManagerState {
     fn from(value: MgUnnumberedManagerState) -> Self {
-        let MgUnnumberedManagerState {
-            monitor_running,
-            pending_interfaces,
-            active_interfaces,
-        } = value;
+        let MgUnnumberedManagerState { monitor_running, interfaces } = value;
 
         Self {
             monitor_running,
-            pending_interfaces: pending_interfaces
+            interfaces: interfaces
                 .into_iter()
-                .map(Into::into)
+                .map(|(interface, status)| {
+                    (nexus_interface_name(interface), status.into())
+                })
                 .collect(),
-            active_interfaces: active_interfaces
-                .into_iter()
-                .map(nexus_interface_name)
-                .collect(),
+        }
+    }
+}
+
+/// Status of an interface configured for unnumbered operation.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum UnnumberedInterfaceStatus {
+    /// Configured but not yet available on the system.
+    Pending {
+        /// Configured router lifetime (seconds)
+        router_lifetime: u16,
+    },
+    /// Active for unnumbered operation.
+    Active {
+        /// Local IPv6 link-local address
+        local_address: Ipv6Addr,
+        /// IPv6 scope ID (interface index)
+        scope_id: u32,
+        /// Router lifetime advertised by this router (seconds)
+        router_lifetime: u16,
+        /// Information about the discovered peer. None if no peer has been
+        /// discovered or the discovered entry has expired.
+        discovered_peer: Option<DiscoveredRouter>,
+        /// Runtime state for router discovery on this interface
+        runtime_state: RouterDiscoveryRuntimeState,
+    },
+}
+
+impl From<MgUnnumberedInterfaceStatus> for UnnumberedInterfaceStatus {
+    fn from(value: MgUnnumberedInterfaceStatus) -> Self {
+        match value {
+            MgUnnumberedInterfaceStatus::Pending { router_lifetime } => {
+                Self::Pending { router_lifetime }
+            }
+            MgUnnumberedInterfaceStatus::Active {
+                local_address,
+                scope_id,
+                router_lifetime,
+                discovered_peer,
+                runtime_state,
+            } => Self::Active {
+                local_address,
+                scope_id,
+                router_lifetime,
+                discovered_peer: discovered_peer.map(Into::into),
+                runtime_state: runtime_state.into(),
+            },
         }
     }
 }
@@ -73,13 +116,6 @@ pub struct PendingUnnumberedInterface {
     pub interface: String,
     /// Configured router lifetime (seconds)
     pub router_lifetime: u16,
-}
-
-impl From<MgPendingUnnumberedInterface> for PendingUnnumberedInterface {
-    fn from(value: MgPendingUnnumberedInterface) -> Self {
-        let MgPendingUnnumberedInterface { interface, router_lifetime } = value;
-        Self { interface: nexus_interface_name(interface), router_lifetime }
-    }
 }
 
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
@@ -139,49 +175,44 @@ impl From<MgUnnumberedInterface> for UnnumberedInterface {
     }
 }
 
+/// Information about a router discovered through router advertisements.
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
 pub struct DiscoveredRouter {
-    /// Peer IPv6 address
+    /// Router IPv6 address
     pub address: Ipv6Addr,
-    /// When the peer was first discovered (ISO 8601 timestamp)
-    pub discovered_at: String,
-    /// When the most recent Router Advertisement was received (ISO 8601
-    /// timestamp)
-    pub last_advertisement: String,
+    /// Time elapsed since the router was first discovered
+    pub time_since_discovered: Duration,
+    /// Time elapsed since the most recent Router Advertisement was received
+    pub time_since_last_rx: Duration,
+    /// Effective reachable time governing expiry of this entry
+    pub effective_reachable_time: Duration,
     /// Router lifetime from RA (seconds)
     pub router_lifetime: u16,
     /// Reachable time from RA (milliseconds)
     pub reachable_time: u32,
     /// Retransmit timer from RA (milliseconds)
     pub retrans_timer: u32,
-    /// Whether the peer entry has expired
-    pub expired: bool,
-    /// Time until expiry (human-readable), or None if already expired
-    pub time_until_expiry: Option<String>,
 }
 
 impl From<MgDiscoveredRouter> for DiscoveredRouter {
     fn from(value: MgDiscoveredRouter) -> Self {
         let MgDiscoveredRouter {
             address,
-            discovered_at,
-            last_advertisement,
+            time_since_discovered,
+            time_since_last_rx,
+            effective_reachable_time,
             router_lifetime,
             reachable_time,
             retrans_timer,
-            expired,
-            time_until_expiry,
         } = value;
-
         Self {
             address,
-            discovered_at,
-            last_advertisement,
+            time_since_discovered,
+            time_since_last_rx,
+            effective_reachable_time,
             router_lifetime,
             reachable_time,
             retrans_timer,
-            expired,
-            time_until_expiry,
         }
     }
 }
