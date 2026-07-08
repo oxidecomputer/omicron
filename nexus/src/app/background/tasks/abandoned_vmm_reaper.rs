@@ -249,7 +249,7 @@ impl AbandonedVmmReaper {
 
             status.batches += 1;
             status.found += batch.len();
-            paginator = p.found_batch(&batch, &|v| v.id().into_untyped_uuid());
+            paginator = p.found_batch(&batch, &|v| *v);
 
             slog::debug!(
                 opctx.log,
@@ -258,10 +258,10 @@ impl AbandonedVmmReaper {
                 "total" => status.found,
             );
 
-            for res in batch {
+            for id in batch {
                 self.delete_sled_reservation(
                     opctx,
-                    res.id(),
+                    id.into(),
                     &mut status.deleted,
                     &mut status.errors,
                 )
