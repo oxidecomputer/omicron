@@ -65,12 +65,75 @@
         "description": "Diagnostic information",
         "type": "object",
         "properties": {
-          "data": {
+          "boundary_pool": {
             "type": "string"
+          },
+          "dns_lookup_results": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DnsLookup"
+            }
+          },
+          "external_ntp_servers": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "icmp_ping_results": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/IcmpPing"
+            }
+          },
+          "is_boundary": {
+            "type": "boolean"
           }
         },
         "required": [
-          "data"
+          "boundary_pool",
+          "dns_lookup_results",
+          "external_ntp_servers",
+          "icmp_ping_results",
+          "is_boundary"
+        ]
+      },
+      "DnsLookup": {
+        "type": "object",
+        "properties": {
+          "host": {
+            "type": "string"
+          },
+          "ips": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "ip"
+            }
+          }
+        },
+        "required": [
+          "host",
+          "ips"
+        ]
+      },
+      "Duration": {
+        "type": "object",
+        "properties": {
+          "nanos": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "secs": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "nanos",
+          "secs"
         ]
       },
       "Error": {
@@ -90,6 +153,70 @@
         "required": [
           "message",
           "request_id"
+        ]
+      },
+      "IcmpPing": {
+        "type": "object",
+        "properties": {
+          "host": {
+            "type": "string"
+          },
+          "ip": {
+            "type": "string",
+            "format": "ip"
+          },
+          "result": {
+            "$ref": "#/components/schemas/IcmpPingResult"
+          }
+        },
+        "required": [
+          "host",
+          "ip",
+          "result"
+        ]
+      },
+      "IcmpPingResult": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "reachable": {
+                "type": "object",
+                "properties": {
+                  "rtt": {
+                    "$ref": "#/components/schemas/Duration"
+                  }
+                },
+                "required": [
+                  "rtt"
+                ]
+              }
+            },
+            "required": [
+              "reachable"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "unreachable": {
+                "type": "object",
+                "properties": {
+                  "msg": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "msg"
+                ]
+              }
+            },
+            "required": [
+              "unreachable"
+            ],
+            "additionalProperties": false
+          }
         ]
       },
       "TimeSync": {

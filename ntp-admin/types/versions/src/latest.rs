@@ -10,4 +10,7 @@ pub mod timesync {
 
 pub mod debug {
     pub use crate::v3::debug::DebugInfo;
+    pub use crate::v3::debug::DnsLookup;
+    pub use crate::v3::debug::IcmpPing;
+    pub use crate::v3::debug::IcmpPingResult;
 }

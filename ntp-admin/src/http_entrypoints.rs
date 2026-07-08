@@ -10,13 +10,15 @@ use dropshot::HttpResponseOk;
 use dropshot::RequestContext;
 use ntp_admin_api::*;
 use ntp_admin_types::debug::DebugInfo;
+use ntp_admin_types::debug::DnsLookup;
+use ntp_admin_types::debug::IcmpPing;
+use ntp_admin_types::debug::IcmpPingResult;
 use ntp_admin_types::timesync::TimeSync;
 use scuffle::HasDirectPropertyGroups;
 use scuffle::Scf;
 use scuffle::Value;
 use slog::info;
 use slog_error_chain::InlineErrorChain;
-use std::collections::BTreeMap;
 use std::net::IpAddr;
 use std::net::Ipv6Addr;
 use std::str::FromStr;
@@ -287,6 +289,9 @@ impl ChronySetupProperties {
     }
 }
 
+const DNS_LOOKUP_TIMEOUT: Duration = Duration::from_secs(3);
+const ICMP_PING_TIMEOUT: Duration = Duration::from_secs(3);
+
 enum NtpAdminImpl {}
 
 impl NtpAdminImpl {
@@ -315,33 +320,24 @@ impl NtpAdminImpl {
         let ChronySetupProperties { server, boundary, boundary_pool } =
             ChronySetupProperties::load().unwrap();
 
-        // TODO-K: This doesn't seem to work on an a4x2 for some reason
-        // when I ping time.cloudflare.com, it just times out, or if I leave it
-        // I get ping: unknown host time.cloudflare.com. I need to test on a
-        // raclette
-        //
-        // Can I reach the DNS server / resolve the configured upstream NTP servers?
-        //
-        // `tokio::net::lookup_host` goes through getaddrinfo -> /etc/resolv.conf,
-        // so a successful lookup means at least one nameserver in resolv.conf
-        // answered. We probe every configured upstream NTP name.
-
         // TODO-K: clean this up, probably should separate external NTP servers
         // and internal ones?
         let mut server_values = vec![];
         for value in &server {
             server_values.push(value.display_smf().to_string());
         }
+
+        // We add the internal NTP server to the list of all NTP servers to run
+        // the diagnostic tests for it as well
         let mut all_ntp_servers = server_values.clone();
         all_ntp_servers.push(boundary_pool.clone().display_smf().to_string());
 
-        let mut ips_per_host = BTreeMap::new();
+        let mut dns_lookup_results = Vec::new();
         // TODO-K: Should spawn tasks for this?
-        for name in &all_ntp_servers {
+        for host in &all_ntp_servers {
             let ips: Vec<IpAddr> = match tokio::time::timeout(
-                // TODO-K: set this timeout as a constant
-                Duration::from_secs(3),
-                lookup_host(format!("{name}:0")),
+                DNS_LOOKUP_TIMEOUT,
+                lookup_host(format!("{host}:0")),
             )
             .await
             {
@@ -362,38 +358,38 @@ impl NtpAdminImpl {
                     ));
                 }
             };
-            info!(log, "dns lookup probe"; "name" => name, "ips" => format!("{:?}", ips));
-            ips_per_host.insert(name.to_string(), ips);
+            info!(log, "dns lookup probe"; "host" => host, "ips" => format!("{:?}", ips));
+            dns_lookup_results.push(DnsLookup { host: host.to_string(), ips });
         }
 
         // For each configured name, resolve it and send one ICMP echo to
         // each resolved IP with a short timeout. Requires the raw socket
         // privileges available inside the NTP zone.
-        let mut ping_results: Vec<(String, IpAddr, String)> = Vec::new();
-        for (host, ips) in &ips_per_host {
+        let mut ping_results = Vec::new();
+        for lookup_result in &dns_lookup_results {
+            let DnsLookup { host, ips } = lookup_result;
             // TODO-K: Should spawn tasks for this
             for ip in ips {
-                let outcome = match crate::ping::ping_once(
+                let result = match crate::ping::ping_once(
                     *ip,
-                    // TODO-K: set this timeout as a constant
-                    Duration::from_secs(3),
+                    ICMP_PING_TIMEOUT,
                 )
                 .await
                 {
-                    // TODO-K: represent this as a type
-                    Ok(pong) => format!(
-                        "reachable, rtt {:.2} ms",
-                        pong.rtt.as_secs_f64() * 1000.0,
-                    ),
-                    Err(err) => {
-                        format!("unreachable: {}", InlineErrorChain::new(&err),)
-                    }
+                    Ok(pong) => IcmpPingResult::Reachable { rtt: pong.rtt },
+                    Err(err) => IcmpPingResult::Unreachable {
+                        msg: InlineErrorChain::new(&err).to_string(),
+                    },
                 };
                 info!(
                     log, "ping probe";
-                    "host" => host, "ip" => %ip, "result" => &outcome,
+                    "host" => host, "ip" => %ip, "result" => ?result,
                 );
-                ping_results.push((host.clone(), *ip, outcome));
+                ping_results.push(IcmpPing {
+                    host: host.clone(),
+                    ip: *ip,
+                    result,
+                });
             }
         }
 
@@ -418,7 +414,7 @@ impl NtpAdminImpl {
             is_boundary,
             external_ntp_servers: server_values,
             boundary_pool: boundary_pool.display_smf().to_string(),
-            dns_look_up_results: ips_per_host,
+            dns_lookup_results,
             icmp_ping_results: ping_results,
         })
     }
