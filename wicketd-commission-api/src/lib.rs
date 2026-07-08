@@ -35,7 +35,10 @@ pub trait WicketdCommissionApi {
     }]
     async fn get_bootstrap_sleds(
         rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<latest::bootstrap_sleds::BootstrapSledIps>, HttpError>;
+    ) -> Result<
+        HttpResponseOk<latest::bootstrap_sleds::BootstrapSledIps>,
+        HttpError,
+    >;
 
     /// Get the current status of the user-provided (or system-default-provided, in
     /// some cases) RSS configuration.
@@ -46,7 +49,10 @@ pub trait WicketdCommissionApi {
     }]
     async fn get_rss_config(
         rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<latest::rss_config::CurrentRssUserConfig>, HttpError>;
+    ) -> Result<
+        HttpResponseOk<latest::rss_config::CurrentRssUserConfig>,
+        HttpError,
+    >;
 
     /// Update (a subset of) the current RSS configuration.
     ///
@@ -74,7 +80,10 @@ pub trait WicketdCommissionApi {
     async fn post_rss_config_cert(
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<String>,
-    ) -> Result<HttpResponseOk<latest::rss_config::CertificateUploadResponse>, HttpError>;
+    ) -> Result<
+        HttpResponseOk<latest::rss_config::CertificateUploadResponse>,
+        HttpError,
+    >;
 
     /// Add the private key of an external certificate.
     ///
@@ -88,7 +97,10 @@ pub trait WicketdCommissionApi {
     async fn post_rss_config_key(
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<String>,
-    ) -> Result<HttpResponseOk<latest::rss_config::CertificateUploadResponse>, HttpError>;
+    ) -> Result<
+        HttpResponseOk<latest::rss_config::CertificateUploadResponse>,
+        HttpError,
+    >;
 
     /// Update the RSS config recovery silo user password hash.
     #[endpoint {
@@ -150,7 +162,10 @@ pub trait WicketdCommissionApi {
     async fn get_inventory(
         rqctx: RequestContext<Self::Context>,
         body_params: TypedBody<latest::inventory::GetInventoryParams>,
-    ) -> Result<HttpResponseOk<latest::inventory::GetInventoryResponse>, HttpError>;
+    ) -> Result<
+        HttpResponseOk<latest::inventory::GetInventoryResponse>,
+        HttpError,
+    >;
 
     /// Upload a TUF repository to the server.
     ///
@@ -178,7 +193,10 @@ pub trait WicketdCommissionApi {
     }]
     async fn get_artifacts_and_event_reports(
         rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<latest::artifacts::GetArtifactsAndEventReportsResponse>, HttpError>;
+    ) -> Result<
+        HttpResponseOk<latest::artifacts::GetArtifactsAndEventReportsResponse>,
+        HttpError,
+    >;
 
     /// Report the identity of the sled and switch we're currently running on /
     /// connected to.
@@ -213,5 +231,8 @@ pub trait WicketdCommissionApi {
     async fn post_clear_update_state(
         rqctx: RequestContext<Self::Context>,
         params: TypedBody<latest::update::ClearUpdateStateParams>,
-    ) -> Result<HttpResponseOk<wicket_common::rack_update::ClearUpdateStateResponse>, HttpError>;
+    ) -> Result<
+        HttpResponseOk<wicket_common::rack_update::ClearUpdateStateResponse>,
+        HttpError,
+    >;
 }
