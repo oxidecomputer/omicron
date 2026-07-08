@@ -4,8 +4,6 @@
 
 //! The oximeter agent handles collection tasks for each producer.
 
-// Copyright 2025 Oxide Computer Company
-
 use crate::DbConfig;
 use crate::Error;
 use crate::ProducerEndpoint;
@@ -788,10 +786,7 @@ mod tests {
     async fn run_n_collections(collector: &OximeterAgent, id: Uuid, n: u64) {
         let mut details_rx = details_watcher(collector, id);
         for i in 1..=n {
-            // The first collection happens automatically, so skip over it here.
-            if i > 1 {
-                force_collect(collector, id);
-            }
+            force_collect(collector, id);
             wait_for_details(
                 &mut details_rx,
                 |details| details.n_collections + details.n_failures >= i,
@@ -1101,8 +1096,9 @@ mod tests {
 
         // We don't manipulate time manually here, since this is pretty short
         // and we want to assert things about the actual timing in the test
-        // below. The first collection is triggered by the interval timer,
-        // which fires once immediately.
+        // below. We force the first collection to avoid waiting for its
+        // jittered offset.
+        force_collect(&collector, id);
         wait_for_condition(
             || async {
                 // We need to check if the server has had a collection

@@ -7274,14 +7274,41 @@ INSERT INTO omicron.public.alert (
     0
 ) ON CONFLICT DO NOTHING;
 
--- Look up webhook events in need of dispatching.
+-- This index is used by the `alert_select_next_for_dispatch` query in the alert
+-- dispatcher background task, which selects the oldest not-yet-dispatched
+-- alert:
 --
--- This is used by the message dispatcher when looking for events to dispatch.
-CREATE INDEX IF NOT EXISTS lookup_undispatched_alerts
+--     WHERE time_dispatched IS NULL ORDER BY time_created ASC LIMIT 1
+--
+-- The `time_dispatched` prefix constrains the scan to undispatched alerts, and
+-- the `time_created` suffix provides the ordering, so this is a single indexed
+-- seek with no sort (rather than sorting every undispatched alert).
+--
+-- The `EXPLAIN` output will encourage us to make this into a covering index. I
+-- didn't do that, because duplicating all the fields, including the JSON, is a
+-- lot of work to do in the write path, and the pkey index join in the
+-- `alert_select_next_for_dispatch` isn't a big deal, since the query only ever
+-- reads one row at a time.
+CREATE INDEX IF NOT EXISTS lookup_alerts_by_time_dispatched
 ON omicron.public.alert (
-    id, time_created
-) WHERE time_dispatched IS NULL;
+    time_dispatched,
+    time_created
+);
 
+CREATE INDEX IF NOT EXISTS lookup_alerts_by_time_created
+ON omicron.public.alert (
+    time_created
+);
+
+CREATE INDEX IF NOT EXISTS lookup_alerts_by_class
+ON omicron.public.alert (
+    alert_class
+);
+
+CREATE INDEX IF NOT EXISTS lookup_alerts_for_fm_case
+ON omicron.public.alert (
+    case_id
+);
 
 /*
  * Alert message dispatching and delivery attempts.
@@ -7375,6 +7402,25 @@ ON omicron.public.webhook_delivery (
     time_created, id
 ) WHERE
     time_completed IS NULL;
+
+
+-- Order/filter deliveries by creation time, regardless of completion state.
+CREATE INDEX IF NOT EXISTS lookup_webhook_deliveries_by_time_created
+ON omicron.public.webhook_delivery (
+    time_created, id
+);
+
+-- Filter deliveries by their delivery state.
+CREATE INDEX IF NOT EXISTS lookup_webhook_deliveries_by_state
+ON omicron.public.webhook_delivery (
+    state
+);
+
+-- Filter deliveries by their trigger.
+CREATE INDEX IF NOT EXISTS lookup_webhook_deliveries_by_trigger
+ON omicron.public.webhook_delivery (
+    triggered_by
+);
 
 CREATE TYPE IF NOT EXISTS omicron.public.webhook_delivery_attempt_result as ENUM (
     -- The delivery attempt failed with an HTTP error.
@@ -8967,7 +9013,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '275.0.0', NULL)
+    (TRUE, NOW(), NOW(), '277.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

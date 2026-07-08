@@ -3,8 +3,9 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::typed_uuid::DbTypedUuid;
-use crate::{DbSwitchSlot, RouterPeerTypeDbRepresentation};
+use crate::{DbSwitchSlot, Name, RouterPeerTypeDbRepresentation};
 use crate::{SqlU8, SqlU16, SqlU32};
+use chrono::{DateTime, Utc};
 use db_macros::Resource;
 use ipnetwork::IpNetwork;
 use nexus_db_schema::schema::{
@@ -96,6 +97,31 @@ impl BgpConfig {
 
     pub fn bgp_announce_set_id(&self) -> BgpAnnounceSetUuid {
         self.bgp_announce_set_id.into()
+    }
+}
+
+#[derive(AsChangeset, Clone, Debug)]
+#[diesel(table_name = bgp_config)]
+pub struct BgpConfigUpdate {
+    pub name: Option<Name>,
+    pub description: Option<String>,
+    pub time_modified: DateTime<Utc>,
+    pub bgp_announce_set_id: Uuid,
+    pub max_paths: Option<SqlU8>,
+}
+
+impl BgpConfigUpdate {
+    pub fn new(
+        bgp_update: networking::BgpConfigUpdate,
+        bgp_announce_set_id: Uuid,
+    ) -> Self {
+        Self {
+            name: bgp_update.identity.name.map(Into::into),
+            description: bgp_update.identity.description,
+            time_modified: Utc::now(),
+            bgp_announce_set_id,
+            max_paths: bgp_update.max_paths.map(|x| x.as_u8().into()),
+        }
     }
 }
 

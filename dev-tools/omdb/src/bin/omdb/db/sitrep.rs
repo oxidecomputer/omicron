@@ -356,7 +356,7 @@ async fn cmd_db_sitrep_show(
         }
     }
 
-    println!("\n{:-<80}", "== DIAGNOSIS INPUTS ");
+    println!("\n{:=<80}", "== DIAGNOSIS INPUTS ");
     println!("    {INV_COLLECTION_ID:>WIDTH$}: {inv_collection_id:?}");
     let inv_collection = inv_collection_dsl::inv_collection
         .filter(
@@ -394,7 +394,7 @@ async fn cmd_db_sitrep_show(
     // behind a verbose flag?
 
     if !cases.is_empty() {
-        println!("\n{:-<80}\n", "== CASES");
+        println!("\n{:=<80}\n", "== CASES ");
         for case in cases {
             println!("{}", case.display_indented(4, Some(id)));
         }
@@ -483,7 +483,7 @@ fn print_analysis_report(
         return Ok(());
     }
 
-    println!("\n{:-<80}", "== ANALYSIS INPUT REPORT ");
+    println!("\n{:=<80}", "== ANALYSIS INPUT REPORT ");
     match serde_json::from_value::<InputReport>(input_report.clone()) {
         Ok(report) => println!("{}", report.display_multiline(0)),
         Err(e) => {
@@ -497,7 +497,7 @@ fn print_analysis_report(
         }
     }
 
-    println!("\n{:-<80}", "== ANALYSIS REPORT ");
+    println!("\n{:=<80}", "== ANALYSIS REPORT ");
     match serde_json::from_value::<AnalysisReport>(analysis_report.clone()) {
         Ok(report) => println!("{}", report.display_multiline(0)),
         Err(e) => {

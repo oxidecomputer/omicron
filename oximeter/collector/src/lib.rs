@@ -4,8 +4,6 @@
 
 //! Implementation of the `oximeter` metric collection server.
 
-// Copyright 2025 Oxide Computer Company
-
 pub use collection_task::ForcedCollectionError;
 use dropshot::ConfigDropshot;
 use dropshot::ConfigLogging;

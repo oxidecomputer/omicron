@@ -10,8 +10,12 @@
 //! reads happen in the caller, which passes the results in via
 //! [`RackNetworkConfigInput`].
 
+use iddqd::IdOrdItem;
+use iddqd::IdOrdMap;
+use iddqd::id_upcast;
 use ipnetwork::IpNetwork;
 use nexus_types::external_api::networking;
+use omicron_uuid_kinds::BgpConfigUuid;
 use oxnet::IpNet;
 use sled_agent_types::early_networking::BfdPeerConfig;
 use sled_agent_types::early_networking::BgpConfig as SledBgpConfig;
@@ -31,6 +35,7 @@ use sled_agent_types::early_networking::UplinkAddress;
 use sled_agent_types::early_networking::UplinkAddressConfig;
 use sled_agent_types::early_networking::UplinkPorts;
 use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::fmt;
 use std::net::IpAddr;
 
@@ -39,7 +44,7 @@ pub struct RackNetworkConfigInput {
     /// The rack's subnet. Must be set and IPv6; the builder bails otherwise.
     pub rack_subnet: Option<IpNetwork>,
     /// The BGP configuration for each switch.
-    pub bgp_configs: BTreeMap<SwitchSlot, BgpConfigInput>,
+    pub bgp_configs: BTreeMap<SwitchSlot, SwitchBgpConfig>,
     /// The ports whose applied settings feed the bootstore config.
     pub ports: Vec<PortInput>,
     /// First address of the infrastructure IP range.
@@ -52,6 +57,8 @@ pub struct RackNetworkConfigInput {
 
 /// Per-switch BGP configuration.
 pub struct BgpConfigInput {
+    /// The config's ID, used to distinguish configs from each other.
+    pub id: BgpConfigUuid,
     /// The local autonomous system number.
     pub asn: u32,
     /// The prefixes this switch originates, resolved from its announce set.
@@ -62,6 +69,60 @@ pub struct BgpConfigInput {
     pub shaper: Option<String>,
     /// The maximum number of equal-cost paths (validated by the builder).
     pub max_paths: u8,
+}
+
+impl IdOrdItem for BgpConfigInput {
+    type Key<'a> = BgpConfigUuid;
+    fn key(&self) -> Self::Key<'_> {
+        self.id
+    }
+    id_upcast!();
+}
+
+/// The BGP configuration a switch's peers reference.
+pub enum SwitchBgpConfig {
+    /// Every peer on the switch references a single BGP config.
+    Single(BgpConfigInput),
+    /// The switch's peers reference more than one distinct BGP config, so its
+    /// ASN is ambiguous.
+    ///
+    /// In this case, [`build_rack_network_config`] reports a
+    /// [`Problem::ConflictingBgpConfigForSwitch`].
+    Conflicting(BTreeSet<BgpConfigUuid>),
+}
+
+/// Collapse the `(switch, config)` BGP associations a switch's peers reference
+/// into one [`SwitchBgpConfig`] per switch.
+///
+/// A switch with more than one *distinct* config has peers that disagree on the
+/// config (and thus the ASN) -- instead of silently picking the first, we
+/// return `Conflicting`.
+pub fn collapse_bgp_configs(
+    associations: impl IntoIterator<Item = (SwitchSlot, BgpConfigInput)>,
+) -> BTreeMap<SwitchSlot, SwitchBgpConfig> {
+    let mut by_switch: BTreeMap<SwitchSlot, IdOrdMap<BgpConfigInput>> =
+        BTreeMap::new();
+    for (switch, config) in associations {
+        by_switch.entry(switch).or_default().insert_overwrite(config);
+    }
+
+    by_switch
+        .into_iter()
+        .map(|(switch, configs)| {
+            let collapsed = match configs.len() {
+                0 => unreachable!(
+                    "every switch in the map was inserted at least once"
+                ),
+                1 => SwitchBgpConfig::Single(
+                    configs.into_iter().next().expect("len checked == 1"),
+                ),
+                _ => SwitchBgpConfig::Conflicting(
+                    configs.into_iter().map(|config| config.id).collect(),
+                ),
+            };
+            (switch, collapsed)
+        })
+        .collect()
 }
 
 /// A switch port's applied settings.
@@ -122,6 +183,12 @@ pub enum Problem {
     /// A port is on a switch that has no BGP config, so its peers' ASN is
     /// unknown.
     MissingBgpConfigForSwitch { switch: SwitchSlot, port: String },
+    /// A switch's peers reference more than one distinct BGP config, so its
+    /// ASN is ambiguous. Only one BGP config (ASN) per switch is allowed.
+    ConflictingBgpConfigForSwitch {
+        switch: SwitchSlot,
+        configs: BTreeSet<BgpConfigUuid>,
+    },
     /// A port has an address that can't be converted to an uplink address.
     MalformedUplinkAddress {
         switch: SwitchSlot,
@@ -149,6 +216,13 @@ impl fmt::Display for Problem {
                 f,
                 "port {port} is on switch {switch:?}, which has no bgp config",
             ),
+            Problem::ConflictingBgpConfigForSwitch { switch, configs } => {
+                write!(
+                    f,
+                    "switch {switch:?} has peers referencing more than one bgp \
+                     config (only one asn per switch is allowed): {configs:?}",
+                )
+            }
             Problem::MalformedUplinkAddress { switch, port, error } => write!(
                 f,
                 "port {port} on switch {switch:?} has a malformed uplink \
@@ -224,8 +298,20 @@ pub fn build_rack_network_config(
         }
     };
 
+    // The bootstore stores one BGP config per switch.
     let mut bgp: Vec<SledBgpConfig> = Vec::new();
-    for (switch, config) in &bgp_configs {
+    for (switch, switch_config) in &bgp_configs {
+        let config = match switch_config {
+            SwitchBgpConfig::Single(config) => config,
+            SwitchBgpConfig::Conflicting(configs) => {
+                problems.push(Problem::ConflictingBgpConfigForSwitch {
+                    switch: *switch,
+                    configs: configs.clone(),
+                });
+                continue;
+            }
+        };
+
         let max_paths = match MaxPathConfig::new(config.max_paths) {
             Ok(max_paths) => max_paths,
             Err(_) => {
@@ -249,8 +335,6 @@ pub fn build_rack_network_config(
         });
     }
 
-    bgp.dedup();
-
     let mut ports: Vec<PortConfig> = vec![];
 
     for port in port_inputs {
@@ -265,7 +349,14 @@ pub fn build_rack_network_config(
         } else {
             // The peer ASN comes from the switch's BGP config.
             let asn = match bgp_configs.get(&port.switch) {
-                Some(config) => config.asn,
+                Some(SwitchBgpConfig::Single(config)) => config.asn,
+                Some(SwitchBgpConfig::Conflicting(_)) => {
+                    // The conflict was already recorded above -- we can skip
+                    // this port here. This won't cause an incomplete bootstore
+                    // config to be returned since we check for problems at the
+                    // end.
+                    continue;
+                }
                 None => {
                     // We attempt to enforce this constraint at the application
                     // layer, though this code hasn't been fully audited for
@@ -415,6 +506,7 @@ mod tests {
 
     fn valid_bgp_config() -> BgpConfigInput {
         BgpConfigInput {
+            id: BgpConfigUuid::from_u128(1),
             asn: 65000,
             originate: vec![],
             checker: None,
@@ -424,12 +516,12 @@ mod tests {
     }
 
     fn input_with(
-        bgp_configs: BTreeMap<SwitchSlot, BgpConfigInput>,
+        bgp_configs: Vec<(SwitchSlot, BgpConfigInput)>,
         ports: Vec<PortInput>,
     ) -> RackNetworkConfigInput {
         RackNetworkConfigInput {
             rack_subnet: Some("fd00:1122:3344:1::/64".parse().unwrap()),
-            bgp_configs,
+            bgp_configs: collapse_bgp_configs(bgp_configs),
             ports,
             infra_ip_first: "fd00:1122:3344:1::1".parse().unwrap(),
             infra_ip_last: "fd00:1122:3344:1::2".parse().unwrap(),
@@ -493,7 +585,7 @@ mod tests {
         // need its switch to have a BGP config.
         let config = build_rack_network_config(input_with(
             // No switch has a BGP config.
-            BTreeMap::new(),
+            vec![],
             // A single peerless port.
             vec![bare_port(SwitchSlot::Switch0, "qsfp0")],
         ))
@@ -509,7 +601,7 @@ mod tests {
     fn peered_port_requires_switch_bgp_config() {
         // A port that *does* have peers needs its switch's BGP config.
         let err = build_rack_network_config(input_with(
-            BTreeMap::new(),
+            vec![],
             vec![port_with_peer(SwitchSlot::Switch0, "qsfp0")],
         ))
         .unwrap_err();
@@ -527,10 +619,99 @@ mod tests {
     }
 
     #[test]
+    fn conflicting_bgp_configs_for_switch_is_reported() {
+        // Two distinct BGP configs (distinct ids) on the same switch must be
+        // reported as a problem.
+        let bgp_configs = vec![
+            (SwitchSlot::Switch0, valid_bgp_config()),
+            (
+                SwitchSlot::Switch0,
+                BgpConfigInput {
+                    id: BgpConfigUuid::from_u128(2),
+                    asn: 65001,
+                    ..valid_bgp_config()
+                },
+            ),
+        ];
+        let err = build_rack_network_config(input_with(bgp_configs, vec![]))
+            .unwrap_err();
+        assert_eq!(
+            err.problems,
+            vec![
+                Problem::ConflictingBgpConfigForSwitch {
+                    switch: SwitchSlot::Switch0,
+                    configs: BTreeSet::from([
+                        BgpConfigUuid::from_u128(1),
+                        BgpConfigUuid::from_u128(2),
+                    ]),
+                },
+                // No ports at all leaves the rack with no uplinks.
+                Problem::NoUplinkPorts,
+            ],
+        );
+    }
+
+    #[test]
+    fn collapse_bgp_configs_marks_only_conflicting_switches() {
+        let configs = collapse_bgp_configs(vec![
+            (SwitchSlot::Switch0, valid_bgp_config()),
+            (
+                SwitchSlot::Switch0,
+                BgpConfigInput {
+                    id: BgpConfigUuid::from_u128(2),
+                    asn: 65001,
+                    ..valid_bgp_config()
+                },
+            ),
+            (SwitchSlot::Switch1, valid_bgp_config()),
+        ]);
+        assert_eq!(configs.len(), 2);
+        match configs.get(&SwitchSlot::Switch0) {
+            Some(SwitchBgpConfig::Conflicting(ids)) => assert_eq!(
+                *ids,
+                BTreeSet::from([
+                    BgpConfigUuid::from_u128(1),
+                    BgpConfigUuid::from_u128(2),
+                ]),
+            ),
+            Some(SwitchBgpConfig::Single(_)) => {
+                panic!("two distinct configs on a switch must conflict")
+            }
+            None => panic!("switch0 must have a config"),
+        }
+        match configs.get(&SwitchSlot::Switch1) {
+            Some(SwitchBgpConfig::Single(_)) => {}
+            Some(SwitchBgpConfig::Conflicting(_)) => {
+                panic!("a single config must not conflict")
+            }
+            None => panic!("switch1 must have a config"),
+        }
+    }
+
+    #[test]
+    fn collapse_bgp_configs_dedups_one_config_referenced_many_times() {
+        let configs = collapse_bgp_configs(vec![
+            (SwitchSlot::Switch0, valid_bgp_config()),
+            (SwitchSlot::Switch0, valid_bgp_config()),
+            (SwitchSlot::Switch0, valid_bgp_config()),
+        ]);
+        assert_eq!(configs.len(), 1);
+        match configs.get(&SwitchSlot::Switch0) {
+            Some(SwitchBgpConfig::Single(_)) => {}
+            Some(SwitchBgpConfig::Conflicting(_)) => {
+                panic!(
+                    "the same config referenced repeatedly must not conflict"
+                )
+            }
+            None => panic!("switch0 must have a config"),
+        }
+    }
+
+    #[test]
     fn missing_rack_subnet_is_reported() {
         let input = RackNetworkConfigInput {
             rack_subnet: None,
-            ..input_with(BTreeMap::new(), vec![])
+            ..input_with(vec![], vec![])
         };
         let err = build_rack_network_config(input).unwrap_err();
         // No subnet and (incidentally) no ports: both are reported.
@@ -545,7 +726,7 @@ mod tests {
         let v4: IpNetwork = "10.0.0.0/24".parse().unwrap();
         let input = RackNetworkConfigInput {
             rack_subnet: Some(v4),
-            ..input_with(BTreeMap::new(), vec![])
+            ..input_with(vec![], vec![])
         };
         let err = build_rack_network_config(input).unwrap_err();
         assert_eq!(
@@ -562,8 +743,7 @@ mod tests {
         // A valid subnet but no ports at all: the rack has no uplinks, so the
         // builder must bail rather than emit an empty config.
         let err =
-            build_rack_network_config(input_with(BTreeMap::new(), vec![]))
-                .unwrap_err();
+            build_rack_network_config(input_with(vec![], vec![])).unwrap_err();
         assert_eq!(err.problems, vec![Problem::NoUplinkPorts]);
     }
 
@@ -573,7 +753,7 @@ mod tests {
         let input = RackNetworkConfigInput {
             rack_subnet: Some(v4),
             ..input_with(
-                BTreeMap::new(),
+                vec![],
                 vec![port_with_peer(SwitchSlot::Switch0, "qsfp0")],
             )
         };
@@ -597,15 +777,16 @@ mod tests {
         // A peered port needs its switch's BGP config to source the peer ASN.
         // Use two switches with distinct ASNs to ensure that the matching up
         // occurs properly.
-        let mut bgp_configs = BTreeMap::new();
-        bgp_configs.insert(
-            SwitchSlot::Switch0,
-            BgpConfigInput { asn: 64999, ..valid_bgp_config() },
-        );
-        bgp_configs.insert(
-            SwitchSlot::Switch1,
-            BgpConfigInput { asn: 65111, ..valid_bgp_config() },
-        );
+        let bgp_configs = vec![
+            (
+                SwitchSlot::Switch0,
+                BgpConfigInput { asn: 64999, ..valid_bgp_config() },
+            ),
+            (
+                SwitchSlot::Switch1,
+                BgpConfigInput { asn: 65111, ..valid_bgp_config() },
+            ),
+        ];
 
         let config = build_rack_network_config(input_with(
             bgp_configs,
@@ -648,9 +829,8 @@ mod tests {
             addresses: vec![AddressInput { address: loopback, vlan_id: None }],
             ..bare_port(SwitchSlot::Switch0, "qsfp0")
         };
-        let err =
-            build_rack_network_config(input_with(BTreeMap::new(), vec![port]))
-                .unwrap_err();
+        let err = build_rack_network_config(input_with(vec![], vec![port]))
+            .unwrap_err();
         assert_eq!(
             err.problems,
             vec![
@@ -677,9 +857,8 @@ mod tests {
             }],
             ..bare_port(SwitchSlot::Switch0, "qsfp0")
         };
-        let config =
-            build_rack_network_config(input_with(BTreeMap::new(), vec![port]))
-                .expect("built network config successfully");
+        let config = build_rack_network_config(input_with(vec![], vec![port]))
+            .expect("built network config successfully");
         assert_eq!(config.ports.len(), 1);
         assert_eq!(config.ports.first().addresses.len(), 1);
         assert_eq!(
@@ -692,11 +871,10 @@ mod tests {
     fn illegal_max_paths_is_reported() {
         // The builder consumes an unvalidated `max_paths`, so an out-of-range
         // value must surface as a problem.
-        let mut bgp_configs = BTreeMap::new();
-        bgp_configs.insert(
+        let bgp_configs = vec![(
             SwitchSlot::Switch0,
             BgpConfigInput { max_paths: 0, ..valid_bgp_config() },
-        );
+        )];
         let err = build_rack_network_config(input_with(bgp_configs, vec![]))
             .unwrap_err();
         assert_eq!(
@@ -729,12 +907,12 @@ mod tests {
         ))]
         ports_spec: Vec<(SwitchSlot, bool)>,
     ) {
-        let mut bgp_configs = BTreeMap::new();
+        let mut bgp_configs = Vec::new();
         if switch0_has_bgp {
-            bgp_configs.insert(SwitchSlot::Switch0, valid_bgp_config());
+            bgp_configs.push((SwitchSlot::Switch0, valid_bgp_config()));
         }
         if switch1_has_bgp {
-            bgp_configs.insert(SwitchSlot::Switch1, valid_bgp_config());
+            bgp_configs.push((SwitchSlot::Switch1, valid_bgp_config()));
         }
 
         let ports: Vec<PortInput> = ports_spec
