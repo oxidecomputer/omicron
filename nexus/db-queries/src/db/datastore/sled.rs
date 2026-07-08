@@ -4786,7 +4786,9 @@ pub(in crate::db::datastore) mod test {
             .await
             .unwrap();
 
-        assert!(disks_with_zombie_allocations.is_empty());
+        let empty: Vec<Uuid> = vec![];
+
+        assert_eq!(disks_with_zombie_allocations, empty);
     }
 
     /// Validate each rendezvous dataset's size_used column
