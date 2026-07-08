@@ -604,6 +604,8 @@ async fn cmd_db_ereporters(
     struct ReporterRow {
         #[tabled(display_with = "datetime_rfc3339_concise")]
         first_seen: DateTime<Utc>,
+        #[tabled(display_with = "datetime_rfc3339_concise")]
+        latest_ereport: DateTime<Utc>,
         id: Uuid,
         #[tabled(display_with = "display_option_invalid")]
         identity: Option<Reporter>,
@@ -648,6 +650,7 @@ async fn cmd_db_ereporters(
             };
             Some(ReporterRow {
                 first_seen: restart.time_first_seen,
+                latest_ereport: restart.time_latest_ereport_received,
                 id,
                 identity,
                 serial,
