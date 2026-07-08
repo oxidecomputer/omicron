@@ -216,6 +216,10 @@ pub fn analyze(builder: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
                 .log_event("analyzed PSC restart")
                 .kv("restart_id", restart.metadata.id())
                 .kv("first_seen_at", restart.metadata.time_first_seen)
+                .kv(
+                    "latest_ereport_at",
+                    restart.metadata.time_latest_ereport_received,
+                )
                 .kv("num_ereports", restart.ereports.len())
                 .kv(
                     "psus_absent",
@@ -225,10 +229,21 @@ pub fn analyze(builder: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
                         .map(|psu| psu.to_string())
                         .collect::<Vec<_>>(),
                 );
-            // Is this the latest restart of this PSC we've seen so far?
-            let current_latest =
-                latest.as_ref().map(|l| l.psc_restart.time_first_seen);
-            if Some(state.psc_restart.time_first_seen) > current_latest {
+
+            // Do we believe that this is the most recent restart of this PSC
+            // we've seen so far? Our heuristic here is that the restart from
+            // which we most recently collected an ereport is *probably* the
+            // most current restart.
+            // TODO(eliza): eventually, this will also be refined based on the
+            // restart ID the SP reports when we poll its health endpoints...
+            // TODO(eliza): eventually, we should factor out this logic into
+            // `Inputs` or something so that other DEs can use it...
+            let current_latest = latest
+                .as_ref()
+                .map(|l| l.psc_restart.time_latest_ereport_received);
+            if Some(state.psc_restart.time_latest_ereport_received)
+                > current_latest
+            {
                 latest = Some(state);
             }
         }
@@ -245,6 +260,10 @@ pub fn analyze(builder: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
                     .kv(
                         "latest_restart_first_seen",
                         state.psc_restart.time_first_seen,
+                    )
+                    .kv(
+                        "latest_ereport_received_at",
+                        state.psc_restart.time_latest_ereport_received,
                     );
             }
             Some(_) => {
