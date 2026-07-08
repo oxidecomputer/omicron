@@ -35,6 +35,7 @@ use nexus_types_versions::v2026_01_22_00;
 use nexus_types_versions::v2026_01_30_01;
 use nexus_types_versions::v2026_01_31_00;
 use nexus_types_versions::v2026_02_13_01;
+use nexus_types_versions::v2026_03_02_00;
 use nexus_types_versions::v2026_04_16_00;
 use nexus_types_versions::v2026_06_05_00;
 use omicron_common::address::IpRange;
@@ -86,6 +87,7 @@ api_versions!([
     // |  date-based version should be at the top of the list.
     // v
     // (next_yyyy_mm_dd_nn, IDENT),
+    (2026_07_07_00, ADD_GROUPS_TO_USERS),
     (2026_06_10_00, BGP_CONFIGURATION_UPDATE),
     (2026_06_08_00, INSTANCE_CPU_TYPE_TURIN_V2),
     (2026_06_05_00, EXTERNAL_JUMBO_FRAMES),
@@ -730,12 +732,37 @@ pub trait NexusExternalApi {
         method = GET,
         path = "/v1/system/users",
         tags = ["system/silos"],
-        versions = VERSION_ADD_TIME_FIELDS_TO_USERS..,
+        versions = VERSION_ADD_GROUPS_TO_USERS..,
     }]
     async fn silo_user_list(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<PaginatedById<latest::silo::SiloSelector>>,
     ) -> Result<HttpResponseOk<ResultsPage<latest::user::User>>, HttpError>;
+
+    /// List built-in (system) users in silo
+    #[endpoint {
+        operation_id = "silo_user_list",
+        method = GET,
+        path = "/v1/system/users",
+        tags = ["system/silos"],
+        versions = VERSION_ADD_TIME_FIELDS_TO_USERS..VERSION_ADD_GROUPS_TO_USERS,
+    }]
+    async fn silo_user_list_v2026_03_02_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedById<latest::silo::SiloSelector>>,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<v2026_03_02_00::user::User>>,
+        HttpError,
+    > {
+        Self::silo_user_list(rqctx, query_params).await.map(
+            |HttpResponseOk(page)| {
+                HttpResponseOk(ResultsPage {
+                    items: page.items.into_iter().map(Into::into).collect(),
+                    next_page: page.next_page,
+                })
+            },
+        )
+    }
 
     /// List built-in (system) users in silo
     #[endpoint {
@@ -752,7 +779,7 @@ pub trait NexusExternalApi {
         HttpResponseOk<ResultsPage<v2025_11_20_00::user::User>>,
         HttpError,
     > {
-        Self::silo_user_list(rqctx, query_params).await.map(
+        Self::silo_user_list_v2026_03_02_00(rqctx, query_params).await.map(
             |HttpResponseOk(page)| {
                 HttpResponseOk(ResultsPage {
                     items: page.items.into_iter().map(Into::into).collect(),
@@ -767,13 +794,31 @@ pub trait NexusExternalApi {
         method = GET,
         path = "/v1/system/users/{user_id}",
         tags = ["system/silos"],
-        versions = VERSION_ADD_TIME_FIELDS_TO_USERS..,
+        versions = VERSION_ADD_GROUPS_TO_USERS..,
     }]
     async fn silo_user_view(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<latest::user::UserParam>,
         query_params: Query<latest::silo::SiloSelector>,
     ) -> Result<HttpResponseOk<latest::user::User>, HttpError>;
+
+    /// Fetch built-in (system) user
+    #[endpoint {
+        operation_id = "silo_user_view",
+        method = GET,
+        path = "/v1/system/users/{user_id}",
+        tags = ["system/silos"],
+        versions = VERSION_ADD_TIME_FIELDS_TO_USERS..VERSION_ADD_GROUPS_TO_USERS,
+    }]
+    async fn silo_user_view_v2026_03_02_00(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::user::UserParam>,
+        query_params: Query<latest::silo::SiloSelector>,
+    ) -> Result<HttpResponseOk<v2026_03_02_00::user::User>, HttpError> {
+        Self::silo_user_view(rqctx, path_params, query_params)
+            .await
+            .map(|HttpResponseOk(u)| HttpResponseOk(u.into()))
+    }
 
     /// Fetch built-in (system) user
     #[endpoint {
@@ -788,7 +833,7 @@ pub trait NexusExternalApi {
         path_params: Path<latest::user::UserParam>,
         query_params: Query<latest::silo::SiloSelector>,
     ) -> Result<HttpResponseOk<v2025_11_20_00::user::User>, HttpError> {
-        Self::silo_user_view(rqctx, path_params, query_params)
+        Self::silo_user_view_v2026_03_02_00(rqctx, path_params, query_params)
             .await
             .map(|HttpResponseOk(u)| HttpResponseOk(u.into()))
     }
@@ -860,13 +905,36 @@ pub trait NexusExternalApi {
         method = POST,
         path = "/v1/system/identity-providers/local/users",
         tags = ["system/silos"],
-        versions = VERSION_ADD_TIME_FIELDS_TO_USERS..,
+        versions = VERSION_ADD_GROUPS_TO_USERS..,
     }]
     async fn local_idp_user_create(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<latest::silo::SiloSelector>,
         new_user_params: TypedBody<latest::user::UserCreate>,
     ) -> Result<HttpResponseCreated<latest::user::User>, HttpError>;
+
+    /// Create user
+    ///
+    /// Users can only be created in Silos with `provision_type` == `Fixed`.
+    /// Otherwise, Silo users are just-in-time (JIT) provisioned when a user
+    /// first logs in using an external Identity Provider.
+    #[endpoint {
+        operation_id = "local_idp_user_create",
+        method = POST,
+        path = "/v1/system/identity-providers/local/users",
+        tags = ["system/silos"],
+        versions = VERSION_ADD_TIME_FIELDS_TO_USERS..VERSION_ADD_GROUPS_TO_USERS,
+    }]
+    async fn local_idp_user_create_v2026_03_02_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<latest::silo::SiloSelector>,
+        new_user_params: TypedBody<latest::user::UserCreate>,
+    ) -> Result<HttpResponseCreated<v2026_03_02_00::user::User>, HttpError>
+    {
+        Self::local_idp_user_create(rqctx, query_params, new_user_params)
+            .await
+            .map(|HttpResponseCreated(u)| HttpResponseCreated(u.into()))
+    }
 
     /// Create user
     ///
@@ -886,9 +954,13 @@ pub trait NexusExternalApi {
         new_user_params: TypedBody<latest::user::UserCreate>,
     ) -> Result<HttpResponseCreated<v2025_11_20_00::user::User>, HttpError>
     {
-        Self::local_idp_user_create(rqctx, query_params, new_user_params)
-            .await
-            .map(|HttpResponseCreated(u)| HttpResponseCreated(u.into()))
+        Self::local_idp_user_create_v2026_03_02_00(
+            rqctx,
+            query_params,
+            new_user_params,
+        )
+        .await
+        .map(|HttpResponseCreated(u)| HttpResponseCreated(u.into()))
     }
 
     /// Delete user
@@ -7951,12 +8023,37 @@ pub trait NexusExternalApi {
         method = GET,
         path = "/v1/users",
         tags = ["silos"],
-        versions = VERSION_ADD_TIME_FIELDS_TO_USERS..,
+        versions = VERSION_ADD_GROUPS_TO_USERS..,
     }]
     async fn user_list(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<PaginatedById<latest::user::OptionalGroupSelector>>,
     ) -> Result<HttpResponseOk<ResultsPage<latest::user::User>>, HttpError>;
+
+    /// List users
+    #[endpoint {
+        operation_id = "user_list",
+        method = GET,
+        path = "/v1/users",
+        tags = ["silos"],
+        versions = VERSION_ADD_TIME_FIELDS_TO_USERS..VERSION_ADD_GROUPS_TO_USERS,
+    }]
+    async fn user_list_v2026_03_02_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedById<latest::user::OptionalGroupSelector>>,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<v2026_03_02_00::user::User>>,
+        HttpError,
+    > {
+        Self::user_list(rqctx, query_params).await.map(
+            |HttpResponseOk(page)| {
+                HttpResponseOk(ResultsPage {
+                    items: page.items.into_iter().map(Into::into).collect(),
+                    next_page: page.next_page,
+                })
+            },
+        )
+    }
 
     /// List users
     #[endpoint {
@@ -7973,7 +8070,7 @@ pub trait NexusExternalApi {
         HttpResponseOk<ResultsPage<v2025_11_20_00::user::User>>,
         HttpError,
     > {
-        Self::user_list(rqctx, query_params).await.map(
+        Self::user_list_v2026_03_02_00(rqctx, query_params).await.map(
             |HttpResponseOk(page)| {
                 HttpResponseOk(ResultsPage {
                     items: page.items.into_iter().map(Into::into).collect(),
@@ -7988,12 +8085,29 @@ pub trait NexusExternalApi {
         method = GET,
         path = "/v1/users/{user_id}",
         tags = ["silos"],
-        versions = VERSION_ADD_TIME_FIELDS_TO_USERS..,
+        versions = VERSION_ADD_GROUPS_TO_USERS..,
     }]
     async fn user_view(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<latest::path_params::UserPath>,
     ) -> Result<HttpResponseOk<latest::user::User>, HttpError>;
+
+    /// Fetch user
+    #[endpoint {
+        operation_id = "user_view",
+        method = GET,
+        path = "/v1/users/{user_id}",
+        tags = ["silos"],
+        versions = VERSION_ADD_TIME_FIELDS_TO_USERS..VERSION_ADD_GROUPS_TO_USERS,
+    }]
+    async fn user_view_v2026_03_02_00(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::UserPath>,
+    ) -> Result<HttpResponseOk<v2026_03_02_00::user::User>, HttpError> {
+        Self::user_view(rqctx, path_params)
+            .await
+            .map(|HttpResponseOk(u)| HttpResponseOk(u.into()))
+    }
 
     /// Fetch user
     #[endpoint {
@@ -8007,7 +8121,7 @@ pub trait NexusExternalApi {
         rqctx: RequestContext<Self::Context>,
         path_params: Path<latest::path_params::UserPath>,
     ) -> Result<HttpResponseOk<v2025_11_20_00::user::User>, HttpError> {
-        Self::user_view(rqctx, path_params)
+        Self::user_view_v2026_03_02_00(rqctx, path_params)
             .await
             .map(|HttpResponseOk(u)| HttpResponseOk(u.into()))
     }
@@ -8155,11 +8269,28 @@ pub trait NexusExternalApi {
         method = GET,
         path = "/v1/me",
         tags = ["current-user"],
-        versions = VERSION_ADD_TIME_FIELDS_TO_USERS..,
+        versions = VERSION_ADD_GROUPS_TO_USERS..,
     }]
     async fn current_user_view(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<latest::user::CurrentUser>, HttpError>;
+
+    /// Fetch user for current session
+    #[endpoint {
+        operation_id = "current_user_view",
+        method = GET,
+        path = "/v1/me",
+        tags = ["current-user"],
+        versions = VERSION_ADD_TIME_FIELDS_TO_USERS..VERSION_ADD_GROUPS_TO_USERS,
+    }]
+    async fn current_user_view_v2026_03_02_00(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<v2026_03_02_00::user::CurrentUser>, HttpError>
+    {
+        Self::current_user_view(rqctx)
+            .await
+            .map(|HttpResponseOk(u)| HttpResponseOk(u.into()))
+    }
 
     /// Fetch user for current session
     #[endpoint {
@@ -8173,7 +8304,7 @@ pub trait NexusExternalApi {
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<v2025_11_20_00::user::CurrentUser>, HttpError>
     {
-        Self::current_user_view(rqctx)
+        Self::current_user_view_v2026_03_02_00(rqctx)
             .await
             .map(|HttpResponseOk(u)| HttpResponseOk(u.into()))
     }

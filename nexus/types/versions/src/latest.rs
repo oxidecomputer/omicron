@@ -570,9 +570,10 @@ pub mod user {
     pub use crate::v2025_11_20_00::user::UserParam;
     pub use crate::v2025_11_20_00::user::UserPassword;
     pub use crate::v2025_11_20_00::user::UsernamePasswordCredentials;
-    pub use crate::v2026_03_02_00::user::CurrentUser;
     pub use crate::v2026_03_02_00::user::Group;
-    pub use crate::v2026_03_02_00::user::User;
+    pub use crate::v2026_07_07_00::user::CurrentUser;
+    pub use crate::v2026_07_07_00::user::User;
+    pub use crate::v2026_07_07_00::user::UserGroup;
 }
 
 pub mod path_params {

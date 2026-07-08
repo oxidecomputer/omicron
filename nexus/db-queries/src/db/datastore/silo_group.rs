@@ -138,6 +138,13 @@ impl From<SiloGroup> for user::Group {
     }
 }
 
+impl From<SiloGroup> for user::UserGroup {
+    fn from(u: SiloGroup) -> user::UserGroup {
+        let group = user::Group::from(u);
+        user::UserGroup { id: group.id, display_name: group.display_name }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct SiloGroupApiOnly {
     pub id: SiloGroupUuid,
@@ -569,6 +576,46 @@ impl DataStore {
             .get_results_async(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    /// Fetch the groups that each of the given users is a member of, for
+    /// embedding group memberships in `User` views
+    pub async fn silo_groups_for_users(
+        &self,
+        opctx: &OpContext,
+        authz_silo: &authz::Silo,
+        silo_user_ids: &[SiloUserUuid],
+    ) -> ListResultVec<(SiloUserUuid, SiloGroup)> {
+        // Match the authz check used to list the silo's groups
+        // (silo_groups_list_by_id): anyone who can read the silo can see the
+        // groups in it.
+        opctx.authorize(authz::Action::Read, authz_silo).await?;
+
+        use nexus_db_schema::schema::{
+            silo_group as sg, silo_group_membership as sgm,
+        };
+
+        let user_ids: Vec<_> =
+            silo_user_ids.iter().map(|id| to_db_typed_uuid(*id)).collect();
+
+        Ok(sgm::dsl::silo_group_membership
+            .inner_join(sg::table.on(sg::id.eq(sgm::silo_group_id)))
+            .filter(sgm::silo_user_id.eq_any(user_ids))
+            .filter(sg::time_deleted.is_null())
+            .select((
+                SiloGroupMembership::as_select(),
+                model::SiloGroup::as_select(),
+            ))
+            .get_results_async::<(SiloGroupMembership, model::SiloGroup)>(
+                &*self.pool_connection_authorized(opctx).await?,
+            )
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?
+            .into_iter()
+            .map(|(membership, group)| {
+                (membership.silo_user_id.into(), group.into())
+            })
+            .collect())
     }
 
     pub async fn silo_groups_for_self(

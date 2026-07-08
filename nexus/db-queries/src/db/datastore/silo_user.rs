@@ -167,12 +167,14 @@ impl From<SiloUser> for model::SiloUser {
     }
 }
 
-impl From<SiloUser> for user::User {
-    fn from(u: SiloUser) -> user::User {
-        match u {
-            SiloUser::ApiOnly(u) => u.into(),
-            SiloUser::Jit(u) => u.into(),
-            SiloUser::Scim(u) => u.into(),
+impl SiloUser {
+    /// Convert to the external API view, embedding the user's group
+    /// memberships.
+    pub fn into_view(self, groups: Vec<user::UserGroup>) -> user::User {
+        match self {
+            SiloUser::ApiOnly(u) => u.into_view(groups),
+            SiloUser::Jit(u) => u.into_view(groups),
+            SiloUser::Scim(u) => u.into_view(groups),
         }
     }
 }
@@ -226,15 +228,16 @@ impl From<SiloUserApiOnly> for SiloUser {
     }
 }
 
-impl From<SiloUserApiOnly> for user::User {
-    fn from(u: SiloUserApiOnly) -> user::User {
+impl SiloUserApiOnly {
+    fn into_view(self, groups: Vec<user::UserGroup>) -> user::User {
         user::User {
-            id: u.id,
+            id: self.id,
             // TODO the use of external_id as display_name is temporary
-            display_name: u.external_id,
-            silo_id: u.silo_id,
-            time_created: u.time_created,
-            time_modified: u.time_modified,
+            display_name: self.external_id,
+            silo_id: self.silo_id,
+            time_created: self.time_created,
+            time_modified: self.time_modified,
+            groups,
         }
     }
 }
@@ -288,15 +291,16 @@ impl From<SiloUserJit> for SiloUser {
     }
 }
 
-impl From<SiloUserJit> for user::User {
-    fn from(u: SiloUserJit) -> user::User {
+impl SiloUserJit {
+    fn into_view(self, groups: Vec<user::UserGroup>) -> user::User {
         user::User {
-            id: u.id,
+            id: self.id,
             // TODO the use of external_id as display_name is temporary
-            display_name: u.external_id,
-            silo_id: u.silo_id,
-            time_created: u.time_created,
-            time_modified: u.time_modified,
+            display_name: self.external_id,
+            silo_id: self.silo_id,
+            time_created: self.time_created,
+            time_modified: self.time_modified,
+            groups,
         }
     }
 }
@@ -361,15 +365,16 @@ impl From<SiloUserScim> for SiloUser {
     }
 }
 
-impl From<SiloUserScim> for user::User {
-    fn from(u: SiloUserScim) -> user::User {
+impl SiloUserScim {
+    fn into_view(self, groups: Vec<user::UserGroup>) -> user::User {
         user::User {
-            id: u.id,
+            id: self.id,
             // TODO the use of user_name as display_name is temporary
-            display_name: u.user_name,
-            silo_id: u.silo_id,
-            time_created: u.time_created,
-            time_modified: u.time_modified,
+            display_name: self.user_name,
+            silo_id: self.silo_id,
+            time_created: self.time_created,
+            time_modified: self.time_modified,
+            groups,
         }
     }
 }

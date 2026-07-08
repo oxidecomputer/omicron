@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "2026061000.0.0"
+    "version": "2026070700.0.0"
   },
   "paths": {
     "/device/auth": {
@@ -19175,6 +19175,13 @@
             "description": "Whether this user has the viewer role on the fleet. Used by the web console to determine whether to show system-level UI.",
             "type": "boolean"
           },
+          "groups": {
+            "description": "Groups to which this user belongs, sorted by display name",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UserGroup"
+            }
+          },
           "id": {
             "type": "string",
             "format": "uuid"
@@ -19210,6 +19217,7 @@
         "required": [
           "display_name",
           "fleet_viewer",
+          "groups",
           "id",
           "silo_admin",
           "silo_id",
@@ -30257,6 +30265,13 @@
             "description": "Human-readable name that can identify the user",
             "type": "string"
           },
+          "groups": {
+            "description": "Groups to which this user belongs, sorted by display name",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UserGroup"
+            }
+          },
           "id": {
             "type": "string",
             "format": "uuid"
@@ -30279,6 +30294,7 @@
         },
         "required": [
           "display_name",
+          "groups",
           "id",
           "silo_id",
           "time_created",
@@ -30370,6 +30386,24 @@
         "required": [
           "external_id",
           "password"
+        ]
+      },
+      "UserGroup": {
+        "description": "A group of which a user is a member",
+        "type": "object",
+        "properties": {
+          "display_name": {
+            "description": "Human-readable name that can identify the group",
+            "type": "string"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "display_name",
+          "id"
         ]
       },
       "UserId": {
