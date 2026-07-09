@@ -314,7 +314,11 @@ fn load_dependent_repo(
         };
 
         // This is cheesy, but it works okay for now and fails safely.
-        if source.repr.contains(expected_commit.as_str()) {
+        if source
+            .repr
+            .rsplit_once('#')
+            .is_some_and(|(_, hash)| hash == expected_commit.as_str())
+        {
             found_pkg = Some(pkginfo);
             break;
         }
