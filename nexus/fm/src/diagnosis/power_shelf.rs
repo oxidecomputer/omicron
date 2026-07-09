@@ -885,13 +885,13 @@ mod tests {
     ) {
         const SHELF: u16 = 0;
         let (mut fmtest, logctx) = FmTest::new_with_logctx(test_name);
-        let mut reporter = fmtest.reporters.reporter(
-            ereport::Reporter::Sp { sp_type: SpType::Power, slot: SHELF },
-            Utc::now(),
-        );
+        let mut reporter = fmtest.reporters.reporter(ereport::Reporter::Sp {
+            sp_type: SpType::Power,
+            slot: SHELF,
+        });
         let ereport = dbg!(Arc::new(reporter.parse_ereport(Utc::now(), json)));
         let parsed = dbg!(PsuEreport::parse(
-            fmtest.reporters.ereporter_restarts(),
+            &fmtest.reporters.ereporter_restarts(),
             &ereport,
             Provenance::ThisSitrep
         ))
@@ -1080,10 +1080,10 @@ mod tests {
             "single_insert_closes_case_with_inserted_alert",
         );
         let (example, _bp) = fmtest.system_builder.build();
-        let mut reporter = fmtest.reporters.reporter(
-            ereport::Reporter::Sp { sp_type: SpType::Power, slot: SHELF },
-            Utc::now(),
-        );
+        let mut reporter = fmtest.reporters.reporter(ereport::Reporter::Sp {
+            sp_type: SpType::Power,
+            slot: SHELF,
+        });
         let insert =
             reporter.parse_ereport(Utc::now(), ereports::PSU_INSERT_JSON);
 
@@ -1124,10 +1124,10 @@ mod tests {
             "single_remove_opens_case_with_removed_alert",
         );
         let (example, _bp) = fmtest.system_builder.build();
-        let mut reporter = fmtest.reporters.reporter(
-            ereport::Reporter::Sp { sp_type: SpType::Power, slot: SHELF },
-            Utc::now(),
-        );
+        let mut reporter = fmtest.reporters.reporter(ereport::Reporter::Sp {
+            sp_type: SpType::Power,
+            slot: SHELF,
+        });
         let remove =
             reporter.parse_ereport(Utc::now(), ereports::PSU_REMOVE_JSON);
 
@@ -1161,10 +1161,10 @@ mod tests {
             "remove_then_insert_in_one_sitrep_closes_with_both_alerts",
         );
         let (example, _bp) = fmtest.system_builder.build();
-        let mut reporter = fmtest.reporters.reporter(
-            ereport::Reporter::Sp { sp_type: SpType::Power, slot: SHELF },
-            Utc::now(),
-        );
+        let mut reporter = fmtest.reporters.reporter(ereport::Reporter::Sp {
+            sp_type: SpType::Power,
+            slot: SHELF,
+        });
         // Same reporter restart, so the insert gets the greater ENA and is
         // recognized as the more recent event.
         let remove =
@@ -1201,10 +1201,10 @@ mod tests {
         let (mut fmtest, logctx) =
             FmTest::new_with_logctx("distinct_slots_get_distinct_cases");
         let (example, _bp) = fmtest.system_builder.build();
-        let mut reporter = fmtest.reporters.reporter(
-            ereport::Reporter::Sp { sp_type: SpType::Power, slot: SHELF },
-            Utc::now(),
-        );
+        let mut reporter = fmtest.reporters.reporter(ereport::Reporter::Sp {
+            sp_type: SpType::Power,
+            slot: SHELF,
+        });
         let remove_psu4 =
             reporter.parse_ereport(Utc::now(), ereports::PSU_REMOVE_JSON);
         let remove_psu2 =
@@ -1238,10 +1238,10 @@ mod tests {
         let (mut fmtest, logctx) =
             FmTest::new_with_logctx("unknown_ereports_are_ignored");
         let (example, _bp) = fmtest.system_builder.build();
-        let mut reporter = fmtest.reporters.reporter(
-            ereport::Reporter::Sp { sp_type: SpType::Power, slot: SHELF },
-            Utc::now(),
-        );
+        let mut reporter = fmtest.reporters.reporter(ereport::Reporter::Sp {
+            sp_type: SpType::Power,
+            slot: SHELF,
+        });
         let pwr_bad =
             reporter.parse_ereport(Utc::now(), ereports::PSU_PWR_BAD_JSON);
         let pwr_good =
@@ -1270,10 +1270,10 @@ mod tests {
         );
         let (example, _bp) = fmtest.system_builder.build();
         let inv_collection_id = example.collection.id;
-        let mut reporter = fmtest.reporters.reporter(
-            ereport::Reporter::Sp { sp_type: SpType::Power, slot: SHELF },
-            Utc::now(),
-        );
+        let mut reporter = fmtest.reporters.reporter(ereport::Reporter::Sp {
+            sp_type: SpType::Power,
+            slot: SHELF,
+        });
 
         // The parent sitrep already saw the remove and requested its alert.
         let remove = Arc::new(
@@ -1323,66 +1323,52 @@ mod tests {
         logctx.cleanup_successful();
     }
 
-    /// Across reporter restarts, the most recent event is the one in the
-    /// restart that was first seen *latest*, not the one with the greatest ENA
-    /// or the latest collection time.
-    ///
-    /// The scenario is constructed so those bases disagree: restart A (seen
-    /// first) sees a remove and then an insert, and that insert is both the
-    /// highest-ENA ereport and the latest-collected one (Nexus ingested it
-    /// after a collection lag). Restart B, which began later, sees only a
-    /// remove, with a lower ENA. Because restart B is the later reporter
-    /// session, its remove is the most recent *event*, so the PSU is absent
-    /// and the case must stay open.
+    /// Across reporter restarts, the current restart is determined based on
+    /// which restart produced the most recently collected ereport from that
+    /// PSC.
     #[test]
-    fn most_recent_event_follows_restart_first_seen() {
+    fn current_restart_is_the_one_with_the_latest_seen_ereport() {
         let (mut fmtest, logctx) = FmTest::new_with_logctx(
-            "most_recent_event_follows_restart_first_seen",
+            "current_restart_is_the_one_with_the_latest_seen_ereport",
         );
         let (example, _bp) = fmtest.system_builder.build();
 
         let t0 = Utc::now();
-        // Restart A is first seen at `t0`.
-        let mut restart_a = fmtest.reporters.reporter(
-            ereport::Reporter::Sp { sp_type: SpType::Power, slot: SHELF },
-            t0,
-        );
-        // Restart A: remove, then a later-collected insert with a higher ENA.
-        let remove_a = restart_a.parse_ereport(t0, ereports::PSU_REMOVE_JSON);
-        let insert_a = restart_a.parse_ereport(
-            t0 + Duration::seconds(10),
-            ereports::PSU_INSERT_JSON,
-        );
-
-        // The reporter restarts (ENAs reset): restart B is first seen after
-        // restart A but before A's insert was collected.
-        let mut restart_b = fmtest.reporters.reporter(
-            ereport::Reporter::Sp { sp_type: SpType::Power, slot: SHELF },
-            t0 + Duration::seconds(5),
-        );
-        let remove_b = restart_b.parse_ereport(
+        // Restart A: actually the earliest ereport, but collected later.
+        let mut reporter = fmtest.reporters.reporter(ereport::Reporter::Sp {
+            sp_type: SpType::Power,
+            slot: SHELF,
+        });
+        let remove_a = reporter.parse_ereport(
             t0 + Duration::seconds(5),
             ereports::PSU_REMOVE_JSON,
+        );
+
+        // Restart B: remove, then a later-collected insert with a higher ENA.
+        reporter.restart();
+        let remove_b = reporter.parse_ereport(
+            t0 + Duration::seconds(1),
+            ereports::PSU_REMOVE_JSON,
+        );
+        let insert_b = reporter.parse_ereport(
+            t0 + Duration::seconds(10),
+            ereports::PSU_INSERT_JSON,
         );
 
         let input = build_input(
             &fmtest,
             example.collection,
             None,
-            [remove_a, insert_a, remove_b],
+            [remove_a, remove_b, insert_b],
         );
         let sitrep = run_analyze(&logctx.log, &input);
 
         let case = sole_case(&sitrep);
-        assert!(
-            case.is_open(),
-            "the latest reporter restart saw a remove, so the PSU is absent \
-             and its case must stay open"
-        );
+        assert!(!case.is_open(), "latest collected ereport is an insert");
         assert_eq!(
             case.alerts_requested.len(),
             3,
-            "each of the three events should request its own alert"
+            "each of the three events should still request its own alert"
         );
 
         logctx.cleanup_successful();
