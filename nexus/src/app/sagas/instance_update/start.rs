@@ -177,6 +177,23 @@ async fn siu_lock_instance(
                     );
                     Ok(None)
                 }
+                // If the instance has been deleted between when this saga
+                // started and when we attempted to lock it, we can just give
+                // up, since there's nothing necessary for us to do here.
+                Err(instance::UpdaterLockError::Query(
+                    err @ Error::ObjectNotFound { .. },
+                )) => {
+                    const MSG: &str = "instance no longer exists; giving up";
+                    info!(
+                        osagactx.log(),
+                        "instance update: {MSG}";
+                        "instance_id" => %instance_id,
+                        "saga_id" => %lock_id,
+                    );
+                    Err(backoff::BackoffError::permanent(
+                        err.internal_context(MSG),
+                    ))
+                }
                 // Retry database errors that *don't* indicate the lock
                 // is already held forever.
                 Err(instance::UpdaterLockError::Query(e)) => {
