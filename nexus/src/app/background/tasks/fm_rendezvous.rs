@@ -799,9 +799,10 @@ mod tests {
         // `alert_generation`, so its `created_at_generation` *equals* the
         // current sitrep's `alert_generation`. The strict-inequality predicate
         // (`created_at_generation < sitrep_alert_generation`) excludes it.
-        // (We don't assert `batches`: the GC op runs concurrently with alert
-        // creation, so how many marker rows its pages see is racy.)
         assert_eq!(alert_marker_gc.details.rows_deleted, 0);
+        // The marker table holds far fewer rows than `SQL_BATCH_SIZE`, so the
+        // sweep is always a single partial page.
+        assert_eq!(alert_marker_gc.details.batches, 1);
         assert!(alert_marker_gc.details.errors.is_empty());
         let db_alert1 = fetch_alert(&datastore, alert1_id)
             .await
@@ -908,8 +909,9 @@ mod tests {
         );
         // As above: sitrep1 and sitrep2 carry the same alert_generation, so
         // every marker's `created_at_generation` equals it and nothing is
-        // swept.
+        // swept, in a single partial page.
         assert_eq!(alert_marker_gc.details.rows_deleted, 0);
+        assert_eq!(alert_marker_gc.details.batches, 1);
         assert!(alert_marker_gc.details.errors.is_empty());
 
         let db_alert1 = fetch_alert(&datastore, alert1_id)

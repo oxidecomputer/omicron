@@ -24,7 +24,7 @@ WITH
             FROM
               page AS p
             WHERE
-              p.created_at_generation < $3
+              EXISTS(SELECT 1 FROM fm_sitrep WHERE id = $3)
               AND NOT
                   EXISTS(
                     SELECT
@@ -34,6 +34,7 @@ WITH
                     WHERE
                       r.sitrep_id = $4 AND r.id = p.dummy_id
                   )
+              AND p.created_at_generation < $5
           )
       RETURNING
         dummy_id
@@ -41,7 +42,7 @@ WITH
 SELECT
   (SELECT count(*) FROM deleted) AS rows_deleted,
   CASE
-  WHEN (SELECT count(*) FROM page) >= $5 THEN (SELECT max(dummy_id) FROM page)
+  WHEN (SELECT count(*) FROM page) >= $6 THEN (SELECT max(dummy_id) FROM page)
   ELSE NULL
   END
     AS next_cursor

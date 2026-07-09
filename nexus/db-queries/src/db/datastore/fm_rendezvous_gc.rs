@@ -53,15 +53,16 @@
 //!
 //! Let's formalize this! Given a sitrep S being executed by some activation of
 //! FM rendezvous, and some resource creation marker row R, we can delete R if
-//! both of the following hold:
+//! all of the following hold:
 //!
-//!   * R is *stale*: `R.created_at_generation < S.<resource>_generation`,
-//!   * R is *unrequested*: `R.<resource>_id` is not requested by S.
+//!   * S *exists*; its `fm_sitrep` row is still present.
+//!   * S *does not request* `R.<resource>_id`.
+//!   * R *predates* S: `R.created_at_generation < S.<resource>_generation`.
 //!
-//! That is, if the resource was created by a sitrep older than the one we're
-//! currently executing, and the one we're executing doesn't request it, then
-//! no future sitrep can request it either, and the marker can be deleted. Note
-//! that this is true even if the sitrep we're executing isn't current.
+//! That is, if the sitrep we're executing doesn't request the resource, and the
+//! resource was created by a sitrep older than the one we're executing, then no
+//! future sitrep can request it either, and the marker can be deleted. Note
+//! that this is true even if the sitrep we're executing isn't current anymore.
 
 use super::SQL_BATCH_SIZE;
 use crate::authz;
@@ -153,8 +154,8 @@ impl DataStore {
             let (deleted, next_cursor) = RendezvousMarkerGcPage::<R>::new(
                 cursor,
                 i64::from(SQL_BATCH_SIZE.get()),
-                sitrep_generation,
                 sitrep_id,
+                sitrep_generation,
             )
             .get_result_async::<(i64, Option<Uuid>)>(&*conn)
             .await
@@ -185,17 +186,21 @@ struct RendezvousMarkerGcPage<R: FmRendezvousResource> {
     cursor: Uuid,
     /// Maximum number of marker rows examined this page.
     page_size: i64,
+    /// Id of the sitrep being executed. A marker row is deletable only if this
+    /// sitrep still exists and the marker's resource is absent from its
+    /// request set.
+    sitrep_id: Uuid,
     /// Generation of the sitrep being executed. A marker row is deletable only
     /// if its `created_at_generation` is strictly less than this.
     sitrep_generation: nexus_db_model::Generation,
-    /// Id of the sitrep being executed. A marker row is deletable only if its
-    /// resource is absent from this sitrep's request set.
-    sitrep_id: Uuid,
     /// `FROM` clause for the marker table, built once in [`Self::new`]. Stored
     /// as a field here, rather than reconstructed inside
     /// [`QueryFragment::walk_ast`], so it correctly shares `self`'s lifetime
     /// when walked.
     marker_from_clause: <MarkerTable<R> as QuerySource>::FromClause,
+    /// `FROM` clause for the `fm_sitrep` table, stored for the same reason.
+    sitrep_from_clause:
+        <nexus_db_schema::schema::fm_sitrep::table as QuerySource>::FromClause,
     /// `FROM` clause for the request table, stored for the same reason.
     request_from_clause: <R::RequestTable as QuerySource>::FromClause,
 }
@@ -204,17 +209,19 @@ impl<R: FmRendezvousResource> RendezvousMarkerGcPage<R> {
     fn new(
         cursor: Uuid,
         page_size: i64,
-        sitrep_generation: Generation,
         sitrep_id: SitrepUuid,
+        sitrep_generation: Generation,
     ) -> Self {
         Self {
             cursor,
             page_size,
+            sitrep_id: sitrep_id.into_untyped_uuid(),
             sitrep_generation: nexus_db_model::Generation::from(
                 sitrep_generation,
             ),
-            sitrep_id: sitrep_id.into_untyped_uuid(),
             marker_from_clause: <MarkerTable<R> as HasTable>::table()
+                .from_clause(),
+            sitrep_from_clause: nexus_db_schema::schema::fm_sitrep::table
                 .from_clause(),
             request_from_clause: <R::RequestTable as HasTable>::table()
                 .from_clause(),
@@ -251,8 +258,9 @@ impl<R: FmRendezvousResource> QueryFragment<Pg> for RendezvousMarkerGcPage<R> {
     ///
     /// 1. `page`: one page of marker rows, at most `page_size` of them,
     ///    ordered by the marker id and starting strictly after `cursor`.
-    /// 2. `deleted`: deletes the page rows that are stale and unrequested
-    ///    (see the module docs for these terms), returning their ids.
+    /// 2. `deleted`: if the executed sitrep still exists, deletes the page rows
+    ///    that it doesn't request and that predate it (see the module docs for
+    ///    these conditions), returning their ids.
     ///
     /// The outer `SELECT` projects the page's outcome back to the sweep loop:
     /// the number of rows deleted, and the next cursor (or `NULL` when the
@@ -276,20 +284,26 @@ impl<R: FmRendezvousResource> QueryFragment<Pg> for RendezvousMarkerGcPage<R> {
         out.push_sql(" LIMIT ");
         out.push_bind_param::<sql_types::BigInt, _>(&self.page_size)?;
 
-        // CTE 2: deleted -- delete the page rows that are both stale and
-        // unrequested (see the module docs for these terms and the safety
-        // argument), returning their ids so the outer SELECT can count them.
+        // CTE 2: deleted -- if the executed sitrep still exists, delete the
+        // page rows that it doesn't request and that predate it, returning
+        // their ids so the outer SELECT can count them.
         out.push_sql("), deleted AS (DELETE FROM ");
         self.marker_from_clause.walk_ast(out.reborrow())?;
         out.push_sql(" WHERE ");
         out.push_identifier(id_column)?;
         out.push_sql(" IN (SELECT p.");
         out.push_identifier(id_column)?;
-        out.push_sql(" FROM page p WHERE p.");
-        out.push_identifier("created_at_generation")?;
-        out.push_sql(" < ");
-        out.push_bind_param::<sql_types::BigInt, _>(&self.sitrep_generation)?;
-        out.push_sql(" AND NOT EXISTS (SELECT 1 FROM ");
+        // Sitrep deletion removes the `fm_sitrep` row either before or together
+        // with any child request rows (see `fm_sitrep_gc_orphans` and
+        // `fm_sitrep_delete_all`), so if the sitrep exists in our snapshot, we
+        // know the request rows checked below are visible too.
+        out.push_sql(" FROM page p WHERE EXISTS (SELECT 1 FROM ");
+        self.sitrep_from_clause.walk_ast(out.reborrow())?;
+        out.push_sql(" WHERE ");
+        out.push_identifier("id")?;
+        out.push_sql(" = ");
+        out.push_bind_param::<sql_types::Uuid, _>(&self.sitrep_id)?;
+        out.push_sql(") AND NOT EXISTS (SELECT 1 FROM ");
         self.request_from_clause.walk_ast(out.reborrow())?;
         out.push_sql(" r WHERE r.");
         out.push_identifier("sitrep_id")?;
@@ -299,7 +313,11 @@ impl<R: FmRendezvousResource> QueryFragment<Pg> for RendezvousMarkerGcPage<R> {
         out.push_identifier("id")?;
         out.push_sql(" = p.");
         out.push_identifier(id_column)?;
-        out.push_sql(")) RETURNING ");
+        out.push_sql(") AND p.");
+        out.push_identifier("created_at_generation")?;
+        out.push_sql(" < ");
+        out.push_bind_param::<sql_types::BigInt, _>(&self.sitrep_generation)?;
+        out.push_sql(") RETURNING ");
         out.push_identifier(id_column)?;
 
         // Outer SELECT: rows deleted, and the cursor advance.
@@ -328,6 +346,7 @@ mod tests {
     use super::*;
     use crate::db::fm_rendezvous_resources::test_utils::DummyResource;
     use crate::db::fm_rendezvous_resources::test_utils::dummy_request;
+    use crate::db::fm_rendezvous_resources::test_utils::insert_current_sitrep;
     use crate::db::fm_rendezvous_resources::test_utils::insert_dummy_marker;
     use crate::db::fm_rendezvous_resources::test_utils::marker_generation;
     use crate::db::fm_rendezvous_resources::test_utils::setup_dummy_schema;
@@ -352,10 +371,10 @@ mod tests {
             .unwrap();
     }
 
-    /// The predicate matrix in one sweep: a marker is deleted only when it is
-    /// both *stale* (`created_at_generation` strictly below the swept sitrep's
-    /// generation) and *unrequested* (its resource absent from that sitrep's
-    /// request set). Markers failing either condition are preserved.
+    /// The predicate matrix in one sweep: given that the executed sitrep
+    /// *exists*, a marker is deleted only when the sitrep *doesn't request* its
+    /// resource and the marker *predates* the sitrep. Markers failing any
+    /// condition are preserved.
     #[tokio::test]
     async fn gc_deletes_only_dropped_markers() {
         let logctx = dev::test_setup_log("gc_deletes_only_dropped_markers");
@@ -364,29 +383,38 @@ mod tests {
         let conn = datastore.pool_connection_for_tests().await.unwrap();
         setup_dummy_schema(&conn).await;
 
-        let sitrep_id = SitrepUuid::new_v4();
-        // 5 deletable markers: stale generation, not requested by any sitrep.
+        // The executed sitrep must actually exist in `fm_sitrep`; sweeping
+        // against a missing sitrep deletes nothing (see
+        // `gc_deletes_nothing_when_sitrep_missing`).
+        let sitrep_id =
+            insert_current_sitrep(datastore, db.opctx(), &conn, None, 5).await;
+        // 5 deletable markers: predate the executed sitrep, not requested by
+        // any sitrep.
         let mut deletable: Vec<Uuid> = (0..5).map(|_| Uuid::new_v4()).collect();
         for &id in &deletable {
             insert_dummy_marker(&conn, id, 1).await;
         }
-        // Also deletable: stale, and requested only by a *different* sitrep.
+        // Also deletable: predates the executed sitrep, and requested only
+        // by a *different* sitrep.
         let foreign_request = Uuid::new_v4();
         insert_dummy_marker(&conn, foreign_request, 1).await;
         insert_dummy_request(&conn, SitrepUuid::new_v4(), foreign_request)
             .await;
         deletable.push(foreign_request);
-        // Preserved: stale, but the resource is still in the swept sitrep's
-        // request set, so not unrequested.
+        // Preserved: predates the executed sitrep, but the sitrep still
+        // requests the resource.
         let requested = Uuid::new_v4();
         insert_dummy_marker(&conn, requested, 1).await;
         insert_dummy_request(&conn, sitrep_id, requested).await;
-        // Preserved: created at the swept generation (staleness is a strict
-        // `<`, so equality preserves).
+        // Preserved: created at the executed sitrep's generation (the
+        // predates condition is a strict `<`, so equality preserves).
         let at_generation = Uuid::new_v4();
         insert_dummy_marker(&conn, at_generation, 5).await;
-        // Preserved: created above the swept generation (an executor lagging
-        // behind marker writers; shouldn't happen, but must still be safe).
+        // Preserved: created above the executed sitrep's generation. This is
+        // an executor lagging behind marker writers, which happens in normal
+        // operation: while this sweep runs against a generation-5 sitrep,
+        // another Nexus executing a newer sitrep can concurrently write
+        // generation-6 markers.
         let above_generation = Uuid::new_v4();
         insert_dummy_marker(&conn, above_generation, 6).await;
 
@@ -409,9 +437,9 @@ mod tests {
             );
         }
         for (id, why) in [
-            (requested, "requested by the swept sitrep"),
-            (at_generation, "at the swept generation"),
-            (above_generation, "above the swept generation"),
+            (requested, "requested by the executed sitrep"),
+            (at_generation, "at the executed sitrep's generation"),
+            (above_generation, "above the executed sitrep's generation"),
         ] {
             assert!(
                 marker_generation(&conn, id).await.is_some(),
@@ -441,10 +469,12 @@ mod tests {
         let conn = datastore.pool_connection_for_tests().await.unwrap();
         setup_dummy_schema(&conn).await;
 
-        let sitrep_id = SitrepUuid::new_v4();
+        let sitrep_id =
+            insert_current_sitrep(datastore, db.opctx(), &conn, None, 5).await;
         // Fixed ids so the scan order is known: markers 1 and 2 sort first
         // and are preserved (their generation equals the sitrep's), while
-        // marker 3 is deletable (stale generation, never requested).
+        // marker 3 is deletable (predates the executed sitrep, never
+        // requested).
         let preserved: Vec<Uuid> = (1..=2).map(Uuid::from_u128).collect();
         let deletable = Uuid::from_u128(3);
         for &id in &preserved {
@@ -456,8 +486,8 @@ mod tests {
             RendezvousMarkerGcPage::<DummyResource>::new(
                 cursor,
                 2,
-                Generation::from_u32(5),
                 sitrep_id,
+                Generation::from_u32(5),
             )
             .get_result_async::<(i64, Option<Uuid>)>(&*conn)
         };
@@ -468,8 +498,7 @@ mod tests {
         assert_eq!(deleted, 0);
         assert_eq!(next_cursor, Some(preserved[1]));
 
-        // The second, partial page deletes the stale marker and ends the
-        // sweep.
+        // The second, partial page deletes marker 3 and ends the sweep.
         let (deleted, next_cursor) = page(preserved[1]).await.unwrap();
         assert_eq!(deleted, 1);
         assert_eq!(next_cursor, None);
@@ -484,6 +513,43 @@ mod tests {
         logctx.cleanup_successful();
     }
 
+    /// A sweep against a sitrep with no `fm_sitrep` row must delete nothing.
+    /// Whether a sitrep requests a resource is judged by querying its request
+    /// rows, so without the existence check, a sweep against a hard-deleted
+    /// sitrep would see every marker as unrequested and delete markers for
+    /// resources still carried forward by the current sitreps.
+    #[tokio::test]
+    async fn gc_deletes_nothing_when_sitrep_missing() {
+        let logctx =
+            dev::test_setup_log("gc_deletes_nothing_when_sitrep_missing");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let datastore = db.datastore();
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
+        setup_dummy_schema(&conn).await;
+
+        // This marker predates the executed sitrep and is unrequested: it
+        // satisfies every deletion condition except the sitrep's existence.
+        let marker = Uuid::new_v4();
+        insert_dummy_marker(&conn, marker, 1).await;
+
+        let result = datastore
+            .fm_rendezvous_marker_gc::<DummyResource>(
+                db.opctx(),
+                SitrepUuid::new_v4(),
+                Generation::from_u32(5),
+            )
+            .await
+            .unwrap();
+        assert_eq!(result, MarkerGcResult { rows_deleted: 0, batches: 1 });
+        assert!(
+            marker_generation(&conn, marker).await.is_some(),
+            "marker must be preserved when the executed sitrep does not exist",
+        );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
     /// Snapshots the SQL the page query generates, so accidental changes to
     /// the hand-assembled query are caught in review.
     #[tokio::test]
@@ -491,8 +557,8 @@ mod tests {
         let query = RendezvousMarkerGcPage::<DummyResource>::new(
             Uuid::nil(),
             1000,
-            Generation::from_u32(5),
             SitrepUuid::nil(),
+            Generation::from_u32(5),
         );
         expectorate_query_contents(
             query,
