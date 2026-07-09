@@ -434,3 +434,141 @@ fn find_repo_commit(
     // unwrap(): we already checked that there's at least one
     Ok(candidates.into_iter().next().unwrap().clone())
 }
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use omicron_zone_package::config::{Config, PackageName, ServiceName};
+    use omicron_zone_package::package::{Package, PackageOutput};
+
+    const TEST_REPO: &str = "testrepo";
+
+    /// Builds a package manifest for testing `find_repo_commit`.
+    ///
+    /// `commits` contains an array of arbitrary strings that stand in for Git
+    /// commit SHAs.  For each entry in this array, a `Prebuilt` package will be
+    /// included for repo `TEST_REPO` having the corresponding Git commit SHA.
+    /// This can be used to test cases where the config has no copies of the
+    /// test package, one copy of it, multiple copies with the same SHA, or
+    /// multiple copies with different SHAs.
+    ///
+    /// The returned manifest always contains a hardcoded set of "noise"
+    /// packages that should never match `TEST_REPO`: one `Local`, one
+    /// `Composite`, one `Manual`, and one `Prebuilt` for a different repo than
+    /// the one we're testing with.
+    fn make_manifest(commits: &[&str]) -> Config {
+        let mut packages = BTreeMap::new();
+
+        packages.insert(
+            PackageName::new_const("some-local"),
+            Package {
+                service_name: ServiceName::new_const("some-local"),
+                source: PackageSource::Local {
+                    blobs: None,
+                    buildomat_blobs: None,
+                    rust: None,
+                    paths: Vec::new(),
+                },
+                output: PackageOutput::Tarball,
+                only_for_targets: None,
+                setup_hint: None,
+            },
+        );
+
+        packages.insert(
+            PackageName::new_const("some-composite"),
+            Package {
+                service_name: ServiceName::new_const("some-composite"),
+                source: PackageSource::Composite { packages: Vec::new() },
+                output: PackageOutput::Tarball,
+                only_for_targets: None,
+                setup_hint: None,
+            },
+        );
+
+        packages.insert(
+            PackageName::new_const("some-manual"),
+            Package {
+                service_name: ServiceName::new_const("some-manual"),
+                source: PackageSource::Manual,
+                output: PackageOutput::Tarball,
+                only_for_targets: None,
+                setup_hint: None,
+            },
+        );
+
+        packages.insert(
+            PackageName::new_const("other-repo-prebuilt"),
+            Package {
+                service_name: ServiceName::new_const("other-repo-prebuilt"),
+                source: PackageSource::Prebuilt {
+                    repo: String::from("otherrepo"),
+                    commit: String::from("11111111111111111111"),
+                    sha256: String::from("deadbeef"),
+                },
+                output: PackageOutput::Tarball,
+                only_for_targets: None,
+                setup_hint: None,
+            },
+        );
+
+        for (i, commit) in commits.iter().enumerate() {
+            let name = format!("testrepo-pkg-{i}");
+            packages.insert(
+                PackageName::new(name.clone()).unwrap(),
+                Package {
+                    service_name: ServiceName::new(name).unwrap(),
+                    source: PackageSource::Prebuilt {
+                        repo: String::from(TEST_REPO),
+                        commit: String::from(*commit),
+                        sha256: String::from("deadbeef"),
+                    },
+                    output: PackageOutput::Tarball,
+                    only_for_targets: None,
+                    setup_hint: None,
+                },
+            );
+        }
+
+        Config { packages, target: Default::default() }
+    }
+
+    #[test]
+    fn find_repo_commit_success() {
+        // Two prebuilt entries for the same repo pointing at the same commit
+        // should collapse to a single commit.
+        let commit = "abcdef1234567890abcdef1234567890abcdef12";
+        let manifest = make_manifest(&[commit, commit]);
+        let found = find_repo_commit(&manifest, TEST_REPO).unwrap();
+        assert_eq!(found.as_str(), commit);
+    }
+
+    #[test]
+    fn find_repo_commit_multiple_prebuilts_different_commits() {
+        let commit_a = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let commit_b = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+        let manifest = make_manifest(&[commit_a, commit_b]);
+        let err = find_repo_commit(&manifest, TEST_REPO).unwrap_err();
+        assert_eq!(
+            format!("{err:#}"),
+            "expected repo \"testrepo\" to have exactly one git commit \
+             in package-manifest.toml, but found multiple: \
+             {\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \
+             \"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"}",
+        );
+    }
+
+    #[test]
+    fn find_repo_commit_repo_absent() {
+        // Empty `commits` means no prebuilt entries for `TEST_REPO` at all,
+        // but the manifest still contains other packages (including a
+        // prebuilt for a different repo) that should all be ignored.
+        let manifest = make_manifest(&[]);
+        let err = find_repo_commit(&manifest, TEST_REPO).unwrap_err();
+        assert_eq!(
+            format!("{err:#}"),
+            "expected repo \"testrepo\" to appear in package-manifest.toml \
+             as a 'prebuilt' package",
+        );
+    }
+}
