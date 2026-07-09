@@ -418,7 +418,10 @@ fn find_repo_commit(
         .collect();
 
     if candidates.is_empty() {
-        bail!("expected repo {repo_name:?} to appear in package-manifest.toml");
+        bail!(
+            "expected repo {repo_name:?} to appear in package-manifest.toml \
+             as a 'prebuilt' package"
+        );
     }
 
     if candidates.len() > 1 {
