@@ -696,6 +696,21 @@ impl DataStore {
         subscriptions: Vec<AlertRxSubscription>,
         conn: &async_bb8_diesel::Connection<DbConnection>,
     ) -> Result<Vec<AlertRxSubscription>, TransactionError<Error>> {
+        // XXX(eliza): this is a rather sad workaround for
+        // https://github.com/oxidecomputer/omicron/issues/10788, in which it
+        // turns out that `DatastoreCollection::insert_resource` will basically
+        // do just about the worst thing possible when given an empty list of
+        // resources to insert. Ideally, we would make it not fail with a SQL
+        // syntax error in that case, but since the function's argument is "a
+        // glob of more or less completely arbitrary Diesel which is probably
+        // not entirely unlike an INSERT statement", it is not immediately clear
+        // to me how it would be able to detect that you are trying to insert
+        // nothing. So, we'll guard against that here for now.
+        if subscriptions.is_empty() {
+            // Inserting nothing does nothing, returning nothing!
+            return Ok(Vec::new());
+        }
+
         <AlertReceiver as DatastoreCollection<AlertRxSubscription>>::insert_resource(
             rx_id.into_untyped_uuid(),
         diesel::insert_into(subscription_dsl::alert_subscription)
