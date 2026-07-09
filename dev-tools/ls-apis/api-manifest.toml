@@ -729,6 +729,18 @@ permalinks = [
 ]
 
 [[intra_deployment_unit_only_edges]]
+server = "lldpd"
+client = "gateway-client"
+note = """
+lldpd defaults to localhost for gateway (main.rs:194), and the SMF start
+script doesn't override it.
+"""
+permalinks = [
+    "https://github.com/oxidecomputer/lldp/blob/d22509dfdb051321b859e924948605115691b93c/lldpd/src/main.rs#L148-L154",
+    "https://github.com/oxidecomputer/lldp/blob/d22509dfdb051321b859e924948605115691b93c/lldpd/misc/svc-lldpd",
+]
+
+[[intra_deployment_unit_only_edges]]
 server = "mgd"
 client = "ddm-admin-client"
 note = "mg-lower hardcodes localhost:8000."
