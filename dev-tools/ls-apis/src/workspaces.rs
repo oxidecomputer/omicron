@@ -327,8 +327,8 @@ fn load_dependent_repo(
         );
         eprintln!(
             "If another version of package {pkgname:?} is found corresponding \
-             with this commit, then it may be suspicious to have multiple version \
-             of this package, but it will not break this tool."
+             with this commit, then it may be suspicious to have multiple \
+             versions of this package, but it will not break this tool."
         );
         eprintln!(
             "If not, there's a mismatch between commits in package-manifest.toml \
