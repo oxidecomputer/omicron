@@ -357,6 +357,12 @@ CREATE INDEX IF NOT EXISTS lookup_vmm_resource_by_instance ON omicron.public.sle
     instance_id
 );
 
+CREATE INDEX IF NOT EXISTS
+    lookup_tombstoned_vmm_resources
+ON omicron.public.sled_resource_vmm (
+    state
+) WHERE state = 'tombstoned';
+
 -- Table of all sled subnets allocated for sleds added to an already initialized
 -- rack. The sleds in this table and their allocated subnets are created before
 -- a sled is added to the `sled` table. Addition to the `sled` table occurs

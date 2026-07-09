@@ -11,6 +11,7 @@ use crate::context::OpContext;
 use crate::db;
 use crate::db::datastore;
 use crate::db::datastore::LocalStorageDisk;
+use crate::db::datastore::RunnableQuery;
 use crate::db::datastore::ValidateTransition;
 use crate::db::datastore::zpool::ZpoolGetForSledReservationResult;
 use crate::db::model::AffinityPolicy;
@@ -19,6 +20,7 @@ use crate::db::model::SledResourceVmm;
 use crate::db::model::SledResourceVmmState;
 use crate::db::model::SledState;
 use crate::db::model::SledUpdate;
+use crate::db::model::VmmState;
 use crate::db::model::to_db_sled_policy;
 use crate::db::model::to_db_typed_uuid;
 use crate::db::pagination::Paginator;
@@ -59,6 +61,7 @@ use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
+use omicron_uuid_kinds::PropolisKind;
 use omicron_uuid_kinds::PropolisUuid;
 use omicron_uuid_kinds::RackKind;
 use omicron_uuid_kinds::RackUuid;
@@ -1594,6 +1597,58 @@ impl DataStore {
         Ok(())
     }
 
+    /// Returns a list of sled resource reservations that are no longer occupied
+    /// by a VMM, paginated by VMM UUID.
+    ///
+    /// Sled resource reservations are considered abandoned if the reservation
+    /// is in [`SledResourceVmmState::Tombstoned`],  and any of the following
+    /// set of conditions is true:
+    ///
+    /// - The reservation's VMM ID corresponds to a record in the `vmm` table
+    ///   that has been soft-deleted,
+    /// - The reservation's VMM ID does not exist in the `vmm` table at all
+    ///   (i.e, it has been hard-deleted somehow)
+    /// - The reservation's VMM ID corresponds to a record in the `vmm` table
+    ///   that is in [`VmmState::Destroyed`], [`VmmState::SagaUnwound`], or
+    ///   [`VmmState::Failed`].
+    ///
+    /// Any of these conditions being met indicates that no VMM is currently
+    /// using the reserved resources, and the resources are not allocated for a
+    /// VMM which is in he process of being created.
+    pub async fn sled_reservation_list_abandoned(
+        &self,
+        opctx: &OpContext,
+        pagparams: &DataPageParams<'_, DbTypedUuid<PropolisKind>>,
+    ) -> ListResultVec<DbTypedUuid<PropolisKind>> {
+        Self::reservation_list_abandoned_query(pagparams)
+            .load_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    fn reservation_list_abandoned_query(
+        pagparams: &DataPageParams<'_, DbTypedUuid<PropolisKind>>,
+    ) -> impl RunnableQuery<DbTypedUuid<PropolisKind>> + use<> {
+        use nexus_db_schema::schema::sled_resource_vmm::dsl as resource_dsl;
+        use nexus_db_schema::schema::vmm::dsl as vmm_dsl;
+
+        paginated(resource_dsl::sled_resource_vmm, resource_dsl::id, &pagparams)
+            .filter(resource_dsl::state.eq(SledResourceVmmState::Tombstoned))
+            .left_join(vmm_dsl::vmm.on(resource_dsl::id.eq(vmm_dsl::id)))
+            .filter(
+                vmm_dsl::state
+                    // Select rows where either the corresponding `vmm` record
+                    // is in a state that indicates it is definitely not
+                    // occupying any sled resources...
+                    .eq_any(VmmState::DESTROYABLE_STATES)
+                    // ...or where it has been deleted...
+                    .or(vmm_dsl::time_deleted.is_not_null())
+                    // ...or where it has been *really* deleted.
+                    .or(vmm_dsl::state.is_null()),
+            )
+            .select(resource_dsl::id)
+    }
+
     /// Sets the provision policy for this sled.
     ///
     /// Errors if the sled is not in service.
@@ -2083,6 +2138,7 @@ pub(in crate::db::datastore) mod test {
     use crate::db::datastore::test_utils::{
         Expected, IneligibleSleds, sled_set_policy, sled_set_state,
     };
+    use crate::db::explain::ExplainableAsync;
     use crate::db::model::ByteCount;
     use crate::db::model::SqlU32;
     use crate::db::model::Zpool;
@@ -2094,6 +2150,7 @@ pub(in crate::db::datastore) mod test {
     use crate::db::pub_test_utils::helpers::create_project;
     use crate::db::pub_test_utils::helpers::small_resource_request;
     use crate::db::queries::ALLOW_FULL_TABLE_SCAN_SQL;
+    use crate::db::raw_query_builder::expectorate_query_contents;
     use anyhow::{Context, Result};
     use async_bb8_diesel::AsyncConnection;
     use async_bb8_diesel::AsyncSimpleConnection;
@@ -7359,6 +7416,58 @@ pub(in crate::db::datastore) mod test {
             .unwrap();
 
         assert_eq!(previously_target_vmm.state, SledResourceVmmState::Active,);
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn expectorate_reservation_list_abandoned_query() {
+        let pagparams = DataPageParams {
+            marker: None,
+            direction: dropshot::PaginationOrder::Ascending,
+            limit: std::num::NonZeroU32::new(100).unwrap(),
+        };
+
+        let query = DataStore::reservation_list_abandoned_query(&pagparams);
+        expectorate_query_contents(
+            &query,
+            "tests/output/sled_reservation_list_abandoned_query.sql",
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn explain_reservation_list_abandoned_query() {
+        let logctx =
+            dev::test_setup_log("explain_reservation_list_abandoned_query");
+        let db = TestDatabase::new_with_pool(&logctx.log).await;
+        let pool = db.pool();
+        let conn = pool.claim().await.unwrap();
+
+        let pagparams = DataPageParams {
+            marker: None,
+            direction: dropshot::PaginationOrder::Ascending,
+            limit: std::num::NonZeroU32::new(100).unwrap(),
+        };
+
+        let query = DataStore::reservation_list_abandoned_query(&pagparams);
+        let explanation = query
+            .explain_async(&conn)
+            .await
+            .expect("Failed to explain query - is it valid SQL?");
+
+        eprintln!("{explanation}");
+
+        // XXX(eliza): this is a bit of a shame. The query plan for a query
+        // without an initial page marker *does* perform a `FULL SCAN`, but it's
+        // a full scan over an *index*, which is permitted. The tests that
+        // actually run the query will fail if it does a full *table* scan.
+
+        // assert!(
+        //     !explanation.contains("FULL SCAN"),
+        //     "Found an unexpected FULL SCAN: {explanation}",
+        // );
 
         db.terminate().await;
         logctx.cleanup_successful();

@@ -96,13 +96,39 @@ pub struct RegionSnapshotReplacementFinishStatus {
 }
 
 /// The status of an `abandoned_vmm_reaper` background task activation.
-#[derive(Serialize, Deserialize, Default, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Eq)]
 pub struct AbandonedVmmReaperStatus {
-    pub vmms_found: usize,
-    pub sled_reservations_deleted: usize,
-    pub vmms_deleted: usize,
-    pub vmms_already_deleted: usize,
-    pub errors: Vec<String>,
+    pub batch_size: std::num::NonZeroU32,
+    pub vmms: abandoned_vmm_reaper::AbandonedVmms,
+    pub reservations: abandoned_vmm_reaper::AbandonedReservations,
+}
+
+impl AbandonedVmmReaperStatus {
+    pub fn total_errors(&self) -> usize {
+        self.vmms.errors.len() + self.reservations.errors.len()
+    }
+}
+
+pub mod abandoned_vmm_reaper {
+    use super::*;
+
+    #[derive(Serialize, Default, Deserialize, Debug, PartialEq, Eq)]
+    pub struct AbandonedVmms {
+        pub batches: usize,
+        pub found: usize,
+        pub sled_reservations_deleted: usize,
+        pub deleted: usize,
+        pub already_deleted: usize,
+        pub errors: Vec<String>,
+    }
+
+    #[derive(Serialize, Default, Deserialize, Debug, PartialEq, Eq)]
+    pub struct AbandonedReservations {
+        pub batches: usize,
+        pub found: usize,
+        pub deleted: usize,
+        pub errors: Vec<String>,
+    }
 }
 
 /// The status of an `instance_updater` background task activation.

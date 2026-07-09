@@ -220,9 +220,10 @@ pub async fn run_abandoned_vmm_reaper(
         )
     });
 
-    assert!(
-        status.errors.is_empty(),
-        "abandoned_vmm_reaper task should complete without errors: {status:?}",
+    assert_eq!(
+        status.total_errors(),
+        0,
+        "abandoned_vmm_reaper task should complete without errors: {status:#?}",
     );
 
     status

@@ -1115,6 +1115,8 @@ table! {
     }
 }
 
+joinable!(sled_resource_vmm -> vmm (id));
+
 table! {
     sled_underlay_subnet_allocation (hw_baseboard_id, sled_id) {
         hw_baseboard_id -> Uuid,
