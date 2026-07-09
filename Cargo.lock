@@ -9795,6 +9795,7 @@ dependencies = [
  "buf-list",
  "bytes",
  "camino",
+ "cc",
  "chacha20 0.10.0",
  "chrono",
  "cipher 0.5.2",
