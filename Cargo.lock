@@ -1992,7 +1992,7 @@ dependencies = [
  "omicron-workspace-hack",
  "serde_json",
  "sha2 0.10.9",
- "tufaceous-artifact",
+ "tufaceous-artifact 0.1.0",
  "uuid",
 ]
 
@@ -16277,7 +16277,7 @@ dependencies = [
 [[package]]
 name = "tufaceous"
 version = "0.2.0"
-source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#6e2d1803e273de403848d62781eaec37996fd2ce"
+source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#de59b9508e99da8fc39a70d29e4d69300325b220"
 dependencies = [
  "atomicwrites",
  "aws-lc-rs",
@@ -16328,7 +16328,7 @@ dependencies = [
 [[package]]
 name = "tufaceous-artifact"
 version = "0.2.0"
-source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#6e2d1803e273de403848d62781eaec37996fd2ce"
+source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#de59b9508e99da8fc39a70d29e4d69300325b220"
 dependencies = [
  "byte-wrapper",
  "daft",
@@ -16353,7 +16353,7 @@ dependencies = [
 [[package]]
 name = "tufaceous-brand-metadata"
 version = "0.2.0"
-source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#6e2d1803e273de403848d62781eaec37996fd2ce"
+source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#de59b9508e99da8fc39a70d29e4d69300325b220"
 dependencies = [
  "serde",
  "serde_json",
