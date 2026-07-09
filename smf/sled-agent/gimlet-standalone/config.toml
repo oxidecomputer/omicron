@@ -63,6 +63,9 @@ swap_device_size_gb = 256
 # $ dladm show-phys -p -o LINK
 # data_link = "igb0"
 
+[external_disks]
+kind = "detect_physical"
+
 [data_links]
 kind = "virtual"
 devices = ["net0", "net1"]
