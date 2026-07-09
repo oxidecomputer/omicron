@@ -59,6 +59,9 @@ vmm_reservoir_percentage = 86.3
 # allocated.
 swap_device_size_gb = 256
 
+[external_disks]
+kind = "detect_physical"
+
 [data_links]
 kind = "physical"
 
@@ -75,3 +78,4 @@ if_exists = "append"
 resolve = { which = "ipcc" }
 attest = { which = "ipcc" }
 roots = ["/usr/share/oxide/idcerts/staging.pem", "/usr/share/oxide/idcerts/production.pem"]
+enforce = "Enforced"

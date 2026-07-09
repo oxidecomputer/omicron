@@ -2318,6 +2318,26 @@ stderr:
 note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
 note: database schema version matches expected (<redacted database version>)
 =============================================
+EXECUTING COMMAND: omdb ["db", "alert", "list", "--cases", "..........<REDACTED_UUID>...........", "..........<REDACTED_UUID>..........."]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+ID CLASS V TIME_CREATED TIME_DISPATCHED DISPATCHED FM_CASE_ID FM_GEN 
+---------------------------------------------
+stderr:
+note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
+note: database schema version matches expected (<redacted database version>)
+=============================================
+EXECUTING COMMAND: omdb ["db", "alert", "list", "--classes", "test.foo.bar", "test.foo.baz"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+ID CLASS V TIME_CREATED TIME_DISPATCHED DISPATCHED FM_CASE_ID FM_GEN 
+---------------------------------------------
+stderr:
+note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
+note: database schema version matches expected (<redacted database version>)
+=============================================
 EXECUTING COMMAND: omdb ["--destructive", "db", "db-metadata", "force-mark-nexus-quiesced", "--skip-confirmation", "--skip-blueprint-validation", "..........<REDACTED_UUID>..........."]
 termination: Exited(0)
 ---------------------------------------------

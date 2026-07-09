@@ -155,6 +155,7 @@ pub mod webhook_delivery;
 mod zpool;
 
 pub use address_lot::AddressLotCreateResult;
+pub use alert::AlertFilters;
 pub use alert::FmRendezvousAlertCreateError;
 pub use db_metadata::DatastoreSetupAction;
 pub use db_metadata::ValidatedDatastoreSetupAction;
@@ -202,6 +203,7 @@ pub use user_data_export::*;
 pub use virtual_provisioning_collection::StorageType;
 pub use vmm::VmmStateUpdateResult;
 pub use volume::*;
+pub use webhook_delivery::WebhookDeliveryFilters;
 
 // Number of unique datasets required to back a region.
 // TODO: This should likely turn into a configuration option.
