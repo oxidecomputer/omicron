@@ -2474,6 +2474,78 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_locking_a_deleted_instance_fails_even_if_locked() {
+        // Setup
+        let logctx = dev::test_setup_log(
+            "test_locking_a_deleted_instance_fails_even_if_locked",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+        let (authz_project, _) = create_test_project(&datastore, &opctx).await;
+        let authz_instance = create_test_instance(
+            &datastore,
+            &opctx,
+            &authz_project,
+            "my-great-instance",
+        )
+        .await;
+        let saga_id = Uuid::new_v4();
+
+        // Move the instance into an "okay-to-delete" state...
+        datastore
+            .instance_update_runtime(
+                &InstanceUuid::from_untyped_uuid(authz_instance.id()),
+                &InstanceRuntimeState {
+                    time_updated: Utc::now(),
+                    generation: Generation(external::Generation::from_u32(2)),
+                    propolis_id: None,
+                    dst_propolis_id: None,
+                    migration_id: None,
+                    nexus_state: InstanceState::NoVmm,
+                    time_last_auto_restarted: None,
+                },
+            )
+            .await
+            .expect("should update state successfully");
+
+        // attempt to lock the instance once.
+        let lock = dbg!(
+            datastore
+                .instance_updater_lock(&opctx, &authz_instance, saga_id)
+                .await
+        )
+        .expect("instance should be locked");
+        assert_eq!(lock.updater_id, saga_id);
+
+        // delete it...
+        dbg!(datastore.project_delete_instance(&opctx, &authz_instance).await)
+            .expect("instance should be deleted");
+
+        // ...and a subsequent atetmpt to lock the instance should realize it's
+        // gone.
+        let err = dbg!(
+            datastore
+                .instance_updater_lock(&opctx, &authz_instance, saga_id)
+                .await
+        )
+        .expect_err(
+            "instance_updater_lock should fail after the instance is deleted",
+        );
+        assert!(
+            matches!(
+                err,
+                UpdaterLockError::Query(Error::ObjectNotFound { .. })
+            ),
+            "expected locking a deleted instance to fail with \
+            `ObjectNotFound`, but got {err:?} instead"
+        );
+
+        // Clean up.
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
     async fn test_instance_updater_cant_unlock_someone_elses_instance_() {
         // Setup
         let logctx = dev::test_setup_log(
