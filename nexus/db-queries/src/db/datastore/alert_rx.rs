@@ -1502,4 +1502,50 @@ mod test {
         db.terminate().await;
         logctx.cleanup_successful();
     }
+
+    #[tokio::test]
+    async fn test_insert_empty_subscription_batch() {
+        let logctx =
+            dev::test_setup_log("test_insert_empty_subscription_batch");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let rx = create_receiver(datastore, opctx, "test", Vec::new()).await.rx;
+
+        let conn = datastore
+            .pool_connection_for_tests()
+            .await
+            .expect("cant get ye conn");
+
+        let result = datastore
+            .add_exact_subscription_batch_on_conn(rx.id(), Vec::new(), &conn)
+            .await
+            .expect("creating an empty subscription batch shouldn't kill you");
+
+        assert!(
+            result.is_empty(),
+            "returned subscription batch should be empty, but found: {:?}",
+            result
+        );
+
+        let (authz_rx, _) = LookupPath::new(opctx, datastore)
+            .alert_receiver_id(rx.id())
+            .fetch()
+            .await
+            .expect("rx should exist");
+
+        let (subscriptions, _) = datastore
+            .webhook_rx_config_fetch(opctx, &authz_rx)
+            .await
+            .expect("alert receiver config should exist");
+
+        assert!(
+            subscriptions.is_empty(),
+            "alert receiver config should have no subscriptions, \
+            but found: {subscriptions:?}",
+        );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
 }
