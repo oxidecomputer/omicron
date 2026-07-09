@@ -39,13 +39,12 @@ use nexus_types::external_api::sled;
 use nexus_types::external_api::snapshot;
 use nexus_types::identity::Asset;
 use nexus_types::silo::DEFAULT_SILO_ID;
+use nexus_types_versions::latest::instance::{Instance, InstanceState};
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Disk;
 use omicron_common::api::external::DiskState;
 use omicron_common::api::external::DiskType;
 use omicron_common::api::external::IdentityMetadataCreateParams;
-use omicron_common::api::external::Instance;
-use omicron_common::api::external::InstanceState;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::NameOrId;
 use omicron_nexus::Nexus;
@@ -549,7 +548,7 @@ async fn test_disk_move_between_instances(cptestctx: &ControlPlaneTestContext) {
     let url_instance_attach_disk =
         get_disk_attach_url(&instance.identity.name.clone().into());
     let url_instance_detach_disk =
-        get_disk_detach_url(&instance.identity.name.into());
+        get_disk_detach_url(&instance.identity.name.clone().into());
 
     // Start attaching the disk to the instance.
     let attached_disk = disk_post(

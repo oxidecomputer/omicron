@@ -608,6 +608,56 @@
         }
       }
     },
+    "/rack-setup/config/multirack": {
+      "get": {
+        "summary": "Get the current status of the multirack join configuration.",
+        "operationId": "get_multirack_join_config",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CurrentMultirackJoinUserConfig"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "put": {
+        "summary": "Upload a configuration for joining this rack into an existing regional",
+        "description": "cluster.\n\nA multirack join configuration is mutually exclusive with an RSS config.",
+        "operationId": "put_multirack_join_config",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MultirackJoinConfigBaseUserInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/rack-setup/config/recovery-user-password-hash": {
       "put": {
         "summary": "Update the RSS config recovery silo user password hash.",
@@ -1585,6 +1635,30 @@
           "tx_output_status"
         ]
       },
+      "CurrentMultirackJoinUserConfig": {
+        "description": "A version of the multirack join configuration which contains learned bootstrap sleds and a redacted form of BGP auth keys if they exist.\n\nThis is returned to the user via wicketd and displayed in wicket.\n\nNote that there are no optional fields here unlike in `CurrentRssUserConfigInsensitive`. This is because wicketd defaults to filling in an empty RSS config for backwards compatibility and allows uploading BGP auth keys before actually uploading the RSS config. However, since we never default to an empty version of the `CurrentMultirackJoinConfig`, we can only fill in the BGP auth keys for this structure after the `MultirackJoinConfigBaseUserInput` is uploaded from a user.",
+        "type": "object",
+        "properties": {
+          "bgp_auth_keys": {
+            "$ref": "#/components/schemas/GetBgpAuthKeyInfoResponse"
+          },
+          "bootstrap_sleds": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BootstrapSledDescription"
+            },
+            "uniqueItems": true
+          },
+          "rack_network_config": {
+            "$ref": "#/components/schemas/UserSpecifiedRackNetworkConfig"
+          }
+        },
+        "required": [
+          "bgp_auth_keys",
+          "bootstrap_sleds",
+          "rack_network_config"
+        ]
+      },
       "CurrentRssUserConfig": {
         "type": "object",
         "properties": {
@@ -1635,6 +1709,11 @@
           },
           "external_dns_zone_name": {
             "type": "string"
+          },
+          "external_jumbo_frames_opt_in_enabled": {
+            "description": "Enable the fleet-wide jumbo-frames opt-in. Operators can also toggle this at runtime via the Nexus API after handoff.",
+            "default": false,
+            "type": "boolean"
           },
           "internal_services_ip_pool_ranges": {
             "type": "array",
@@ -2199,6 +2278,100 @@
           "flipped"
         ]
       },
+      "LinkFec": {
+        "description": "The forward error correction mode of a link.",
+        "oneOf": [
+          {
+            "description": "Firecode forward error correction.",
+            "type": "string",
+            "enum": [
+              "firecode"
+            ]
+          },
+          {
+            "description": "No forward error correction.",
+            "type": "string",
+            "enum": [
+              "none"
+            ]
+          },
+          {
+            "description": "Reed-Solomon forward error correction.",
+            "type": "string",
+            "enum": [
+              "rs"
+            ]
+          }
+        ]
+      },
+      "LinkSpeed": {
+        "description": "The speed of a link.",
+        "oneOf": [
+          {
+            "description": "Zero gigabits per second.",
+            "type": "string",
+            "enum": [
+              "speed0_g"
+            ]
+          },
+          {
+            "description": "1 gigabit per second.",
+            "type": "string",
+            "enum": [
+              "speed1_g"
+            ]
+          },
+          {
+            "description": "10 gigabits per second.",
+            "type": "string",
+            "enum": [
+              "speed10_g"
+            ]
+          },
+          {
+            "description": "25 gigabits per second.",
+            "type": "string",
+            "enum": [
+              "speed25_g"
+            ]
+          },
+          {
+            "description": "40 gigabits per second.",
+            "type": "string",
+            "enum": [
+              "speed40_g"
+            ]
+          },
+          {
+            "description": "50 gigabits per second.",
+            "type": "string",
+            "enum": [
+              "speed50_g"
+            ]
+          },
+          {
+            "description": "100 gigabits per second.",
+            "type": "string",
+            "enum": [
+              "speed100_g"
+            ]
+          },
+          {
+            "description": "200 gigabits per second.",
+            "type": "string",
+            "enum": [
+              "speed200_g"
+            ]
+          },
+          {
+            "description": "400 gigabits per second.",
+            "type": "string",
+            "enum": [
+              "speed400_g"
+            ]
+          }
+        ]
+      },
       "LldpAdminStatus": {
         "description": "To what extent should this port participate in LLDP",
         "type": "string",
@@ -2259,6 +2432,70 @@
         "required": [
           "status"
         ]
+      },
+      "ManualPortConfig": {
+        "description": "User-specified version of `PortConfig`.\n\nAll of `PortConfig` is user-specified. But we expect the port name to be a key, rather than a field as in `PortConfig`. So this has all of the fields other than the port name.",
+        "type": "object",
+        "properties": {
+          "addresses": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UserSpecifiedUplinkAddressConfig"
+            }
+          },
+          "autoneg": {
+            "type": "boolean"
+          },
+          "bgp_peers": {
+            "default": [],
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UserSpecifiedBgpPeerConfig"
+            }
+          },
+          "lldp": {
+            "nullable": true,
+            "default": null,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/LldpPortConfig"
+              }
+            ]
+          },
+          "routes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RouteConfig"
+            }
+          },
+          "tx_eq": {
+            "nullable": true,
+            "default": null,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TxEqConfig"
+              }
+            ]
+          },
+          "uplink_port_fec": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/LinkFec"
+              }
+            ]
+          },
+          "uplink_port_speed": {
+            "$ref": "#/components/schemas/LinkSpeed"
+          }
+        },
+        "required": [
+          "addresses",
+          "autoneg",
+          "routes",
+          "uplink_port_speed"
+        ],
+        "additionalProperties": false
       },
       "MaxPathConfig": {
         "type": "integer",
@@ -2449,6 +2686,29 @@
           }
         }
       },
+      "MultirackJoinConfigBaseUserInput": {
+        "description": "Input from a user for adopting an uninitialized rack into an existing regional cluster.\n\nThis type is provided in the form of a TOML file uploaded via the wicket CLI. It does not contain sensitive user input such as BGP keys. Those are input separately.",
+        "type": "object",
+        "properties": {
+          "bootstrap_slots": {
+            "description": "List of slot numbers only.",
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "uint16",
+              "minimum": 0
+            },
+            "uniqueItems": true
+          },
+          "rack_network_config": {
+            "$ref": "#/components/schemas/UserSpecifiedRackNetworkConfig"
+          }
+        },
+        "required": [
+          "bootstrap_slots",
+          "rack_network_config"
+        ]
+      },
       "Name": {
         "title": "A name unique within the parent collection",
         "description": "Names must begin with a lower case ASCII letter, be composed exclusively of lowercase ASCII, uppercase ASCII, numbers, and '-', and may not end with a '-'. Names cannot be a UUID, but they may contain a UUID. They can be at most 63 characters long.",
@@ -2480,30 +2740,6 @@
           "invalid"
         ]
       },
-      "PortFec": {
-        "description": "Switchport FEC options",
-        "type": "string",
-        "enum": [
-          "firecode",
-          "none",
-          "rs"
-        ]
-      },
-      "PortSpeed": {
-        "description": "Switchport Speed options",
-        "type": "string",
-        "enum": [
-          "speed0_g",
-          "speed1_g",
-          "speed10_g",
-          "speed25_g",
-          "speed40_g",
-          "speed50_g",
-          "speed100_g",
-          "speed200_g",
-          "speed400_g"
-        ]
-      },
       "PowerMode": {
         "description": "The power mode of a module.",
         "type": "object",
@@ -2517,7 +2753,7 @@
             "description": "The actual power state.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/PowerState2"
+                "$ref": "#/components/schemas/PowerState3"
               }
             ]
           }
@@ -2536,6 +2772,15 @@
         ]
       },
       "PowerState2": {
+        "description": "See RFD 81.\n\nThis enum only lists power states the SP is able to control; higher power states are controlled by ignition.",
+        "type": "string",
+        "enum": [
+          "A0",
+          "A1",
+          "A2"
+        ]
+      },
+      "PowerState3": {
         "description": "An allowed power state for the module.",
         "oneOf": [
           {
@@ -3333,6 +3578,11 @@
           "external_dns_zone_name": {
             "type": "string"
           },
+          "external_jumbo_frames_opt_in_enabled": {
+            "description": "Enable the fleet-wide jumbo-frames opt-in.",
+            "default": false,
+            "type": "boolean"
+          },
           "internal_services_ip_pool_ranges": {
             "type": "array",
             "items": {
@@ -3606,7 +3856,6 @@
         ]
       },
       "RotImageError": {
-        "description": "`RotImageError`\n\n<details><summary>JSON schema</summary>\n\n```json { \"type\": \"string\", \"enum\": [ \"unchecked\", \"first_page_erased\", \"partially_programmed\", \"invalid_length\", \"header_not_programmed\", \"bootloader_too_small\", \"bad_magic\", \"header_image_size\", \"unaligned_length\", \"unsupported_type\", \"reset_vector_not_thumb2\", \"reset_vector\", \"signature\" ] } ``` </details>",
         "type": "string",
         "enum": [
           "unchecked",
@@ -3701,7 +3950,6 @@
         ]
       },
       "RotState": {
-        "description": "`RotState`\n\n<details><summary>JSON schema</summary>\n\n```json { \"oneOf\": [ { \"type\": \"object\", \"required\": [ \"active\", \"persistent_boot_preference\", \"state\" ], \"properties\": { \"active\": { \"$ref\": \"#/components/schemas/RotSlot\" }, \"pending_persistent_boot_preference\": { \"oneOf\": [ { \"type\": \"null\" }, { \"allOf\": [ { \"$ref\": \"#/components/schemas/RotSlot\" } ] } ] }, \"persistent_boot_preference\": { \"$ref\": \"#/components/schemas/RotSlot\" }, \"slot_a_sha3_256_digest\": { \"type\": [ \"string\", \"null\" ] }, \"slot_b_sha3_256_digest\": { \"type\": [ \"string\", \"null\" ] }, \"state\": { \"type\": \"string\", \"enum\": [ \"v2\" ] }, \"transient_boot_preference\": { \"oneOf\": [ { \"type\": \"null\" }, { \"allOf\": [ { \"$ref\": \"#/components/schemas/RotSlot\" } ] } ] } } }, { \"type\": \"object\", \"required\": [ \"message\", \"state\" ], \"properties\": { \"message\": { \"type\": \"string\" }, \"state\": { \"type\": \"string\", \"enum\": [ \"communication_failed\" ] } } }, { \"type\": \"object\", \"required\": [ \"active\", \"persistent_boot_preference\", \"slot_a_fwid\", \"slot_b_fwid\", \"stage0_fwid\", \"stage0next_fwid\", \"state\" ], \"properties\": { \"active\": { \"$ref\": \"#/components/schemas/RotSlot\" }, \"pending_persistent_boot_preference\": { \"oneOf\": [ { \"type\": \"null\" }, { \"allOf\": [ { \"$ref\": \"#/components/schemas/RotSlot\" } ] } ] }, \"persistent_boot_preference\": { \"$ref\": \"#/components/schemas/RotSlot\" }, \"slot_a_error\": { \"oneOf\": [ { \"type\": \"null\" }, { \"allOf\": [ { \"$ref\": \"#/components/schemas/RotImageError\" } ] } ] }, \"slot_a_fwid\": { \"type\": \"string\" }, \"slot_b_error\": { \"oneOf\": [ { \"type\": \"null\" }, { \"allOf\": [ { \"$ref\": \"#/components/schemas/RotImageError\" } ] } ] }, \"slot_b_fwid\": { \"type\": \"string\" }, \"stage0_error\": { \"oneOf\": [ { \"type\": \"null\" }, { \"allOf\": [ { \"$ref\": \"#/components/schemas/RotImageError\" } ] } ] }, \"stage0_fwid\": { \"type\": \"string\" }, \"stage0next_error\": { \"oneOf\": [ { \"type\": \"null\" }, { \"allOf\": [ { \"$ref\": \"#/components/schemas/RotImageError\" } ] } ] }, \"stage0next_fwid\": { \"type\": \"string\" }, \"state\": { \"type\": \"string\", \"enum\": [ \"v3\" ] }, \"transient_boot_preference\": { \"oneOf\": [ { \"type\": \"null\" }, { \"allOf\": [ { \"$ref\": \"#/components/schemas/RotSlot\" } ] } ] } } } ] } ``` </details>",
         "oneOf": [
           {
             "type": "object",
@@ -4600,7 +4848,6 @@
         ]
       },
       "SpState": {
-        "description": "`SpState`\n\n<details><summary>JSON schema</summary>\n\n```json { \"type\": \"object\", \"required\": [ \"base_mac_address\", \"hubris_archive_id\", \"model\", \"power_state\", \"revision\", \"rot\", \"serial_number\" ], \"properties\": { \"base_mac_address\": { \"type\": \"array\", \"items\": { \"type\": \"integer\", \"format\": \"uint8\", \"minimum\": 0.0 }, \"maxItems\": 6, \"minItems\": 6 }, \"hubris_archive_id\": { \"type\": \"string\" }, \"model\": { \"type\": \"string\" }, \"power_state\": { \"$ref\": \"#/components/schemas/PowerState\" }, \"revision\": { \"type\": \"integer\", \"format\": \"uint32\", \"minimum\": 0.0 }, \"rot\": { \"$ref\": \"#/components/schemas/RotState\" }, \"serial_number\": { \"type\": \"string\" } } } ``` </details>",
         "type": "object",
         "properties": {
           "base_mac_address": {
@@ -4620,7 +4867,7 @@
             "type": "string"
           },
           "power_state": {
-            "$ref": "#/components/schemas/PowerState"
+            "$ref": "#/components/schemas/PowerState2"
           },
           "revision": {
             "type": "integer",
@@ -7731,68 +7978,14 @@
         }
       },
       "UserSpecifiedPortConfig": {
-        "description": "User-specified version of `PortConfig`.\n\nAll of `PortConfig` is user-specified. But we expect the port name to be a key, rather than a field as in `PortConfig`. So this has all of the fields other than the port name.",
-        "type": "object",
-        "properties": {
-          "addresses": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/UserSpecifiedUplinkAddressConfig"
-            }
+        "anyOf": [
+          {
+            "$ref": "#/components/schemas/ManualPortConfig"
           },
-          "autoneg": {
-            "type": "boolean"
-          },
-          "bgp_peers": {
-            "default": [],
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/UserSpecifiedBgpPeerConfig"
-            }
-          },
-          "lldp": {
-            "nullable": true,
-            "default": null,
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/LldpPortConfig"
-              }
-            ]
-          },
-          "routes": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/RouteConfig"
-            }
-          },
-          "tx_eq": {
-            "nullable": true,
-            "default": null,
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/TxEqConfig"
-              }
-            ]
-          },
-          "uplink_port_fec": {
-            "nullable": true,
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/PortFec"
-              }
-            ]
-          },
-          "uplink_port_speed": {
-            "$ref": "#/components/schemas/PortSpeed"
+          {
+            "type": "object"
           }
-        },
-        "required": [
-          "addresses",
-          "autoneg",
-          "routes",
-          "uplink_port_speed"
-        ],
-        "additionalProperties": false
+        ]
       },
       "UserSpecifiedRackNetworkConfig": {
         "description": "User-specified parts of `RackNetworkConfig`.",

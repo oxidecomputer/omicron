@@ -287,6 +287,21 @@ impl Zpool {
         Ok(zpool)
     }
 
+    pub async fn list_with_info() -> Result<Vec<ZpoolInfo>, ListError> {
+        let mut command = Command::new(ZPOOL);
+        let cmd =
+            command.args(&["list", "-Hpo", "name,size,allocated,free,health"]);
+
+        let output = execute_async(cmd).await.map_err(Error::from)?;
+        let stdout = String::from_utf8_lossy(&output.stdout);
+
+        let zpools = stdout
+            .lines()
+            .filter_map(|line| line.parse::<ZpoolInfo>().ok())
+            .collect();
+        Ok(zpools)
+    }
+
     #[cfg_attr(test, allow(dead_code))]
     pub async fn get_info(name: &str) -> Result<ZpoolInfo, GetInfoError> {
         let mut command = Command::new(ZPOOL);

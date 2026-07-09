@@ -102,7 +102,7 @@ cockroachdb settings:
     version::::::::::::   (none)
     preserve downgrade:   (not set)
 planner config:
-    add zones with mupdate override:   false
+    (no current planner configs)
 
 
 
@@ -800,6 +800,8 @@ LEDGERED SLED CONFIG
     reconciler task status: idle (finished at <REDACTED_TIMESTAMP> after running for <REDACTED_DURATION>s)
     reference measurements:
         (measurement set is empty)
+    fmd:
+        no faults reported
 
 SMF SERVICES STATUS
     no data on SMF services has been collected
@@ -993,6 +995,8 @@ LEDGERED SLED CONFIG
     reconciler task status: idle (finished at <REDACTED_TIMESTAMP> after running for <REDACTED_DURATION>s)
     reference measurements:
         (measurement set is empty)
+    fmd:
+        no faults reported
 
 SMF SERVICES STATUS
     no data on SMF services has been collected
@@ -1186,6 +1190,8 @@ LEDGERED SLED CONFIG
     reconciler task status: idle (finished at <REDACTED_TIMESTAMP> after running for <REDACTED_DURATION>s)
     reference measurements:
         (measurement set is empty)
+    fmd:
+        no faults reported
 
 SMF SERVICES STATUS
     no data on SMF services has been collected
@@ -1528,8 +1534,15 @@ blueprint source: edited directly with reconfigurator-cli
 > #
 > # Note that since we are not running the command to emulate the sled-agent
 > # performing an inventory collection and seeing the DNS zone has gone away, the
-> # planner will not attemt to restore the internal DNS zone. This is intentional
-> # as we want the zone to stay in this state for the purposes of this test
+> # planner will not attempt to restore the internal DNS zone. This is intentional
+> # as we want the zone to stay in this state for the purposes of this test.
+> #
+> # A secondary effect of pinning inventory this way is that the noop image source
+> # check on serial1 will be skipped with reason "inventory stale" for the rest
+> # of this test: the expunge bumps serial1's blueprint sled-agent generation,
+> # but inventory still reports the prior generation. That's the correct
+> # behavior; see `cmds-noop-stale-inventory.txt` for a focused test of the
+> # inventory-staleness guarantee.
 > blueprint-edit latest expunge-zones 99e2f30b-3174-40bf-a78a-90da8abba8ca
 blueprint df06bb57-ad42-4431-9206-abff322896c7 created from latest blueprint (af934083-59b5-4bf6-8966-6fb5292c29e1): expunged zone 99e2f30b-3174-40bf-a78a-90da8abba8ca from sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c
 
@@ -1668,9 +1681,7 @@ external DNS:
 > # Attempt to upgrade one RoT bootloader. This should successfully plan the
 > # pending RoT bootloader update
 > blueprint-plan latest latest
-INFO performed noop zone image source checks on sled, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, num_total: 8, num_already_artifact: 8, num_eligible: 0, num_ineligible: 0
-INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
-INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, slot: b, expected_hash: 0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b
+INFO skipped noop image source check on sled, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, reason: inventory stale: inventory reported generation (3) that is older than the generation in the parent blueprint (4)
 INFO performed noop zone image source checks on sled, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, num_total: 8, num_already_artifact: 8, num_eligible: 0, num_ineligible: 0
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, slot: b, expected_hash: 0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b
@@ -1729,9 +1740,7 @@ external DNS:
 
 > # We generate another plan, there should be no changes
 > blueprint-plan latest latest
-INFO performed noop zone image source checks on sled, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, num_total: 8, num_already_artifact: 8, num_eligible: 0, num_ineligible: 0
-INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
-INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, slot: b, expected_hash: 0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b
+INFO skipped noop image source check on sled, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, reason: inventory stale: inventory reported generation (3) that is older than the generation in the parent blueprint (4)
 INFO performed noop zone image source checks on sled, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, num_total: 8, num_already_artifact: 8, num_eligible: 0, num_ineligible: 0
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, slot: b, expected_hash: 0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b
@@ -1798,9 +1807,7 @@ set sled d81c6a84-79b8-4958-ae41-ea46c9b19763 RoT bootloader versions: stage0 ->
 generated inventory collection a71f7a73-35a6-45e8-acbe-f1c5925eed69 from configured sleds
 
 > blueprint-plan latest latest
-INFO performed noop zone image source checks on sled, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, num_total: 8, num_already_artifact: 8, num_eligible: 0, num_ineligible: 0
-INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
-INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, slot: b, expected_hash: 0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b
+INFO skipped noop image source check on sled, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, reason: inventory stale: inventory reported generation (3) that is older than the generation in the parent blueprint (4)
 INFO performed noop zone image source checks on sled, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, num_total: 8, num_already_artifact: 8, num_eligible: 0, num_ineligible: 0
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, slot: b, expected_hash: 0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b
@@ -1875,9 +1882,7 @@ set sled d81c6a84-79b8-4958-ae41-ea46c9b19763 RoT settings: slot b -> 1.0.0, act
 generated inventory collection 0b5efbb3-0b1b-4bbf-b7d8-a2d6fca074c6 from configured sleds
 
 > blueprint-plan latest latest
-INFO performed noop zone image source checks on sled, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, num_total: 8, num_already_artifact: 8, num_eligible: 0, num_ineligible: 0
-INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
-INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, slot: b, expected_hash: 0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b
+INFO skipped noop image source check on sled, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, reason: inventory stale: inventory reported generation (3) that is older than the generation in the parent blueprint (4)
 INFO performed noop zone image source checks on sled, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, num_total: 8, num_already_artifact: 8, num_eligible: 0, num_ineligible: 0
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, slot: b, expected_hash: 0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b
@@ -1952,18 +1957,17 @@ set sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c SP versions: active -> 1.0.0
 > sled-update-sp serial2 --active 1.0.0
 set sled d81c6a84-79b8-4958-ae41-ea46c9b19763 SP versions: active -> 1.0.0
 
-> sled-update-host-phase2 serial1 --boot-disk B --slot-b d944ae205b61ccf4322448f7d0311a819c53d9844769de066c5307c1682abb47 
+> sled-update-host-phase2 serial1 --boot-disk B --slot-b d944ae205b61ccf4322448f7d0311a819c53d9844769de066c5307c1682abb47
 set sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c host phase 2 details: boot_disk -> B, B -> d944ae205b61ccf4322448f7d0311a819c53d9844769de066c5307c1682abb47
 
-> sled-update-host-phase1 serial1 --active B --slot-b b99d5273ba1418bebb19d74b701d716896409566d41de76ada71bded4c9b166b 
+> sled-update-host-phase1 serial1 --active B --slot-b b99d5273ba1418bebb19d74b701d716896409566d41de76ada71bded4c9b166b
 set sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c host phase 1 details: active -> B, B -> b99d5273ba1418bebb19d74b701d716896409566d41de76ada71bded4c9b166b
 
 > inventory-generate
 generated inventory collection 78f72e8d-46a9-40a9-8618-602f54454d80 from configured sleds
 
 > blueprint-plan latest latest
-INFO performed noop zone image source checks on sled, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, num_total: 8, num_already_artifact: 8, num_eligible: 0, num_ineligible: 0
-INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
+INFO skipped noop image source check on sled, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, reason: inventory stale: inventory reported generation (3) that is older than the generation in the parent blueprint (4)
 INFO performed noop zone image source checks on sled, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, num_total: 8, num_already_artifact: 8, num_eligible: 0, num_ineligible: 0
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, slot: b, expected_hash: 0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b
@@ -1978,7 +1982,6 @@ INFO ran out of boards for MGS-driven update
 generated blueprint 626487fa-7139-45ec-8416-902271fc730b based on parent blueprint a5a8f242-ffa5-473c-8efd-2acf2dc0b736
 blueprint source: planner with report:
 planning report:
-* noop converting host phase 2 slot B to Artifact on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c
 * 2 blocked MGS updates:
   * 913-0000019:serial0: failed to plan a Host OS update: sled contains zones that are unsafe to shut down: "427ec88f-f467-42fa-9bbb-66a91a36103c: only 2/2 internal DNS zones are synchronized; require at least 3"
   * 913-0000019:serial2: failed to plan a Host OS update: sled contains zones that are unsafe to shut down: "ea5b4030-b52f-44b2-8d70-45f15f987d01: only 2/2 internal DNS zones are synchronized; require at least 3"
@@ -1990,83 +1993,6 @@ planning report:
 > blueprint-diff latest
 from: blueprint a5a8f242-ffa5-473c-8efd-2acf2dc0b736
 to:   blueprint 626487fa-7139-45ec-8416-902271fc730b
-
- MODIFIED SLEDS:
-
-  sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c (active, config generation 4 -> 5):
-
-    measurements:
-    --------------------------------------------------------------------------------
-    hash                                                               version      
-    --------------------------------------------------------------------------------
-    8a0e23157bae655fceec7376926c9758efee6511c7b7ff8355bbb49545a2257f   version 1.0.0
-
-
-    host phase 2 contents:
-    --------------------------------
-    slot   boot image source        
-    --------------------------------
-    A      current contents         
-*   B      - current contents       
-     └─    + artifact: version 1.0.0
-
-
-    physical disks:
-    ------------------------------------------------------------------------------------
-    vendor        model        serial                                        disposition
-    ------------------------------------------------------------------------------------
-    fake-vendor   fake-model   serial-727522a7-934f-494d-b5b3-160968e74463   in service 
-    fake-vendor   fake-model   serial-72c59873-31ff-4e36-8d76-ff834009349a   in service 
-    fake-vendor   fake-model   serial-b5fd5bc1-099e-4e77-8028-a9793c11f43b   in service 
-
-
-    datasets:
-    -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-    dataset name                                                                                                   dataset id                             disposition   quota     reservation   compression
-    -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-    oxp_727522a7-934f-494d-b5b3-160968e74463/crucible                                                              feecfda1-9966-43d4-aaef-440b77f0b26d   in service    none      none          off        
-    oxp_72c59873-31ff-4e36-8d76-ff834009349a/crucible                                                              956966b9-8201-437b-81ba-3c8ad2032080   in service    none      none          off        
-    oxp_b5fd5bc1-099e-4e77-8028-a9793c11f43b/crucible                                                              4b0b09bf-94b7-45bf-a6b3-d46af53ae44a   in service    none      none          off        
-    oxp_727522a7-934f-494d-b5b3-160968e74463/crypt/clickhouse                                                      5ae11c7e-08fa-4d78-a4ea-14b4a9a10241   in service    none      none          off        
-    oxp_727522a7-934f-494d-b5b3-160968e74463/crypt/external_dns                                                    3e0d6188-c503-49cf-a441-fa7df40ceb43   in service    none      none          off        
-    oxp_727522a7-934f-494d-b5b3-160968e74463/crypt/internal_dns                                                    b8f2a09f-8bd2-4418-872b-a4457a3f958c   expunged      none      none          off        
-    oxp_727522a7-934f-494d-b5b3-160968e74463/crypt/zone                                                            4829f422-aa31-41a8-ab73-95684ff1ef48   in service    none      none          off        
-    oxp_72c59873-31ff-4e36-8d76-ff834009349a/crypt/zone                                                            3b66453b-7148-4c1b-84a9-499e43290ab4   in service    none      none          off        
-    oxp_b5fd5bc1-099e-4e77-8028-a9793c11f43b/crypt/zone                                                            841d5648-05f0-47b0-b446-92f6b60fe9a6   in service    none      none          off        
-    oxp_727522a7-934f-494d-b5b3-160968e74463/crypt/zone/oxz_clickhouse_353b3b65-20f7-48c3-88f7-495bd5d31545        49f8fbb6-5bac-4609-907f-6e3dfc206059   in service    none      none          off        
-    oxp_b5fd5bc1-099e-4e77-8028-a9793c11f43b/crypt/zone/oxz_crucible_86a22a56-0168-453d-9df1-cb2a7c64b5d3          6e218d0a-13fd-4f70-884e-47e960fa8bb8   in service    none      none          off        
-    oxp_727522a7-934f-494d-b5b3-160968e74463/crypt/zone/oxz_crucible_bd354eef-d8a6-4165-9124-283fb5e46d77          9073fb6b-f973-4bbd-b7cc-ba1abf6cb238   in service    none      none          off        
-    oxp_72c59873-31ff-4e36-8d76-ff834009349a/crypt/zone/oxz_crucible_e2fdefe7-95b2-4fd2-ae37-56929a06d58c          0582030b-aab6-4d0e-b1d2-64562ee712cd   in service    none      none          off        
-    oxp_727522a7-934f-494d-b5b3-160968e74463/crypt/zone/oxz_crucible_pantry_ad6a3a03-8d0f-4504-99a4-cbf73d69b973   1640adb6-70bf-44cf-b05c-bff6dd300cf3   in service    none      none          off        
-    oxp_727522a7-934f-494d-b5b3-160968e74463/crypt/zone/oxz_external_dns_6c3ae381-04f7-41ea-b0ac-74db387dbc3a      78f34ce7-42f1-41da-995f-318f32054ad2   in service    none      none          off        
-    oxp_727522a7-934f-494d-b5b3-160968e74463/crypt/zone/oxz_internal_dns_99e2f30b-3174-40bf-a78a-90da8abba8ca      2f204c50-a327-479c-8852-f53ec7a19c1f   expunged      none      none          off        
-    oxp_727522a7-934f-494d-b5b3-160968e74463/crypt/zone/oxz_nexus_466a9f29-62bf-4e63-924a-b9efdb86afec             8e0bd2bd-23b7-4bc6-9e73-c4d4ebc0bc8c   in service    none      none          off        
-    oxp_727522a7-934f-494d-b5b3-160968e74463/crypt/zone/oxz_ntp_62620961-fc4a-481e-968b-f5acbac0dc63               8c4fa711-1d5d-4e93-85f0-d17bff47b063   in service    none      none          off        
-    oxp_727522a7-934f-494d-b5b3-160968e74463/crypt/debug                                                           93957ca0-9ed1-4e7b-8c34-2ce07a69541c   in service    100 GiB   none          gzip-9     
-    oxp_72c59873-31ff-4e36-8d76-ff834009349a/crypt/debug                                                           318fae85-abcb-4259-b1b6-ac96d193f7b7   in service    100 GiB   none          gzip-9     
-    oxp_b5fd5bc1-099e-4e77-8028-a9793c11f43b/crypt/debug                                                           b46de15d-33e7-4cd0-aa7c-e7be2a61e71b   in service    100 GiB   none          gzip-9     
-    oxp_727522a7-934f-494d-b5b3-160968e74463/crypt/local_storage                                                   2db6b7c1-0f46-4ced-a3ad-48872793360e   in service    none      none          off        
-    oxp_72c59873-31ff-4e36-8d76-ff834009349a/crypt/local_storage                                                   09b9cc9b-3426-470b-a7bc-538f82dede03   in service    none      none          off        
-    oxp_b5fd5bc1-099e-4e77-8028-a9793c11f43b/crypt/local_storage                                                   c31623de-c19b-4615-9f1d-5e1daa5d3bda   in service    none      none          off        
-    oxp_727522a7-934f-494d-b5b3-160968e74463/local_storage_unencrypted                                             775f9207-c42d-4af2-9186-27ffef67735e   in service    none      none          off        
-    oxp_72c59873-31ff-4e36-8d76-ff834009349a/local_storage_unencrypted                                             3560dd69-3b23-4c69-807d-d673104cfc68   in service    none      none          off        
-    oxp_b5fd5bc1-099e-4e77-8028-a9793c11f43b/local_storage_unencrypted                                             2ad1875a-92ac-472f-8c26-593309f0e4da   in service    none      none          off        
-
-
-    omicron zones:
-    -----------------------------------------------------------------------------------------------------------------------
-    zone type         zone id                                image source              disposition    underlay IP          
-    -----------------------------------------------------------------------------------------------------------------------
-    clickhouse        353b3b65-20f7-48c3-88f7-495bd5d31545   artifact: version 0.0.1   in service     fd00:1122:3344:102::5
-    crucible          86a22a56-0168-453d-9df1-cb2a7c64b5d3   artifact: version 0.0.1   in service     fd00:1122:3344:102::a
-    crucible          bd354eef-d8a6-4165-9124-283fb5e46d77   artifact: version 0.0.1   in service     fd00:1122:3344:102::8
-    crucible          e2fdefe7-95b2-4fd2-ae37-56929a06d58c   artifact: version 0.0.1   in service     fd00:1122:3344:102::9
-    crucible_pantry   ad6a3a03-8d0f-4504-99a4-cbf73d69b973   artifact: version 0.0.1   in service     fd00:1122:3344:102::7
-    external_dns      6c3ae381-04f7-41ea-b0ac-74db387dbc3a   artifact: version 0.0.1   in service     fd00:1122:3344:102::6
-    internal_dns      99e2f30b-3174-40bf-a78a-90da8abba8ca   artifact: version 0.0.1   expunged ⏳     fd00:1122:3344:1::1  
-    internal_ntp      62620961-fc4a-481e-968b-f5acbac0dc63   artifact: version 0.0.1   in service     fd00:1122:3344:102::3
-    nexus             466a9f29-62bf-4e63-924a-b9efdb86afec   artifact: version 0.0.1   in service     fd00:1122:3344:102::4
-
 
  COCKROACHDB SETTINGS:
     state fingerprint:::::::::::::::::   (none) (unchanged)

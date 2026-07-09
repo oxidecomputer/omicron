@@ -25,7 +25,7 @@ cockroachdb settings:
     version::::::::::::   (none)
     preserve downgrade:   (not set)
 planner config:
-    add zones with mupdate override:   false
+    (no current planner configs)
 
 
 
@@ -1742,6 +1742,8 @@ LEDGERED SLED CONFIG
     reconciler task status: idle (finished at <REDACTED_TIMESTAMP> after running for <REDACTED_DURATION>s)
     reference measurements:
         (measurement set is empty)
+    fmd:
+        no faults reported
 
 SMF SERVICES STATUS
     no data on SMF services has been collected
@@ -1893,6 +1895,8 @@ LEDGERED SLED CONFIG
     reconciler task status: idle (finished at <REDACTED_TIMESTAMP> after running for <REDACTED_DURATION>s)
     reference measurements:
         (measurement set is empty)
+    fmd:
+        no faults reported
 
 SMF SERVICES STATUS
     no data on SMF services has been collected
@@ -2137,6 +2141,8 @@ LEDGERED SLED CONFIG
     reconciler task status: idle (finished at <REDACTED_TIMESTAMP> after running for <REDACTED_DURATION>s)
     reference measurements:
         (measurement set is empty)
+    fmd:
+        no faults reported
 
 SMF SERVICES STATUS
     no data on SMF services has been collected
@@ -2319,23 +2325,6 @@ external DNS:
 
 
 
-> # Set planner config.
-> set planner-config --add-zones-with-mupdate-override false
-no changes to planner config:
-    add zones with mupdate override:   false
-
-
-> set planner-config --add-zones-with-mupdate-override true
-planner config updated:
-*   add zones with mupdate override:   false -> true
-
-
-> set planner-config --add-zones-with-mupdate-override true
-no changes to planner config:
-    add zones with mupdate override:   true
-
-
-
 > # Sled index out of bounds, will error out.
 > wipe all
 - wiped system, reconfigurator-sim config, and RNG state
@@ -2346,21 +2335,9 @@ error: setting sled policy: sled index 3 out of range (0..3)
 
 
 > log
-@  1d89a28e (generation 14)
+@  953857be (generation 11)
 │  - wiped system, reconfigurator-sim config, and RNG state
 │  - reset seed to test-basic
-│
-○  4d8d6725 (generation 13)
-│  reconfigurator-cli set: no changes to planner config:
-│      add zones with mupdate override:   true
-│
-○  860f14d3 (generation 12)
-│  reconfigurator-cli set: planner config updated:
-│  *   add zones with mupdate override:   false -> true
-│
-○  953857be (generation 11)
-│  reconfigurator-cli set: no changes to planner config:
-│      add zones with mupdate override:   false
 │
 ○  0a37e015 (generation 10)
 │  reconfigurator-cli blueprint-plan
@@ -2399,24 +2376,12 @@ error: setting sled policy: sled index 3 out of range (0..3)
 
 
 > log --verbose
-@  1d89a28e-fc1e-4a6c-9ef7-ea21ce7779e5 (generation 14)
+@  953857be-1ce7-453f-b6cc-4e2ff2c0eee2 (generation 11)
 │  - wiped system, reconfigurator-sim config, and RNG state
 │  - reset seed to test-basic
 │  details:
 │    system: wipe
 │    config: wipe
-│
-○  4d8d6725-1ae3-4f88-b9cb-a34db82d7439 (generation 13)
-│  reconfigurator-cli set: no changes to planner config:
-│      add zones with mupdate override:   true
-│
-○  860f14d3-e719-4fa8-a801-73164bd6463d (generation 12)
-│  reconfigurator-cli set: planner config updated:
-│  *   add zones with mupdate override:   false -> true
-│
-○  953857be-1ce7-453f-b6cc-4e2ff2c0eee2 (generation 11)
-│  reconfigurator-cli set: no changes to planner config:
-│      add zones with mupdate override:   false
 │
 ○  0a37e015-bb94-4767-a992-54e3848079a6 (generation 10)
 │  reconfigurator-cli blueprint-plan
@@ -2489,32 +2454,18 @@ error: setting sled policy: sled index 3 out of range (0..3)
 
 
 > # Switch states with a full UUID.
-> switch 4d8d6725-1ae3-4f88-b9cb-a34db82d7439
-switched to state 4d8d6725-1ae3-4f88-b9cb-a34db82d7439 (generation 13): reconfigurator-cli set: no changes to planner config:
-    add zones with mupdate override:   true
-
+> switch 4a3b153b-fc8a-485a-baee-badaad53d2fc
+switched to state 4a3b153b-fc8a-485a-baee-badaad53d2fc (generation 9): reconfigurator-cli load-example
 
 > log
-○  1d89a28e (generation 14)
+○  953857be (generation 11)
 │  - wiped system, reconfigurator-sim config, and RNG state
 │  - reset seed to test-basic
-│
-@  4d8d6725 (generation 13)
-│  reconfigurator-cli set: no changes to planner config:
-│      add zones with mupdate override:   true
-│
-○  860f14d3 (generation 12)
-│  reconfigurator-cli set: planner config updated:
-│  *   add zones with mupdate override:   false -> true
-│
-○  953857be (generation 11)
-│  reconfigurator-cli set: no changes to planner config:
-│      add zones with mupdate override:   false
 │
 ○  0a37e015 (generation 10)
 │  reconfigurator-cli blueprint-plan
 │
-○  4a3b153b (generation 9)
+@  4a3b153b (generation 9)
 │  reconfigurator-cli load-example
 │
 ○  2f40b35e (generation 8)
@@ -2549,29 +2500,15 @@ switched to state 4d8d6725-1ae3-4f88-b9cb-a34db82d7439 (generation 13): reconfig
 
 
 > # Switch states with a unique prefix.
-> switch 860f
-switched to state 860f14d3-e719-4fa8-a801-73164bd6463d (generation 12): reconfigurator-cli set: planner config updated:
-*   add zones with mupdate override:   false -> true
-
+> switch 0a3
+switched to state 0a37e015-bb94-4767-a992-54e3848079a6 (generation 10): reconfigurator-cli blueprint-plan
 
 > log
-○  1d89a28e (generation 14)
+○  953857be (generation 11)
 │  - wiped system, reconfigurator-sim config, and RNG state
 │  - reset seed to test-basic
 │
-○  4d8d6725 (generation 13)
-│  reconfigurator-cli set: no changes to planner config:
-│      add zones with mupdate override:   true
-│
-@  860f14d3 (generation 12)
-│  reconfigurator-cli set: planner config updated:
-│  *   add zones with mupdate override:   false -> true
-│
-○  953857be (generation 11)
-│  reconfigurator-cli set: no changes to planner config:
-│      add zones with mupdate override:   false
-│
-○  0a37e015 (generation 10)
+@  0a37e015 (generation 10)
 │  reconfigurator-cli blueprint-plan
 │
 ○  4a3b153b (generation 9)
@@ -2609,13 +2546,13 @@ switched to state 860f14d3-e719-4fa8-a801-73164bd6463d (generation 12): reconfig
 
 
 > # Switch states with an ambiguous prefix (should fail).
-> switch 4
-error: prefix '4' is ambiguous: matches 2 states
-  - 4a3b153b-fc8a-485a-baee-badaad53d2fc generation 9:
+> switch 2
+error: prefix '2' is ambiguous: matches 2 states
+  - 2d296288-6fbc-4acb-8669-97fb8f38e5b7 generation 6:
     reconfigurator-cli load-example
-  - 4d8d6725-1ae3-4f88-b9cb-a34db82d7439 generation 13:
-    reconfigurator-cli set: no changes to planner config:
-        add zones with mupdate override:   true
+  - 2f40b35e-54e0-4c08-bf62-cd2315fffd1e generation 8:
+    - wiped system, reconfigurator-sim config, and RNG state
+    - reset seed to test-basic
 
 
 
@@ -2633,45 +2570,31 @@ added sled 99cff2b9-4293-4a1f-bd94-f1ca9ae0dba0 (serial: serial4)
 
 
 > # Make an additional branch based on the previous branch.
-> switch 4d8d6725
-switched to state 4d8d6725-1ae3-4f88-b9cb-a34db82d7439 (generation 13): reconfigurator-cli set: no changes to planner config:
-    add zones with mupdate override:   true
-
+> switch 860f
+switched to state 860f14d3-e719-4fa8-a801-73164bd6463d (generation 11): reconfigurator-cli sled-add: 9b8b43e1-5ce7-4094-87b1-0be0416174a4 (serial: serial3)
 
 > sled-add
-added sled 9b8b43e1-5ce7-4094-87b1-0be0416174a4 (serial: serial3)
+added sled 99cff2b9-4293-4a1f-bd94-f1ca9ae0dba0 (serial: serial4)
 
 
 > # Go back to the previous branch.
-> switch 5c53cf4b
-switched to state 5c53cf4b-26c3-4437-87e1-459fc8f152fe (generation 14): reconfigurator-cli sled-add: 99cff2b9-4293-4a1f-bd94-f1ca9ae0dba0 (serial: serial4)
+> switch 4d8d6725
+switched to state 4d8d6725-1ae3-4f88-b9cb-a34db82d7439 (generation 12): reconfigurator-cli sled-add: 99cff2b9-4293-4a1f-bd94-f1ca9ae0dba0 (serial: serial4)
 
 
 > log
-@  5c53cf4b (generation 14)
+@  4d8d6725 (generation 12)
 │  reconfigurator-cli sled-add: 99cff2b9-4293-4a1f-bd94-f1ca9ae0dba0 (serial: serial4)
 │
-○  afbfc525 (generation 13)
+│ ○  1d89a28e (generation 12)
+├─╯  reconfigurator-cli sled-add: 99cff2b9-4293-4a1f-bd94-f1ca9ae0dba0 (serial: serial4)
+│
+○  860f14d3 (generation 11)
 │  reconfigurator-cli sled-add: 9b8b43e1-5ce7-4094-87b1-0be0416174a4 (serial: serial3)
 │
-│ ○  1d89a28e (generation 14)
-│ │  - wiped system, reconfigurator-sim config, and RNG state
-│ │  - reset seed to test-basic
-│ │
-│ │ ○  810c9381 (generation 14)
-│ ├─╯  reconfigurator-cli sled-add: 9b8b43e1-5ce7-4094-87b1-0be0416174a4 (serial: serial3)
-│ │
-│ ○  4d8d6725 (generation 13)
-├─╯  reconfigurator-cli set: no changes to planner config:
-│        add zones with mupdate override:   true
-│
-○  860f14d3 (generation 12)
-│  reconfigurator-cli set: planner config updated:
-│  *   add zones with mupdate override:   false -> true
-│
-○  953857be (generation 11)
-│  reconfigurator-cli set: no changes to planner config:
-│      add zones with mupdate override:   false
+│ ○  953857be (generation 11)
+├─╯  - wiped system, reconfigurator-sim config, and RNG state
+│    - reset seed to test-basic
 │
 ○  0a37e015 (generation 10)
 │  reconfigurator-cli blueprint-plan
@@ -2710,39 +2633,27 @@ switched to state 5c53cf4b-26c3-4437-87e1-459fc8f152fe (generation 14): reconfig
 
 
 > log --verbose
-@  5c53cf4b-26c3-4437-87e1-459fc8f152fe (generation 14)
+@  4d8d6725-1ae3-4f88-b9cb-a34db82d7439 (generation 12)
 │  reconfigurator-cli sled-add: 99cff2b9-4293-4a1f-bd94-f1ca9ae0dba0 (serial: serial4)
 │  details:
 │    rng: next sled id: 99cff2b9-4293-4a1f-bd94-f1ca9ae0dba0
 │
-○  afbfc525-c81c-4923-adf6-c75f60b6f590 (generation 13)
+│ ○  1d89a28e-fc1e-4a6c-9ef7-ea21ce7779e5 (generation 12)
+├─╯  reconfigurator-cli sled-add: 99cff2b9-4293-4a1f-bd94-f1ca9ae0dba0 (serial: serial4)
+│    details:
+│      rng: next sled id: 99cff2b9-4293-4a1f-bd94-f1ca9ae0dba0
+│
+○  860f14d3-e719-4fa8-a801-73164bd6463d (generation 11)
 │  reconfigurator-cli sled-add: 9b8b43e1-5ce7-4094-87b1-0be0416174a4 (serial: serial3)
 │  details:
 │    rng: next sled id: 9b8b43e1-5ce7-4094-87b1-0be0416174a4
 │
-│ ○  1d89a28e-fc1e-4a6c-9ef7-ea21ce7779e5 (generation 14)
-│ │  - wiped system, reconfigurator-sim config, and RNG state
-│ │  - reset seed to test-basic
-│ │  details:
-│ │    system: wipe
-│ │    config: wipe
-│ │
-│ │ ○  810c9381-92f1-43b9-9660-e935c34459e5 (generation 14)
-│ ├─╯  reconfigurator-cli sled-add: 9b8b43e1-5ce7-4094-87b1-0be0416174a4 (serial: serial3)
-│ │    details:
-│ │      rng: next sled id: 9b8b43e1-5ce7-4094-87b1-0be0416174a4
-│ │
-│ ○  4d8d6725-1ae3-4f88-b9cb-a34db82d7439 (generation 13)
-├─╯  reconfigurator-cli set: no changes to planner config:
-│        add zones with mupdate override:   true
-│
-○  860f14d3-e719-4fa8-a801-73164bd6463d (generation 12)
-│  reconfigurator-cli set: planner config updated:
-│  *   add zones with mupdate override:   false -> true
-│
-○  953857be-1ce7-453f-b6cc-4e2ff2c0eee2 (generation 11)
-│  reconfigurator-cli set: no changes to planner config:
-│      add zones with mupdate override:   false
+│ ○  953857be-1ce7-453f-b6cc-4e2ff2c0eee2 (generation 11)
+├─╯  - wiped system, reconfigurator-sim config, and RNG state
+│    - reset seed to test-basic
+│    details:
+│      system: wipe
+│      config: wipe
 │
 ○  0a37e015-bb94-4767-a992-54e3848079a6 (generation 10)
 │  reconfigurator-cli blueprint-plan

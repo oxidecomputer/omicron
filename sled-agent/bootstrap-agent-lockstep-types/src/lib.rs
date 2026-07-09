@@ -78,6 +78,13 @@ pub struct RackInitializeRequest {
 
     /// IPs or subnets allowed to make requests to user-facing services
     pub allowed_source_ips: AllowedSourceIps,
+
+    /// When true, end users may opt in to jumbo frames on the primary interface
+    /// of an instance, and control plane services with external-facing OPTE
+    /// NICs are brought up with an 8500 byte MTU. Operators can toggle this at
+    /// runtime via the fleet networking settings API.
+    #[serde(default)]
+    pub external_jumbo_frames_opt_in_enabled: bool,
 }
 
 // This custom debug implementation hides the private keys.
@@ -97,6 +104,7 @@ impl std::fmt::Debug for RackInitializeRequest {
             recovery_silo,
             rack_network_config,
             allowed_source_ips,
+            external_jumbo_frames_opt_in_enabled,
         } = &self;
 
         f.debug_struct("RackInitializeRequest")
@@ -114,6 +122,10 @@ impl std::fmt::Debug for RackInitializeRequest {
             .field("recovery_silo", recovery_silo)
             .field("rack_network_config", rack_network_config)
             .field("allowed_source_ips", allowed_source_ips)
+            .field(
+                "external_jumbo_frames_opt_in_enabled",
+                external_jumbo_frames_opt_in_enabled,
+            )
             .finish()
     }
 }
@@ -156,6 +168,8 @@ struct UnvalidatedRackInitializeRequest {
     // passing this field.
     #[serde(default = "default_allowed_source_ips")]
     allowed_source_ips: AllowedSourceIps,
+    #[serde(default)]
+    external_jumbo_frames_opt_in_enabled: bool,
 }
 
 impl TryFrom<UnvalidatedRackInitializeRequest> for RackInitializeRequest {
@@ -182,6 +196,8 @@ impl TryFrom<UnvalidatedRackInitializeRequest> for RackInitializeRequest {
             recovery_silo: value.recovery_silo,
             rack_network_config: value.rack_network_config,
             allowed_source_ips: value.allowed_source_ips,
+            external_jumbo_frames_opt_in_enabled: value
+                .external_jumbo_frames_opt_in_enabled,
         })
     }
 }

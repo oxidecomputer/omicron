@@ -22,7 +22,7 @@ cockroachdb settings:
     version::::::::::::   (none)
     preserve downgrade:   (not set)
 planner config:
-    add zones with mupdate override:   false
+    (no current planner configs)
 
 
 
@@ -762,6 +762,8 @@ LEDGERED SLED CONFIG
     reconciler task status: idle (finished at <REDACTED_TIMESTAMP> after running for <REDACTED_DURATION>s)
     reference measurements:
         (measurement set is empty)
+    fmd:
+        no faults reported
 
 SMF SERVICES STATUS
     no data on SMF services has been collected
@@ -955,6 +957,8 @@ LEDGERED SLED CONFIG
     reconciler task status: idle (finished at <REDACTED_TIMESTAMP> after running for <REDACTED_DURATION>s)
     reference measurements:
         (measurement set is empty)
+    fmd:
+        no faults reported
 
 SMF SERVICES STATUS
     no data on SMF services has been collected
@@ -1148,6 +1152,8 @@ LEDGERED SLED CONFIG
     reconciler task status: idle (finished at <REDACTED_TIMESTAMP> after running for <REDACTED_DURATION>s)
     reference measurements:
         (measurement set is empty)
+    fmd:
+        no faults reported
 
 SMF SERVICES STATUS
     no data on SMF services has been collected
@@ -1769,12 +1775,9 @@ external DNS:
 > # If we try to plan again, nothing happens.
 > # The report should say why: These zones haven't propagated to inventory yet.
 > blueprint-plan latest latest
-INFO performed noop zone image source checks on sled, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, num_total: 10, num_already_artifact: 10, num_eligible: 0, num_ineligible: 0
-INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, slot: b, expected_hash: 0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b
-INFO performed noop zone image source checks on sled, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, num_total: 9, num_already_artifact: 9, num_eligible: 0, num_ineligible: 0
-INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, slot: b, expected_hash: 0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b
-INFO performed noop zone image source checks on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, num_total: 9, num_already_artifact: 9, num_eligible: 0, num_ineligible: 0
-INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, slot: b, expected_hash: 0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b
+INFO skipped noop image source check on sled, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, reason: inventory stale: inventory reported generation (4) that is older than the generation in the parent blueprint (5)
+INFO skipped noop image source check on sled, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, reason: inventory stale: inventory reported generation (4) that is older than the generation in the parent blueprint (5)
+INFO skipped noop image source check on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, reason: inventory stale: inventory reported generation (4) that is older than the generation in the parent blueprint (5)
 INFO skipping board for MGS-driven update (no update necessary), serial_number: serial0, part_number: 913-0000019
 INFO skipping board for MGS-driven update (no update necessary), serial_number: serial1, part_number: 913-0000019
 INFO skipping board for MGS-driven update (no update necessary), serial_number: serial2, part_number: 913-0000019
@@ -1820,12 +1823,9 @@ generated inventory collection a71f7a73-35a6-45e8-acbe-f1c5925eed69 from configu
 > # This will refuse to bump the Nexus generation ("new Nexus zones
 > # are not in inventory yet")
 > blueprint-plan latest b1bda47d-2c19-4fba-96e3-d9df28db7436
-INFO performed noop zone image source checks on sled, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, num_total: 10, num_already_artifact: 10, num_eligible: 0, num_ineligible: 0
-INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, slot: b, expected_hash: 0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b
-INFO performed noop zone image source checks on sled, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, num_total: 9, num_already_artifact: 9, num_eligible: 0, num_ineligible: 0
-INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, slot: b, expected_hash: 0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b
-INFO performed noop zone image source checks on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, num_total: 9, num_already_artifact: 9, num_eligible: 0, num_ineligible: 0
-INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, slot: b, expected_hash: 0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b
+INFO skipped noop image source check on sled, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, reason: inventory stale: inventory reported generation (4) that is older than the generation in the parent blueprint (5)
+INFO skipped noop image source check on sled, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, reason: inventory stale: inventory reported generation (4) that is older than the generation in the parent blueprint (5)
+INFO skipped noop image source check on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, reason: inventory stale: inventory reported generation (4) that is older than the generation in the parent blueprint (5)
 INFO skipping board for MGS-driven update (no update necessary), serial_number: serial0, part_number: 913-0000019
 INFO skipping board for MGS-driven update (no update necessary), serial_number: serial1, part_number: 913-0000019
 INFO skipping board for MGS-driven update (no update necessary), serial_number: serial2, part_number: 913-0000019
@@ -2196,8 +2196,7 @@ external DNS:
 
 
 > blueprint-plan latest latest
-INFO performed noop zone image source checks on sled, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, num_total: 9, num_already_artifact: 9, num_eligible: 0, num_ineligible: 0
-INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, slot: b, expected_hash: 0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b
+INFO skipped noop image source check on sled, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, reason: inventory stale: inventory reported generation (5) that is older than the generation in the parent blueprint (6)
 INFO performed noop zone image source checks on sled, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, num_total: 9, num_already_artifact: 9, num_eligible: 0, num_ineligible: 0
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, slot: b, expected_hash: 0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b
 INFO performed noop zone image source checks on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, num_total: 9, num_already_artifact: 9, num_eligible: 0, num_ineligible: 0
@@ -2322,10 +2321,8 @@ external DNS:
 
 
 > blueprint-plan latest latest
-INFO performed noop zone image source checks on sled, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, num_total: 9, num_already_artifact: 9, num_eligible: 0, num_ineligible: 0
-INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, slot: b, expected_hash: 0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b
-INFO performed noop zone image source checks on sled, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, num_total: 8, num_already_artifact: 8, num_eligible: 0, num_ineligible: 0
-INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, slot: b, expected_hash: 0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b
+INFO skipped noop image source check on sled, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, reason: inventory stale: inventory reported generation (5) that is older than the generation in the parent blueprint (6)
+INFO skipped noop image source check on sled, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, reason: inventory stale: inventory reported generation (5) that is older than the generation in the parent blueprint (6)
 INFO performed noop zone image source checks on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, num_total: 9, num_already_artifact: 9, num_eligible: 0, num_ineligible: 0
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, slot: b, expected_hash: 0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b
 INFO skipping board for MGS-driven update (no update necessary), serial_number: serial0, part_number: 913-0000019
@@ -2450,12 +2447,9 @@ external DNS:
 
 > # Should be a no-op
 > blueprint-plan latest latest
-INFO performed noop zone image source checks on sled, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, num_total: 9, num_already_artifact: 9, num_eligible: 0, num_ineligible: 0
-INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, slot: b, expected_hash: 0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b
-INFO performed noop zone image source checks on sled, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, num_total: 8, num_already_artifact: 8, num_eligible: 0, num_ineligible: 0
-INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, slot: b, expected_hash: 0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b
-INFO performed noop zone image source checks on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, num_total: 8, num_already_artifact: 8, num_eligible: 0, num_ineligible: 0
-INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, slot: b, expected_hash: 0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b
+INFO skipped noop image source check on sled, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, reason: inventory stale: inventory reported generation (5) that is older than the generation in the parent blueprint (6)
+INFO skipped noop image source check on sled, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, reason: inventory stale: inventory reported generation (5) that is older than the generation in the parent blueprint (6)
+INFO skipped noop image source check on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, reason: inventory stale: inventory reported generation (5) that is older than the generation in the parent blueprint (6)
 INFO skipping board for MGS-driven update (no update necessary), serial_number: serial0, part_number: 913-0000019
 INFO skipping board for MGS-driven update (no update necessary), serial_number: serial1, part_number: 913-0000019
 INFO skipping board for MGS-driven update (no update necessary), serial_number: serial2, part_number: 913-0000019

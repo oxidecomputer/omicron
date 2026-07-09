@@ -4,6 +4,6 @@
 
 //! Version `AUDIT_LOG_CREDENTIAL_ID` of the Nexus external API.
 //!
-//! Adds `AuthMethod` enum and `credential_id` to audit log entries.
+//! Adds `credential_id` to audit log entries.
 
 pub mod audit;

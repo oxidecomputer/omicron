@@ -360,9 +360,9 @@ pub struct PortConfig {
     /// Name of the port this config applies to.
     pub port: String,
     /// Port speed.
-    pub uplink_port_speed: v1::PortSpeed,
+    pub uplink_port_speed: v1::LinkSpeed,
     /// Port forward error correction type.
-    pub uplink_port_fec: Option<v1::PortFec>,
+    pub uplink_port_fec: Option<v1::LinkFec>,
     /// BGP peers on this port
     pub bgp_peers: Vec<BgpPeerConfig>,
     /// Whether or not to set autonegotiation
@@ -372,6 +372,24 @@ pub struct PortConfig {
     pub lldp: Option<v1::LldpPortConfig>,
     /// TX-EQ configuration for this port
     pub tx_eq: Option<v1::TxEqConfig>,
+}
+
+impl PortConfig {
+    /// Create a placeholder `PortConfig` for use in tests.
+    pub fn empty_for_tests(port: &str) -> Self {
+        Self {
+            routes: Vec::new(),
+            addresses: Vec::new(),
+            switch: v1::SwitchSlot::Switch0,
+            port: port.to_string(),
+            uplink_port_speed: v1::LinkSpeed::Speed100G,
+            uplink_port_fec: None,
+            bgp_peers: Vec::new(),
+            autoneg: false,
+            lldp: None,
+            tx_eq: None,
+        }
+    }
 }
 
 #[derive(Debug, thiserror::Error)]

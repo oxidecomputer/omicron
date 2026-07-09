@@ -25,8 +25,8 @@ use illumos_utils::zone::SVCCFG;
 use omicron_common::OMICRON_DPD_TAG;
 use omicron_common::address::DENDRITE_PORT;
 use oxnet::IpNet;
-use sled_agent_types::early_networking::PortFec as OmicronPortFec;
-use sled_agent_types::early_networking::PortSpeed as OmicronPortSpeed;
+use sled_agent_types::early_networking::LinkFec;
+use sled_agent_types::early_networking::LinkSpeed;
 use sled_agent_types::early_networking::SwitchSlot;
 use sled_agent_types::early_networking::UplinkAddress;
 use sled_agent_types::early_networking::UplinkAddressConfig;
@@ -53,6 +53,7 @@ use wicket_common::preflight_check::StepWarning;
 use wicket_common::preflight_check::UpdateEngine;
 use wicket_common::preflight_check::UplinkPreflightStepId;
 use wicket_common::preflight_check::UplinkPreflightTerminalError;
+use wicket_common::rack_setup::ManualPortConfig;
 use wicket_common::rack_setup::UserSpecifiedPortConfig;
 use wicket_common::rack_setup::UserSpecifiedRackNetworkConfig;
 
@@ -95,6 +96,11 @@ pub(super) async fn run_local_uplink_preflight_check(
     let mut engine = UpdateEngine::new(log, sender);
 
     for (port, uplink) in network_config.port_map(our_switch_slot) {
+        let UserSpecifiedPortConfig::Manual(uplink) = uplink else {
+            error!(log, "DdmAutoPortConfig not supported for uplinks",);
+            continue;
+        };
+
         add_steps_for_single_local_uplink_preflight_check(
             &mut engine,
             &dpd_client,
@@ -134,7 +140,7 @@ fn add_steps_for_single_local_uplink_preflight_check<'a>(
     engine: &mut UpdateEngine<'a>,
     dpd_client: &'a DpdClient,
     port: &'a str,
-    uplink: &'a UserSpecifiedPortConfig,
+    uplink: &'a ManualPortConfig,
     dns_servers: &'a [IpAddr],
     ntp_servers: &'a [String],
     dns_name_to_query: Option<&'a str>,
@@ -819,25 +825,25 @@ fn add_steps_for_single_local_uplink_preflight_check<'a>(
 }
 
 fn build_port_settings(
-    uplink: &UserSpecifiedPortConfig,
+    uplink: &ManualPortConfig,
     link_id: &LinkId,
 ) -> PortSettings {
     // Map from omicron_common types to dpd_client types
     let fec = uplink.uplink_port_fec.map(|fec| match fec {
-        OmicronPortFec::Firecode => DpdPortFec::Firecode,
-        OmicronPortFec::None => DpdPortFec::None,
-        OmicronPortFec::Rs => DpdPortFec::Rs,
+        LinkFec::Firecode => DpdPortFec::Firecode,
+        LinkFec::None => DpdPortFec::None,
+        LinkFec::Rs => DpdPortFec::Rs,
     });
     let speed = match uplink.uplink_port_speed {
-        OmicronPortSpeed::Speed0G => DpdPortSpeed::Speed0G,
-        OmicronPortSpeed::Speed1G => DpdPortSpeed::Speed1G,
-        OmicronPortSpeed::Speed10G => DpdPortSpeed::Speed10G,
-        OmicronPortSpeed::Speed25G => DpdPortSpeed::Speed25G,
-        OmicronPortSpeed::Speed40G => DpdPortSpeed::Speed40G,
-        OmicronPortSpeed::Speed50G => DpdPortSpeed::Speed50G,
-        OmicronPortSpeed::Speed100G => DpdPortSpeed::Speed100G,
-        OmicronPortSpeed::Speed200G => DpdPortSpeed::Speed200G,
-        OmicronPortSpeed::Speed400G => DpdPortSpeed::Speed400G,
+        LinkSpeed::Speed0G => DpdPortSpeed::Speed0G,
+        LinkSpeed::Speed1G => DpdPortSpeed::Speed1G,
+        LinkSpeed::Speed10G => DpdPortSpeed::Speed10G,
+        LinkSpeed::Speed25G => DpdPortSpeed::Speed25G,
+        LinkSpeed::Speed40G => DpdPortSpeed::Speed40G,
+        LinkSpeed::Speed50G => DpdPortSpeed::Speed50G,
+        LinkSpeed::Speed100G => DpdPortSpeed::Speed100G,
+        LinkSpeed::Speed200G => DpdPortSpeed::Speed200G,
+        LinkSpeed::Speed400G => DpdPortSpeed::Speed400G,
     };
 
     let mut port_settings = PortSettings { links: HashMap::new() };

@@ -19,10 +19,11 @@
 //!   * [`SwitchPortSettingsCreate`]
 
 use crate::v2025_11_20_00::networking::{
-    AddressConfig, LinkConfigCreate, RouteConfig, SwitchInterfaceConfigCreate,
-    SwitchPortConfigCreate,
+    AddressConfig, LinkConfigCreate, RouteConfig, SwitchInterfaceConfig,
+    SwitchInterfaceConfigCreate, SwitchPortAddressView, SwitchPortConfig,
+    SwitchPortConfigCreate, SwitchPortLinkConfig, SwitchPortRouteConfig,
+    SwitchPortSettingsGroups, SwitchVlanInterfaceConfig,
 };
-use omicron_common::api::external;
 use omicron_common::api::external::IdentityMetadata;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::Name;
@@ -323,39 +324,34 @@ impl TryFrom<crate::v2026_02_13_01::networking::SwitchPortSettingsCreate>
 /// This structure contains all port settings information in one place. It's a
 /// convenience data structure for getting a complete view of a particular
 /// port's settings.
-// TODO: several fields below embed `external::*` types directly from
-// `omicron-common`, which means their serialized shape is not truly frozen.
-// Once `omicron-common-versions` exists, replace these with version-local
-// copies of the types to ensure the initial version's wire format is
-// immutable.
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
 pub struct SwitchPortSettings {
     #[serde(flatten)]
     pub identity: IdentityMetadata,
 
     /// Switch port settings included from other switch port settings groups.
-    pub groups: Vec<external::SwitchPortSettingsGroups>,
+    pub groups: Vec<SwitchPortSettingsGroups>,
 
     /// Layer 1 physical port settings.
-    pub port: external::SwitchPortConfig,
+    pub port: SwitchPortConfig,
 
     /// Layer 2 link settings.
-    pub links: Vec<external::SwitchPortLinkConfig>,
+    pub links: Vec<SwitchPortLinkConfig>,
 
     /// Layer 3 interface settings.
-    pub interfaces: Vec<external::SwitchInterfaceConfig>,
+    pub interfaces: Vec<SwitchInterfaceConfig>,
 
     /// Vlan interface settings.
-    pub vlan_interfaces: Vec<external::SwitchVlanInterfaceConfig>,
+    pub vlan_interfaces: Vec<SwitchVlanInterfaceConfig>,
 
     /// IP route settings.
-    pub routes: Vec<external::SwitchPortRouteConfig>,
+    pub routes: Vec<SwitchPortRouteConfig>,
 
     /// BGP peer settings.
     pub bgp_peers: Vec<BgpPeer>,
 
     /// Layer 3 IP address settings.
-    pub addresses: Vec<external::SwitchPortAddressView>,
+    pub addresses: Vec<SwitchPortAddressView>,
 }
 
 impl From<SwitchPortSettings>

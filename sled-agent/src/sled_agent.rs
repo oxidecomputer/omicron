@@ -37,6 +37,8 @@ use illumos_utils::zfs::DatasetVolumeDeleteArgs;
 use illumos_utils::zfs::DatasetVolumeEnsureArgs;
 use illumos_utils::zfs::DestroyDatasetErrorVariant;
 use illumos_utils::zfs::Mountpoint;
+use illumos_utils::zfs::RemoveReservationError;
+use illumos_utils::zfs::RemoveReservationErrorInner;
 use illumos_utils::zfs::SizeDetails;
 use illumos_utils::zfs::Zfs;
 use illumos_utils::zpool::PathInPool;
@@ -64,9 +66,9 @@ use sled_agent_config_reconciler::{
     InternalDisksReceiver, LedgerNewConfigError, LedgerTaskError,
     ReconcilerInventory, SledAgentFacilities,
 };
+use sled_agent_early_networking::EarlyNetworkSetupError;
 use sled_agent_health_monitor::handle::HealthMonitorHandle;
 use sled_agent_measurements::MeasurementsHandle;
-use sled_agent_rack_setup::EarlyNetworkSetupError;
 use sled_agent_types::attached_subnet::AttachedSubnet;
 use sled_agent_types::attached_subnet::AttachedSubnets;
 use sled_agent_types::dataset::LocalStorageDatasetDeleteRequest;
@@ -540,7 +542,7 @@ impl SledAgent {
         // Start collecting metric data.
         let baseboard = long_running_task_handles.hardware_manager.baseboard();
         let identifiers = SledIdentifiers {
-            rack_id: request.body.rack_id,
+            rack_id: request.body.rack_id.into_untyped_uuid(),
             sled_id: request.body.id.into_untyped_uuid(),
             model: baseboard.model().to_string(),
             revision: baseboard.revision(),
@@ -1246,7 +1248,7 @@ impl SledAgent {
     pub(crate) fn sled_identifiers(&self) -> SledIdentifiers {
         let baseboard = self.inner.hardware.baseboard();
         SledIdentifiers {
-            rack_id: self.inner.start_request.body.rack_id,
+            rack_id: self.inner.start_request.body.rack_id.into_untyped_uuid(),
             sled_id: self.inner.id.into_untyped_uuid(),
             model: baseboard.model().to_string(),
             revision: baseboard.revision(),
@@ -1277,6 +1279,8 @@ impl SledAgent {
         let smf_services_enabled_not_online =
             self.inner.health_monitor.to_inventory();
 
+        let fmd = crate::fmd::collect_fmd_inventory(&self.log).await;
+
         let ReconcilerInventory {
             disks,
             zpools,
@@ -1304,6 +1308,7 @@ impl SledAgent {
             file_source_resolver,
             smf_services_enabled_not_online,
             reference_measurements: self.inner.measurements.to_inventory(),
+            fmd,
         })
     }
 
@@ -1538,9 +1543,27 @@ impl SledAgent {
         // the volume, remove the reservation set for the parent dataset if one
         // exists.
 
-        Zfs::remove_reservation(&delegated_zvol.parent_dataset_name())
-            .await
-            .map_err(|e| HttpError::for_internal_error(e.to_string()))?;
+        let result =
+            Zfs::remove_reservation(&delegated_zvol.parent_dataset_name())
+                .await;
+
+        if let Err(e) = result {
+            let RemoveReservationError { name: _, err } = &e;
+            match err {
+                RemoveReservationErrorInner::DatasetNotFound => {
+                    // If the parent dataset is no longer found, then a
+                    // concurrent deletion occurred. Return Ok
+                    return Ok(());
+                }
+
+                _ => {
+                    // Anything else is a 500
+                    return Err(HttpError::for_internal_error(
+                        InlineErrorChain::new(&e).to_string(),
+                    ));
+                }
+            }
+        }
 
         // Then proceed with deleting the child volume dataset, then the parent
         // dataset

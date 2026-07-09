@@ -7,7 +7,7 @@
 use anyhow::{Context, anyhow, bail, ensure};
 use camino::Utf8PathBuf;
 use chrono::{DateTime, Utc};
-use clap::{ArgAction, ValueEnum};
+use clap::ValueEnum;
 use clap::{Args, Parser, Subcommand};
 use daft::Diffable;
 use gateway_types::rot::RotSlot;
@@ -34,6 +34,7 @@ use nexus_reconfigurator_simulation::{
 };
 use nexus_reconfigurator_simulation::{SimStateBuilder, SimTufRepoSource};
 use nexus_reconfigurator_simulation::{SimTufRepoDescription, Simulator};
+use nexus_types::deployment::BlueprintHostPhase2DesiredContents;
 use nexus_types::deployment::BlueprintMeasurements;
 use nexus_types::deployment::CockroachDbSettings;
 use nexus_types::deployment::ExpectedVersion;
@@ -42,9 +43,6 @@ use nexus_types::deployment::execution::blueprint_internal_dns_config;
 use nexus_types::deployment::{Blueprint, UnstableReconfiguratorState};
 use nexus_types::deployment::{BlueprintArtifactVersion, PendingMgsUpdate};
 use nexus_types::deployment::{BlueprintExpungedZoneAccessReason, execution};
-use nexus_types::deployment::{
-    BlueprintHostPhase2DesiredContents, PlannerConfig,
-};
 use nexus_types::deployment::{BlueprintSource, SledFilter};
 use nexus_types::deployment::{
     BlueprintZoneImageSource, PendingMgsUpdateDetails,
@@ -1554,8 +1552,6 @@ enum SetArgs {
         /// TUF repo containing release artifacts
         filename: Utf8PathBuf,
     },
-    /// planner config
-    PlannerConfig(SetPlannerConfigArgs),
     /// timestamp for ignoring impossible MGS updates
     IgnoreImpossibleMgsUpdatesSince {
         since: SetIgnoreImpossibleMgsUpdatesSinceArgs,
@@ -1578,35 +1574,6 @@ impl FromStr for SetIgnoreImpossibleMgsUpdatesSinceArgs {
             return Ok(Self(datetime.into()));
         }
         bail!("invalid timestamp: expected `now` or an RFC3339 timestamp")
-    }
-}
-
-#[derive(Debug, Args)]
-struct SetPlannerConfigArgs {
-    #[clap(flatten)]
-    planner_config: PlannerConfigOpts,
-}
-
-// Define the config fields separately so we can use `group(required = true,
-// multiple = true).`
-#[derive(Debug, Clone, Args)]
-#[group(required = true, multiple = true)]
-pub struct PlannerConfigOpts {
-    #[clap(long, action = ArgAction::Set)]
-    add_zones_with_mupdate_override: Option<bool>,
-}
-
-impl PlannerConfigOpts {
-    fn update_if_modified(
-        &self,
-        current: &PlannerConfig,
-    ) -> Option<PlannerConfig> {
-        let new = PlannerConfig {
-            add_zones_with_mupdate_override: self
-                .add_zones_with_mupdate_override
-                .unwrap_or(current.add_zones_with_mupdate_override),
-        };
-        (new != *current).then_some(new)
     }
 }
 
@@ -2639,12 +2606,16 @@ fn cmd_blueprint_edit(
             .context("failed to construct external networking allocator")?
             .for_new_nexus()
             .context("failed to pick an external IP for Nexus")?;
+            let nexus_config = planning_input
+                .external_service_networking_policy()
+                .operator_nexus_config();
             builder
                 .sled_add_zone_nexus(
                     sled_id,
                     image_source,
                     external_ip,
                     nexus_generation,
+                    &nexus_config,
                 )
                 .context("failed to add Nexus zone")?;
             format!("added Nexus zone to sled {}", sled_id)
@@ -3541,17 +3512,6 @@ fn cmd_set(
                 TargetReleaseDescription::TufRepo(description),
             );
             format!("set target release based on {}", filename)
-        }
-        SetArgs::PlannerConfig(args) => {
-            let current = state.system_mut().description().get_planner_config();
-            if let Some(new) = args.planner_config.update_if_modified(&current)
-            {
-                state.system_mut().description_mut().set_planner_config(new);
-                let diff = current.diff(&new);
-                format!("planner config updated:\n{}", diff.display())
-            } else {
-                format!("no changes to planner config:\n{}", current.display())
-            }
         }
         SetArgs::IgnoreImpossibleMgsUpdatesSince { since } => {
             state

@@ -5,12 +5,8 @@
 //! Background task for managing switch bidirectional forwarding detection
 //! (BFD) sessions.
 
-use crate::app::{
-    background::tasks::networking::build_mgd_clients,
-    switch_zone_address_mappings,
-};
-
 use crate::app::background::BackgroundTask;
+use crate::app::background::tasks::networking::resolve_mgd_clients;
 use futures::FutureExt;
 use futures::future::BoxFuture;
 use internal_dns_resolver::Resolver;
@@ -120,21 +116,19 @@ impl BackgroundTask for BfdManager {
 
             let mut current: HashSet<BfdSessionKey> = HashSet::new();
 
-            let mappings = match switch_zone_address_mappings(&self.resolver, log).await {
-                Ok(mappings) => mappings,
-                Err(e) => {
-                    error!(log, "failed to resolve addresses for Dendrite services"; "error" => %e);
-                    return json!({
-                        "error":
-                            format!(
-                                "failed to resolve addresses for Dendrite services: {:#}",
-                                e
-                            )
-                    });
-                },
-            };
-
-            let mgd_clients = build_mgd_clients(mappings, log, &self.resolver).await;
+            let mgd_clients =
+                match resolve_mgd_clients(&self.resolver, log).await {
+                    Ok(clients) => clients,
+                    Err(e) => {
+                        let e = InlineErrorChain::new(&e);
+                        error!(
+                            log,
+                            "failed to resolve addresses for MGD services";
+                            &e,
+                        );
+                        return json!({ "error": e.to_string() });
+                    }
+                };
 
             for (location, c) in &mgd_clients {
                 let client_current = match c.get_bfd_peers().await {
@@ -142,7 +136,7 @@ impl BackgroundTask for BfdManager {
                     Err(e) => {
                         error!(&log, "failed to get bfd sessions from mgd: {}",
                             c.baseurl();
-                            "error" => e.to_string()
+                            InlineErrorChain::new(&e),
                         );
                         continue;
                     }

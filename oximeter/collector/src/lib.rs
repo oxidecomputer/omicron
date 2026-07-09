@@ -4,8 +4,6 @@
 
 //! Implementation of the `oximeter` metric collection server.
 
-// Copyright 2025 Oxide Computer Company
-
 pub use collection_task::ForcedCollectionError;
 use dropshot::ConfigDropshot;
 use dropshot::ConfigLogging;
@@ -379,7 +377,7 @@ impl Oximeter {
         .version_policy(dropshot::VersionPolicy::Dynamic(Box::new(
             dropshot::ClientSpecifiesVersionInHeader::new(
                 omicron_common::api::VERSION_HEADER,
-                oximeter_api::VERSION_INITIAL,
+                oximeter_api::latest_version(),
             ),
         )))
         .start()
@@ -497,7 +495,7 @@ impl Oximeter {
         .version_policy(dropshot::VersionPolicy::Dynamic(Box::new(
             dropshot::ClientSpecifiesVersionInHeader::new(
                 omicron_common::api::VERSION_HEADER,
-                oximeter_api::VERSION_INITIAL,
+                oximeter_api::latest_version(),
             ),
         )))
         .start()

@@ -104,6 +104,7 @@ pub struct ImageVersion {
 #[derive(
     Debug,
     Clone,
+    Copy,
     PartialEq,
     Eq,
     PartialOrd,
@@ -111,21 +112,35 @@ pub struct ImageVersion {
     Deserialize,
     Serialize,
     JsonSchema,
+    thiserror::Error,
 )]
 #[serde(rename_all = "snake_case")]
 pub enum RotImageError {
+    #[error("unchecked")]
     Unchecked,
+    #[error("first page erased")]
     FirstPageErased,
+    #[error("partially programmed")]
     PartiallyProgrammed,
+    #[error("invalid length")]
     InvalidLength,
+    #[error("header not programmed")]
     HeaderNotProgrammed,
+    #[error("bootloader too small")]
     BootloaderTooSmall,
+    #[error("bad magic")]
     BadMagic,
+    #[error("header image size")]
     HeaderImageSize,
+    #[error("unaligned length")]
     UnalignedLength,
+    #[error("unsupported type")]
     UnsupportedType,
+    #[error("reset vector not thumb2")]
     ResetVectorNotThumb2,
+    #[error("reset vector")]
     ResetVector,
+    #[error("signature")]
     Signature,
 }
 

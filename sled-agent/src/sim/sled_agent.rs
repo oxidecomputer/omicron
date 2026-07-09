@@ -53,7 +53,9 @@ use sled_agent_types::attached_subnet::{AttachedSubnet, AttachedSubnets};
 use sled_agent_types::dataset::LocalStorageDatasetEnsureRequest;
 use sled_agent_types::disk::DiskStateRequested;
 use sled_agent_types::early_networking::EarlyNetworkConfigEnvelope;
+use sled_agent_types::early_networking::PortConfig;
 use sled_agent_types::early_networking::RackNetworkConfig;
+use sled_agent_types::early_networking::UplinkPorts;
 use sled_agent_types::instance::{
     InstanceEnsureBody, InstanceExternalIpBody, InstanceMulticastMembership,
     MigrationRuntimeState, MigrationState, SledVmmState, VmmPutStateResponse,
@@ -61,8 +63,8 @@ use sled_agent_types::instance::{
 };
 use sled_agent_types::inventory::{
     ConfigReconcilerInventory, ConfigReconcilerInventoryResult,
-    ConfigReconcilerInventoryStatus, HostPhase2DesiredSlots, Inventory,
-    InventoryDataset, InventoryDisk, InventoryZpool,
+    ConfigReconcilerInventoryStatus, FmdInventory, HostPhase2DesiredSlots,
+    Inventory, InventoryDataset, InventoryDisk, InventoryZpool,
     OmicronFileSourceResolverInventory, OmicronSledConfig, OmicronZonesConfig,
     SingleMeasurementInventory, SledRole, ZpoolHealth,
 };
@@ -148,13 +150,19 @@ impl SledAgent {
                         .unwrap(),
                     infra_ip_first: IpAddr::V4(Ipv4Addr::UNSPECIFIED),
                     infra_ip_last: IpAddr::V4(Ipv4Addr::UNSPECIFIED),
-                    ports: Vec::new(),
+                    // The simulated sled-agent doesn't do real uplink setup,
+                    // but `UplinkPorts` must be non-empty, so use a single
+                    // placeholder port.
+                    ports: UplinkPorts::new(vec![PortConfig::empty_for_tests(
+                        "qsfp0",
+                    )])
+                    .expect("placeholder port list is non-empty"),
                     bgp: Vec::new(),
                     bfd: Vec::new(),
                 },
                 // TODO-correctness Can we fill this in for the simulated
                 // sled-agent?
-                service_zone_nat_entries: None,
+                blueprint_external_networking_config: None,
             })
             .serialize_to_bootstore_with_generation(0),
         );
@@ -994,6 +1002,7 @@ impl SledAgent {
             ),
             smf_services_enabled_not_online,
             reference_measurements,
+            fmd: Ok(FmdInventory::default()),
         })
     }
 

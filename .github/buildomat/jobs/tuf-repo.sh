@@ -1,8 +1,11 @@
 #!/bin/bash
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
 #:
 #: name = "helios / build TUF repo"
 #: variety = "basic"
-#: target = "helios-2.0-16c128gb"
+#: target = "helios-3.0-16c128gb"
 #: rust_toolchain = true
 #: output_rules = [
 #:	"=/work/manifest.toml",
@@ -81,4 +84,4 @@ esac
 pfexec zfs create -p "rpool/images/$USER/host"
 pfexec zfs create -p "rpool/images/$USER/recovery"
 
-cargo xtask releng --output-dir /work --mkincorp
+cargo xtask releng --output-dir /work --mkincorp --verify-debug-libraries

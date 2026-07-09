@@ -931,8 +931,8 @@ mod tests {
     use crate::db::datastore::Error;
     use crate::db::datastore::LookupType;
     use crate::db::model::{
-        IncompleteIpPoolResource, IpPool, IpPoolReservationType,
-        IpPoolResourceType, IpVersion,
+        IncompleteIpPoolResource, IpPool, IpPoolAssignment, IpPoolResourceType,
+        IpVersion,
     };
     use crate::db::pub_test_utils::helpers::create_instance_with_vmm;
     use crate::db::pub_test_utils::{TestDatabase, multicast};
@@ -956,7 +956,7 @@ mod tests {
                 IpPool::new_multicast(
                     &pool_identity,
                     IpVersion::V4,
-                    IpPoolReservationType::ExternalSilos,
+                    IpPoolAssignment::Silos,
                 ),
             )
             .await
@@ -1101,7 +1101,7 @@ mod tests {
                 IpPool::new_multicast(
                     &pool_identity,
                     IpVersion::V4,
-                    IpPoolReservationType::ExternalSilos,
+                    IpPoolAssignment::Silos,
                 ),
             )
             .await
@@ -1252,7 +1252,7 @@ mod tests {
                 IpPool::new_multicast(
                     &pool_identity,
                     IpVersion::V4,
-                    IpPoolReservationType::ExternalSilos,
+                    IpPoolAssignment::Silos,
                 ),
             )
             .await
@@ -1351,7 +1351,7 @@ mod tests {
                 IpPool::new_multicast(
                     &pool_identity,
                     IpVersion::V4,
-                    IpPoolReservationType::ExternalSilos,
+                    IpPoolAssignment::Silos,
                 ),
             )
             .await
@@ -1459,7 +1459,7 @@ mod tests {
                 IpPool::new_multicast(
                     &pool_identity,
                     IpVersion::V4,
-                    IpPoolReservationType::ExternalSilos,
+                    IpPoolAssignment::Silos,
                 ),
             )
             .await
@@ -1582,7 +1582,7 @@ mod tests {
                 IpPool::new_multicast(
                     &pool_identity,
                     IpVersion::V4,
-                    IpPoolReservationType::ExternalSilos,
+                    IpPoolAssignment::Silos,
                 ),
             )
             .await
@@ -1688,7 +1688,7 @@ mod tests {
                 IpPool::new_multicast(
                     &pool_identity,
                     IpVersion::V4,
-                    IpPoolReservationType::ExternalSilos,
+                    IpPoolAssignment::Silos,
                 ),
             )
             .await
@@ -1817,7 +1817,7 @@ mod tests {
                 IpPool::new_multicast(
                     &pool_identity,
                     IpVersion::V4,
-                    IpPoolReservationType::ExternalSilos,
+                    IpPoolAssignment::Silos,
                 ),
             )
             .await
@@ -2150,7 +2150,7 @@ mod tests {
                 IpPool::new_multicast(
                     &pool_identity,
                     IpVersion::V4,
-                    IpPoolReservationType::ExternalSilos,
+                    IpPoolAssignment::Silos,
                 ),
             )
             .await
@@ -2239,7 +2239,7 @@ mod tests {
                 IpPool::new_multicast(
                     &asm_pool_identity,
                     IpVersion::V4,
-                    IpPoolReservationType::ExternalSilos,
+                    IpPoolAssignment::Silos,
                 ),
             )
             .await
@@ -2311,7 +2311,7 @@ mod tests {
                 IpPool::new_multicast(
                     &ssm_pool_identity,
                     IpVersion::V4,
-                    IpPoolReservationType::ExternalSilos,
+                    IpPoolAssignment::Silos,
                 ),
             )
             .await
@@ -2417,7 +2417,7 @@ mod tests {
                 IpPool::new_multicast(
                     &pool_identity,
                     IpVersion::V4,
-                    IpPoolReservationType::ExternalSilos,
+                    IpPoolAssignment::Silos,
                 ),
             )
             .await
@@ -2555,7 +2555,7 @@ mod tests {
                 IpPool::new_multicast(
                     &pool_identity,
                     IpVersion::V4,
-                    IpPoolReservationType::ExternalSilos,
+                    IpPoolAssignment::Silos,
                 ),
             )
             .await

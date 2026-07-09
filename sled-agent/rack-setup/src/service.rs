@@ -67,7 +67,6 @@
 //! after a clean slate upon failure.
 //! See <https://github.com/oxidecomputer/omicron/issues/7174> for details.
 
-use crate::early_networking::{EarlyNetworkSetup, EarlyNetworkSetupError};
 use crate::plan::service::PlanError as ServicePlanError;
 use crate::plan::service::ServicePlan;
 use crate::plan::sled::SledPlan;
@@ -88,7 +87,6 @@ use nexus_lockstep_client::{
 use nexus_types::deployment::{
     Blueprint, BlueprintZoneType, blueprint_zone_type,
 };
-use nexus_types::internal_api::params::ExternalPortDiscovery;
 use ntp_admin_client::ClientInfo as _;
 use ntp_admin_client::{
     Client as NtpAdminClient, Error as NtpAdminError, types::TimeSync,
@@ -111,15 +109,14 @@ use sled_agent_client::{
     Client as SledAgentClient, Error as SledAgentError, types as SledAgentTypes,
 };
 use sled_agent_config_reconciler::InternalDisksReceiver;
-use sled_agent_types::early_networking::{
-    EarlyNetworkConfigEnvelope, LldpAdminStatus,
-};
+use sled_agent_types::early_networking::EarlyNetworkConfigEnvelope;
 use sled_agent_types::inventory::{
     ConfigReconcilerInventoryResult, HostPhase2DesiredSlots, OmicronSledConfig,
     OmicronZoneConfig, OmicronZoneType, OmicronZonesConfig,
 };
 use sled_agent_types::rack_init::rack_init_bootstore_generation;
 use sled_agent_types::sled::StartSledAgentRequest;
+use sled_agent_types::system_networking::BlueprintExternalNetworkingConfig;
 use sled_agent_types::system_networking::ServiceZoneNatEntriesError;
 use sled_agent_types::system_networking::SystemNetworkingConfig;
 use sled_hardware_types::BaseboardId;
@@ -264,11 +261,6 @@ pub enum SetupServiceError {
 
     #[error("Failed to construct valid set of service zone NAT entries")]
     InvalidServiceZoneNatEntries(#[from] ServiceZoneNatEntriesError),
-
-    // We used transparent, because `EarlyNetworkSetupError` contains a subset
-    // of error variants already in this type
-    #[error(transparent)]
-    EarlyNetworkSetup(#[from] EarlyNetworkSetupError),
 
     #[error("Rack already initialized")]
     RackAlreadyInitialized,
@@ -757,15 +749,7 @@ impl ServiceInner {
     ) -> Result<TimeSync, SetupServiceError> {
         info!(client.inner(), "Checking time synchronization");
 
-        let ts = client.timesync().await?.into_inner();
-        Ok(TimeSync {
-            sync: ts.sync,
-            ref_id: ts.ref_id,
-            ip_addr: ts.ip_addr,
-            stratum: ts.stratum,
-            ref_time: ts.ref_time,
-            correction: ts.correction,
-        })
+        Ok(client.timesync().await?.into_inner())
     }
 
     async fn wait_for_timesync(
@@ -822,14 +806,12 @@ impl ServiceInner {
         Ok(())
     }
 
-    #[allow(clippy::too_many_arguments)]
     async fn handoff_to_nexus(
         &self,
         blueprint: Blueprint,
         config: &Config,
         sled_plan: &SledPlan,
         service_plan: &ServicePlan,
-        port_discovery_mode: ExternalPortDiscovery,
         nexus_lockstep_address: SocketAddrV6,
         initial_trust_quorum_configuration: Option<InitialTrustQuorumConfig>,
     ) -> Result<(), SetupServiceError> {
@@ -915,88 +897,7 @@ impl ServiceInner {
                 rack_subnet: config.rack_subnet,
                 infra_ip_first: config.infra_ip_first,
                 infra_ip_last: config.infra_ip_last,
-                ports: config
-                    .ports
-                    .iter()
-                    .map(|config| NexusTypes::PortConfig {
-                        port: config.port.clone(),
-                        routes: config
-                            .routes
-                            .iter()
-                            .map(|r| NexusTypes::RouteConfig {
-                                destination: r.destination,
-                                nexthop: r.nexthop,
-                                vlan_id: r.vlan_id,
-                                rib_priority: r.rib_priority,
-                            })
-                            .collect(),
-                        addresses: config.addresses.clone(),
-                        switch: config.switch,
-                        uplink_port_speed: config.uplink_port_speed,
-                        uplink_port_fec: config.uplink_port_fec,
-                        autoneg: config.autoneg,
-                        bgp_peers: config
-                            .bgp_peers
-                            .iter()
-                            .map(|b| NexusTypes::BgpPeerConfig {
-                                addr: b.addr,
-                                asn: b.asn,
-                                port: b.port.clone(),
-                                hold_time: b.hold_time,
-                                connect_retry: b.connect_retry,
-                                delay_open: b.delay_open,
-                                idle_hold_time: b.idle_hold_time,
-                                keepalive: b.keepalive,
-                                remote_asn: b.remote_asn,
-                                min_ttl: b.min_ttl,
-                                md5_auth_key: b.md5_auth_key.clone(),
-                                multi_exit_discriminator: b
-                                    .multi_exit_discriminator,
-                                local_pref: b.local_pref,
-                                enforce_first_as: b.enforce_first_as,
-                                communities: b.communities.clone(),
-                                allowed_export: b.allowed_export.clone(),
-                                allowed_import: b.allowed_import.clone(),
-                                vlan_id: b.vlan_id,
-                            })
-                            .collect(),
-                        lldp: config.lldp.as_ref().map(|lp| {
-                            NexusTypes::LldpPortConfig {
-                                status: match lp.status {
-                                    LldpAdminStatus::Enabled => {
-                                        NexusTypes::LldpAdminStatus::Enabled
-                                    }
-                                    LldpAdminStatus::Disabled => {
-                                        NexusTypes::LldpAdminStatus::Disabled
-                                    }
-                                    LldpAdminStatus::TxOnly => {
-                                        NexusTypes::LldpAdminStatus::TxOnly
-                                    }
-                                    LldpAdminStatus::RxOnly => {
-                                        NexusTypes::LldpAdminStatus::RxOnly
-                                    }
-                                },
-                                chassis_id: lp.chassis_id.clone(),
-                                port_id: lp.port_id.clone(),
-                                system_name: lp.system_name.clone(),
-                                system_description: lp
-                                    .system_description
-                                    .clone(),
-                                port_description: lp.port_description.clone(),
-                                management_addrs: lp.management_addrs.clone(),
-                            }
-                        }),
-                        tx_eq: config.tx_eq.as_ref().map(|tx_eq| {
-                            NexusTypes::TxEqConfig {
-                                pre1: tx_eq.pre1,
-                                pre2: tx_eq.pre2,
-                                main: tx_eq.main,
-                                post2: tx_eq.post2,
-                                post1: tx_eq.post1,
-                            }
-                        }),
-                    })
-                    .collect(),
+                ports: config.ports.clone(),
                 bgp: config
                     .bgp
                     .iter()
@@ -1077,9 +978,10 @@ impl ServiceInner {
             external_dns_zone_name: config.external_dns_zone_name.clone(),
             recovery_silo: config.recovery_silo.clone(),
             rack_network_config,
-            external_port_count: port_discovery_mode,
             allowed_source_ips,
             initial_trust_quorum_configuration,
+            external_jumbo_frames_opt_in_enabled: config
+                .external_jumbo_frames_opt_in_enabled,
         };
 
         let notify_nexus = || async {
@@ -1354,7 +1256,7 @@ impl ServiceInner {
             // TODO-correctness could we wait to put this into the bootstore
             // until after the service plan is created, once we've finished
             // moving all system networking into scrimlet reconcilers?
-            service_zone_nat_entries: None,
+            blueprint_external_networking_config: None,
         };
         info!(self.log, "Writing initial network configuration to bootstore");
         rss_step.update(RssStep::InitialNetworkConfigUpdate);
@@ -1406,12 +1308,14 @@ impl ServiceInner {
             .map_err(SetupServiceError::ConvertPlanToBlueprint)?;
 
         // Now that we have a service plan (and therefore a blueprint), we can
-        // fill in the service_zone_nat_entries in the bootstore.
-        system_networking_config.service_zone_nat_entries = Some(
-            blueprint
-                .to_service_zone_nat_entries()
-                .map_err(SetupServiceError::InvalidServiceZoneNatEntries)?,
-        );
+        // fill in the `blueprint_external_networking_config` in the bootstore.
+        system_networking_config.blueprint_external_networking_config =
+            Some(BlueprintExternalNetworkingConfig {
+                blueprint_external_networking_generation: Generation::new(),
+                service_zone_nat_entries: blueprint
+                    .to_service_zone_nat_entries()
+                    .map_err(SetupServiceError::InvalidServiceZoneNatEntries)?,
+            });
         info!(
             self.log,
             "Writing final system networking configuration to bootstore",
@@ -1446,28 +1350,6 @@ impl ServiceInner {
         .await?;
         rss_step.update(RssStep::ConfigureDns);
         self.initialize_internal_dns_records(&service_plan).await?;
-
-        // Ask MGS in each switch zone which switch it is.
-        //
-        // lookup_uplinked_switch_zone_underlay_addrs() is shared with
-        // sled-agent, which has the network config in a watch channel that
-        // changes as Nexus pushes updates in via the bootstore. We don't have
-        // that, but can stuff the (unchanging) config into a watch channel to
-        // fit this API.
-        let (_tx, network_config_rx) = watch::channel(system_networking_config);
-        let switch_mgmt_addrs = EarlyNetworkSetup::new(&self.log)
-            .lookup_uplinked_switch_zone_underlay_addrs(
-                &resolver,
-                &network_config_rx,
-                // We willing to wait forever to find all the switches that have
-                // configured uplinks; if we attempt to proceed without doing
-                // so, we'll fail handing off to Nexus later. (Ideally we could
-                // complete RSS with only one switch up and then configure the
-                // second later, but that currently doesn't work.)
-                // <https://github.com/oxidecomputer/omicron/issues/9678>
-                Duration::MAX,
-            )
-            .await;
 
         rss_step.update(RssStep::InitNtp);
         // Next start up the NTP services.
@@ -1583,7 +1465,6 @@ impl ServiceInner {
             &config,
             &sled_plan,
             &service_plan,
-            ExternalPortDiscovery::Auto(switch_mgmt_addrs),
             nexus_lockstep_address,
             initial_trust_quorum_configuration,
         )
@@ -1918,11 +1799,12 @@ mod test {
     use omicron_uuid_kinds::SledUuid;
     use oxnet::Ipv6Net;
     use sled_agent_types::{
-        early_networking::RackNetworkConfig,
+        early_networking::{PortConfig, RackNetworkConfig, UplinkPorts},
         inventory::{
-            Baseboard, ConfigReconcilerInventoryStatus, Inventory,
-            InventoryDisk, OmicronFileSourceResolverInventory, OmicronZoneType,
-            SledCpuFamily, SledRole, SvcsEnabledNotOnlineResult,
+            Baseboard, ConfigReconcilerInventoryStatus, FmdInventory,
+            Inventory, InventoryDisk, OmicronFileSourceResolverInventory,
+            OmicronZoneType, SledCpuFamily, SledRole,
+            SvcsEnabledNotOnlineResult,
         },
     };
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
@@ -1983,6 +1865,7 @@ mod test {
                 smf_services_enabled_not_online:
                     SvcsEnabledNotOnlineResult::DataUnavailable,
                 reference_measurements: IdOrdMap::new(),
+                fmd: Ok(FmdInventory::default()),
             },
             true,
         )
@@ -2242,11 +2125,17 @@ mod test {
                 .unwrap(),
                 infra_ip_first: IpAddr::V4(Ipv4Addr::LOCALHOST),
                 infra_ip_last: IpAddr::V4(Ipv4Addr::LOCALHOST),
-                ports: Vec::new(),
+                // The list of ports must be non-empty -- this test doesn't
+                // exercise uplinks, so use a placeholder port here.
+                ports: UplinkPorts::new(vec![PortConfig::empty_for_tests(
+                    "qsfp0",
+                )])
+                .expect("placeholder port list is non-empty"),
                 bgp: Vec::new(),
                 bfd: Vec::new(),
             },
             allowed_source_ips: AllowedSourceIps::Any,
+            external_jumbo_frames_opt_in_enabled: false,
         };
 
         assert_eq!(

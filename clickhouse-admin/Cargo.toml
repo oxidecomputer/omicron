@@ -48,6 +48,8 @@ serde_json.workspace = true
 slog-term.workspace = true
 subprocess.workspace = true
 url.workspace = true
+uuid.workspace = true
+chrono-tz.workspace = true
 
 [lints]
 workspace = true

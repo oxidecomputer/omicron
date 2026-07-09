@@ -23,6 +23,7 @@ use futures::future::BoxFuture;
 use gateway_test_utils::setup::GatewayTestContext;
 use iddqd::IdOrdMap;
 use internal_dns_types::config::DnsConfigBuilder;
+use internal_dns_types::config::HostSwitchZonePorts;
 use internal_dns_types::names::DNS_ZONE_EXTERNAL_TESTING;
 use internal_dns_types::names::ServiceName;
 use nexus_config::Database;
@@ -56,6 +57,7 @@ use nexus_types::deployment::OximeterReadMode;
 use nexus_types::deployment::PendingMgsUpdates;
 use nexus_types::deployment::PlannerConfig;
 use nexus_types::deployment::ReconfiguratorConfig;
+use nexus_types::deployment::ReconfiguratorDisruptionPolicy;
 use nexus_types::deployment::blueprint_zone_type;
 use nexus_types::external_api::sled::SledState;
 use nexus_types::internal_api::params::DnsConfigParams;
@@ -90,8 +92,10 @@ use omicron_uuid_kinds::ZpoolUuid;
 use oximeter_collector::Oximeter;
 use oximeter_producer::LogConfig;
 use oximeter_producer::Server as ProducerServer;
+use sled_agent_types::early_networking::PortConfig;
 use sled_agent_types::early_networking::RackNetworkConfig;
 use sled_agent_types::early_networking::SwitchSlot;
+use sled_agent_types::early_networking::UplinkPorts;
 use sled_agent_types::inventory::HostPhase2DesiredSlots;
 use sled_agent_types::inventory::NetworkInterface;
 use sled_agent_types::inventory::NetworkInterfaceKind;
@@ -146,6 +150,7 @@ pub struct ControlPlaneStarter<'a, N: NexusServer> {
     pub gateway: BTreeMap<SwitchSlot, GatewayTestContext>,
     pub dendrite: RwLock<HashMap<SwitchSlot, dev::dendrite::DendriteInstance>>,
     pub mgd: HashMap<SwitchSlot, dev::maghemite::MgdInstance>,
+    pub ddm: HashMap<SwitchSlot, dev::maghemite::DdmInstance>,
 
     // NOTE: Only exists after starting Nexus, until external Nexus is
     // initialized.
@@ -203,6 +208,7 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
             gateway: BTreeMap::new(),
             dendrite: RwLock::new(HashMap::new()),
             mgd: HashMap::new(),
+            ddm: HashMap::new(),
             nexus_internal: None,
             nexus_internal_addr: None,
             external_dns_zone_name: None,
@@ -427,13 +433,13 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
 
         // Set up a stub instance of dendrite
         let dendrite = dev::dendrite::DendriteInstance::start(
-            0,
             self.nexus_internal_addr,
-            Some(mgs_addr),
+            mgs_addr,
+            &log.new(o!("switch_slot" => format!("{switch_slot:?}"))),
         )
         .await
         .unwrap();
-        let port = dendrite.port;
+        let port = dendrite.port();
         self.dendrite.write().unwrap().insert(switch_slot, dendrite);
 
         let address = SocketAddrV6::new(Ipv6Addr::LOCALHOST, port, 0, 0);
@@ -448,9 +454,13 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
     pub async fn start_mgd(&mut self, switch_slot: SwitchSlot) {
         let log = &self.logctx.log;
         debug!(log, "Starting mgd"; "switch_slot" => ?switch_slot);
+        let mgs = self.gateway.get(&switch_slot).unwrap();
+        let mgs_addr =
+            SocketAddrV6::new(Ipv6Addr::LOCALHOST, mgs.port, 0, 0).into();
 
         // Set up an instance of mgd
-        let mgd = dev::maghemite::MgdInstance::start(0).await.unwrap();
+        let mgd =
+            dev::maghemite::MgdInstance::start(0, mgs_addr).await.unwrap();
         let port = mgd.port;
         self.mgd.insert(switch_slot, mgd);
         let address = SocketAddrV6::new(Ipv6Addr::LOCALHOST, port, 0, 0);
@@ -459,6 +469,17 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
 
         let config = MgdConfig { address: std::net::SocketAddr::V6(address) };
         self.config.pkg.mgd.insert(switch_slot, config);
+    }
+
+    pub async fn start_ddm(&mut self, switch_slot: SwitchSlot) {
+        let log = &self.logctx.log;
+        debug!(log, "Starting DDM sim"; "switch_slot" => ?switch_slot);
+
+        let ddm = dev::maghemite::DdmInstance::start().await.unwrap();
+        let port = ddm.port;
+        self.ddm.insert(switch_slot, ddm);
+
+        debug!(log, "DDM sim started"; "port" => port);
     }
 
     pub async fn record_switch_dns(
@@ -479,9 +500,18 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
             .host_zone_switch(
                 sled_id,
                 Ipv6Addr::LOCALHOST,
-                self.dendrite.read().unwrap().get(&switch_slot).unwrap().port,
-                self.gateway.get(&switch_slot).unwrap().port,
-                self.mgd.get(&switch_slot).unwrap().port,
+                HostSwitchZonePorts {
+                    dendrite: self
+                        .dendrite
+                        .read()
+                        .unwrap()
+                        .get(&switch_slot)
+                        .unwrap()
+                        .port(),
+                    mgs: self.gateway.get(&switch_slot).unwrap().port,
+                    mgd: self.mgd.get(&switch_slot).unwrap().port,
+                    ddm: self.ddm.get(&switch_slot).unwrap().port,
+                },
             )
             .unwrap()
     }
@@ -541,6 +571,7 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
                 planner_enabled: false,
                 planner_config: PlannerConfig::default(),
                 tuf_repo_pruner_enabled: true,
+                disruption_policy: ReconfiguratorDisruptionPolicy::default(),
             });
         self.config.deployment.internal_dns = InternalDns::FromAddress {
             address: self
@@ -919,11 +950,16 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
                     bgp: Vec::new(),
                     infra_ip_first: "192.0.2.10".parse().unwrap(),
                     infra_ip_last: "192.0.2.100".parse().unwrap(),
-                    ports: Vec::new(),
+                    // `UplinkPorts` must be non-empty; this test harness
+                    // doesn't exercise uplinks, so use a placeholder port.
+                    ports: UplinkPorts::new(vec![PortConfig::empty_for_tests(
+                        "qsfp0",
+                    )])
+                    .expect("placeholder port list is non-empty"),
                     rack_subnet: "fd00:1122:3344:0100::/56".parse().unwrap(),
                 },
                 // TODO-correctness Can we fill this in for tests?
-                service_zone_nat_entries: None,
+                blueprint_external_networking_config: None,
             },
             generation: 1,
         };
@@ -1248,8 +1284,8 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
             logctx: self.logctx,
             gateway: self.gateway,
             dendrite: RwLock::new(self.dendrite.into_inner().unwrap()),
-            stopped_dendrite_ports: RwLock::new(HashMap::new()),
             mgd: self.mgd,
+            ddm: self.ddm,
             external_dns_zone_name: self.external_dns_zone_name.unwrap(),
             external_dns: self.external_dns.unwrap(),
             internal_dns: self.internal_dns.unwrap(),
@@ -1285,11 +1321,14 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
         for (_, gateway) in self.gateway {
             gateway.teardown().await;
         }
-        for (_, mut dendrite) in self.dendrite.into_inner().unwrap() {
+        for (_, dendrite) in self.dendrite.into_inner().unwrap() {
             dendrite.cleanup().await.unwrap();
         }
         for (_, mut mgd) in self.mgd {
             mgd.cleanup().await.unwrap();
+        }
+        for (_, mut ddm) in self.ddm {
+            ddm.cleanup().await.unwrap();
         }
         self.logctx.cleanup_successful();
     }
@@ -1632,6 +1671,12 @@ pub(crate) async fn setup_with_config_impl<N: NexusServer>(
                     }),
                 ),
                 (
+                    "start_ddm_switch0",
+                    Box::new(|builder| {
+                        builder.start_ddm(SwitchSlot::Switch0).boxed()
+                    }),
+                ),
+                (
                     "record_switch_dns",
                     Box::new(|builder| {
                         builder
@@ -1673,6 +1718,12 @@ pub(crate) async fn setup_with_config_impl<N: NexusServer>(
                         "start_mgd_switch1",
                         Box::new(|builder| {
                             builder.start_mgd(SwitchSlot::Switch1).boxed()
+                        }),
+                    ),
+                    (
+                        "start_ddm_switch1",
+                        Box::new(|builder| {
+                            builder.start_ddm(SwitchSlot::Switch1).boxed()
                         }),
                     ),
                     (

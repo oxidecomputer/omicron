@@ -9,7 +9,6 @@ workspace = true
 
 [build-dependencies]
 omicron-rpaths.workspace = true
-vergen-gitcl.workspace = true
 
 [dependencies]
 anyhow.workspace = true
@@ -19,6 +18,7 @@ base64.workspace = true
 bootstrap-agent-lockstep-client.workspace = true
 bytes.workspace = true
 camino.workspace = true
+camino-tempfile.workspace = true
 chrono.workspace = true
 clap.workspace = true
 clickhouse-admin-single-client.workspace = true
@@ -30,6 +30,7 @@ daft.workspace = true
 diesel.workspace = true
 dropshot.workspace = true
 dyn-clone.workspace = true
+erebor = { workspace = true, features = ["pmbus"] }
 ereport-types.workspace = true
 futures.workspace = true
 gateway-client.workspace = true
@@ -54,10 +55,14 @@ nexus-db-queries.workspace = true
 nexus-db-schema.workspace = true
 nexus-inventory.workspace = true
 nexus-lockstep-client.workspace = true
+nexus-networking.workspace = true
 nexus-reconfigurator-preparation.workspace = true
 nexus-saga-recovery.workspace = true
 nexus-types.workspace = true
+ntp-admin-client.workspace = true
 omicron-common.workspace = true
+omicron-git-version.workspace = true
+omicron-nexus.workspace = true
 omicron-uuid-kinds.workspace = true
 omicron-workspace-hack.workspace = true
 owo-colors.workspace = true
@@ -83,6 +88,7 @@ slog.workspace = true
 slog-error-chain.workspace = true
 steno.workspace = true
 strum.workspace = true
+support-bundle-collection.workspace = true
 support-bundle-viewer.workspace = true
 supports-color.workspace = true
 tabled.workspace = true
@@ -95,15 +101,19 @@ update-engine.workspace = true
 url.workspace = true
 uuid.workspace = true
 
+[target.'cfg(target_os = "illumos")'.dependencies]
+# See omicron-rpaths for more about the "fmd-adm-sys" dependency.
+fmd-adm-sys.workspace = true
+
 [dev-dependencies]
 camino-tempfile.workspace = true
 expectorate.workspace = true
 http.workspace = true
 nexus-test-utils.workspace = true
 nexus-test-utils-macros.workspace = true
-omicron-nexus.workspace = true
 omicron-test-utils.workspace = true
 subprocess.workspace = true
+zip.workspace = true
 
 # Disable doc builds by default for our binaries to work around issue
 # rust-lang/cargo#8373.  These docs would not be very useful anyway.

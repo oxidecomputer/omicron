@@ -25,6 +25,7 @@ use crate::db::model::InstanceCpuPlatform;
 use crate::db::model::InstanceIntendedState;
 use crate::db::model::InstanceRuntimeState;
 use crate::db::model::InstanceState;
+use crate::db::model::InstanceStateComputer;
 use crate::db::model::InstanceUpdate;
 use crate::db::model::Migration;
 use crate::db::model::MigrationState;
@@ -47,6 +48,7 @@ use nexus_db_errors::public_error_from_diesel;
 use nexus_db_lookup::DbConnection;
 use nexus_db_lookup::LookupPath;
 use nexus_db_model::Disk;
+use nexus_types::external_api::instance as instance_types;
 use nexus_types::internal_api::background::ReincarnationReason;
 use omicron_common::api;
 use omicron_common::api::external;
@@ -69,104 +71,6 @@ use omicron_uuid_kinds::SledUuid;
 use ref_cast::RefCast;
 use std::collections::HashMap;
 use uuid::Uuid;
-
-/// Returns the operator-visible [external API
-/// `InstanceState`](external::InstanceState) for the provided [`Instance`]
-/// and its active [`Vmm`], if one exists.
-pub struct InstanceStateComputer<'s> {
-    instance_state: &'s InstanceState,
-    migration_id: Option<&'s Uuid>,
-    vmm_state: Option<&'s VmmState>,
-}
-
-impl<'s> InstanceStateComputer<'s> {
-    pub fn new(instance: &'s Instance, vmm: Option<&'s Vmm>) -> Self {
-        Self {
-            instance_state: &instance.nexus_state,
-            migration_id: instance.migration_id.as_ref(),
-            vmm_state: vmm.as_ref().map(|vmm| &vmm.state),
-        }
-    }
-
-    pub fn compute_state_from(
-        instance_state: &'s InstanceState,
-        migration_id: Option<&'s Uuid>,
-        vmm_state: Option<&'s VmmState>,
-    ) -> external::InstanceState {
-        Self { instance_state, migration_id, vmm_state }.compute_state()
-    }
-
-    pub fn compute_state(&self) -> external::InstanceState {
-        use crate::db::model::InstanceState;
-        use crate::db::model::VmmState;
-
-        // We want to only report that an instance is `Stopped` when a new
-        // `instance-start` saga is able to proceed. That means that:
-        match (self.instance_state, self.vmm_state) {
-            // - If there's an active migration ID for the instance, *always*
-            //   treat its state as "migration" regardless of the VMM's state.
-            //
-            //   This avoids an issue where an instance whose previous active
-            //   VMM has been destroyed as a result of a successful migration
-            //   out will appear to be "stopping" for the time between when that
-            //   VMM was reported destroyed and when the instance record was
-            //   updated to reflect the migration's completion.
-            //
-            //   Instead, we'll continue to report the instance's state as
-            //   "migrating" until an instance-update saga has resolved the
-            //   outcome of the migration, since only the instance-update saga
-            //   can complete the migration and update the instance record to
-            //   point at its new active VMM. No new instance-migrate,
-            //   instance-stop, or instance-delete saga can be started
-            //   until this occurs.
-            //
-            //   If the instance actually *has* stopped or failed before a
-            //   successful migration out, this is fine, because an
-            //   instance-update saga will come along and remove the active VMM
-            //   and migration IDs.
-            //
-            (InstanceState::Vmm, Some(_)) if self.migration_id.is_some() => {
-                external::InstanceState::Migrating
-            }
-            // - An instance with a "stopped" or "destroyed" VMM needs to be
-            //   recast as a "stopping" instance, as the virtual provisioning
-            //   resources for that instance have not been deallocated until the
-            //   active VMM ID has been unlinked by an update saga.
-            (
-                InstanceState::Vmm,
-                Some(VmmState::Stopped | VmmState::Destroyed),
-            ) => external::InstanceState::Stopping,
-            // - An instance with a "failed" VMM should *not* be counted as
-            //   failed until the VMM is unlinked, because a start saga must be
-            //   able to run for a "failed" instance. Until then, it will
-            //   continue to appear "stopping".
-            (InstanceState::Vmm, Some(VmmState::Failed)) => {
-                external::InstanceState::Stopping
-            }
-            // - An instance with a "saga unwound" VMM, on the other hand, can
-            //   be treated as "failed", since --- unlike an instance with a
-            //   "failed" active VMM --- a new start saga can run at any time by
-            //   just clearing out the old VMM ID.
-            (InstanceState::Vmm, Some(VmmState::SagaUnwound)) => {
-                external::InstanceState::Failed
-            }
-            // - An instance with no VMM is always "stopped" (as long as it's
-            //   not "starting" etc.)
-            (InstanceState::NoVmm, _vmm_state) => {
-                debug_assert_eq!(_vmm_state, None);
-                external::InstanceState::Stopped
-            }
-            // If there's a VMM state, and none of the above rules apply, use
-            // that.
-            (_instance_state, Some(vmm_state)) => {
-                debug_assert_eq!(_instance_state, &InstanceState::Vmm);
-                (*vmm_state).into()
-            }
-            // If there's no VMM state, use the instance's state.
-            (instance_state, None) => (*instance_state).into(),
-        }
-    }
-}
 
 impl<'s> From<&'s InstanceAndActiveVmm> for InstanceStateComputer<'s> {
     fn from(i: &'s InstanceAndActiveVmm) -> Self {
@@ -195,9 +99,9 @@ impl InstanceAndActiveVmm {
     }
 
     /// Returns the operator-visible [external API
-    /// `InstanceState`](external::InstanceState) for this instance and its
+    /// `InstanceState`](instance_types::InstanceState) for this instance and its
     /// active VMM.
-    pub fn effective_state(&self) -> external::InstanceState {
+    pub fn effective_state(&self) -> instance_types::InstanceState {
         InstanceStateComputer::from(self).compute_state()
     }
 }
@@ -208,7 +112,7 @@ impl From<(Instance, Option<Vmm>)> for InstanceAndActiveVmm {
     }
 }
 
-impl From<InstanceAndActiveVmm> for external::Instance {
+impl From<InstanceAndActiveVmm> for instance_types::Instance {
     fn from(value: InstanceAndActiveVmm) -> Self {
         let time_run_state_updated = value
             .vmm
@@ -248,7 +152,7 @@ impl From<InstanceAndActiveVmm> for external::Instance {
                 InstanceAutoRestartPolicy::Never => false,
                 InstanceAutoRestartPolicy::BestEffort => true,
             };
-            external::InstanceAutoRestartStatus {
+            instance_types::InstanceAutoRestartStatus {
                 enabled,
                 policy: policy.map(Into::into),
                 cooldown_expiration,
@@ -267,15 +171,15 @@ impl From<InstanceAndActiveVmm> for external::Instance {
                 .expect("found invalid hostname in the database"),
             boot_disk_id: value.instance.boot_disk_id,
             cpu_platform: value.instance.cpu_platform.map(Into::into),
-            runtime: external::InstanceRuntimeState {
+            runtime: instance_types::InstanceRuntimeState {
                 run_state: value.effective_state(),
                 time_run_state_updated,
                 time_last_auto_restarted: value
                     .instance
                     .time_last_auto_restarted,
             },
-
             auto_restart_status,
+            enable_jumbo_frames: value.instance.enable_jumbo_frames,
         }
     }
 }
@@ -1154,6 +1058,7 @@ impl DataStore {
                     ncpus,
                     memory,
                     cpu_platform,
+                    enable_jumbo_frames,
                 } = update.clone();
                 async move {
                     // Set the auto-restart policy.
@@ -1162,6 +1067,16 @@ impl DataStore {
                         .set(
                             instance_dsl::auto_restart_policy
                                 .eq(auto_restart_policy),
+                        )
+                        .execute_async(&conn)
+                        .await?;
+
+                    // Set the per-instance jumbo-frames opt-in.
+                    diesel::update(instance_dsl::instance)
+                        .filter(instance_dsl::id.eq(authz_instance.id()))
+                        .set(
+                            instance_dsl::enable_jumbo_frames
+                                .eq(enable_jumbo_frames),
                         )
                         .execute_async(&conn)
                         .await?;
@@ -1577,8 +1492,8 @@ impl DataStore {
                 }
                 let instance_state = collection.nexus_state.state();
                 match instance_state {
-                    api::external::InstanceState::Stopped
-                    | api::external::InstanceState::Failed => {
+                    instance_types::InstanceState::Stopped
+                    | instance_types::InstanceState::Failed => {
                         Err(Error::internal_error("cannot delete instance"))
                     }
                     _ => Err(Error::invalid_request(&format!(
@@ -2307,7 +2222,6 @@ mod tests {
     use nexus_db_model::InstanceState;
     use nexus_db_model::Project;
     use nexus_db_model::VmmCpuPlatform;
-    use nexus_db_model::VmmRuntimeState;
     use nexus_db_model::VmmState;
     use nexus_types::external_api::instance as instance_types;
     use nexus_types::external_api::project;
@@ -2377,6 +2291,7 @@ mod tests {
                         auto_restart_policy: Default::default(),
                         anti_affinity_groups: Vec::new(),
                         multicast_groups: Vec::new(),
+                        enable_jumbo_frames: false,
                     },
                 ),
             )
@@ -2991,6 +2906,7 @@ mod tests {
                     time_state_updated: Utc::now(),
                     generation: Generation::new(),
                     state: VmmState::Running,
+                    failure_reason: None,
                 },
             )
             .await
@@ -3052,6 +2968,7 @@ mod tests {
                     time_state_updated: Utc::now(),
                     generation: Generation::new(),
                     state: VmmState::Running,
+                    failure_reason: None,
                 },
             )
             .await
@@ -3148,6 +3065,7 @@ mod tests {
                     time_state_updated: Utc::now(),
                     generation: Generation::new(),
                     state: VmmState::Stopped,
+                    failure_reason: None,
                 },
             )
             .await
@@ -3187,6 +3105,7 @@ mod tests {
                     time_state_updated: Utc::now(),
                     generation: Generation::new(),
                     state: VmmState::Running,
+                    failure_reason: None,
                 },
             )
             .await
@@ -3217,15 +3136,13 @@ mod tests {
         assert!(res.is_err());
 
         // Okay, now, advance the active VMM to Running, and try again.
+        let vmm1_state =
+            vmm1.runtime().transition(nexus_types::instance::VmmState::Running);
         let updated = dbg!(
             datastore
                 .vmm_update_runtime(
                     &PropolisUuid::from_untyped_uuid(vmm1.id),
-                    &VmmRuntimeState {
-                        time_state_updated: Utc::now(),
-                        generation: Generation(vmm2.generation.0.next()),
-                        state: VmmState::Running,
-                    },
+                    &vmm1_state,
                 )
                 .await
         )
@@ -3288,6 +3205,7 @@ mod tests {
                     time_state_updated: Utc::now(),
                     generation: Generation::new(),
                     state: VmmState::Running,
+                    failure_reason: None,
                 },
             )
             .await
@@ -3320,11 +3238,9 @@ mod tests {
             datastore
                 .vmm_update_runtime(
                     &PropolisUuid::from_untyped_uuid(vmm2.id),
-                    &VmmRuntimeState {
-                        time_state_updated: Utc::now(),
-                        generation: Generation(vmm2.generation.0.next().next()),
-                        state: VmmState::SagaUnwound,
-                    },
+                    &vmm2.runtime().transition(
+                        nexus_types::instance::VmmState::SagaUnwound
+                    )
                 )
                 .await
         )
@@ -3433,6 +3349,7 @@ mod tests {
                             time_state_updated: Utc::now(),
                             generation: Generation::new(),
                             state: VmmState::Running,
+                            failure_reason: None,
                         },
                     )
                     .await

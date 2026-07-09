@@ -2,8 +2,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-// Copyright 2022 Oxide Computer Company
-
 //! Interface for API requests to a Management Gateway Service (MGS) instance
 
 pub use gateway_messages::SpComponent;
@@ -67,12 +65,9 @@ progenitor::generate_api!(
         HostPhase2RecoveryImageId = { derives = [PartialEq, Eq, PartialOrd, Ord] },
         ImageVersion = { derives = [PartialEq, Eq, PartialOrd, Ord] },
         RotImageDetails = { derives = [PartialEq, Eq, PartialOrd, Ord] },
-        RotImageError = { derives = [ thiserror::Error, PartialEq, Eq, PartialOrd, Ord] },
-        RotState = { derives = [PartialEq, Eq, PartialOrd, Ord] },
         SpComponentCaboose = { derives = [PartialEq, Eq] },
         SpComponentInfo = { derives = [PartialEq, Eq] },
         SpIdentifier = { derives = [Copy, PartialEq, Hash, Eq] },
-        SpState = { derives = [PartialEq, Eq, PartialOrd, Ord] },
         SpUpdateStatus = { derives = [PartialEq, Hash, Eq] },
         UpdatePreparationProgress = { derives = [PartialEq, Hash, Eq] },
     },
@@ -82,6 +77,8 @@ progenitor::generate_api!(
 
     replace = {
         RotSlot = gateway_types::rot::RotSlot,
+        RotState = gateway_types::rot::RotState,
+        RotImageError = gateway_types::rot::RotImageError,
         Ena = ereport_types::Ena,
         Ereport = ereport_types::Ereport,
         Ereports = ereport_types::Ereports,
@@ -89,6 +86,7 @@ progenitor::generate_api!(
         TaskDump = gateway_types::task_dump::TaskDump,
         SpIgnition = gateway_types::ignition::SpIgnition,
         SpIgnitionSystemType = gateway_types::ignition::SpIgnitionSystemType,
+        SpState = gateway_types::component::SpState
     },
 );
 

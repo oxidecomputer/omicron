@@ -6,21 +6,25 @@
 
 use super::DataStore;
 use crate::context::OpContext;
+use crate::db::model;
 use crate::db::model::Vmm;
-use crate::db::model::VmmRuntimeState;
 use crate::db::model::VmmState as DbVmmState;
 use crate::db::pagination::paginated;
 use crate::db::update_and_check::UpdateAndCheck;
 use crate::db::update_and_check::UpdateAndQueryResult;
 use crate::db::update_and_check::UpdateStatus;
 use async_bb8_diesel::AsyncRunQueryDsl;
+use chrono::DateTime;
 use chrono::Utc;
 use diesel::prelude::*;
 use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::OptionalError;
 use nexus_db_errors::public_error_from_diesel;
 use nexus_db_lookup::DbConnection;
+use nexus_db_schema::schema::vmm;
 use nexus_db_schema::schema::vmm::dsl;
+use nexus_types::instance::Migrations;
+use nexus_types::instance::VmmRuntimeState;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
@@ -32,7 +36,7 @@ use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::PropolisUuid;
-use sled_agent_types::instance::{MigrationRuntimeState, Migrations};
+use sled_agent_types::instance::MigrationRuntimeState;
 use std::net::SocketAddr;
 use uuid::Uuid;
 
@@ -55,6 +59,50 @@ pub struct VmmStateUpdateResult {
     /// `true` if a migration record was updated for the migration out, false if
     /// no update was performed or no migration out was provided.
     pub migration_out_updated: bool,
+}
+
+/// Changeset for a VMM's runtime state.
+#[derive(Clone, Debug, AsChangeset)]
+#[diesel(table_name = vmm)]
+struct RuntimeStateChangeset {
+    /// The time at which this state was most recently updated.
+    time_state_updated: DateTime<Utc>,
+
+    /// The generation number protecting this VMM's state and update time.
+    #[diesel(column_name = state_generation)]
+    generation: model::Generation,
+
+    /// The state of this VMM. If this VMM is the active VMM for a given
+    /// instance, this state is the instance's logical state.
+    state: DbVmmState,
+
+    /// If this VMM is in the `Failed` state, this field describes why it
+    /// failed. This is `None` for VMMs that are not in the `Failed` state.
+    failure_reason: Option<model::VmmFailureReason>,
+}
+
+impl From<nexus_types::instance::VmmRuntimeState> for RuntimeStateChangeset {
+    fn from(value: nexus_types::instance::VmmRuntimeState) -> Self {
+        use nexus_types::instance as input;
+        let input::VmmRuntimeState { state, time_updated, generation } = value;
+
+        // The `nexus_types` version of this includes the failure reason as
+        // a field of the `Failed` variant, to enforce the invariant that
+        // failed VMMs have a failure reason, and non-failed VMMs do not.
+        // The db model type cannot do that, so unpack it here.
+        let (state, failure_reason) = match state {
+            input::VmmState::Failed(reason) => {
+                (DbVmmState::Failed, Some(reason.into()))
+            }
+            state => (state.into(), None),
+        };
+        Self {
+            state,
+            time_state_updated: time_updated,
+            generation: generation.into(),
+            failure_reason,
+        }
+    }
 }
 
 impl DataStore {
@@ -138,7 +186,7 @@ impl DataStore {
         self.vmm_update_runtime_on_connection(
             &*self.pool_connection_unauthorized().await?,
             vmm_id,
-            new_runtime,
+            new_runtime.clone().into(),
         )
         .await
         .map(|r| match r.status {
@@ -160,7 +208,7 @@ impl DataStore {
         &self,
         conn: &async_bb8_diesel::Connection<DbConnection>,
         vmm_id: &PropolisUuid,
-        new_runtime: &VmmRuntimeState,
+        new_runtime: RuntimeStateChangeset,
     ) -> Result<UpdateAndQueryResult<Vmm>, diesel::result::Error> {
         diesel::update(dsl::vmm)
             .filter(dsl::time_deleted.is_null())
@@ -223,10 +271,12 @@ impl DataStore {
 
         let err = OptionalError::new();
         let conn = self.pool_connection_authorized(opctx).await?;
+        let new_runtime = RuntimeStateChangeset::from(new_runtime.clone());
 
         self.transaction_retry_wrapper("vmm_and_migration_update_runtime")
             .transaction(&conn, |conn| {
                 let err = err.clone();
+                let new_runtime = new_runtime.clone();
                 async move {
                 let vmm_update_result = self
                     .vmm_update_runtime_on_connection(
@@ -380,10 +430,10 @@ impl DataStore {
     ///
     /// A VMM is considered "abandoned" if (and only if):
     ///
-    /// - It is in the `Destroyed` or `SagaUnwound` state.
+    /// - It is in the `Destroyed`, `Failed`, or `SagaUnwound` state.
     /// - It is not currently running an instance, and it is also not the
-    ///   migration target of any instance (i.e. it is not pointed to by
-    ///   any instance record's `active_propolis_id` and `target_propolis_id`
+    ///   migration target of an instance (i.e. it is not pointed to by its
+    ///   owning instance's `active_propolis_id` or `target_propolis_id`
     ///   fields).
     /// - It has not been deleted yet.
     pub async fn vmm_list_abandoned(
@@ -395,12 +445,12 @@ impl DataStore {
 
         paginated(dsl::vmm, dsl::id, pagparams)
             // In order to be considered "abandoned", a VMM must be:
-            // - in the `Destroyed`, `SagaUnwound`, or `Failed` states
+            // - in the `Destroyed`, `Failed`, or `SagaUnwound` states
             .filter(dsl::state.eq_any(DbVmmState::DESTROYABLE_STATES))
             // - not deleted yet
             .filter(dsl::time_deleted.is_null())
-            // - not pointed to by any instance's `active_propolis_id` or
-            //   `target_propolis_id`.
+            // - not pointed to by its owning instance's `active_propolis_id`
+            //   or `target_propolis_id`.
             .left_join(
                 // Left join with the `instance` table on the VMM's instance ID, so
                 // that we can check if the instance pointed to by this VMM (if
@@ -440,10 +490,9 @@ mod tests {
     use crate::db;
     use crate::db::model::Generation;
     use crate::db::model::Migration;
-    use crate::db::model::VmmRuntimeState;
-    use crate::db::model::VmmState;
     use crate::db::pub_test_utils::TestDatabase;
     use nexus_db_model::VmmCpuPlatform;
+    use nexus_types::instance::VmmState;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::InstanceUuid;
     use omicron_uuid_kinds::SledUuid;
@@ -472,7 +521,8 @@ mod tests {
                     cpu_platform: VmmCpuPlatform::SledDefault,
                     time_state_updated: Utc::now(),
                     generation: Generation::new(),
-                    state: VmmState::Running,
+                    state: db::model::VmmState::Running,
+                    failure_reason: None,
                 },
             )
             .await
@@ -492,11 +542,13 @@ mod tests {
                     cpu_platform: VmmCpuPlatform::SledDefault,
                     time_state_updated: Utc::now(),
                     generation: Generation::new(),
-                    state: VmmState::Running,
+                    state: db::model::VmmState::Running,
+                    failure_reason: None,
                 },
             )
             .await
             .expect("VMM 2 should be inserted successfully!");
+        let mut vmm2_state = vmm2.runtime();
 
         let migration1 = datastore
             .migration_insert(
@@ -524,11 +576,7 @@ mod tests {
             .vmm_and_migration_update_runtime(
                 &opctx,
                 PropolisUuid::from_untyped_uuid(vmm1.id),
-                &VmmRuntimeState {
-                    time_state_updated: Utc::now(),
-                    generation: Generation(vmm1.generation.0.next()),
-                    state: VmmState::Stopping,
-                },
+                &vmm1.runtime().transition(VmmState::Stopping),
                 Migrations {
                     migration_in: None,
                     migration_out: Some(&vmm1_migration_out),
@@ -542,22 +590,19 @@ mod tests {
             generation: Generation::new().0.next(),
             time_updated: Utc::now(),
         };
+        vmm2_state = vmm2_state.transition(VmmState::Running);
         datastore
             .vmm_and_migration_update_runtime(
                 &opctx,
                 PropolisUuid::from_untyped_uuid(vmm2.id),
-                &VmmRuntimeState {
-                    time_state_updated: Utc::now(),
-                    generation: Generation(vmm2.generation.0.next()),
-                    state: VmmState::Running,
-                },
+                &vmm2_state,
                 Migrations {
                     migration_in: Some(&vmm2_migration_in),
                     migration_out: None,
                 },
             )
             .await
-            .expect("vmm1 state should update");
+            .expect("vmm2 state should update");
 
         let all_migrations = datastore
             .instance_list_migrations(
@@ -601,7 +646,8 @@ mod tests {
                     cpu_platform: VmmCpuPlatform::SledDefault,
                     time_state_updated: Utc::now(),
                     generation: Generation::new(),
-                    state: VmmState::Running,
+                    state: db::model::VmmState::Running,
+                    failure_reason: None,
                 },
             )
             .await
@@ -628,15 +674,12 @@ mod tests {
             generation: Generation::new().0.next(),
             time_updated: Utc::now(),
         };
+        vmm2_state = vmm2_state.transition(VmmState::Destroyed);
         datastore
             .vmm_and_migration_update_runtime(
                 &opctx,
                 PropolisUuid::from_untyped_uuid(vmm2.id),
-                &VmmRuntimeState {
-                    time_state_updated: Utc::now(),
-                    generation: Generation(vmm2.generation.0.next()),
-                    state: VmmState::Destroyed,
-                },
+                &vmm2_state,
                 Migrations {
                     migration_in: Some(&vmm2_migration_in),
                     migration_out: Some(&vmm2_migration_out),
@@ -656,11 +699,7 @@ mod tests {
             .vmm_and_migration_update_runtime(
                 &opctx,
                 PropolisUuid::from_untyped_uuid(vmm3.id),
-                &VmmRuntimeState {
-                    time_state_updated: Utc::now(),
-                    generation: Generation(vmm3.generation.0.next()),
-                    state: VmmState::Destroyed,
-                },
+                &vmm3.runtime().transition(VmmState::Running),
                 Migrations {
                     migration_in: Some(&vmm3_migration_in),
                     migration_out: None,

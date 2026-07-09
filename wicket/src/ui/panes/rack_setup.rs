@@ -42,9 +42,9 @@ use std::borrow::Cow;
 use wicket_common::rack_setup::BgpAuthKeyInfo;
 use wicket_common::rack_setup::BgpAuthKeyStatus;
 use wicket_common::rack_setup::CurrentRssUserConfigInsensitive;
+use wicket_common::rack_setup::ManualPortConfig;
 use wicket_common::rack_setup::UserSpecifiedBgpPeerConfig;
 use wicket_common::rack_setup::UserSpecifiedImportExportPolicy;
-use wicket_common::rack_setup::UserSpecifiedPortConfig;
 use wicket_common::rack_setup::UserSpecifiedRackNetworkConfig;
 use wicket_common::rack_setup::UserSpecifiedRouterPeerAddr;
 use wicket_common::rack_setup::UserSpecifiedUplinkAddressConfig;
@@ -692,6 +692,7 @@ fn rss_config_text<'a>(
         external_dns_zone_name,
         rack_network_config,
         allowed_source_ips,
+        external_jumbo_frames_opt_in_enabled,
     } = &config.insensitive;
 
     // Special single-line values, where we convert some kind of condition into
@@ -706,6 +707,10 @@ fn rss_config_text<'a>(
     spans.push(Line::from(vec![
         Span::styled("Recovery password set: ", label_style),
         dyn_span(*recovery_silo_password_set, "Yes", "No"),
+    ]));
+    spans.push(Line::from(vec![
+        Span::styled("External jumbo frames opt-in: ", label_style),
+        dyn_span(*external_jumbo_frames_opt_in_enabled, "Enabled", "Disabled"),
     ]));
 
     // List of single-line values, each of which may or may not be set; if it's
@@ -785,7 +790,7 @@ fn rss_config_text<'a>(
         } = cfg;
 
         for (i, (switch, port, uplink)) in cfg.iter_uplinks().enumerate() {
-            let UserSpecifiedPortConfig {
+            let ManualPortConfig {
                 routes,
                 addresses,
                 uplink_port_speed,
@@ -1247,8 +1252,8 @@ fn rss_config_text<'a>(
             );
         }
 
-        // Show BGP configuration.
-        for cfg in bgp {
+        // Show BGP configurations.
+        for (i, cfg) in bgp.iter().enumerate() {
             let BgpConfig {
                 asn,
                 originate,
@@ -1258,19 +1263,29 @@ fn rss_config_text<'a>(
                 max_paths,
             } = cfg;
             let mut items = vec![
-                Span::styled("  • BGP config    :", label_style),
-                Span::styled(" asn=", label_style),
-                Span::styled(asn.to_string(), ok_style),
-                Span::styled(" max_paths=", label_style),
-                Span::styled(max_paths.to_string(), ok_style),
-                Span::styled(" originate=", label_style),
+                vec![
+                    Span::styled("  • asn       : ", label_style),
+                    Span::styled(asn.to_string(), ok_style),
+                ],
+                vec![
+                    Span::styled("  • max_paths : ", label_style),
+                    Span::styled(max_paths.to_string(), ok_style),
+                ],
             ];
+            let mut originate_spans =
+                vec![Span::styled("  • originate : ", label_style)];
             if originate.is_empty() {
-                items.push(Span::styled("None", warn_style));
+                originate_spans.push(Span::styled("None", warn_style));
             } else {
-                items.push(Span::styled(originate.iter().join(","), ok_style));
+                originate_spans
+                    .push(Span::styled(originate.iter().join(","), ok_style));
             }
-            spans.push(Line::from(items));
+            items.push(originate_spans);
+            append_list(
+                &mut spans,
+                Cow::from(format!("BGP config {}:", i + 1)),
+                items,
+            );
         }
     } else {
         append_list(&mut spans, "Uplinks: ".into(), vec![]);

@@ -774,6 +774,14 @@ set sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 host phase 2 details: boot_disk ->
 > # report that we are missing sled agent inventory for measurements on sled 1.
 > # This will block any MGS updates that could be pending because we must
 > # observe the expected measurements on all sleds before we proceed.
+> #
+> # Apply the latest blueprint to serial0's inventory so that its reported
+> # sled-agent generation isn't stale relative to the parent blueprint. (Earlier
+> # plans bumped the blueprint's generation for this sled.) That keeps the noop
+> # check on serial0 from firing the inventory-stale path.
+> sled-set serial0 omicron-config latest
+set sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 omicron config from latest blueprint (d60afc57-f15d-476c-bd0f-b1071e2bb976)
+
 > sled-set serial1 inventory-hidden
 set sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c inventory visibility: visible -> hidden
 

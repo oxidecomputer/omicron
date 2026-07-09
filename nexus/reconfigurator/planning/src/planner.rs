@@ -286,9 +286,8 @@ impl<'a> Planner<'a> {
             PlanningMgsUpdatesStepReport::new()
         };
 
-        // Likewise for zone additions, unless overridden by the config, or
-        // unless a target release has never been set (i.e. we're effectively in
-        // a pre-Nexus-driven-update world).
+        // Likewise for zone additions, unless a target release has never been
+        // set (i.e. we're effectively in a pre-Nexus-driven-update world).
         //
         // We don't have to check for the minimum target release generation in
         // this case. On a freshly-installed or MUPdated system, Nexus will find
@@ -296,13 +295,10 @@ impl<'a> Planner<'a> {
         // overrides always sets the minimum generation to the current target
         // release generation plus one, so the minimum generation will always be
         // exactly 2.
-        let add_zones_with_mupdate_override =
-            self.input.planner_config().add_zones_with_mupdate_override;
         let target_release_generation_is_one =
             self.input.tuf_repo().target_release_generation
                 == Generation::from_u32(1);
         let mut add = if add_update_blocked_reasons.is_empty()
-            || add_zones_with_mupdate_override
             || target_release_generation_is_one
             || measurement_updates.all_sleds_updated()
         {
@@ -311,7 +307,6 @@ impl<'a> Planner<'a> {
             PlanningAddStepReport::waiting_on(ZoneAddWaitingOn::Blockers)
         };
         add.add_update_blocked_reasons = add_update_blocked_reasons;
-        add.add_zones_with_mupdate_override = add_zones_with_mupdate_override;
         add.target_release_generation_is_one = target_release_generation_is_one;
 
         let zone_updates = if add.any_discretionary_zones_placed() {
@@ -1371,16 +1366,10 @@ impl<'a> Planner<'a> {
                 self.input.target_internal_dns_zone_count()
             }
             DiscretionaryOmicronZone::ExternalDns => {
-                // TODO-cleanup: When external DNS addresses are
-                // in the policy, this can use the input, too.
-                //
                 // The target number of external DNS zones is exactly equal to
                 // the number of distinct external DNS IPs we're supposed to
                 // service.
-                self.input
-                    .parent_blueprint()
-                    .all_external_dns_external_ips()
-                    .len()
+                self.input.external_ip_policy().external_dns_ips().len()
             }
             DiscretionaryOmicronZone::Nexus => {
                 self.input.target_nexus_zone_count()
@@ -1457,6 +1446,10 @@ impl<'a> Planner<'a> {
                         sled_id,
                         image,
                         external_ip,
+                        &self
+                            .input
+                            .external_service_networking_policy()
+                            .upstream_ntp_config(),
                     )?
                 }
                 DiscretionaryOmicronZone::Clickhouse => {
@@ -1501,6 +1494,10 @@ impl<'a> Planner<'a> {
                         image,
                         external_ip,
                         nexus_generation,
+                        &self
+                            .input
+                            .external_service_networking_policy()
+                            .operator_nexus_config(),
                     )?
                 }
                 DiscretionaryOmicronZone::Oximeter => {

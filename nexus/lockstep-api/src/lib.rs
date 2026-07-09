@@ -42,7 +42,7 @@ use nexus_types::internal_api::views::SupportBundleInfo;
 use nexus_types::internal_api::views::UpdateStatus;
 use nexus_types::trust_quorum::TrustQuorumConfig;
 use nexus_types_versions::latest::headers::RangeRequest;
-use omicron_common::api::external::Instance;
+use nexus_types_versions::latest::instance::Instance;
 use omicron_common::api::external::http_pagination::PaginatedById;
 use omicron_common::api::external::http_pagination::PaginatedByTimeAndId;
 use omicron_uuid_kinds::*;
@@ -587,6 +587,17 @@ pub trait NexusLockstepApi {
         rqctx: RequestContext<Self::Context>,
         path_params: Path<SledSelector>,
     ) -> Result<HttpResponseOk<Epoch>, HttpError>;
+
+    // Fault management
+
+    /// List ereport classes that this Nexus's diagnosis engines consume.
+    #[endpoint {
+        method = GET,
+        path = "/fm/known-ereport-classes",
+    }]
+    async fn fm_known_ereport_classes_list(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<Vec<String>>, HttpError>;
 }
 
 /// Path parameters for Rack requests.

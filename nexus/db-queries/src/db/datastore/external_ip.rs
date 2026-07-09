@@ -1340,7 +1340,7 @@ mod tests {
     };
     use nexus_db_model::IpPoolResourceType;
     use nexus_db_model::IpVersion;
-    use nexus_db_model::{Generation, IpPoolReservationType, Ipv4Net, Ipv6Net};
+    use nexus_db_model::{Generation, IpPoolAssignment, Ipv4Net, Ipv6Net};
     use nexus_db_model::{
         IncompleteIpPoolResource, IncompleteNetworkInterface, IncompleteVpc,
         VpcSubnet,
@@ -1588,7 +1588,7 @@ mod tests {
                         description: "Multicast default pool".to_string(),
                     },
                     IpVersion::V4,
-                    IpPoolReservationType::ExternalSilos,
+                    IpPoolAssignment::Silos,
                 ),
             )
             .await
@@ -1660,7 +1660,7 @@ mod tests {
                         description: "Unicast default pool".to_string(),
                     },
                     IpVersion::V4,
-                    IpPoolReservationType::ExternalSilos,
+                    IpPoolAssignment::Silos,
                 ),
             )
             .await
@@ -1842,7 +1842,7 @@ mod tests {
                         description: "Multicast default pool".to_string(),
                     },
                     IpVersion::V4,
-                    IpPoolReservationType::ExternalSilos,
+                    IpPoolAssignment::Silos,
                 ),
             )
             .await
@@ -1914,7 +1914,7 @@ mod tests {
                         description: "Unicast default pool".to_string(),
                     },
                     IpVersion::V4,
-                    IpPoolReservationType::ExternalSilos,
+                    IpPoolAssignment::Silos,
                 ),
             )
             .await

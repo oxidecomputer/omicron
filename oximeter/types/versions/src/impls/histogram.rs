@@ -288,7 +288,7 @@ where
 
         let mut bins = Bins::try_from(bins.as_slice())?.0;
         let mut n_samples = 0;
-        for (bin, count) in bins.iter_mut().zip(counts.into_iter()) {
+        for (bin, count) in bins.iter_mut().zip(counts) {
             bin.count = count;
             n_samples += count;
         }

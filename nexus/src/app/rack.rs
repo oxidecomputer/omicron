@@ -26,11 +26,9 @@ use nexus_types::external_api::networking;
 use nexus_types::external_api::policy;
 use nexus_types::external_api::silo;
 use nexus_types::external_api::sled as sled_types;
-use nexus_types::internal_api::params::ExternalPortDiscovery;
 use nexus_types::inventory::SpType;
 use nexus_types::silo::silo_dns_name;
 use omicron_common::address::{Ipv6Subnet, RACK_PREFIX, get_64_subnet};
-use omicron_common::api::external::AddressLotKind;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::IdentityMetadataCreateParams;
@@ -40,6 +38,8 @@ use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::ResourceType;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::RackUuid;
 use omicron_uuid_kinds::SledUuid;
 use oxnet::IpNet;
 use sled_agent_client::types::AddSledRequest;
@@ -68,7 +68,7 @@ impl super::Nexus {
     pub(crate) async fn rack_lookup(
         &self,
         opctx: &OpContext,
-        rack_id: &Uuid,
+        rack_id: &RackUuid,
     ) -> LookupResult<db::model::Rack> {
         let (.., db_rack) = LookupPath::new(opctx, &self.db_datastore)
             .rack_id(*rack_id)
@@ -83,7 +83,7 @@ impl super::Nexus {
     pub(crate) async fn rack_initialize(
         &self,
         opctx: &OpContext,
-        rack_id: Uuid,
+        rack_id: RackUuid,
         request: RackInitializationRequest,
         blueprint_execution_enabled: bool,
     ) -> Result<(), Error> {
@@ -95,7 +95,7 @@ impl super::Nexus {
             .physical_disks
             .into_iter()
             .map(|disk| {
-                db::model::PhysicalDisk::new(
+                db::model::PhysicalDisk::from_parts(
                     disk.id,
                     disk.vendor,
                     disk.serial,
@@ -297,69 +297,6 @@ impl super::Nexus {
             Some(IpNet::from(rack_network_config.rack_subnet).into());
         self.datastore().update_rack_subnet(opctx, &rack).await?;
 
-        // TODO - https://github.com/oxidecomputer/omicron/pull/3359
-        // register all switches found during rack initialization
-        // identify requested switch from config and associate
-        // uplink records to that switch
-        match request.external_port_count {
-            ExternalPortDiscovery::Auto(switch_mgmt_addrs) => {
-                use dpd_client::Client as DpdClient;
-                info!(log, "Using automatic external switchport discovery");
-
-                for (switch, addr) in switch_mgmt_addrs {
-                    let dpd_client = DpdClient::new(
-                        &format!(
-                            "http://[{}]:{}",
-                            addr,
-                            omicron_common::address::DENDRITE_PORT
-                        ),
-                        dpd_client::ClientState {
-                            tag: "nexus".to_string(),
-                            log: log.new(o!("component" => "DpdClient")),
-                        },
-                    );
-
-                    let all_ports =
-                        dpd_client.port_list().await.map_err(|e| {
-                            Error::internal_error(&format!("encountered error while discovering ports for {switch:#?}: {e}"))
-                        })?;
-
-                    info!(
-                        log, "discovered ports for switch";
-                        "switch_slot" => ?switch,
-                        "all_ports" => #?all_ports,
-                    );
-
-                    let qsfp_ports: Vec<Name> = all_ports
-                        .iter()
-                        .filter(|port| {
-                            matches!(port, dpd_client::types::PortId::Qsfp(_))
-                        })
-                        .map(|port| port.to_string().parse().unwrap())
-                        .collect();
-
-                    info!(
-                        log, "populating ports for switch";
-                        "switch_slot" => ?switch,
-                        "qsfp_ports" => #?qsfp_ports,
-                    );
-
-                    self.populate_switch_ports(&opctx, &qsfp_ports, switch)
-                        .await?;
-                }
-            }
-            // TODO: #3602 Eliminate need for static port mappings for switch ports
-            ExternalPortDiscovery::Static(port_mappings) => {
-                info!(
-                    log,
-                    "Using static configuration for external switchports"
-                );
-                for (switch, ports) in port_mappings {
-                    self.populate_switch_ports(&opctx, &ports, switch).await?;
-                }
-            }
-        }
-
         // TODO
         // configure rack networking / boundary services here
         // Currently calling some of the apis directly, but should we be using
@@ -376,7 +313,7 @@ impl super::Nexus {
             description: "initial infrastructure ip address lot".to_string(),
         };
 
-        let kind = AddressLotKind::Infra;
+        let kind = networking::AddressLotKind::Infra;
 
         let first_address = rack_network_config.infra_ip_first;
         let last_address = rack_network_config.infra_ip_last;
@@ -428,7 +365,7 @@ impl super::Nexus {
                                 bgp_config.asn
                             ),
                         },
-                        kind: AddressLotKind::Infra,
+                        kind: networking::AddressLotKind::Infra,
                         blocks: bgp_config
                             .originate
                             .iter()
@@ -637,8 +574,8 @@ impl super::Nexus {
                 link_name: link_name.clone(),
                 //TODO https://github.com/oxidecomputer/omicron/issues/2274
                 mtu: 1500,
-                fec: uplink_config.uplink_port_fec.map(|fec| fec.into()),
-                speed: uplink_config.uplink_port_speed.into(),
+                fec: uplink_config.uplink_port_fec,
+                speed: uplink_config.uplink_port_speed,
                 autoneg: uplink_config.autoneg,
                 lldp,
                 tx_eq: uplink_config.tx_eq,
@@ -714,6 +651,15 @@ impl super::Nexus {
                 },
             )
             .await?;
+
+        // Persist the fleet-wide jumbo-frames opt-in. The singleton row was
+        // seeded by the schema migration; we update it here in case RSS shipped
+        // a non-default value.
+        if request.external_jumbo_frames_opt_in_enabled {
+            self.db_datastore
+                .system_networking_settings_update(opctx, true)
+                .await?;
+        }
 
         // Note: Service firewall rules are propagated on a best-effort basis
         // in Server::start() via attempt_ip_allowlist_plumbing(). OPTE's
@@ -814,7 +760,7 @@ impl super::Nexus {
                                 part: k.part_number.clone(),
                                 revision: v.baseboard_revision,
                             },
-                            rack_id: self.rack_id,
+                            rack_id: self.rack_id.into_untyped_uuid(),
                             cubby: v.sp_slot,
                         })
                     } else {
@@ -884,7 +830,7 @@ impl super::Nexus {
                 schema_version: 1,
                 body: StartSledAgentRequestBody {
                     id: allocation.sled_id.into(),
-                    rack_id: allocation.rack_id,
+                    rack_id: allocation.rack_id.into(),
                     use_trust_quorum: true,
                     is_lrtq_learner: true,
                     subnet: sled_agent_client::types::Ipv6Subnet {

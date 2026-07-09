@@ -45,18 +45,22 @@ use nexus_types::external_api::{
     external_subnet, floating_ip, hardware, identity_provider, image, instance,
     internet_gateway, ip_pool, metrics, multicast, networking, oxql,
     path_params, policy, probe, project, rack, scim, silo, sled, snapshot,
-    ssh_key, subnet_pool, support_bundle, switch, system, timeseries, update,
-    user, vpc,
+    ssh_key, subnet_pool, support_bundle, switch, system, system_networking,
+    timeseries, update, user, vpc,
 };
 // Type imports for API implementations (per RFD 619)
 use nexus_types::external_api::bfd::BfdStatus;
 use nexus_types::external_api::certificate::Certificate;
 use nexus_types::external_api::floating_ip::FloatingIp;
+use nexus_types::external_api::headers::RangeRequest;
 use nexus_types::external_api::identity_provider::IdentityProvider;
 use nexus_types::external_api::image::Image;
 use nexus_types::external_api::ip_pool::{IpPool, IpPoolRange};
 use nexus_types::external_api::metrics::SystemMetricsPathParam;
-use nexus_types::external_api::physical_disk::PhysicalDisk;
+use nexus_types::external_api::physical_disk::{
+    PhysicalDisk, PhysicalDiskAdoptionRequest, PhysicalDiskAdoptionRequestPath,
+    PhysicalDiskManufacturerIdentity, UnadoptedPhysicalDisk,
+};
 use nexus_types::external_api::probe::ProbeInfo;
 use nexus_types::external_api::project::Project;
 use nexus_types::external_api::rack::{Rack, RackMembershipStatus};
@@ -68,29 +72,18 @@ use nexus_types::external_api::snapshot::Snapshot;
 use nexus_types::external_api::ssh_key::SshKey;
 use nexus_types::external_api::user::{Group, User, UserBuiltin};
 use nexus_types::external_api::vpc::{Vpc, VpcRouter, VpcSubnet};
-use nexus_types_versions::latest::headers::RangeRequest;
 use nexus_types_versions::v2025_11_20_00;
 use omicron_common::address::IpRange;
-use omicron_common::api::external::AddressLot;
-use omicron_common::api::external::AddressLotBlock;
-use omicron_common::api::external::AddressLotCreateResponse;
-use omicron_common::api::external::AddressLotViewResponse;
-use omicron_common::api::external::AffinityGroupMember;
-use omicron_common::api::external::AntiAffinityGroupMember;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Disk;
 use omicron_common::api::external::Error;
-use omicron_common::api::external::Instance;
 use omicron_common::api::external::InstanceNetworkInterface;
 use omicron_common::api::external::InternalContext;
-use omicron_common::api::external::LldpLinkConfig;
-use omicron_common::api::external::LldpNeighbor;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::Probe;
 use omicron_common::api::external::RouterRoute;
 use omicron_common::api::external::RouterRouteKind;
 use omicron_common::api::external::ServiceIcmpConfig;
-use omicron_common::api::external::SwitchPortSettingsIdentity;
 use omicron_common::api::external::VpcFirewallRuleUpdateParams;
 use omicron_common::api::external::VpcFirewallRules;
 use omicron_common::api::external::http_pagination::PaginatedBy;
@@ -165,6 +158,47 @@ impl NexusExternalApi for NexusExternalApiImpl {
             bail_unless!(nasgns <= policy::MAX_ROLE_ASSIGNMENTS_PER_RESOURCE);
             let policy = nexus.fleet_update_policy(&opctx, &new_policy).await?;
             Ok(HttpResponseOk(policy))
+        })
+        .await
+    }
+
+    async fn system_networking_settings_view(
+        rqctx: RequestContext<ApiContext>,
+    ) -> Result<
+        HttpResponseOk<system_networking::SystemNetworkingSettings>,
+        HttpError,
+    > {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let settings =
+                nexus.system_networking_settings_view(&opctx).await?;
+            Ok(HttpResponseOk(settings))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn system_networking_settings_update(
+        rqctx: RequestContext<ApiContext>,
+        new_settings: TypedBody<
+            system_networking::SystemNetworkingSettingsUpdate,
+        >,
+    ) -> Result<
+        HttpResponseOk<system_networking::SystemNetworkingSettings>,
+        HttpError,
+    > {
+        audit_and_time(&rqctx, |opctx, nexus| async move {
+            let new_settings = new_settings.into_inner();
+            let settings = nexus
+                .system_networking_settings_update(&opctx, &new_settings)
+                .await?;
+            Ok(HttpResponseOk(settings))
         })
         .await
     }
@@ -2677,7 +2711,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
     async fn instance_list(
         rqctx: RequestContext<ApiContext>,
         query_params: Query<PaginatedByNameOrId<project::ProjectSelector>>,
-    ) -> Result<HttpResponseOk<ResultsPage<Instance>>, HttpError> {
+    ) -> Result<HttpResponseOk<ResultsPage<instance::Instance>>, HttpError>
+    {
         let apictx = rqctx.context();
         let handler = async {
             let nexus = &apictx.context.nexus;
@@ -2712,7 +2747,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
         rqctx: RequestContext<ApiContext>,
         query_params: Query<project::ProjectSelector>,
         new_instance: TypedBody<instance::InstanceCreate>,
-    ) -> Result<HttpResponseCreated<Instance>, HttpError> {
+    ) -> Result<HttpResponseCreated<instance::Instance>, HttpError> {
         audit_and_time(&rqctx, |opctx, nexus| async move {
             let project_selector = query_params.into_inner();
             let new_instance_params = new_instance.into_inner();
@@ -2734,7 +2769,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
         rqctx: RequestContext<ApiContext>,
         query_params: Query<project::OptionalProjectSelector>,
         path_params: Path<path_params::InstancePath>,
-    ) -> Result<HttpResponseOk<Instance>, HttpError> {
+    ) -> Result<HttpResponseOk<instance::Instance>, HttpError> {
         let apictx = rqctx.context();
         let nexus = &apictx.context.nexus;
         let path = path_params.into_inner();
@@ -2788,7 +2823,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
         query_params: Query<project::OptionalProjectSelector>,
         path_params: Path<path_params::InstancePath>,
         instance_config: TypedBody<instance::InstanceUpdate>,
-    ) -> Result<HttpResponseOk<Instance>, HttpError> {
+    ) -> Result<HttpResponseOk<instance::Instance>, HttpError> {
         let query = query_params.into_inner();
         let path = path_params.into_inner();
         let instance_config = instance_config.into_inner();
@@ -2815,7 +2850,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
         rqctx: RequestContext<ApiContext>,
         query_params: Query<project::OptionalProjectSelector>,
         path_params: Path<path_params::InstancePath>,
-    ) -> Result<HttpResponseAccepted<Instance>, HttpError> {
+    ) -> Result<HttpResponseAccepted<instance::Instance>, HttpError> {
         let path = path_params.into_inner();
         let query = query_params.into_inner();
         let instance_selector = instance::InstanceSelector {
@@ -2836,7 +2871,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
         rqctx: RequestContext<ApiContext>,
         query_params: Query<project::OptionalProjectSelector>,
         path_params: Path<path_params::InstancePath>,
-    ) -> Result<HttpResponseAccepted<Instance>, HttpError> {
+    ) -> Result<HttpResponseAccepted<instance::Instance>, HttpError> {
         let path = path_params.into_inner();
         let query = query_params.into_inner();
         let instance_selector = instance::InstanceSelector {
@@ -2862,7 +2897,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
         rqctx: RequestContext<ApiContext>,
         query_params: Query<project::OptionalProjectSelector>,
         path_params: Path<path_params::InstancePath>,
-    ) -> Result<HttpResponseAccepted<Instance>, HttpError> {
+    ) -> Result<HttpResponseAccepted<instance::Instance>, HttpError> {
         let path = path_params.into_inner();
         let query = query_params.into_inner();
         let instance_selector = instance::InstanceSelector {
@@ -3256,8 +3291,10 @@ impl NexusExternalApi for NexusExternalApiImpl {
             PaginatedByNameOrId<project::OptionalProjectSelector>,
         >,
         path_params: Path<path_params::AffinityGroupPath>,
-    ) -> Result<HttpResponseOk<ResultsPage<AffinityGroupMember>>, HttpError>
-    {
+    ) -> Result<
+        HttpResponseOk<ResultsPage<affinity::AffinityGroupMember>>,
+        HttpError,
+    > {
         let apictx = rqctx.context();
         let handler = async {
             let opctx =
@@ -3299,7 +3336,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
         rqctx: RequestContext<ApiContext>,
         query_params: Query<project::OptionalProjectSelector>,
         path_params: Path<affinity::AffinityInstanceGroupMemberPath>,
-    ) -> Result<HttpResponseOk<AffinityGroupMember>, HttpError> {
+    ) -> Result<HttpResponseOk<affinity::AffinityGroupMember>, HttpError> {
         let apictx = rqctx.context();
         let handler = async {
             let nexus = &apictx.context.nexus;
@@ -3345,7 +3382,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
         rqctx: RequestContext<ApiContext>,
         query_params: Query<project::OptionalProjectSelector>,
         path_params: Path<affinity::AffinityInstanceGroupMemberPath>,
-    ) -> Result<HttpResponseCreated<AffinityGroupMember>, HttpError> {
+    ) -> Result<HttpResponseCreated<affinity::AffinityGroupMember>, HttpError>
+    {
         audit_and_time(&rqctx, |opctx, nexus| async move {
             let path = path_params.into_inner();
             let query = query_params.into_inner();
@@ -3549,8 +3587,10 @@ impl NexusExternalApi for NexusExternalApiImpl {
             PaginatedByNameOrId<project::OptionalProjectSelector>,
         >,
         path_params: Path<path_params::AntiAffinityGroupPath>,
-    ) -> Result<HttpResponseOk<ResultsPage<AntiAffinityGroupMember>>, HttpError>
-    {
+    ) -> Result<
+        HttpResponseOk<ResultsPage<affinity::AntiAffinityGroupMember>>,
+        HttpError,
+    > {
         let apictx = rqctx.context();
         let handler = async {
             let opctx =
@@ -3592,7 +3632,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
         rqctx: RequestContext<ApiContext>,
         query_params: Query<project::OptionalProjectSelector>,
         path_params: Path<affinity::AntiAffinityInstanceGroupMemberPath>,
-    ) -> Result<HttpResponseOk<AntiAffinityGroupMember>, HttpError> {
+    ) -> Result<HttpResponseOk<affinity::AntiAffinityGroupMember>, HttpError>
+    {
         let apictx = rqctx.context();
         let handler = async {
             let nexus = &apictx.context.nexus;
@@ -3638,7 +3679,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
         rqctx: RequestContext<ApiContext>,
         query_params: Query<project::OptionalProjectSelector>,
         path_params: Path<affinity::AntiAffinityInstanceGroupMemberPath>,
-    ) -> Result<HttpResponseCreated<AntiAffinityGroupMember>, HttpError> {
+    ) -> Result<HttpResponseCreated<affinity::AntiAffinityGroupMember>, HttpError>
+    {
         audit_and_time(&rqctx, |opctx, nexus| async move {
             let path = path_params.into_inner();
             let query = query_params.into_inner();
@@ -3861,14 +3903,20 @@ impl NexusExternalApi for NexusExternalApiImpl {
     async fn networking_address_lot_create(
         rqctx: RequestContext<ApiContext>,
         new_address_lot: TypedBody<networking::AddressLotCreate>,
-    ) -> Result<HttpResponseCreated<AddressLotCreateResponse>, HttpError> {
+    ) -> Result<
+        HttpResponseCreated<networking::AddressLotCreateResponse>,
+        HttpError,
+    > {
         audit_and_time(&rqctx, |opctx, nexus| async move {
             let params = new_address_lot.into_inner();
             let result = nexus.address_lot_create(&opctx, params).await?;
-            let lot: AddressLot = result.lot.into();
-            let blocks: Vec<AddressLotBlock> =
+            let lot: networking::AddressLot = result.lot.into();
+            let blocks: Vec<networking::AddressLotBlock> =
                 result.blocks.iter().map(|b| b.clone().into()).collect();
-            Ok(HttpResponseCreated(AddressLotCreateResponse { lot, blocks }))
+            Ok(HttpResponseCreated(networking::AddressLotCreateResponse {
+                lot,
+                blocks,
+            }))
         })
         .await
     }
@@ -3876,7 +3924,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
     async fn networking_address_lot_view(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<path_params::AddressLotPath>,
-    ) -> Result<HttpResponseOk<AddressLotViewResponse>, HttpError> {
+    ) -> Result<HttpResponseOk<networking::AddressLotViewResponse>, HttpError>
+    {
         let apictx = rqctx.context();
         let handler = async {
             let opctx =
@@ -3891,7 +3940,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 .into_iter()
                 .map(|p| p.into())
                 .collect();
-            Ok(HttpResponseOk(AddressLotViewResponse {
+            Ok(HttpResponseOk(networking::AddressLotViewResponse {
                 lot: lot.into(),
                 blocks,
             }))
@@ -3920,7 +3969,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
     async fn networking_address_lot_list(
         rqctx: RequestContext<ApiContext>,
         query_params: Query<PaginatedByNameOrId>,
-    ) -> Result<HttpResponseOk<ResultsPage<AddressLot>>, HttpError> {
+    ) -> Result<HttpResponseOk<ResultsPage<networking::AddressLot>>, HttpError>
+    {
         let apictx = rqctx.context();
         let handler = async {
             let nexus = &apictx.context.nexus;
@@ -3954,7 +4004,10 @@ impl NexusExternalApi for NexusExternalApiImpl {
         rqctx: RequestContext<ApiContext>,
         path_params: Path<path_params::AddressLotPath>,
         query_params: Query<PaginatedById>,
-    ) -> Result<HttpResponseOk<ResultsPage<AddressLotBlock>>, HttpError> {
+    ) -> Result<
+        HttpResponseOk<ResultsPage<networking::AddressLotBlock>>,
+        HttpError,
+    > {
         let apictx = rqctx.context();
         let handler = async {
             let nexus = &apictx.context.nexus;
@@ -3979,7 +4032,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             Ok(HttpResponseOk(ScanById::results_page(
                 &query,
                 blocks,
-                &|_, x: &AddressLotBlock| x.id,
+                &|_, x: &networking::AddressLotBlock| x.id,
             )?))
         };
         apictx
@@ -4019,7 +4072,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             nexus
                 .loopback_address_delete(
                     &opctx,
-                    path.rack_id,
+                    RackUuid::from_untyped_uuid(path.rack_id),
                     path.switch_slot,
                     addr.into(),
                 )
@@ -4072,7 +4125,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let params = new_settings.into_inner();
             let result =
                 nexus.switch_port_settings_post(&opctx, params).await?;
-            let settings: networking::SwitchPortSettings = result.into();
+            let settings: networking::SwitchPortSettings = result.try_into()?;
             Ok(HttpResponseCreated(settings))
         })
         .await
@@ -4096,7 +4149,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             PaginatedByNameOrId<networking::SwitchPortSettingsSelector>,
         >,
     ) -> Result<
-        HttpResponseOk<ResultsPage<SwitchPortSettingsIdentity>>,
+        HttpResponseOk<ResultsPage<networking::SwitchPortSettingsIdentity>>,
         HttpError,
     > {
         let apictx = rqctx.context();
@@ -4140,7 +4193,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 crate::context::op_context_for_external_api(&rqctx).await?;
             let settings =
                 nexus.switch_port_settings_get(&opctx, &query).await?;
-            Ok(HttpResponseOk(settings.into()))
+            Ok(HttpResponseOk(settings.try_into()?))
         };
         apictx
             .context
@@ -4242,7 +4295,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
         rqctx: RequestContext<ApiContext>,
         path_params: Path<networking::SwitchPortPathSelector>,
         query_params: Query<networking::SwitchPortSelector>,
-    ) -> Result<HttpResponseOk<LldpLinkConfig>, HttpError> {
+    ) -> Result<HttpResponseOk<networking::LldpLinkConfig>, HttpError> {
         let apictx = rqctx.context();
         let handler = async {
             let nexus = &apictx.context.nexus;
@@ -4253,7 +4306,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let settings = nexus
                 .lldp_config_get(
                     &opctx,
-                    query.rack_id,
+                    RackUuid::from_untyped_uuid(query.rack_id),
                     query.switch_slot,
                     path.port,
                 )
@@ -4271,7 +4324,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
         rqctx: RequestContext<ApiContext>,
         path_params: Path<networking::SwitchPortPathSelector>,
         query_params: Query<networking::SwitchPortSelector>,
-        config: TypedBody<LldpLinkConfig>,
+        config: TypedBody<networking::LldpLinkConfig>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         audit_and_time(&rqctx, |opctx, nexus| async move {
             let query = query_params.into_inner();
@@ -4280,7 +4333,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             nexus
                 .lldp_config_update(
                     &opctx,
-                    query.rack_id,
+                    RackUuid::from_untyped_uuid(query.rack_id),
                     query.switch_slot,
                     path.port,
                     config,
@@ -4295,7 +4348,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
         rqctx: RequestContext<Self::Context>,
         path_params: Path<networking::LldpPortPathSelector>,
         query_params: Query<PaginatedById>,
-    ) -> Result<HttpResponseOk<ResultsPage<LldpNeighbor>>, HttpError> {
+    ) -> Result<HttpResponseOk<ResultsPage<networking::LldpNeighbor>>, HttpError>
+    {
         let apictx = rqctx.context();
         let handler = async {
             let query = query_params.into_inner();
@@ -4312,7 +4366,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
                     &opctx,
                     &prev,
                     limit,
-                    path.rack_id,
+                    RackUuid::from_untyped_uuid(path.rack_id),
                     path.switch_slot,
                     &path.port,
                 )
@@ -4486,6 +4540,20 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let sel = sel.into_inner();
             nexus.bgp_config_delete(&opctx, &sel).await?;
             Ok(HttpResponseUpdatedNoContent {})
+        })
+        .await
+    }
+
+    async fn networking_bgp_config_update(
+        rqctx: RequestContext<ApiContext>,
+        sel: Query<networking::BgpConfigSelector>,
+        update: TypedBody<networking::BgpConfigUpdate>,
+    ) -> Result<HttpResponseOk<networking::BgpConfig>, HttpError> {
+        audit_and_time(&rqctx, |opctx, nexus| async move {
+            let sel = sel.into_inner();
+            let update = update.into_inner();
+            let result = nexus.bgp_config_update(&opctx, &sel, update).await?;
+            Ok(HttpResponseOk::<networking::BgpConfig>(result.try_into()?))
         })
         .await
     }
@@ -6475,7 +6543,9 @@ impl NexusExternalApi for NexusExternalApiImpl {
         let handler = async {
             let opctx =
                 crate::context::op_context_for_external_api(&rqctx).await?;
-            let rack_info = nexus.rack_lookup(&opctx, &path.rack_id).await?;
+            let rack_info = nexus
+                .rack_lookup(&opctx, &RackUuid::from_untyped_uuid(path.rack_id))
+                .await?;
             Ok(HttpResponseOk(rack_info.into()))
         };
         apictx
@@ -6485,6 +6555,13 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
+    // This request isn't currently paginated. The query is somewhat complex
+    // underneath and doesn't support pagination right now. We would need a way
+    // to order filtered `InvPhysicalDisk` objects to support pagination, and
+    // we've decided to punt on this for now. The justification for punting is
+    // that in single-rack systems there is a limit to the number of disks we'd
+    // adopt at one time. The maximum is 320 U.2 drives in an entire rack, and
+    // we won't be replacing them all at once.
     async fn sled_list_uninitialized(
         rqctx: RequestContext<ApiContext>,
         query: Query<PaginationParams<EmptyScanParams, String>>,
@@ -6693,6 +6770,115 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .external_latencies
             .instrument_dropshot_handler(&rqctx, handler)
             .await
+    }
+
+    async fn physical_disk_list_unadopted(
+        rqctx: RequestContext<ApiContext>,
+        query: Query<PaginationParams<EmptyScanParams, String>>,
+    ) -> Result<HttpResponseOk<ResultsPage<UnadoptedPhysicalDisk>>, HttpError>
+    {
+        let apictx = rqctx.context();
+        let pag_params = query.into_inner();
+        if let dropshot::WhichPage::Next(last_seen) = &pag_params.page {
+            return Err(Error::invalid_value(
+                last_seen.clone(),
+                "pagination currently unsupported",
+            )
+            .into());
+        }
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let disks = nexus
+                .physical_disk_list_unadopted(&opctx)
+                .await?
+                .into_iter()
+                .map(|d| UnadoptedPhysicalDisk {
+                    sled_id: d.sled_id.into(),
+                    slot: d.slot,
+                    variant: d.variant.into(),
+                    disk_id: PhysicalDiskManufacturerIdentity {
+                        vendor: d.vendor,
+                        serial: d.serial,
+                        model: d.model,
+                    },
+                })
+                .collect();
+            Ok(HttpResponseOk(ResultsPage { items: disks, next_page: None }))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn physical_disk_list_adoption_requests(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedById>,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<PhysicalDiskAdoptionRequest>>,
+        HttpError,
+    > {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let query = query_params.into_inner();
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let requests = nexus
+                .physical_disk_adoption_request_list(
+                    &opctx,
+                    &data_page_params_for(&rqctx, &query)?,
+                )
+                .await?
+                .into_iter()
+                .map(|r| r.into())
+                .collect();
+            Ok(HttpResponseOk(ScanById::results_page(
+                &query,
+                requests,
+                &|_, req: &PhysicalDiskAdoptionRequest| {
+                    req.id.into_untyped_uuid()
+                },
+            )?))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn physical_disk_enable_adoption(
+        rqctx: RequestContext<Self::Context>,
+        req: TypedBody<PhysicalDiskManufacturerIdentity>,
+    ) -> Result<HttpResponseCreated<PhysicalDiskAdoptionRequest>, HttpError>
+    {
+        audit_and_time(&rqctx, |opctx, nexus| async move {
+            let request = nexus
+                .physical_disk_enable_adoption(&opctx, req.into_inner())
+                .await?;
+            Ok(HttpResponseCreated(request))
+        })
+        .await
+    }
+
+    async fn physical_disk_disable_adoption(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<PhysicalDiskAdoptionRequestPath>,
+    ) -> Result<HttpResponseDeleted, HttpError> {
+        audit_and_time(&rqctx, |opctx, nexus| async move {
+            nexus
+                .physical_disk_disable_adoption(
+                    &opctx,
+                    path_params.into_inner().physical_disk_adoption_req_id,
+                )
+                .await?;
+            Ok(HttpResponseDeleted())
+        })
+        .await
     }
 
     // Switches

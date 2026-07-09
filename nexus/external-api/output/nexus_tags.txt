@@ -217,7 +217,11 @@ networking_switch_port_apply_settings    POST     /v1/system/hardware/switch-por
 networking_switch_port_clear_settings    DELETE   /v1/system/hardware/switch-port/{port}/settings
 networking_switch_port_list              GET      /v1/system/hardware/switch-port
 networking_switch_port_status            GET      /v1/system/hardware/switch-port/{port}/status
+physical_disk_disable_adoption           DELETE   /v1/system/hardware/disk-adoption-request/{physical_disk_adoption_req_id}
+physical_disk_enable_adoption            PUT      /v1/system/hardware/disk-adoption-request
 physical_disk_list                       GET      /v1/system/hardware/disks
+physical_disk_list_adoption_requests     GET      /v1/system/hardware/disk-adoption-requests
+physical_disk_list_unadopted             GET      /v1/system/hardware/disks-unadopted
 physical_disk_view                       GET      /v1/system/hardware/disks/{disk_id}
 rack_list                                GET      /v1/system/hardware/racks
 rack_view                                GET      /v1/system/hardware/racks/{rack_id}
@@ -275,6 +279,7 @@ networking_bgp_announcement_list         GET      /v1/system/networking/bgp-anno
 networking_bgp_config_create             POST     /v1/system/networking/bgp
 networking_bgp_config_delete             DELETE   /v1/system/networking/bgp
 networking_bgp_config_list               GET      /v1/system/networking/bgp
+networking_bgp_config_update             PUT      /v1/system/networking/bgp
 networking_bgp_exported                  GET      /v1/system/networking/bgp-exported
 networking_bgp_imported                  GET      /v1/system/networking/bgp-imported
 networking_bgp_message_history           GET      /v1/system/networking/bgp-message-history
@@ -291,6 +296,8 @@ networking_switch_port_settings_create   POST     /v1/system/networking/switch-p
 networking_switch_port_settings_delete   DELETE   /v1/system/networking/switch-port-settings
 networking_switch_port_settings_list     GET      /v1/system/networking/switch-port-settings
 networking_switch_port_settings_view     GET      /v1/system/networking/switch-port-settings/{port}
+system_networking_settings_update        PUT      /v1/system/networking/settings
+system_networking_settings_view          GET      /v1/system/networking/settings
 
 API operations found with tag "system/silos"
 OPERATION ID                             METHOD   URL PATH

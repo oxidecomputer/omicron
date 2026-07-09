@@ -8,6 +8,10 @@ use crate::dev::poll;
 use anyhow::Context;
 use anyhow::anyhow;
 use anyhow::bail;
+use camino::Utf8Path;
+use camino::Utf8PathBuf;
+use camino_tempfile::Utf8TempDir;
+use camino_tempfile::tempdir;
 use nexus_config::PostgresConfigWithUrl;
 use std::collections::BTreeMap;
 use std::ffi::{OsStr, OsString};
@@ -15,12 +19,8 @@ use std::fmt;
 use std::net::SocketAddr;
 use std::ops::Deref;
 use std::os::unix::process::ExitStatusExt;
-use std::path::Path;
-use std::path::PathBuf;
 use std::process::Stdio;
 use std::time::Duration;
-use tempfile::TempDir;
-use tempfile::tempdir;
 use thiserror::Error;
 use tokio::io::AsyncWriteExt;
 use tokio_postgres::config::Host;
@@ -75,7 +75,7 @@ const COCKROACHDB_VERSION: &str =
 #[derive(Debug)]
 pub struct CockroachStarterBuilder {
     /// optional value for the --store-dir option
-    store_dir: Option<PathBuf>,
+    store_dir: Option<Utf8PathBuf>,
     /// optional value for the listening port
     listen_port: u16,
     /// environment variables, mirrored here for reporting
@@ -164,7 +164,7 @@ impl CockroachStarterBuilder {
     /// isn't specified, CockroachDB will be configured to store data into a
     /// temporary directory that will be cleaned up on Drop of
     /// [`CockroachStarter`] or [`CockroachInstance`].
-    pub fn store_dir<P: AsRef<Path>>(mut self, store_dir: P) -> Self {
+    pub fn store_dir<P: AsRef<Utf8Path>>(mut self, store_dir: P) -> Self {
         self.store_dir.replace(store_dir.as_ref().to_owned());
         self
     }
@@ -188,7 +188,7 @@ impl CockroachStarterBuilder {
 
     fn redirect_file(
         &self,
-        temp_dir_path: &Path,
+        temp_dir_path: &Utf8Path,
         label: &str,
     ) -> Result<std::fs::File, anyhow::Error> {
         let out_path = temp_dir_path.join(label);
@@ -196,7 +196,7 @@ impl CockroachStarterBuilder {
             .write(true)
             .create_new(true)
             .open(&out_path)
-            .with_context(|| format!("open \"{}\"", out_path.display()))
+            .with_context(|| format!("open \"{out_path}\""))
     }
 
     /// Starts CockroachDB using the configured command-line arguments
@@ -217,14 +217,9 @@ impl CockroachStarterBuilder {
         // shutdowns.
         let temp_dir =
             tempdir().with_context(|| "creating temporary directory")?;
-        let store_dir = self
-            .store_dir
-            .as_ref()
-            .map(|s| s.as_os_str().to_owned())
-            .unwrap_or_else(|| {
-                CockroachStarterBuilder::temp_path(&temp_dir, "data")
-                    .into_os_string()
-            });
+        let store_dir = self.store_dir.clone().unwrap_or_else(|| {
+            CockroachStarterBuilder::temp_path(&temp_dir, "data")
+        });
 
         // Disable the CockroachDB automatic emergency ballast file. By default
         // CockroachDB creates a 1 GiB ballast file on startup; because we start
@@ -258,7 +253,7 @@ impl CockroachStarterBuilder {
 
         Ok(CockroachStarter {
             temp_dir,
-            store_dir: store_dir.into(),
+            store_dir,
             listen_url_file,
             args: self.args,
             env: self.env,
@@ -293,7 +288,7 @@ impl CockroachStarterBuilder {
     }
 
     /// Convenience for constructing a path name in a given temporary directory
-    fn temp_path<S: AsRef<str>>(tempdir: &TempDir, file: S) -> PathBuf {
+    fn temp_path<S: AsRef<str>>(tempdir: &Utf8TempDir, file: S) -> Utf8PathBuf {
         let mut pathbuf = tempdir.path().to_owned();
         pathbuf.push(file.as_ref());
         pathbuf
@@ -307,11 +302,11 @@ impl CockroachStarterBuilder {
 #[derive(Debug)]
 pub struct CockroachStarter {
     /// temporary directory used for URL file and potentially data storage
-    temp_dir: TempDir,
+    temp_dir: Utf8TempDir,
     /// path to storage directory
-    store_dir: PathBuf,
+    store_dir: Utf8PathBuf,
     /// path to listen URL file (inside temp_dir)
-    listen_url_file: PathBuf,
+    listen_url_file: Utf8PathBuf,
     /// environment variables, mirrored here for reporting
     env: BTreeMap<String, String>,
     /// command-line arguments, mirrored here for reporting to the user
@@ -335,18 +330,18 @@ impl CockroachStarter {
     }
 
     /// Returns the path to the temporary directory created for this execution
-    pub fn temp_dir(&self) -> &Path {
+    pub fn temp_dir(&self) -> &Utf8Path {
         self.temp_dir.path()
     }
 
     /// Returns the path to the listen-url file for this execution
     #[cfg(test)]
-    pub fn listen_url_file(&self) -> &Path {
+    pub fn listen_url_file(&self) -> &Utf8Path {
         &self.listen_url_file
     }
 
     /// Returns the path to the storage directory created for this execution.
-    pub fn store_dir(&self) -> &Path {
+    pub fn store_dir(&self) -> &Utf8Path {
         self.store_dir.as_path()
     }
 
@@ -421,7 +416,9 @@ impl CockroachStarter {
                             Ok(_) => {
                                 // The file hasn't been fully written yet.
                                 // Keep waiting.
-                                return Err(poll::CondCheckError::NotYet);
+                                return Err(poll::CondCheckError::NotYet {
+                                    status: None,
+                                });
                             }
 
                             Err(error)
@@ -430,7 +427,9 @@ impl CockroachStarter {
                             {
                                 // The file doesn't exist yet.
                                 // Keep waiting.
-                                return Err(poll::CondCheckError::NotYet);
+                                return Err(poll::CondCheckError::NotYet {
+                                    status: None,
+                                });
                             }
 
                             Err(error) => {
@@ -459,7 +458,7 @@ impl CockroachStarter {
                         }
                         Ok(None) => {
                             // HTTP address not available yet, keep waiting
-                            Err(poll::CondCheckError::NotYet)
+                            Err(poll::CondCheckError::NotYet { status: None })
                         }
                         Err(source) => {
                             // Error parsing HTTP address
@@ -493,7 +492,7 @@ impl CockroachStarter {
 
                 Err(match poll_error {
                     poll::Error::PermanentError(e) => e,
-                    poll::Error::TimedOut(time_waited) => {
+                    poll::Error::TimedOut { elapsed: time_waited, .. } => {
                         CockroachStartError::TimedOut { pid, time_waited }
                     }
                 })
@@ -594,9 +593,9 @@ pub struct CockroachInstance {
     /// handle to child process, if it hasn't been cleaned up already
     child_process: Option<tokio::process::Child>,
     /// handle to temporary directory, if it hasn't been cleaned up already
-    temp_dir: Option<TempDir>,
+    temp_dir: Option<Utf8TempDir>,
     /// path to temporary directory
-    temp_dir_path: PathBuf,
+    temp_dir_path: Utf8PathBuf,
 }
 
 impl CockroachInstance {
@@ -627,7 +626,7 @@ impl CockroachInstance {
     }
 
     /// Returns the path to the temporary directory created for this execution
-    pub fn temp_dir(&self) -> &Path {
+    pub fn temp_dir(&self) -> &Utf8Path {
         &self.temp_dir_path
     }
 
@@ -963,7 +962,7 @@ pub async fn wipe(
 /// Looks for a line like "webui: http://127.0.0.1:39953"
 /// and extracts the socket address.
 async fn parse_http_addr_from_stdout(
-    stdout_path: &std::path::Path,
+    stdout_path: &Utf8Path,
 ) -> Result<Option<SocketAddr>, anyhow::Error> {
     use std::str::FromStr;
 
@@ -1241,14 +1240,14 @@ mod test {
     use crate::dev::db::process_exited;
     use crate::dev::poll;
     use crate::dev::process_running;
+    use camino::Utf8PathBuf;
+    use camino_tempfile::tempdir;
     use slog_error_chain::InlineErrorChain;
     use std::collections::BTreeMap;
     use std::env;
     use std::path::Path;
-    use std::path::PathBuf;
     use std::process::Stdio;
     use std::time::Duration;
-    use tempfile::tempdir;
     use tokio::fs;
 
     fn new_builder() -> CockroachStarterBuilder {
@@ -1323,7 +1322,7 @@ mod test {
     // expected behavior depends on the failure mode.
     async fn test_database_start_failure(
         starter: CockroachStarter,
-    ) -> (PathBuf, CockroachStartError) {
+    ) -> (Utf8PathBuf, CockroachStartError) {
         let temp_dir = starter.temp_dir().to_owned();
         eprintln!("will run: {}", starter.cmdline());
         eprintln!("environment:");
@@ -1347,7 +1346,7 @@ mod test {
         builder.start_timeout(&Duration::from_millis(0));
         let starter = builder.build().expect("failed to build starter");
         let directory = starter.temp_dir().to_owned();
-        eprintln!("temporary directory: {}", directory.display());
+        eprintln!("temporary directory: {directory}");
         let error =
             starter.start().await.expect_err("unexpectedly started database");
         eprintln!("(expected) error starting database: {:?}", error);
@@ -1380,7 +1379,7 @@ mod test {
         poll::wait_for_condition::<(), std::convert::Infallible, _, _>(
             || async {
                 if process_running(pid) {
-                    Err(poll::CondCheckError::NotYet)
+                    Err(poll::CondCheckError::NotYet { status: None })
                 } else {
                     Ok(())
                 }
@@ -1391,10 +1390,8 @@ mod test {
         .await
         .unwrap_or_else(|_| {
             panic!(
-                "timed out waiting for pid {} to exit \
-                    (leaving temporary directory {})",
-                pid,
-                directory.display()
+                "timed out waiting for pid {pid} to exit \
+                    (leaving temporary directory {directory})"
             );
         });
         assert!(!process_running(pid));
@@ -1409,15 +1406,13 @@ mod test {
         if !directory.starts_with(env::temp_dir()) {
             panic!(
                 "refusing to remove temporary directory not under
-                std::env::temp_dir(): {}",
-                directory.display()
+                std::env::temp_dir(): {directory}"
             )
         }
 
         fs::remove_dir_all(&directory).await.unwrap_or_else(|e| {
             panic!(
-                "failed to remove temporary directory {}: {}",
-                directory.display(),
+                "failed to remove temporary directory {directory}: {}",
                 InlineErrorChain::new(&e)
             )
         });

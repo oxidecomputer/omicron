@@ -53,6 +53,30 @@ impl std::fmt::Display for DendriteAsic {
     }
 }
 
+/// Whether physical or virtual NICs are present in the system.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "kind")]
+pub enum DataLinks {
+    /// Virtual NICs are present. This is the case for development environments,
+    /// or any Oxide sled running outside of a rack.
+    Virtual { devices: Vec<String> },
+    /// Physical NICs are present, with device names like `cxgbeN`. This is the
+    /// case for Oxide compute sleds running inside of a rack.
+    Physical,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "kind")]
+pub enum ExternalDisks {
+    /// Instead of detecting physical disks, use the provided file-backed vdevs.
+    Virtual { vdevs: Vec<String> },
+    /// Instead of detecting physical disks, inject the provided ones during
+    /// device polling.
+    HardcodedPhysical { disks: Vec<UnparsedDisk> },
+    /// Detect physical external disks connected to the sled.
+    DetectPhysical,
+}
+
 /// Configuration for forcing a sled to run as a Scrimlet or compute Sled
 #[derive(Copy, Clone, Debug)]
 pub enum SledMode {

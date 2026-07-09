@@ -244,6 +244,19 @@ impl<'a> Redactor<'a> {
         self
     }
 
+    /// Replace any text matching `pattern` with `<NAME_REDACTED>`.
+    ///
+    /// More flexible than [`Self::field`], which requires a fixed
+    /// `name<spaces>value` shape. Use this when the entire variable substring
+    /// is itself a regex (e.g., the substring may take one of several
+    /// alternative forms across runs).
+    pub fn variable_regex(&mut self, name: &str, pattern: &str) -> &mut Self {
+        let re = regex::Regex::new(pattern).unwrap();
+        let replacement = format!("<{}_REDACTED>", name.to_uppercase());
+        self.extra_regex.push((re, replacement));
+        self
+    }
+
     /// Redact an entire indented section.
     ///
     /// This can be used if the shape of a section might change from run to run.

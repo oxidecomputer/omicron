@@ -21,6 +21,7 @@ use crate::db::model::PhysicalDisk;
 use crate::db::model::Rack;
 use crate::db::model::UserProvisionType;
 use crate::db::model::Zpool;
+use crate::db::model::to_db_typed_uuid;
 use crate::db::pagination::paginated;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
@@ -80,7 +81,7 @@ use uuid::Uuid;
 /// Groups arguments related to rack initialization
 #[derive(Clone)]
 pub struct RackInit {
-    pub rack_id: Uuid,
+    pub rack_id: RackUuid,
     pub rack_subnet: IpNetwork,
     pub blueprint: Blueprint,
     pub blueprint_execution_enabled: bool,
@@ -110,7 +111,7 @@ enum RackInitError {
     DatasetInsert { err: AsyncInsertError, zpool_id: ZpoolUuid },
     PhysicalDiskInsert(Error),
     ZpoolInsert(Error),
-    RackUpdate { err: DieselError, rack_id: Uuid },
+    RackUpdate { err: DieselError, rack_id: RackUuid },
     DnsSerialization(Error),
     Silo(Error),
     RoleAssignment(Error),
@@ -161,7 +162,7 @@ impl From<RackInitError> for Error {
                     err,
                     ErrorHandler::NotFoundByLookup(
                         ResourceType::Rack,
-                        LookupType::ById(rack_id),
+                        LookupType::ById(rack_id.into_untyped_uuid()),
                     ),
                 )
             }
@@ -268,7 +269,7 @@ impl DataStore {
         );
         use nexus_db_schema::schema::rack::dsl;
         diesel::update(dsl::rack)
-            .filter(dsl::id.eq(rack.id()))
+            .filter(dsl::id.eq(to_db_typed_uuid(rack.id())))
             .set(dsl::rack_subnet.eq(rack.rack_subnet))
             .execute_async(&*self.pool_connection_authorized(opctx).await?)
             .await
@@ -281,7 +282,7 @@ impl DataStore {
     pub async fn rack_subnet(
         &self,
         opctx: &OpContext,
-        rack_id: Uuid,
+        rack_id: RackUuid,
     ) -> Result<IpNetwork, Error> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
         let conn = self.pool_connection_authorized(opctx).await?;
@@ -289,7 +290,7 @@ impl DataStore {
         // It's safe to unwrap the returned `rack_subnet` because
         // we filter on `rack_subnet.is_not_null()`
         let subnet = dsl::rack
-            .filter(dsl::id.eq(rack_id))
+            .filter(dsl::id.eq(to_db_typed_uuid(rack_id)))
             .filter(dsl::rack_subnet.is_not_null())
             .select(dsl::rack_subnet)
             .first_async::<Option<IpNetwork>>(&*conn)
@@ -316,7 +317,7 @@ impl DataStore {
     pub async fn allocate_sled_underlay_subnet_octets(
         &self,
         opctx: &OpContext,
-        rack_id: Uuid,
+        rack_id: RackUuid,
         hw_baseboard_id: Uuid,
     ) -> Result<SledUnderlayAllocationResult, Error> {
         // Fetch all the existing allocations via self.rack_id
@@ -328,7 +329,7 @@ impl DataStore {
         // for the given sled then reuse that one.
         const MIN_SUBNET_OCTET: i16 = 33;
         let mut new_allocation = SledUnderlaySubnetAllocation {
-            rack_id,
+            rack_id: to_db_typed_uuid(rack_id),
             sled_id: SledUuid::new_v4().into(),
             subnet_octet: MIN_SUBNET_OCTET,
             hw_baseboard_id,
@@ -398,12 +399,12 @@ impl DataStore {
     pub async fn rack_subnet_allocations(
         &self,
         opctx: &OpContext,
-        rack_id: Uuid,
+        rack_id: RackUuid,
     ) -> Result<Vec<SledUnderlaySubnetAllocation>, Error> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
         use nexus_db_schema::schema::sled_underlay_subnet_allocation::dsl as subnet_dsl;
         subnet_dsl::sled_underlay_subnet_allocation
-            .filter(subnet_dsl::rack_id.eq(rack_id))
+            .filter(subnet_dsl::rack_id.eq(to_db_typed_uuid(rack_id)))
             .select(SledUnderlaySubnetAllocation::as_select())
             .order_by(subnet_dsl::subnet_octet.asc())
             .load_async(&*self.pool_connection_authorized(opctx).await?)
@@ -749,7 +750,7 @@ impl DataStore {
 
                     // Early exit if the rack has already been initialized.
                     let rack = rack_dsl::rack
-                        .filter(rack_dsl::id.eq(rack_id))
+                        .filter(rack_dsl::id.eq(to_db_typed_uuid(rack_id)))
                         .select(Rack::as_select())
                         .get_result_async(&conn)
                         .await
@@ -876,7 +877,7 @@ impl DataStore {
 
                     for physical_disk in physical_disks {
                         info!(log, "physical disk upsert in handoff: {physical_disk:#?}");
-                        if let Err(e) = Self::physical_disk_insert_on_connection(&conn, &opctx, physical_disk)
+                        if let Err(e) = Self::physical_disk_insert_on_connection(&conn, physical_disk)
                             .await {
                             if !matches!(e, TransactionError::CustomError(Error::ObjectAlreadyExists { .. })) {
                                 error!(log, "Failed to upsert physical disk"; "err" => #%e);
@@ -980,9 +981,8 @@ impl DataStore {
 
                     // Insert the initial trust quorum configuration
                     if let Some(tq_config) = rack_init.initial_trust_quorum_configuration {
-                        let authz_tq = authz::TrustQuorumConfig::for_rack_id(
-                            RackUuid::from_untyped_uuid(rack_id),
-                        );
+                        let authz_tq =
+                            authz::TrustQuorumConfig::for_rack_id(rack_id);
                         Self::tq_insert_rss_config_after_handoff(
                             opctx,
                             &conn,
@@ -996,7 +996,7 @@ impl DataStore {
                     }
 
                     let rack = diesel::update(rack_dsl::rack)
-                        .filter(rack_dsl::id.eq(rack_id))
+                        .filter(rack_dsl::id.eq(to_db_typed_uuid(rack_id)))
                         .set((
                             rack_dsl::initialized.eq(true),
                             rack_dsl::time_modified.eq(Utc::now()),
@@ -1029,7 +1029,7 @@ impl DataStore {
     pub async fn load_builtin_rack_data(
         &self,
         opctx: &OpContext,
-        rack_id: Uuid,
+        rack_id: RackUuid,
     ) -> Result<(), Error> {
         use omicron_common::api::external::Name;
 
@@ -1049,7 +1049,7 @@ impl DataStore {
                     ),
                 },
                 version,
-                nexus_db_model::IpPoolReservationType::OxideInternal,
+                nexus_db_model::IpPoolAssignment::SystemServices,
             );
             match self.ip_pool_create(opctx, internal_pool).await {
                 Ok(_) | Err(Error::ObjectAlreadyExists { .. }) => {}
@@ -1085,8 +1085,10 @@ mod test {
     use nexus_types::deployment::BlueprintSource;
     use nexus_types::deployment::CockroachDbPreserveDowngrade;
     use nexus_types::deployment::ExternalIpPolicy;
+    use nexus_types::deployment::OperatorNexusConfig;
     use nexus_types::deployment::PendingMgsUpdates;
     use nexus_types::deployment::SledFilter;
+    use nexus_types::deployment::UpstreamNtpConfig;
     use nexus_types::deployment::{BlueprintZoneImageSource, OximeterReadMode};
     use nexus_types::external_api::silo::SiloIdentityMode;
     use nexus_types::identity::Asset;
@@ -1113,7 +1115,7 @@ mod test {
         fn default() -> Self {
             let blueprint_id = BlueprintUuid::new_v4();
             RackInit {
-                rack_id: Uuid::parse_str(nexus_test_utils::RACK_UUID).unwrap(),
+                rack_id: nexus_test_utils::RACK_UUID,
                 rack_subnet: nexus_test_utils::RACK_SUBNET.parse().unwrap(),
                 blueprint: Blueprint {
                     id: blueprint_id,
@@ -1191,10 +1193,6 @@ mod test {
         }
     }
 
-    fn rack_id() -> Uuid {
-        Uuid::parse_str(nexus_test_utils::RACK_UUID).unwrap()
-    }
-
     // Return a `BlueprintBuilder` configured from `system` and based on an
     // empty parent blueprint.
     //
@@ -1253,7 +1251,7 @@ mod test {
             .expect("Failed to initialize rack");
 
         let after = Utc::now();
-        assert_eq!(rack.id(), rack_id());
+        assert_eq!(rack.id(), nexus_test_utils::RACK_UUID);
         assert!(rack.initialized);
 
         // Verify the DNS configuration.
@@ -1355,7 +1353,7 @@ mod test {
     async fn create_test_sled(db: &DataStore, sled_id: SledUuid) -> Sled {
         let sled_update = SledUpdateBuilder::new()
             .sled_id(sled_id)
-            .rack_id(rack_id())
+            .rack_id(nexus_test_utils::RACK_UUID)
             .build();
         let (sled, _) = db
             .sled_upsert(sled_update)
@@ -1480,13 +1478,15 @@ mod test {
             )
             .expect("added zone");
         builder
-            .sled_add_zone_nexus_with_config(
+            .sled_add_zone_nexus(
                 sled2.id(),
-                false,
-                Vec::new(),
                 BlueprintZoneImageSource::InstallDataset,
                 nexus_networking,
                 *Generation::new(),
+                &OperatorNexusConfig {
+                    external_tls: false,
+                    external_dns_servers: &[],
+                },
             )
             .expect("added zone");
 
@@ -1494,13 +1494,15 @@ mod test {
             [(sled1.id(), ntp1_networking), (sled2.id(), ntp2_networking)]
         {
             builder
-                .sled_add_zone_boundary_ntp_with_config(
+                .sled_add_zone_boundary_ntp(
                     sled_id,
-                    Vec::new(),
-                    Vec::new(),
-                    None,
                     BlueprintZoneImageSource::InstallDataset,
                     external_ip,
+                    &UpstreamNtpConfig {
+                        ntp_servers: &[],
+                        dns_servers: &[],
+                        domain: None,
+                    },
                 )
                 .expect("added boundary NTP");
         }
@@ -1572,7 +1574,7 @@ mod test {
             .await
             .expect("Failed to initialize rack");
 
-        assert_eq!(rack.id(), rack_id());
+        assert_eq!(rack.id(), nexus_test_utils::RACK_UUID);
         assert!(rack.initialized);
 
         // We should see the blueprint we passed in.
@@ -1705,15 +1707,17 @@ mod test {
             .expect("constructed allocator");
         for _ in 0..2 {
             builder
-                .sled_add_zone_nexus_with_config(
+                .sled_add_zone_nexus(
                     sled.id(),
-                    false,
-                    Vec::new(),
                     BlueprintZoneImageSource::InstallDataset,
                     external_networking_alloc
                         .for_new_nexus()
                         .expect("got Nexus IP"),
                     *Generation::new(),
+                    &OperatorNexusConfig {
+                        external_tls: false,
+                        external_dns_servers: &[],
+                    },
                 )
                 .expect("added Nexus");
         }
@@ -1757,7 +1761,7 @@ mod test {
             .await
             .expect("Failed to initialize rack");
 
-        assert_eq!(rack.id(), rack_id());
+        assert_eq!(rack.id(), nexus_test_utils::RACK_UUID);
         assert!(rack.initialized);
 
         // We should see the blueprint we passed in.
@@ -1898,15 +1902,17 @@ mod test {
             )
             .expect("constructed allocator");
         builder
-            .sled_add_zone_nexus_with_config(
+            .sled_add_zone_nexus(
                 sled.id(),
-                false,
-                Vec::new(),
                 BlueprintZoneImageSource::InstallDataset,
                 external_networking_alloc
                     .for_new_nexus()
                     .expect("got Nexus IP"),
                 *Generation::new(),
+                &OperatorNexusConfig {
+                    external_tls: false,
+                    external_dns_servers: &[],
+                },
             )
             .expect("added Nexus");
         let mut blueprint = builder.build(BlueprintSource::Test);
@@ -1950,7 +1956,7 @@ mod test {
             )
             .await
             .expect("an initialized rack");
-        assert_eq!(rack.id(), rack_id());
+        assert_eq!(rack.id(), nexus_test_utils::RACK_UUID);
         assert!(rack.initialized);
 
         // We should see the blueprint we passed in.
@@ -2074,10 +2080,8 @@ mod test {
                 .unwrap();
         let mut macs = MacAddr::iter_system();
         builder
-            .sled_add_zone_nexus_with_config(
+            .sled_add_zone_nexus(
                 sled.id(),
-                false,
-                Vec::new(),
                 BlueprintZoneImageSource::InstallDataset,
                 ExternalNetworkingChoice {
                     external_ip: nexus_ip,
@@ -2085,6 +2089,10 @@ mod test {
                     nic_mac: macs.next().unwrap(),
                 },
                 *Generation::new(),
+                &OperatorNexusConfig {
+                    external_tls: false,
+                    external_dns_servers: &[],
+                },
             )
             .expect("added Nexus");
 
@@ -2148,13 +2156,15 @@ mod test {
             external_networking_alloc.for_new_nexus().expect("got Nexus IP");
         for _ in 0..2 {
             builder
-                .sled_add_zone_nexus_with_config(
+                .sled_add_zone_nexus(
                     sled.id(),
-                    false,
-                    Vec::new(),
                     BlueprintZoneImageSource::InstallDataset,
                     nexus_external_ip.clone(),
                     *Generation::new(),
+                    &OperatorNexusConfig {
+                        external_tls: false,
+                        external_dns_servers: &[],
+                    },
                 )
                 .expect("added Nexus");
         }
@@ -2166,7 +2176,7 @@ mod test {
             .rack_set_initialized(
                 &opctx,
                 RackInit {
-                    rack_id: rack_id(),
+                    rack_id: nexus_test_utils::RACK_UUID,
                     blueprint: blueprint.clone(),
                     service_ip_pool_ranges: vec![service_ip_pool],
                     ..Default::default()
@@ -2192,7 +2202,7 @@ mod test {
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
-        let rack_id = Uuid::new_v4();
+        let rack_id = RackUuid::new_v4();
 
         // Ensure we get an empty list when there are no allocations
         let allocations =
@@ -2202,7 +2212,7 @@ mod test {
         // Add 5 allocations
         for i in 0..5i16 {
             let allocation = SledUnderlaySubnetAllocation {
-                rack_id,
+                rack_id: to_db_typed_uuid(rack_id),
                 sled_id: SledUuid::new_v4().into(),
                 subnet_octet: 33 + i,
                 hw_baseboard_id: Uuid::new_v4(),
@@ -2222,7 +2232,7 @@ mod test {
         // Try to add another allocation for the same octet, but with a distinct
         // sled_id. Ensure we get an error due to a unique constraint.
         let mut should_fail_allocation = SledUnderlaySubnetAllocation {
-            rack_id,
+            rack_id: to_db_typed_uuid(rack_id),
             sled_id: SledUuid::new_v4().into(),
             subnet_octet: 37,
             hw_baseboard_id: Uuid::new_v4(),
@@ -2250,7 +2260,7 @@ mod test {
 
         // Allocations outside our expected range fail
         let mut should_fail_allocation = SledUnderlaySubnetAllocation {
-            rack_id,
+            rack_id: to_db_typed_uuid(rack_id),
             sled_id: SledUuid::new_v4().into(),
             subnet_octet: 32,
             hw_baseboard_id: Uuid::new_v4(),
@@ -2285,7 +2295,7 @@ mod test {
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
-        let rack_id = Uuid::new_v4();
+        let rack_id = RackUuid::new_v4();
 
         let mut hw_baseboard_ids = vec![];
         let mut allocated_octets = vec![];
@@ -2376,10 +2386,10 @@ mod test {
         // decommission that sled, and confirm we get a new octet, five times in
         // a loop (to emulate the same sled being added and decommissioned
         // multiple times).
-        let mut next_expected_octet = *expected.last().unwrap() + 1;
         let mut prior_allocation = allocations.last().unwrap().clone();
         let target_hw_baseboard_id = *hw_baseboard_ids.last().unwrap();
-        for _ in 0..5 {
+        for next_expected_octet in (*expected.last().unwrap()..).skip(1).take(5)
+        {
             // Commission the sled.
             let sled =
                 create_test_sled(&datastore, prior_allocation.sled_id.into())
@@ -2458,9 +2468,6 @@ mod test {
                     panic!("unexpected allocation {existing:?}");
                 }
             }
-
-            // Bump our expectations for the next iteration.
-            next_expected_octet += 1;
         }
 
         db.terminate().await;

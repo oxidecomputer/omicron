@@ -15,7 +15,7 @@ pub const NO_SOURCE_IPS: &[IpAddr] = &[];
 use uuid::Uuid;
 
 use nexus_db_model::{
-    IncompleteIpPoolResource, IncompleteVpc, IpPool, IpPoolReservationType,
+    IncompleteIpPoolResource, IncompleteVpc, IpPool, IpPoolAssignment,
     IpPoolResourceType, IpVersion,
 };
 use nexus_types::external_api::vpc;
@@ -108,7 +108,7 @@ pub async fn create_test_setup_with_range(
             IpPool::new_multicast(
                 &pool_identity,
                 IpVersion::V4,
-                IpPoolReservationType::ExternalSilos,
+                IpPoolAssignment::Silos,
             ),
         )
         .await

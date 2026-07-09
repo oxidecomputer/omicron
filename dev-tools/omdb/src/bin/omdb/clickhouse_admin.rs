@@ -42,7 +42,7 @@ pub struct ClickHouseAdminArgs {
 }
 
 #[derive(Debug, Args)]
-struct RetentionPolicy {
+struct RetentionPolicyRequest {
     /// The number of days to retain telemetry data.
     #[arg(long)]
     days: std::num::NonZeroU8,
@@ -54,7 +54,7 @@ enum ClickHouseAdminCommands {
     /// Fetch the current database retention policy
     RetentionPolicy,
     /// Set the current database retention policy
-    SetRetentionPolicy(RetentionPolicy),
+    SetRetentionPolicy(RetentionPolicyRequest),
     /// Fetch the current database table usage.
     DatabaseUsage,
 }
@@ -115,12 +115,24 @@ impl ClickHouseAdminArgs {
     }
 
     async fn retention_policy(&self, client: &Client) -> anyhow::Result<()> {
-        let types::RetentionPolicy { days } = client
+        let types::DatabaseRetentionPolicy { tables } = client
             .retention_policy()
             .await
             .context("fetching retention policy")?
             .into_inner();
-        println!("Retention: {:>2} days", days);
+        let rows = tables
+            .into_iter()
+            .map(|t| RetentionPolicy {
+                table_name: t.table,
+                retention: t.days.as_human_str(),
+            })
+            .collect::<Vec<_>>();
+        let table = Table::new(rows)
+            .with(tabled::settings::Style::empty())
+            .with(tabled::settings::Padding::new(0, 1, 0, 0))
+            .to_string();
+        println!();
+        println!("{table}");
         Ok(())
     }
 
@@ -178,11 +190,11 @@ impl ClickHouseAdminArgs {
     async fn set_retention_policy(
         &self,
         client: &Client,
-        retention: &RetentionPolicy,
+        retention: &RetentionPolicyRequest,
     ) -> anyhow::Result<()> {
         let days = types::Days(retention.days);
         client
-            .set_retention_policy(&types::RetentionPolicy { days })
+            .set_retention_policy(&types::RetentionPolicyRequest { days })
             .await
             .context("setting retention policy")
             .map(|_| ())
@@ -210,6 +222,13 @@ struct TableUsage {
     table_name: String,
     n_bytes: String,
     n_rows: u64,
+}
+
+#[derive(Tabled)]
+#[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+struct RetentionPolicy {
+    table_name: String,
+    retention: String,
 }
 
 #[cfg(test)]

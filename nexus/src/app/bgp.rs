@@ -4,13 +4,19 @@
 
 use crate::app::authz;
 use mg_admin_client::types::MessageHistoryRequest;
+use nexus_db_lookup::LookupPath;
+use nexus_db_lookup::lookup;
 use nexus_db_model::{BgpAnnounceSet, BgpAnnouncement, BgpConfig};
 use nexus_db_queries::context::OpContext;
 use nexus_types::external_api::networking;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::{
     self, CreateResult, DeleteResult, ListResultVec, LookupResult, NameOrId,
+    UpdateResult,
 };
+use omicron_uuid_kinds::BgpAnnounceSetUuid;
+use omicron_uuid_kinds::BgpConfigUuid;
+use omicron_uuid_kinds::GenericUuid;
 use slog_error_chain::InlineErrorChain;
 
 impl super::Nexus {
@@ -40,6 +46,77 @@ impl super::Nexus {
     ) -> ListResultVec<BgpConfig> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
         self.db_datastore.bgp_config_list(opctx, pagparams).await
+    }
+
+    pub fn bgp_config_lookup<'a>(
+        &'a self,
+        opctx: &'a OpContext,
+        name_or_id: NameOrId,
+    ) -> LookupResult<lookup::BgpConfig<'a>> {
+        match name_or_id {
+            NameOrId::Id(id) => Ok(LookupPath::new(opctx, &self.db_datastore)
+                .bgp_config_id(BgpConfigUuid::from_untyped_uuid(id))),
+            NameOrId::Name(name) => {
+                Ok(LookupPath::new(opctx, &self.db_datastore)
+                    .bgp_config_name_owned(name.into()))
+            }
+        }
+    }
+
+    pub fn bgp_announce_set_lookup<'a>(
+        &'a self,
+        opctx: &'a OpContext,
+        name_or_id: NameOrId,
+    ) -> LookupResult<lookup::BgpAnnounceSet<'a>> {
+        match name_or_id {
+            NameOrId::Id(id) => Ok(LookupPath::new(opctx, &self.db_datastore)
+                .bgp_announce_set_id(BgpAnnounceSetUuid::from_untyped_uuid(
+                    id,
+                ))),
+            NameOrId::Name(name) => {
+                Ok(LookupPath::new(opctx, &self.db_datastore)
+                    .bgp_announce_set_name_owned(name.into()))
+            }
+        }
+    }
+
+    pub async fn bgp_config_update(
+        &self,
+        opctx: &OpContext,
+        sel: &networking::BgpConfigSelector,
+        update: networking::BgpConfigUpdate,
+    ) -> UpdateResult<BgpConfig> {
+        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
+
+        let (.., authz_bgp_config, db_bgp_config) = self
+            .bgp_config_lookup(opctx, sel.name_or_id.clone())?
+            .fetch_for(authz::Action::Modify)
+            .await?;
+
+        let (.., authz_bgp_announce_set) = self
+            .bgp_announce_set_lookup(
+                opctx,
+                update.bgp_announce_set_id.clone().unwrap_or(NameOrId::Id(
+                    db_bgp_config.bgp_announce_set_id.into_untyped_uuid(),
+                )),
+            )?
+            .lookup_for(authz::Action::Read)
+            .await?;
+
+        let update = nexus_db_model::BgpConfigUpdate::new(
+            update,
+            authz_bgp_announce_set.id().into_untyped_uuid(),
+        );
+
+        let result = self
+            .db_datastore
+            .bgp_config_update(opctx, &authz_bgp_config, update)
+            .await?;
+
+        // Eagerly propagate changes via background task
+        self.background_tasks
+            .activate(&self.background_tasks.task_switch_port_settings_manager);
+        Ok(result)
     }
 
     pub async fn bgp_config_delete(
@@ -177,7 +254,7 @@ impl super::Nexus {
 
             for r in &router_info {
                 let asn = r.asn;
-                let selector = mg_admin_client::types::ExportedSelector {
+                let selector = mg_api_types::bgp::session::ExportedSelector {
                     afi: None,
                     asn,
                     peer: None,
@@ -198,22 +275,10 @@ impl super::Nexus {
 
                 for (peer_id, exports) in exported {
                     for ex in exports.iter() {
-                        let prefix = match ex {
-                            rdb_types::Prefix::V4(v4) => {
-                                oxnet::IpNet::V4(oxnet::Ipv4Net::new_unchecked(
-                                    v4.value, v4.length,
-                                ))
-                            }
-                            rdb_types::Prefix::V6(v6) => {
-                                oxnet::IpNet::V6(oxnet::Ipv6Net::new_unchecked(
-                                    v6.value, v6.length,
-                                ))
-                            }
-                        };
                         let export = networking::BgpExported {
                             peer_id: peer_id.clone(),
                             switch: switch_slot,
-                            prefix,
+                            prefix: *ex,
                         };
                         result.push(export);
                     }

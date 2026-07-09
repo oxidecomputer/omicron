@@ -63,7 +63,10 @@ jiff.workspace = true
 lldpd_client.workspace = true
 macaddr.workspace = true
 maplit.workspace = true
+mg-api-types.workspace = true
 nexus-background-task-interface.workspace = true
+nexus-switch-config.workspace = true
+nexus-switch-config-preparation.workspace = true
 # Not under "dev-dependencies"; these also need to be implemented for
 # integration tests.
 nexus-config.workspace = true
@@ -96,11 +99,8 @@ qorb.workspace = true
 rand.workspace = true
 range-requests.workspace = true
 ref-cast.workspace = true
-rdb-types.workspace = true
 regex.workspace = true
 reqwest = { workspace = true, features = ["http2", "json"] }
-reqwest012 = { workspace = true }
-ring.workspace = true
 samael.workspace = true
 schemars = { workspace = true, features = ["chrono", "uuid1"] }
 semver.workspace = true
@@ -118,12 +118,12 @@ slog.workspace = true
 slog-async.workspace = true
 slog-dtrace.workspace = true
 slog-error-chain.workspace = true
+strum.workspace = true
 swrite.workspace = true
 display-error-chain.workspace = true
 slog-term.workspace = true
 static_assertions.workspace = true
 steno.workspace = true
-tempfile.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["full"] }
 tokio-postgres = { workspace = true, features = ["with-serde_json-1"] }
@@ -159,11 +159,16 @@ raw-cpuid = { workspace = true, features = ["std"] }
 rustls = { workspace = true }
 rustls-pemfile = { workspace = true }
 scim2-rs.workspace = true
+support-bundle-collection.workspace = true
 update-common.workspace = true
 update-engine.workspace = true
 omicron-workspace-hack.workspace = true
 omicron-uuid-kinds.workspace = true
 zip = { workspace = true, features = ["jiff-02"] }
+
+[target.'cfg(target_os = "illumos")'.dependencies]
+# See omicron-rpaths for more about the "fmd-adm-sys" dependency.
+fmd-adm-sys.workspace = true
 
 [dev-dependencies]
 async-bb8-diesel.workspace = true
@@ -171,6 +176,7 @@ camino-tempfile.workspace = true
 criterion.workspace = true
 diesel.workspace = true
 dns-server.workspace = true
+flate2.workspace = true
 expectorate.workspace = true
 gateway-messages.workspace = true
 gateway-test-utils.workspace = true
@@ -179,6 +185,7 @@ httpmock.workspace = true
 httptest.workspace = true
 hubtools.workspace = true
 hyper-rustls.workspace = true
+nexus-background-task-interface = { workspace = true, features = ["testing"] }
 nexus-client.workspace = true
 nexus-db-queries = { workspace = true, features = ["testing"] }
 nexus-fm = { workspace = true, features = ["testing"] }
@@ -203,7 +210,6 @@ sp-sim.workspace = true
 strum.workspace = true
 subprocess.workspace = true
 term.workspace = true
-tokio-test.workspace = true
 tufaceous.workspace = true
 tufaceous-artifact.workspace = true
 tufaceous-lib.workspace = true

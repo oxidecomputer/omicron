@@ -61,10 +61,12 @@ use nexus_types::internal_api::background::DatasetsRendezvousStats;
 use nexus_types::internal_api::background::EreporterStatus;
 use nexus_types::internal_api::background::FmAnalysisStatus;
 use nexus_types::internal_api::background::FmRendezvousStatus;
+use nexus_types::internal_api::background::IncompleteBootstoreConfigReport;
 use nexus_types::internal_api::background::InstanceReincarnationStatus;
 use nexus_types::internal_api::background::InstanceUpdaterStatus;
 use nexus_types::internal_api::background::InventoryLoadStatus;
 use nexus_types::internal_api::background::LookupRegionPortStatus;
+use nexus_types::internal_api::background::PhysicalDiskAdoptionStatus;
 use nexus_types::internal_api::background::ProbeDistributorStatus;
 use nexus_types::internal_api::background::ReadOnlyRegionReplacementStartStatus;
 use nexus_types::internal_api::background::RegionReplacementDriverStatus;
@@ -77,10 +79,12 @@ use nexus_types::internal_api::background::ServiceFirewallRuleStatus;
 use nexus_types::internal_api::background::SessionCleanupStatus;
 use nexus_types::internal_api::background::SitrepGcStatus;
 use nexus_types::internal_api::background::SitrepLoadStatus;
+use nexus_types::internal_api::background::SupportBundleActivationReport;
 use nexus_types::internal_api::background::SupportBundleCleanupReport;
-use nexus_types::internal_api::background::SupportBundleCollectionReport;
 use nexus_types::internal_api::background::SupportBundleCollectionStepStatus;
-use nexus_types::internal_api::background::SupportBundleEreportStatus;
+use nexus_types::internal_api::background::SwitchPortPopulatorStatus;
+use nexus_types::internal_api::background::SwitchPortPopulatorStatusKind;
+use nexus_types::internal_api::background::SwitchPortSettingsManagerStatus;
 use nexus_types::internal_api::background::TrustQuorumManagerStatus;
 use nexus_types::internal_api::background::TufArtifactReplicationCounters;
 use nexus_types::internal_api::background::TufArtifactReplicationRequest;
@@ -1300,6 +1304,9 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
         "phantom_disks" => {
             print_task_phantom_disks(details);
         }
+        "physical_disk_adoption" => {
+            print_task_physical_disk_adoption(details);
+        }
         "probe_distributor" => {
             print_task_probe_distributor(details);
         }
@@ -1368,6 +1375,12 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
         }
         "trust_quorum_manager" => {
             print_task_trust_quorum_manager(details);
+        }
+        "populate_switch_ports" => {
+            print_task_populate_switch_ports(details);
+        }
+        "switch_port_config_manager" => {
+            print_task_switch_port_settings_manager(details);
         }
         _ => {
             println!(
@@ -2839,7 +2852,7 @@ fn print_task_support_bundle_collector(details: &serde_json::Value) {
     struct SupportBundleCollectionStatus {
         cleanup_report: Option<SupportBundleCleanupReport>,
         cleanup_err: Option<String>,
-        collection_report: Option<SupportBundleCollectionReport>,
+        collection_report: Option<SupportBundleActivationReport>,
         collection_err: Option<String>,
     }
 
@@ -2889,15 +2902,13 @@ fn print_task_support_bundle_collector(details: &serde_json::Value) {
                 println!("    failed to perform collection: {collection_err}");
             }
 
-            if let Some(SupportBundleCollectionReport {
-                bundle,
+            if let Some(SupportBundleActivationReport {
+                collection,
                 activated_in_db_ok,
-                mut steps,
-                ereports,
             }) = collection_report
             {
                 println!("    Support Bundle Collection Report:");
-                println!("      Bundle ID: {bundle}");
+                println!("      Bundle ID: {}", collection.bundle);
 
                 #[derive(Tabled)]
                 #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
@@ -2908,18 +2919,19 @@ fn print_task_support_bundle_collector(details: &serde_json::Value) {
                     status: SupportBundleCollectionStepStatus,
                 }
 
+                let mut steps = collection.steps;
                 steps.sort_unstable_by_key(|s| s.start);
                 let rows: Vec<StepRow> = steps
-                    .into_iter()
+                    .iter()
                     .map(|step| {
                         let duration = (step.end - step.start)
                             .to_std()
                             .unwrap_or(Duration::from_millis(0));
                         StepRow {
-                            step_name: step.name,
+                            step_name: step.name.clone(),
                             start_time: step.start,
                             duration: format!("{:.3}s", duration.as_secs_f64()),
-                            status: step.status,
+                            status: step.status.clone(),
                         }
                     })
                     .collect();
@@ -2927,38 +2939,17 @@ fn print_task_support_bundle_collector(details: &serde_json::Value) {
                 if !rows.is_empty() {
                     println!("\n{}", tabled::Table::new(rows));
                 }
+                for step in &steps {
+                    if let Some(details) = &step.details {
+                        println!("      {} details:", step.name);
+                        let pretty = serde_json::to_string_pretty(details)
+                            .unwrap_or_else(|_| details.to_string());
+                        println!("{}", textwrap::indent(&pretty, "        "));
+                    }
+                }
                 println!(
                     "      Bundle was activated in the database: {activated_in_db_ok}"
                 );
-                match ereports {
-                    None => {
-                        println!("      ereport collection was not requested");
-                    }
-                    Some(SupportBundleEreportStatus {
-                        errors,
-                        n_collected,
-                        n_found,
-                    }) if !errors.is_empty() => {
-                        println!("      ereport collection failed:");
-                        println!(
-                            "        total matching ereports found: {n_found}"
-                        );
-                        println!(
-                            "        ereports collected successfully: {n_collected}"
-                        );
-                        println!("        errors:");
-                        for error in errors {
-                            println!("          {error}");
-                        }
-                    }
-                    Some(SupportBundleEreportStatus {
-                        n_collected, ..
-                    }) => {
-                        // If ereport collection succeeded, n_found should be
-                        // equal to n_collected.
-                        println!("      ereports collected: {n_collected}");
-                    }
-                }
             }
         }
     }
@@ -3333,17 +3324,22 @@ fn print_task_sp_ereport_ingester(details: &serde_json::Value) {
     use nexus_types::internal_api::background::SpEreportIngesterStatus;
     use nexus_types::internal_api::background::SpEreporterStatus;
 
-    let SpEreportIngesterStatus { sps, errors, disabled, sps_not_present } =
-        match serde_json::from_value(details.clone()) {
-            Err(error) => {
-                eprintln!(
-                    "warning: failed to interpret task details: {:?}: {:?}",
-                    error, details
-                );
-                return;
-            }
-            Ok(status) => status,
-        };
+    let SpEreportIngesterStatus {
+        sps,
+        errors,
+        disabled,
+        sps_found,
+        sps_not_present,
+    } = match serde_json::from_value(details.clone()) {
+        Err(error) => {
+            eprintln!(
+                "warning: failed to interpret task details: {:?}: {:?}",
+                error, details
+            );
+            return;
+        }
+        Ok(status) => status,
+    };
 
     if !errors.is_empty() {
         println!("    errors listing reporters:");
@@ -3355,11 +3351,13 @@ fn print_task_sp_ereport_ingester(details: &serde_json::Value) {
     if disabled {
         println!("    SP ereport ingestion explicitly disabled by config!");
     } else {
+        println!("    {SPS_FOUND:<WIDTH$}{sps_found:>NUM_WIDTH$}");
+        if sps_not_present > 0 {
+            println!(
+                "(i) {SPS_NOT_PRESENT:<WIDTH$}{sps_not_present:>NUM_WIDTH$}"
+            );
+        }
         print_ereporter_status_totals(sps.iter().map(|sp| &sp.status));
-    }
-
-    if sps_not_present > 0 {
-        println!("(i) {SPS_NOT_PRESENT:<WIDTH$}{sps_not_present:>NUM_WIDTH$}");
     }
 
     if !sps.is_empty() {
@@ -3422,12 +3420,12 @@ fn print_ereporter_status_totals<'status>(
         total_new += new_ereports;
         total_reqs += requests;
         total_errors += errors.len();
-        if total_received > 0 {
+        if ereports_received > 0 {
             reporters_with_ereports += 1;
         } else {
             reporters_without_ereports += 1;
         }
-        if total_errors > 0 {
+        if !errors.is_empty() {
             reporters_with_errors += 1;
         } else {
             reporters_without_errors += 1;
@@ -3439,7 +3437,7 @@ fn print_ereporter_status_totals<'status>(
     println!("    {EREPORTS_RECEIVED:<WIDTH$}{total_received:>NUM_WIDTH$}");
     println!("    {NEW_EREPORTS:<WIDTH$}{total_new:>NUM_WIDTH$}");
     println!("    {HTTP_REQUESTS:<WIDTH$}{total_reqs:>NUM_WIDTH$}");
-    println!("    {ERRORS:<WIDTH$}{total_reqs:>NUM_WIDTH$}");
+    println!("    {ERRORS:<WIDTH$}{total_errors:>NUM_WIDTH$}");
     println!("    {TOTAL_REPORTERS:<WIDTH$}{total_reporters:>NUM_WIDTH$}",);
     println!(
         "    {REPORTERS_CONTACTED_SUCCESSFULLY:<WIDTH$}\
@@ -3473,6 +3471,7 @@ mod ereporter_status_fields {
     pub const REPORTERS_WITH_EREPORTS: &str = "    with ereports:";
     pub const REPORTERS_WITHOUT_EREPORTS: &str = "    without ereports:";
     pub const REPORTERS_WITH_ERRORS: &str = "  with collection errors:";
+    pub const SPS_FOUND: &str = "SPs found via ignition:";
     pub const SPS_NOT_PRESENT: &str = "SPs not present:";
     pub const WIDTH: usize = super::const_max_len(&[
         TOTAL_NEW_EREPORTS,
@@ -3485,6 +3484,7 @@ mod ereporter_status_fields {
         REPORTERS_WITH_EREPORTS,
         REPORTERS_WITHOUT_EREPORTS,
         REPORTERS_WITH_ERRORS,
+        SPS_FOUND,
         SPS_NOT_PRESENT,
     ]) + 1;
     pub const NUM_WIDTH: usize = 4;
@@ -3495,22 +3495,37 @@ fn print_task_fm_analysis(details: &serde_json::Value) {
         AnalysisOutcome, AnalysisStatus, Outcome, PreparationStatus,
     };
 
-    let FmAnalysisStatus { parent_sitrep_id, inv_collection_id, outcome } =
-        match serde_json::from_value::<FmAnalysisStatus>(details.clone()) {
-            Err(error) => {
-                eprintln!(
-                    "warning: failed to interpret task details: {:?}: {:?}",
-                    error, details
-                );
-                return;
-            }
-            Ok(status) => status,
-        };
+    let FmAnalysisStatus {
+        parent_sitrep_id,
+        inv_collection_id,
+        known_classes,
+        outcome,
+        warnings,
+    } = match serde_json::from_value::<FmAnalysisStatus>(details.clone()) {
+        Err(error) => {
+            eprintln!(
+                "warning: failed to interpret task details: {:?}: {:?}",
+                error, details
+            );
+            return;
+        }
+        Ok(status) => status,
+    };
     pub const PARENT_SITREP_ID: &str = "parent sitrep ID:";
     pub const INV_ID: &str = "current inventory collection ID:";
-    pub const WIDTH: usize = const_max_len(&[PARENT_SITREP_ID, INV_ID]) + 1;
+    pub const KNOWN_CLASSES: &str = "ereport classes consumed:";
+    pub const WIDTH: usize =
+        const_max_len(&[PARENT_SITREP_ID, INV_ID, KNOWN_CLASSES]) + 1;
     println!("    {PARENT_SITREP_ID:<WIDTH$}{parent_sitrep_id:?}");
     println!("    {INV_ID:<WIDTH$}{inv_collection_id:?}");
+    if known_classes.is_empty() {
+        println!("    {KNOWN_CLASSES:<WIDTH$}(none)");
+    } else {
+        println!("    {KNOWN_CLASSES:<WIDTH$}({} total)", known_classes.len());
+        for class in &known_classes {
+            println!("      - {class}");
+        }
+    }
     println!("    FAULT MANAGEMENT ANALYSIS SUMMARY");
     println!("    =================================");
     let (prep_status, analysis_status) = match outcome {
@@ -3605,16 +3620,26 @@ fn print_task_fm_analysis(details: &serde_json::Value) {
     }
     println!();
 
-    let PreparationStatus { errors, report: prep_report } = prep_status;
-    print!("{}", prep_report.display_multiline(4));
-    if !errors.is_empty() {
-        println!("{ERRICON}   errors preparing analysis inputs:");
-        for error in errors {
+    if !warnings.is_empty() {
+        println!("{ERRICON}   non-fatal errors occurred during analysis:");
+        for error in warnings {
             println!("      > {error}")
         }
     }
+
+    let PreparationStatus { warnings, report: prep_report } = prep_status;
+    println!("    preparation report:");
+    print!("{}", prep_report.display_multiline(6));
+    if !warnings.is_empty() {
+        println!("{ERRICON}   non-fatal errors preparing analysis inputs:");
+        for error in warnings {
+            println!("      > {error}")
+        }
+    }
+
     println!();
-    print!("{}", analysis_report.display_multiline(4));
+    println!("    analysis report:");
+    print!("{}", analysis_report.display_multiline(6));
     print_start_end_time(start_time, end_time, 4);
 }
 
@@ -3758,23 +3783,26 @@ fn print_task_fm_rendezvous(details: &serde_json::Value) {
              total_alerts_requested,
              current_sitrep_alerts_requested,
              alerts_created,
+             alerts_already_existed,
+             stale_sitrep,
              errors,
          }| {
-            let already_created =
-                total_alerts_requested - alerts_created - errors.len();
             const REQUESTED: &str = "alerts requested:";
             const REQUESTED_THIS_SITREP: &str = "  requested in this sitrep:";
             const CREATED: &str = "  created in this activation:";
-            const ALREADY_CREATED: &str = "  already created:";
+            const ALREADY_EXISTED: &str = "  already existed:";
             const ERRORS: &str = "  errors:";
             const WIDTH: usize = const_max_len(&[
                 REQUESTED,
                 REQUESTED_THIS_SITREP,
                 CREATED,
-                ALREADY_CREATED,
+                ALREADY_EXISTED,
                 ERRORS,
             ]) + 1;
             pub const NUM_WIDTH: usize = 4;
+            if *stale_sitrep {
+                println!("{ERRICON}   sitrep was stale");
+            }
             println!(
                 "      {REQUESTED:<WIDTH$}{total_alerts_requested:>NUM_WIDTH$}"
             );
@@ -3784,7 +3812,7 @@ fn print_task_fm_rendezvous(details: &serde_json::Value) {
             );
             println!("      {CREATED:<WIDTH$}{alerts_created:>NUM_WIDTH$}");
             println!(
-                "      {ALREADY_CREATED:<WIDTH$}{already_created:>NUM_WIDTH$}"
+                "      {ALREADY_EXISTED:<WIDTH$}{alerts_already_existed:>NUM_WIDTH$}"
             );
             println!(
                 "{}   {ERRORS:<WIDTH$}{:>NUM_WIDTH$}",
@@ -3803,23 +3831,26 @@ fn print_task_fm_rendezvous(details: &serde_json::Value) {
              total_bundles_requested,
              current_sitrep_bundles_requested,
              bundles_created,
+             bundles_already_existed,
+             stale_sitrep,
              errors,
          }| {
-            let already_created =
-                total_bundles_requested - bundles_created - errors.len();
             const REQUESTED: &str = "support bundles requested:";
             const REQUESTED_THIS_SITREP: &str = "  requested in this sitrep:";
             const CREATED: &str = "  created in this activation:";
-            const ALREADY_CREATED: &str = "  already created:";
+            const ALREADY_EXISTED: &str = "  already existed:";
             const ERRORS: &str = "  errors:";
             const WIDTH: usize = const_max_len(&[
                 REQUESTED,
                 REQUESTED_THIS_SITREP,
                 CREATED,
-                ALREADY_CREATED,
+                ALREADY_EXISTED,
                 ERRORS,
             ]) + 1;
             pub const NUM_WIDTH: usize = 4;
+            if *stale_sitrep {
+                println!("{ERRICON}   sitrep was stale");
+            }
             println!(
                 "      {REQUESTED:<WIDTH$}{total_bundles_requested:>NUM_WIDTH$}"
             );
@@ -3829,7 +3860,7 @@ fn print_task_fm_rendezvous(details: &serde_json::Value) {
             );
             println!("      {CREATED:<WIDTH$}{bundles_created:>NUM_WIDTH$}");
             println!(
-                "      {ALREADY_CREATED:<WIDTH$}{already_created:>NUM_WIDTH$}"
+                "      {ALREADY_EXISTED:<WIDTH$}{bundles_already_existed:>NUM_WIDTH$}"
             );
             println!(
                 "{}   {ERRORS:<WIDTH$}{:>NUM_WIDTH$}",
@@ -3937,6 +3968,104 @@ fn print_task_trust_quorum_manager(details: &serde_json::Value) {
         TrustQuorumManagerStatus::Error(error) => {
             println!("    task did not complete successfully: {error}");
         }
+    }
+}
+
+fn print_task_populate_switch_ports(details: &serde_json::Value) {
+    fn print_one(
+        name: &str,
+        result: Result<SwitchPortPopulatorStatusKind, String>,
+    ) {
+        match result {
+            Ok(SwitchPortPopulatorStatusKind::Populated { num_ports }) => {
+                println!("{name}: populated {num_ports} ports");
+            }
+            Ok(SwitchPortPopulatorStatusKind::PreviouslyPopulated) => {
+                println!("{name} skipped: previously populated ports");
+            }
+            Err(err) => println!("{name} failed: {err}"),
+        }
+    }
+
+    let status = match serde_json::from_value::<SwitchPortPopulatorStatus>(
+        details.clone(),
+    ) {
+        Ok(status) => status,
+        Err(error) => {
+            eprintln!(
+                "warning: failed to interpret task details: {:?}: {:#?}",
+                error, details
+            );
+            return;
+        }
+    };
+
+    let SwitchPortPopulatorStatus { switch0, switch1 } = status;
+    print_one("switch0", switch0);
+    print_one("switch1", switch1);
+}
+
+fn print_task_switch_port_settings_manager(details: &serde_json::Value) {
+    let status = match serde_json::from_value::<SwitchPortSettingsManagerStatus>(
+        details.clone(),
+    ) {
+        Ok(status) => status,
+        Err(error) => {
+            eprintln!(
+                "warning: failed to interpret task details: {:?}: {:#?}",
+                error, details
+            );
+            return;
+        }
+    };
+
+    let SwitchPortSettingsManagerStatus { incomplete_bootstore_configs } =
+        status;
+
+    if incomplete_bootstore_configs.is_empty() {
+        println!(
+            "all racks appear to have a complete bootstore network config\n\
+             (note: this check is not yet complete -- there might still \
+             be errors that aren't in the report)"
+        );
+        return;
+    }
+
+    println!(
+        "{ERRICON} {} rack(s) skipped due to an incomplete bootstore network \
+         config:",
+        incomplete_bootstore_configs.len(),
+    );
+    for IncompleteBootstoreConfigReport { rack_id, problems } in
+        incomplete_bootstore_configs
+    {
+        println!("  rack {rack_id}: {} problem(s)", problems.len());
+        for problem in problems {
+            println!("    {ERRICON} {problem}");
+        }
+    }
+    println!(
+        "(note: this check is not yet complete -- there might be other \
+         errors that aren't in the report)"
+    );
+}
+
+fn print_task_physical_disk_adoption(details: &serde_json::Value) {
+    let status = match serde_json::from_value::<PhysicalDiskAdoptionStatus>(
+        details.clone(),
+    ) {
+        Ok(status) => status,
+        Err(error) => {
+            eprintln!(
+                "warning: failed to interpret task details: {:?}: {:#?}",
+                error, details
+            );
+            return;
+        }
+    };
+    println!("physical disks added: {}", status.disks_added);
+    for error in status.errors {
+        println!("{ERRICON} {error}");
     }
 }
 

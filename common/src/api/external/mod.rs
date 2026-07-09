@@ -12,7 +12,6 @@ pub mod http_pagination;
 pub use crate::address::IpVersion;
 pub use crate::api::internal::shared::AllowedSourceIps;
 use crate::update::ArtifactId;
-use anyhow::Context;
 use api_identity::ObjectIdentity;
 use chrono::DateTime;
 use chrono::Utc;
@@ -21,8 +20,6 @@ use dropshot::HttpError;
 pub use dropshot::PaginationOrder;
 pub use error::*;
 use futures::stream::BoxStream;
-use omicron_uuid_kinds::GenericUuid;
-use omicron_uuid_kinds::InstanceUuid;
 use omicron_uuid_kinds::SledUuid;
 use oxnet::IpNet;
 use oxnet::Ipv4Net;
@@ -643,6 +640,74 @@ impl From<ByteCount> for i64 {
     }
 }
 
+/// Size of blocks for a disk. Valid values are: 512, 2048, or 4096.
+#[derive(Copy, Clone, Debug, Deserialize, Serialize)]
+#[serde(try_from = "u32")]
+pub struct BlockSize(pub u32);
+
+impl schemars::JsonSchema for BlockSize {
+    fn schema_name() -> String {
+        "BlockSize".to_string()
+    }
+
+    fn json_schema(
+        _: &mut schemars::r#gen::SchemaGenerator,
+    ) -> schemars::schema::Schema {
+        schemars::schema::Schema::Object(schemars::schema::SchemaObject {
+            metadata: Some(Box::new(schemars::schema::Metadata {
+                id: None,
+                description: Some(
+                    "Valid values are: 512, 2048, or 4096.".to_string(),
+                ),
+                title: Some("Block size in bytes".to_string()),
+                ..Default::default()
+            })),
+            instance_type: Some(schemars::schema::InstanceType::Integer.into()),
+            enum_values: Some(vec![
+                serde_json::json!(512),
+                serde_json::json!(2048),
+                serde_json::json!(4096),
+            ]),
+            ..Default::default()
+        })
+    }
+}
+
+impl BlockSize {
+    pub fn to_bytes(&self) -> u64 {
+        u64::from(self.0)
+    }
+}
+
+impl TryFrom<u32> for BlockSize {
+    type Error = anyhow::Error;
+    fn try_from(x: u32) -> Result<BlockSize, Self::Error> {
+        if ![512, 2048, 4096].contains(&x) {
+            anyhow::bail!("invalid block size {}", x);
+        }
+
+        Ok(BlockSize(x))
+    }
+}
+
+impl From<ByteCount> for BlockSize {
+    fn from(bc: ByteCount) -> BlockSize {
+        BlockSize(bc.to_bytes() as u32)
+    }
+}
+
+impl From<BlockSize> for ByteCount {
+    fn from(bs: BlockSize) -> ByteCount {
+        ByteCount::from(bs.0)
+    }
+}
+
+impl From<BlockSize> for u64 {
+    fn from(bs: BlockSize) -> u64 {
+        u64::from(bs.0)
+    }
+}
+
 /// Generation numbers stored in the database, used for optimistic concurrency
 /// control
 //
@@ -1048,372 +1113,9 @@ pub struct IdentityMetadataUpdateParams {
 
 // Specific API resources
 
-// INSTANCES
+// INSTANCES -- all instance types have been moved to nexus-types.
 
-/// Running state of an Instance (primarily: booted or stopped)
-///
-/// This typically reflects whether it's starting, running, stopping, or stopped,
-/// but also includes states related to the Instance's lifecycle
-#[derive(
-    Copy,
-    Clone,
-    Debug,
-    Deserialize,
-    Eq,
-    Hash,
-    Ord,
-    PartialEq,
-    PartialOrd,
-    Serialize,
-    JsonSchema,
-)]
-#[serde(rename_all = "snake_case")]
-// TODO-polish: RFD 315
-pub enum InstanceState {
-    /// The instance is being created.
-    Creating,
-    /// The instance is currently starting up.
-    Starting,
-    /// The instance is currently running.
-    Running,
-    /// The instance has been requested to stop and a transition to "Stopped" is imminent.
-    Stopping,
-    /// The instance is currently stopped.
-    Stopped,
-    /// The instance is in the process of rebooting - it will remain
-    /// in the "rebooting" state until the VM is starting once more.
-    Rebooting,
-    /// The instance is in the process of migrating - it will remain
-    /// in the "migrating" state until the migration process is complete
-    /// and the destination propolis is ready to continue execution.
-    Migrating,
-    /// The instance is attempting to recover from a failure.
-    Repairing,
-    /// The instance has encountered a failure.
-    Failed,
-    /// The instance has been deleted.
-    Destroyed,
-}
-
-impl Display for InstanceState {
-    fn fmt(&self, f: &mut Formatter) -> FormatResult {
-        write!(f, "{}", self.label())
-    }
-}
-
-// TODO-cleanup why is this error type different from the one for Name?  The
-// reason is probably that Name can be provided by the user, so we want a
-// good validation error.  InstanceState cannot.  Still, is there a way to
-// unify these?
-impl TryFrom<&str> for InstanceState {
-    type Error = String;
-
-    fn try_from(variant: &str) -> Result<Self, Self::Error> {
-        let r = match variant {
-            "creating" => InstanceState::Creating,
-            "starting" => InstanceState::Starting,
-            "running" => InstanceState::Running,
-            "stopping" => InstanceState::Stopping,
-            "stopped" => InstanceState::Stopped,
-            "rebooting" => InstanceState::Rebooting,
-            "migrating" => InstanceState::Migrating,
-            "repairing" => InstanceState::Repairing,
-            "failed" => InstanceState::Failed,
-            "destroyed" => InstanceState::Destroyed,
-            _ => return Err(format!("Unexpected variant {}", variant)),
-        };
-        Ok(r)
-    }
-}
-
-impl InstanceState {
-    pub fn label(&self) -> &'static str {
-        match self {
-            InstanceState::Creating => "creating",
-            InstanceState::Starting => "starting",
-            InstanceState::Running => "running",
-            InstanceState::Stopping => "stopping",
-            InstanceState::Stopped => "stopped",
-            InstanceState::Rebooting => "rebooting",
-            InstanceState::Migrating => "migrating",
-            InstanceState::Repairing => "repairing",
-            InstanceState::Failed => "failed",
-            InstanceState::Destroyed => "destroyed",
-        }
-    }
-}
-
-/// The number of CPUs in an Instance
-#[derive(
-    Copy, Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq,
-)]
-pub struct InstanceCpuCount(pub u16);
-
-impl TryFrom<i64> for InstanceCpuCount {
-    type Error = anyhow::Error;
-
-    fn try_from(value: i64) -> Result<Self, Self::Error> {
-        Ok(InstanceCpuCount(u16::try_from(value).context("parsing CPU count")?))
-    }
-}
-
-impl From<&InstanceCpuCount> for i64 {
-    fn from(c: &InstanceCpuCount) -> Self {
-        i64::from(c.0)
-    }
-}
-
-/// The state of an `Instance`
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct InstanceRuntimeState {
-    pub run_state: InstanceState,
-    pub time_run_state_updated: DateTime<Utc>,
-    /// The timestamp of the most recent time this instance was automatically
-    /// restarted by the control plane.
-    ///
-    /// If this is not present, then this instance has not been automatically
-    /// restarted.
-    pub time_last_auto_restarted: Option<DateTime<Utc>>,
-}
-
-/// View of an Instance
-#[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct Instance {
-    // TODO is flattening here the intent in RFD 4?
-    #[serde(flatten)]
-    pub identity: IdentityMetadata,
-
-    /// ID for the project containing this instance
-    pub project_id: Uuid,
-
-    /// Number of CPUs allocated for this instance
-    pub ncpus: InstanceCpuCount,
-    /// Memory allocated for this instance
-    pub memory: ByteCount,
-    /// RFC1035-compliant hostname for the instance
-    pub hostname: String,
-
-    /// The ID of the disk used to boot this instance, if a specific one is assigned
-    pub boot_disk_id: Option<Uuid>,
-
-    #[serde(flatten)]
-    pub runtime: InstanceRuntimeState,
-
-    #[serde(flatten)]
-    pub auto_restart_status: InstanceAutoRestartStatus,
-
-    /// The CPU platform for this instance. If this is `null`, the instance
-    /// requires no particular CPU platform.
-    pub cpu_platform: Option<InstanceCpuPlatform>,
-}
-
-/// Status of control-plane driven automatic failure recovery for this instance.
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct InstanceAutoRestartStatus {
-    /// `true` if this instance's auto-restart policy will permit the control
-    /// plane to automatically restart it if it enters the `Failed` state.
-    //
-    // Rename this field, as the struct is `#[serde(flatten)]`ed into the
-    // `Instance` type, and we would like the field to be prefixed with
-    // `auto_restart`.
-    #[serde(rename = "auto_restart_enabled")]
-    pub enabled: bool,
-
-    /// The auto-restart policy configured for this instance, or `null` if no
-    /// explicit policy has been configured.
-    ///
-    /// This policy determines whether the instance should be automatically
-    /// restarted by the control plane on failure. If this is `null`, the
-    /// control plane will use the default policy when determining whether or
-    /// not to automatically restart this instance, which may or may not allow
-    /// it to be restarted. The value of the `auto_restart_enabled` field
-    /// indicates whether the instance will be auto-restarted, based on its
-    /// current policy or the default if it has no configured policy.
-    //
-    // Rename this field, as the struct is `#[serde(flatten)]`ed into the
-    // `Instance` type, and we would like the field to be prefixed with
-    // `auto_restart`.
-    #[serde(rename = "auto_restart_policy")]
-    pub policy: Option<InstanceAutoRestartPolicy>,
-
-    /// The time at which the auto-restart cooldown period for this instance
-    /// completes, permitting it to be automatically restarted again. If the
-    /// instance enters the `Failed` state, it will not be restarted until after
-    /// this time.
-    ///
-    /// If this is not present, then either the instance has never been
-    /// automatically restarted, or the cooldown period has already expired,
-    /// allowing the instance to be restarted immediately if it fails.
-    //
-    // Rename this field, as the struct is `#[serde(flatten)]`ed into the
-    // `Instance` type, and we would like the field to be prefixed with
-    // `auto_restart`.
-    #[serde(rename = "auto_restart_cooldown_expiration")]
-    pub cooldown_expiration: Option<DateTime<Utc>>,
-}
-
-/// A policy determining when an instance should be automatically restarted by
-/// the control plane.
-#[derive(
-    Copy, Clone, Debug, Deserialize, Serialize, JsonSchema, Eq, PartialEq,
-)]
-#[serde(rename_all = "snake_case")]
-pub enum InstanceAutoRestartPolicy {
-    /// The instance should not be automatically restarted by the control plane
-    /// if it fails.
-    Never,
-    /// If this instance is running and unexpectedly fails (e.g. due to a host
-    /// software crash or unexpected host reboot), the control plane will make a
-    /// best-effort attempt to restart it. The control plane may choose not to
-    /// restart the instance to preserve the overall availability of the system.
-    BestEffort,
-}
-
-/// A required CPU platform for an instance.
-///
-/// When an instance specifies a required CPU platform:
-///
-/// - The system may expose (to the VM) new CPU features that are only present
-///   on that platform (or on newer platforms of the same lineage that also
-///   support those features).
-/// - The instance must run on hosts that have CPUs that support all the
-///   features of the supplied platform.
-///
-/// That is, the instance is restricted to hosts that have the CPUs which
-/// support all features of the required platform, but in exchange the CPU
-/// features exposed by the platform are available for the guest to use. Note
-/// that this may prevent an instance from starting (if the hosts that could run
-/// it are full but there is capacity on other incompatible hosts).
-///
-/// If an instance does not specify a required CPU platform, then when
-/// it starts, the control plane selects a host for the instance and then
-/// supplies the guest with the "minimum" CPU platform supported by that host.
-/// This maximizes the number of hosts that can run the VM if it later needs to
-/// migrate to another host.
-///
-/// In all cases, the CPU features presented by a given CPU platform are a
-/// subset of what the corresponding hardware may actually support; features
-/// which cannot be used from a virtual environment or do not have full
-/// hypervisor support may be masked off. See RFD 314 for specific CPU features
-/// in a CPU platform.
-#[derive(
-    Copy, Clone, Debug, Deserialize, Serialize, JsonSchema, Eq, PartialEq,
-)]
-#[serde(rename_all = "snake_case")]
-pub enum InstanceCpuPlatform {
-    /// An AMD Milan-like CPU platform.
-    AmdMilan,
-
-    /// An AMD Turin-like CPU platform.
-    // Note that there is only Turin, not Turin Dense - feature-wise there are
-    // collapsed together as the guest-visible platform is the same.
-    // If the two must be distinguished for instance placement, we'll want to
-    // track whatever the motivating constraint is more explicitly. CPU
-    // families, and especially the vendor code names, don't necessarily promise
-    // details about specific processor packaging choices.
-    AmdTurin,
-}
-
-// AFFINITY GROUPS
-
-/// Affinity policy used to describe "what to do when a request cannot be satisfied"
-///
-/// Used for both Affinity and Anti-Affinity Groups
-#[derive(
-    Clone, Copy, Debug, Deserialize, Hash, Eq, Serialize, PartialEq, JsonSchema,
-)]
-#[serde(rename_all = "snake_case")]
-pub enum AffinityPolicy {
-    /// If the affinity request cannot be satisfied, allow it anyway.
-    ///
-    /// This enables a "best-effort" attempt to satisfy the affinity policy.
-    Allow,
-
-    /// If the affinity request cannot be satisfied, fail explicitly.
-    Fail,
-}
-
-/// Describes the scope of affinity for the purposes of co-location.
-#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum FailureDomain {
-    /// Instances are considered co-located if they are on the same sled
-    Sled,
-}
-
-/// A member of an Affinity Group
-///
-/// Membership in a group is not exclusive - members may belong to multiple
-/// affinity / anti-affinity groups.
-///
-/// Affinity Groups can contain up to 32 members.
-// See: AFFINITY_GROUP_MAX_MEMBERS
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
-#[serde(tag = "type", content = "value", rename_all = "snake_case")]
-pub enum AffinityGroupMember {
-    /// An instance belonging to this group
-    ///
-    /// Instances can belong to up to 16 affinity groups.
-    // See: INSTANCE_MAX_AFFINITY_GROUPS
-    Instance {
-        #[schemars(with = "Uuid")]
-        id: InstanceUuid,
-        name: Name,
-        run_state: InstanceState,
-    },
-}
-
-impl SimpleIdentityOrName for AffinityGroupMember {
-    fn id(&self) -> Uuid {
-        match self {
-            AffinityGroupMember::Instance { id, .. } => *id.as_untyped_uuid(),
-        }
-    }
-
-    fn name(&self) -> &Name {
-        match self {
-            AffinityGroupMember::Instance { name, .. } => name,
-        }
-    }
-}
-
-/// A member of an Anti-Affinity Group
-///
-/// Membership in a group is not exclusive - members may belong to multiple
-/// affinity / anti-affinity groups.
-///
-/// Anti-Affinity Groups can contain up to 32 members.
-// See: ANTI_AFFINITY_GROUP_MAX_MEMBERS
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
-#[serde(tag = "type", content = "value", rename_all = "snake_case")]
-pub enum AntiAffinityGroupMember {
-    /// An instance belonging to this group
-    ///
-    /// Instances can belong to up to 16 anti-affinity groups.
-    // See: INSTANCE_MAX_ANTI_AFFINITY_GROUPS
-    Instance {
-        #[schemars(with = "Uuid")]
-        id: InstanceUuid,
-        name: Name,
-        run_state: InstanceState,
-    },
-}
-
-impl SimpleIdentityOrName for AntiAffinityGroupMember {
-    fn id(&self) -> Uuid {
-        match self {
-            AntiAffinityGroupMember::Instance { id, .. } => {
-                *id.as_untyped_uuid()
-            }
-        }
-    }
-
-    fn name(&self) -> &Name {
-        match self {
-            AntiAffinityGroupMember::Instance { name, .. } => name,
-        }
-    }
-}
+// AFFINITY GROUPS -- all affinity types have been moved to nexus-types.
 
 // DISKS
 
@@ -1435,7 +1137,7 @@ pub struct Disk {
     /// ID of image from which disk was created, if any
     pub image_id: Option<Uuid>,
     pub size: ByteCount,
-    pub block_size: ByteCount,
+    pub block_size: BlockSize,
     pub state: DiskState,
     pub device_path: String,
     pub disk_type: DiskType,
@@ -2780,398 +2482,6 @@ impl std::fmt::Display for Digest {
             }
         )
     }
-}
-
-/// An address lot and associated blocks resulting from creating an address lot.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-pub struct AddressLotCreateResponse {
-    /// The address lot that was created.
-    pub lot: AddressLot,
-
-    /// The address lot blocks that were created.
-    pub blocks: Vec<AddressLotBlock>,
-}
-
-/// An address lot and associated blocks resulting from viewing an address lot.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-pub struct AddressLotViewResponse {
-    /// The address lot.
-    pub lot: AddressLot,
-
-    /// The address lot blocks.
-    pub blocks: Vec<AddressLotBlock>,
-}
-
-/// Represents an address lot object, containing the id of the lot that can be
-/// used in other API calls.
-// TODO Add kind attribute to AddressLot
-// https://github.com/oxidecomputer/omicron/issues/3064
-#[derive(
-    ObjectIdentity, Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq,
-)]
-pub struct AddressLot {
-    #[serde(flatten)]
-    pub identity: IdentityMetadata,
-
-    /// Desired use of `AddressLot`
-    pub kind: AddressLotKind,
-}
-
-/// The kind associated with an address lot.
-#[derive(Copy, Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
-#[serde(rename_all = "snake_case")]
-pub enum AddressLotKind {
-    /// Infrastructure address lots are used for network infrastructure like
-    /// addresses assigned to rack switches.
-    Infra,
-
-    /// Pool address lots are used by IP pools.
-    Pool,
-}
-
-/// An address lot block is a part of an address lot and contains a range of
-/// addresses. The range is inclusive.
-#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
-pub struct AddressLotBlock {
-    /// The id of the address lot block.
-    pub id: Uuid,
-
-    /// The first address of the block (inclusive).
-    pub first_address: IpAddr,
-
-    /// The last address of the block (inclusive).
-    pub last_address: IpAddr,
-}
-
-/// A switch port settings identity whose id may be used to view additional
-/// details.
-#[derive(
-    ObjectIdentity, Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq,
-)]
-pub struct SwitchPortSettingsIdentity {
-    #[serde(flatten)]
-    pub identity: IdentityMetadata,
-}
-
-/// This structure maps a port settings object to a port settings groups. Port
-/// settings objects may inherit settings from groups. This mapping defines the
-/// relationship between settings objects and the groups they reference.
-#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
-pub struct SwitchPortSettingsGroups {
-    /// The id of a port settings object referencing a port settings group.
-    pub port_settings_id: Uuid,
-
-    /// The id of a port settings group being referenced by a port settings
-    /// object.
-    pub port_settings_group_id: Uuid,
-}
-
-/// A port settings group is a named object that references a port settings
-/// object.
-#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
-pub struct SwitchPortSettingsGroup {
-    #[serde(flatten)]
-    pub identity: IdentityMetadata,
-
-    /// The port settings that comprise this group.
-    pub port_settings_id: Uuid,
-}
-
-/// The link geometry associated with a switch port.
-#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
-#[serde(rename_all = "lowercase")]
-pub enum SwitchPortGeometry {
-    /// The port contains a single QSFP28 link with four lanes.
-    Qsfp28x1,
-
-    /// The port contains two QSFP28 links each with two lanes.
-    Qsfp28x2,
-
-    /// The port contains four SFP28 links each with one lane.
-    Sfp28x4,
-}
-
-/// A physical port configuration for a port settings object.
-#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
-pub struct SwitchPortConfig {
-    /// The id of the port settings object this configuration belongs to.
-    pub port_settings_id: Uuid,
-
-    /// The physical link geometry of the port.
-    pub geometry: SwitchPortGeometry,
-}
-
-/// The speed of a link.
-#[derive(Copy, Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
-#[serde(rename_all = "snake_case")]
-pub enum LinkSpeed {
-    /// Zero gigabits per second.
-    Speed0G,
-    /// 1 gigabit per second.
-    Speed1G,
-    /// 10 gigabits per second.
-    Speed10G,
-    /// 25 gigabits per second.
-    Speed25G,
-    /// 40 gigabits per second.
-    Speed40G,
-    /// 50 gigabits per second.
-    Speed50G,
-    /// 100 gigabits per second.
-    Speed100G,
-    /// 200 gigabits per second.
-    Speed200G,
-    /// 400 gigabits per second.
-    Speed400G,
-}
-
-/// The forward error correction mode of a link.
-#[derive(Copy, Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
-#[serde(rename_all = "snake_case")]
-pub enum LinkFec {
-    /// Firecode forward error correction.
-    Firecode,
-    /// No forward error correction.
-    None,
-    /// Reed-Solomon forward error correction.
-    Rs,
-}
-
-/// A link configuration for a port settings object.
-#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
-pub struct SwitchPortLinkConfig {
-    /// The port settings this link configuration belongs to.
-    pub port_settings_id: Uuid,
-
-    /// The name of this link.
-    pub link_name: Name,
-
-    /// The maximum transmission unit for this link.
-    pub mtu: u16,
-
-    /// The requested forward-error correction method.  If this is not
-    /// specified, the standard FEC for the underlying media will be applied
-    /// if it can be determined.
-    pub fec: Option<LinkFec>,
-
-    /// The configured speed of the link.
-    pub speed: LinkSpeed,
-
-    /// Whether or not the link has autonegotiation enabled.
-    pub autoneg: bool,
-
-    /// The link-layer discovery protocol service configuration for this
-    /// link.
-    pub lldp_link_config: Option<LldpLinkConfig>,
-
-    /// The tx_eq configuration for this link.
-    pub tx_eq_config: Option<TxEqConfig>,
-}
-
-/// A link layer discovery protocol (LLDP) service configuration.
-#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
-pub struct LldpLinkConfig {
-    /// The id of this LLDP service instance.
-    pub id: Uuid,
-
-    /// Whether or not the LLDP service is enabled.
-    pub enabled: bool,
-
-    /// The LLDP link name TLV.
-    pub link_name: Option<String>,
-
-    /// The LLDP link description TLV.
-    pub link_description: Option<String>,
-
-    /// The LLDP chassis identifier TLV.
-    pub chassis_id: Option<String>,
-
-    /// The LLDP system name TLV.
-    pub system_name: Option<String>,
-
-    /// The LLDP system description TLV.
-    pub system_description: Option<String>,
-
-    /// The LLDP management IP TLV.
-    pub management_ip: Option<IpAddr>,
-}
-
-/// Information about LLDP advertisements from other network entities directly
-/// connected to a switch port.  This structure contains both metadata about
-/// when and where the neighbor was seen, as well as the specific information
-/// the neighbor was advertising.
-#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
-pub struct LldpNeighbor {
-    // Unique ID assigned to this neighbor - only used for pagination
-    #[serde(skip)]
-    pub id: Uuid,
-
-    /// The port on which the neighbor was seen
-    pub local_port: String,
-
-    /// Initial sighting of this LldpNeighbor
-    pub first_seen: DateTime<Utc>,
-
-    /// Most recent sighting of this LldpNeighbor
-    pub last_seen: DateTime<Utc>,
-
-    /// The LLDP link name advertised by the neighbor
-    pub link_name: String,
-
-    /// The LLDP link description advertised by the neighbor
-    pub link_description: Option<String>,
-
-    /// The LLDP chassis identifier advertised by the neighbor
-    pub chassis_id: String,
-
-    /// The LLDP system name advertised by the neighbor
-    pub system_name: Option<String>,
-
-    /// The LLDP system description advertised by the neighbor
-    pub system_description: Option<String>,
-
-    /// The LLDP management IP(s) advertised by the neighbor
-    pub management_ip: Vec<lldp_protocol::types::ManagementAddress>,
-}
-
-impl SimpleIdentity for LldpNeighbor {
-    fn id(&self) -> Uuid {
-        self.id
-    }
-}
-
-/// Per-port tx-eq overrides.  This can be used to fine-tune the transceiver
-/// equalization settings to improve signal integrity.
-#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
-pub struct TxEqConfig {
-    /// Pre-cursor tap1
-    pub pre1: Option<i32>,
-    /// Pre-cursor tap2
-    pub pre2: Option<i32>,
-    /// Main tap
-    pub main: Option<i32>,
-    /// Post-cursor tap2
-    pub post2: Option<i32>,
-    /// Post-cursor tap1
-    pub post1: Option<i32>,
-}
-
-/// Describes the kind of an switch interface.
-#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
-#[serde(rename_all = "snake_case")]
-pub enum SwitchInterfaceKind {
-    /// Primary interfaces are associated with physical links. There is exactly
-    /// one primary interface per physical link.
-    Primary,
-
-    /// VLAN interfaces allow physical interfaces to be multiplexed onto
-    /// multiple logical links, each distinguished by a 12-bit 802.1Q Ethernet
-    /// tag.
-    Vlan,
-
-    /// Loopback interfaces are anchors for IP addresses that are not specific
-    /// to any particular port.
-    Loopback,
-}
-
-/// A switch port interface configuration for a port settings object.
-#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
-pub struct SwitchInterfaceConfig {
-    /// The port settings object this switch interface configuration belongs to.
-    pub port_settings_id: Uuid,
-
-    /// A unique identifier for this switch interface.
-    pub id: Uuid,
-
-    /// The name of this switch interface.
-    pub interface_name: Name,
-
-    /// Whether or not IPv6 is enabled on this interface.
-    pub v6_enabled: bool,
-
-    /// The switch interface kind.
-    pub kind: SwitchInterfaceKind,
-}
-
-/// A switch port VLAN interface configuration for a port settings object.
-#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
-pub struct SwitchVlanInterfaceConfig {
-    /// The switch interface configuration this VLAN interface configuration
-    /// belongs to.
-    pub interface_config_id: Uuid,
-
-    /// The virtual network id for this interface that is used for producing and
-    /// consuming 802.1Q Ethernet tags. This field has a maximum value of 4095
-    /// as 802.1Q tags are twelve bits.
-    pub vlan_id: u16,
-}
-
-/// A route configuration for a port settings object.
-#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
-pub struct SwitchPortRouteConfig {
-    /// The port settings object this route configuration belongs to.
-    pub port_settings_id: Uuid,
-
-    /// The interface name this route configuration is assigned to.
-    pub interface_name: Name,
-
-    /// The route's destination network.
-    pub dst: oxnet::IpNet,
-
-    /// The route's gateway address.
-    pub gw: IpAddr,
-
-    /// The VLAN identifier for the route. Use this if the gateway is reachable
-    /// over an 802.1Q tagged L2 segment.
-    pub vlan_id: Option<u16>,
-
-    /// Route RIB priority. Higher priority indicates precedence within and across
-    /// protocols.
-    pub rib_priority: Option<u8>,
-}
-
-/// An IP address configuration for a port settings object.
-#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
-pub struct SwitchPortAddressConfig {
-    /// The port settings object this address configuration belongs to.
-    pub port_settings_id: Uuid,
-
-    /// The id of the address lot block this address is drawn from.
-    pub address_lot_block_id: Uuid,
-
-    /// The IP address and prefix.
-    pub address: oxnet::IpNet,
-
-    /// An optional VLAN ID
-    pub vlan_id: Option<u16>,
-
-    /// The interface name this address belongs to.
-    pub interface_name: Name,
-}
-
-/// An IP address configuration for a port settings object.
-#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
-pub struct SwitchPortAddressView {
-    /// The port settings object this address configuration belongs to.
-    pub port_settings_id: Uuid,
-
-    /// The id of the address lot this address is drawn from.
-    pub address_lot_id: Uuid,
-
-    /// The name of the address lot this address is drawn from.
-    pub address_lot_name: Name,
-
-    /// The id of the address lot block this address is drawn from.
-    pub address_lot_block_id: Uuid,
-
-    /// The IP address and prefix.
-    pub address: oxnet::IpNet,
-
-    /// An optional VLAN ID
-    pub vlan_id: Option<u16>,
-
-    /// The interface name this address belongs to.
-    pub interface_name: Name,
 }
 
 /// Configuration of inbound ICMP allowed by API services.
