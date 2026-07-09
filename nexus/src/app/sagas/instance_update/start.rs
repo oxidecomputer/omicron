@@ -123,7 +123,7 @@ async fn siu_lock_instance(
     //    the instance has been deleted, in which case we can give up.
     //
     // This is necessary in order to satisfy the distributed saga requirement
-    // that exuting an action must be idempotent. Retrying transient database
+    // that executing an action must be idempotent. Retrying transient database
     // errors indefinitely is necessary to ensure idempotency because it is
     // possible that a previous execution of this action *did* succesfully
     // acquire the lock but crashed before it completed.
