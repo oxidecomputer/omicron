@@ -470,7 +470,9 @@ mod test {
     }
 
     /// Describes an organization within the database.
-    #[derive(Queryable, Insertable, Debug, Resource, Selectable)]
+    #[derive(
+        Queryable, Insertable, Debug, Resource, Selectable, PartialEq, Eq,
+    )]
     #[diesel(table_name = resource)]
     struct Resource {
         #[diesel(embed)]
@@ -636,6 +638,61 @@ mod test {
 
         // Make sure rcgen got incremented
         assert_eq!(collection_rcgen, 2);
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_insert_no_entries_into_collection() {
+        let logctx =
+            dev::test_setup_log("test_insert_no_entries_into_collection");
+        let db = TestDatabase::new_with_pool(&logctx.log).await;
+        let pool = db.pool();
+        let conn = setup_db(pool).await;
+
+        let collection_id = uuid::Uuid::new_v4();
+        let resource_id = uuid::Uuid::new_v4();
+
+        // Insert the collection so it's present later
+        diesel::insert_into(collection::table)
+            .values(vec![(
+                collection::dsl::id.eq(collection_id),
+                collection::dsl::name.eq("test"),
+                collection::dsl::description.eq("desc"),
+                collection::dsl::time_created.eq(Utc::now()),
+                collection::dsl::time_modified.eq(Utc::now()),
+                collection::dsl::rcgen.eq(1),
+            )])
+            .execute_async(&*conn)
+            .await
+            .unwrap();
+
+        let create_time = DateTime::from_timestamp(0, 0).unwrap();
+        let modify_time = DateTime::from_timestamp(1, 0).unwrap();
+        let result: Vec<Resource> = Collection::insert_resource(
+            collection_id,
+            diesel::insert_into(resource::table)
+                .values::<Vec<Resource>>(vec![]),
+        )
+        .insert_and_get_results_async(&conn)
+        .await
+        .unwrap();
+
+        assert_eq!(result, vec![]);
+
+        let collection_rcgen = collection::table
+            .find(collection_id)
+            .select(collection::dsl::rcgen)
+            .first_async::<i64>(&*conn)
+            .await
+            .unwrap();
+
+        // Make sure rcgen got incremented
+        assert_eq!(
+            collection_rcgen, 1,
+            "rcgen shouldn't be incremented if we didn't insert anything"
+        );
 
         db.terminate().await;
         logctx.cleanup_successful();
