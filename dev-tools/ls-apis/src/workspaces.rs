@@ -178,11 +178,8 @@ impl Workspaces {
         //
         // Loading each workspace involves running `cargo metadata`, which is
         // pretty I/O intensive.  Latency benefits significantly from
-        // parallelizing, though we have to respect the dependencies.  We can't
-        // look up a package in "maghemite" before we've loaded Maghemite.
-        //
-        // If we had many more repos than this, we'd probably want to limit the
-        // concurrency.
+        // parallelizing, though if we had many more repos than this, we'd
+        // probably want to limit the concurrency.
         let handles: Vec<_> = RELATED_REPOS
             .iter()
             .map(|repo_config| {
