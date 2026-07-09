@@ -389,8 +389,8 @@ fn find_repo_commit(
     // they all be the same commit.
     let candidates: BTreeSet<&String> = package_manifest
         .packages
-        .iter()
-        .filter_map(|(_, pkg)| match &pkg.source {
+        .values()
+        .filter_map(|pkg| match &pkg.source {
             PackageSource::Local { .. }
             | PackageSource::Composite { .. }
             | PackageSource::Manual => None,
