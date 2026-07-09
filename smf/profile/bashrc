@@ -20,7 +20,7 @@ case "$_hst" in
                 _hstc+="$C_CYAN$_switchid"
         fi
         # Fetch the first system name from lldpd.  If not configured this defaults
-        # to the scrimlet serial number 
+        # to the scrimlet serial number
         _systemname=$(curl --max-time 1 -H 'api-version: 1.0.0' -s http://localhost:12230/interface/ \
             | /opt/ooce/bin/jq -r '.[0].system_info.system_name')
         if (( $? == 0 )) && [[ -n "$_systemname" ]]; then
