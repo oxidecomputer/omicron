@@ -652,7 +652,6 @@ mod test {
         let conn = setup_db(pool).await;
 
         let collection_id = uuid::Uuid::new_v4();
-        let resource_id = uuid::Uuid::new_v4();
 
         // Insert the collection so it's present later
         diesel::insert_into(collection::table)
@@ -668,8 +667,6 @@ mod test {
             .await
             .unwrap();
 
-        let create_time = DateTime::from_timestamp(0, 0).unwrap();
-        let modify_time = DateTime::from_timestamp(1, 0).unwrap();
         let result: Vec<Resource> = Collection::insert_resource(
             collection_id,
             diesel::insert_into(resource::table)
@@ -679,7 +676,7 @@ mod test {
         .await
         .unwrap();
 
-        assert_eq!(result, vec![]);
+        assert_eq!(result, vec![], "inserting nothing should return nothing");
 
         let collection_rcgen = collection::table
             .find(collection_id)
