@@ -19,6 +19,15 @@ use std::collections::BTreeSet;
 use std::sync::Arc;
 use std::sync::LazyLock;
 
+/// A Git commit identifier (typically a full SHA-1 hash) identifying a
+/// specific revision of one of the related repositories.
+#[derive(Clone, Ord, PartialOrd, Eq, PartialEq)]
+pub struct GitCommit(String);
+NewtypeDebug! { () pub struct GitCommit(String); }
+NewtypeDeref! { () pub struct GitCommit(String); }
+NewtypeDisplay! { () pub struct GitCommit(String); }
+NewtypeFrom! { () pub struct GitCommit(String); }
+
 struct RelatedRepoConfig {
     repo_name: &'static str,
     expected_pkg_name: &'static str,
@@ -278,7 +287,7 @@ fn load_dependent_repo(
     pkgname: &str,
     extra_features: Option<CargoOpt>,
     ignored_non_clients: BTreeSet<ClientPackageName>,
-    expected_commit: &str,
+    expected_commit: &GitCommit,
 ) -> Result<Workspace> {
     // It's possible to have more than one non-workspace package with a given
     // name.  For example, Omicron references `dpd-client` in multiple ways:
@@ -305,7 +314,7 @@ fn load_dependent_repo(
         };
 
         // This is cheesy, but it works okay for now and fails safely.
-        if source.repr.contains(expected_commit) {
+        if source.repr.contains(expected_commit.as_str()) {
             found_pkg = Some(pkginfo);
             break;
         }
@@ -380,14 +389,14 @@ fn load_dependent_repo(
 fn find_repo_commit(
     package_manifest: &omicron_zone_package::config::Config,
     repo_name: &str,
-) -> Result<String> {
+) -> Result<GitCommit> {
     // We want to figure out which version of repo `repo_name` is actually
     // deployed on real systems.  To do that, we look at what's in the package
     // manifest.  All of the repos we care about are packaged into Omicron as
     // prebuilt packages.  The one hitch is that the same repo may appear
     // multiple times in the package manifest.  In that case, we require that
     // they all be the same commit.
-    let candidates: BTreeSet<&String> = package_manifest
+    let candidates: BTreeSet<GitCommit> = package_manifest
         .packages
         .values()
         .filter_map(|pkg| match &pkg.source {
@@ -395,7 +404,11 @@ fn find_repo_commit(
             | PackageSource::Composite { .. }
             | PackageSource::Manual => None,
             PackageSource::Prebuilt { repo, commit, .. } => {
-                if repo == repo_name { Some(commit) } else { None }
+                if repo == repo_name {
+                    Some(GitCommit::from(commit.clone()))
+                } else {
+                    None
+                }
             }
         })
         .collect();
