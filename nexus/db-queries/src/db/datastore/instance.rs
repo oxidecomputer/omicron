@@ -1612,47 +1612,68 @@ impl DataStore {
                 "current_gen" => ?current_gen,
             );
 
-            (instance, did_lock) = diesel::update(dsl::instance)
-                .filter(dsl::time_deleted.is_null())
-                .filter(dsl::id.eq(instance_id))
-                // If the generation is the same as the captured generation when we
-                // read the instance record to check if it was not locked, we can
-                // lock this instance. This is because changing the `updater_id`
-                // field always increments the generation number. Therefore, we
-                // want the update query to succeed if and only if the
-                // generation number remains the same as the generation when we
-                // last fetched the instance. This query is used equivalently to
-                // an atomic compare-and-swap instruction in the implementation
-                // of a non-distributed, single-process mutex.
-                .filter(dsl::updater_gen.eq(current_gen))
-                .set((
-                    dsl::updater_gen.eq(locked_gen),
-                    dsl::updater_id.eq(Some(updater_id)),
-                ))
-                .check_if_exists::<Instance>(instance_id)
-                .execute_and_check(
-                    &*self.pool_connection_authorized(opctx).await?,
-                )
-                .await
-                .map(|r| {
-                    // If we successfully updated the instance record, we have
-                    // acquired the lock; otherwise, we haven't --- either because
-                    // our generation is stale, or because the instance is already locked.
-                    let locked = match r.status {
-                        UpdateStatus::Updated => true,
-                        UpdateStatus::NotUpdatedButExists => false,
-                    };
-                    (r.found, locked)
-                })
-                .map_err(|e| {
-                    public_error_from_diesel(
-                        e,
-                        ErrorHandler::NotFoundByLookup(
-                            ResourceType::Instance,
-                            LookupType::ById(instance_id),
-                        ),
+            let UpdateAndQueryResult { status, found } =
+                diesel::update(dsl::instance)
+                    .filter(dsl::time_deleted.is_null())
+                    .filter(dsl::id.eq(instance_id))
+                    // If the generation is the same as the captured generation
+                    // when we read the instance record to check if it was not
+                    // locked, we can lock this instance. This is because
+                    // changing the `updater_id` field always increments the
+                    // generation number. Therefore, we want the update query to
+                    // succeed if and only if the generation number remains the
+                    // same as the generation when we last fetched the instance.
+                    // This query is used equivalently to an atomic
+                    // compare-and-swap instruction in the implementation of a
+                    // non-distributed, single-process mutex.
+                    .filter(dsl::updater_gen.eq(current_gen))
+                    .set((
+                        dsl::updater_gen.eq(locked_gen),
+                        dsl::updater_id.eq(Some(updater_id)),
+                    ))
+                    .check_if_exists::<Instance>(instance_id)
+                    .execute_and_check(
+                        &*self.pool_connection_authorized(opctx).await?,
                     )
-                })?;
+                    .await
+                    .map_err(|e| {
+                        public_error_from_diesel(
+                            e,
+                            ErrorHandler::NotFoundByLookup(
+                                ResourceType::Instance,
+                                LookupType::ById(instance_id),
+                            ),
+                        )
+                    })?;
+
+            match status {
+                // If we successfully updated the instance record, we have
+                // acquired the lock.
+                UpdateStatus::Updated => {
+                    did_lock = true;
+                }
+                // If the instance record has been soft-deleted, return
+                // `NotFound` explicitly. `check_if_exists` does not know
+                // about soft-deletion, so it will still return that it
+                // `found` something even if its `time_deleted` is set.
+                UpdateStatus::NotUpdatedButExists
+                    if found.time_deleted().is_some() =>
+                {
+                    return Err(Error::not_found_by_id(
+                        ResourceType::Instance,
+                        &instance_id,
+                    )
+                    .into());
+                }
+                // Otherwise, the instance still exists but we haven't
+                // locked it --- either because our generation is stale, or
+                // because the instance is already locked.
+                UpdateStatus::NotUpdatedButExists => {
+                    did_lock = false;
+                }
+            };
+
+            instance = found;
         }
     }
 
@@ -2446,6 +2467,78 @@ mod tests {
         .expect("instance should unlock again");
         // ...but the `locked` bool should now be false.
         assert!(!unlocked, "instance should already have been unlocked");
+
+        // Clean up.
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_locking_a_deleted_instance_fails_even_if_locked() {
+        // Setup
+        let logctx = dev::test_setup_log(
+            "test_locking_a_deleted_instance_fails_even_if_locked",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+        let (authz_project, _) = create_test_project(&datastore, &opctx).await;
+        let authz_instance = create_test_instance(
+            &datastore,
+            &opctx,
+            &authz_project,
+            "my-great-instance",
+        )
+        .await;
+        let saga_id = Uuid::new_v4();
+
+        // Move the instance into an "okay-to-delete" state...
+        datastore
+            .instance_update_runtime(
+                &InstanceUuid::from_untyped_uuid(authz_instance.id()),
+                &InstanceRuntimeState {
+                    time_updated: Utc::now(),
+                    generation: Generation(external::Generation::from_u32(2)),
+                    propolis_id: None,
+                    dst_propolis_id: None,
+                    migration_id: None,
+                    nexus_state: InstanceState::NoVmm,
+                    time_last_auto_restarted: None,
+                },
+            )
+            .await
+            .expect("should update state successfully");
+
+        // attempt to lock the instance once.
+        let lock = dbg!(
+            datastore
+                .instance_updater_lock(&opctx, &authz_instance, saga_id)
+                .await
+        )
+        .expect("instance should be locked");
+        assert_eq!(lock.updater_id, saga_id);
+
+        // delete it...
+        dbg!(datastore.project_delete_instance(&opctx, &authz_instance).await)
+            .expect("instance should be deleted");
+
+        // ...and a subsequent atetmpt to lock the instance should realize it's
+        // gone.
+        let err = dbg!(
+            datastore
+                .instance_updater_lock(&opctx, &authz_instance, saga_id)
+                .await
+        )
+        .expect_err(
+            "instance_updater_lock should fail after the instance is deleted",
+        );
+        assert!(
+            matches!(
+                err,
+                UpdaterLockError::Query(Error::ObjectNotFound { .. })
+            ),
+            "expected locking a deleted instance to fail with \
+            `ObjectNotFound`, but got {err:?} instead"
+        );
 
         // Clean up.
         db.terminate().await;
