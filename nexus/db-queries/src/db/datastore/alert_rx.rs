@@ -1296,6 +1296,15 @@ mod test {
             "test.quux.**",
         )
         .await;
+        // Not actually subscribed to anything!
+        let _test_nonexistent_class = create_rx(
+            &datastore,
+            &opctx,
+            &mut all_rxs,
+            "test-nonexistent-class",
+            "test.nonexistent.*",
+        )
+        .await;
 
         // Before we check whether the receivers are subscribed to the expected
         // event classes, we must generate exact subscriptions for their globs.
