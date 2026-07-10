@@ -1249,6 +1249,71 @@ mod test {
     }
 
     #[tokio::test]
+    async fn test_queryable_silently_swaps_same_typed_columns() {
+        let logctx = dev::test_setup_log(
+            "test_queryable_silently_swaps_same_typed_columns",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+        let rx = create_receiver(
+            datastore,
+            opctx,
+            "positional-decoding",
+            Vec::new(),
+        )
+        .await;
+        let rx_id = rx.rx.id().into_untyped_uuid();
+        let secret_gen = Generation::try_from(2_i64).unwrap();
+        let subscription_gen = Generation::try_from(3_i64).unwrap();
+        let conn = datastore.pool_connection_authorized(opctx).await.unwrap();
+
+        diesel::update(rx_dsl::alert_receiver.find(rx_id))
+            .set((
+                rx_dsl::secret_gen.eq(secret_gen),
+                rx_dsl::subscription_gen.eq(subscription_gen),
+            ))
+            .execute_async(&*conn)
+            .await
+            .unwrap();
+
+        let correctly_ordered = rx_dsl::alert_receiver
+            .find(rx_id)
+            .select(AlertReceiver::as_select())
+            .get_result_async(&*conn)
+            .await
+            .unwrap();
+        assert_eq!(correctly_ordered.secret_gen, secret_gen);
+        assert_eq!(correctly_ordered.subscription_gen, subscription_gen);
+
+        // This has the same SQL type as `AlertReceiver::as_select()`, so
+        // Diesel accepts it even though the two generation columns are in the
+        // opposite order from the model fields.
+        let incorrectly_ordered = rx_dsl::alert_receiver
+            .find(rx_id)
+            .select((
+                (
+                    rx_dsl::id,
+                    rx_dsl::name,
+                    rx_dsl::description,
+                    rx_dsl::time_created,
+                    rx_dsl::time_modified,
+                    rx_dsl::time_deleted,
+                ),
+                rx_dsl::subscription_gen,
+                rx_dsl::secret_gen,
+                rx_dsl::endpoint,
+            ))
+            .get_result_async::<AlertReceiver>(&*conn)
+            .await
+            .unwrap();
+        assert_eq!(incorrectly_ordered.secret_gen, subscription_gen);
+        assert_eq!(incorrectly_ordered.subscription_gen, secret_gen);
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
     async fn test_webhook_rx_update_fails_when_receiver_deleted() {
         let logctx = dev::test_setup_log(
             "test_webhook_rx_update_fails_when_receiver_deleted",
