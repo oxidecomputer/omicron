@@ -1724,11 +1724,11 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         authz_instance: &authz::Instance,
-        parent_lock: UpdaterLock,
+        parent_lock: &UpdaterLock,
         child_lock_id: Uuid,
     ) -> Result<UpdaterLock, UpdaterLockError> {
         use nexus_db_schema::schema::instance::dsl;
-        let UpdaterLock { updater_id: parent_id, locked_gen } = parent_lock;
+        let &UpdaterLock { updater_id: parent_id, locked_gen } = parent_lock;
         let instance_id = authz_instance.id();
         let new_gen = Generation(locked_gen.0.next());
 
