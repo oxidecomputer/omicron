@@ -140,6 +140,7 @@ impl OximeterArgs {
 #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
 struct Producer {
     id: Uuid,
+    kind: String,
     address: SocketAddr,
     interval: String,
 }
@@ -148,6 +149,7 @@ impl From<ProducerEndpoint> for Producer {
     fn from(p: ProducerEndpoint) -> Self {
         Self {
             id: p.id,
+            kind: p.kind.to_string(),
             address: p.address.parse().unwrap(),
             interval: duration_to_humantime(&p.interval),
         }
@@ -164,6 +166,7 @@ const WIDTH: usize = 12;
 fn print_producer_details(details: ProducerDetails) {
     println!();
     println!("{:>WIDTH$}: {}", "ID", details.id);
+    println!("{:>WIDTH$}: {:?}", "Kind", details.kind);
     println!("{:>WIDTH$}: {}", "Address", details.address);
     println!(
         "{:>WIDTH$}: {}",
@@ -258,6 +261,7 @@ mod tests {
     use chrono::Utc;
     use oximeter_client::types::FailedCollection;
     use oximeter_client::types::ProducerDetails;
+    use oximeter_client::types::ProducerKind;
     use oximeter_client::types::SuccessfulCollection;
     use std::time::Duration;
     use uuid::Uuid;
@@ -267,6 +271,7 @@ mod tests {
         let now = Utc::now();
         let details = ProducerDetails {
             id: Uuid::new_v4(),
+            kind: ProducerKind::SledAgent,
             address: "[::1]:12345".parse().unwrap(),
             interval: Duration::from_secs(10).into(),
             last_success: Some(SuccessfulCollection {
@@ -289,6 +294,7 @@ mod tests {
         let now = Utc::now();
         let details = ProducerDetails {
             id: Uuid::new_v4(),
+            kind: ProducerKind::SledAgent,
             interval: Duration::from_secs(10).into(),
             address: "[::1]:12345".parse().unwrap(),
             last_success: Some(SuccessfulCollection {
