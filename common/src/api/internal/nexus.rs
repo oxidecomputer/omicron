@@ -60,6 +60,17 @@ pub enum ProducerKind {
     ManagementGateway,
 }
 
+impl ProducerKind {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::SledAgent => "sled_agent",
+            Self::Service => "service",
+            Self::Instance => "instance",
+            Self::ManagementGateway => "management_gateway",
+        }
+    }
+}
+
 /// Information announced by a metric server, used so that clients can contact it and collect
 /// available metric data from it.
 #[derive(Clone, Copy, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]

@@ -14,7 +14,7 @@ description = "Total number of successful collections from a producer"
 units = "count"
 datum_type = "cumulative_u64"
 versions = [
-    { added_in = 1, fields = [ "base_route", "producer_id", "producer_ip", "producer_port" ] }
+    { added_in = 1, fields = [ "base_route", "producer_id", "producer_kind", "producer_ip", "producer_port" ] }
 ]
 
 [[metrics]]
@@ -23,7 +23,7 @@ description = "Total number of failed collections from a producer"
 units = "count"
 datum_type = "cumulative_u64"
 versions = [
-    { added_in = 1, fields = [ "base_route", "producer_id", "producer_ip", "producer_port", "reason" ] }
+    { added_in = 1, fields = [ "base_route", "producer_id", "producer_kind", "producer_ip", "producer_port", "reason" ] }
 ]
 
 [[metrics]]
@@ -50,7 +50,7 @@ description = "Total number of samples collected from a producer"
 units = "count"
 datum_type = "cumulative_u64"
 versions = [
-    { added_in = 1, fields = [ "base_route", "producer_id", "producer_ip", "producer_port" ] }
+    { added_in = 1, fields = [ "base_route", "producer_id", "producer_kind", "producer_ip", "producer_port" ] }
 ]
 
 [fields.base_route]
@@ -76,6 +76,10 @@ description = "Name of collector metrics destination"
 [fields.producer_id]
 type = "uuid"
 description = "UUID of the metric producer instance"
+
+[fields.producer_kind]
+type = "string"
+description = "Kind of the metric producer instance"
 
 [fields.producer_ip]
 type = "ip_addr"

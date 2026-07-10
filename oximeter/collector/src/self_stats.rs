@@ -161,6 +161,7 @@ impl CollectionTaskStats {
             collector,
             collections: Collections {
                 producer_id: producer.id,
+                producer_kind: producer.kind.as_str().into(),
                 producer_ip: producer.address.ip(),
                 producer_port: producer.address.port(),
                 base_route: "".into(),
@@ -169,6 +170,7 @@ impl CollectionTaskStats {
             failed_collections: BTreeMap::new(),
             samples_collected: SamplesCollected {
                 producer_id: producer.id,
+                producer_kind: producer.kind.as_str().into(),
                 producer_ip: producer.address.ip(),
                 producer_port: producer.address.port(),
                 base_route: "".into(),
@@ -213,6 +215,7 @@ impl CollectionTaskStats {
         self.failed_collections.entry(reason).or_insert_with(|| {
             FailedCollections {
                 producer_id: self.collections.producer_id,
+                producer_kind: self.collections.producer_kind.clone(),
                 producer_ip: self.collections.producer_ip,
                 producer_port: self.collections.producer_port,
                 base_route: self.collections.base_route.clone(),
