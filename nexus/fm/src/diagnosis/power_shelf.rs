@@ -7,7 +7,7 @@ use crate::SitrepBuilder;
 use crate::ereport;
 use crate::ereport::Ereport;
 use anyhow::Context;
-use iddqd::{IdHashItem, IdHashMap, IdOrdItem, IdOrdMap, id_upcast};
+use iddqd::{IdOrdItem, IdOrdMap, id_upcast};
 use nexus_db_model::EreporterRestart;
 use nexus_types::alert::power_shelf as alert_types;
 use nexus_types::external_api;
@@ -20,8 +20,7 @@ use omicron_uuid_kinds::RackUuid;
 use serde::Deserialize;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
-use std::collections::HashMap;
-use std::collections::HashSet;
+use std::collections::BTreeSet;
 use std::fmt;
 use std::sync::Arc;
 use strum::VariantArray;
@@ -118,7 +117,7 @@ pub fn analyze(builder: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
             // important later.
             cases_by_psu
                 .entry(location)
-                .or_insert_with(HashSet::new)
+                .or_insert_with(BTreeSet::new)
                 .insert(case.id);
         }
     }
@@ -180,7 +179,7 @@ pub fn analyze(builder: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
                 );
                 cases_by_psu
                     .entry(location)
-                    .or_insert_with(HashSet::new)
+                    .or_insert_with(BTreeSet::new)
                     .insert(c.id);
                 cases_by_id
                     .insert_unique(PscCase::new(c.id))
@@ -313,7 +312,7 @@ impl fmt::Display for PsuSlot {
 /// A set of PSUs across any number of power shelves.
 #[derive(Default)]
 struct PsuSet {
-    shelves: HashMap<(RackUuid, u8), ShelfPsuSet>,
+    shelves: BTreeMap<(RackUuid, u8), ShelfPsuSet>,
 }
 
 impl PsuSet {
