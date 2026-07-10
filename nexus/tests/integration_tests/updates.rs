@@ -25,6 +25,7 @@ use nexus_types::external_api::update;
 use nexus_types::external_api::update::TufRepoUpload;
 use nexus_types::external_api::update::TufRepoUploadStatus;
 use omicron_common::api::external::TufArtifactMeta;
+use omicron_test_utils::dev::poll::wait_for_watch_channel_condition;
 use pretty_assertions::assert_eq;
 use semver::Version;
 use serde::Deserialize;
@@ -75,6 +76,23 @@ async fn get_repo_artifacts(
     // Sort artifacts by their ID for consistent comparison
     result.sort_by(|a, b| a.id.cmp(&b.id));
     result
+}
+
+/// Wait for in-flight artifact copy tasks on all sled agents to complete.
+///
+/// The wait is bounded so that a wedged copy task fails the test here, with
+/// context, rather than hanging until nextest's terminate timeout.
+async fn wait_for_all_copy_tasks(cptestctx: &ControlPlaneTestContext) {
+    tokio::time::timeout(
+        std::time::Duration::from_secs(60),
+        futures::future::join_all(cptestctx.sled_agents.iter().map(
+            |sled_agent| {
+                sled_agent.sled_agent().artifact_store().wait_for_copy_tasks()
+            },
+        )),
+    )
+    .await
+    .expect("sled agent copy tasks completed within 60 seconds");
 }
 
 pub struct TestTrustRoot {
@@ -299,10 +317,7 @@ async fn test_repo_upload() -> Result<()> {
     assert_eq!(status.local_repos, 1);
 
     // Wait for all the copy requests to complete.
-    futures::future::join_all(cptestctx.sled_agents.iter().map(|sled_agent| {
-        sled_agent.sled_agent().artifact_store().wait_for_copy_tasks()
-    }))
-    .await;
+    wait_for_all_copy_tasks(&cptestctx).await;
 
     // Run the replication background task again; the local repos should be
     // dropped.
@@ -556,6 +571,10 @@ async fn test_repo_upload() -> Result<()> {
     assert_eq!(status.last_run_counters.put_ok, 3);
     assert_eq!(status.last_run_counters.copy_ok, 1);
     assert_eq!(status.local_repos, 1);
+
+    // Wait for all the copy requests to complete.
+    wait_for_all_copy_tasks(&cptestctx).await;
+
     // Run the replication background task again; the local repos should be
     // dropped.
     let status =
@@ -600,10 +619,8 @@ async fn test_repo_upload() -> Result<()> {
         .await
         .unwrap();
     // Marking a repository as pruned bumps the generation number.
-    assert_eq!(
-        datastore.tuf_get_generation(&opctx).await.unwrap(),
-        4u32.into()
-    );
+    let pruned_generation = datastore.tuf_get_generation(&opctx).await.unwrap();
+    assert_eq!(pruned_generation, 4u32.into());
     // Run the replication background task; we should see new configs be put.
     let status =
         run_tuf_artifact_replication_step(&cptestctx.lockstep_client).await;
@@ -612,11 +629,34 @@ async fn test_repo_upload() -> Result<()> {
     assert_eq!(status.last_run_counters.list_ok, 4);
     assert_eq!(status.last_run_counters.sum(), 8);
     assert_eq!(status.generation, 4u32.into());
-    // Wait for the delete reconciler to finish on all sled agents.
-    futures::future::join_all(
-        delete_watchers.iter_mut().map(|watcher| watcher.changed()),
-    )
+
+    // Wait for the delete reconciler to complete a pass at (or after) the
+    // pruned generation on all sled agents.
+    //
+    // Waiting for `changed()` alone is racy, because these watchers were
+    // subscribed while a reconciler pass for the previous config write could
+    // still be in flight. Use the generation in the watch channel instead --
+    // the reconciler signals the generation it observed at the start of a pass
+    // once the pass completes, so a value >= the pruned generation guarantees a
+    // completed pass against a config without the pruned repo's artifacts.
+    futures::future::join_all(delete_watchers.iter_mut().enumerate().map(
+        |(i, watcher)| async move {
+            wait_for_watch_channel_condition(
+                watcher,
+                |generation| *generation >= pruned_generation,
+                std::time::Duration::from_secs(60),
+            )
+            .await
+            .unwrap_or_else(|err| {
+                panic!(
+                    "sled agent {i}: delete reconciler did not complete a \
+                     pass at generation {pruned_generation}: {err}"
+                )
+            });
+        },
+    ))
     .await;
+
     // Verify the installinator document from the initial repo is deleted.
     for sled_agent in &cptestctx.sled_agents {
         for dir in sled_agent.sled_agent().artifact_store().storage_paths() {
