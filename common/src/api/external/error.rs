@@ -420,8 +420,9 @@ impl From<Error> for HttpError {
 
             Error::ObjectAlreadyExists { type_name: t, object_name: n } => {
                 let message = format!("already exists: {} \"{}\"", t, n);
-                HttpError::for_bad_request(
+                HttpError::for_client_error(
                     Some(String::from("ObjectAlreadyExists")),
+                    dropshot::ClientErrorStatusCode::CONFLICT,
                     message,
                 )
             }

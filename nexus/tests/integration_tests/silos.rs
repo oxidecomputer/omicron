@@ -69,7 +69,7 @@ async fn test_silos(cptestctx: &ControlPlaneTestContext) {
     let error: dropshot::HttpErrorResponseBody =
         NexusRequest::expect_failure_with_body(
             client,
-            StatusCode::BAD_REQUEST,
+            StatusCode::CONFLICT,
             Method::POST,
             "/v1/system/silos",
             &silo::SiloCreate {
