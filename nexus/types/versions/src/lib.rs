@@ -95,3 +95,5 @@ pub mod v2026_06_05_00;
 pub mod v2026_06_08_00;
 #[path = "bgp_configuration_update/mod.rs"]
 pub mod v2026_06_10_00;
+#[path = "bgp_announce_set_list_results_page/mod.rs"]
+pub mod v2026_07_03_00;

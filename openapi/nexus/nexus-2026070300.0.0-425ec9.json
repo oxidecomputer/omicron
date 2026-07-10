@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "2026061000.0.0"
+    "version": "2026070300.0.0"
   },
   "paths": {
     "/device/auth": {
@@ -10829,11 +10829,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "title": "Array_of_BgpAnnounceSet",
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/BgpAnnounceSet"
-                  }
+                  "$ref": "#/components/schemas/BgpAnnounceSetResultsPage"
                 }
               }
             }
@@ -17396,6 +17392,27 @@
           "announcement",
           "description",
           "name"
+        ]
+      },
+      "BgpAnnounceSetResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BgpAnnounceSet"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
         ]
       },
       "BgpAnnouncement": {

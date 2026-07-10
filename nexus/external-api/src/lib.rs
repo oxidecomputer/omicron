@@ -86,6 +86,7 @@ api_versions!([
     // |  date-based version should be at the top of the list.
     // v
     // (next_yyyy_mm_dd_nn, IDENT),
+    (2026_07_03_00, BGP_ANNOUNCE_SET_LIST_RESULTS_PAGE),
     (2026_06_10_00, BGP_CONFIGURATION_UPDATE),
     (2026_06_08_00, INSTANCE_CPU_TYPE_TURIN_V2),
     (2026_06_05_00, EXTERNAL_JUMBO_FRAMES),
@@ -5883,14 +5884,35 @@ pub trait NexusExternalApi {
         method = GET,
         path = "/v1/system/networking/bgp-announce-set",
         tags = ["system/networking"],
+        versions = VERSION_BGP_ANNOUNCE_SET_LIST_RESULTS_PAGE..,
     }]
     async fn networking_bgp_announce_set_list(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<PaginatedByNameOrId>,
     ) -> Result<
-        HttpResponseOk<Vec<latest::networking::BgpAnnounceSet>>,
+        HttpResponseOk<ResultsPage<latest::networking::BgpAnnounceSet>>,
         HttpError,
     >;
+
+    /// List BGP announce sets
+    #[endpoint {
+        operation_id = "networking_bgp_announce_set_list",
+        method = GET,
+        path = "/v1/system/networking/bgp-announce-set",
+        tags = ["system/networking"],
+        versions = ..VERSION_BGP_ANNOUNCE_SET_LIST_RESULTS_PAGE,
+    }]
+    async fn networking_bgp_announce_set_list_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedByNameOrId>,
+    ) -> Result<
+        HttpResponseOk<Vec<v2025_11_20_00::networking::BgpAnnounceSet>>,
+        HttpError,
+    > {
+        let HttpResponseOk(page) =
+            Self::networking_bgp_announce_set_list(rqctx, query_params).await?;
+        Ok(HttpResponseOk(page.items.into_iter().map(Into::into).collect()))
+    }
 
     /// Delete BGP announce set
     #[endpoint {
