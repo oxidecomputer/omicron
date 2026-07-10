@@ -17,7 +17,6 @@ use omicron_zone_package::package::PackageSource;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::sync::Arc;
-use std::sync::LazyLock;
 
 /// A Git commit identifier (typically a full SHA-1 hash) identifying a
 /// specific revision of one of the related repositories.
@@ -31,45 +30,41 @@ NewtypeFrom! { () pub struct GitCommit(String); }
 struct RelatedRepoConfig {
     repo_name: &'static str,
     expected_pkg_name: &'static str,
-    extra_cargo_features: Option<CargoOpt>,
+    extra_cargo_features: &'static [&'static str],
 }
 
-static RELATED_REPOS: LazyLock<[RelatedRepoConfig; 5]> = LazyLock::new(|| {
-    [
-        RelatedRepoConfig {
-            repo_name: "crucible",
-            expected_pkg_name: "crucible-agent-client",
-            extra_cargo_features: None,
-        },
-        RelatedRepoConfig {
-            repo_name: "dendrite",
-            expected_pkg_name: "dpd-client",
-            extra_cargo_features: None,
-        },
-        RelatedRepoConfig {
-            repo_name: "propolis",
-            expected_pkg_name: "propolis-client",
-            // The artifacts shipped from the Propolis repo (particularly,
-            // `propolis-server`) are built with the `omicron-build`
-            // feature, which is not enabled by default.  Enable this
-            // feature when loading the Propolis repo metadata so that we
-            // see the dependency tree that a shipping system will have.
-            extra_cargo_features: Some(CargoOpt::SomeFeatures(vec![
-                String::from("omicron-build"),
-            ])),
-        },
-        RelatedRepoConfig {
-            repo_name: "maghemite",
-            expected_pkg_name: "mg-admin-client",
-            extra_cargo_features: None,
-        },
-        RelatedRepoConfig {
-            repo_name: "lldp",
-            expected_pkg_name: "lldpd-client",
-            extra_cargo_features: None,
-        },
-    ]
-});
+static RELATED_REPOS: [RelatedRepoConfig; 5] = [
+    RelatedRepoConfig {
+        repo_name: "crucible",
+        expected_pkg_name: "crucible-agent-client",
+        extra_cargo_features: &[],
+    },
+    RelatedRepoConfig {
+        repo_name: "dendrite",
+        expected_pkg_name: "dpd-client",
+        extra_cargo_features: &[],
+    },
+    RelatedRepoConfig {
+        repo_name: "propolis",
+        expected_pkg_name: "propolis-client",
+        // The artifacts shipped from the Propolis repo (particularly,
+        // `propolis-server`) are built with the `omicron-build` feature,
+        // which is not enabled by default.  Enable this feature when
+        // loading the Propolis repo metadata so that we see the dependency
+        // tree that a shipping system will have.
+        extra_cargo_features: &["omicron-build"],
+    },
+    RelatedRepoConfig {
+        repo_name: "maghemite",
+        expected_pkg_name: "mg-admin-client",
+        extra_cargo_features: &[],
+    },
+    RelatedRepoConfig {
+        repo_name: "lldp",
+        expected_pkg_name: "lldpd-client",
+        extra_cargo_features: &[],
+    },
+];
 
 /// Thin wrapper around a list of workspaces that makes it easy to query which
 /// workspace has which package
@@ -162,7 +157,7 @@ impl Workspaces {
                     format!("parsing {package_manifest_path:?}")
                 })?;
         let mut related_repo_commits = BTreeMap::new();
-        for related_repo in &*RELATED_REPOS {
+        for related_repo in &RELATED_REPOS {
             let commit =
                 find_repo_commit(&package_manifest, related_repo.repo_name)?;
             related_repo_commits.insert(related_repo.repo_name, commit);
@@ -193,12 +188,22 @@ impl Workspaces {
                 // unwrap(): we loaded a commit for each repo in the loop above
                 let expected_commit =
                     (*related_repo_commits.get(repo_name).unwrap()).clone();
+                let extra_features = if extra_cargo_features.is_empty() {
+                    None
+                } else {
+                    Some(CargoOpt::SomeFeatures(
+                        extra_cargo_features
+                            .iter()
+                            .map(|s| s.to_string())
+                            .collect(),
+                    ))
+                };
                 std::thread::spawn(move || {
                     load_dependent_repo(
                         &mine,
                         repo_name,
                         expected_pkg_name,
-                        extra_cargo_features.clone(),
+                        extra_features,
                         my_ignored,
                         &expected_commit,
                     )
