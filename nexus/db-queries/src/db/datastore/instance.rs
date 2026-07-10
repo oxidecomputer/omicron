@@ -1756,8 +1756,8 @@ impl DataStore {
 
         match result {
             // If we updated the record, the lock has been successfully
-            // inherited! Return `Ok(true)` to indicate that we have acquired
-            // the lock successfully.
+            // inherited! Return the new lock to indicate that we have acquired
+            // it successfully.
             UpdateAndQueryResult { status: UpdateStatus::Updated, .. } => {
                 slog::debug!(
                     &opctx.log,
@@ -1775,7 +1775,7 @@ impl DataStore {
             }
             // The generation has advanced past the generation at which the
             // lock was held. This means that we have already inherited the
-            // lock. Return `Ok(false)` here for idempotency.
+            // lock. Return `Ok` here for idempotency.
             UpdateAndQueryResult {
                 status: UpdateStatus::NotUpdatedButExists,
                 ref found,
