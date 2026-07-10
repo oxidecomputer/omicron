@@ -696,6 +696,21 @@ impl DataStore {
         subscriptions: Vec<AlertRxSubscription>,
         conn: &async_bb8_diesel::Connection<DbConnection>,
     ) -> Result<Vec<AlertRxSubscription>, TransactionError<Error>> {
+        // XXX(eliza): this is a rather sad workaround for
+        // https://github.com/oxidecomputer/omicron/issues/10788, in which it
+        // turns out that `DatastoreCollection::insert_resource` will basically
+        // do just about the worst thing possible when given an empty list of
+        // resources to insert. Ideally, we would make it not fail with a SQL
+        // syntax error in that case, but since the function's argument is "a
+        // glob of more or less completely arbitrary Diesel which is probably
+        // not entirely unlike an INSERT statement", it is not immediately clear
+        // to me how it would be able to detect that you are trying to insert
+        // nothing. So, we'll guard against that here for now.
+        if subscriptions.is_empty() {
+            // Inserting nothing does nothing, returning nothing!
+            return Ok(Vec::new());
+        }
+
         <AlertReceiver as DatastoreCollection<AlertRxSubscription>>::insert_resource(
             rx_id.into_untyped_uuid(),
         diesel::insert_into(subscription_dsl::alert_subscription)
@@ -1296,6 +1311,15 @@ mod test {
             "test.quux.**",
         )
         .await;
+        // Not actually subscribed to anything!
+        let _test_nonexistent_class = create_rx(
+            &datastore,
+            &opctx,
+            &mut all_rxs,
+            "test-nonexistent-class",
+            "test.nonexistent.*",
+        )
+        .await;
 
         // Before we check whether the receivers are subscribed to the expected
         // event classes, we must generate exact subscriptions for their globs.
@@ -1489,6 +1513,52 @@ mod test {
             .alert_rx_is_subscribed_to_alert(opctx, &authz_rx, &authz_quux_bar)
             .await;
         assert_eq!(is_subscribed_quux_bar, Ok(true));
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_insert_empty_subscription_batch() {
+        let logctx =
+            dev::test_setup_log("test_insert_empty_subscription_batch");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let rx = create_receiver(datastore, opctx, "test", Vec::new()).await.rx;
+
+        let conn = datastore
+            .pool_connection_for_tests()
+            .await
+            .expect("cant get ye conn");
+
+        let result = datastore
+            .add_exact_subscription_batch_on_conn(rx.id(), Vec::new(), &conn)
+            .await
+            .expect("creating an empty subscription batch shouldn't kill you");
+
+        assert!(
+            result.is_empty(),
+            "returned subscription batch should be empty, but found: {:?}",
+            result
+        );
+
+        let (authz_rx, _) = LookupPath::new(opctx, datastore)
+            .alert_receiver_id(rx.id())
+            .fetch()
+            .await
+            .expect("rx should exist");
+
+        let (subscriptions, _) = datastore
+            .webhook_rx_config_fetch(opctx, &authz_rx)
+            .await
+            .expect("alert receiver config should exist");
+
+        assert!(
+            subscriptions.is_empty(),
+            "alert receiver config should have no subscriptions, \
+            but found: {subscriptions:?}",
+        );
 
         db.terminate().await;
         logctx.cleanup_successful();
