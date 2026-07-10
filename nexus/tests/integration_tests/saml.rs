@@ -751,6 +751,8 @@ pub const SAML_RESPONSE_UNSIGNED: &str =
     include_str!("data/saml_response_unsigned.xml");
 pub const SAML_RESPONSE_WITH_COMMENT: &str =
     include_str!("data/saml_response_with_comment.xml");
+pub const SAML_RESPONSE_SIGNED_WITH_SHA1: &str =
+    include_str!("data/saml_response_signed_with_sha1.xml");
 pub const SAML_RESPONSE_WITH_GROUPS: &str =
     include_str!("data/saml_response_with_groups.xml");
 
@@ -1002,6 +1004,45 @@ fn test_reject_saml_response_with_xml_comment() {
     let body_bytes = serde_urlencoded::to_string(SamlLoginPost {
         saml_response: base64::engine::general_purpose::STANDARD
             .encode(&SAML_RESPONSE_WITH_COMMENT),
+        relay_state: None,
+    })
+    .unwrap();
+
+    let result = silo_saml_identity_provider.authenticated_subject(
+        &body_bytes,
+        // Set max_issue_delay so that SAMLResponse is valid
+        Some(
+            chrono::Utc::now()
+                - "2022-05-04T15:36:12.631Z"
+                    .parse::<chrono::DateTime<chrono::Utc>>()
+                    .unwrap()
+                + chrono::Duration::seconds(60),
+        ),
+    );
+
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_reject_saml_response_with_insecure_signature_algo() {
+    let silo_saml_identity_provider = SamlIdentityProvider {
+        idp_metadata_document_string: SAML_RESPONSE_IDP_DESCRIPTOR.to_string(),
+
+        idp_entity_id: "https://some.idp.test/oxide_rack/".to_string(),
+        sp_client_id: "https://customer.site/oxide_rack/saml".to_string(),
+        acs_url: "https://customer.site/oxide_rack/saml".to_string(),
+        slo_url: "http://slo".to_string(),
+        technical_contact_email: "technical@fake".to_string(),
+
+        public_cert: None,
+        private_key: None,
+
+        group_attribute_name: None,
+    };
+
+    let body_bytes = serde_urlencoded::to_string(SamlLoginPost {
+        saml_response: base64::engine::general_purpose::STANDARD
+            .encode(&SAML_RESPONSE_SIGNED_WITH_SHA1),
         relay_state: None,
     })
     .unwrap();
