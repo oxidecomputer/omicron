@@ -20,7 +20,6 @@ members = [
     "clients/nexus-client",
     "clients/nexus-lockstep-client",
     "clients/ntp-admin-client",
-    "clients/ntp-admin-v1-client",
     "clients/oxide-client",
     "clients/oximeter-client",
     "clients/repo-depot-client",
@@ -211,7 +210,6 @@ default-members = [
     "clients/nexus-client",
     "clients/nexus-lockstep-client",
     "clients/ntp-admin-client",
-    "clients/ntp-admin-v1-client",
     "clients/oxide-client",
     "clients/oximeter-client",
     "clients/repo-depot-client",
@@ -620,7 +618,6 @@ maplit = "1.0.2"
 newtype_derive = "0.1.6"
 ntp-admin-api = { path = "ntp-admin/api" }
 ntp-admin-client = { path = "clients/ntp-admin-client" }
-ntp-admin-v1-client = { path = "clients/ntp-admin-v1-client" }
 ntp-admin-types = { path = "ntp-admin/types" }
 ntp-admin-types-versions = { path = "ntp-admin/types/versions" }
 mg-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "dc84a6ce494a9d004568b67e22add2285a04d887" }
