@@ -968,33 +968,22 @@ fn test_reject_unsigned_saml_response() {
     assert!(result.is_err());
 }
 
-// Test accepting a correct SAML response that contains a XML comment in
-// saml:NameID, and ensuring that the full text node is extracted (and not a
-// substring).
+// Test rejecting a correct SAML response that contains a XML comment in
+// saml:NameID.
 //
-// This used to be a test that _rejected_ such responses, but a change to an
-// upstream dependency (quick-xml) caused the behavior around text nodes with
-// embedded comments to change. Specifically, consider:
+// This used to be a test that _accepted_ such responses, but a change to samael
+// caused it to reject this test's response document. An example of an embedded
+// comment is:
 //
 // <saml:NameId>user@example.com<!--comment-->.evil.com</saml:NameId>
 //
-// What should the text node for this element be?
+// Outright rejecting documents with comments will protect us from the
+// vulnerability.
 //
-// * Some XML parsing libraries just return "user@example.com". That leads to a
-//   vulnerability, where an attacker can get a response signed with a
-//   different email address than intended.
-// * Some XML libraries return "user@example.com.evil.com". This is safe,
-//   because the text after the comment hasn't been dropped. This is the behavior
-//   with quick-xml 0.30, and the one that we're testing here.
-// * Some XML libraries are unable to deserialize the document. This is also
-//   safe (and not particularly problematic because typically SAML responses
-//   aren't going to contain comments), and was the behavior with quick-xml
-//   0.23.
-//
-// See:
+// See also:
 // https://duo.com/blog/duo-finds-saml-vulnerabilities-affecting-multiple-implementations
 #[test]
-fn test_handle_saml_response_with_xml_comment() {
+fn test_reject_saml_response_with_xml_comment() {
     let silo_saml_identity_provider = SamlIdentityProvider {
         idp_metadata_document_string: SAML_RESPONSE_IDP_DESCRIPTOR.to_string(),
 
@@ -1029,9 +1018,7 @@ fn test_handle_saml_response_with_xml_comment() {
         ),
     );
 
-    let (authenticated_subject, _) =
-        result.expect("expected validation to succeed");
-    assert_eq!(authenticated_subject.external_id, "some@customer.com");
+    assert!(result.is_err());
 }
 
 // Test receiving a correct SAML response that has group attributes

@@ -7,6 +7,9 @@
 use anyhow::{Result, anyhow};
 use base64::Engine;
 use dropshot::HttpError;
+use samael::crypto::AllowedSignatureAlgorithm;
+use samael::crypto::CertificateDer;
+use samael::crypto::ReduceMode;
 use samael::metadata::ContactPerson;
 use samael::metadata::ContactType;
 use samael::metadata::EntityDescriptor;
@@ -109,7 +112,7 @@ impl SamlIdentityProvider {
             // sign authn request if keys were supplied
             let pkey = openssl::pkey::PKey::private_key_from_der(&key)
                 .map_err(|e| anyhow!(e.to_string()))?;
-            authn_request.signed_redirect(&encoded_relay_state, pkey)
+            authn_request.signed_redirect(&encoded_relay_state, &pkey)
         } else {
             authn_request.redirect(&encoded_relay_state)
         }
@@ -143,11 +146,27 @@ impl SamlIdentityProvider {
         sp_builder.acs_url(self.acs_url.clone());
         sp_builder.slo_url(self.slo_url.clone());
 
-        if let Some(cert) = &self.public_cert_bytes()? {
-            if let Ok(parsed) = openssl::x509::X509::from_der(&cert) {
-                sp_builder.certificate(Some(parsed));
-            }
+        if let Some(cert) = self.public_cert_bytes()? {
+            sp_builder.certificate(CertificateDer::from(cert));
         }
+
+        sp_builder.allowed_signature_algorithms(vec![
+            // List taken from Signature section of
+            // https://www.w3.org/TR/xmldsig-core1/#sec-AlgID, removing
+            // discouraged items.
+
+            // Required
+            AllowedSignatureAlgorithm::RsaSha256,
+            AllowedSignatureAlgorithm::EcdsaSha256,
+            // Optional
+            AllowedSignatureAlgorithm::RsaSha224,
+            AllowedSignatureAlgorithm::RsaSha384,
+            AllowedSignatureAlgorithm::RsaSha512,
+            AllowedSignatureAlgorithm::EcdsaSha224,
+            AllowedSignatureAlgorithm::EcdsaSha384,
+            AllowedSignatureAlgorithm::EcdsaSha512,
+            AllowedSignatureAlgorithm::DsaSha256,
+        ]);
 
         Ok(sp_builder.build()?)
     }
@@ -278,50 +297,22 @@ impl SamlIdentityProvider {
         }
 
         let assertion = service_provider
-            .parse_base64_response(&saml_post.saml_response, None)
+            .parse_base64_response_with_mode(
+                &saml_post.saml_response,
+                // We don't track the list of possible request ids, so this is
+                // None.
+                None,
+                // _Only_ signed content is retained, and all other notes are
+                // removed. Note in this process the ds:Signature notes
+                // themselves are also removed.
+                ReduceMode::default(),
+            )
             .map_err(|e| {
                 HttpError::for_bad_request(
                     None,
                     format!("could not extract SAMLResponse assertion! {}", e),
                 )
             })?;
-
-        // If the response isn't signed, then parse_response above will fail.
-        // Every assertion should also be signed. Check the signature and digest
-        // schemes against an explicit allow list.
-        let assertion_signature = assertion.signature.ok_or_else(|| {
-            HttpError::for_bad_request(
-                None,
-                "assertion is missing signature!".to_string(),
-            )
-        })?;
-
-        match assertion_signature.signed_info.signature_method.algorithm.value()  {
-            // List taken from Signature section of
-            // https://www.w3.org/TR/xmldsig-core1/#sec-AlgID, removing
-            // discouraged items.
-
-            // Required
-            "http://www.w3.org/2001/04/xmldsig-more#rsa-sha256" |
-            "http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha256" |
-            // Optional
-            "http://www.w3.org/2001/04/xmldsig-more#rsa-sha224" |
-            "http://www.w3.org/2001/04/xmldsig-more#rsa-sha384" |
-            "http://www.w3.org/2001/04/xmldsig-more#rsa-sha512" |
-            "http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha224" |
-            "http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha384" |
-            "http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha512" |
-            "http://www.w3.org/2009/xmldsig11#dsa-sha256" => {}
-
-            signature_algorithm => {
-                return Err(
-                    HttpError::for_bad_request(
-                        None,
-                        format!("signature algorithm {} is not allowed", signature_algorithm),
-                    )
-                );
-            }
-        }
 
         // What is being asserted? Extract subject
         let subject = assertion.subject.ok_or_else(|| {
