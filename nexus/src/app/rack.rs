@@ -423,6 +423,14 @@ impl super::Nexus {
                 },
             }?;
 
+            let (.., authz_bgp_announce_set) = self
+                .bgp_announce_set_lookup(
+                    opctx,
+                    announce_set_name.clone().into(),
+                )?
+                .lookup_for(authz::Action::Read)
+                .await?;
+
             match self
                 .db_datastore
                 .bgp_config_create(
@@ -442,6 +450,7 @@ impl super::Nexus {
                         checker: bgp_config.checker.clone(),
                         max_paths: bgp_config.max_paths,
                     },
+                    authz_bgp_announce_set.id(),
                 )
                 .await
             {
