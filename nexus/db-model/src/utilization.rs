@@ -15,15 +15,16 @@ use uuid::Uuid;
 pub struct SiloUtilization {
     pub silo_id: Uuid,
     pub silo_name: Name,
-    pub silo_discoverable: bool,
+
+    pub cpus_provisioned: i64,
+    pub memory_provisioned: ByteCount,
+    pub storage_provisioned: ByteCount,
 
     pub cpus_allocated: i64,
     pub memory_allocated: ByteCount,
     pub storage_allocated: ByteCount,
 
-    pub cpus_provisioned: i64,
-    pub memory_provisioned: ByteCount,
-    pub storage_provisioned: ByteCount,
+    pub silo_discoverable: bool,
 }
 
 impl From<SiloUtilization> for silo::SiloUtilization {

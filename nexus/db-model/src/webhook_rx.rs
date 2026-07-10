@@ -135,10 +135,10 @@ pub struct WebhookReceiverUpdate {
 pub struct WebhookSecret {
     #[diesel(embed)]
     pub identity: WebhookSecretIdentity,
+    pub time_deleted: Option<DateTime<Utc>>,
     #[diesel(column_name = rx_id)]
     pub alert_receiver_id: DbTypedUuid<AlertReceiverKind>,
     pub secret: String,
-    pub time_deleted: Option<DateTime<Utc>>,
 }
 
 impl WebhookSecret {

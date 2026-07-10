@@ -139,7 +139,6 @@ full_row_models! {
     address_lot: crate::address_lot::AddressLot => address_lot;
     affinity_group_instance_membership: crate::affinity::AffinityGroupInstanceMembership => affinity_group_instance_membership;
     affinity_group: crate::affinity::AffinityGroup => affinity_group;
-    alert_glob: crate::alert_subscription::AlertGlob => alert_glob;
     alert_receiver: crate::webhook_rx::AlertReceiver => alert_receiver;
     alert_request: crate::fm::AlertRequest => fm_alert_request;
     alert_rx_glob: crate::alert_subscription::AlertRxGlob => alert_glob;
@@ -148,7 +147,6 @@ full_row_models! {
     allow_list: crate::allow_list::AllowList => allow_list;
     anti_affinity_group_instance_membership: crate::affinity::AntiAffinityGroupInstanceMembership => anti_affinity_group_instance_membership;
     anti_affinity_group: crate::affinity::AntiAffinityGroup => anti_affinity_group;
-    audit_log_entry_init: crate::audit_log::AuditLogEntryInit => audit_log;
     audit_log_entry: crate::audit_log::AuditLogEntry => audit_log_complete;
     bfd_session: crate::bfd::BfdSession => bfd_session;
     bgp_announce_set: crate::bgp::BgpAnnounceSet => bgp_announce_set;
@@ -180,14 +178,11 @@ full_row_models! {
     cockroach_zone_id_to_node_id: crate::cockroachdb_node_id::CockroachZoneIdToNodeId => cockroachdb_zone_id_to_node_id;
     console_session: crate::console_session::ConsoleSession => console_session;
     crucible_dataset: crate::crucible_dataset::CrucibleDataset => crucible_dataset;
-    db_host_phase2_desired_slots: crate::inventory::DbHostPhase2DesiredSlots => inv_omicron_sled_config;
     db_metadata_nexus: crate::db_metadata::DbMetadataNexus => db_metadata_nexus;
     db_metadata: crate::db_metadata::DbMetadata => db_metadata;
-    db_omicron_measurements: crate::inventory::DbOmicronMeasurements => inv_omicron_sled_config;
     debug_log_blueprint_planning: crate::deployment::DebugLogBlueprintPlanning => debug_log_blueprint_planning;
     device_access_token: crate::device_auth::DeviceAccessToken => device_access_token;
     device_auth_request: crate::device_auth::DeviceAuthRequest => device_auth_request;
-    disk_runtime_state: crate::disk::DiskRuntimeState => disk;
     disk_type_crucible: crate::disk_type_crucible::DiskTypeCrucible => disk_type_crucible;
     disk_type_local_storage: crate::disk_type_local_storage::DiskTypeLocalStorage => disk_type_local_storage;
     disk: crate::disk::Disk => disk;
@@ -209,9 +204,7 @@ full_row_models! {
     hw_baseboard_id: crate::inventory::HwBaseboardId => hw_baseboard_id;
     identity_provider: crate::identity_provider::IdentityProvider => identity_provider;
     image: crate::image::Image => image;
-    instance_auto_restart: crate::instance::InstanceAutoRestart => instance;
     instance_network_interface: crate::network_interface::InstanceNetworkInterface => instance_network_interface;
-    instance_runtime_state: crate::instance::InstanceRuntimeState => instance;
     instance_ssh_key: crate::ssh_key::InstanceSshKey => instance_ssh_key;
     instance: crate::instance::Instance => instance;
     internet_gateway_ip_address: crate::internet_gateway::InternetGatewayIpAddress => internet_gateway_ip_address;
@@ -222,7 +215,6 @@ full_row_models! {
     inv_cockroach_status: crate::inventory::InvCockroachStatus => inv_cockroachdb_status;
     inv_collection_error: crate::inventory::InvCollectionError => inv_collection_error;
     inv_collection: crate::inventory::InvCollection => inv_collection;
-    inv_config_reconciler_status: crate::inventory::InvConfigReconcilerStatus => inv_sled_agent;
     inv_dataset: crate::inventory::InvDataset => inv_dataset;
     inv_fmd_host_case: crate::inventory::InvFmdHostCase => inv_fmd_host_case;
     inv_fmd_resource: crate::inventory::InvFmdResource => inv_fmd_resource;
@@ -238,14 +230,12 @@ full_row_models! {
     inv_mupdate_override_non_boot: crate::inventory::InvMupdateOverrideNonBoot => inv_mupdate_override_non_boot;
     inv_ntp_timesync: crate::inventory::InvNtpTimesync => inv_ntp_timesync;
     inv_nvme_disk_firmware: crate::inventory::InvNvmeDiskFirmware => inv_nvme_disk_firmware;
-    inv_omicron_file_source_resolver: crate::inventory::InvOmicronFileSourceResolver => inv_sled_agent;
     inv_omicron_sled_config_dataset: crate::inventory::InvOmicronSledConfigDataset => inv_omicron_sled_config_dataset;
     inv_omicron_sled_config_disk: crate::inventory::InvOmicronSledConfigDisk => inv_omicron_sled_config_disk;
     inv_omicron_sled_config_zone_nic: crate::inventory::InvOmicronSledConfigZoneNic => inv_omicron_sled_config_zone_nic;
     inv_omicron_sled_config_zone: crate::inventory::InvOmicronSledConfigZone => inv_omicron_sled_config_zone;
     inv_omicron_sled_config: crate::inventory::InvOmicronSledConfig => inv_omicron_sled_config;
     inv_physical_disk: crate::inventory::InvPhysicalDisk => inv_physical_disk;
-    inv_remove_mupdate_override: crate::inventory::InvRemoveMupdateOverride => inv_sled_config_reconciler;
     inv_root_of_trust: crate::inventory::InvRootOfTrust => inv_root_of_trust;
     inv_rot_page: crate::inventory::InvRotPage => inv_root_of_trust_page;
     inv_service_processor: crate::inventory::InvServiceProcessor => inv_service_processor;
@@ -293,8 +283,6 @@ full_row_models! {
     rendezvous_local_storage_dataset: crate::local_storage::RendezvousLocalStorageDataset => rendezvous_local_storage_dataset;
     rendezvous_local_storage_unencrypted_dataset: crate::local_storage::RendezvousLocalStorageUnencryptedDataset => rendezvous_local_storage_unencrypted_dataset;
     rendezvous_support_bundle_created: crate::fm::RendezvousSupportBundleCreated => rendezvous_support_bundle_created;
-    reporter: crate::ereport::Reporter => ereport;
-    resources: crate::sled_resource_vmm::Resources => sled_resource_vmm;
     role_assignment: crate::role_assignment::RoleAssignment => role_assignment;
     router_route: crate::vpc_route::RouterRoute => router_route;
     saga_node_event: crate::saga_types::SagaNodeEvent => saga_node_event;
@@ -320,7 +308,6 @@ full_row_models! {
     sled: crate::sled::Sled => sled;
     snapshot: crate::snapshot::Snapshot => snapshot;
     ssh_key: crate::ssh_key::SshKey => ssh_key;
-    subnet_pool_member: crate::external_subnet::SubnetPoolMember => subnet_pool_member;
     subnet_pool_silo_link: crate::external_subnet::SubnetPoolSiloLink => subnet_pool_silo_link;
     subnet_pool: crate::external_subnet::SubnetPool => subnet_pool;
     support_bundle_data_selection_ereports: crate::support_bundle::Ereports => support_bundle_data_selection_ereports;

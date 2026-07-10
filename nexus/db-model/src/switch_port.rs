@@ -8,6 +8,9 @@ use crate::{SqlU32, impl_enum_type};
 use chrono::{DateTime, Utc};
 use db_macros::Resource;
 use diesel::AsChangeset;
+use diesel::deserialize::{self, Queryable};
+use diesel::expression::Selectable;
+use diesel::pg::Pg;
 use ipnetwork::IpNetwork;
 use nexus_db_schema::schema::{
     lldp_link_config, switch_port, switch_port_settings,
@@ -420,21 +423,67 @@ impl Into<networking_types::SwitchPortSettingsGroups>
     }
 }
 
-#[derive(
-    Queryable,
-    Insertable,
-    Selectable,
-    Clone,
-    Debug,
-    Resource,
-    Serialize,
-    Deserialize,
-)]
+#[derive(Insertable, Clone, Debug, Resource, Serialize, Deserialize)]
 #[diesel(table_name = switch_port_settings_group)]
 pub struct SwitchPortSettingsGroup {
     #[diesel(embed)]
     pub identity: SwitchPortSettingsGroupIdentity,
     pub port_settings_id: Uuid,
+}
+
+// In the database schema, `port_settings_id` appears between `id` and the
+// remaining identity metadata columns even though it is not part of the
+// identity metadata. Avoiding this adapter would require reordering the table
+// columns by moving `port_settings_id` to the end of
+// `switch_port_settings_group`.
+#[derive(Queryable, Selectable)]
+#[diesel(table_name = switch_port_settings_group)]
+#[doc(hidden)]
+pub struct SwitchPortSettingsGroupRow {
+    id: Uuid,
+    port_settings_id: Uuid,
+    name: Name,
+    description: String,
+    time_created: DateTime<Utc>,
+    time_modified: DateTime<Utc>,
+    time_deleted: Option<DateTime<Utc>>,
+}
+
+type SwitchPortSettingsGroupSqlType =
+    <<SwitchPortSettingsGroupRow as Selectable<Pg>>::SelectExpression as diesel::Expression>::SqlType;
+
+impl Selectable<Pg> for SwitchPortSettingsGroup {
+    type SelectExpression =
+        <SwitchPortSettingsGroupRow as Selectable<Pg>>::SelectExpression;
+
+    fn construct_selection() -> Self::SelectExpression {
+        <SwitchPortSettingsGroupRow as Selectable<Pg>>::construct_selection()
+    }
+}
+
+impl Queryable<SwitchPortSettingsGroupSqlType, Pg> for SwitchPortSettingsGroup {
+    type Row = <SwitchPortSettingsGroupRow as Queryable<
+        SwitchPortSettingsGroupSqlType,
+        Pg,
+    >>::Row;
+
+    fn build(row: Self::Row) -> deserialize::Result<Self> {
+        let row = <SwitchPortSettingsGroupRow as Queryable<
+            SwitchPortSettingsGroupSqlType,
+            Pg,
+        >>::build(row)?;
+        Ok(Self {
+            identity: SwitchPortSettingsGroupIdentity {
+                id: row.id,
+                name: row.name,
+                description: row.description,
+                time_created: row.time_created,
+                time_modified: row.time_modified,
+                time_deleted: row.time_deleted,
+            },
+            port_settings_id: row.port_settings_id,
+        })
+    }
 }
 
 impl Into<networking_types::SwitchPortSettingsGroup>
@@ -485,12 +534,12 @@ impl Into<networking_types::SwitchPortConfig> for SwitchPortConfig {
 #[diesel(table_name = switch_port_settings_link_config)]
 pub struct SwitchPortLinkConfig {
     pub port_settings_id: Uuid,
-    pub lldp_link_config_id: Option<Uuid>,
     pub link_name: Name,
     pub mtu: SqlU16,
     pub fec: Option<SwitchLinkFec>,
     pub speed: SwitchLinkSpeed,
     pub autoneg: bool,
+    pub lldp_link_config_id: Option<Uuid>,
     pub tx_eq_config_id: Option<Uuid>,
 }
 
@@ -538,10 +587,10 @@ pub struct LldpLinkConfig {
     pub chassis_id: Option<String>,
     pub system_name: Option<String>,
     pub system_description: Option<String>,
-    pub management_ip: Option<IpNetwork>,
     pub time_created: DateTime<Utc>,
     pub time_modified: DateTime<Utc>,
     pub time_deleted: Option<DateTime<Utc>>,
+    pub management_ip: Option<IpNetwork>,
 }
 
 impl LldpLinkConfig {

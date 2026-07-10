@@ -157,16 +157,18 @@ impl From<IpPoolType> for ip_pool_types::IpPoolType {
 pub struct IpPool {
     #[diesel(embed)]
     pub identity: IpPoolIdentity,
-    /// The IP version of the pool.
-    pub ip_version: IpVersion,
     /// Child resource generation number, for optimistic concurrency control of
     /// the contained ranges.
     pub rcgen: i64,
 
-    /// Indicates what the pool is assigned for.
-    pub assignment: IpPoolAssignment,
+    /// The IP version of the pool.
+    pub ip_version: IpVersion,
+
     /// Pool type for unicast (default) vs multicast pools.
     pub pool_type: IpPoolType,
+
+    /// Indicates what the pool is assigned for.
+    pub assignment: IpPoolAssignment,
 }
 
 impl IpPool {

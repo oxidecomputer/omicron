@@ -90,12 +90,6 @@ pub struct NetworkInterface {
     // columns isn't idempotent in CRDB as of today.
     #[diesel(column_name = ip)]
     pub ipv4: Option<Ipv4Addr>,
-    /// The VPC-private IPv6 address of the interface.
-    ///
-    /// At least one of the `ip` and `ipv6` fields will always be `Some(_)`, a
-    /// constraint enforced by the database. Both may be `Some(_)` for
-    /// dual-stack interfaces.
-    pub ipv6: Option<Ipv6Addr>,
     /// The PCI slot on the instance where the interface appears.
     pub slot: SqlU8,
     /// True if this is the instance's primary interface.
@@ -105,6 +99,12 @@ pub struct NetworkInterface {
     /// send / receive traffic.
     #[diesel(column_name = transit_ips)]
     pub transit_ips_v4: Vec<crate::Ipv4Net>,
+    /// The VPC-private IPv6 address of the interface.
+    ///
+    /// At least one of the `ip` and `ipv6` fields will always be `Some(_)`, a
+    /// constraint enforced by the database. Both may be `Some(_)` for
+    /// dual-stack interfaces.
+    pub ipv6: Option<Ipv6Addr>,
     /// List of additional IPv6 networks on which the instance is allowed to
     /// send / receive traffic.
     pub transit_ips_v6: Vec<crate::Ipv6Net>,

@@ -82,13 +82,13 @@ use uuid::Uuid;
 pub struct Blueprint {
     pub id: DbTypedUuid<BlueprintKind>,
     pub parent_blueprint_id: Option<DbTypedUuid<BlueprintKind>>,
+    pub time_created: DateTime<Utc>,
+    pub creator: String,
+    pub comment: String,
     pub internal_dns_version: Generation,
     pub external_dns_version: Generation,
     pub cockroachdb_fingerprint: String,
     pub cockroachdb_setting_preserve_downgrade: Option<String>,
-    pub time_created: DateTime<Utc>,
-    pub creator: String,
-    pub comment: String,
     pub target_release_minimum_generation: Generation,
     pub nexus_generation: Generation,
     pub source: DbBpSource,
@@ -615,12 +615,12 @@ pub struct BpOmicronZone {
     pub snat_first_port: Option<SqlU16>,
     pub snat_last_port: Option<SqlU16>,
 
+    pub external_ip_id: Option<DbTypedUuid<ExternalIpKind>>,
+    pub filesystem_pool: DbTypedUuid<ZpoolKind>,
+
     disposition: DbBpZoneDisposition,
     disposition_expunged_as_of_generation: Option<Generation>,
     disposition_expunged_ready_for_cleanup: bool,
-
-    pub external_ip_id: Option<DbTypedUuid<ExternalIpKind>>,
-    pub filesystem_pool: DbTypedUuid<ZpoolKind>,
 
     pub image_source: DbBpZoneImageSource,
     pub image_artifact_sha256: Option<ArtifactHash>,
