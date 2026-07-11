@@ -603,6 +603,11 @@ pub async fn create_silo(
     .await
 }
 
+pub async fn delete_silo(client: &ClientTestContext, silo_name_or_id: &str) {
+    let url = format!("/v1/system/silos/{silo_name_or_id}");
+    object_delete(client, &url).await;
+}
+
 pub async fn create_silo_with_admin_group_name(
     client: &ClientTestContext,
     silo_name: &str,
