@@ -22,6 +22,10 @@ use diesel::ExpressionMethods;
 use diesel::OptionalExtension;
 use diesel::expression::SelectableHelper;
 use diesel::query_dsl::QueryDsl;
+use iddqd::IdOrdItem;
+use iddqd::IdOrdMap;
+use iddqd::id_upcast;
+use nexus_db_lookup::DbConnection;
 use nexus_db_lookup::LookupPath;
 use nexus_db_model::Alert;
 use nexus_db_model::AlertClass;
@@ -35,6 +39,9 @@ use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
 use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::datastore::WebhookDeliveryFilters;
+use nexus_db_queries::db::pagination::paginated;
+use nexus_db_schema::schema::alert_glob::dsl as glob_dsl;
+use nexus_db_schema::schema::alert_subscription::dsl as subscription_dsl;
 use nexus_db_schema::schema::webhook_delivery::dsl as delivery_dsl;
 use nexus_db_schema::schema::webhook_delivery_attempt::dsl as attempt_dsl;
 use nexus_types::external_api::alert as types;
@@ -367,7 +374,7 @@ async fn cmd_db_webhook(
     match &args.command {
         WebhookCommands::Receiver(WebhookRxArgs {
             command: WebhookRxCommands::Info(args),
-        }) => cmd_db_webhook_rx_info(datastore, fetch_opts, args).await,
+        }) => cmd_db_webhook_rx_info(opctx, datastore, fetch_opts, args).await,
         WebhookCommands::Receiver(WebhookRxArgs {
             command: WebhookRxCommands::List(args),
         }) => cmd_db_webhook_rx_list(opctx, datastore, fetch_opts, args).await,
@@ -450,32 +457,20 @@ async fn cmd_db_webhook_rx_list(
 }
 
 async fn cmd_db_webhook_rx_info(
+    opctx: &OpContext,
     datastore: &DataStore,
     fetch_opts: &DbFetchOptions,
     args: &WebhookRxInfoArgs,
 ) -> anyhow::Result<()> {
-    use nexus_db_schema::schema::alert_glob::dsl as glob_dsl;
-    use nexus_db_schema::schema::alert_subscription::dsl as subscription_dsl;
     use nexus_db_schema::schema::webhook_secret::dsl as secret_dsl;
 
     let conn = datastore.pool_connection_for_tests().await?;
-    let rx = lookup_webhook_rx(datastore, &args.receiver)
-        .await
-        .with_context(|| format!("loading webhook receiver {}", args.receiver))?
-        .ok_or_else(|| {
-            anyhow::anyhow!("no webhook receiver {} exists", args.receiver)
-        })?;
+    let (authz_rx, rx) =
+        lookup_webhook_rx(opctx, datastore, &args.receiver).await?;
 
     const NAME: &'static str = "name";
     const DESCRIPTION: &'static str = "description";
     const ENDPOINT: &'static str = "endpoint";
-    const GEN: &'static str = "generation";
-    const EXACT: &'static str = "exact subscriptions";
-    const GLOBS: &'static str = "glob subscriptions";
-    const GLOB_REGEX: &'static str = "  regex";
-    const GLOB_SCHEMA_VERSION: &'static str = "  schema version";
-    const GLOB_CREATED: &'static str = "  created at";
-    const GLOB_EXACT: &'static str = "  exact subscriptions";
     const WIDTH: usize = const_max_len(&[
         ID,
         NAME,
@@ -484,13 +479,6 @@ async fn cmd_db_webhook_rx_info(
         TIME_DELETED,
         TIME_MODIFIED,
         ENDPOINT,
-        GEN,
-        EXACT,
-        GLOBS,
-        GLOB_REGEX,
-        GLOB_SCHEMA_VERSION,
-        GLOB_CREATED,
-        GLOB_EXACT,
     ]);
 
     let AlertReceiver {
@@ -521,7 +509,7 @@ async fn cmd_db_webhook_rx_info(
     }
 
     println!("\n{:=<80}", "== SECRETS ");
-    println!("    {GEN:>WIDTH$}: {}", secret_gen.0);
+    println!("generation: {}", secret_gen.0);
 
     let query = secret_dsl::webhook_secret
         .filter(secret_dsl::rx_id.eq(id.into_untyped_uuid()))
@@ -575,75 +563,9 @@ async fn cmd_db_webhook_rx_info(
     }
 
     println!("\n{:=<80}", "== SUBSCRIPTIONS ");
-    println!("    {GEN:>WIDTH$}: {}", subscription_gen.0);
-
-    let exact = subscription_dsl::alert_subscription
-        .filter(subscription_dsl::rx_id.eq(id.into_untyped_uuid()))
-        .filter(subscription_dsl::glob.is_null())
-        .select(subscription_dsl::alert_class)
-        .load_async::<AlertClass>(&*conn)
-        .await;
-    match exact {
-        Ok(exact) => {
-            println!("    {EXACT:>WIDTH$}: {}", exact.len());
-            for alert_class in exact {
-                println!("    - {alert_class}");
-            }
-        }
-        Err(e) => {
-            eprintln!("failed to list exact subscriptions: {e}");
-        }
-    }
-
-    let globs = glob_dsl::alert_glob
-        .filter(glob_dsl::rx_id.eq(id.into_untyped_uuid()))
-        .select(db::model::AlertRxGlob::as_select())
-        .load_async::<db::model::AlertRxGlob>(&*conn)
-        .await;
-    match globs {
-        Ok(globs) => {
-            println!("    {GLOBS:>WIDTH$}: {}", globs.len());
-            for glob in globs {
-                let db::model::AlertRxGlob {
-                    rx_id: _,
-                    glob: db::model::AlertGlob { glob, regex },
-                    time_created,
-                    schema_version,
-                } = glob;
-                println!("    - {glob}");
-                println!("    {GLOB_CREATED:>WIDTH$}: {time_created}");
-                if let Some(v) = schema_version {
-                    println!("    {GLOB_SCHEMA_VERSION:>WIDTH$}: {v}")
-                } else {
-                    println!(
-                        "(i) {GLOB_SCHEMA_VERSION:>WIDTH$}: <not yet processed>",
-                    )
-                }
-
-                println!("    {GLOB_REGEX:>WIDTH$}: {regex}");
-                let exact = subscription_dsl::alert_subscription
-                    .filter(subscription_dsl::rx_id.eq(id.into_untyped_uuid()))
-                    .filter(subscription_dsl::glob.eq(glob))
-                    .select(subscription_dsl::alert_class)
-                    .load_async::<AlertClass>(&*conn)
-                    .await;
-                match exact {
-                    Ok(exact) => {
-                        println!("    {GLOB_EXACT:>WIDTH$}: {}", exact.len());
-                        for alert_class in exact {
-                            println!("      - {alert_class}")
-                        }
-                    }
-                    Err(e) => eprintln!(
-                        "failed to list exact subscriptions for glob: {e}"
-                    ),
-                }
-            }
-        }
-        Err(e) => {
-            eprintln!("failed to list glob subscriptions: {e}");
-        }
-    }
+    println!("generation: {}", subscription_gen.0);
+    println!();
+    display_rx_subscriptions(&authz_rx, fetch_opts, &conn).await?;
 
     Ok(())
 }
@@ -829,32 +751,23 @@ where
 
 /// Helper function to look up a webhook receiver with the given name or ID
 async fn lookup_webhook_rx(
+    opctx: &OpContext,
     datastore: &DataStore,
     name_or_id: &NameOrId,
-) -> anyhow::Result<Option<AlertReceiver>> {
-    use nexus_db_schema::schema::alert_receiver::dsl;
-
-    let conn = datastore.pool_connection_for_tests().await?;
-    match name_or_id {
+) -> anyhow::Result<(authz::AlertReceiver, AlertReceiver)> {
+    let lookup = LookupPath::new(opctx, datastore);
+    let rx_lookup = match name_or_id {
         NameOrId::Id(id) => {
-            dsl::alert_receiver
-                .filter(dsl::id.eq(*id))
-                .limit(1)
-                .select(AlertReceiver::as_select())
-                .get_result_async(&*conn)
-                .await
+            lookup.alert_receiver_id(AlertReceiverUuid::from_untyped_uuid(*id))
         }
         NameOrId::Name(name) => {
-            dsl::alert_receiver
-                .filter(dsl::name.eq(name.to_string()))
-                .limit(1)
-                .select(AlertReceiver::as_select())
-                .get_result_async(&*conn)
-                .await
+            lookup.alert_receiver_name_owned(name.clone().into())
         }
-    }
-    .optional()
-    .with_context(|| format!("loading webhook_receiver {name_or_id}"))
+    };
+    rx_lookup
+        .fetch()
+        .await
+        .with_context(|| format!("loading webhook receiver {name_or_id}"))
 }
 
 async fn cmd_db_webhook_delivery_info(
@@ -1293,6 +1206,155 @@ async fn cmd_db_alert_info(
             "/!\\ WEIRD: alert claims to have {num_dispatched} deliveries \
              dispatched, but no delivery records were found"
         )
+    }
+
+    Ok(())
+}
+
+async fn display_rx_subscriptions(
+    authz_rx: &authz::AlertReceiver,
+    fetch_opts: &DbFetchOptions,
+    conn: &async_bb8_diesel::Connection<DbConnection>,
+) -> Result<(), anyhow::Error> {
+    let rx_id = authz_rx.id();
+
+    let ctx =
+        || format!("loading glob subscriptions for alert receiver {rx_id}");
+
+    let pagparams: DataPageParams<'_, String> =
+        first_page(fetch_opts.fetch_limit);
+    let globs = paginated(glob_dsl::alert_glob, glob_dsl::glob, &pagparams)
+        .filter(glob_dsl::rx_id.eq(rx_id.into_untyped_uuid()))
+        .select(db::model::AlertRxGlob::as_select())
+        .load_async::<db::model::AlertRxGlob>(conn)
+        .await
+        .with_context(ctx)?;
+    check_limit(&globs, fetch_opts.fetch_limit, ctx);
+
+    // Load the exact subscriptions from the `alert_subscription` table. These
+    // include both subscriptions added directly by the user and the exact
+    // subscriptions expanded from glob subscriptions.
+    let ctx =
+        || format!("loading exact subscriptions for alert receiver {rx_id}");
+
+    let pagparams: DataPageParams<'_, AlertClass> =
+        first_page(fetch_opts.fetch_limit);
+    let subscriptions = paginated(
+        subscription_dsl::alert_subscription,
+        subscription_dsl::alert_class,
+        &pagparams,
+    )
+    .filter(subscription_dsl::rx_id.eq(rx_id.into_untyped_uuid()))
+    .select(db::model::AlertRxSubscription::as_select())
+    .load_async::<db::model::AlertRxSubscription>(conn)
+    .await
+    .with_context(ctx)?;
+    check_limit(&subscriptions, fetch_opts.fetch_limit, ctx);
+
+    #[derive(Clone, Copy, Tabled)]
+    struct GlobRow<'a> {
+        glob: &'a str,
+        regex: &'a str,
+        #[tabled(display_with = "display_reprocessed_at")]
+        reprocessed_at: Option<&'a nexus_db_model::SemverVersion>,
+        // Number of exact subscriptions generated by expanding this glob,
+        // tallied from the `alert_subscription` table below.
+        n_exact: usize,
+        #[tabled(display_with = "datetime_rfc3339_concise")]
+        time_created: &'a DateTime<Utc>,
+    }
+
+    impl<'a> IdOrdItem for GlobRow<'a> {
+        type Key<'k>
+            = &'k str
+        where
+            Self: 'k;
+
+        fn key(&self) -> Self::Key<'_> {
+            self.glob
+        }
+
+        id_upcast!();
+    }
+
+    fn display_reprocessed_at(
+        version: &Option<&nexus_db_model::SemverVersion>,
+    ) -> std::borrow::Cow<'static, str> {
+        if let Some(version) = version {
+            std::borrow::Cow::Owned(version.to_string())
+        } else {
+            std::borrow::Cow::Borrowed("<not yet reprocessed>")
+        }
+    }
+
+    let mut glob_rows: IdOrdMap<GlobRow<'_>> = globs
+        .iter()
+        .map(
+            |db::model::AlertRxGlob {
+                 rx_id: _,
+                 glob: db::model::AlertGlob { glob, regex },
+                 schema_version,
+                 time_created,
+             }| GlobRow {
+                glob,
+                regex,
+                reprocessed_at: schema_version.as_ref(),
+                n_exact: 0,
+                time_created,
+            },
+        )
+        .collect();
+
+    // Count the number of exact subscriptions generated from each glob.
+    let mut total_from_globs = 0;
+    for glob in subscriptions.iter().filter_map(|s| s.glob.as_deref()) {
+        if let Some(mut row) = glob_rows.get_mut(glob) {
+            row.n_exact += 1;
+        }
+        total_from_globs += 1;
+    }
+
+    if !glob_rows.is_empty() {
+        println!("glob subscriptions: {}", glob_rows.len());
+        let mut table = tabled::Table::new(glob_rows.iter().copied());
+        table
+            .with(tabled::settings::Style::empty())
+            .with(tabled::settings::Padding::new(0, 1, 0, 0));
+        println!("{table}\n");
+    } else {
+        println!("glob subscriptions: <none>");
+    }
+
+    #[derive(Tabled)]
+    struct SubscriptionRow<'a> {
+        alert_class: &'a AlertClass,
+        #[tabled(display_with = "display_option_blank")]
+        from_glob: Option<&'a str>,
+        #[tabled(display_with = "datetime_rfc3339_concise")]
+        time_created: &'a DateTime<Utc>,
+    }
+
+    if !subscriptions.is_empty() {
+        println!("exact subscriptions:  {}", subscriptions.len());
+        println!("  generated by globs: {total_from_globs}");
+        let mut table = tabled::Table::new(subscriptions.iter().map(
+            |db::model::AlertRxSubscription {
+                 rx_id: _,
+                 class,
+                 glob,
+                 time_created,
+             }| SubscriptionRow {
+                alert_class: class,
+                from_glob: glob.as_deref(),
+                time_created,
+            },
+        ));
+        table
+            .with(tabled::settings::Style::empty())
+            .with(tabled::settings::Padding::new(0, 1, 0, 0));
+        println!("{table}");
+    } else {
+        println!("exact subscriptions: <none>");
     }
 
     Ok(())
