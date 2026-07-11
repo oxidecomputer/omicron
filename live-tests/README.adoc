@@ -6,7 +6,7 @@ This package is not built or tested by default because the tests generally can't
 
 == Why a separate test suite?
 
-What makes these tests different from the rest of the test suite is that they require connectivity to the underlay network of the deployed system and they make API calls to various components in that system and they assume that this will behave like a real production system.  By contrast, the normal tests instead _set up_ a bunch of components using simulated sled agents and localhost networking, which is great for starting from a predictable state and running tests in parallel, but the simulated sled agents and networking make it impossible to exercise quite a lot of Reconfigurator's functionality.  
+What makes these tests different from the rest of the test suite is that they require connectivity to the underlay network of the deployed system and they make API calls to various components in that system and they assume that this will behave like a real production system.  By contrast, the normal tests instead _set up_ a bunch of components using simulated sled agents and localhost networking, which is great for starting from a predictable state and running tests in parallel, but the simulated sled agents and networking make it impossible to exercise quite a lot of Reconfigurator's functionality.
 
 There are also the `end-to-end-tests`.  That environment is more realistic than the main test suite, but not faithful enough for many Reconfigurator tests.
 
@@ -22,13 +22,13 @@ First, deploy Omicron using `a4x2` or one of the hardware test rigs.
 
 Ensure the system's target blueprint is enabled. The live tests require this to avoid a case where the live tests generate blueprints based on a target blueprint that is not current, and then make a bunch of changes to the system unrelated to the tests.
 
-On a fresh system, you will have to enable the target blueprint yourself:
+Ensure the system's blueprint planner is disabled. Live tests may generate various blueprints with content that won't make sense to the planner, and we don't want the planner to run mid-test and attempt to "fix" the state of the system.
+
+On a fresh system, you will have to disable the blueprint planner yourself:
 
 ```
-omdb --destructive nexus blueprints target enable current
+omdb --destructive nexus reconfigurator-config set --planner-enabled false
 ```
-
-This essentially enables reconfigurator, causing it to constantly try to make the system match its target blueprint. You only need to do this once in the lifetime of the system, not every time you re-run the live tests.
 
 At this point the system is prepared for testing. In your Omicron workspace, run `cargo xtask live-tests` to build an archive and then follow the instructions:
 

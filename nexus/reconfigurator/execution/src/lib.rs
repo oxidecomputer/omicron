@@ -374,7 +374,11 @@ fn register_support_bundle_failure_step<'a>(
                             "support bundle expunge report: {report:?}"
                         ))
                         .build(),
-                    Err(err) => StepWarning::new((), err.to_string()).build(),
+                    Err(err) => StepWarning::new(
+                        (),
+                        InlineErrorChain::new(&err).to_string(),
+                    )
+                    .build(),
                 };
                 Ok(res)
             },
@@ -418,19 +422,12 @@ fn register_deploy_db_metadata_nexus_records_step<'a>(
                     return StepSkipped::new((), "not running as Nexus").into();
                 };
 
-                match database::deploy_db_metadata_nexus_records(
+                let result = database::deploy_db_metadata_nexus_records(
                     opctx, &datastore, &blueprint, nexus_id,
                 )
                 .await
-                {
-                    Ok(()) => StepSuccess::new(()).into(),
-                    Err(err) => StepWarning::new(
-                        (),
-                        err.context("ensuring db_metadata_nexus_state")
-                            .to_string(),
-                    )
-                    .into(),
-                }
+                .context("ensuring db_metadata_nexus_state");
+                Ok(map_err_to_step_warning(result))
             },
         )
         .register();
@@ -685,9 +682,12 @@ fn register_reassign_sagas_step<'a>(
                                     needs_saga_recovery,
                                 ),
                             ),
-                            Err(error) => (
-                                StepWarning::new(false, error.to_string())
-                                    .build(),
+                            Err(err) => (
+                                StepWarning::new(
+                                    false,
+                                    InlineErrorChain::new(&*err).to_string(),
+                                )
+                                .build(),
                                 SagaReassignmentDone::Indeterminate,
                             ),
                         }
