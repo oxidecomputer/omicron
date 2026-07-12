@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "2026061000.0.0"
+    "version": "2026062500.0.0"
   },
   "paths": {
     "/device/auth": {
@@ -10787,6 +10787,113 @@
         }
       }
     },
+    "/v1/system/networking/bgp/unnumbered/interfaces": {
+      "get": {
+        "tags": [
+          "system/networking"
+        ],
+        "summary": "List BGP Unnumbered interfaces",
+        "operationId": "networking_bgp_unnumbered_interface_list",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Array_of_SwitchUnnumberedInterface",
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SwitchUnnumberedInterface"
+                  }
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/system/networking/bgp/unnumbered/interfaces/{switch_slot}/{interface_name}": {
+      "get": {
+        "tags": [
+          "system/networking"
+        ],
+        "summary": "Get BGP Unnumbered interface state",
+        "operationId": "networking_bgp_unnumbered_interface_view",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "interface_name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "switch_slot",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SwitchSlot"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SwitchUnnumberedInterface"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/system/networking/bgp/unnumbered/manager": {
+      "get": {
+        "tags": [
+          "system/networking"
+        ],
+        "summary": "Get BGP Unnumbered manager state",
+        "operationId": "networking_bgp_unnumbered_manager_status",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Array_of_SwitchUnnumberedManagerState",
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SwitchUnnumberedManagerState"
+                  }
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/v1/system/networking/bgp-announce-set": {
       "get": {
         "tags": [
@@ -19914,6 +20021,68 @@
           }
         ]
       },
+      "DiscoveredRouter": {
+        "description": "Information about a router discovered through router advertisements.",
+        "type": "object",
+        "properties": {
+          "address": {
+            "description": "Router IPv6 address",
+            "type": "string",
+            "format": "ipv6"
+          },
+          "effective_reachable_time": {
+            "description": "Effective reachable time governing expiry of this entry",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Duration"
+              }
+            ]
+          },
+          "reachable_time": {
+            "description": "Reachable time from RA (milliseconds)",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "retrans_timer": {
+            "description": "Retransmit timer from RA (milliseconds)",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "router_lifetime": {
+            "description": "Router lifetime from RA (seconds)",
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          },
+          "time_since_discovered": {
+            "description": "Time elapsed since the router was first discovered",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Duration"
+              }
+            ]
+          },
+          "time_since_last_rx": {
+            "description": "Time elapsed since the most recent Router Advertisement was received",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Duration"
+              }
+            ]
+          }
+        },
+        "required": [
+          "address",
+          "effective_reachable_time",
+          "reachable_time",
+          "retrans_timer",
+          "router_lifetime",
+          "time_since_discovered",
+          "time_since_last_rx"
+        ]
+      },
       "Disk": {
         "description": "View of a Disk",
         "type": "object",
@@ -20532,6 +20701,25 @@
           "counts",
           "squared_mean",
           "sum_of_samples"
+        ]
+      },
+      "Duration": {
+        "type": "object",
+        "properties": {
+          "nanos": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "secs": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "nanos",
+          "secs"
         ]
       },
       "EphemeralIpCreate": {
@@ -26918,6 +27106,23 @@
           }
         ]
       },
+      "RouterDiscoveryRuntimeState": {
+        "type": "object",
+        "properties": {
+          "rx": {
+            "description": "ICMPv6 Router Advertisement receive loop is running",
+            "type": "boolean"
+          },
+          "tx": {
+            "description": "ICMPv6 Router Advertisement transmit loop is running",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "rx",
+          "tx"
+        ]
+      },
       "RouterLifetimeConfig": {
         "description": "Router lifetime in seconds for unnumbered BGP peers",
         "type": "integer",
@@ -29750,6 +29955,36 @@
           }
         ]
       },
+      "SwitchUnnumberedInterface": {
+        "type": "object",
+        "properties": {
+          "interface": {
+            "$ref": "#/components/schemas/UnnumberedInterface"
+          },
+          "switch_slot": {
+            "$ref": "#/components/schemas/SwitchSlot"
+          }
+        },
+        "required": [
+          "interface",
+          "switch_slot"
+        ]
+      },
+      "SwitchUnnumberedManagerState": {
+        "type": "object",
+        "properties": {
+          "state": {
+            "$ref": "#/components/schemas/UnnumberedManagerState"
+          },
+          "switch_slot": {
+            "$ref": "#/components/schemas/SwitchSlot"
+          }
+        },
+        "required": [
+          "state",
+          "switch_slot"
+        ]
+      },
       "SystemNetworkingSettings": {
         "description": "Fleet-wide networking settings. Only fleet viewers may view these settings. Only fleet admins can modify them.",
         "type": "object",
@@ -30159,6 +30394,151 @@
               "rpm"
             ]
           }
+        ]
+      },
+      "UnnumberedInterface": {
+        "type": "object",
+        "properties": {
+          "discovered_peer": {
+            "nullable": true,
+            "description": "Information about discovered peer",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/DiscoveredRouter"
+              }
+            ]
+          },
+          "interface": {
+            "description": "Interface name (e.g. \"qsfp0\")",
+            "type": "string"
+          },
+          "local_address": {
+            "description": "IPv6 link-local address of this interface.",
+            "type": "string",
+            "format": "ipv6"
+          },
+          "ndp_state": {
+            "description": "State of rx/tx loops (None if interface not active in NDP)",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/RouterDiscoveryRuntimeState"
+              }
+            ]
+          },
+          "router_lifetime": {
+            "description": "Router Lifetime advertised in ICMPv6 Router Advertisements sent on this interface.",
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "interface",
+          "local_address",
+          "ndp_state",
+          "router_lifetime"
+        ]
+      },
+      "UnnumberedInterfaceStatus": {
+        "description": "Status of an interface configured for unnumbered operation.",
+        "oneOf": [
+          {
+            "description": "Configured but not yet available on the system.",
+            "type": "object",
+            "properties": {
+              "pending": {
+                "type": "object",
+                "properties": {
+                  "router_lifetime": {
+                    "description": "Configured router lifetime (seconds)",
+                    "type": "integer",
+                    "format": "uint16",
+                    "minimum": 0
+                  }
+                },
+                "required": [
+                  "router_lifetime"
+                ]
+              }
+            },
+            "required": [
+              "pending"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "description": "Active for unnumbered operation.",
+            "type": "object",
+            "properties": {
+              "active": {
+                "type": "object",
+                "properties": {
+                  "discovered_peer": {
+                    "nullable": true,
+                    "description": "Information about the discovered peer. None if no peer has been discovered or the discovered entry has expired.",
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/DiscoveredRouter"
+                      }
+                    ]
+                  },
+                  "local_address": {
+                    "description": "Local IPv6 link-local address",
+                    "type": "string",
+                    "format": "ipv6"
+                  },
+                  "router_lifetime": {
+                    "description": "Router lifetime advertised by this router (seconds)",
+                    "type": "integer",
+                    "format": "uint16",
+                    "minimum": 0
+                  },
+                  "runtime_state": {
+                    "description": "Runtime state for router discovery on this interface",
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/RouterDiscoveryRuntimeState"
+                      }
+                    ]
+                  },
+                  "scope_id": {
+                    "description": "IPv6 scope ID (interface index)",
+                    "type": "integer",
+                    "format": "uint32",
+                    "minimum": 0
+                  }
+                },
+                "required": [
+                  "local_address",
+                  "router_lifetime",
+                  "runtime_state",
+                  "scope_id"
+                ]
+              }
+            },
+            "required": [
+              "active"
+            ],
+            "additionalProperties": false
+          }
+        ]
+      },
+      "UnnumberedManagerState": {
+        "type": "object",
+        "properties": {
+          "interfaces": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/UnnumberedInterfaceStatus"
+            }
+          },
+          "monitor_running": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "interfaces",
+          "monitor_running"
         ]
       },
       "UpdateStatus": {

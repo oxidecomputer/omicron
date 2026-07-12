@@ -57,6 +57,10 @@ use nexus_types::external_api::identity_provider::IdentityProvider;
 use nexus_types::external_api::image::Image;
 use nexus_types::external_api::ip_pool::{IpPool, IpPoolRange};
 use nexus_types::external_api::metrics::SystemMetricsPathParam;
+use nexus_types::external_api::networking::{
+    SwitchUnnumberedInterface, SwitchUnnumberedManagerState,
+    UnnumberedInterfacePath,
+};
 use nexus_types::external_api::physical_disk::{
     PhysicalDisk, PhysicalDiskAdoptionRequest, PhysicalDiskAdoptionRequestPath,
     PhysicalDiskManufacturerIdentity, UnadoptedPhysicalDisk,
@@ -4675,6 +4679,72 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 crate::context::op_context_for_external_api(&rqctx).await?;
             opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
             let status = nexus.bfd_status(&opctx).await?;
+            Ok(HttpResponseOk(status))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn networking_bgp_unnumbered_manager_status(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<Vec<SwitchUnnumberedManagerState>>, HttpError>
+    {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
+            let status = nexus.bgp_unnumbered_manager_status(&opctx).await?;
+            Ok(HttpResponseOk(status))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn networking_bgp_unnumbered_interface_list(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<Vec<SwitchUnnumberedInterface>>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
+            let status = nexus.bgp_unnumbered_interfaces(&opctx).await?;
+            Ok(HttpResponseOk(status))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn networking_bgp_unnumbered_interface_view(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<UnnumberedInterfacePath>,
+    ) -> Result<HttpResponseOk<SwitchUnnumberedInterface>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let path = path_params.into_inner();
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
+            let status = nexus
+                .bgp_unnumbered_interface(
+                    &opctx,
+                    path.switch_slot,
+                    path.interface_name,
+                )
+                .await?;
             Ok(HttpResponseOk(status))
         };
         apictx
