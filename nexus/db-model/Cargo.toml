@@ -9,7 +9,6 @@ workspace = true
 
 [build-dependencies]
 omicron-rpaths.workspace = true
-vergen-gitcl.workspace = true
 
 [dependencies]
 anyhow.workspace = true
@@ -27,6 +26,7 @@ illumos-utils.workspace = true
 macaddr.workspace = true
 newtype_derive.workspace = true
 omicron-cockroach-metrics.workspace = true
+omicron-git-version.workspace = true
 omicron-uuid-kinds.workspace = true
 oxnet.workspace = true
 parse-display.workspace = true

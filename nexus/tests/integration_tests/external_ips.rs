@@ -47,13 +47,15 @@ use nexus_types::external_api::external_ip;
 use nexus_types::external_api::floating_ip;
 use nexus_types::external_api::floating_ip::FloatingIp;
 use nexus_types::external_api::instance;
-use nexus_types::external_api::instance::InstanceNetworkInterfaceAttachment;
+use nexus_types::external_api::instance::{
+    Instance, InstanceCpuCount, InstanceNetworkInterfaceAttachment,
+    InstanceState,
+};
 use nexus_types::external_api::ip_pool;
 use nexus_types::external_api::policy::SiloRole;
 use nexus_types::external_api::project;
 use nexus_types::external_api::silo;
 use nexus_types::identity::Resource;
-use nexus_types_versions::latest::instance::Instance;
 use omicron_common::address::IpRange;
 use omicron_common::address::IpVersion;
 use omicron_common::address::Ipv4Range;
@@ -62,8 +64,6 @@ use omicron_common::address::NUM_SOURCE_NAT_PORTS;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::IdentityMetadataUpdateParams;
-use omicron_common::api::external::InstanceCpuCount;
-use omicron_common::api::external::InstanceState;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::PrivateIpStack;

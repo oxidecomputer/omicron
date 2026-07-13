@@ -86,6 +86,7 @@ api_versions!([
     // |  date-based version should be at the top of the list.
     // v
     // (next_yyyy_mm_dd_nn, IDENT),
+    (2026_06_10_00, BGP_CONFIGURATION_UPDATE),
     (2026_06_08_00, INSTANCE_CPU_TYPE_TURIN_V2),
     (2026_06_05_00, EXTERNAL_JUMBO_FRAMES),
     (2026_06_04_00, IMAGE_BLOCK_SIZE_TYPE),
@@ -4696,7 +4697,10 @@ pub trait NexusExternalApi {
             PaginatedByNameOrId<latest::project::OptionalProjectSelector>,
         >,
         path_params: Path<latest::path_params::AffinityGroupPath>,
-    ) -> Result<HttpResponseOk<ResultsPage<AffinityGroupMember>>, HttpError>;
+    ) -> Result<
+        HttpResponseOk<ResultsPage<latest::affinity::AffinityGroupMember>>,
+        HttpError,
+    >;
 
     /// Fetch affinity group member
     #[endpoint {
@@ -4708,7 +4712,7 @@ pub trait NexusExternalApi {
         rqctx: RequestContext<Self::Context>,
         query_params: Query<latest::project::OptionalProjectSelector>,
         path_params: Path<latest::affinity::AffinityInstanceGroupMemberPath>,
-    ) -> Result<HttpResponseOk<AffinityGroupMember>, HttpError>;
+    ) -> Result<HttpResponseOk<latest::affinity::AffinityGroupMember>, HttpError>;
 
     /// Add member to affinity group
     #[endpoint {
@@ -4720,7 +4724,10 @@ pub trait NexusExternalApi {
         rqctx: RequestContext<Self::Context>,
         query_params: Query<latest::project::OptionalProjectSelector>,
         path_params: Path<latest::affinity::AffinityInstanceGroupMemberPath>,
-    ) -> Result<HttpResponseCreated<AffinityGroupMember>, HttpError>;
+    ) -> Result<
+        HttpResponseCreated<latest::affinity::AffinityGroupMember>,
+        HttpError,
+    >;
 
     /// Remove member from affinity group
     #[endpoint {
@@ -4813,7 +4820,10 @@ pub trait NexusExternalApi {
             PaginatedByNameOrId<latest::project::OptionalProjectSelector>,
         >,
         path_params: Path<latest::path_params::AntiAffinityGroupPath>,
-    ) -> Result<HttpResponseOk<ResultsPage<AntiAffinityGroupMember>>, HttpError>;
+    ) -> Result<
+        HttpResponseOk<ResultsPage<latest::affinity::AntiAffinityGroupMember>>,
+        HttpError,
+    >;
 
     /// Fetch anti-affinity group member
     #[endpoint {
@@ -4827,7 +4837,10 @@ pub trait NexusExternalApi {
         path_params: Path<
             latest::affinity::AntiAffinityInstanceGroupMemberPath,
         >,
-    ) -> Result<HttpResponseOk<AntiAffinityGroupMember>, HttpError>;
+    ) -> Result<
+        HttpResponseOk<latest::affinity::AntiAffinityGroupMember>,
+        HttpError,
+    >;
 
     /// Add member to anti-affinity group
     #[endpoint {
@@ -4841,7 +4854,10 @@ pub trait NexusExternalApi {
         path_params: Path<
             latest::affinity::AntiAffinityInstanceGroupMemberPath,
         >,
-    ) -> Result<HttpResponseCreated<AntiAffinityGroupMember>, HttpError>;
+    ) -> Result<
+        HttpResponseCreated<latest::affinity::AntiAffinityGroupMember>,
+        HttpError,
+    >;
 
     /// Remove member from anti-affinity group
     #[endpoint {
@@ -4968,7 +4984,10 @@ pub trait NexusExternalApi {
     async fn networking_address_lot_create(
         rqctx: RequestContext<Self::Context>,
         new_address_lot: TypedBody<latest::networking::AddressLotCreate>,
-    ) -> Result<HttpResponseCreated<AddressLotCreateResponse>, HttpError>;
+    ) -> Result<
+        HttpResponseCreated<latest::networking::AddressLotCreateResponse>,
+        HttpError,
+    >;
 
     /// Delete address lot
     #[endpoint {
@@ -4990,7 +5009,10 @@ pub trait NexusExternalApi {
     async fn networking_address_lot_list(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<PaginatedByNameOrId>,
-    ) -> Result<HttpResponseOk<ResultsPage<AddressLot>>, HttpError>;
+    ) -> Result<
+        HttpResponseOk<ResultsPage<latest::networking::AddressLot>>,
+        HttpError,
+    >;
 
     /// Fetch address lot
     #[endpoint {
@@ -5001,7 +5023,10 @@ pub trait NexusExternalApi {
     async fn networking_address_lot_view(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<latest::path_params::AddressLotPath>,
-    ) -> Result<HttpResponseOk<AddressLotViewResponse>, HttpError>;
+    ) -> Result<
+        HttpResponseOk<latest::networking::AddressLotViewResponse>,
+        HttpError,
+    >;
 
     /// List blocks in address lot
     #[endpoint {
@@ -5013,7 +5038,10 @@ pub trait NexusExternalApi {
         rqctx: RequestContext<Self::Context>,
         path_params: Path<latest::path_params::AddressLotPath>,
         query_params: Query<PaginatedById>,
-    ) -> Result<HttpResponseOk<ResultsPage<AddressLotBlock>>, HttpError>;
+    ) -> Result<
+        HttpResponseOk<ResultsPage<latest::networking::AddressLotBlock>>,
+        HttpError,
+    >;
 
     /// Create loopback address
     #[endpoint {
@@ -5573,7 +5601,10 @@ pub trait NexusExternalApi {
         rqctx: RequestContext<Self::Context>,
         path_params: Path<latest::networking::LldpPortPathSelector>,
         query_params: Query<PaginatedById>,
-    ) -> Result<HttpResponseOk<ResultsPage<LldpNeighbor>>, HttpError>;
+    ) -> Result<
+        HttpResponseOk<ResultsPage<latest::networking::LldpNeighbor>>,
+        HttpError,
+    >;
 
     /// Fetch LLDP neighbors for switch port
     #[endpoint {
@@ -5587,7 +5618,10 @@ pub trait NexusExternalApi {
         rqctx: RequestContext<Self::Context>,
         path_params: Path<v2025_11_20_00::networking::LldpPortPathSelector>,
         query_params: Query<PaginatedById>,
-    ) -> Result<HttpResponseOk<ResultsPage<LldpNeighbor>>, HttpError> {
+    ) -> Result<
+        HttpResponseOk<ResultsPage<latest::networking::LldpNeighbor>>,
+        HttpError,
+    > {
         let path_params = path_params.try_map(TryInto::try_into)?;
         Self::networking_switch_port_lldp_neighbors(
             rqctx,
@@ -5813,6 +5847,22 @@ pub trait NexusExternalApi {
         rqctx: RequestContext<Self::Context>,
         sel: Query<latest::networking::BgpConfigSelector>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    /// Update the mutable fields of an existing BGP configuration
+    ///
+    /// The asn field is not updatable; to change the autonomous system number,
+    /// create a new BGP configuration object.
+    #[endpoint {
+        method = PUT,
+        path = "/v1/system/networking/bgp",
+        tags = ["system/networking"],
+        versions = VERSION_BGP_CONFIGURATION_UPDATE..,
+    }]
+    async fn networking_bgp_config_update(
+        rqctx: RequestContext<Self::Context>,
+        sel: Query<latest::networking::BgpConfigSelector>,
+        update: TypedBody<latest::networking::BgpConfigUpdate>,
+    ) -> Result<HttpResponseOk<latest::networking::BgpConfig>, HttpError>;
 
     /// Update BGP announce set
     ///

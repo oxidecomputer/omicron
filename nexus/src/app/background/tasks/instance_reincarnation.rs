@@ -337,10 +337,10 @@ mod test {
     };
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::external_api::instance;
+    use nexus_types::external_api::instance::InstanceAutoRestartPolicy;
     use nexus_types_versions::latest;
     use omicron_common::api::external::ByteCount;
     use omicron_common::api::external::IdentityMetadataCreateParams;
-    use omicron_common::api::external::InstanceAutoRestartPolicy;
     use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::InstanceUuid;
     use omicron_uuid_kinds::PropolisUuid;

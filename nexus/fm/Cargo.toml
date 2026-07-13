@@ -13,12 +13,19 @@ testing = [
     "ereport-types",
 ]
 
+[build-dependencies]
+omicron-rpaths.workspace = true
+
 [dependencies]
 anyhow.workspace = true
 chrono.workspace = true
 iddqd.workspace = true
 nexus-types.workspace = true
+nexus-db-model.workspace = true
+omicron-common.workspace = true
 omicron-uuid-kinds.workspace = true
+# See omicron-rpaths for more about the "pq-sys" dependency.
+pq-sys = "*"
 rand.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -36,5 +43,6 @@ omicron-workspace-hack.workspace = true
 
 [dev-dependencies]
 omicron-test-utils.workspace = true
+nexus-inventory.workspace = true
 nexus-reconfigurator-planning.workspace = true
 ereport-types.workspace = true

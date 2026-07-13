@@ -1951,6 +1951,7 @@ mod tests {
     use model::NetworkInterfaceKind;
     use nexus_db_lookup::LookupPath;
     use nexus_db_model::IpVersion;
+    use nexus_types::external_api::instance::InstanceCpuCount;
     use nexus_types::external_api::instance::InstanceCreate;
     use nexus_types::external_api::instance::InstanceNetworkInterfaceAttachment;
     use nexus_types::external_api::instance::Ipv4Assignment;
@@ -1960,7 +1961,6 @@ mod tests {
     use omicron_common::api::external::ByteCount;
     use omicron_common::api::external::Error;
     use omicron_common::api::external::IdentityMetadataCreateParams;
-    use omicron_common::api::external::InstanceCpuCount;
     use omicron_common::api::external::MacAddr;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::GenericUuid;

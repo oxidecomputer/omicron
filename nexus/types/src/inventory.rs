@@ -14,9 +14,9 @@ use chrono::DateTime;
 use chrono::Utc;
 use clickhouse_admin_types::keeper::ClickhouseKeeperClusterMembership;
 use daft::Diffable;
-pub use gateway_client::types::PowerState;
-pub use gateway_client::types::RotImageError;
+pub use gateway_types::component::PowerState;
 pub use gateway_types::component::SpType;
+pub use gateway_types::rot::RotImageError;
 pub use gateway_types::rot::RotSlot;
 use iddqd::IdOrdItem;
 use iddqd::IdOrdMap;
@@ -35,6 +35,8 @@ use serde_with::serde_as;
 use sled_agent_types_versions::latest::inventory::ConfigReconcilerInventory;
 use sled_agent_types_versions::latest::inventory::ConfigReconcilerInventoryResult;
 use sled_agent_types_versions::latest::inventory::ConfigReconcilerInventoryStatus;
+use sled_agent_types_versions::latest::inventory::FmdInventory;
+use sled_agent_types_versions::latest::inventory::FmdInventoryError;
 use sled_agent_types_versions::latest::inventory::InventoryDataset;
 use sled_agent_types_versions::latest::inventory::InventoryDisk;
 use sled_agent_types_versions::latest::inventory::InventoryZpool;
@@ -45,7 +47,7 @@ use sled_agent_types_versions::latest::inventory::SingleMeasurementInventory;
 use sled_agent_types_versions::latest::inventory::SledCpuFamily;
 use sled_agent_types_versions::latest::inventory::SledRole;
 use sled_agent_types_versions::latest::inventory::SvcsEnabledNotOnlineResult;
-use sled_agent_types_versions::latest::inventory::ZpoolHealth;
+pub use sled_agent_types_versions::latest::inventory::ZpoolHealth;
 use sled_hardware_types::BaseboardId;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
@@ -706,6 +708,7 @@ pub struct SledAgent {
     pub file_source_resolver: OmicronFileSourceResolverInventory,
     pub smf_services_enabled_not_online: SvcsEnabledNotOnlineResult,
     pub reference_measurements: IdOrdMap<SingleMeasurementInventory>,
+    pub fmd: Result<FmdInventory, FmdInventoryError>,
 }
 
 impl IdOrdItem for SledAgent {

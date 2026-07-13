@@ -5,12 +5,12 @@
 //! Test-only support code for testing MGS update planning.
 
 use chrono::Utc;
-use gateway_client::types::PowerState;
-use gateway_client::types::RotState;
 use gateway_client::types::SpComponentCaboose;
 use gateway_client::types::SpIdentifier;
-use gateway_client::types::SpState;
+use gateway_types::component::PowerState;
+use gateway_types::component::SpState;
 use gateway_types::rot::RotSlot;
+use gateway_types::rot::RotState;
 use iddqd::IdOrdItem;
 use iddqd::IdOrdMap;
 use nexus_types::deployment::BlueprintArtifactVersion;

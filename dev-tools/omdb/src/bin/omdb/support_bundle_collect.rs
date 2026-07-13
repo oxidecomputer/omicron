@@ -211,14 +211,11 @@ impl CollectArgs {
                 step.status,
                 step.name,
             );
-        }
-        if let Some(ereports) = &report.ereports {
-            eprintln!(
-                "ereports: {} found, {} collected, {} errors",
-                ereports.n_found,
-                ereports.n_collected,
-                ereports.errors.len(),
-            );
+            if let Some(details) = &step.details {
+                let pretty = serde_json::to_string_pretty(details)
+                    .unwrap_or_else(|_| details.to_string());
+                eprintln!("{}", textwrap::indent(&pretty, "      "));
+            }
         }
         Ok(())
     }
