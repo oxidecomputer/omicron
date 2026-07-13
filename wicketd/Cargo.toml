@@ -57,6 +57,7 @@ uuid.workspace = true
 
 bootstrap-agent-client.workspace = true
 bootstrap-agent-lockstep-client.workspace = true
+bootstrap-agent-lockstep-types.workspace = true
 omicron-ddm-admin-client.workspace = true
 gateway-client.workspace = true
 gateway-types.workspace = true
@@ -72,6 +73,7 @@ update-common.workspace = true
 update-engine.workspace = true
 wicket-common.workspace = true
 wicketd-api.workspace = true
+wicketd-commission-types.workspace = true
 wicketd-client.workspace = true
 omicron-workspace-hack.workspace = true
 semver.workspace = true

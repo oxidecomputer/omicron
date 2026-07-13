@@ -185,6 +185,8 @@ members = [
     "wicket",
     "wicketd",
     "wicketd-api",
+    "wicketd-commission-types",
+    "wicketd-commission-types/versions",
     "workspace-hack",
     "zone-setup"
 ]
@@ -378,6 +380,8 @@ default-members = [
     "wicket",
     "wicketd",
     "wicketd-api",
+    "wicketd-commission-types",
+    "wicketd-commission-types/versions",
     "workspace-hack",
     "zone-setup",
 ]
@@ -892,6 +896,8 @@ wicket = { path = "wicket" }
 wicket-common = { path = "wicket-common" }
 wicketd-api = { path = "wicketd-api" }
 wicketd-client = { path = "clients/wicketd-client" }
+wicketd-commission-types = { path = "wicketd-commission-types" }
+wicketd-commission-types-versions = { path = "wicketd-commission-types/versions" }
 x509-cert = { version = "0.2.5", default-features = false }
 xshell = "0.2.7"
 zerocopy = "0.8.26"

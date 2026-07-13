@@ -22,14 +22,13 @@ use sled_hardware_types::Baseboard;
 
 use crate::{
     inventory::{MgsV1Inventory, SpIdentifier, SpInventory},
-    rack_setup::{
-        BgpAuthKeyId, BootstrapSledDescription,
-        CurrentRssUserConfigInsensitive, ManualPortConfig,
-        PutRssUserConfigInsensitive, UserSpecifiedBgpPeerConfig,
-        UserSpecifiedImportExportPolicy, UserSpecifiedPortConfig,
-        UserSpecifiedRackNetworkConfig, UserSpecifiedRouterPeerAddr,
-        UserSpecifiedUplinkAddressConfig,
-    },
+    rack_setup::{BootstrapSledDescription, CurrentRssUserConfigInsensitive},
+};
+use wicketd_commission_types::rack_setup::{
+    BgpAuthKeyId, ManualPortConfig, PutRssUserConfigInsensitive,
+    UserSpecifiedBgpPeerConfig, UserSpecifiedImportExportPolicy,
+    UserSpecifiedPortConfig, UserSpecifiedRackNetworkConfig,
+    UserSpecifiedRouterPeerAddr, UserSpecifiedUplinkAddressConfig,
 };
 
 /// A collection of example data structures.
