@@ -284,8 +284,14 @@ impl TaskExec {
         // signal from the Driver, or for one of our dependencies ("watch"
         // channels) to trigger an activation.
         loop {
-            let mut dependencies: FuturesUnordered<_> =
-                deps.iter_mut().map(|w| w.wait_for_change()).collect();
+            let deps_len = deps.len();
+            let mut dependencies = deps
+                .iter_mut()
+                .map(|w| w.wait_for_change())
+                .collect::<FuturesUnordered<_>>()
+                // Wait for one changed dependency, then collapse any others
+                // that are also ready into the same activation.
+                .ready_chunks(deps_len.max(1));
 
             tokio::select! {
                 _ = interval.tick() => {
@@ -296,7 +302,7 @@ impl TaskExec {
                     self.activate(ActivationReason::Signaled).await;
                 }
 
-                _ = dependencies.next(), if !dependencies.is_empty() => {
+                _ = dependencies.next(), if deps_len > 0 => {
                     self.activate(ActivationReason::Dependency).await;
                 }
             }
@@ -770,7 +776,6 @@ mod test {
         // two without also spending a lot of wall-clock time on this test.
     }
 
-
     // Verifies that when multiple distinct dependencies become ready while an
     // activation is already running, the task is activated only once afterward
     // instead of once per ready dependency.
@@ -847,9 +852,6 @@ mod test {
         // previous step.
         tokio::time::sleep(Duration::from_secs(1)).await;
         let status = driver.task_status(&task_handle);
-        // Currently, the following is_idle() assertion fails since there is no
-        // collapsing of distinct ready dependencies and the third activation
-        // already started.
         assert!(status.current.is_idle());
         assert!(status.last.has_completed());
         assert_eq!(status.last.unwrap_completion().iteration, 2);
