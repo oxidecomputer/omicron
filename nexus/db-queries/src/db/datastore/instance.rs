@@ -770,6 +770,13 @@ impl DataStore {
                     )
                 })?;
 
+        // `check_if_exists` fetches by ID without applying the other
+        // filters from the query, so a soft-deleted instance is returned as
+        // `NotUpdatedButExists`.
+        if found.time_deleted().is_some() {
+            return Err(authz_instance.not_found());
+        }
+
         slog::info!(
             opctx.log,
             "set intended instance state";
@@ -1773,6 +1780,15 @@ impl DataStore {
                     locked_gen: new_gen,
                 })
             }
+            // Because `check_if_exists` will return records that have been
+            // soft-deleted, we must check for `time_deleted` before considering
+            // whether the lock has been successfully inherited.
+            UpdateAndQueryResult {
+                status: UpdateStatus::NotUpdatedButExists,
+                ref found,
+            } if found.time_deleted().is_some() => {
+                Err(UpdaterLockError::Query(authz_instance.not_found()))
+            }
             // The generation has advanced past the generation at which the
             // lock was held. This means that we have already inherited the
             // lock. Return `Ok(false)` here for idempotency.
@@ -2688,6 +2704,79 @@ mod tests {
             .expect("instance should remain deleted");
 
         // Clean up.
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_updating_deleted_instance_fails() {
+        let logctx =
+            dev::test_setup_log("test_updating_deleted_instance_fails");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+        let (authz_project, _) = create_test_project(&datastore, &opctx).await;
+        let authz_instance = create_test_instance(
+            &datastore,
+            &opctx,
+            &authz_project,
+            "my-great-instance",
+        )
+        .await;
+
+        datastore
+            .instance_update_runtime(
+                &InstanceUuid::from_untyped_uuid(authz_instance.id()),
+                &InstanceRuntimeState {
+                    time_updated: Utc::now(),
+                    generation: Generation(external::Generation::from_u32(2)),
+                    propolis_id: None,
+                    dst_propolis_id: None,
+                    migration_id: None,
+                    nexus_state: InstanceState::NoVmm,
+                    time_last_auto_restarted: None,
+                },
+            )
+            .await
+            .expect("instance must become deletable");
+        let parent_lock = datastore
+            .instance_updater_lock(&opctx, &authz_instance, Uuid::new_v4())
+            .await
+            .expect("instance must be locked");
+        datastore
+            .project_delete_instance(&opctx, &authz_instance)
+            .await
+            .expect("instance must be deleted");
+
+        let err = datastore
+            .instance_set_intended_state(
+                &opctx,
+                &authz_instance,
+                InstanceIntendedState::Running,
+            )
+            .await
+            .expect_err("updating a deleted instance must fail");
+        assert!(
+            matches!(err, Error::ObjectNotFound { .. }),
+            "expected ObjectNotFound, got {err:?}",
+        );
+
+        let err = datastore
+            .instance_updater_inherit_lock(
+                &opctx,
+                &authz_instance,
+                parent_lock,
+                Uuid::new_v4(),
+            )
+            .await
+            .expect_err("inheriting a deleted instance's lock must fail");
+        assert!(
+            matches!(
+                err,
+                UpdaterLockError::Query(Error::ObjectNotFound { .. })
+            ),
+            "expected ObjectNotFound, got {err:?}",
+        );
+
         db.terminate().await;
         logctx.cleanup_successful();
     }
