@@ -2874,8 +2874,11 @@ impl DataStore {
         // churn to cause this method to go into an infinite loop, and we expect
         // inventory collections to be inserted/pruned on the order of minutes,
         // which means a single retry should be fine in practice.
-        match self.inventory_collection_read(opctx, collection_id).await {
-            Ok(collection) => Ok(Some(collection)),
+        let err = match self
+            .inventory_collection_read(opctx, collection_id)
+            .await
+        {
+            Ok(collection) => return Ok(Some(collection)),
             Err(err @ Error::NotFound { .. }) => {
                 // Check and see if there's a newer collection than the one we
                 // believed was the latest.
@@ -2885,37 +2888,65 @@ impl DataStore {
                     // This should be impossible: we did have a latest inventory
                     // collection ID, but now don't? Return the error we got
                     // from our prior read attempt.
-                    warn!(
+                    error!(
                         opctx.log,
                         "failed to find any latest collection ID after failing \
                          to read previous latest collection";
                         "prev-collection-id" => %collection_id,
                         "prev-collection-err" => InlineErrorChain::new(&err),
                     );
-                    return Err(err);
+                    return Err(Error::internal_error(format!(
+                        "no latest collection ID after failing to read a \
+                         former latest collection with ID {collection_id}"
+                    )));
                 };
 
                 if new_collection_id == collection_id {
-                    // No newer collection - return the error as-is.
-                    Err(err)
+                    // No newer collection - handle the error as-is.
+                    err
                 } else {
                     // There is a newer collection - try to read it instead.
-                    Ok(Some(
-                        self.inventory_collection_read(
-                            opctx,
-                            new_collection_id,
-                        )
-                        .await?,
-                    ))
+                    // This is our singular retry.
+                    match self
+                        .inventory_collection_read(opctx, new_collection_id)
+                        .await
+                    {
+                        Ok(collection) => return Ok(Some(collection)),
+                        Err(err) => err,
+                    }
                 }
             }
 
-            // Return any other error as-is.
-            Err(err) => Err(err),
+            // Handle any other error as-is.
+            Err(err) => err,
+        };
+
+        // `inventory_collection_read()` can return a `NotFound` error, but we
+        // never expect to return a `NotFound` from _this_ method. If the latest
+        // collection was pruned while we were reading it, we should have read
+        // the new latest inventory in our singular retry above; the only way to
+        // have a `NotFound` here is if that retry also failed with `NotFound`
+        // (or more unusually, we got a `NotFound` error while reading a
+        // collection that appears to still be the latest!). Convert `NotFound`
+        // to internal errors.
+        match err {
+            Error::NotFound { message } => {
+                error!(
+                    opctx.log,
+                    "unexpected NotFound error while reading latest \
+                     inventory collection";
+                    "context" => message.internal_context(),
+                );
+                return Err(Error::internal_error(format!(
+                    "latest inventory collection not found: {}",
+                    message.internal_context()
+                )));
+            }
+            _ => Err(err),
         }
     }
 
-    /// Attempt to read the current collection
+    /// Attempt to read the a specific collection
     pub async fn inventory_collection_read(
         &self,
         opctx: &OpContext,
