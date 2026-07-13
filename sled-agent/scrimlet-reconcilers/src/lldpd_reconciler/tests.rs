@@ -168,8 +168,8 @@ impl TestSetup {
 }
 
 fn erase_port_configs(scope: &Scope<'_>) {
-    let service = scope.service("oxide/lldpd").unwrap().unwrap();
-    let mut instance = service.instance("default").unwrap().unwrap();
+    let service = scope.service(LLDPD_SERVICE_NAME).unwrap().unwrap();
+    let mut instance = service.instance(LLDPD_INSTANCE_NAME).unwrap().unwrap();
 
     let mut pgs_to_delete = Vec::new();
     for pg in instance.property_groups_direct().unwrap() {
@@ -188,8 +188,8 @@ fn apply_port_configs(
     configs: BTreeMap<String, LldpSmfProperties>,
     refresh_instance: bool,
 ) {
-    let service = scope.service("oxide/lldpd").unwrap().unwrap();
-    let mut instance = service.instance("default").unwrap().unwrap();
+    let service = scope.service(LLDPD_SERVICE_NAME).unwrap().unwrap();
+    let mut instance = service.instance(LLDPD_INSTANCE_NAME).unwrap().unwrap();
 
     for (pg_name, config) in configs {
         let mut pg = instance
@@ -225,8 +225,8 @@ fn apply_port_configs(
 fn config_of_running_snapshot(
     scope: &Scope<'_>,
 ) -> BTreeMap<String, LldpSmfProperties> {
-    let service = scope.service("oxide/lldpd").unwrap().unwrap();
-    let instance = service.instance("default").unwrap().unwrap();
+    let service = scope.service(LLDPD_SERVICE_NAME).unwrap().unwrap();
+    let instance = service.instance(LLDPD_INSTANCE_NAME).unwrap().unwrap();
     let snapshot = instance.snapshot("running").unwrap().unwrap();
 
     let mut config_pgs = BTreeMap::new();
@@ -273,7 +273,7 @@ fn proptest_lldpd_reconciliation() {
     );
     let log = &logctx.log;
     let isolated =
-        IsolatedConfigd::builder("oxide/lldpd").unwrap().build().unwrap();
+        IsolatedConfigd::builder(LLDPD_SERVICE_NAME).unwrap().build().unwrap();
     let scf = Scf::connect_isolated(&isolated).unwrap();
     let scope = scf.scope_local().unwrap();
 
@@ -308,7 +308,7 @@ fn proptest_lldpd_reconciliation_refresh() {
     );
     let log = &logctx.log;
     let isolated =
-        IsolatedConfigd::builder("oxide/lldpd").unwrap().build().unwrap();
+        IsolatedConfigd::builder(LLDPD_SERVICE_NAME).unwrap().build().unwrap();
     let scf = Scf::connect_isolated(&isolated).unwrap();
     let scope = scf.scope_local().unwrap();
 

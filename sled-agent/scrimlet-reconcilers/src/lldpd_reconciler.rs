@@ -115,7 +115,7 @@ impl Reconciler for LldpdReconciler {
             // any status, so we pick `Failed` to give a description of why we
             // didn't run.
             return LldpdReconcilerStatus::Failed(
-                "reconcilation disabled \
+                "reconciliation disabled \
                  (SMF within the switch zone not available in test mode)"
                     .to_string(),
             );
