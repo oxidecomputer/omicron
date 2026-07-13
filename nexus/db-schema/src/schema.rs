@@ -3201,6 +3201,15 @@ allow_tables_to_appear_in_same_query!(
 );
 
 table! {
+    fm_config (version) {
+        version -> Int8,
+        sitrep_limit -> Int8,
+        sitrep_deletion_threshold -> Int8,
+        time_modified -> Timestamptz,
+    }
+}
+
+table! {
     fm_sitrep (id) {
         id -> Uuid,
         parent_sitrep_id -> Nullable<Uuid>,

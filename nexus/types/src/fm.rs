@@ -12,6 +12,8 @@ pub mod ereport;
 pub use ereport::{Ereport, EreportId};
 pub mod case;
 pub use case::Case;
+pub mod config;
+pub use config::{FmConfig, FmConfigParam, FmConfigView};
 pub mod fact;
 pub use fact::{DiskFact, FactPayload, ZpoolUnhealthyFactPayload};
 pub mod json_display;
