@@ -8411,20 +8411,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "ntp-admin-v1-client"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "git-stub-vcs",
- "omicron-workspace-hack",
- "progenitor 0.14.0",
- "reqwest 0.13.2",
- "schemars 0.8.22",
- "serde",
- "slog",
-]
-
-[[package]]
 name = "nu-ansi-term"
 version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -13899,7 +13885,7 @@ dependencies = [
  "installinator-common",
  "key-manager",
  "key-manager-types",
- "ntp-admin-v1-client",
+ "ntp-admin-client",
  "omicron-common",
  "omicron-ledger",
  "omicron-test-utils",
