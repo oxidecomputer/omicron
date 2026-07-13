@@ -113,8 +113,7 @@ pub enum UserSpecifiedPortConfig {
     DdmAutoPortConfig {},
 }
 
-/// User-specified version of
-/// [`sled_agent_types::early_networking::UplinkAddressConfig`].
+/// User-specified version of `UplinkAddressConfig`.
 ///
 /// This allows us to have a nicer TOML representation of [`UplinkAddress`].
 #[derive(
@@ -177,9 +176,9 @@ pub(crate) mod uplink_address_serde {
     }
 }
 
-/// User-specified version of [`BgpPeerConfig`].
+/// User-specified version of `BgpPeerConfig`.
 ///
-/// This is similar to [`BgpPeerConfig`], except it doesn't have the sensitive
+/// This is similar to `BgpPeerConfig`, except it doesn't have the sensitive
 /// `md5_auth_key` parameter, instead requiring that the user provide the key
 /// separately.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq, JsonSchema)]
