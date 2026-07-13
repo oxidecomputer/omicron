@@ -4,8 +4,6 @@
 
 //! Grammar for the Oximeter Query Language (OxQL).
 
-// Copyright 2024 Oxide Computer
-
 peg::parser! {
     pub grammar query_parser() for str {
         use crate::oxql::ast::cmp::Comparison;

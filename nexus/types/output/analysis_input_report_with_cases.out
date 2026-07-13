@@ -1,6 +1,7 @@
 parent sitrep:        aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa
 inventory collection: bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb
  --> different from parent sitrep (collection cccccccc-cccc-cccc-cccc-cccccccccccc)
+total known ereport restart IDs: 420
 
 new ereports (2 total):
   * ereport dddddddd-dddd-dddd-dddd-dddddddddddd:3
@@ -23,6 +24,8 @@ cases (3 total):
           * ereport dddddddd-dddd-dddd-dddd-dddddddddddd:2
         alert requests not yet satisfied:
           * alert 66666666-6666-6666-6666-666666666666
+        support bundle requests not yet satisfied:
+          * support bundle 88888888-8888-8888-8888-888888888888
     * case 77777777-7777-7777-7777-777777777777
       // PSU 2 replaced
       diagnosis engine: power_shelf

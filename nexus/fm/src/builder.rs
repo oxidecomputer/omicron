@@ -30,6 +30,7 @@ pub struct SitrepBuilder<'a> {
     input: &'a analysis_input::Input,
     closed_cases_copied_forward: &'a IdOrdMap<fm::Case>,
     alerts_changed: bool,
+    support_bundles_changed: bool,
     comment: String,
 }
 
@@ -39,12 +40,16 @@ pub struct SitrepBuilder<'a> {
 #[derive(Debug, Clone, Copy)]
 struct ParentGenerations {
     alert_generation: Generation,
+    support_bundle_generation: Generation,
 }
 
 impl ParentGenerations {
     /// Initial generations for the first sitrep, which has no parent.
     fn new() -> Self {
-        Self { alert_generation: Generation::new() }
+        Self {
+            alert_generation: Generation::new(),
+            support_bundle_generation: Generation::new(),
+        }
     }
 }
 
@@ -89,6 +94,7 @@ impl<'a> SitrepBuilder<'a> {
             input: inputs,
             closed_cases_copied_forward,
             alerts_changed: inputs.alerts_changed(),
+            support_bundles_changed: inputs.support_bundles_changed(),
             cases,
         }
     }
@@ -115,6 +121,7 @@ impl<'a> SitrepBuilder<'a> {
         self.parent_sitrep
             .map(|p| ParentGenerations {
                 alert_generation: p.metadata.alert_generation,
+                support_bundle_generation: p.metadata.support_bundle_generation,
             })
             .unwrap_or_else(ParentGenerations::new)
     }
@@ -130,6 +137,14 @@ impl<'a> SitrepBuilder<'a> {
                 parent.alert_generation.next()
             } else {
                 parent.alert_generation
+            };
+        let support_bundle_generation =
+            if self.cases.support_bundle_set_changed()
+                || self.support_bundles_changed
+            {
+                parent.support_bundle_generation.next()
+            } else {
+                parent.support_bundle_generation
             };
 
         let mut ereports_by_id = iddqd::IdOrdMap::new();
@@ -178,6 +193,7 @@ impl<'a> SitrepBuilder<'a> {
                 // inventory collection ended.
                 next_inv_min_time_started: self.inventory.time_done,
                 alert_generation,
+                support_bundle_generation,
             },
             cases,
             ereports_by_id,
@@ -191,12 +207,18 @@ mod tests {
     use super::*;
     use crate::analysis_input::Input;
     use nexus_inventory::CollectionBuilder;
+    use nexus_types::alert::AlertClass;
     use nexus_types::alert::test_alerts;
     use nexus_types::fm;
     use nexus_types::fm::SitrepVersion;
+    use nexus_types::fm::case::AlertRequest;
+    use nexus_types::fm::case::SupportBundleRequest;
     use nexus_types::inventory;
+    use nexus_types::support_bundle::BundleDataSelection;
     use omicron_test_utils::dev;
+    use omicron_uuid_kinds::AlertUuid;
     use omicron_uuid_kinds::OmicronZoneUuid;
+    use omicron_uuid_kinds::SupportBundleUuid;
     use std::sync::Arc;
 
     /// Build an empty inventory `Collection`. The id is irrelevant to these
@@ -243,6 +265,7 @@ mod tests {
                 comment: String::new(),
                 time_created: chrono::Utc::now(),
                 alert_generation: gens.alert_generation,
+                support_bundle_generation: gens.support_bundle_generation,
             },
             cases: IdOrdMap::new(),
             ereports_by_id: IdOrdMap::new(),
@@ -271,6 +294,10 @@ mod tests {
         let inputs = make_input();
         let sitrep = build_sitrep(SitrepBuilder::new(&logctx.log, &inputs));
         assert_eq!(sitrep.metadata.alert_generation, Generation::new());
+        assert_eq!(
+            sitrep.metadata.support_bundle_generation,
+            Generation::new()
+        );
         logctx.cleanup_successful();
     }
 
@@ -289,31 +316,63 @@ mod tests {
         }
         let sitrep = build_sitrep(builder);
         assert_eq!(sitrep.metadata.alert_generation, Generation::new().next());
+        assert_eq!(
+            sitrep.metadata.support_bundle_generation,
+            Generation::new()
+        );
         logctx.cleanup_successful();
     }
 
     #[test]
-    fn alert_generation_stable_when_no_new_alert_requests_with_parent() {
+    fn first_sitrep_with_support_bundle_request_bumps_bundle_generation() {
         let logctx = dev::test_setup_log(
-            "alert_generation_stable_when_no_new_alert_requests_with_parent",
+            "first_sitrep_with_support_bundle_request_bumps_bundle_generation",
+        );
+        let inputs = make_input();
+        let mut builder = SitrepBuilder::new(&logctx.log, &inputs);
+        {
+            let mut case =
+                builder.cases.open_case(fm::DiagnosisEngineKind::PowerShelf);
+            case.request_support_bundle(Default::default(), "");
+        }
+        let sitrep = build_sitrep(builder);
+        assert_eq!(sitrep.metadata.alert_generation, Generation::new());
+        assert_eq!(
+            sitrep.metadata.support_bundle_generation,
+            Generation::new().next()
+        );
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn generation_stable_when_no_new_requests_with_parent() {
+        let logctx = dev::test_setup_log(
+            "generation_stable_when_no_new_requests_with_parent",
         );
         let inputs = make_input_with_parent_generations(ParentGenerations {
-            alert_generation: Generation::from_u32(5),
+            alert_generation: Generation::from_u32(1),
+            support_bundle_generation: Generation::from_u32(2),
         });
         let sitrep = build_sitrep(SitrepBuilder::new(&logctx.log, &inputs));
-        assert_eq!(sitrep.metadata.alert_generation, Generation::from_u32(5));
+        assert_eq!(sitrep.metadata.alert_generation, Generation::from_u32(1));
+        assert_eq!(
+            sitrep.metadata.support_bundle_generation,
+            Generation::from_u32(2)
+        );
         logctx.cleanup_successful();
     }
 
-    /// Verifies that the bump is relative to the parent sitrep's generation,
-    /// not restarted from a fixed initial value.
+    /// Verifies that the alert bump is relative to the parent sitrep's
+    /// generation (not restarted from a fixed initial value), and that the
+    /// support bundle generation is left untouched.
     #[test]
-    fn child_sitrep_with_new_alert_bumps_alert_generation() {
+    fn child_sitrep_with_new_alert_bumps_alert_generation_only() {
         let logctx = dev::test_setup_log(
-            "child_sitrep_with_new_alert_bumps_alert_generation",
+            "child_sitrep_with_new_alert_bumps_alert_generation_only",
         );
         let inputs = make_input_with_parent_generations(ParentGenerations {
             alert_generation: Generation::from_u32(5),
+            support_bundle_generation: Generation::from_u32(7),
         });
         let mut builder = SitrepBuilder::new(&logctx.log, &inputs);
         {
@@ -324,6 +383,62 @@ mod tests {
         }
         let sitrep = build_sitrep(builder);
         assert_eq!(sitrep.metadata.alert_generation, Generation::from_u32(6));
+        assert_eq!(
+            sitrep.metadata.support_bundle_generation,
+            Generation::from_u32(7)
+        );
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn child_sitrep_with_new_bundle_bumps_bundle_generation_only() {
+        let logctx = dev::test_setup_log(
+            "child_sitrep_with_new_bundle_bumps_bundle_generation_only",
+        );
+        let inputs = make_input_with_parent_generations(ParentGenerations {
+            alert_generation: Generation::from_u32(5),
+            support_bundle_generation: Generation::from_u32(7),
+        });
+        let mut builder = SitrepBuilder::new(&logctx.log, &inputs);
+        {
+            let mut case =
+                builder.cases.open_case(fm::DiagnosisEngineKind::PowerShelf);
+            case.request_support_bundle(Default::default(), "");
+        }
+        let sitrep = build_sitrep(builder);
+        assert_eq!(sitrep.metadata.alert_generation, Generation::from_u32(5));
+        assert_eq!(
+            sitrep.metadata.support_bundle_generation,
+            Generation::from_u32(8)
+        );
+        logctx.cleanup_successful();
+    }
+
+    /// Verifies that the bump is relative to the parent sitrep's generation,
+    /// not restarted from a fixed initial value.
+    #[test]
+    fn child_sitrep_with_both_new_requests_bumps_both_generations() {
+        let logctx = dev::test_setup_log(
+            "child_sitrep_with_both_new_requests_bumps_both_generations",
+        );
+        let inputs = make_input_with_parent_generations(ParentGenerations {
+            alert_generation: Generation::from_u32(5),
+            support_bundle_generation: Generation::from_u32(7),
+        });
+        let mut builder = SitrepBuilder::new(&logctx.log, &inputs);
+        {
+            let mut case =
+                builder.cases.open_case(fm::DiagnosisEngineKind::PowerShelf);
+            case.request_alert(&test_alerts::Foo(serde_json::json!({})), "")
+                .unwrap();
+            case.request_support_bundle(Default::default(), "");
+        }
+        let sitrep = build_sitrep(builder);
+        assert_eq!(sitrep.metadata.alert_generation, Generation::from_u32(6));
+        assert_eq!(
+            sitrep.metadata.support_bundle_generation,
+            Generation::from_u32(8)
+        );
         logctx.cleanup_successful();
     }
 
@@ -332,10 +447,6 @@ mod tests {
     /// though no open-case builder mutations happened.
     #[test]
     fn carry_forward_drop_bumps_alert_generation() {
-        use nexus_types::alert::AlertClass;
-        use nexus_types::fm::case::AlertRequest;
-        use omicron_uuid_kinds::AlertUuid;
-
         let logctx =
             dev::test_setup_log("carry_forward_drop_bumps_alert_generation");
         let inv = make_collection();
@@ -376,6 +487,7 @@ mod tests {
                 comment: String::new(),
                 time_created: chrono::Utc::now(),
                 alert_generation: Generation::new(),
+                support_bundle_generation: Generation::new(),
             },
             cases: [closed_case].into_iter().collect(),
             ereports_by_id: IdOrdMap::new(),
@@ -402,6 +514,83 @@ mod tests {
             Generation::new().next(),
             "dropping a case with alerts from the set of closed cases being \
              carried forwards must bump alert_generation past the parent's"
+        );
+        logctx.cleanup_successful();
+    }
+
+    /// A closed case with an outstanding support-bundle request becomes
+    /// "satisfied" via marker presence, carry-forward drops it, and
+    /// support_bundle_generation bumps even though no open-case builder
+    /// mutations happened.
+    #[test]
+    fn carry_forward_drop_bumps_support_bundle_generation() {
+        let logctx = dev::test_setup_log(
+            "carry_forward_drop_bumps_support_bundle_generation",
+        );
+        let inv = make_collection();
+        let bundle_id = SupportBundleUuid::new_v4();
+        let case_id = omicron_uuid_kinds::CaseUuid::new_v4();
+        let parent_id = SitrepUuid::new_v4();
+
+        let closed_case = fm::Case {
+            id: case_id,
+            metadata: fm::case::Metadata {
+                created_sitrep_id: parent_id,
+                closed_sitrep_id: Some(parent_id),
+                de: fm::DiagnosisEngineKind::PowerShelf,
+                comment: String::new(),
+            },
+            ereports: IdOrdMap::new(),
+            alerts_requested: IdOrdMap::new(),
+            support_bundles_requested: [SupportBundleRequest {
+                id: bundle_id,
+                requested_sitrep_id: parent_id,
+                data_selection: BundleDataSelection::default(),
+                comment: String::new(),
+            }]
+            .into_iter()
+            .collect(),
+            facts: IdOrdMap::new(),
+        };
+
+        let parent = fm::Sitrep {
+            metadata: fm::SitrepMetadata {
+                id: parent_id,
+                parent_sitrep_id: None,
+                inv_collection_id: inv.id,
+                next_inv_min_time_started: inv.time_done,
+                creator_id: OmicronZoneUuid::new_v4(),
+                comment: String::new(),
+                time_created: chrono::Utc::now(),
+                alert_generation: Generation::new(),
+                support_bundle_generation: Generation::new(),
+            },
+            cases: [closed_case].into_iter().collect(),
+            ereports_by_id: IdOrdMap::new(),
+        };
+        let parent_version = SitrepVersion {
+            id: parent_id,
+            version: 1,
+            time_made_current: chrono::Utc::now(),
+        };
+        let mut builder_inputs = crate::analysis_input::Input::builder(
+            Some(Arc::new((parent_version, parent))),
+            inv,
+            Arc::new(IdOrdMap::new()),
+            Arc::new(IdOrdMap::new()),
+        )
+        .unwrap();
+        // Marker exists, so carry-forward will drop the case.
+        builder_inputs.add_marked_support_bundle_requests([bundle_id]);
+        let (input, _) = builder_inputs.build();
+
+        let sitrep = build_sitrep(SitrepBuilder::new(&logctx.log, &input));
+        assert_eq!(
+            sitrep.metadata.support_bundle_generation,
+            Generation::new().next(),
+            "dropping a case with support bundle requests from the set of \
+             closed cases being carried forwards must bump \
+             support_bundle_generation past the parent's"
         );
         logctx.cleanup_successful();
     }

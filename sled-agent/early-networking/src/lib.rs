@@ -132,8 +132,8 @@ impl<'a> EarlyNetworkSetup<'a> {
     /// Dynamically looks up (via internal DNS and queries to MGS) the underlay
     /// addresses of the switch zone(s) that have uplinks configured.
     ///
-    /// If the `RackNetworkConfig` inside `config_rx` does not contain any
-    /// uplinks, returns an empty set. Otherwise:
+    /// The `RackNetworkConfig` inside `config_rx` always has at least one uplink
+    /// port, so there is always at least one switch zone to find:
     ///
     /// * If the config specifies only one switch with an uplink, blocks until
     ///   we can find that switch zone's underlay address.
@@ -152,7 +152,9 @@ impl<'a> EarlyNetworkSetup<'a> {
         let uplinked_switch_zone_addrs = retry_notify(
             retry_policy_switch_mapping(),
             || async {
-                // Which switches have configured ports?
+                // Which switches have configured ports? The list of ports is
+                // guaranteed to be non-empty by the type system, so this set
+                // always has at least one switch.
                 let uplinked_switches = config_rx
                     .borrow()
                     .rack_network_config
@@ -160,11 +162,6 @@ impl<'a> EarlyNetworkSetup<'a> {
                     .iter()
                     .map(|port_config| port_config.switch)
                     .collect::<HashSet<SwitchSlot>>();
-
-                // If we have no uplinks, we have nothing to look up.
-                if uplinked_switches.is_empty() {
-                    return Ok(HashMap::new());
-                }
 
                 match self
                     .lookup_switch_zone_underlay_addrs_one_attempt(
@@ -223,9 +220,10 @@ impl<'a> EarlyNetworkSetup<'a> {
         .await
         .expect("Expected an infinite retry loop finding switch zones");
 
-        // lookup_switch_zone_underlay_addrs_impl should not return until it
-        // finds at least one of the uplinked_switches
-        assert!(!uplinked_switch_zone_addrs.is_empty());
+        assert!(
+            !uplinked_switch_zone_addrs.is_empty(),
+            "retry loop found at least one switch zone"
+        );
 
         uplinked_switch_zone_addrs
     }

@@ -29,6 +29,7 @@ use nexus_types::observed_saga::{
 use omicron_uuid_kinds::AlertUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
+use omicron_uuid_kinds::SupportBundleUuid;
 use serde_json::json;
 use slog_error_chain::InlineErrorChain;
 use std::sync::Arc;
@@ -254,6 +255,9 @@ impl FmAnalysis {
             in_service_disks,
             observed_sagas,
         )?;
+        self.load_ereporter_restarts(opctx, &mut builder)
+            .await
+            .context("failed to load ereporter restarts")?;
         self.load_new_ereports(opctx, &mut builder, &mut warnings)
             .await
             .context("failed to load new ereports")?;
@@ -264,6 +268,13 @@ impl FmAnalysis {
         )
         .await
         .context("failed to load existing alert markers")?;
+        self.load_existing_support_bundle_markers(
+            opctx,
+            parent_sitrep.as_ref().map(|s| &s.1),
+            &mut builder,
+        )
+        .await
+        .context("failed to load existing support bundle markers")?;
 
         let (input, report) = builder.build();
         Ok((input, status::PreparationStatus { warnings, report }))
@@ -424,6 +435,35 @@ impl FmAnalysis {
         Ok(observed)
     }
 
+    async fn load_ereporter_restarts(
+        &mut self,
+        opctx: &OpContext,
+        builder: &mut fm::analysis_input::Builder,
+    ) -> anyhow::Result<()> {
+        let mut nbatches = 0;
+        let mut paginator = Paginator::new(
+            nexus_db_queries::db::datastore::SQL_BATCH_SIZE,
+            dropshot::PaginationOrder::Ascending,
+        );
+        while let Some(p) = paginator.next() {
+            nbatches += 1;
+            let batch = self
+                .datastore
+                .ereporter_restart_list(opctx, &p.current_pagparams())
+                .await?;
+            paginator = p.found_batch(&batch, &|e| e.id().into_untyped_uuid());
+            builder.add_ereporter_restarts(batch);
+        }
+
+        slog::debug!(
+            opctx.log,
+            "loaded {} ereporter restarts (in {nbatches} batches)",
+            builder.ereporter_restarts().len(),
+        );
+
+        Ok(())
+    }
+
     async fn load_new_ereports(
         &mut self,
         opctx: &OpContext,
@@ -446,21 +486,31 @@ impl FmAnalysis {
                 (e.restart_id.into_untyped_uuid(), e.ena)
             });
             let loaded = batch.len();
-            let mut invalid = 0;
-            builder.add_unmarked_ereports(batch.into_iter().filter_map(
-                |ereport| {
-                    let ereport = match fm::Ereport::try_from(ereport) {
-                        Ok(ereport) => ereport,
-                        Err(e) => {
-                            invalid += 1;
-                            warnings.push(e.to_string());
-                            return None;
-                        }
-                    };
 
-                    Some(ereport)
-                },
-            ));
+            let mut invalid = 0;
+            for ereport in batch {
+                let ereport = match fm::Ereport::try_from(ereport) {
+                    Ok(ereport) => ereport,
+                    Err(e) => {
+                        invalid += 1;
+                        warnings.push(e.to_string());
+                        continue;
+                    }
+                };
+
+                // Check if this is a reporter we know about, and issue a
+                // warning if it is not.
+                let id = ereport.id;
+                if !builder.ereporter_restarts().contains_key(&id.restart_id) {
+                    let msg = format!(
+                        "ereport {id} has a restart ID not contained in the \
+                         `ereporter_restart` table"
+                    );
+                    slog::warn!(&opctx.log, "{msg}");
+                    warnings.push(msg);
+                }
+                builder.add_unmarked_ereports(std::iter::once(ereport));
+            }
 
             let total = builder.num_ereports();
             let new = total - prev_total;
@@ -502,6 +552,37 @@ impl FmAnalysis {
             .await
             .context("failed to look up alert marker existence")?;
         builder.add_marked_alert_requests(marked);
+        Ok(())
+    }
+
+    async fn load_existing_support_bundle_markers(
+        &mut self,
+        opctx: &OpContext,
+        parent: Option<&nexus_types::fm::Sitrep>,
+        builder: &mut fm::analysis_input::Builder,
+    ) -> anyhow::Result<()> {
+        let Some(parent) = parent else {
+            // No parent sitrep, so no closed cases, so nothing to look up.
+            return Ok(());
+        };
+        let candidate_ids: Vec<SupportBundleUuid> = parent
+            .cases
+            .iter()
+            .filter(|c| !c.is_open())
+            .flat_map(|c| c.support_bundles_requested.iter().map(|r| r.id))
+            .collect();
+        if candidate_ids.is_empty() {
+            return Ok(());
+        }
+        let marked = self
+            .datastore
+            .fm_rendezvous_existing_support_bundle_markers(
+                opctx,
+                &candidate_ids,
+            )
+            .await
+            .context("failed to look up support bundle marker existence")?;
+        builder.add_marked_support_bundle_requests(marked);
         Ok(())
     }
 
@@ -690,6 +771,7 @@ mod tests {
                     comment: "test sitrep".to_string(),
                     time_created: Utc::now(),
                     alert_generation: Generation::new(),
+                    support_bundle_generation: Generation::new(),
                 },
                 cases: Default::default(),
                 ereports_by_id: Default::default(),
@@ -982,6 +1064,7 @@ mod tests {
                 comment: "test sitrep".to_string(),
                 time_created: Utc::now(),
                 alert_generation: Generation::new(),
+                support_bundle_generation: Generation::new(),
             },
             cases,
             ereports_by_id: Default::default(),

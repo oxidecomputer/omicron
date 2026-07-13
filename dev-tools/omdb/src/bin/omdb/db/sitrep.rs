@@ -275,6 +275,7 @@ async fn cmd_db_sitrep_show(
         comment,
         next_inv_min_time_started,
         alert_generation,
+        support_bundle_generation,
     } = metadata;
 
     const ID: &'static str = "ID";
@@ -291,6 +292,7 @@ async fn cmd_db_sitrep_show(
     const NEXT_INV_MIN_START: &'static str =
         "  next inventory minimum start time";
     const ALERT_GEN: &'static str = "alert generation";
+    const SUPPORT_BUNDLE_GEN: &'static str = "support bundle generation";
     const TOTAL_EREPORTS: &'static str = "ereports in this sitrep";
 
     const WIDTH: usize = const_max_len(&[
@@ -307,6 +309,7 @@ async fn cmd_db_sitrep_show(
         INV_FINISHED_AT,
         NEXT_INV_MIN_START,
         ALERT_GEN,
+        SUPPORT_BUNDLE_GEN,
         TOTAL_EREPORTS,
     ]);
 
@@ -353,7 +356,7 @@ async fn cmd_db_sitrep_show(
         }
     }
 
-    println!("\n{:-<80}", "== DIAGNOSIS INPUTS ");
+    println!("\n{:=<80}", "== DIAGNOSIS INPUTS ");
     println!("    {INV_COLLECTION_ID:>WIDTH$}: {inv_collection_id:?}");
     let inv_collection = inv_collection_dsl::inv_collection
         .filter(
@@ -384,13 +387,14 @@ async fn cmd_db_sitrep_show(
     println!("    ");
     println!("    rendezvous resource generation numbers:");
     println!("    {ALERT_GEN:>WIDTH$}: {alert_generation}");
+    println!("    {SUPPORT_BUNDLE_GEN:>WIDTH$}: {support_bundle_generation}");
     println!("    ");
     println!("    {TOTAL_EREPORTS}: {}", ereports_by_id.len());
     // TODO(eliza): perhaps display a table summarizing those ereports? possibly
     // behind a verbose flag?
 
     if !cases.is_empty() {
-        println!("\n{:-<80}\n", "== CASES");
+        println!("\n{:=<80}\n", "== CASES ");
         for case in cases {
             println!("{}", case.display_indented(4, Some(id)));
         }
@@ -479,7 +483,7 @@ fn print_analysis_report(
         return Ok(());
     }
 
-    println!("\n{:-<80}", "== ANALYSIS INPUT REPORT ");
+    println!("\n{:=<80}", "== ANALYSIS INPUT REPORT ");
     match serde_json::from_value::<InputReport>(input_report.clone()) {
         Ok(report) => println!("{}", report.display_multiline(0)),
         Err(e) => {
@@ -493,7 +497,7 @@ fn print_analysis_report(
         }
     }
 
-    println!("\n{:-<80}", "== ANALYSIS REPORT ");
+    println!("\n{:=<80}", "== ANALYSIS REPORT ");
     match serde_json::from_value::<AnalysisReport>(analysis_report.clone()) {
         Ok(report) => println!("{}", report.display_multiline(0)),
         Err(e) => {

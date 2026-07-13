@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use bootstrap_agent_lockstep_client::types::RackOperationStatus;
+use bootstrap_agent_lockstep_types::RackOperationStatus;
 use dropshot::HttpError;
 use dropshot::HttpResponseOk;
 use dropshot::HttpResponseUpdatedNoContent;
@@ -26,6 +26,8 @@ use tufaceous_artifact::ArtifactHashId;
 use wicket_common::inventory::RackV1Inventory;
 use wicket_common::inventory::SpIdentifier;
 use wicket_common::inventory::SpType;
+use wicket_common::multirack_setup::CurrentMultirackJoinUserConfig;
+use wicket_common::multirack_setup::MultirackJoinConfigBaseUserInput;
 use wicket_common::preflight_check;
 use wicket_common::rack_setup::BgpAuthKey;
 use wicket_common::rack_setup::BgpAuthKeyId;
@@ -76,6 +78,28 @@ pub trait WicketdApi {
     async fn put_rss_config(
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<PutRssUserConfigInsensitive>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    /// Get the current status of the multirack join configuration.
+    #[endpoint {
+        method = GET,
+        path = "/rack-setup/config/multirack"
+    }]
+    async fn get_multirack_join_config(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<CurrentMultirackJoinUserConfig>, HttpError>;
+
+    /// Upload a configuration for joining this rack into an existing regional
+    /// cluster.
+    ///
+    /// A multirack join configuration is mutually exclusive with an RSS config.
+    #[endpoint {
+        method = PUT,
+        path = "/rack-setup/config/multirack"
+    }]
+    async fn put_multirack_join_config(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<MultirackJoinConfigBaseUserInput>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
     /// Add an external certificate.

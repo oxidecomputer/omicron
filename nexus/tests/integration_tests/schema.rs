@@ -177,9 +177,8 @@ async fn apply_update(
 
         // After applying the step, run its verification SQL (if any) in a
         // separate transaction — just like the real Nexus startup path does.
-        // This confirms that async backfill operations (CREATE INDEX,
-        // ALTER COLUMN SET NOT NULL, ADD CONSTRAINT, ADD COLUMN with
-        // backfill) actually completed.
+        // This confirms that async backfill operations (CREATE INDEX and
+        // validating ADD CONSTRAINT) actually completed.
         if let Some(verify_sql) = step.verification_sql() {
             info!(
                 log,

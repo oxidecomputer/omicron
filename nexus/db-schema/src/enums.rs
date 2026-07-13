@@ -61,6 +61,7 @@ define_enums! {
     FmFactPhysicalDiskKindEnum => "fm_fact_physical_disk_kind",
     FmFactSagaKindEnum => "fm_fact_saga_kind",
     FmFactSagaOrphanReasonEnum => "fm_fact_saga_orphan_reason",
+    FmdInventoryErrorKindEnum => "fmd_inventory_error_kind",
     HwM2SlotEnum => "hw_m2_slot",
     HwPowerStateEnum => "hw_power_state",
     HwRotSlotEnum => "hw_rot_slot",

@@ -178,6 +178,13 @@ pub struct SitrepMetadata {
     /// value: a rendezvous task working from a sitrep whose generation no
     /// longer matches the current sitrep's has its inserts rejected as stale.
     pub alert_generation: Generation,
+
+    /// `SitrepBuilder` increments this each time it builds a sitrep whose
+    /// support bundle request set differs from its parent's. Support bundle
+    /// creation is guarded on this value: a rendezvous task working from
+    /// a sitrep whose generation no longer matches the current sitrep's has
+    /// its inserts rejected as stale.
+    pub support_bundle_generation: Generation,
 }
 
 pub struct SitrepStateComparison<'sitrep> {

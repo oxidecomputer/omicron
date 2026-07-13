@@ -2,8 +2,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-// Copyright 2023 Oxide Computer Company
-
 //! A framework to declare a series of steps to perform updates with.
 //!
 //! The general data flow of the engine is as a series of steps that is executed

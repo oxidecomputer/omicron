@@ -13,6 +13,7 @@ use chrono::{DateTime, Utc};
 use iddqd::IdOrdMap;
 use omicron_uuid_kinds::{
     AlertUuid, CaseUuid, CollectionUuid, PhysicalDiskUuid, SitrepUuid,
+    SupportBundleUuid,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -85,8 +86,8 @@ impl AnalysisReport {
                     indent,
                 } = self;
 
-                if !comment.is_empty() {
-                    writeln!(f, "{:indent$}// {comment}", "")?;
+                for line in comment.lines() {
+                    writeln!(f, "{:indent$}// {line}", "")?;
                 }
                 writeln!(f, "{:indent$}sitrep ID: {sitrep_id}", "")?;
                 if cases.is_empty() {
@@ -206,7 +207,9 @@ impl LogEntry {
                 let colon = if kvs.is_empty() { "" } else { ":" };
                 writeln!(f, "{:indent$}{bullet}{event}{colon}", "")?;
                 if let Some(comment) = comment {
-                    writeln!(f, "{:indent$}  // {comment}", "")?;
+                    for line in comment.lines() {
+                        writeln!(f, "{:indent$}  // {line}", "")?;
+                    }
                 }
                 for (k, v) in kvs {
                     fmt_json_value(f, k, v, indent + 2)?;
@@ -230,6 +233,8 @@ pub struct InputReport {
     /// Cases which have closed, but which have been copied forwards as they
     /// contain ereports which have not yet been marked seen.
     pub closed_cases_copied_forward: BTreeMap<CaseUuid, ClosedCaseReport>,
+    /// Number of entries in the ereporter restart table.
+    pub num_ereporter_restarts: usize,
     /// All control-plane-managed physical disks visible to the diagnosis
     /// engines for this analysis pass.
     pub in_service_disks: BTreeSet<PhysicalDiskUuid>,
@@ -256,6 +261,7 @@ pub struct ClosedCaseReport {
     pub metadata: case::Metadata,
     pub unmarked_ereports: BTreeSet<EreportId>,
     pub unmarked_alert_requests: BTreeSet<AlertUuid>,
+    pub unmarked_support_bundle_requests: BTreeSet<SupportBundleUuid>,
 }
 
 impl InputReport {
@@ -280,6 +286,7 @@ impl fmt::Display for InputReportMultilineDisplay<'_> {
                     new_ereport_ids,
                     open_cases,
                     closed_cases_copied_forward,
+                    num_ereporter_restarts,
                     in_service_disks,
                     observed_sagas,
                 },
@@ -303,6 +310,13 @@ impl fmt::Display for InputReportMultilineDisplay<'_> {
                 "",
             )?;
         }
+
+        writeln!(
+            f,
+            "{:indent$}total known ereport restart IDs: \
+                {num_ereporter_restarts}",
+            "",
+        )?;
 
         if !new_ereport_ids.is_empty() {
             writeln!(
@@ -363,6 +377,7 @@ impl fmt::Display for InputReportMultilineDisplay<'_> {
                         metadata,
                         unmarked_ereports,
                         unmarked_alert_requests,
+                        unmarked_support_bundle_requests,
                     },
                 ) in closed_cases_copied_forward
                 {
@@ -375,6 +390,7 @@ impl fmt::Display for InputReportMultilineDisplay<'_> {
                     // forward anyway, that's weird and worth a warning.
                     if unmarked_ereports.is_empty()
                         && unmarked_alert_requests.is_empty()
+                        && unmarked_support_bundle_requests.is_empty()
                     {
                         writeln!(
                             f,
@@ -410,6 +426,22 @@ impl fmt::Display for InputReportMultilineDisplay<'_> {
                         let indent = indent + 2;
                         for alert_id in unmarked_alert_requests {
                             writeln!(f, "{:indent$}* alert {alert_id}", "")?;
+                        }
+                    }
+                    if !unmarked_support_bundle_requests.is_empty() {
+                        writeln!(
+                            f,
+                            "{:indent$}support bundle requests not yet \
+                             satisfied:",
+                            ""
+                        )?;
+                        let indent = indent + 2;
+                        for bundle_id in unmarked_support_bundle_requests {
+                            writeln!(
+                                f,
+                                "{:indent$}* support bundle {bundle_id}",
+                                ""
+                            )?;
                         }
                     }
                 }
@@ -540,6 +572,11 @@ mod tests {
             AlertUuid::from_str("66666666-6666-6666-6666-666666666666")
                 .unwrap(),
         );
+        let mut unmarked_support_bundle_requests = BTreeSet::new();
+        unmarked_support_bundle_requests.insert(
+            SupportBundleUuid::from_str("88888888-8888-8888-8888-888888888888")
+                .unwrap(),
+        );
         closed_cases_copied_forward.insert(
             case2_id,
             ClosedCaseReport {
@@ -551,6 +588,7 @@ mod tests {
                 },
                 unmarked_ereports,
                 unmarked_alert_requests,
+                unmarked_support_bundle_requests,
             },
         );
         // A closed case with no recorded reason for being copied forwards. The
@@ -567,6 +605,7 @@ mod tests {
                 },
                 unmarked_ereports: BTreeSet::new(),
                 unmarked_alert_requests: BTreeSet::new(),
+                unmarked_support_bundle_requests: BTreeSet::new(),
             },
         );
 
@@ -586,6 +625,7 @@ mod tests {
             parent_sitrep_id: Some(parent_sitrep_id),
             parent_inv_id: Some(parent_inv_id),
             inv_id,
+            num_ereporter_restarts: 420,
             new_ereport_ids,
             open_cases,
             closed_cases_copied_forward,
@@ -632,6 +672,7 @@ mod tests {
             parent_sitrep_id: None,
             parent_inv_id: None,
             inv_id,
+            num_ereporter_restarts: 0,
             new_ereport_ids: BTreeSet::new(),
             open_cases: BTreeMap::new(),
             closed_cases_copied_forward: BTreeMap::new(),
@@ -652,6 +693,7 @@ mod tests {
             parent_sitrep_id: Some(parent_sitrep_id),
             parent_inv_id: Some(inv_id),
             inv_id,
+            num_ereporter_restarts: 420,
             new_ereport_ids: BTreeSet::new(),
             open_cases: BTreeMap::new(),
             closed_cases_copied_forward: BTreeMap::new(),
@@ -785,6 +827,23 @@ mod tests {
         let output = format!("{}", entry.display_indented(0));
         expectorate::assert_contents(
             "output/log_entry_display_nested_values.out",
+            &output,
+        );
+    }
+
+    /// The pretty-printer handles multi-line strings in comments by outputting
+    /// them at the correct indentation and prefixing each line with a `//`.
+    #[test]
+    fn test_log_entry_display_multiline_comment() {
+        let json = serde_json::json!({
+            "event": "multi-line comment",
+            "comment": "this comment\nspans multiple lines\nisn't that cool?",
+            "flat_key": "flat_value",
+        });
+        let entry: LogEntry = serde_json::from_value(json).unwrap();
+        let output = format!("{}", entry.display_indented(0));
+        expectorate::assert_contents(
+            "output/log_entry_display_multiline_comment.out",
             &output,
         );
     }

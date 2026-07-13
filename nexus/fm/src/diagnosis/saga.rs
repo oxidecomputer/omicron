@@ -634,6 +634,8 @@ mod tests {
                 comment: String::new(),
                 alert_generation:
                     omicron_common::api::external::Generation::new(),
+                support_bundle_generation:
+                    omicron_common::api::external::Generation::new(),
             },
             cases: case_map,
             ereports_by_id: Default::default(),

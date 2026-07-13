@@ -51,7 +51,6 @@ use nexus_types::external_api::timeseries;
 use nexus_types::external_api::update;
 use nexus_types::external_api::vpc;
 use omicron_common::address::{IpRange, IpVersion, Ipv4Range};
-use omicron_common::api::external::AddressLotKind;
 use omicron_common::api::external::AllowedSourceIps;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::IdentityMetadataCreateParams;
@@ -67,6 +66,7 @@ use omicron_common::api::external::VpcFirewallRuleUpdateParams;
 use omicron_test_utils::certificates::CertificateChain;
 use semver::Version;
 use sled_agent_types::early_networking::BfdMode;
+use sled_agent_types::early_networking::MaxPathConfig;
 use sled_agent_types::early_networking::SwitchSlot;
 use std::collections::BTreeSet;
 use std::net::IpAddr;
@@ -989,7 +989,7 @@ pub static DEMO_ADDRESS_LOT_CREATE: LazyLock<networking::AddressLotCreate> =
             name: "parkinglot".parse().unwrap(),
             description: "an address parking lot".into(),
         },
-        kind: AddressLotKind::Infra,
+        kind: networking::AddressLotKind::Infra,
         blocks: vec![networking::AddressLotBlockCreate {
             first_address: "203.0.113.10".parse().unwrap(),
             last_address: "203.0.113.20".parse().unwrap(),
@@ -1011,6 +1011,16 @@ pub static DEMO_BGP_CONFIG: LazyLock<networking::BgpConfigCreate> =
         shaper: None,
         max_paths: Default::default(),
     });
+pub static DEMO_BGP_CONFIG_UPDATE: LazyLock<networking::BgpConfigUpdate> =
+    LazyLock::new(|| networking::BgpConfigUpdate {
+        identity: IdentityMetadataUpdateParams {
+            name: Some("as47".parse().unwrap()),
+            description: Some("BGP config for AS47".into()),
+        },
+        bgp_announce_set_id: Some(NameOrId::Name("instances".parse().unwrap())),
+        max_paths: Some(MaxPathConfig::new(1).unwrap()),
+    });
+
 pub const DEMO_BGP_ANNOUNCE_SET_URL: &'static str =
     "/v1/system/networking/bgp-announce-set";
 pub static DEMO_BGP_ANNOUNCE: LazyLock<networking::BgpAnnounceSetCreate> =
@@ -3436,6 +3446,9 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
                         serde_json::to_value(&*DEMO_BGP_CONFIG).unwrap(),
                     ),
                     AllowedMethod::Get,
+                    AllowedMethod::Put(
+                        serde_json::to_value(&*DEMO_BGP_CONFIG_UPDATE).unwrap(),
+                    ),
                     AllowedMethod::Delete,
                 ],
             },
