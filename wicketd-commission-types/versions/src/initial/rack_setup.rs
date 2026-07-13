@@ -2,35 +2,43 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use omicron_common::address;
+//! Rack setup (RSS) types for the commissioning API.
+//!
+//! The RSS configuration tree (rooted at [`PutRssUserConfigInsensitive`]) is
+//! copied verbatim from `wicket-common`, `sled-agent-types`, and
+//! `omicron-common` so that its serde shape is byte-for-byte compatible with
+//! the internal types (see the round-trip tests in wicketd). The functional
+//! machinery of the originals (validation error types, inherent methods, and
+//! conversions to internal types) lives elsewhere: validation and conversion
+//! happen at the wicketd boundary.
+
+use std::collections::{BTreeMap, BTreeSet};
+use std::fmt;
+use std::net::{IpAddr, Ipv6Addr};
+
 use omicron_common::api::external::Name;
-use omicron_common::api::internal::shared::AllowedSourceIps;
 use oxnet::IpNet;
 use schemars::JsonSchema;
-use serde::Deserialize;
-use serde::Serialize;
-use serde::Serializer;
-use sled_agent_types::early_networking::BgpConfig;
-use sled_agent_types::early_networking::BgpPeerConfig;
-use sled_agent_types::early_networking::ImportExportPolicy;
-use sled_agent_types::early_networking::LinkFec;
-use sled_agent_types::early_networking::LinkSpeed;
-use sled_agent_types::early_networking::LldpPortConfig;
-use sled_agent_types::early_networking::RouteConfig;
-use sled_agent_types::early_networking::RouterLifetimeConfig;
-use sled_agent_types::early_networking::RouterPeerIpAddr;
-use sled_agent_types::early_networking::SwitchSlot;
-use sled_agent_types::early_networking::TxEqConfig;
-use sled_agent_types::early_networking::UplinkAddress;
-use sled_agent_types::early_networking::UplinkAddressConfig;
-use sled_agent_types::early_networking::UplinkIpNet;
+use serde::{Deserialize, Serialize, Serializer};
 use slog_error_chain::InlineErrorChain;
-use std::collections::BTreeMap;
-use std::collections::BTreeSet;
-use std::fmt;
-use std::net::IpAddr;
-use std::net::Ipv6Addr;
-use std::str::FromStr;
+
+// Re-exports of pinned types from sled-agent-types-versions.
+pub use sled_agent_types_versions::v1::early_networking::{
+    LinkFec, LinkSpeed, LldpAdminStatus, LldpPortConfig, RouteConfig,
+    TxEqConfig,
+};
+pub use sled_agent_types_versions::v20::early_networking::{
+    BgpConfig, MaxPathConfig, RouterLifetimeConfig,
+};
+pub use sled_agent_types_versions::v30::early_networking::{
+    RouterPeerIpAddr, UplinkAddress, UplinkIpNet,
+};
+
+// Re-exports of types from omicron-common that should never change.
+pub use omicron_common::address::{IpRange, Ipv4Range, Ipv6Range};
+pub use omicron_common::api::internal::shared::{
+    AllowedSourceIps, IpAllowList,
+};
 
 /// The portion of `CurrentRssUserConfig` that can be posted in one shot; it is
 /// provided by the wicket user uploading a TOML file, currently.
@@ -48,7 +56,7 @@ pub struct PutRssUserConfigInsensitive {
     pub bootstrap_sleds: BTreeSet<u16>,
     pub ntp_servers: Vec<String>,
     pub dns_servers: Vec<IpAddr>,
-    pub internal_services_ip_pool_ranges: Vec<address::IpRange>,
+    pub internal_services_ip_pool_ranges: Vec<IpRange>,
     pub external_dns_ips: Vec<IpAddr>,
     pub external_dns_zone_name: String,
     pub rack_network_config: UserSpecifiedRackNetworkConfig,
@@ -70,72 +78,6 @@ pub struct UserSpecifiedRackNetworkConfig {
     pub switch0: BTreeMap<String, UserSpecifiedPortConfig>,
     pub switch1: BTreeMap<String, UserSpecifiedPortConfig>,
     pub bgp: Vec<BgpConfig>,
-}
-
-impl UserSpecifiedRackNetworkConfig {
-    /// Returns all BGP auth key IDs in the rack network config.
-    pub fn get_bgp_auth_key_ids(&self) -> BTreeSet<BgpAuthKeyId> {
-        self.iter_uplinks()
-            .flat_map(|(_, _, cfg)| cfg.bgp_peers.iter())
-            .filter_map(|peer| peer.auth_key_id.as_ref())
-            .cloned()
-            .collect()
-    }
-
-    /// Returns the port map for a particular switch location.
-    pub fn port_map(
-        &self,
-        switch: SwitchSlot,
-    ) -> &BTreeMap<String, UserSpecifiedPortConfig> {
-        match switch {
-            SwitchSlot::Switch0 => &self.switch0,
-            SwitchSlot::Switch1 => &self.switch1,
-        }
-    }
-
-    /// Returns true if there is at least one uplink configured.
-    pub fn has_any_uplinks(&self) -> bool {
-        !self.switch0.is_empty() || !self.switch1.is_empty()
-    }
-
-    /// Returns an iterator over all uplinks -- (switch, port, config) triples.
-    pub fn iter_uplinks(
-        &self,
-    ) -> impl Iterator<Item = (SwitchSlot, &str, &ManualPortConfig)> {
-        let iter0 = self.switch0.iter().filter_map(|(port, cfg)| match cfg {
-            UserSpecifiedPortConfig::Manual(cfg) => {
-                Some((SwitchSlot::Switch0, port.as_str(), cfg))
-            }
-            UserSpecifiedPortConfig::DdmAutoPortConfig => None,
-        });
-
-        let iter1 = self.switch1.iter().filter_map(|(port, cfg)| match cfg {
-            UserSpecifiedPortConfig::Manual(cfg) => {
-                Some((SwitchSlot::Switch1, port.as_str(), cfg))
-            }
-            UserSpecifiedPortConfig::DdmAutoPortConfig => None,
-        });
-
-        iter0.chain(iter1)
-    }
-
-    /// Returns a mutable iterator over all uplinks -- (switch, port, config) triples.
-    pub fn iter_uplinks_mut(
-        &mut self,
-    ) -> impl Iterator<Item = (SwitchSlot, &str, &mut UserSpecifiedPortConfig)>
-    {
-        let iter0 = self
-            .switch0
-            .iter_mut()
-            .map(|(port, cfg)| (SwitchSlot::Switch0, port.as_str(), cfg));
-
-        let iter1 = self
-            .switch1
-            .iter_mut()
-            .map(|(port, cfg)| (SwitchSlot::Switch1, port.as_str(), cfg));
-
-        iter0.chain(iter1)
-    }
 }
 
 /// User-specified version of `PortConfig`.
@@ -326,24 +268,7 @@ impl JsonSchema for UserSpecifiedPortConfig {
     }
 }
 
-impl UserSpecifiedPortConfig {
-    pub fn manual(&self) -> Option<&ManualPortConfig> {
-        match self {
-            Self::Manual(cfg) => Some(cfg),
-            Self::DdmAutoPortConfig => None,
-        }
-    }
-
-    pub fn manual_mut(&mut self) -> Option<&mut ManualPortConfig> {
-        match self {
-            Self::Manual(cfg) => Some(cfg),
-            Self::DdmAutoPortConfig => None,
-        }
-    }
-}
-
-/// User-specified version of
-/// [`sled_agent_types::early_networking::UplinkAddressConfig`].
+/// User-specified version of `UplinkAddressConfig`.
 ///
 /// This allows us to have a nicer TOML representation of [`UplinkAddress`].
 #[derive(
@@ -352,45 +277,23 @@ impl UserSpecifiedPortConfig {
 #[serde(deny_unknown_fields)]
 pub struct UserSpecifiedUplinkAddressConfig {
     /// The address to be used on the uplink.
-    // This type is used in both JSON (via OpenAPI) and TOML (for operator
-    // uploads to wicket). For the TOML case specifically, we want to use a more
-    // user-friendly representation, so we serialize/deserialize this field as a
-    // string. See the `uplink_address_serde` module below for the specific
-    // mapping.
     #[serde(with = "uplink_address_serde")]
     #[schemars(with = "String")]
     pub address: UplinkAddress,
-
     /// The VLAN id (if any) associated with this address.
     #[serde(default)]
     pub vlan_id: Option<u16>,
 }
 
-impl From<UserSpecifiedUplinkAddressConfig> for UplinkAddressConfig {
-    fn from(value: UserSpecifiedUplinkAddressConfig) -> Self {
-        Self { address: value.address, vlan_id: value.vlan_id }
-    }
-}
-
 impl UserSpecifiedUplinkAddressConfig {
-    /// String representation for [`UplinkAddress::AddrConf`] when
-    /// serializing/deserializing [`UserSpecifiedUplinkAddressConfig`].
+    /// String representation for the "addrconf" uplink address.
     pub const ADDR_CONF: &str = "addrconf";
-
-    /// Helper to construct a `UserSpecifiedUplinkAddressConfig` with a
-    /// specified IP net and no VLAN ID.
-    pub fn without_vlan(ip_net: UplinkIpNet) -> Self {
-        Self { address: UplinkAddress::Static { ip_net }, vlan_id: None }
-    }
 }
 
-/// Special handling to serialize/deserialize [`UplinkAddress`] as a flat
-/// string for a nicer TOML representation.
 pub(crate) mod uplink_address_serde {
-    use super::{UplinkAddress, UserSpecifiedUplinkAddressConfig};
+    use super::{UplinkAddress, UplinkIpNet, UserSpecifiedUplinkAddressConfig};
     use oxnet::IpNet;
     use serde::{Deserialize, Deserializer, Serializer};
-    use sled_agent_types::early_networking::UplinkIpNet;
     use slog_error_chain::InlineErrorChain;
 
     pub fn serialize<S: Serializer>(
@@ -428,9 +331,9 @@ pub(crate) mod uplink_address_serde {
     }
 }
 
-/// User-specified version of [`BgpPeerConfig`].
+/// User-specified version of `BgpPeerConfig`.
 ///
-/// This is similar to [`BgpPeerConfig`], except it doesn't have the sensitive
+/// This is similar to `BgpPeerConfig`, except it doesn't have the sensitive
 /// `md5_auth_key` parameter, instead requiring that the user provide the key
 /// separately.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq, JsonSchema)]
@@ -492,18 +395,17 @@ pub struct UserSpecifiedBgpPeerConfig {
     pub router_lifetime: RouterLifetimeConfig,
 }
 
-// Type that allows either the string "unnumbered" or an IP address. Has custom
-// implementations of `JsonSchema`, `Serialize`, and `Deserialize` to support
-// this.
+/// The address of a BGP peer: either `unnumbered` or an IP address.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum UserSpecifiedRouterPeerAddr {
+    /// An unnumbered BGP peer.
     Unnumbered,
+    /// A numbered BGP peer with the given address.
     Numbered(RouterPeerIpAddr),
 }
 
 impl UserSpecifiedRouterPeerAddr {
-    /// String representation for [`UserSpecifiedRouterPeerAddr::Unnumbered`] in
-    /// serialization.
+    /// String representation for the unnumbered peer.
     pub const UNNUMBERED_PEER: &str = "unnumbered";
 }
 
@@ -554,28 +456,6 @@ impl<'de> Deserialize<'de> for UserSpecifiedRouterPeerAddr {
     }
 }
 
-impl UserSpecifiedBgpPeerConfig {
-    pub fn hold_time(&self) -> u64 {
-        self.hold_time.unwrap_or(BgpPeerConfig::DEFAULT_HOLD_TIME)
-    }
-
-    pub fn idle_hold_time(&self) -> u64 {
-        self.idle_hold_time.unwrap_or(BgpPeerConfig::DEFAULT_IDLE_HOLD_TIME)
-    }
-
-    pub fn delay_open(&self) -> u64 {
-        self.delay_open.unwrap_or(BgpPeerConfig::DEFAULT_DELAY_OPEN)
-    }
-
-    pub fn connect_retry(&self) -> u64 {
-        self.connect_retry.unwrap_or(BgpPeerConfig::DEFAULT_CONNECT_RETRY)
-    }
-
-    pub fn keepalive(&self) -> u64 {
-        self.keepalive.unwrap_or(BgpPeerConfig::DEFAULT_KEEPALIVE)
-    }
-}
-
 /// The key identifier for authentication to use with a BGP peer.
 #[derive(
     Clone,
@@ -589,33 +469,7 @@ impl UserSpecifiedBgpPeerConfig {
     Ord,
     Hash,
 )]
-pub struct BgpAuthKeyId(Name);
-
-impl BgpAuthKeyId {
-    /// Returns the key ID string.
-    pub fn as_str(&self) -> &str {
-        self.0.as_str()
-    }
-
-    /// Returns the key ID as a `Name`.
-    pub fn as_name(&self) -> &Name {
-        &self.0
-    }
-}
-
-impl FromStr for BgpAuthKeyId {
-    type Err = String;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Ok(Self(s.parse()?))
-    }
-}
-
-impl fmt::Display for BgpAuthKeyId {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        fmt::Display::fmt(&self.0, f)
-    }
-}
+pub struct BgpAuthKeyId(pub(crate) Name);
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
 #[serde(tag = "status", rename_all = "snake_case")]
@@ -645,19 +499,6 @@ pub enum UserSpecifiedImportExportPolicy {
     #[default]
     NoFiltering,
     Allow(Vec<IpNet>),
-}
-
-impl From<UserSpecifiedImportExportPolicy> for ImportExportPolicy {
-    fn from(policy: UserSpecifiedImportExportPolicy) -> Self {
-        match policy {
-            UserSpecifiedImportExportPolicy::NoFiltering => {
-                ImportExportPolicy::NoFiltering
-            }
-            UserSpecifiedImportExportPolicy::Allow(list) => {
-                ImportExportPolicy::Allow(list)
-            }
-        }
-    }
 }
 
 impl Serialize for UserSpecifiedImportExportPolicy {
@@ -690,7 +531,6 @@ impl<'de> Deserialize<'de> for UserSpecifiedImportExportPolicy {
                 formatter.write_str("an array of IP prefixes, or null")
             }
 
-            // Note: null is represented by visit_unit, not visit_none.
             fn visit_unit<E>(self) -> Result<Self::Value, E> {
                 Ok(UserSpecifiedImportExportPolicy::NoFiltering)
             }
@@ -719,7 +559,6 @@ impl JsonSchema for UserSpecifiedImportExportPolicy {
     fn json_schema(
         r#gen: &mut schemars::r#gen::SchemaGenerator,
     ) -> schemars::schema::Schema {
-        // The above is equivalent to an Option<Vec<IpNet>>.
         Option::<Vec<IpNet>>::json_schema(r#gen)
     }
 }

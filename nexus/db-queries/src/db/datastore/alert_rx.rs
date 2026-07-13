@@ -28,7 +28,6 @@ use crate::db::model::WebhookSecret;
 use crate::db::pagination::Paginator;
 use crate::db::pagination::paginated;
 use crate::db::pagination::paginated_multicolumn;
-use crate::db::update_and_check::UpdateAndCheck;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::prelude::*;
 use nexus_auth::authz::ApiResource;
@@ -350,20 +349,19 @@ impl DataStore {
             endpoint: params.endpoint.as_ref().map(ToString::to_string),
             time_modified: chrono::Utc::now(),
         };
-        let updated = diesel::update(rx_dsl::alert_receiver)
+        diesel::update(rx_dsl::alert_receiver)
             .filter(rx_dsl::id.eq(rx_id))
             .filter(rx_dsl::time_deleted.is_null())
             .set(update)
-            .check_if_exists(rx_id)
-            .execute_and_check(&conn)
+            .returning(AlertReceiver::as_returning())
+            .get_result_async(&*conn)
             .await
             .map_err(|e| {
                 public_error_from_diesel(
                     e,
                     ErrorHandler::NotFoundByResource(authz_rx),
                 )
-            })?;
-        Ok(updated.found)
+            })
     }
 
     pub async fn alert_rx_list(
@@ -1187,6 +1185,7 @@ mod test {
     use nexus_db_lookup::LookupPath;
     use nexus_types::alert::test_alerts;
     use omicron_common::api::external::IdentityMetadataCreateParams;
+    use omicron_common::api::external::IdentityMetadataUpdateParams;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::AlertUuid;
 
@@ -1215,6 +1214,79 @@ mod test {
             )
             .await
             .expect("cant create ye webhook receiver!!!!")
+    }
+
+    #[tokio::test]
+    async fn test_webhook_rx_update_succeeds() {
+        let logctx = dev::test_setup_log("test_webhook_rx_update_succeeds");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+        let rx = create_receiver(datastore, opctx, "updated", Vec::new()).await;
+        let (authz_rx, _) = LookupPath::new(opctx, datastore)
+            .alert_receiver_id(rx.rx.id())
+            .fetch()
+            .await
+            .expect("receiver must exist");
+
+        let updated = datastore
+            .webhook_rx_update(
+                opctx,
+                &authz_rx,
+                alert::WebhookReceiverUpdate {
+                    identity: IdentityMetadataUpdateParams {
+                        name: None,
+                        description: Some("new description".to_string()),
+                    },
+                    endpoint: None,
+                },
+            )
+            .await
+            .expect("updating an existing receiver must succeed");
+        assert_eq!(updated.identity.description, "new description");
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_webhook_rx_update_fails_when_receiver_deleted() {
+        let logctx = dev::test_setup_log(
+            "test_webhook_rx_update_fails_when_receiver_deleted",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+        let rx = create_receiver(datastore, opctx, "deleted", Vec::new()).await;
+        let (authz_rx, db_rx) = LookupPath::new(opctx, datastore)
+            .alert_receiver_id(rx.rx.id())
+            .fetch()
+            .await
+            .expect("receiver must exist");
+
+        datastore
+            .webhook_rx_delete(opctx, &authz_rx, &db_rx)
+            .await
+            .expect("receiver must be deleted");
+        let err = datastore
+            .webhook_rx_update(
+                opctx,
+                &authz_rx,
+                alert::WebhookReceiverUpdate {
+                    identity: IdentityMetadataUpdateParams {
+                        name: None,
+                        description: Some("updated".to_string()),
+                    },
+                    endpoint: None,
+                },
+            )
+            .await
+            .expect_err("updating a deleted receiver must fail");
+        assert!(
+            matches!(err, Error::ObjectNotFound { .. }),
+            "expected ObjectNotFound, got {err:?}",
+        );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
     }
 
     async fn create_alert<A: nexus_types::alert::AlertPayload>(
