@@ -968,6 +968,7 @@ dependencies = [
 name = "bootstrap-agent-lockstep-client"
 version = "0.1.0"
 dependencies = [
+ "bootstrap-agent-lockstep-types",
  "omicron-common",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
@@ -17342,6 +17343,7 @@ dependencies = [
  "base64 0.22.1",
  "bootstrap-agent-client",
  "bootstrap-agent-lockstep-client",
+ "bootstrap-agent-lockstep-types",
  "buf-list",
  "bytes",
  "camino",
@@ -17429,6 +17431,7 @@ name = "wicketd-api"
 version = "0.1.0"
 dependencies = [
  "bootstrap-agent-lockstep-client",
+ "bootstrap-agent-lockstep-types",
  "dropshot",
  "gateway-client",
  "omicron-common",
