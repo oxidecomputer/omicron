@@ -1759,8 +1759,9 @@ impl DataStore {
                     locked_gen: new_gen,
                 })
             }
-            // Check for deletion before interpreting the retained updater ID.
-            // `check_if_exists` returns soft-deleted rows as existing.
+            // Because `check_if_exists` will return records that have been
+            // soft-deleted, we must check for `time_deleted` before considering
+            // whether the lock has been successfully inherited.
             UpdateAndQueryResult {
                 status: UpdateStatus::NotUpdatedButExists,
                 ref found,
