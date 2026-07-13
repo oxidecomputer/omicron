@@ -36,10 +36,9 @@ pub enum ObservedSagaState {
 /// subset of [`ObservedSagaState`] that can appear in a `NotProgressing`
 /// fact.
 ///
-/// This is intentionally a subset of "omicron.public.saga_state" because some
-/// of those states are terminal (e.g., done, abandoned) and should not be
-/// observed on a fact attempting to indicate "this saga should be making
-/// progress".
+/// This is intentionally a subset of "omicron.public.saga_state" because the
+/// other states never appear in a `NotProgressing` fact: a done saga has no
+/// facts at all, and an abandoned saga carries an `Abandoned` fact instead.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SagaProgressState {
@@ -85,8 +84,8 @@ impl SagaOwnerState {
 }
 
 /// Why a saga is orphaned: its owning Nexus exists but will not advance it.
-/// The reduced, only-ever-stored form of [`SagaOwnerState`] (the `Active` and
-/// `NotYet` states never produce a fact).
+/// The subset of [`SagaOwnerState`] that appears in a fact: `Active` and
+/// `NotYet` owners never produce one.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum OrphanedReason {
@@ -110,8 +109,8 @@ pub struct ObservedSaga {
     /// current SEC.
     pub current_sec: Option<OmicronZoneUuid>,
     /// The latest `saga_node_event.event_time` for this saga, i.e. the last
-    /// durably-recorded forward or undo step. `None` if the saga somehow has
-    /// no node events yet. This is the "last progress" signal:
+    /// durably-recorded forward or undo step. `None` if the saga has no node
+    /// events yet. This is the "last progress" signal:
     /// `now - last_event_time` is how long the saga has gone without
     /// recording progress.
     pub last_event_time: Option<DateTime<Utc>>,

@@ -125,8 +125,7 @@ pub enum SagaFact {
     /// Nexus failed to recover the saga for a non-transient reason and has
     /// permanently given up on running it. The saga may be holding
     /// partially-allocated resources; remediation is manual and
-    /// saga-specific (see omicron#10581 / RFD 555). The case stays open
-    /// until the saga row is removed from the database.
+    /// saga-specific (see omicron#10581 / RFD 555).
     Abandoned(SagaAbandonedFactPayload),
 }
 
@@ -153,8 +152,7 @@ impl SagaFact {
 pub struct SagaNotProgressingFactPayload {
     /// The saga this fact (and its parent case) is about.
     pub saga_id: steno::SagaId,
-    /// Whether the saga is running forward or unwinding. Unwinding-but-stuck
-    /// is the more dangerous case (it may have half-torn-down resources).
+    /// Whether the saga is running forward or unwinding.
     pub saga_state: SagaProgressState,
     /// The last durably-recorded progress: the latest
     /// `saga_node_event.event_time` observed for this saga, or the saga's

@@ -228,10 +228,8 @@ impl DataStore {
     /// node event (`MAX(event_time)`), i.e. the last durably-recorded forward
     /// or undo step. Sagas with no node events are absent from the result.
     ///
-    /// This is the saga diagnosis engine's progress signal: `now - max` is how
-    /// long a saga has gone without recording progress. The query seeks by the
-    /// `saga_node_event` primary-key prefix (`saga_id`), so it does not scan
-    /// the whole table.
+    /// The query seeks by the `saga_node_event` primary-key prefix
+    /// (`saga_id`), so it does not scan the whole table.
     pub async fn saga_latest_node_event_times(
         &self,
         opctx: &OpContext,

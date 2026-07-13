@@ -2496,10 +2496,8 @@ mod tests {
             }
         };
 
-        // Saga cases, exercising the fm_fact_saga read/write/GC paths. A live
-        // saga may carry NotProgressing and OwnerNotCurrentGeneration
-        // together, but Abandoned supersedes both, so the abandoned saga gets
-        // a case of its own.
+        // Saga cases, exercising the fm_fact_saga read/write/GC paths, split
+        // across two cases so each is a shape the engine actually produces.
         let case3 = {
             let stuck_saga_id = steno::SagaId(uuid::Uuid::new_v4());
             let mut facts = iddqd::IdOrdMap::new();

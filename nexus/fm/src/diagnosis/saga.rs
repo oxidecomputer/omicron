@@ -32,9 +32,7 @@ use std::collections::BTreeMap;
 use std::collections::btree_map::Entry;
 
 /// A saga is flagged as "not progressing" once it has recorded no node event
-/// for at least this long. This is a wall-clock, cadence-independent quantity
-/// (`reference_time - last_event_time`), deliberately not a count of analysis
-/// passes.
+/// for at least this long (`reference_time - last_event_time`).
 const STALE_SAGA_THRESHOLD: TimeDelta = TimeDelta::minutes(30);
 
 /// A parent-forwarded Saga case, parsed into the form this engine acts on.
@@ -47,9 +45,7 @@ struct ParsedSagaCase {
     owner_not_current: Option<(FactUuid, SagaOwnerNotCurrentFactPayload)>,
     abandoned: Option<(FactUuid, SagaAbandonedFactPayload)>,
     /// Facts that should not exist: duplicates of a kind beyond the first.
-    /// These carry no information the kept fact doesn't; reconciliation
-    /// removes them whether or not the kept fact still matches the
-    /// observation.
+    /// They carry no information the kept fact doesn't.
     duplicate_facts: Vec<FactUuid>,
 }
 
@@ -172,7 +168,7 @@ pub(super) fn analyze(builder: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
     // so a saga with two parent cases is already pathological. We keep one and
     // close the rest as duplicates; which one we keep is arbitrary.
     // `parent_cases` iterates ascending by CaseUuid, so we deterministically
-    // keep the lowest-ID case, but the ID ordering carries no meaning here.
+    // keep the lowest-ID case.
     let mut case_for_saga: BTreeMap<steno::SagaId, CaseUuid> = BTreeMap::new();
     for (case_id, parsed_case) in &parent_cases {
         match case_for_saga.entry(parsed_case.saga_id) {

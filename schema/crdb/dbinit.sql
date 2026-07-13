@@ -7984,9 +7984,8 @@ CREATE TABLE IF NOT EXISTS omicron.public.fm_fact_physical_disk (
 
     PRIMARY KEY (sitrep_id, id),
 
-    -- Each variant validates that the columns it expects are present.
-    -- Future variants should add their own constraint like this one,
-    -- leaving existing constraints untouched.
+    -- Each kind's constraint checks only that its own columns are present,
+    -- not that others are NULL, so future kinds may share columns.
     CONSTRAINT zpool_unhealthy_columns_present CHECK (
         kind != 'zpool_unhealthy' OR (
             zpool_id IS NOT NULL
@@ -8047,9 +8046,8 @@ CREATE TABLE IF NOT EXISTS omicron.public.fm_fact_saga (
 
     PRIMARY KEY (sitrep_id, id),
 
-    -- Each variant validates that the columns it expects are present.
-    -- Future variants should add their own constraint like this one,
-    -- leaving existing constraints untouched.
+    -- Each kind's constraint checks only that its own columns are present,
+    -- not that others are NULL, so future kinds may share columns.
     CONSTRAINT not_progressing_columns_present CHECK (
         kind != 'not_progressing' OR (
             saga_state IS NOT NULL
