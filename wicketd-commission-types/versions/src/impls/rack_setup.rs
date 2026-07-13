@@ -11,7 +11,9 @@ mod tests {
     };
     use crate::v1::rack_setup::uplink_address_serde;
     use serde::{Deserialize, Serialize};
-    use sled_agent_types::early_networking::{LinkFec, LinkSpeed, UplinkAddress};
+    use sled_agent_types::early_networking::{
+        LinkFec, LinkSpeed, UplinkAddress,
+    };
 
     #[test]
     fn roundtrip_import_export_policy() {
