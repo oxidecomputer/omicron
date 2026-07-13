@@ -9017,7 +9017,11 @@ CREATE TABLE IF NOT EXISTS omicron.public.trust_quorum_member (
 );
 
 
--- Global configuration for the fault management system.
+-- Overrides to the fault management system's global configuration.
+--
+-- If no overrides are set, this table is empty and the system uses the default
+-- configuration. Otherwise, the row in this table with the highest `version` is
+-- selected and used as the active configuration.
 CREATE TABLE IF NOT EXISTS omicron.public.fm_config (
     -- The version number of the configuration.
     --
@@ -9046,16 +9050,6 @@ CREATE TABLE IF NOT EXISTS omicron.public.fm_config (
         sitrep_deletion_threshold < sitrep_limit
     )
 );
-
--- Initial default FM config version.
-INSERT INTO omicron.public.fm_config (
-    version,
-    sitrep_limit,
-    sitrep_deletion_threshold,
-    time_modified
-) VALUES
-    (1, 1000, 900, NOW())
-ON CONFLICT DO NOTHING;
 
 
 -- Keep this at the end of file so that the database does not contain a version

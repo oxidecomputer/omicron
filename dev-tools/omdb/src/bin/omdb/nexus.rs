@@ -3662,44 +3662,15 @@ fn print_task_fm_config_loader(details: &serde_json::Value) {
             time_updated: time_loaded,
         }) => {
             const TIME_UPDATED: &str = "config last updated at:";
-            const UPDATED: &str = "  updated by this activation:";
-            const VERSION: &str = "  version:";
-            const TIME_MODIFIED: &str = "  last modified at:";
-            const SITREP_LIMIT: &str = "  sitrep limit:";
-            const SITREP_DELETION_THRESHOLD: &str =
-                "  sitrep deletion threshold:";
-            const WIDTH: usize = const_max_len(&[
-                TIME_UPDATED,
-                UPDATED,
-                VERSION,
-                TIME_MODIFIED,
-                SITREP_LIMIT,
-                SITREP_DELETION_THRESHOLD,
-            ]) + 1;
+            const UPDATED: &str = "updated by this activation:";
+            const WIDTH: usize = const_max_len(&[TIME_UPDATED, UPDATED]) + 1;
 
             println!("    {TIME_UPDATED:<WIDTH$}{time_loaded}");
             println!("    {UPDATED:<WIDTH$}{updated}");
             println!("    current config:");
-
-            let fm::FmConfigView { config, time_modified } = config;
-            let fm::FmConfig {
-                version,
-                sitrep_limit,
-                sitrep_deletion_threshold,
-            } = config;
-            println!("    {VERSION:<WIDTH$}{version}");
-            println!(
-                "    {TIME_MODIFIED:<WIDTH$}{}",
-                humantime::format_rfc3339_millis(time_modified.into()),
-            );
-            println!("    {SITREP_LIMIT:<WIDTH$}{sitrep_limit}");
-            println!(
-                "    {SITREP_DELETION_THRESHOLD:<WIDTH$}\
-                 {sitrep_deletion_threshold}"
-            );
+            print!("{}", config.display_multiline(6));
         }
     };
-    TIME_LOADED
 }
 
 fn print_task_fm_sitrep_loader(details: &serde_json::Value) {

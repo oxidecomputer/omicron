@@ -13,7 +13,22 @@ pub use ereport::{Ereport, EreportId};
 pub mod case;
 pub use case::Case;
 pub mod config;
-pub use config::{FmConfig, FmConfigParam, FmConfigView};
+pub use config::{FmConfig, FmConfigParam, FmConfigSource, FmConfigView};
+
+/// Computes the maximum length of a set of labels, for aligning columns in
+/// the `Display` implementations in this module's submodules.
+pub(crate) const fn const_max_len(strs: &[&str]) -> usize {
+    let mut max = 0;
+    let mut i = 0;
+    while i < strs.len() {
+        let len = strs[i].len();
+        if len > max {
+            max = len;
+        }
+        i += 1;
+    }
+    max
+}
 pub mod fact;
 pub use fact::{DiskFact, FactPayload, ZpoolUnhealthyFactPayload};
 pub mod json_display;

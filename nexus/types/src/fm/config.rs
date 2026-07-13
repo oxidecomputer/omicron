@@ -4,16 +4,19 @@
 
 //! Runtime configuration for the fault management subsystem.
 //!
-//! FM configuration is versioned: changes are made by inserting a new config
-//! with the next version number, rather than by updating the current one in
-//! place. The database is seeded with a default config at version 1, so a
-//! current config always exists.
+//! The default configuration is defined by [`FmConfig::default`]. This
+//! configuration may be persistently overridden by creating rows in the
+//! `fm_config` database table. Overrides are versioned: changes are made by
+//! inserting a new config with the next version number, rather than by updating
+//! the current one in place. [`FmConfigView::source`] indicates whether a
+//! configuration came from the current default or a database override.
 //!
 //! Configuration values are represented by two types: a [`FmConfigParam`]
-//! holds unvalidated values (a new version requested by a caller, or a row
+//! holds unvalidated values (a new override requested by a caller, or a row
 //! read back from the database), while a [`FmConfig`] has been validated
 //! against the invariants described in [`FmConfigParam`]'s documentation.
 
+use super::const_max_len;
 use std::fmt;
 use std::num::NonZeroU32;
 
@@ -22,14 +25,14 @@ use omicron_common::api::external::Error;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-/// An unvalidated FM configuration at a particular version, such as a request
-/// to insert a new FM config version.
+/// An unvalidated FM configuration override at a particular version, such as
+/// a request to insert a new FM config version.
 ///
 /// An insert succeeds only if `version` is exactly one greater than the
-/// current latest version, and if the configuration values pass validation.
-/// This type is entirely unvalidated, and its invariants may not hold:
+/// current latest override version (or 1, if no overrides exist), and if the
+/// configuration values pass validation. The configuration values in this
+/// type are unvalidated, and their invariants may not hold:
 ///
-/// - `version` must be nonzero,
 /// - `sitrep_limit` must be at least [`FmConfig::MIN_SITREP_LIMIT`],
 /// - `sitrep_deletion_threshold` must be at least
 ///   [`FmConfig::MIN_SITREP_DELETION_THRESHOLD`],
@@ -44,7 +47,7 @@ use serde::{Deserialize, Serialize};
 )]
 pub struct FmConfigParam {
     /// The version of the configuration.
-    pub version: u32,
+    pub version: NonZeroU32,
 
     /// The maximum number of historical sitreps to keep in the database.
     ///
@@ -58,37 +61,140 @@ pub struct FmConfigParam {
     pub sitrep_deletion_threshold: u32,
 }
 
-/// An FM config version as read back from the database.
+/// A view of the current fault management configuration.
 #[derive(
-    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema,
+    Debug,
+    Clone,
+    Copy,
+    Default,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    JsonSchema,
 )]
 pub struct FmConfigView {
     pub config: FmConfig,
-    pub time_modified: DateTime<Utc>,
+    pub source: FmConfigSource,
 }
 
 impl FmConfigView {
-    pub fn display(&self) -> FmConfigViewDisplay<'_> {
-        FmConfigViewDisplay { view: self }
+    /// Returns a multi-line displayer for this view, with each line indented
+    /// by `indent` spaces.
+    pub fn display_multiline(&self, indent: usize) -> impl fmt::Display + '_ {
+        struct DisplayView<'a> {
+            view: &'a FmConfigView,
+            indent: usize,
+        }
+
+        impl fmt::Display for DisplayView<'_> {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                let DisplayView {
+                    view: FmConfigView { config, source },
+                    indent,
+                } = self;
+                write!(f, "{}", source.display_multiline(*indent))?;
+                write!(f, "{}", config.display_multiline(*indent))
+            }
+        }
+
+        DisplayView { view: self, indent }
     }
 }
 
-#[derive(Clone, Debug)]
-pub struct FmConfigViewDisplay<'a> {
-    view: &'a FmConfigView,
+impl fmt::Display for FmConfigView {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.display_multiline(0).fmt(f)
+    }
 }
 
-impl fmt::Display for FmConfigViewDisplay<'_> {
+/// Where a [`FmConfigView`]'s configuration came from.
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    Default,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum FmConfigSource {
+    #[default]
+    Default,
+
+    Override {
+        /// The version of the override.
+        version: NonZeroU32,
+        /// The time at which this override was inserted.
+        time_modified: DateTime<Utc>,
+    },
+}
+
+impl FmConfigSource {
+    /// Returns a multi-line displayer for this source, with each line
+    /// indented by `indent` spaces.
+    ///
+    /// The [`fmt::Display`] implementation for this type formats the source
+    /// on a single line instead.
+    pub fn display_multiline(&self, indent: usize) -> impl fmt::Display + '_ {
+        struct DisplaySource<'a> {
+            source: &'a FmConfigSource,
+            indent: usize,
+        }
+
+        impl fmt::Display for DisplaySource<'_> {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                let DisplaySource { source, indent } = self;
+
+                const SOURCE: &str = "source:";
+                const VERSION: &str = "version:";
+                const TIME_MODIFIED: &str = "modified at:";
+                const WIDTH: usize =
+                    const_max_len(&[SOURCE, VERSION, TIME_MODIFIED]);
+
+                match source {
+                    FmConfigSource::Default => {
+                        writeln!(f, "{:>indent$}{SOURCE:<WIDTH$} default", "")
+                    }
+                    FmConfigSource::Override { version, time_modified } => {
+                        writeln!(
+                            f,
+                            "{:>indent$}{SOURCE:<WIDTH$} override",
+                            ""
+                        )?;
+                        writeln!(
+                            f,
+                            "{:>indent$}{VERSION:<WIDTH$} {version}",
+                            ""
+                        )?;
+                        writeln!(
+                            f,
+                            "{:>indent$}{TIME_MODIFIED:<WIDTH$} {}",
+                            "",
+                            humantime::format_rfc3339_millis(
+                                (*time_modified).into()
+                            )
+                        )
+                    }
+                }
+            }
+        }
+
+        DisplaySource { source: self, indent }
+    }
+}
+
+impl fmt::Display for FmConfigSource {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let Self { view: FmConfigView { config, time_modified } } = self;
-        writeln!(
-            f,
-            "last modified at: {}",
-            humantime::format_rfc3339_millis((*time_modified).into())
-        )?;
-        // No need for a newline here because .display() adds its own newline
-        // at the end.
-        write!(f, "{}", config.display())
+        match self {
+            Self::Default => write!(f, "default"),
+            Self::Override { version, .. } => {
+                write!(f, "override (v{version})")
+            }
+        }
     }
 }
 
@@ -102,8 +208,6 @@ impl fmt::Display for FmConfigViewDisplay<'_> {
     Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema,
 )]
 pub struct FmConfig {
-    pub version: NonZeroU32,
-
     /// The maximum number of historical sitreps to keep in the database.
     ///
     /// If the number of sitreps in the history exceeds this limit, the FM
@@ -130,8 +234,51 @@ impl FmConfig {
     pub const MIN_SITREP_DELETION_THRESHOLD: NonZeroU32 =
         NonZeroU32::new(2).unwrap();
 
-    pub fn display(&self) -> FmConfigDisplay<'_> {
-        FmConfigDisplay { config: self }
+    /// Returns a multi-line displayer for this config, with each line
+    /// indented by `indent` spaces.
+    pub fn display_multiline(&self, indent: usize) -> impl fmt::Display + '_ {
+        struct DisplayConfig<'a> {
+            config: &'a FmConfig,
+            indent: usize,
+        }
+
+        impl fmt::Display for DisplayConfig<'_> {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                let DisplayConfig {
+                    config: FmConfig { sitrep_limit, sitrep_deletion_threshold },
+                    indent,
+                } = self;
+
+                const SITREP_LIMIT: &str = "sitrep limit:";
+                const SITREP_DELETION_THRESHOLD: &str =
+                    "sitrep deletion threshold:";
+                const WIDTH: usize =
+                    const_max_len(&[SITREP_LIMIT, SITREP_DELETION_THRESHOLD]);
+
+                writeln!(
+                    f,
+                    "{:>indent$}{SITREP_LIMIT:<WIDTH$} {sitrep_limit}",
+                    ""
+                )?;
+                writeln!(
+                    f,
+                    "{:>indent$}{SITREP_DELETION_THRESHOLD:<WIDTH$} \
+                     {sitrep_deletion_threshold}",
+                    ""
+                )
+            }
+        }
+
+        DisplayConfig { config: self, indent }
+    }
+}
+
+impl Default for FmConfig {
+    fn default() -> Self {
+        Self {
+            sitrep_limit: NonZeroU32::new(1000).unwrap(),
+            sitrep_deletion_threshold: NonZeroU32::new(900).unwrap(),
+        }
     }
 }
 
@@ -144,8 +291,14 @@ impl TryFrom<&'_ FmConfigParam> for FmConfig {
         // to update this validation (and the database insert query in
         // `nexus-db-queries`). If you get a compiler error here, you probably
         // added or removed a field, and will need to adjust both accordingly.
-        let &FmConfigParam { version, sitrep_limit, sitrep_deletion_threshold } =
-            value;
+        //
+        // `version` is not used by this conversion: it is not part of the
+        // config itself, and its type already ensures it is nonzero.
+        let &FmConfigParam {
+            version: _,
+            sitrep_limit,
+            sitrep_deletion_threshold,
+        } = value;
 
         fn check_minimum(
             value: u32,
@@ -164,9 +317,6 @@ impl TryFrom<&'_ FmConfigParam> for FmConfig {
             Ok(value)
         }
 
-        let version = NonZeroU32::new(version).ok_or_else(|| {
-            Error::invalid_value("version", "version must be nonzero")
-        })?;
         let sitrep_limit = check_minimum(
             sitrep_limit,
             "sitrep_limit",
@@ -187,24 +337,7 @@ impl TryFrom<&'_ FmConfigParam> for FmConfig {
                 ),
             ));
         }
-        Ok(Self { version, sitrep_limit, sitrep_deletion_threshold })
-    }
-}
-
-#[derive(Clone, Debug)]
-pub struct FmConfigDisplay<'a> {
-    config: &'a FmConfig,
-}
-
-impl fmt::Display for FmConfigDisplay<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let Self {
-            config:
-                FmConfig { version, sitrep_limit, sitrep_deletion_threshold },
-        } = self;
-        writeln!(f, "version: {version}")?;
-        writeln!(f, "sitrep limit: {sitrep_limit}")?;
-        writeln!(f, "sitrep deletion threshold: {sitrep_deletion_threshold}")
+        Ok(Self { sitrep_limit, sitrep_deletion_threshold })
     }
 }
 
@@ -212,10 +345,12 @@ impl fmt::Display for FmConfigDisplay<'_> {
 mod tests {
     use super::*;
 
+    const V1: NonZeroU32 = NonZeroU32::new(1).unwrap();
+
     #[test]
-    fn validation_rejects_zero_limit() {
+    fn test_sitrep_limit_nonzero() {
         let err = FmConfig::try_from(&FmConfigParam {
-            version: 1,
+            version: V1,
             sitrep_limit: 0,
             sitrep_deletion_threshold: 2,
         })
@@ -227,9 +362,9 @@ mod tests {
     }
 
     #[test]
-    fn validation_rejects_too_small_limit() {
+    fn test_min_sitrep_limit() {
         let err = FmConfig::try_from(&FmConfigParam {
-            version: 1,
+            version: V1,
             sitrep_limit: 2,
             sitrep_deletion_threshold: 2,
         })
@@ -241,9 +376,9 @@ mod tests {
     }
 
     #[test]
-    fn validation_rejects_zero_threshold() {
+    fn test_nonzero_sitrep_deletion_threshold() {
         let err = FmConfig::try_from(&FmConfigParam {
-            version: 1,
+            version: V1,
             sitrep_limit: 100,
             sitrep_deletion_threshold: 0,
         })
@@ -256,9 +391,9 @@ mod tests {
     }
 
     #[test]
-    fn validation_rejects_too_small_threshold() {
+    fn test_min_sitrep_deletion_threshold() {
         let err = FmConfig::try_from(&FmConfigParam {
-            version: 1,
+            version: V1,
             sitrep_limit: 100,
             sitrep_deletion_threshold: 1,
         })
@@ -271,10 +406,10 @@ mod tests {
     }
 
     #[test]
-    fn validation_rejects_threshold_not_less_than_limit() {
+    fn test_sitrep_deletion_threshold_must_be_less_than_sitrep_limit() {
         for threshold in [100, 101] {
             let err = FmConfig::try_from(&FmConfigParam {
-                version: 1,
+                version: V1,
                 sitrep_limit: 100,
                 sitrep_deletion_threshold: threshold,
             })

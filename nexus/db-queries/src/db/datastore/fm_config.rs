@@ -11,7 +11,9 @@ use crate::db;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::ExpressionMethods;
 use diesel::IntoSql;
+use diesel::OptionalExtension;
 use diesel::QueryDsl;
+use diesel::define_sql_function;
 use diesel::sql_types;
 use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::public_error_from_diesel;
@@ -21,18 +23,20 @@ use nexus_types::fm::FmConfigParam;
 use nexus_types::fm::FmConfigView;
 use omicron_common::api::external::Error;
 
+define_sql_function! {
+    fn coalesce(
+        x: sql_types::Nullable<sql_types::BigInt>,
+        y: sql_types::BigInt,
+    ) -> sql_types::BigInt;
+}
+
 impl DataStore {
-    /// Read the current FM configuration (the one with the highest version
-    /// number).
-    ///
-    /// Unlike most "latest version" queries, this does not return an
-    /// `Option`: the `fm_config` table is seeded with a default configuration
-    /// at version 1 when the database is populated, so a missing row
-    /// indicates a broken database and is reported as an internal error.
+    /// Read the current FM configuration override, or `None` if no overrides
+    /// exist in the database.
     pub async fn fm_config_get_latest(
         &self,
         opctx: &OpContext,
-    ) -> Result<FmConfigView, Error> {
+    ) -> Result<Option<FmConfigView>, Error> {
         opctx.authorize(authz::Action::Read, &authz::FM_CONFIG).await?;
         let conn = self.pool_connection_authorized(opctx).await?;
 
@@ -40,15 +44,17 @@ impl DataStore {
             .order_by(dsl::version.desc())
             .first_async::<db::model::fm::FmConfig>(&*conn)
             .await
+            .optional()
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
-        latest.try_into()
+        latest.map(TryInto::try_into).transpose()
     }
 
-    /// Insert a new version of the FM configuration in the database.
+    /// Insert a new version of the FM configuration override in the database.
     ///
     /// This only succeeds if the provided version is exactly one greater than
-    /// the latest version currently in the `fm_config` table.
+    /// the latest version currently in the `fm_config` table, or 1 if the
+    /// table contains no overrides.
     pub async fn fm_config_insert_latest_version(
         &self,
         opctx: &OpContext,
@@ -63,12 +69,14 @@ impl DataStore {
         let config = db::model::fm::FmConfig::try_from(config)?;
 
         // The largest version currently in the table. `MAX` over an empty
-        // table is NULL, in which case the comparison below is also NULL and
-        // no row is inserted; that's the desired behavior, since an empty
-        // `fm_config` table means the database seed data is missing.
-        let current_version = dsl::fm_config
-            .select(diesel::dsl::max(dsl::version))
-            .single_value();
+        // table is NULL; coalescing it to 0 allows the first override to be
+        // inserted at version 1.
+        let current_version = coalesce(
+            dsl::fm_config
+                .select(diesel::dsl::max(dsl::version))
+                .single_value(),
+            0,
+        );
 
         // This exhaustive destructuring exists to trigger compilation
         // errors when the database model changes, so that people are
@@ -94,8 +102,8 @@ impl DataStore {
             sitrep_deletion_threshold.into_sql::<sql_types::BigInt>(),
             time_modified.into_sql::<sql_types::Timestamptz>(),
         ))
-        // `version - 1` cannot underflow, as the `TryFrom` conversion above
-        // rejects a zero version
+        // `version - 1` cannot underflow: `FmConfigParam::version` is a
+        // `NonZeroU32`.
         .filter(current_version.eq(SqlU32::new(u32::from(version) - 1)));
 
         let num_inserted = diesel::insert_into(dsl::fm_config)
@@ -126,6 +134,7 @@ impl DataStore {
 mod tests {
     use super::*;
     use crate::db::pub_test_utils::TestDatabase;
+    use nexus_types::fm::FmConfigSource;
     use omicron_test_utils::dev;
     use std::num::NonZeroU32;
 
@@ -135,14 +144,14 @@ mod tests {
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
-        // The table is seeded with a default config at version 1 by
-        // dbinit.sql.
-        let seeded = datastore.fm_config_get_latest(opctx).await.unwrap();
-        assert_eq!(seeded.config.version, NonZeroU32::new(1).unwrap());
+        // With no override rows in the table, there is no config to read.
+        let read = datastore.fm_config_get_latest(opctx).await.unwrap();
+        assert_eq!(read, None);
 
-        // Inserting version 0 should fail: config versions must be nonzero.
+        // Inserting version 2 should fail: no overrides exist yet, so the
+        // first must be version 1.
         let mut config = FmConfigParam {
-            version: 0,
+            version: NonZeroU32::new(2).unwrap(),
             sitrep_limit: 5,
             sitrep_deletion_threshold: 4,
         };
@@ -152,36 +161,33 @@ mod tests {
                 .await
                 .unwrap_err()
                 .to_string()
-                .contains("must be greater than 0")
+                .contains("version 2 is not the most recent")
         );
 
-        // Inserting version 1 should fail: the seeded version 1 is already
-        // the latest.
-        config.version = 1;
-        assert!(
-            datastore
-                .fm_config_insert_latest_version(opctx, config)
-                .await
-                .unwrap_err()
-                .to_string()
-                .contains("version 1 is not the most recent")
-        );
+        // Inserting version 1 should work.
+        config.version = NonZeroU32::new(1).unwrap();
+        datastore
+            .fm_config_insert_latest_version(opctx, config)
+            .await
+            .expect("inserting version 1 should succeed");
 
-        // Inserting version 3 should fail, since the latest version is 1.
-        config.version = 3;
-        assert!(
-            datastore
-                .fm_config_insert_latest_version(opctx, config)
-                .await
-                .unwrap_err()
-                .to_string()
-                .contains("version 3 is not the most recent")
-        );
+        // Getting the latest config should now return the version 1 override.
+        let read = datastore
+            .fm_config_get_latest(opctx)
+            .await
+            .unwrap()
+            .expect("an override was inserted");
+        let FmConfigSource::Override { version, .. } = read.source else {
+            panic!("expected an override source, got {:?}", read.source);
+        };
+        assert_eq!(version.get(), 1);
+        assert_eq!(read.config.sitrep_limit.get(), 5);
+        assert_eq!(read.config.sitrep_deletion_threshold.get(), 4);
 
         // An invalid config is rejected with an invalid value error.
         // (Validation is tested exhaustively in `nexus-types`; this just
         // checks that invalid configs are rejected on the insert path.)
-        config.version = 2;
+        config.version = NonZeroU32::new(2).unwrap();
         config.sitrep_limit = 100;
         config.sitrep_deletion_threshold = 100;
         assert!(
@@ -201,9 +207,16 @@ mod tests {
             .await
             .expect("inserting version 2 should succeed");
 
-        // Getting the latest version should return version 2.
-        let read = datastore.fm_config_get_latest(opctx).await.unwrap();
-        assert_eq!(read.config.version.get(), 2);
+        // Getting the latest config should return the version 2 override.
+        let read = datastore
+            .fm_config_get_latest(opctx)
+            .await
+            .unwrap()
+            .expect("an override was inserted");
+        let FmConfigSource::Override { version, .. } = read.source else {
+            panic!("expected an override source, got {:?}", read.source);
+        };
+        assert_eq!(version.get(), 2);
         assert_eq!(read.config.sitrep_limit.get(), 500);
         assert_eq!(read.config.sitrep_deletion_threshold.get(), 400);
 
