@@ -158,9 +158,12 @@ impl SystemApis {
         };
 
         // Load Cargo metadata and cross-check it against the manifest.
-        let Some(workspaces) =
-            Workspaces::load(&api_metadata, &args.workspace_root, &mut errors)
-        else {
+        let Some(workspaces) = Workspaces::load(
+            &api_metadata,
+            &args.workspace_root,
+            args.patched_dep_policy,
+            &mut errors,
+        ) else {
             return Err(errors.take_load_errors().expect(
                 "Workspaces::load returns None only after recording an error",
             ));

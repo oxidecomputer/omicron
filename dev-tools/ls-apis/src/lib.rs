@@ -82,6 +82,27 @@ pub struct LoadArgs {
 
     /// path to developer-maintained API metadata
     pub api_manifest_path: Utf8PathBuf,
+
+    /// how to treat dependencies that appear to have been overridden with a
+    /// local Cargo `[patch]` (see [`PatchedDepPolicy`])
+    pub patched_dep_policy: PatchedDepPolicy,
+}
+
+/// How the tool should treat a related-repo dependency whose resolved package
+/// has no source (typically because the developer has overridden it with a
+/// local Cargo `[patch]`).
+///
+/// When a dependency has been patched to a local path, there is no reliable
+/// way for this tool to check that the local copy corresponds to the commit
+/// pinned in `package-manifest.toml`.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PatchedDepPolicy {
+    /// Report an error if the only candidate for a related-repo dependency
+    /// looks like a local `[patch]` override.
+    Reject,
+    /// Assume that a local `[patch]` override corresponds to the commit
+    /// pinned in `package-manifest.toml` and use it.
+    AssumeMatch,
 }
 
 fn parse_toml_file<T: DeserializeOwned>(path: &Utf8Path) -> Result<T> {

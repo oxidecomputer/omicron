@@ -5,6 +5,7 @@
 //! Combines information about multiple `Workspace`s
 
 use crate::ClientPackageName;
+use crate::PatchedDepPolicy;
 use crate::api_metadata::AllApiMetadata;
 use crate::cargo::Workspace;
 use crate::errors::{ErrorAccumulator, LoadError};
@@ -86,18 +87,22 @@ impl Workspaces {
     pub fn load(
         api_metadata: &AllApiMetadata,
         workspace_root: &Utf8Path,
+        patched_dep_policy: PatchedDepPolicy,
         errors: &mut ErrorAccumulator,
     ) -> Option<Workspaces> {
         // If `cargo metadata` won't run, there's no `Workspaces` to return, so
         // record that as a single fatal error.
-        let workspaces =
-            match Self::load_workspace_map(api_metadata, workspace_root) {
-                Ok(workspaces) => workspaces,
-                Err(source) => {
-                    errors.push(LoadError::LoadWorkspaces { source });
-                    return None;
-                }
-            };
+        let workspaces = match Self::load_workspace_map(
+            api_metadata,
+            workspace_root,
+            patched_dep_policy,
+        ) {
+            Ok(workspaces) => workspaces,
+            Err(source) => {
+                errors.push(LoadError::LoadWorkspaces { source });
+                return None;
+            }
+        };
 
         // Validate the metadata against what we found in the workspaces.
         let mut client_pkgnames_unused: BTreeSet<_> =
@@ -135,6 +140,7 @@ impl Workspaces {
     fn load_workspace_map(
         api_metadata: &AllApiMetadata,
         workspace_root: &Utf8Path,
+        patched_dep_policy: PatchedDepPolicy,
     ) -> Result<BTreeMap<String, Workspace>> {
         // First, load information about the "omicron" workspace.  This is the
         // current workspace so we don't need to provide the path to it.
@@ -208,6 +214,7 @@ impl Workspaces {
                         extra_features,
                         my_ignored,
                         &expected_commit,
+                        patched_dep_policy,
                     )
                 })
             })
@@ -292,6 +299,7 @@ fn load_dependent_repo(
     extra_features: Option<CargoOpt>,
     ignored_non_clients: BTreeSet<ClientPackageName>,
     expected_commit: &GitCommit,
+    patched_dep_policy: PatchedDepPolicy,
 ) -> Result<Workspace> {
     // It's possible to have more than one non-workspace package with a given
     // name.  For example, Omicron references `dpd-client` in multiple ways:
@@ -303,7 +311,11 @@ fn load_dependent_repo(
     // `expected_commit`.
     //
     // In summary: we're going to choose the package matching `expected_commit`.
+    // If we don't find such a match but we do encounter a candidate with no
+    // source (likely a local Cargo `[patch]` override), we may fall back to
+    // that one depending on `patched_dep_policy`.
     let mut found_pkg = None;
+    let mut patched_pkg = None;
 
     for pkgid in workspace.pkgids(pkgname) {
         let pkginfo = workspace.pkg_by_id(pkgid).with_context(|| {
@@ -311,9 +323,23 @@ fn load_dependent_repo(
         })?;
 
         let Some(source) = &pkginfo.source else {
+            // A package with no source is most likely one that has been
+            // overridden by a local Cargo `[patch]` pointing at a filesystem
+            // path.  There is no reliable way to check that such a checkout
+            // corresponds to `expected_commit`, so we always warn.  We defer
+            // the decision about whether to accept it until after we've
+            // scanned every candidate, in case a real commit match is also
+            // present.
             eprintln!(
-                "warn: looking up {pkgid:?}: unexpectedly found source `None`"
+                "warn: looking up {pkgid:?}: found package with no source, \
+                 which usually means it has been overridden with a Cargo \
+                 [patch] pointing at a local path.  This tool cannot verify \
+                 that this checkout matches the commit pinned in \
+                 package-manifest.toml ({expected_commit})."
             );
+            if patched_pkg.is_none() {
+                patched_pkg = Some(pkginfo);
+            }
             continue;
         };
 
@@ -344,12 +370,34 @@ fn load_dependent_repo(
         );
     }
 
-    let Some(pkg) = found_pkg else {
-        bail!(
-            "found no versions of package {pkgname:?} matching the git commit \
-             found in package-manifest.toml ({})",
-            expected_commit,
-        );
+    let pkg = match (found_pkg, patched_pkg, patched_dep_policy) {
+        (Some(pkg), _, _) => pkg,
+        (None, Some(pkg), PatchedDepPolicy::AssumeMatch) => {
+            eprintln!(
+                "note: package {pkgname:?}: no candidate matched the commit \
+                 pinned in package-manifest.toml ({expected_commit}), but a \
+                 candidate with no source (likely a local [patch]) was \
+                 found.  Proceeding with that candidate because \
+                 --assume-patched-deps-match was given."
+            );
+            pkg
+        }
+        (None, Some(_), PatchedDepPolicy::Reject) => {
+            bail!(
+                "found no versions of package {pkgname:?} matching the git \
+                 commit found in package-manifest.toml ({expected_commit}).  \
+                 A candidate with no source (likely a local Cargo [patch]) \
+                 was found, but this tool cannot verify that it matches.  \
+                 If you believe the patched version is correct, re-run with \
+                 --assume-patched-deps-match."
+            );
+        }
+        (None, None, _) => {
+            bail!(
+                "found no versions of package {pkgname:?} matching the git \
+                 commit found in package-manifest.toml ({expected_commit})",
+            );
+        }
     };
 
     // The package metadata should show where the package's manifest file should

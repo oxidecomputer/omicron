@@ -10,8 +10,8 @@ use clap::{Args, Parser, Subcommand};
 use indent_write::indentable::Indentable;
 use omicron_ls_apis::{
     AllApiMetadata, ApiConsumerStatus, ApiDependencyFilter, ApiMetadata,
-    FailedConsumerCheck, LoadArgs, ServerComponentName, SystemApis,
-    VersionedHow, plural,
+    FailedConsumerCheck, LoadArgs, PatchedDepPolicy, ServerComponentName,
+    SystemApis, VersionedHow, plural,
 };
 use parse_display::{Display, FromStr};
 
@@ -25,6 +25,14 @@ struct LsApis {
     /// path to metadata about APIs
     #[arg(long)]
     api_manifest: Option<Utf8PathBuf>,
+
+    /// Assume that any related-repo dependency that has been overridden by a
+    /// local Cargo `[patch]` corresponds to the commit pinned in
+    /// `package-manifest.toml`.  Without this flag, the tool will report an
+    /// error if it encounters such a dependency and cannot find a match by
+    /// commit.
+    #[arg(long)]
+    assume_patched_deps_match: bool,
 
     #[command(subcommand)]
     cmd: Cmds,
@@ -351,7 +359,17 @@ impl TryFrom<&LsApis> for LoadArgs {
         workspace_root.pop();
         workspace_root.pop();
 
-        Ok(LoadArgs { workspace_root, api_manifest_path })
+        let patched_dep_policy = if args.assume_patched_deps_match {
+            PatchedDepPolicy::AssumeMatch
+        } else {
+            PatchedDepPolicy::Reject
+        };
+
+        Ok(LoadArgs {
+            workspace_root,
+            api_manifest_path,
+            patched_dep_policy,
+        })
     }
 }
 
