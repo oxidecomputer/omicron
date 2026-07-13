@@ -1379,6 +1379,7 @@
         ]
       },
       "CertificateUploadResponse": {
+        "description": "The result of uploading half of a certificate/key pair.",
         "oneOf": [
           {
             "description": "The key has been uploaded, but we're waiting on its corresponding certificate chain.",
@@ -2434,19 +2435,22 @@
         ]
       },
       "ManualPortConfig": {
-        "description": "User-specified version of `PortConfig`.\n\nAll of `PortConfig` is user-specified. But we expect the port name to be a key, rather than a field as in `PortConfig`. So this has all of the fields other than the port name.",
+        "description": "User-specified per-port configuration.\n\nThis contains all of the fields of a port configuration other than the port name, which is used as the map key.",
         "type": "object",
         "properties": {
           "addresses": {
+            "description": "Addresses configured on this port.",
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/UserSpecifiedUplinkAddressConfig"
             }
           },
           "autoneg": {
+            "description": "Whether autonegotiation is enabled.",
             "type": "boolean"
           },
           "bgp_peers": {
+            "description": "BGP peers reachable on this port.",
             "default": [],
             "type": "array",
             "items": {
@@ -2455,6 +2459,7 @@
           },
           "lldp": {
             "nullable": true,
+            "description": "LLDP configuration for this port.",
             "default": null,
             "allOf": [
               {
@@ -2463,6 +2468,7 @@
             ]
           },
           "routes": {
+            "description": "Static routes for this port.",
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/RouteConfig"
@@ -2470,6 +2476,7 @@
           },
           "tx_eq": {
             "nullable": true,
+            "description": "Transmit equalization overrides for this port.",
             "default": null,
             "allOf": [
               {
@@ -2479,6 +2486,7 @@
           },
           "uplink_port_fec": {
             "nullable": true,
+            "description": "The forward error correction mode, if any.",
             "allOf": [
               {
                 "$ref": "#/components/schemas/LinkFec"
@@ -2486,7 +2494,12 @@
             ]
           },
           "uplink_port_speed": {
-            "$ref": "#/components/schemas/LinkSpeed"
+            "description": "The port speed.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/LinkSpeed"
+              }
+            ]
           }
         },
         "required": [
@@ -3545,14 +3558,19 @@
         ]
       },
       "PutRssUserConfigInsensitive": {
-        "description": "The portion of `CurrentRssUserConfig` that can be posted in one shot; it is provided by the wicket user uploading a TOML file, currently.\n\nThis is the \"write\" version of [`CurrentRssUserConfigInsensitive`], with some different fields.",
+        "description": "The portion of the RSS configuration that can be posted in one shot.\n\nIt is provided by the operator uploading a TOML file. Sensitive values (certificates and the recovery password hash) are set separately.",
         "type": "object",
         "properties": {
           "allowed_source_ips": {
-            "$ref": "#/components/schemas/AllowedSourceIps"
+            "description": "IPs or subnets allowed to make requests to user-facing services.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/AllowedSourceIps"
+              }
+            ]
           },
           "bootstrap_sleds": {
-            "description": "List of slot numbers only.\n\n`wicketd` will map this back to sleds with the correct `SpIdentifier` based on the `bootstrap_sleds` it provides in `CurrentRssUserConfigInsensitive`.",
+            "description": "The slot numbers of the sleds to bring up during RSS.\n\nwicketd maps these back to sleds with the correct identifiers based on the bootstrap sleds it reports.",
             "type": "array",
             "items": {
               "type": "integer",
@@ -3562,6 +3580,7 @@
             "uniqueItems": true
           },
           "dns_servers": {
+            "description": "The external DNS server addresses.",
             "type": "array",
             "items": {
               "type": "string",
@@ -3569,6 +3588,7 @@
             }
           },
           "external_dns_ips": {
+            "description": "Service IP addresses on which external DNS servers are run.",
             "type": "array",
             "items": {
               "type": "string",
@@ -3576,6 +3596,7 @@
             }
           },
           "external_dns_zone_name": {
+            "description": "The DNS zone name delegated to the rack for external DNS.",
             "type": "string"
           },
           "external_jumbo_frames_opt_in_enabled": {
@@ -3584,19 +3605,26 @@
             "type": "boolean"
           },
           "internal_services_ip_pool_ranges": {
+            "description": "Ranges of the service IP pool which may be used for internal services.",
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/IpRange"
             }
           },
           "ntp_servers": {
+            "description": "The external NTP server addresses.",
             "type": "array",
             "items": {
               "type": "string"
             }
           },
           "rack_network_config": {
-            "$ref": "#/components/schemas/UserSpecifiedRackNetworkConfig"
+            "description": "The user-specified rack network configuration.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/UserSpecifiedRackNetworkConfig"
+              }
+            ]
           }
         },
         "required": [
@@ -3621,7 +3649,7 @@
         "format": "uuid"
       },
       "RackOperationStatus": {
-        "description": "Current status of any rack-level operation being performed by this bootstrap agent.\n\n<details><summary>JSON schema</summary>\n\n```json { \"description\": \"Current status of any rack-level operation being performed by this bootstrap agent.\", \"oneOf\": [ { \"type\": \"object\", \"required\": [ \"id\", \"status\", \"step\" ], \"properties\": { \"id\": { \"$ref\": \"#/components/schemas/RackInitUuid\" }, \"status\": { \"type\": \"string\", \"enum\": [ \"initializing\" ] }, \"step\": { \"$ref\": \"#/components/schemas/RssStep\" } } }, { \"description\": \"`id` will be none if the rack was already initialized on startup.\", \"type\": \"object\", \"required\": [ \"status\" ], \"properties\": { \"id\": { \"oneOf\": [ { \"type\": \"null\" }, { \"allOf\": [ { \"$ref\": \"#/components/schemas/RackInitUuid\" } ] } ] }, \"status\": { \"type\": \"string\", \"enum\": [ \"initialized\" ] } } }, { \"type\": \"object\", \"required\": [ \"id\", \"message\", \"status\" ], \"properties\": { \"id\": { \"$ref\": \"#/components/schemas/RackInitUuid\" }, \"message\": { \"type\": \"string\" }, \"status\": { \"type\": \"string\", \"enum\": [ \"initialization_failed\" ] } } }, { \"type\": \"object\", \"required\": [ \"id\", \"status\" ], \"properties\": { \"id\": { \"$ref\": \"#/components/schemas/RackInitUuid\" }, \"status\": { \"type\": \"string\", \"enum\": [ \"initialization_panicked\" ] } } }, { \"type\": \"object\", \"required\": [ \"id\", \"status\" ], \"properties\": { \"id\": { \"$ref\": \"#/components/schemas/RackResetUuid\" }, \"status\": { \"type\": \"string\", \"enum\": [ \"resetting\" ] } } }, { \"description\": \"`reset_id` will be None if the rack is in an uninitialized-on-startup, or Some if it is in an uninitialized state due to a reset operation completing.\", \"type\": \"object\", \"required\": [ \"status\" ], \"properties\": { \"reset_id\": { \"oneOf\": [ { \"type\": \"null\" }, { \"allOf\": [ { \"$ref\": \"#/components/schemas/RackResetUuid\" } ] } ] }, \"status\": { \"type\": \"string\", \"enum\": [ \"uninitialized\" ] } } }, { \"type\": \"object\", \"required\": [ \"id\", \"message\", \"status\" ], \"properties\": { \"id\": { \"$ref\": \"#/components/schemas/RackResetUuid\" }, \"message\": { \"type\": \"string\" }, \"status\": { \"type\": \"string\", \"enum\": [ \"reset_failed\" ] } } }, { \"type\": \"object\", \"required\": [ \"id\", \"status\" ], \"properties\": { \"id\": { \"$ref\": \"#/components/schemas/RackResetUuid\" }, \"status\": { \"type\": \"string\", \"enum\": [ \"reset_panicked\" ] } } } ] } ``` </details>",
+        "description": "Current status of any rack-level operation being performed by this bootstrap agent.",
         "oneOf": [
           {
             "type": "object",
@@ -4149,7 +4177,7 @@
         "maximum": 9000
       },
       "RssStep": {
-        "description": "Steps we go through during initial rack setup. Keep this list in order that they happen.\n\n<details><summary>JSON schema</summary>\n\n```json { \"description\": \"Steps we go through during initial rack setup. Keep this list in order that they happen.\", \"oneOf\": [ { \"type\": \"object\", \"required\": [ \"status\" ], \"properties\": { \"status\": { \"type\": \"string\", \"enum\": [ \"requested\" ] } } }, { \"type\": \"object\", \"required\": [ \"status\" ], \"properties\": { \"status\": { \"type\": \"string\", \"enum\": [ \"starting\" ] } } }, { \"type\": \"object\", \"required\": [ \"status\" ], \"properties\": { \"status\": { \"type\": \"string\", \"enum\": [ \"load_existing_plan\" ] } } }, { \"type\": \"object\", \"required\": [ \"status\" ], \"properties\": { \"status\": { \"type\": \"string\", \"enum\": [ \"create_sled_plan\" ] } } }, { \"type\": \"object\", \"required\": [ \"status\" ], \"properties\": { \"status\": { \"type\": \"string\", \"enum\": [ \"init_trust_quorum\" ] } } }, { \"type\": \"object\", \"required\": [ \"status\" ], \"properties\": { \"status\": { \"type\": \"string\", \"enum\": [ \"initial_network_config_update\" ] } } }, { \"type\": \"object\", \"required\": [ \"status\" ], \"properties\": { \"status\": { \"type\": \"string\", \"enum\": [ \"sled_init\" ] } } }, { \"type\": \"object\", \"required\": [ \"status\" ], \"properties\": { \"status\": { \"type\": \"string\", \"enum\": [ \"final_network_config_update\" ] } } }, { \"type\": \"object\", \"required\": [ \"status\" ], \"properties\": { \"status\": { \"type\": \"string\", \"enum\": [ \"init_dns\" ] } } }, { \"type\": \"object\", \"required\": [ \"status\" ], \"properties\": { \"status\": { \"type\": \"string\", \"enum\": [ \"configure_dns\" ] } } }, { \"type\": \"object\", \"required\": [ \"status\" ], \"properties\": { \"status\": { \"type\": \"string\", \"enum\": [ \"init_ntp\" ] } } }, { \"type\": \"object\", \"required\": [ \"status\" ], \"properties\": { \"status\": { \"type\": \"string\", \"enum\": [ \"wait_for_time_sync\" ] } } }, { \"type\": \"object\", \"required\": [ \"status\" ], \"properties\": { \"status\": { \"type\": \"string\", \"enum\": [ \"wait_for_database\" ] } } }, { \"type\": \"object\", \"required\": [ \"status\" ], \"properties\": { \"status\": { \"type\": \"string\", \"enum\": [ \"cluster_init\" ] } } }, { \"type\": \"object\", \"required\": [ \"status\" ], \"properties\": { \"status\": { \"type\": \"string\", \"enum\": [ \"zones_init\" ] } } }, { \"type\": \"object\", \"required\": [ \"status\" ], \"properties\": { \"status\": { \"type\": \"string\", \"enum\": [ \"nexus_handoff\" ] } } } ] } ``` </details>",
+        "description": "Steps we go through during initial rack setup. Keep this list in order that they happen.",
         "oneOf": [
           {
             "type": "object",
@@ -7814,7 +7842,7 @@
         ]
       },
       "UserSpecifiedBgpPeerConfig": {
-        "description": "User-specified version of [`BgpPeerConfig`].\n\nThis is similar to [`BgpPeerConfig`], except it doesn't have the sensitive `md5_auth_key` parameter, instead requiring that the user provide the key separately.",
+        "description": "User-specified configuration for a BGP peer.\n\nThis is similar to the internal BGP peer configuration, except it does not carry the sensitive `md5_auth_key`; the operator provides the key separately, referenced by `auth_key_id`.",
         "type": "object",
         "properties": {
           "addr": {
@@ -7844,7 +7872,7 @@
             ]
           },
           "asn": {
-            "description": "The autonomous sysetm number of the router the peer belongs to.",
+            "description": "The autonomous system number of the router the peer belongs to.",
             "type": "integer",
             "format": "uint32",
             "minimum": 0
@@ -7878,7 +7906,7 @@
           },
           "delay_open": {
             "nullable": true,
-            "description": "How long to delay sending open messages to a peer in seconds. Defaults to 0.",
+            "description": "How long to delay sending open messages to a peer, in seconds. Defaults to 0.",
             "type": "integer",
             "format": "uint64",
             "minimum": 0
@@ -7890,14 +7918,14 @@
           },
           "hold_time": {
             "nullable": true,
-            "description": "How long to keep a session alive without a keepalive in seconds. Defaults to 6 seconds.",
+            "description": "How long to keep a session alive without a keepalive, in seconds. Defaults to 6 seconds.",
             "type": "integer",
             "format": "uint64",
             "minimum": 0
           },
           "idle_hold_time": {
             "nullable": true,
-            "description": "How long to keep a peer in idle after a state machine reset in seconds. Defaults to 3 seconds.",
+            "description": "How long to keep a peer in idle after a state machine reset, in seconds. Defaults to 3 seconds.",
             "type": "integer",
             "format": "uint64",
             "minimum": 0
@@ -7978,45 +8006,59 @@
         }
       },
       "UserSpecifiedPortConfig": {
+        "description": "A user-specified port configuration.",
         "anyOf": [
           {
-            "$ref": "#/components/schemas/ManualPortConfig"
+            "description": "A manually-configured port.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ManualPortConfig"
+              }
+            ]
           },
           {
-            "type": "object"
+            "description": "A port configured automatically via DDM.",
+            "type": "object",
+            "additionalProperties": false
           }
         ]
       },
       "UserSpecifiedRackNetworkConfig": {
-        "description": "User-specified parts of `RackNetworkConfig`.",
+        "description": "User-specified parts of the rack network configuration.",
         "type": "object",
         "properties": {
           "bgp": {
+            "description": "BGP configuration for the rack.",
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/BgpConfig"
             }
           },
           "infra_ip_first": {
+            "description": "The first address of the infrastructure IP range.",
             "type": "string",
             "format": "ip"
           },
           "infra_ip_last": {
+            "description": "The last address of the infrastructure IP range.",
             "type": "string",
             "format": "ip"
           },
           "rack_subnet_address": {
             "nullable": true,
+            "description": "The rack subnet address, if statically assigned.",
             "type": "string",
             "format": "ipv6"
           },
           "switch0": {
+            "description": "Per-port configuration for switch 0, keyed by port name.",
             "type": "object",
             "additionalProperties": {
               "$ref": "#/components/schemas/UserSpecifiedPortConfig"
             }
           },
           "switch1": {
+            "description": "Per-port configuration for switch 1, keyed by port name.",
             "type": "object",
             "additionalProperties": {
               "$ref": "#/components/schemas/UserSpecifiedPortConfig"
@@ -8036,7 +8078,7 @@
         "type": "string"
       },
       "UserSpecifiedUplinkAddressConfig": {
-        "description": "User-specified version of [`sled_agent_types::early_networking::UplinkAddressConfig`].\n\nThis allows us to have a nicer TOML representation of [`UplinkAddress`].",
+        "description": "A user-specified uplink address configuration.\n\nThis provides a friendlier TOML representation of an uplink address.",
         "type": "object",
         "properties": {
           "address": {
