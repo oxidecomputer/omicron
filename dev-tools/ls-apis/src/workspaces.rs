@@ -156,12 +156,17 @@ impl Workspaces {
                 .with_context(|| {
                     format!("parsing {package_manifest_path:?}")
                 })?;
-        let mut related_repo_commits = BTreeMap::new();
-        for related_repo in &RELATED_REPOS {
-            let commit =
-                find_repo_commit(&package_manifest, related_repo.repo_name)?;
-            related_repo_commits.insert(related_repo.repo_name, commit);
-        }
+        let related_repo_commits: Vec<(&RelatedRepoConfig, GitCommit)> =
+            RELATED_REPOS
+                .iter()
+                .map(|related_repo| {
+                    let commit = find_repo_commit(
+                        &package_manifest,
+                        related_repo.repo_name,
+                    )?;
+                    Ok((related_repo, commit))
+                })
+                .collect::<Result<_>>()?;
 
         // In order to assemble this metadata, Cargo already has a clone of most
         // of the other workspaces that we care about.  We'll use those clones
@@ -175,9 +180,9 @@ impl Workspaces {
         // pretty I/O intensive.  Latency benefits significantly from
         // parallelizing, though if we had many more repos than this, we'd
         // probably want to limit the concurrency.
-        let handles: Vec<_> = RELATED_REPOS
-            .iter()
-            .map(|repo_config| {
+        let handles: Vec<_> = related_repo_commits
+            .into_iter()
+            .map(|(repo_config, expected_commit)| {
                 let RelatedRepoConfig {
                     repo_name,
                     expected_pkg_name,
@@ -185,9 +190,6 @@ impl Workspaces {
                 } = repo_config;
                 let mine = omicron.clone();
                 let my_ignored = ignored_non_clients.clone();
-                // unwrap(): we loaded a commit for each repo in the loop above
-                let expected_commit =
-                    (*related_repo_commits.get(repo_name).unwrap()).clone();
                 let extra_features = if extra_cargo_features.is_empty() {
                     None
                 } else {
