@@ -7,16 +7,39 @@
 //! Unlike most reconcilers in this crate, `uplinkd`'s configuration is managed
 //! via SMF, not a dropshot server.
 
+use crate::SWITCH_ZONE_NAME;
 use crate::ScrimletReconcilersMode;
 use crate::reconciler_task::Reconciler;
 use crate::switch_zone_slot::ThisSledSwitchSlot;
+use anyhow::anyhow;
+use anyhow::bail;
+use scuffle::AddPropertyGroupFlags;
+use scuffle::EditPropertyGroups;
+use scuffle::HasComposedPropertyGroups;
+use scuffle::Instance;
+use scuffle::PropertyGroupType;
+use scuffle::Scf;
+use scuffle::Value;
+use scuffle::ValueKind;
+use scuffle::ValueRef;
+use sled_agent_types::early_networking::RackNetworkConfig;
 use sled_agent_types::system_networking::SystemNetworkingConfig;
 use slog::Logger;
+use slog::info;
+use slog::warn;
+use slog_error_chain::InlineErrorChain;
+use std::collections::BTreeMap;
 use std::time::Duration;
 
+const UPLINK_SERVICE_NAME: &str = "oxide/uplink";
+const UPLINK_INSTANCE_NAME: &str = "default";
+const UPLINKS_PG_NAME: &str = "uplinks";
+
 #[derive(Debug, Clone)]
-pub struct UplinkdReconcilerStatus {
-    pub todo_status: (),
+pub enum UplinkdReconcilerStatus {
+    Failed(String),
+    SkippedConfigUpToDate,
+    Reconciled { ports: BTreeMap<String, Vec<String>> },
 }
 
 impl slog::KV for UplinkdReconcilerStatus {
@@ -25,13 +48,22 @@ impl slog::KV for UplinkdReconcilerStatus {
         _record: &slog::Record<'_>,
         serializer: &mut dyn slog::Serializer,
     ) -> slog::Result {
-        serializer.emit_str("uplinkd-reconciler".into(), "not yet implemented")
+        match self {
+            UplinkdReconcilerStatus::Failed(reason) => {
+                serializer.emit_str("uplinkd".into(), &reason)
+            }
+            UplinkdReconcilerStatus::SkippedConfigUpToDate => serializer
+                .emit_str("uplinkd".into(), "skipped: config up-to-date"),
+            UplinkdReconcilerStatus::Reconciled { ports } => serializer
+                .emit_usize("uplinkd-reconciled-ports".into(), ports.len()),
+        }
     }
 }
 
 #[derive(Debug)]
 pub(crate) struct UplinkdReconciler {
-    _switch_slot: ThisSledSwitchSlot,
+    switch_slot: ThisSledSwitchSlot,
+    is_running_in_test_mode: bool,
 }
 
 impl Reconciler for UplinkdReconciler {
@@ -41,20 +73,239 @@ impl Reconciler for UplinkdReconciler {
     const RE_RECONCILE_INTERVAL: std::time::Duration = Duration::from_secs(30);
 
     fn new(
-        _mode: ScrimletReconcilersMode,
+        mode: ScrimletReconcilersMode,
         switch_slot: ThisSledSwitchSlot,
         _parent_log: &Logger,
     ) -> Self {
-        // TODO: Remain inert if `mode` is `ScrimletReconcilersMode::Test`,
-        // since that indicates there's no real zone to connect to.
-        Self { _switch_slot: switch_slot }
+        let is_running_in_test_mode = match mode {
+            ScrimletReconcilersMode::SwitchZone(_) => false,
+            #[cfg(any(test, feature = "testing"))]
+            ScrimletReconcilersMode::Test { .. } => true,
+        };
+        Self { switch_slot, is_running_in_test_mode }
     }
 
     async fn do_reconciliation(
         &mut self,
-        _system_networking_config: &SystemNetworkingConfig,
-        _log: &Logger,
+        system_networking_config: &SystemNetworkingConfig,
+        log: &Logger,
     ) -> Self::Status {
-        UplinkdReconcilerStatus { todo_status: () }
+        if self.is_running_in_test_mode {
+            // We can't run SMF-based reconcilers in test mode. We could thread
+            // through a separate status variant just for this, but that'd be a
+            // little painful for upstream callers; it's probably okay to report
+            // any status, so we pick `Failed` to give a description of why we
+            // didn't run.
+            return UplinkdReconcilerStatus::Failed(
+                "reconciliation disabled \
+                 (SMF within the switch zone not available in test mode)"
+                    .to_string(),
+            );
+        }
+
+        let result = {
+            let config = system_networking_config.rack_network_config.clone();
+            let log = log.clone();
+            let switch_slot = self.switch_slot;
+            tokio::task::spawn_blocking(move || {
+                do_reconciliation_blocking(&config, switch_slot, &log)
+            })
+            .await
+        };
+
+        let status = match result {
+            Ok(Ok(status)) => status,
+            Ok(Err(err)) => UplinkdReconcilerStatus::Failed(format!(
+                "reconciliation failed: {}",
+                InlineErrorChain::new(&*err)
+            )),
+            Err(err) => {
+                // We don't expect any of these cases, except possibly during
+                // tokio runtime shutdown in unit tests, but it's easy to map
+                // them to errors instead of panicking ourselves.
+                if err.is_cancelled() {
+                    UplinkdReconcilerStatus::Failed(
+                        "do_reconciliation_blocking() \
+                         was cancelled unexpectedly"
+                            .to_string(),
+                    )
+                } else if err.is_panic() {
+                    UplinkdReconcilerStatus::Failed(
+                        "do_reconciliation_blocking() panicked".to_string(),
+                    )
+                } else {
+                    UplinkdReconcilerStatus::Failed(
+                        "tokio::task::spawn_blocking() failed without \
+                         being cancelled or panicking ?!"
+                            .to_string(),
+                    )
+                }
+            }
+        };
+
+        status
     }
 }
+
+fn do_reconciliation_blocking(
+    config: &RackNetworkConfig,
+    our_switch_slot: ThisSledSwitchSlot,
+    log: &Logger,
+) -> anyhow::Result<UplinkdReconcilerStatus> {
+    // Connect to SMF inside the zone.
+    let scf = Scf::connect_zone(SWITCH_ZONE_NAME)?;
+
+    // Forward to the real function; it's separate so unit tests can connect to
+    // an isolated `svc.configd` instead of requiring a real switch zone.
+    do_reconciliation_blocking_impl(&scf, config, our_switch_slot, log)
+}
+
+fn do_reconciliation_blocking_impl(
+    scf: &Scf<'_>,
+    config: &RackNetworkConfig,
+    our_switch_slot: ThisSledSwitchSlot,
+    log: &Logger,
+) -> anyhow::Result<UplinkdReconcilerStatus> {
+    let scope = scf.scope_local()?;
+    let Some(service) = scope.service(UPLINK_SERVICE_NAME)? else {
+        bail!("no `{UPLINK_SERVICE_NAME}` service present in switch zone");
+    };
+    let Some(mut instance) = service.instance(UPLINK_INSTANCE_NAME)? else {
+        bail!("no `{UPLINK_INSTANCE_NAME}` instance within {}", service.fmri());
+    };
+
+    info!(log, "reading properties from running snapshot");
+    let current_properties = current_uplink_addresses(&instance, log)?;
+    let desired_properties = desired_uplink_addresses(config, our_switch_slot);
+
+    // We could compute exact diffs to know exactly what properties need to be
+    // removed / added / changed, but we'd need to compute _two_ diffs:
+    //
+    // 1. Does the running snapshot match the desired config? If so, nothing to
+    //    do.
+    // 2. If not, we have to compute a diff against the current instance
+    //    properties, not the running snapshot - it's possible a previous
+    //    reconciliation attempt changed the instance properties but failed to
+    //    refresh, so this could be in any previous state.
+    //
+    // Instead, we do something simpler: if the running snapshot matches the
+    // desired config, we do nothing; otherwise, we apply the new config
+    // wholesale without computing a precise diff. `apply_config()` deletes the
+    // `UPLINKS_PG_NAME` property group entirely, then recreates it with only
+    // our desired values.
+    if current_properties == desired_properties {
+        Ok(UplinkdReconcilerStatus::SkippedConfigUpToDate)
+    } else {
+        info!(log, "applying new configuration");
+        apply_config(&mut instance, &desired_properties)?;
+        Ok(UplinkdReconcilerStatus::Reconciled { ports: desired_properties })
+    }
+}
+
+fn apply_config(
+    instance: &mut Instance<'_>,
+    ports: &BTreeMap<String, Vec<String>>,
+) -> anyhow::Result<()> {
+    instance.delete_property_group(UPLINKS_PG_NAME)?;
+
+    {
+        let mut pg = instance.add_property_group(
+            UPLINKS_PG_NAME,
+            PropertyGroupType::Application,
+            AddPropertyGroupFlags::Persistent,
+        )?;
+
+        let mut tx = pg.transaction()?.start()?;
+        for (port, addrs) in ports {
+            tx.property_new_multiple(
+                port,
+                ValueKind::AString,
+                addrs.iter().map(|addr| ValueRef::AString(addr)),
+            )?;
+        }
+
+        tx.commit()?;
+    }
+
+    instance.smf_refresh()?;
+
+    Ok(())
+}
+
+fn desired_uplink_addresses(
+    config: &RackNetworkConfig,
+    our_switch_slot: ThisSledSwitchSlot,
+) -> BTreeMap<String, Vec<String>> {
+    config
+        .ports
+        .iter()
+        .filter(|port| port.switch == our_switch_slot)
+        .filter_map(|port_config| {
+            let values = port_config
+                .addresses
+                .iter()
+                .map(|addr| addr.to_uplinkd_smf_property())
+                .collect::<Vec<_>>();
+
+            if values.is_empty() {
+                None
+            } else {
+                Some((format!("{}_0", port_config.port), values))
+            }
+        })
+        .collect()
+}
+
+fn current_uplink_addresses(
+    instance: &Instance<'_>,
+    log: &Logger,
+) -> anyhow::Result<BTreeMap<String, Vec<String>>> {
+    // If there's no running snapshot, we're not going to be able to apply new
+    // properties - bail out.
+    let snapshot = instance
+        .snapshot("running")?
+        .ok_or_else(|| anyhow!("no running snapshot for uplinkd"))?;
+
+    // We have a running snapshot. From this point we bail out if we have an SMF
+    // error, but not if we have unexpected data:
+    //
+    // * We'll treat "missing the pg entirely" as "no properties"
+    // * We'll skip any property values that aren't `AString`s
+
+    let Some(pg) = snapshot.property_group_composed(UPLINKS_PG_NAME)? else {
+        return Ok(BTreeMap::new());
+    };
+
+    let properties = pg
+        .properties()?
+        .map(|prop| {
+            let prop = prop?;
+            let name = prop.name();
+
+            let mut addrs = Vec::new();
+            for value in prop.values()? {
+                match value? {
+                    Value::AString(addr) => {
+                        addrs.push(addr);
+                    }
+                    other => {
+                        warn!(
+                            log, "ignoring address value with unexpected type";
+                            "property" => name,
+                            "value-type" => %other.kind(),
+                            "value" => %other.display_smf(),
+                        );
+                    }
+                }
+            }
+
+            Ok((name.to_owned(), addrs))
+        })
+        .collect::<anyhow::Result<BTreeMap<_, _>>>()?;
+
+    Ok(properties)
+}
+
+// Our tests require smf, which is only available on illumos.
+#[cfg(all(test, target_os = "illumos"))]
+mod tests;

@@ -72,3 +72,22 @@ pub use status::ReconciliationCompletedStatus;
 pub use status::ScrimletReconcilersStatus;
 pub use status::ScrimletStatus;
 pub use uplinkd_reconciler::UplinkdReconcilerStatus;
+
+// TODO-cleanup The SMF-based reconcilers need to know the name of the switch
+// zone. This is a little spread out today: `illumos-utils` defines
+// `zone_name()`, but calling it for the switch zone is a little awkward
+// (`zone_name("switch", None)`) when all it does is prepend `oxz_`. We define a
+// constant here, but maybe there's a better option? We have a unit test below
+// to ensure this matches what `illumos-utils` would report.
+const SWITCH_ZONE_NAME: &str = "oxz_switch";
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_switch_zone_name_const_matches_illumos_utils_dynamic() {
+        let expected = illumos_utils::zone::zone_name("switch", None);
+        assert_eq!(SWITCH_ZONE_NAME, expected);
+    }
+}

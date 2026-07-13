@@ -779,6 +779,7 @@ rustix = "1.1.2"
 samael = { version = "0.0.19", features = ["xmlsec"] }
 schemars = "0.8.22"
 scopeguard = "1.2.0"
+scuffle = { version = "0.1.0", features = ["daft", "smf-by-instance"] }
 secrecy = "0.10.3"
 semver = { version = "1.0.26", features = ["std", "serde"] }
 seq-macro = "0.3.6"
