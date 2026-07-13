@@ -424,7 +424,6 @@ impl FmAnalysis {
                     saga_state,
                     time_created: saga.time_created,
                     current_sec,
-                    adopt_generation: *saga.adopt_generation,
                     last_event_time,
                     owner_state,
                 })

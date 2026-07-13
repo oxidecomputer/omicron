@@ -61,8 +61,8 @@ pub struct Input {
     /// new sitrep's `support_bundle_generation`.
     support_bundles_changed: bool,
     in_service_disks: Arc<IdOrdMap<InServiceDisk>>,
-    /// All non-terminal (running/unwinding) sagas, annotated with their
-    /// latest node-event time and owning-Nexus state.
+    /// All non-terminal (running, unwinding, or abandoned) sagas, annotated
+    /// with their latest node-event time and owning-Nexus state.
     observed_sagas: Arc<IdOrdMap<ObservedSaga>>,
 }
 

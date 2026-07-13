@@ -131,8 +131,7 @@ sitrep_child_tables! {
     AnalysisReport => { table: "fm_sitrep_analysis_report" },
 }
 
-/// Insert a reconstructed fact into the per-case map, erroring if two facts
-/// share a UUID (impossible, as the fact UUID is a primary key).
+/// Insert a reconstructed fact into the per-case map
 fn insert_fact_for_case(
     by_case: &mut HashMap<CaseUuid, iddqd::IdOrdMap<fm::case::Fact>>,
     case_id: CaseUuid,
@@ -2438,67 +2437,6 @@ mod tests {
                     ),
                 })
                 .unwrap();
-            // Saga facts (both kinds), to exercise the fm_fact_saga
-            // read/write/GC paths. Storage fidelity is what's under test here,
-            // so it's fine that these sit on a physical-disk case.
-            facts
-                .insert_unique(fm::case::Fact {
-                    metadata: fm::case::FactMetadata {
-                        id: FactUuid::new_v4(),
-                        created_sitrep_id: sitrep_id,
-                        comment: "a representative not-progressing saga fact"
-                            .to_string(),
-                    },
-                    payload: fm::FactPayload::Saga(
-                        fm::SagaFact::NotProgressing(
-                            fm::SagaNotProgressingFactPayload {
-                                saga_id: steno::SagaId(uuid::Uuid::new_v4()),
-                                saga_state:
-                                    nexus_types::observed_saga::SagaProgressState::Unwinding,
-                                last_event_time:
-                                    omicron_common::now_db_precision(),
-                            },
-                        ),
-                    ),
-                })
-                .unwrap();
-            facts
-                .insert_unique(fm::case::Fact {
-                    metadata: fm::case::FactMetadata {
-                        id: FactUuid::new_v4(),
-                        created_sitrep_id: sitrep_id,
-                        comment: "a representative orphaned saga fact"
-                            .to_string(),
-                    },
-                    payload: fm::FactPayload::Saga(
-                        fm::SagaFact::OwnerNotCurrentGeneration(
-                            fm::SagaOwnerNotCurrentFactPayload {
-                                saga_id: steno::SagaId(uuid::Uuid::new_v4()),
-                                current_sec:
-                                    omicron_uuid_kinds::OmicronZoneUuid::new_v4(),
-                                orphan_reason:
-                                    nexus_types::observed_saga::OrphanedReason::Quiesced,
-                            },
-                        ),
-                    ),
-                })
-                .unwrap();
-            facts
-                .insert_unique(fm::case::Fact {
-                    metadata: fm::case::FactMetadata {
-                        id: FactUuid::new_v4(),
-                        created_sitrep_id: sitrep_id,
-                        comment: "a representative abandoned saga fact"
-                            .to_string(),
-                    },
-                    payload: fm::FactPayload::Saga(fm::SagaFact::Abandoned(
-                        fm::SagaAbandonedFactPayload {
-                            saga_id: steno::SagaId(uuid::Uuid::new_v4()),
-                        },
-                    )),
-                })
-                .unwrap();
-
             fm::Case {
                 id: omicron_uuid_kinds::CaseUuid::new_v4(),
                 metadata: fm::case::Metadata {
@@ -2558,9 +2496,110 @@ mod tests {
             }
         };
 
+        // Saga cases, exercising the fm_fact_saga read/write/GC paths. A live
+        // saga may carry NotProgressing and OwnerNotCurrentGeneration
+        // together, but Abandoned supersedes both, so the abandoned saga gets
+        // a case of its own.
+        let case3 = {
+            let stuck_saga_id = steno::SagaId(uuid::Uuid::new_v4());
+            let mut facts = iddqd::IdOrdMap::new();
+            facts
+                .insert_unique(fm::case::Fact {
+                    metadata: fm::case::FactMetadata {
+                        id: FactUuid::new_v4(),
+                        created_sitrep_id: sitrep_id,
+                        comment: "a representative not-progressing saga fact"
+                            .to_string(),
+                    },
+                    payload: fm::FactPayload::Saga(
+                        fm::SagaFact::NotProgressing(
+                            fm::SagaNotProgressingFactPayload {
+                                saga_id: stuck_saga_id,
+                                saga_state:
+                                    nexus_types::observed_saga::SagaProgressState::Unwinding,
+                                last_event_time:
+                                    omicron_common::now_db_precision(),
+                            },
+                        ),
+                    ),
+                })
+                .unwrap();
+            facts
+                .insert_unique(fm::case::Fact {
+                    metadata: fm::case::FactMetadata {
+                        id: FactUuid::new_v4(),
+                        created_sitrep_id: sitrep_id,
+                        comment: "a representative orphaned saga fact"
+                            .to_string(),
+                    },
+                    payload: fm::FactPayload::Saga(
+                        fm::SagaFact::OwnerNotCurrentGeneration(
+                            fm::SagaOwnerNotCurrentFactPayload {
+                                saga_id: stuck_saga_id,
+                                current_sec:
+                                    omicron_uuid_kinds::OmicronZoneUuid::new_v4(),
+                                orphan_reason:
+                                    nexus_types::observed_saga::OrphanedReason::Quiesced,
+                            },
+                        ),
+                    ),
+                })
+                .unwrap();
+
+            fm::Case {
+                id: omicron_uuid_kinds::CaseUuid::new_v4(),
+                metadata: fm::case::Metadata {
+                    created_sitrep_id: sitrep_id,
+                    closed_sitrep_id: None,
+                    de: fm::DiagnosisEngineKind::Saga,
+                    comment: "a stuck saga with an orphaned owner".to_string(),
+                },
+                ereports: iddqd::IdOrdMap::new(),
+                alerts_requested: iddqd::IdOrdMap::new(),
+                support_bundles_requested: iddqd::IdOrdMap::new(),
+                facts,
+            }
+        };
+
+        let case4 = {
+            let mut facts = iddqd::IdOrdMap::new();
+            facts
+                .insert_unique(fm::case::Fact {
+                    metadata: fm::case::FactMetadata {
+                        id: FactUuid::new_v4(),
+                        created_sitrep_id: sitrep_id,
+                        comment: "a representative abandoned saga fact"
+                            .to_string(),
+                    },
+                    payload: fm::FactPayload::Saga(fm::SagaFact::Abandoned(
+                        fm::SagaAbandonedFactPayload {
+                            saga_id: steno::SagaId(uuid::Uuid::new_v4()),
+                        },
+                    )),
+                })
+                .unwrap();
+
+            fm::Case {
+                id: omicron_uuid_kinds::CaseUuid::new_v4(),
+                metadata: fm::case::Metadata {
+                    created_sitrep_id: sitrep_id,
+                    closed_sitrep_id: None,
+                    de: fm::DiagnosisEngineKind::Saga,
+                    comment: "an abandoned saga awaiting manual remediation"
+                        .to_string(),
+                },
+                ereports: iddqd::IdOrdMap::new(),
+                alerts_requested: iddqd::IdOrdMap::new(),
+                support_bundles_requested: iddqd::IdOrdMap::new(),
+                facts,
+            }
+        };
+
         let mut cases = iddqd::IdOrdMap::new();
         cases.insert_unique(case1.clone()).expect("failed to insert case 1");
         cases.insert_unique(case2.clone()).expect("failed to insert case 2");
+        cases.insert_unique(case3).expect("failed to insert case 3");
+        cases.insert_unique(case4).expect("failed to insert case 4");
         let mut ereports_by_id = iddqd::IdOrdMap::new();
         for case in cases.iter() {
             ereports_by_id
@@ -2850,7 +2889,7 @@ mod tests {
             .get_result_async::<i64>(&*conn)
             .await
             .expect("failed to count cases before deletion");
-        assert_eq!(cases_before, 2, "two cases should exist before deletion");
+        assert_eq!(cases_before, 4, "four cases should exist before deletion");
 
         let case_ereports_before: i64 = case_ereport_dsl::fm_ereport_in_case
             .filter(

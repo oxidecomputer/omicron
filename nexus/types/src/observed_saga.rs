@@ -5,17 +5,9 @@
 //! "Currently non-terminal sagas": the executed view from the `saga` and
 //! `saga_node_event` DB tables, annotated with the state of each saga's
 //! owning Nexus.
-//!
-//! This is the saga diagnosis engine's analog of
-//! [`InServiceDisk`](crate::in_service_disk::InServiceDisk): the fault
-//! management preparation phase reads it directly from the database, and the
-//! saga diagnosis engine consumes it to decide whether a saga is stuck (not
-//! making progress) or orphaned (owned by a Nexus that is no longer of the
-//! current generation).
 
 use chrono::{DateTime, Utc};
 use iddqd::{IdOrdItem, id_upcast};
-use omicron_common::api::external::Generation;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use serde::{Deserialize, Serialize};
 
@@ -42,8 +34,12 @@ pub enum ObservedSagaState {
 
 /// The execution state of a *live* (running or unwinding) saga. This is the
 /// subset of [`ObservedSagaState`] that can appear in a `NotProgressing`
-/// fact: an abandoned saga is never "not progressing" (it is never going to
-/// progress); it carries an `Abandoned` fact instead.
+/// fact.
+///
+/// This is intentionally a subset of "omicron.public.saga_state" because some
+/// of those states are terminal (e.g., done, abandoned) and should not be
+/// observed on a fact attempting to indicate "this saga should be making
+/// progress".
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SagaProgressState {
@@ -61,6 +57,11 @@ pub enum SagaOwnerState {
     /// The owning Nexus is the current, active generation.
     Active,
     /// The owning Nexus is a newer generation that is not yet active.
+    ///
+    /// This is not treated as orphaned: the owner is expected to start
+    /// running the saga once it becomes active. If the handoff stalls
+    /// indefinitely, the saga is surfaced by the `NotProgressing` condition
+    /// instead.
     NotYet,
     /// The owning Nexus has quiesced (an older generation handed off).
     Quiesced,
@@ -108,9 +109,6 @@ pub struct ObservedSaga {
     /// The owning Nexus zone (`saga.current_sec`), or `None` if the saga has no
     /// current SEC.
     pub current_sec: Option<OmicronZoneUuid>,
-    /// `saga.adopt_generation`: bumps each time the saga is re-adopted to a
-    /// SEC (failover), not on progress.
-    pub adopt_generation: Generation,
     /// The latest `saga_node_event.event_time` for this saga, i.e. the last
     /// durably-recorded forward or undo step. `None` if the saga somehow has
     /// no node events yet. This is the "last progress" signal:

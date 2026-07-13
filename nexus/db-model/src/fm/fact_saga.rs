@@ -74,17 +74,19 @@ impl From<SagaProgressState> for SagaState {
     }
 }
 
-/// Convert a DB `saga_state` back into the non-terminal [`SagaProgressState`]
-/// recorded on a fact. Terminal states never appear on a saga fact (the case
-/// is closed once the saga terminates), so they are treated as corrupt rows.
+/// Convert a DB `saga_state` back into the [`SagaProgressState`] recorded on
+/// a `NotProgressing` fact. Only live (running or unwinding) sagas carry that
+/// fact: a done saga has no facts at all, and an abandoned saga carries an
+/// `Abandoned` fact, whose payload has no saga state. A stored `Done` or
+/// `Abandoned` here therefore indicates a corrupt row.
 fn saga_progress_state(state: SagaState) -> Result<SagaProgressState, Error> {
     match state {
         SagaState::Running => Ok(SagaProgressState::Running),
         SagaState::Unwinding => Ok(SagaProgressState::Unwinding),
         SagaState::Done | SagaState::Abandoned => {
             Err(Error::internal_error(&format!(
-                "fm_fact_saga row has terminal saga_state {state:?}, which \
-                 should never be recorded on a saga fact"
+                "fm_fact_saga row has saga_state {state:?}, which is never \
+                 recorded on a NotProgressing saga fact"
             )))
         }
     }
@@ -93,10 +95,7 @@ fn saga_progress_state(state: SagaState) -> Result<SagaProgressState, Error> {
 /// Diesel row for the `fm_fact_saga` table.
 ///
 /// The payload columns are populated according to `kind`: a column is `Some`
-/// if it belongs to that `kind`'s payload, and `None` otherwise (by
-/// convention; the per-kind CHECK constraints, e.g.
-/// `not_progressing_columns_present`, enforce only the "present for the
-/// matching kind" direction so that future kinds may share columns).
+/// if it belongs to that `kind`'s payload, and `None` otherwise.
 #[derive(Queryable, Insertable, Clone, Debug, Selectable)]
 #[diesel(table_name = fm_fact_saga)]
 pub struct FmFactSaga {
@@ -113,8 +112,7 @@ pub struct FmFactSaga {
     pub created_sitrep_id: DbTypedUuid<SitrepKind>,
     pub comment: String,
 
-    /// The saga this fact is about. Common to every `kind`, so it is always
-    /// present (the column is `NOT NULL`).
+    /// The saga this fact is about.
     pub saga_id: Uuid,
     pub kind: FmFactSagaKind,
 
@@ -136,8 +134,6 @@ impl FmFactSaga {
         metadata: &FactMetadata,
         saga_fact: &SagaFact,
     ) -> Self {
-        // Destructure exhaustively: a new `FactMetadata` field will fail to
-        // compile here until it is mapped to a column.
         let FactMetadata { id, created_sitrep_id, comment } = metadata;
         let base = Self {
             id: (*id).into(),
@@ -165,8 +161,6 @@ impl FmFactSaga {
                 orphan_reason: Some(p.orphan_reason.into()),
                 ..base
             },
-            // The Abandoned payload is pure identity (the condition is
-            // boolean), so the row carries only the common columns.
             SagaFact::Abandoned(_) => {
                 Self { kind: FmFactSagaKind::Abandoned, ..base }
             }
@@ -174,10 +168,6 @@ impl FmFactSaga {
     }
 
     /// Reconstruct an in-memory fact from a row.
-    ///
-    /// Columns the database's CHECK constraint guarantees are non-NULL for this
-    /// `kind` are unwrapped; a NULL where one is required indicates a corrupt
-    /// row and yields an internal error rather than a panic.
     pub fn into_fact(self) -> Result<fm::case::Fact, Error> {
         let kind = self.kind;
         let saga_id = steno::SagaId(self.saga_id);

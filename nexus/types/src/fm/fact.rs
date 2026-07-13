@@ -50,7 +50,6 @@ impl FactPayload {
     /// The physical-disk payload, or `None` if this fact belongs to a
     /// different diagnosis engine.
     pub fn as_physical_disk(&self) -> Option<&DiskFact> {
-        #[allow(unreachable_patterns)]
         match self {
             FactPayload::PhysicalDisk(fact) => Some(fact),
             _ => None,
@@ -60,7 +59,6 @@ impl FactPayload {
     /// The saga payload, or `None` if this fact belongs to a different
     /// diagnosis engine.
     pub fn as_saga(&self) -> Option<&SagaFact> {
-        #[allow(unreachable_patterns)]
         match self {
             FactPayload::Saga(fact) => Some(fact),
             _ => None,
@@ -185,8 +183,9 @@ pub struct SagaOwnerNotCurrentFactPayload {
 /// Payload of a [`SagaFact::Abandoned`] fact.
 ///
 /// The condition is boolean (the saga is abandoned or it isn't), so the
-/// payload is pure identity. See [`SagaNotProgressingFactPayload`] for why
-/// payloads carry only condition-defining fields.
+/// payload carries nothing beyond the saga's ID. See
+/// [`SagaNotProgressingFactPayload`] for why payloads carry only
+/// condition-defining fields.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct SagaAbandonedFactPayload {
     /// The saga this fact (and its parent case) is about.

@@ -1074,9 +1074,7 @@ mod tests {
     }
 
     /// A Disk case carrying a saga fact payload is a data-model violation;
-    /// the engine closes it as uninterpretable. (This exercises the
-    /// `ForeignFactPayload` path, which only became constructible once a
-    /// second diagnosis engine's payload variant existed.)
+    /// the engine closes it as uninterpretable.
     #[test]
     fn foreign_payload_case_is_closed() {
         let (logctx, collection, _zpools) =
