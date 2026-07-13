@@ -7,7 +7,6 @@ members = [
     "clickhouse-admin/api",
     "clickhouse-admin/test-utils",
     "clickhouse-admin/types/versions",
-    "clients/bootstrap-agent-client",
     "clients/bootstrap-agent-lockstep-client",
     "clients/clickhouse-admin-keeper-client",
     "clients/clickhouse-admin-server-client",
@@ -148,7 +147,6 @@ members = [
     "rpaths",
     "sled-agent",
     "sled-agent/api",
-    "sled-agent/bootstrap-agent-api",
     "sled-agent/bootstrap-agent-lockstep-api",
     "sled-agent/bootstrap-agent-lockstep-types",
     "sled-agent/config-reconciler",
@@ -198,7 +196,6 @@ default-members = [
     "clickhouse-admin/types",
     "clickhouse-admin/types/versions",
     "clickhouse-admin/test-utils",
-    "clients/bootstrap-agent-client",
     "clients/bootstrap-agent-lockstep-client",
     "clients/clickhouse-admin-keeper-client",
     "clients/clickhouse-admin-server-client",
@@ -341,7 +338,6 @@ default-members = [
     "rpaths",
     "sled-agent",
     "sled-agent/api",
-    "sled-agent/bootstrap-agent-api",
     "sled-agent/bootstrap-agent-lockstep-api",
     "sled-agent/bootstrap-agent-lockstep-types",
     "sled-agent/config-reconciler",
@@ -445,8 +441,6 @@ base64 = "0.22.1"
 bcs = "0.1.6"
 bincode = "1.3.3"
 bootstore = { path = "bootstore" }
-bootstrap-agent-api = { path = "sled-agent/bootstrap-agent-api" }
-bootstrap-agent-client = { path = "clients/bootstrap-agent-client" }
 bootstrap-agent-lockstep-api = { path = "sled-agent/bootstrap-agent-lockstep-api" }
 bootstrap-agent-lockstep-client = { path = "clients/bootstrap-agent-lockstep-client" }
 bootstrap-agent-lockstep-types = { path = "sled-agent/bootstrap-agent-lockstep-types" }

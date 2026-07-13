@@ -146,14 +146,9 @@ impl RackSetupPane {
         }
 
         match (popup, cmd) {
-            (
-                Popup::RackSetup(PopupKind::Prompting)
-                | Popup::RackReset(PopupKind::Prompting),
-                Cmd::No,
-            )
+            (Popup::RackSetup(PopupKind::Prompting), Cmd::No)
             | (
                 Popup::RackSetup(PopupKind::Failed { .. })
-                | Popup::RackReset(PopupKind::Failed { .. })
                 | Popup::RackStatusDetails(_),
                 Cmd::Exit,
             ) => {
@@ -164,30 +159,9 @@ impl RackSetupPane {
                 *kind = PopupKind::Waiting;
                 Some(Action::StartRackSetup)
             }
-            (Popup::RackReset(kind @ PopupKind::Prompting), Cmd::Yes) => {
-                *kind = PopupKind::Waiting;
-                Some(Action::StartRackReset)
-            }
             (
                 Popup::RackSetup(kind @ PopupKind::Waiting),
                 Cmd::ShowPopup(ShowPopupCmd::StartRackSetupResponse(response)),
-            ) => {
-                match response {
-                    Ok(()) => {
-                        self.popup = None;
-                    }
-                    Err(message) => {
-                        *kind = PopupKind::Failed {
-                            message,
-                            scroll_offset: PopupScrollOffset::default(),
-                        };
-                    }
-                }
-                Some(Action::Redraw)
-            }
-            (
-                Popup::RackReset(kind @ PopupKind::Waiting),
-                Cmd::ShowPopup(ShowPopupCmd::StartRackResetResponse(response)),
             ) => {
                 match response {
                     Ok(()) => {
@@ -369,17 +343,11 @@ fn draw_rack_status_details_popup(
     let status = Span::styled("Status: ", style::selected());
     let prefix = vec![Span::styled("Message: ", style::selected())];
     match state.rack_setup_state.as_ref() {
-        Ok(RackOperationStatus::Uninitialized { reset_id }) => {
+        Ok(RackOperationStatus::Uninitialized) => {
             body.lines.push(Line::from(vec![
                 status,
                 Span::styled("Uninitialized", style::plain_text()),
             ]));
-            if let Some(id) = reset_id {
-                body.lines.push(Line::from(vec![Span::styled(
-                    format!("Last reset operation ID: {}", id),
-                    style::plain_text(),
-                )]));
-            }
         }
         Ok(RackOperationStatus::Initialized { id }) => {
             body.lines.push(Line::from(vec![
@@ -414,27 +382,6 @@ fn draw_rack_status_details_popup(
                 style::plain_text(),
             )]));
         }
-        Ok(RackOperationStatus::ResetFailed { id, message }) => {
-            body.lines.push(Line::from(vec![
-                status,
-                Span::styled("Reset Failed", style::plain_text()),
-            ]));
-            body.lines.push(Line::from(vec![Span::styled(
-                format!("Last reset operation ID: {}", id),
-                style::plain_text(),
-            )]));
-            push_text_lines(message, prefix, &mut body.lines);
-        }
-        Ok(RackOperationStatus::ResetPanicked { id }) => {
-            body.lines.push(Line::from(vec![
-                status,
-                Span::styled("Reset Panicked", style::plain_text()),
-            ]));
-            body.lines.push(Line::from(vec![Span::styled(
-                format!("Last reset operation ID: {}", id),
-                style::plain_text(),
-            )]));
-        }
         Ok(RackOperationStatus::Initializing { id, step }) => {
             body.lines.push(Line::from(vec![
                 status,
@@ -450,16 +397,6 @@ fn draw_rack_status_details_popup(
                 format!("Current operation: {:?}", step),
                 style::plain_text(),
             )]));
-            body.lines.push(Line::from(vec![Span::styled(
-                format!("Current operation ID: {}", id),
-                style::plain_text(),
-            )]));
-        }
-        Ok(RackOperationStatus::Resetting { id }) => {
-            body.lines.push(Line::from(vec![
-                status,
-                Span::styled("Resetting", style::plain_text()),
-            ]));
             body.lines.push(Line::from(vec![Span::styled(
                 format!("Current operation ID: {}", id),
                 style::plain_text(),
@@ -652,17 +589,10 @@ fn rss_config_text<'a>(
             let msg = format!("Initializing: Step {}/{}", index, max);
             Span::styled(msg, warn_style)
         }
-        Ok(RackOperationStatus::Resetting { .. }) => {
-            Span::styled("Resetting", warn_style)
-        }
         Ok(
             RackOperationStatus::InitializationFailed { .. }
             | RackOperationStatus::InitializationPanicked { .. },
         ) => Span::styled("Initialization Failed", bad_style),
-        Ok(
-            RackOperationStatus::ResetFailed { .. }
-            | RackOperationStatus::ResetPanicked { .. },
-        ) => Span::styled("Resetting Failed", bad_style),
         Err(_) => Span::styled("Unknown", bad_style),
     };
 
@@ -1354,7 +1284,7 @@ fn rss_config_text<'a>(
         bootstrap_sleds
             .iter()
             .map(|desc| {
-                let identifier = desc.baseboard.identifier();
+                let identifier = &desc.baseboard_id.serial_number;
                 let mut spans = vec![
                     Span::styled("  • ", label_style),
                     Span::styled(format!("Cubby {}", desc.id.slot), ok_style),

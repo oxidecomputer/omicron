@@ -248,13 +248,6 @@ impl RunnerCore {
                         .blocking_send(wicketd::Request::StartRackSetup)?;
                 }
             }
-            Action::StartRackReset => {
-                if let Some(wicketd) = wicketd {
-                    wicketd
-                        .tx
-                        .blocking_send(wicketd::Request::StartRackReset)?;
-                }
-            }
         }
         Ok(())
     }

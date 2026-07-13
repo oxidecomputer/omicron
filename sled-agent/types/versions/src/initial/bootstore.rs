@@ -9,7 +9,8 @@ use std::net::SocketAddrV6;
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use sled_hardware_types::Baseboard;
+
+use super::inventory::Baseboard;
 
 /// Status of the local bootstore node.
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
@@ -49,8 +50,10 @@ pub struct EstablishedConnection {
     pub addr: SocketAddrV6,
 }
 
-impl From<(Baseboard, SocketAddrV6)> for EstablishedConnection {
-    fn from(value: (Baseboard, SocketAddrV6)) -> Self {
-        EstablishedConnection { baseboard: value.0, addr: value.1 }
+impl From<(sled_hardware_types::Baseboard, SocketAddrV6)>
+    for EstablishedConnection
+{
+    fn from(value: (sled_hardware_types::Baseboard, SocketAddrV6)) -> Self {
+        EstablishedConnection { baseboard: value.0.into(), addr: value.1 }
     }
 }

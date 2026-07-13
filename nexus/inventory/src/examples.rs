@@ -45,7 +45,6 @@ use sled_agent_resolvable_files_examples::NON_BOOT_PATHS;
 use sled_agent_resolvable_files_examples::NON_BOOT_UUID;
 use sled_agent_resolvable_files_examples::WriteInstallDatasetContext;
 use sled_agent_resolvable_files_examples::dataset_missing_error;
-use sled_agent_types::inventory::Baseboard;
 use sled_agent_types::inventory::BootImageHeader;
 use sled_agent_types::inventory::BootPartitionDetails;
 use sled_agent_types::inventory::ConfigReconcilerInventory;
@@ -572,10 +571,9 @@ pub fn representative() -> Representative {
             "fake sled agent 1",
             sled_agent(
                 sled_agent_id_basic,
-                Baseboard::Gimlet {
-                    identifier: String::from("s1"),
-                    model: String::from("model1"),
-                    revision: 0,
+                BaseboardId {
+                    part_number: String::from("model1"),
+                    serial_number: String::from("s1"),
                 },
                 SledRole::Gimlet,
                 disks,
@@ -607,11 +605,7 @@ pub fn representative() -> Representative {
             "fake sled agent 4",
             sled_agent(
                 sled_agent_id_extra,
-                Baseboard::Gimlet {
-                    identifier: sled4_bb.serial_number.clone(),
-                    model: sled4_bb.part_number.clone(),
-                    revision: 0,
-                },
+                (*sled4_bb).clone(),
                 SledRole::Scrimlet,
                 vec![],
                 vec![],
@@ -628,20 +622,20 @@ pub fn representative() -> Representative {
         )
         .unwrap();
 
-    // Now report a different sled as though it were a PC.  It'd be unlikely to
-    // see a mix of real Oxide hardware and PCs in the same deployment, but this
-    // exercises different code paths.
+    // Now report a couple more sleds with their own distinct baseboards.
     let sled_agent_id_pc =
         "c4a5325b-e852-4747-b28a-8aaa7eded8a0".parse().unwrap();
+
+    let sled5_bb = Arc::new(BaseboardId {
+        part_number: String::from("fellofftruck"),
+        serial_number: String::from("fellofftruck1"),
+    });
     builder
         .found_sled_inventory(
             "fake sled agent 5",
             sled_agent(
                 sled_agent_id_pc,
-                Baseboard::Pc {
-                    identifier: String::from("fellofftruck1"),
-                    model: String::from("fellofftruck"),
-                },
+                (*sled5_bb).clone(),
                 SledRole::Gimlet,
                 vec![],
                 vec![],
@@ -666,18 +660,20 @@ pub fn representative() -> Representative {
         )
         .unwrap();
 
-    // Finally, report a sled with unknown baseboard information.  This should
-    // look the same as the PC as far as inventory is concerned but let's verify
-    // it.
+    // Finally, report one more sled with its own baseboard.
     let sled_agent_id_unknown =
         "5c5b4cf9-3e13-45fd-871c-f177d6537510".parse().unwrap();
 
+    let sled6_bb = Arc::new(BaseboardId {
+        part_number: "test".to_string(),
+        serial_number: "test".to_string(),
+    });
     builder
         .found_sled_inventory(
             "fake sled agent 6",
             sled_agent(
                 sled_agent_id_unknown,
-                Baseboard::Unknown,
+                (*sled6_bb).clone(),
                 SledRole::Gimlet,
                 vec![],
                 vec![],
@@ -738,7 +734,7 @@ pub fn representative() -> Representative {
 
     Representative {
         builder,
-        sleds: [sled1_bb, sled2_bb, sled3_bb, sled4_bb],
+        sleds: [sled1_bb, sled2_bb, sled3_bb, sled4_bb, sled5_bb, sled6_bb],
         switch: switch1_bb,
         psc: psc_bb,
         sled_agents: [
@@ -752,7 +748,7 @@ pub fn representative() -> Representative {
 
 pub struct Representative {
     pub builder: CollectionBuilder,
-    pub sleds: [Arc<BaseboardId>; 4],
+    pub sleds: [Arc<BaseboardId>; 6],
     pub switch: Arc<BaseboardId>,
     pub psc: Arc<BaseboardId>,
     pub sled_agents: [SledUuid; 4],
@@ -761,7 +757,7 @@ pub struct Representative {
 impl Representative {
     pub fn new(
         builder: CollectionBuilder,
-        sleds: [Arc<BaseboardId>; 4],
+        sleds: [Arc<BaseboardId>; 6],
         switch: Arc<BaseboardId>,
         psc: Arc<BaseboardId>,
         sled_agents: [SledUuid; 4],
@@ -1034,7 +1030,7 @@ pub fn file_source_resolver(
 #[expect(clippy::too_many_arguments)]
 pub fn sled_agent(
     sled_id: SledUuid,
-    baseboard: Baseboard,
+    baseboard_id: BaseboardId,
     sled_role: SledRole,
     disks: Vec<InventoryDisk>,
     zpools: Vec<InventoryZpool>,
@@ -1122,7 +1118,7 @@ pub fn sled_agent(
     let fmd = Ok(FmdInventory { cases: fmd_cases, resources: fmd_resources });
 
     Inventory {
-        baseboard,
+        baseboard_id,
         reservoir_size: ByteCount::from(1024),
         sled_role,
         sled_agent_address: "[::1]:56792".parse().unwrap(),

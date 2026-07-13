@@ -9,7 +9,6 @@ use bootstore::schemes::v0 as bootstore;
 use bootstrap_agent_lockstep_types::RackOperationStatus;
 use bootstrap_agent_lockstep_types::RssStep;
 use omicron_uuid_kinds::RackInitUuid;
-use omicron_uuid_kinds::RackResetUuid;
 use sled_agent_config_reconciler::InternalDisksReceiver;
 use sled_agent_measurements::MeasurementsHandle;
 use sled_agent_rack_setup::RackInitializeRequestParams;
@@ -35,14 +34,6 @@ pub enum RssAccessError {
     InitializationPanicked,
     #[error("RSS is already initialized")]
     AlreadyInitialized,
-    #[error("RSS is still resetting and cannot run concurrently")]
-    StillResetting,
-    #[error("RSS failed to reset: {message}")]
-    ResetFailed { message: String },
-    #[error("RSS panicked while resetting")]
-    ResetPanicked,
-    #[error("RSS is already reset")]
-    AlreadyReset,
 }
 
 #[derive(Clone)]
@@ -59,7 +50,7 @@ impl RssAccess {
         let status = if initialized {
             RssStatus::Initialized { id: None }
         } else {
-            RssStatus::Uninitialized { reset_id: None }
+            RssStatus::Uninitialized
         };
         Self { status: Arc::new(Mutex::new(status)) }
     }
@@ -106,42 +97,7 @@ impl RssAccess {
             RssStatus::InitializationPanicked { id } => {
                 RackOperationStatus::InitializationPanicked { id: *id }
             }
-            RssStatus::Uninitialized { reset_id } => {
-                RackOperationStatus::Uninitialized { reset_id: *reset_id }
-            }
-            RssStatus::Resetting { id, completion } => {
-                let id = *id;
-                // This is our only chance to notice the initialization task has
-                // panicked: if it dropped the sending half of `completion`
-                // without reporting in.
-                match completion.try_recv() {
-                    Ok(()) => {
-                        // This should be unreachable, I think? But it is
-                        // harmless to report the reset state.
-                        RackOperationStatus::Uninitialized {
-                            reset_id: Some(id),
-                        }
-                    }
-                    Err(TryRecvError::Empty) => {
-                        // Initialization task is still running
-                        RackOperationStatus::Resetting { id }
-                    }
-                    Err(TryRecvError::Closed) => {
-                        // Initialization task has panicked!
-                        *status = RssStatus::ResetPanicked { id };
-                        RackOperationStatus::ResetPanicked { id }
-                    }
-                }
-            }
-            RssStatus::ResetFailed { id, err } => {
-                RackOperationStatus::ResetFailed {
-                    id: *id,
-                    message: InlineErrorChain::new(err).to_string(),
-                }
-            }
-            RssStatus::ResetPanicked { id } => {
-                RackOperationStatus::ResetPanicked { id: *id }
-            }
+            RssStatus::Uninitialized => RackOperationStatus::Uninitialized,
         }
     }
 
@@ -175,16 +131,7 @@ impl RssAccess {
                 Err(RssAccessError::InitializationPanicked)
             }
 
-            RssStatus::Resetting { .. } => Err(RssAccessError::StillResetting),
-            RssStatus::ResetFailed { err, .. } => {
-                Err(RssAccessError::ResetFailed {
-                    message: InlineErrorChain::new(err).to_string(),
-                })
-            }
-            RssStatus::ResetPanicked { .. } => {
-                Err(RssAccessError::ResetPanicked)
-            }
-            RssStatus::Uninitialized { .. } => {
+            RssStatus::Uninitialized => {
                 let (completion_tx, completion) = oneshot::channel();
                 let id = RackInitUuid::new_v4();
                 let (step_tx, step_rx) = watch::channel(RssStep::Requested);
@@ -224,84 +171,11 @@ impl RssAccess {
             }
         }
     }
-
-    pub(super) fn start_reset(
-        &self,
-        parent_log: &Logger,
-        sprockets: SprocketsConfig,
-        global_zone_bootstrap_ip: Ipv6Addr,
-        measurements: Arc<MeasurementsHandle>,
-    ) -> Result<RackResetUuid, RssAccessError> {
-        let mut status = self.status.lock().unwrap();
-
-        match &*status {
-            RssStatus::Initializing { .. } => {
-                Err(RssAccessError::StillInitializing)
-            }
-            RssStatus::InitializationFailed { err, .. } => {
-                Err(RssAccessError::InitializationFailed {
-                    message: InlineErrorChain::new(err).to_string(),
-                })
-            }
-            RssStatus::InitializationPanicked { .. } => {
-                Err(RssAccessError::InitializationPanicked)
-            }
-            RssStatus::Resetting { .. } => Err(RssAccessError::StillResetting),
-            RssStatus::ResetFailed { err, .. } => {
-                Err(RssAccessError::ResetFailed {
-                    message: InlineErrorChain::new(err).to_string(),
-                })
-            }
-            RssStatus::ResetPanicked { .. } => {
-                Err(RssAccessError::ResetPanicked)
-            }
-            RssStatus::Uninitialized { .. } => {
-                Err(RssAccessError::AlreadyReset)
-            }
-            RssStatus::Initialized { .. } => {
-                let (completion_tx, completion) = oneshot::channel();
-                let id = RackResetUuid::new_v4();
-                *status = RssStatus::Resetting { id, completion };
-                mem::drop(status);
-
-                let parent_log = parent_log.clone();
-                let status = Arc::clone(&self.status);
-                tokio::spawn(async move {
-                    let result = rack_reset(
-                        &parent_log,
-                        sprockets,
-                        global_zone_bootstrap_ip,
-                        measurements,
-                    )
-                    .await;
-                    let new_status = match result {
-                        Ok(()) => {
-                            RssStatus::Uninitialized { reset_id: Some(id) }
-                        }
-                        Err(err) => RssStatus::ResetFailed { id, err },
-                    };
-
-                    // Order here is critical: store the new status in the
-                    // shared mutex _before_ signaling on the channel that
-                    // initialization has completed; otherwise, callers waiting
-                    // on the channel could see an incomplete status.
-                    *status.lock().unwrap() = new_status;
-                    _ = completion_tx.send(());
-                });
-                Ok(id)
-            }
-        }
-    }
 }
 
 enum RssStatus {
     // Our two main primary states.
-    Uninitialized {
-        // We can either be uninitialized on startup (in which case `reset_id`
-        // is None) or because a reset has completed (in which case `reset_id`
-        // is Some).
-        reset_id: Option<RackResetUuid>,
-    },
+    Uninitialized,
     Initialized {
         // We can either be initialized on startup (in which case `id`
         // is None) or because initialization has completed (in which case `id`
@@ -318,10 +192,6 @@ enum RssStatus {
         // This holds the current RSS step.
         step_rx: watch::Receiver<RssStep>,
     },
-    Resetting {
-        id: RackResetUuid,
-        completion: oneshot::Receiver<()>,
-    },
 
     // Terminal failure states; these require support intervention.
     InitializationFailed {
@@ -330,13 +200,6 @@ enum RssStatus {
     },
     InitializationPanicked {
         id: RackInitUuid,
-    },
-    ResetFailed {
-        id: RackResetUuid,
-        err: SetupServiceError,
-    },
-    ResetPanicked {
-        id: RackResetUuid,
     },
 }
 
@@ -362,21 +225,6 @@ async fn rack_initialize(
         bootstore_node_handle,
         trust_quorum_handle,
         step_tx,
-    )
-    .await
-}
-
-async fn rack_reset(
-    parent_log: &Logger,
-    sprockets: SprocketsConfig,
-    global_zone_bootstrap_ip: Ipv6Addr,
-    measurements: Arc<MeasurementsHandle>,
-) -> Result<(), SetupServiceError> {
-    RssHandle::run_rss_reset(
-        parent_log,
-        global_zone_bootstrap_ip,
-        sprockets,
-        measurements,
     )
     .await
 }

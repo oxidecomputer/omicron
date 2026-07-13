@@ -52,9 +52,7 @@ These paths are local to your system and will differ from system to system.
 $ cargo xtask ls-apis servers
 ...
 omicron-sled-agent (omicron/sled-agent)
-    exposes: Bootstrap Agent (client = bootstrap-agent-client)
     exposes: Sled Agent (client = sled-agent-client)
-    consumes: bootstrap-agent-client
     consumes: ddm-admin-client
     consumes: dns-service-client
     consumes: dpd-client

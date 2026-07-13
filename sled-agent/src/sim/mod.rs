@@ -17,7 +17,6 @@ mod sled_agent;
 mod storage;
 mod upstairs;
 
-pub use crate::updates::ConfigUpdates;
 pub use config::{
     Baseboard, Config, ConfigHardware, ConfigStorage, ConfigZpool, SimMode,
     TEST_HARDWARE_THREADS, TEST_RESERVOIR_RAM, ZpoolConfig,

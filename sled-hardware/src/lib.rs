@@ -356,7 +356,7 @@ enum TofinoView {
 pub struct HardwareView {
     tofino: TofinoView,
     disks: HashMap<DiskIdentity, UnparsedDisk>,
-    baseboard: Option<Baseboard>,
+    baseboard: Baseboard,
     online_processor_count: u32,
     usable_physical_pages: u64,
     usable_physical_ram_bytes: u64,
@@ -365,7 +365,7 @@ pub struct HardwareView {
 
 impl HardwareView {
     pub fn baseboard(&self) -> Baseboard {
-        self.baseboard.as_ref().cloned().unwrap_or_else(|| Baseboard::unknown())
+        self.baseboard.clone()
     }
 
     pub fn cpu_family(&self) -> sled_hardware_types::SledCpuFamily {

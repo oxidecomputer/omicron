@@ -6,6 +6,7 @@ use std::net::{Ipv6Addr, SocketAddr, SocketAddrV6};
 
 use dropshot::test_util::ClientTestContext;
 use gateway_test_utils::setup::GatewayTestContext;
+use sled_hardware_types::BaseboardId;
 
 pub struct WicketdTestContext {
     pub wicketd_addr: SocketAddrV6,
@@ -42,9 +43,13 @@ impl WicketdTestContext {
         let args = wicketd::Args {
             address: LOCALHOST_PORT_0,
             artifact_address: LOCALHOST_PORT_0,
+            bootstrap_agent_lockstep_address: LOCALHOST_PORT_0,
             mgs_address,
             nexus_proxy_address: LOCALHOST_PORT_0,
-            baseboard: None,
+            baseboard_id: BaseboardId {
+                serial_number: "test".to_string(),
+                part_number: "test".to_string(),
+            },
             rack_subnet: None,
         };
 

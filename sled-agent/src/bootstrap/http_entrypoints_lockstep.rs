@@ -8,11 +8,16 @@
 //! API, meaning the client and server are always deployed together and only
 //! need to support a single version.
 
-use super::http_entrypoints::BootstrapServerContext;
+use std::net::Ipv6Addr;
+
+use super::RssAccessError;
 use base64::Engine;
-use bootstore::schemes::v0::NetworkConfig;
+use bootstore::NetworkConfig;
+use bootstore::schemes::v0 as bootstore;
 use bootstrap_agent_lockstep_api::BootstrapAgentLockstepApi;
 use bootstrap_agent_lockstep_api::bootstrap_agent_lockstep_api_mod;
+use bootstrap_agent_lockstep_types::BaseboardIds;
+use bootstrap_agent_lockstep_types::BootstrapIpOfBaseboardId;
 use bootstrap_agent_lockstep_types::RackInitializeRequest;
 use bootstrap_agent_lockstep_types::RackOperationStatus;
 use bootstrap_agent_lockstep_types::ReplicatedNetworkConfig;
@@ -21,8 +26,44 @@ use dropshot::{
     ApiDescription, HttpError, HttpResponseOk, RequestContext, TypedBody,
 };
 use omicron_uuid_kinds::RackInitUuid;
-use omicron_uuid_kinds::RackResetUuid;
+use sled_agent_config_reconciler::InternalDisksReceiver;
+use sled_agent_measurements::MeasurementsHandle;
 use sled_agent_rack_setup::RackInitializeRequestParams;
+use slog::Logger;
+use sprockets_tls::keys::SprocketsConfig;
+use std::sync::Arc;
+
+use crate::bootstrap::rack_ops::RssAccess;
+
+#[derive(Clone)]
+pub(crate) struct BootstrapServerContext {
+    pub(crate) base_log: Logger,
+    pub(crate) global_zone_bootstrap_ip: Ipv6Addr,
+    pub(crate) internal_disks_rx: InternalDisksReceiver,
+    pub(crate) bootstore_node_handle: bootstore::NodeHandle,
+    pub(crate) rss_access: RssAccess,
+    pub(crate) sprockets: SprocketsConfig,
+    pub(crate) trust_quorum_handle: trust_quorum::NodeTaskHandle,
+    pub(crate) measurements: Arc<MeasurementsHandle>,
+}
+
+impl BootstrapServerContext {
+    pub(super) fn start_rack_initialize(
+        &self,
+        request: RackInitializeRequestParams,
+    ) -> Result<RackInitUuid, RssAccessError> {
+        self.rss_access.start_initializing(
+            &self.base_log,
+            self.sprockets.clone(),
+            self.global_zone_bootstrap_ip,
+            &self.internal_disks_rx,
+            self.measurements.clone(),
+            &self.bootstore_node_handle,
+            &self.trust_quorum_handle,
+            request,
+        )
+    }
+}
 
 /// Returns a description of the bootstrap agent lockstep API
 pub(crate) fn api() -> ApiDescription<BootstrapServerContext> {
@@ -62,22 +103,6 @@ impl BootstrapAgentLockstepApi for BootstrapAgentLockstepImpl {
         Ok(HttpResponseOk(id))
     }
 
-    async fn rack_reset(
-        rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<RackResetUuid>, HttpError> {
-        let ctx = rqctx.context();
-        let id = ctx
-            .rss_access
-            .start_reset(
-                &ctx.base_log,
-                ctx.sprockets.clone(),
-                ctx.global_zone_bootstrap_ip,
-                ctx.measurements.clone(),
-            )
-            .map_err(|err| HttpError::for_bad_request(None, err.to_string()))?;
-        Ok(HttpResponseOk(id))
-    }
-
     async fn network_config_contents_for_debug(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<ReplicatedNetworkConfig>, HttpError> {
@@ -92,5 +117,35 @@ impl BootstrapAgentLockstepApi for BootstrapAgentLockstepImpl {
             },
         );
         Ok(HttpResponseOk(ReplicatedNetworkConfig { contents }))
+    }
+
+    async fn baseboard_ids(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<BaseboardIds>, HttpError> {
+        let ctx = rqctx.context();
+
+        // The trust quorum connection manager already knows who is connected.
+        // It polls DDM and connects itself. We use its knowledge so that we
+        // don't spam sprockets connections unnecessarily.
+        let status =
+            ctx.trust_quorum_handle.conn_mgr_status().await.map_err(|err| {
+                HttpError::for_internal_error(err.to_string())
+            })?;
+
+        // We then also have to join our own information, since trust quorum
+        // doesn't connect to itself.
+        let ourself = BootstrapIpOfBaseboardId {
+            id: ctx.trust_quorum_handle.baseboard_id().clone(),
+            ip: ctx.global_zone_bootstrap_ip,
+        };
+
+        let data = status
+            .connected_peers()
+            .into_iter()
+            .map(|(id, ip)| BootstrapIpOfBaseboardId { id, ip })
+            .chain(std::iter::once(ourself))
+            .collect();
+
+        Ok(HttpResponseOk(BaseboardIds { data }))
     }
 }

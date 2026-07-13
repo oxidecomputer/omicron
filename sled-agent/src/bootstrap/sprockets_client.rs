@@ -14,7 +14,7 @@ use sled_agent_measurements::{MeasurementError, MeasurementsHandle};
 use sled_agent_types::sled::StartSledAgentRequest;
 use slog::Logger;
 use slog_error_chain::SlogInlineError;
-use sprockets_tls::client::Client as SprocketsClient;
+use sprockets_tls;
 use sprockets_tls::keys::SprocketsConfig;
 use std::borrow::Cow;
 use std::io;
@@ -23,9 +23,10 @@ use std::sync::Arc;
 use thiserror::Error;
 use tokio::io::AsyncReadExt;
 use tokio::io::AsyncWriteExt;
+use tokio::net::TcpStream;
 
 #[derive(Debug, Error, SlogInlineError)]
-pub enum Error {
+pub enum SprocketsClientError {
     #[error("Could not connect to {addr}")]
     Connect {
         addr: SocketAddrV6,
@@ -71,20 +72,16 @@ pub enum Error {
     MeasurementError(#[source] MeasurementError),
 }
 
-/// A TCP client used to connect to bootstrap agents for rack initialization
-///
-/// TODO: This will transition to a sprockets channel in the fullness of time.
-/// In all likelyhood, the sprockets channels will actually be managed by
-/// the bootstore which will proxy requests and resposnes as needed for the
-/// bootstrap agent.
-pub(crate) struct Client {
+/// A sprockets client wrapper used to connect to bootstrap agents for rack
+/// initialization
+pub(crate) struct SprocketsClient {
     addr: SocketAddrV6,
     log: Logger,
     sprockets_conf: SprocketsConfig,
     measurements: Arc<MeasurementsHandle>,
 }
 
-impl Client {
+impl SprocketsClient {
     pub(crate) fn new(
         addr: SocketAddrV6,
         sprockets_conf: SprocketsConfig,
@@ -100,18 +97,47 @@ impl Client {
     pub(crate) async fn start_sled_agent(
         &self,
         request: &StartSledAgentRequest,
-    ) -> Result<SledAgentResponse, Error> {
-        let request = Request::StartSledAgentRequest(Cow::Borrowed(request));
+    ) -> Result<SledAgentResponse, SprocketsClientError> {
+        let stream = self.connect().await?;
+        Self::start_sled_agent_with_stream(stream, request).await
+    }
 
-        match self.request_response(request).await? {
+    pub(crate) async fn start_sled_agent_with_stream(
+        stream: sprockets_tls::Stream<TcpStream>,
+        request: &StartSledAgentRequest,
+    ) -> Result<SledAgentResponse, SprocketsClientError> {
+        let request = Request::StartSledAgentRequest(Cow::Borrowed(request));
+        match Self::request_response(stream, request).await? {
             Response::SledAgentResponse(response) => Ok(response),
         }
     }
 
-    async fn request_response(
+    pub(crate) async fn connect(
         &self,
+    ) -> Result<sprockets_tls::Stream<TcpStream>, SprocketsClientError> {
+        let log =
+            self.log.new(o!("component" => "BootstrapAgentSprocketsClient"));
+        // Establish sprockets connection (if possible).
+        // The sprockets client loads the associated root certificates at this point.
+        let corpus = self
+            .measurements
+            .current_measurements()
+            .map_err(SprocketsClientError::MeasurementError)?;
+
+        sprockets_tls::client::Client::connect(
+            self.sprockets_conf.clone(),
+            self.addr,
+            corpus,
+            log.clone(),
+        )
+        .await
+        .map_err(|err| SprocketsClientError::Connect { addr: self.addr, err })
+    }
+
+    async fn request_response(
+        stream: sprockets_tls::Stream<TcpStream>,
         request: Request<'_>,
-    ) -> Result<Response, Error> {
+    ) -> Result<Response, SprocketsClientError> {
         // Bound to avoid allocating an unreasonable amount of memory from a
         // bogus length prefix from a server. We authenticate servers via
         // sprockets before allocating based on the length prefix they send, so
@@ -119,29 +145,12 @@ impl Client {
         // far larger than we ever expect to see.
         const MAX_RESPONSE_LEN: u32 = 16 << 20;
 
-        let log = self.log.new(o!("component" => "SledAgentSprocketsClient"));
-        // Establish connection and sprockets connection (if possible).
-        // The sprockets client loads the associated root certificates at this point.
-        //
-        let corpus = self
-            .measurements
-            .current_measurements()
-            .map_err(Error::MeasurementError)?;
-
-        let stream = SprocketsClient::connect(
-            self.sprockets_conf.clone(),
-            self.addr,
-            corpus,
-            log.clone(),
-        )
-        .await
-        .map_err(|err| Error::Connect { addr: self.addr, err })?;
-
         let mut stream = Box::new(tokio::io::BufStream::new(stream));
 
         // Build and serialize our request.
         let envelope = RequestEnvelope { version: version::V1, request };
-        let buf = serde_json::to_vec(&envelope).map_err(Error::Serialize)?;
+        let buf = serde_json::to_vec(&envelope)
+            .map_err(SprocketsClientError::Serialize)?;
         let request_length = u32::try_from(buf.len())
             .expect("serialized bootstrap-agent request length overflowed u32");
 
@@ -149,30 +158,42 @@ impl Client {
         stream
             .write_u32(request_length)
             .await
-            .map_err(Error::WriteLengthPrefix)?;
-        stream.write_all(&buf).await.map_err(Error::WriteRequest)?;
-        stream.flush().await.map_err(Error::FlushRequest)?;
+            .map_err(SprocketsClientError::WriteLengthPrefix)?;
+        stream
+            .write_all(&buf)
+            .await
+            .map_err(SprocketsClientError::WriteRequest)?;
+        stream.flush().await.map_err(SprocketsClientError::FlushRequest)?;
 
         // Read the response, length prefix first.
-        let response_length =
-            stream.read_u32().await.map_err(Error::ReadLengthPrefix)?;
+        let response_length = stream
+            .read_u32()
+            .await
+            .map_err(SprocketsClientError::ReadLengthPrefix)?;
         // Sanity check / guard against malformed lengths
         if response_length > MAX_RESPONSE_LEN {
-            return Err(Error::BadResponseLength(response_length));
+            return Err(SprocketsClientError::BadResponseLength(
+                response_length,
+            ));
         }
 
         let mut buf = vec![0; response_length as usize];
-        stream.read_exact(&mut buf).await.map_err(Error::ReadResponse)?;
+        stream
+            .read_exact(&mut buf)
+            .await
+            .map_err(SprocketsClientError::ReadResponse)?;
 
         // Deserialize and handle the response.
-        let envelope: ResponseEnvelope =
-            serde_json::from_slice(&buf).map_err(Error::Deserialize)?;
+        let envelope: ResponseEnvelope = serde_json::from_slice(&buf)
+            .map_err(SprocketsClientError::Deserialize)?;
 
         match envelope.version {
             version::V1 => (),
-            other => return Err(Error::UnsupportedVersion(other)),
+            other => {
+                return Err(SprocketsClientError::UnsupportedVersion(other));
+            }
         }
 
-        envelope.response.map_err(Error::ServerFailure)
+        envelope.response.map_err(SprocketsClientError::ServerFailure)
     }
 }

@@ -4,12 +4,10 @@
 
 //! Server API for bootstrap-related functionality.
 
-use super::BootstrapError;
 use super::RssAccessError;
-use super::http_entrypoints;
 use super::http_entrypoints_lockstep;
+use super::http_entrypoints_lockstep::BootstrapServerContext;
 use super::views::SledAgentResponse;
-use crate::bootstrap::http_entrypoints::BootstrapServerContext;
 use crate::bootstrap::maghemite;
 use crate::bootstrap::pre_server::BootstrapAgentStartup;
 use crate::bootstrap::pumpkind;
@@ -26,15 +24,10 @@ use crate::services::ServiceManager;
 use crate::sled_agent::SledAgent;
 use bootstore::schemes::v0 as bootstore;
 use camino::Utf8PathBuf;
-use cancel_safe_futures::TryStreamExt;
 use dropshot::HttpServer;
-use futures::StreamExt;
 use illumos_utils::dladm;
 use illumos_utils::zfs;
 use illumos_utils::zone;
-use illumos_utils::zone::Api;
-use illumos_utils::zone::Zones;
-use omicron_common::address::BOOTSTRAP_AGENT_HTTP_PORT;
 use omicron_common::address::BOOTSTRAP_AGENT_LOCKSTEP_PORT;
 use omicron_common::address::BOOTSTRAP_AGENT_RACK_INIT_PORT;
 use omicron_ddm_admin_client::DdmError;
@@ -169,7 +162,6 @@ pub enum StartError {
 /// sled-agent server).
 pub struct Server {
     inner_task: JoinHandle<()>,
-    bootstrap_http_server: HttpServer<BootstrapServerContext>,
     // The lockstep server shares the same context as bootstrap_http_server.
     // We hold this handle to keep the server running; the actual rack
     // initialization calls go through bootstrap_http_server.app_private().
@@ -178,6 +170,7 @@ pub struct Server {
 }
 
 impl Server {
+    /// The entry point to the bootstrap server
     pub async fn start(config: SledConfig) -> Result<Self, StartError> {
         // Do all initial setup that we can do even before we start listening
         // for and handling hardware updates (e.g., discovery if we're a
@@ -209,27 +202,17 @@ impl Server {
         // below.
         let rss_access = RssAccess::new(maybe_ledger.is_some());
 
-        // Create a channel for requesting sled reset. We use a channel depth
-        // of 1: if there's a pending sled reset request, there's no need to
-        // enqueue another, and we can send back an HTTP busy.
-        let (sled_reset_tx, sled_reset_rx) = mpsc::channel(1);
-
         // Start the bootstrap dropshot server.
         let bootstrap_context = BootstrapServerContext {
             base_log: base_log.clone(),
             global_zone_bootstrap_ip,
             internal_disks_rx,
             bootstore_node_handle: long_running_task_handles.bootstore.clone(),
-            baseboard: long_running_task_handles.hardware_manager.baseboard(),
             rss_access,
-            updates: config.updates.clone(),
-            sled_reset_tx,
             sprockets: config.sprockets.clone(),
             trust_quorum_handle: long_running_task_handles.trust_quorum.clone(),
             measurements: long_running_task_handles.measurements.clone(),
         };
-        let bootstrap_http_server =
-            start_dropshot_server(bootstrap_context.clone())?;
 
         // Start the lockstep dropshot server for rack initialization.
         let lockstep_http_server =
@@ -273,7 +256,7 @@ impl Server {
             )
             .await?;
 
-            // Give the HardwareMonitory access to the `SledAgent`
+            // Give the HardwareMonitor access to the `SledAgent`
             let sled_agent = sled_agent_server.sled_agent();
             sled_agent_started_tx
                 .send(sled_agent.clone())
@@ -295,7 +278,6 @@ impl Server {
             config,
             state,
             sled_init_rx,
-            sled_reset_rx,
             long_running_task_handles,
             service_manager,
             _sprockets_server_handle: sprockets_server_handle,
@@ -303,14 +285,14 @@ impl Server {
         };
         let inner_task = tokio::spawn(inner.run());
 
-        Ok(Self { inner_task, bootstrap_http_server, lockstep_http_server })
+        Ok(Self { inner_task, lockstep_http_server })
     }
 
     pub fn start_rack_initialize(
         &self,
         request: RackInitializeRequestParams,
     ) -> Result<RackInitUuid, RssAccessError> {
-        self.bootstrap_http_server.app_private().start_rack_initialize(request)
+        self.lockstep_http_server.app_private().start_rack_initialize(request)
     }
 
     pub async fn wait_for_finish(self) -> Result<(), String> {
@@ -458,43 +440,6 @@ async fn start_sled_agent(
 // https://github.com/oxidecomputer/usdt/issues/133; remove this once that issue
 // is addressed.
 #[allow(clippy::result_large_err)]
-fn start_dropshot_server(
-    context: BootstrapServerContext,
-) -> Result<HttpServer<BootstrapServerContext>, StartError> {
-    let mut dropshot_config = dropshot::ConfigDropshot::default();
-    dropshot_config.default_request_body_max_bytes = 1024 * 1024;
-    dropshot_config.bind_address = SocketAddr::V6(SocketAddrV6::new(
-        context.global_zone_bootstrap_ip,
-        BOOTSTRAP_AGENT_HTTP_PORT,
-        0,
-        0,
-    ));
-    let dropshot_log =
-        context.base_log.new(o!("component" => "dropshot (BootstrapAgent)"));
-    let http_server = dropshot::ServerBuilder::new(
-        http_entrypoints::api(),
-        context,
-        dropshot_log,
-    )
-    .config(dropshot_config)
-    .version_policy(dropshot::VersionPolicy::Dynamic(Box::new(
-        dropshot::ClientSpecifiesVersionInHeader::new(
-            omicron_common::api::VERSION_HEADER,
-            bootstrap_agent_api::latest_version(),
-        ),
-    )))
-    .start()
-    .map_err(|error| {
-        StartError::InitBootstrapDropshotServer(error.to_string())
-    })?;
-
-    Ok(http_server)
-}
-
-// Clippy doesn't like `StartError` due to
-// https://github.com/oxidecomputer/usdt/issues/133; remove this once that issue
-// is addressed.
-#[allow(clippy::result_large_err)]
 fn start_lockstep_dropshot_server(
     context: BootstrapServerContext,
 ) -> Result<HttpServer<BootstrapServerContext>, StartError> {
@@ -559,7 +504,6 @@ struct Inner {
         StartSledAgentRequest,
         oneshot::Sender<Result<SledAgentResponse, String>>,
     )>,
-    sled_reset_rx: mpsc::Receiver<oneshot::Sender<Result<(), BootstrapError>>>,
     long_running_task_handles: LongRunningTaskHandles,
     service_manager: ServiceManager,
     _sprockets_server_handle: JoinHandle<()>,
@@ -569,32 +513,10 @@ struct Inner {
 impl Inner {
     async fn run(mut self) {
         let log = self.base_log.new(o!("component" => "SledAgentMain"));
-        loop {
-            tokio::select! {
-                // Cancel-safe per the docs on `mpsc::Receiver::recv()`.
-                Some((request, response_tx)) = self.sled_init_rx.recv() => {
-                    self.handle_start_sled_agent_request(
-                        request,
-                        response_tx,
-                        &log,
-                    ).await;
-                }
-
-                // Cancel-safe per the docs on `mpsc::Receiver::recv()`.
-                Some(response_tx) = self.sled_reset_rx.recv() => {
-                    // Try to reset the sled, but do not exit early on error.
-                    let result = async {
-                        self.uninstall_zones().await?;
-                        self.uninstall_sled_local_config().await?;
-                        self.uninstall_networking(&log).await?;
-                        self.uninstall_storage(&log).await?;
-                        Ok::<(), BootstrapError>(())
-                    }
-                    .await;
-
-                    _ = response_tx.send(result);
-                }
-            }
+        while let Some((request, response_tx)) = self.sled_init_rx.recv().await
+        {
+            self.handle_start_sled_agent_request(request, response_tx, &log)
+                .await;
         }
     }
 
@@ -677,100 +599,6 @@ impl Inner {
                 _ = response_tx.send(response);
             }
         }
-    }
-
-    // Uninstall all oxide zones (except the switch zone)
-    async fn uninstall_zones(&self) -> Result<(), BootstrapError> {
-        const CONCURRENCY_CAP: usize = 32;
-        futures::stream::iter(Zones::real_api().get().await?)
-            .map(Ok::<_, anyhow::Error>)
-            // Use for_each_concurrent_then_try to delete as much as possible.
-            // We only return one error though -- hopefully that's enough to
-            // signal to the caller that this failed.
-            .for_each_concurrent_then_try(CONCURRENCY_CAP, |zone| async move {
-                if zone.name() != "oxz_switch" {
-                    Zones::real_api().halt_and_remove(zone.name()).await?;
-                }
-                Ok(())
-            })
-            .await
-            .map_err(BootstrapError::Cleanup)?;
-        Ok(())
-    }
-
-    async fn uninstall_sled_local_config(&self) -> Result<(), BootstrapError> {
-        let internal_disks = self
-            .long_running_task_handles
-            .config_reconciler
-            .internal_disks_rx()
-            .current();
-
-        for dir in internal_disks.all_config_datasets() {
-            for entry in dir.read_dir_utf8().map_err(|err| {
-                BootstrapError::Io { message: format!("Deleting {dir}"), err }
-            })? {
-                let entry = entry.map_err(|err| BootstrapError::Io {
-                    message: format!("Deleting {dir}"),
-                    err,
-                })?;
-
-                let path = entry.path();
-                let file_type =
-                    entry.file_type().map_err(|err| BootstrapError::Io {
-                        message: format!("Deleting {path}"),
-                        err,
-                    })?;
-
-                if file_type.is_dir() {
-                    tokio::fs::remove_dir_all(path).await
-                } else {
-                    tokio::fs::remove_file(path).await
-                }
-                .map_err(|err| BootstrapError::Io {
-                    message: format!("Deleting {path}"),
-                    err,
-                })?;
-            }
-        }
-        Ok(())
-    }
-
-    async fn uninstall_networking(
-        &self,
-        log: &Logger,
-    ) -> Result<(), BootstrapError> {
-        // NOTE: This is very similar to the invocations
-        // in "sled_hardware::cleanup::cleanup_networking_resources",
-        // with a few notable differences:
-        //
-        // - We can't remove bootstrap-related networking -- this operation
-        // is performed via a request on the bootstrap network.
-        // - We avoid deleting addresses using the chelsio link. Removing
-        // these addresses would delete "cxgbe0/ll", and could render
-        // the sled inaccessible via a local interface.
-
-        sled_hardware::cleanup::delete_underlay_addresses(&log)
-            .map_err(BootstrapError::Cleanup)?;
-        sled_hardware::cleanup::delete_omicron_vnics(&log)
-            .await
-            .map_err(BootstrapError::Cleanup)?;
-        illumos_utils::opte::delete_all_xde_devices(&log)?;
-        Ok(())
-    }
-
-    async fn uninstall_storage(
-        &self,
-        log: &Logger,
-    ) -> Result<(), BootstrapError> {
-        let datasets = zfs::get_all_omicron_datasets_for_delete()
-            .await
-            .map_err(BootstrapError::ZfsDatasetsList)?;
-        for dataset in &datasets {
-            info!(log, "Removing dataset: {dataset}");
-            zfs::Zfs::destroy_dataset(dataset).await?;
-        }
-
-        Ok(())
     }
 }
 
