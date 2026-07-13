@@ -3637,7 +3637,9 @@ mod tests {
             // fm_* tables that are NOT children of fm_sitrep and are
             // intentionally ignored.
             let tables_ignored: BTreeSet<&str> =
-                ["fm_sitrep", "fm_sitrep_history"].into_iter().collect();
+                ["fm_sitrep", "fm_sitrep_history", "fm_config"]
+                    .into_iter()
+                    .collect();
             let tables_checked = self.tables_checked();
 
             let mut query = QueryBuilder::new();

@@ -60,6 +60,7 @@ use nexus_types::internal_api::background::BlueprintRendezvousStatus;
 use nexus_types::internal_api::background::DatasetsRendezvousStats;
 use nexus_types::internal_api::background::EreporterStatus;
 use nexus_types::internal_api::background::FmAnalysisStatus;
+use nexus_types::internal_api::background::FmConfigLoadStatus;
 use nexus_types::internal_api::background::FmRendezvousStatus;
 use nexus_types::internal_api::background::IncompleteBootstoreConfigReport;
 use nexus_types::internal_api::background::InstanceReincarnationStatus;
@@ -1363,6 +1364,9 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
         }
         "fm_analysis" => {
             print_task_fm_analysis(details);
+        }
+        "fm_config_loader" => {
+            print_task_fm_config_loader(details);
         }
         "fm_sitrep_loader" => {
             print_task_fm_sitrep_loader(details);
@@ -3641,6 +3645,61 @@ fn print_task_fm_analysis(details: &serde_json::Value) {
     println!("    analysis report:");
     print!("{}", analysis_report.display_multiline(6));
     print_start_end_time(start_time, end_time, 4);
+}
+
+fn print_task_fm_config_loader(details: &serde_json::Value) {
+    match serde_json::from_value::<FmConfigLoadStatus>(details.clone()) {
+        Err(error) => eprintln!(
+            "warning: failed to interpret task details: {:?}: {:?}",
+            error, details
+        ),
+        Ok(FmConfigLoadStatus::Error(error)) => {
+            println!("    task did not complete successfully: {error}");
+        }
+        Ok(FmConfigLoadStatus::Loaded {
+            config,
+            updated,
+            time_updated: time_loaded,
+        }) => {
+            const TIME_UPDATED: &str = "config last updated at:";
+            const UPDATED: &str = "  updated by this activation:";
+            const VERSION: &str = "  version:";
+            const TIME_MODIFIED: &str = "  last modified at:";
+            const SITREP_LIMIT: &str = "  sitrep limit:";
+            const SITREP_DELETION_THRESHOLD: &str =
+                "  sitrep deletion threshold:";
+            const WIDTH: usize = const_max_len(&[
+                TIME_UPDATED,
+                UPDATED,
+                VERSION,
+                TIME_MODIFIED,
+                SITREP_LIMIT,
+                SITREP_DELETION_THRESHOLD,
+            ]) + 1;
+
+            println!("    {TIME_UPDATED:<WIDTH$}{time_loaded}");
+            println!("    {UPDATED:<WIDTH$}{updated}");
+            println!("    current config:");
+
+            let fm::FmConfigView { config, time_modified } = config;
+            let fm::FmConfig {
+                version,
+                sitrep_limit,
+                sitrep_deletion_threshold,
+            } = config;
+            println!("    {VERSION:<WIDTH$}{version}");
+            println!(
+                "    {TIME_MODIFIED:<WIDTH$}{}",
+                humantime::format_rfc3339_millis(time_modified.into()),
+            );
+            println!("    {SITREP_LIMIT:<WIDTH$}{sitrep_limit}");
+            println!(
+                "    {SITREP_DELETION_THRESHOLD:<WIDTH$}\
+                 {sitrep_deletion_threshold}"
+            );
+        }
+    };
+    TIME_LOADED
 }
 
 fn print_task_fm_sitrep_loader(details: &serde_json::Value) {

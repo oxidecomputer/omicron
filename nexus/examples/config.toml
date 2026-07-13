@@ -159,6 +159,10 @@ sp_ereport_ingester.period_secs = 30
 # Nexus).
 # This is cheap, so we should check frequently.
 fm.sitrep_load_period_secs = 15
+# How frequently to reload the fault management configuration from the
+# database. This is cheap, and operators expect config changes to take effect
+# promptly.
+fm.config_load_period_secs = 15
 fm.analysis_enabled = true
 # How frequently to run analysis from the current sitrep.
 fm.analysis_period_secs = 120
