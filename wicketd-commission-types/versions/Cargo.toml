@@ -1,5 +1,5 @@
 [package]
-name = "bootstrap-agent-lockstep-client"
+name = "wicketd-commission-types-versions"
 version = "0.1.0"
 edition.workspace = true
 license = "MPL-2.0"
@@ -8,17 +8,14 @@ license = "MPL-2.0"
 workspace = true
 
 [dependencies]
-bootstrap-agent-lockstep-types.workspace = true
 omicron-common.workspace = true
-omicron-uuid-kinds.workspace = true
 omicron-workspace-hack.workspace = true
 oxnet.workspace = true
-progenitor.workspace = true
-regress.workspace = true
-reqwest.workspace = true
 schemars.workspace = true
 serde.workspace = true
-serde_json.workspace = true
 sled-agent-types.workspace = true
-sled-hardware-types.workspace = true
-slog.workspace = true
+slog-error-chain.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
+toml.workspace = true

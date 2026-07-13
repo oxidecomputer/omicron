@@ -15,7 +15,7 @@ use crate::mgs::MgsHandle;
 use crate::mgs::ShutdownInProgress;
 use crate::multirack_config::CurrentMultirackJoinConfig;
 use crate::transceivers::GetTransceiversResponse;
-use bootstrap_agent_lockstep_client::types::RackOperationStatus;
+use bootstrap_agent_lockstep_types::RackOperationStatus;
 use dropshot::ApiDescription;
 use dropshot::HttpError;
 use dropshot::HttpResponseOk;
