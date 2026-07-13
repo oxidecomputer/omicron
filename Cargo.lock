@@ -968,6 +968,7 @@ dependencies = [
 name = "bootstrap-agent-lockstep-client"
 version = "0.1.0"
 dependencies = [
+ "bootstrap-agent-lockstep-types",
  "omicron-common",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
@@ -17301,13 +17302,13 @@ dependencies = [
  "sled-agent-types",
  "sled-hardware-types",
  "slog",
- "slog-error-chain",
  "thiserror 2.0.18",
  "tokio",
  "toml 0.8.23",
  "transceiver-controller 0.1.1 (git+https://github.com/oxidecomputer/transceiver-control)",
  "tufaceous-artifact",
  "update-engine",
+ "wicketd-commission-types",
 ]
 
 [[package]]
@@ -17342,6 +17343,7 @@ dependencies = [
  "base64 0.22.1",
  "bootstrap-agent-client",
  "bootstrap-agent-lockstep-client",
+ "bootstrap-agent-lockstep-types",
  "buf-list",
  "bytes",
  "camino",
@@ -17429,6 +17431,7 @@ name = "wicketd-api"
 version = "0.1.0"
 dependencies = [
  "bootstrap-agent-lockstep-client",
+ "bootstrap-agent-lockstep-types",
  "dropshot",
  "gateway-client",
  "omicron-common",
@@ -17442,6 +17445,7 @@ dependencies = [
  "slog",
  "tufaceous-artifact",
  "wicket-common",
+ "wicketd-commission-types",
 ]
 
 [[package]]
@@ -17467,6 +17471,29 @@ dependencies = [
  "update-engine",
  "uuid",
  "wicket-common",
+]
+
+[[package]]
+name = "wicketd-commission-types"
+version = "0.1.0"
+dependencies = [
+ "omicron-workspace-hack",
+ "wicketd-commission-types-versions",
+]
+
+[[package]]
+name = "wicketd-commission-types-versions"
+version = "0.1.0"
+dependencies = [
+ "omicron-common",
+ "omicron-workspace-hack",
+ "oxnet",
+ "schemars 0.8.22",
+ "serde",
+ "serde_json",
+ "sled-agent-types",
+ "slog-error-chain",
+ "toml 0.8.23",
 ]
 
 [[package]]
