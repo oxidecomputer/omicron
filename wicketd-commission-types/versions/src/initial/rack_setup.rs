@@ -35,7 +35,7 @@ use std::str::FromStr;
 /// The portion of `CurrentRssUserConfig` that can be posted in one shot; it is
 /// provided by the wicket user uploading a TOML file, currently.
 ///
-/// This is the "write" version of [`CurrentRssUserConfigInsensitive`], with
+/// This is the "write" version of `CurrentRssUserConfigInsensitive`, with
 /// some different fields.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]

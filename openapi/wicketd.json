@@ -3545,7 +3545,7 @@
         ]
       },
       "PutRssUserConfigInsensitive": {
-        "description": "The portion of `CurrentRssUserConfig` that can be posted in one shot; it is provided by the wicket user uploading a TOML file, currently.\n\nThis is the \"write\" version of [`CurrentRssUserConfigInsensitive`], with some different fields.",
+        "description": "The portion of `CurrentRssUserConfig` that can be posted in one shot; it is provided by the wicket user uploading a TOML file, currently.\n\nThis is the \"write\" version of `CurrentRssUserConfigInsensitive`, with some different fields.",
         "type": "object",
         "properties": {
           "allowed_source_ips": {
