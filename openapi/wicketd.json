@@ -7814,7 +7814,7 @@
         ]
       },
       "UserSpecifiedBgpPeerConfig": {
-        "description": "User-specified version of [`BgpPeerConfig`].\n\nThis is similar to [`BgpPeerConfig`], except it doesn't have the sensitive `md5_auth_key` parameter, instead requiring that the user provide the key separately.",
+        "description": "User-specified version of `BgpPeerConfig`.\n\nThis is similar to `BgpPeerConfig`, except it doesn't have the sensitive `md5_auth_key` parameter, instead requiring that the user provide the key separately.",
         "type": "object",
         "properties": {
           "addr": {
@@ -8044,7 +8044,7 @@
         "type": "string"
       },
       "UserSpecifiedUplinkAddressConfig": {
-        "description": "User-specified version of [`sled_agent_types::early_networking::UplinkAddressConfig`].\n\nThis allows us to have a nicer TOML representation of [`UplinkAddress`].",
+        "description": "User-specified version of `UplinkAddressConfig`.\n\nThis allows us to have a nicer TOML representation of [`UplinkAddress`].",
         "type": "object",
         "properties": {
           "address": {
