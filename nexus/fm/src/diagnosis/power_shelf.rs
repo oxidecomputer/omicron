@@ -97,7 +97,7 @@ pub fn analyze(builder: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
                     // `psc_case` is a `RefMut` that mutably borrows this case's
                     // entry in `cases_by_id`; as long as it exists, the whole
                     // map is borrowed mutably. We must therefore drop the
-                    // `RefMut` to release the mut borrow of the map so tht the
+                    // `RefMut` to release the mut borrow of the map so that the
                     // `cases_by_id.remove(...)` call on the subsequent line can
                     // compile, as it must also mutably borrow the whole map.
                     drop(psc_case);
