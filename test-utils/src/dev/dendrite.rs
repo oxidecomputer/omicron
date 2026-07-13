@@ -172,7 +172,14 @@ impl DendriteInstance {
         args.push("--mgs-address".to_string());
         args.push(self.mgs_address.to_string());
 
-        let mut child = tokio::process::Command::new("dpd")
+        let (dpd_bin, p4_dir) = get_dpd_path();
+        let mut cmd = tokio::process::Command::new(dpd_bin);
+        if let Some(ref p4_dir) = p4_dir {
+            if std::env::var("P4_DIR").is_err() {
+                cmd.env("P4_DIR", p4_dir);
+            }
+        }
+        let mut child = cmd
             .args(&args)
             .stdin(Stdio::null())
             .stdout(Stdio::from(redirect_file(
@@ -227,6 +234,26 @@ impl DendriteInstance {
             .as_ref()
             .expect("proxy is running across all non-consuming methods")
     }
+}
+
+fn get_dpd_path() -> (PathBuf, Option<PathBuf>) {
+    // On macOS, std::env::current_exe() does not resolve symlinks.
+    let dpd_path = Path::new("dpd");
+    let resolved_dpd = std::env::var_os("PATH")
+        .and_then(|paths| {
+            std::env::split_paths(&paths)
+                .map(|dir| dir.join("dpd"))
+                .find(|p| p.is_file())
+        })
+        .and_then(|p| std::fs::canonicalize(&p).ok());
+
+    // Rebuild the p4 directory path from dpd path
+    let p4_dir = resolved_dpd.as_ref().and_then(|p| {
+        p.parent().and_then(|p| p.parent()).map(|p| p.join("sidecar"))
+    });
+
+    let dpd_bin = resolved_dpd.as_deref().unwrap_or(dpd_path).to_owned();
+    (dpd_bin, p4_dir)
 }
 
 impl Drop for DendriteInstance {
@@ -321,6 +348,8 @@ async fn find_dendrite_port_in_log(
 
 #[cfg(test)]
 mod tests {
+    use crate::dev::dendrite::get_dpd_path;
+
     use super::find_dendrite_port_in_log;
     use camino_tempfile::NamedUtf8TempFile;
     use std::io::Write;
@@ -331,7 +360,8 @@ mod tests {
     #[tokio::test]
     async fn test_dpd_in_path() {
         // With no arguments, we expect to see the default help message.
-        tokio::process::Command::new("dpd")
+        let (dpd_bin, _) = get_dpd_path();
+        tokio::process::Command::new(dpd_bin)
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
