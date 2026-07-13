@@ -338,8 +338,9 @@ fn load_dependent_repo(
              versions of this package, but it will not break this tool."
         );
         eprintln!(
-            "If not, there's a mismatch between commits in package-manifest.toml \
-             and Cargo.toml or there is a bug in this tool."
+            "If not, there's a mismatch between commits in \
+             package-manifest.toml and Cargo.toml or there is a bug in this \
+             tool."
         );
     }
 
