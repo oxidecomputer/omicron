@@ -97,7 +97,7 @@ impl Reconciler for UplinkdReconciler {
             // any status, so we pick `Failed` to give a description of why we
             // didn't run.
             return UplinkdReconcilerStatus::Failed(
-                "reconcilation disabled \
+                "reconciliation disabled \
                  (SMF within the switch zone not available in test mode)"
                     .to_string(),
             );
@@ -272,7 +272,7 @@ fn current_uplink_addresses(
     // * We'll treat "missing the pg entirely" as "no properties"
     // * We'll skip any property values that aren't `AString`s
 
-    let Some(pg) = snapshot.property_group_composed("uplinks")? else {
+    let Some(pg) = snapshot.property_group_composed(UPLINKS_PG_NAME)? else {
         return Ok(BTreeMap::new());
     };
 

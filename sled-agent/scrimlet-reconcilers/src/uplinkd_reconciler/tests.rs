@@ -44,7 +44,7 @@ enum PortSetup {
     // Port should exist with these addresses and remain unchanged after
     // reconciliation
     Unchanged(UplinkAddressConfigs),
-    // Port should exist both before and after but  have different addresses
+    // Port should exist both before and after but have different addresses
     // after reconciliation (except when proptest gives us the same values for
     // both, in which case this goes to "unchanged" instead).
     Change { before: UplinkAddressConfigs, after: UplinkAddressConfigs },
@@ -144,15 +144,16 @@ fn apply_uplinks(
     uplinks: BTreeMap<String, Vec<Value>>,
     refresh_instance: bool,
 ) {
-    let service = scope.service("oxide/uplink").unwrap().unwrap();
-    let mut instance = service.instance("default").unwrap().unwrap();
+    let service = scope.service(super::UPLINK_SERVICE_NAME).unwrap().unwrap();
+    let mut instance =
+        service.instance(super::UPLINK_INSTANCE_NAME).unwrap().unwrap();
 
-    instance.delete_property_group("uplinks").unwrap();
+    instance.delete_property_group(super::UPLINKS_PG_NAME).unwrap();
 
     {
         let mut pg = instance
             .add_property_group(
-                "uplinks",
+                super::UPLINKS_PG_NAME,
                 PropertyGroupType::Application,
                 AddPropertyGroupFlags::Persistent,
             )
@@ -180,10 +181,13 @@ fn apply_uplinks(
 fn config_of_running_snapshot(
     scope: &Scope<'_>,
 ) -> BTreeMap<String, Vec<Value>> {
-    let service = scope.service("oxide/uplink").unwrap().unwrap();
-    let instance = service.instance("default").unwrap().unwrap();
+    let service = scope.service(super::UPLINK_SERVICE_NAME).unwrap().unwrap();
+    let instance =
+        service.instance(super::UPLINK_INSTANCE_NAME).unwrap().unwrap();
     let snapshot = instance.snapshot("running").unwrap().unwrap();
-    let Some(pg) = snapshot.property_group_composed("uplinks").unwrap() else {
+    let Some(pg) =
+        snapshot.property_group_composed(super::UPLINKS_PG_NAME).unwrap()
+    else {
         return BTreeMap::new();
     };
 
@@ -206,8 +210,10 @@ fn proptest_uplinkd_reconciliation() {
         "proptest_uplinkd_reconciliation",
     );
     let log = &logctx.log;
-    let isolated =
-        IsolatedConfigd::builder("oxide/uplink").unwrap().build().unwrap();
+    let isolated = IsolatedConfigd::builder(super::UPLINK_SERVICE_NAME)
+        .unwrap()
+        .build()
+        .unwrap();
     let scf = Scf::connect_isolated(&isolated).unwrap();
     let scope = scf.scope_local().unwrap();
 
@@ -240,8 +246,10 @@ fn proptest_uplinkd_reconciliation_refresh() {
         "proptest_uplinkd_reconciliation_refresh",
     );
     let log = &logctx.log;
-    let isolated =
-        IsolatedConfigd::builder("oxide/uplink").unwrap().build().unwrap();
+    let isolated = IsolatedConfigd::builder(super::UPLINK_SERVICE_NAME)
+        .unwrap()
+        .build()
+        .unwrap();
     let scf = Scf::connect_isolated(&isolated).unwrap();
     let scope = scf.scope_local().unwrap();
 

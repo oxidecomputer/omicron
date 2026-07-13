@@ -75,7 +75,7 @@ pub use uplinkd_reconciler::UplinkdReconcilerStatus;
 
 // TODO-cleanup The SMF-based reconcilers need to know the name of the switch
 // zone. This is a little spread out today: `illumos-utils` defines
-// `zone_name()`, but calling it for the switch zone is a lttile awkward
+// `zone_name()`, but calling it for the switch zone is a little awkward
 // (`zone_name("switch", None)`) when all it does is prepend `oxz_`. We define a
 // constant here, but maybe there's a better option? We have a unit test below
 // to ensure this matches what `illumos-utils` would report.
