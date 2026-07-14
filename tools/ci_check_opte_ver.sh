@@ -54,7 +54,19 @@ API_VER=$(curl -s https://raw.githubusercontent.com/oxidecomputer/opte/"$OPTE_RE
 # above status, but then the observed output when this fails would be an opaque
 # "exited with status 22" or something. Help ourselves out and keep the response
 # head, printing that if something goes sideways instead.
-COMMIT_INFO_HEAD="$(curl -I -s "https://api.github.com/repos/oxidecomputer/opte/commits?per_page=1&sha=$OPTE_REV")"
+#
+# Unauthenticated API requests share a 60/IP/hour limit which can run into
+# issues on GitHub-hosted runners. If GITHUB_TOKEN is in the environment, use it
+# for the higher 1000/IP/hour limit. (CI sets this environment variable.)
+CURL_AUTH=()
+if [[ -n "${GITHUB_TOKEN:-}" ]]; then
+    CURL_AUTH=(-H "Authorization: Bearer $GITHUB_TOKEN")
+fi
+
+# The ${arr[@]+...} syntax avoids an "unbound variable" error under set -u when
+# the array is empty on bash < 4.4 (e.g., on macOS). See
+# https://mywiki.wooledge.org/BashFAQ/112.
+COMMIT_INFO_HEAD="$(curl -I -s ${CURL_AUTH[@]+"${CURL_AUTH[@]}"} "https://api.github.com/repos/oxidecomputer/opte/commits?per_page=1&sha=$OPTE_REV")"
 REV_COUNT=$(echo "$COMMIT_INFO_HEAD" | sed -n '/^[Ll]ink:/ s/.*"next".*page=\([0-9]*\).*"last".*/\1/p')
 
 if [ -z "$REV_COUNT" ]; then
