@@ -31,7 +31,6 @@ const KNOWN_EREPORTS: &[&str] = &[PSU_INSERT_EREPORT, PSU_REMOVE_EREPORT];
 
 pub fn analyze(builder: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
     let input = builder.input();
-    let log = builder.log.new(slog::o!("de" => "power_shelf"));
 
     // Okay so basically, here's what we do:
     // 1. index existing cases
@@ -137,14 +136,15 @@ pub fn analyze(builder: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
         ) {
             Ok(psu_ereport) => psu_ereport,
             Err(e) => {
-                slog::warn!(
-                    &log,
-                    "skipping a new ereport that isn't an interpretable PSU \
-                     insert/remove event";
-                    "ereport_id" => %ereport.id,
-                    "ereport_class" => ?ereport.class,
-                    "error" => InlineErrorChain::new(&*e),
-                );
+                builder
+                    .log_warning("skipped uninterpretable ereport")
+                    .comment(
+                        "this ereport has a class that I care about, but I \
+                        could not interpret it!",
+                    )
+                    .kv("ereport_id", format_args!("{}", ereport.id))
+                    .kv("ereport_class", class)
+                    .kv("error", InlineErrorChain::new(&*e).to_string());
                 continue;
             }
         };

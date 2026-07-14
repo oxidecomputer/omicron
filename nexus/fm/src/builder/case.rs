@@ -16,7 +16,7 @@ use std::sync::Arc;
 
 #[derive(Debug)]
 pub struct CaseBuilder {
-    pub log: slog::Logger,
+    log: slog::Logger,
     case: fm::Case,
     sitrep_id: SitrepUuid,
     rng: rng::CaseBuilderRng,

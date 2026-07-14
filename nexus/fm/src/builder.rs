@@ -20,7 +20,8 @@ pub use rng::SitrepBuilderRng;
 
 #[derive(Debug)]
 pub struct SitrepBuilder<'a> {
-    pub log: Logger,
+    logger: Logger,
+    debug_log: fm::analysis_reports::DebugLog,
     pub inventory: &'a inventory::Collection,
     pub parent_sitrep: Option<&'a fm::Sitrep>,
     pub sitrep_id: SitrepUuid,
@@ -86,7 +87,8 @@ impl<'a> SitrepBuilder<'a> {
         );
 
         SitrepBuilder {
-            log,
+            logger: log,
+            debug_log: fm::analysis_reports::DebugLog::default(),
             sitrep_id,
             inventory,
             parent_sitrep,
@@ -115,6 +117,20 @@ impl<'a> SitrepBuilder<'a> {
         &mut self.comment
     }
 
+    pub fn log_event(
+        &mut self,
+        event: impl ToString,
+    ) -> fm::analysis_reports::LogEntryBuilder<'_> {
+        self.debug_log.entry(&self.logger, event)
+    }
+
+    pub fn log_warning(
+        &mut self,
+        event: impl ToString,
+    ) -> fm::analysis_reports::LogEntryBuilder<'_> {
+        self.debug_log.warning(&self.logger, event)
+    }
+
     /// The parent sitrep's generations, or the initial generation on the
     /// first-ever sitrep.
     fn parent_generations(&self) -> ParentGenerations {
@@ -127,22 +143,28 @@ impl<'a> SitrepBuilder<'a> {
     }
 
     pub fn build(
-        self,
+        mut self,
         creator_id: OmicronZoneUuid,
         time_created: chrono::DateTime<chrono::Utc>,
     ) -> (fm::Sitrep, fm::analysis_reports::AnalysisReport) {
         let parent = self.parent_generations();
-        let alert_generation =
-            if self.cases.alert_set_changed() || self.alerts_changed {
-                parent.alert_generation.next()
-            } else {
-                parent.alert_generation
-            };
+        let alert_generation = if self.cases.alert_set_changed()
+            || self.alerts_changed
+        {
+            let new_gen = parent.alert_generation.next();
+            self.log_event("alerts changed").kv("generation", new_gen.as_u64());
+            new_gen
+        } else {
+            parent.alert_generation
+        };
         let support_bundle_generation =
             if self.cases.support_bundle_set_changed()
                 || self.support_bundles_changed
             {
-                parent.support_bundle_generation.next()
+                let new_gen = parent.support_bundle_generation.next();
+                self.log_event("support bundles changed")
+                    .kv("generation", new_gen.as_u64());
+                new_gen
             } else {
                 parent.support_bundle_generation
             };
@@ -175,6 +197,7 @@ impl<'a> SitrepBuilder<'a> {
             })
             .collect();
         let report = fm::analysis_reports::AnalysisReport {
+            log: self.debug_log,
             sitrep_id: self.sitrep_id,
             comment: self.comment.clone(),
             cases: report_cases,

@@ -23,6 +23,8 @@ pub struct AnalysisReport {
     pub sitrep_id: SitrepUuid,
     pub comment: String,
     pub cases: IdOrdMap<CaseReport>,
+    #[serde(default)]
+    pub log: DebugLog,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -131,12 +133,13 @@ impl AnalysisReport {
         impl<'a> fmt::Display for AnalysisReportDisplayer<'a> {
             fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
                 let &Self {
-                    report: AnalysisReport { cases, sitrep_id, comment },
+                    report: AnalysisReport { cases, sitrep_id, comment, log },
                     indent,
                 } = self;
 
                 display::Comment::from(comment).indent(indent).fmt(f)?;
                 writeln!(f, "{:indent$}sitrep ID: {sitrep_id}", "")?;
+                log.display_multiline(indent).titled("analysis log").fmt(f)?;
                 if cases.is_empty() {
                     writeln!(
                         f,
@@ -178,7 +181,7 @@ impl CaseReport {
         impl<'a> fmt::Display for CaseReportDisplayer<'a> {
             fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
                 let &Self {
-                    report: CaseReport { id, metadata, log: DebugLog(log) },
+                    report: CaseReport { id, metadata, log },
                     indent,
                     this_sitrep,
                 } = self;
@@ -186,15 +189,9 @@ impl CaseReport {
                 writeln!(f, "{:indent$}{bullet}case {id}", "")?;
                 let indent = indent + 2;
                 metadata.display_multiline(indent, this_sitrep).fmt(f)?;
-                if !log.is_empty() {
-                    writeln!(f, "{:indent$}activity in this analysis:", "")?;
-                    let indent = indent + 2;
-                    for entry in &log[..] {
-                        entry.display_indented(indent).fmt(f)?;
-                    }
-                } else {
-                    writeln!(f, "{:indent$}no activity in this analysis", "")?;
-                }
+                log.display_multiline(indent)
+                    .titled("activity in this analysis")
+                    .fmt(f)?;
                 Ok(())
             }
         }
@@ -232,6 +229,51 @@ impl DebugLog {
             analysis_log: self,
             entry: LogEntry::new(event, LogLevel::Warn),
         }
+    }
+
+    fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    fn display_multiline(&self, indent: usize) -> DebugLogDisplayer<'_> {
+        DebugLogDisplayer { log: self, indent, title: None }
+    }
+}
+
+struct DebugLogDisplayer<'a> {
+    log: &'a DebugLog,
+    indent: usize,
+    title: Option<&'a str>,
+}
+
+impl<'a> DebugLogDisplayer<'a> {
+    fn titled(self, title: &'a str) -> Self {
+        Self { title: Some(title), ..self }
+    }
+}
+
+impl fmt::Display for DebugLogDisplayer<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let &Self { log, indent, title } = self;
+        let mut indent = indent;
+        if let Some(title) = title {
+            if log.is_empty() {
+                return writeln!(f, "{:<indent$}no {title}", "");
+            } else {
+                writeln!(f, "{:<indent$}{title}:", "")?;
+                // log entries will be indented under the title
+                indent += 2;
+            }
+        }
+        if log.is_empty() {
+            return writeln!(f, "{:<indent$}(no log entries)", "");
+        }
+
+        for entry in &log.0 {
+            entry.display_indented(indent).fmt(f)?;
+        }
+
+        Ok(())
     }
 }
 
