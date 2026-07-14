@@ -50,6 +50,7 @@ pub(crate) struct BootstrapServerContext {
 }
 
 impl BootstrapServerContext {
+    /// This is mutually exclusive with `start_multirack_join`.
     pub(super) fn start_rack_initialize(
         &self,
         request: RackInitializeRequestParams,
@@ -66,13 +67,21 @@ impl BootstrapServerContext {
         )
     }
 
-    // TODO(ajs): Should this use an error other than RssAccessError?
-    // Should there be separate path that doesn't go through self.rss_access?
+    /// This is mutually exclusive with `start_rack_initialize`.
     pub(super) fn start_multirack_join(
         &self,
         request: MultirackJoinRequest,
     ) -> Result<MultirackJoinUuid, RssAccessError> {
-        todo!()
+        self.rss_access.start_multirack_join(
+            &self.base_log,
+            self.sprockets.clone(),
+            self.global_zone_bootstrap_ip,
+            &self.internal_disks_rx,
+            self.measurements.clone(),
+            &self.bootstore_node_handle,
+            &self.trust_quorum_handle,
+            request,
+        )
     }
 }
 
