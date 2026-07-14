@@ -396,7 +396,7 @@ impl fmt::Debug for ShelfPsuSet {
 struct PscCase {
     case_id: CaseUuid,
     impacted_psus: PsuSet,
-    restarts: IdHashMap<Restart>,
+    restarts: IdOrdMap<Restart>,
 }
 
 impl IdOrdItem for PscCase {
@@ -414,7 +414,7 @@ impl PscCase {
         Self {
             case_id,
             impacted_psus: PsuSet::default(),
-            restarts: IdHashMap::default(),
+            restarts: IdOrdMap::default(),
         }
     }
 
@@ -532,7 +532,7 @@ impl Restart {
     }
 }
 
-impl IdHashItem for Restart {
+impl IdOrdItem for Restart {
     type Key<'a> = &'a EreporterRestartUuid;
 
     fn key(&self) -> Self::Key<'_> {
