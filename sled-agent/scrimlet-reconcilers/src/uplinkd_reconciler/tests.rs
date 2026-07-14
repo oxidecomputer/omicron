@@ -19,6 +19,7 @@ use sled_agent_types::early_networking::PortConfig;
 use sled_agent_types::early_networking::RackNetworkConfig;
 use sled_agent_types::early_networking::SwitchSlot;
 use sled_agent_types::early_networking::UplinkAddressConfig;
+use sled_agent_types::early_networking::UplinkPorts;
 use std::collections::BTreeMap;
 use test_strategy::Arbitrary;
 
@@ -128,11 +129,30 @@ impl TestSetup {
             });
         }
 
+        // RackNetworkConfig's ports must be nonempty. If we have no ports,
+        // insert an arbitrary switch1 port; this won't affect the proptests
+        // because they're exercising dpd on switch 0, but ensures we don't get
+        // type construction errors from `UplinkPorts`.
+        if ports.is_empty() {
+            ports.push(PortConfig {
+                routes: Vec::new(),
+                addresses: Vec::new(),
+                switch: SwitchSlot::Switch1,
+                port: "qsfp0".to_owned(),
+                uplink_port_speed: LinkSpeed::Speed100G,
+                uplink_port_fec: None,
+                bgp_peers: Vec::new(),
+                autoneg: false,
+                lldp: None,
+                tx_eq: None,
+            });
+        }
+
         RackNetworkConfig {
             rack_subnet: "fd00::/48".parse().unwrap(),
             infra_ip_first: "10.0.0.1".parse().unwrap(),
             infra_ip_last: "10.0.0.100".parse().unwrap(),
-            ports,
+            ports: UplinkPorts::new(ports).unwrap(),
             bgp: Vec::new(),
             bfd: Vec::new(),
         }
