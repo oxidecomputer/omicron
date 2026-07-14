@@ -608,9 +608,8 @@ impl PsuEreport {
                  {reporter:?}"
             ),
         };
-        let data: PsuEreportData =
-            serde_json::from_value(ereport.data.report.clone())
-                .context("invalid data for a PSC ereport")?;
+        let data = PsuEreportData::deserialize(&ereport.data.report)
+            .context("invalid data for a PSC ereport")?;
         let slot = PsuSlot::from_repr(data.slot).ok_or_else(|| {
             anyhow::anyhow!("PSU slot {} out of range (must be 0-5)", data.slot)
         })?;
