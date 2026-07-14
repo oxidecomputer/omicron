@@ -313,9 +313,12 @@ fn load_dependent_repo(
     // In summary: we're going to choose the package matching `expected_commit`.
     // If we don't find such a match but we do encounter a candidate with no
     // source (likely a local Cargo `[patch]` override), we may fall back to
-    // that one depending on `patched_dep_policy`.
+    // that one depending on `patched_dep_policy`.  Along the way, we keep
+    // track of any candidates whose git source doesn't match
+    // `expected_commit` so that we can produce a helpful message.
     let mut found_pkg = None;
     let mut patched_pkg = None;
+    let mut mismatched: Vec<(&PackageId, &cargo_metadata::Source)> = Vec::new();
 
     for pkgid in workspace.pkgids(pkgname) {
         let pkginfo = workspace.pkg_by_id(pkgid).with_context(|| {
@@ -326,59 +329,61 @@ fn load_dependent_repo(
             // A package with no source is most likely one that has been
             // overridden by a local Cargo `[patch]` pointing at a filesystem
             // path.  There is no reliable way to check that such a checkout
-            // corresponds to `expected_commit`, so we always warn.  We defer
-            // the decision about whether to accept it until after we've
-            // scanned every candidate, in case a real commit match is also
-            // present.
-            eprintln!(
-                "warn: looking up {pkgid:?}: found package with no source, \
-                 which usually means it has been overridden with a Cargo \
-                 [patch] pointing at a local path.  This tool cannot verify \
-                 that this checkout matches the commit pinned in \
-                 package-manifest.toml ({expected_commit})."
-            );
+            // corresponds to `expected_commit`.  We defer the decision about
+            // whether to accept it until after we've scanned every candidate,
+            // in case a real commit match is also present.
             if patched_pkg.is_none() {
                 patched_pkg = Some(pkginfo);
             }
             continue;
         };
 
-        // This is cheesy, but it works okay for now and fails safely.
+        // Determine if this instance of this package matches the git commit
+        // that we expect.
+        //
+        // This implementation is cheesy, but it works okay for now and fails
+        // safely.
         if source
             .repr
             .rsplit_once('#')
             .is_some_and(|(_, hash)| hash == expected_commit.as_str())
         {
-            found_pkg = Some(pkginfo);
-            break;
+            // We know at this point that we're going to succeed and return this
+            // package.  But we still want to report any diverging versions
+            // below if we find them.
+            if found_pkg.is_none() {
+                found_pkg = Some(pkginfo);
+            }
+        } else {
+            mismatched.push((pkgid, source));
         }
-
-        eprintln!(
-            "warn: looking up {pkgid:?}: looking for git commit \
-             {expected_commit} (based on package-manifest.toml), found \
-             source {source:?}"
-        );
-        eprintln!(
-            "If another version of package {pkgname:?} is found corresponding \
-             with this commit, then it may be suspicious to have multiple \
-             versions of this package, but it will not break this tool."
-        );
-        eprintln!(
-            "If not, there's a mismatch between commits in \
-             package-manifest.toml and Cargo.toml or there is a bug in this \
-             tool."
-        );
     }
 
     let pkg = match (found_pkg, patched_pkg, patched_dep_policy) {
-        (Some(pkg), _, _) => pkg,
+        (Some(pkg), _, _) => {
+            if !mismatched.is_empty() {
+                eprintln!(
+                    "note: package {pkgname:?}: found a version matching \
+                     the git commit in package-manifest.toml \
+                     ({expected_commit}), but also found other versions at \
+                     different commits.  This does not affect this tool.  But \
+                     it's potentially suspicious that different components are \
+                     using different versions."
+                );
+                for (pkgid, source) in &mismatched {
+                    eprintln!("  - {pkgid:?}: {source:?}");
+                }
+            }
+            pkg
+        }
         (None, Some(pkg), PatchedDepPolicy::AssumeMatch) => {
             eprintln!(
                 "note: package {pkgname:?}: no candidate matched the commit \
                  pinned in package-manifest.toml ({expected_commit}), but a \
-                 candidate with no source (likely a local [patch]) was \
+                 candidate with no source (likely a local Cargo [patch]) was \
                  found.  Proceeding with that candidate because \
-                 --assume-patched-deps-match was given."
+                 --assume-patched-deps-match was given.  This tool cannot \
+                 verify that the patched checkout matches the pinned commit."
             );
             pkg
         }
@@ -393,6 +398,21 @@ fn load_dependent_repo(
             );
         }
         (None, None, _) => {
+            if !mismatched.is_empty() {
+                eprintln!(
+                    "note: found the following versions of package \
+                     {pkgname:?}, none of which matched the git commit in \
+                     package-manifest.toml ({expected_commit}):"
+                );
+                for (pkgid, source) in &mismatched {
+                    eprintln!("  - {pkgid:?}: {source:?}");
+                }
+                eprintln!(
+                    "There may be a mismatch between commits in \
+                     package-manifest.toml and Cargo.toml or a bug in this \
+                     tool."
+                );
+            }
             bail!(
                 "found no versions of package {pkgname:?} matching the git \
                  commit found in package-manifest.toml ({expected_commit})",

@@ -365,11 +365,7 @@ impl TryFrom<&LsApis> for LoadArgs {
             PatchedDepPolicy::Reject
         };
 
-        Ok(LoadArgs {
-            workspace_root,
-            api_manifest_path,
-            patched_dep_policy,
-        })
+        Ok(LoadArgs { workspace_root, api_manifest_path, patched_dep_policy })
     }
 }
 
