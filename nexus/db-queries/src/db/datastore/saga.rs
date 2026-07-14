@@ -28,9 +28,16 @@ use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
 use std::ops::Add;
 
+// This type is deliberately close to the database representation so it can be
+// directly inserted as-is. It is currently pub so that omdb can use it and
+// mark a saga as abandoned even if it does not have a current SEC assigned.
+//
+// Otherwise, it's highly discouraged to use this type. Use `saga_update_state`
+// instead. This method uses `SagaStateTransition` under the hood, which makes
+// it impossible to represent an invalid state.
 #[derive(AsChangeset)]
 #[diesel(table_name = saga, treat_none_as_null = true)]
-pub struct SagaStateUpdate {
+pub struct SagaStateDbFields {
     pub saga_state: SagaState,
     pub abandon_reason: Option<SagaReasonAbandoned>,
     pub abandon_information: Option<String>,
@@ -60,6 +67,9 @@ impl From<SagaStateTransition> for SagaState {
     }
 }
 
+// Steno requires that we be able to persistently record changes in the saga's
+// state (represented with `steno::SagaCachedState`). This converts that into
+// the `SagaStateTransition` that the datastore method expects.
 impl From<steno::SagaCachedState> for SagaStateTransition {
     fn from(value: steno::SagaCachedState) -> Self {
         match value {
@@ -71,11 +81,11 @@ impl From<steno::SagaCachedState> for SagaStateTransition {
 }
 
 impl SagaStateTransition {
-    fn into_update(self) -> SagaStateUpdate {
+    fn into_update(self) -> SagaStateDbFields {
         match self {
             SagaStateTransition::Running
             | SagaStateTransition::Unwinding
-            | SagaStateTransition::Done => SagaStateUpdate {
+            | SagaStateTransition::Done => SagaStateDbFields {
                 saga_state: self.into(),
                 abandon_reason: None,
                 abandon_information: None,
@@ -83,7 +93,7 @@ impl SagaStateTransition {
             },
             SagaStateTransition::Abandoned { reason, information } => {
                 let now = chrono::Utc::now();
-                SagaStateUpdate {
+                SagaStateDbFields {
                     saga_state: SagaState::Abandoned,
                     abandon_reason: Some(reason),
                     abandon_information: Some(information),

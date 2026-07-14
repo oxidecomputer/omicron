@@ -28,7 +28,7 @@ use nexus_db_model::SecId;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::datastore::SQL_BATCH_SIZE;
-use nexus_db_queries::db::datastore::saga::SagaStateUpdate;
+use nexus_db_queries::db::datastore::saga::SagaStateDbFields;
 use nexus_db_queries::db::pagination::Paginator;
 use nexus_db_queries::db::pagination::paginated;
 use owo_colors::OwoColorize;
@@ -441,7 +441,7 @@ execute even if it is abandoned. You should only proceed if:
     prompt.read_and_validate("y/N", "y")?;
     drop(prompt);
 
-    let new_state = SagaStateUpdate {
+    let new_state = SagaStateDbFields {
         saga_state: SagaState::Abandoned,
         abandon_reason: Some(nexus_db_model::SagaReasonAbandoned::Omdb),
         abandon_information: Some(information),
