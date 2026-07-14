@@ -143,8 +143,13 @@ impl DataStore {
                             match e {
                                 diesel::result::Error::DatabaseError(kind, _) => {
                                     match kind {
+                                        // The only unique index on active rows is the
+                                        // name index, so this is a name collision.
                                         diesel::result::DatabaseErrorKind::UniqueViolation => {
-                                            err.bail(Error::conflict("a field that must be unique conflicts with an existing record"))
+                                            err.bail(Error::ObjectAlreadyExists {
+                                                type_name: ResourceType::BgpConfig,
+                                                object_name: config.name().to_string(),
+                                            })
                                         },
                                         // technically we don't use Foreign Keys but it doesn't hurt to match on them
                                         // instead of returning a 500 by default in the event that we do switch to Foreign Keys
@@ -192,7 +197,10 @@ impl DataStore {
     ) -> CreateResult<BgpConfig> {
         let conflict = match self.bgp_config_create(opctx, config).await {
             Ok(created) => return Ok(created),
-            Err(error @ Error::Conflict { .. }) => error,
+            Err(
+                error @ (Error::Conflict { .. }
+                | Error::ObjectAlreadyExists { .. }),
+            ) => error,
             Err(error) => return Err(error),
         };
 
@@ -1104,11 +1112,15 @@ mod tests {
             .await
             .expect("create BGP config");
 
+        // The identical and duplicate-ASN cases hit the ASN guard, which runs
+        // before the insert, so only the duplicate-name case reaches the
+        // unique name index.
         let conflicting_configs = [
-            ("identical config", config.clone()),
+            ("identical config", config.clone(), false),
             (
                 "duplicate name",
                 networking::BgpConfigCreate { asn: 48, ..config.clone() },
+                true,
             ),
             (
                 "duplicate ASN",
@@ -1119,18 +1131,23 @@ mod tests {
                     },
                     ..config.clone()
                 },
+                false,
             ),
         ];
 
-        for (description, conflicting_config) in conflicting_configs {
+        for (description, conflicting_config, expect_already_exists) in
+            conflicting_configs
+        {
             let error = datastore
                 .bgp_config_create(&opctx, &conflicting_config)
                 .await
                 .expect_err(description);
-            assert!(
-                matches!(error, Error::Conflict { .. }),
-                "unexpected error for {description}: {error}",
-            );
+            let matched = if expect_already_exists {
+                matches!(error, Error::ObjectAlreadyExists { .. })
+            } else {
+                matches!(error, Error::Conflict { .. })
+            };
+            assert!(matched, "unexpected error for {description}: {error}");
         }
 
         let ensured = datastore
