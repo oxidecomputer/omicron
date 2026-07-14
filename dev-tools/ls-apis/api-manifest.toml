@@ -256,20 +256,6 @@ configuration and monitoring that requires the `cockroach` CLI.
 """
 
 [[apis]]
-client_package_name = "ntp-admin-v1-client"
-label = "NTP Admin version 1"
-server_package_name = "ntp-admin-api"
-versioned_how = "client"
-versioned_how_reason = """
-Sled Agent (within the Host OS deployment unit) calls into NTP, and is updated \
-before NTP. This requires that the NTP Admin API be client-side versioned.
-"""
-notes = """
-This is the server running inside NTP zones that performs \
-monitoring on 'chrony'.
-"""
-
-[[apis]]
 client_package_name = "ntp-admin-client"
 label = "NTP Admin"
 server_package_name = "ntp-admin-api"
