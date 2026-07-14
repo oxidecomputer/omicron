@@ -46,12 +46,12 @@ impl super::Nexus {
     ) -> LookupResult<BgpConfig> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
 
-        let (.., authz_bgp_config, _) = self
-            .bgp_config_lookup(opctx, name_or_id.clone())?
+        let (.., bgp_config) = self
+            .bgp_config_lookup(opctx, name_or_id)?
             .fetch_for(authz::Action::Read)
             .await?;
 
-        self.db_datastore.bgp_config_get(opctx, authz_bgp_config.id()).await
+        Ok(bgp_config)
     }
 
     pub async fn bgp_config_list(

@@ -2666,19 +2666,14 @@ mod test {
                     NameOrId::Name(name) => {
                         let (.., authz_bgp_config) =
                             LookupPath::new(&opctx, datastore)
-                                .bgp_config_name_owned(name.clone().into())
+                                .bgp_config_name_owned(name.into())
                                 .lookup_for(nexus_auth::authz::Action::Read)
                                 .await
                                 .expect("lookup bgp config");
 
-                        let db_bgp_config = datastore
-                            .bgp_config_get(opctx, authz_bgp_config.id())
-                            .await
-                            .expect("bgp config should be present in db");
-
                         assert_eq!(
-                            db_bgp_config.identity.name,
-                            nexus_db_model::Name(name)
+                            db_peer.bgp_config_id(),
+                            authz_bgp_config.id(),
                         );
                     }
                 }

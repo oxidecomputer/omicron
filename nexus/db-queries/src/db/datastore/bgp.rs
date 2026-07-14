@@ -256,7 +256,10 @@ impl DataStore {
                     err
                 } else {
                     error!(opctx.log, "{msg}"; "error" => ?e);
-                    public_error_from_diesel(e, ErrorHandler::Server)
+                    public_error_from_diesel(
+                        e,
+                        ErrorHandler::NotFoundByResource(authz_bgp_config),
+                    )
                 }
             })
     }
@@ -330,7 +333,13 @@ impl DataStore {
             .await
             .map_err(|e| {
                 error!(opctx.log, "bgp_config_get failed"; "error" => ?e);
-                public_error_from_diesel(e, ErrorHandler::Server)
+                public_error_from_diesel(
+                    e,
+                    ErrorHandler::NotFoundByLookup(
+                        ResourceType::BgpConfig,
+                        external::LookupType::ById(id),
+                    ),
+                )
             })
     }
 
@@ -1122,7 +1131,7 @@ mod tests {
 
         // Update the BGP config
         datastore
-            .bgp_config_update(&opctx, &authz_bgp_config, update)
+            .bgp_config_update(&opctx, &authz_bgp_config, update.clone())
             .await
             .expect("update bgp config");
 
@@ -1139,6 +1148,22 @@ mod tests {
         assert_eq!(bgp_config.identity.description, new_description);
         assert_eq!(bgp_config.bgp_announce_set_id, new_announce_id);
         assert_eq!(bgp_config.max_paths.0, new_max_paths.as_u8());
+
+        // Simulate deletion after the app layer has resolved the config but
+        // before the datastore update begins.
+        datastore
+            .bgp_config_delete(&opctx, &authz_bgp_config)
+            .await
+            .expect("delete bgp config");
+
+        let err = datastore
+            .bgp_config_update(&opctx, &authz_bgp_config, update)
+            .await
+            .expect_err("updating a deleted BGP config should fail");
+        assert!(
+            matches!(err, Error::ObjectNotFound { .. }),
+            "unexpected error: {err:?}"
+        );
 
         db.terminate().await;
         logctx.cleanup_successful();
@@ -1744,11 +1769,14 @@ mod tests {
             .await
             .expect("delete bgp config by name");
 
+        let err = datastore
+            .bgp_config_get(&opctx, authz_bgp_config.id())
+            .await
+            .expect_err("get deleted BGP config should fail");
+
         assert!(
-            datastore
-                .bgp_config_get(&opctx, authz_bgp_config.id())
-                .await
-                .is_err()
+            matches!(err, Error::ObjectNotFound { .. }),
+            "unexpected error: {err:?}"
         );
 
         db.terminate().await;
