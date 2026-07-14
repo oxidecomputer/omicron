@@ -16,6 +16,9 @@ use uuid::Uuid;
 /// power shelf.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct PsuInsertedV0 {
+    /// The ID of the rack containing the power shelf.
+    #[schemars(with = "Uuid")]
+    pub rack_id: RackUuid,
     pub power_shelf: PowerShelf,
     pub psu: Psu,
     pub time: DateTime<Utc>,
@@ -30,6 +33,9 @@ impl AlertPayload for PsuInsertedV0 {
 /// power shelf.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct PsuRemovedV0 {
+    /// The ID of the rack containing the power shelf.
+    #[schemars(with = "Uuid")]
+    pub rack_id: RackUuid,
     pub power_shelf: PowerShelf,
     pub psu: Psu,
     pub time: DateTime<Utc>,
@@ -45,9 +51,6 @@ impl AlertPayload for PsuRemovedV0 {
 pub struct PowerShelf {
     // TODO(eliza): the PSC should probably have a UUID, but AFAICT, they don't
     // currently...
-    /// The ID of the rack containing the power shelf.
-    #[schemars(with = "Uuid")]
-    pub rack_id: RackUuid,
     /// The physical shelf number of the power shelf involved in the alert.
     ///
     /// This will always be either 0 or 1.

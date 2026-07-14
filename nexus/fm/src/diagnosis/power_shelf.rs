@@ -476,6 +476,7 @@ impl Restart {
                     if ereport.provenance == Provenance::ThisSitrep {
                         case.request_alert(
                             &alert_types::PsuInsertedV0 {
+                                rack_id: ereport.location.rack,
                                 psu: ereport.alert_psu(),
                                 power_shelf: ereport
                                     .alert_power_shelf(&case.log),
@@ -498,6 +499,7 @@ impl Restart {
                     if ereport.provenance == Provenance::ThisSitrep {
                         case.request_alert(
                             &alert_types::PsuRemovedV0 {
+                                rack_id: ereport.location.rack,
                                 psu: ereport.alert_psu(),
                                 power_shelf: ereport
                                     .alert_power_shelf(&case.log),
@@ -671,11 +673,7 @@ impl PsuEreport {
                 None
             }
         };
-        alert_types::PowerShelf {
-            rack_id: self.location.rack,
-            shelf: self.location.shelf,
-            baseboard,
-        }
+        alert_types::PowerShelf { shelf: self.location.shelf, baseboard }
     }
 }
 
