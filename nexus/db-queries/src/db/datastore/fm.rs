@@ -2568,6 +2568,10 @@ mod tests {
             .await
             .expect("failed to read sitrep");
 
+        // Before comparing against what we inserted, the loaded sitrep must
+        // be well-formed on its own.
+        nexus_fm_slippy::assert_sitrep_has_no_fatal_notes(&read_sitrep, None);
+
         assert_sitreps_eq(&sitrep, &read_sitrep);
 
         // Clean up
@@ -2670,6 +2674,9 @@ mod tests {
             .fm_sitrep_read(&opctx, sitrep_id)
             .await
             .expect("failed to read sitrep");
+
+        // The loaded sitrep must be well-formed
+        nexus_fm_slippy::assert_sitrep_has_no_fatal_notes(&read_sitrep, None);
 
         assert_sitreps_eq(&sitrep, &read_sitrep);
 

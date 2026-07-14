@@ -1069,6 +1069,7 @@ Commands:
   current          Show the current situation report
   info             Show details on a situation report
   analysis-report  Show the analysis report for the requested sitrep, if one exists
+  slippy           Run the slippy sitrep linter over the requested sitrep
   help             Print this message or the help of the given subcommand(s)
 
 Options:

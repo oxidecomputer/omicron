@@ -9,6 +9,7 @@ workspace = true
 [features]
 testing = [
     "omicron-test-utils",
+    "nexus-fm-slippy",
     "nexus-reconfigurator-planning",
     "ereport-types",
 ]
@@ -36,6 +37,7 @@ typed-rng.workspace = true
 
 # deps for test utils
 omicron-test-utils = { workspace = true, optional = true }
+nexus-fm-slippy = { workspace = true, optional = true }
 nexus-reconfigurator-planning = { workspace = true, optional = true }
 ereport-types = { workspace = true, optional = true }
 
@@ -43,6 +45,7 @@ omicron-workspace-hack.workspace = true
 
 [dev-dependencies]
 omicron-test-utils.workspace = true
+nexus-fm-slippy.workspace = true
 nexus-inventory.workspace = true
 nexus-reconfigurator-planning.workspace = true
 ereport-types.workspace = true
