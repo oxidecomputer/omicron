@@ -67,6 +67,7 @@ impl AllCases {
     pub fn open_case(
         &mut self,
         de: fm::DiagnosisEngineKind,
+        comment: impl ToString,
     ) -> iddqd::id_ord_map::RefMut<'_, CaseBuilder> {
         let (id, case_rng) = loop {
             let (id, case_rng) = self.rng.next_case();
@@ -80,13 +81,14 @@ impl AllCases {
                 unreachable!("UUID should be unused")
             }
             iddqd::id_ord_map::Entry::Vacant(entry) => {
+                let comment = comment.to_string();
                 let case = fm::Case {
                     id,
                     metadata: fm::case::Metadata {
                         created_sitrep_id: self.sitrep_id,
                         closed_sitrep_id: None,
                         de,
-                        comment: String::new(),
+                        comment: comment.clone(),
                     },
                     ereports: Default::default(),
                     alerts_requested: Default::default(),
@@ -95,7 +97,7 @@ impl AllCases {
                 };
                 let mut builder =
                     CaseBuilder::new(&self.log, sitrep_id, case, case_rng);
-                builder.log_event("opened case").finish();
+                builder.log_event("opened case").comment(comment).finish();
                 entry.insert(builder)
             }
         };
@@ -399,7 +401,8 @@ mod tests {
     fn dirty_bits_default_false() {
         let logctx = dev::test_setup_log("dirty_bits_default_false");
         let mut all_cases = make_all_cases(&logctx.log);
-        let case = all_cases.open_case(fm::DiagnosisEngineKind::PowerShelf);
+        let case = all_cases
+            .open_case(fm::DiagnosisEngineKind::PowerShelf, "test case");
         assert!(!case.new_alerts_requested);
         assert!(!case.new_support_bundles_requested);
         logctx.cleanup_successful();
@@ -412,8 +415,8 @@ mod tests {
         assert!(!all_cases.alert_set_changed());
 
         {
-            let mut case =
-                all_cases.open_case(fm::DiagnosisEngineKind::PowerShelf);
+            let mut case = all_cases
+                .open_case(fm::DiagnosisEngineKind::PowerShelf, "test case");
             case.request_alert(&test_alerts::Foo(serde_json::json!({})), "")
                 .unwrap();
             assert!(case.new_alerts_requested);
@@ -433,8 +436,8 @@ mod tests {
         assert!(!all_cases.support_bundle_set_changed());
 
         {
-            let mut case =
-                all_cases.open_case(fm::DiagnosisEngineKind::PowerShelf);
+            let mut case = all_cases
+                .open_case(fm::DiagnosisEngineKind::PowerShelf, "test case");
             case.request_support_bundle(BundleDataSelection::default(), "");
             assert!(case.new_support_bundles_requested);
             assert!(!case.new_alerts_requested);

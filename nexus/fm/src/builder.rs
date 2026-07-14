@@ -304,8 +304,9 @@ mod tests {
         let inputs = make_input();
         let mut builder = SitrepBuilder::new(&logctx.log, &inputs);
         {
-            let mut case =
-                builder.cases.open_case(fm::DiagnosisEngineKind::PowerShelf);
+            let mut case = builder
+                .cases
+                .open_case(fm::DiagnosisEngineKind::PowerShelf, "test case");
             case.request_alert(&test_alerts::Foo(serde_json::json!({})), "")
                 .unwrap();
         }
@@ -326,8 +327,9 @@ mod tests {
         let inputs = make_input();
         let mut builder = SitrepBuilder::new(&logctx.log, &inputs);
         {
-            let mut case =
-                builder.cases.open_case(fm::DiagnosisEngineKind::PowerShelf);
+            let mut case = builder
+                .cases
+                .open_case(fm::DiagnosisEngineKind::PowerShelf, "test case");
             case.request_support_bundle(Default::default(), "");
         }
         let sitrep = build_sitrep(builder);
@@ -371,8 +373,9 @@ mod tests {
         });
         let mut builder = SitrepBuilder::new(&logctx.log, &inputs);
         {
-            let mut case =
-                builder.cases.open_case(fm::DiagnosisEngineKind::PowerShelf);
+            let mut case = builder
+                .cases
+                .open_case(fm::DiagnosisEngineKind::PowerShelf, "test case");
             case.request_alert(&test_alerts::Foo(serde_json::json!({})), "")
                 .unwrap();
         }
@@ -396,8 +399,9 @@ mod tests {
         });
         let mut builder = SitrepBuilder::new(&logctx.log, &inputs);
         {
-            let mut case =
-                builder.cases.open_case(fm::DiagnosisEngineKind::PowerShelf);
+            let mut case = builder
+                .cases
+                .open_case(fm::DiagnosisEngineKind::PowerShelf, "test case");
             case.request_support_bundle(Default::default(), "");
         }
         let sitrep = build_sitrep(builder);
@@ -422,8 +426,9 @@ mod tests {
         });
         let mut builder = SitrepBuilder::new(&logctx.log, &inputs);
         {
-            let mut case =
-                builder.cases.open_case(fm::DiagnosisEngineKind::PowerShelf);
+            let mut case = builder
+                .cases
+                .open_case(fm::DiagnosisEngineKind::PowerShelf, "test case");
             case.request_alert(&test_alerts::Foo(serde_json::json!({})), "")
                 .unwrap();
             case.request_support_bundle(Default::default(), "");

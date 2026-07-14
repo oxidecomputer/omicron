@@ -759,8 +759,10 @@ mod tests {
         sitrep_builder.comment_mut().push_str("my cool sitrep");
 
         let new_case_id = {
-            let mut new_case =
-                sitrep_builder.cases.open_case(DiagnosisEngineKind::PowerShelf);
+            let mut new_case = sitrep_builder.cases.open_case(
+                DiagnosisEngineKind::PowerShelf,
+                "my cool test case",
+            );
             new_case.add_ereport(
                 &ereport_new,
                 "this ereport is important to the case somehow",

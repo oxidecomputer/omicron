@@ -169,21 +169,22 @@ pub fn analyze(builder: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
                 "an open case from the parent sitrep should be in the builder",
             ),
             None => {
-                let mut c =
-                    builder.cases.open_case(DiagnosisEngineKind::PowerShelf);
-                *c.comment_mut() = format!(
-                    "opened because {location} was {verbed}\n\
-                     this happened in ereport {}\n",
-                    ereport.id
+                let case = builder.cases.open_case(
+                    DiagnosisEngineKind::PowerShelf,
+                    format!(
+                        "opened because {location} was {verbed}.\n\
+                        this happened in ereport {}.",
+                        ereport.id
+                    ),
                 );
                 cases_by_psu
                     .entry(location)
                     .or_insert_with(BTreeSet::new)
-                    .insert(c.id);
+                    .insert(case.id);
                 cases_by_id
-                    .insert_unique(PscCase::new(c.id))
+                    .insert_unique(PscCase::new(case.id))
                     .expect("a freshly-opened case has a unique id");
-                c
+                case
             }
         };
 
