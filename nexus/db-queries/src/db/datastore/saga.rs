@@ -67,26 +67,13 @@ impl From<SagaStateTransition> for SagaState {
     }
 }
 
-// Steno requires that we be able to persistently record changes in the saga's
-// state (represented with `steno::SagaCachedState`). This converts that into
-// the `SagaStateTransition` that the datastore method expects.
-impl From<steno::SagaCachedState> for SagaStateTransition {
-    fn from(value: steno::SagaCachedState) -> Self {
+impl From<SagaStateTransition> for SagaStateDbFields {
+    fn from(value: SagaStateTransition) -> Self {
         match value {
-            steno::SagaCachedState::Running => SagaStateTransition::Running,
-            steno::SagaCachedState::Unwinding => SagaStateTransition::Unwinding,
-            steno::SagaCachedState::Done => SagaStateTransition::Done,
-        }
-    }
-}
-
-impl SagaStateTransition {
-    fn into_update(self) -> SagaStateDbFields {
-        match self {
             SagaStateTransition::Running
             | SagaStateTransition::Unwinding
             | SagaStateTransition::Done => SagaStateDbFields {
-                saga_state: self.into(),
+                saga_state: value.into(),
                 abandon_reason: None,
                 abandon_information: None,
                 abandon_time: None,
@@ -100,6 +87,19 @@ impl SagaStateTransition {
                     abandon_time: Some(now),
                 }
             }
+        }
+    }
+}
+
+// Steno requires that we be able to persistently record changes in the saga's
+// state (represented with `steno::SagaCachedState`). This converts that into
+// the `SagaStateTransition` that the datastore method expects.
+impl From<steno::SagaCachedState> for SagaStateTransition {
+    fn from(value: steno::SagaCachedState) -> Self {
+        match value {
+            steno::SagaCachedState::Running => SagaStateTransition::Running,
+            steno::SagaCachedState::Unwinding => SagaStateTransition::Unwinding,
+            steno::SagaCachedState::Done => SagaStateTransition::Done,
         }
     }
 }
@@ -178,7 +178,7 @@ impl DataStore {
         let result = diesel::update(dsl::saga)
             .filter(dsl::id.eq(saga_id))
             .filter(dsl::current_sec.eq(current_sec))
-            .set(new_state.clone().into_update())
+            .set::<SagaStateDbFields>(new_state.clone().into())
             .check_if_exists::<db::saga_types::Saga>(saga_id)
             .execute_and_check(&*self.pool_connection_unauthorized().await?)
             .await
@@ -371,6 +371,7 @@ mod test {
     use async_bb8_diesel::AsyncSimpleConnection;
     use chrono::TimeDelta;
     use db::queries::ALLOW_FULL_TABLE_SCAN_SQL;
+    use nexus_db_model::Saga;
     use nexus_db_model::SagaReasonAbandoned;
     use nexus_db_model::SagaState;
     use nexus_db_model::{SagaNodeEvent, SecId};
@@ -681,6 +682,25 @@ mod test {
             )
             .await
             .expect("updating state to Abandoned");
+
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
+        let saga_id: db::saga_types::SagaId = node_cx.saga_id.into();
+        let found_saga = {
+            use nexus_db_schema::schema::saga::dsl;
+            dsl::saga
+                .filter(dsl::id.eq(saga_id))
+                .select(Saga::as_select())
+                .first_async(&*conn)
+                .await
+                .unwrap()
+        };
+
+        assert_eq!(found_saga.saga_state, SagaState::Abandoned);
+        assert_eq!(
+            found_saga.abandon_reason,
+            Some(SagaReasonAbandoned::Unrecoverable)
+        );
+        assert_eq!(found_saga.abandon_information, Some("test".to_string()));
 
         // Test cleanup
         db.terminate().await;

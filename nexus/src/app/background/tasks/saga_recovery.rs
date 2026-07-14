@@ -358,11 +358,15 @@ impl<N: MakeSagaContext> SagaRecoveryInner<N> {
             // When failure is transient, the next recovery pass will retry.
             RecoveryFailureKind::Transient => return,
             RecoveryFailureKind::Permanent => {
-                // We can't abandon a saga whose current SEC is unknown (there's no row to
-                // conditionally update on), so a permanent failure with no `current_sec` is
-                // left as a recovery candidate.
+                // We can't abandon a saga whose current SEC is unknown (there's
+                // no row to conditionally update on), so a permanent failure
+                // with no `current_sec` is left as a recovery candidate.
+                //
+                // It is very unlikely that this field will ever be None. The
+                // schema allowed for that because we thought we might use it to
+                // deal with failover, but we never did.
                 let Some(sec_id) = current_sec else {
-                    warn!(
+                    error!(
                         log,
                         "unable to mark saga as abandoned; missing current SEC";
                         "saga_id" => %saga_id,
@@ -374,19 +378,20 @@ impl<N: MakeSagaContext> SagaRecoveryInner<N> {
 
                 warn!(
                     log,
-                    "saga recovery failed due to a non-transient error; marking as \
-                    abandoned";
+                    "saga recovery failed due to a non-transient error; \
+                    marking as abandoned";
                     "saga_id" => %saga_id,
                     "message" => message,
                     "time_failed" => ?time,
                 );
 
-                // Abandoning is idempotent and best effort. The datastore write has no
-                // SQL statement timeout, so we bound it explicitly. A hung write must
-                // not stall the recovery pass. If it times out or errors, we log and
-                // move on. The saga stays a recovery candidate, so a later pass will
-                // try again.  Dropping the write future on timeout is safe. The only
-                // effect is this single, idempotent state transition.
+                // Abandoning is idempotent and best effort. The datastore write
+                // has no SQL statement timeout, so we bound it explicitly. A
+                // hung write must not stall the recovery pass. If it times out
+                // or errors, we log and move on. The saga stays a recovery
+                // candidate, so a later pass will try again.  Dropping the
+                // write future on timeout is safe. The only effect is this
+                // single, idempotent state transition.
                 let mark_abandoned = self.datastore.saga_update_state(
                     *saga_id,
                     SagaStateTransition::Abandoned {
@@ -402,8 +407,8 @@ impl<N: MakeSagaContext> SagaRecoveryInner<N> {
                     Ok(Err(error)) => {
                         warn!(
                             log,
-                            "failed to mark saga as abandoned; will retry on the \
-                            next saga recovery pass";
+                            "failed to mark saga as abandoned; will retry on \
+                            the next saga recovery pass";
                             "saga_id" => %saga_id,
                             "error" => %error,
                         );
@@ -411,8 +416,8 @@ impl<N: MakeSagaContext> SagaRecoveryInner<N> {
                     Err(_) => {
                         warn!(
                             log,
-                            "timed out marking saga as abandoned; will retry on the \
-                            next saga recovery pass";
+                            "timed out marking saga as abandoned; will retry \
+                            on the next saga recovery pass";
                             "saga_id" => %saga_id,
                         );
                     }

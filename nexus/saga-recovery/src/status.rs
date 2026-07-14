@@ -116,30 +116,20 @@ pub enum RecoveryFailureKind {
 }
 
 impl RecoveryFailureKind {
-    /// Classify a saga-recovery error by its HTTP-style status.
+    /// Classify a saga-recovery error as transient or permanent.
     ///
     /// We treat an error as transient when the condition it describes may
-    /// resolve on its own, so retrying recovery on a later pass could succeed.
+    /// resolve on its own (see [`Error::retryable`]), so retrying recovery on
+    /// a later pass could succeed.
     ///
     /// Everything else is permanent. Retrying won't change the outcome. In
     /// particular, [`Error::InternalError`] (HTTP 500), which is how a failed
     /// `saga_resume`/`saga_start` surfaces, means the saga cannot be
     /// recovered, so it should be abandoned rather than retried forever.
     pub fn classify(error: &Error) -> Self {
-        match error {
-            Error::ServiceUnavailable { .. }
-            | Error::InsufficientCapacity { .. }
-            | Error::Unauthenticated { .. } => Self::Transient,
-            Error::InternalError { .. }
-            | Error::TypeVersionMismatch { .. }
-            | Error::ObjectNotFound { .. }
-            | Error::ObjectAlreadyExists { .. }
-            | Error::InvalidRequest { .. }
-            | Error::InvalidValue { .. }
-            | Error::Forbidden
-            | Error::Conflict { .. }
-            | Error::NotFound { .. }
-            | Error::Gone => Self::Permanent,
+        match error.retryable() {
+            true => Self::Transient,
+            false => Self::Permanent,
         }
     }
 }
