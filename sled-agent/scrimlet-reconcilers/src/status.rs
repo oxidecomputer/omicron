@@ -5,6 +5,7 @@
 //! Types for the status and results of the reconcilers in this crate.
 
 use crate::DpdReconcilerStatus;
+use crate::LldpdReconcilerStatus;
 use crate::MgdReconcilerStatus;
 use crate::UplinkdReconcilerStatus;
 use chrono::DateTime;
@@ -135,6 +136,7 @@ pub enum ScrimletReconcilersStatus {
     /// We are a scrimlet and the individual reconcilers are running.
     Running {
         dpd_reconciler: ReconcilerStatus<DpdReconcilerStatus>,
+        lldpd_reconciler: ReconcilerStatus<LldpdReconcilerStatus>,
         mgd_reconciler: ReconcilerStatus<MgdReconcilerStatus>,
         uplinkd_reconciler: ReconcilerStatus<UplinkdReconcilerStatus>,
     },
