@@ -753,6 +753,16 @@ task: "fm_rendezvous"
       batch size:                            1000
       batches:                                  0
       errors:                                   0
+    garbage collecting alert creation markers:
+      started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+      rows deleted:    0
+      batches:         1
+      errors:          0
+    garbage collecting support bundle creation markers:
+      started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+      rows deleted:    0
+      batches:         1
+      errors:          0
 
 task: "fm_sitrep_gc"
   configured period: every <REDACTED_DURATION>s
@@ -1456,6 +1466,16 @@ task: "fm_rendezvous"
       batch size:                            1000
       batches:                                  0
       errors:                                   0
+    garbage collecting alert creation markers:
+      started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+      rows deleted:    0
+      batches:         1
+      errors:          0
+    garbage collecting support bundle creation markers:
+      started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+      rows deleted:    0
+      batches:         1
+      errors:          0
 
 task: "fm_sitrep_gc"
   configured period: every <REDACTED_DURATION>s

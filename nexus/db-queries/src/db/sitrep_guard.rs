@@ -347,29 +347,19 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::context::OpContext;
-    use crate::db::DataStore;
     use crate::db::pub_test_utils::TestDatabase;
     use crate::db::raw_query_builder::expectorate_query_contents;
     use assert_matches::assert_matches;
     use async_bb8_diesel::AsyncRunQueryDsl;
-    use async_bb8_diesel::AsyncSimpleConnection;
-    use chrono::Utc;
     use diesel::prelude::*;
-    use iddqd::IdOrdMap;
-    use nexus_types::fm::Sitrep;
-    use nexus_types::fm::SitrepMetadata;
-    use omicron_common::api::external;
     use omicron_test_utils::dev;
-    use omicron_uuid_kinds::CollectionUuid;
-    use omicron_uuid_kinds::OmicronZoneUuid;
-    use omicron_uuid_kinds::SitrepUuid;
     use uuid::uuid;
 
     // The synthetic resource and dummy schema are shared with the GC test suite;
     // see `crate::db::fm_rendezvous_resources::test_utils`.
     use crate::db::fm_rendezvous_resources::test_utils::DummyResource;
     use crate::db::fm_rendezvous_resources::test_utils::dummy_resource;
+    use crate::db::fm_rendezvous_resources::test_utils::insert_current_sitrep;
     use crate::db::fm_rendezvous_resources::test_utils::insert_dummy_marker;
     use crate::db::fm_rendezvous_resources::test_utils::marker_generation;
     use crate::db::fm_rendezvous_resources::test_utils::setup_dummy_schema;
@@ -397,45 +387,6 @@ mod tests {
             "tests/output/sitrep_guarded_insert.sql",
         )
         .await;
-    }
-
-    // Inserts a current sitrep with a given `dummy_generation`, returning its
-    // ID so further sitreps can be chained onto it via `parent`.
-    async fn insert_current_sitrep(
-        datastore: &DataStore,
-        opctx: &OpContext,
-        conn: &async_bb8_diesel::Connection<DbConnection>,
-        parent: Option<SitrepUuid>,
-        generation: i64,
-    ) -> SitrepUuid {
-        let sitrep_id = SitrepUuid::new_v4();
-        let sitrep = Sitrep {
-            metadata: SitrepMetadata {
-                id: sitrep_id,
-                parent_sitrep_id: parent,
-                inv_collection_id: CollectionUuid::new_v4(),
-                next_inv_min_time_started: Utc::now(),
-                creator_id: OmicronZoneUuid::new_v4(),
-                comment: "sitrep_guard test sitrep".to_string(),
-                time_created: Utc::now(),
-                alert_generation: external::Generation::new(),
-                support_bundle_generation: external::Generation::new(),
-            },
-            cases: IdOrdMap::new(),
-            ereports_by_id: IdOrdMap::new(),
-        };
-        datastore.fm_sitrep_insert(opctx, sitrep, None).await.unwrap();
-
-        // `SitrepMetadata` doesn't have a `dummy_generation` field, so we have
-        // to update it manually.
-        conn.batch_execute_async(&format!(
-            "UPDATE omicron.public.fm_sitrep \
-                 SET dummy_generation = {generation} WHERE id = '{sitrep_id}'"
-        ))
-        .await
-        .unwrap();
-
-        sitrep_id
     }
 
     // Builds and runs a guarded insert for `resource_id` at
