@@ -28,42 +28,86 @@ NewtypeDeref! { () pub struct GitCommit(String); }
 NewtypeDisplay! { () pub struct GitCommit(String); }
 NewtypeFrom! { () pub struct GitCommit(String); }
 
-struct RelatedRepoConfig {
+/// One entry in `MANIFEST_PREBUILT_REPOS`, describing a repo that appears in
+/// `package-manifest.toml` as a `prebuilt` package.
+struct PrebuiltRepoConfig {
     repo_name: &'static str,
-    expected_pkg_name: &'static str,
-    extra_cargo_features: &'static [&'static str],
+    behavior: PrebuiltRepoBehavior,
 }
 
-static RELATED_REPOS: [RelatedRepoConfig; 5] = [
-    RelatedRepoConfig {
+/// Describes what this tool should do with a prebuilt repo listed in
+/// `package-manifest.toml`.
+enum PrebuiltRepoBehavior {
+    /// Look up the given package in the Omicron workspace and use its
+    /// resolved location to load the repo's own Cargo workspace metadata.
+    Inspect {
+        expected_pkg_name: &'static str,
+        extra_cargo_features: &'static [&'static str],
+    },
+
+    /// Verify that the repo appears in `package-manifest.toml` as a
+    /// `prebuilt` package but otherwise do not load any Cargo metadata for
+    /// it.  This is appropriate for prebuilt repos whose contents this tool
+    /// doesn't need to trace.
+    Ignore,
+}
+
+/// Every repo that appears in `package-manifest.toml` as a `prebuilt` package
+/// must appear here.  The reverse must also hold: any entry here must
+/// correspond to a `prebuilt` package in `package-manifest.toml`.  Both
+/// directions are checked at runtime.
+static MANIFEST_PREBUILT_REPOS: [PrebuiltRepoConfig; 8] = [
+    PrebuiltRepoConfig {
         repo_name: "crucible",
-        expected_pkg_name: "crucible-agent-client",
-        extra_cargo_features: &[],
+        behavior: PrebuiltRepoBehavior::Inspect {
+            expected_pkg_name: "crucible-agent-client",
+            extra_cargo_features: &[],
+        },
     },
-    RelatedRepoConfig {
+    PrebuiltRepoConfig {
         repo_name: "dendrite",
-        expected_pkg_name: "dpd-client",
-        extra_cargo_features: &[],
+        behavior: PrebuiltRepoBehavior::Inspect {
+            expected_pkg_name: "dpd-client",
+            extra_cargo_features: &[],
+        },
     },
-    RelatedRepoConfig {
-        repo_name: "propolis",
-        expected_pkg_name: "propolis-client",
-        // The artifacts shipped from the Propolis repo (particularly,
-        // `propolis-server`) are built with the `omicron-build` feature,
-        // which is not enabled by default.  Enable this feature when
-        // loading the Propolis repo metadata so that we see the dependency
-        // tree that a shipping system will have.
-        extra_cargo_features: &["omicron-build"],
-    },
-    RelatedRepoConfig {
-        repo_name: "maghemite",
-        expected_pkg_name: "mg-admin-client",
-        extra_cargo_features: &[],
-    },
-    RelatedRepoConfig {
+    PrebuiltRepoConfig {
         repo_name: "lldp",
-        expected_pkg_name: "lldpd-client",
-        extra_cargo_features: &[],
+        behavior: PrebuiltRepoBehavior::Inspect {
+            expected_pkg_name: "lldpd-client",
+            extra_cargo_features: &[],
+        },
+    },
+    PrebuiltRepoConfig {
+        repo_name: "maghemite",
+        behavior: PrebuiltRepoBehavior::Inspect {
+            expected_pkg_name: "mg-admin-client",
+            extra_cargo_features: &[],
+        },
+    },
+    PrebuiltRepoConfig {
+        repo_name: "management-gateway-service",
+        behavior: PrebuiltRepoBehavior::Ignore,
+    },
+    PrebuiltRepoConfig {
+        repo_name: "propolis",
+        behavior: PrebuiltRepoBehavior::Inspect {
+            expected_pkg_name: "propolis-client",
+            // The artifacts shipped from the Propolis repo (particularly,
+            // `propolis-server`) are built with the `omicron-build` feature,
+            // which is not enabled by default.  Enable this feature when
+            // loading the Propolis repo metadata so that we see the
+            // dependency tree that a shipping system will have.
+            extra_cargo_features: &["omicron-build"],
+        },
+    },
+    PrebuiltRepoConfig {
+        repo_name: "pumpkind",
+        behavior: PrebuiltRepoBehavior::Ignore,
+    },
+    PrebuiltRepoConfig {
+        repo_name: "thundermuffin",
+        behavior: PrebuiltRepoBehavior::Ignore,
     },
 ];
 
@@ -162,17 +206,52 @@ impl Workspaces {
                 .with_context(|| {
                     format!("parsing {package_manifest_path:?}")
                 })?;
-        let related_repo_commits: Vec<(&RelatedRepoConfig, GitCommit)> =
-            RELATED_REPOS
-                .iter()
-                .map(|related_repo| {
-                    let commit = find_repo_commit(
-                        &package_manifest,
-                        related_repo.repo_name,
-                    )?;
-                    Ok((related_repo, commit))
-                })
-                .collect::<Result<_>>()?;
+        let mut manifest_commits =
+            find_prebuilt_repo_commits(&package_manifest)?;
+
+        // Verify that our static list agrees with the manifest in both
+        // directions: every prebuilt repo in the manifest must be listed in
+        // MANIFEST_PREBUILT_REPOS, and every entry in MANIFEST_PREBUILT_REPOS
+        // must appear in the manifest.  Both mismatches are errors so we
+        // don't silently drop coverage for a repo that has been added or
+        // removed.
+        //
+        // We do this by walking the static list once, removing each entry
+        // from `manifest_commits` as we go.  A `None` return from `remove()`
+        // means the static list references a repo the manifest lacks; any
+        // commits still in `manifest_commits` afterward correspond to repos
+        // the manifest has but the static list doesn't.  Pairing each static
+        // entry with its commit falls out of the same pass.
+        let mut paired: Vec<(&PrebuiltRepoConfig, GitCommit)> = Vec::new();
+        let mut missing_from_manifest: Vec<&str> = Vec::new();
+        for repo_config in &MANIFEST_PREBUILT_REPOS {
+            match manifest_commits.remove(repo_config.repo_name) {
+                Some(commit) => paired.push((repo_config, commit)),
+                None => missing_from_manifest.push(repo_config.repo_name),
+            }
+        }
+        let missing_from_static: Vec<&str> =
+            manifest_commits.keys().map(String::as_str).collect();
+        if !missing_from_static.is_empty() || !missing_from_manifest.is_empty()
+        {
+            let mut msg = String::from(
+                "mismatch between prebuilt repos in \
+                 package-manifest.toml and MANIFEST_PREBUILT_REPOS",
+            );
+            if !missing_from_static.is_empty() {
+                msg.push_str(&format!(
+                    "; repos in package-manifest.toml but not in \
+                     MANIFEST_PREBUILT_REPOS: {missing_from_static:?}"
+                ));
+            }
+            if !missing_from_manifest.is_empty() {
+                msg.push_str(&format!(
+                    "; repos in MANIFEST_PREBUILT_REPOS but not in \
+                     package-manifest.toml: {missing_from_manifest:?}"
+                ));
+            }
+            bail!("{msg}");
+        }
 
         // In order to assemble this metadata, Cargo already has a clone of most
         // of the other workspaces that we care about.  We'll use those clones
@@ -185,15 +264,20 @@ impl Workspaces {
         // Loading each workspace involves running `cargo metadata`, which is
         // pretty I/O intensive.  Latency benefits significantly from
         // parallelizing, though if we had many more repos than this, we'd
-        // probably want to limit the concurrency.
-        let handles: Vec<_> = related_repo_commits
+        // probably want to limit the concurrency.  We only spawn threads for
+        // repos with `Inspect` behavior; `Ignore` entries have already been
+        // validated by the presence check above.
+        let handles: Vec<_> = paired
             .into_iter()
-            .map(|(repo_config, expected_commit)| {
-                let RelatedRepoConfig {
-                    repo_name,
+            .filter_map(|(repo_config, expected_commit)| {
+                let PrebuiltRepoConfig { repo_name, behavior } = repo_config;
+                let PrebuiltRepoBehavior::Inspect {
                     expected_pkg_name,
                     extra_cargo_features,
-                } = repo_config;
+                } = behavior
+                else {
+                    return None;
+                };
                 let mine = omicron.clone();
                 let my_ignored = ignored_non_clients.clone();
                 let extra_features = if extra_cargo_features.is_empty() {
@@ -206,7 +290,7 @@ impl Workspaces {
                             .collect(),
                     ))
                 };
-                std::thread::spawn(move || {
+                Some(std::thread::spawn(move || {
                     load_dependent_repo(
                         &mine,
                         repo_name,
@@ -216,7 +300,7 @@ impl Workspaces {
                         &expected_commit,
                         patched_dep_policy,
                     )
-                })
+                }))
             })
             .collect();
 
@@ -463,49 +547,46 @@ fn load_dependent_repo(
     )
 }
 
-fn find_repo_commit(
+/// Scans `package_manifest` and returns a map from repo name to the git
+/// commit at which each `Prebuilt` package for that repo is pinned.
+///
+/// If a repo appears in multiple `Prebuilt` entries, all of them must agree
+/// on the commit; otherwise this function returns an error.
+fn find_prebuilt_repo_commits(
     package_manifest: &omicron_zone_package::config::Config,
-    repo_name: &str,
-) -> Result<GitCommit> {
-    // We want to figure out which version of repo `repo_name` is actually
-    // deployed on real systems.  To do that, we look at what's in the package
-    // manifest.  All of the repos we care about are packaged into Omicron as
-    // prebuilt packages.  The one hitch is that the same repo may appear
-    // multiple times in the package manifest.  In that case, we require that
-    // they all be the same commit.
-    let candidates: BTreeSet<GitCommit> = package_manifest
-        .packages
-        .values()
-        .filter_map(|pkg| match &pkg.source {
+) -> Result<BTreeMap<String, GitCommit>> {
+    // Collect every distinct commit for every repo that appears as a
+    // `Prebuilt` package.
+    let mut candidates: BTreeMap<String, BTreeSet<GitCommit>> = BTreeMap::new();
+    for pkg in package_manifest.packages.values() {
+        match &pkg.source {
             PackageSource::Local { .. }
             | PackageSource::Composite { .. }
-            | PackageSource::Manual => None,
+            | PackageSource::Manual => {}
             PackageSource::Prebuilt { repo, commit, .. } => {
-                if repo == repo_name {
-                    Some(GitCommit::from(commit.clone()))
-                } else {
-                    None
-                }
+                candidates
+                    .entry(repo.clone())
+                    .or_default()
+                    .insert(GitCommit::from(commit.clone()));
             }
-        })
-        .collect();
-
-    if candidates.is_empty() {
-        bail!(
-            "expected repo {repo_name:?} to appear in package-manifest.toml \
-             as a 'prebuilt' package"
-        );
+        }
     }
 
-    if candidates.len() > 1 {
-        bail!(
-            "expected repo {repo_name:?} to have exactly one git commit \
-             in package-manifest.toml, but found multiple: {candidates:?}",
-        );
+    // For each repo, verify that all `Prebuilt` entries agree on the commit.
+    let mut result = BTreeMap::new();
+    for (repo, commits) in candidates {
+        if commits.len() > 1 {
+            bail!(
+                "expected repo {repo:?} to have exactly one git commit \
+                 in package-manifest.toml, but found multiple: {commits:?}",
+            );
+        }
+        // unwrap(): `candidates.or_default()` always inserts at least one
+        // commit before we get here.
+        let commit = commits.into_iter().next().unwrap();
+        result.insert(repo, commit);
     }
-
-    // unwrap(): we already checked that there's at least one
-    Ok(candidates.into_iter().next().unwrap().clone())
+    Ok(result)
 }
 
 #[cfg(test)]
@@ -515,8 +596,10 @@ mod test {
     use omicron_zone_package::package::{Package, PackageOutput};
 
     const TEST_REPO: &str = "testrepo";
+    const OTHER_REPO: &str = "otherrepo";
+    const OTHER_REPO_COMMIT: &str = "11111111111111111111";
 
-    /// Builds a package manifest for testing `find_repo_commit`.
+    /// Builds a package manifest for testing `find_prebuilt_repo_commits`.
     ///
     /// `commits` contains an array of arbitrary strings that stand in for Git
     /// commit SHAs.  For each entry in this array, a `Prebuilt` package will be
@@ -526,9 +609,9 @@ mod test {
     /// multiple copies with different SHAs.
     ///
     /// The returned manifest always contains a hardcoded set of "noise"
-    /// packages that should never match `TEST_REPO`: one `Local`, one
-    /// `Composite`, one `Manual`, and one `Prebuilt` for a different repo than
-    /// the one we're testing with.
+    /// packages: one `Local`, one `Composite`, one `Manual`, and one
+    /// `Prebuilt` for `OTHER_REPO` (which should always show up in the
+    /// result).
     fn make_manifest(commits: &[&str]) -> Config {
         let mut packages = BTreeMap::new();
 
@@ -575,8 +658,8 @@ mod test {
             Package {
                 service_name: ServiceName::new_const("other-repo-prebuilt"),
                 source: PackageSource::Prebuilt {
-                    repo: String::from("otherrepo"),
-                    commit: String::from("11111111111111111111"),
+                    repo: String::from(OTHER_REPO),
+                    commit: String::from(OTHER_REPO_COMMIT),
                     sha256: String::from("deadbeef"),
                 },
                 output: PackageOutput::Tarball,
@@ -607,21 +690,25 @@ mod test {
     }
 
     #[test]
-    fn find_repo_commit_success() {
+    fn find_prebuilt_repo_commits_success() {
         // Two prebuilt entries for the same repo pointing at the same commit
-        // should collapse to a single commit.
+        // should collapse to a single commit.  The unrelated `OTHER_REPO`
+        // entry should also appear in the result.
         let commit = "abcdef1234567890abcdef1234567890abcdef12";
         let manifest = make_manifest(&[commit, commit]);
-        let found = find_repo_commit(&manifest, TEST_REPO).unwrap();
-        assert_eq!(found.as_str(), commit);
+        let found = find_prebuilt_repo_commits(&manifest).unwrap();
+        assert_eq!(found.get(TEST_REPO).unwrap().as_str(), commit);
+        assert_eq!(found.get(OTHER_REPO).unwrap().as_str(), OTHER_REPO_COMMIT);
+        // No other repos should appear.
+        assert_eq!(found.len(), 2);
     }
 
     #[test]
-    fn find_repo_commit_multiple_prebuilts_different_commits() {
+    fn find_prebuilt_repo_commits_multiple_prebuilts_different_commits() {
         let commit_a = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
         let commit_b = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
         let manifest = make_manifest(&[commit_a, commit_b]);
-        let err = find_repo_commit(&manifest, TEST_REPO).unwrap_err();
+        let err = find_prebuilt_repo_commits(&manifest).unwrap_err();
         assert_eq!(
             format!("{err:#}"),
             "expected repo \"testrepo\" to have exactly one git commit \
@@ -632,16 +719,14 @@ mod test {
     }
 
     #[test]
-    fn find_repo_commit_repo_absent() {
+    fn find_prebuilt_repo_commits_repo_absent() {
         // Empty `commits` means no prebuilt entries for `TEST_REPO` at all,
-        // but the manifest still contains other packages (including a
-        // prebuilt for a different repo) that should all be ignored.
+        // so the result should only contain the noise entry for
+        // `OTHER_REPO`.
         let manifest = make_manifest(&[]);
-        let err = find_repo_commit(&manifest, TEST_REPO).unwrap_err();
-        assert_eq!(
-            format!("{err:#}"),
-            "expected repo \"testrepo\" to appear in package-manifest.toml \
-             as a 'prebuilt' package",
-        );
+        let found = find_prebuilt_repo_commits(&manifest).unwrap();
+        assert_eq!(found.get(TEST_REPO), None);
+        assert_eq!(found.get(OTHER_REPO).unwrap().as_str(), OTHER_REPO_COMMIT);
+        assert_eq!(found.len(), 1);
     }
 }
