@@ -730,13 +730,12 @@ task: "fm_config_loader"
   configured period: every <REDACTED_DURATION>s
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-    config last updated at:       2026-07-13 22:38:18.947487750 UTC
-      updated by this activation: true
+    config last updated at:       <REDACTED_TIMESTAMP>
+      updated by this activation: false
     current config:
-      version:                    1
-      last modified at:           <REDACTED_TIMESTAMP>
-      sitrep limit:               1000
-      sitrep deletion threshold:  900
+      source:                    default
+      sitrep history limit:      1000
+      sitrep deletion threshold: 900
 
 task: "fm_rendezvous"
   configured period: every <REDACTED_DURATION>m
@@ -1452,13 +1451,12 @@ task: "fm_config_loader"
   configured period: every <REDACTED_DURATION>s
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-    config last updated at:       2026-07-13 22:38:18.947487750 UTC
-      updated by this activation: true
+    config last updated at:       <REDACTED_TIMESTAMP>
+      updated by this activation: false
     current config:
-      version:                    1
-      last modified at:           <REDACTED_TIMESTAMP>
-      sitrep limit:               1000
-      sitrep deletion threshold:  900
+      source:                    default
+      sitrep history limit:      1000
+      sitrep deletion threshold: 900
 
 task: "fm_rendezvous"
   configured period: every <REDACTED_DURATION>m

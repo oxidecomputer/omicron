@@ -3656,16 +3656,15 @@ fn print_task_fm_config_loader(details: &serde_json::Value) {
         Ok(FmConfigLoadStatus::Error(error)) => {
             println!("    task did not complete successfully: {error}");
         }
-        Ok(FmConfigLoadStatus::Loaded {
-            config,
-            updated,
-            time_updated: time_loaded,
-        }) => {
+        Ok(FmConfigLoadStatus::Loaded { config, updated, time_updated }) => {
             const TIME_UPDATED: &str = "config last updated at:";
-            const UPDATED: &str = "updated by this activation:";
+            const UPDATED: &str = "  updated by this activation:";
             const WIDTH: usize = const_max_len(&[TIME_UPDATED, UPDATED]) + 1;
 
-            println!("    {TIME_UPDATED:<WIDTH$}{time_loaded}");
+            println!(
+                "    {TIME_UPDATED:<WIDTH$}{}",
+                humantime::format_rfc3339_millis(time_updated.into()),
+            );
             println!("    {UPDATED:<WIDTH$}{updated}");
             println!("    current config:");
             print!("{}", config.display_multiline(6));
