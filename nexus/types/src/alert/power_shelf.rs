@@ -8,6 +8,7 @@ use super::*;
 use crate::external_api::hardware::Baseboard;
 use chrono::DateTime;
 use chrono::Utc;
+use omicron_uuid_kinds::RackUuid;
 use serde::Deserialize;
 use uuid::Uuid;
 
@@ -39,7 +40,8 @@ impl AlertPayload for PsuRemovedV0 {
 pub struct PowerShelf {
     // TODO(eliza): the PSC should probably have a UUID, but AFAICT, they don't
     // currently...
-    pub rack_id: Uuid,
+    #[schemars(with = "Uuid")]
+    pub rack_id: RackUuid,
     pub shelf: u8,
     pub baseboard: Option<Baseboard>,
 }

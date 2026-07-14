@@ -15,7 +15,6 @@ use nexus_types::fm::DiagnosisEngineKind;
 use nexus_types::inventory;
 use omicron_uuid_kinds::CaseUuid;
 use omicron_uuid_kinds::EreporterRestartUuid;
-use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::RackUuid;
 use serde::Deserialize;
 use slog_error_chain::InlineErrorChain;
@@ -673,7 +672,7 @@ impl PsuEreport {
             }
         };
         alert_types::PowerShelf {
-            rack_id: self.location.rack.into_untyped_uuid(),
+            rack_id: self.location.rack,
             shelf: self.location.shelf,
             baseboard,
         }
