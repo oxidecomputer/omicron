@@ -13,11 +13,13 @@ use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::datastore::FmRendezvousAlertCreateError;
 use nexus_db_queries::db::datastore::FmSupportBundleCreateError;
+use nexus_db_queries::db::datastore::MarkerGcResult;
 use nexus_db_queries::db::datastore::SupportBundleCreateParams;
 use nexus_types::fm;
 use nexus_types::fm::case::AlertRequest;
 use nexus_types::internal_api::background::FmRendezvousStatus as Status;
 use nexus_types::internal_api::background::fm_rendezvous::*;
+use omicron_common::api::external::Error;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use serde_json::json;
 use slog_error_chain::InlineErrorChain;
@@ -98,6 +100,23 @@ impl FmRendezvous {
             "marking ereports as seen",
             Self::mark_ereports_seen,
         );
+        // GC of `rendezvous_*_created` marker rows runs as peer ops, not as a
+        // tail of creation: the sweep's safety does not depend on any creation
+        // loop completing (see the `fm_rendezvous_gc` module docs), and running
+        // it as its own op lets the operator see GC timing and outcomes
+        // separately from creation.
+        let alert_marker_gc = self.spawn_op(
+            &sitrep,
+            opctx,
+            "sweeping alert creation markers",
+            Self::gc_alert_markers,
+        );
+        let support_bundle_marker_gc = self.spawn_op(
+            &sitrep,
+            opctx,
+            "sweeping support bundle creation markers",
+            Self::gc_support_bundle_markers,
+        );
 
         const TASKS_SHOULDNT_FAIL: &str = "\
             rendezvous op tasks should never return a `JoinError`. Nexus is \
@@ -112,6 +131,10 @@ impl FmRendezvous {
             alerts: alerts.await.expect(TASKS_SHOULDNT_FAIL),
             support_bundles: support_bundles.await.expect(TASKS_SHOULDNT_FAIL),
             ereport_marking: marking.await.expect(TASKS_SHOULDNT_FAIL),
+            alert_marker_gc: alert_marker_gc.await.expect(TASKS_SHOULDNT_FAIL),
+            support_bundle_marker_gc: support_bundle_marker_gc
+                .await
+                .expect(TASKS_SHOULDNT_FAIL),
         };
 
         // If a guarded-create op observed that our sitrep is stale, the db
@@ -534,6 +557,72 @@ impl FmRendezvous {
 
         status
     }
+
+    /// Sweep the `rendezvous_alert_created` marker table, using this
+    /// activation's sitrep to decide which rows are still needed.
+    async fn gc_alert_markers(
+        self,
+        sitrep: CurrentSitrep,
+        opctx: OpContext,
+    ) -> MarkerGcStatus {
+        let (_, ref sitrep) = *sitrep;
+        let result = self
+            .datastore
+            .fm_rendezvous_alert_marker_gc(
+                &opctx,
+                sitrep.id(),
+                sitrep.metadata.alert_generation,
+            )
+            .await;
+        Self::marker_gc_status(&opctx.log, result)
+    }
+
+    /// Sweep the `rendezvous_support_bundle_created` marker table, using this
+    /// activation's sitrep to decide which rows are still needed.
+    async fn gc_support_bundle_markers(
+        self,
+        sitrep: CurrentSitrep,
+        opctx: OpContext,
+    ) -> MarkerGcStatus {
+        let (_, ref sitrep) = *sitrep;
+        let result = self
+            .datastore
+            .fm_rendezvous_support_bundle_marker_gc(
+                &opctx,
+                sitrep.id(),
+                sitrep.metadata.support_bundle_generation,
+            )
+            .await;
+        Self::marker_gc_status(&opctx.log, result)
+    }
+
+    /// Map the outcome of a `rendezvous_*_created` GC sweep into a
+    /// [`MarkerGcStatus`].
+    fn marker_gc_status(
+        log: &slog::Logger,
+        result: Result<MarkerGcResult, Error>,
+    ) -> MarkerGcStatus {
+        match result {
+            Ok(MarkerGcResult { rows_deleted, batches }) => {
+                if rows_deleted > 0 {
+                    slog::debug!(log, "GC swept {rows_deleted} marker row(s)",);
+                }
+                MarkerGcStatus { rows_deleted, batches, errors: Vec::new() }
+            }
+            Err(e) => {
+                slog::warn!(
+                    log,
+                    "marker GC failed";
+                    "error" => InlineErrorChain::new(&e),
+                );
+                MarkerGcStatus {
+                    rows_deleted: 0,
+                    batches: 0,
+                    errors: vec![InlineErrorChain::new(&e).to_string()],
+                }
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -560,6 +649,7 @@ mod tests {
     use omicron_uuid_kinds::EreporterRestartUuid;
     use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::OmicronZoneUuid;
+    use omicron_uuid_kinds::RackUuid;
     use omicron_uuid_kinds::SitrepUuid;
     use omicron_uuid_kinds::SupportBundleUuid;
 
@@ -690,7 +780,7 @@ mod tests {
             ))))
             .unwrap();
 
-        let Status { sitrep_id, alerts, .. } =
+        let Status { sitrep_id, alerts, alert_marker_gc, .. } =
             dbg!(task.actually_activate(opctx).await);
         assert_eq!(sitrep_id, Some(sitrep1_id));
         assert_eq!(
@@ -704,6 +794,16 @@ mod tests {
                 errors: Vec::new(),
             }
         );
+        // The single `rendezvous_alert_created` marker row we just
+        // inserted for `alert1` was stamped with the current sitrep's
+        // `alert_generation`, so its `created_at_generation` *equals* the
+        // current sitrep's `alert_generation`. The strict-inequality predicate
+        // (`created_at_generation < sitrep_alert_generation`) excludes it.
+        assert_eq!(alert_marker_gc.details.rows_deleted, 0);
+        // The marker table holds far fewer rows than `SQL_BATCH_SIZE`, so the
+        // sweep is always a single partial page.
+        assert_eq!(alert_marker_gc.details.batches, 1);
+        assert!(alert_marker_gc.details.errors.is_empty());
         let db_alert1 = fetch_alert(&datastore, alert1_id)
             .await
             .expect("alert1 must have been created");
@@ -794,7 +894,7 @@ mod tests {
             .unwrap();
 
         let status = dbg!(task.actually_activate(opctx).await);
-        let Status { sitrep_id, alerts, .. } = status;
+        let Status { sitrep_id, alerts, alert_marker_gc, .. } = status;
         assert_eq!(sitrep_id, Some(sitrep2_id));
         assert_eq!(
             alerts.details,
@@ -807,6 +907,12 @@ mod tests {
                 errors: Vec::new(),
             }
         );
+        // As above: sitrep1 and sitrep2 carry the same alert_generation, so
+        // every marker's `created_at_generation` equals it and nothing is
+        // swept, in a single partial page.
+        assert_eq!(alert_marker_gc.details.rows_deleted, 0);
+        assert_eq!(alert_marker_gc.details.batches, 1);
+        assert!(alert_marker_gc.details.errors.is_empty());
 
         let db_alert1 = fetch_alert(&datastore, alert1_id)
             .await
@@ -1294,6 +1400,7 @@ mod tests {
 
         let restart_id = EreporterRestartUuid::new_v4();
         let collector_id = OmicronZoneUuid::new_v4();
+        let rack_id = RackUuid::new_v4();
         let time_collected = Utc::now();
         let reporter = Reporter::Sp {
             sp_type: nexus_types::inventory::SpType::Sled,
@@ -1330,6 +1437,7 @@ mod tests {
                 restart_id,
                 time_collected,
                 collector_id,
+                rack_id,
                 reporter,
                 vec![
                     (ereport1_id.ena, ereport1_data.clone()),
@@ -1530,6 +1638,7 @@ mod tests {
 
         let restart_id = EreporterRestartUuid::new_v4();
         let collector_id = OmicronZoneUuid::new_v4();
+        let rack_id = RackUuid::new_v4();
         let reporter = Reporter::Sp {
             sp_type: nexus_types::inventory::SpType::Sled,
             slot: 1,
@@ -1565,6 +1674,7 @@ mod tests {
                 restart_id,
                 time_collected,
                 collector_id,
+                rack_id,
                 reporter,
                 vec![
                     (ereport1_id.ena, ereport1_data.clone()),
@@ -1807,6 +1917,7 @@ mod tests {
         use omicron_uuid_kinds::BlueprintUuid;
         use omicron_uuid_kinds::DatasetUuid;
         use omicron_uuid_kinds::PhysicalDiskUuid;
+        use omicron_uuid_kinds::RackUuid;
         use omicron_uuid_kinds::SledUuid;
         use omicron_uuid_kinds::ZpoolUuid;
 
@@ -1827,7 +1938,7 @@ mod tests {
                 reservoir_size: ByteCount::from(0).into(),
                 cpu_family: SledCpuFamily::AmdMilan,
             },
-            uuid::Uuid::new_v4(),
+            RackUuid::new_v4(),
             Generation::new(),
         );
         datastore.sled_upsert(sled).await.unwrap();
@@ -1976,6 +2087,16 @@ mod tests {
                 stale_sitrep: false,
                 errors: Vec::new(),
             }
+        );
+
+        // The bundle-side GC op ran against the real
+        // `rendezvous_support_bundle_created` / `fm_support_bundle_request`
+        // tables; an error here would mean the identifiers the generic query
+        // splices for `SupportBundle` don't match the real schema.
+        assert!(
+            status.support_bundle_marker_gc.details.errors.is_empty(),
+            "support bundle marker GC should not have failed: {:?}",
+            status.support_bundle_marker_gc.details.errors,
         );
 
         // The bundle should exist in the database in Collecting state.

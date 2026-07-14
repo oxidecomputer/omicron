@@ -357,10 +357,10 @@ async fn proptest_full_reconciliation() {
         SpPort::One,
     )
     .await;
-    let mut dpdctx = dev::dendrite::DendriteInstance::start(
-        0,
+    let dpdctx = dev::dendrite::DendriteInstance::start(
         None,
-        Some(mgsctx.address().into()),
+        mgsctx.address().into(),
+        &logctx.log,
     )
     .await
     .expect("started dendrite");

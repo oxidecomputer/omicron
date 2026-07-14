@@ -1088,10 +1088,11 @@
           },
           "ports": {
             "description": "Uplinks for connecting the rack to external networks",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/PortConfig"
-            }
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/UplinkPorts"
+              }
+            ]
           },
           "rack_subnet": {
             "$ref": "#/components/schemas/Ipv6Net"
@@ -1773,6 +1774,13 @@
         "required": [
           "address"
         ]
+      },
+      "UplinkPorts": {
+        "type": "array",
+        "items": {
+          "$ref": "#/components/schemas/PortConfig"
+        },
+        "minItems": 1
       },
       "UserId": {
         "title": "A username for a local-only user",

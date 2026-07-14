@@ -160,13 +160,13 @@ use nexus_types::deployment::PendingMgsUpdates;
 
 use nexus_types::inventory::Collection;
 use omicron_uuid_kinds::OmicronZoneUuid;
+use omicron_uuid_kinds::RackUuid;
 use oximeter::types::ProducerRegistry;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio::sync::watch;
 use update_common::artifacts::ArtifactsWithPlan;
-use uuid::Uuid;
 
 /// Internal state for communication between Nexus and background tasks.
 ///
@@ -588,6 +588,7 @@ impl BackgroundTasksInitializer {
             reconfigurator_config_watcher.clone(),
             inventory_load_watcher.clone(),
             rx_blueprint.clone(),
+            nexus_id,
         );
         let rx_planner = blueprint_planner.watcher();
         driver.register(TaskDefinition {
@@ -1118,6 +1119,7 @@ impl BackgroundTasksInitializer {
                 datastore.clone(),
                 resolver.clone(),
                 nexus_id,
+                rack_id,
                 task_fm_analysis.clone(),
                 config.sp_ereport_ingester.disable,
             )),
@@ -1316,7 +1318,7 @@ pub struct BackgroundTasksData {
     /// whether multicast functionality is enabled (or not)
     pub multicast_enabled: bool,
     /// rack identifier
-    pub rack_id: Uuid,
+    pub rack_id: RackUuid,
     /// nexus identifier
     pub nexus_id: OmicronZoneUuid,
     /// internal DNS DNS resolver, used when tasks need to contact other
@@ -1429,6 +1431,7 @@ fn init_dns(
 pub mod test {
     use crate::app::saga::SagaCompletionFuture;
     use crate::app::saga::StartSaga;
+    use camino_tempfile::Utf8TempDir;
     use dropshot::HandlerTaskMode;
     use futures::FutureExt;
     use internal_dns_types::names::ServiceName;
@@ -1446,7 +1449,6 @@ pub mod test {
     use std::sync::atomic::AtomicU64;
     use std::sync::atomic::Ordering;
     use std::time::Duration;
-    use tempfile::TempDir;
     use uuid::Uuid;
 
     /// Used by various tests of tasks that kick off sagas
@@ -1565,14 +1567,10 @@ pub mod test {
         // new service ought to do that for us.
         let log = &cptestctx.logctx.log;
         let storage_path =
-            TempDir::new().expect("Failed to create temporary directory");
+            Utf8TempDir::new().expect("Failed to create temporary directory");
         let config_store = dns_server::storage::Config {
             keep_old_generations: 3,
-            storage_path: storage_path
-                .path()
-                .to_string_lossy()
-                .into_owned()
-                .into(),
+            storage_path: storage_path.path().to_owned(),
         };
         let store = dns_server::storage::Store::new(
             log.new(o!("component" => "DnsStore")),

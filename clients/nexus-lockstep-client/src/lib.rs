@@ -81,6 +81,7 @@ progenitor::generate_api!(
         TxEqConfig = sled_agent_types::early_networking::TxEqConfig,
         UpdateStatus = nexus_types::internal_api::views::UpdateStatus,
         UplinkAddressConfig = sled_agent_types::early_networking::UplinkAddressConfig,
+        UplinkPorts = sled_agent_types::early_networking::UplinkPorts,
         ZoneStatus = nexus_types::internal_api::views::ZoneStatus,
         ZpoolName = omicron_common::zpool_name::ZpoolName,
     },

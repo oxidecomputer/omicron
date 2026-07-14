@@ -18,6 +18,7 @@ use sled_agent_types::early_networking::PortConfig;
 use sled_agent_types::early_networking::RouterLifetimeConfig;
 use sled_agent_types::early_networking::RouterPeerIpAddr;
 use sled_agent_types::early_networking::SwitchSlot;
+use sled_agent_types::early_networking::UplinkPorts;
 use std::collections::BTreeMap;
 use test_strategy::proptest;
 use tokio::task::block_in_place;
@@ -50,7 +51,7 @@ fn rack_config(
         rack_subnet: "fd00::/48".parse().unwrap(),
         infra_ip_first: "10.0.0.1".parse().unwrap(),
         infra_ip_last: "10.0.0.100".parse().unwrap(),
-        ports,
+        ports: UplinkPorts::new(ports).unwrap(),
         bgp,
         bfd: Vec::new(),
     }

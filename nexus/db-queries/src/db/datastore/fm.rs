@@ -1637,9 +1637,12 @@ mod tests {
     use nexus_types::fm::ereport::{EreportData, Reporter};
     use omicron_common::api::external::Generation;
     use omicron_test_utils::dev;
+    use omicron_uuid_kinds::CaseEreportUuid;
     use omicron_uuid_kinds::CollectionUuid;
+    use omicron_uuid_kinds::EreporterRestartUuid;
     use omicron_uuid_kinds::FactUuid;
     use omicron_uuid_kinds::OmicronZoneUuid;
+    use omicron_uuid_kinds::RackUuid;
     use omicron_uuid_kinds::SupportBundleUuid;
     use std::collections::BTreeMap;
     use std::collections::BTreeSet;
@@ -2232,8 +2235,9 @@ mod tests {
         // In order to read sitreps with case ereport assignments, the
         // corresponding entries in the `ereport` table must also exist, so
         // we'll make those here first.
-        let restart_id = omicron_uuid_kinds::EreporterRestartUuid::new_v4();
+        let restart_id = EreporterRestartUuid::new_v4();
         let collector_id = OmicronZoneUuid::new_v4();
+        let rack_id = RackUuid::new_v4();
         let time_collected = Utc::now();
 
         let ereport1_id =
@@ -2266,6 +2270,7 @@ mod tests {
                 restart_id,
                 time_collected,
                 collector_id,
+                rack_id,
                 reporter,
                 vec![
                     (ereport1_id.ena, ereport1.clone()),
@@ -2281,7 +2286,7 @@ mod tests {
             let mut ereports = iddqd::IdOrdMap::new();
             ereports
                 .insert_unique(fm::case::CaseEreport {
-                    id: omicron_uuid_kinds::CaseEreportUuid::new_v4(),
+                    id: CaseEreportUuid::new_v4(),
                     ereport: Arc::new(fm::Ereport::new(
                         ereport1_id,
                         time_collected,

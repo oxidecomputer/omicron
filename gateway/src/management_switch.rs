@@ -2,8 +2,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-// Copyright 2022 Oxide Computer Company
-
 //!
 //! Long-running task responsible for tracking the topology of the SPs connected
 //! to the management network switch ports.

@@ -7,10 +7,15 @@ edition.workspace = true
 workspace = true
 
 [dependencies]
+iddqd.workspace = true
 ipnetwork.workspace = true
 nexus-types.workspace = true
+omicron-uuid-kinds.workspace = true
 omicron-workspace-hack.workspace = true
 oxnet.workspace = true
 sled-agent-types.workspace = true
-slog.workspace = true
-slog-error-chain.workspace = true
+
+[dev-dependencies]
+omicron-common.workspace = true
+proptest.workspace = true
+test-strategy.workspace = true

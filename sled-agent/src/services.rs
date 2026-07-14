@@ -84,6 +84,7 @@ use omicron_common::backoff::{
 use omicron_common::disk::{DatasetKind, DatasetName};
 use omicron_ddm_admin_client::DdmError;
 use omicron_uuid_kinds::OmicronZoneUuid;
+use omicron_uuid_kinds::RackUuid;
 use sled_agent_early_networking::{EarlyNetworkSetup, EarlyNetworkSetupError};
 use sled_agent_resolvable_files::{
     ZoneImageSourceResolver, ramdisk_file_source,
@@ -624,7 +625,7 @@ pub(crate) struct SledAgentInfo {
     pub(crate) resolver: Resolver,
     pub(crate) underlay_address: Ipv6Addr,
     pub(crate) local_switch_zone_ip: ThisSledSwitchZoneUnderlayIpAddr,
-    pub(crate) rack_id: Uuid,
+    pub(crate) rack_id: RackUuid,
     pub(crate) network_config_rx: watch::Receiver<SystemNetworkingConfig>,
     pub(crate) metrics_queue: MetricsRequestQueue,
 }

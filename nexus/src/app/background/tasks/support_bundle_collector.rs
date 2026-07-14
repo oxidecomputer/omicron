@@ -735,7 +735,7 @@ mod test {
     use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::{
         BlueprintUuid, DatasetUuid, EreporterRestartUuid, OmicronZoneUuid,
-        PhysicalDiskUuid, SledUuid,
+        PhysicalDiskUuid, RackUuid, SledUuid,
     };
     use sled_agent_types::inventory::ZpoolHealth;
     use std::num::NonZeroU64;
@@ -862,7 +862,8 @@ mod test {
         let sp_restart_id = EreporterRestartUuid::new_v4();
         let time_collected = chrono::Utc::now();
         let collector_id = OmicronZoneUuid::new_v4();
-        datastore.ereports_insert(&opctx, sp_restart_id, time_collected, collector_id, Reporter::Sp { sp_type: SpType::Sled, slot: SLED_SLOT}, vec![
+        let rack_id = RackUuid::new_v4();
+        datastore.ereports_insert(&opctx, sp_restart_id, time_collected, collector_id, rack_id, Reporter::Sp { sp_type: SpType::Sled, slot: SLED_SLOT}, vec![
             (ereport_types::Ena(1), EreportData {
                 part_number: Some(GIMLET_PN.to_string()),
                 serial_number: Some(SP_SERIAL.to_string()),
@@ -887,6 +888,7 @@ mod test {
                 sp_restart_id2,
                 time_collected,
                 collector_id,
+                rack_id,
                 Reporter::Sp { sp_type: SpType::Sled, slot: SLED_SLOT },
                 vec![(
                     ereport_types::Ena(1),
@@ -912,6 +914,7 @@ mod test {
                 sp2_restart_id,
                 time_collected,
                 OmicronZoneUuid::new_v4(),
+                rack_id,
                 Reporter::Sp { sp_type: SpType::Switch, slot: 1 },
                 vec![(
                     ereport_types::Ena(1),
@@ -935,6 +938,7 @@ mod test {
                 sled1_restart_id,
                 time_collected,
                 collector_id,
+                rack_id,
                 Reporter::HostOs {
                     sled: SledUuid::new_v4(),
                     slot: Some(SLED_SLOT),
@@ -972,6 +976,7 @@ mod test {
                 sled2_restart_id,
                 time_collected,
                 OmicronZoneUuid::new_v4(),
+                rack_id,
                 Reporter::HostOs { sled: SledUuid::new_v4(), slot: Some(SLED_SLOT) },
                 vec![
                     (ereport_types::Ena(1), EreportData {

@@ -4,8 +4,6 @@
 
 //! OxQL shell implementation.
 
-// Copyright 2026 Oxide Computer
-
 use super::{list_timeseries, prepare_columns};
 use crate::{Client, OxqlResult, make_client, oxql::query::QueryAuthzScope};
 use clap::Args;

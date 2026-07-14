@@ -349,9 +349,13 @@ fn populate_uplink_table(cfg: &UserSpecifiedPortConfig) -> Table {
     // This style ensures that if a new field is added, this fails loudly.
     let manual_port_config = match cfg {
         UserSpecifiedPortConfig::Manual(manual) => manual,
-        UserSpecifiedPortConfig::DdmAutoPortConfig {} => {
+        UserSpecifiedPortConfig::DdmAutoPortConfig => {
+            // A DDM-auto port is encoded as an empty table (the comment is
+            // operator-facing).
             let mut uplink = Table::new();
-            uplink.insert("type", string_item("ddm_auto_port_config"));
+            uplink.decor_mut().set_prefix(
+                "\n# This port is configured automatically via DDM.\n",
+            );
             return uplink;
         }
     };

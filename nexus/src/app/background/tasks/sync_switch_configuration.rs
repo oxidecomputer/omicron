@@ -18,11 +18,9 @@ use slog::{Logger, o};
 use internal_dns_resolver::Resolver;
 use ipnetwork::IpNetwork;
 use nexus_db_model::{
-    AddressLotBlock, BgpConfig, BootstoreConfig, INFRA_LOT, LoopbackAddress,
-    NETWORK_KEY,
+    BgpConfig, BootstoreConfig, LoopbackAddress, NETWORK_KEY,
 };
 use tokio::sync::watch;
-use uuid::Uuid;
 
 use crate::app::background::BackgroundTask;
 use display_error_chain::DisplayErrorChain;
@@ -53,26 +51,23 @@ use nexus_db_queries::{
     context::OpContext,
     db::{DataStore, datastore::SwitchPortSettingsCombinedResult},
 };
-use nexus_switch_config::{
-    AddressInput, BgpConfigInput, LinkInput, LldpInput, PortInput,
-    RackNetworkConfigInput,
-};
 use nexus_types::external_api::networking;
 use nexus_types::identity::{Asset, Resource};
+use nexus_types::internal_api::background::IncompleteBootstoreConfigReport;
+use nexus_types::internal_api::background::SwitchPortSettingsManagerStatus;
 use omicron_common::OMICRON_DPD_TAG;
 use omicron_common::{
     address::{Ipv6Subnet, get_sled_address},
     api::external::DataPageParams,
 };
+use omicron_uuid_kinds::{BgpAnnounceSetUuid, BgpConfigUuid, GenericUuid};
 use serde_json::json;
 use sled_agent_client::types::HostPortConfig;
-use sled_agent_types::early_networking::BfdPeerConfig;
 use sled_agent_types::early_networking::EarlyNetworkConfigEnvelope;
 use sled_agent_types::early_networking::InvalidIpAddrError;
 use sled_agent_types::early_networking::LldpAdminStatus;
 use sled_agent_types::early_networking::LldpPortConfig;
 use sled_agent_types::early_networking::RackNetworkConfig;
-use sled_agent_types::early_networking::RouteConfig;
 use sled_agent_types::early_networking::RouterPeerType;
 use sled_agent_types::early_networking::SwitchSlot;
 use sled_agent_types::early_networking::TxEqConfig;
@@ -83,7 +78,7 @@ use sled_agent_types::system_networking::SystemNetworkingConfig;
 use sled_agent_types::system_networking::WriteNetworkConfigRequest;
 use slog_error_chain::InlineErrorChain;
 use std::{
-    collections::{BTreeMap, HashMap, HashSet, hash_map::Entry},
+    collections::{HashMap, HashSet, hash_map::Entry},
     hash::Hash,
     net::{IpAddr, SocketAddr},
     str::FromStr,
@@ -301,6 +296,8 @@ impl BackgroundTask for SwitchPortSettingsManager {
                 },
             };
 
+            let mut status = SwitchPortSettingsManagerStatus::default();
+
             // TODO: https://github.com/oxidecomputer/omicron/issues/3090
             // Here we're iterating over racks because that's technically the correct thing to do,
             // but our logic for pulling switch ports and their related configurations
@@ -505,10 +502,10 @@ impl BackgroundTask for SwitchPortSettingsManager {
                         > = HashMap::new();
 
                 // we currently only support one bgp config per switch
-                let mut switch_bgp_config: HashMap<SwitchSlot, (Uuid, BgpConfig)> = HashMap::new();
+                let mut switch_bgp_config: HashMap<SwitchSlot, (BgpConfigUuid, BgpConfig)> = HashMap::new();
 
                 // Prefixes are associated to BgpConfig via the config id
-                let mut bgp_announce_prefixes: HashMap<Uuid, Vec<IpNet>> = HashMap::new();
+                let mut bgp_announce_prefixes: HashMap<BgpAnnounceSetUuid, Vec<IpNet>> = HashMap::new();
 
                 for (switch_slot, port, change) in &changes {
                     let PortSettingsChange::Apply(settings) = change else {
@@ -548,7 +545,12 @@ impl BackgroundTask for SwitchPortSettingsManager {
                                 // get the bgp config for this peer
                                 let config = match self
                                     .datastore
-                                    .bgp_config_get(opctx, &bgp_config_id.into())
+                                    .bgp_config_get(
+                                        opctx,
+                                        &bgp_config_id
+                                            .into_untyped_uuid()
+                                            .into(),
+                                    )
                                     .await
                                 {
                                     Ok(config) => config,
@@ -575,14 +577,15 @@ impl BackgroundTask for SwitchPortSettingsManager {
                         // Same thing as above, check to see if we've already built the announce set,
                         // if so we'll skip this step
                         #[allow(clippy::map_entry)]
-                        if !bgp_announce_prefixes.contains_key(&bgp_config.bgp_announce_set_id) {
+                        if !bgp_announce_prefixes.contains_key(&bgp_config.bgp_announce_set_id()) {
                             let announcements = match self
                                 .datastore
                                 .bgp_announcement_list(
                                     opctx,
                                     &networking::BgpAnnounceSetSelector {
                                         announce_set: bgp_config
-                                            .bgp_announce_set_id
+                                            .bgp_announce_set_id()
+                                            .into_untyped_uuid()
                                             .into(),
                                     },
                                 )
@@ -594,7 +597,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                                         log,
                                         "error while fetching bgp announcements from db";
                                         "switch_slot" => ?switch_slot,
-                                        "bgp_announce_set_id" => %bgp_config.bgp_announce_set_id,
+                                        "bgp_announce_set_id" => %bgp_config.bgp_announce_set_id(),
                                         "error" => %DisplayErrorChain::new(&e)
                                     );
                                     continue;
@@ -615,7 +618,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                                     },
                                 };
                             }
-                            bgp_announce_prefixes.insert(bgp_config.bgp_announce_set_id, prefixes);
+                            bgp_announce_prefixes.insert(bgp_config.bgp_announce_set_id(), prefixes);
                         }
 
                         // NOTE: this mgd-apply path re-reads each peer's
@@ -881,14 +884,14 @@ impl BackgroundTask for SwitchPortSettingsManager {
                     };
 
                     let request_prefixes = match bgp_announce_prefixes.get(
-                        &request_bgp_config.bgp_announce_set_id) {
+                        &request_bgp_config.bgp_announce_set_id()) {
                         Some(prefixes) => prefixes,
                         None => {
                             error!(
                                 log,
                                 "no prefixes to announce found for bgp config";
                                 "switch" => ?switch_slot,
-                                "announce_set_id" => ?request_bgp_config.bgp_announce_set_id,
+                                "announce_set_id" => ?request_bgp_config.bgp_announce_set_id(),
                                 "bgp_config_id" => ?config_id,
                             );
                             continue;
@@ -965,94 +968,50 @@ impl BackgroundTask for SwitchPortSettingsManager {
                 // calculate and apply bootstore changes
                 //
 
-                let ports: Vec<PortInput> = changes
-                    .iter()
-                    .filter_map(|(switch_slot, port, change)| match change {
-                        PortSettingsChange::Apply(info) => {
-                            Some(port_input_from_db(*switch_slot, port, info))
-                        }
-                        PortSettingsChange::Clear => None,
-                    })
-                    .collect();
-
-                let bgp_configs: BTreeMap<SwitchSlot, BgpConfigInput> =
-                    switch_bgp_config
-                        .iter()
-                        .map(|(switch_slot, (_id, config))| {
-                            let originate = bgp_announce_prefixes
-                                .get(&config.bgp_announce_set_id)
-                                .expect(
-                                    "bgp config is present but announce set \
-                                     is not populated",
-                                )
-                                .clone();
-                            (
-                                *switch_slot,
-                                BgpConfigInput {
-                                    asn: config.asn.0,
-                                    originate,
-                                    checker: config.checker.clone(),
-                                    shaper: config.shaper.clone(),
-                                    max_paths: *config.max_paths,
-                                },
-                            )
-                        })
-                        .collect();
-
-                // Read the infra IP range and BFD configuration; the builder
-                // itself is a pure, in-memory computation.
-                let blocks = match self
-                    .datastore
-                    .address_lot_blocks_by_name(opctx, INFRA_LOT.into())
-                    .await
+                let input = match nexus_switch_config_preparation::read_and_assemble(
+                    &self.datastore,
+                    opctx,
+                    &log,
+                    rack.rack_subnet,
+                )
+                .await
                 {
-                    Ok(blocks) => blocks,
+                    Ok(input) => input,
                     Err(e) => {
-                        error!(log, "error while fetching address lot blocks from db"; "error" => %e);
+                        error!(
+                            log,
+                            "failed to read bootstore network config; \
+                             skipping rack";
+                            "error" => InlineErrorChain::new(&e),
+                        );
                         continue;
                     }
                 };
-
-                // currently there should only be one block assigned. If there is more than one
-                // block, grab the first one and emit a warning.
-                if blocks.len() > 1 {
-                    warn!(log, "more than one block assigned to infra lot"; "blocks" => ?blocks);
-                }
-
-                let (infra_ip_first, infra_ip_last) = match blocks.get(0) {
-                    Some(AddressLotBlock { first_address, last_address, .. }) => {
-                        (first_address.ip(), last_address.ip())
-                    }
-                    None => {
-                        error!(log, "no blocks assigned to infra lot");
-                        continue;
-                    }
-                };
-
-                let bfd =
-                    match bfd_peer_configs_from_db(&self.datastore, opctx).await
-                    {
-                        Ok(bfd) => bfd,
-                        Err(e) => {
-                            error!(log, "error fetching bfd config from db"; "error" => %e);
-                            continue;
-                        }
-                    };
 
                 let rack_network_config =
                     match nexus_switch_config::build_rack_network_config(
-                        &log,
-                        RackNetworkConfigInput {
-                            rack_subnet: rack.rack_subnet,
-                            bgp_configs,
-                            ports,
-                            infra_ip_first,
-                            infra_ip_last,
-                            bfd,
-                        },
+                        input,
                     ) {
-                        Some(rack_network_config) => rack_network_config,
-                        None => continue,
+                        Ok(rack_network_config) => rack_network_config,
+                        Err(report) => {
+                            error!(
+                                log,
+                                "incomplete bootstore network config; \
+                                 skipping rack";
+                                "problems" => %report,
+                            );
+                            status.incomplete_bootstore_configs.push(
+                                IncompleteBootstoreConfigReport {
+                                    rack_id: rack.id(),
+                                    problems: report
+                                        .problems
+                                        .iter()
+                                        .map(|problem| problem.to_string())
+                                        .collect(),
+                                },
+                            );
+                            continue;
+                        }
                     };
 
                 let (
@@ -1282,7 +1241,14 @@ impl BackgroundTask for SwitchPortSettingsManager {
                     }
                 }
             }
-            json!({})
+            // TODO: we have some early returns in this task. We should instead
+            // collect all problems and return them in the response.
+            //
+            // As part of that, we should move the body into an
+            // `activate_impl(...)` function which returns a
+            // `SwitchPortManagerStatus`. That'll force us to not do early
+            // returns.
+            json!(status)
         }
         .boxed()
     }
@@ -1295,107 +1261,6 @@ where
     let left = left.iter().collect::<HashSet<&T>>();
     let right = right.iter().collect::<HashSet<&T>>();
     left == right
-}
-
-/// Translate a port's applied database settings into the [`PortInput`] consumed
-/// by the bootstore config builder.
-fn port_input_from_db(
-    switch: SwitchSlot,
-    port: &nexus_db_model::SwitchPort,
-    info: &SwitchPortSettingsCombinedResult,
-) -> PortInput {
-    PortInput {
-        switch,
-        port_name: port.port_name.to_string(),
-        bgp_peers: info
-            .bgp_peers
-            .iter()
-            .map(|peer| peer.as_bgp_peer().clone())
-            .collect(),
-        addresses: info
-            .addresses
-            .iter()
-            .map(|a| AddressInput { address: a.address, vlan_id: a.vlan_id })
-            .collect(),
-        links: info
-            .links
-            .iter()
-            .map(|l| LinkInput {
-                autoneg: l.autoneg,
-                fec: l.fec.map(Into::into),
-                speed: l.speed.into(),
-            })
-            .collect(),
-        routes: info
-            .routes
-            .iter()
-            .map(|r| RouteConfig {
-                destination: r.dst.into(),
-                nexthop: r.gw.ip(),
-                vlan_id: r.vid.map(|x| x.0),
-                rib_priority: r.rib_priority.map(|x| x.0),
-            })
-            .collect(),
-        lldp: info
-            .link_lldp
-            .iter()
-            .map(|c| LldpInput {
-                enabled: c.enabled,
-                link_name: c.link_name.clone(),
-                link_description: c.link_description.clone(),
-                chassis_id: c.chassis_id.clone(),
-                system_name: c.system_name.clone(),
-                system_description: c.system_description.clone(),
-                management_ip: c.management_ip.map(|a| a.ip()),
-            })
-            .collect(),
-        tx_eq: info
-            .tx_eq
-            .iter()
-            .map(|c| TxEqConfig {
-                pre1: c.pre1,
-                pre2: c.pre2,
-                main: c.main,
-                post2: c.post2,
-                post1: c.post1,
-            })
-            .collect(),
-    }
-}
-
-async fn bfd_peer_configs_from_db(
-    datastore: &DataStore,
-    opctx: &OpContext,
-) -> Result<Vec<BfdPeerConfig>, omicron_common::api::external::Error> {
-    let db_data =
-        datastore.bfd_session_list(opctx, &DataPageParams::max_page()).await?;
-
-    let mut result = Vec::new();
-    for spec in db_data.into_iter() {
-        let config = BfdPeerConfig {
-            local: spec.local.map(|x| x.ip()),
-            remote: spec.remote.ip(),
-            detection_threshold: spec
-                .detection_threshold
-                .0
-                .try_into()
-                .map_err(|_| {
-                    omicron_common::api::external::Error::InternalError {
-                        internal_message: format!(
-                            "db_bfd_peer_configs: detection threshold \
-                             overflow: {}",
-                            spec.detection_threshold.0,
-                        ),
-                    }
-                })?,
-            required_rx: spec.required_rx.0.into(),
-            mode: spec.mode.into(),
-            switch: spec.switch_slot.into(),
-        };
-        result.push(config);
-    }
-
-    Ok(result)
 }
 
 /// Ensure that a loopback address is created.
@@ -2307,7 +2172,7 @@ fn does_bootstore_need_update(
 
         let rnc_differs = !hashset_eq(current_bgp, desired_bgp)
             || !hashset_eq(current_bfd, desired_bfd)
-            || !hashset_eq(current_ports, desired_ports)
+            || !hashset_eq(current_ports.as_slice(), desired_ports.as_slice())
             || current_subnet != desired_subnet
             || current_infra_ip_first != desired_infra_ip_first
             || current_infra_ip_last != desired_infra_ip_last;
@@ -2386,6 +2251,8 @@ mod tests {
     use omicron_common::api::external::Generation;
     use omicron_common::api::external::Vni;
     use omicron_test_utils::dev::test_setup_log;
+    use sled_agent_types::early_networking::PortConfig;
+    use sled_agent_types::early_networking::UplinkPorts;
     use sled_agent_types::inventory::SourceNatConfigGeneric;
     use sled_agent_types::system_networking::ServiceZoneNatEntries;
     use sled_agent_types::system_networking::ServiceZoneNatEntry;
@@ -2396,7 +2263,9 @@ mod tests {
             rack_subnet: rack_subnet.parse().unwrap(),
             infra_ip_first: "172.20.15.21".parse().unwrap(),
             infra_ip_last: "172.20.15.22".parse().unwrap(),
-            ports: vec![],
+            // `UplinkPorts` must be non-empty -- use a single placeholder port.
+            ports: UplinkPorts::new(vec![PortConfig::empty_for_tests("qsfp0")])
+                .expect("placeholder port list is non-empty"),
             bgp: vec![],
             bfd: vec![],
         }

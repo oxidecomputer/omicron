@@ -12,7 +12,11 @@ use gateway_test_utils::setup::GatewayTestContext;
 use httpmock::Mock;
 use httpmock::MockServer;
 use omicron_test_utils::dev;
+use sled_agent_types::early_networking::LinkSpeed;
+use sled_agent_types::early_networking::PortConfig;
 use sled_agent_types::early_networking::RackNetworkConfig;
+use sled_agent_types::early_networking::SwitchSlot;
+use sled_agent_types::early_networking::UplinkPorts;
 use std::time::Duration;
 
 // For "happy path" tests, we spin up a real MGS instances (pointed at a
@@ -51,13 +55,32 @@ struct Harness<T> {
 
 impl<T: MgsFlavor> Harness<T> {
     fn new_common(logctx: LogContext, mgs: T) -> Self {
+        // The tests in this module don't care about the details of the network
+        // config uplink ports, but we're required by construction to have a
+        // nonempty set.
+        fn any_uplink_ports() -> UplinkPorts {
+            UplinkPorts::new(vec![PortConfig {
+                routes: Vec::new(),
+                addresses: Vec::new(),
+                switch: SwitchSlot::Switch0,
+                port: "does-not-matter".to_owned(),
+                uplink_port_speed: LinkSpeed::Speed0G,
+                uplink_port_fec: None,
+                bgp_peers: Vec::new(),
+                autoneg: false,
+                lldp: None,
+                tx_eq: None,
+            }])
+            .unwrap()
+        }
+
         let (networking_config_tx, _) =
             watch::channel(SystemNetworkingConfig {
                 rack_network_config: RackNetworkConfig {
                     rack_subnet: "fd00:1122:3344:0100::/56".parse().unwrap(),
                     infra_ip_first: "192.0.2.10".parse().unwrap(),
                     infra_ip_last: "192.0.2.100".parse().unwrap(),
-                    ports: Vec::new(),
+                    ports: any_uplink_ports(),
                     bgp: Vec::new(),
                     bfd: Vec::new(),
                 },

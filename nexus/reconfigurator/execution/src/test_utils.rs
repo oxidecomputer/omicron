@@ -111,8 +111,13 @@ pub fn overridables_for_test(
         let ip = Ipv6Addr::LOCALHOST;
         let mgs_port =
             cptestctx.gateway.get(&switch_slot).unwrap().address().port();
-        let dendrite_port =
-            cptestctx.dendrite.read().unwrap().get(&switch_slot).unwrap().port;
+        let dendrite_port = cptestctx
+            .dendrite
+            .read()
+            .unwrap()
+            .get(&switch_slot)
+            .unwrap()
+            .port();
         let mgd_port = cptestctx.mgd.get(&switch_slot).unwrap().port;
         let ddm_port = cptestctx.ddm.get(&switch_slot).unwrap().port;
         overrides.override_switch_zone_ip(sled_id, ip);

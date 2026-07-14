@@ -18,6 +18,7 @@ use sled_agent_types::early_networking::RackNetworkConfig;
 use sled_agent_types::early_networking::RouteConfig;
 use sled_agent_types::early_networking::SwitchSlot;
 use sled_agent_types::early_networking::UplinkIpNet;
+use sled_agent_types::early_networking::UplinkPorts;
 use std::collections::BTreeMap;
 use test_strategy::proptest;
 use tokio::task::block_in_place;
@@ -89,7 +90,7 @@ fn rack_config(ports: Vec<PortConfig>) -> RackNetworkConfig {
         rack_subnet: "fd00::/48".parse().unwrap(),
         infra_ip_first: "10.0.0.1".parse().unwrap(),
         infra_ip_last: "10.0.0.100".parse().unwrap(),
-        ports,
+        ports: UplinkPorts::new(ports).unwrap(),
         bgp: Vec::new(),
         bfd: Vec::new(),
     }
@@ -199,8 +200,9 @@ fn plan_delete_all() {
     let logctx = dev::test_setup_log("plan_delete_all");
     let log = &logctx.log;
 
-    // Desired: no routes.
-    let config = rack_config(vec![]);
+    // Desired config: no ports for our switch.
+    let config =
+        rack_config(vec![port_config(SwitchSlot::Switch1, Vec::new())]);
 
     // mgd has two routes.
     let current = mgd_routes(
@@ -439,7 +441,9 @@ fn plan_rejects_bad_mgd_prefix() {
     let logctx = dev::test_setup_log("plan_rejects_bad_mgd_prefix");
     let log = &logctx.log;
 
-    let config = rack_config(vec![]);
+    // Desired config: no ports for our switch.
+    let config =
+        rack_config(vec![port_config(SwitchSlot::Switch1, Vec::new())]);
 
     // mgd returns an unparseable prefix.
     let current = mgd_routes(
@@ -506,7 +510,9 @@ fn plan_rejects_ipv6_prefix_with_ipv4_nexthop_from_mgd() {
     );
     let log = &logctx.log;
 
-    let config = rack_config(vec![]);
+    // Desired config: no ports for our switch.
+    let config =
+        rack_config(vec![port_config(SwitchSlot::Switch1, Vec::new())]);
 
     // mgd has a v6 prefix but a v4 nexthop.
     let current = mgd_routes(
@@ -535,7 +541,11 @@ fn plan_both_empty() {
     let logctx = dev::test_setup_log("plan_both_empty");
     let log = &logctx.log;
 
-    let config = rack_config(vec![]);
+    // Desired config: no ports for our switch.
+    let config =
+        rack_config(vec![port_config(SwitchSlot::Switch1, Vec::new())]);
+
+    // Current settings: no ports for our switch.
     let current = mgd_routes(vec![], vec![]);
 
     let plan = ReconciliationPlan::new(

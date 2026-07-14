@@ -15,6 +15,7 @@ use omicron_uuid_kinds::AlertReceiverUuid;
 use omicron_uuid_kinds::AlertUuid;
 use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::CollectionUuid;
+use omicron_uuid_kinds::RackUuid;
 use omicron_uuid_kinds::SitrepUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::SupportBundleUuid;
@@ -1024,6 +1025,9 @@ pub struct FmRendezvousStatus {
         fm_rendezvous::OpStatus<fm_rendezvous::SupportBundleCreationStatus>,
     pub ereport_marking:
         fm_rendezvous::OpStatus<fm_rendezvous::EreportMarkingStatus>,
+    pub alert_marker_gc: fm_rendezvous::OpStatus<fm_rendezvous::MarkerGcStatus>,
+    pub support_bundle_marker_gc:
+        fm_rendezvous::OpStatus<fm_rendezvous::MarkerGcStatus>,
 }
 
 impl FmRendezvousStatus {
@@ -1099,6 +1103,21 @@ pub mod fm_rendezvous {
         /// fresher activation will retry them.
         pub stale_sitrep: bool,
         /// Errors that occurred during this activation.
+        pub errors: Vec<String>,
+    }
+
+    /// Per-activation statistics for a `rendezvous_*_created` marker-table
+    /// GC sweep.
+    ///
+    /// Used for both `rendezvous_alert_created` and
+    /// `rendezvous_support_bundle_created` since the shape is identical.
+    #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+    pub struct MarkerGcStatus {
+        /// Number of marker rows deleted by this activation's sweep.
+        pub rows_deleted: usize,
+        /// Number of pages the sweep executed.
+        pub batches: usize,
+        /// Errors from this activation's sweep.
         pub errors: Vec<String>,
     }
 
@@ -1223,6 +1242,24 @@ pub struct SwitchPortPopulatorStatus {
     pub switch0: Result<SwitchPortPopulatorStatusKind, String>,
     /// Result of populating switch 1's ports, if any.
     pub switch1: Result<SwitchPortPopulatorStatusKind, String>,
+}
+
+/// The status of a `sync_switch_configuration` background task activation.
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+pub struct SwitchPortSettingsManagerStatus {
+    /// Racks skipped because a complete bootstore network config could not be
+    /// built from their switch port settings.
+    pub incomplete_bootstore_configs: Vec<IncompleteBootstoreConfigReport>,
+}
+
+/// A rack that `sync_switch_configuration` skipped because its bootstore network
+/// config could not be built completely.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub struct IncompleteBootstoreConfigReport {
+    /// The rack that was skipped.
+    pub rack_id: RackUuid,
+    /// The list of problems encountered.
+    pub problems: Vec<String>,
 }
 
 /// The status of a `session_cleanup` background task activation.

@@ -20,6 +20,7 @@ use sled_agent_types::early_networking::SwitchSlot;
 use sled_agent_types::early_networking::UplinkAddress;
 use sled_agent_types::early_networking::UplinkAddressConfig;
 use sled_agent_types::early_networking::UplinkIpNet;
+use sled_agent_types::early_networking::UplinkPorts;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::collections::HashMap;
@@ -92,7 +93,7 @@ fn rack_config(ports: Vec<PortConfig>) -> RackNetworkConfig {
         rack_subnet: "fd00::/48".parse().unwrap(),
         infra_ip_first: "10.0.0.1".parse().unwrap(),
         infra_ip_last: "10.0.0.100".parse().unwrap(),
-        ports,
+        ports: UplinkPorts::new(ports).unwrap(),
         bgp: Vec::new(),
         bfd: Vec::new(),
     }
@@ -197,8 +198,15 @@ fn plan_clear_all() {
     let qsfp0: DpdQsfp = "qsfp0".parse().unwrap();
     let qsfp1: DpdQsfp = "qsfp1".parse().unwrap();
 
-    // Desired config: no ports.
-    let config = rack_config(vec![]);
+    // Desired config: no ports for our switch.
+    let config = rack_config(vec![port_config(
+        &qsfp0,
+        SwitchSlot::Switch1,
+        LinkSpeed::Speed100G,
+        Some(LinkFec::Rs),
+        true,
+        &[],
+    )]);
 
     // dpd has settings for two ports.
     let dpd_current = BTreeMap::from([
@@ -425,7 +433,15 @@ fn plan_rejects_multi_link_dpd_port() {
     let log = &logctx.log;
 
     let qsfp0: DpdQsfp = "qsfp0".parse().unwrap();
-    let config = rack_config(vec![]);
+    // Desired config: no ports for our switch.
+    let config = rack_config(vec![port_config(
+        &qsfp0,
+        SwitchSlot::Switch1,
+        LinkSpeed::Speed100G,
+        Some(LinkFec::Rs),
+        true,
+        &[],
+    )]);
 
     // Build DpdPortSettings with two links -- this is not representable in
     // RackNetworkConfig and should cause plan generation to fail.
@@ -609,8 +625,10 @@ impl TestInput {
 
     // Map all our arbitrary inputs into the desired `RackNetworkConfig`.
     fn desired_rack_config(&self) -> RackNetworkConfig {
-        let switch0 =
-            self.ports.iter().filter_map(|(port_id, input)| match input {
+        let mut switch0 = self
+            .ports
+            .iter()
+            .filter_map(|(port_id, input)| match input {
                 SwitchPortSettingsTestInput::DesiredSwitch0(switch0)
                 | SwitchPortSettingsTestInput::DpdAndSwitch0Same(switch0)
                 | SwitchPortSettingsTestInput::DpdAndSwitch0Changed {
@@ -623,9 +641,12 @@ impl TestInput {
                 )),
                 SwitchPortSettingsTestInput::DpdOnly(_)
                 | SwitchPortSettingsTestInput::DesiredSwitch1(_) => None,
-            });
-        let switch1 =
-            self.ports.iter().filter_map(|(port_id, input)| match input {
+            })
+            .peekable();
+        let mut switch1 = self
+            .ports
+            .iter()
+            .filter_map(|(port_id, input)| match input {
                 SwitchPortSettingsTestInput::DesiredSwitch1(switch1) => {
                     Some(diffable_to_port_config(
                         SwitchSlot::Switch1,
@@ -639,8 +660,29 @@ impl TestInput {
                 | SwitchPortSettingsTestInput::DpdAndSwitch0Changed {
                     ..
                 } => None,
-            });
-        rack_config(switch0.chain(switch1).collect())
+            })
+            .peekable();
+
+        // RackNetworkConfig's ports must be nonempty. If we have no ports,
+        // insert an arbitrary switch1 port; this won't affect the proptests
+        // because they're exercising dpd on switch 0, but ensures we don't get
+        // type construction errors from `rack_config()`.
+        if switch0.peek().is_none() && switch1.peek().is_none() {
+            rack_config(vec![PortConfig {
+                routes: Vec::new(),
+                addresses: Vec::new(),
+                switch: SwitchSlot::Switch1,
+                port: "qsfp0".to_owned(),
+                uplink_port_speed: LinkSpeed::Speed0G,
+                uplink_port_fec: None,
+                bgp_peers: Vec::new(),
+                autoneg: false,
+                lldp: None,
+                tx_eq: None,
+            }])
+        } else {
+            rack_config(switch0.chain(switch1).collect())
+        }
     }
 
     // Build the set of expected unchanged port names based on our arbitrary
@@ -830,10 +872,10 @@ async fn proptest_full_reconciliation() {
         SpPort::One,
     )
     .await;
-    let mut dpdctx = dev::dendrite::DendriteInstance::start(
-        0,
+    let dpdctx = dev::dendrite::DendriteInstance::start(
         None,
-        Some(mgsctx.address().into()),
+        mgsctx.address().into(),
+        &logctx.log,
     )
     .await
     .expect("started dendrite");
