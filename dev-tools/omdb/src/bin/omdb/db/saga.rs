@@ -28,7 +28,7 @@ use nexus_db_model::SecId;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::datastore::SQL_BATCH_SIZE;
-use nexus_db_queries::db::datastore::saga::SagaStateDbFields;
+use nexus_db_queries::db::datastore::SagaStateDbFields;
 use nexus_db_queries::db::pagination::Paginator;
 use nexus_db_queries::db::pagination::paginated;
 use owo_colors::OwoColorize;
