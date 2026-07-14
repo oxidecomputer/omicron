@@ -2923,9 +2923,9 @@ CREATE TYPE IF NOT EXISTS omicron.public.saga_state AS ENUM (
  * Why a saga was abandoned (only set when `saga_state` is 'abandoned')
  */
 CREATE TYPE IF NOT EXISTS omicron.public.saga_abandon_reason AS ENUM (
-    /* an operator explicitly abandoned the saga via omdb */
+    /* the saga was explicitly abandoned via omdb */
     'omdb',
-    /* the saga failed and unwinding also failed, leaving it stuck */
+    /* during saga recovery, the persistent state was unable to processed */
     'unrecoverable'
 );
 

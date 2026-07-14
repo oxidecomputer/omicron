@@ -139,20 +139,9 @@ use omicron_common::api::external::Error;
 use omicron_common::api::external::InternalContext;
 use std::collections::BTreeMap;
 use std::sync::Arc;
-use std::time::Duration;
 use steno::SagaId;
 use steno::SagaStateView;
 use tokio::sync::mpsc;
-
-/// Maximum time to wait for a single saga-abandonment database write.
-///
-/// Abandonment runs inline in the saga recovery pass, and the datastore does
-/// not impose a SQL statement timeout, so without this bound a hung write could
-/// stall the entire pass, and with it all future recovery, since the background
-/// task won't re-activate until the current activation finishes.
-/// Abandonment is idempotent and retried on the next pass, so a timeout is
-/// safe.
-const SAGA_ABANDON_TIMEOUT: Duration = Duration::from_secs(15);
 
 /// Helpers used for saga recovery
 pub struct SagaRecoveryHelpers<N: MakeSagaContext> {
@@ -385,40 +374,29 @@ impl<N: MakeSagaContext> SagaRecoveryInner<N> {
                     "time_failed" => ?time,
                 );
 
-                // Abandoning is idempotent and best effort. The datastore write
-                // has no SQL statement timeout, so we bound it explicitly. A
-                // hung write must not stall the recovery pass. If it times out
-                // or errors, we log and move on. The saga stays a recovery
-                // candidate, so a later pass will try again.  Dropping the
-                // write future on timeout is safe. The only effect is this
-                // single, idempotent state transition.
-                let mark_abandoned = self.datastore.saga_update_state(
-                    *saga_id,
-                    SagaStateTransition::Abandoned {
-                        reason: SagaReasonAbandoned::Unrecoverable,
-                        information: message.clone(),
-                    },
-                    *sec_id,
-                );
-                match tokio::time::timeout(SAGA_ABANDON_TIMEOUT, mark_abandoned)
+                // Abandoning is idempotent and best effort. If it errors we
+                // log and move on. The saga stays a recovery candidate, so a
+                // later pass will try again.
+                match self
+                    .datastore
+                    .saga_update_state(
+                        *saga_id,
+                        SagaStateTransition::Abandoned {
+                            reason: SagaReasonAbandoned::Unrecoverable,
+                            information: message.clone(),
+                        },
+                        *sec_id,
+                    )
                     .await
                 {
-                    Ok(Ok(())) => {}
-                    Ok(Err(error)) => {
+                    Ok(()) => {}
+                    Err(error) => {
                         warn!(
                             log,
                             "failed to mark saga as abandoned; will retry on \
                             the next saga recovery pass";
                             "saga_id" => %saga_id,
                             "error" => %error,
-                        );
-                    }
-                    Err(_) => {
-                        warn!(
-                            log,
-                            "timed out marking saga as abandoned; will retry \
-                            on the next saga recovery pass";
-                            "saga_id" => %saga_id,
                         );
                     }
                 }
