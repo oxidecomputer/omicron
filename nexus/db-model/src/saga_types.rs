@@ -221,37 +221,95 @@ impl From<steno::SagaCachedState> for SagaState {
     }
 }
 
-/// Represents a row in the "Saga" table
+/// Represents a raw row in the "saga" table.
+///
+/// This is the type Diesel reads and writes directly. It can represent states
+/// that should never produced (for example, abandonment metadata columns set
+/// without the saga being `Abandoned`), so it isn't constructed directly.
+/// Reads produce it via `Queryable` and immediately validate it into [`Saga`]
+/// (`Saga::try_from`). Writes lower a validated [`Saga`] into it via
+/// `SagaRow::from(&saga)`.
+///
+/// This is `pub` only because Diesel needs to name the row type at query sites
+/// in other crates (like omdb). It's `#[doc(hidden)]` to signal that it's an
+/// internal type and not part of the supported API.
+#[doc(hidden)]
 #[derive(Queryable, Insertable, Clone, Debug, Selectable, PartialEq)]
 #[diesel(table_name = saga)]
-pub struct Saga {
-    pub id: SagaId,
-    pub creator: SecId,
-    pub time_created: chrono::DateTime<chrono::Utc>,
-    pub name: String,
-    pub saga_dag: serde_json::Value,
-    pub saga_state: SagaState,
-    pub current_sec: Option<SecId>,
-    pub adopt_generation: super::Generation,
-    pub adopt_time: chrono::DateTime<chrono::Utc>,
+pub struct SagaRow {
+    id: SagaId,
+    creator: SecId,
+    time_created: chrono::DateTime<chrono::Utc>,
+    name: String,
+    saga_dag: serde_json::Value,
+    saga_state: SagaState,
+    current_sec: Option<SecId>,
+    adopt_generation: super::Generation,
+    adopt_time: chrono::DateTime<chrono::Utc>,
 
-    /// Abandonment metadata. These are only set when `saga_state` is
-    /// `Abandoned` and are `None` otherwise.
+    // Abandonment metadata. These are only set when `saga_state` is
+    // `Abandoned` and are `None` otherwise.
     abandon_time: Option<DateTime<Utc>>,
     abandon_reason: Option<SagaReasonAbandoned>,
     abandon_comment: Option<String>,
+}
+
+impl SagaRow {
+    pub fn id(&self) -> SagaId {
+        self.id
+    }
+
+    pub fn current_sec(&self) -> Option<SecId> {
+        self.current_sec
+    }
+
+    pub fn saga_state(&self) -> SagaState {
+        self.saga_state
+    }
+
+    pub fn creator(&self) -> SecId {
+        self.creator
+    }
+
+    pub fn adopt_generation(&self) -> super::Generation {
+        self.adopt_generation
+    }
 }
 
 /// Abandonment metadata for a saga.
 ///
 /// These three values are always written and cleared together, so bundling
 /// them keeps them "all or none". A saga is either not abandoned (no
-/// `AbandonInfo`) or fully abandoned (an `AbandonInfo` with every field set).
+/// `AbandonMetadata`) or fully abandoned (an `AbandonMetadata` with every field set).
 #[derive(Clone, Debug, PartialEq)]
-pub struct AbandonInfo {
+pub struct AbandonMetadata {
     pub time: DateTime<Utc>,
     pub reason: SagaReasonAbandoned,
     pub comment: String,
+}
+
+/// A saga loaded and validated from the database or built in memory for
+/// insertion.
+///
+/// Compared to [`SagaRow`], the three abandon metadata columns are bundled
+/// into a single private `abandon` field, kept all-or-none. It's populated
+/// only together with the `Abandoned` state, via [`Saga::set_abandoned`], and
+/// read via [`Saga::abandon_metadata`]. Reads go through `TryFrom<SagaRow>`,
+/// which rejects rows whose metadata is inconsistent with `saga_state` with an
+/// [`Error::internal_error`].
+#[derive(Clone, Debug, PartialEq)]
+pub struct Saga {
+    pub id: SagaId,
+    pub creator: SecId,
+    pub time_created: DateTime<Utc>,
+    pub name: String,
+    pub saga_dag: serde_json::Value,
+    pub saga_state: SagaState,
+    pub current_sec: Option<SecId>,
+    pub adopt_generation: super::Generation,
+    pub adopt_time: DateTime<Utc>,
+    // Abandon metadata, present only when `saga_state` is `Abandoned`.
+    abandon_metadata: Option<AbandonMetadata>,
 }
 
 impl Saga {
@@ -276,37 +334,119 @@ impl Saga {
             current_sec: Some(creator),
             adopt_generation: Generation::new().into(),
             adopt_time: now,
-            abandon_time: None,
-            abandon_reason: None,
-            abandon_comment: None,
+            // A newly-created saga is never abandoned.
+            abandon_metadata: None,
         }
     }
 
-    /// Returns this saga's abandonment metadata, or `None` if it isn't
-    /// abandoned.
-    ///
-    /// The three underlying columns are written and cleared as a unit (see
-    /// [`Saga::set_abandoned`] and [`Saga::new`]), and the
-    /// `abandoned_requires_metadata` database CHECK constraint keeps them
-    /// consistent with `saga_state`. So in practice they are either all set or
-    /// all `None`. A partially-populated row would be a bug, and is reported
-    /// here as "not abandoned".
-    pub fn abandon_info(&self) -> Option<AbandonInfo> {
-        match (self.abandon_time, self.abandon_reason, &self.abandon_comment) {
-            (Some(time), Some(reason), Some(comment)) => {
-                Some(AbandonInfo { time, reason, comment: comment.clone() })
-            }
-            _ => None, // TODO-K: Should probably log here? Or have an enum for invalid state
-        }
+    pub fn abandon_metadata(&self) -> Option<AbandonMetadata> {
+        self.abandon_metadata.clone()
     }
 
     /// Marks this saga abandoned with the required metadata.
-    pub fn set_abandoned(&mut self, info: AbandonInfo) {
-        let AbandonInfo { time, reason, comment } = info;
+    ///
+    /// Sets `saga_state` and the abandonment metadata together so they stay
+    /// all-or-none. This is the only way to populate `abandon_metadata` other
+    /// than loading a validated row from the database.
+    pub fn set_abandoned(&mut self, metadata: AbandonMetadata) {
         self.saga_state = SagaState::Abandoned;
-        self.abandon_time = Some(time);
-        self.abandon_reason = Some(reason);
-        self.abandon_comment = Some(comment);
+        self.abandon_metadata = Some(metadata);
+    }
+}
+
+impl TryFrom<SagaRow> for Saga {
+    type Error = Error;
+
+    fn try_from(row: SagaRow) -> Result<Self, Self::Error> {
+        let SagaRow {
+            id,
+            creator,
+            time_created,
+            name,
+            saga_dag,
+            saga_state,
+            current_sec,
+            adopt_generation,
+            adopt_time,
+            abandon_time,
+            abandon_reason,
+            abandon_comment,
+        } = row;
+
+        // Convert the three nullable abandonment columns into `AbandonMetadata`.
+        // A partially-populated set is impossible per the
+        // `abandoned_requires_metadata` CHECK constraint, so treat it as
+        // corruption.
+        let abandon_metadata =
+            match (abandon_time, abandon_reason, abandon_comment) {
+                (Some(time), Some(reason), Some(comment)) => {
+                    Some(AbandonMetadata { time, reason, comment })
+                }
+                (None, None, None) => None,
+                _ => {
+                    return Err(Error::internal_error(&format!(
+                        "saga {id}: abandonment metadata is partially populated"
+                    )));
+                }
+            };
+
+        // The metadata must be present exactly when the saga is abandoned.
+        match (saga_state == SagaState::Abandoned, abandon_metadata.is_some()) {
+            (true, false) => {
+                return Err(Error::internal_error(&format!(
+                    "saga {id}: abandoned but has no abandonment metadata"
+                )));
+            }
+            (false, true) => {
+                return Err(Error::internal_error(&format!(
+                    "saga {id}: has abandonment metadata but is not abandoned"
+                )));
+            }
+            (true, true) | (false, false) => {}
+        }
+
+        Ok(Saga {
+            id,
+            creator,
+            time_created,
+            name,
+            saga_dag,
+            saga_state,
+            current_sec,
+            adopt_generation,
+            adopt_time,
+            abandon_metadata,
+        })
+    }
+}
+
+/// Lowers a validated [`Saga`] into a raw [`SagaRow`] for insertion. This
+/// expands the all-or-none `abandon_metadata` back into the three nullable
+/// columns.
+impl From<&Saga> for SagaRow {
+    fn from(saga: &Saga) -> Self {
+        let (abandon_time, abandon_reason, abandon_comment) =
+            match &saga.abandon_metadata {
+                Some(AbandonMetadata { time, reason, comment }) => {
+                    (Some(*time), Some(*reason), Some(comment.clone()))
+                }
+                None => (None, None, None),
+            };
+
+        SagaRow {
+            id: saga.id,
+            creator: saga.creator,
+            time_created: saga.time_created,
+            name: saga.name.clone(),
+            saga_dag: saga.saga_dag.clone(),
+            saga_state: saga.saga_state,
+            current_sec: saga.current_sec,
+            adopt_generation: saga.adopt_generation,
+            adopt_time: saga.adopt_time,
+            abandon_time,
+            abandon_reason,
+            abandon_comment,
+        }
     }
 }
 
