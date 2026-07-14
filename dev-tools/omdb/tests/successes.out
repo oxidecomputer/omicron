@@ -721,6 +721,7 @@ task: "fm_analysis"
 
     analysis report:
       sitrep ID: ..........<REDACTED_UUID>...........
+      no analysis log
       no cases changed in this analysis step
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
 
@@ -1423,6 +1424,7 @@ task: "fm_analysis"
 
     analysis report:
       sitrep ID: ..........<REDACTED_UUID>...........
+      no analysis log
       no cases changed in this analysis step
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
 
