@@ -28,7 +28,6 @@ use crate::db::model::WebhookSecret;
 use crate::db::pagination::Paginator;
 use crate::db::pagination::paginated;
 use crate::db::pagination::paginated_multicolumn;
-use crate::db::update_and_check::UpdateAndCheck;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::prelude::*;
 use nexus_auth::authz::ApiResource;
@@ -350,20 +349,19 @@ impl DataStore {
             endpoint: params.endpoint.as_ref().map(ToString::to_string),
             time_modified: chrono::Utc::now(),
         };
-        let updated = diesel::update(rx_dsl::alert_receiver)
+        diesel::update(rx_dsl::alert_receiver)
             .filter(rx_dsl::id.eq(rx_id))
             .filter(rx_dsl::time_deleted.is_null())
             .set(update)
-            .check_if_exists(rx_id)
-            .execute_and_check(&conn)
+            .returning(AlertReceiver::as_returning())
+            .get_result_async(&*conn)
             .await
             .map_err(|e| {
                 public_error_from_diesel(
                     e,
                     ErrorHandler::NotFoundByResource(authz_rx),
                 )
-            })?;
-        Ok(updated.found)
+            })
     }
 
     pub async fn alert_rx_list(
@@ -696,6 +694,21 @@ impl DataStore {
         subscriptions: Vec<AlertRxSubscription>,
         conn: &async_bb8_diesel::Connection<DbConnection>,
     ) -> Result<Vec<AlertRxSubscription>, TransactionError<Error>> {
+        // XXX(eliza): this is a rather sad workaround for
+        // https://github.com/oxidecomputer/omicron/issues/10788, in which it
+        // turns out that `DatastoreCollection::insert_resource` will basically
+        // do just about the worst thing possible when given an empty list of
+        // resources to insert. Ideally, we would make it not fail with a SQL
+        // syntax error in that case, but since the function's argument is "a
+        // glob of more or less completely arbitrary Diesel which is probably
+        // not entirely unlike an INSERT statement", it is not immediately clear
+        // to me how it would be able to detect that you are trying to insert
+        // nothing. So, we'll guard against that here for now.
+        if subscriptions.is_empty() {
+            // Inserting nothing does nothing, returning nothing!
+            return Ok(Vec::new());
+        }
+
         <AlertReceiver as DatastoreCollection<AlertRxSubscription>>::insert_resource(
             rx_id.into_untyped_uuid(),
         diesel::insert_into(subscription_dsl::alert_subscription)
@@ -1172,6 +1185,7 @@ mod test {
     use nexus_db_lookup::LookupPath;
     use nexus_types::alert::test_alerts;
     use omicron_common::api::external::IdentityMetadataCreateParams;
+    use omicron_common::api::external::IdentityMetadataUpdateParams;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::AlertUuid;
 
@@ -1200,6 +1214,79 @@ mod test {
             )
             .await
             .expect("cant create ye webhook receiver!!!!")
+    }
+
+    #[tokio::test]
+    async fn test_webhook_rx_update_succeeds() {
+        let logctx = dev::test_setup_log("test_webhook_rx_update_succeeds");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+        let rx = create_receiver(datastore, opctx, "updated", Vec::new()).await;
+        let (authz_rx, _) = LookupPath::new(opctx, datastore)
+            .alert_receiver_id(rx.rx.id())
+            .fetch()
+            .await
+            .expect("receiver must exist");
+
+        let updated = datastore
+            .webhook_rx_update(
+                opctx,
+                &authz_rx,
+                alert::WebhookReceiverUpdate {
+                    identity: IdentityMetadataUpdateParams {
+                        name: None,
+                        description: Some("new description".to_string()),
+                    },
+                    endpoint: None,
+                },
+            )
+            .await
+            .expect("updating an existing receiver must succeed");
+        assert_eq!(updated.identity.description, "new description");
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_webhook_rx_update_fails_when_receiver_deleted() {
+        let logctx = dev::test_setup_log(
+            "test_webhook_rx_update_fails_when_receiver_deleted",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+        let rx = create_receiver(datastore, opctx, "deleted", Vec::new()).await;
+        let (authz_rx, db_rx) = LookupPath::new(opctx, datastore)
+            .alert_receiver_id(rx.rx.id())
+            .fetch()
+            .await
+            .expect("receiver must exist");
+
+        datastore
+            .webhook_rx_delete(opctx, &authz_rx, &db_rx)
+            .await
+            .expect("receiver must be deleted");
+        let err = datastore
+            .webhook_rx_update(
+                opctx,
+                &authz_rx,
+                alert::WebhookReceiverUpdate {
+                    identity: IdentityMetadataUpdateParams {
+                        name: None,
+                        description: Some("updated".to_string()),
+                    },
+                    endpoint: None,
+                },
+            )
+            .await
+            .expect_err("updating a deleted receiver must fail");
+        assert!(
+            matches!(err, Error::ObjectNotFound { .. }),
+            "expected ObjectNotFound, got {err:?}",
+        );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
     }
 
     async fn create_alert<A: nexus_types::alert::AlertPayload>(
@@ -1294,6 +1381,15 @@ mod test {
             &mut all_rxs,
             "test-quux-starstar",
             "test.quux.**",
+        )
+        .await;
+        // Not actually subscribed to anything!
+        let _test_nonexistent_class = create_rx(
+            &datastore,
+            &opctx,
+            &mut all_rxs,
+            "test-nonexistent-class",
+            "test.nonexistent.*",
         )
         .await;
 
@@ -1489,6 +1585,52 @@ mod test {
             .alert_rx_is_subscribed_to_alert(opctx, &authz_rx, &authz_quux_bar)
             .await;
         assert_eq!(is_subscribed_quux_bar, Ok(true));
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_insert_empty_subscription_batch() {
+        let logctx =
+            dev::test_setup_log("test_insert_empty_subscription_batch");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let rx = create_receiver(datastore, opctx, "test", Vec::new()).await.rx;
+
+        let conn = datastore
+            .pool_connection_for_tests()
+            .await
+            .expect("cant get ye conn");
+
+        let result = datastore
+            .add_exact_subscription_batch_on_conn(rx.id(), Vec::new(), &conn)
+            .await
+            .expect("creating an empty subscription batch shouldn't kill you");
+
+        assert!(
+            result.is_empty(),
+            "returned subscription batch should be empty, but found: {:?}",
+            result
+        );
+
+        let (authz_rx, _) = LookupPath::new(opctx, datastore)
+            .alert_receiver_id(rx.id())
+            .fetch()
+            .await
+            .expect("rx should exist");
+
+        let (subscriptions, _) = datastore
+            .webhook_rx_config_fetch(opctx, &authz_rx)
+            .await
+            .expect("alert receiver config should exist");
+
+        assert!(
+            subscriptions.is_empty(),
+            "alert receiver config should have no subscriptions, \
+            but found: {subscriptions:?}",
+        );
 
         db.terminate().await;
         logctx.cleanup_successful();
