@@ -54,6 +54,7 @@ pub struct PowerShelf {
     /// The physical shelf number of the power shelf involved in the alert.
     ///
     /// This will always be either 0 or 1.
+    #[schemars(range(min = 0, max = 1))]
     pub shelf: u8,
     /// The baseboard FRU identity of the power shelf controller that was
     /// installed in the power shelf at the time the event occurred.
@@ -67,6 +68,7 @@ pub struct Psu {
     ///
     /// This will always be an integer between 0 and 5 (inclusive), since each
     /// power shelf can contain up to 6 PSUs.
+    #[schemars(range(min = 0, max = 5))]
     pub slot: u8,
     /// The FRU identity of the PSU, if it could be determined.
     ///
