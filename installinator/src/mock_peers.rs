@@ -17,6 +17,8 @@ use std::{
 use anyhow::{Result, bail};
 use async_trait::async_trait;
 use bytes::Bytes;
+use futures::FutureExt;
+use futures::future::BoxFuture;
 use installinator_client::{ClientError, ResponseValue};
 use installinator_common::EventReport;
 use omicron_uuid_kinds::MupdateUuid;
@@ -62,20 +64,21 @@ impl MockPeersUniverse {
 
     fn strategy(max_peer_count: usize) -> impl Strategy<Value = Self> {
         let artifact_strategy = prop_oneof![
-            // Don't try shrinking the bytes inside the artifact -- their individual values don't
-            // matter.
+            // Don't try shrinking the bytes inside the artifact -- their
+            // individual values don't matter.
             99 => prop::collection::vec(any::<u8>().no_shrink(), 0..4096),
             // Make it not very unlikely that the artifact is empty.
             1 => Just(Vec::new()),
         ];
 
-        // We can assume without loss of generality that content is fetched from peers in
-        // ascending IPv6 order. In other words, the addresses themselves aren't relevant beyond
-        // being unique identifiers. This means that this code can use a BTreeMap rather than a
-        // fancier structure like an IndexMap.
+        // We can assume without loss of generality that content is fetched from
+        // peers in ascending IPv6 order. In other words, the addresses
+        // themselves aren't relevant beyond being unique identifiers. This
+        // means that this code can use a BTreeMap rather than a fancier
+        // structure like an IndexMap.
         let peers_strategy = prop::collection::btree_map(
             any::<PeerAddress>(),
-            any::<MockResponse_>(),
+            any::<MockPeer_>(),
             0..max_peer_count,
         );
 
@@ -84,19 +87,20 @@ impl MockPeersUniverse {
             prop::collection::vec(any::<AttemptBitmap>(), 1..16);
 
         (artifact_strategy, peers_strategy, attempt_bitmaps_strategy).prop_map(
-            |(artifact, peers, attempt_bitmaps): (
-                Vec<u8>,
-                BTreeMap<PeerAddress, MockResponse_>,
-                Vec<AttemptBitmap>,
-            )| {
+            |(artifact, peers, attempt_bitmaps)| {
                 let artifact = Bytes::from(artifact);
                 let peers = peers
                     .into_iter()
-                    .map(|(peer, response)| {
-                        let response = response.into_actual(&artifact);
+                    .map(|(addr, mock_peer)| {
+                        let response =
+                            mock_peer.response.into_actual(&artifact);
                         (
-                            peer,
-                            MockPeer { artifact: artifact.clone(), response },
+                            addr,
+                            MockPeer {
+                                artifact: artifact.clone(),
+                                response,
+                                connect_delay: mock_peer.connect_delay,
+                            },
                         )
                     })
                     .collect();
@@ -105,7 +109,7 @@ impl MockPeersUniverse {
         )
     }
 
-    /// On success this returns (successful attempt, peer).
+    /// On success this returns (successful attempt, winning peer).
     ///
     /// On failure this returns the number of attempts that failed.
     fn expected_result(
@@ -115,12 +119,10 @@ impl MockPeersUniverse {
         self.attempts()
             .enumerate()
             .filter_map(|(attempt, peers)| {
-                peers
-                    .ok()?
-                    .successful_peer(timeout)
-                    // attempt is zero-indexed here, but the attempt returned by FetchedArtifact is
-                    // 1-indexed.
-                    .map(|addr| (attempt + 1, addr))
+                let winner = peers.ok()?.simulate_concurrent_fetch(timeout)?;
+                // attempt is zero-indexed here, but the attempt returned by
+                // FetchedArtifact is 1-indexed.
+                Some((attempt + 1, winner))
             })
             .next()
             .ok_or_else(|| {
@@ -145,10 +147,7 @@ impl MockPeersUniverse {
                                     .then(|| (*addr, peer.clone()))
                             })
                             .collect();
-                        Ok(MockFetchBackend::new(
-                            self.artifact.clone(),
-                            selected_peers,
-                        ))
+                        Ok(MockFetchBackend::new(selected_peers))
                     }
                     AttemptBitmap::Failure => {
                         bail!(
@@ -163,8 +162,8 @@ impl MockPeersUniverse {
 
 #[derive(Copy, Clone, Debug, Arbitrary)]
 enum AttemptBitmap {
-    /// Any u32 is a valid bitmap. If there are fewer peers than bits in the bitmap, the
-    /// higher-order bits will be ignored.
+    /// Any u32 is a valid bitmap. If there are fewer peers than bits in the
+    /// bitmap, the higher-order bits will be ignored.
     ///
     /// (We check in MockPeersUniverse::new that there are at most 32 peers.)
     #[weight(9)]
@@ -176,94 +175,355 @@ enum AttemptBitmap {
 
 #[derive(Debug)]
 struct MockFetchBackend {
-    artifact: Bytes,
-    // Peers within the universe that have been selected
+    // Peers within the universe that have been selected.
     selected_peers: BTreeMap<PeerAddress, MockPeer>,
     // selected_peers keys stored in a suitable form for the
-    // FetchArtifactImpl trait
+    // FetchArtifactImpl trait.
     peer_addresses: PeerAddresses,
 }
 
 impl MockFetchBackend {
-    fn new(
-        artifact: Bytes,
-        selected_peers: BTreeMap<PeerAddress, MockPeer>,
-    ) -> Self {
+    fn new(selected_peers: BTreeMap<PeerAddress, MockPeer>) -> Self {
         let peer_addresses = selected_peers.keys().copied().collect();
-        Self { artifact, selected_peers, peer_addresses }
+        Self { selected_peers, peer_addresses }
     }
 
     fn get(&self, peer: PeerAddress) -> Option<&MockPeer> {
         self.selected_peers.get(&peer)
     }
 
-    /// Returns the peer that can return the entire dataset within the timeout.
-    fn successful_peer(&self, timeout: Duration) -> Option<PeerAddress> {
-        self.selected_peers.iter()
-            .filter_map(|(addr, peer)| {
-                if peer.artifact != self.artifact {
-                    // We don't handle the case where the peer returns the wrong artifact yet.
-                    panic!("peer artifact not the same as self.artifact -- can't happen in normal use");
-                }
+    /// Simulate the concurrent fetch for this attempt.
+    ///
+    /// All sender tasks start at t=0. Each peer's `fetch_from_peer_impl`
+    /// completes at `t = connect_delay`, so `JoinSet` returns peers in
+    /// ascending `connect_delay` order (where ties are broken by BTreeMap
+    /// insertion order). The simulation processes peers in that order, tracking
+    /// wall-clock time so that each peer's sender benefits from pre-progress
+    /// accumulated while earlier peers were being processed.
+    fn simulate_concurrent_fetch(
+        &self,
+        read_timeout: Duration,
+    ) -> Option<PeerAddress> {
+        // Build processing order: sort by (connect_delay, BTreeMap key order).
+        // BTreeMap iteration is already in key order, so a stable sort by
+        // connect_delay preserves key order for ties. This matches the
+        // real `ParallelTaskSet`/`JoinSet` behavior: tasks spawned in
+        // BTreeMap key order that complete at the same simulated instant
+        // are returned in spawn (so key) order.
+        let mut peers_ordered: Vec<_> = self
+            .selected_peers
+            .iter()
+            .map(|(&addr, peer)| (addr, peer))
+            .collect();
+        peers_ordered.sort_by_key(|&(_, peer)| peer.connect_delay);
 
-                match &peer.response {
-                    MockResponse::Response(actions) => {
-                        let mut total_count = 0;
-                        for action in actions {
-                            match action {
-                                ResponseAction::Response { after, count } => {
-                                    // Each action must finish under the timeout. Note that within Tokio,
-                                    // timers of the same duration should fire in the order that they were
-                                    // created, because that's the order they'll be added to the linked list
-                                    // for that timer wheel slot. While this is not yet guaranteed in
-                                    // Tokio's documentation, it is the only reasonable implementation so we
-                                    // rely on it here.
-                                    //
-                                    // Since Peers creates the timeout BEFORE MockPeersUniverse sets its
-                                    // delay, action.after must be less than timeout.
-                                    if *after >= timeout {
-                                        return None;
-                                    }
+        let mut wall_clock = Duration::ZERO;
 
-                                    total_count += count;
-                                    if total_count >= peer.artifact.len() {
-                                        return Some(*addr);
-                                    }
-                                }
-                                ResponseAction::Error => return None,
-                            }
-                        }
-                        None
-                    }
-                    MockResponse::Forbidden { .. } | MockResponse::NotFound { .. } => None,
-                }
-            })
-            .next()
+        for (addr, peer) in peers_ordered {
+            // Advance wall clock to at least this peer's connect_delay
+            // (the `JoinSet` won't return this peer's result before then).
+            wall_clock = wall_clock.max(peer.connect_delay);
+
+            let result =
+                simulate_read_from_peer(peer, wall_clock, read_timeout);
+            wall_clock = result.wall_clock;
+            if result.success {
+                return Some(addr);
+            }
+        }
+
+        None
     }
 }
 
-#[async_trait]
+/// Channel capacity used by the mock (matches `mpsc::channel(8)` in
+/// `fetch_from_peer_impl`).
+const CHANNEL_CAPACITY: usize = 8;
+
+/// An item buffered in the simulated channel.
+#[derive(Clone, Debug)]
+enum ChannelItem {
+    Data(usize),
+    Error,
+}
+
+/// Tracks the state of a sender task for the simulation.
+struct SenderSim {
+    actions: Vec<ResponseAction>,
+    action_idx: usize,
+    /// The sender's local clock (time at which it last completed work).
+    sender_clock: Duration,
+    remaining_bytes: usize,
+    buffer: VecDeque<ChannelItem>,
+    /// The sender is blocked waiting for channel capacity.
+    blocked_on_full: bool,
+    /// The sender has finished (dropped the channel sender).
+    channel_closed: bool,
+    /// For `NotFound`/`Forbidden` responses: the absolute time at which the
+    /// error will be produced. `None` for normal responses.
+    pending_error_time: Option<Duration>,
+}
+
+impl SenderSim {
+    fn new(peer: &MockPeer) -> Self {
+        let (actions, remaining_bytes, pending_error_time) = match &peer
+            .response
+        {
+            MockResponse::Response(actions) => {
+                (actions.clone(), peer.artifact.len(), None)
+            }
+            // For NotFound/Forbidden, the sender sleeps `after` then
+            // sends an error through the channel. We model the delay
+            // with `pending_error_time` so that `advance()` produces
+            // the error at the correct wall-clock time.
+            MockResponse::NotFound { after }
+            | MockResponse::Forbidden { after } => (vec![], 0, Some(*after)),
+        };
+
+        SenderSim {
+            actions,
+            action_idx: 0,
+            sender_clock: Duration::ZERO,
+            remaining_bytes,
+            buffer: VecDeque::new(),
+            blocked_on_full: false,
+            channel_closed: false,
+            pending_error_time,
+        }
+    }
+
+    /// Advance the sender as far as possible up to `up_to` time.
+    fn advance(&mut self, up_to: Duration) {
+        if self.channel_closed || self.blocked_on_full {
+            return;
+        }
+
+        // Handle pending error (NotFound/Forbidden responses).
+        if let Some(error_time) = self.pending_error_time {
+            if up_to >= error_time {
+                if self.buffer.len() < CHANNEL_CAPACITY {
+                    self.buffer.push_back(ChannelItem::Error);
+                    self.pending_error_time = None;
+                    self.channel_closed = true;
+                } else {
+                    self.blocked_on_full = true;
+                }
+            }
+            return;
+        }
+
+        while self.action_idx < self.actions.len() {
+            let action = &self.actions[self.action_idx];
+            match action {
+                ResponseAction::Response { after, count } => {
+                    let wake_time = self.sender_clock + *after;
+                    if wake_time > up_to {
+                        // Timer hasn't fired yet.
+                        return;
+                    }
+
+                    self.sender_clock = wake_time;
+
+                    if self.buffer.len() >= CHANNEL_CAPACITY {
+                        self.blocked_on_full = true;
+                        return;
+                    }
+
+                    let actual = (*count).min(self.remaining_bytes);
+                    self.buffer.push_back(ChannelItem::Data(actual));
+                    self.remaining_bytes -= actual;
+                    self.action_idx += 1;
+
+                    if self.remaining_bytes == 0 {
+                        // All data sent; sender drops.
+                        self.channel_closed = true;
+                        return;
+                    }
+                }
+                ResponseAction::Error => {
+                    if self.buffer.len() >= CHANNEL_CAPACITY {
+                        self.blocked_on_full = true;
+                        return;
+                    }
+                    self.buffer.push_back(ChannelItem::Error);
+                    self.action_idx += 1;
+                    self.channel_closed = true;
+                    return;
+                }
+            }
+        }
+
+        // Actions exhausted without delivering all data. The sender
+        // sleeps forever (far_future). It will never produce more
+        // items, but it doesn't close the channel either.
+    }
+
+    /// Returns the time at which the sender will next produce an item,
+    /// or `None` if it can't (blocked, closed, or sleeping forever).
+    fn next_production_time(&self) -> Option<Duration> {
+        if self.channel_closed || self.blocked_on_full {
+            return None;
+        }
+        if let Some(error_time) = self.pending_error_time {
+            return Some(error_time);
+        }
+        if self.action_idx >= self.actions.len() {
+            // Actions exhausted; sleeping forever.
+            return None;
+        }
+        match &self.actions[self.action_idx] {
+            ResponseAction::Response { after, .. } => {
+                Some(self.sender_clock + *after)
+            }
+            ResponseAction::Error => {
+                // Error is sent immediately (no sleep).
+                Some(self.sender_clock)
+            }
+        }
+    }
+
+    /// Unblock the sender after the reader consumed an item, freeing
+    /// channel capacity.
+    fn unblock_after_consume(&mut self) {
+        if self.blocked_on_full {
+            self.blocked_on_full = false;
+
+            // Check if we were blocked on a pending error.
+            if self.pending_error_time.is_some() {
+                self.buffer.push_back(ChannelItem::Error);
+                self.pending_error_time = None;
+                self.channel_closed = true;
+                return;
+            }
+
+            // The sender was blocked trying to produce an item.
+            // Now there's space: produce it immediately (at the
+            // sender's current clock — the sleep already elapsed).
+            if self.action_idx < self.actions.len() {
+                match &self.actions[self.action_idx] {
+                    ResponseAction::Response { count, .. } => {
+                        let actual = (*count).min(self.remaining_bytes);
+                        self.buffer.push_back(ChannelItem::Data(actual));
+                        self.remaining_bytes -= actual;
+                        self.action_idx += 1;
+                        if self.remaining_bytes == 0 {
+                            self.channel_closed = true;
+                        }
+                    }
+                    ResponseAction::Error => {
+                        self.buffer.push_back(ChannelItem::Error);
+                        self.action_idx += 1;
+                        self.channel_closed = true;
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Result of simulating a read from a single peer.
+struct SimulatedRead {
+    /// Whether the peer successfully delivered the full artifact.
+    success: bool,
+    /// Wall-clock time after processing this peer. Subsequent peers'
+    /// senders have been running since t=0, so this determines how much
+    /// pre-progress they've accumulated.
+    wall_clock: Duration,
+}
+
+/// Simulate `fetch_full_artifact_from_peer` for a single peer.
+fn simulate_read_from_peer(
+    peer: &MockPeer,
+    wall_clock: Duration,
+    read_timeout: Duration,
+) -> SimulatedRead {
+    let artifact_len = peer.artifact.len();
+    let mut sender = SenderSim::new(peer);
+    let mut total_read: usize = 0;
+    let mut wall_clock = wall_clock;
+
+    // Advance the sender up to the current wall clock (it has been
+    // running since t=0 while earlier peers were being processed).
+    sender.advance(wall_clock);
+
+    loop {
+        // Try to consume a buffered item.
+        if let Some(item) = sender.buffer.pop_front() {
+            sender.unblock_after_consume();
+            // Let the sender make further progress now that there's
+            // channel space.
+            sender.advance(wall_clock);
+
+            match item {
+                ChannelItem::Data(n) => {
+                    total_read += n;
+                    continue;
+                }
+                ChannelItem::Error => {
+                    return SimulatedRead { success: false, wall_clock };
+                }
+            }
+        }
+
+        // Buffer is empty.
+        if sender.channel_closed {
+            // recv() returns None (channel closed). Check size.
+            let success = total_read == artifact_len;
+            return SimulatedRead { success, wall_clock };
+        }
+
+        // Race: sender's next production vs. read timeout.
+        let timeout_deadline = wall_clock + read_timeout;
+
+        match sender.next_production_time() {
+            Some(t) if t < timeout_deadline => {
+                // Sender produces strictly before the timeout.
+                wall_clock = t;
+                sender.advance(wall_clock);
+                // Loop back to consume the newly-buffered item.
+            }
+            _ => {
+                // Timeout fires first, or sender produces at exactly the
+                // same instant. On ties, the timeout wins: tokio's timer
+                // wheel uses LIFO ordering within a slot, and the
+                // reader's timeout timer is registered after the
+                // sender's sleep timer, so the timeout fires first.
+                wall_clock = timeout_deadline;
+                return SimulatedRead { success: false, wall_clock };
+            }
+        }
+    }
+}
+
 impl FetchArtifactImpl for MockFetchBackend {
     fn peers(&self) -> &PeerAddresses {
         &self.peer_addresses
     }
 
-    async fn fetch_from_peer_impl(
+    fn fetch_from_peer_impl(
         &self,
         peer: PeerAddress,
         // We don't (yet) use the artifact ID in MockPeers
         _artifact_hash_id: ArtifactHashId,
-    ) -> Result<(u64, FetchReceiver), HttpError> {
+    ) -> BoxFuture<'static, Result<(u64, FetchReceiver), HttpError>> {
         let peer_data = self
             .get(peer)
             .unwrap_or_else(|| panic!("peer {peer} not found in selection"))
             .clone();
         let artifact_size = peer_data.artifact.len() as u64;
+        let connect_delay = peer_data.connect_delay;
 
         let (sender, receiver) = mpsc::channel(8);
+        // The sender starts immediately, accumulating pre-progress
+        // while the connect delay elapses.
         tokio::spawn(async move { peer_data.send_response(sender).await });
-        // TODO: add tests to ensure an invalid artifact size is correctly detected
-        Ok((artifact_size, receiver))
+        async move {
+            if !connect_delay.is_zero() {
+                tokio::time::sleep(connect_delay).await;
+            }
+            Ok((artifact_size, receiver))
+        }
+        .boxed()
     }
 }
 
@@ -271,6 +531,12 @@ impl FetchArtifactImpl for MockFetchBackend {
 struct MockPeer {
     artifact: Bytes,
     response: MockResponse,
+    /// Simulates the time for the initial HTTP connection to succeed.
+    /// The sender task starts immediately (at t=0), but the
+    /// `fetch_from_peer_impl` future doesn't complete until this delay
+    /// elapses. This gives the sender a head start ("pre-progress"),
+    /// and makes `JoinSet` ordering deterministic (shortest delay first).
+    connect_delay: Duration,
 }
 
 impl fmt::Debug for MockPeer {
@@ -278,6 +544,7 @@ impl fmt::Debug for MockPeer {
         f.debug_struct("MockPeer")
             .field("artifact", &format!("({} bytes)", self.artifact.len()))
             .field("response", &self.response)
+            .field("connect_delay", &self.connect_delay)
             .finish()
     }
 }
@@ -378,6 +645,15 @@ enum MockResponse {
 enum ResponseAction {
     Response { after: Duration, count: usize },
     Error,
+}
+
+/// Proptest-level representation of a `MockPeer`, before the artifact is
+/// known. Resolved into a `MockPeer` by `MockPeersUniverse::strategy`.
+#[derive(Debug, Arbitrary)]
+struct MockPeer_ {
+    response: MockResponse_,
+    #[strategy((0..1000u64).prop_map(Duration::from_millis))]
+    connect_delay: Duration,
 }
 
 /// This is an enum that has the same shape as `MockResponse`, except it uses `prop::sample::Index`
@@ -698,7 +974,7 @@ mod tests {
     use installinator_common::{
         InstallinatorCompletionMetadata, InstallinatorComponent,
         InstallinatorProgressMetadata, InstallinatorStepId, StepContext,
-        StepEvent, StepEventKind, StepOutcome, StepSuccess, UpdateEngine,
+        StepEventKind, StepOutcome, StepSuccess, UpdateEngine,
     };
     use omicron_test_utils::dev::test_setup_log;
     use test_strategy::proptest;
@@ -790,33 +1066,36 @@ mod tests {
                 ) => {
                     assert_eq!(
                         expected_attempt, attempt,
-                        "expected successful attempt is the same as actual attempt"
+                        "expected successful attempt matches actual"
                     );
                     assert_eq!(
                         expected_addr, peer,
-                        "expected successful peer is the same as actual peer"
+                        "expected successful peer matches actual"
                     );
-                    let artifact = artifact.copy_to_bytes(artifact.num_bytes());
+                    let artifact_bytes =
+                        artifact.copy_to_bytes(artifact.num_bytes());
                     assert_eq!(
-                        expected_artifact, artifact,
-                        "correct artifact fetched from peer {}",
-                        peer,
+                        expected_artifact, artifact_bytes,
+                        "correct artifact fetched from peer {peer}",
                     );
+                    assert_success_reports(&reports, attempt, peer);
                 }
-                (Err(_), Err(_)) => {}
+                (Err(expected_total_attempts), Err(_)) => {
+                    assert_failure_reports(&reports, expected_total_attempts);
+                }
                 (Err(_), Ok(fetched_artifact)) => {
                     panic!(
-                        "expected failure to fetch but found success: {fetched_artifact:?}"
+                        "expected failure but found success: \
+                         {fetched_artifact:?}"
                     );
                 }
                 (Ok((attempt, addr)), Err(err)) => {
                     panic!(
-                        "expected success at attempt `{attempt}` from `{addr}`, but found failure: {err}"
+                        "expected success at attempt `{attempt}` from \
+                         `{addr}`, but found failure: {err}"
                     );
                 }
             }
-
-            assert_reports(&reports, expected_result);
 
             logctx.cleanup_successful();
         });
@@ -851,68 +1130,49 @@ mod tests {
         .await
     }
 
-    fn assert_reports(
+    /// Verify reports are self-consistent with an actual successful outcome.
+    fn assert_success_reports(
         reports: &[EventReport],
-        expected_result: Result<(usize, PeerAddress), usize>,
+        actual_attempt: usize,
+        actual_peer: PeerAddress,
     ) {
         let all_step_events: Vec<_> =
             reports.iter().flat_map(|report| &report.step_events).collect();
 
-        // Assert that we received failure events for all prior attempts and
-        // a success event for the current attempt.
-        match expected_result {
-            Ok((expected_attempt, expected_addr)) => {
-                assert_success_events(
-                    all_step_events,
-                    expected_attempt,
-                    expected_addr,
-                );
-            }
-            Err(expected_total_attempts) => {
-                assert_failure_events(all_step_events, expected_total_attempts);
-            }
-        }
-    }
-
-    fn assert_success_events(
-        all_step_events: Vec<&StepEvent>,
-        expected_attempt: usize,
-        expected_peer: PeerAddress,
-    ) {
         let mut saw_success = false;
 
         for event in all_step_events {
             match &event.kind {
                 StepEventKind::ProgressReset { attempt, metadata, .. } => {
-                    if *attempt == expected_attempt {
+                    if *attempt == actual_attempt {
                         match metadata {
                             InstallinatorProgressMetadata::Download {
                                 peer,
                             } => {
+                                // The winning peer succeeded, so it
+                                // should not have a reset on the winning
+                                // attempt. Other peers failing is fine.
                                 assert_ne!(
                                     *peer,
-                                    expected_peer.address(),
-                                    "peer cannot match since this is the last attempt"
+                                    actual_peer.address(),
+                                    "winning peer should not have a \
+                                     ProgressReset on the winning attempt"
                                 );
                             }
                             other => {
                                 panic!(
-                                    "expected download metadata, found {other:?}"
+                                    "expected download metadata, found \
+                                     {other:?}"
                                 );
                             }
                         };
                     }
                 }
                 StepEventKind::AttemptRetry { next_attempt, .. } => {
-                    // It's hard to say anything about failing attempts for now
-                    // because it's possible we didn't have any peers. In the
-                    // future we can look at the MockPeersUniverse to ensure
-                    // that we receive failing events from every peer that
-                    // should have failed.
-
                     assert!(
-                        *next_attempt <= expected_attempt,
-                        "next attempt {next_attempt} is <= {expected_attempt} + 1"
+                        *next_attempt <= actual_attempt,
+                        "retry next_attempt {next_attempt} should be <= \
+                         actual successful attempt {actual_attempt}"
                     );
                 }
                 StepEventKind::ExecutionCompleted {
@@ -921,8 +1181,8 @@ mod tests {
                     ..
                 } => {
                     assert_eq!(
-                        *last_attempt, expected_attempt,
-                        "last attempt matches expected"
+                        *last_attempt, actual_attempt,
+                        "last attempt in report matches actual"
                     );
                     match last_outcome {
                         StepOutcome::Success {
@@ -934,8 +1194,8 @@ mod tests {
                         } => {
                             assert_eq!(
                                 *address,
-                                expected_peer.address(),
-                                "address matches expected"
+                                actual_peer.address(),
+                                "report address matches actual peer"
                             );
                         }
                         other => {
@@ -945,7 +1205,7 @@ mod tests {
                     saw_success = true;
                 }
                 StepEventKind::ExecutionFailed { .. } => {
-                    panic!("received unexpected failed event {:?}", event.kind)
+                    panic!("received unexpected failed event {:?}", event.kind,)
                 }
                 _ => {}
             }
@@ -954,10 +1214,13 @@ mod tests {
         assert!(saw_success, "successful event must have been produced");
     }
 
-    fn assert_failure_events(
-        all_step_events: Vec<&StepEvent>,
+    fn assert_failure_reports(
+        reports: &[EventReport],
         expected_total_attempts: usize,
     ) {
+        let all_step_events: Vec<_> =
+            reports.iter().flat_map(|report| &report.step_events).collect();
+
         let mut saw_failure = false;
         for event in all_step_events {
             match &event.kind {
