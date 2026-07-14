@@ -18,6 +18,7 @@ use bootstrap_agent_lockstep_api::BootstrapAgentLockstepApi;
 use bootstrap_agent_lockstep_api::bootstrap_agent_lockstep_api_mod;
 use bootstrap_agent_lockstep_types::BaseboardIds;
 use bootstrap_agent_lockstep_types::BootstrapIpOfBaseboardId;
+use bootstrap_agent_lockstep_types::MultirackJoinRequest;
 use bootstrap_agent_lockstep_types::RackInitializeRequest;
 use bootstrap_agent_lockstep_types::RackOperationStatus;
 use bootstrap_agent_lockstep_types::ReplicatedNetworkConfig;
@@ -25,6 +26,7 @@ use bootstrap_agent_lockstep_types::ReplicatedNetworkConfigContents;
 use dropshot::{
     ApiDescription, HttpError, HttpResponseOk, RequestContext, TypedBody,
 };
+use omicron_uuid_kinds::MultirackJoinUuid;
 use omicron_uuid_kinds::RackInitUuid;
 use sled_agent_config_reconciler::InternalDisksReceiver;
 use sled_agent_measurements::MeasurementsHandle;
@@ -62,6 +64,15 @@ impl BootstrapServerContext {
             &self.trust_quorum_handle,
             request,
         )
+    }
+
+    // TODO(ajs): Should this use an error other than RssAccessError?
+    // Should there be separate path that doesn't go through self.rss_access?
+    pub(super) fn start_multirack_join(
+        &self,
+        request: MultirackJoinRequest,
+    ) -> Result<MultirackJoinUuid, RssAccessError> {
+        todo!()
     }
 }
 
@@ -147,5 +158,17 @@ impl BootstrapAgentLockstepApi for BootstrapAgentLockstepImpl {
             .collect();
 
         Ok(HttpResponseOk(BaseboardIds { data }))
+    }
+
+    async fn multirack_join(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<MultirackJoinRequest>,
+    ) -> Result<HttpResponseOk<MultirackJoinUuid>, HttpError> {
+        let ctx = rqctx.context();
+        let request = body.into_inner();
+        let id = ctx
+            .start_multirack_join(request)
+            .map_err(|err| HttpError::for_bad_request(None, err.to_string()))?;
+        Ok(HttpResponseOk(id))
     }
 }

@@ -6,8 +6,10 @@
 
 use crate::bootstrap::rss_handle::RssHandle;
 use bootstore::schemes::v0 as bootstore;
+use bootstrap_agent_lockstep_types::MultirackJoinStep;
 use bootstrap_agent_lockstep_types::RackOperationStatus;
 use bootstrap_agent_lockstep_types::RssStep;
+use omicron_uuid_kinds::MultirackJoinUuid;
 use omicron_uuid_kinds::RackInitUuid;
 use sled_agent_config_reconciler::InternalDisksReceiver;
 use sled_agent_measurements::MeasurementsHandle;
@@ -34,8 +36,19 @@ pub enum RssAccessError {
     InitializationPanicked,
     #[error("RSS is already initialized")]
     AlreadyInitialized,
+    #[error("Multirack join in progress")]
+    MultirackJoinInProgress,
+    #[error("Multirack join failed: {message}")]
+    MultirackJoinFailed { message: String },
+    #[error("MultirackJoin panicked")]
+    MultirackJoinPanicked,
+    #[error("Already part of a multirack cluster")]
+    MultirackJoinCompleted,
 }
 
+/// A mechanism for accessing rack setup related functionality. We're
+/// using `RSS` as a catch all here. This type allows access to both rack
+/// initialization and mulitrack regional cluster join services.
 #[derive(Clone)]
 pub(crate) struct RssAccess {
     // Note: The `Mutex` here is a std mutex, not a tokio mutex, and thus not
@@ -59,6 +72,7 @@ impl RssAccess {
         let mut status = self.status.lock().unwrap();
 
         match &mut *status {
+            RssStatus::Uninitialized => RackOperationStatus::Uninitialized,
             RssStatus::Initializing { id, completion, step_rx } => {
                 let id = *id;
                 // This is our only chance to notice the initialization task has
@@ -97,7 +111,46 @@ impl RssAccess {
             RssStatus::InitializationPanicked { id } => {
                 RackOperationStatus::InitializationPanicked { id: *id }
             }
-            RssStatus::Uninitialized => RackOperationStatus::Uninitialized,
+            RssStatus::MultirackJoinInProgress { id, completion, step_rx } => {
+                let id = *id;
+                // This is our only chance to notice the initialization task has
+                // panicked: if it dropped the sending half of `completion`
+                // without reporting in.
+                match completion.try_recv() {
+                    Ok(()) => {
+                        // This should be unreachable, I think? But it is
+                        // harmless to report the initialized state.
+                        RackOperationStatus::MultirackJoinCompleted {
+                            id: Some(id),
+                        }
+                    }
+                    Err(TryRecvError::Empty) => {
+                        // Initialization task is still running
+                        // Update the step we are on.
+                        RackOperationStatus::MultirackJoinInProgress {
+                            id,
+                            step: *step_rx.borrow(),
+                        }
+                    }
+                    Err(TryRecvError::Closed) => {
+                        // Initialization task has panicked!
+                        *status = RssStatus::MultirackJoinPanicked { id };
+                        RackOperationStatus::MultirackJoinPanicked { id }
+                    }
+                }
+            }
+            RssStatus::MultirackJoinCompleted { id } => {
+                RackOperationStatus::MultirackJoinCompleted { id: *id }
+            }
+            RssStatus::MultirackJoinFailed { id, err } => {
+                RackOperationStatus::MultirackJoinFailed {
+                    id: *id,
+                    message: InlineErrorChain::new(err).to_string(),
+                }
+            }
+            RssStatus::MultirackJoinPanicked { id } => {
+                RackOperationStatus::MultirackJoinPanicked { id: *id }
+            }
         }
     }
 
@@ -116,21 +169,6 @@ impl RssAccess {
         let mut status = self.status.lock().unwrap();
 
         match &*status {
-            RssStatus::Initializing { .. } => {
-                Err(RssAccessError::StillInitializing)
-            }
-            RssStatus::Initialized { .. } => {
-                Err(RssAccessError::AlreadyInitialized)
-            }
-            RssStatus::InitializationFailed { err, .. } => {
-                Err(RssAccessError::InitializationFailed {
-                    message: InlineErrorChain::new(err).to_string(),
-                })
-            }
-            RssStatus::InitializationPanicked { .. } => {
-                Err(RssAccessError::InitializationPanicked)
-            }
-
             RssStatus::Uninitialized => {
                 let (completion_tx, completion) = oneshot::channel();
                 let id = RackInitUuid::new_v4();
@@ -169,6 +207,36 @@ impl RssAccess {
                 });
                 Ok(id)
             }
+
+            RssStatus::Initializing { .. } => {
+                Err(RssAccessError::StillInitializing)
+            }
+            RssStatus::Initialized { .. } => {
+                Err(RssAccessError::AlreadyInitialized)
+            }
+            RssStatus::InitializationFailed { err, .. } => {
+                Err(RssAccessError::InitializationFailed {
+                    message: InlineErrorChain::new(err).to_string(),
+                })
+            }
+            RssStatus::InitializationPanicked { .. } => {
+                Err(RssAccessError::InitializationPanicked)
+            }
+
+            RssStatus::MultirackJoinInProgress { .. } => {
+                Err(RssAccessError::MultirackJoinInProgress)
+            }
+            RssStatus::MultirackJoinCompleted { id } => {
+                Err(RssAccessError::MultirackJoinCompleted)
+            }
+            RssStatus::MultirackJoinFailed { err, .. } => {
+                Err(RssAccessError::MultirackJoinFailed {
+                    message: InlineErrorChain::new(err).to_string(),
+                })
+            }
+            RssStatus::MultirackJoinPanicked { .. } => {
+                Err(RssAccessError::MultirackJoinPanicked)
+            }
         }
     }
 }
@@ -200,6 +268,30 @@ enum RssStatus {
     },
     InitializationPanicked {
         id: RackInitUuid,
+    },
+
+    // Tranistory states (which we may be in for a long time, even on human time
+    // scales, but should eventually leave).
+    MultirackJoinInProgress {
+        id: MultirackJoinUuid,
+        completion: oneshot::Receiver<()>,
+        // Used by the MultirackJoin task to update us with what step it is on.
+        step_rx: watch::Receiver<MultirackJoinStep>,
+    },
+
+    MultirackJoinCompleted {
+        // We can either be joined on startup (in which case `id` is None) or
+        // because join has completed (in which case `id` is Some).
+        id: Option<MultirackJoinUuid>,
+    },
+
+    // Terminal failure states; these require support intervention.
+    MultirackJoinFailed {
+        id: MultirackJoinUuid,
+        err: SetupServiceError,
+    },
+    MultirackJoinPanicked {
+        id: MultirackJoinUuid,
     },
 }
 
