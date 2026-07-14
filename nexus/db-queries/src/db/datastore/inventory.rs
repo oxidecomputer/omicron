@@ -3039,7 +3039,7 @@ impl DataStore {
                 // collection has been deleted.
                 let err =
                     match DataStore::inventory_collection_read_metadata_on_conn(
-                        &*conn, id,
+                        &conn, id,
                     )
                     .await
                     {
@@ -3106,7 +3106,7 @@ impl DataStore {
                 .filter(dsl::inv_collection_id.eq(db_id))
                 .order_by(dsl::idx)
                 .select(InvCollectionError::as_select())
-                .load_async(&*conn)
+                .load_async(conn)
                 .await?;
                 paginator =
                     p.found_batch(&batch, &|row: &InvCollectionError| row.idx);
@@ -3132,7 +3132,7 @@ impl DataStore {
                 )
                 .filter(dsl::inv_collection_id.eq(db_id))
                 .select(InvServiceProcessor::as_select())
-                .load_async(&*conn)
+                .load_async(conn)
                 .await?;
                 paginator = p.found_batch(&batch, &|row| row.hw_baseboard_id);
                 sps.extend(batch.into_iter().map(|row| {
@@ -3163,7 +3163,7 @@ impl DataStore {
                 )
                 .filter(dsl::inv_collection_id.eq(db_id))
                 .select(InvRootOfTrust::as_select())
-                .load_async(&*conn)
+                .load_async(conn)
                 .await?;
                 paginator = p.found_batch(&batch, &|row| row.hw_baseboard_id);
                 rots.extend(batch.into_iter().map(|rot_row| {
@@ -3194,7 +3194,7 @@ impl DataStore {
                 )
                 .filter(dsl::inv_collection_id.eq(db_id))
                 .select(InvSledAgent::as_select())
-                .load_async(&*conn)
+                .load_async(conn)
                 .await?;
                 paginator = p.found_batch(&batch, &|row| row.sled_id);
                 rows.extend(batch);
@@ -3226,7 +3226,7 @@ impl DataStore {
                 )
                 .filter(dsl::inv_collection_id.eq(db_id))
                 .select(InvNvmeDiskFirmware::as_select())
-                .load_async(&*conn)
+                .load_async(conn)
                 .await?;
                 paginator =
                     p.found_batch(&batch, &|row| (row.sled_id(), row.slot()));
@@ -3268,7 +3268,7 @@ impl DataStore {
                 )
                 .filter(dsl::inv_collection_id.eq(db_id))
                 .select(InvPhysicalDisk::as_select())
-                .load_async(&*conn)
+                .load_async(conn)
                 .await?;
                 paginator =
                     p.found_batch(&batch, &|row| (row.sled_id, row.slot));
@@ -3314,7 +3314,7 @@ impl DataStore {
                 )
                 .filter(dsl::inv_collection_id.eq(db_id))
                 .select(InvZpool::as_select())
-                .load_async(&*conn)
+                .load_async(conn)
                 .await?;
                 paginator = p.found_batch(&batch, &|row| (row.sled_id, row.id));
                 for zpool in batch {
@@ -3345,7 +3345,7 @@ impl DataStore {
                 )
                 .filter(dsl::inv_collection_id.eq(db_id))
                 .select(InvDataset::as_select())
-                .load_async(&*conn)
+                .load_async(conn)
                 .await?;
                 paginator = p.found_batch(&batch, &|row| {
                     (row.sled_id, row.name.clone())
@@ -3379,7 +3379,7 @@ impl DataStore {
                 )
                 .filter(dsl::inv_collection_id.eq(db_id))
                 .select(InvSvcEnabledNotOnline::as_select())
-                .load_async(&*conn)
+                .load_async(conn)
                 .await?;
                 paginator = p.found_batch(&batch, &|row| (row.sled_id, row.id));
                 for svc in batch {
@@ -3409,7 +3409,7 @@ impl DataStore {
                     )
                     .filter(dsl::inv_collection_id.eq(db_id))
                     .select(InvSvcEnabledNotOnlineService::as_select())
-                    .load_async(&*conn)
+                    .load_async(conn)
                     .await?;
                 paginator = p.found_batch(&batch, &|row| (row.sled_id, row.id));
                 for svc in batch {
@@ -3441,7 +3441,7 @@ impl DataStore {
                     )
                     .filter(dsl::inv_collection_id.eq(db_id))
                     .select(InvSvcEnabledNotOnlineParseError::as_select())
-                    .load_async(&*conn)
+                    .load_async(conn)
                     .await?;
                 paginator = p.found_batch(&batch, &|row| (row.sled_id, row.id));
                 for svc in batch {
@@ -3477,7 +3477,7 @@ impl DataStore {
                 )
                 .filter(dsl::id.eq_any(baseboard_id_ids.clone()))
                 .select(HwBaseboardId::as_select())
-                .load_async(&*conn)
+                .load_async(conn)
                 .await?;
                 paginator = p.found_batch(&batch, &|row| row.id);
                 bbs.extend(
@@ -3533,7 +3533,7 @@ impl DataStore {
                 )
                 .filter(dsl::inv_collection_id.eq(db_id))
                 .select(InvHostPhase1ActiveSlot::as_select())
-                .load_async(&*conn)
+                .load_async(conn)
                 .await?;
                 paginator = p.found_batch(&batch, &|row| row.hw_baseboard_id);
                 for row in batch {
@@ -3568,7 +3568,7 @@ impl DataStore {
                 )
                 .filter(dsl::inv_collection_id.eq(db_id))
                 .select(InvHostPhase1FlashHash::as_select())
-                .load_async(&*conn)
+                .load_async(conn)
                 .await?;
                 paginator = p.found_batch(&batch, &|row| {
                     (row.hw_baseboard_id, row.slot)
@@ -3629,7 +3629,7 @@ impl DataStore {
                 )
                 .filter(dsl::inv_collection_id.eq(db_id))
                 .select(InvCaboose::as_select())
-                .load_async(&*conn)
+                .load_async(conn)
                 .await?;
                 paginator = p.found_batch(&batch, &|row| {
                     (row.hw_baseboard_id, row.which)
@@ -3660,7 +3660,7 @@ impl DataStore {
                     paginated(dsl::sw_caboose, dsl::id, &p.current_pagparams())
                         .filter(dsl::id.eq_any(sw_caboose_ids.clone()))
                         .select(SwCaboose::as_select())
-                        .load_async(&*conn)
+                        .load_async(conn)
                         .await?;
                 paginator = p.found_batch(&batch, &|row| row.id);
                 cabooses.extend(batch.into_iter().map(|sw_caboose_row| {
@@ -3729,7 +3729,7 @@ impl DataStore {
                 )
                 .filter(dsl::inv_collection_id.eq(db_id))
                 .select(InvRotPage::as_select())
-                .load_async(&*conn)
+                .load_async(conn)
                 .await?;
                 paginator = p.found_batch(&batch, &|row| {
                     (row.hw_baseboard_id, row.which)
@@ -3763,7 +3763,7 @@ impl DataStore {
                 )
                 .filter(dsl::id.eq_any(sw_rot_page_ids.clone()))
                 .select(SwRotPage::as_select())
-                .load_async(&*conn)
+                .load_async(conn)
                 .await?;
                 paginator = p.found_batch(&batch, &|row| row.id);
                 rot_pages.extend(batch.into_iter().map(|sw_rot_page_row| {
@@ -3845,7 +3845,7 @@ impl DataStore {
                 )
                 .filter(dsl::inv_collection_id.eq(db_id))
                 .select(InvOmicronSledConfig::as_select())
-                .load_async(&*conn)
+                .load_async(conn)
                 .await?;
                 paginator = p.found_batch(&batch, &|row| row.id);
                 for sled_config in batch {
@@ -3898,7 +3898,7 @@ impl DataStore {
                 )
                 .filter(dsl::inv_collection_id.eq(db_id))
                 .select(InvOmicronSledConfigZoneNic::as_select())
-                .load_async(&*conn)
+                .load_async(conn)
                 .await?;
                 paginator = p.found_batch(&batch, &|row| row.id);
                 nics.extend(batch.into_iter().map(|found_zone_nic| {
@@ -3930,7 +3930,7 @@ impl DataStore {
                 )
                 .filter(dsl::inv_collection_id.eq(db_id))
                 .select(InvOmicronSledConfigZone::as_select())
-                .load_async(&*conn)
+                .load_async(conn)
                 .await?;
                 paginator = p.found_batch(&batch, &|row| row.id);
                 zones.extend(batch);
@@ -3997,7 +3997,7 @@ impl DataStore {
                 )
                 .filter(dsl::inv_collection_id.eq(db_id))
                 .select(InvOmicronSledConfigDataset::as_select())
-                .load_async(&*conn)
+                .load_async(conn)
                 .await?;
                 paginator = p.found_batch(&batch, &|row| row.id);
 
@@ -4039,7 +4039,7 @@ impl DataStore {
                 )
                 .filter(dsl::inv_collection_id.eq(db_id))
                 .select(InvOmicronSledConfigDisk::as_select())
-                .load_async(&*conn)
+                .load_async(conn)
                 .await?;
                 paginator = p.found_batch(&batch, &|row| row.id);
 
@@ -4078,7 +4078,7 @@ impl DataStore {
                 )
                 .filter(dsl::inv_collection_id.eq(db_id))
                 .select(InvSledConfigReconciler::as_select())
-                .load_async(&*conn)
+                .load_async(conn)
                 .await?;
                 paginator = p.found_batch(&batch, &|row| row.sled_id);
 
@@ -4110,7 +4110,7 @@ impl DataStore {
                 )
                 .filter(dsl::inv_collection_id.eq(db_id))
                 .select(InvSledBootPartition::as_select())
-                .load_async(&*conn)
+                .load_async(conn)
                 .await?;
                 paginator = p.found_batch(&batch, &|row| {
                     (row.sled_id, row.boot_disk_slot)
@@ -4153,7 +4153,7 @@ impl DataStore {
                 )
                 .filter(dsl::inv_collection_id.eq(db_id))
                 .select(InvLastReconciliationDiskResult::as_select())
-                .load_async(&*conn)
+                .load_async(conn)
                 .await?;
                 paginator = p.found_batch(&batch, &|row| row.disk_id);
 
@@ -4189,7 +4189,7 @@ impl DataStore {
                 )
                 .filter(dsl::inv_collection_id.eq(db_id))
                 .select(InvLastReconciliationDatasetResult::as_select())
-                .load_async(&*conn)
+                .load_async(conn)
                 .await?;
                 paginator = p.found_batch(&batch, &|row| row.dataset_id);
 
@@ -4222,7 +4222,7 @@ impl DataStore {
             let rows = dsl::inv_last_reconciliation_orphaned_dataset
                 .filter(dsl::inv_collection_id.eq(db_id))
                 .select(InvLastReconciliationOrphanedDataset::as_select())
-                .load_async(&*conn)
+                .load_async(conn)
                 .await?;
 
             for row in rows {
@@ -4264,7 +4264,7 @@ impl DataStore {
             let rows = dsl::inv_single_measurements
                 .filter(dsl::inv_collection_id.eq(db_id))
                 .select(InvSingleMeasurements::as_select())
-                .load_async(&*conn)
+                .load_async(conn)
                 .await?;
 
             for row in rows {
@@ -4294,7 +4294,7 @@ impl DataStore {
             let rows = dsl::inv_fmd_status
                 .filter(dsl::inv_collection_id.eq(db_id))
                 .select(InvFmdStatus::as_select())
-                .load_async(&*conn)
+                .load_async(conn)
                 .await?;
             rows.into_iter()
                 .map(|row| {
@@ -4323,7 +4323,7 @@ impl DataStore {
             let rows = dsl::inv_fmd_host_case
                 .filter(dsl::inv_collection_id.eq(db_id))
                 .select(InvFmdHostCase::as_select())
-                .load_async(&*conn)
+                .load_async(conn)
                 .await?;
             let mut by_sled: BTreeMap<
                 SledUuid,
@@ -4353,7 +4353,7 @@ impl DataStore {
             let rows = dsl::inv_fmd_resource
                 .filter(dsl::inv_collection_id.eq(db_id))
                 .select(InvFmdResource::as_select())
-                .load_async(&*conn)
+                .load_async(conn)
                 .await?;
             let mut by_sled: BTreeMap<
                 SledUuid,
@@ -4397,7 +4397,7 @@ impl DataStore {
                 )
                 .filter(dsl::inv_collection_id.eq(db_id))
                 .select(InvLastReconciliationZoneResult::as_select())
-                .load_async(&*conn)
+                .load_async(conn)
                 .await?;
                 paginator = p.found_batch(&batch, &|row| row.zone_id);
 
@@ -4432,7 +4432,7 @@ impl DataStore {
                 )
                 .filter(dsl::inv_collection_id.eq(db_id))
                 .select(InvZoneManifestMeasurement::as_select())
-                .load_async(&*conn)
+                .load_async(conn)
                 .await?;
                 paginator = p.found_batch(&batch, &|row| {
                     (row.sled_id, row.measurement_file_name.clone())
@@ -4471,7 +4471,7 @@ impl DataStore {
                 )
                 .filter(dsl::inv_collection_id.eq(db_id))
                 .select(InvZoneManifestZone::as_select())
-                .load_async(&*conn)
+                .load_async(conn)
                 .await?;
                 paginator = p.found_batch(&batch, &|row| {
                     (row.sled_id, row.zone_file_name.clone())
@@ -4516,7 +4516,7 @@ impl DataStore {
                 )
                 .filter(dsl::inv_collection_id.eq(db_id))
                 .select(InvZoneManifestNonBoot::as_select())
-                .load_async(&*conn)
+                .load_async(conn)
                 .await?;
                 paginator = p.found_batch(&batch, &|row| {
                     (row.sled_id, row.non_boot_zpool_id)
@@ -4554,7 +4554,7 @@ impl DataStore {
                 )
                 .filter(dsl::inv_collection_id.eq(db_id))
                 .select(InvMeasurementManifestNonBoot::as_select())
-                .load_async(&*conn)
+                .load_async(conn)
                 .await?;
                 paginator = p.found_batch(&batch, &|row| {
                     (row.sled_id, row.non_boot_zpool_id)
@@ -4593,7 +4593,7 @@ impl DataStore {
                 )
                 .filter(dsl::inv_collection_id.eq(db_id))
                 .select(InvMupdateOverrideNonBoot::as_select())
-                .load_async(&*conn)
+                .load_async(conn)
                 .await?;
                 paginator = p.found_batch(&batch, &|row| {
                     (row.sled_id, row.non_boot_zpool_id)
@@ -4626,7 +4626,7 @@ impl DataStore {
                 )
                 .filter(dsl::inv_collection_id.eq(db_id))
                 .select(InvClickhouseKeeperMembership::as_select())
-                .load_async(&*conn)
+                .load_async(conn)
                 .await?;
                 paginator = p.found_batch(&batch, &|row| row.queried_keeper_id);
                 for membership in batch.into_iter() {
@@ -4651,7 +4651,7 @@ impl DataStore {
                 dsl::inv_cockroachdb_status
                     .filter(dsl::inv_collection_id.eq(db_id))
                     .select(InvCockroachStatus::as_select())
-                    .load_async(&*conn)
+                    .load_async(conn)
                     .await?;
 
             status_records
@@ -4676,7 +4676,7 @@ impl DataStore {
             let records: Vec<InvNtpTimesync> = dsl::inv_ntp_timesync
                 .filter(dsl::inv_collection_id.eq(db_id))
                 .select(InvNtpTimesync::as_select())
-                .load_async(&*conn)
+                .load_async(conn)
                 .await?;
 
             records
@@ -4694,7 +4694,7 @@ impl DataStore {
             let records: Vec<InvInternalDns> = dsl::inv_internal_dns
                 .filter(dsl::inv_collection_id.eq(db_id))
                 .select(InvInternalDns::as_select())
-                .load_async(&*conn)
+                .load_async(conn)
                 .await?;
 
             records
