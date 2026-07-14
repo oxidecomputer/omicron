@@ -471,12 +471,12 @@ impl Restart {
                     // whether the *same* PSU was already believed to be
                     // there when deciding whether to alert?
                     if ereport.provenance == Provenance::ThisSitrep {
+                        let power_shelf = ereport.alert_power_shelf(case);
                         case.request_alert(
                             &alert_types::PsuInsertedV0 {
                                 rack_id: ereport.location.rack,
                                 psu: ereport.alert_psu(),
-                                power_shelf: ereport
-                                    .alert_power_shelf(&case.log),
+                                power_shelf,
                                 time: ereport.ereport.time_collected,
                             },
                             format_args!(
@@ -494,12 +494,12 @@ impl Restart {
                     // goodbye!
                     psus_absent.insert(psu);
                     if ereport.provenance == Provenance::ThisSitrep {
+                        let power_shelf = ereport.alert_power_shelf(case);
                         case.request_alert(
                             &alert_types::PsuRemovedV0 {
                                 rack_id: ereport.location.rack,
                                 psu: ereport.alert_psu(),
-                                power_shelf: ereport
-                                    .alert_power_shelf(&case.log),
+                                power_shelf,
                                 time: ereport.ereport.time_collected,
                             },
                             format_args!(
@@ -515,14 +515,11 @@ impl Restart {
                 }
             };
             if let Err(err) = alert_result {
-                slog::error!(
-                    &case.log,
-                    "failed to request alert for ereport";
-                    "ereport" => %ereport.id(),
-                    "ereport_class" => %ereport.class(),
-                    "ereport_location" => %psu,
-                    "error" => &InlineErrorChain::new(&*err)
-                );
+                case.log_warning("failed to request alert for ereport")
+                    .kv("ereport_id", format_args!("{}", ereport.id()))
+                    .kv("ereport_class", ereport.class())
+                    .kv("ereport_location", format_args!("{}", psu))
+                    .kv("error", format_args!("{err}"));
             }
         }
 
@@ -654,19 +651,19 @@ impl PsuEreport {
         }
     }
 
-    fn alert_power_shelf(&self, log: &slog::Logger) -> alert_types::PowerShelf {
+    fn alert_power_shelf(
+        &self,
+        case: &mut CaseBuilder,
+    ) -> alert_types::PowerShelf {
         let baseboard = match self.psc_baseboard() {
             Ok(bb) => Some(bb),
             Err(err) => {
-                let err = InlineErrorChain::new(&*err);
-                slog::warn!(
-                    &log,
-                    "couldn't determine ereport PSC baseboard identity \
-                    for alert payload";
-                    "ereport" => %self.id(),
-                    "ereport_class" => ?self.ereport.class,
-                    &err,
-                );
+                case.log_warning(
+                    "couldn't determine PSC baseboard identity from ereport",
+                )
+                .kv("ereport_id", format_args!("{}", self.id()))
+                .kv("ereport_class", &self.ereport.class)
+                .kv("error", format_args!("{err}"));
                 None
             }
         };
