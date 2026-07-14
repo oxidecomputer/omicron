@@ -95,17 +95,10 @@ impl AllCases {
                 };
                 let mut builder =
                     CaseBuilder::new(&self.log, sitrep_id, case, case_rng);
-                builder.report_log.entry("opened case");
+                builder.log_event("opened case").finish();
                 entry.insert(builder)
             }
         };
-
-        slog::info!(
-            self.log,
-            "opened case {id:?}";
-            "case_id" => ?id,
-            "de" => %de
-        );
 
         case
     }
@@ -195,22 +188,13 @@ impl CaseBuilder {
             .expect("UUID should be unused");
 
         let comment = comment.to_string();
-        slog::info!(
-            &self.log,
-            "requested an alert";
-            "alert_id" => %id,
-            "alert_class" => ?class,
-            "alert_version" => version,
-            "alert_payload_type" => %payload_type,
-            "comment" => %comment,
-        );
-        self.report_log
-            .entry("requested alert")
+        self.log_event("requested an alert")
             .kv("alert_id", id)
             .kv("alert_class", &class)
             .kv("alert_version", version)
             .kv("alert_payload_type", payload_type)
-            .comment(comment);
+            .comment(comment)
+            .finish();
         self.new_alerts_requested = true;
         Ok(())
     }
@@ -237,15 +221,7 @@ impl CaseBuilder {
             .insert_unique(req)
             .expect("UUID should be unused");
 
-        let comment = comment.to_string();
-        slog::info!(
-            &self.log,
-            "requested a support bundle";
-            "support_bundle_id" => %id,
-            "comment" => %comment,
-        );
-        self.report_log
-            .entry("requested support bundle")
+        self.log_event("requested support bundle")
             .kv("support_bundle_id", id)
             .comment(comment);
         self.new_support_bundles_requested = true;
@@ -255,8 +231,7 @@ impl CaseBuilder {
         self.case.metadata.closed_sitrep_id = Some(self.sitrep_id);
 
         let comment = comment.to_string();
-        slog::info!(&self.log, "case closed"; "comment" => %comment);
-        self.report_log.entry("case closed").comment(comment);
+        self.log_event("case closed").comment(comment);
     }
 
     /// Replace this case's free-form comment string.
@@ -280,18 +255,11 @@ impl CaseBuilder {
         };
         let payload = payload.into();
         let comment = comment.to_string();
-        slog::info!(
-            &self.log,
-            "added a fact";
-            "fact_id" => %id,
-            "payload" => ?payload,
-            "comment" => %comment,
-        );
-        self.report_log
-            .entry("added fact")
+        self.log_event("added fact")
             .kv("fact_id", id)
             .kv("payload", &payload)
-            .comment(comment.clone());
+            .comment(comment.clone())
+            .finish();
         let fact = fm::case::Fact {
             metadata: fm::case::FactMetadata {
                 id,
@@ -308,27 +276,12 @@ impl CaseBuilder {
     /// into the next sitrep. `comment` records why it was removed.
     pub fn remove_fact(&mut self, id: FactUuid, comment: impl ToString) {
         let comment = comment.to_string();
-        if let Some(fact) = self.case.facts.remove(&id) {
-            slog::info!(
-                &self.log,
-                "removed a fact";
-                "fact_id" => %id,
-                "payload" => ?fact.payload,
-                "comment" => %comment,
-            );
-            self.report_log
-                .entry("removed fact")
-                .kv("fact_id", id)
-                .kv("payload", &fact.payload)
-                .comment(comment);
+        let log = if let Some(fact) = self.case.facts.remove(&id) {
+            self.log_event("removed a fact").kv("payload", &fact.payload)
         } else {
-            slog::warn!(
-                &self.log,
-                "tried to remove a fact that does not exist";
-                "fact_id" => %id,
-                "comment" => %comment,
-            );
-        }
+            self.log_warning("tried to remove a fact that does not exist")
+        };
+        log.kv("fact_id", id).comment(comment).finish();
     }
 
     pub fn add_ereport(
@@ -338,41 +291,28 @@ impl CaseBuilder {
     ) {
         let comment = comment.to_string();
         let assignment_id = self.rng.next_case_ereport();
-        match self.case.ereports.insert_unique(fm::case::CaseEreport {
-            id: assignment_id,
-            ereport: report.clone(),
-            assigned_sitrep_id: self.sitrep_id,
-            comment: comment.clone(),
-        }) {
-            Ok(_) => {
-                slog::info!(
-                    self.log,
-                    "assigned ereport {} to case", report.id;
-                    "ereport_id" => %report.id,
-                    "ereport_class" => ?report.class,
-                    "assignment_id" => %assignment_id,
-                    "comment" => %comment,
-                );
+        let log =
+            match self.case.ereports.insert_unique(fm::case::CaseEreport {
+                id: assignment_id,
+                ereport: report.clone(),
+                assigned_sitrep_id: self.sitrep_id,
+                comment: comment.clone(),
+            }) {
+                Ok(_) => self.log_event(format_args!(
+                    "assigned ereport {} to case",
+                    report.id
+                )),
+                Err(_) => self.log_warning(format_args!(
+                    "assigned ereport {} to case",
+                    report.id
+                )),
+            };
 
-                self.report_log
-                    .entry("assigned ereport to case")
-                    .comment(comment)
-                    .kv("ereport_id", &format_args!("{}", report.id))
-                    .kv(
-                        "ereport_class",
-                        &report.class.as_deref().unwrap_or("<none>"),
-                    )
-                    .kv("assignment_id", assignment_id);
-            }
-            Err(_) => {
-                slog::warn!(
-                    self.log,
-                    "ereport {} already assigned to case", report.id;
-                    "ereport_id" => %report.id,
-                    "ereport_class" => ?report.class,
-                );
-            }
-        }
+        log.comment(comment)
+            .kv("ereport_id", &format_args!("{}", report.id))
+            .kv("ereport_class", &report.class.as_deref().unwrap_or("<none>"))
+            .kv("assignment_id", assignment_id)
+            .finish();
     }
 
     /// Returns an iterator over all ereports that were assigned to this case in
@@ -399,10 +339,17 @@ impl CaseBuilder {
     pub fn log_event(
         &mut self,
         event: impl ToString,
-    ) -> &mut fm::analysis_reports::LogEntry {
-        let event = event.to_string();
-        slog::debug!(self.log, "{event}");
-        self.report_log.entry(event)
+    ) -> fm::analysis_reports::LogEntryBuilder<'_> {
+        self.report_log.entry(&self.log, event)
+    }
+
+    /// Adds a warning-level event to the analysis report debug log for this
+    /// case in the current sitrep.
+    pub fn log_warning(
+        &mut self,
+        event: impl ToString,
+    ) -> fm::analysis_reports::LogEntryBuilder<'_> {
+        self.report_log.entry(&self.log, event)
     }
 
     pub(crate) fn build(self) -> (fm::Case, fm::analysis_reports::CaseReport) {

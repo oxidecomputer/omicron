@@ -491,8 +491,7 @@ fn print_analysis_report(
                 "WARNING: failed to parse input report; falling back to \
                 less structured output: {e}"
             );
-            let displayer =
-                nexus_types::fm::json_display::Displayer::new(&input_report);
+            let displayer = nexus_types::fm::display::Json::new(&input_report);
             println!("{displayer}",);
         }
     }
@@ -506,7 +505,7 @@ fn print_analysis_report(
                 less structured output: {e}"
             );
             let displayer =
-                nexus_types::fm::json_display::Displayer::new(&analysis_report);
+                nexus_types::fm::display::Json::new(&analysis_report);
             println!("{displayer}",);
         }
     }
