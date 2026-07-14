@@ -304,10 +304,9 @@ impl CaseBuilder {
                     "assigned ereport {} to case",
                     report.id
                 )),
-                Err(_) => self.log_warning(format_args!(
-                    "assigned ereport {} to case",
-                    report.id
-                )),
+                Err(_) => self.log_warning(
+                    "attempted to assign an ereport to a case twice",
+                ),
             };
 
         log.comment(comment)
