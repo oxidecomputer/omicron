@@ -138,7 +138,7 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 /// Error type for the private
-/// [`DataStore::inventory_collection_read_batched()`] method.
+/// [`DataStore::inventory_collection_read_batched_on_connection()`] method.
 ///
 /// Reading an inventory is complex, and can fail for a few different reasons
 /// (described by the variants of this enum). We convert this type to a public
@@ -2297,7 +2297,8 @@ impl DataStore {
         // transaction for simplicity.  Similar considerations apply.  We could
         // break it up if these transactions become too big.  But we'd need a
         // way to stop other clients from discovering a collection after we
-        // start removing it (see: inventory_collection_read_batched, which
+        // start removing it (see:
+        // inventory_collection_read_batched_on_connection, which
         // reads the inventory non-transactionally) and we'd also need to make
         // sure we didn't leak a collection if we crash while deleting it.
         let conn = self.pool_connection_authorized(opctx).await?;
@@ -6545,10 +6546,10 @@ mod test {
 
     // Test that concurrent read and delete operations on inventory collections
     // do not result in torn reads. With the fix for issue #9594,
-    // inventory_collection_read_batched checks for the top-level collection
-    // record at the END of reading, so if a concurrent delete has started
-    // (which deletes the top-level record first), the read will fail rather
-    // than returning partial data.
+    // inventory_collection_read_batched_on_connection checks for the top-level
+    // collection record at the END of reading, so if a concurrent delete has
+    // started (which deletes the top-level record first), the read will fail
+    // rather than returning partial data.
     //
     // This test spawns concurrent readers and a deleter to exercise the race
     // condition. Readers should either get the complete original collection
