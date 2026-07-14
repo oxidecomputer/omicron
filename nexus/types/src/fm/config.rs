@@ -149,12 +149,6 @@ impl FmConfigSource {
             fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
                 let DisplaySource { source, indent } = self;
 
-                const SOURCE: &str = "source:";
-                const VERSION: &str = "version:";
-                const TIME_MODIFIED: &str = "modified at:";
-                const WIDTH: usize =
-                    const_max_len(&[SOURCE, VERSION, TIME_MODIFIED]);
-
                 match source {
                     FmConfigSource::Default => {
                         writeln!(f, "{:>indent$}{SOURCE:<WIDTH$} default", "")
@@ -249,12 +243,6 @@ impl FmConfig {
                     indent,
                 } = self;
 
-                const SITREP_LIMIT: &str = "sitrep limit:";
-                const SITREP_DELETION_THRESHOLD: &str =
-                    "sitrep deletion threshold:";
-                const WIDTH: usize =
-                    const_max_len(&[SITREP_LIMIT, SITREP_DELETION_THRESHOLD]);
-
                 writeln!(
                     f,
                     "{:>indent$}{SITREP_LIMIT:<WIDTH$} {sitrep_limit}",
@@ -340,6 +328,19 @@ impl TryFrom<&'_ FmConfigParam> for FmConfig {
         Ok(Self { sitrep_limit, sitrep_deletion_threshold })
     }
 }
+
+const SOURCE: &str = "source:";
+const VERSION: &str = "  version:";
+const TIME_MODIFIED: &str = "  modified at:";
+const SITREP_LIMIT: &str = "sitrep history limit:";
+const SITREP_DELETION_THRESHOLD: &str = "sitrep deletion threshold:";
+const WIDTH: usize = const_max_len(&[
+    SOURCE,
+    VERSION,
+    TIME_MODIFIED,
+    SITREP_LIMIT,
+    SITREP_DELETION_THRESHOLD,
+]);
 
 #[cfg(test)]
 mod tests {
