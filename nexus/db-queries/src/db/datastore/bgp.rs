@@ -1836,6 +1836,20 @@ mod tests {
             .identity
             .id;
 
+        datastore
+            .bgp_create_announce_set(
+                &opctx,
+                &networking::BgpAnnounceSetCreate {
+                    identity: IdentityMetadataCreateParams {
+                        name: "other-announce-set".parse().unwrap(),
+                        description: String::from("another announce set"),
+                    },
+                    announcement: Vec::default(),
+                },
+            )
+            .await
+            .expect("create other bgp announce set");
+
         let bgp_config = networking::BgpConfigCreate {
             identity: IdentityMetadataCreateParams {
                 name: "config-name".parse().unwrap(),
@@ -1851,27 +1865,62 @@ mod tests {
             max_paths: MaxPathConfig::new(1).unwrap(),
         };
 
-        datastore
+        let created = datastore
             .bgp_config_create(&opctx, &bgp_config)
             .await
             .expect("create bgp config");
 
         // Subsequent creates should succeed if all fields match
-        assert!(datastore.bgp_config_create(&opctx, &bgp_config).await.is_ok());
+        let replayed = datastore
+            .bgp_config_create(&opctx, &bgp_config)
+            .await
+            .expect("replay identical bgp config create");
+        assert_eq!(created.identity.id, replayed.identity.id);
 
         // Subsequent creates should fail if any field is different
-        assert!(
-            datastore
-                .bgp_config_create(
-                    &opctx,
-                    &BgpConfigCreate {
-                        max_paths: MaxPathConfig::new(2).unwrap(),
-                        ..bgp_config
-                    }
-                )
+        type Mutation = (&'static str, fn(&mut BgpConfigCreate));
+        let mutations: &[Mutation] = &[
+            ("identity.name", |config| {
+                config.identity.name = "other-config-name".parse().unwrap();
+            }),
+            ("identity.description", |config| {
+                config.identity.description =
+                    String::from("another description");
+            }),
+            ("asn", |config| {
+                config.asn = 48;
+            }),
+            ("bgp_announce_set_id", |config| {
+                config.bgp_announce_set_id =
+                    NameOrId::Name("other-announce-set".parse().unwrap());
+            }),
+            ("vrf", |config| {
+                config.vrf = Some("other-vrf".parse().unwrap());
+            }),
+            ("shaper", |config| {
+                config.shaper = Some(String::from("other shaper"));
+            }),
+            ("checker", |config| {
+                config.checker = Some(String::from("other checker"));
+            }),
+            ("max_paths", |config| {
+                config.max_paths = MaxPathConfig::new(2).unwrap();
+            }),
+        ];
+
+        for &(field, mutate) in mutations {
+            let mut conflicting_config = bgp_config.clone();
+            mutate(&mut conflicting_config);
+
+            let error = datastore
+                .bgp_config_create(&opctx, &conflicting_config)
                 .await
-                .is_err()
-        );
+                .expect_err(&format!("{field} should affect idempotency"));
+            assert!(
+                matches!(error, Error::Conflict { .. }),
+                "changing {field} returned an unexpected error: {error:?}"
+            );
+        }
 
         db.terminate().await;
         logctx.cleanup_successful();
