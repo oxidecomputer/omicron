@@ -101,16 +101,178 @@ pub struct ManualPortConfig {
     pub tx_eq: Option<TxEqConfig>,
 }
 
-// We use `serde(untagged)` here, since the variants are vastly different.
-// This prevents having backwards incompatible changes in the RSS config before
-// multirack ships. Once multirack ships, we may wish to use internal tagging,
-// but it's not mandatory.
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "snake_case", untagged)]
+/// A user-specified port configuration.
+///
+/// An empty map is serialized and deserialized as an auto config.
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[allow(clippy::large_enum_variant)]
 pub enum UserSpecifiedPortConfig {
+    /// A manually-configured port.
     Manual(ManualPortConfig),
-    DdmAutoPortConfig {},
+    /// A port configured automatically via DDM.
+    DdmAutoPortConfig,
+}
+
+// Hand-roll the Serialize and Deserialize impls so we don't have to use
+// serde(untagged), under which invalid manual configs would silently fall back
+// to the auto variant.
+//
+// We may wish to switch this to internal tagging in the future, but that will
+// cause changes to the TOML config as well as the JSON schema.
+impl Serialize for UserSpecifiedPortConfig {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        match self {
+            Self::Manual(cfg) => cfg.serialize(serializer),
+            Self::DdmAutoPortConfig => {
+                use serde::ser::SerializeMap;
+                serializer.serialize_map(Some(0))?.end()
+            }
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for UserSpecifiedPortConfig {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        struct PortConfigVisitor;
+
+        impl<'de> serde::de::Visitor<'de> for PortConfigVisitor {
+            type Value = UserSpecifiedPortConfig;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str(
+                    "a map of manual port configuration fields, or an empty \
+                     map for a DDM-automatic port",
+                )
+            }
+
+            fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+            where
+                A: serde::de::MapAccess<'de>,
+            {
+                let Some(first_key) = map.next_key::<String>()? else {
+                    return Ok(UserSpecifiedPortConfig::DdmAutoPortConfig);
+                };
+
+                let replay =
+                    ReplayFirstKey { first_key: Some(first_key), inner: map };
+                let manual = ManualPortConfig::deserialize(
+                    serde::de::value::MapAccessDeserializer::new(replay),
+                )?;
+                Ok(UserSpecifiedPortConfig::Manual(manual))
+            }
+        }
+
+        deserializer.deserialize_map(PortConfigVisitor)
+    }
+}
+
+/// A `MapAccess` adaptor that yields the already-consumed first key before
+/// delegating the rest of the map to the inner `MapAccess`.
+struct ReplayFirstKey<A> {
+    first_key: Option<String>,
+    inner: A,
+}
+
+impl<'de, A> serde::de::MapAccess<'de> for ReplayFirstKey<A>
+where
+    A: serde::de::MapAccess<'de>,
+{
+    type Error = A::Error;
+
+    fn next_key_seed<K>(
+        &mut self,
+        seed: K,
+    ) -> Result<Option<K::Value>, Self::Error>
+    where
+        K: serde::de::DeserializeSeed<'de>,
+    {
+        match self.first_key.take() {
+            Some(first_key) => {
+                use serde::de::IntoDeserializer;
+                let de = first_key.into_deserializer();
+                seed.deserialize(de).map(Some)
+            }
+            None => self.inner.next_key_seed(seed),
+        }
+    }
+
+    fn next_value_seed<V>(&mut self, seed: V) -> Result<V::Value, Self::Error>
+    where
+        V: serde::de::DeserializeSeed<'de>,
+    {
+        self.inner.next_value_seed(seed)
+    }
+
+    fn size_hint(&self) -> Option<usize> {
+        let inner = self.inner.size_hint();
+        match self.first_key {
+            Some(_) => inner.map(|n| n + 1),
+            None => inner,
+        }
+    }
+}
+
+// The descriptions and shape here must stay in sync with the variant doc
+// comments and the hand-rolled Serialize/Deserialize impls above.
+impl JsonSchema for UserSpecifiedPortConfig {
+    fn schema_name() -> String {
+        "UserSpecifiedPortConfig".to_string()
+    }
+
+    fn json_schema(
+        generator: &mut schemars::r#gen::SchemaGenerator,
+    ) -> schemars::schema::Schema {
+        use schemars::schema::InstanceType;
+        use schemars::schema::Metadata;
+        use schemars::schema::ObjectValidation;
+        use schemars::schema::Schema;
+        use schemars::schema::SchemaObject;
+        use schemars::schema::SubschemaValidation;
+
+        let mut manual =
+            generator.subschema_for::<ManualPortConfig>().into_object();
+        manual.metadata().description =
+            Some("A manually-configured port.".to_string());
+
+        let ddm_auto = SchemaObject {
+            metadata: Some(Box::new(Metadata {
+                description: Some(
+                    "A port configured automatically via DDM.".to_string(),
+                ),
+                ..Default::default()
+            })),
+            instance_type: Some(InstanceType::Object.into()),
+            object: Some(Box::new(ObjectValidation {
+                additional_properties: Some(Box::new(Schema::Bool(false))),
+                ..Default::default()
+            })),
+            ..Default::default()
+        };
+
+        SchemaObject {
+            metadata: Some(Box::new(Metadata {
+                description: Some(
+                    "A user-specified port configuration.".to_string(),
+                ),
+                ..Default::default()
+            })),
+            subschemas: Some(Box::new(SubschemaValidation {
+                any_of: Some(vec![
+                    Schema::Object(manual),
+                    Schema::Object(ddm_auto),
+                ]),
+                ..Default::default()
+            })),
+            ..Default::default()
+        }
+        .into()
+    }
 }
 
 /// User-specified version of `UplinkAddressConfig`.

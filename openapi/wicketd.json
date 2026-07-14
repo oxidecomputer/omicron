@@ -7978,12 +7978,20 @@
         }
       },
       "UserSpecifiedPortConfig": {
+        "description": "A user-specified port configuration.",
         "anyOf": [
           {
-            "$ref": "#/components/schemas/ManualPortConfig"
+            "description": "A manually-configured port.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ManualPortConfig"
+              }
+            ]
           },
           {
-            "type": "object"
+            "description": "A port configured automatically via DDM.",
+            "type": "object",
+            "additionalProperties": false
           }
         ]
       },
