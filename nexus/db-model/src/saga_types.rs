@@ -14,6 +14,8 @@
 
 use super::impl_enum_type;
 
+use chrono::DateTime;
+use chrono::Utc;
 use diesel::backend::Backend;
 use diesel::deserialize::{self, FromSql};
 use diesel::pg::Pg;
@@ -233,11 +235,23 @@ pub struct Saga {
     pub adopt_generation: super::Generation,
     pub adopt_time: chrono::DateTime<chrono::Utc>,
 
-    /// Abandonment metadata.  These are only set when `saga_state` is
+    /// Abandonment metadata. These are only set when `saga_state` is
     /// `Abandoned` and are `None` otherwise.
-    pub abandon_time: Option<chrono::DateTime<chrono::Utc>>,
-    pub abandon_reason: Option<SagaReasonAbandoned>,
-    pub abandon_comment: Option<String>,
+    abandon_time: Option<DateTime<Utc>>,
+    abandon_reason: Option<SagaReasonAbandoned>,
+    abandon_comment: Option<String>,
+}
+
+/// Abandonment metadata for a saga.
+///
+/// These three values are always written and cleared together, so bundling
+/// them keeps them "all or none". A saga is either not abandoned (no
+/// `AbandonInfo`) or fully abandoned (an `AbandonInfo` with every field set).
+#[derive(Clone, Debug, PartialEq)]
+pub struct AbandonInfo {
+    pub time: DateTime<Utc>,
+    pub reason: SagaReasonAbandoned,
+    pub comment: String,
 }
 
 impl Saga {
@@ -266,6 +280,33 @@ impl Saga {
             abandon_reason: None,
             abandon_comment: None,
         }
+    }
+
+    /// Returns this saga's abandonment metadata, or `None` if it isn't
+    /// abandoned.
+    ///
+    /// The three underlying columns are written and cleared as a unit (see
+    /// [`Saga::set_abandoned`] and [`Saga::new`]), and the
+    /// `abandoned_requires_metadata` database CHECK constraint keeps them
+    /// consistent with `saga_state`. So in practice they are either all set or
+    /// all `None`. A partially-populated row would be a bug, and is reported
+    /// here as "not abandoned".
+    pub fn abandon_info(&self) -> Option<AbandonInfo> {
+        match (self.abandon_time, self.abandon_reason, &self.abandon_comment) {
+            (Some(time), Some(reason), Some(comment)) => {
+                Some(AbandonInfo { time, reason, comment: comment.clone() })
+            }
+            _ => None, // TODO-K: Should probably log here? Or have an enum for invalid state
+        }
+    }
+
+    /// Marks this saga abandoned with the required metadata.
+    pub fn set_abandoned(&mut self, info: AbandonInfo) {
+        let AbandonInfo { time, reason, comment } = info;
+        self.saga_state = SagaState::Abandoned;
+        self.abandon_time = Some(time);
+        self.abandon_reason = Some(reason);
+        self.abandon_comment = Some(comment);
     }
 }
 

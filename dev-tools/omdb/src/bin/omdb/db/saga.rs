@@ -186,9 +186,9 @@ impl From<Saga> for SagaRow {
             current_sec,
             adopt_generation: _,
             adopt_time: _,
-            abandon_comment: _,
-            abandon_reason: _,
-            abandon_time: _,
+            // The `abandon_*` fields are private (accessed via
+            // `Saga::abandon_info`) and aren't shown in this row.
+            ..
         } = saga;
         Self {
             id: id.0.into(),

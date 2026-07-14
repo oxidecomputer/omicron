@@ -696,11 +696,11 @@ mod test {
         };
 
         assert_eq!(found_saga.saga_state, SagaState::Abandoned);
-        assert_eq!(
-            found_saga.abandon_reason,
-            Some(SagaReasonAbandoned::Unrecoverable)
-        );
-        assert_eq!(found_saga.abandon_comment, Some("test".to_string()));
+        let abandon_info = found_saga
+            .abandon_info()
+            .expect("an abandoned saga should have abandonment metadata");
+        assert_eq!(abandon_info.reason, SagaReasonAbandoned::Unrecoverable);
+        assert_eq!(abandon_info.comment, "test");
 
         // Test cleanup
         db.terminate().await;
@@ -739,11 +739,12 @@ mod test {
 
             let mut saga =
                 db::model::saga_types::Saga::new(self.sec_id, params);
-            saga.saga_state = SagaState::Abandoned;
-            saga.abandon_time = Some(saga.adopt_time);
-            saga.abandon_comment =
-                Some("fake abandoned saga created".to_string());
-            saga.abandon_reason = Some(SagaReasonAbandoned::Unrecoverable);
+            let time = saga.adopt_time;
+            saga.set_abandoned(db::model::saga_types::AbandonInfo {
+                time,
+                reason: SagaReasonAbandoned::Unrecoverable,
+                comment: "fake abandoned saga created".to_string(),
+            });
             saga
         }
 
