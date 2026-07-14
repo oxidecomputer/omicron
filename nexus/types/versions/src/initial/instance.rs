@@ -506,6 +506,8 @@ pub enum InstanceState {
     Starting,
     /// The instance is currently running.
     Running,
+    /// This instance is updating while running.
+    //Updating,
     /// The instance has been requested to stop and a transition to "Stopped" is imminent.
     Stopping,
     /// The instance is currently stopped.

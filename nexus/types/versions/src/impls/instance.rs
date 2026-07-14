@@ -177,6 +177,7 @@ impl InstanceState {
             InstanceState::Creating => "creating",
             InstanceState::Starting => "starting",
             InstanceState::Running => "running",
+            //InstanceState::Updating => "updating",
             InstanceState::Stopping => "stopping",
             InstanceState::Stopped => "stopped",
             InstanceState::Rebooting => "rebooting",

@@ -3079,12 +3079,12 @@ impl NexusExternalApi for NexusExternalApiImpl {
         rqctx: RequestContext<ApiContext>,
         path_params: Path<path_params::InstancePath>,
         query_params: Query<project::OptionalProjectSelector>,
-        disk_to_attach: TypedBody<path_params::DiskPath>,
+        disk_to_attach: TypedBody<instance::InstanceAttachDisk>,
     ) -> Result<HttpResponseAccepted<Disk>, HttpError> {
         audit_and_time(&rqctx, |opctx, nexus| async move {
             let path = path_params.into_inner();
             let query = query_params.into_inner();
-            let disk = disk_to_attach.into_inner().disk;
+            let disk = disk_to_attach.into_inner();
             let instance_selector = instance::InstanceSelector {
                 project: query.project,
                 instance: path.instance,

@@ -5436,7 +5436,7 @@
             ]
           },
           {
-            "description": "The instance has been requested to stop and a transition to \"Stopped\" is imminent.",
+            "description": "This instance is updating while running. The instance has been requested to stop and a transition to \"Stopped\" is imminent.",
             "type": "string",
             "enum": [
               "stopping"

@@ -39,6 +39,7 @@ pub mod image_delete;
 pub(crate) mod instance_common;
 pub mod instance_create;
 pub mod instance_delete;
+pub mod instance_disk_attach;
 pub mod instance_ip_attach;
 pub mod instance_ip_detach;
 pub mod instance_migrate;
@@ -174,6 +175,7 @@ fn make_action_registry() -> ActionRegistry {
         image_create::SagaImageCreate,
         instance_create::SagaInstanceCreate,
         instance_delete::SagaInstanceDelete,
+        instance_disk_attach::SagaInstanceDiskAttach,
         instance_ip_attach::SagaInstanceIpAttach,
         instance_ip_detach::SagaInstanceIpDetach,
         instance_migrate::SagaInstanceMigrate,

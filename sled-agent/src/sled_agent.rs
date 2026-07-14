@@ -78,7 +78,7 @@ use sled_agent_types::early_networking::EarlyNetworkConfigEnvelope;
 use sled_agent_types::instance::ResolvedVpcFirewallRule;
 use sled_agent_types::instance::{
     InstanceEnsureBody, InstanceExternalIpBody, InstanceMulticastBody,
-    SledVmmState, VmmPutStateResponse, VmmStateRequested,
+    SledVmmState, VmmDiskAttachBody, VmmPutStateResponse, VmmStateRequested,
     VmmUnregisterResponse,
 };
 use sled_agent_types::inventory::{Inventory, OmicronSledConfig, SledRole};
@@ -1003,6 +1003,18 @@ impl SledAgent {
         self.inner
             .instances
             .ensure_state(propolis_id, target)
+            .await
+            .map_err(|e| Error::Instance(e))
+    }
+
+    pub async fn instance_attach_disk(
+        &self,
+        propolis_id: PropolisUuid,
+        body: &VmmDiskAttachBody,
+    ) -> Result<(), Error> {
+        self.inner
+            .instances
+            .attach_disk(propolis_id, body)
             .await
             .map_err(|e| Error::Instance(e))
     }

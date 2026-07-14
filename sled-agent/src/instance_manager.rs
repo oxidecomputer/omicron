@@ -237,6 +237,24 @@ impl InstanceManager {
         }
     }
 
+    pub async fn attach_disk(
+        &self,
+        propolis_id: PropolisUuid,
+        body: &VmmDiskAttachBody,
+    ) -> Result<(), Error> {
+        let (tx, rx) = oneshot::channel();
+        self.inner
+            .tx
+            .send(InstanceManagerRequest::AttachDisk {
+                propolis_id,
+                body: body.clone(),
+                tx,
+            })
+            .await
+            .map_err(|_| Error::FailedSendInstanceManagerClosed)?;
+        rx.await?
+    }
+
     pub async fn issue_disk_snapshot_request(
         &self,
         propolis_id: PropolisUuid,
@@ -462,7 +480,11 @@ enum InstanceManagerRequest {
         target: VmmStateRequested,
         tx: oneshot::Sender<Result<VmmPutStateResponse, Error>>,
     },
-
+    AttachDisk {
+        propolis_id: PropolisUuid,
+        body: VmmDiskAttachBody,
+        tx: oneshot::Sender<Result<(), Error>>,
+    },
     IssueDiskSnapshot {
         propolis_id: PropolisUuid,
         disk_id: Uuid,
@@ -617,6 +639,9 @@ impl InstanceManagerRunner {
                         },
                         Some(EnsureState { propolis_id, target, tx }) => {
                             self.ensure_state(tx, propolis_id, target)
+                        },
+                        Some(AttachDisk{ propolis_id, body, tx}) => {
+                            self.attach_disk(tx, propolis_id, &body)
                         },
                         Some(IssueDiskSnapshot { propolis_id, disk_id, snapshot_id, tx }) => {
                             self.issue_disk_snapshot_request(tx, propolis_id, disk_id, snapshot_id)
@@ -834,6 +859,18 @@ impl InstanceManagerRunner {
         };
         instance.put_state(tx, target)?;
         Ok(())
+    }
+
+    fn attach_disk(
+        &self,
+        tx: oneshot::Sender<Result<(), Error>>,
+        propolis_id: PropolisUuid,
+        body: &VmmDiskAttachBody,
+    ) -> Result<(), Error> {
+        let instance =
+            self.jobs.get(&propolis_id).ok_or(Error::NoSuchVmm(propolis_id))?;
+
+        instance.attach_disk(tx, body).map_err(Error::from)
     }
 
     fn issue_disk_snapshot_request(

@@ -743,10 +743,10 @@ progenitor-extras = "0.2.0"
 # dependencies, you must also update the references in package-manifest.toml to
 # match the new revision.
 bhyve_api = { git = "https://github.com/oxidecomputer/propolis", rev = "979b72896bc39a876c98fb32fe706da37a4fc408" }
-propolis-api-types-versions = { git = "https://github.com/oxidecomputer/propolis", rev = "979b72896bc39a876c98fb32fe706da37a4fc408" }
-propolis_api_types = { git = "https://github.com/oxidecomputer/propolis", rev = "979b72896bc39a876c98fb32fe706da37a4fc408" }
-propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "979b72896bc39a876c98fb32fe706da37a4fc408" }
-propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", rev = "979b72896bc39a876c98fb32fe706da37a4fc408" }
+propolis-api-types-versions = { path = "../propolis/crates/propolis-api-types-versions" }
+propolis_api_types = { path = "../propolis/crates/propolis-api-types" }
+propolis-client = { path = "../propolis/lib/propolis-client" }
+propolis-mock-server = {  git = "https://github.com/oxidecomputer/propolis", rev = "979b72896bc39a876c98fb32fe706da37a4fc408" }
 # NOTE: see above!
 proptest = "1.7.0"
 qorb = "0.4.1"

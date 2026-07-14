@@ -46,9 +46,10 @@ use sled_agent_types::firewall_rules::VpcFirewallRulesEnsureBody;
 use sled_agent_types::instance::SledVmmState;
 use sled_agent_types::instance::{
     InstanceEnsureBody, InstanceExternalIpBody, InstanceMulticastBody,
-    VmmIssueDiskSnapshotRequestBody, VmmIssueDiskSnapshotRequestPathParam,
-    VmmIssueDiskSnapshotRequestResponse, VmmPathParam, VmmPutStateBody,
-    VmmPutStateResponse, VmmUnregisterResponse, VpcPathParam,
+    VmmDiskAttachBody, VmmIssueDiskSnapshotRequestBody,
+    VmmIssueDiskSnapshotRequestPathParam, VmmIssueDiskSnapshotRequestResponse,
+    VmmPathParam, VmmPutStateBody, VmmPutStateResponse, VmmUnregisterResponse,
+    VpcPathParam,
 };
 use sled_agent_types::inventory::{Inventory, OmicronSledConfig};
 use sled_agent_types::probes::ProbeSet;
@@ -671,6 +672,22 @@ impl SledAgentApi for SledAgentImpl {
         sa.latencies()
             .instrument_dropshot_handler(&rqctx, async {
                 Ok(HttpResponseOk(sa.instance_get_state(id).await?))
+            })
+            .await
+    }
+
+    async fn vmm_attach_disk(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<VmmPathParam>,
+        body: TypedBody<VmmDiskAttachBody>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let sa = rqctx.context();
+        let id = path_params.into_inner().propolis_id;
+        let body_args = body.into_inner();
+        sa.latencies()
+            .instrument_dropshot_handler(&rqctx, async {
+                sa.instance_attach_disk(id, &body_args).await?;
+                Ok(HttpResponseUpdatedNoContent())
             })
             .await
     }

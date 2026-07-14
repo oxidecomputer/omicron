@@ -28,6 +28,7 @@ impl_enum_type!(
     Creating => b"creating"
     NoVmm => b"no_vmm"
     Vmm => b"vmm"
+    //Updating => b"updating"
     Failed => b"failed"
     Destroyed => b"destroyed"
 );
@@ -47,6 +48,7 @@ impl InstanceState {
             InstanceState::Creating => "creating",
             InstanceState::NoVmm => "no_VMM",
             InstanceState::Vmm => "VMM",
+            //InstanceState::Updating => "updating",
             InstanceState::Failed => "failed",
             InstanceState::Destroyed => "destroyed",
         }
@@ -69,6 +71,7 @@ impl From<InstanceState> for instance::InstanceState {
             InstanceState::Creating => Output::Creating,
             InstanceState::NoVmm => Output::Stopped,
             InstanceState::Vmm => Output::Running,
+            //InstanceState::Updating => Output::Updating,
             InstanceState::Failed => Output::Failed,
             InstanceState::Destroyed => Output::Destroyed,
         }

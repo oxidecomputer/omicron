@@ -81,6 +81,7 @@ use super::LOCAL_STORAGE_WORKERS;
 use crate::db::datastore::Disk;
 use nexus_db_queries::db;
 use omicron_common::api::external::Error;
+use omicron_uuid_kinds::PropolisUuid;
 use sled_agent_client::types::VirtioSocket;
 use sled_agent_client::types::{
     BlobStorageBackend, Board, BootOrderEntry, BootSettings, Chipset,
@@ -364,6 +365,10 @@ impl Default for Components {
 }
 
 impl Components {
+    fn new() -> Self {
+        Self(HashMap::new())
+    }
+
     /// Adds a named component to this component list. Returns a 500 error if
     /// the component name was already present in the list.
     fn add(&mut self, key: String, component: Component) -> Result<(), Error> {
@@ -588,6 +593,44 @@ impl super::Nexus {
         };
 
         Ok(VmmSpec(spec))
+    }
+
+    pub(crate) async fn generate_disk_components(
+        &self,
+        vmm_id: &PropolisUuid,
+        disk: &db::datastore::Disk,
+    ) -> Result<HashMap<String, Component>, Error> {
+        let mut builder = DisksByIdBuilder::new();
+
+        match disk {
+            db::datastore::Disk::Crucible(crucible_disk) => {
+                // Get the volume information needed to fill in the disks'
+                // backends' volume construction requests. Calling
+                // `volume_checkout` bumps the volumes' generation numbers.
+
+                use db::datastore::VolumeCheckoutReason;
+
+                let volume = self
+                    .db_datastore
+                    .volume_checkout(
+                        crucible_disk.volume_id(),
+                        // TODO: create new reason
+                        VolumeCheckoutReason::InstanceStart { vmm_id: *vmm_id },
+                    )
+                    .await?;
+
+                builder.add_crucible_disk(disk, &volume)?;
+            }
+            db::datastore::Disk::LocalStorage(_) => {
+                panic!("can't use local disk");
+            }
+        }
+
+        let disks: DisksById = builder.into();
+
+        let mut components = Components::new();
+        components.add_disks(disks);
+        Ok(components.0)
     }
 }
 

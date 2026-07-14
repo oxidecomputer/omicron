@@ -23,7 +23,7 @@ pub const OXIMETER_REDUNDANCY: usize = 1;
 ///
 /// This is used by both RSS (to distribute the initial set of services) and the
 /// Reconfigurator (to know whether to add new crdb zones)
-pub const COCKROACHDB_REDUNDANCY: usize = 5;
+pub const COCKROACHDB_REDUNDANCY: usize = 3;
 
 /// The amount of redundancy for Crucible Pantry services.
 ///

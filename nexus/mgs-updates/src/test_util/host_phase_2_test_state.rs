@@ -226,6 +226,7 @@ mod api_impl {
     use sled_agent_types::instance::InstanceExternalIpBody;
     use sled_agent_types::instance::InstanceMulticastBody;
     use sled_agent_types::instance::SledVmmState;
+    use sled_agent_types::instance::VmmDiskAttachBody;
     use sled_agent_types::instance::VmmIssueDiskSnapshotRequestBody;
     use sled_agent_types::instance::VmmIssueDiskSnapshotRequestPathParam;
     use sled_agent_types::instance::VmmIssueDiskSnapshotRequestResponse;
@@ -610,6 +611,14 @@ mod api_impl {
             _rqctx: RequestContext<Self::Context>,
             _path_params: Path<VmmPathParam>,
         ) -> Result<HttpResponseOk<SledVmmState>, HttpError> {
+            unimplemented!()
+        }
+
+        async fn vmm_attach_disk(
+            _rqctx: RequestContext<Self::Context>,
+            _path_params: Path<VmmPathParam>,
+            _body: TypedBody<VmmDiskAttachBody>,
+        ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
             unimplemented!()
         }
 

@@ -38,6 +38,7 @@ api_versions!([
     // |  example for the next person.
     // v
     // (next_int, IDENT),
+    (43, DISK_HOTPLUG),
     (42, NON_EMPTY_UPLINK_PORTS),
     (41, ADD_INSTANCE_PRIMARY_NIC_MTU),
     (40, ADD_FMD_TO_INVENTORY),
@@ -671,6 +672,17 @@ pub trait SledAgentApi {
         rqctx: RequestContext<Self::Context>,
         path_params: Path<latest::instance::VmmPathParam>,
         body: TypedBody<latest::instance::InstanceMulticastBody>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    #[endpoint {
+        method = PUT,
+        path = "/vmms/{propolis_id}/disk",
+        versions = VERSION_DISK_HOTPLUG..,
+    }]
+    async fn vmm_attach_disk(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::instance::VmmPathParam>,
+        body: TypedBody<latest::instance::VmmDiskAttachBody>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
     #[endpoint {

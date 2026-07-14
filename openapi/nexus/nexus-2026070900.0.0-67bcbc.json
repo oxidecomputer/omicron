@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "2026061000.0.0"
+    "version": "2026070900.0.0"
   },
   "paths": {
     "/device/auth": {
@@ -4412,7 +4412,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/DiskPath"
+                "$ref": "#/components/schemas/InstanceAttachDisk"
               }
             }
           },
@@ -22881,6 +22881,25 @@
           "time_run_state_updated"
         ]
       },
+      "InstanceAttachDisk": {
+        "type": "object",
+        "properties": {
+          "disk": {
+            "$ref": "#/components/schemas/NameOrId"
+          },
+          "slot_number": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/InstanceSlotNumber"
+              }
+            ]
+          }
+        },
+        "required": [
+          "disk"
+        ]
+      },
       "InstanceAutoRestartPolicy": {
         "description": "A policy determining when an instance should be automatically restarted by the control plane.",
         "oneOf": [
@@ -23493,6 +23512,11 @@
           "last_byte_offset"
         ]
       },
+      "InstanceSlotNumber": {
+        "type": "integer",
+        "format": "uint16",
+        "minimum": 0
+      },
       "InstanceState": {
         "description": "Running state of an Instance (primarily: booted or stopped)\n\nThis typically reflects whether it's starting, running, stopping, or stopped, but also includes states related to the Instance's lifecycle",
         "oneOf": [
@@ -23518,7 +23542,7 @@
             ]
           },
           {
-            "description": "The instance has been requested to stop and a transition to \"Stopped\" is imminent.",
+            "description": "This instance is updating while running. The instance has been requested to stop and a transition to \"Stopped\" is imminent.",
             "type": "string",
             "enum": [
               "stopping"

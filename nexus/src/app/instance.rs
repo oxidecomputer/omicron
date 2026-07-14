@@ -76,10 +76,12 @@ use propolis_client::support::tungstenite::Message as WebSocketMessage;
 use propolis_client::support::tungstenite::protocol::CloseFrame;
 use propolis_client::support::tungstenite::protocol::frame::coding::CloseCode;
 use sagas::instance_common::ExternalIpAttach;
+use sagas::instance_disk_attach;
 use sagas::instance_start;
 use sagas::instance_update;
 use sled_agent_client::types::DelegatedZvol;
 use sled_agent_client::types::InstanceMigrationTargetParams;
+use sled_agent_client::types::VmmDiskAttachBody;
 use sled_agent_client::types::VmmPutStateBody;
 use sled_agent_types::instance as sled_agent;
 use sled_agent_types::instance::ExternalIpConfig;
@@ -1880,7 +1882,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         instance_lookup: &lookup::Instance<'_>,
-        disk: NameOrId,
+        disk_attach: instance::InstanceAttachDisk,
     ) -> UpdateResult<db::datastore::Disk> {
         let (.., authz_project, authz_instance) =
             instance_lookup.lookup_for(authz::Action::Modify).await?;
@@ -1889,11 +1891,11 @@ impl super::Nexus {
             .disk_lookup(
                 opctx,
                 disk::DiskSelector {
-                    project: match disk {
+                    project: match disk_attach.disk {
                         NameOrId::Name(_) => Some(authz_project.id().into()),
                         NameOrId::Id(_) => None,
                     },
-                    disk,
+                    disk: disk_attach.disk,
                 },
             )?
             .lookup_for(authz::Action::Modify)
@@ -1911,6 +1913,29 @@ impl super::Nexus {
             ));
         }
 
+        let saga = instance_disk_attach::SagaInstanceDiskAttach::prepare(
+            &instance_disk_attach::Params {
+                serialized_authn: authn::saga::Serialized::for_opctx(opctx),
+                authz_instance: authz_instance.clone(),
+                authz_disk: authz_disk.clone(),
+            },
+        )?;
+
+        // TODO: only use saga if instance is running.
+        let sagas = self.sagas.clone();
+        let runnable_saga = sagas.saga_prepare(saga).await?;
+        let running_saga = runnable_saga.start().await;
+        let result = match running_saga {
+            Err(error) => {
+                return Err(Error::internal_error(format!("error: {}", error)));
+            }
+            Ok(saga) => saga.wait_until_stopped().await.into_omicron_result(),
+        };
+
+        if let Err(error) = result {
+            return Err(Error::internal_error(format!("error: {}", error)));
+        }
+
         // TODO(https://github.com/oxidecomputer/omicron/issues/811):
         // Disk attach is only implemented for instances that are not
         // currently running. This operation therefore can operate exclusively
@@ -1924,17 +1949,36 @@ impl super::Nexus {
         //   - Update the DB if the request succeeded (hopefully to "Attached").
         // - If the instance is not running...
         //   - Update the disk state in the DB to "Attached".
-        let (_instance, disk) = self
-            .db_datastore
-            .instance_attach_disk(
-                &opctx,
-                &authz_instance,
-                &authz_disk,
-                MAX_DISKS_PER_INSTANCE,
-            )
-            .await?;
+        //let (_instance, disk) = self
+        //    .db_datastore
+        //    .instance_attach_disk(
+        //        &opctx,
+        //        &authz_instance,
+        //        &authz_disk,
+        //        MAX_DISKS_PER_INSTANCE,
+        //    )
+        //    .await?;
 
+        let disk = self.db_datastore.disk_get(&opctx, authz_disk.id()).await?;
         Ok(disk)
+    }
+
+    pub(crate) async fn request_disk_attach(
+        &self,
+        opctx: &OpContext,
+        propolis_id: &PropolisUuid,
+        sled_id: &SledUuid,
+        disk_id: Uuid,
+    ) -> Result<(), Error> {
+        let sa = self.sled_client(&sled_id).await?;
+
+        let disk = self.datastore().disk_get(&opctx, disk_id).await?;
+        let components =
+            self.generate_disk_components(propolis_id, &disk).await?;
+
+        sa.vmm_attach_disk(propolis_id, &VmmDiskAttachBody { components })
+            .await?;
+        Ok(())
     }
 
     /// Detach a disk from an instance.

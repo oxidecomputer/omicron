@@ -963,6 +963,7 @@ impl DataStore {
         let ok_to_attach_instance_states = vec![
             db::model::InstanceState::Creating,
             db::model::InstanceState::NoVmm,
+            db::model::InstanceState::Vmm,
         ];
 
         let attach_update = DiskSetClauseForAttach::new(authz_instance.id());
@@ -1084,9 +1085,7 @@ impl DataStore {
                 authz_instance.id(),
                 authz_disk.id(),
                 instance::table.into_boxed().filter(
-                    instance::dsl::state
-                        .eq_any(ok_to_attach_instance_states)
-                        .and(instance::dsl::active_propolis_id.is_null()),
+                    instance::dsl::state.eq_any(ok_to_attach_instance_states),
                 ),
                 resource_query,
                 max_disks,
@@ -1139,15 +1138,16 @@ impl DataStore {
                         // why we did not attach.
                         api::external::DiskState::Creating
                         | api::external::DiskState::Detached => {
-                            if collection.propolis_id.is_some() {
-                                return Err(Error::invalid_request(
-                                    "cannot attach disk: instance is not \
-                                        fully stopped",
-                                ));
-                            }
+                            //if collection.propolis_id.is_some() {
+                            //    return Err(Error::invalid_request(
+                            //        "cannot attach disk: instance is not \
+                            //            fully stopped",
+                            //    ));
+                            //}
                             match collection.nexus_state.state() {
                                 // Ok-to-be-attached instance states:
                                 instance_types::InstanceState::Creating
+                                | instance_types::InstanceState::Running
                                 | instance_types::InstanceState::Stopped => {
                                     // The disk is ready to be attached, and the
                                     // instance is ready to be attached. Perhaps

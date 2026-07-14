@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "42.0.0"
+    "version": "43.0.0"
   },
   "paths": {
     "/artifacts": {
@@ -2160,6 +2160,42 @@
         "responses": {
           "204": {
             "description": "successful deletion"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/vmms/{propolis_id}/disk": {
+      "put": {
+        "operationId": "vmm_attach_disk",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "propolis_id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/PropolisUuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VmmDiskAttachBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -10364,6 +10400,20 @@
           "virtual_ip",
           "virtual_mac",
           "vni"
+        ]
+      },
+      "VmmDiskAttachBody": {
+        "type": "object",
+        "properties": {
+          "components": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/Component"
+            }
+          }
+        },
+        "required": [
+          "components"
         ]
       },
       "VmmIssueDiskSnapshotRequestBody": {

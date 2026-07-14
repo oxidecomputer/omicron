@@ -38,6 +38,7 @@ use oxnet::IpNet;
 use propolis_api_types::instance::ErrorCode as PropolisErrorCode;
 use propolis_client::Client as PropolisClient;
 use propolis_client::instance_spec::{Component, SpecKey};
+use propolis_client::types::InstanceDiskAttachRequest;
 use rand::SeedableRng;
 use rand::prelude::IteratorRandom;
 use sled_agent_config_reconciler::AvailableDatasetsReceiver;
@@ -237,6 +238,14 @@ enum InstanceRequest {
         snapshot_id: Uuid,
         tx: oneshot::Sender<Result<(), ManagerError>>,
     },
+    AttachDisk {
+        body: VmmDiskAttachBody,
+        tx: oneshot::Sender<Result<(), ManagerError>>,
+    },
+    //DetachDisk {
+    //    disk_id: Uuid,
+    //    tx: oneshot::Sender<Result<(), ManagerError>>,
+    //},
     AddExternalIp {
         ip: InstanceExternalIpBody,
         tx: oneshot::Sender<Result<(), ManagerError>>,
@@ -314,6 +323,7 @@ impl InstanceRequest {
                 .send(Err(error.into()))
                 .map_err(|_| Error::FailedSendClientClosed),
             Self::IssueSnapshotRequest { tx, .. }
+            | Self::AttachDisk { tx, .. }
             | Self::AddExternalIp { tx, .. }
             | Self::DeleteExternalIp { tx, .. }
             | Self::RefreshExternalIps { tx }
@@ -753,6 +763,10 @@ impl InstanceRunner {
                                 )
                                 .map_err(|_| Error::FailedSendClientClosed)
                             },
+                            AttachDisk {body, tx } => {
+                                tx.send(self.attach_disk(&body).await.map_err(|e| e.into()))
+                                .map_err(|_| Error::FailedSendClientClosed)
+                            },
                             AddExternalIp { ip, tx } => {
                                 tx.send(self.add_external_ip(&ip).map_err(|e| e.into()))
                                 .map_err(|_| Error::FailedSendClientClosed)
@@ -879,6 +893,9 @@ impl InstanceRunner {
                     tx.send(Err(Error::Terminating.into())).map_err(|_| ())
                 }
                 IssueSnapshotRequest { tx, .. } => {
+                    tx.send(Err(Error::Terminating.into())).map_err(|_| ())
+                }
+                AttachDisk { tx, .. } => {
                     tx.send(Err(Error::Terminating.into())).map_err(|_| ())
                 }
                 AddExternalIp { tx, .. } => {
@@ -2019,6 +2036,16 @@ impl Instance {
             .map_err(|_| Error::FailedSendClientClosed)
     }
 
+    pub fn attach_disk(
+        &self,
+        tx: oneshot::Sender<Result<(), ManagerError>>,
+        body: &VmmDiskAttachBody,
+    ) -> Result<(), Error> {
+        self.tx
+            .try_send(InstanceRequest::AttachDisk { body: body.clone(), tx })
+            .or_else(InstanceRequest::fail_try_send)
+    }
+
     pub fn issue_snapshot_request(
         &self,
         tx: oneshot::Sender<Result<(), ManagerError>>,
@@ -2576,6 +2603,23 @@ impl InstanceRunner {
                 .instance_issue_crucible_snapshot_request()
                 .id(disk_id)
                 .snapshot_id(snapshot_id)
+                .send()
+                .await?;
+
+            Ok(())
+        } else {
+            Err(Error::VmNotRunning(self.propolis_id))
+        }
+    }
+
+    async fn attach_disk(&self, body: &VmmDiskAttachBody) -> Result<(), Error> {
+        if let Some(running_state) = &self.running_state {
+            running_state
+                .client
+                .instance_disk_attach()
+                .body(InstanceDiskAttachRequest {
+                    components: body.components.clone(),
+                })
                 .send()
                 .await?;
 

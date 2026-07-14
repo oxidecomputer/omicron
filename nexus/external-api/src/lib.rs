@@ -86,6 +86,7 @@ api_versions!([
     // |  date-based version should be at the top of the list.
     // v
     // (next_yyyy_mm_dd_nn, IDENT),
+    (2026_07_09_00, INSTANCE_DISK_HOTPLUG),
     (2026_06_10_00, BGP_CONFIGURATION_UPDATE),
     (2026_06_08_00, INSTANCE_CPU_TYPE_TURIN_V2),
     (2026_06_05_00, EXTERNAL_JUMBO_FRAMES),
@@ -4448,14 +4449,42 @@ pub trait NexusExternalApi {
         method = POST,
         path = "/v1/instances/{instance}/disks/attach",
         tags = ["instances"],
-        versions = VERSION_DISK_BLOCK_SIZE_TYPE..,
+        versions = VERSION_INSTANCE_DISK_HOTPLUG..,
     }]
     async fn instance_disk_attach(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<latest::path_params::InstancePath>,
         query_params: Query<latest::project::OptionalProjectSelector>,
-        disk_to_attach: TypedBody<latest::path_params::DiskPath>,
+        disk_to_attach: TypedBody<latest::instance::InstanceAttachDisk>,
     ) -> Result<HttpResponseAccepted<Disk>, HttpError>;
+
+    /// Attach disk to instance
+    #[endpoint {
+        method = POST,
+        path = "/v1/instances/{instance}/disks/attach",
+        tags = ["instances"],
+        versions = VERSION_DISK_BLOCK_SIZE_TYPE..VERSION_INSTANCE_DISK_HOTPLUG,
+    }]
+    async fn instance_disk_attach_v2026_06_10_00(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::InstancePath>,
+        query_params: Query<latest::project::OptionalProjectSelector>,
+        disk_to_attach: TypedBody<latest::path_params::DiskPath>,
+    ) -> Result<HttpResponseAccepted<Disk>, HttpError> {
+        Self::instance_disk_attach(
+            rqctx,
+            path_params,
+            query_params,
+            disk_to_attach.try_map(TryFrom::try_from).map_err(|err| {
+                HttpError::for_bad_request(
+                    None,
+                    InlineErrorChain::new(&err).to_string(),
+                )
+            })?,
+        )
+        .await
+        .map(|resp| resp.map(Into::into))
+    }
 
     /// Attach disk to instance
     #[endpoint {
@@ -4467,16 +4496,21 @@ pub trait NexusExternalApi {
     }]
     async fn instance_disk_attach_v2026_01_30_01(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<latest::path_params::InstancePath>,
-        query_params: Query<latest::project::OptionalProjectSelector>,
-        disk_to_attach: TypedBody<latest::path_params::DiskPath>,
+        path_params: Path<v2025_11_20_00::path_params::InstancePath>,
+        query_params: Query<v2025_11_20_00::project::OptionalProjectSelector>,
+        disk_to_attach: TypedBody<v2025_11_20_00::path_params::DiskPath>,
     ) -> Result<HttpResponseAccepted<v2026_05_20_00_local::Disk>, HttpError>
     {
         Self::instance_disk_attach(
             rqctx,
             path_params,
             query_params,
-            disk_to_attach,
+            disk_to_attach.try_map(TryFrom::try_from).map_err(|err| {
+                HttpError::for_bad_request(
+                    None,
+                    InlineErrorChain::new(&err).to_string(),
+                )
+            })?,
         )
         .await
         .map(|resp| resp.map(Into::into))
@@ -4501,7 +4535,12 @@ pub trait NexusExternalApi {
             rqctx,
             path_params,
             query_params,
-            disk_to_attach,
+            disk_to_attach.try_map(TryFrom::try_from).map_err(|err| {
+                HttpError::for_bad_request(
+                    None,
+                    InlineErrorChain::new(&err).to_string(),
+                )
+            })?,
         )
         .await
         .map(|resp| resp.map(Into::into))
@@ -4526,7 +4565,12 @@ pub trait NexusExternalApi {
             rqctx,
             path_params,
             query_params,
-            disk_to_attach,
+            disk_to_attach.try_map(TryFrom::try_from).map_err(|err| {
+                HttpError::for_bad_request(
+                    None,
+                    InlineErrorChain::new(&err).to_string(),
+                )
+            })?,
         )
         .await
         .and_then(|resp| resp.try_map(TryInto::try_into))
