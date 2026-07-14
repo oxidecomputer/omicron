@@ -87,3 +87,19 @@ pub struct PsuIdentity {
     pub firmware_revision: String,
     pub serial: String,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::alert::tests::expectorate_alert_schema;
+
+    #[test]
+    fn psu_inserted_v0_schema() {
+        expectorate_alert_schema::<PsuInsertedV0>();
+    }
+
+    #[test]
+    fn psu_removed_v0_schema() {
+        expectorate_alert_schema::<PsuRemovedV0>();
+    }
+}

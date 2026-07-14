@@ -211,8 +211,32 @@ pub mod test_alerts {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
+
+    #[track_caller]
+    pub(crate) fn expectorate_alert_schema<T: AlertPayload>() {
+        let schema = schemars::schema_for!(T);
+        let schema_json = match serde_json::to_string_pretty(&schema) {
+            Ok(json) => json,
+            Err(e) => panic!(
+                "Failed to serialize schema for {} v{}: {e}",
+                T::CLASS,
+                T::VERSION
+            ),
+        };
+        let dir = camino::Utf8Path::new("output")
+            .join("alert_schemas")
+            .join(T::CLASS.as_str());
+        if let Err(e) = std::fs::create_dir_all(&dir) {
+            panic!(
+                "Failed to create schema directory {dir} for alert class {}: {e}",
+                T::CLASS,
+            );
+        }
+        let path = dir.join(format!("v{}.json", T::VERSION));
+        expectorate::assert_contents(&path, &schema_json);
+    }
 
     #[test]
     fn test_from_str_roundtrips() {

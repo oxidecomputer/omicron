@@ -8176,6 +8176,7 @@ dependencies = [
  "async-trait",
  "base64 0.22.1",
  "bootstrap-agent-lockstep-types",
+ "camino",
  "chrono",
  "clap",
  "clickhouse-admin-types",
