@@ -1024,7 +1024,7 @@ table! {
         adopt_time -> Timestamptz,
         abandon_time -> Nullable<Timestamptz>,
         abandon_reason -> Nullable<crate::enums::SagaAbandonReasonEnum>,
-        abandon_information -> Nullable<Text>,
+        abandon_comment -> Nullable<Text>,
     }
 }
 

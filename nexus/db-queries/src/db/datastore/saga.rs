@@ -40,7 +40,7 @@ use std::ops::Add;
 pub struct SagaStateDbFields {
     pub saga_state: SagaState,
     pub abandon_reason: Option<SagaReasonAbandoned>,
-    pub abandon_information: Option<String>,
+    pub abandon_comment: Option<String>,
     pub abandon_time: Option<chrono::DateTime<chrono::Utc>>,
 }
 
@@ -75,7 +75,7 @@ impl From<SagaStateTransition> for SagaStateDbFields {
             | SagaStateTransition::Done => SagaStateDbFields {
                 saga_state: value.into(),
                 abandon_reason: None,
-                abandon_information: None,
+                abandon_comment: None,
                 abandon_time: None,
             },
             SagaStateTransition::Abandoned { reason, information } => {
@@ -83,7 +83,7 @@ impl From<SagaStateTransition> for SagaStateDbFields {
                 SagaStateDbFields {
                     saga_state: SagaState::Abandoned,
                     abandon_reason: Some(reason),
-                    abandon_information: Some(information),
+                    abandon_comment: Some(information),
                     abandon_time: Some(now),
                 }
             }
@@ -700,7 +700,7 @@ mod test {
             found_saga.abandon_reason,
             Some(SagaReasonAbandoned::Unrecoverable)
         );
-        assert_eq!(found_saga.abandon_information, Some("test".to_string()));
+        assert_eq!(found_saga.abandon_comment, Some("test".to_string()));
 
         // Test cleanup
         db.terminate().await;
@@ -741,7 +741,7 @@ mod test {
                 db::model::saga_types::Saga::new(self.sec_id, params);
             saga.saga_state = SagaState::Abandoned;
             saga.abandon_time = Some(saga.adopt_time);
-            saga.abandon_information =
+            saga.abandon_comment =
                 Some("fake abandoned saga created".to_string());
             saga.abandon_reason = Some(SagaReasonAbandoned::Unrecoverable);
             saga

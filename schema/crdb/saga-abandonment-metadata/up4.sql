@@ -4,6 +4,6 @@ ALTER TABLE omicron.public.saga
         OR (
             abandon_time IS NOT NULL
             AND abandon_reason IS NOT NULL
-            AND abandon_information IS NOT NULL
+            AND abandon_comment IS NOT NULL
         )
     );

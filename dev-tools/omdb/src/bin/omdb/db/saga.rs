@@ -103,8 +103,8 @@ struct SagaAbandonArgs {
     saga_id: Uuid,
 
     #[clap(long, default_value = "manually abandoned")]
-    /// Additional information as to why the saga was abandoned
-    information: String,
+    /// Additional comment as to why the saga was abandoned
+    comment: String,
 
     /// Skip checking if the SEC is up
     #[clap(long, default_value_t = false)]
@@ -186,7 +186,7 @@ impl From<Saga> for SagaRow {
             current_sec,
             adopt_generation: _,
             adopt_time: _,
-            abandon_information: _,
+            abandon_comment: _,
             abandon_reason: _,
             abandon_time: _,
         } = saga;
@@ -370,7 +370,7 @@ async fn cmd_sagas_abandon(
     omdb: &Omdb,
     opctx: &OpContext,
     datastore: &DataStore,
-    SagaAbandonArgs { saga_id, information, bypass_sec_check }: SagaAbandonArgs,
+    SagaAbandonArgs { saga_id, comment, bypass_sec_check }: SagaAbandonArgs,
     _destruction_token: DestructiveOperationToken,
 ) -> anyhow::Result<()> {
     use nexus_db_schema::schema::saga::dsl;
@@ -444,7 +444,7 @@ execute even if it is abandoned. You should only proceed if:
     let new_state = SagaStateDbFields {
         saga_state: SagaState::Abandoned,
         abandon_reason: Some(nexus_db_model::SagaReasonAbandoned::Omdb),
-        abandon_information: Some(information),
+        abandon_comment: Some(comment),
         abandon_time: Some(Utc::now()),
     };
 

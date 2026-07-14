@@ -237,7 +237,7 @@ pub struct Saga {
     /// `Abandoned` and are `None` otherwise.
     pub abandon_time: Option<chrono::DateTime<chrono::Utc>>,
     pub abandon_reason: Option<SagaReasonAbandoned>,
-    pub abandon_information: Option<String>,
+    pub abandon_comment: Option<String>,
 }
 
 impl Saga {
@@ -264,7 +264,7 @@ impl Saga {
             adopt_time: now,
             abandon_time: None,
             abandon_reason: None,
-            abandon_information: None,
+            abandon_comment: None,
         }
     }
 }
