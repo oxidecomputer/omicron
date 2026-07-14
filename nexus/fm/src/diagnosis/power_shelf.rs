@@ -69,29 +69,25 @@ pub fn analyze(builder: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
                 Err(e) => {
                     // This is weird: a case in the parent sitrep created by
                     // this DE contained an ereport that we couldn't understand.
-                    // Close the case since we don't know what to do with it.
-                    let err = InlineErrorChain::new(&*e);
-                    slog::warn!(
-                        &log,
-                        "couldn't interpret ereport assigned to a case in the \
-                         parent sitrep!";
-                        "case_id" => %case.id,
-                        "ereport_id" => %ereport.id,
-                        "case_ereport_id" => %case_ereport.id,
-                        "error" => &err,
-                    );
-                    let comment = format!(
-                        "I couldn't understand this case, as it \
-                         contained an incomprehensible ereport {} \
-                         (case ereport {}). The ereport could not be \
-                         interpreted because: {err}",
-                        ereport.id, case_ereport.id,
-                    );
+                    // Don't close the case, since we may be misinterpreting it
+                    // due to a bug that could be fixed in a future software
+                    // version, and we therefore must not close it permanently.
+                    // Instead, just log a warning and do nothing with this
+                    // case.
+                    let error = InlineErrorChain::new(&*e);
                     builder
                         .cases
                         .case_mut(&case.id)
                         .expect("open case in parent sitrep should be present")
-                        .close(comment);
+                        .log_warning("failed to parse ereport")
+                        .comment(
+                            "I couldn't understand this case, as it contained \
+                             an ereport that I couldn't interpret.\n\
+                             I am doing nothing with this case for now.",
+                        )
+                        .kv("ereport_id", format_args!("{}", ereport.id))
+                        .kv("case_ereport_id", case_ereport.id)
+                        .kv("error", error.to_string());
                     // `psc_case` is a `RefMut` that mutably borrows this case's
                     // entry in `cases_by_id`; as long as it exists, the whole
                     // map is borrowed mutably. We must therefore drop the
