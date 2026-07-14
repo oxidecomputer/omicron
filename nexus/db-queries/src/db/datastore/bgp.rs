@@ -30,7 +30,7 @@ use omicron_common::api::external::{
     CreateResult, DeleteResult, Error, ListResultVec, LookupResult, NameOrId,
     ResourceType, UpdateResult,
 };
-use omicron_uuid_kinds::{BgpAnnounceSetUuid, BgpConfigUuid, GenericUuid};
+use omicron_uuid_kinds::{BgpConfigUuid, GenericUuid};
 use ref_cast::RefCast;
 use sled_agent_types::early_networking::RouterPeerType;
 use sled_agent_types::early_networking::SwitchSlot;
@@ -40,8 +40,7 @@ impl DataStore {
     pub async fn bgp_config_create(
         &self,
         opctx: &OpContext,
-        config: &networking::BgpConfigCreate,
-        announce_set_id: BgpAnnounceSetUuid,
+        config: BgpConfig,
     ) -> CreateResult<BgpConfig> {
         use diesel::dsl::exists;
         use nexus_db_schema::schema::bgp_config::dsl;
@@ -49,6 +48,7 @@ impl DataStore {
             bgp_announce_set, bgp_announce_set::dsl as announce_set_dsl,
         };
 
+        let announce_set_id = config.bgp_announce_set_id();
         let conn = self.pool_connection_authorized(opctx).await?;
         let err = OptionalError::new();
         self.transaction_retry_wrapper("bgp_config_create")
@@ -70,11 +70,6 @@ impl DataStore {
                         ),
                     }));
                 }
-
-                let config = BgpConfig::from_config_create(
-                    config,
-                    announce_set_id
-                );
 
                 let BgpConfig {
                     identity,
@@ -255,8 +250,14 @@ impl DataStore {
             })
             .await
             .map_err(|e| {
-                error!(opctx.log, "bgp_config_update failed"; "error" => ?e);
-                public_error_from_diesel(e, ErrorHandler::Server)
+                let msg = "bgp_config_update failed";
+                if let Some(err) = err.take() {
+                    error!(opctx.log, "{msg}"; "error" => ?err);
+                    err
+                } else {
+                    error!(opctx.log, "{msg}"; "error" => ?e);
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                }
             })
     }
 
@@ -1093,7 +1094,10 @@ mod tests {
 
         // Create the BGP config
         let config_id = datastore
-            .bgp_config_create(&opctx, &config, new_announce_id.into())
+            .bgp_config_create(
+                &opctx,
+                BgpConfig::from_config_create(&config, new_announce_id.into()),
+            )
             .await
             .expect("create bgp config")
             .identity
@@ -1168,19 +1172,23 @@ mod tests {
         datastore
             .bgp_config_create(
                 &opctx,
-                &networking::BgpConfigCreate {
-                    identity: IdentityMetadataCreateParams {
-                        name: config_name.clone(),
-                        description: String::from("a test config"),
+                BgpConfig::from_config_create(
+                    &networking::BgpConfigCreate {
+                        identity: IdentityMetadataCreateParams {
+                            name: config_name.clone(),
+                            description: String::from("a test config"),
+                        },
+                        asn: 47,
+                        bgp_announce_set_id: NameOrId::Name(
+                            announce_name.clone(),
+                        ),
+                        vrf: None,
+                        shaper: None,
+                        checker: None,
+                        max_paths: Default::default(),
                     },
-                    asn: 47,
-                    bgp_announce_set_id: NameOrId::Name(announce_name.clone()),
-                    vrf: None,
-                    shaper: None,
-                    checker: None,
-                    max_paths: Default::default(),
-                },
-                announce_set.id(),
+                    announce_set.id(),
+                ),
             )
             .await
             .expect("create bgp config");
@@ -1688,21 +1696,23 @@ mod tests {
         datastore
             .bgp_config_create(
                 &opctx,
-                &networking::BgpConfigCreate {
-                    identity: IdentityMetadataCreateParams {
-                        name: config_name.clone(),
-                        description: description.clone(),
+                BgpConfig::from_config_create(
+                    &networking::BgpConfigCreate {
+                        identity: IdentityMetadataCreateParams {
+                            name: config_name.clone(),
+                            description: description.clone(),
+                        },
+                        asn,
+                        bgp_announce_set_id: NameOrId::Id(
+                            announce_id.into_untyped_uuid(),
+                        ),
+                        vrf: None,
+                        shaper: None,
+                        checker: None,
+                        max_paths: Default::default(),
                     },
-                    asn,
-                    bgp_announce_set_id: NameOrId::Id(
-                        announce_id.into_untyped_uuid(),
-                    ),
-                    vrf: None,
-                    shaper: None,
-                    checker: None,
-                    max_paths: Default::default(),
-                },
-                announce_id.into(),
+                    announce_id.into(),
+                ),
             )
             .await
             .expect("create bgp config");
@@ -1784,7 +1794,13 @@ mod tests {
         };
 
         datastore
-            .bgp_config_create(&opctx, &bgp_config, bgp_announce_set_id.into())
+            .bgp_config_create(
+                &opctx,
+                BgpConfig::from_config_create(
+                    &bgp_config,
+                    bgp_announce_set_id.into(),
+                ),
+            )
             .await
             .expect("create bgp config");
 
@@ -1793,8 +1809,10 @@ mod tests {
             datastore
                 .bgp_config_create(
                     &opctx,
-                    &bgp_config,
-                    bgp_announce_set_id.into()
+                    BgpConfig::from_config_create(
+                        &bgp_config,
+                        bgp_announce_set_id.into(),
+                    ),
                 )
                 .await
                 .is_ok()
@@ -1805,11 +1823,13 @@ mod tests {
             datastore
                 .bgp_config_create(
                     &opctx,
-                    &BgpConfigCreate {
-                        max_paths: MaxPathConfig::new(2).unwrap(),
-                        ..bgp_config
-                    },
-                    bgp_announce_set_id.into()
+                    BgpConfig::from_config_create(
+                        &BgpConfigCreate {
+                            max_paths: MaxPathConfig::new(2).unwrap(),
+                            ..bgp_config
+                        },
+                        bgp_announce_set_id.into(),
+                    ),
                 )
                 .await
                 .is_err()

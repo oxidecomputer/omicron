@@ -32,10 +32,10 @@ impl super::Nexus {
             .lookup_for(authz::Action::Read)
             .await?;
 
-        let result = self
-            .db_datastore
-            .bgp_config_create(opctx, config, authz_bgp_announce_set.id())
-            .await?;
+        let config =
+            BgpConfig::from_config_create(config, authz_bgp_announce_set.id());
+
+        let result = self.db_datastore.bgp_config_create(opctx, config).await?;
         Ok(result)
     }
 
@@ -141,9 +141,9 @@ impl super::Nexus {
     ) -> DeleteResult {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
 
-        let (.., authz_bgp_config, _bgp_config) = self
+        let (.., authz_bgp_config) = self
             .bgp_config_lookup(opctx, sel.name_or_id.clone())?
-            .fetch_for(authz::Action::Delete)
+            .lookup_for(authz::Action::Delete)
             .await?;
 
         self.db_datastore.bgp_config_delete(opctx, &authz_bgp_config).await

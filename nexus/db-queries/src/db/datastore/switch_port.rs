@@ -2373,10 +2373,16 @@ mod test {
             )
             .lookup_for(nexus_auth::authz::Action::Read)
             .await
-            .expect("lookup bgp config");
+            .expect("lookup announce set");
 
         datastore
-            .bgp_config_create(&opctx, &bgp_config, authz_announce_set.id())
+            .bgp_config_create(
+                &opctx,
+                nexus_db_model::BgpConfig::from_config_create(
+                    &bgp_config,
+                    authz_announce_set.id(),
+                ),
+            )
             .await
             .unwrap();
 
@@ -2771,10 +2777,16 @@ mod test {
             )
             .lookup_for(nexus_auth::authz::Action::Read)
             .await
-            .expect("lookup bgp config");
+            .expect("lookup announce set");
 
         datastore
-            .bgp_config_create(&opctx, &bgp_config, authz_announce_set.id())
+            .bgp_config_create(
+                &opctx,
+                nexus_db_model::BgpConfig::from_config_create(
+                    &bgp_config,
+                    authz_announce_set.id(),
+                ),
+            )
             .await
             .unwrap();
 
@@ -2951,10 +2963,16 @@ mod test {
             )
             .lookup_for(nexus_auth::authz::Action::Read)
             .await
-            .expect("lookup bgp config");
+            .expect("lookup announce set");
 
         datastore
-            .bgp_config_create(&opctx, &bgp_config, authz_announce_set.id())
+            .bgp_config_create(
+                &opctx,
+                nexus_db_model::BgpConfig::from_config_create(
+                    &bgp_config,
+                    authz_announce_set.id(),
+                ),
+            )
             .await
             .unwrap();
 
