@@ -5,50 +5,9 @@
 # improvements or bugfixes that are present in newer versions of nextest.
 nextest-version = { required = "0.9.131", recommended = "0.9.131" }
 
-experimental = ["benchmarks", "setup-scripts"]
-
-[[profile.default.scripts]]
-# Exclude omicron-dev tests from crdb-seed as we explicitly want to simulate an
-# environment where the seed file doesn't exist.
-# Exclude omicron-live-tests because those don't need this and also don't have
-# it available in the environment in which they run.
-filter = '(rdeps(nexus-test-utils) + package(nexus-db-schema)) - package(omicron-dev) - package(omicron-live-tests)'
-setup = 'crdb-seed'
-
-[profile.ci]
-fail-fast = false
-retries = 2
-flaky-result = "fail"
-
-[profile.ci.junit]
-path = "junit.xml"
-# Mark flaky-fail tests as passing in JUnit output since we care about that
-# output for analysis, not visualization.
-flaky-fail-status = "success"
-
-[scripts.setup.crdb-seed]
-# Use the test profile for this executable since that's how almost all
-# invocations of nextest happen.
-command = 'cargo run -p crdb-seed --profile test'
-
-[[profile.default.scripts]]
-filter = 'package(omicron-clickhouse-admin)'
-setup = 'clickhouse-cluster'
-
-[scripts.setup.clickhouse-cluster]
-command = 'cargo run -p clickhouse-cluster-dev'
-
-[test-groups]
-# The ClickHouse cluster tests currently rely on a hard-coded set of ports for
-# the nodes in the cluster. We would like to relax this in the future, at which
-# point this test-group configuration can be removed or at least loosened to
-# support testing in parallel. For now, enforce strict serialization for all
-# tests with `replicated` in the name.
-clickhouse-cluster = { max-threads = 1 }
-# While most Omicron tests operate with their own simulated control plane, the
-# live-tests operate on a more realistic, shared control plane and test
-# behaviors that conflict with each other.  They need to be run serially.
-live-tests = { max-threads = 1 }
+[experimental]
+benchmarks = true
+setup-scripts = true
 
 [profile.default]
 default-filter = 'all() - package(omicron-live-tests) - package(end-to-end-tests)'
@@ -71,6 +30,29 @@ priority = 10
 filter = 'binary_id(omicron-nexus::test_all) and test(::schema::)'
 threads-required = 4
 
+[[profile.default.scripts]]
+# Exclude omicron-dev tests from crdb-seed as we explicitly want to simulate an
+# environment where the seed file doesn't exist.
+# Exclude omicron-live-tests because those don't need this and also don't have
+# it available in the environment in which they run.
+filter = '(rdeps(nexus-test-utils) + package(nexus-db-schema)) - package(omicron-dev) - package(omicron-live-tests)'
+setup = 'crdb-seed'
+
+[[profile.default.scripts]]
+filter = 'package(omicron-clickhouse-admin)'
+setup = 'clickhouse-cluster'
+
+[profile.ci]
+fail-fast = false
+retries = 2
+flaky-result = "fail"
+
+[profile.ci.junit]
+path = "junit.xml"
+# Mark flaky-fail tests as passing in JUnit output since we care about that
+# output for analysis, not visualization.
+flaky-fail-status = "success"
+
 [[profile.ci.overrides]]
 # `omicron-test-utils` is included in this block that uses a longer-than-normal
 # timeout because under some conditions it waits for CockroachDB to shut down
@@ -87,3 +69,23 @@ default-filter = 'package(omicron-live-tests)'
 [[profile.live-tests.overrides]]
 filter = 'package(omicron-live-tests)'
 test-group = 'live-tests'
+
+[scripts.setup.crdb-seed]
+# Use the test profile for this executable since that's how almost all
+# invocations of nextest happen.
+command = 'cargo run -p crdb-seed --profile test'
+
+[scripts.setup.clickhouse-cluster]
+command = 'cargo run -p clickhouse-cluster-dev'
+
+[test-groups]
+# The ClickHouse cluster tests currently rely on a hard-coded set of ports for
+# the nodes in the cluster. We would like to relax this in the future, at which
+# point this test-group configuration can be removed or at least loosened to
+# support testing in parallel. For now, enforce strict serialization for all
+# tests with `replicated` in the name.
+clickhouse-cluster = { max-threads = 1 }
+# While most Omicron tests operate with their own simulated control plane, the
+# live-tests operate on a more realistic, shared control plane and test
+# behaviors that conflict with each other.  They need to be run serially.
+live-tests = { max-threads = 1 }
