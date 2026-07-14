@@ -136,6 +136,20 @@ impl From<AlertClass> for crate::external_api::alert::AlertClass {
     }
 }
 
+/// Alert classes are sorted lexicographically by the class string.
+impl Ord for AlertClass {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.as_str().cmp(&other.as_str())
+    }
+}
+
+/// Alert classes are sorted lexicographically by the class string.
+impl PartialOrd for AlertClass {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
 #[derive(Debug, Eq, PartialEq)]
 pub struct AlertClassParseError(());
 

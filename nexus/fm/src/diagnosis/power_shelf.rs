@@ -948,7 +948,7 @@ mod tests {
     /// optional parent sitrep, and a set of brand-new ereports.
     fn build_input(
         fmtest: &FmTest,
-        collection: inventory::Collection,
+        collection: impl Into<Arc<inventory::Collection>>,
         parent_sitrep: Option<Sitrep>,
         new_ereports: impl IntoIterator<Item = Ereport>,
     ) -> Input {
@@ -956,18 +956,14 @@ mod tests {
             Arc::new((
                 SitrepVersion {
                     id: s.id(),
-                    version: 0,
+                    version: 1,
                     time_made_current: Utc::now(),
                 },
                 s,
             ))
         });
         let mut builder = fmtest
-            .input_builder(
-                parent,
-                Arc::new(collection),
-                Arc::new(IdOrdMap::new()),
-            )
+            .input_builder(parent, collection.into(), Arc::new(IdOrdMap::new()))
             .expect("input builder should accept fresh inventory");
         builder.add_unmarked_ereports(new_ereports);
         let (input, report) = builder.build();
@@ -1066,6 +1062,37 @@ mod tests {
             "expected exactly one case in the sitrep"
         );
         sitrep.cases.iter().next().unwrap()
+    }
+
+    fn alert_counts(case: &fm::Case) -> BTreeMap<AlertClass, usize> {
+        let mut counts = BTreeMap::new();
+        for alert in &case.alerts_requested {
+            *counts.entry(alert.class).or_default() += 1;
+        }
+        counts
+    }
+
+    #[track_caller]
+    fn assert_alert_counts(
+        case: &fm::Case,
+        expected: impl IntoIterator<Item = (AlertClass, usize)>,
+        msg: impl fmt::Display,
+    ) {
+        let expected =
+            expected.into_iter().collect::<BTreeMap<AlertClass, usize>>();
+        let actual = alert_counts(case);
+
+        // N.B. that this uses `assert!(x == y)` rather than `assert_eq!(x, y)`
+        // intentionally, because I want the assertion failure to print the more
+        // semantically meaningful "expected:" vs "actual:" and *not* also print
+        // the default "left:" vs "right:" from `assert_eq!`.
+        assert!(
+            expected == actual,
+            "{msg}\ncase {} did not contain the expected alerts!\n \
+             expected: {expected:?}\n   \
+               actual: {actual:?}",
+            case.id
+        );
     }
 
     /// A single rectifier insert opens a case, immediately closes it (the PSU
@@ -1178,15 +1205,75 @@ mod tests {
             !case.is_open(),
             "the most recent event was an insert, so the case should close"
         );
-        assert_eq!(
-            case.alerts_requested.len(),
-            2,
-            "both the remove and the insert should each request an alert"
+        assert_alert_counts(
+            &case,
+            [(AlertClass::PsuRemoved, 1), (AlertClass::PsuInserted, 1)],
+            "both the remove and the insert should each request an alert",
         );
-        let has_class =
-            |class| case.alerts_requested.iter().any(|a| a.class == class);
-        assert!(has_class(AlertClass::PsuRemoved));
-        assert!(has_class(AlertClass::PsuInserted));
+
+        logctx.cleanup_successful();
+    }
+
+    /// An insert followed by a remove within a single analysis run collapses
+    /// into one case. The case remains open when the first analysis pass
+    /// completes, and then closes only after the missing rectifier is inserted
+    /// again.
+    #[test]
+    fn insert_then_remove_remains_open_until_insert() {
+        let (mut fmtest, logctx) = FmTest::new_with_logctx(
+            "insert_then_remove_remains_open_until_insert",
+        );
+        let (example, _bp) = fmtest.system_builder.build();
+        let mut reporter = fmtest.reporters.reporter(ereport::Reporter::Sp {
+            sp_type: SpType::Power,
+            slot: SHELF,
+        });
+        let inventory = Arc::new(example.collection);
+        // Same reporter restart, so the remove gets the greater ENA and is
+        // recognized as the more recent event.
+        let insert =
+            reporter.parse_ereport(Utc::now(), ereports::PSU_INSERT_JSON);
+        let remove =
+            reporter.parse_ereport(Utc::now(), ereports::PSU_REMOVE_JSON);
+
+        let input =
+            build_input(&fmtest, inventory.clone(), None, [remove, insert]);
+        let sitrep = run_analyze(&logctx.log, &input);
+
+        let case = sole_case(&sitrep);
+        assert!(
+            case.is_open(),
+            "the most recent event was a remove, so the case should remain \
+             open",
+        );
+        assert_alert_counts(
+            &case,
+            [(AlertClass::PsuRemoved, 1), (AlertClass::PsuInserted, 1)],
+            "both the remove and the insert should each request an alert",
+        );
+
+        // Okay, now let's put the rectifier back.
+        let insert2 =
+            reporter.parse_ereport(Utc::now(), ereports::PSU_INSERT_JSON);
+
+        // Run analysis with the sitrep from the previous analysis step and the
+        // new insert ereport.
+        let input =
+            build_input(&fmtest, inventory.clone(), Some(sitrep), [insert2]);
+        let sitrep2 = run_analyze(&logctx.log, &input);
+
+        let case = sole_case(&sitrep2);
+        assert!(
+            !case.is_open(),
+            "the most recent event was an insert, so the case should now be \
+             closed"
+        );
+        assert_alert_counts(
+            &case,
+            [(AlertClass::PsuRemoved, 1), (AlertClass::PsuInserted, 2)],
+            "the remove and *both* insert ereports should each request \
+             an alert",
+        );
 
         logctx.cleanup_successful();
     }
@@ -1299,23 +1386,13 @@ mod tests {
             !case.is_open(),
             "the insert means the PSU is present again, so the case closes"
         );
-        assert_eq!(
-            case.alerts_requested.len(),
-            2,
-            "the carried-forward remove alert plus exactly one new insert alert"
+        assert_alert_counts(
+            &case,
+            [(AlertClass::PsuRemoved, 1), (AlertClass::PsuInserted, 1)],
+            "both the carried forward remove alert and the newly added \
+             insert alert should be requested, and no new alerts should be \
+             requested",
         );
-        let inserted = case
-            .alerts_requested
-            .iter()
-            .filter(|a| a.class == AlertClass::PsuInserted)
-            .count();
-        let removed = case
-            .alerts_requested
-            .iter()
-            .filter(|a| a.class == AlertClass::PsuRemoved)
-            .count();
-        assert_eq!(inserted, 1, "exactly one new insert alert");
-        assert_eq!(removed, 1, "the remove alert must not be duplicated");
 
         logctx.cleanup_successful();
     }
@@ -1362,10 +1439,10 @@ mod tests {
 
         let case = sole_case(&sitrep);
         assert!(!case.is_open(), "latest collected ereport is an insert");
-        assert_eq!(
-            case.alerts_requested.len(),
-            3,
-            "each of the three events should still request its own alert"
+        assert_alert_counts(
+            &case,
+            [(AlertClass::PsuRemoved, 2), (AlertClass::PsuInserted, 1)],
+            "each of the ereports should request an alert",
         );
 
         logctx.cleanup_successful();
