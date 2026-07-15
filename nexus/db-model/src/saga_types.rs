@@ -281,22 +281,24 @@ impl SagaRow {
             && self.abandon_time.is_none()
     }
 
-    fn is_abandon_metadata_fully_present(&self) -> bool {
-        self.abandon_comment.is_some()
-            && self.abandon_reason.is_some()
-            && self.abandon_time.is_some()
+    // Returns the abandonment metadata iff all three columns are set.
+    fn valid_abandon_metadata(&self) -> Option<AbandonMetadata> {
+        Some(AbandonMetadata {
+            time: self.abandon_time?,
+            reason: self.abandon_reason?,
+            comment: self.abandon_comment.clone()?,
+        })
     }
 
     fn abandon_metadata_state(&self) -> AbandonMetadataState {
         if self.is_abandon_metadata_empty() {
             AbandonMetadataState::Empty
-        } else if self.is_abandon_metadata_fully_present() {
-            // TODO-K: Get rid of the unwraps?
-            AbandonMetadataState::Present(AbandonMetadata {
-                time: self.abandon_time.unwrap(),
-                reason: self.abandon_reason.unwrap(),
-                comment: self.abandon_comment.clone().unwrap(),
-            })
+        // Convert the three nullable abandonment columns into
+        // `AbandonMetadata`. A partially-populated set is impossible per the
+        // `abandoned_requires_metadata` CHECK constraint, so treat it as
+        // corruption.
+        } else if let Some(metadata) = self.valid_abandon_metadata() {
+            AbandonMetadataState::Present(metadata)
         } else {
             AbandonMetadataState::Corrupted {
                 time: self.abandon_time,
@@ -307,6 +309,8 @@ impl SagaRow {
     }
 }
 
+/// The state of a [`SagaRow`]'s three abandonment columns.
+/// All unset `Empty`, all set `Present`, or a partial mix `Corrupted`.
 enum AbandonMetadataState {
     Corrupted {
         time: Option<DateTime<Utc>>,
@@ -334,7 +338,7 @@ pub struct AbandonMetadata {
 /// insertion.
 ///
 /// Compared to [`SagaRow`], the three abandon metadata columns are bundled
-/// into a single private `abandon` field, kept all-or-none. It's populated
+/// into a single private `abandon` field, kept all or none. It's populated
 /// only together with the `Abandoned` state, via [`Saga::set_abandoned`], and
 /// read via [`Saga::abandon_metadata`]. Reads go through `TryFrom<SagaRow>`,
 /// which rejects rows whose metadata is inconsistent with `saga_state` with an
@@ -388,7 +392,7 @@ impl Saga {
     /// Marks this saga abandoned with the required metadata.
     ///
     /// Sets `saga_state` and the abandonment metadata together so they stay
-    /// all-or-none. This is the only way to populate `abandon_metadata` other
+    /// all or none. This is the only way to populate `abandon_metadata` other
     /// than loading a validated row from the database.
     pub fn set_abandoned(&mut self, metadata: AbandonMetadata) {
         self.saga_state = SagaState::Abandoned;
@@ -400,12 +404,14 @@ impl TryFrom<SagaRow> for Saga {
     type Error = Error;
 
     fn try_from(row: SagaRow) -> Result<Self, Self::Error> {
+        let abandon_metadata_state = row.abandon_metadata_state();
+
         let SagaRow {
             id,
             creator,
             time_created,
-            ref name,
-            ref saga_dag,
+            name,
+            saga_dag,
             saga_state,
             current_sec,
             adopt_generation,
@@ -415,11 +421,7 @@ impl TryFrom<SagaRow> for Saga {
             abandon_comment: _,
         } = row;
 
-        // Convert the three nullable abandonment columns into `AbandonMetadata`.
-        // A partially-populated set is impossible per the
-        // `abandoned_requires_metadata` CHECK constraint, so treat it as
-        // corruption.
-        let abandon_metadata = match &row.abandon_metadata_state() {
+        let abandon_metadata = match abandon_metadata_state {
             AbandonMetadataState::Corrupted { time, reason, comment } => {
                 return Err(Error::internal_error(&format!(
                     "saga {id}: abandonment metadata is partially populated. \
@@ -457,8 +459,8 @@ impl TryFrom<SagaRow> for Saga {
             id,
             creator,
             time_created,
-            name: name.clone(),
-            saga_dag: saga_dag.clone(),
+            name,
+            saga_dag,
             saga_state,
             current_sec,
             adopt_generation,
@@ -469,7 +471,7 @@ impl TryFrom<SagaRow> for Saga {
 }
 
 /// Lowers a validated [`Saga`] into a raw [`SagaRow`] for insertion. This
-/// expands the all-or-none `abandon_metadata` back into the three nullable
+/// expands the all or none `abandon_metadata` back into the three nullable
 /// columns.
 impl From<&Saga> for SagaRow {
     fn from(saga: &Saga) -> Self {
