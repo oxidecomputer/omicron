@@ -87,7 +87,10 @@ static MANIFEST_PREBUILT_REPOS: [PrebuiltRepoConfig; 8] = [
     },
     PrebuiltRepoConfig {
         repo_name: "management-gateway-service",
-        behavior: PrebuiltRepoBehavior::Ignore,
+        behavior: PrebuiltRepoBehavior::Inspect {
+            expected_pkg_name: "gateway-messages",
+            extra_cargo_features: &[],
+        },
     },
     PrebuiltRepoConfig {
         repo_name: "propolis",
