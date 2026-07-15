@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use bootstrap_agent_lockstep_client::types::RackOperationStatus;
+use bootstrap_agent_lockstep_types::RackOperationStatus;
 use dropshot::HttpError;
 use dropshot::HttpResponseOk;
 use dropshot::HttpResponseUpdatedNoContent;
@@ -39,6 +39,8 @@ use wicket_common::rack_update::ClearUpdateStateOptions;
 use wicket_common::rack_update::ClearUpdateStateResponse;
 use wicket_common::rack_update::StartUpdateOptions;
 use wicket_common::update_events::EventReport;
+// Temporary re-exports -- a later commit will remove them.
+pub use wicketd_commission_types::rack_setup::CertificateUploadResponse;
 
 /// Full release repositories are currently (Dec 2024) 1.8 GiB and are likely to
 /// continue growing.
@@ -411,21 +413,6 @@ pub struct CurrentRssUserConfigSensitive {
 pub struct CurrentRssUserConfig {
     pub sensitive: CurrentRssUserConfigSensitive,
     pub insensitive: CurrentRssUserConfigInsensitive,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
-#[serde(tag = "status", rename_all = "snake_case")]
-pub enum CertificateUploadResponse {
-    /// The key has been uploaded, but we're waiting on its corresponding
-    /// certificate chain.
-    WaitingOnCert,
-    /// The cert chain has been uploaded, but we're waiting on its corresponding
-    /// private key.
-    WaitingOnKey,
-    /// A cert chain and its key have been accepted.
-    CertKeyAccepted,
-    /// A cert chain and its key are valid, but have already been uploaded.
-    CertKeyDuplicateIgnored,
 }
 
 #[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq, Eq)]
