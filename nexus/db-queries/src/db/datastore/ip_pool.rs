@@ -2418,10 +2418,10 @@ fn assign_ip_pool_query(
     assert_ne!(pool.assignment, assignment);
     match pool.assignment {
         IpPoolAssignment::Silos => {
-            assign_ip_pool_to_silos_query(pool, assignment)
+            reassign_silo_ip_pool_query(pool, assignment)
         }
         IpPoolAssignment::SystemServices => {
-            assign_ip_pool_to_system_services_query(pool, assignment)
+            reassign_system_services_ip_pool_query(pool, assignment)
         }
     }
 }
@@ -2431,7 +2431,7 @@ fn assign_ip_pool_query(
 //
 // Checks that the pool is not currently linked to any silos first. Note that
 // this means there cannot be any silo-specific resources using the pool.
-fn assign_ip_pool_to_silos_query(
+fn reassign_silo_ip_pool_query(
     ip_pool: &IpPool,
     new_assignment: IpPoolAssignment,
 ) -> TypedSqlQuery<SelectableSql<IpPool>> {
@@ -2487,7 +2487,7 @@ fn assign_ip_pool_to_silos_query(
 //
 // - There are no external IPs in use by Oxide resources.
 // - There is at least one other system-services pool of the same assignment.
-fn assign_ip_pool_to_system_services_query(
+fn reassign_system_services_ip_pool_query(
     ip_pool: &IpPool,
     new_assignment: IpPoolAssignment,
 ) -> TypedSqlQuery<SelectableSql<IpPool>> {

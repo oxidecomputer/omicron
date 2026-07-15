@@ -41,16 +41,19 @@ pub struct SystemIpPoolFilter {
 }
 
 /// Assignment of an IP pool to resources and services.
-#[derive(
-    Clone, Copy, Debug, Default, Deserialize, Serialize, JsonSchema, PartialEq,
-)]
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum IpPoolAssignment {
     /// Pool is available to be linked to customer silos.
-    #[default]
     Silos,
     /// Pool is reserved for Oxide-operated rack services (NTP, DNS, etc.).
     SystemServices,
+}
+
+impl IpPoolAssignment {
+    const fn silos() -> Self {
+        Self::Silos
+    }
 }
 
 /// A collection of IP ranges.
@@ -93,7 +96,7 @@ pub struct IpPoolCreate {
     #[serde(default)]
     pub pool_type: IpPoolType,
     /// What this pool is assigned to (defaults to Silos).
-    #[serde(default)]
+    #[serde(default = "IpPoolAssignment::silos")]
     pub assignment: IpPoolAssignment,
 }
 

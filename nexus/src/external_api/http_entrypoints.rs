@@ -1346,33 +1346,6 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
-    async fn project_ip_pool_list_v2025_11_20_00(
-        rqctx: RequestContext<ApiContext>,
-        query_params: Query<PaginatedByNameOrId>,
-    ) -> Result<
-        HttpResponseOk<ResultsPage<v2025_11_20_00::ip_pool::SiloIpPool>>,
-        HttpError,
-    > {
-        let page =
-            Self::project_ip_pool_list_v2026_01_01_00(rqctx, query_params)
-                .await?
-                .0;
-        Ok(HttpResponseOk(ResultsPage {
-            items: page.items.into_iter().map(Into::into).collect(),
-            next_page: page.next_page,
-        }))
-    }
-
-    async fn ip_pool_list_v2026_02_09_00(
-        rqctx: RequestContext<ApiContext>,
-        query_params: Query<PaginatedByNameOrId>,
-    ) -> Result<
-        HttpResponseOk<ResultsPage<v2026_01_01_00::ip_pool::SiloIpPool>>,
-        HttpError,
-    > {
-        Self::project_ip_pool_list_v2026_01_01_00(rqctx, query_params).await
-    }
-
     async fn ip_pool_view(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<path_params::IpPoolPath>,
