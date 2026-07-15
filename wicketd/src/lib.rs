@@ -3,6 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 mod artifacts;
+mod bgp_auth_keys;
 mod bootstrap_addrs;
 mod config;
 mod context;
@@ -10,6 +11,7 @@ mod helpers;
 mod http_entrypoints;
 mod installinator_progress;
 pub mod mgs;
+mod multirack_config;
 mod nexus_proxy;
 mod preflight_check;
 mod rss_config;
@@ -21,8 +23,9 @@ use artifacts::{
     WicketdArtifactStore, WicketdInstallinatorApiImpl,
     WicketdInstallinatorContext,
 };
-use bootstrap_addrs::BootstrapPeers;
+use bootstrap_addrs::BootstrapPeersFromDdm;
 pub use config::Config;
+pub(crate) use context::RssOrMultirackJoinConfigCommon;
 pub(crate) use context::ServerContext;
 use display_error_chain::DisplayErrorChain;
 use dropshot::{ConfigDropshot, HandlerTaskMode, HttpServer};
@@ -162,7 +165,7 @@ impl Server {
             ipr_update_tracker.clone(),
         ));
 
-        let bootstrap_peers = BootstrapPeers::new(&log);
+        let bootstrap_peers = BootstrapPeersFromDdm::new(&log);
         let internal_dns_resolver = args
             .rack_subnet
             .map(|addr| {
@@ -203,7 +206,7 @@ impl Server {
                     bootstrap_peers,
                     update_tracker: update_tracker.clone(),
                     baseboard: args.baseboard,
-                    rss_config: Default::default(),
+                    rss_or_multirack_join_config: Default::default(),
                     preflight_checker: PreflightCheckerHandler::new(&log),
                     internal_dns_resolver,
                 },

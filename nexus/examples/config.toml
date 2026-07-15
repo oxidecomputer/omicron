@@ -191,6 +191,11 @@ audit_log_cleanup.retention_days = 90
 audit_log_cleanup.max_deleted_per_activation = 10000
 populate_switch_ports.period_secs = 30
 
+[multicast]
+# Enable multicast switch programming and the group reconciler. The multicast
+# API is served regardless of this setting.
+enabled = true
+
 [default_region_allocation_strategy]
 # allocate region on 3 random distinct zpools, on 3 random distinct sleds.
 # type = "random_with_distinct_sleds"

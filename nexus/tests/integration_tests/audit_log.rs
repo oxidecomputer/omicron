@@ -20,8 +20,8 @@ use nexus_types::external_api::audit::{
 };
 use nexus_types::external_api::device;
 use nexus_types::external_api::instance::{
-    ExternalIpCreate, InstanceCpuPlatform, InstanceDiskAttachment,
-    InstanceNetworkInterfaceAttachment,
+    ExternalIpCreate, InstanceAutoRestartPolicy, InstanceCpuPlatform,
+    InstanceDiskAttachment, InstanceNetworkInterfaceAttachment,
 };
 use nexus_types::external_api::policy;
 use nexus_types::external_api::project::ProjectCreate;
@@ -30,7 +30,7 @@ use nexus_types::external_api::silo::{self, SiloIdentityMode};
 use nexus_types::external_api::user::CurrentUser;
 use nexus_types::{identity::Asset, silo::DEFAULT_SILO_ID};
 use omicron_common::api::external::{
-    IdentityMetadataCreateParams, InstanceAutoRestartPolicy, Name, UserId,
+    IdentityMetadataCreateParams, Name, UserId,
 };
 use std::str::FromStr;
 

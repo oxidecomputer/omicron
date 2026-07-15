@@ -38,6 +38,20 @@ use uuid::Uuid;
 type ControlPlaneTestContext =
     nexus_test_utils::ControlPlaneTestContext<crate::Server>;
 
+/// Return a test context builder for instance start saga tests.
+///
+/// These tests effectively disable the instance_watcher background task to
+/// avoid colliding with it.
+pub(crate) fn instance_saga_test_builder(
+    test_name: &str,
+) -> nexus_test_utils::ControlPlaneBuilder<'_> {
+    nexus_test_utils::ControlPlaneBuilder::new(test_name)
+        .customize_nexus_config(&|config| {
+            config.pkg.background_tasks.instance_watcher.period_secs =
+                Duration::from_secs(86_400);
+        })
+}
+
 pub fn test_opctx(cptestctx: &ControlPlaneTestContext) -> OpContext {
     OpContext::for_tests(
         cptestctx.logctx.log.new(o!()),
@@ -372,7 +386,7 @@ async fn instance_poll_state(
                     "instance" => ?db_state.instance(),
                     "active_vmm" => ?db_state.vmm(),
                 );
-                Err(poll::CondCheckError::<Error>::NotYet)
+                Err(poll::CondCheckError::<Error>::NotYet { status: None })
             }
         },
         &Duration::from_secs(1),
@@ -574,7 +588,7 @@ pub async fn wait_for_running_sagas(cptestctx: &ControlPlaneTestContext) {
             } else {
                 info!(log, "still waiting for sagas: {list:?}");
 
-                Err(poll::CondCheckError::<Error>::NotYet)
+                Err(poll::CondCheckError::<Error>::NotYet { status: None })
             }
         },
         &Duration::from_secs(1),

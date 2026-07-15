@@ -6,8 +6,9 @@
 
 use super::asset::AssetIdentityMetadata;
 use super::hardware::Baseboard;
+use super::instance::InstanceState;
 use daft::Diffable;
-use omicron_common::api::external::{ByteCount, InstanceState, Name};
+use omicron_common::api::external::{ByteCount, Name};
 use omicron_uuid_kinds::SledUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};

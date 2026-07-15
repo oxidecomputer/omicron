@@ -11,12 +11,10 @@ use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::networking::{
-    AddressLotBlockCreate, AddressLotCreate,
+    AddressLot, AddressLotBlock, AddressLotBlockCreate, AddressLotCreate,
+    AddressLotCreateResponse, AddressLotKind, AddressLotViewResponse,
 };
-use omicron_common::api::external::{
-    AddressLot, AddressLotBlock, AddressLotCreateResponse, AddressLotKind,
-    AddressLotViewResponse, IdentityMetadataCreateParams,
-};
+use omicron_common::api::external::IdentityMetadataCreateParams;
 use std::net::IpAddr;
 
 type ControlPlaneTestContext =

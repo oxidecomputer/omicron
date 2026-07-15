@@ -624,10 +624,10 @@ only_for_targets.image = "standard"
 # 3. Use source.type = "manual" instead of "prebuilt"
 source.type = "prebuilt"
 source.repo = "crucible"
-source.commit = "bd9a0e2abe6b6b89aec8c85f4ee57474144ed150"
+source.commit = "2bfe090eb5318ec8c467157018db2429d4df535b"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/crucible/image/<commit>/crucible.sha256.txt
-source.sha256 = "918a3db80758e93b2f01c8bd78a358065f4636c4bda387e12948830d1028909a"
+source.sha256 = "86d155da32960b2d64bb0cceaccddfe10ae5bc8b44335e144436eeb0d5999b09"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -636,10 +636,10 @@ service_name = "crucible_pantry_prebuilt"
 only_for_targets.image = "standard"
 source.type = "prebuilt"
 source.repo = "crucible"
-source.commit = "bd9a0e2abe6b6b89aec8c85f4ee57474144ed150"
+source.commit = "2bfe090eb5318ec8c467157018db2429d4df535b"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/crucible/image/<commit>/crucible-pantry.sha256.txt
-source.sha256 = "3567a37b4136b03fd08032ec88886223c8b33c227a7cb9e1ebdbe3e0198d6b98"
+source.sha256 = "48d1e97bb1129666b5af5ca412eef3a1e99026c10222436bc04ad95dde8aaaf4"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -653,10 +653,10 @@ service_name = "crucible_utils"
 only_for_targets.image = "standard"
 source.type = "prebuilt"
 source.repo = "crucible"
-source.commit = "bd9a0e2abe6b6b89aec8c85f4ee57474144ed150"
+source.commit = "2bfe090eb5318ec8c467157018db2429d4df535b"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/crucible/image/<commit>/crucible-utils.sha256.txt
-source.sha256 = "e1b87fa2a3b916ed67b31de02238691ddbf59def31336c1f73e182fd067a5c79"
+source.sha256 = "103aacff3cf1ffd29c0c66edaab1eeab85cf3123d149ebf4c6b1ee309d8d20ba"
 output.type = "tarball"
 
 # Refer to
@@ -667,10 +667,10 @@ service_name = "propolis-server"
 only_for_targets.image = "standard"
 source.type = "prebuilt"
 source.repo = "propolis"
-source.commit = "75518ad2c26db9278895ab1262c28daf13bfdffd"
+source.commit = "cd0e2618eac4d80bbfcdbcbd546cb27fd62caa90"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/propolis/image/<commit>/propolis-server.sha256.txt
-source.sha256 = "5dd6af4c615e471cde8df42c0a9152e879e552ad248910d8e74c007b6bc028c7"
+source.sha256 = "47f41363e1a1f40d5e3c1ba98868e880b18cfd9126a681fc1cc4accdd5827fc7"
 output.type = "zone"
 
 [package.mg-ddm-gz]
@@ -683,10 +683,10 @@ source.repo = "maghemite"
 # `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
 # building `ddm-admin-client` (which will instruct you to update
 # `tools/maghemite_openapi_version`).
-source.commit = "5aaa7c9bc2d0e541d29604453dd98cb32676b347"
+source.commit = "0509f50053149b5ab87e3e33bf291baab729fe5b"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/mg-ddm-gz.sha256.txt
-source.sha256 = "e4d20f7f4ff7933e95abff79e7467e4b1a0302066f63be6b14cde739d3899afe"
+source.sha256 = "475cb8b5ded4a26bf0e431d29c0a2104da83e91609de10f7a0c3c7e038032874"
 output.type = "tarball"
 
 [package.mg-ddm]
@@ -699,10 +699,10 @@ source.repo = "maghemite"
 # `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
 # building `ddm-admin-client` (which will instruct you to update
 # `tools/maghemite_openapi_version`).
-source.commit = "5aaa7c9bc2d0e541d29604453dd98cb32676b347"
+source.commit = "0509f50053149b5ab87e3e33bf291baab729fe5b"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/mg-ddm.sha256.txt
-source.sha256 = "5e05778f0ec0385b2e097f82bd6776942ba93cdf4118c4f72f54c612636d3372"
+source.sha256 = "3d7ed45afd03049fcc3df620b65e17dfe139b909e98230e7d8fcb3b7380937b1"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -714,10 +714,10 @@ source.repo = "maghemite"
 # `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
 # building `ddm-admin-client` (which will instruct you to update
 # `tools/maghemite_openapi_version`).
-source.commit = "5aaa7c9bc2d0e541d29604453dd98cb32676b347"
+source.commit = "0509f50053149b5ab87e3e33bf291baab729fe5b"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/mgd.sha256.txt
-source.sha256 = "ae057ecdaed165fbd3eaaa9459c934249d7a366a51bda5c62584fa4bc011be8e"
+source.sha256 = "d3b6282fd1a42b1853f38f17f0bbea8220a3ffef56206ffc113f9df6118d8aab"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -765,8 +765,8 @@ only_for_targets.image = "standard"
 # the other `source.*` keys.
 source.type = "prebuilt"
 source.repo = "dendrite"
-source.commit = "eb0ac9553c67a0c45ea72cf13138f0de52519d70"
-source.sha256 = "748228eae92580030aa84eda8e077977ade54a3063927b023bd1827532b40a6b"
+source.commit = "ab6c1a4326abbcb9f98a459ae74da4995e6b41af"
+source.sha256 = "350c2e9ad9f9dc474b217d27a9aaa10b408e60e463b35384a1c3aaee1aaf3ac6"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -792,8 +792,8 @@ only_for_targets.image = "standard"
 # the other `source.*` keys.
 source.type = "prebuilt"
 source.repo = "dendrite"
-source.commit = "eb0ac9553c67a0c45ea72cf13138f0de52519d70"
-source.sha256 = "ab20401f04eea11c5e79f1f0e1d1e2338a5da2bd384650c1c22dee839d8e62c3"
+source.commit = "ab6c1a4326abbcb9f98a459ae74da4995e6b41af"
+source.sha256 = "159eb0fc5d6cc41d8b6c997d70f8c9e9272d52db583b6c0fb3519980e0d77286"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -812,8 +812,8 @@ only_for_targets.image = "standard"
 # the other `source.*` keys.
 source.type = "prebuilt"
 source.repo = "dendrite"
-source.commit = "eb0ac9553c67a0c45ea72cf13138f0de52519d70"
-source.sha256 = "916c4474f949427760fb66e32b0bbfc479a756291b67920b57b524eac402b812"
+source.commit = "ab6c1a4326abbcb9f98a459ae74da4995e6b41af"
+source.sha256 = "d46094acd8236eadac5186523d2c24d94ac1b2795fce76bb9d487607f5aca00b"
 output.type = "zone"
 output.intermediate_only = true
 

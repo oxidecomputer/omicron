@@ -2,7 +2,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 //
-// Copyright 2025 Oxide Computer Company
 
 //! Tests for multicast API behavior and functionality.
 //!
@@ -34,7 +33,7 @@ use nexus_test_utils::resource_helpers::{
 };
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::instance::{
-    InstanceCreate, InstanceNetworkInterfaceAttachment,
+    InstanceCpuCount, InstanceCreate, InstanceNetworkInterfaceAttachment,
 };
 use nexus_types::external_api::multicast::{
     InstanceMulticastGroupJoin, MulticastGroup, MulticastGroupIdentifier,
@@ -42,9 +41,7 @@ use nexus_types::external_api::multicast::{
 };
 use nexus_types_versions::latest::instance::Instance;
 use omicron_common::address::is_ssm_address;
-use omicron_common::api::external::{
-    ByteCount, IdentityMetadataCreateParams, InstanceCpuCount,
-};
+use omicron_common::api::external::{ByteCount, IdentityMetadataCreateParams};
 
 use super::*;
 

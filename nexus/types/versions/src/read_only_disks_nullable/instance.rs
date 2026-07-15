@@ -5,14 +5,14 @@
 //! Instance types for version READ_ONLY_DISKS_NULLABLE.
 
 use omicron_common::api::external::{
-    ByteCount, Hostname, IdentityMetadataCreateParams,
-    InstanceAutoRestartPolicy, InstanceCpuCount, NameOrId,
+    ByteCount, Hostname, IdentityMetadataCreateParams, NameOrId,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::v2025_11_20_00::instance::{
-    InstanceCpuPlatform, InstanceDiskAttach, UserData, bool_true,
+    InstanceAutoRestartPolicy, InstanceCpuCount, InstanceCpuPlatform,
+    InstanceDiskAttach, UserData, bool_true,
 };
 use crate::v2026_01_03_00::instance::InstanceNetworkInterfaceAttachment;
 use crate::v2026_01_05_00::instance::ExternalIpCreate;
