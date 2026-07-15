@@ -1576,4 +1576,37 @@ mod tests {
         );
         logctx.cleanup_successful();
     }
+
+    /// Running the engine a second time on unchanged input, with the first
+    /// run's sitrep as parent, must carry every case and fact forward
+    /// verbatim.
+    #[test]
+    fn rerun_with_unchanged_input_changes_nothing() {
+        let (logctx, collection) = setup("saga_rerun_unchanged_input");
+        let stale = collection.time_done
+            - (STALE_SAGA_THRESHOLD + TimeDelta::minutes(1));
+        let recent = collection.time_done - TimeDelta::minutes(1);
+        // One stuck saga, so the parent sitrep has a case carrying a fact,
+        // and one healthy saga, so the "nothing to do" path is exercised too.
+        let observed = observed_map([
+            mk_observed(saga_id(1), Some(stale), None, None),
+            mk_observed(saga_id(2), Some(recent), None, None),
+        ]);
+
+        let input1 = build_input(collection.clone(), None, observed.clone());
+        let (sitrep1, _report) = run_analyze(&logctx.log, &input1);
+        assert_eq!(
+            saga_facts(&sitrep1, true).len(),
+            1,
+            "the stuck saga should have produced an open case",
+        );
+
+        let input2 = build_input(collection, Some(sitrep1.clone()), observed);
+        let (sitrep2, _report) = run_analyze(&logctx.log, &input2);
+        assert_eq!(
+            sitrep1.cases, sitrep2.cases,
+            "no changes must produce identical cases to the parent",
+        );
+        logctx.cleanup_successful();
+    }
 }
