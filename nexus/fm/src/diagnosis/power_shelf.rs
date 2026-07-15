@@ -54,11 +54,12 @@ pub fn analyze(builder: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
         let mut psc_case = cases_by_id
             .entry(&case.id)
             .or_insert_with(|| PscCase::new(case.id));
+
+        // These ereports were assigned to the case in an earlier sitrep,
+        // so they are not new in this run and have already had their
+        // alerts requested.
         for case_ereport in case.ereports.iter() {
             let ereport = &case_ereport.ereport;
-            // These ereports were assigned to the case in an earlier sitrep,
-            // so they are not new in this run and have already had their
-            // alerts requested.
             let ereport = match PsuEreport::parse(
                 input.ereporter_restarts(),
                 &ereport,
