@@ -209,7 +209,7 @@ impl Server {
             internal_disks_rx,
             bootstore_node_handle: long_running_task_handles.bootstore.clone(),
             rss_access,
-            sprockets: config.sprockets.clone(),
+            sprockets_config: config.sprockets.clone(),
             trust_quorum_handle: long_running_task_handles.trust_quorum.clone(),
             measurements: long_running_task_handles.measurements.clone(),
         };

@@ -4,8 +4,9 @@
 
 //! Internal API for rack-level bootstrap agent operations.
 
-use crate::bootstrap::rss_handle::RssHandle;
+use crate::bootstrap::rss_handle::run_rss;
 use bootstore::schemes::v0 as bootstore;
+use bootstrap_agent_lockstep_types::MultirackJoinRequest;
 use bootstrap_agent_lockstep_types::MultirackJoinStep;
 use bootstrap_agent_lockstep_types::RackOperationStatus;
 use bootstrap_agent_lockstep_types::RssStep;
@@ -44,6 +45,18 @@ pub enum RssAccessError {
     MultirackJoinPanicked,
     #[error("Already part of a multirack cluster")]
     MultirackJoinCompleted,
+}
+
+/// Functionality necessary to run rack initialization or multirack cluster join
+#[derive(Clone)]
+pub(crate) struct RssContext {
+    pub(crate) base_log: Logger,
+    pub(crate) global_zone_bootstrap_ip: Ipv6Addr,
+    pub(crate) internal_disks_rx: InternalDisksReceiver,
+    pub(crate) bootstore_node_handle: bootstore::NodeHandle,
+    pub(crate) sprockets_config: SprocketsConfig,
+    pub(crate) trust_quorum_handle: trust_quorum::NodeTaskHandle,
+    pub(crate) measurements: Arc<MeasurementsHandle>,
 }
 
 /// A mechanism for accessing rack setup related functionality. We're
@@ -154,16 +167,9 @@ impl RssAccess {
         }
     }
 
-    #[allow(clippy::too_many_arguments)]
     pub(crate) fn start_initializing(
         &self,
-        parent_log: &Logger,
-        sprockets: SprocketsConfig,
-        global_zone_bootstrap_ip: Ipv6Addr,
-        internal_disks_rx: &InternalDisksReceiver,
-        measurements: Arc<MeasurementsHandle>,
-        bootstore_node_handle: &bootstore::NodeHandle,
-        trust_quorum_handle: &trust_quorum::NodeTaskHandle,
+        ctx: RssContext,
         request: RackInitializeRequestParams,
     ) -> Result<RackInitUuid, RssAccessError> {
         let mut status = self.status.lock().unwrap();
@@ -175,24 +181,9 @@ impl RssAccess {
                 let (step_tx, step_rx) = watch::channel(RssStep::Requested);
                 *status = RssStatus::Initializing { id, completion, step_rx };
                 mem::drop(status);
-                let parent_log = parent_log.clone();
-                let internal_disks_rx = internal_disks_rx.clone();
-                let bootstore_node_handle = bootstore_node_handle.clone();
                 let status = Arc::clone(&self.status);
-                let trust_quorum_handle = trust_quorum_handle.clone();
                 tokio::spawn(async move {
-                    let result = RssHandle::run_rss(
-                        &parent_log,
-                        sprockets,
-                        request,
-                        global_zone_bootstrap_ip,
-                        internal_disks_rx,
-                        measurements,
-                        bootstore_node_handle,
-                        trust_quorum_handle,
-                        step_tx,
-                    )
-                    .await;
+                    let result = run_rss(ctx, request, step_tx).await;
                     let new_status = match result {
                         Ok(()) => RssStatus::Initialized { id: Some(id) },
                         Err(err) => RssStatus::InitializationFailed { id, err },
@@ -240,21 +231,14 @@ impl RssAccess {
         }
     }
 
-    #[allow(clippy::too_many_arguments)]
     pub(crate) fn start_multirack_join(
         &self,
-        parent_log: &Logger,
-        sprockets: SprocketsConfig,
-        global_zone_bootstrap_ip: Ipv6Addr,
-        internal_disks_rx: &InternalDisksReceiver,
-        measurements: Arc<MeasurementsHandle>,
-        bootstore_node_handle: &bootstore::NodeHandle,
-        trust_quorum_handle: &trust_quorum::NodeTaskHandle,
-        request: RackInitializeRequestParams,
+        ctx: RssContext,
+        request: MultirackJoinRequest,
     ) -> Result<MultirackJoinUuid, RssAccessError> {
         let mut status = self.status.lock().unwrap();
 
-        match &*status {
+        match &mut *status {
             RssStatus::Uninitialized => {
                 todo!()
             }

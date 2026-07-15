@@ -4,16 +4,16 @@
 
 //! sled-agent's handle to the Rack Setup Service it spawns
 
+use crate::bootstrap::rack_ops::RssContext;
+
 use super::sprockets_client::SprocketsClient;
 use super::sprockets_client::SprocketsClientError;
-use bootstore::schemes::v0 as bootstore;
 use bootstrap_agent_lockstep_types::RssStep;
 use futures::StreamExt;
 use futures::stream::FuturesUnordered;
 use omicron_common::backoff::BackoffError;
 use omicron_common::backoff::retry_notify;
 use omicron_common::backoff::retry_policy_local;
-use sled_agent_config_reconciler::InternalDisksReceiver;
 use sled_agent_measurements::MeasurementsHandle;
 use sled_agent_rack_setup::LocalBootstrapAgent;
 use sled_agent_rack_setup::RackInitializeRequestParams;
@@ -22,60 +22,33 @@ use sled_agent_rack_setup::SetupServiceError;
 use sled_agent_types::sled::StartSledAgentRequest;
 use slog::Logger;
 use sprockets_tls::keys::SprocketsConfig;
-use std::net::Ipv6Addr;
 use std::net::SocketAddrV6;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
 use tokio::sync::watch;
-use tokio::task::JoinHandle;
 
-pub(super) struct RssHandle {
-    _rss: RackSetupService,
-    task: JoinHandle<()>,
-}
+/// Executes the rack setup service until it has completed
+pub(super) async fn run_rss(
+    ctx: RssContext,
+    config: RackInitializeRequestParams,
+    step_tx: watch::Sender<RssStep>,
+) -> Result<(), SetupServiceError> {
+    let (tx, rx) = rss_channel(ctx.sprockets_config, ctx.measurements.clone());
 
-impl Drop for RssHandle {
-    fn drop(&mut self) {
-        // NOTE: Ideally, with async drop, we'd await completion of the our task
-        // handler.
-        //
-        // Without that option, we instead opt to simply cancel the task to
-        // ensure it does not remain alive beyond the handle itself.
-        self.task.abort();
-    }
-}
-
-impl RssHandle {
-    /// Executes the rack setup service until it has completed
-    #[allow(clippy::too_many_arguments)]
-    pub(super) async fn run_rss(
-        log: &Logger,
-        sprockets: SprocketsConfig,
-        config: RackInitializeRequestParams,
-        our_bootstrap_address: Ipv6Addr,
-        internal_disks_rx: InternalDisksReceiver,
-        measurements: Arc<MeasurementsHandle>,
-        bootstore: bootstore::NodeHandle,
-        trust_quorum: trust_quorum::NodeTaskHandle,
-        step_tx: watch::Sender<RssStep>,
-    ) -> Result<(), SetupServiceError> {
-        let (tx, rx) = rss_channel(sprockets, measurements.clone());
-
-        let rss = RackSetupService::new(
-            log.new(o!("component" => "RSS")),
-            config,
-            internal_disks_rx,
-            tx,
-            our_bootstrap_address,
-            bootstore,
-            trust_quorum,
-            step_tx,
-        );
-        let log = log.new(o!("component" => "BootstrapAgentRssHandler"));
-        rx.await_local_rss_request(&log).await;
-        rss.join().await
-    }
+    let rss = RackSetupService::new(
+        ctx.base_log.new(o!("component" => "RSS")),
+        config,
+        ctx.internal_disks_rx,
+        tx,
+        ctx.global_zone_bootstrap_ip,
+        ctx.bootstore_node_handle,
+        ctx.trust_quorum_handle,
+        step_tx,
+    );
+    let log = ctx.base_log.new(o!("component" => "BootstrapAgentRssHandler"));
+    rx.await_local_rss_request(&log).await;
+    rss.join().await
 }
 
 // Send a message to start a sled agent via bootstrap agent client

@@ -36,6 +36,7 @@ use sprockets_tls::keys::SprocketsConfig;
 use std::sync::Arc;
 
 use crate::bootstrap::rack_ops::RssAccess;
+use crate::bootstrap::rack_ops::RssContext;
 
 #[derive(Clone)]
 pub(crate) struct BootstrapServerContext {
@@ -44,9 +45,23 @@ pub(crate) struct BootstrapServerContext {
     pub(crate) internal_disks_rx: InternalDisksReceiver,
     pub(crate) bootstore_node_handle: bootstore::NodeHandle,
     pub(crate) rss_access: RssAccess,
-    pub(crate) sprockets: SprocketsConfig,
+    pub(crate) sprockets_config: SprocketsConfig,
     pub(crate) trust_quorum_handle: trust_quorum::NodeTaskHandle,
     pub(crate) measurements: Arc<MeasurementsHandle>,
+}
+
+impl From<&BootstrapServerContext> for RssContext {
+    fn from(value: &BootstrapServerContext) -> Self {
+        RssContext {
+            base_log: value.base_log.clone(),
+            global_zone_bootstrap_ip: value.global_zone_bootstrap_ip,
+            internal_disks_rx: value.internal_disks_rx.clone(),
+            bootstore_node_handle: value.bootstore_node_handle.clone(),
+            sprockets_config: value.sprockets_config.clone(),
+            trust_quorum_handle: value.trust_quorum_handle.clone(),
+            measurements: value.measurements.clone(),
+        }
+    }
 }
 
 impl BootstrapServerContext {
@@ -55,16 +70,7 @@ impl BootstrapServerContext {
         &self,
         request: RackInitializeRequestParams,
     ) -> Result<RackInitUuid, RssAccessError> {
-        self.rss_access.start_initializing(
-            &self.base_log,
-            self.sprockets.clone(),
-            self.global_zone_bootstrap_ip,
-            &self.internal_disks_rx,
-            self.measurements.clone(),
-            &self.bootstore_node_handle,
-            &self.trust_quorum_handle,
-            request,
-        )
+        self.rss_access.start_initializing(self.into(), request)
     }
 
     /// This is mutually exclusive with `start_rack_initialize`.
@@ -72,16 +78,7 @@ impl BootstrapServerContext {
         &self,
         request: MultirackJoinRequest,
     ) -> Result<MultirackJoinUuid, RssAccessError> {
-        self.rss_access.start_multirack_join(
-            &self.base_log,
-            self.sprockets.clone(),
-            self.global_zone_bootstrap_ip,
-            &self.internal_disks_rx,
-            self.measurements.clone(),
-            &self.bootstore_node_handle,
-            &self.trust_quorum_handle,
-            request,
-        )
+        self.rss_access.start_multirack_join(self.into(), request)
     }
 }
 
