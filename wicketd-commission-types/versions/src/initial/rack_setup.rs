@@ -40,63 +40,79 @@ pub use omicron_common::api::internal::shared::{
     AllowedSourceIps, IpAllowList,
 };
 
-/// The portion of `CurrentRssUserConfig` that can be posted in one shot; it is
-/// provided by the wicket user uploading a TOML file, currently.
+/// The portion of the RSS configuration that can be posted in one shot.
 ///
-/// This is the "write" version of `CurrentRssUserConfigInsensitive`, with
-/// some different fields.
+/// It is provided by the operator uploading a TOML file. Sensitive values
+/// (certificates and the recovery password hash) are set separately.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct PutRssUserConfigInsensitive {
-    /// List of slot numbers only.
+    /// The slot numbers of the sleds to bring up during RSS.
     ///
-    /// `wicketd` will map this back to sleds with the correct `SpIdentifier`
-    /// based on the `bootstrap_sleds` it provides in
-    /// `CurrentRssUserConfigInsensitive`.
+    /// wicketd maps these back to sleds with the correct identifiers based on
+    /// the bootstrap sleds it reports.
     pub bootstrap_sleds: BTreeSet<u16>,
+    /// The external NTP server addresses.
     pub ntp_servers: Vec<String>,
+    /// The external DNS server addresses.
     pub dns_servers: Vec<IpAddr>,
+    /// Ranges of the service IP pool which may be used for internal services.
     pub internal_services_ip_pool_ranges: Vec<IpRange>,
+    /// Service IP addresses on which external DNS servers are run.
     pub external_dns_ips: Vec<IpAddr>,
+    /// The DNS zone name delegated to the rack for external DNS.
     pub external_dns_zone_name: String,
+    /// The user-specified rack network configuration.
     pub rack_network_config: UserSpecifiedRackNetworkConfig,
+    /// IPs or subnets allowed to make requests to user-facing services.
     pub allowed_source_ips: AllowedSourceIps,
     /// Enable the fleet-wide jumbo-frames opt-in.
     #[serde(default)]
     pub external_jumbo_frames_opt_in_enabled: bool,
 }
 
-/// User-specified parts of `RackNetworkConfig`.
+/// User-specified parts of the rack network configuration.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct UserSpecifiedRackNetworkConfig {
+    /// The rack subnet address, if statically assigned.
     pub rack_subnet_address: Option<Ipv6Addr>,
+    /// The first address of the infrastructure IP range.
     pub infra_ip_first: IpAddr,
+    /// The last address of the infrastructure IP range.
     pub infra_ip_last: IpAddr,
-    // Map of switch -> port -> configuration, under the assumption that
-    // (switch, port) is unique.
+    /// Per-port configuration for switch 0, keyed by port name.
     pub switch0: BTreeMap<String, UserSpecifiedPortConfig>,
+    /// Per-port configuration for switch 1, keyed by port name.
     pub switch1: BTreeMap<String, UserSpecifiedPortConfig>,
+    /// BGP configuration for the rack.
     pub bgp: Vec<BgpConfig>,
 }
 
-/// User-specified version of `PortConfig`.
+/// User-specified per-port configuration.
 ///
-/// All of `PortConfig` is user-specified. But we expect the port name to
-/// be a key, rather than a field as in `PortConfig`. So this has all of
-/// the fields other than the port name.
+/// This contains all of the fields of a port configuration other than the port
+/// name, which is used as the map key.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ManualPortConfig {
+    /// Static routes for this port.
     pub routes: Vec<RouteConfig>,
+    /// Addresses configured on this port.
     pub addresses: Vec<UserSpecifiedUplinkAddressConfig>,
+    /// The port speed.
     pub uplink_port_speed: LinkSpeed,
+    /// The forward error correction mode, if any.
     pub uplink_port_fec: Option<LinkFec>,
+    /// Whether autonegotiation is enabled.
     pub autoneg: bool,
+    /// BGP peers reachable on this port.
     #[serde(default)]
     pub bgp_peers: Vec<UserSpecifiedBgpPeerConfig>,
+    /// LLDP configuration for this port.
     #[serde(default)]
     pub lldp: Option<LldpPortConfig>,
+    /// Transmit equalization overrides for this port.
     #[serde(default)]
     pub tx_eq: Option<TxEqConfig>,
 }
@@ -275,9 +291,9 @@ impl JsonSchema for UserSpecifiedPortConfig {
     }
 }
 
-/// User-specified version of `UplinkAddressConfig`.
+/// A user-specified uplink address configuration.
 ///
-/// This allows us to have a nicer TOML representation of [`UplinkAddress`].
+/// This provides a friendlier TOML representation of an uplink address.
 #[derive(
     Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema,
 )]
@@ -338,34 +354,34 @@ pub(crate) mod uplink_address_serde {
     }
 }
 
-/// User-specified version of `BgpPeerConfig`.
+/// User-specified configuration for a BGP peer.
 ///
-/// This is similar to `BgpPeerConfig`, except it doesn't have the sensitive
-/// `md5_auth_key` parameter, instead requiring that the user provide the key
-/// separately.
+/// This is similar to the internal BGP peer configuration, except it does not
+/// carry the sensitive `md5_auth_key`; the operator provides the key
+/// separately, referenced by `auth_key_id`.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct UserSpecifiedBgpPeerConfig {
-    /// The autonomous sysetm number of the router the peer belongs to.
+    /// The autonomous system number of the router the peer belongs to.
     pub asn: u32,
     /// Switch port the peer is reachable on.
     pub port: String,
     /// Address of the peer.
     pub addr: UserSpecifiedRouterPeerAddr,
-    /// How long to keep a session alive without a keepalive in seconds.
+    /// How long to keep a session alive without a keepalive, in seconds.
     /// Defaults to 6 seconds.
     pub hold_time: Option<u64>,
-    /// How long to keep a peer in idle after a state machine reset in seconds.
+    /// How long to keep a peer in idle after a state machine reset, in seconds.
     /// Defaults to 3 seconds.
     pub idle_hold_time: Option<u64>,
-    /// How long to delay sending open messages to a peer in seconds. Defaults
-    /// to 0.
+    /// How long to delay sending open messages to a peer, in seconds.
+    /// Defaults to 0.
     pub delay_open: Option<u64>,
     /// The interval in seconds between peer connection retry attempts.
     /// Defaults to 3 seconds.
     pub connect_retry: Option<u64>,
-    /// The interval to send keepalive messages at, in seconds. Defaults to 2
-    /// seconds.
+    /// The interval to send keepalive messages at, in seconds.
+    /// Defaults to 2 seconds.
     pub keepalive: Option<u64>,
     /// Require that a peer has a specified ASN.
     #[serde(default)]
@@ -376,7 +392,8 @@ pub struct UserSpecifiedBgpPeerConfig {
     /// The key identifier for authentication to use with the peer.
     #[serde(default)]
     pub auth_key_id: Option<BgpAuthKeyId>,
-    /// Apply the provided multi-exit discriminator (MED) updates sent to the peer.
+    /// Apply the provided multi-exit discriminator (MED) updates sent to the
+    /// peer.
     #[serde(default)]
     pub multi_exit_discriminator: Option<u32>,
     /// Include the provided communities in updates sent to the peer.
@@ -385,7 +402,8 @@ pub struct UserSpecifiedBgpPeerConfig {
     /// Apply a local preference to routes received from this peer.
     #[serde(default)]
     pub local_pref: Option<u32>,
-    /// Enforce that the first AS in paths received from this peer is the peer's AS.
+    /// Enforce that the first AS in paths received from this peer is the peer's
+    /// AS.
     #[serde(default)]
     pub enforce_first_as: bool,
     /// Apply import policy to this peer with an allow list.
@@ -478,6 +496,7 @@ impl<'de> Deserialize<'de> for UserSpecifiedRouterPeerAddr {
 )]
 pub struct BgpAuthKeyId(pub(crate) Name);
 
+/// The result of uploading half of a certificate/key pair.
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
 #[serde(tag = "status", rename_all = "snake_case")]
 pub enum CertificateUploadResponse {
@@ -493,18 +512,16 @@ pub enum CertificateUploadResponse {
     CertKeyDuplicateIgnored,
 }
 
-/// User-friendly serializer and deserializer for `ImportExportPolicy`.
+/// User-friendly import/export policy for a BGP peer.
 ///
-/// This serializes the "NoFiltering" variant as `null`, and the "Allow"
-/// variant as a list.
-///
-/// This would ordinarily just be a module used with `#[serde(with)]`, but
-/// schemars requires that it be a type since it needs to know the JSON schema
-/// corresponding to it.
+/// Serializes as `null` for the no-filtering variant, or as a list of IP
+/// prefixes for the allow variant.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub enum UserSpecifiedImportExportPolicy {
+    /// Do not perform any filtering.
     #[default]
     NoFiltering,
+    /// Only allow the listed prefixes.
     Allow(Vec<IpNet>),
 }
 

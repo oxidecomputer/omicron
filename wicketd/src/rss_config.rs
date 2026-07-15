@@ -41,13 +41,13 @@ use wicket_common::inventory::MgsV1Inventory;
 use wicket_common::rack_setup::BgpAuthKey;
 use wicket_common::rack_setup::CurrentRssUserConfigInsensitive;
 use wicket_common::rack_setup::GetBgpAuthKeyInfoResponse;
-use wicket_common::rack_setup::ManualPortConfig;
-use wicket_common::rack_setup::PutRssUserConfigInsensitive;
-use wicket_common::rack_setup::UserSpecifiedRackNetworkConfig;
-use wicket_common::rack_setup::UserSpecifiedRouterPeerAddr;
-use wicketd_api::CertificateUploadResponse;
 use wicketd_api::CurrentRssUserConfig;
 use wicketd_api::CurrentRssUserConfigSensitive;
+use wicketd_commission_types::rack_setup::CertificateUploadResponse;
+use wicketd_commission_types::rack_setup::ManualPortConfig;
+use wicketd_commission_types::rack_setup::PutRssUserConfigInsensitive;
+use wicketd_commission_types::rack_setup::UserSpecifiedRackNetworkConfig;
+use wicketd_commission_types::rack_setup::UserSpecifiedRouterPeerAddr;
 
 const RECOVERY_SILO_NAME: &str = "recovery";
 const RECOVERY_SILO_USERNAME: &str = "recovery";
@@ -569,7 +569,7 @@ pub fn validate_rack_subnet(
 }
 
 /// Builds a [`PortConfig`] from a
-/// [`wicket_common::rack_setup::UserSpecifiedPortConfig`].
+/// [`wicketd_commission_types::rack_setup::UserSpecifiedPortConfig`].
 ///
 /// Assumes that all auth keys are present in `bgp_auth_keys`.
 fn build_port_config(
@@ -698,9 +698,9 @@ mod tests {
     use omicron_test_utils::certificates::CertificateChain;
     use omicron_test_utils::dev;
     use wicket_common::example::ExampleRackSetupData;
-    use wicket_common::rack_setup::BgpAuthKeyId;
     use wicket_common::rack_setup::BgpAuthKeyStatus;
     use wicketd_api::SetBgpAuthKeyStatus;
+    use wicketd_commission_types::rack_setup::BgpAuthKeyId;
 
     use super::*;
 

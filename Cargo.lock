@@ -17339,6 +17339,7 @@ dependencies = [
  "update-engine",
  "wicket-common",
  "wicketd-client",
+ "wicketd-commission-types",
  "zeroize",
 ]
 
@@ -17486,6 +17487,7 @@ dependencies = [
  "wicket-common",
  "wicketd-api",
  "wicketd-client",
+ "wicketd-commission-types",
 ]
 
 [[package]]
@@ -17533,6 +17535,7 @@ dependencies = [
  "update-engine",
  "uuid",
  "wicket-common",
+ "wicketd-commission-types-versions",
 ]
 
 [[package]]
