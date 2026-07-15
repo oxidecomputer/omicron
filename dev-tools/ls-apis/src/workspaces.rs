@@ -56,7 +56,7 @@ enum PrebuiltRepoBehavior {
 /// must appear here.  The reverse must also hold: any entry here must
 /// correspond to a `prebuilt` package in `package-manifest.toml`.  Both
 /// directions are checked at runtime.
-static MANIFEST_PREBUILT_REPOS: [PrebuiltRepoConfig; 8] = [
+static MANIFEST_PREBUILT_REPOS: &[PrebuiltRepoConfig] = &[
     PrebuiltRepoConfig {
         repo_name: "crucible",
         behavior: PrebuiltRepoBehavior::Inspect {
@@ -231,7 +231,7 @@ impl Workspaces {
         // entry with its commit falls out of the same pass.
         let mut paired: Vec<(&PrebuiltRepoConfig, GitCommit)> = Vec::new();
         let mut missing_from_manifest: Vec<&str> = Vec::new();
-        for repo_config in &MANIFEST_PREBUILT_REPOS {
+        for repo_config in MANIFEST_PREBUILT_REPOS {
             match manifest_commits.remove(repo_config.repo_name) {
                 Some(commit) => paired.push((repo_config, commit)),
                 None => missing_from_manifest.push(repo_config.repo_name),
@@ -380,8 +380,8 @@ impl Workspaces {
 /// Load a `Workspace` for a repo `repo` using the manifest path inferred by
 /// looking up one of its packages `pkgname` in `workspace`
 ///
-/// For example, we might locate the Crucible repo by looking up the
-/// `crucible-pantry-client` package in the Omicron workspace, finding its
+/// For example, we locate the Crucible repo by looking up the
+/// `crucible-agent-client` package in the Omicron workspace, finding its
 /// manifest path, and locating the containing Crucible workspace.
 fn load_dependent_repo(
     workspace: &Workspace,
