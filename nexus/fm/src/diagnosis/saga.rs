@@ -32,7 +32,7 @@ use std::collections::BTreeMap;
 use std::collections::btree_map::Entry;
 
 /// A saga is flagged as "not progressing" once it has recorded no node event
-/// for at least this long (`reference_time - last_event_time`).
+/// for more than this long (`reference_time - last_event_time`).
 const STALE_SAGA_THRESHOLD: TimeDelta = TimeDelta::minutes(30);
 
 /// A parent-forwarded Saga case, parsed into the form this engine acts on.
