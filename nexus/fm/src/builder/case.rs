@@ -350,7 +350,7 @@ impl CaseBuilder {
         &mut self,
         event: impl ToString,
     ) -> fm::analysis_reports::LogEntryBuilder<'_> {
-        self.report_log.entry(&self.log, event)
+        self.report_log.warning(&self.log, event)
     }
 
     pub(crate) fn build(self) -> (fm::Case, fm::analysis_reports::CaseReport) {
