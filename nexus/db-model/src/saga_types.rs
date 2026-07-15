@@ -274,13 +274,55 @@ impl SagaRow {
     pub fn adopt_generation(&self) -> super::Generation {
         self.adopt_generation
     }
+
+    fn is_abandon_metadata_empty(&self) -> bool {
+        self.abandon_comment.is_none()
+            && self.abandon_reason.is_none()
+            && self.abandon_time.is_none()
+    }
+
+    fn is_abandon_metadata_fully_present(&self) -> bool {
+        self.abandon_comment.is_some()
+            && self.abandon_reason.is_some()
+            && self.abandon_time.is_some()
+    }
+
+    fn abandon_metadata_state(&self) -> AbandonMetadataState {
+        if self.is_abandon_metadata_empty() {
+            AbandonMetadataState::Empty
+        } else if self.is_abandon_metadata_fully_present() {
+            // TODO-K: Get rid of the unwraps?
+            AbandonMetadataState::Present(AbandonMetadata {
+                time: self.abandon_time.unwrap(),
+                reason: self.abandon_reason.unwrap(),
+                comment: self.abandon_comment.clone().unwrap(),
+            })
+        } else {
+            AbandonMetadataState::Corrupted {
+                time: self.abandon_time,
+                reason: self.abandon_reason,
+                comment: self.abandon_comment.clone(),
+            }
+        }
+    }
+}
+
+enum AbandonMetadataState {
+    Corrupted {
+        time: Option<DateTime<Utc>>,
+        reason: Option<SagaReasonAbandoned>,
+        comment: Option<String>,
+    },
+    Empty,
+    Present(AbandonMetadata),
 }
 
 /// Abandonment metadata for a saga.
 ///
 /// These three values are always written and cleared together, so bundling
 /// them keeps them "all or none". A saga is either not abandoned (no
-/// `AbandonMetadata`) or fully abandoned (an `AbandonMetadata` with every field set).
+/// `AbandonMetadata`) or fully abandoned (an `AbandonMetadata` with every field
+/// set).
 #[derive(Clone, Debug, PartialEq)]
 pub struct AbandonMetadata {
     pub time: DateTime<Utc>,
@@ -362,55 +404,61 @@ impl TryFrom<SagaRow> for Saga {
             id,
             creator,
             time_created,
-            name,
-            saga_dag,
+            ref name,
+            ref saga_dag,
             saga_state,
             current_sec,
             adopt_generation,
             adopt_time,
-            abandon_time,
-            abandon_reason,
-            abandon_comment,
+            abandon_time: _,
+            abandon_reason: _,
+            abandon_comment: _,
         } = row;
 
         // Convert the three nullable abandonment columns into `AbandonMetadata`.
         // A partially-populated set is impossible per the
         // `abandoned_requires_metadata` CHECK constraint, so treat it as
         // corruption.
-        let abandon_metadata =
-            match (abandon_time, abandon_reason, abandon_comment) {
-                (Some(time), Some(reason), Some(comment)) => {
-                    Some(AbandonMetadata { time, reason, comment })
-                }
-                (None, None, None) => None,
-                _ => {
+        let abandon_metadata = match &row.abandon_metadata_state() {
+            AbandonMetadataState::Corrupted { time, reason, comment } => {
+                return Err(Error::internal_error(&format!(
+                    "saga {id}: abandonment metadata is partially populated. \
+                    abandon_time: {time:?} abandon_reason {reason:?} \
+                    abandon_comment: {comment:?}"
+                )));
+            }
+            // The metadata must be present exactly when the saga is abandoned.
+            AbandonMetadataState::Present(abandon_metadata) => {
+                if saga_state == SagaState::Abandoned {
+                    Some(abandon_metadata.clone())
+                } else {
                     return Err(Error::internal_error(&format!(
-                        "saga {id}: abandonment metadata is partially populated"
+                        "saga {id}: has abandonment metadata but is not \
+                        abandoned. abandon_time: {:?} abandon_reason {:?} \
+                        abandon_comment: {:?}",
+                        abandon_metadata.time,
+                        abandon_metadata.reason,
+                        abandon_metadata.comment
                     )));
                 }
-            };
-
-        // The metadata must be present exactly when the saga is abandoned.
-        match (saga_state == SagaState::Abandoned, abandon_metadata.is_some()) {
-            (true, false) => {
-                return Err(Error::internal_error(&format!(
-                    "saga {id}: abandoned but has no abandonment metadata"
-                )));
             }
-            (false, true) => {
-                return Err(Error::internal_error(&format!(
-                    "saga {id}: has abandonment metadata but is not abandoned"
-                )));
+            AbandonMetadataState::Empty => {
+                if saga_state == SagaState::Abandoned {
+                    return Err(Error::internal_error(&format!(
+                        "saga {id}: abandoned but has no abandonment metadata"
+                    )));
+                } else {
+                    None
+                }
             }
-            (true, true) | (false, false) => {}
-        }
+        };
 
         Ok(Saga {
             id,
             creator,
             time_created,
-            name,
-            saga_dag,
+            name: name.clone(),
+            saga_dag: saga_dag.clone(),
             saga_state,
             current_sec,
             adopt_generation,
@@ -524,5 +572,105 @@ impl TryFrom<SagaNodeEvent> for steno::SagaNodeEvent {
             node_id: ours.node_id.into(),
             event_type,
         })
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    fn fake_saga_row(
+        saga_state: SagaState,
+        abandon_time: Option<DateTime<Utc>>,
+        abandon_reason: Option<SagaReasonAbandoned>,
+        abandon_comment: Option<String>,
+    ) -> SagaRow {
+        SagaRow {
+            id: SagaId(steno::SagaId(Uuid::new_v4())),
+            creator: SecId(Uuid::new_v4()),
+            time_created: Utc::now(),
+            name: "test-saga".to_string(),
+            saga_dag: serde_json::Value::Null,
+            saga_state,
+            current_sec: Some(SecId(Uuid::new_v4())),
+            adopt_generation: Generation::new().into(),
+            adopt_time: Utc::now(),
+            abandon_time,
+            abandon_reason,
+            abandon_comment,
+        }
+    }
+
+    #[test]
+    fn test_try_from_validates_abandon_metadata() {
+        let time = Utc::now();
+        let reason = SagaReasonAbandoned::Unrecoverable;
+        let comment = "test abandon".to_string();
+
+        // Abandoned and fully-present metadata is valid, and the metadata is
+        // carried through to the validated `Saga`.
+        let row = fake_saga_row(
+            SagaState::Abandoned,
+            Some(time),
+            Some(reason),
+            Some(comment.clone()),
+        );
+        let saga = Saga::try_from(row)
+            .expect("abandoned saga with full metadata should be valid");
+        assert_eq!(saga.saga_state, SagaState::Abandoned);
+        assert_eq!(
+            saga.abandon_metadata(),
+            Some(AbandonMetadata { time, reason, comment: comment.clone() })
+        );
+
+        // Not abandoned and empty metadata is valid. No metadata is propagated
+        // to the validated `Saga`.
+        let row = fake_saga_row(SagaState::Running, None, None, None);
+        let saga = Saga::try_from(row)
+            .expect("non-abandoned saga without metadata should be valid");
+        assert_eq!(saga.saga_state, SagaState::Running);
+        assert_eq!(saga.abandon_metadata(), None);
+
+        // Abandoned and empty metadata is invalid.
+        let row = fake_saga_row(SagaState::Abandoned, None, None, None);
+        Saga::try_from(row)
+            .expect_err("abandoned saga without metadata should be rejected");
+
+        // Not abandoned and fully-present metadata is invalid.
+        let row = fake_saga_row(
+            SagaState::Done,
+            Some(time),
+            Some(reason),
+            Some(comment.clone()),
+        );
+        Saga::try_from(row)
+            .expect_err("non-abandoned saga with metadata should be rejected");
+
+        // Partially-populated ("corrupted") metadata is invalid regardless of
+        // the saga state. Cover every partial column combination.
+        let partial_shapes = [
+            (Some(time), None, None),
+            (None, Some(reason), None),
+            (None, None, Some(comment.clone())),
+            (Some(time), Some(reason), None),
+            (Some(time), None, Some(comment.clone())),
+            (None, Some(reason), Some(comment.clone())),
+        ];
+        for saga_state in [SagaState::Abandoned, SagaState::Unwinding] {
+            for (abandon_time, abandon_reason, abandon_comment) in
+                partial_shapes.iter().cloned()
+            {
+                let row = fake_saga_row(
+                    saga_state,
+                    abandon_time,
+                    abandon_reason,
+                    abandon_comment,
+                );
+                Saga::try_from(row).expect_err(
+                    "partially-populated abandonment metadata should be \
+                     rejected",
+                );
+            }
+        }
     }
 }
