@@ -4282,6 +4282,7 @@ dependencies = [
  "futures",
  "gateway-client",
  "gateway-messages",
+ "gateway-types",
  "omicron-common",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
