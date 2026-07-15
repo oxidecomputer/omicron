@@ -442,7 +442,7 @@ impl UpdateTracker {
             let event_report =
                 update_data.event_buffer.lock().unwrap().generate_report();
             let inner: &mut BTreeMap<_, _> =
-                event_reports.entry(sp.type_).or_default();
+                event_reports.entry(sp.typ).or_default();
             inner.insert(sp.slot, event_report);
         }
 
@@ -967,7 +967,7 @@ impl UpdateDriver {
                     let caboose = update_cx
                         .mgs_client
                         .sp_component_caboose_get(
-                            &update_cx.sp.type_,
+                            &update_cx.sp.typ,
                             update_cx.sp.slot,
                             SpComponent::SP_ITSELF.const_as_str(),
                             sp_firmware_slot,
@@ -1237,7 +1237,7 @@ impl UpdateDriver {
             )
             .register();
 
-        if update_cx.sp.type_ == SpType::Sled {
+        if update_cx.sp.typ == SpType::Sled {
             self.register_sled_steps(
                 update_cx,
                 &mut engine,
@@ -1283,7 +1283,7 @@ impl UpdateDriver {
                 async |_cx| {
                     let state = update_cx
                         .mgs_client
-                        .sp_get(&update_cx.sp.type_, update_cx.sp.slot)
+                        .sp_get(&update_cx.sp.typ, update_cx.sp.slot)
                         .await
                         .map(|response| response.into_inner())
                         .map_err(|error| UpdateTerminalError::SpGetFailed {
@@ -1466,7 +1466,7 @@ impl UpdateDriver {
                     update_cx
                         .mgs_client
                         .sp_installinator_image_id_set(
-                            &update_cx.sp.type_,
+                            &update_cx.sp.typ,
                             update_cx.sp.slot,
                             &installinator_image_id,
                         )
@@ -1504,7 +1504,7 @@ impl UpdateDriver {
                     update_cx
                         .mgs_client
                         .sp_startup_options_set(
-                            &update_cx.sp.type_,
+                            &update_cx.sp.typ,
                             update_cx.sp.slot,
                             &HostStartupOptions {
                                 boot_net: false,
@@ -1577,7 +1577,7 @@ impl UpdateDriver {
                 if let Err(err) = update_cx
                     .mgs_client
                         .sp_installinator_image_id_delete(
-                            &update_cx.sp.type_,
+                            &update_cx.sp.typ,
                             update_cx.sp.slot,
                         )
                         .await
@@ -1627,7 +1627,7 @@ impl UpdateDriver {
                     update_cx
                         .mgs_client
                         .sp_startup_options_set(
-                            &update_cx.sp.type_,
+                            &update_cx.sp.typ,
                             update_cx.sp.slot,
                             &HostStartupOptions {
                                 boot_net: false,
@@ -1801,7 +1801,7 @@ impl RotInterrogation {
     ) -> bool {
         let sp_caboose = client
             .sp_component_caboose_get(
-                &self.sp.type_,
+                &self.sp.typ,
                 self.sp.slot,
                 SpComponent::SP_ITSELF.const_as_str(),
                 0,
@@ -1822,7 +1822,7 @@ impl RotInterrogation {
             // trying an update
             None => false,
             Some(caboose) => match caboose.version.parse::<Version>() {
-                Ok(vers) => match self.sp.type_ {
+                Ok(vers) => match self.sp.typ {
                     SpType::Sled => vers >= MIN_GIMLET_VERSION,
                     SpType::Switch => vers >= MIN_SWITCH_VERSION,
                     SpType::Power => vers >= MIN_PSC_VERSION,
@@ -1942,7 +1942,7 @@ impl UpdateContext {
         let caboose = self
             .mgs_client
             .sp_component_caboose_get(
-                &self.sp.type_,
+                &self.sp.typ,
                 self.sp.slot,
                 SpComponent::STAGE0.const_as_str(),
                 0,
@@ -2021,7 +2021,7 @@ impl UpdateContext {
         let caboose = self
             .mgs_client
             .sp_component_caboose_get(
-                &self.sp.type_,
+                &self.sp.typ,
                 self.sp.slot,
                 SpComponent::ROT.const_as_str(),
                 rot_active_slot,
@@ -2072,7 +2072,7 @@ impl UpdateContext {
         let cmpa = match self
             .mgs_client
             .sp_rot_cmpa_get(
-                &self.sp.type_,
+                &self.sp.typ,
                 self.sp.slot,
                 SpComponent::ROT.const_as_str(),
             )
@@ -2254,7 +2254,7 @@ impl UpdateContext {
         // installinator tells us it has failed.
         if let Err(err) = self
             .mgs_client
-            .sp_host_phase2_progress_delete(&self.sp.type_, self.sp.slot)
+            .sp_host_phase2_progress_delete(&self.sp.typ, self.sp.slot)
             .await
         {
             warn!(
@@ -2293,7 +2293,7 @@ impl UpdateContext {
     ) {
         match self
             .mgs_client
-            .sp_host_phase2_progress_get(&self.sp.type_, self.sp.slot)
+            .sp_host_phase2_progress_get(&self.sp.typ, self.sp.slot)
             .await
             .map(|response| response.into_inner())
         {
@@ -2336,7 +2336,7 @@ impl UpdateContext {
     ) -> Result<StepResult<()>, UpdateTerminalError> {
         info!(self.log, "moving host to {power_state:?}");
         self.mgs_client
-            .sp_power_state_set(&self.sp.type_, self.sp.slot, power_state)
+            .sp_power_state_set(&self.sp.typ, self.sp.slot, power_state)
             .await
             .map(|response| response.into_inner())
             .map_err(|error| UpdateTerminalError::UpdatePowerStateFailed {
@@ -2348,7 +2348,7 @@ impl UpdateContext {
     async fn get_rot_boot_info(&self) -> anyhow::Result<RotState> {
         self.mgs_client
             .sp_rot_boot_info(
-                &self.sp.type_,
+                &self.sp.typ,
                 self.sp.slot,
                 SpComponent::ROT.const_as_str(),
                 &GetRotBootInfoParams {
@@ -2366,11 +2366,7 @@ impl UpdateContext {
         component: &str,
     ) -> anyhow::Result<u16> {
         self.mgs_client
-            .sp_component_active_slot_get(
-                &self.sp.type_,
-                self.sp.slot,
-                component,
-            )
+            .sp_component_active_slot_get(&self.sp.typ, self.sp.slot, component)
             .await
             .context("failed to get component active slot")
             .map(|res| res.into_inner().slot)
@@ -2384,7 +2380,7 @@ impl UpdateContext {
     ) -> anyhow::Result<()> {
         self.mgs_client
             .sp_component_active_slot_set(
-                &self.sp.type_,
+                &self.sp.typ,
                 self.sp.slot,
                 component,
                 persist,
@@ -2397,7 +2393,7 @@ impl UpdateContext {
 
     async fn reset_sp_component(&self, component: &str) -> anyhow::Result<()> {
         self.mgs_client
-            .sp_component_reset(&self.sp.type_, self.sp.slot, component)
+            .sp_component_reset(&self.sp.typ, self.sp.slot, component)
             .await
             .context("failed to reset SP")
             .map(|res| res.into_inner())
@@ -2420,7 +2416,7 @@ impl UpdateContext {
             let status = self
                 .mgs_client
                 .sp_component_update_status(
-                    &self.sp.type_,
+                    &self.sp.typ,
                     self.sp.slot,
                     component,
                 )
@@ -2637,7 +2633,7 @@ impl<'a> SpComponentUpdateContext<'a> {
                     update_cx
                         .mgs_client
                         .sp_component_update(
-                            &update_cx.sp.type_,
+                            &update_cx.sp.typ,
                             update_cx.sp.slot,
                             component_name,
                             firmware_slot,

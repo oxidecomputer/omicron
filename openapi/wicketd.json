@@ -4583,7 +4583,6 @@
         ]
       },
       "SpIdentifier": {
-        "description": "`SpIdentifier`\n\n<details><summary>JSON schema</summary>\n\n```json { \"type\": \"object\", \"required\": [ \"slot\", \"type\" ], \"properties\": { \"slot\": { \"type\": \"integer\", \"format\": \"uint16\", \"minimum\": 0.0 }, \"type\": { \"$ref\": \"#/components/schemas/SpType\" } } } ``` </details>",
         "type": "object",
         "properties": {
           "slot": {

@@ -98,7 +98,7 @@ async fn test_updates() {
         response.artifacts
     };
 
-    let target_sp = SpIdentifier { type_: SpType::Sled, slot: 0 };
+    let target_sp = SpIdentifier { typ: SpType::Sled, slot: 0 };
 
     // Ensure wicketd knows our target_sp (which is simulated) is online and
     // available to update.
@@ -176,7 +176,7 @@ async fn test_updates() {
 
         let event_report = wicketd_testctx
             .wicketd_client
-            .get_update_sp(&target_sp.type_, target_sp.slot)
+            .get_update_sp(&target_sp.typ, target_sp.slot)
             .await
             .expect("get_update_sp successful")
             .into_inner();
@@ -280,12 +280,9 @@ async fn test_updates() {
         assert_eq!(
             response.expect("expected Ok response"),
             ClearUpdateStateResponse {
-                cleared: btreeset![SpIdentifier {
-                    type_: SpType::Sled,
-                    slot: 0
-                }],
+                cleared: btreeset![SpIdentifier { typ: SpType::Sled, slot: 0 }],
                 no_update_data: btreeset![SpIdentifier {
-                    type_: SpType::Sled,
+                    typ: SpType::Sled,
                     slot: 1
                 }],
             }
@@ -315,7 +312,7 @@ async fn test_updates() {
     // Check to see that the update state for SP 0 was cleared.
     let event_report = wicketd_testctx
         .wicketd_client
-        .get_update_sp(&target_sp.type_, target_sp.slot)
+        .get_update_sp(&target_sp.typ, target_sp.slot)
         .await
         .expect("get_update_sp successful")
         .into_inner();
@@ -698,7 +695,7 @@ async fn test_update_races() {
         .expect("bytes read and archived");
 
     // Now start an update.
-    let sp = SpIdentifier { slot: 0, type_: SpType::Sled };
+    let sp = SpIdentifier { slot: 0, typ: SpType::Sled };
     let sps: BTreeSet<_> = vec![sp].into_iter().collect();
 
     let (sender, receiver) = oneshot::channel();

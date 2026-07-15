@@ -320,10 +320,19 @@ impl CurrentRssConfig {
         // Cert and key appear to be valid; steal them out of
         // `partial_external_certificate` and promote them to
         // `external_certificates`.
-        self.external_certificates.push(Certificate {
-            cert: self.partial_external_certificate.cert.take().unwrap(),
-            key: self.partial_external_certificate.key.take().unwrap(),
-        });
+        let cert = self.partial_external_certificate.cert.take().unwrap();
+        let key = self.partial_external_certificate.key.take().unwrap();
+
+        // Byte-identical re-uploads (maybe an operator retry?) are
+        // deduplicated.
+        if self
+            .external_certificates
+            .iter()
+            .any(|existing| existing.cert == cert && existing.key == key)
+        {
+            return Ok(CertificateUploadResponse::CertKeyDuplicateIgnored);
+        }
+        self.external_certificates.push(Certificate { cert, key });
 
         Ok(CertificateUploadResponse::CertKeyAccepted)
     }
@@ -686,6 +695,7 @@ impl CertificateValidator {
 #[cfg(test)]
 mod tests {
     use crate::bgp_auth_keys::BgpAuthKeyError;
+    use omicron_test_utils::certificates::CertificateChain;
     use omicron_test_utils::dev;
     use wicket_common::example::ExampleRackSetupData;
     use wicket_common::rack_setup::BgpAuthKeyId;
@@ -960,5 +970,57 @@ mod tests {
                 assert_eq!(valid_keys, expected_valid_keys);
             }
         }
+    }
+
+    #[test]
+    fn duplicate_external_certificate_uploads_are_deduplicated() {
+        let chain = CertificateChain::new("test-cert.example.com");
+        let cert = chain.cert_chain_as_pem();
+        let key = chain.end_cert_private_key_as_pem();
+
+        let mut config = CurrentRssConfig::default();
+
+        assert_eq!(
+            config.push_cert(cert.clone()).unwrap(),
+            CertificateUploadResponse::WaitingOnKey,
+        );
+        assert_eq!(
+            config.push_key(key.clone()).unwrap(),
+            CertificateUploadResponse::CertKeyAccepted,
+        );
+        assert_eq!(config.external_certificates.len(), 1);
+
+        // Re-uploading the same pair reports CertKeyDuplicateIgnored and adds
+        // no second entry.
+        assert_eq!(
+            config.push_cert(cert.clone()).unwrap(),
+            CertificateUploadResponse::WaitingOnKey,
+        );
+        assert_eq!(
+            config.push_key(key.clone()).unwrap(),
+            CertificateUploadResponse::CertKeyDuplicateIgnored,
+        );
+        assert_eq!(config.external_certificates.len(), 1);
+        assert_eq!(config.external_certificates[0].cert, cert);
+        assert_eq!(config.external_certificates[0].key, key);
+
+        // A different certificate is accepted.
+        let other = CertificateChain::new("other-cert.example.com");
+        let other_cert = other.cert_chain_as_pem();
+        let other_key = other.end_cert_private_key_as_pem();
+        assert_ne!(other_cert, cert);
+        assert_eq!(
+            config.push_cert(other_cert.clone()).unwrap(),
+            CertificateUploadResponse::WaitingOnKey,
+        );
+        assert_eq!(
+            config.push_key(other_key.clone()).unwrap(),
+            CertificateUploadResponse::CertKeyAccepted,
+        );
+        assert_eq!(config.external_certificates.len(), 2);
+        assert_eq!(config.external_certificates[0].cert, cert);
+        assert_eq!(config.external_certificates[0].key, key);
+        assert_eq!(config.external_certificates[1].cert, other_cert);
+        assert_eq!(config.external_certificates[1].key, other_key);
     }
 }

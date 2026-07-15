@@ -593,7 +593,7 @@ fn write_status_table(
             };
 
             ComponentRow {
-                type_: c.id.type_.to_string(),
+                type_: c.id.typ.to_string(),
                 slot: c.id.slot,
                 state: c.state.to_string(),
                 progress,
@@ -620,7 +620,7 @@ fn write_status_table(
             writeln!(
                 out,
                 "\n{} {} ({}): {}",
-                component.id.type_,
+                component.id.typ,
                 component.id.slot,
                 component.state,
                 exit_message.message,
@@ -663,7 +663,7 @@ impl ClearArgs {
                     .cleared
                     .iter()
                     .map(|sp| {
-                        ComponentId::from_sp_type_and_slot(sp.type_, sp.slot)
+                        ComponentId::from_sp_type_and_slot(sp.typ, sp.slot)
                             .map(|id| id.to_string())
                     })
                     .collect::<Result<Vec<_>>>()
@@ -672,7 +672,7 @@ impl ClearArgs {
                     .no_update_data
                     .iter()
                     .map(|sp| {
-                        ComponentId::from_sp_type_and_slot(sp.type_, sp.slot)
+                        ComponentId::from_sp_type_and_slot(sp.typ, sp.slot)
                             .map(|id| id.to_string())
                     })
                     .collect::<Result<Vec<_>>>()
