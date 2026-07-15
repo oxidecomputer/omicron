@@ -170,7 +170,10 @@ function install_packages {
     for p in system/library/gcc-runtime system/library/g++-runtime; do
         # buildmat runners do not yet have a new enough `pkg` for -o
         #v=$(pkg list -Ho release $p)
-        v=$(pkg list -H -F tsv $p | awk '{split($2, a, "-"); print a[1]}')
+        # Split on tabs. With default whitespace splitting, the
+        # "(publisher)" annotation that pkg appends to the name field for
+        # packages from a non-preferred publisher shifts the version to $3.
+        v=$(pkg list -H -F tsv $p | awk -F'\t' '{split($2, a, "-"); print a[1]}')
         ((v < RTVER)) && packages+=($p@latest)
     done
 
