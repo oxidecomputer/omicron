@@ -5,22 +5,17 @@
 //! Internal API for rack-level bootstrap agent operations.
 
 use crate::bootstrap::rss_handle::run_rss;
-use bootstore::schemes::v0 as bootstore;
 use bootstrap_agent_lockstep_types::MultirackJoinRequest;
 use bootstrap_agent_lockstep_types::MultirackJoinStep;
 use bootstrap_agent_lockstep_types::RackOperationStatus;
 use bootstrap_agent_lockstep_types::RssStep;
 use omicron_uuid_kinds::MultirackJoinUuid;
 use omicron_uuid_kinds::RackInitUuid;
-use sled_agent_config_reconciler::InternalDisksReceiver;
-use sled_agent_measurements::MeasurementsHandle;
+use sled_agent_bootstrap_common::RssContext;
 use sled_agent_rack_setup::RackInitializeRequestParams;
 use sled_agent_rack_setup::SetupServiceError;
-use slog::Logger;
 use slog_error_chain::InlineErrorChain;
-use sprockets_tls::keys::SprocketsConfig;
 use std::mem;
-use std::net::Ipv6Addr;
 use std::sync::Arc;
 use std::sync::Mutex;
 use tokio::sync::oneshot;
@@ -45,18 +40,6 @@ pub enum RssAccessError {
     MultirackJoinPanicked,
     #[error("Already part of a multirack cluster")]
     MultirackJoinCompleted,
-}
-
-/// Functionality necessary to run rack initialization or multirack cluster join
-#[derive(Clone)]
-pub(crate) struct RssContext {
-    pub(crate) base_log: Logger,
-    pub(crate) global_zone_bootstrap_ip: Ipv6Addr,
-    pub(crate) internal_disks_rx: InternalDisksReceiver,
-    pub(crate) bootstore_node_handle: bootstore::NodeHandle,
-    pub(crate) sprockets_config: SprocketsConfig,
-    pub(crate) trust_quorum_handle: trust_quorum::NodeTaskHandle,
-    pub(crate) measurements: Arc<MeasurementsHandle>,
 }
 
 /// A mechanism for accessing rack setup related functionality. We're

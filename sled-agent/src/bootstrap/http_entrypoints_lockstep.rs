@@ -28,6 +28,7 @@ use dropshot::{
 };
 use omicron_uuid_kinds::MultirackJoinUuid;
 use omicron_uuid_kinds::RackInitUuid;
+use sled_agent_bootstrap_common::RssContext;
 use sled_agent_config_reconciler::InternalDisksReceiver;
 use sled_agent_measurements::MeasurementsHandle;
 use sled_agent_rack_setup::RackInitializeRequestParams;
@@ -36,7 +37,6 @@ use sprockets_tls::keys::SprocketsConfig;
 use std::sync::Arc;
 
 use crate::bootstrap::rack_ops::RssAccess;
-use crate::bootstrap::rack_ops::RssContext;
 
 #[derive(Clone)]
 pub(crate) struct BootstrapServerContext {

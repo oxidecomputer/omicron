@@ -9619,6 +9619,7 @@ dependencies = [
  "sha3 0.10.8",
  "signal-hook",
  "sled-agent-api",
+ "sled-agent-bootstrap-common",
  "sled-agent-client",
  "sled-agent-config-reconciler",
  "sled-agent-early-networking",
@@ -13778,6 +13779,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "sled-agent-bootstrap-common"
+version = "0.1.0"
+dependencies = [
+ "bootstore",
+ "sled-agent-config-reconciler",
+ "sled-agent-measurements",
+ "slog",
+ "sprockets-tls",
+ "trust-quorum",
+]
+
+[[package]]
 name = "sled-agent-client"
 version = "0.1.0"
 dependencies = [
@@ -13927,6 +13940,38 @@ dependencies = [
  "slog-error-chain",
  "thiserror 2.0.18",
  "tokio",
+]
+
+[[package]]
+name = "sled-agent-multirack-join"
+version = "0.1.0"
+dependencies = [
+ "bootstore",
+ "bootstrap-agent-lockstep-types",
+ "camino",
+ "camino-tempfile",
+ "itertools 0.14.0",
+ "omicron-common",
+ "omicron-ddm-admin-client",
+ "omicron-ledger",
+ "omicron-test-utils",
+ "omicron-uuid-kinds",
+ "omicron-workspace-hack",
+ "oxnet",
+ "serde",
+ "sled-agent-types",
+ "sled-hardware-types",
+ "sled-storage",
+ "slog",
+ "slog-error-chain",
+ "static_assertions",
+ "thiserror 2.0.18",
+ "tokio",
+ "toml 0.8.23",
+ "trust-quorum",
+ "trust-quorum-protocol",
+ "trust-quorum-types",
+ "uuid",
 ]
 
 [[package]]

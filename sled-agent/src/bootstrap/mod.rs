@@ -7,7 +7,6 @@
 pub(crate) mod bootstore_setup;
 mod http_entrypoints_lockstep;
 mod maghemite;
-pub(crate) mod multirack_join_handle;
 pub(crate) mod params;
 mod pre_server;
 mod pumpkind;

@@ -1,0 +1,15 @@
+[package]
+name = "sled-agent-bootstrap-common"
+version = "0.1.0"
+edition.workspace = true
+license = "MPL-2.0"
+description = "shared code for bootstrap agent related crates"
+
+[dependencies]
+bootstore.workspace = true
+sled-agent-config-reconciler.workspace = true
+sled-agent-measurements.workspace = true
+slog.workspace = true
+sprockets-tls.workspace = true
+trust-quorum.workspace = true
+

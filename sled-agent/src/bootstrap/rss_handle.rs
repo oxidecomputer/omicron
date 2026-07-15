@@ -4,8 +4,6 @@
 
 //! sled-agent's handle to the Rack Setup Service it spawns
 
-use crate::bootstrap::rack_ops::RssContext;
-
 use super::sprockets_client::SprocketsClient;
 use super::sprockets_client::SprocketsClientError;
 use bootstrap_agent_lockstep_types::RssStep;
@@ -14,6 +12,7 @@ use futures::stream::FuturesUnordered;
 use omicron_common::backoff::BackoffError;
 use omicron_common::backoff::retry_notify;
 use omicron_common::backoff::retry_policy_local;
+use sled_agent_bootstrap_common::RssContext;
 use sled_agent_measurements::MeasurementsHandle;
 use sled_agent_rack_setup::LocalBootstrapAgent;
 use sled_agent_rack_setup::RackInitializeRequestParams;

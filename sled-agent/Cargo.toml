@@ -86,6 +86,7 @@ sha2.workspace = true
 sha3.workspace = true
 signal-hook.workspace = true
 sled-agent-api.workspace = true
+sled-agent-bootstrap-common.workspace = true
 sled-agent-client.workspace = true
 sled-agent-config-reconciler.workspace = true
 sled-agent-early-networking.workspace = true
