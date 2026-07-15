@@ -237,10 +237,15 @@ pub struct InputReport {
     pub num_ereporter_restarts: usize,
     /// All control-plane-managed physical disks visible to the diagnosis
     /// engines for this analysis pass.
+    #[serde(default)]
     pub in_service_disks: BTreeSet<PhysicalDiskUuid>,
     /// All non-terminal sagas visible to the diagnosis engines for this
     /// analysis pass.
+    #[serde(default)]
     pub observed_sagas: BTreeMap<steno::SagaId, ObservedSagaReport>,
+    // Reports are serialized to the database, so any new field here should
+    // be `#[serde(default)]` (or `Option`al) to keep reports written before
+    // the field existed parseable.
 }
 
 /// Summary of one non-terminal saga in an [`InputReport`].
