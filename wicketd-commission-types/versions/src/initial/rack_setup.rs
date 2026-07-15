@@ -129,8 +129,9 @@ pub enum UserSpecifiedPortConfig {
     DdmAutoPortConfig,
 }
 
-// Hand-roll Serialize and Deserialize impls so we don't have to use
-// serde(untagged) and don't fall invalid configs back to auto.
+// Hand-roll the Serialize and Deserialize impls so we don't have to use
+// serde(untagged), under which invalid manual configs would silently fall back
+// to the auto variant.
 //
 // We may wish to switch this to internal tagging in the future, but that will
 // cause changes to the TOML config as well as the JSON schema.
@@ -225,10 +226,16 @@ where
     }
 
     fn size_hint(&self) -> Option<usize> {
-        self.inner.size_hint()
+        let inner = self.inner.size_hint();
+        match self.first_key {
+            Some(_) => inner.map(|n| n + 1),
+            None => inner,
+        }
     }
 }
 
+// The descriptions and shape here must stay in sync with the variant doc
+// comments and the hand-rolled Serialize/Deserialize impls above.
 impl JsonSchema for UserSpecifiedPortConfig {
     fn schema_name() -> String {
         "UserSpecifiedPortConfig".to_string()
