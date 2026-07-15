@@ -150,6 +150,9 @@ enum EnsureDatasetErrorRaw {
     #[error("Dataset does not exist")]
     DoesNotExist,
 
+    #[error("Failed to read current properties")]
+    ReadProperties(#[source] anyhow::Error),
+
     #[error("Failed to mount filesystem")]
     MountFsFailed(#[source] crate::ExecutionError),
 
@@ -169,6 +172,10 @@ impl From<SetValueErrorRaw> for EnsureDatasetErrorRaw {
         match e {
             SetValueErrorRaw::DatasetNotFound => {
                 EnsureDatasetErrorRaw::DoesNotExist
+            }
+
+            SetValueErrorRaw::ReadProperties(err) => {
+                EnsureDatasetErrorRaw::ReadProperties(err)
             }
 
             SetValueErrorRaw::Execution(err) => {
@@ -191,6 +198,9 @@ pub struct EnsureDatasetError {
 enum SetValueErrorRaw {
     #[error("Dataset not found")]
     DatasetNotFound,
+
+    #[error("Failed to read current properties")]
+    ReadProperties(#[source] anyhow::Error),
 
     #[error(transparent)]
     Execution(#[from] crate::ExecutionError),
@@ -560,7 +570,7 @@ pub struct EncryptionDetails {
     pub epoch: u64,
 }
 
-#[derive(Debug, Default)]
+#[derive(Clone, Copy, Debug, Default)]
 pub struct SizeDetails {
     pub quota: Option<ByteCount>,
     pub reservation: Option<ByteCount>,
@@ -794,32 +804,108 @@ pub enum WhichDatasets {
     SelfAndChildren,
 }
 
+/// Renders an optional size as the string ZFS expects: the byte count, or
+/// `"none"` when unset. ZFS treats a size of 0 as "none" and reports it back
+/// that way, so we render 0 as "none" too; otherwise a desired "0" would never
+/// compare equal to the persisted "none" and we'd re-set it every reconcile.
+fn render_size(size: Option<ByteCount>) -> String {
+    match size {
+        Some(s) if s.to_bytes() != 0 => s.to_bytes().to_string(),
+        _ => String::from("none"),
+    }
+}
+
+/// The ZFS properties `ensure_dataset` keeps in sync, in the string form ZFS
+/// uses (`"none"` for an unset size).
+///
+/// A field is `None` when the property is not managed for a given request (in
+/// the [desired](Self::desired) form) or not present on a dataset (in the
+/// [current](Self::current) form). The request side and the observed side both
+/// produce one of these, so [build_zfs_set_key_value_pairs] and
+/// [props_needing_update] compare and emit values without any per-property
+/// logic of their own.
+///
+/// Adding a managed property means adding a field here: both constructors are
+/// struct literals and [into_pairs](Self::into_pairs) destructures
+/// exhaustively, so the compiler forces every site to account for it.
+struct ManagedProps {
+    quota: Option<String>,
+    reservation: Option<String>,
+    compression: Option<String>,
+    oxide_uuid: Option<String>,
+}
+
+impl ManagedProps {
+    /// The values to set for the given request. A `None` field is left
+    /// untouched; `Some("none")` explicitly clears a size.
+    fn desired(
+        size_details: Option<SizeDetails>,
+        dataset_id: Option<DatasetUuid>,
+    ) -> Self {
+        Self {
+            quota: size_details.map(|s| render_size(s.quota)),
+            reservation: size_details.map(|s| render_size(s.reservation)),
+            compression: size_details.map(|s| s.compression.to_string()),
+            oxide_uuid: dataset_id.map(|id| id.to_string()),
+        }
+    }
+
+    /// The values currently persisted on the dataset. Sizes are always present
+    /// (`"none"` when unset); `oxide:uuid` is absent on datasets that inherit
+    /// it. `compression` is the raw string ZFS reports, so an algorithm we
+    /// don't model still compares correctly (and is re-set if it differs).
+    fn current(props: &DatasetProperties) -> Self {
+        Self {
+            quota: Some(render_size(props.quota)),
+            reservation: Some(render_size(props.reservation)),
+            compression: Some(props.compression.clone()),
+            oxide_uuid: props.id.map(|id| id.to_string()),
+        }
+    }
+
+    /// The `(name, value)` pairs for the properties that are present, in the
+    /// order ZFS should receive them.
+    fn into_pairs(self) -> Vec<(&'static str, String)> {
+        let Self { quota, reservation, compression, oxide_uuid } = self;
+        [
+            ("quota", quota),
+            ("reservation", reservation),
+            ("compression", compression),
+            ("oxide:uuid", oxide_uuid),
+        ]
+        .into_iter()
+        .filter_map(|(name, value)| Some((name, value?)))
+        .collect()
+    }
+}
+
 fn build_zfs_set_key_value_pairs(
     size_details: Option<SizeDetails>,
     dataset_id: Option<DatasetUuid>,
 ) -> Vec<(&'static str, String)> {
-    let mut props = Vec::new();
-    if let Some(SizeDetails { quota, reservation, compression }) = size_details
-    {
-        let quota = quota
-            .map(|q| q.to_bytes().to_string())
-            .unwrap_or_else(|| String::from("none"));
-        props.push(("quota", quota));
+    ManagedProps::desired(size_details, dataset_id).into_pairs()
+}
 
-        let reservation = reservation
-            .map(|r| r.to_bytes().to_string())
-            .unwrap_or_else(|| String::from("none"));
-        props.push(("reservation", reservation));
-
-        let compression = compression.to_string();
-        props.push(("compression", compression));
-    }
-
-    if let Some(id) = dataset_id {
-        props.push(("oxide:uuid", id.to_string()));
-    }
-
-    props
+/// Returns the `(key, value)` pairs that need to be written for the given
+/// request, given the dataset's currently-persisted properties: every managed
+/// property whose desired value differs from what is already in place.
+///
+/// Each property is evaluated independently, so a property that is unset or
+/// unreadable never prevents the skip-if-unchanged behavior for the others.
+fn props_needing_update(
+    current: &DatasetProperties,
+    size_details: Option<SizeDetails>,
+    dataset_id: Option<DatasetUuid>,
+) -> Vec<(&'static str, String)> {
+    let actual = ManagedProps::current(current).into_pairs();
+    ManagedProps::desired(size_details, dataset_id)
+        .into_pairs()
+        .into_iter()
+        // Keep (set) a pair unless an identical one is already persisted.
+        .filter(|(name, value)| {
+            !actual.iter().any(|(n, v)| n == name && v == value)
+        })
+        .collect()
 }
 
 /// Describes the ZFS "canmount" options.
@@ -1423,13 +1509,17 @@ impl Zfs {
         // we don't do this mountpoint manipulation for them.
         let wants_mounting =
             !zoned && !dataset_info.mounted && can_mount.wants_mounting();
-        let props = build_zfs_set_key_value_pairs(size_details, id);
 
         if dataset_info.exists {
             // If the dataset already exists: Update properties which might
             // have changed, and ensure it has been mounted if it needs
             // to be mounted.
-            Self::set_values(name, props.as_slice())
+            //
+            // We only set properties that differ from what is already
+            // persisted; re-applying an already-correct `quota` can otherwise
+            // fail if `used` has crept slightly over it (see
+            // [Self::set_values_if_changed]).
+            Self::set_values_if_changed(name, size_details, id)
                 .await
                 .map_err(|err| EnsureDatasetErrorRaw::from(err.err))?;
 
@@ -1504,6 +1594,9 @@ impl Zfs {
                 .map_err(|err| EnsureDatasetErrorRaw::from(err))?;
         }
 
+        // A freshly created dataset has its properties at ZFS defaults, so set
+        // them all.
+        let props = build_zfs_set_key_value_pairs(size_details, id);
         Self::set_values(name, props.as_slice())
             .await
             .map_err(|err| EnsureDatasetErrorRaw::from(err.err))?;
@@ -1636,6 +1729,44 @@ impl Zfs {
         })?;
 
         Ok(())
+    }
+
+    /// Like [Self::set_values], but first reads the dataset's currently-
+    /// persisted properties and only sets the ones that differ. If every
+    /// property already matches, no `zfs set` is issued at all.
+    async fn set_values_if_changed(
+        filesystem_name: &str,
+        size_details: Option<SizeDetails>,
+        dataset_id: Option<DatasetUuid>,
+    ) -> Result<(), SetValueError> {
+        // Read the current properties so we can skip re-setting unchanged
+        // values. A failed read is surfaced rather than papered over: falling
+        // back to setting everything would re-apply `quota`, which can itself
+        // fail once `used` has crept past it (the very failure this avoids; see
+        // https://github.com/oxidecomputer/omicron/issues/10662).
+        let make_err = |err| SetValueError {
+            filesystem: filesystem_name.to_string(),
+            values: build_zfs_set_key_value_pairs(size_details, dataset_id)
+                .iter()
+                .map(|(k, v)| format!("{k}={v}"))
+                .join(","),
+            err,
+        };
+
+        let props = Self::get_dataset_properties(
+            &[filesystem_name.to_string()],
+            WhichDatasets::SelfOnly,
+        )
+        .await
+        .map_err(|err| make_err(SetValueErrorRaw::ReadProperties(err)))?;
+
+        let current = props
+            .into_iter()
+            .find(|p| p.name == filesystem_name)
+            .ok_or_else(|| make_err(SetValueErrorRaw::DatasetNotFound))?;
+
+        let to_set = props_needing_update(&current, size_details, dataset_id);
+        Self::set_values(filesystem_name, to_set.as_slice()).await
     }
 
     /// Get the value of an Oxide-managed ZFS property.
@@ -2694,6 +2825,164 @@ mod test {
             .expect("Should have parsed data");
         assert_eq!(props.len(), 1);
         assert_eq!(props[0].reservation, None);
+    }
+
+    // Builds a DatasetProperties with the fields that `props_needing_update`
+    // compares; the rest are filled with arbitrary values.
+    fn props_with(
+        id: Option<DatasetUuid>,
+        quota: Option<ByteCount>,
+        reservation: Option<ByteCount>,
+        compression: &str,
+        used: u64,
+    ) -> DatasetProperties {
+        DatasetProperties {
+            id,
+            name: "pool/dataset".to_string(),
+            mounted: true,
+            avail: ByteCount::try_from(0u64).unwrap(),
+            used: ByteCount::try_from(used).unwrap(),
+            quota,
+            reservation,
+            compression: compression.to_string(),
+            epoch: None,
+        }
+    }
+
+    #[test]
+    fn props_needing_update_skips_matching_values() {
+        // Regression test for https://github.com/oxidecomputer/omicron/issues/10662
+        // `quota`, `reservation`, and `compression` are all already persisted
+        // at their desired values, but `used` has crept one sector past the
+        // quota (the "one free hit"). We must emit no updates, so no `zfs set`
+        // is issued.
+        let hundred_gib = ByteCount::try_from(107374182400u64).unwrap();
+        let current = props_with(
+            None,
+            Some(hundred_gib),
+            None,
+            "gzip-9",
+            107374182912, // 512 bytes over the quota
+        );
+
+        let size = Some(SizeDetails {
+            quota: Some(hundred_gib),
+            reservation: None,
+            compression: CompressionAlgorithm::GzipN {
+                level: omicron_common::disk::GzipLevel::new::<9>(),
+            },
+        });
+
+        assert!(
+            props_needing_update(&current, size, None).is_empty(),
+            "no properties should need updating when all already match"
+        );
+    }
+
+    #[test]
+    fn props_needing_update_emits_only_changed_values() {
+        let current = props_with(
+            None,
+            Some(ByteCount::try_from(100u64).unwrap()),
+            None,
+            "off",
+            10,
+        );
+
+        // Only the quota differs (200 vs persisted 100).
+        let size = Some(SizeDetails {
+            quota: Some(ByteCount::try_from(200u64).unwrap()),
+            reservation: None,
+            compression: CompressionAlgorithm::Off,
+        });
+
+        assert_eq!(
+            props_needing_update(&current, size, None),
+            vec![("quota", "200".to_string())]
+        );
+    }
+
+    #[test]
+    fn props_needing_update_none_matches_unset() {
+        // Desired "none" for quota/reservation matches a persisted None.
+        let current = props_with(None, None, None, "off", 10);
+        let size = Some(SizeDetails {
+            quota: None,
+            reservation: None,
+            compression: CompressionAlgorithm::Off,
+        });
+        assert!(props_needing_update(&current, size, None).is_empty());
+    }
+
+    #[test]
+    fn props_needing_update_zero_size_matches_unset() {
+        // ZFS treats quota/reservation of 0 as "none", so a desired 0 must
+        // compare equal to a persisted-unset value; otherwise we'd re-set it
+        // every reconcile and never converge.
+        let current = props_with(None, None, None, "off", 10);
+        let size = Some(SizeDetails {
+            quota: Some(ByteCount::try_from(0u64).unwrap()),
+            reservation: Some(ByteCount::try_from(0u64).unwrap()),
+            compression: CompressionAlgorithm::Off,
+        });
+        assert!(props_needing_update(&current, size, None).is_empty());
+    }
+
+    #[test]
+    fn props_needing_update_compression_change_is_kept() {
+        let current = props_with(None, None, None, "off", 10);
+        let size = Some(SizeDetails {
+            quota: None,
+            reservation: None,
+            compression: CompressionAlgorithm::Lz4,
+        });
+        assert_eq!(
+            props_needing_update(&current, size, None),
+            vec![("compression", "lz4".to_string())]
+        );
+    }
+
+    #[test]
+    fn props_needing_update_oxide_uuid() {
+        let id: DatasetUuid =
+            "d4e1e554-7b98-4413-809e-4a42561c3d0c".parse().unwrap();
+
+        // A matching oxide:uuid is dropped.
+        let current = props_with(Some(id), None, None, "off", 10);
+        assert!(props_needing_update(&current, None, Some(id)).is_empty());
+
+        // An absent (inherited) uuid never matches, so it is set.
+        let current_no_id = props_with(None, None, None, "off", 10);
+        assert_eq!(
+            props_needing_update(&current_no_id, None, Some(id)),
+            vec![("oxide:uuid", id.to_string())]
+        );
+    }
+
+    #[test]
+    fn props_needing_update_unknown_current_compression_is_set() {
+        // A compression value we don't model is compared as a plain string, so
+        // it is simply re-set rather than blocking anything. Crucially, the
+        // matching `quota` is still skipped: one property's "weird" value does
+        // not prevent skip-if-unchanged for the others.
+        let current = props_with(
+            None,
+            Some(ByteCount::try_from(100u64).unwrap()),
+            None,
+            "zstd-3",
+            10,
+        );
+
+        let size = Some(SizeDetails {
+            quota: Some(ByteCount::try_from(100u64).unwrap()),
+            reservation: None,
+            compression: CompressionAlgorithm::Off,
+        });
+
+        assert_eq!(
+            props_needing_update(&current, size, None),
+            vec![("compression", "off".to_string())]
+        );
     }
 
     #[test]

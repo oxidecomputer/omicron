@@ -2,8 +2,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-// Copyright 2023 Oxide Computer Company
-
 #![allow(clippy::redundant_closure_call)]
 #![allow(clippy::needless_lifetimes)]
 #![allow(clippy::match_single_binding)]
@@ -113,7 +111,7 @@ impl Client {
         interfaces: &'a [BootstrapInterface],
     ) -> Result<impl Iterator<Item = Ipv6Addr> + 'a + use<'a>, DdmError> {
         let prefixes = self.inner.get_prefixes().await?.into_inner();
-        Ok(prefixes.into_iter().flat_map(|(_, prefixes)| {
+        Ok(prefixes.into_values().flat_map(|prefixes| {
             prefixes.into_iter().flat_map(|prefix| {
                 let mut segments = prefix.destination.addr().segments();
                 if prefix.destination.width() == BOOTSTRAP_MASK

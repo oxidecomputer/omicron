@@ -1,8 +1,6 @@
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
-// file, You can obtain one at https://mozilla.org/MPL/2.0/
-//
-// Copyright 2025 Oxide Computer Company
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 //! Tests multicast group + instance integration.
 //!
@@ -33,7 +31,8 @@ use nexus_test_utils::resource_helpers::{
 };
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::instance::{
-    InstanceCreate, InstanceNetworkInterfaceAttachment, InstanceUpdate,
+    InstanceCpuCount, InstanceCreate, InstanceNetworkInterfaceAttachment,
+    InstanceState, InstanceUpdate,
 };
 use nexus_types::external_api::multicast::{
     InstanceMulticastGroupJoin, MulticastGroup, MulticastGroupJoinSpec,
@@ -43,8 +42,7 @@ use nexus_types::internal_api::params::InstanceMigrateRequest;
 
 use nexus_types_versions::latest::instance::Instance;
 use omicron_common::api::external::{
-    ByteCount, IdentityMetadataCreateParams, InstanceCpuCount, InstanceState,
-    Nullable,
+    ByteCount, IdentityMetadataCreateParams, Nullable,
 };
 use omicron_nexus::TestInterfaces;
 use omicron_uuid_kinds::{GenericUuid, InstanceUuid};

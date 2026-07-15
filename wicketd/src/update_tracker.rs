@@ -2,8 +2,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-// Copyright 2023 Oxide Computer Company
-
 use crate::artifacts::WicketdArtifactStore;
 use crate::helpers::sps_to_string;
 use crate::installinator_progress::IprStartReceiver;
@@ -26,12 +24,12 @@ use gateway_client::types::HostStartupOptions;
 use gateway_client::types::InstallinatorImageId;
 use gateway_client::types::PowerState;
 use gateway_client::types::RotCfpaSlot;
-use gateway_client::types::RotImageError;
-use gateway_client::types::RotState;
 use gateway_client::types::SpComponentFirmwareSlot;
 use gateway_client::types::SpUpdateStatus;
 use gateway_messages::ROT_PAGE_SIZE;
 use gateway_messages::SpComponent;
+use gateway_types::rot::RotImageError;
+use gateway_types::rot::RotState;
 use hubtools::RawHubrisArchive;
 use installinator_common::InstallinatorCompletionMetadata;
 use installinator_common::WriteOutput;

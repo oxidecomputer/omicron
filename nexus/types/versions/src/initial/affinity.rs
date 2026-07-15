@@ -4,12 +4,14 @@
 
 //! Affinity and anti-affinity group types for version INITIAL.
 
+use super::instance::InstanceState;
+
 use api_identity::ObjectIdentity;
 use omicron_common::api::external::{
-    AffinityPolicy, FailureDomain, IdentityMetadata,
-    IdentityMetadataCreateParams, IdentityMetadataUpdateParams, NameOrId,
-    ObjectIdentity,
+    IdentityMetadata, IdentityMetadataCreateParams,
+    IdentityMetadataUpdateParams, Name, NameOrId, ObjectIdentity,
 };
+use omicron_uuid_kinds::InstanceUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -94,4 +96,73 @@ pub struct AffinityInstanceGroupMemberPath {
 pub struct AntiAffinityInstanceGroupMemberPath {
     pub anti_affinity_group: NameOrId,
     pub instance: NameOrId,
+}
+
+/// Affinity policy used to describe "what to do when a request cannot be satisfied"
+///
+/// Used for both Affinity and Anti-Affinity Groups
+#[derive(
+    Clone, Copy, Debug, Deserialize, Hash, Eq, Serialize, PartialEq, JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum AffinityPolicy {
+    /// If the affinity request cannot be satisfied, allow it anyway.
+    ///
+    /// This enables a "best-effort" attempt to satisfy the affinity policy.
+    Allow,
+
+    /// If the affinity request cannot be satisfied, fail explicitly.
+    Fail,
+}
+
+/// Describes the scope of affinity for the purposes of co-location.
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum FailureDomain {
+    /// Instances are considered co-located if they are on the same sled
+    Sled,
+}
+
+/// A member of an Affinity Group
+///
+/// Membership in a group is not exclusive - members may belong to multiple
+/// affinity / anti-affinity groups.
+///
+/// Affinity Groups can contain up to 32 members.
+// See: AFFINITY_GROUP_MAX_MEMBERS
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+#[serde(tag = "type", content = "value", rename_all = "snake_case")]
+pub enum AffinityGroupMember {
+    /// An instance belonging to this group
+    ///
+    /// Instances can belong to up to 16 affinity groups.
+    // See: INSTANCE_MAX_AFFINITY_GROUPS
+    Instance {
+        #[schemars(with = "Uuid")]
+        id: InstanceUuid,
+        name: Name,
+        run_state: InstanceState,
+    },
+}
+
+/// A member of an Anti-Affinity Group
+///
+/// Membership in a group is not exclusive - members may belong to multiple
+/// affinity / anti-affinity groups.
+///
+/// Anti-Affinity Groups can contain up to 32 members.
+// See: ANTI_AFFINITY_GROUP_MAX_MEMBERS
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+#[serde(tag = "type", content = "value", rename_all = "snake_case")]
+pub enum AntiAffinityGroupMember {
+    /// An instance belonging to this group
+    ///
+    /// Instances can belong to up to 16 anti-affinity groups.
+    // See: INSTANCE_MAX_ANTI_AFFINITY_GROUPS
+    Instance {
+        #[schemars(with = "Uuid")]
+        id: InstanceUuid,
+        name: Name,
+        run_state: InstanceState,
+    },
 }
