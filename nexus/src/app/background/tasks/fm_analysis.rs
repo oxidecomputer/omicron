@@ -397,7 +397,7 @@ impl FmAnalysis {
 
                 // Check if this is a reporter we know about, and issue a
                 // warning if it is not.
-                let id = ereport.id();
+                let id = ereport.id;
                 if !builder.ereporter_restarts().contains_key(&id.restart_id) {
                     let msg = format!(
                         "ereport {id} has a restart ID not contained in the \

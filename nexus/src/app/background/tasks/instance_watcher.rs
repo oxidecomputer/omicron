@@ -30,6 +30,7 @@ use omicron_common::api::external::Error;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::PropolisUuid;
+use omicron_uuid_kinds::RackUuid;
 use omicron_uuid_kinds::SledUuid;
 use oximeter::types::ProducerRegistry;
 use parallel_task_set::ParallelTaskSet;
@@ -43,7 +44,6 @@ use std::future::Future;
 use std::sync::Arc;
 use std::sync::Mutex;
 use tokio::sync::watch;
-use uuid::Uuid;
 
 oximeter::use_timeseries!("vm-health-check.toml");
 use virtual_machine::VirtualMachine;
@@ -452,7 +452,7 @@ async fn is_computer_on(
 #[derive(Copy, Clone)]
 pub struct WatcherIdentity {
     pub nexus_id: OmicronZoneUuid,
-    pub rack_id: Uuid,
+    pub rack_id: RackUuid,
 }
 
 impl VirtualMachine {
@@ -465,7 +465,7 @@ impl VirtualMachine {
     ) -> Self {
         let addr = sled.address();
         Self {
-            rack_id,
+            rack_id: rack_id.into_untyped_uuid(),
             nexus_id: nexus_id.into_untyped_uuid(),
             instance_id: instance.id(),
             silo_id: project.silo_id,

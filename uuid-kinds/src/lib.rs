@@ -43,6 +43,8 @@ impl_typed_uuid_kinds! {
         Alert = {},
         AlertReceiver = {},
         AntiAffinityGroup = {},
+        BgpAnnounceSet = {},
+        BgpConfig = {},
         BgpPeerConfigAllowExport = {},
         BgpPeerConfigAllowImport = {},
         BgpPeerConfigCommunity = {},

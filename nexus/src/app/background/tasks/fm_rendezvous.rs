@@ -13,11 +13,13 @@ use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::datastore::FmRendezvousAlertCreateError;
 use nexus_db_queries::db::datastore::FmSupportBundleCreateError;
+use nexus_db_queries::db::datastore::MarkerGcResult;
 use nexus_db_queries::db::datastore::SupportBundleCreateParams;
 use nexus_types::fm;
 use nexus_types::fm::case::AlertRequest;
 use nexus_types::internal_api::background::FmRendezvousStatus as Status;
 use nexus_types::internal_api::background::fm_rendezvous::*;
+use omicron_common::api::external::Error;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use serde_json::json;
 use slog_error_chain::InlineErrorChain;
@@ -30,6 +32,7 @@ pub struct FmRendezvous {
     sitrep_watcher: watch::Receiver<Option<CurrentSitrep>>,
     alert_dispatcher: Activator,
     support_bundle_collector: Activator,
+    sitrep_loader: Activator,
     nexus_id: OmicronZoneUuid,
 }
 
@@ -60,6 +63,7 @@ impl FmRendezvous {
         rx: watch::Receiver<Option<CurrentSitrep>>,
         alert_dispatcher: Activator,
         support_bundle_collector: Activator,
+        sitrep_loader: Activator,
         nexus_id: OmicronZoneUuid,
     ) -> Self {
         Self {
@@ -67,6 +71,7 @@ impl FmRendezvous {
             sitrep_watcher: rx,
             alert_dispatcher,
             support_bundle_collector,
+            sitrep_loader,
             nexus_id,
         }
     }
@@ -95,6 +100,23 @@ impl FmRendezvous {
             "marking ereports as seen",
             Self::mark_ereports_seen,
         );
+        // GC of `rendezvous_*_created` marker rows runs as peer ops, not as a
+        // tail of creation: the sweep's safety does not depend on any creation
+        // loop completing (see the `fm_rendezvous_gc` module docs), and running
+        // it as its own op lets the operator see GC timing and outcomes
+        // separately from creation.
+        let alert_marker_gc = self.spawn_op(
+            &sitrep,
+            opctx,
+            "sweeping alert creation markers",
+            Self::gc_alert_markers,
+        );
+        let support_bundle_marker_gc = self.spawn_op(
+            &sitrep,
+            opctx,
+            "sweeping support bundle creation markers",
+            Self::gc_support_bundle_markers,
+        );
 
         const TASKS_SHOULDNT_FAIL: &str = "\
             rendezvous op tasks should never return a `JoinError`. Nexus is \
@@ -104,12 +126,27 @@ impl FmRendezvous {
             indicating that they were aborted.
         ";
 
-        Status {
+        let status = Status {
             sitrep_id: Some(sitrep.1.id()),
             alerts: alerts.await.expect(TASKS_SHOULDNT_FAIL),
             support_bundles: support_bundles.await.expect(TASKS_SHOULDNT_FAIL),
             ereport_marking: marking.await.expect(TASKS_SHOULDNT_FAIL),
+            alert_marker_gc: alert_marker_gc.await.expect(TASKS_SHOULDNT_FAIL),
+            support_bundle_marker_gc: support_bundle_marker_gc
+                .await
+                .expect(TASKS_SHOULDNT_FAIL),
+        };
+
+        // If a guarded-create op observed that our sitrep is stale, the db
+        // already has a newer current sitrep than the one we have loaded. Poke
+        // the sitrep loader so that it picks up the new sitrep promptly, rather
+        // than on its next periodic activation; the loader in turn re-activates
+        // this task with the fresh sitrep.
+        if status.stale_sitrep_detected() {
+            self.sitrep_loader.activate();
         }
+
+        status
     }
 
     fn spawn_op<F>(
@@ -302,7 +339,7 @@ impl FmRendezvous {
             .cloned()
             .filter_map(|ereport| {
                 if ereport.marked_seen_in.is_none() {
-                    Some(*ereport.id())
+                    Some(ereport.id)
                 } else {
                     None
                 }
@@ -520,6 +557,72 @@ impl FmRendezvous {
 
         status
     }
+
+    /// Sweep the `rendezvous_alert_created` marker table, using this
+    /// activation's sitrep to decide which rows are still needed.
+    async fn gc_alert_markers(
+        self,
+        sitrep: CurrentSitrep,
+        opctx: OpContext,
+    ) -> MarkerGcStatus {
+        let (_, ref sitrep) = *sitrep;
+        let result = self
+            .datastore
+            .fm_rendezvous_alert_marker_gc(
+                &opctx,
+                sitrep.id(),
+                sitrep.metadata.alert_generation,
+            )
+            .await;
+        Self::marker_gc_status(&opctx.log, result)
+    }
+
+    /// Sweep the `rendezvous_support_bundle_created` marker table, using this
+    /// activation's sitrep to decide which rows are still needed.
+    async fn gc_support_bundle_markers(
+        self,
+        sitrep: CurrentSitrep,
+        opctx: OpContext,
+    ) -> MarkerGcStatus {
+        let (_, ref sitrep) = *sitrep;
+        let result = self
+            .datastore
+            .fm_rendezvous_support_bundle_marker_gc(
+                &opctx,
+                sitrep.id(),
+                sitrep.metadata.support_bundle_generation,
+            )
+            .await;
+        Self::marker_gc_status(&opctx.log, result)
+    }
+
+    /// Map the outcome of a `rendezvous_*_created` GC sweep into a
+    /// [`MarkerGcStatus`].
+    fn marker_gc_status(
+        log: &slog::Logger,
+        result: Result<MarkerGcResult, Error>,
+    ) -> MarkerGcStatus {
+        match result {
+            Ok(MarkerGcResult { rows_deleted, batches }) => {
+                if rows_deleted > 0 {
+                    slog::debug!(log, "GC swept {rows_deleted} marker row(s)",);
+                }
+                MarkerGcStatus { rows_deleted, batches, errors: Vec::new() }
+            }
+            Err(e) => {
+                slog::warn!(
+                    log,
+                    "marker GC failed";
+                    "error" => InlineErrorChain::new(&e),
+                );
+                MarkerGcStatus {
+                    rows_deleted: 0,
+                    batches: 0,
+                    errors: vec![InlineErrorChain::new(&e).to_string()],
+                }
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -546,6 +649,7 @@ mod tests {
     use omicron_uuid_kinds::EreporterRestartUuid;
     use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::OmicronZoneUuid;
+    use omicron_uuid_kinds::RackUuid;
     use omicron_uuid_kinds::SitrepUuid;
     use omicron_uuid_kinds::SupportBundleUuid;
 
@@ -553,15 +657,18 @@ mod tests {
     struct TestActivators {
         alert_dispatcher_activator: Activator,
         support_bundle_collector_activator: Activator,
+        sitrep_loader_activator: Activator,
     }
 
     fn make_activators() -> TestActivators {
         let activators = TestActivators {
             alert_dispatcher_activator: Activator::new(),
             support_bundle_collector_activator: Activator::new(),
+            sitrep_loader_activator: Activator::new(),
         };
         activators.alert_dispatcher_activator.mark_wired_up().unwrap();
         activators.support_bundle_collector_activator.mark_wired_up().unwrap();
+        activators.sitrep_loader_activator.mark_wired_up().unwrap();
         activators
     }
 
@@ -589,6 +696,7 @@ mod tests {
         let TestActivators {
             alert_dispatcher_activator,
             support_bundle_collector_activator,
+            sitrep_loader_activator,
         } = make_activators();
 
         let mut task = FmRendezvous::new(
@@ -596,6 +704,7 @@ mod tests {
             sitrep_rx,
             alert_dispatcher_activator.clone(),
             support_bundle_collector_activator.clone(),
+            sitrep_loader_activator.clone(),
             OmicronZoneUuid::new_v4(),
         );
 
@@ -671,7 +780,7 @@ mod tests {
             ))))
             .unwrap();
 
-        let Status { sitrep_id, alerts, .. } =
+        let Status { sitrep_id, alerts, alert_marker_gc, .. } =
             dbg!(task.actually_activate(opctx).await);
         assert_eq!(sitrep_id, Some(sitrep1_id));
         assert_eq!(
@@ -685,6 +794,16 @@ mod tests {
                 errors: Vec::new(),
             }
         );
+        // The single `rendezvous_alert_created` marker row we just
+        // inserted for `alert1` was stamped with the current sitrep's
+        // `alert_generation`, so its `created_at_generation` *equals* the
+        // current sitrep's `alert_generation`. The strict-inequality predicate
+        // (`created_at_generation < sitrep_alert_generation`) excludes it.
+        assert_eq!(alert_marker_gc.details.rows_deleted, 0);
+        // The marker table holds far fewer rows than `SQL_BATCH_SIZE`, so the
+        // sweep is always a single partial page.
+        assert_eq!(alert_marker_gc.details.batches, 1);
+        assert!(alert_marker_gc.details.errors.is_empty());
         let db_alert1 = fetch_alert(&datastore, alert1_id)
             .await
             .expect("alert1 must have been created");
@@ -775,7 +894,7 @@ mod tests {
             .unwrap();
 
         let status = dbg!(task.actually_activate(opctx).await);
-        let Status { sitrep_id, alerts, .. } = status;
+        let Status { sitrep_id, alerts, alert_marker_gc, .. } = status;
         assert_eq!(sitrep_id, Some(sitrep2_id));
         assert_eq!(
             alerts.details,
@@ -788,6 +907,12 @@ mod tests {
                 errors: Vec::new(),
             }
         );
+        // As above: sitrep1 and sitrep2 carry the same alert_generation, so
+        // every marker's `created_at_generation` equals it and nothing is
+        // swept, in a single partial page.
+        assert_eq!(alert_marker_gc.details.rows_deleted, 0);
+        assert_eq!(alert_marker_gc.details.batches, 1);
+        assert!(alert_marker_gc.details.errors.is_empty());
 
         let db_alert1 = fetch_alert(&datastore, alert1_id)
             .await
@@ -817,6 +942,12 @@ mod tests {
             "alert3 should have case_id set to case1"
         );
 
+        // Neither activation saw a stale sitrep, so the sitrep loader should
+        // not have been poked.
+        sitrep_loader_activator.assert_not_activated(
+            "sitrep loader should not be activated without a stale sitrep",
+        );
+
         // Cleanup
         db.terminate().await;
         logctx.cleanup_successful();
@@ -839,6 +970,7 @@ mod tests {
         let TestActivators {
             alert_dispatcher_activator,
             support_bundle_collector_activator,
+            sitrep_loader_activator,
         } = make_activators();
 
         let mut task = FmRendezvous::new(
@@ -846,6 +978,7 @@ mod tests {
             sitrep_rx,
             alert_dispatcher_activator.clone(),
             support_bundle_collector_activator.clone(),
+            sitrep_loader_activator.clone(),
             OmicronZoneUuid::new_v4(),
         );
 
@@ -980,6 +1113,11 @@ mod tests {
             status.support_bundles.result,
             OpResult::Executed { .. }
         );
+        // Detecting a stale sitrep should poke the sitrep loader so the
+        // newer sitrep is picked up promptly.
+        sitrep_loader_activator.assert_activated(
+            "sitrep loader should be activated when a stale sitrep is detected",
+        );
 
         db.terminate().await;
         logctx.cleanup_successful();
@@ -1003,6 +1141,7 @@ mod tests {
         let TestActivators {
             alert_dispatcher_activator,
             support_bundle_collector_activator,
+            sitrep_loader_activator,
         } = make_activators();
 
         let mut task = FmRendezvous::new(
@@ -1010,6 +1149,7 @@ mod tests {
             sitrep_rx,
             alert_dispatcher_activator.clone(),
             support_bundle_collector_activator.clone(),
+            sitrep_loader_activator.clone(),
             OmicronZoneUuid::new_v4(),
         );
 
@@ -1146,6 +1286,11 @@ mod tests {
         // Alert processing should still have run: the stale-sitrep outcome
         // aborts only the bundle loop, not the whole activation.
         assert_matches!(status.alerts.result, OpResult::Executed { .. });
+        // Detecting a stale sitrep should poke the sitrep loader so the
+        // newer sitrep is picked up promptly.
+        sitrep_loader_activator.assert_activated(
+            "sitrep loader should be activated when a stale sitrep is detected",
+        );
 
         db.terminate().await;
         logctx.cleanup_successful();
@@ -1241,6 +1386,7 @@ mod tests {
         let TestActivators {
             alert_dispatcher_activator,
             support_bundle_collector_activator,
+            sitrep_loader_activator,
         } = make_activators();
 
         let mut task = FmRendezvous::new(
@@ -1248,48 +1394,38 @@ mod tests {
             sitrep_rx,
             alert_dispatcher_activator.clone(),
             support_bundle_collector_activator.clone(),
+            sitrep_loader_activator.clone(),
             OmicronZoneUuid::new_v4(),
         );
 
         let restart_id = EreporterRestartUuid::new_v4();
         let collector_id = OmicronZoneUuid::new_v4();
+        let rack_id = RackUuid::new_v4();
         let time_collected = Utc::now();
         let reporter = Reporter::Sp {
             sp_type: nexus_types::inventory::SpType::Sled,
             slot: 0,
         };
 
+        let ereport1_id =
+            ereport_types::EreportId { restart_id, ena: ereport_types::Ena(2) };
         let ereport1_data = EreportData {
-            id: ereport_types::EreportId {
-                restart_id,
-                ena: ereport_types::Ena(2),
-            },
-            time_collected,
-            collector_id,
             part_number: Some("9130000019".to_string()),
             serial_number: Some("BRM420069".to_string()),
             class: Some("ereport.test.one".to_string()),
             report: serde_json::json!({"info": "first ereport"}),
         };
+        let ereport2_id =
+            ereport_types::EreportId { restart_id, ena: ereport_types::Ena(3) };
         let ereport2_data = EreportData {
-            id: ereport_types::EreportId {
-                restart_id,
-                ena: ereport_types::Ena(3),
-            },
-            time_collected,
-            collector_id,
             part_number: Some("9130000019".to_string()),
             serial_number: Some("BRM420069".to_string()),
             class: Some("ereport.test.two".to_string()),
             report: serde_json::json!({"info": "second ereport"}),
         };
+        let ereport3_id =
+            ereport_types::EreportId { restart_id, ena: ereport_types::Ena(4) };
         let ereport3_data = EreportData {
-            id: ereport_types::EreportId {
-                restart_id,
-                ena: ereport_types::Ena(4),
-            },
-            time_collected,
-            collector_id,
             part_number: Some("9130000019".to_string()),
             serial_number: Some("BRM420069".to_string()),
             class: Some("ereport.test.three".to_string()),
@@ -1300,11 +1436,13 @@ mod tests {
                 &opctx,
                 restart_id,
                 time_collected,
+                collector_id,
+                rack_id,
                 reporter,
                 vec![
-                    ereport1_data.clone(),
-                    ereport2_data.clone(),
-                    ereport3_data.clone(),
+                    (ereport1_id.ena, ereport1_data.clone()),
+                    (ereport2_id.ena, ereport2_data.clone()),
+                    (ereport3_id.ena, ereport3_data.clone()),
                 ],
             )
             .await
@@ -1314,7 +1452,7 @@ mod tests {
         assert_ereports_unseen(
             &datastore,
             opctx,
-            &[ereport1_data.id, ereport2_data.id, ereport3_data.id],
+            &[ereport1_id, ereport2_id, ereport3_id],
         )
         .await;
 
@@ -1328,6 +1466,9 @@ mod tests {
                 .insert_unique(fm::case::CaseEreport {
                     id: CaseEreportUuid::new_v4(),
                     ereport: Arc::new(fm::ereport::Ereport::new(
+                        ereport1_id,
+                        time_collected,
+                        collector_id,
                         ereport1_data.clone(),
                         reporter,
                     )),
@@ -1339,6 +1480,9 @@ mod tests {
                 .insert_unique(fm::case::CaseEreport {
                     id: CaseEreportUuid::new_v4(),
                     ereport: Arc::new(fm::ereport::Ereport::new(
+                        ereport2_id,
+                        time_collected,
+                        collector_id,
                         ereport2_data.clone(),
                         reporter,
                     )),
@@ -1421,11 +1565,11 @@ mod tests {
         assert_ereports_seen_in(
             &datastore,
             opctx,
-            &[ereport1_data.id, ereport2_data.id],
+            &[ereport1_id, ereport2_id],
             sitrep1_id,
         )
         .await;
-        assert_ereports_unseen(&datastore, opctx, &[ereport3_data.id]).await;
+        assert_ereports_unseen(&datastore, opctx, &[ereport3_id]).await;
 
         // Second activation: ereport1 and ereport2 are already marked
         // seen in the sitrep, so they should NOT be marked again
@@ -1454,11 +1598,11 @@ mod tests {
         assert_ereports_seen_in(
             &datastore,
             opctx,
-            &[ereport1_data.id, ereport2_data.id],
+            &[ereport1_id, ereport2_id],
             sitrep1_id,
         )
         .await;
-        assert_ereports_unseen(&datastore, opctx, &[ereport3_data.id]).await;
+        assert_ereports_unseen(&datastore, opctx, &[ereport3_id]).await;
 
         // Cleanup
         db.terminate().await;
@@ -1480,6 +1624,7 @@ mod tests {
         let TestActivators {
             alert_dispatcher_activator,
             support_bundle_collector_activator,
+            sitrep_loader_activator,
         } = make_activators();
 
         let mut task = FmRendezvous::new(
@@ -1487,47 +1632,37 @@ mod tests {
             sitrep_rx,
             alert_dispatcher_activator.clone(),
             support_bundle_collector_activator.clone(),
+            sitrep_loader_activator.clone(),
             OmicronZoneUuid::new_v4(),
         );
 
         let restart_id = EreporterRestartUuid::new_v4();
         let collector_id = OmicronZoneUuid::new_v4();
+        let rack_id = RackUuid::new_v4();
         let reporter = Reporter::Sp {
             sp_type: nexus_types::inventory::SpType::Sled,
             slot: 1,
         };
         let time_collected = Utc::now();
+        let ereport1_id =
+            ereport_types::EreportId { restart_id, ena: ereport_types::Ena(2) };
         let ereport1_data = EreportData {
-            id: ereport_types::EreportId {
-                restart_id,
-                ena: ereport_types::Ena(2),
-            },
-            time_collected,
-            collector_id,
             part_number: Some("9130000019".to_string()),
             serial_number: Some("BRM420069".to_string()),
             class: Some("ereport.test.one".to_string()),
             report: serde_json::json!({"info": "first ereport"}),
         };
+        let ereport2_id =
+            ereport_types::EreportId { restart_id, ena: ereport_types::Ena(3) };
         let ereport2_data = EreportData {
-            id: ereport_types::EreportId {
-                restart_id,
-                ena: ereport_types::Ena(3),
-            },
-            time_collected,
-            collector_id,
             part_number: Some("9130000019".to_string()),
             serial_number: Some("BRM420069".to_string()),
             class: Some("ereport.test.two".to_string()),
             report: serde_json::json!({"info": "second ereport"}),
         };
+        let ereport3_id =
+            ereport_types::EreportId { restart_id, ena: ereport_types::Ena(4) };
         let ereport3_data = EreportData {
-            id: ereport_types::EreportId {
-                restart_id,
-                ena: ereport_types::Ena(4),
-            },
-            time_collected,
-            collector_id,
             part_number: Some("9130000019".to_string()),
             serial_number: Some("BRM420069".to_string()),
             class: Some("ereport.test.three".to_string()),
@@ -1538,11 +1673,13 @@ mod tests {
                 opctx,
                 restart_id,
                 time_collected,
+                collector_id,
+                rack_id,
                 reporter,
                 vec![
-                    ereport1_data.clone(),
-                    ereport2_data.clone(),
-                    ereport3_data.clone(),
+                    (ereport1_id.ena, ereport1_data.clone()),
+                    (ereport2_id.ena, ereport2_data.clone()),
+                    (ereport3_id.ena, ereport3_data.clone()),
                 ],
             )
             .await
@@ -1556,6 +1693,9 @@ mod tests {
                 .insert_unique(fm::case::CaseEreport {
                     id: CaseEreportUuid::new_v4(),
                     ereport: Arc::new(fm::ereport::Ereport::new(
+                        ereport1_id,
+                        time_collected,
+                        collector_id,
                         ereport1_data.clone(),
                         reporter,
                     )),
@@ -1620,24 +1760,18 @@ mod tests {
         assert_eq!(ereport_marking.details.ereports_marked_seen, 1);
 
         // Verify DB state after sitrep 1.
-        assert_ereports_seen_in(
-            &datastore,
-            opctx,
-            &[ereport1_data.id],
-            sitrep1_id,
-        )
-        .await;
-        assert_ereports_unseen(
-            &datastore,
-            opctx,
-            &[ereport2_data.id, ereport3_data.id],
-        )
-        .await;
+        assert_ereports_seen_in(&datastore, opctx, &[ereport1_id], sitrep1_id)
+            .await;
+        assert_ereports_unseen(&datastore, opctx, &[ereport2_id, ereport3_id])
+            .await;
 
         // Sitrep 2: carries forward ereport1 AND adds ereport2 and
         // ereport3
         let sitrep2_id = SitrepUuid::new_v4();
         let ereport1_seen = fm::ereport::Ereport {
+            id: ereport1_id,
+            time_collected,
+            collector_id,
             data: ereport1_data.clone(),
             reporter,
             marked_seen_in: Some(sitrep1_id),
@@ -1657,6 +1791,9 @@ mod tests {
                 .insert_unique(fm::case::CaseEreport {
                     id: CaseEreportUuid::new_v4(),
                     ereport: Arc::new(fm::ereport::Ereport::new(
+                        ereport2_id,
+                        time_collected,
+                        collector_id,
                         ereport2_data.clone(),
                         reporter,
                     )),
@@ -1668,6 +1805,9 @@ mod tests {
                 .insert_unique(fm::case::CaseEreport {
                     id: CaseEreportUuid::new_v4(),
                     ereport: Arc::new(fm::ereport::Ereport::new(
+                        ereport3_id,
+                        time_collected,
+                        collector_id,
                         ereport3_data.clone(),
                         reporter,
                     )),
@@ -1740,17 +1880,12 @@ mod tests {
             "only ereport2 and ereport3 should be newly marked"
         );
         assert!(ereport_marking.details.errors.is_empty());
+        assert_ereports_seen_in(&datastore, opctx, &[ereport1_id], sitrep1_id)
+            .await;
         assert_ereports_seen_in(
             &datastore,
             opctx,
-            &[ereport1_data.id],
-            sitrep1_id,
-        )
-        .await;
-        assert_ereports_seen_in(
-            &datastore,
-            opctx,
-            &[ereport2_data.id, ereport3_data.id],
+            &[ereport2_id, ereport3_id],
             sitrep2_id,
         )
         .await;
@@ -1782,6 +1917,7 @@ mod tests {
         use omicron_uuid_kinds::BlueprintUuid;
         use omicron_uuid_kinds::DatasetUuid;
         use omicron_uuid_kinds::PhysicalDiskUuid;
+        use omicron_uuid_kinds::RackUuid;
         use omicron_uuid_kinds::SledUuid;
         use omicron_uuid_kinds::ZpoolUuid;
 
@@ -1802,7 +1938,7 @@ mod tests {
                 reservoir_size: ByteCount::from(0).into(),
                 cpu_family: SledCpuFamily::AmdMilan,
             },
-            uuid::Uuid::new_v4(),
+            RackUuid::new_v4(),
             Generation::new(),
         );
         datastore.sled_upsert(sled).await.unwrap();
@@ -1854,6 +1990,7 @@ mod tests {
         let TestActivators {
             alert_dispatcher_activator,
             support_bundle_collector_activator,
+            sitrep_loader_activator,
         } = make_activators();
 
         let nexus_id = OmicronZoneUuid::new_v4();
@@ -1862,6 +1999,7 @@ mod tests {
             sitrep_rx,
             alert_dispatcher_activator.clone(),
             support_bundle_collector_activator.clone(),
+            sitrep_loader_activator.clone(),
             nexus_id,
         );
 
@@ -1951,6 +2089,16 @@ mod tests {
             }
         );
 
+        // The bundle-side GC op ran against the real
+        // `rendezvous_support_bundle_created` / `fm_support_bundle_request`
+        // tables; an error here would mean the identifiers the generic query
+        // splices for `SupportBundle` don't match the real schema.
+        assert!(
+            status.support_bundle_marker_gc.details.errors.is_empty(),
+            "support bundle marker GC should not have failed: {:?}",
+            status.support_bundle_marker_gc.details.errors,
+        );
+
         // The bundle should exist in the database in Collecting state.
         let db_bundle = fetch_support_bundle(&datastore, bundle1_id)
             .await
@@ -1963,14 +2111,8 @@ mod tests {
         );
 
         // The collector should have been activated.
-        assert!(
-            tokio::time::timeout(
-                std::time::Duration::from_millis(1),
-                support_bundle_collector_activator.activated(),
-            )
-            .await
-            .is_ok(),
-            "collector should be activated when bundles are created"
+        support_bundle_collector_activator.assert_activated(
+            "collector should be activated when bundles are created",
         );
 
         // Build a second sitrep that carries forward the existing bundle
@@ -2064,6 +2206,7 @@ mod tests {
         let TestActivators {
             alert_dispatcher_activator,
             support_bundle_collector_activator,
+            sitrep_loader_activator,
         } = make_activators();
 
         let nexus_id = OmicronZoneUuid::new_v4();
@@ -2072,6 +2215,7 @@ mod tests {
             sitrep_rx,
             alert_dispatcher_activator.clone(),
             support_bundle_collector_activator.clone(),
+            sitrep_loader_activator.clone(),
             nexus_id,
         );
 
@@ -2154,14 +2298,8 @@ mod tests {
         );
 
         // The collector should NOT have been activated (no bundles created).
-        assert!(
-            tokio::time::timeout(
-                std::time::Duration::from_millis(1),
-                support_bundle_collector_activator.activated(),
-            )
-            .await
-            .is_err(),
-            "collector should not be activated when no bundles were created"
+        support_bundle_collector_activator.assert_not_activated(
+            "collector should not be activated when no bundles were created",
         );
 
         // Cleanup

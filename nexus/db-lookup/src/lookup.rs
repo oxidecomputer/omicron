@@ -267,7 +267,7 @@ impl<'a> LookupPath<'a> {
     }
 
     /// Select a resource of type Rack, identified by its id
-    pub fn rack_id(self, id: Uuid) -> Rack<'a> {
+    pub fn rack_id(self, id: RackUuid) -> Rack<'a> {
         Rack::PrimaryKey(Root { lookup_root: self }, id)
     }
 
@@ -335,6 +335,25 @@ impl<'a> LookupPath<'a> {
         AddressLot::OwnedName(Root { lookup_root: self }, name)
     }
 
+    pub fn bgp_config_id(self, id: BgpConfigUuid) -> BgpConfig<'a> {
+        BgpConfig::PrimaryKey(Root { lookup_root: self }, id)
+    }
+
+    pub fn bgp_config_name_owned(self, name: Name) -> BgpConfig<'a> {
+        BgpConfig::OwnedName(Root { lookup_root: self }, name)
+    }
+
+    pub fn bgp_announce_set_id(
+        self,
+        id: BgpAnnounceSetUuid,
+    ) -> BgpAnnounceSet<'a> {
+        BgpAnnounceSet::PrimaryKey(Root { lookup_root: self }, id)
+    }
+
+    pub fn bgp_announce_set_name_owned(self, name: Name) -> BgpAnnounceSet<'a> {
+        BgpAnnounceSet::OwnedName(Root { lookup_root: self }, name)
+    }
+
     /// Select a resource of type MulticastGroup, identified by its name
     pub fn multicast_group_name<'b, 'c>(
         self,
@@ -354,7 +373,7 @@ impl<'a> LookupPath<'a> {
 
     pub fn loopback_address(
         self,
-        rack_id: Uuid,
+        rack_id: RackUuid,
         switch_slot: DbSwitchSlot,
         address: IpNetwork,
     ) -> LoopbackAddress<'a> {
@@ -771,7 +790,7 @@ lookup_resource! {
     ancestors = [],
     lookup_by_name = false,
     soft_deletes = false,
-    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
+    primary_key_columns = [ { column_name = "id", uuid_kind = RackKind } ]
 }
 
 lookup_resource! {
@@ -873,13 +892,29 @@ lookup_resource! {
 }
 
 lookup_resource! {
+    name = "BgpConfig",
+    ancestors = [],
+    lookup_by_name = true,
+    soft_deletes = true,
+    primary_key_columns = [ { column_name = "id", uuid_kind = BgpConfigKind} ]
+}
+
+lookup_resource! {
+    name = "BgpAnnounceSet",
+    ancestors = [],
+    lookup_by_name = true,
+    soft_deletes = true,
+    primary_key_columns = [ { column_name = "id", uuid_kind = BgpAnnounceSetKind } ]
+}
+
+lookup_resource! {
     name = "LoopbackAddress",
     ancestors = [],
     lookup_by_name = false,
     soft_deletes = false,
     primary_key_columns = [
         { column_name = "address", rust_type = IpNetwork },
-        { column_name = "rack_id", rust_type = Uuid },
+        { column_name = "rack_id", uuid_kind = RackKind },
         { column_name = "switch_slot", rust_type = DbSwitchSlot }
     ]
 }

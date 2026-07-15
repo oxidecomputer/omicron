@@ -59,9 +59,9 @@ slog-error-chain.workspace = true
 
 [dev-dependencies]
 assert_cmd.workspace = true
+camino-tempfile.workspace = true
 expectorate.workspace = true
 maplit.workspace = true
-tempfile.workspace = true
 proptest.workspace = true
 
 [[bin]]

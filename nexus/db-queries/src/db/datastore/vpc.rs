@@ -2991,6 +2991,7 @@ mod tests {
     use omicron_uuid_kinds::BlueprintUuid;
     use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::InstanceUuid;
+    use omicron_uuid_kinds::RackUuid;
     use oxnet::IpNet;
     use oxnet::Ipv4Net;
     use slog::info;
@@ -3263,7 +3264,7 @@ mod tests {
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
         // Set up our fake system with 5 sleds.
-        let rack_id = Uuid::new_v4();
+        let rack_id = RackUuid::new_v4();
         let mut system = SystemDescription::new();
         let mut sled_ids = Vec::new();
         for _ in 0..5 {

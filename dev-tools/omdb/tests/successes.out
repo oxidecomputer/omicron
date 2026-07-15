@@ -750,6 +750,16 @@ task: "fm_rendezvous"
       batch size:                            1000
       batches:                                  0
       errors:                                   0
+    garbage collecting alert creation markers:
+      started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+      rows deleted:    0
+      batches:         1
+      errors:          0
+    garbage collecting support bundle creation markers:
+      started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+      rows deleted:    0
+      batches:         1
+      errors:          0
 
 task: "fm_sitrep_gc"
   configured period: every <REDACTED_DURATION>s
@@ -1015,7 +1025,8 @@ task: "switch_port_config_manager"
   configured period: every <REDACTED_DURATION>s
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-warning: unknown background task: "switch_port_config_manager" (don't know how to interpret details: Object {})
+all racks appear to have a complete bootstore network config
+(note: this check is not yet complete -- there might still be errors that aren't in the report)
 
 task: "trust_quorum_manager"
   configured period: every <REDACTED_DURATION>m
@@ -1449,6 +1460,16 @@ task: "fm_rendezvous"
       batch size:                            1000
       batches:                                  0
       errors:                                   0
+    garbage collecting alert creation markers:
+      started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+      rows deleted:    0
+      batches:         1
+      errors:          0
+    garbage collecting support bundle creation markers:
+      started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+      rows deleted:    0
+      batches:         1
+      errors:          0
 
 task: "fm_sitrep_gc"
   configured period: every <REDACTED_DURATION>s
@@ -1714,7 +1735,8 @@ task: "switch_port_config_manager"
   configured period: every <REDACTED_DURATION>s
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-warning: unknown background task: "switch_port_config_manager" (don't know how to interpret details: Object {})
+all racks appear to have a complete bootstore network config
+(note: this check is not yet complete -- there might still be errors that aren't in the report)
 
 task: "trust_quorum_manager"
   configured period: every <REDACTED_DURATION>m
@@ -2311,6 +2333,26 @@ stdout:
 ..........<REDACTED_UUID>........... found in silo_quotas.silo_id
 ..........<REDACTED_UUID>........... found in virtual_provisioning_collection.id
 ..........<REDACTED_UUID>........... found in silo_user.id
+---------------------------------------------
+stderr:
+note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
+note: database schema version matches expected (<redacted database version>)
+=============================================
+EXECUTING COMMAND: omdb ["db", "alert", "list", "--cases", "..........<REDACTED_UUID>...........", "..........<REDACTED_UUID>..........."]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+ID CLASS V TIME_CREATED TIME_DISPATCHED DISPATCHED FM_CASE_ID FM_GEN 
+---------------------------------------------
+stderr:
+note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
+note: database schema version matches expected (<redacted database version>)
+=============================================
+EXECUTING COMMAND: omdb ["db", "alert", "list", "--classes", "test.foo.bar", "test.foo.baz"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+ID CLASS V TIME_CREATED TIME_DISPATCHED DISPATCHED FM_CASE_ID FM_GEN 
 ---------------------------------------------
 stderr:
 note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable

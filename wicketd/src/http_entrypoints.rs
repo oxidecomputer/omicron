@@ -15,7 +15,7 @@ use crate::mgs::MgsHandle;
 use crate::mgs::ShutdownInProgress;
 use crate::multirack_config::CurrentMultirackJoinConfig;
 use crate::transceivers::GetTransceiversResponse;
-use bootstrap_agent_lockstep_client::types::RackOperationStatus;
+use bootstrap_agent_lockstep_types::RackOperationStatus;
 use dropshot::ApiDescription;
 use dropshot::HttpError;
 use dropshot::HttpResponseOk;
@@ -706,7 +706,7 @@ impl WicketdApi for WicketdApiImpl {
                     // locations where we could be running: scrimlets can only be in
                     // cubbies 14 or 16, so we refuse to update either of those.
                     let target_is_scrimlet = matches!(
-                        (target.type_, target.slot),
+                        (target.typ, target.slot),
                         (SpType::Sled, 14 | 16)
                     );
                     if target_is_scrimlet {
@@ -882,7 +882,7 @@ impl WicketdApi for WicketdApiImpl {
         let options = body.into_inner();
 
         let our_switch_slot = match rqctx.local_switch_id().await {
-            Some(SpIdentifier { slot, type_: SpType::Switch }) => match slot {
+            Some(SpIdentifier { slot, typ: SpType::Switch }) => match slot {
                 0 => SwitchSlot::Switch0,
                 1 => SwitchSlot::Switch1,
                 _ => {

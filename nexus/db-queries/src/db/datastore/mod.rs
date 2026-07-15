@@ -96,6 +96,7 @@ mod ereport;
 mod external_ip;
 mod external_subnet;
 pub mod fm;
+mod fm_rendezvous_gc;
 mod identity_provider;
 mod image;
 pub mod instance;
@@ -155,6 +156,7 @@ pub mod webhook_delivery;
 mod zpool;
 
 pub use address_lot::AddressLotCreateResult;
+pub use alert::AlertFilters;
 pub use alert::FmRendezvousAlertCreateError;
 pub use db_metadata::DatastoreSetupAction;
 pub use db_metadata::ValidatedDatastoreSetupAction;
@@ -169,6 +171,7 @@ pub use dns::DnsVersionUpdateBuilder;
 pub use external_ip::FloatingIpAllocation;
 pub use external_subnet::ExternalSubnetBeginOpResult;
 pub use external_subnet::ExternalSubnetCompleteOpResult;
+pub use fm_rendezvous_gc::MarkerGcResult;
 pub use instance::{InstanceAndActiveVmm, InstanceGestalt};
 pub use inventory::DataStoreInventoryTest;
 use nexus_db_model::AllSchemaVersions;
@@ -196,11 +199,13 @@ pub use sled::TransitionError;
 pub use support_bundle::FmSupportBundleCreateError;
 pub use support_bundle::SupportBundleCreateParams;
 pub use support_bundle::SupportBundleExpungementReport;
+pub use switch_port::SwitchConfigData;
 pub use switch_port::SwitchPortSettingsCombinedResult;
 pub use user_data_export::*;
 pub use virtual_provisioning_collection::StorageType;
 pub use vmm::VmmStateUpdateResult;
 pub use volume::*;
+pub use webhook_delivery::WebhookDeliveryFilters;
 
 // Number of unique datasets required to back a region.
 // TODO: This should likely turn into a configuration option.
@@ -703,6 +708,7 @@ mod test {
     use omicron_uuid_kinds::DatasetUuid;
     use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::PhysicalDiskUuid;
+    use omicron_uuid_kinds::RackUuid;
     use omicron_uuid_kinds::SiloUserUuid;
     use omicron_uuid_kinds::SledUuid;
     use omicron_uuid_kinds::VolumeUuid;
@@ -1964,7 +1970,7 @@ mod test {
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
-        let rack_id = Uuid::new_v4();
+        let rack_id = RackUuid::new_v4();
         let addr1 = "[fd00:1de::1]:12345".parse().unwrap();
         let sled1_id = "0de4b299-e0b4-46f0-d528-85de81a7095f".parse().unwrap();
 
@@ -2093,7 +2099,7 @@ mod test {
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
         // Create a Rack, insert it into the DB.
-        let rack = Rack::new(Uuid::new_v4());
+        let rack = Rack::new(RackUuid::new_v4());
         let result = datastore.rack_insert(&opctx, &rack).await.unwrap();
         assert_eq!(result.id(), rack.id());
         assert_eq!(result.initialized, false);

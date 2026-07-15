@@ -10610,6 +10610,53 @@
           "required": []
         }
       },
+      "put": {
+        "tags": [
+          "system/networking"
+        ],
+        "summary": "Update the mutable fields of an existing BGP configuration",
+        "description": "The asn field is not updatable; to change the autonomous system number, create a new BGP configuration object.",
+        "operationId": "networking_bgp_config_update",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "name_or_id",
+            "description": "A name or id to use when selecting BGP config.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BgpConfigUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BgpConfig"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
       "post": {
         "tags": [
           "system/networking"
@@ -17467,6 +17514,42 @@
         "required": [
           "items"
         ]
+      },
+      "BgpConfigUpdate": {
+        "description": "Parameters for updating a BGP configuration\n\nIf a value is not specified, it will remain unchanged.",
+        "type": "object",
+        "properties": {
+          "bgp_announce_set_id": {
+            "nullable": true,
+            "description": "Update the BGP announce set associated with this configuration.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/NameOrId"
+              }
+            ]
+          },
+          "description": {
+            "nullable": true,
+            "type": "string"
+          },
+          "max_paths": {
+            "nullable": true,
+            "description": "Update the maximum number of equal-cost paths.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/MaxPathConfig"
+              }
+            ]
+          },
+          "name": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
+          }
+        }
       },
       "BgpExported": {
         "description": "Route exported to a peer.",

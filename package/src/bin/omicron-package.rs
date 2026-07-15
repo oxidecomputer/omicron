@@ -24,7 +24,7 @@ use omicron_zone_package::package::{Package, PackageOutput, PackageSource};
 use omicron_zone_package::progress::Progress;
 use omicron_zone_package::target::TargetMap;
 use rayon::prelude::*;
-use ring::digest::{Context as DigestContext, Digest, SHA256};
+use sha2::{Digest, Sha256};
 use sled_hardware::cleanup::cleanup_networking_resources;
 use slog::Drain;
 use slog::Logger;
@@ -243,14 +243,14 @@ async fn replace_active_link(
 }
 
 // Calculates the SHA256 digest for a file.
-async fn get_sha256_digest(path: &Utf8PathBuf) -> Result<Digest> {
+async fn get_sha256_digest(path: &Utf8PathBuf) -> Result<[u8; 32]> {
     let mut reader = BufReader::new(
         tokio::fs::File::open(&path)
             .await
             .with_context(|| format!("could not open {path:?}"))?,
     );
-    let mut context = DigestContext::new(&SHA256);
-    let mut buffer = [0; 1024];
+    let mut hasher = Sha256::new();
+    let mut buffer = [0; 8192];
 
     loop {
         let count = reader
@@ -260,10 +260,10 @@ async fn get_sha256_digest(path: &Utf8PathBuf) -> Result<Digest> {
         if count == 0 {
             break;
         } else {
-            context.update(&buffer[..count]);
+            hasher.update(&buffer[..count]);
         }
     }
-    Ok(context.finish())
+    Ok(hasher.finalize().into())
 }
 
 async fn download_prebuilt(
@@ -305,12 +305,12 @@ async fn download_prebuilt(
         .await
         .with_context(|| format!("failed to create {path:?}"))?;
     let mut stream = response.bytes_stream();
-    let mut context = DigestContext::new(&SHA256);
+    let mut hasher = Sha256::new();
     while let Some(chunk) = stream.next().await {
         let chunk = chunk
             .with_context(|| format!("failed reading response from {url}"))?;
         // Update the running SHA digest
-        context.update(&chunk);
+        hasher.update(&chunk);
         // Update the downloaded file
         file.write_all(&chunk)
             .await
@@ -319,8 +319,8 @@ async fn download_prebuilt(
         progress.increment_completed(chunk.len().try_into().unwrap());
     }
 
-    let digest = context.finish();
-    if digest.as_ref() == expected_digest {
+    let digest: [u8; 32] = hasher.finalize().into();
+    if digest == **expected_digest {
         Ok(())
     } else {
         Err(anyhow!("Failed validating download of {url}").context(format!(
