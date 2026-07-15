@@ -10,6 +10,7 @@ mod tuf;
 mod tuf_v2;
 
 use std::collections::BTreeMap;
+use std::fmt::Write;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::LazyLock;
@@ -262,19 +263,8 @@ async fn main() -> Result<()> {
         .trim()
         .to_owned();
 
-    let mut version = BASE_VERSION.clone();
-    // Differentiate between CI and local builds. We use `0.word` as the
-    // prerelease field because it comes before `alpha`.
-    version.pre =
-        if std::env::var_os("CI").is_some() { "0.ci" } else { "0.local" }
-            .parse()?;
-    // Set the build metadata to the current commit hash.
-    let mut build = String::with_capacity(14);
-    build.push_str("git");
-    build.extend(commit.chars().take(11));
-    version.build = build.parse()?;
-    let version_str = version.to_string();
-    info!(logger, "version: {}", version_str);
+    let version = generate_version(&commit)?;
+    info!(logger, "version: {}", version);
 
     let xtask_config: Arc<XtaskConfig> = Arc::new(
         toml::from_str(
@@ -565,7 +555,7 @@ async fn main() -> Result<()> {
                             $target.artifacts_path(&args).as_str(),
                             "stamp",
                             package.as_str(),
-                            &version_str,
+                            &version.to_string(),
                         ])
                         .env_remove("CARGO_MANIFEST_DIR"),
                 );
@@ -1166,6 +1156,48 @@ async fn host_add_root_profile(host_proto_root: Utf8PathBuf) -> Result<()> {
         export PATH=$PATH:/opt/oxide/opte/bin:/opt/oxide/mg-ddm:/opt/oxide/oxlog\n",
     ).await?;
     Ok(())
+}
+
+fn generate_version(commit: &str) -> Result<Version> {
+    const PADDED_WIDTH: usize = 8;
+
+    let mut version = BASE_VERSION.clone();
+    // Differentiate between CI and local builds. We use `0.word` as the
+    // prerelease field because it comes before `alpha`.
+    version.pre =
+        if std::env::var_os("CI").is_some() { "0.ci" } else { "0.local" }
+            .parse()?;
+    // Set the build metadata to the current commit hash.
+    let mut build = String::with_capacity(14);
+    build.push_str("git");
+    build.extend(commit.chars().take(11));
+    version.build = build.parse()?;
+
+    // Verify that this version can fit in the database. Nexus converts SemVer
+    // to a zero-padded version in order to use lexicographic sorting in the
+    // database, and the database column is limited to 64 Unicode code points.
+    ensure!(
+        version.major.to_string().len() <= PADDED_WIDTH
+            && version.major.to_string().len() <= PADDED_WIDTH
+            && version.major.to_string().len() <= PADDED_WIDTH,
+        "major, minor, and patch versions may not be longer than {PADDED_WIDTH} digits"
+    );
+    let mut version_str = format!(
+        "{:0>0PADDED_WIDTH$}.{:0>0PADDED_WIDTH$}.{:0>0PADDED_WIDTH$}",
+        version.major, version.minor, version.patch,
+    );
+    if !version.pre.is_empty() {
+        write!(version_str, "-{}", version.pre).unwrap();
+    }
+    if !version.build.is_empty() {
+        write!(version_str, "+{}", version.build).unwrap();
+    }
+    // Avoid bothering with "what does Cockroach mean by Unicode code points"
+    // and just assume the version is entirely ASCII.
+    ensure!(version_str.is_ascii(), "{version_str} is not ASCII");
+    ensure!(version_str.len() <= 64, "{version_str} is longer than 64 bytes");
+
+    Ok(version)
 }
 
 /// Check that the local console assets match the pinned console version and
