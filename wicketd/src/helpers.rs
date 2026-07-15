@@ -26,7 +26,7 @@ impl<'a> From<&'a SpIdentifier> for SpIdentifierDisplay {
 
 impl fmt::Display for SpIdentifierDisplay {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self.0.type_ {
+        match self.0.typ {
             SpType::Sled => write!(f, "sled {}", self.0.slot),
             SpType::Switch => write!(f, "switch {}", self.0.slot),
             SpType::Power => write!(f, "PSC {}", self.0.slot),
