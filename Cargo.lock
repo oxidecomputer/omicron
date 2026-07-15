@@ -1993,7 +1993,7 @@ dependencies = [
  "omicron-workspace-hack",
  "serde_json",
  "sha2 0.10.9",
- "tufaceous-artifact 0.1.0",
+ "tufaceous-artifact 0.2.0",
  "uuid",
 ]
 
@@ -8822,7 +8822,6 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "toml 0.8.23",
- "tufaceous-artifact 0.1.0",
  "tufaceous-artifact 0.2.0",
  "uuid",
 ]

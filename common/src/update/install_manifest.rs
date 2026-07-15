@@ -8,7 +8,7 @@ use iddqd::{IdOrdItem, IdOrdMap, id_upcast};
 use omicron_uuid_kinds::MupdateUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use tufaceous_artifact::ArtifactHash;
+use tufaceous_artifact_v2::ArtifactHash;
 
 /// Describes a set of files written out into an install dataset.
 /// This is currently used for zones and reference measurements
@@ -82,23 +82,8 @@ pub struct OmicronInstallMetadata {
     pub file_size: u64,
 
     /// The hash of the file.
+    #[schemars(schema_with = "ArtifactHash::v1_json_schema")]
     pub hash: ArtifactHash,
-}
-
-impl OmicronInstallMetadata {
-    // TODO(iliana): remove when cleaning up Tufaceous v1
-    pub fn new_v2(
-        file_name: String,
-        file_size: u64,
-        hash: tufaceous_artifact_v2::ArtifactHash,
-    ) -> Self {
-        Self { file_name, file_size, hash: ArtifactHash(hash.0) }
-    }
-
-    // TODO(iliana): remove when cleaning up Tufaceous v1
-    pub fn hash_v2(&self) -> tufaceous_artifact_v2::ArtifactHash {
-        tufaceous_artifact_v2::ArtifactHash(self.hash.0)
-    }
 }
 
 impl IdOrdItem for OmicronInstallMetadata {

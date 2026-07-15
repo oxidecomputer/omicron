@@ -7,11 +7,12 @@
 use camino::Utf8PathBuf;
 use display_error_chain::DisplayErrorChain;
 use dropshot::HttpError;
-use omicron_common::update::ArtifactId;
 use thiserror::Error;
 use tufaceous_artifact::{
     ArtifactHashId, ArtifactKind, ArtifactVersion, KnownArtifactKind,
 };
+
+use crate::tuf_repo::ArtifactId;
 
 #[derive(Debug, Error)]
 pub enum RepositoryError {

@@ -204,14 +204,13 @@ impl WriteInstallDatasetContext {
                 .zones
                 .iter()
                 .filter_map(|zone| {
-                    zone.include_in_json.then(|| {
-                        OmicronInstallMetadata::new_v2(
-                            zone.zone_kind
-                                .artifact_in_install_dataset()
-                                .to_owned(),
-                            zone.json_size,
-                            zone.json_hash,
-                        )
+                    zone.include_in_json.then(|| OmicronInstallMetadata {
+                        file_name: zone
+                            .zone_kind
+                            .artifact_in_install_dataset()
+                            .to_owned(),
+                        file_size: zone.json_size,
+                        hash: zone.json_hash,
                     })
                 })
                 .collect(),

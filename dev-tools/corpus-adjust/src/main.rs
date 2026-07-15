@@ -9,7 +9,7 @@ use iddqd::IdOrdMap;
 use omicron_common::update::{OmicronInstallManifest, OmicronInstallMetadata};
 use sha2::{Digest, Sha256};
 use std::fs::File;
-use tufaceous_artifact::ArtifactHash;
+use tufaceous_artifact_v2::ArtifactHash;
 use uuid::Uuid;
 
 /// Return a UUID if the `DirEntry` contains a directory that parses into a UUID.

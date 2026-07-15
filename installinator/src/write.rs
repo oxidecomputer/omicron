@@ -990,11 +990,11 @@ async fn compute_measurement_hashes(
                 hasher.update(&d);
             }
             let hash = hasher.finalize();
-            OmicronInstallMetadata::new_v2(
+            OmicronInstallMetadata {
                 file_name,
-                u64::try_from(data.num_bytes()).unwrap(),
-                ArtifactHash(hash.into()),
-            )
+                file_size: u64::try_from(data.num_bytes()).unwrap(),
+                hash: ArtifactHash(hash.into()),
+            }
         });
     }
 
@@ -1033,11 +1033,11 @@ async fn compute_zone_hashes(
                 hasher.update(&buf);
             }
             let hash = hasher.finalize();
-            OmicronInstallMetadata::new_v2(
+            OmicronInstallMetadata {
                 file_name,
-                u64::try_from(len).unwrap(),
-                ArtifactHash(hash.into()),
-            )
+                file_size: u64::try_from(len).unwrap(),
+                hash: ArtifactHash(hash.into()),
+            }
         });
     }
 
