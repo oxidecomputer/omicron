@@ -232,6 +232,21 @@ impl Saga {
     }
 }
 
+/// The subset of a `saga` row needed to identify and classify a saga,
+/// omitting the DAG (by far the widest column in the table).
+///
+/// Used by queries that inspect saga state in bulk, like fault-management
+/// analysis, where fetching the DAG for every row would be wasteful.
+#[derive(Queryable, Selectable, Clone, Debug, PartialEq)]
+#[diesel(table_name = saga)]
+pub struct SagaSummary {
+    pub id: SagaId,
+    pub name: String,
+    pub time_created: chrono::DateTime<chrono::Utc>,
+    pub saga_state: SagaState,
+    pub current_sec: Option<SecId>,
+}
+
 /// Represents a row in the "SagaNodeEvent" table
 #[derive(Queryable, Insertable, Clone, Debug, Selectable, PartialEq)]
 #[diesel(table_name = saga_node_event)]

@@ -193,10 +193,14 @@ impl DataStore {
 
     /// Returns all unfinished sagas: running, unwinding, or abandoned. Makes
     /// as many queries as needed (in batches) to get them all.
+    ///
+    /// Returns [`db::saga_types::SagaSummary`] rather than the full row: the
+    /// callers of this method classify sagas but never execute them, so the
+    /// DAG would be dead weight.
     pub async fn saga_list_unfinished_batched(
         &self,
         opctx: &OpContext,
-    ) -> Result<Vec<db::saga_types::Saga>, Error> {
+    ) -> Result<Vec<db::saga_types::SagaSummary>, Error> {
         const UNFINISHED_STATES: &[SagaState] =
             &[SagaState::Running, SagaState::Unwinding, SagaState::Abandoned];
         let mut sagas = vec![];
@@ -211,7 +215,7 @@ impl DataStore {
             let mut batch =
                 paginated(dsl::saga, dsl::id, &p.current_pagparams())
                     .filter(dsl::saga_state.eq_any(UNFINISHED_STATES))
-                    .select(db::saga_types::Saga::as_select())
+                    .select(db::saga_types::SagaSummary::as_select())
                     .load_async(&*conn)
                     .await
                     .map_err(|e| {
@@ -489,24 +493,36 @@ mod test {
             .await
             .expect("Failed to list unfinished sagas");
 
-        // Every state but Done should be present in the result.
+        // Every state but Done should be present in the result, as
+        // `SagaSummary` projections of the inserted rows.
         inserted_sagas.retain(|s| s.saga_state != SagaState::Done);
         inserted_sagas.sort_by_key(|a| a.id);
+        let mut expected_sagas: Vec<db::saga_types::SagaSummary> =
+            inserted_sagas
+                .into_iter()
+                .map(|s| db::saga_types::SagaSummary {
+                    id: s.id,
+                    name: s.name,
+                    time_created: s.time_created,
+                    saga_state: s.saga_state,
+                    current_sec: s.current_sec,
+                })
+                .collect();
 
         // Timestamps can change slightly when we insert them.
         //
         // Sanitize them to make input/output equality checks easier.
-        let sanitize_timestamps = |sagas: &mut Vec<db::saga_types::Saga>| {
-            for saga in sagas {
-                saga.time_created = chrono::DateTime::UNIX_EPOCH;
-                saga.adopt_time = chrono::DateTime::UNIX_EPOCH;
-            }
-        };
+        let sanitize_timestamps =
+            |sagas: &mut Vec<db::saga_types::SagaSummary>| {
+                for saga in sagas {
+                    saga.time_created = chrono::DateTime::UNIX_EPOCH;
+                }
+            };
         sanitize_timestamps(&mut observed_sagas);
-        sanitize_timestamps(&mut inserted_sagas);
+        sanitize_timestamps(&mut expected_sagas);
 
         assert_eq!(
-            inserted_sagas, observed_sagas,
+            expected_sagas, observed_sagas,
             "Observed sagas did not match inserted unfinished sagas"
         );
 
