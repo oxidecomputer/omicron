@@ -56,7 +56,7 @@ impl From<BTreeSet<BootstrapSledDescription>> for SledInventory {
 }
 
 // Inventory about sleds derived from MGS inventory and DDM
-#[derive(Default, Clone)]
+#[derive(Default, Clone, PartialEq, Eq)]
 pub struct SledInventory {
     pub sleds: BTreeSet<BootstrapSledDescription>,
 }
