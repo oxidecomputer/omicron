@@ -46,7 +46,7 @@ pub fn analyze(builder: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
 
     let mut cases_by_id = IdOrdMap::new();
     let mut cases_by_psu = BTreeMap::new();
-    'cases: for case in parent_cases {
+    for case in parent_cases {
         // Reconstruct the case by looking at its ereports:
         // - the ereports should all be associated with a single PSC at this
         //   point.
@@ -60,12 +60,17 @@ pub fn analyze(builder: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
         // alerts requested.
         for case_ereport in case.ereports.iter() {
             let ereport = &case_ereport.ereport;
-            let ereport = match PsuEreport::parse(
+            match PsuEreport::parse(
                 input.ereporter_restarts(),
                 &ereport,
                 Provenance::Parent,
             ) {
-                Ok(ereport) => ereport,
+                Ok(ereport) => {
+                    psc_case.insert_ereport(ereport).expect(
+                        "ereport can't possibly be a duplicate because it came \
+                         from the case's existing ereport set",
+                    );
+                }
                 Err(e) => {
                     // This is weird: a case in the parent sitrep created by
                     // this DE contained an ereport that we couldn't understand.
@@ -81,28 +86,17 @@ pub fn analyze(builder: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
                         .expect("open case in parent sitrep should be present")
                         .log_warning("failed to parse ereport")
                         .comment(
-                            "I couldn't understand this case, as it contained \
-                             an ereport that I couldn't interpret.\n\
-                             I am doing nothing with this case for now.",
+                            "I couldn't fully understand this case, as it \n\
+                            contained an ereport that I couldn't interpret.\n\
+                            I am doing nothing with this ereport for now, and\n\
+                            hoping that I can figure out what's going on here\n\
+                            based on the other ereports in this case.",
                         )
                         .kv("ereport_id", format_args!("{}", ereport.id))
                         .kv("case_ereport_id", case_ereport.id)
                         .kv("error", error.to_string());
-                    // `psc_case` is a `RefMut` that mutably borrows this case's
-                    // entry in `cases_by_id`; as long as it exists, the whole
-                    // map is borrowed mutably. We must therefore drop the
-                    // `RefMut` to release the mut borrow of the map so that the
-                    // `cases_by_id.remove(...)` call on the subsequent line can
-                    // compile, as it must also mutably borrow the whole map.
-                    drop(psc_case);
-                    cases_by_id.remove(&case.id);
-                    continue 'cases;
                 }
-            };
-            psc_case.insert_ereport(ereport).expect(
-                "ereport can't possibly be a duplicate because it came \
-                 from the case's existing ereport set",
-            );
+            }
         }
 
         // Now, add the case to the index of cases by PSU.
@@ -114,6 +108,22 @@ pub fn analyze(builder: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
                 .entry(location)
                 .or_insert_with(BTreeSet::new)
                 .insert(case.id);
+        }
+        if psc_case.impacted_psus.is_empty() {
+            // Well, this is weird and unfortunate!
+            builder
+                .cases
+                .case_mut(&case.id)
+                .expect("open case in parent sitrep must be present")
+                .log_warning("no PSUs impacted by case")
+                .comment(
+                    "A case created by this DE previously seems to not impact\n\
+                    any PSUs based on my current understanding of the case's\n\
+                    ereports. This may be because no ereports could be\n\
+                    interpreted successfully.",
+                )
+                .kv("num_case_ereports", case.ereports.len())
+                .kv("num_ereports_parsed_ok", psc_case.total_ereports());
         }
     }
 
@@ -434,6 +444,10 @@ impl PscCase {
             })?;
         self.impacted_psus.insert(location);
         Ok(())
+    }
+
+    fn total_ereports(&self) -> usize {
+        self.restarts.iter().map(|r| r.ereports.len()).sum()
     }
 }
 
