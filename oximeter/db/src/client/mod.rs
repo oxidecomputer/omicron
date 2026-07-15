@@ -4,8 +4,6 @@
 
 //! Rust client to ClickHouse database
 
-// Copyright 2026 Oxide Computer Company
-
 pub(crate) mod dbwrite;
 #[cfg(any(feature = "oxql", test))]
 pub(crate) mod oxql;
@@ -1580,7 +1578,7 @@ impl Client {
     async fn read_timeseries_to_delete(
         replicated: bool,
         next_version: u64,
-        schema_dir: &Path,
+        schema_dir: impl AsRef<Path>,
     ) -> Result<Vec<TimeseriesName>, Error> {
         let version_schema_dir =
             Self::full_upgrade_path(replicated, next_version, schema_dir);
@@ -1771,6 +1769,7 @@ mod tests {
     use crate::query;
     use crate::query::field_table_name;
     use bytes::Bytes;
+    use camino_tempfile::Utf8TempDir;
     use chrono::Utc;
     use dropshot::test_util::LogContext;
     use futures::Future;
@@ -1791,7 +1790,6 @@ mod tests {
     use std::path::PathBuf;
     use std::pin::Pin;
     use std::time::Duration;
-    use tempfile::TempDir;
     use uuid::Uuid;
 
     /// Use client to initialize the database.
@@ -4035,10 +4033,8 @@ mod tests {
 
     fn verify_target(actual: &crate::Target, expected: &Service) {
         assert_eq!(actual.name, expected.name());
-        for (field_name, field_value) in expected
-            .field_names()
-            .into_iter()
-            .zip(expected.field_values().into_iter())
+        for (field_name, field_value) in
+            expected.field_names().into_iter().zip(expected.field_values())
         {
             let actual_field = actual
                 .fields
@@ -4054,10 +4050,8 @@ mod tests {
 
     fn verify_metric(actual: &crate::Metric, expected: &RequestLatency) {
         assert_eq!(actual.name, expected.name());
-        for (field_name, field_value) in expected
-            .field_names()
-            .into_iter()
-            .zip(expected.field_values().into_iter())
+        for (field_name, field_value) in
+            expected.field_names().into_iter().zip(expected.field_values())
         {
             let actual_field = actual
                 .fields
@@ -4074,15 +4068,15 @@ mod tests {
     async fn create_test_upgrade_schema_directory(
         replicated: bool,
         versions: &[u64],
-    ) -> (TempDir, Vec<PathBuf>) {
+    ) -> (Utf8TempDir, Vec<PathBuf>) {
         assert!(!versions.is_empty());
-        let schema_dir = TempDir::new().expect("failed to create tempdir");
+        let schema_dir = Utf8TempDir::new().expect("failed to create tempdir");
         let mut paths = Vec::with_capacity(versions.len());
         for version in versions.iter() {
             let version_dir = Client::full_upgrade_path(
                 replicated,
                 *version,
-                schema_dir.as_ref(),
+                schema_dir.path(),
             );
             fs::create_dir_all(&version_dir)
                 .await
@@ -4856,12 +4850,13 @@ mod tests {
 
     // Helper to write a test file containing timeseries to delete.
     async fn write_timeseries_to_delete_file(
-        schema_dir: &Path,
+        schema_dir: impl AsRef<Path>,
         replicated: bool,
         version: u64,
         names: &[TimeseriesName],
     ) {
         let subdir = schema_dir
+            .as_ref()
             .join(if replicated { "replicated" } else { "single-node" })
             .join(version.to_string());
         tokio::fs::create_dir_all(&subdir)
@@ -4882,8 +4877,7 @@ mod tests {
     async fn test_read_timeseries_to_delete() {
         let names: Vec<TimeseriesName> =
             vec!["a:b".parse().unwrap(), "c:d".parse().unwrap()];
-        let schema_dir =
-            tempfile::TempDir::new().expect("failed to make temp dir");
+        let schema_dir = Utf8TempDir::new().expect("failed to make temp dir");
         const VERSION: u64 = 7;
         write_timeseries_to_delete_file(
             schema_dir.path(),
@@ -4904,8 +4898,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_read_timeseries_to_delete_empty_file_is_ok() {
-        let schema_dir =
-            tempfile::TempDir::new().expect("failed to make temp dir");
+        let schema_dir = Utf8TempDir::new().expect("failed to make temp dir");
         const VERSION: u64 = 7;
         write_timeseries_to_delete_file(schema_dir.path(), false, VERSION, &[])
             .await;

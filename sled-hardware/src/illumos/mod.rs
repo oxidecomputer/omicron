@@ -3,6 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::DiskFirmware;
+use crate::ExternalDisks;
 use crate::HardwareView;
 use crate::TofinoSnapshot;
 use crate::TofinoView;
@@ -124,7 +125,10 @@ struct HardwareSnapshot {
 
 impl HardwareSnapshot {
     // Walk the device tree to capture a view of the current hardware.
-    fn new(log: &Logger) -> Result<Self, Error> {
+    fn new(
+        log: &Logger,
+        external_disks: &ExternalDisks,
+    ) -> Result<Self, Error> {
         let mut device_info =
             DevInfo::new_force_load().map_err(Error::DevInfo)?;
 
@@ -168,17 +172,27 @@ impl HardwareSnapshot {
 
         // Monitor for block devices.
         let mut disks = HashMap::new();
-        let mut node_walker = device_info.walk_driver("blkdev");
-        while let Some(node) =
-            node_walker.next().transpose().map_err(Error::DevInfo)?
-        {
-            poll_blkdev_node(
-                &log,
-                sled_type,
-                &mut disks,
-                node,
-                boot_storage_unit,
-            )?;
+        match external_disks {
+            ExternalDisks::DetectPhysical => {
+                let mut node_walker = device_info.walk_driver("blkdev");
+                while let Some(node) =
+                    node_walker.next().transpose().map_err(Error::DevInfo)?
+                {
+                    poll_blkdev_node(
+                        &log,
+                        sled_type,
+                        &mut disks,
+                        node,
+                        boot_storage_unit,
+                    )?;
+                }
+            }
+            ExternalDisks::HardcodedPhysical { disks: hardcoded_disks } => {
+                for disk in hardcoded_disks {
+                    disks.insert(disk.identity().clone(), disk.clone());
+                }
+            }
+            ExternalDisks::Virtual { .. } => {}
         }
 
         Ok(Self { tofino, disks, baseboard })
@@ -504,10 +518,10 @@ fn poll_blkdev_node(
 fn poll_device_tree(
     log: &Logger,
     hardware_view_tx: &watch::Sender<HardwareView>,
-    nonsled_observed_disks: &[UnparsedDisk],
+    external_disks: &ExternalDisks,
 ) -> Result<(), Error> {
     // Construct a view of hardware by walking the device tree.
-    let polled_hw = match HardwareSnapshot::new(log) {
+    let polled_hw = match HardwareSnapshot::new(log, external_disks) {
         Ok(polled_hw) => polled_hw,
 
         Err(e) => {
@@ -529,16 +543,19 @@ fn poll_device_tree(
 
                     // For platforms that don't support the HardwareSnapshot
                     // functionality, sled-agent can be supplied a fixed list of
-                    // UnparsedDisks. Add those to the HardwareSnapshot here if they
-                    // are missing (which they will be for non-sleds).
-                    for observed_disk in nonsled_observed_disks {
-                        let identity = observed_disk.identity();
-                        if !inner.disks.contains_key(identity) {
-                            inner.disks.insert(
-                                identity.clone(),
-                                observed_disk.clone(),
-                            );
-                            did_modify = true;
+                    // UnparsedDisks. Add those to the HardwareSnapshot here if
+                    // they are missing (which they will be for non-sleds).
+                    if let ExternalDisks::HardcodedPhysical { disks } =
+                        external_disks
+                    {
+                        for disk in disks {
+                            let identity = disk.identity();
+                            if !inner.disks.contains_key(identity) {
+                                inner
+                                    .disks
+                                    .insert(identity.clone(), disk.clone());
+                                did_modify = true;
+                            }
                         }
                     }
 
@@ -747,11 +764,10 @@ fn parse_smbios_output(log: &Logger, output: String) -> Option<Baseboard> {
 fn hardware_tracking_task(
     log: Logger,
     hardware_view_tx: watch::Sender<HardwareView>,
-    nonsled_observed_disks: Vec<UnparsedDisk>,
+    external_disks: ExternalDisks,
 ) {
     loop {
-        match poll_device_tree(&log, &hardware_view_tx, &nonsled_observed_disks)
-        {
+        match poll_device_tree(&log, &hardware_view_tx, &external_disks) {
             // We've already warned about `NotAnOxideSled` by this point,
             // so let's not spam the logs.
             Ok(_) | Err(Error::NotAnOxideSled(_)) => (),
@@ -785,7 +801,7 @@ impl HardwareManager {
     pub fn new(
         log: &Logger,
         sled_mode: SledMode,
-        nonsled_observed_disks: Vec<UnparsedDisk>,
+        external_disks: ExternalDisks,
     ) -> Result<Self, String> {
         let log = log.new(o!("component" => "HardwareManager"));
         info!(log, "Creating HardwareManager");
@@ -837,8 +853,7 @@ impl HardwareManager {
         // This mitigates issues where the Sled Agent could try to propagate
         // an "empty" view of hardware to other consumers before the first
         // query.
-        match poll_device_tree(&log, &hardware_view_tx, &nonsled_observed_disks)
-        {
+        match poll_device_tree(&log, &hardware_view_tx, &external_disks) {
             Ok(_) => (),
             // Allow non-sled devices to proceed with a "null" view of
             // hardware, otherwise they won't be able to start.
@@ -865,11 +880,7 @@ impl HardwareManager {
         });
 
         std::thread::spawn(move || {
-            hardware_tracking_task(
-                log,
-                hardware_view_tx,
-                nonsled_observed_disks,
-            );
+            hardware_tracking_task(log, hardware_view_tx, external_disks);
         });
 
         Ok(Self { hardware_view_rx })

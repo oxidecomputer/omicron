@@ -2,12 +2,11 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-// Copyright 2023 Oxide Computer Company
-
 use std::time::Duration;
 
 pub mod example;
 pub mod inventory;
+pub mod multirack_setup;
 pub mod preflight_check;
 pub mod rack_setup;
 pub mod rack_update;

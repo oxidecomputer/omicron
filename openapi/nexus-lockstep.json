@@ -8401,10 +8401,11 @@
           },
           "ports": {
             "description": "Uplinks for connecting the rack to external networks",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/PortConfig"
-            }
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/UplinkPorts"
+              }
+            ]
           },
           "rack_subnet": {
             "$ref": "#/components/schemas/Ipv6Net"
@@ -8430,6 +8431,9 @@
       "ReconfiguratorConfig": {
         "type": "object",
         "properties": {
+          "disruption_policy": {
+            "$ref": "#/components/schemas/ReconfiguratorDisruptionPolicy"
+          },
           "planner_config": {
             "default": {},
             "allOf": [
@@ -8446,6 +8450,7 @@
           }
         },
         "required": [
+          "disruption_policy",
           "planner_enabled",
           "tuf_repo_pruner_enabled"
         ]
@@ -8487,6 +8492,32 @@
           "config",
           "time_modified",
           "version"
+        ]
+      },
+      "ReconfiguratorDisruptionPolicy": {
+        "description": "Controls how instances are disrupted during updates.",
+        "oneOf": [
+          {
+            "description": "Terminate instances during updates -- do not attempt to migrate instances. This is currently the default.",
+            "type": "string",
+            "enum": [
+              "terminate"
+            ]
+          },
+          {
+            "description": "Attempt to live-migrate instances, and terminate instances if migration is not possible.",
+            "type": "string",
+            "enum": [
+              "migrate_or_terminate"
+            ]
+          },
+          {
+            "description": "Live-migrate any potentially migratable instances, and block reconfigurator progress if migration is not currently possible for operational reasons.\n\nThis will still cause instances to be terminated if it is impossible for them to be live-migrated, such as if they use local storage.",
+            "type": "string",
+            "enum": [
+              "migrate_only"
+            ]
+          }
         ]
       },
       "RecoverySiloConfig": {
@@ -9771,6 +9802,13 @@
         "required": [
           "address"
         ]
+      },
+      "UplinkPorts": {
+        "type": "array",
+        "items": {
+          "$ref": "#/components/schemas/PortConfig"
+        },
+        "minItems": 1
       },
       "UserId": {
         "title": "A username for a local-only user",

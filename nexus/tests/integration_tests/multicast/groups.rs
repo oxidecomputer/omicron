@@ -2,7 +2,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 //
-// Copyright 2025 Oxide Computer Company
 
 //! Integration tests for multicast group APIs and IP pool operations.
 //!
@@ -40,15 +39,14 @@ use nexus_test_utils::resource_helpers::{
     object_get, object_get_error, object_put_error,
 };
 use nexus_test_utils_macros::nexus_test;
+use nexus_types::external_api::instance::InstanceState;
 use nexus_types::external_api::ip_pool::{
     IpPool, IpPoolCreate, IpPoolRange, IpRange, IpVersion, Ipv4Range, Ipv6Range,
 };
 use nexus_types::external_api::multicast::{
     InstanceMulticastGroupJoin, MulticastGroup, MulticastGroupMember,
 };
-use omicron_common::api::external::{
-    IdentityMetadataCreateParams, InstanceState,
-};
+use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_uuid_kinds::InstanceUuid;
 
 use super::*;

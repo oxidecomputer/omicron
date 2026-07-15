@@ -125,6 +125,8 @@ use uuid::Uuid;
 
 mod external_networking;
 
+pub use external_networking::ExternalServiceNetworkingConfig;
+
 impl DataStore {
     /// List blueprints
     pub async fn blueprints_list(
@@ -4647,7 +4649,7 @@ mod tests {
                 if target_check_done.load(Ordering::SeqCst) {
                     Ok(())
                 } else {
-                    Err(CondCheckError::<()>::NotYet)
+                    Err(CondCheckError::<()>::NotYet { status: None })
                 }
             },
             &Duration::from_millis(50),

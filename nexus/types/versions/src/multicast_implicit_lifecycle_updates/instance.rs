@@ -10,12 +10,13 @@
 //! `InstanceDiskAttachment` are defined here.
 
 use omicron_common::api::external::{
-    ByteCount, Hostname, IdentityMetadataCreateParams,
-    InstanceAutoRestartPolicy, InstanceCpuCount, NameOrId, Nullable,
+    ByteCount, Hostname, IdentityMetadataCreateParams, NameOrId, Nullable,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+use crate::v2025_11_20_00::instance::InstanceAutoRestartPolicy;
+use crate::v2025_11_20_00::instance::InstanceCpuCount;
 use crate::v2025_11_20_00::instance::InstanceCpuPlatform;
 use crate::v2025_11_20_00::instance::InstanceDiskAttach;
 use crate::v2025_11_20_00::instance::{UserData, bool_true};

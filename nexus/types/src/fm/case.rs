@@ -2,14 +2,17 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use super::json_display::fmt_json_value;
 use crate::alert::AlertClass;
 use crate::fm::DiagnosisEngineKind;
 use crate::fm::Ereport;
 use crate::fm::EreportId;
+use crate::fm::FactPayload;
 use crate::support_bundle::BundleDataSelection;
 use iddqd::{IdOrdItem, IdOrdMap};
 use omicron_uuid_kinds::{
-    AlertUuid, CaseEreportUuid, CaseUuid, SitrepUuid, SupportBundleUuid,
+    AlertUuid, CaseEreportUuid, CaseUuid, FactUuid, SitrepUuid,
+    SupportBundleUuid,
 };
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -24,6 +27,9 @@ pub struct Case {
     pub ereports: IdOrdMap<CaseEreport>,
     pub alerts_requested: IdOrdMap<AlertRequest>,
     pub support_bundles_requested: IdOrdMap<SupportBundleRequest>,
+    /// Diagnosis-engine-derived facts attached to this case. See
+    /// [`Fact`] for semantics.
+    pub facts: IdOrdMap<Fact>,
 }
 
 impl Case {
@@ -109,8 +115,8 @@ impl Metadata {
                 const CLOSED_IN: &str = "closed in sitrep:";
                 const WIDTH: usize = const_max_len(&[DE, OPENED_IN, CLOSED_IN]);
 
-                if !comment.is_empty() {
-                    writeln!(f, "{:>indent$}// {comment}", "")?;
+                for line in comment.lines() {
+                    writeln!(f, "{:>indent$}// {line}", "")?;
                 }
                 writeln!(f, "{:>indent$}{DE:<WIDTH$} {de}", "")?;
                 writeln!(
@@ -155,7 +161,95 @@ impl IdOrdItem for CaseEreport {
 
 impl CaseEreport {
     pub fn ereport_id(&self) -> &EreportId {
-        self.ereport.id()
+        &self.ereport.id
+    }
+}
+
+/// A diagnosis-engine-derived fact attached to a [`Case`].
+///
+/// Facts are **immutable**: to "update" a fact, the diagnosis engine
+/// removes the old one and adds a fresh one. As long as a fact's content
+/// matches the engine's current view, the same fact is carried forward
+/// across sitreps unchanged.
+///
+/// The `payload` is a fully-typed [`FactPayload`] whose variant is owned by
+/// the case's diagnosis engine (see [`Metadata::de`]).
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
+pub struct Fact {
+    #[serde(flatten)]
+    pub metadata: FactMetadata,
+    pub payload: FactPayload,
+}
+
+/// The diagnosis-engine-agnostic part of a [`Fact`]: everything that is not
+/// the typed [`payload`](Fact::payload). Every diagnosis engine's facts share
+/// these fields.
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
+pub struct FactMetadata {
+    pub id: FactUuid,
+    /// The sitrep in which this fact was first added. Preserved
+    /// unchanged when the fact is carried forward into a child sitrep.
+    /// Debug-only.
+    pub created_sitrep_id: SitrepUuid,
+    pub comment: String,
+}
+
+impl IdOrdItem for Fact {
+    type Key<'a> = &'a FactUuid;
+    fn key(&self) -> Self::Key<'_> {
+        &self.metadata.id
+    }
+    iddqd::id_upcast!();
+}
+
+impl Fact {
+    pub fn display_multiline(
+        &self,
+        indent: usize,
+        sitrep_id: Option<SitrepUuid>,
+    ) -> impl fmt::Display + '_ {
+        struct DisplayFact<'a> {
+            fact: &'a Fact,
+            indent: usize,
+            sitrep_id: Option<SitrepUuid>,
+        }
+
+        impl fmt::Display for DisplayFact<'_> {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                const BULLET: &str = "* ";
+
+                let &Self {
+                    fact:
+                        Fact {
+                            metadata:
+                                FactMetadata { id, created_sitrep_id, comment },
+                            payload,
+                        },
+                    indent,
+                    sitrep_id,
+                } = self;
+                let this_sitrep = |s| {
+                    if Some(s) == sitrep_id { " <-- this sitrep" } else { "" }
+                };
+
+                writeln!(f, "{BULLET:>indent$}fact {id}")?;
+                for line in comment.lines() {
+                    writeln!(f, "{:>indent$}// {line}", "")?;
+                }
+                writeln!(
+                    f,
+                    "{:>indent$}added in: {created_sitrep_id}{}",
+                    "",
+                    this_sitrep(*created_sitrep_id),
+                )?;
+                let payload = serde_json::to_value(payload)
+                    .unwrap_or(serde_json::Value::Null);
+                fmt_json_value(f, "payload", &payload, indent)?;
+                writeln!(f)
+            }
+        }
+
+        DisplayFact { fact: self, indent, sitrep_id }
     }
 }
 
@@ -218,6 +312,7 @@ impl fmt::Display for DisplayCase<'_> {
                     ereports,
                     alerts_requested,
                     support_bundles_requested,
+                    facts,
                 },
             indent,
             sitrep_id,
@@ -251,20 +346,21 @@ impl fmt::Display for DisplayCase<'_> {
                 const REPORTED_BY: &str = "reported by:";
                 const ADDED_IN: &str = "added in:";
                 const ASSIGNMENT_ID: &str = "assignment ID:";
-                const COMMENT: &str = "comment:";
 
                 const WIDTH: usize = const_max_len(&[
                     CLASS,
                     REPORTED_BY,
                     ADDED_IN,
                     ASSIGNMENT_ID,
-                    COMMENT,
                 ]);
 
                 let pn = ereport.part_number.as_deref().unwrap_or("<UNKNOWN>");
                 let sn =
                     ereport.serial_number.as_deref().unwrap_or("<UNKNOWN>");
-                writeln!(f, "{BULLET:>indent$}ereport {}", ereport.id())?;
+                writeln!(f, "{BULLET:>indent$}ereport {}", ereport.id)?;
+                for line in comment.lines() {
+                    writeln!(f, "{:>indent$}// {line}", "")?;
+                }
                 writeln!(
                     f,
                     "{:>indent$}{CLASS:<WIDTH$} {}",
@@ -283,7 +379,17 @@ impl fmt::Display for DisplayCase<'_> {
                     this_sitrep(*assigned_sitrep_id)
                 )?;
                 writeln!(f, "{:>indent$}{ASSIGNMENT_ID:<WIDTH$} {id}", "")?;
-                writeln!(f, "{:>indent$}{COMMENT:<WIDTH$} {comment}\n", "",)?;
+                writeln!(f)?;
+            }
+        }
+
+        if !facts.is_empty() {
+            writeln!(f, "\n{:>indent$}facts:", "")?;
+            writeln!(f, "{:>indent$}------", "")?;
+
+            let indent = indent + 2;
+            for fact in facts.iter() {
+                fact.display_multiline(indent, sitrep_id).fmt(f)?;
             }
         }
 
@@ -303,12 +409,13 @@ impl fmt::Display for DisplayCase<'_> {
             {
                 const CLASS: &str = "class:";
                 const REQUESTED_IN: &str = "requested in:";
-                const COMMENT: &str = "comment:";
 
-                const WIDTH: usize =
-                    const_max_len(&[CLASS, REQUESTED_IN, COMMENT]);
+                const WIDTH: usize = const_max_len(&[CLASS, REQUESTED_IN]);
 
                 writeln!(f, "{BULLET:>indent$}alert {id}",)?;
+                for line in comment.lines() {
+                    writeln!(f, "{:>indent$}// {line}", "")?;
+                }
                 writeln!(
                     f,
                     "{:>indent$}{CLASS:<WIDTH$} {class}, v{version}",
@@ -320,7 +427,7 @@ impl fmt::Display for DisplayCase<'_> {
                     "",
                     this_sitrep(*requested_sitrep_id)
                 )?;
-                writeln!(f, "{:>indent$}{COMMENT:<WIDTH$} {comment}\n", "")?;
+                writeln!(f)?;
             }
         }
 
@@ -338,11 +445,13 @@ impl fmt::Display for DisplayCase<'_> {
             {
                 const REQUESTED_IN: &str = "requested in:";
                 const DATA: &str = "data:";
-                const COMMENT: &str = "comment:";
-                const WIDTH: usize =
-                    const_max_len(&[REQUESTED_IN, DATA, COMMENT]);
+                const WIDTH: usize = const_max_len(&[REQUESTED_IN, DATA]);
 
                 writeln!(f, "{BULLET:>indent$}bundle {id}",)?;
+
+                for line in comment.lines() {
+                    writeln!(f, "{:>indent$}// {line}", "")?;
+                }
                 writeln!(
                     f,
                     "{:>indent$}{REQUESTED_IN:<WIDTH$} {requested_sitrep_id}{}",
@@ -351,7 +460,7 @@ impl fmt::Display for DisplayCase<'_> {
                 )?;
                 writeln!(f, "{:>indent$}{DATA}", "")?;
                 writeln!(f, "{}", data_selection.display(indent + 2))?;
-                writeln!(f, "{:>indent$}{COMMENT:<WIDTH$} {comment}\n", "")?;
+                writeln!(f)?;
             }
         }
 
@@ -379,12 +488,14 @@ mod tests {
     use super::*;
     use crate::fm::DiagnosisEngineKind;
     use crate::fm::ereport::EreportFilters;
-    use crate::inventory::SpType;
+    use crate::fm::{DiskFact, ZpoolUnhealthyFactPayload};
+    use crate::inventory::{SpType, ZpoolHealth};
     use crate::support_bundle::BundleDataSelection;
     use ereport_types::{Ena, EreportId};
     use omicron_uuid_kinds::{
-        AlertUuid, CaseUuid, EreporterRestartUuid, OmicronZoneUuid, SitrepUuid,
-        SupportBundleUuid,
+        AlertUuid, CaseUuid, CollectionUuid, EreporterRestartUuid, FactUuid,
+        OmicronZoneUuid, PhysicalDiskUuid, SitrepUuid, SupportBundleUuid,
+        ZpoolUuid,
     };
     use std::str::FromStr;
     use std::sync::Arc;
@@ -430,10 +541,10 @@ mod tests {
             )
             .unwrap(),
             ereport: Arc::new(Ereport {
+                id: EreportId { restart_id, ena: Ena::from(2u64) },
+                time_collected,
+                collector_id,
                 data: crate::fm::ereport::EreportData {
-                    id: EreportId { restart_id, ena: Ena::from(2u64) },
-                    time_collected,
-                    collector_id,
                     serial_number: Some("BRM6900420".to_string()),
                     part_number: Some("913-0000037".to_string()),
                     class: Some("hw.pwr.remove.psu".to_string()),
@@ -456,10 +567,10 @@ mod tests {
             )
             .unwrap(),
             ereport: Arc::new(Ereport {
+                id: EreportId { restart_id, ena: Ena::from(3u64) },
+                time_collected,
+                collector_id,
                 data: crate::fm::ereport::EreportData {
-                    id: EreportId { restart_id, ena: Ena::from(3u64) },
-                    time_collected,
-                    collector_id,
                     serial_number: Some("BRM6900420".to_string()),
                     part_number: Some("913-0000037".to_string()),
                     class: Some("hw.pwr.insert.psu".to_string()),
@@ -522,6 +633,38 @@ mod tests {
             })
             .unwrap();
 
+        let mut facts = IdOrdMap::new();
+        facts
+            .insert_unique(Fact {
+                metadata: FactMetadata {
+                    id: FactUuid::from_str(
+                        "f00f00f0-0f00-4f00-8f00-f00f00f00f00",
+                    )
+                    .unwrap(),
+                    created_sitrep_id,
+                    comment: "made-up fact for display test".to_string(),
+                },
+                payload: FactPayload::PhysicalDisk(DiskFact::ZpoolUnhealthy(
+                    ZpoolUnhealthyFactPayload {
+                        physical_disk_id: PhysicalDiskUuid::from_str(
+                            "d15d15d1-5d15-4d15-8d15-d15d15d15d15",
+                        )
+                        .unwrap(),
+                        zpool_id: ZpoolUuid::from_str(
+                            "200100f0-0100-4f00-8f00-f00f00f00f00",
+                        )
+                        .unwrap(),
+                        last_seen_health: ZpoolHealth::Degraded,
+                        observed_in_inv: CollectionUuid::from_str(
+                            "c0110011-c011-4011-8011-c0110011c011",
+                        )
+                        .unwrap(),
+                        time_observed: chrono::DateTime::<chrono::Utc>::MIN_UTC,
+                    },
+                )),
+            })
+            .unwrap();
+
         // Create the case
         let case = Case {
             id: case_id,
@@ -535,6 +678,7 @@ mod tests {
             ereports,
             alerts_requested,
             support_bundles_requested,
+            facts,
         };
 
         eprintln!("example case display:");

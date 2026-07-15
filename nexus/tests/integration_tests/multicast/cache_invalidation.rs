@@ -13,7 +13,8 @@
 
 use http::{Method, StatusCode};
 
-use gateway_client::types::{PowerState, RotState, SpState};
+use gateway_types::component::{PowerState, SpState};
+use gateway_types::rot::RotState;
 use nexus_db_lookup::LookupPath;
 use nexus_db_queries::context::OpContext;
 use nexus_test_utils::resource_helpers::{
@@ -484,9 +485,9 @@ async fn test_cache_ttl_behavior() {
             .await
             {
                 Ok(()) => Ok(()),
-                Err(_) => {
+                Err(e) => {
                     // Not yet updated, reconciler needs another cycle
-                    Err(CondCheckError::<String>::NotYet)
+                    Err(CondCheckError::<String>::NotYet { status: Some(e) })
                 }
             }
         },

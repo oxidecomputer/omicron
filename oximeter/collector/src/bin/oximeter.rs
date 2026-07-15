@@ -4,8 +4,6 @@
 
 //! Main entry point to run an `oximeter` server in the control plane.
 
-// Copyright 2023 Oxide Computer Company
-
 use anyhow::{Context, anyhow};
 use clap::Parser;
 use omicron_common::cmd::CmdError;

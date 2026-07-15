@@ -53,7 +53,9 @@ use sled_agent_types::attached_subnet::{AttachedSubnet, AttachedSubnets};
 use sled_agent_types::dataset::LocalStorageDatasetEnsureRequest;
 use sled_agent_types::disk::DiskStateRequested;
 use sled_agent_types::early_networking::EarlyNetworkConfigEnvelope;
+use sled_agent_types::early_networking::PortConfig;
 use sled_agent_types::early_networking::RackNetworkConfig;
+use sled_agent_types::early_networking::UplinkPorts;
 use sled_agent_types::instance::{
     InstanceEnsureBody, InstanceExternalIpBody, InstanceMulticastMembership,
     MigrationRuntimeState, MigrationState, SledVmmState, VmmPutStateResponse,
@@ -154,7 +156,13 @@ impl SledAgent {
                         .unwrap(),
                     infra_ip_first: IpAddr::V4(Ipv4Addr::UNSPECIFIED),
                     infra_ip_last: IpAddr::V4(Ipv4Addr::UNSPECIFIED),
-                    ports: Vec::new(),
+                    // The simulated sled-agent doesn't do real uplink setup,
+                    // but `UplinkPorts` must be non-empty, so use a single
+                    // placeholder port.
+                    ports: UplinkPorts::new(vec![PortConfig::empty_for_tests(
+                        "qsfp0",
+                    )])
+                    .expect("placeholder port list is non-empty"),
                     bgp: Vec::new(),
                     bfd: Vec::new(),
                 },

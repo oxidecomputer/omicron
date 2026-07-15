@@ -4,8 +4,6 @@
 
 //! A single OxQL query.
 
-// Copyright 2024 Oxide Computer Company
-
 use std::collections::BTreeSet;
 
 use super::ast::SplitQuery;

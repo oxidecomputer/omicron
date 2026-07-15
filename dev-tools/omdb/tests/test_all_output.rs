@@ -11,6 +11,7 @@ use dropshot::Method;
 use expectorate::assert_contents;
 use gateway_client::ClientInfo as _;
 use http::StatusCode;
+use nexus_test_utils::background::activate_background_task;
 use nexus_test_utils::wait_for_producer;
 use nexus_test_utils::{OXIMETER_UUID, PRODUCER_UUID};
 use nexus_test_utils_macros::nexus_test;
@@ -78,6 +79,14 @@ async fn test_omdb_usage_errors() {
         // Command help output
         &["db"],
         &["db", "--help"],
+        &["db", "alert"],
+        &["db", "alert", "list", "--help"],
+        // Nonexistent alert class
+        &["db", "alert", "list", "--classes", "test.foo.bar", "test.foo.box"],
+        &["db", "alert", "webhook", "delivery", "list", "--help"],
+        // Nonexistent webhook delivery state and trigger
+        &["db", "alert", "webhook", "delivery", "list", "--state", "bogus"],
+        &["db", "alert", "webhook", "delivery", "list", "--trigger", "bogus"],
         &["db", "disks"],
         &["db", "dns"],
         &["db", "dns", "diff"],
@@ -94,6 +103,12 @@ async fn test_omdb_usage_errors() {
         &["db", "ereport", "info", "--help"],
         &["db", "sleds", "--help"],
         &["db", "sitrep", "--help"],
+        &["db", "sitrep", "show", "--help"],
+        &["db", "sitrep", "analysis-report", "--help"],
+        // Invalid sitrep selectors: not a UUID, a version number, or "current"
+        &["db", "sitrep", "show", "not-a-sitrep"],
+        // Invalid sitrep selector: begins with 'v' but is not an integer.
+        &["db", "sitrep", "show", "v1.2.3"],
         &["db", "saga"],
         &["db", "snapshots"],
         &["db", "multicast"],
@@ -187,6 +202,27 @@ async fn test_omdb_success_cases() {
     cptestctx
         .wait_for_at_least_one_inventory_collection(Duration::from_secs(60))
         .await;
+
+    // Drive the FM task pipeline to its steady state, so that the omdb
+    // snapshot of each task's last completed activation is deterministic
+    // rather than racing the tasks' watch-channel triggers:
+    //
+    // 1. `fm_analysis` commits the first sitrep (unless its natural cadence
+    //    already has). This run reports "committed new sitrep".
+    // 2. `fm_sitrep_loader` loads that sitrep and publishes it on the sitrep
+    //    watch channel.
+    // 3. `fm_analysis` re-runs with the loaded sitrep as its parent and
+    //    reports "no changes" -- the steady-state output asserted below.
+    //    (No later activation ever commits another sitrep here: this
+    //    environment has no in-service control plane disks and no
+    //    consumable ereports, so every post-load analysis is a no-op.)
+    // 4. `fm_rendezvous` runs against the loaded sitrep, so its status shows
+    //    the executed operations rather than "no FM situation report loaded".
+    let lockstep_client = &cptestctx.lockstep_client;
+    activate_background_task(lockstep_client, "fm_analysis").await;
+    activate_background_task(lockstep_client, "fm_sitrep_loader").await;
+    activate_background_task(lockstep_client, "fm_analysis").await;
+    activate_background_task(lockstep_client, "fm_rendezvous").await;
 
     let mut output = String::new();
 
@@ -294,6 +330,14 @@ async fn test_omdb_success_cases() {
             "--planner-enabled",
             "true",
         ],
+        &[
+            "-w",
+            "nexus",
+            "reconfigurator-config",
+            "set",
+            "--disruption-policy",
+            "migrate-or-terminate",
+        ],
         &["nexus", "reconfigurator-config", "show", "current"],
         &["reconfigurator", "export", tmppath.as_str()],
         // We can't easily test the sled agent output because that's only
@@ -307,6 +351,18 @@ async fn test_omdb_success_cases() {
             "001de000-5110-4000-8000-000000000000",
             "001de000-05e4-4000-8000-000000004007",
         ],
+        // The alert list command should accept multiple case IDs and multiple
+        // alert classes. Note that this command shouldn't actually print any
+        // alerts, which is fine; this is a test for the argument parsing.
+        &[
+            "db",
+            "alert",
+            "list",
+            "--cases",
+            "001de000-05e4-4000-8000-000000004007",
+            "98b11fa2-3437-4704-83f5-e4aa5163e672",
+        ],
+        &["db", "alert", "list", "--classes", "test.foo.bar", "test.foo.baz"],
         // This operation will set the "db_metadata_nexus" state to quiesced.
         //
         // This would normally only be set by a Nexus as it shuts itself down;
@@ -353,6 +409,28 @@ async fn test_omdb_success_cases() {
         .field("list ok:", r"\d+")
         .field("triggered by", r"[\w ]+")
         .section(&["task: \"tuf_artifact_replication\"", "request ringbuf:"]);
+
+    // The `fm_analysis` task's input report includes a line comparing the
+    // current inventory collection against the parent sitrep's collection,
+    // which can be either "same" or "different" depending on whether a new
+    // inventory was collected between sitreps. Collapse both forms.
+    redactor.variable_regex(
+        "fm_input_inv_comparison",
+        r" --> (same collection as parent sitrep|different from parent sitrep \(collection [-a-f0-9]+\))",
+    );
+
+    // The `fm_sitrep_gc` task's orphan counts are racy. When two `fm_analysis`
+    // activations overlap (e.g. the boot-time activation and the explicit drive
+    // above), both can insert a first sitrep before either is made current; the
+    // loser's sitrep and its stashed analysis report are inserted but orphaned
+    // (see `DataStore::fm_sitrep_insert`'s `ParentNotCurrent` path), and a
+    // later GC pass deletes them. Whether that race happened before this
+    // snapshot is timing-dependent, so redact both counts. Other child tables
+    // stay zero: with no faults, orphaned sitreps carry no cases, facts,
+    // ereports, or bundles.
+    redactor
+        .field("orphaned sitreps deleted:", r"\d+")
+        .field("orphaned fm_sitrep_analysis_report rows deleted:", r"\d+");
 
     // The `sp_ereport_ingester` task's output depends on how many simulated
     // sled agents ahppen to register with Nexus before its first execution.

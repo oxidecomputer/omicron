@@ -2,6 +2,9 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+//! A mechanism for for discovering peer sleds on the bootstrap network via DDM
+//! and the bootstrap agent.
+
 use futures::stream::FuturesUnordered;
 use omicron_ddm_admin_client::Client as DdmAdminClient;
 use sled_hardware_types::Baseboard;
@@ -16,7 +19,7 @@ use std::time::Duration;
 use tokio::task::JoinHandle;
 use tokio_stream::StreamExt;
 
-pub(crate) struct BootstrapPeers {
+pub(crate) struct BootstrapPeersFromDdm {
     // We use a standard mutex here, not a tokio mutex, even though this is
     // shared with a tokio task. We only keep it locked long enough to insert a
     // new entry or clone it.
@@ -24,13 +27,13 @@ pub(crate) struct BootstrapPeers {
     inner_task: JoinHandle<()>,
 }
 
-impl Drop for BootstrapPeers {
+impl Drop for BootstrapPeersFromDdm {
     fn drop(&mut self) {
         self.inner_task.abort();
     }
 }
 
-impl BootstrapPeers {
+impl BootstrapPeersFromDdm {
     pub(crate) fn new(log: &Logger) -> Self {
         let log = log.new(slog::o!("component" => "BootstrapPeers"));
         let sleds = Arc::default();

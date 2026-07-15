@@ -19,11 +19,12 @@ use nexus_test_utils::resource_helpers::create_project;
 use nexus_test_utils::resource_helpers::objects_list_page_authz;
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::instance;
-use nexus_types::external_api::instance::PrivateIpStackCreate;
+use nexus_types::external_api::instance::{
+    InstanceCpuCount, PrivateIpStackCreate,
+};
 use nexus_types::external_api::vpc;
 use omicron_common::api::external::{
-    ByteCount, IdentityMetadataCreateParams, InstanceCpuCount,
-    InstanceNetworkInterface,
+    ByteCount, IdentityMetadataCreateParams, InstanceNetworkInterface,
 };
 use oxnet::Ipv4Net;
 use std::net::IpAddr;

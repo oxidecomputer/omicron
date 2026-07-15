@@ -66,6 +66,7 @@ use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use sled_hardware_types::BaseboardId;
 use slog::Logger;
+use slog_error_chain::InlineErrorChain;
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
 use std::collections::HashSet;
@@ -1321,6 +1322,12 @@ impl DataStore {
                             );
                         } else {
                             // The query failed, return this as an error
+                            error!(
+                                &log,
+                                "sled reservation insert query failed";
+                                "sled_target" => %sled_target,
+                                "error" => InlineErrorChain::new(&e),
+                            );
                             return Err(
                                 SledReservationTransactionError::Diesel(e),
                             );
@@ -1497,6 +1504,12 @@ impl DataStore {
                                 break 'local_storage_allocation_search;
                             } else {
                                 // The query failed, return this as an error
+                                error!(
+                                    &log,
+                                    "sled reservation insert query failed";
+                                    "sled_target" => %sled_target,
+                                    "error" => InlineErrorChain::new(&e),
+                                );
                                 return Err(
                                     SledReservationTransactionError::Diesel(e),
                                 );
@@ -2091,7 +2104,7 @@ pub(in crate::db::datastore) mod test {
     use nexus_db_model::PhysicalDiskState;
     use nexus_db_model::{Generation, SledCpuFamily};
     use nexus_db_model::{InstanceCpuPlatform, PhysicalDisk};
-    use nexus_types::external_api::{disk, instance};
+    use nexus_types::external_api::{affinity, disk, instance};
     use nexus_types::identity::Asset;
     use nexus_types::identity::Resource;
     use omicron_common::api::external;
@@ -2109,10 +2122,6 @@ pub(in crate::db::datastore) mod test {
     use std::collections::BTreeMap;
     use std::collections::HashMap;
     use std::net::SocketAddrV6;
-
-    fn rack_id() -> Uuid {
-        Uuid::parse_str(nexus_test_utils::RACK_UUID).unwrap()
-    }
 
     #[tokio::test]
     async fn upsert_sled_updates_hardware() {
@@ -2416,7 +2425,7 @@ pub(in crate::db::datastore) mod test {
     struct Group {
         affinity: Affinity,
         name: GroupName,
-        policy: external::AffinityPolicy,
+        policy: affinity::AffinityPolicy,
     }
 
     impl Group {
@@ -2713,7 +2722,7 @@ pub(in crate::db::datastore) mod test {
         let groups = [Group {
             affinity: Affinity::Negative,
             name: "anti-affinity",
-            policy: external::AffinityPolicy::Fail,
+            policy: affinity::AffinityPolicy::Fail,
         }];
         let all_groups =
             AllGroups::create(&opctx, &datastore, &authz_project, &groups)
@@ -2762,7 +2771,7 @@ pub(in crate::db::datastore) mod test {
         let groups = [Group {
             affinity: Affinity::Negative,
             name: "anti-affinity",
-            policy: external::AffinityPolicy::Fail,
+            policy: affinity::AffinityPolicy::Fail,
         }];
         let all_groups =
             AllGroups::create(&opctx, &datastore, &authz_project, &groups)
@@ -2808,7 +2817,7 @@ pub(in crate::db::datastore) mod test {
         let groups = [Group {
             affinity: Affinity::Negative,
             name: "anti-affinity",
-            policy: external::AffinityPolicy::Allow,
+            policy: affinity::AffinityPolicy::Allow,
         }];
         let all_groups =
             AllGroups::create(&opctx, &datastore, &authz_project, &groups)
@@ -2855,7 +2864,7 @@ pub(in crate::db::datastore) mod test {
         let groups = [Group {
             affinity: Affinity::Positive,
             name: "affinity",
-            policy: external::AffinityPolicy::Fail,
+            policy: affinity::AffinityPolicy::Fail,
         }];
         let all_groups =
             AllGroups::create(&opctx, &datastore, &authz_project, &groups)
@@ -2903,12 +2912,12 @@ pub(in crate::db::datastore) mod test {
             Group {
                 affinity: Affinity::Positive,
                 name: "affinity1",
-                policy: external::AffinityPolicy::Fail,
+                policy: affinity::AffinityPolicy::Fail,
             },
             Group {
                 affinity: Affinity::Positive,
                 name: "affinity2",
-                policy: external::AffinityPolicy::Fail,
+                policy: affinity::AffinityPolicy::Fail,
             },
         ];
         let all_groups =
@@ -2965,7 +2974,7 @@ pub(in crate::db::datastore) mod test {
         let groups = [Group {
             affinity: Affinity::Positive,
             name: "affinity",
-            policy: external::AffinityPolicy::Fail,
+            policy: affinity::AffinityPolicy::Fail,
         }];
         let all_groups =
             AllGroups::create(&opctx, &datastore, &authz_project, &groups)
@@ -3018,7 +3027,7 @@ pub(in crate::db::datastore) mod test {
         let groups = [Group {
             affinity: Affinity::Positive,
             name: "affinity",
-            policy: external::AffinityPolicy::Allow,
+            policy: affinity::AffinityPolicy::Allow,
         }];
         let all_groups =
             AllGroups::create(&opctx, &datastore, &authz_project, &groups)
@@ -3067,12 +3076,12 @@ pub(in crate::db::datastore) mod test {
             Group {
                 affinity: Affinity::Negative,
                 name: "anti-affinity",
-                policy: external::AffinityPolicy::Fail,
+                policy: affinity::AffinityPolicy::Fail,
             },
             Group {
                 affinity: Affinity::Positive,
                 name: "affinity",
-                policy: external::AffinityPolicy::Fail,
+                policy: affinity::AffinityPolicy::Fail,
             },
         ];
         let all_groups =
@@ -3126,12 +3135,12 @@ pub(in crate::db::datastore) mod test {
             Group {
                 affinity: Affinity::Negative,
                 name: "anti-affinity",
-                policy: external::AffinityPolicy::Allow,
+                policy: affinity::AffinityPolicy::Allow,
             },
             Group {
                 affinity: Affinity::Positive,
                 name: "affinity",
-                policy: external::AffinityPolicy::Allow,
+                policy: affinity::AffinityPolicy::Allow,
             },
         ];
         let all_groups =
@@ -3184,17 +3193,17 @@ pub(in crate::db::datastore) mod test {
             Group {
                 affinity: Affinity::Negative,
                 name: "strict-anti-affinity",
-                policy: external::AffinityPolicy::Fail,
+                policy: affinity::AffinityPolicy::Fail,
             },
             Group {
                 affinity: Affinity::Negative,
                 name: "anti-affinity",
-                policy: external::AffinityPolicy::Allow,
+                policy: affinity::AffinityPolicy::Allow,
             },
             Group {
                 affinity: Affinity::Positive,
                 name: "affinity",
-                policy: external::AffinityPolicy::Allow,
+                policy: affinity::AffinityPolicy::Allow,
             },
         ];
         let all_groups =
@@ -3252,12 +3261,12 @@ pub(in crate::db::datastore) mod test {
             Group {
                 affinity: Affinity::Positive,
                 name: "affinity",
-                policy: external::AffinityPolicy::Allow,
+                policy: affinity::AffinityPolicy::Allow,
             },
             Group {
                 affinity: Affinity::Negative,
                 name: "anti-affinity",
-                policy: external::AffinityPolicy::Allow,
+                policy: affinity::AffinityPolicy::Allow,
             },
         ];
         let all_groups =
@@ -3320,12 +3329,12 @@ pub(in crate::db::datastore) mod test {
             Group {
                 affinity: Affinity::Positive,
                 name: "affinity1",
-                policy: external::AffinityPolicy::Fail,
+                policy: affinity::AffinityPolicy::Fail,
             },
             Group {
                 affinity: Affinity::Positive,
                 name: "affinity2",
-                policy: external::AffinityPolicy::Fail,
+                policy: affinity::AffinityPolicy::Fail,
             },
         ];
         let all_groups =
@@ -3379,12 +3388,12 @@ pub(in crate::db::datastore) mod test {
             Group {
                 affinity: Affinity::Negative,
                 name: "anti-affinity1",
-                policy: external::AffinityPolicy::Fail,
+                policy: affinity::AffinityPolicy::Fail,
             },
             Group {
                 affinity: Affinity::Negative,
                 name: "anti-affinity2",
-                policy: external::AffinityPolicy::Fail,
+                policy: affinity::AffinityPolicy::Fail,
             },
         ];
         let all_groups =
@@ -3455,7 +3464,7 @@ pub(in crate::db::datastore) mod test {
         let groups = [Group {
             affinity: Affinity::Positive,
             name: "affinity",
-            policy: external::AffinityPolicy::Fail,
+            policy: affinity::AffinityPolicy::Fail,
         }];
         let all_groups =
             AllGroups::create(&opctx, &datastore, &authz_project, &groups)
@@ -3557,7 +3566,7 @@ pub(in crate::db::datastore) mod test {
         let groups = [Group {
             affinity: Affinity::Negative,
             name: "anti-affinity",
-            policy: external::AffinityPolicy::Fail,
+            policy: affinity::AffinityPolicy::Fail,
         }];
         let all_groups =
             AllGroups::create(&opctx, &datastore, &authz_project, &groups)
@@ -3721,7 +3730,7 @@ pub(in crate::db::datastore) mod test {
         for family in [SledCpuFamily::AmdMilan, SledCpuFamily::AmdTurin] {
             for _ in 0..2 {
                 let mut builder = SledUpdateBuilder::new();
-                builder.rack_id(rack_id());
+                builder.rack_id(nexus_test_utils::RACK_UUID);
                 builder.hardware().cpu_family(family);
                 let (sled, _) =
                     datastore.sled_upsert(builder.build()).await.unwrap();
@@ -4077,7 +4086,7 @@ pub(in crate::db::datastore) mod test {
     // ---
 
     pub(crate) fn test_new_sled_update() -> SledUpdate {
-        SledUpdateBuilder::new().rack_id(rack_id()).build()
+        SledUpdateBuilder::new().rack_id(nexus_test_utils::RACK_UUID).build()
     }
 
     /// Initial state for state transitions.
@@ -4177,15 +4186,15 @@ pub(in crate::db::datastore) mod test {
     struct LocalStorageAffinityGroup {
         id: AffinityGroupUuid,
         name: String,
-        policy: external::AffinityPolicy,
-        failure_domain: external::FailureDomain,
+        policy: affinity::AffinityPolicy,
+        failure_domain: affinity::FailureDomain,
     }
 
     struct LocalStorageAntiAffinityGroup {
         id: AntiAffinityGroupUuid,
         name: String,
-        policy: external::AffinityPolicy,
-        failure_domain: external::FailureDomain,
+        policy: affinity::AffinityPolicy,
+        failure_domain: affinity::FailureDomain,
     }
 
     struct LocalStorageTestInstance {
@@ -4225,7 +4234,7 @@ pub(in crate::db::datastore) mod test {
                     reservoir_size: (56 << 30).try_into().unwrap(),
                     cpu_family: SledCpuFamily::AmdMilan,
                 },
-                Uuid::new_v4(),
+                RackUuid::new_v4(),
                 Generation::new(),
             );
 
@@ -4613,7 +4622,7 @@ pub(in crate::db::datastore) mod test {
                             name: name.parse().unwrap(),
                             description: "It's an instance".into(),
                         },
-                        ncpus: external::InstanceCpuCount(ncpus),
+                        ncpus: instance::InstanceCpuCount(ncpus),
                         memory,
                         hostname: "myhostname".try_into().unwrap(),
                         user_data: Vec::new(),
@@ -6522,8 +6531,8 @@ pub(in crate::db::datastore) mod test {
             affinity_groups: vec![LocalStorageAffinityGroup {
                 id: AffinityGroupUuid::new_v4(),
                 name: String::from("group-0"),
-                policy: external::AffinityPolicy::Fail,
-                failure_domain: external::FailureDomain::Sled,
+                policy: affinity::AffinityPolicy::Fail,
+                failure_domain: affinity::FailureDomain::Sled,
             }],
             anti_affinity_groups: vec![],
             // Configure two instances with one local storage disk each, both in
@@ -6650,8 +6659,8 @@ pub(in crate::db::datastore) mod test {
             anti_affinity_groups: vec![LocalStorageAntiAffinityGroup {
                 id: AntiAffinityGroupUuid::new_v4(),
                 name: String::from("anti-group-0"),
-                policy: external::AffinityPolicy::Fail,
-                failure_domain: external::FailureDomain::Sled,
+                policy: affinity::AffinityPolicy::Fail,
+                failure_domain: affinity::FailureDomain::Sled,
             }],
             // Configure two instances with one local storage disk each, both in
             // the same anti-affinity group

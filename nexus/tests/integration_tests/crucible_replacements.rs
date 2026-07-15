@@ -149,7 +149,7 @@ pub(crate) async fn wait_for_all_replacements(
                         rs_left_to_do,
                     );
 
-                    return Err(CondCheckError::<()>::NotYet);
+                    return Err(CondCheckError::<()>::NotYet { status: None });
                 }
 
                 // Now that all resources have been moved, wait for the requests
@@ -195,7 +195,7 @@ pub(crate) async fn wait_for_all_replacements(
                         region_snapshot_replacement_left,
                     );
 
-                    return Err(CondCheckError::<()>::NotYet);
+                    return Err(CondCheckError::<()>::NotYet { status: None });
                 }
 
                 Ok(())
@@ -457,7 +457,9 @@ mod region_replacement {
                                 Ok(())
                             } else if state == expected_intermediate_state.0 {
                                 // The saga is still running
-                                Err(CondCheckError::<()>::NotYet)
+                                Err(CondCheckError::<()>::NotYet {
+                                    status: None,
+                                })
                             } else {
                                 // Any other state is not expected
                                 panic!("unexpected state {state:?}!");
@@ -471,7 +473,9 @@ mod region_replacement {
                             {
                                 // The saga is still running, or hasn't started
                                 // yet.
-                                Err(CondCheckError::<()>::NotYet)
+                                Err(CondCheckError::<()>::NotYet {
+                                    status: None,
+                                })
                             } else {
                                 // Any other state is not expected
                                 panic!("unexpected state {state:?}!");
@@ -589,14 +593,18 @@ mod region_replacement {
                                     // The replacement step is in progress, but
                                     // not done yet. We're still waiting, but
                                     // probably not for long.
-                                    Err(CondCheckError::<()>::NotYet)
+                                    Err(CondCheckError::<()>::NotYet {
+                                        status: None,
+                                    })
                                 }
                             }
 
                             None => {
                                 // The saga has not started, so we're not done
                                 // waiting.
-                                Err(CondCheckError::<()>::NotYet)
+                                Err(CondCheckError::<()>::NotYet {
+                                    status: None,
+                                })
                             }
                         }
                     }
@@ -921,7 +929,7 @@ async fn test_racing_replacements_for_soft_deleted_disk_volume(
                     Ok(())
                 } else {
                     // The saga is still running
-                    Err(CondCheckError::<()>::NotYet)
+                    Err(CondCheckError::<()>::NotYet { status: None })
                 }
             }
         },
@@ -971,7 +979,7 @@ async fn test_racing_replacements_for_soft_deleted_disk_volume(
                     Ok(())
                 } else {
                     // The saga is still running
-                    Err(CondCheckError::<()>::NotYet)
+                    Err(CondCheckError::<()>::NotYet { status: None })
                 }
             }
         },
@@ -1050,7 +1058,7 @@ async fn test_racing_replacements_for_soft_deleted_disk_volume(
                 match region_snapshot {
                     Some(_) => {
                         // Region snapshot not garbage collected yet
-                        Err(CondCheckError::<()>::NotYet)
+                        Err(CondCheckError::<()>::NotYet { status: None })
                     }
 
                     None => {
@@ -1149,10 +1157,10 @@ async fn test_racing_replacements_for_soft_deleted_disk_volume(
                     Ok(())
                 } else if state == RegionReplacementState::Driving {
                     // The drive saga is still running
-                    Err(CondCheckError::<()>::NotYet)
+                    Err(CondCheckError::<()>::NotYet { status: None })
                 } else if state == RegionReplacementState::Running {
                     // The drive saga hasn't started yet
-                    Err(CondCheckError::<()>::NotYet)
+                    Err(CondCheckError::<()>::NotYet { status: None })
                 } else if state == RegionReplacementState::Completing {
                     // The saga transitioned the request ok, and it's now being
                     // finished by the region replacement finish saga
@@ -1225,7 +1233,7 @@ async fn test_racing_replacements_for_soft_deleted_disk_volume(
                     Ok(())
                 } else {
                     // Any other state is not expected
-                    Err(CondCheckError::<()>::NotYet)
+                    Err(CondCheckError::<()>::NotYet { status: None })
                 }
             }
         },
@@ -1277,7 +1285,7 @@ async fn test_racing_replacements_for_soft_deleted_disk_volume(
                 if volume.is_none() {
                     Ok(())
                 } else {
-                    Err(CondCheckError::<()>::NotYet)
+                    Err(CondCheckError::<()>::NotYet { status: None })
                 }
             }
         },
@@ -1588,10 +1596,10 @@ mod region_snapshot_replacement {
                             Ok(())
                         } else if state == expected_intermediate_state.0 {
                             // The saga is still running
-                            Err(CondCheckError::<()>::NotYet)
+                            Err(CondCheckError::<()>::NotYet { status: None })
                         } else if state == expected_start_state.0 {
                             // The saga hasn't started yet
-                            Err(CondCheckError::<()>::NotYet)
+                            Err(CondCheckError::<()>::NotYet { status: None })
                         } else {
                             // Any other state is not expected
                             panic!("unexpected state {state:?}!");

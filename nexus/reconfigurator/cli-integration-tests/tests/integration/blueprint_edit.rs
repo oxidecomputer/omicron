@@ -101,10 +101,10 @@ async fn test_blueprint_edit(cptestctx: &ControlPlaneTestContext) {
             );
 
             match result {
-                Ok(None) => Err(CondCheckError::NotYet),
+                Ok(None) => Err(CondCheckError::NotYet { status: None }),
                 Ok(Some(c)) => Ok(c),
                 Err(Error::ServiceUnavailable { .. }) => {
-                    Err(CondCheckError::NotYet)
+                    Err(CondCheckError::NotYet { status: None })
                 }
                 Err(error) => Err(CondCheckError::Failed(error)),
             }

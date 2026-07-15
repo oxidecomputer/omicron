@@ -61,6 +61,7 @@ use nexus_types::internal_api::background::DatasetsRendezvousStats;
 use nexus_types::internal_api::background::EreporterStatus;
 use nexus_types::internal_api::background::FmAnalysisStatus;
 use nexus_types::internal_api::background::FmRendezvousStatus;
+use nexus_types::internal_api::background::IncompleteBootstoreConfigReport;
 use nexus_types::internal_api::background::InstanceReincarnationStatus;
 use nexus_types::internal_api::background::InstanceUpdaterStatus;
 use nexus_types::internal_api::background::InventoryLoadStatus;
@@ -79,12 +80,12 @@ use nexus_types::internal_api::background::ServiceFirewallRuleStatus;
 use nexus_types::internal_api::background::SessionCleanupStatus;
 use nexus_types::internal_api::background::SitrepGcStatus;
 use nexus_types::internal_api::background::SitrepLoadStatus;
+use nexus_types::internal_api::background::SupportBundleActivationReport;
 use nexus_types::internal_api::background::SupportBundleCleanupReport;
-use nexus_types::internal_api::background::SupportBundleCollectionReport;
 use nexus_types::internal_api::background::SupportBundleCollectionStepStatus;
-use nexus_types::internal_api::background::SupportBundleEreportStatus;
 use nexus_types::internal_api::background::SwitchPortPopulatorStatus;
 use nexus_types::internal_api::background::SwitchPortPopulatorStatusKind;
+use nexus_types::internal_api::background::SwitchPortSettingsManagerStatus;
 use nexus_types::internal_api::background::TrustQuorumManagerStatus;
 use nexus_types::internal_api::background::TufArtifactReplicationCounters;
 use nexus_types::internal_api::background::TufArtifactReplicationRequest;
@@ -1381,6 +1382,9 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
         }
         "populate_switch_ports" => {
             print_task_populate_switch_ports(details);
+        }
+        "switch_port_config_manager" => {
+            print_task_switch_port_settings_manager(details);
         }
         _ => {
             println!(
@@ -2922,7 +2926,7 @@ fn print_task_support_bundle_collector(details: &serde_json::Value) {
     struct SupportBundleCollectionStatus {
         cleanup_report: Option<SupportBundleCleanupReport>,
         cleanup_err: Option<String>,
-        collection_report: Option<SupportBundleCollectionReport>,
+        collection_report: Option<SupportBundleActivationReport>,
         collection_err: Option<String>,
     }
 
@@ -2972,15 +2976,13 @@ fn print_task_support_bundle_collector(details: &serde_json::Value) {
                 println!("    failed to perform collection: {collection_err}");
             }
 
-            if let Some(SupportBundleCollectionReport {
-                bundle,
+            if let Some(SupportBundleActivationReport {
+                collection,
                 activated_in_db_ok,
-                mut steps,
-                ereports,
             }) = collection_report
             {
                 println!("    Support Bundle Collection Report:");
-                println!("      Bundle ID: {bundle}");
+                println!("      Bundle ID: {}", collection.bundle);
 
                 #[derive(Tabled)]
                 #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
@@ -2991,18 +2993,19 @@ fn print_task_support_bundle_collector(details: &serde_json::Value) {
                     status: SupportBundleCollectionStepStatus,
                 }
 
+                let mut steps = collection.steps;
                 steps.sort_unstable_by_key(|s| s.start);
                 let rows: Vec<StepRow> = steps
-                    .into_iter()
+                    .iter()
                     .map(|step| {
                         let duration = (step.end - step.start)
                             .to_std()
                             .unwrap_or(Duration::from_millis(0));
                         StepRow {
-                            step_name: step.name,
+                            step_name: step.name.clone(),
                             start_time: step.start,
                             duration: format!("{:.3}s", duration.as_secs_f64()),
-                            status: step.status,
+                            status: step.status.clone(),
                         }
                     })
                     .collect();
@@ -3010,38 +3013,17 @@ fn print_task_support_bundle_collector(details: &serde_json::Value) {
                 if !rows.is_empty() {
                     println!("\n{}", tabled::Table::new(rows));
                 }
+                for step in &steps {
+                    if let Some(details) = &step.details {
+                        println!("      {} details:", step.name);
+                        let pretty = serde_json::to_string_pretty(details)
+                            .unwrap_or_else(|_| details.to_string());
+                        println!("{}", textwrap::indent(&pretty, "        "));
+                    }
+                }
                 println!(
                     "      Bundle was activated in the database: {activated_in_db_ok}"
                 );
-                match ereports {
-                    None => {
-                        println!("      ereport collection was not requested");
-                    }
-                    Some(SupportBundleEreportStatus {
-                        errors,
-                        n_collected,
-                        n_found,
-                    }) if !errors.is_empty() => {
-                        println!("      ereport collection failed:");
-                        println!(
-                            "        total matching ereports found: {n_found}"
-                        );
-                        println!(
-                            "        ereports collected successfully: {n_collected}"
-                        );
-                        println!("        errors:");
-                        for error in errors {
-                            println!("          {error}");
-                        }
-                    }
-                    Some(SupportBundleEreportStatus {
-                        n_collected, ..
-                    }) => {
-                        // If ereport collection succeeded, n_found should be
-                        // equal to n_collected.
-                        println!("      ereports collected: {n_collected}");
-                    }
-                }
             }
         }
     }
@@ -3592,6 +3574,7 @@ fn print_task_fm_analysis(details: &serde_json::Value) {
         inv_collection_id,
         known_classes,
         outcome,
+        warnings,
     } = match serde_json::from_value::<FmAnalysisStatus>(details.clone()) {
         Err(error) => {
             eprintln!(
@@ -3711,16 +3694,26 @@ fn print_task_fm_analysis(details: &serde_json::Value) {
     }
     println!();
 
-    let PreparationStatus { errors, report: prep_report } = prep_status;
-    print!("{}", prep_report.display_multiline(4));
-    if !errors.is_empty() {
-        println!("{ERRICON}   errors preparing analysis inputs:");
-        for error in errors {
+    if !warnings.is_empty() {
+        println!("{ERRICON}   non-fatal errors occurred during analysis:");
+        for error in warnings {
             println!("      > {error}")
         }
     }
+
+    let PreparationStatus { warnings, report: prep_report } = prep_status;
+    println!("    preparation report:");
+    print!("{}", prep_report.display_multiline(6));
+    if !warnings.is_empty() {
+        println!("{ERRICON}   non-fatal errors preparing analysis inputs:");
+        for error in warnings {
+            println!("      > {error}")
+        }
+    }
+
     println!();
-    print!("{}", analysis_report.display_multiline(4));
+    println!("    analysis report:");
+    print!("{}", analysis_report.display_multiline(6));
     print_start_end_time(start_time, end_time, 4);
 }
 
@@ -3840,6 +3833,8 @@ fn print_task_fm_rendezvous(details: &serde_json::Value) {
         alerts,
         support_bundles,
         ereport_marking: marking,
+        alert_marker_gc,
+        support_bundle_marker_gc,
     } = match serde_json::from_value::<FmRendezvousStatus>(details.clone()) {
         Err(error) => {
             eprintln!(
@@ -3864,23 +3859,26 @@ fn print_task_fm_rendezvous(details: &serde_json::Value) {
              total_alerts_requested,
              current_sitrep_alerts_requested,
              alerts_created,
+             alerts_already_existed,
+             stale_sitrep,
              errors,
          }| {
-            let already_created =
-                total_alerts_requested - alerts_created - errors.len();
             const REQUESTED: &str = "alerts requested:";
             const REQUESTED_THIS_SITREP: &str = "  requested in this sitrep:";
             const CREATED: &str = "  created in this activation:";
-            const ALREADY_CREATED: &str = "  already created:";
+            const ALREADY_EXISTED: &str = "  already existed:";
             const ERRORS: &str = "  errors:";
             const WIDTH: usize = const_max_len(&[
                 REQUESTED,
                 REQUESTED_THIS_SITREP,
                 CREATED,
-                ALREADY_CREATED,
+                ALREADY_EXISTED,
                 ERRORS,
             ]) + 1;
             pub const NUM_WIDTH: usize = 4;
+            if *stale_sitrep {
+                println!("{ERRICON}   sitrep was stale");
+            }
             println!(
                 "      {REQUESTED:<WIDTH$}{total_alerts_requested:>NUM_WIDTH$}"
             );
@@ -3890,7 +3888,7 @@ fn print_task_fm_rendezvous(details: &serde_json::Value) {
             );
             println!("      {CREATED:<WIDTH$}{alerts_created:>NUM_WIDTH$}");
             println!(
-                "      {ALREADY_CREATED:<WIDTH$}{already_created:>NUM_WIDTH$}"
+                "      {ALREADY_EXISTED:<WIDTH$}{alerts_already_existed:>NUM_WIDTH$}"
             );
             println!(
                 "{}   {ERRORS:<WIDTH$}{:>NUM_WIDTH$}",
@@ -3909,23 +3907,26 @@ fn print_task_fm_rendezvous(details: &serde_json::Value) {
              total_bundles_requested,
              current_sitrep_bundles_requested,
              bundles_created,
+             bundles_already_existed,
+             stale_sitrep,
              errors,
          }| {
-            let already_created =
-                total_bundles_requested - bundles_created - errors.len();
             const REQUESTED: &str = "support bundles requested:";
             const REQUESTED_THIS_SITREP: &str = "  requested in this sitrep:";
             const CREATED: &str = "  created in this activation:";
-            const ALREADY_CREATED: &str = "  already created:";
+            const ALREADY_EXISTED: &str = "  already existed:";
             const ERRORS: &str = "  errors:";
             const WIDTH: usize = const_max_len(&[
                 REQUESTED,
                 REQUESTED_THIS_SITREP,
                 CREATED,
-                ALREADY_CREATED,
+                ALREADY_EXISTED,
                 ERRORS,
             ]) + 1;
             pub const NUM_WIDTH: usize = 4;
+            if *stale_sitrep {
+                println!("{ERRICON}   sitrep was stale");
+            }
             println!(
                 "      {REQUESTED:<WIDTH$}{total_bundles_requested:>NUM_WIDTH$}"
             );
@@ -3935,7 +3936,7 @@ fn print_task_fm_rendezvous(details: &serde_json::Value) {
             );
             println!("      {CREATED:<WIDTH$}{bundles_created:>NUM_WIDTH$}");
             println!(
-                "      {ALREADY_CREATED:<WIDTH$}{already_created:>NUM_WIDTH$}"
+                "      {ALREADY_EXISTED:<WIDTH$}{bundles_already_existed:>NUM_WIDTH$}"
             );
             println!(
                 "{}   {ERRORS:<WIDTH$}{:>NUM_WIDTH$}",
@@ -4011,6 +4012,36 @@ fn print_task_fm_rendezvous(details: &serde_json::Value) {
             }
         },
     );
+    print_op(
+        "garbage collecting alert creation markers",
+        &alert_marker_gc,
+        print_marker_gc_details,
+    );
+    print_op(
+        "garbage collecting support bundle creation markers",
+        &support_bundle_marker_gc,
+        print_marker_gc_details,
+    );
+}
+
+fn print_marker_gc_details(status: &fm_rendezvous::MarkerGcStatus) {
+    let fm_rendezvous::MarkerGcStatus { rows_deleted, batches, errors } =
+        status;
+    const ROWS_DELETED: &str = "rows deleted:";
+    const BATCHES: &str = "batches:";
+    const ERRORS: &str = "errors:";
+    const WIDTH: usize = const_max_len(&[ROWS_DELETED, BATCHES, ERRORS]) + 1;
+    const NUM_WIDTH: usize = 4;
+    println!("      {ROWS_DELETED:<WIDTH$}{rows_deleted:>NUM_WIDTH$}");
+    println!("      {BATCHES:<WIDTH$}{batches:>NUM_WIDTH$}");
+    println!(
+        "{}   {ERRORS:<WIDTH$}{:>NUM_WIDTH$}",
+        warn_if_nonzero(errors.len()),
+        errors.len()
+    );
+    for error in errors {
+        println!("        > {error}");
+    }
 }
 
 fn print_task_trust_quorum_manager(details: &serde_json::Value) {
@@ -4078,6 +4109,51 @@ fn print_task_populate_switch_ports(details: &serde_json::Value) {
     let SwitchPortPopulatorStatus { switch0, switch1 } = status;
     print_one("switch0", switch0);
     print_one("switch1", switch1);
+}
+
+fn print_task_switch_port_settings_manager(details: &serde_json::Value) {
+    let status = match serde_json::from_value::<SwitchPortSettingsManagerStatus>(
+        details.clone(),
+    ) {
+        Ok(status) => status,
+        Err(error) => {
+            eprintln!(
+                "warning: failed to interpret task details: {:?}: {:#?}",
+                error, details
+            );
+            return;
+        }
+    };
+
+    let SwitchPortSettingsManagerStatus { incomplete_bootstore_configs } =
+        status;
+
+    if incomplete_bootstore_configs.is_empty() {
+        println!(
+            "all racks appear to have a complete bootstore network config\n\
+             (note: this check is not yet complete -- there might still \
+             be errors that aren't in the report)"
+        );
+        return;
+    }
+
+    println!(
+        "{ERRICON} {} rack(s) skipped due to an incomplete bootstore network \
+         config:",
+        incomplete_bootstore_configs.len(),
+    );
+    for IncompleteBootstoreConfigReport { rack_id, problems } in
+        incomplete_bootstore_configs
+    {
+        println!("  rack {rack_id}: {} problem(s)", problems.len());
+        for problem in problems {
+            println!("    {ERRICON} {problem}");
+        }
+    }
+    println!(
+        "(note: this check is not yet complete -- there might be other \
+         errors that aren't in the report)"
+    );
 }
 
 fn print_task_physical_disk_adoption(details: &serde_json::Value) {

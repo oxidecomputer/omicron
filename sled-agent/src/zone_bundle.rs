@@ -2,8 +2,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-// Copyright 2023 Oxide Computer Company
-
 //! Tools for collecting and inspecting service bundles for zones.
 
 use anyhow::Context;
@@ -2256,7 +2254,8 @@ mod illumos_tests {
     #[tokio::test]
     async fn test_find_archived_log_files() {
         let log = test_logger();
-        let tmpdir = tempfile::tempdir().expect("Failed to make tempdir");
+        let tmpdir =
+            camino_tempfile::tempdir().expect("Failed to make tempdir");
 
         for prefix in ["oxide", "system-illumos"] {
             let mut should_match = [
@@ -2274,10 +2273,7 @@ mod illumos_tests {
                     .expect("failed to create dummy file");
             }
 
-            let path = Utf8PathBuf::try_from(
-                tmpdir.path().as_os_str().to_str().unwrap(),
-            )
-            .unwrap();
+            let path = tmpdir.path().to_owned();
             let mut files = find_archived_log_files(
                 &log,
                 "zone-name", // unused here, for logging only

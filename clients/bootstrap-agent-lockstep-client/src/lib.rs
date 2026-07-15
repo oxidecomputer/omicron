@@ -33,11 +33,14 @@ progenitor::generate_api!(
         LldpAdminStatus = sled_agent_types::early_networking::LldpAdminStatus,
         LldpPortConfig = sled_agent_types::early_networking::LldpPortConfig,
         PortConfig = sled_agent_types::early_networking::PortConfig,
+        RackOperationStatus = bootstrap_agent_lockstep_types::RackOperationStatus,
         RouteConfig = sled_agent_types::early_networking::RouteConfig,
         RouterLifetimeConfig = sled_agent_types::early_networking::RouterLifetimeConfig,
+        RssStep = bootstrap_agent_lockstep_types::RssStep,
         SwitchSlot = sled_agent_types::early_networking::SwitchSlot,
         TxEqConfig = sled_agent_types::early_networking::TxEqConfig,
         UplinkAddressConfig = sled_agent_types::early_networking::UplinkAddressConfig,
+        UplinkPorts = sled_agent_types::early_networking::UplinkPorts,
     },
 );
 

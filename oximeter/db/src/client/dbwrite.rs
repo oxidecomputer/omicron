@@ -4,8 +4,6 @@
 
 //! Implementation of client methods that write to the ClickHouse database.
 
-// Copyright 2026 Oxide Computer Company
-
 use crate::Error;
 use crate::client::Client;
 use crate::model;

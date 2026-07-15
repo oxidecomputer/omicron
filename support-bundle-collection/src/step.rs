@@ -13,7 +13,6 @@ use futures::future::BoxFuture;
 use nexus_types::internal_api::background::SupportBundleCollectionReport;
 use nexus_types::internal_api::background::SupportBundleCollectionStep;
 use nexus_types::internal_api::background::SupportBundleCollectionStepStatus;
-use nexus_types::internal_api::background::SupportBundleEreportStatus;
 use slog::warn;
 use slog_error_chain::InlineErrorChain;
 use std::sync::Arc;
@@ -88,13 +87,14 @@ impl CompletedCollectionStep {
     ) {
         use SupportBundleCollectionStepStatus as Status;
 
+        let mut details = None;
         let status = match self.output {
             CollectionStepOutput::Skipped => Status::Skipped,
             CollectionStepOutput::Failed(err) => {
                 Status::Failed(err.to_string())
             }
-            CollectionStepOutput::Ereports(status) => {
-                report.ereports = Some(status);
+            CollectionStepOutput::Details(value) => {
+                details = Some(value);
                 Status::Ok
             }
             CollectionStepOutput::Spawn { extra_steps } => {
@@ -110,6 +110,7 @@ impl CompletedCollectionStep {
             start: self.start,
             end: self.end,
             status,
+            details,
         };
         report.steps.push(step);
     }
@@ -122,7 +123,10 @@ pub enum CollectionStepOutput {
     //
     // It may have still saved a partial set of data to the bundle.
     Failed(anyhow::Error),
-    Ereports(SupportBundleEreportStatus),
+    // The step completed successfully and wants to surface a structured
+    // summary in its report entry (counts, partial-success info, errors,
+    // etc.). Use any `Serialize` type that fits the step.
+    Details(serde_json::Value),
     // The step spawned additional steps to execute
     Spawn { extra_steps: Vec<CollectionStep> },
     // The step completed with nothing to report, and no follow-up steps

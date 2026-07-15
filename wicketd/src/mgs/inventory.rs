@@ -4,12 +4,12 @@
 
 //! Implementation details for polling MGS for rack inventory details.
 
-use gateway_client::types::RotState;
 use gateway_client::types::SpComponentCaboose;
 use gateway_client::types::SpComponentInfo;
-use gateway_client::types::SpState;
 use gateway_messages::SpComponent;
+use gateway_types::component::SpState;
 use gateway_types::ignition::SpIgnition;
+use gateway_types::rot::RotState;
 use slog::Logger;
 use slog::warn;
 use std::collections::BTreeMap;
@@ -300,7 +300,7 @@ async fn sp_fetching_task(
             }
         }
 
-        let state = match mgs_client.sp_get(&id.type_, id.slot).await {
+        let state = match mgs_client.sp_get(&id.typ, id.slot).await {
             Ok(response) => response.into_inner(),
             Err(err) => {
                 warn!(
@@ -350,7 +350,7 @@ async fn sp_fetching_task(
 
         if prev_state.as_ref() != Some(&state) || components.is_none() {
             components =
-                match mgs_client.sp_component_list(&id.type_, id.slot).await {
+                match mgs_client.sp_component_list(&id.typ, id.slot).await {
                     Ok(response) => {
                         mgs_received = Instant::now();
                         Some(response.into_inner().components)
@@ -369,7 +369,7 @@ async fn sp_fetching_task(
         if prev_state.as_ref() != Some(&state) || caboose_active.is_none() {
             caboose_active = match mgs_client
                 .sp_component_caboose_get(
-                    &id.type_,
+                    &id.typ,
                     id.slot,
                     SpComponent::SP_ITSELF.const_as_str(),
                     0,
@@ -394,7 +394,7 @@ async fn sp_fetching_task(
         if prev_state.as_ref() != Some(&state) || caboose_inactive.is_none() {
             caboose_inactive = match mgs_client
                 .sp_component_caboose_get(
-                    &id.type_,
+                    &id.typ,
                     id.slot,
                     SpComponent::SP_ITSELF.const_as_str(),
                     1,
@@ -420,7 +420,7 @@ async fn sp_fetching_task(
             if prev_state.as_ref() != Some(&state) || rot.caboose_a.is_none() {
                 rot.caboose_a = match mgs_client
                     .sp_component_caboose_get(
-                        &id.type_,
+                        &id.typ,
                         id.slot,
                         SpComponent::ROT.const_as_str(),
                         0,
@@ -445,7 +445,7 @@ async fn sp_fetching_task(
             if prev_state.as_ref() != Some(&state) || rot.caboose_b.is_none() {
                 rot.caboose_b = match mgs_client
                     .sp_component_caboose_get(
-                        &id.type_,
+                        &id.typ,
                         id.slot,
                         SpComponent::ROT.const_as_str(),
                         1,
@@ -471,7 +471,7 @@ async fn sp_fetching_task(
                 if prev_state.as_ref() != Some(&state) || v.is_none() {
                     rot.caboose_stage0 = match mgs_client
                         .sp_component_caboose_get(
-                            &id.type_,
+                            &id.typ,
                             id.slot,
                             SpComponent::STAGE0.const_as_str(),
                             0,
@@ -498,7 +498,7 @@ async fn sp_fetching_task(
                 if prev_state.as_ref() != Some(&state) || v.is_none() {
                     rot.caboose_stage0next = match mgs_client
                         .sp_component_caboose_get(
-                            &id.type_,
+                            &id.typ,
                             id.slot,
                             SpComponent::STAGE0.const_as_str(),
                             1,

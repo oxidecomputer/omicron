@@ -388,7 +388,7 @@ impl Resolver {
     ) -> impl Iterator<Item = SocketAddrV6> + Send + use<> {
         let futures =
             std::iter::repeat((self.log.clone(), self.resolver.clone()))
-                .zip(service_lookup.into_iter())
+                .zip(service_lookup)
                 .map(|((log, resolver), srv)| async move {
                     let target = srv.target();
                     let port = srv.port();
@@ -457,6 +457,7 @@ mod test {
     use super::ResolveError;
     use super::Resolver;
     use anyhow::Context;
+    use camino_tempfile::Utf8TempDir;
     use dropshot::{
         ApiDescription, HandlerTaskMode, HttpError, HttpResponseOk,
         RequestContext, endpoint,
@@ -475,13 +476,12 @@ mod test {
     use std::net::SocketAddrV6;
     use std::str::FromStr;
     use std::sync::Arc;
-    use tempfile::TempDir;
 
     struct DnsServer {
         // We hang onto the storage_path even though it's never used because
         // dropping it causes it to be cleaned up.
         #[allow(dead_code)]
-        storage_path: Option<TempDir>,
+        storage_path: Option<Utf8TempDir>,
         // Similarly, we hang onto the Dropshot server to keep it running.
         #[allow(dead_code)]
         dropshot_server: dropshot::HttpServer<dns_server::http_server::Context>,
@@ -494,15 +494,11 @@ mod test {
 
     impl DnsServer {
         async fn create(log: &Logger) -> Self {
-            let storage_path =
-                TempDir::new().expect("Failed to create temporary directory");
+            let storage_path = Utf8TempDir::new()
+                .expect("Failed to create temporary directory");
             let config_store = dns_server::storage::Config {
                 keep_old_generations: 3,
-                storage_path: storage_path
-                    .path()
-                    .to_string_lossy()
-                    .into_owned()
-                    .into(),
+                storage_path: storage_path.path().to_owned(),
             };
             let store = dns_server::storage::Store::new(
                 log.new(o!("component" => "DnsStore")),

@@ -5,8 +5,7 @@
 //! Instance types for version LOCAL_STORAGE.
 
 use omicron_common::api::external::{
-    ByteCount, Hostname, IdentityMetadataCreateParams,
-    InstanceAutoRestartPolicy, InstanceCpuCount, Name, NameOrId,
+    ByteCount, Hostname, IdentityMetadataCreateParams, Name, NameOrId,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -14,7 +13,8 @@ use serde::{Deserialize, Serialize};
 use super::disk::DiskCreate;
 use crate::v2025_11_20_00;
 use crate::v2025_11_20_00::instance::{
-    ExternalIpCreate, InstanceCpuPlatform, InstanceDiskAttach,
+    ExternalIpCreate, InstanceAutoRestartPolicy, InstanceCpuCount,
+    InstanceCpuPlatform, InstanceDiskAttach,
     InstanceNetworkInterfaceAttachment, UserData, bool_true,
 };
 

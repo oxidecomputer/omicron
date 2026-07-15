@@ -4,8 +4,6 @@
 
 //! AST node for the `group_by` operation.
 
-// Copyright 2024 Oxide Computer Company
-
 use chrono::DateTime;
 use chrono::Utc;
 

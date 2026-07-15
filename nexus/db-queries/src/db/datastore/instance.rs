@@ -25,6 +25,7 @@ use crate::db::model::InstanceCpuPlatform;
 use crate::db::model::InstanceIntendedState;
 use crate::db::model::InstanceRuntimeState;
 use crate::db::model::InstanceState;
+use crate::db::model::InstanceStateComputer;
 use crate::db::model::InstanceUpdate;
 use crate::db::model::Migration;
 use crate::db::model::MigrationState;
@@ -47,8 +48,8 @@ use nexus_db_errors::public_error_from_diesel;
 use nexus_db_lookup::DbConnection;
 use nexus_db_lookup::LookupPath;
 use nexus_db_model::Disk;
+use nexus_types::external_api::instance as instance_types;
 use nexus_types::internal_api::background::ReincarnationReason;
-use nexus_types_versions::latest;
 use omicron_common::api;
 use omicron_common::api::external;
 use omicron_common::api::external::CreateResult;
@@ -70,104 +71,6 @@ use omicron_uuid_kinds::SledUuid;
 use ref_cast::RefCast;
 use std::collections::HashMap;
 use uuid::Uuid;
-
-/// Returns the operator-visible [external API
-/// `InstanceState`](external::InstanceState) for the provided [`Instance`]
-/// and its active [`Vmm`], if one exists.
-pub struct InstanceStateComputer<'s> {
-    instance_state: &'s InstanceState,
-    migration_id: Option<&'s Uuid>,
-    vmm_state: Option<&'s VmmState>,
-}
-
-impl<'s> InstanceStateComputer<'s> {
-    pub fn new(instance: &'s Instance, vmm: Option<&'s Vmm>) -> Self {
-        Self {
-            instance_state: &instance.nexus_state,
-            migration_id: instance.migration_id.as_ref(),
-            vmm_state: vmm.as_ref().map(|vmm| &vmm.state),
-        }
-    }
-
-    pub fn compute_state_from(
-        instance_state: &'s InstanceState,
-        migration_id: Option<&'s Uuid>,
-        vmm_state: Option<&'s VmmState>,
-    ) -> external::InstanceState {
-        Self { instance_state, migration_id, vmm_state }.compute_state()
-    }
-
-    pub fn compute_state(&self) -> external::InstanceState {
-        use crate::db::model::InstanceState;
-        use crate::db::model::VmmState;
-
-        // We want to only report that an instance is `Stopped` when a new
-        // `instance-start` saga is able to proceed. That means that:
-        match (self.instance_state, self.vmm_state) {
-            // - If there's an active migration ID for the instance, *always*
-            //   treat its state as "migration" regardless of the VMM's state.
-            //
-            //   This avoids an issue where an instance whose previous active
-            //   VMM has been destroyed as a result of a successful migration
-            //   out will appear to be "stopping" for the time between when that
-            //   VMM was reported destroyed and when the instance record was
-            //   updated to reflect the migration's completion.
-            //
-            //   Instead, we'll continue to report the instance's state as
-            //   "migrating" until an instance-update saga has resolved the
-            //   outcome of the migration, since only the instance-update saga
-            //   can complete the migration and update the instance record to
-            //   point at its new active VMM. No new instance-migrate,
-            //   instance-stop, or instance-delete saga can be started
-            //   until this occurs.
-            //
-            //   If the instance actually *has* stopped or failed before a
-            //   successful migration out, this is fine, because an
-            //   instance-update saga will come along and remove the active VMM
-            //   and migration IDs.
-            //
-            (InstanceState::Vmm, Some(_)) if self.migration_id.is_some() => {
-                external::InstanceState::Migrating
-            }
-            // - An instance with a "stopped" or "destroyed" VMM needs to be
-            //   recast as a "stopping" instance, as the virtual provisioning
-            //   resources for that instance have not been deallocated until the
-            //   active VMM ID has been unlinked by an update saga.
-            (
-                InstanceState::Vmm,
-                Some(VmmState::Stopped | VmmState::Destroyed),
-            ) => external::InstanceState::Stopping,
-            // - An instance with a "failed" VMM should *not* be counted as
-            //   failed until the VMM is unlinked, because a start saga must be
-            //   able to run for a "failed" instance. Until then, it will
-            //   continue to appear "stopping".
-            (InstanceState::Vmm, Some(VmmState::Failed)) => {
-                external::InstanceState::Stopping
-            }
-            // - An instance with a "saga unwound" VMM, on the other hand, can
-            //   be treated as "failed", since --- unlike an instance with a
-            //   "failed" active VMM --- a new start saga can run at any time by
-            //   just clearing out the old VMM ID.
-            (InstanceState::Vmm, Some(VmmState::SagaUnwound)) => {
-                external::InstanceState::Failed
-            }
-            // - An instance with no VMM is always "stopped" (as long as it's
-            //   not "starting" etc.)
-            (InstanceState::NoVmm, _vmm_state) => {
-                debug_assert_eq!(_vmm_state, None);
-                external::InstanceState::Stopped
-            }
-            // If there's a VMM state, and none of the above rules apply, use
-            // that.
-            (_instance_state, Some(vmm_state)) => {
-                debug_assert_eq!(_instance_state, &InstanceState::Vmm);
-                (*vmm_state).into()
-            }
-            // If there's no VMM state, use the instance's state.
-            (instance_state, None) => (*instance_state).into(),
-        }
-    }
-}
 
 impl<'s> From<&'s InstanceAndActiveVmm> for InstanceStateComputer<'s> {
     fn from(i: &'s InstanceAndActiveVmm) -> Self {
@@ -196,9 +99,9 @@ impl InstanceAndActiveVmm {
     }
 
     /// Returns the operator-visible [external API
-    /// `InstanceState`](external::InstanceState) for this instance and its
+    /// `InstanceState`](instance_types::InstanceState) for this instance and its
     /// active VMM.
-    pub fn effective_state(&self) -> external::InstanceState {
+    pub fn effective_state(&self) -> instance_types::InstanceState {
         InstanceStateComputer::from(self).compute_state()
     }
 }
@@ -209,7 +112,7 @@ impl From<(Instance, Option<Vmm>)> for InstanceAndActiveVmm {
     }
 }
 
-impl From<InstanceAndActiveVmm> for latest::instance::Instance {
+impl From<InstanceAndActiveVmm> for instance_types::Instance {
     fn from(value: InstanceAndActiveVmm) -> Self {
         let time_run_state_updated = value
             .vmm
@@ -249,7 +152,7 @@ impl From<InstanceAndActiveVmm> for latest::instance::Instance {
                 InstanceAutoRestartPolicy::Never => false,
                 InstanceAutoRestartPolicy::BestEffort => true,
             };
-            external::InstanceAutoRestartStatus {
+            instance_types::InstanceAutoRestartStatus {
                 enabled,
                 policy: policy.map(Into::into),
                 cooldown_expiration,
@@ -268,7 +171,7 @@ impl From<InstanceAndActiveVmm> for latest::instance::Instance {
                 .expect("found invalid hostname in the database"),
             boot_disk_id: value.instance.boot_disk_id,
             cpu_platform: value.instance.cpu_platform.map(Into::into),
-            runtime: external::InstanceRuntimeState {
+            runtime: instance_types::InstanceRuntimeState {
                 run_state: value.effective_state(),
                 time_run_state_updated,
                 time_last_auto_restarted: value
@@ -866,6 +769,13 @@ impl DataStore {
                         ErrorHandler::NotFoundByResource(authz_instance),
                     )
                 })?;
+
+        // `check_if_exists` fetches by ID without applying the other
+        // filters from the query, so a soft-deleted instance is returned as
+        // `NotUpdatedButExists`.
+        if found.time_deleted().is_some() {
+            return Err(authz_instance.not_found());
+        }
 
         slog::info!(
             opctx.log,
@@ -1589,8 +1499,8 @@ impl DataStore {
                 }
                 let instance_state = collection.nexus_state.state();
                 match instance_state {
-                    api::external::InstanceState::Stopped
-                    | api::external::InstanceState::Failed => {
+                    instance_types::InstanceState::Stopped
+                    | instance_types::InstanceState::Failed => {
                         Err(Error::internal_error("cannot delete instance"))
                     }
                     _ => Err(Error::invalid_request(&format!(
@@ -1709,47 +1619,68 @@ impl DataStore {
                 "current_gen" => ?current_gen,
             );
 
-            (instance, did_lock) = diesel::update(dsl::instance)
-                .filter(dsl::time_deleted.is_null())
-                .filter(dsl::id.eq(instance_id))
-                // If the generation is the same as the captured generation when we
-                // read the instance record to check if it was not locked, we can
-                // lock this instance. This is because changing the `updater_id`
-                // field always increments the generation number. Therefore, we
-                // want the update query to succeed if and only if the
-                // generation number remains the same as the generation when we
-                // last fetched the instance. This query is used equivalently to
-                // an atomic compare-and-swap instruction in the implementation
-                // of a non-distributed, single-process mutex.
-                .filter(dsl::updater_gen.eq(current_gen))
-                .set((
-                    dsl::updater_gen.eq(locked_gen),
-                    dsl::updater_id.eq(Some(updater_id)),
-                ))
-                .check_if_exists::<Instance>(instance_id)
-                .execute_and_check(
-                    &*self.pool_connection_authorized(opctx).await?,
-                )
-                .await
-                .map(|r| {
-                    // If we successfully updated the instance record, we have
-                    // acquired the lock; otherwise, we haven't --- either because
-                    // our generation is stale, or because the instance is already locked.
-                    let locked = match r.status {
-                        UpdateStatus::Updated => true,
-                        UpdateStatus::NotUpdatedButExists => false,
-                    };
-                    (r.found, locked)
-                })
-                .map_err(|e| {
-                    public_error_from_diesel(
-                        e,
-                        ErrorHandler::NotFoundByLookup(
-                            ResourceType::Instance,
-                            LookupType::ById(instance_id),
-                        ),
+            let UpdateAndQueryResult { status, found } =
+                diesel::update(dsl::instance)
+                    .filter(dsl::time_deleted.is_null())
+                    .filter(dsl::id.eq(instance_id))
+                    // If the generation is the same as the captured generation
+                    // when we read the instance record to check if it was not
+                    // locked, we can lock this instance. This is because
+                    // changing the `updater_id` field always increments the
+                    // generation number. Therefore, we want the update query to
+                    // succeed if and only if the generation number remains the
+                    // same as the generation when we last fetched the instance.
+                    // This query is used equivalently to an atomic
+                    // compare-and-swap instruction in the implementation of a
+                    // non-distributed, single-process mutex.
+                    .filter(dsl::updater_gen.eq(current_gen))
+                    .set((
+                        dsl::updater_gen.eq(locked_gen),
+                        dsl::updater_id.eq(Some(updater_id)),
+                    ))
+                    .check_if_exists::<Instance>(instance_id)
+                    .execute_and_check(
+                        &*self.pool_connection_authorized(opctx).await?,
                     )
-                })?;
+                    .await
+                    .map_err(|e| {
+                        public_error_from_diesel(
+                            e,
+                            ErrorHandler::NotFoundByLookup(
+                                ResourceType::Instance,
+                                LookupType::ById(instance_id),
+                            ),
+                        )
+                    })?;
+
+            match status {
+                // If we successfully updated the instance record, we have
+                // acquired the lock.
+                UpdateStatus::Updated => {
+                    did_lock = true;
+                }
+                // If the instance record has been soft-deleted, return
+                // `NotFound` explicitly. `check_if_exists` does not know
+                // about soft-deletion, so it will still return that it
+                // `found` something even if its `time_deleted` is set.
+                UpdateStatus::NotUpdatedButExists
+                    if found.time_deleted().is_some() =>
+                {
+                    return Err(Error::not_found_by_id(
+                        ResourceType::Instance,
+                        &instance_id,
+                    )
+                    .into());
+                }
+                // Otherwise, the instance still exists but we haven't
+                // locked it --- either because our generation is stale, or
+                // because the instance is already locked.
+                UpdateStatus::NotUpdatedButExists => {
+                    did_lock = false;
+                }
+            };
+
+            instance = found;
         }
     }
 
@@ -1848,6 +1779,15 @@ impl DataStore {
                     updater_id: child_lock_id,
                     locked_gen: new_gen,
                 })
+            }
+            // Because `check_if_exists` will return records that have been
+            // soft-deleted, we must check for `time_deleted` before considering
+            // whether the lock has been successfully inherited.
+            UpdateAndQueryResult {
+                status: UpdateStatus::NotUpdatedButExists,
+                ref found,
+            } if found.time_deleted().is_some() => {
+                Err(UpdaterLockError::Query(authz_instance.not_found()))
             }
             // The generation has advanced past the generation at which the
             // lock was held. This means that we have already inherited the
@@ -2550,6 +2490,78 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_locking_a_deleted_instance_fails_even_if_locked() {
+        // Setup
+        let logctx = dev::test_setup_log(
+            "test_locking_a_deleted_instance_fails_even_if_locked",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+        let (authz_project, _) = create_test_project(&datastore, &opctx).await;
+        let authz_instance = create_test_instance(
+            &datastore,
+            &opctx,
+            &authz_project,
+            "my-great-instance",
+        )
+        .await;
+        let saga_id = Uuid::new_v4();
+
+        // Move the instance into an "okay-to-delete" state...
+        datastore
+            .instance_update_runtime(
+                &InstanceUuid::from_untyped_uuid(authz_instance.id()),
+                &InstanceRuntimeState {
+                    time_updated: Utc::now(),
+                    generation: Generation(external::Generation::from_u32(2)),
+                    propolis_id: None,
+                    dst_propolis_id: None,
+                    migration_id: None,
+                    nexus_state: InstanceState::NoVmm,
+                    time_last_auto_restarted: None,
+                },
+            )
+            .await
+            .expect("should update state successfully");
+
+        // attempt to lock the instance once.
+        let lock = dbg!(
+            datastore
+                .instance_updater_lock(&opctx, &authz_instance, saga_id)
+                .await
+        )
+        .expect("instance should be locked");
+        assert_eq!(lock.updater_id, saga_id);
+
+        // delete it...
+        dbg!(datastore.project_delete_instance(&opctx, &authz_instance).await)
+            .expect("instance should be deleted");
+
+        // ...and a subsequent atetmpt to lock the instance should realize it's
+        // gone.
+        let err = dbg!(
+            datastore
+                .instance_updater_lock(&opctx, &authz_instance, saga_id)
+                .await
+        )
+        .expect_err(
+            "instance_updater_lock should fail after the instance is deleted",
+        );
+        assert!(
+            matches!(
+                err,
+                UpdaterLockError::Query(Error::ObjectNotFound { .. })
+            ),
+            "expected locking a deleted instance to fail with \
+            `ObjectNotFound`, but got {err:?} instead"
+        );
+
+        // Clean up.
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
     async fn test_instance_updater_cant_unlock_someone_elses_instance_() {
         // Setup
         let logctx = dev::test_setup_log(
@@ -2692,6 +2704,79 @@ mod tests {
             .expect("instance should remain deleted");
 
         // Clean up.
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_updating_deleted_instance_fails() {
+        let logctx =
+            dev::test_setup_log("test_updating_deleted_instance_fails");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+        let (authz_project, _) = create_test_project(&datastore, &opctx).await;
+        let authz_instance = create_test_instance(
+            &datastore,
+            &opctx,
+            &authz_project,
+            "my-great-instance",
+        )
+        .await;
+
+        datastore
+            .instance_update_runtime(
+                &InstanceUuid::from_untyped_uuid(authz_instance.id()),
+                &InstanceRuntimeState {
+                    time_updated: Utc::now(),
+                    generation: Generation(external::Generation::from_u32(2)),
+                    propolis_id: None,
+                    dst_propolis_id: None,
+                    migration_id: None,
+                    nexus_state: InstanceState::NoVmm,
+                    time_last_auto_restarted: None,
+                },
+            )
+            .await
+            .expect("instance must become deletable");
+        let parent_lock = datastore
+            .instance_updater_lock(&opctx, &authz_instance, Uuid::new_v4())
+            .await
+            .expect("instance must be locked");
+        datastore
+            .project_delete_instance(&opctx, &authz_instance)
+            .await
+            .expect("instance must be deleted");
+
+        let err = datastore
+            .instance_set_intended_state(
+                &opctx,
+                &authz_instance,
+                InstanceIntendedState::Running,
+            )
+            .await
+            .expect_err("updating a deleted instance must fail");
+        assert!(
+            matches!(err, Error::ObjectNotFound { .. }),
+            "expected ObjectNotFound, got {err:?}",
+        );
+
+        let err = datastore
+            .instance_updater_inherit_lock(
+                &opctx,
+                &authz_instance,
+                parent_lock,
+                Uuid::new_v4(),
+            )
+            .await
+            .expect_err("inheriting a deleted instance's lock must fail");
+        assert!(
+            matches!(
+                err,
+                UpdaterLockError::Query(Error::ObjectNotFound { .. })
+            ),
+            "expected ObjectNotFound, got {err:?}",
+        );
+
         db.terminate().await;
         logctx.cleanup_successful();
     }

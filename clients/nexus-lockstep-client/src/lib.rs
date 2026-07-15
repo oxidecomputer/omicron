@@ -33,6 +33,7 @@ progenitor::generate_api!(
     replace = {
         BaseboardId = sled_hardware_types::BaseboardId,
         BfdMode = sled_agent_types::early_networking::BfdMode,
+        BgpPeerConfig = sled_agent_types::early_networking::BgpPeerConfig,
         // It's kind of unfortunate to pull in such a complex and unstable type
         // as "blueprint" this way, but we have really useful functionality
         // (e.g., diff'ing) that's implemented on our local type.
@@ -54,6 +55,8 @@ progenitor::generate_api!(
         ImportExportPolicy = sled_agent_types::early_networking::ImportExportPolicy,
         LinkFec = sled_agent_types::early_networking::LinkFec,
         LinkSpeed = sled_agent_types::early_networking::LinkSpeed,
+        LldpAdminStatus = sled_agent_types::early_networking::LldpAdminStatus,
+        LldpPortConfig = sled_agent_types::early_networking::LldpPortConfig,
         MacAddr = omicron_common::api::external::MacAddr,
         MgsUpdateDriverStatus = nexus_types::internal_api::views::MgsUpdateDriverStatus,
         Name = omicron_common::api::external::Name,
@@ -64,16 +67,21 @@ progenitor::generate_api!(
         OximeterReadPolicy = nexus_types::deployment::OximeterReadPolicy,
         PendingMgsUpdate = nexus_types::deployment::PendingMgsUpdate,
         PlannerConfig = nexus_types::deployment::PlannerConfig,
+        PortConfig = sled_agent_types::early_networking::PortConfig,
         ReconfiguratorConfig = nexus_types::deployment::ReconfiguratorConfig,
         ReconfiguratorConfigParam = nexus_types::deployment::ReconfiguratorConfigParam,
         ReconfiguratorConfigView = nexus_types::deployment::ReconfiguratorConfigView,
         RecoverySiloConfig = bootstrap_agent_lockstep_types::RecoverySiloConfig,
+        RouteConfig = sled_agent_types::early_networking::RouteConfig,
+        RouterLifetimeConfig = sled_agent_types::early_networking::RouterLifetimeConfig,
         RouterPeerType = sled_agent_types::early_networking::RouterPeerType,
         SledAgentUpdateStatus = nexus_types::internal_api::views::SledAgentUpdateStatus,
         SwitchSlot = sled_agent_types::early_networking::SwitchSlot,
         TrustQuorumConfig = nexus_types::trust_quorum::TrustQuorumConfig,
+        TxEqConfig = sled_agent_types::early_networking::TxEqConfig,
         UpdateStatus = nexus_types::internal_api::views::UpdateStatus,
         UplinkAddressConfig = sled_agent_types::early_networking::UplinkAddressConfig,
+        UplinkPorts = sled_agent_types::early_networking::UplinkPorts,
         ZoneStatus = nexus_types::internal_api::views::ZoneStatus,
         ZpoolName = omicron_common::zpool_name::ZpoolName,
     },

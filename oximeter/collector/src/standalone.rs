@@ -5,8 +5,6 @@
 //! Implementation of a standalone fake Nexus, simply for registering producers
 //! and collectors with one another.
 
-// Copyright 2024 Oxide Computer Company
-
 use crate::Error;
 use dropshot::ApiDescription;
 use dropshot::ConfigDropshot;

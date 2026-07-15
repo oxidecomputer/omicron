@@ -1681,14 +1681,8 @@ impl DebugLogBlueprintPlanning {
         // `debug_blob`, because we don't want anyone to attempt to parse it. It
         // should only be useful to humans, potentially via omdb, and they (and
         // omdb) can duplicate these fields to understand it.
-        let git_commit = if env!("VERGEN_GIT_DIRTY") == "true" {
-            concat!(env!("VERGEN_GIT_SHA"), "-dirty")
-        } else {
-            env!("VERGEN_GIT_SHA")
-        };
-
         let debug_blob = serde_json::json!({
-            "git-commit": git_commit,
+            "git-commit": omicron_git_version::GitVersion::current(),
             "report": report,
         });
 

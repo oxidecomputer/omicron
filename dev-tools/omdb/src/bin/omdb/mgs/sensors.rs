@@ -9,7 +9,7 @@ use clap::Args;
 use gateway_client::types::MeasurementErrorCode;
 use gateway_client::types::MeasurementKind;
 use gateway_client::types::SpComponentDetails;
-use gateway_client::types::SpIdentifier;
+use gateway_types::component::SpIdentifier;
 use gateway_types::ignition::SpIgnition;
 use multimap::MultiMap;
 use nexus_types::inventory::SpType;
@@ -94,7 +94,7 @@ pub(crate) struct SensorsArgs {
 
 impl SensorsArgs {
     fn matches_sp(&self, sp: &SpIdentifier) -> bool {
-        match sp.type_ {
+        match sp.typ {
             SpType::Sled => {
                 let matched = if !self.sled.is_empty() {
                     self.sled.contains(&sp.slot)
@@ -328,7 +328,7 @@ async fn sp_info_mgs(
         .iter()
         .filter_map(|ignition| {
             if matches!(ignition.details, SpIgnition::Present { .. })
-                && ignition.id.type_ == SpType::Sled
+                && ignition.id.typ == SpType::Sled
             {
                 if args.matches_sp(&ignition.id) {
                     return Some(ignition.id);
@@ -339,12 +339,12 @@ async fn sp_info_mgs(
         .collect::<Vec<_>>();
 
     if args.switches {
-        sp_list.push(SpIdentifier { type_: SpType::Switch, slot: 0 });
-        sp_list.push(SpIdentifier { type_: SpType::Switch, slot: 1 });
+        sp_list.push(SpIdentifier { typ: SpType::Switch, slot: 0 });
+        sp_list.push(SpIdentifier { typ: SpType::Switch, slot: 1 });
     }
 
     if args.psc {
-        sp_list.push(SpIdentifier { type_: SpType::Power, slot: 0 });
+        sp_list.push(SpIdentifier { typ: SpType::Power, slot: 0 });
     }
 
     sp_list.sort();
@@ -354,7 +354,7 @@ async fn sp_info_mgs(
     let mut handles = vec![];
     for sp_id in sp_list {
         let handle =
-            tokio::spawn(sp_info(mgs_client.clone(), sp_id.type_, sp_id.slot));
+            tokio::spawn(sp_info(mgs_client.clone(), sp_id.typ, sp_id.slot));
 
         handles.push((sp_id, handle));
     }
@@ -439,7 +439,7 @@ fn sp_info_csv<R: std::io::Read>(
             bail!("invalid slot in \"{field}\"");
         })?;
 
-        let sp = SpIdentifier { type_, slot };
+        let sp = SpIdentifier { typ: type_, slot };
 
         if args.matches_sp(&sp) {
             sps.push(Some(sp));
@@ -679,7 +679,7 @@ async fn sp_read_sensors(
 
     for (component, ids) in work.iter() {
         for (value, id) in mgs_client
-            .sp_component_get(&id.type_, id.slot, component.device())
+            .sp_component_get(&id.typ, id.slot, component.device())
             .await?
             .iter()
             .filter_map(|detail| match detail {
@@ -865,7 +865,7 @@ pub(crate) async fn cmd_mgs_sensors(
         for sp in &sps {
             print_value(format!(
                 "{}-{}",
-                crate::mgs::sp_type_to_str(&sp.type_).to_uppercase(),
+                crate::mgs::sp_type_to_str(&sp.typ).to_uppercase(),
                 sp.slot
             ));
         }

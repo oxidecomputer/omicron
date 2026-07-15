@@ -5,14 +5,16 @@
 //! Functional code for instance-related types.
 
 use crate::latest::instance::{
-    InstanceDiskAttach, InstanceDiskAttachment, IpAssignment, Ipv4Assignment,
-    Ipv6Assignment, PrivateIpStackCreate, PrivateIpv4StackCreate,
-    PrivateIpv6StackCreate,
+    InstanceCpuCount, InstanceDiskAttach, InstanceDiskAttachment,
+    InstanceState, IpAssignment, Ipv4Assignment, Ipv6Assignment,
+    PrivateIpStackCreate, PrivateIpv4StackCreate, PrivateIpv6StackCreate,
 };
+use anyhow::Context;
 use omicron_common::api::external::Name;
 use oxnet::IpNet;
 use oxnet::Ipv4Net;
 use oxnet::Ipv6Net;
+use std::fmt::{self, Display, Formatter};
 
 impl InstanceDiskAttachment {
     /// Get the name of the disk described by this attachment.
@@ -160,5 +162,42 @@ impl PrivateIpStackCreate {
     /// Return true if this IP configuration has an IPv6 stack.
     pub fn has_ipv6_stack(&self) -> bool {
         self.ipv6_assignment().is_some()
+    }
+}
+
+impl Display for InstanceState {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        write!(f, "{}", self.label())
+    }
+}
+
+impl InstanceState {
+    pub fn label(&self) -> &'static str {
+        match self {
+            InstanceState::Creating => "creating",
+            InstanceState::Starting => "starting",
+            InstanceState::Running => "running",
+            InstanceState::Stopping => "stopping",
+            InstanceState::Stopped => "stopped",
+            InstanceState::Rebooting => "rebooting",
+            InstanceState::Migrating => "migrating",
+            InstanceState::Repairing => "repairing",
+            InstanceState::Failed => "failed",
+            InstanceState::Destroyed => "destroyed",
+        }
+    }
+}
+
+impl TryFrom<i64> for InstanceCpuCount {
+    type Error = anyhow::Error;
+
+    fn try_from(value: i64) -> Result<Self, Self::Error> {
+        Ok(InstanceCpuCount(u16::try_from(value).context("parsing CPU count")?))
+    }
+}
+
+impl From<&InstanceCpuCount> for i64 {
+    fn from(c: &InstanceCpuCount) -> Self {
+        i64::from(c.0)
     }
 }

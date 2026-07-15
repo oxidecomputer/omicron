@@ -38,9 +38,11 @@ use nexus_types::deployment::ClickhouseMode;
 use nexus_types::deployment::ClickhousePolicy;
 use nexus_types::deployment::ExpectedVersion;
 use nexus_types::deployment::OmicronZoneNic;
+use nexus_types::deployment::OperatorNexusConfig;
 use nexus_types::deployment::PlanningInput;
 use nexus_types::deployment::SledFilter;
 use nexus_types::deployment::TargetReleaseDescription;
+use nexus_types::deployment::UpstreamNtpConfig;
 use nexus_types::external_api::sled::SledPolicy;
 use nexus_types::inventory::Collection;
 use omicron_common::address::Ipv4Range;
@@ -736,15 +738,17 @@ impl ExampleSystemBuilder {
                             .for_new_nexus()
                             .expect("should have an external IP for Nexus");
                         builder
-                            .sled_add_zone_nexus_with_config(
+                            .sled_add_zone_nexus(
                                 sled_id,
-                                false,
-                                vec![],
                                 self.target_release
                                     .zone_image_source(ZoneKind::Nexus)
                                     .expect("obtained Nexus image source"),
                                 external_ip,
                                 initial_blueprint.nexus_generation,
+                                &OperatorNexusConfig {
+                                    external_tls: false,
+                                    external_dns_servers: &[],
+                                },
                             )
                             .unwrap();
                     }
@@ -898,26 +902,35 @@ impl ExampleSystemBuilder {
                     }
                     // Add BoundaryNtp zones on the first N discretionary sleds.
                     if will_get_boundary_ntp {
-                        let ntp_servers = vec!["ntp.example.com".to_string()];
-                        let dns_servers = vec!["8.8.8.8".parse().unwrap()];
-                        let domain = Some("example.com".to_string());
+                        // Use the upstream NTP / DNS values from the
+                        // `PlanningInput`'s policy so this stays in sync with
+                        // the `SystemDescription` defaults.
+                        let networking =
+                            base_input.external_service_networking_policy();
+                        let ntp_servers =
+                            networking.upstream_ntp_servers.clone();
+                        let dns_servers =
+                            networking.upstream_dns_servers.clone();
+                        let domain = networking.upstream_ntp_domain.clone();
                         let external_ip = external_networking_alloc
                             .for_new_boundary_ntp()
                             .expect(
                                 "should have an external IP for BoundaryNtp",
                             );
                         builder
-                            .sled_add_zone_boundary_ntp_with_config(
+                            .sled_add_zone_boundary_ntp(
                                 sled_id,
-                                ntp_servers,
-                                dns_servers,
-                                domain,
                                 self.target_release
                                     .zone_image_source(ZoneKind::BoundaryNtp)
                                     .expect(
                                         "obtained BoundaryNtp image source",
                                     ),
                                 external_ip,
+                                &UpstreamNtpConfig {
+                                    ntp_servers: &ntp_servers,
+                                    dns_servers: &dns_servers,
+                                    domain: domain.as_deref(),
+                                },
                             )
                             .unwrap();
                     }

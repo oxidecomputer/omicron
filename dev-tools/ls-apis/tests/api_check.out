@@ -37,9 +37,6 @@ Client-managed API:
     NTP Admin (ntp-admin-client, exposed by omicron-ntp-admin)
         reason: Sled Agent (within the Host OS deployment unit) calls into NTP, and is updated before NTP. This requires that the NTP Admin API be client-side versioned.
 
-    NTP Admin version 1 (ntp-admin-v1-client, exposed by omicron-ntp-admin)
-        reason: Sled Agent (within the Host OS deployment unit) calls into NTP, and is updated before NTP. This requires that the NTP Admin API be client-side versioned.
-
     Crucible Repair (repair-client, exposed by crucible-downstairs)
         reason: depends on itself (i.e., instances call each other)
     Repo Depot API (repo-depot-client, exposed by omicron-sled-agent)

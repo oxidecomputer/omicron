@@ -74,13 +74,6 @@ impl From<sled_agent::VmmRuntimeState> for VmmRuntimeState {
     }
 }
 
-impl From<VmmRuntimeState> for sled_agent::VmmRuntimeState {
-    fn from(state: VmmRuntimeState) -> Self {
-        let VmmRuntimeState { state, generation, time_updated } = state;
-        Self { state: state.into(), generation, time_updated }
-    }
-}
-
 #[derive(Copy, Clone, Debug, Deserialize, Serialize, Eq, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum VmmState {
@@ -180,57 +173,6 @@ impl From<sled_agent::VmmState> for VmmState {
                 VmmState::Failed(VmmFailureReason::FromSledAgent)
             }
             sled_agent::VmmState::Destroyed => VmmState::Destroyed,
-        }
-    }
-}
-
-impl From<VmmState> for sled_agent::VmmState {
-    fn from(state: VmmState) -> Self {
-        match state {
-            // The `Creating` state is internal to Nexus; the outside world
-            // should treat it as equivalent to `Starting`.
-            VmmState::Starting | VmmState::Creating => {
-                sled_agent::VmmState::Starting
-            }
-            VmmState::Running => sled_agent::VmmState::Running,
-            VmmState::Stopping => sled_agent::VmmState::Stopping,
-            VmmState::Stopped => sled_agent::VmmState::Stopped,
-            VmmState::Rebooting => sled_agent::VmmState::Rebooting,
-            VmmState::Migrating => sled_agent::VmmState::Migrating,
-            VmmState::Failed(_) => sled_agent::VmmState::Failed,
-
-            // The `SagaUnwound` state is internal to Nexus; the outside world
-            // should treat it as equivalent to `Destroyed`.
-            VmmState::Destroyed | VmmState::SagaUnwound => {
-                sled_agent::VmmState::Destroyed
-            }
-        }
-    }
-}
-
-impl From<VmmState> for omicron_common::api::external::InstanceState {
-    fn from(value: VmmState) -> Self {
-        use omicron_common::api::external::InstanceState as Output;
-
-        match value {
-            // An instance with a VMM which is in the `Creating` state maps to
-            // `InstanceState::Starting`, rather than `InstanceState::Creating`.
-            // If we are still creating the VMM, this is because we are
-            // attempting to *start* the instance; instances may be created
-            // without creating a VMM to run them, and then started later.
-            VmmState::Creating | VmmState::Starting => Output::Starting,
-            VmmState::Running => Output::Running,
-            VmmState::Stopping => Output::Stopping,
-            // `SagaUnwound` should map to `Stopped` so that an `instance_view`
-            // API call that produces an instance with an unwound VMM will appear to
-            // be `Stopped`. This is because instances with unwound VMMs can
-            // be started by a subsequent instance-start saga, just like
-            // instances whose internal state actually is `Stopped`.
-            VmmState::Stopped | VmmState::SagaUnwound => Output::Stopped,
-            VmmState::Rebooting => Output::Rebooting,
-            VmmState::Migrating => Output::Migrating,
-            VmmState::Failed(_) => Output::Failed,
-            VmmState::Destroyed => Output::Destroyed,
         }
     }
 }

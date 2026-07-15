@@ -445,7 +445,7 @@ mod tests {
                 if requests_completed.load(Ordering::Relaxed) == 2 {
                     Ok(())
                 } else {
-                    Err(CondCheckError::<()>::NotYet)
+                    Err(CondCheckError::<()>::NotYet { status: None })
                 }
             },
             &Duration::from_millis(10),
@@ -519,7 +519,7 @@ mod tests {
                 if requests_completed.load(Ordering::Relaxed) == 1 {
                     Ok(())
                 } else {
-                    Err(CondCheckError::<()>::NotYet)
+                    Err(CondCheckError::<()>::NotYet { status: None })
                 }
             },
             &Duration::from_millis(10),
@@ -605,7 +605,7 @@ mod tests {
                 if requests_completed.load(Ordering::Relaxed) == 2 {
                     Ok(())
                 } else {
-                    Err(CondCheckError::<()>::NotYet)
+                    Err(CondCheckError::<()>::NotYet { status: None })
                 }
             },
             &Duration::from_millis(10),

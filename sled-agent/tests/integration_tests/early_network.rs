@@ -12,7 +12,7 @@ use sled_agent_types::early_networking::{
     BgpConfig, BgpPeerConfig, EarlyNetworkConfigEnvelope, ImportExportPolicy,
     LinkFec, LinkSpeed, LldpAdminStatus, LldpPortConfig, MaxPathConfig,
     PortConfig, RackNetworkConfig, RouterLifetimeConfig, RouterPeerType,
-    SwitchSlot, UplinkAddress, UplinkAddressConfig,
+    SwitchSlot, UplinkAddress, UplinkAddressConfig, UplinkPorts,
 };
 use sled_agent_types::inventory::SourceNatConfigGeneric;
 use sled_agent_types::system_networking::{
@@ -139,7 +139,7 @@ fn current_config_example() -> (&'static str, EarlyNetworkConfigEnvelope) {
             rack_subnet: "fd00:1122:3344:100::/56".parse().unwrap(),
             infra_ip_first: "172.20.15.21".parse().unwrap(),
             infra_ip_last: "172.20.15.22".parse().unwrap(),
-            ports: vec![
+            ports: UplinkPorts::new(vec![
                 PortConfig {
                     routes: vec![],
                     addresses: vec![],
@@ -298,7 +298,8 @@ fn current_config_example() -> (&'static str, EarlyNetworkConfigEnvelope) {
                         management_addrs: None,
                     }),
                 },
-            ],
+            ])
+            .expect("test port list is non-empty"),
             bgp: vec![BgpConfig {
                 asn: 65002,
                 originate: vec![

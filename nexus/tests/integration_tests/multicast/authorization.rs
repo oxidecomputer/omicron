@@ -21,7 +21,7 @@ use nexus_test_utils::resource_helpers::{
 };
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::instance::{
-    InstanceCreate, InstanceNetworkInterfaceAttachment,
+    InstanceCpuCount, InstanceCreate, InstanceNetworkInterfaceAttachment,
 };
 use nexus_types::external_api::multicast::{
     InstanceMulticastGroupJoin, MulticastGroup, MulticastGroupMember,
@@ -33,7 +33,7 @@ use nexus_types::external_api::silo::{
 };
 use nexus_types_versions::latest::instance::Instance;
 use omicron_common::api::external::{
-    ByteCount, Hostname, IdentityMetadataCreateParams, InstanceCpuCount,
+    ByteCount, Hostname, IdentityMetadataCreateParams,
 };
 use omicron_uuid_kinds::SiloUserUuid;
 

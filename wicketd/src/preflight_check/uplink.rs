@@ -53,6 +53,7 @@ use wicket_common::preflight_check::StepWarning;
 use wicket_common::preflight_check::UpdateEngine;
 use wicket_common::preflight_check::UplinkPreflightStepId;
 use wicket_common::preflight_check::UplinkPreflightTerminalError;
+use wicket_common::rack_setup::ManualPortConfig;
 use wicket_common::rack_setup::UserSpecifiedPortConfig;
 use wicket_common::rack_setup::UserSpecifiedRackNetworkConfig;
 
@@ -95,6 +96,11 @@ pub(super) async fn run_local_uplink_preflight_check(
     let mut engine = UpdateEngine::new(log, sender);
 
     for (port, uplink) in network_config.port_map(our_switch_slot) {
+        let UserSpecifiedPortConfig::Manual(uplink) = uplink else {
+            error!(log, "DdmAutoPortConfig not supported for uplinks",);
+            continue;
+        };
+
         add_steps_for_single_local_uplink_preflight_check(
             &mut engine,
             &dpd_client,
@@ -134,7 +140,7 @@ fn add_steps_for_single_local_uplink_preflight_check<'a>(
     engine: &mut UpdateEngine<'a>,
     dpd_client: &'a DpdClient,
     port: &'a str,
-    uplink: &'a UserSpecifiedPortConfig,
+    uplink: &'a ManualPortConfig,
     dns_servers: &'a [IpAddr],
     ntp_servers: &'a [String],
     dns_name_to_query: Option<&'a str>,
@@ -819,7 +825,7 @@ fn add_steps_for_single_local_uplink_preflight_check<'a>(
 }
 
 fn build_port_settings(
-    uplink: &UserSpecifiedPortConfig,
+    uplink: &ManualPortConfig,
     link_id: &LinkId,
 ) -> PortSettings {
     // Map from omicron_common types to dpd_client types

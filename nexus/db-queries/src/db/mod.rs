@@ -16,6 +16,7 @@ mod cte_utils;
 // This is marked public for use by the integration tests
 pub mod datastore;
 mod explain;
+pub(crate) mod fm_rendezvous_resources;
 mod on_conflict_ext;
 // Public for doctests.
 pub mod pagination;

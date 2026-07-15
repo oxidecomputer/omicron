@@ -89,7 +89,7 @@ async fn wait_for_group_active(
             if group.state == "Active" {
                 Ok(group)
             } else {
-                Err(CondCheckError::<()>::NotYet)
+                Err(CondCheckError::<()>::NotYet { status: None })
             }
         },
         &POLL_INTERVAL,
@@ -98,7 +98,7 @@ async fn wait_for_group_active(
     .await
     {
         Ok(group) => group,
-        Err(poll::Error::TimedOut(elapsed)) => {
+        Err(poll::Error::TimedOut { elapsed, .. }) => {
             panic!(
                 "group {group_name} did not reach state 'Active' within {elapsed:?}"
             );
@@ -134,10 +134,10 @@ async fn wait_for_member_state(
                 if member.state == expected_state_str {
                     Ok(member.clone())
                 } else {
-                    Err(CondCheckError::<()>::NotYet)
+                    Err(CondCheckError::<()>::NotYet { status: None })
                 }
             } else {
-                Err(CondCheckError::<()>::NotYet)
+                Err(CondCheckError::<()>::NotYet { status: None })
             }
         },
         &POLL_INTERVAL,
@@ -146,7 +146,7 @@ async fn wait_for_member_state(
     .await
     {
         Ok(member) => member,
-        Err(poll::Error::TimedOut(elapsed)) => {
+        Err(poll::Error::TimedOut { elapsed, .. }) => {
             panic!(
                 "member {instance_id} in group {group_name} did not reach state '{expected_state_str}' within {elapsed:?}"
             );

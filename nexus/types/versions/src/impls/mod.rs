@@ -41,6 +41,7 @@ macro_rules! id_path_param {
 pub(crate) use id_path_param;
 pub(crate) use path_param;
 
+mod affinity;
 mod alert;
 mod hardware;
 mod instance;

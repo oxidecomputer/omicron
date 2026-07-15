@@ -116,6 +116,7 @@ pub fn make_omicron_oso(log: &slog::Logger) -> Result<OsoInit, anyhow::Error> {
         QuiesceState::get_polar_class(),
         SiloCertificateList::get_polar_class(),
         SiloGroupList::get_polar_class(),
+        SiloImageList::get_polar_class(),
         SiloIdentityProviderList::get_polar_class(),
         SiloUserList::get_polar_class(),
         SiloUserSessionList::get_polar_class(),
@@ -157,6 +158,8 @@ pub fn make_omicron_oso(log: &slog::Logger) -> Result<OsoInit, anyhow::Error> {
         SiloImage::init(),
         // Fleet-level resources
         AddressLot::init(),
+        BgpConfig::init(),
+        BgpAnnounceSet::init(),
         Blueprint::init(),
         LoopbackAddress::init(),
         Certificate::init(),

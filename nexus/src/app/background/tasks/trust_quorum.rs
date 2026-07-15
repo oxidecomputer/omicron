@@ -23,7 +23,7 @@ use nexus_types::trust_quorum::{
     TrustQuorumMemberState,
 };
 use omicron_common::address::{Ipv6Subnet, RACK_PREFIX, get_64_subnet};
-use omicron_uuid_kinds::{GenericUuid, RackUuid, SledUuid};
+use omicron_uuid_kinds::{RackUuid, SledUuid};
 use parallel_task_set::ParallelTaskSet;
 use rand::seq::SliceRandom;
 use serde_json::json;
@@ -519,7 +519,7 @@ async fn allocate_subnets_and_start_sled_agents(
         let allocation = match datastore
             .allocate_sled_underlay_subnet_octets(
                 &opctx,
-                rack_id.into_untyped_uuid(),
+                rack_id,
                 hw_baseboard_id,
             )
             .await?
@@ -561,8 +561,7 @@ async fn start_sled_agents(
     >,
 ) -> Result<Vec<StartSledAgentResults>, Error> {
     info!(log, "Looking up subnet for rack: {}", rack_id);
-    let subnet =
-        datastore.rack_subnet(&opctx, rack_id.into_untyped_uuid()).await?;
+    let subnet = datastore.rack_subnet(&opctx, rack_id).await?;
     let rack_subnet =
         Ipv6Subnet::<RACK_PREFIX>::from(rack_subnet(Some(subnet))?);
 
@@ -633,7 +632,7 @@ async fn send_start_sled_agent_requests(
                 schema_version: 1,
                 body: StartSledAgentRequestBody {
                     id: allocation.sled_id.into(),
-                    rack_id: allocation.rack_id,
+                    rack_id: allocation.rack_id.into(),
                     use_trust_quorum: true,
                     is_lrtq_learner: false,
                     subnet: sled_agent_client::types::Ipv6Subnet {

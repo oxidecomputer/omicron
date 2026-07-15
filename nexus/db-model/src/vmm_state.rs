@@ -3,9 +3,14 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use super::impl_enum_type;
+use crate::Instance;
+use crate::InstanceState;
+use crate::Vmm;
+use nexus_types::external_api::instance;
 use serde::Deserialize;
 use serde::Serialize;
 use std::fmt;
+use uuid::Uuid;
 
 impl_enum_type!(
     VmmStateEnum:
@@ -143,12 +148,6 @@ impl From<sled_agent_types::instance::VmmState> for VmmState {
     }
 }
 
-impl From<VmmState> for omicron_common::api::external::InstanceState {
-    fn from(value: VmmState) -> Self {
-        value.to_nexus_state().into()
-    }
-}
-
 impl std::str::FromStr for VmmState {
     type Err = VmmStateParseError;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
@@ -180,6 +179,198 @@ impl fmt::Display for VmmStateParseError {
 }
 
 impl std::error::Error for VmmStateParseError {}
+
+/// Returns the operator-visible [external API
+/// `InstanceState`](instance::InstanceState) for the provided [`Instance`]
+/// and its active [`Vmm`], if one exists.
+pub struct InstanceStateComputer<'s> {
+    instance_state: InstanceState,
+    migration_id: Option<&'s Uuid>,
+    vmm_state: Option<&'s VmmState>,
+}
+
+impl<'s> InstanceStateComputer<'s> {
+    pub fn new(instance: &'s Instance, vmm: Option<&'s Vmm>) -> Self {
+        Self {
+            instance_state: instance.nexus_state,
+            migration_id: instance.migration_id.as_ref(),
+            vmm_state: vmm.as_ref().map(|vmm| &vmm.state),
+        }
+    }
+
+    pub(crate) fn from_sled_instance(
+        sled_instance: &'s crate::SledInstance,
+    ) -> Self {
+        Self {
+            // A `SledInstance` is a view which contains only instances which
+            // are in the `Vmm` state, so we can assume the `InstanceState`
+            // here, even though it isn't part of the `SledInstance` model.
+            instance_state: InstanceState::Vmm,
+            migration_id: sled_instance.migration_id.as_ref(),
+            vmm_state: Some(&sled_instance.state),
+        }
+    }
+
+    /// Determine the [`instance::InstanceState`] to report for the instance,
+    /// based on the provided `instance_state`, `vmm_state`, and `migration_id`.
+    ///
+    /// Note that these fields *must* all come from the the same instance record
+    /// in the database; otherwise, an incorrect state may be synthesized.
+    ///
+    /// # Panics
+    ///
+    /// In debug mode only, this function panics if it encounters a combination
+    /// of instance and VMM states that should not occur: namely, if the
+    /// instance is in [`InstanceState::Vmm`] but has no active VMM, or if it is
+    /// in any other [`InstanceState`] and *does* have an active VMM.
+    ///
+    /// These cases should be unrepresentable in the database due to CHECK
+    /// constraints on the `instance` table. If they are encountered here, it is
+    /// due to a programmer error; either the check constraint is not working
+    /// correctly or the instance and VMM records did not come from the same
+    /// database query. Therefore, we panic when running tests if these
+    /// conditions are encountered in order to loudly alert the programmer that
+    /// they've made a mistake. If we are not running in debug mode, we instead
+    /// produce a state based on the `InstanceState` so that Nexus does not
+    /// crash upon encountering an invalid situation.
+    pub fn compute_state_from(
+        instance_state: &'s InstanceState,
+        migration_id: Option<&'s Uuid>,
+        vmm_state: Option<&'s VmmState>,
+    ) -> instance::InstanceState {
+        Self { instance_state: *instance_state, migration_id, vmm_state }
+            .compute_state()
+    }
+
+    /// Determine the [`instance::InstanceState`] to report for the instance,
+    /// based on the state of the instance record and its active VMM record (if
+    /// one exists).
+    ///
+    /// # Panics
+    ///
+    /// In debug mode only, this function panics if it encounters a combination
+    /// of instance and VMM states that should not occur: namely, if the
+    /// instance is in [`InstanceState::Vmm`] but has no active VMM, or if it is
+    /// in any other [`InstanceState`] and *does* have an active VMM.
+    ///
+    /// These cases should be unrepresentable in the database due to CHECK
+    /// constraints on the `instance` table. If they are encountered here, it is
+    /// due to a programmer error; either the check constraint is not working
+    /// correctly or the instance and VMM records did not come from the same
+    /// database query. Therefore, we panic when running tests if these
+    /// conditions are encountered in order to loudly alert the programmer that
+    /// they've made a mistake. If we are not running in debug mode, we instead
+    /// produce a state based on the `InstanceState` so that Nexus does not
+    /// crash upon encountering an invalid situation.
+    pub fn compute_state(&self) -> instance::InstanceState {
+        // We want to only report that an instance is `Stopped` when a new
+        // `instance-start` saga is able to proceed. That means that:
+        match (self.instance_state, self.vmm_state) {
+            // - If there's an active migration ID for the instance, *always*
+            //   treat its state as "migration" regardless of the VMM's state.
+            //
+            //   This avoids an issue where an instance whose previous active
+            //   VMM has been destroyed as a result of a successful migration
+            //   out will appear to be "stopping" for the time between when that
+            //   VMM was reported destroyed and when the instance record was
+            //   updated to reflect the migration's completion.
+            //
+            //   Instead, we'll continue to report the instance's state as
+            //   "migrating" until an instance-update saga has resolved the
+            //   outcome of the migration, since only the instance-update saga
+            //   can complete the migration and update the instance record to
+            //   point at its new active VMM. No new instance-migrate,
+            //   instance-stop, or instance-delete saga can be started
+            //   until this occurs.
+            //
+            //   If the instance actually *has* stopped or failed before a
+            //   successful migration out, this is fine, because an
+            //   instance-update saga will come along and remove the active VMM
+            //   and migration IDs.
+            //
+            (InstanceState::Vmm, Some(_)) if self.migration_id.is_some() => {
+                instance::InstanceState::Migrating
+            }
+            // - An instance with a "stopped" or "destroyed" VMM needs to be
+            //   recast as a "stopping" instance, as the virtual provisioning
+            //   resources for that instance have not been deallocated until the
+            //   active VMM ID has been unlinked by an update saga.
+            (
+                InstanceState::Vmm,
+                Some(VmmState::Stopped | VmmState::Destroyed),
+            ) => instance::InstanceState::Stopping,
+            // - An instance with a "failed" VMM should *not* be counted as
+            //   failed until the VMM is unlinked, because a start saga must be
+            //   able to run for a "failed" instance. Until then, it will
+            //   continue to appear "stopping".
+            (InstanceState::Vmm, Some(VmmState::Failed)) => {
+                instance::InstanceState::Stopping
+            }
+            // - An instance with a "saga unwound" VMM, on the other hand, can
+            //   be treated as "failed", since --- unlike an instance with a
+            //   "failed" active VMM --- a new start saga can run at any time by
+            //   just clearing out the old VMM ID.
+            (InstanceState::Vmm, Some(VmmState::SagaUnwound)) => {
+                instance::InstanceState::Failed
+            }
+            // - If the instance has a VMM but the VMM is "creating", return
+            //   `InstanceState::Starting`, rather than
+            //   `InstanceState::Creating`.
+            //   If we are still creating the VMM, this is because we are
+            //   attempting to *start* the instance; instances may be created
+            //   without creating a VMM to run them, and then started later.
+            (
+                InstanceState::Vmm,
+                Some(VmmState::Creating | VmmState::Starting),
+            ) => instance::InstanceState::Starting,
+            (InstanceState::Vmm, Some(VmmState::Running)) => {
+                instance::InstanceState::Running
+            }
+            (InstanceState::Vmm, Some(VmmState::Stopping)) => {
+                instance::InstanceState::Stopping
+            }
+            (InstanceState::Vmm, Some(VmmState::Rebooting)) => {
+                instance::InstanceState::Rebooting
+            }
+            (InstanceState::Vmm, Some(VmmState::Migrating)) => {
+                instance::InstanceState::Migrating
+            }
+            // - An instance with no VMM is always "stopped" (as long as it's
+            //   not "starting" etc.)
+            (InstanceState::NoVmm, None) => instance::InstanceState::Stopped,
+            // - The instance should not be in `InstanceState::Vmm` if there is
+            //   no active VMM record, this is probably a bug, but return
+            //   `InstanceState::Stopped`, because that's basically true
+            //   regardless.
+            (InstanceState::Vmm, None) => {
+                debug_assert!(
+                    false,
+                    "if the instance state is `InstanceState::Vmm`, there \
+                     should be a VMM state"
+                );
+                instance::InstanceState::Stopped
+            }
+            (InstanceState::NoVmm, _vmm_state) => {
+                debug_assert_eq!(
+                    _vmm_state, None,
+                    "if the instance is in `InstanceState::NoVmm`, there \
+                     should be no VMM state"
+                );
+                instance::InstanceState::Stopped
+            }
+            // - If there's no VMM state, use the instance's state.
+            (instance_state, None) => instance_state.into(),
+            (instance_state, _vmm_state) => {
+                debug_assert_eq!(
+                    _vmm_state, None,
+                    "if the instance state is not `InstanceState::Vmm`, \
+                     there should be no VMM state"
+                );
+                instance_state.into()
+            }
+        }
+    }
+}
 
 #[cfg(test)]
 mod tests {

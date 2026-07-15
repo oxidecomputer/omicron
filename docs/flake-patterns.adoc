@@ -8,6 +8,7 @@ Omicron is a large distributed system, as a result of which it is somewhat susce
 
 == Glossary [[glossary]]
 
+Background task:: A task that runs periodically in the background on a timer. Most background tasks implement the _reliable persistent workflow_ or _RPW_ pattern; see https://rfd.shared.oxide.computer/rfd/0373[RFD 373 Reliable Persistent Workflows].
 Nexus test:: A test that uses the Nexus test framework, typically represented as an async function annotated with `#[nexus_test]`. (Some tests may manually set up Nexus.)
 System under test (SUT):: The production code (components or systems) being tested.
 
@@ -45,6 +46,7 @@ This is most commonly observed with inventory collections, with two variations:
 **Example commits:**
 
 * https://github.com/oxidecomputer/omicron/commit/1bb7b11bbbe3[`1bb7b11bbbe3`] tells ClickHouse to perform an `ALTER TABLE` operation synchronously.
+* https://github.com/oxidecomputer/omicron/commit/9f1029da32f2[`9f1029da32f2`] waits for instance-update saga nodes that run after the node that makes the instance externally `Running`, instead of asserting on their effects immediately.
 
 === Stale watch channel notifications [[stale-watch-channel-notifications]]
 
@@ -63,8 +65,7 @@ This is most commonly observed with inventory collections, with two variations:
 
 // FIXME: replace XXXX with the merged commit hash of the test_repo_upload race-fix PR.
 * https://github.com/oxidecomputer/omicron/commit/XXXX[`XXXX`] replaces `changed()` waits on the sled agents' delete-reconciler channels with a `generation >= pruned_generation` predicate.
-// FIXME: replace YYYY with the merged commit hash of the oximeter agent test fix.
-* https://github.com/oxidecomputer/omicron/commit/YYYY[`YYYY`] replaces a `has_changed()` wait on the oximeter producer-details channel (which a spurious notification could satisfy) with a level-triggered `n_collections + n_failures >= n` predicate.
+* https://github.com/oxidecomputer/omicron/commit/cfdb3c3018f1[`cfdb3c3018f1`] replaces a `has_changed()` wait on the oximeter producer-details channel (which a spurious notification could satisfy) with a level-triggered `n_collections + n_failures >= n` predicate.
 
 === Infinite retry loops [[infinite-retry-loops]]
 
@@ -90,6 +91,27 @@ This is most commonly observed with inventory collections, with two variations:
 
 * https://github.com/oxidecomputer/omicron/commit/2050ef3a67d2[`2050ef3a67d2`] disables the `sp_ereport_ingester` background task for most tests, but re-enables it for `test_omdb_success_cases`.
 * https://github.com/oxidecomputer/omicron/commit/4bd9ebbc71e9[`4bd9ebbc71e9`] makes Nexus's startup-time switch-port insertion (exercised by `omicron-dev run-all`) accept `Error::ObjectAlreadyExists` when a background task wins the race to insert the same record.
+
+=== Relying on periodic background-task activation [[relying-on-periodic-background-task-activation]]
+
+**What this is:** A test waits for a state change that only a Nexus background task performs, but never activates the task explicitly. Instead, it relies on the task's periodic timer firing while the test waits.
+
+**Why this is bad:** Task activation periods are often at the same time scale as test timeouts. For example, the `abandoned_vmm_reaper` task's period and a typical `wait_for_condition` timeout are both 60 seconds, so whether an activation lands inside the wait window depends on when the timer last fired. Even when the test doesn't flake, it spends most of its runtime sleeping.
+
+**How to fix this:** Activate the task explicitly through the Nexus lockstep API, using either `activate_background_task` in `nexus/test-utils/src/background.rs` or a task-specific `run_*` wrapper.
+
+Note that a background task activation that fires too early (e.g., one that requires a saga to complete) can be a no-op.
+
+* If the prerequisite is directly observable, wait for it first and then activate the task once.
+* If it is not, activate the task on each iteration of the surrounding `wait_for_condition` loop, which makes the wait level-triggered. This relies on the general design principle that background tasks are idempotent.
+
+It is fine to call `activate_background_task` in a loop since it is synchronous: it waits for the task to go idle, activates it, and waits for a newer completed iteration before returning.
+
+**Example commits:**
+
+* https://github.com/oxidecomputer/omicron/commit/9f1029da32f2[`9f1029da32f2`] activates the `abandoned_vmm_reaper` task on each poll instead of waiting out its periodic activation interval.
+// FIXME: replace WWWW with the merged commit hash of the dead-switch NAT race-fix PR.
+* https://github.com/oxidecomputer/omicron/commit/8038f747226b[`8038f747226b`] makes it so that when checking that a restarted switch zone has received its NAT entries, the test triggers dendrite's NAT reconciliation on each poll rather than waiting for dendrite's own periodic background task poll. Here, the background task lives inside `dpd` rather than Nexus, so it is triggered through the `dpd` client's `nat_trigger_update` rather than the Nexus lockstep API.
 
 === Teardown ordering races [[teardown-ordering-races]]
 
@@ -121,8 +143,7 @@ This is particularly susceptible to happening with Tokio's paused timer, which w
 * https://github.com/oxidecomputer/omicron/commit/ca3b41b1e3f4[`ca3b41b1e3f4`] treats a `QueueFull` error as a transient `CondCheckError::NotYet`.
 * https://github.com/oxidecomputer/omicron/commit/9b5d906eb468[`9b5d906eb468`] advances Tokio's time by one Oximeter collection at a time, and uses a watch channel to signal that collection has been completed.
 ** This fix, while necessary, turned out to not be sufficient: it stopped advancing time once a collection completed, but kept advancing while one was in flight, so under load further timer ticks could still overflow the channel.
-** The followup https://github.com/oxidecomputer/omicron/commit/YYYY[`YYYY`] makes the Oximeter collection interval far longer than the test's runtime (effectively disabling periodic collections after the first one), and makes the tests request each further collection explicitly. This prevents the bounded channel from ever filling up.
-// FIXME: replace YYYY with the merged commit hash of the oximeter agent test fix.
+** The followup https://github.com/oxidecomputer/omicron/commit/cfdb3c3018f1[`cfdb3c3018f1`] makes the Oximeter collection interval far longer than the test's runtime (effectively disabling periodic collections after the first one), and makes the tests request each further collection explicitly. This prevents the bounded channel from ever filling up.
 
 === Database time resolution mismatch [[database-time-resolution-mismatch]]
 
@@ -163,3 +184,21 @@ NOTE: The `serial_test` crate **does not work** within Omicron: it depends on an
 
 * https://github.com/oxidecomputer/omicron/commit/c9dec4111860[`c9dec4111860`] ensures that learner nodes' ledger file names cannot collide with those of regular peer nodes. (Learner 1 and peer node `pc-b-1` both generated `test-1-network-config-ledger`.)
 * https://github.com/oxidecomputer/omicron/commit/067c79302158[`067c79302158`] changes a scenario from being a separate test to being listed within `test_replicated`.
+
+=== Ephemeral port reuse races [[ephemeral-port-reuse-races]]
+
+**What this is:** A test performs the following sequence of operations:
+
+. Start a service on an ephemeral TCP port (i.e., bind to port 0).
+. Kill the service.
+. Restart the service, attempting to bind to the port determined in step 1.
+
+In between steps 2 and 3, a different process such as a test running concurrently can grab the same port. This can result in test flakiness.
+
+**Why this is bad:** This is a test flake at best and cross-test interference at worst.
+
+**How to fix this:** Use the `RetargetableTcpProxy` available at `test-utils/src/dev/tcp-proxy.rs`. That provides a persistent port that stays bound throughout process restarts.
+
+**Example commits:**
+
+* https://github.com/oxidecomputer/omicron/commit/1a1529176b54[`1a1529176b54`] introduces the TCP proxy.

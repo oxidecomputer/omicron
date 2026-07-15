@@ -80,6 +80,13 @@
       mgVersion = openAPIVersion
         ./tools/maghemite_mg_openapi_version;
 
+      mgDdmdCommit = with pkgs.lib;
+        let
+          file = strings.fileContents ./tools/maghemite_ddm_openapi_version;
+          parts = strings.splitString "\n" file;
+        in
+        extractHash { prefix = "COMMIT"; inherit parts; } 0;
+
       dendriteCommit = with pkgs.lib;
         let
           file = strings.fileContents ./tools/dendrite_version;
@@ -166,66 +173,100 @@
               '';
           };
 
-      mgd = with pkgs.lib;
+      maghemiteShas = with pkgs.lib;
         let
-          commit = mgVersion.commit;
-          repo = "maghemite";
-          shas =
-            let
-              file = builtins.readFile
-                ./tools/maghemite_mgd_checksums;
-            in
-            strings.splitString
-              "\n"
-              file;
-          # get stuff
-          tarball = downloadBuildomat
-            {
-              inherit commit repo;
-              sha = findSha shas "CIDL_SHA256";
-              kind = "image";
-              file = "mgd.tar.gz";
-            };
-          linuxBin =
-            downloadBuildomat
+          file = builtins.readFile
+            ./tools/maghemite_mgd_checksums;
+        in
+        strings.splitString
+          "\n"
+          file;
+
+      # downloads a maghemite thing from buildomat, and produces a derivation
+      # with the maghemite thing's binary symlinked into its outputs.
+      mkMaghemiteThing =
+        {
+          # name of the maghemite thing to download. this is the filename stem
+          # for the tarball to fetch, and the name of the directory for the
+          # maghemite thing's outputs (nested under `opt/oxide/`) tarball and
+          # binary to symlink into the outputs.
+          name
+          # name of the Linux binary to download and symlink into the outputs.
+          #
+          # this defaults to `name` if not specified explicitly
+        , binFilename ? name
+          # Git SHA of the maghemite repo commit to fetch.
+        , commit
+          # name of the tarball SHA variable in `maghemite_mgd_checksums`
+        , tarballShaName
+          # name of the Linux binary SHA variable in `maghemite_mgd_checksums`
+        , linuxBinShaName
+        }:
+          with pkgs.lib; let
+            repo = "maghemite";
+            # get stuff
+            tarball = downloadBuildomat
               {
                 inherit commit repo;
-                sha = findSha shas "MGD_LINUX_SHA256";
-                kind = "linux";
-                file = "mgd";
+                sha = findSha maghemiteShas tarballShaName;
+                kind = "image";
+                file = "${name}.tar.gz";
               };
-        in
-        with pkgs;
-        stdenv.mkDerivation
-          {
-            name = "mgd";
-            src = tarball;
-            version = commit;
-            nativeBuildInputs = [
-              # patch the binary to use the right dynamic library paths.
-              autoPatchelfHook
-            ];
+            linuxBin =
+              downloadBuildomat
+                {
+                  inherit commit repo;
+                  sha = findSha maghemiteShas linuxBinShaName;
+                  kind = "linux";
+                  file = binFilename;
+                };
+          in
+          with pkgs;
+          stdenv.mkDerivation
+            {
+              inherit name;
+              src = tarball;
+              version = commit;
+              nativeBuildInputs = [
+                # patch the binary to use the right dynamic library paths.
+                autoPatchelfHook
+              ];
 
-            buildInputs = [
-              glibc
-              gcc-unwrapped
-              openssl.dev
-            ];
+              buildInputs = [
+                glibc
+                gcc-unwrapped
+                openssl.dev
+              ];
 
-            installPhase =
-              let
-                binPath = "root/opt/oxide/mgd/bin";
-              in
-              ''
-                mkdir -p $out/${binPath}
-                cp -r . $out/root
-                cp ${linuxBin} $out/${binPath}/mgd
-                chmod +x $out/${binPath}/mgd
+              installPhase =
+                let
+                  binPath = "root/opt/oxide/${name}/bin";
+                in
+                ''
+                  mkdir -p $out/${binPath}
+                  cp -r . $out/root
+                  cp ${linuxBin} $out/${binPath}/${binFilename}
+                  chmod +x $out/${binPath}/${binFilename}
 
-                mkdir -p $out/bin
-                ln -s $out/${binPath}/mgd $out/bin/mgd
-              '';
-          };
+                  mkdir -p $out/bin
+                  ln -s $out/${binPath}/${binFilename} $out/bin/${binFilename}
+                '';
+            };
+
+      mgd = mkMaghemiteThing {
+        name = "mgd";
+        commit = mgVersion.commit;
+        tarballShaName = "CIDL_SHA256";
+        linuxBinShaName = "MGD_LINUX_SHA256";
+      };
+
+      mgDdmd = mkMaghemiteThing {
+        name = "mg-ddm";
+        binFilename = "ddmd";
+        commit = mgDdmdCommit;
+        tarballShaName = "MG_DDM_SHA256";
+        linuxBinShaName = "DDMD_LINUX_SHA256";
+      };
 
       # reads the version for Clickhouse or Cockroachdb from the
       # `tools/clickhouse_version` and `tools/cockroachdb_version` files.
@@ -312,7 +353,7 @@
     in
     {
       packages.x86_64-linux = {
-        inherit dendrite-stub mgd cockroachdb clickhouse;
+        inherit dendrite-stub mgd mgDdmd cockroachdb clickhouse;
       };
 
       checks.x86_64-linux = with pkgs;
@@ -409,6 +450,7 @@
               mkdir -p out/cockroachdb/
 
               ln -s ${mgd.out} -T out/mgd
+              ln -s ${mgDdmd.out} -T out/mg-ddm
               ln -s ${dendrite-stub.out} -T out/dendrite-stub
               ln -s ${clickhouse.out}/bin/clickhouse out/clickhouse/clickhouse
               ln -s ${clickhouse.out}/etc/config.xml out/clickhouse

@@ -15,7 +15,7 @@ use chrono::Utc;
 use clickhouse_admin_types::keeper::ClickhouseKeeperClusterMembership;
 use cockroach_admin_types::node::InternalNodeId;
 use gateway_client::types::SpComponentCaboose;
-use gateway_client::types::SpState;
+use gateway_types::component::SpState;
 use iddqd::IdOrdMap;
 use nexus_types::inventory::Caboose;
 use nexus_types::inventory::CabooseFound;
@@ -245,7 +245,7 @@ impl CollectionBuilder {
         });
 
         match sp_state.rot {
-            gateway_client::types::RotState::V2 {
+            gateway_types::rot::RotState::V2 {
                 active,
                 pending_persistent_boot_preference,
                 persistent_boot_preference,
@@ -273,9 +273,7 @@ impl CollectionBuilder {
                         }
                     });
             }
-            gateway_client::types::RotState::CommunicationFailed {
-                message,
-            } => {
+            gateway_types::rot::RotState::CommunicationFailed { message } => {
                 self.found_error(InventoryError::from(anyhow!(
                     "MGS {:?}: reading RoT state for {:?}: {}",
                     source,
@@ -283,7 +281,7 @@ impl CollectionBuilder {
                     message
                 )));
             }
-            gateway_client::types::RotState::V3 {
+            gateway_types::rot::RotState::V3 {
                 active,
                 pending_persistent_boot_preference,
                 persistent_boot_preference,
@@ -678,6 +676,7 @@ impl CollectionBuilder {
             smf_services_enabled_not_online: inventory
                 .smf_services_enabled_not_online,
             reference_measurements: inventory.reference_measurements,
+            fmd: inventory.fmd,
         };
 
         self.sleds
@@ -792,11 +791,11 @@ mod test {
     use crate::examples::representative;
     use base64::Engine;
     use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
-    use gateway_client::types::PowerState;
-    use gateway_client::types::RotState;
     use gateway_client::types::SpComponentCaboose;
-    use gateway_client::types::SpState;
+    use gateway_types::component::PowerState;
+    use gateway_types::component::SpState;
     use gateway_types::rot::RotSlot;
+    use gateway_types::rot::RotState;
     use nexus_types::inventory::Caboose;
     use nexus_types::inventory::CabooseWhich;
     use nexus_types::inventory::RotPage;

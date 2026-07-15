@@ -2286,7 +2286,9 @@ pub async fn verify_silo_dns_name(
             if should_exist == found {
                 Ok(())
             } else {
-                Err::<_, CondCheckError<Infallible>>(CondCheckError::NotYet)
+                Err::<_, CondCheckError<Infallible>>(CondCheckError::NotYet {
+                    status: None,
+                })
             }
         },
         &Duration::from_millis(50),

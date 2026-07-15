@@ -4,8 +4,6 @@
 
 //! An AST node describing timeseries alignment operations.
 
-// Copyright 2024 Oxide Computer Company
-
 use anyhow::Context;
 use anyhow::Error;
 use chrono::DateTime;

@@ -24,7 +24,6 @@ pub mod backoff;
 pub mod cmd;
 pub mod disk;
 pub mod policy;
-pub mod progenitor_operation_retry;
 pub mod resolvable_files;
 pub mod snake_case_result;
 pub mod update;
@@ -61,8 +60,22 @@ impl slog::KV for FileKv {
 /// This exists because the database doesn't store nanosecond-precision, so if
 /// we store nanosecond-precision timestamps, then DateTime conversion is lossy
 /// when round-tripping through the database.  That's rather inconvenient.
+///
+/// To truncate an arbitrary timestamp to database precision, use
+/// [`timestamp_db_precision`].
 pub fn now_db_precision() -> chrono::DateTime<chrono::Utc> {
-    let ts = chrono::Utc::now();
+    timestamp_db_precision(chrono::Utc::now())
+}
+
+/// Truncates a [`chrono::DateTime`]`<`[`chrono::Utc`]`>` to the previous
+/// microsecond.
+///
+/// This exists because the database doesn't store nanosecond-precision, so if
+/// we store nanosecond-precision timestamps, then `DateTime`conversion is lossy
+/// when round-tripping through the database.  That's rather inconvenient.
+pub fn timestamp_db_precision(
+    ts: chrono::DateTime<chrono::Utc>,
+) -> chrono::DateTime<chrono::Utc> {
     let nanosecs = ts.timestamp_subsec_nanos();
     let micros = ts.timestamp_subsec_micros();
     let only_nanos = nanosecs - micros * 1000;

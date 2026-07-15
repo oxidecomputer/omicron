@@ -40,7 +40,6 @@ use omicron_common::api::external;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::DiskState;
 use omicron_common::api::external::IdentityMetadataCreateParams;
-use omicron_common::api::external::InstanceCpuCount;
 use omicron_common::api::external::Name;
 use omicron_nexus::app::MIN_DISK_SIZE_BYTES;
 use omicron_uuid_kinds::DatasetUuid;
@@ -124,7 +123,7 @@ async fn test_snapshot_basic(cptestctx: &ControlPlaneTestContext) {
                 name: instance_name.parse().unwrap(),
                 description: format!("instance {:?}", instance_name),
             },
-            ncpus: InstanceCpuCount(2),
+            ncpus: instance::InstanceCpuCount(2),
             memory: ByteCount::from_gibibytes_u32(1),
             hostname: "base-instance".parse().unwrap(),
             user_data:
@@ -307,7 +306,7 @@ async fn test_snapshot_stopped_instance(cptestctx: &ControlPlaneTestContext) {
                 name: instance_name.parse().unwrap(),
                 description: format!("instance {:?}", instance_name),
             },
-            ncpus: InstanceCpuCount(2),
+            ncpus: instance::InstanceCpuCount(2),
             memory: ByteCount::from_gibibytes_u32(1),
             hostname: "base-instance".parse().unwrap(),
             user_data:
@@ -331,7 +330,7 @@ async fn test_snapshot_stopped_instance(cptestctx: &ControlPlaneTestContext) {
     )
     .await;
 
-    assert_eq!(instance.runtime.run_state, external::InstanceState::Stopped);
+    assert_eq!(instance.runtime.run_state, instance::InstanceState::Stopped);
 
     // Issue snapshot request
     let snapshots_url = format!("/v1/snapshots?project={}", PROJECT_NAME);

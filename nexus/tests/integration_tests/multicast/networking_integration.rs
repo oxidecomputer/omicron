@@ -26,13 +26,13 @@ use nexus_types::external_api::floating_ip::{
     AddressAllocator, FloatingIp, FloatingIpAttach,
 };
 use nexus_types::external_api::instance::{
-    EphemeralIpCreate, ExternalIpCreate, InstanceCreate,
+    EphemeralIpCreate, ExternalIpCreate, InstanceCpuCount, InstanceCreate,
     InstanceNetworkInterfaceAttachment,
 };
 use nexus_types::external_api::ip_pool::{IpVersion, PoolSelector};
 use nexus_types_versions::latest::instance::Instance;
 use omicron_common::api::external::{
-    ByteCount, IdentityMetadataCreateParams, InstanceCpuCount, NameOrId,
+    ByteCount, IdentityMetadataCreateParams, NameOrId,
 };
 use omicron_nexus::TestInterfaces;
 use omicron_test_utils::dev::poll::{CondCheckError, wait_for_condition};
@@ -563,7 +563,9 @@ async fn test_multicast_with_floating_ip_basic(
             if group.state == "Active" {
                 Ok(())
             } else {
-                Err(CondCheckError::<String>::NotYet)
+                Err(CondCheckError::<String>::NotYet {
+                    status: Some(format!("group state: {}", group.state)),
+                })
             }
         },
         &POLL_INTERVAL,
@@ -643,7 +645,15 @@ async fn test_multicast_with_floating_ip_basic(
             if has_floating_ip {
                 Ok(())
             } else {
-                Err(CondCheckError::<String>::NotYet)
+                Err(CondCheckError::<String>::NotYet {
+                    status: Some(format!(
+                        "external IPs: {:?}",
+                        external_ips
+                            .iter()
+                            .map(|ip| ip.ip())
+                            .collect::<Vec<_>>()
+                    )),
+                })
             }
         },
         &POLL_INTERVAL,
@@ -700,7 +710,9 @@ async fn test_multicast_with_floating_ip_basic(
             if !still_has_floating_ip {
                 Ok(())
             } else {
-                Err(CondCheckError::<String>::NotYet)
+                Err(CondCheckError::<String>::NotYet {
+                    status: Some("floating IP still attached".to_string()),
+                })
             }
         },
         &POLL_INTERVAL,
@@ -952,7 +964,7 @@ async fn test_multicast_sled_agent_m2p_and_subscriptions(
             if !m2p.contains(&(multicast_ip, underlay_ipv6)) {
                 Ok(())
             } else {
-                Err(CondCheckError::<()>::NotYet)
+                Err(CondCheckError::<()>::NotYet { status: None })
             }
         },
         &POLL_INTERVAL,
@@ -969,7 +981,7 @@ async fn test_multicast_sled_agent_m2p_and_subscriptions(
             if !fwd.contains_key(&underlay_ipv6) {
                 Ok(())
             } else {
-                Err(CondCheckError::<()>::NotYet)
+                Err(CondCheckError::<()>::NotYet { status: None })
             }
         },
         &POLL_INTERVAL,
@@ -1122,7 +1134,7 @@ async fn test_multicast_multi_sled_m2p_propagation(
                 if m2p.contains(&(multicast_ip, underlay_ipv6)) {
                     Ok(())
                 } else {
-                    Err(CondCheckError::NotYet::<()>)
+                    Err(CondCheckError::<()>::NotYet { status: None })
                 }
             },
             &POLL_INTERVAL,
@@ -1144,7 +1156,7 @@ async fn test_multicast_multi_sled_m2p_propagation(
                 if fwd.contains_key(&underlay_ipv6) {
                     Ok(())
                 } else {
-                    Err(CondCheckError::NotYet::<()>)
+                    Err(CondCheckError::<()>::NotYet { status: None })
                 }
             },
             &POLL_INTERVAL,
@@ -1190,7 +1202,7 @@ async fn test_multicast_multi_sled_m2p_propagation(
                 {
                     Ok(())
                 }
-                _ => Err(CondCheckError::NotYet::<()>),
+                _ => Err(CondCheckError::<()>::NotYet { status: None }),
             }
         },
         &POLL_INTERVAL,
@@ -1219,7 +1231,7 @@ async fn test_multicast_multi_sled_m2p_propagation(
                 {
                     Ok(())
                 } else {
-                    Err(CondCheckError::NotYet::<()>)
+                    Err(CondCheckError::<()>::NotYet { status: None })
                 }
             },
             &POLL_INTERVAL,
@@ -1422,7 +1434,9 @@ async fn test_multicast_cross_sled_forwarding(
                 let fwd = agent.mcast_fwd.lock().unwrap();
                 match fwd.get(&underlay_ipv6) {
                     Some(hops) if hops.len() == 1 => Ok(()),
-                    _ => Err(CondCheckError::NotYet::<()>),
+                    other => Err(CondCheckError::<()>::NotYet {
+                        status: Some(format!("forwarding entry: {other:?}")),
+                    }),
                 }
             },
             &POLL_INTERVAL,
@@ -1555,7 +1569,7 @@ async fn test_multicast_cold_start_reestablishment(
             if m2p.contains(&(multicast_ip, underlay_ipv6)) {
                 Ok(())
             } else {
-                Err(CondCheckError::NotYet::<()>)
+                Err(CondCheckError::<()>::NotYet { status: None })
             }
         },
         &POLL_INTERVAL,
@@ -1624,14 +1638,23 @@ async fn test_multicast_cold_start_reestablishment(
                 .authn_as(AuthnMode::PrivilegedUser)
                 .execute()
                 .await
-                .map_err(|_| CondCheckError::<()>::NotYet)?
+                .map_err(|e| CondCheckError::<()>::NotYet {
+                    status: Some(format!("instance fetch failed: {e}")),
+                })?
                 .parsed_body()
-                .map_err(|_| CondCheckError::<()>::NotYet)?;
+                .map_err(|e| CondCheckError::<()>::NotYet {
+                    status: Some(format!("instance parse failed: {e}")),
+                })?;
 
             if instance.runtime.run_state == InstanceState::Running {
                 Ok(())
             } else {
-                Err(CondCheckError::<()>::NotYet)
+                Err(CondCheckError::<()>::NotYet {
+                    status: Some(format!(
+                        "instance state: {:?}",
+                        instance.runtime.run_state
+                    )),
+                })
             }
         },
         &POLL_INTERVAL,
@@ -1658,7 +1681,7 @@ async fn test_multicast_cold_start_reestablishment(
                 if m2p.contains(&(multicast_ip, underlay_ipv6)) {
                     Ok(())
                 } else {
-                    Err(CondCheckError::NotYet::<()>)
+                    Err(CondCheckError::<()>::NotYet { status: None })
                 }
             },
             &POLL_INTERVAL,
@@ -1676,7 +1699,7 @@ async fn test_multicast_cold_start_reestablishment(
                 if fwd.contains_key(&underlay_ipv6) {
                     Ok(())
                 } else {
-                    Err(CondCheckError::NotYet::<()>)
+                    Err(CondCheckError::<()>::NotYet { status: None })
                 }
             },
             &POLL_INTERVAL,
@@ -1717,7 +1740,7 @@ async fn test_multicast_cold_start_reestablishment(
                 {
                     Ok(())
                 }
-                _ => Err(CondCheckError::NotYet::<()>),
+                _ => Err(CondCheckError::<()>::NotYet { status: None }),
             }
         },
         &POLL_INTERVAL,

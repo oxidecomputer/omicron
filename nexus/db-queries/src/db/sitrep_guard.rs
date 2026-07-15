@@ -20,12 +20,14 @@
 //!     indicating that the resource was previously created. This guards
 //!     against resurrection of resources that were already deleted.
 //!
-//! See detailed comments on trait [`SitrepGuardedResource`] and struct
+//! See detailed comments on trait [`FmRendezvousResource`] and struct
 //! [`SitrepGuardedInsert`] for how this policy is implemented.
 //!
 //! [`AlertRequest`]: nexus_types::fm::case::AlertRequest
 //! [`SupportBundleRequest`]: nexus_types::fm::case::SupportBundleRequest
 
+use crate::db::fm_rendezvous_resources::FmRendezvousResource;
+use crate::db::fm_rendezvous_resources::MarkerTable;
 use crate::db::true_or_cast_error::matches_sentinel;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::Column;
@@ -43,47 +45,18 @@ use nexus_db_lookup::DbConnection;
 use nexus_db_model::Generation;
 use uuid::Uuid;
 
-/// Trait supplying the types injected into [`SitrepGuardedInsert`]'s emitted
-/// SQL. This codifies the expectation that each guarded resource `R` will have
-/// some generation column on `fm_sitrep`, and some "marker" table (distinct
-/// from the resource) for tracking resource creation.
-///
-/// Example:
-///
-/// ```ignore
-/// use schema::fm_sitrep::dsl::my_resource_generation;
-/// use schema::rendezvous_my_resource_created::dsl::my_resource_id;
-///
-/// impl SitrepGuardedResource for MyResource {
-///     type GenerationColumn = my_resource_generation;
-///     type MarkerIdColumn = my_resource_id;
-/// }
-/// ```
-///
-pub trait SitrepGuardedResource {
-    /// Column on `fm_sitrep` carrying this resource's generation counter.
-    type GenerationColumn: Column;
-    /// Resource-id column in the marker table.
-    type MarkerIdColumn: Column;
-}
-
-/// The marker table for resource `R`: the table owning its
-/// [`SitrepGuardedResource::MarkerIdColumn`].
-type MarkerTable<R> =
-    <<R as SitrepGuardedResource>::MarkerIdColumn as Column>::Table;
-
 /// CTE-wrapped stale-execution-guarded INSERT.
 ///
 /// Type parameters:
 /// - `R` is the type of the resource being inserted, which must implement
-///   [`SitrepGuardedResource`] (see [`Self::walk_ast`] below).
+///   [`FmRendezvousResource`] (see [`Self::walk_ast`] below).
 /// - `ISR` is the wrapped `INSERT` -- typically a Diesel-built
 ///   `InsertStatement<...>`, inferred at the call site. It must include a
 ///   `RETURNING` clause projecting to `R`.
 #[must_use = "Queries must be executed"]
 pub struct SitrepGuardedInsert<R, ISR>
 where
-    R: SitrepGuardedResource,
+    R: FmRendezvousResource,
 {
     /// UUID of the resource being inserted. Used as the lookup key in the
     /// `prior_marker_guard` CTE and as the row value written by the
@@ -92,7 +65,7 @@ where
 
     /// Resource generation in the sitrep currently being executed by
     /// fm_rendezvous. The `stale_guard` CTE requires this to equal the latest
-    /// sitrep's value of [`SitrepGuardedResource::GenerationColumn`].
+    /// sitrep's value of [`FmRendezvousResource::GenerationColumn`].
     expected_generation: Generation,
 
     /// Caller-built INSERT for the resource row itself, nested into the
@@ -108,8 +81,7 @@ where
 
 impl<R, ISR> SitrepGuardedInsert<R, ISR>
 where
-    R: SitrepGuardedResource,
-    MarkerTable<R>: HasTable<Table = MarkerTable<R>>,
+    R: FmRendezvousResource,
 {
     /// Build a guarded insert for `resource_id` at `expected_generation`. The
     /// wrapped `resource_insert` statement must satisfy the following:
@@ -147,7 +119,7 @@ where
 
 impl<R, ISR> QueryId for SitrepGuardedInsert<R, ISR>
 where
-    R: SitrepGuardedResource,
+    R: FmRendezvousResource,
 {
     type QueryId = ();
     const HAS_STATIC_QUERY_ID: bool = false;
@@ -157,7 +129,7 @@ where
 /// See [`Self::walk_ast`]'s outer `SELECT nr.* FROM new_resource nr`.
 impl<R, ISR> Query for SitrepGuardedInsert<R, ISR>
 where
-    R: SitrepGuardedResource,
+    R: FmRendezvousResource,
     ISR: Query,
 {
     type SqlType = ISR::SqlType;
@@ -174,9 +146,8 @@ const ALREADY_EXISTS_SENTINEL: &str = "marker already exists";
 
 impl<R, ISR> QueryFragment<Pg> for SitrepGuardedInsert<R, ISR>
 where
-    R: SitrepGuardedResource,
+    R: FmRendezvousResource,
     ISR: QueryFragment<Pg>,
-    <MarkerTable<R> as QuerySource>::FromClause: QueryFragment<Pg>,
 {
     /// Executes a statement of the form:
     ///
@@ -206,7 +177,7 @@ where
     ///    `new_resource` actually produced a row.
     fn walk_ast<'b>(&'b self, mut out: AstPass<'_, 'b, Pg>) -> QueryResult<()> {
         // Column names injected into the CTEs below.
-        let marker_id_column = <R::MarkerIdColumn as Column>::NAME;
+        let id_column = <R::IdColumn as Column>::NAME;
         let generation_column = <R::GenerationColumn as Column>::NAME;
 
         // CTE 1: latest_history.
@@ -265,7 +236,7 @@ where
         );
         self.marker_from_clause.walk_ast(out.reborrow())?;
         out.push_sql(" WHERE ");
-        out.push_identifier(marker_id_column)?;
+        out.push_identifier(id_column)?;
         out.push_sql(" = ");
         out.push_bind_param::<sql_types::Uuid, _>(&self.resource_id)?;
         out.push_sql("), 'TRUE', '");
@@ -287,10 +258,10 @@ where
         out.push_sql(", new_marker AS (INSERT INTO ");
         self.marker_from_clause.walk_ast(out.reborrow())?;
         out.push_sql(" (");
-        out.push_identifier(marker_id_column)?;
+        out.push_identifier(id_column)?;
         out.push_sql(", ");
         // The generation column name is hardcoded here rather than carried as a
-        // `SitrepGuardedResource` associated type. We expect all marker tables
+        // `FmRendezvousResource` associated type. We expect all marker tables
         // to use the same column name for consistency.
         out.push_identifier("created_at_generation")?;
         out.push_sql(") SELECT ");
@@ -300,9 +271,9 @@ where
         out.push_sql(
             " WHERE EXISTS (SELECT 1 FROM new_resource) ON CONFLICT (",
         );
-        out.push_identifier(marker_id_column)?;
+        out.push_identifier(id_column)?;
         out.push_sql(") DO NOTHING RETURNING ");
-        out.push_identifier(marker_id_column)?;
+        out.push_identifier(id_column)?;
         out.push_sql(")");
 
         // Outer SELECT projects the inner INSERT's `RETURNING` columns through,
@@ -314,7 +285,7 @@ where
 }
 
 impl<R, ISR> diesel::RunQueryDsl<DbConnection> for SitrepGuardedInsert<R, ISR> where
-    R: SitrepGuardedResource
+    R: FmRendezvousResource
 {
 }
 
@@ -330,14 +301,14 @@ pub enum SitrepGuardedInsertOutcome<R> {
     /// both guards passed but the inner INSERT `ON CONFLICT DO NOTHING` matched
     /// a pre-existing row.
     AlreadyExists,
-    /// The executor's expected generation does not match the current generation
-    /// on the latest sitrep; nothing was inserted.
+    /// The rendezvous task's expected generation does not match the current
+    /// generation on the latest sitrep; nothing was inserted.
     StaleSitrep,
 }
 
 impl<R, ISR> SitrepGuardedInsert<R, ISR>
 where
-    R: SitrepGuardedResource + Send + 'static,
+    R: FmRendezvousResource + Send + 'static,
     ISR: 'static,
     Self:
         Send + diesel::query_dsl::methods::LoadQuery<'static, DbConnection, R>,
@@ -376,58 +347,22 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::context::OpContext;
-    use crate::db::DataStore;
     use crate::db::pub_test_utils::TestDatabase;
     use crate::db::raw_query_builder::expectorate_query_contents;
     use assert_matches::assert_matches;
     use async_bb8_diesel::AsyncRunQueryDsl;
-    use async_bb8_diesel::AsyncSimpleConnection;
-    use chrono::Utc;
     use diesel::prelude::*;
-    use iddqd::IdOrdMap;
-    use nexus_types::fm::Sitrep;
-    use nexus_types::fm::SitrepMetadata;
     use omicron_test_utils::dev;
-    use omicron_uuid_kinds::CollectionUuid;
-    use omicron_uuid_kinds::OmicronZoneUuid;
-    use omicron_uuid_kinds::SitrepUuid;
     use uuid::uuid;
 
-    // Dummy schema standing in for a real resource. These tables exist only in
-    // this test module (not in the real schema) so we can exercise the typed
-    // `SitrepGuardedResource` path without a concrete resource, which lands in
-    // later PRs.
-    table! {
-        test_schema.dummy_sitrep (id) {
-            id -> Uuid,
-            dummy_generation -> Int8,
-        }
-    }
-    table! {
-        test_schema.dummy_marker (dummy_id) {
-            dummy_id -> Uuid,
-            created_at_generation -> Int8,
-        }
-    }
-    table! {
-        test_schema.dummy_resource (id) {
-            id -> Uuid,
-            name -> Text,
-        }
-    }
-
-    #[derive(Queryable, Selectable, Debug)]
-    #[diesel(table_name = dummy_resource)]
-    struct DummyResource {
-        id: Uuid,
-        name: String,
-    }
-
-    impl SitrepGuardedResource for DummyResource {
-        type GenerationColumn = dummy_sitrep::dsl::dummy_generation;
-        type MarkerIdColumn = dummy_marker::dsl::dummy_id;
-    }
+    // The synthetic resource and dummy schema are shared with the GC test suite;
+    // see `crate::db::fm_rendezvous_resources::test_utils`.
+    use crate::db::fm_rendezvous_resources::test_utils::DummyResource;
+    use crate::db::fm_rendezvous_resources::test_utils::dummy_resource;
+    use crate::db::fm_rendezvous_resources::test_utils::insert_current_sitrep;
+    use crate::db::fm_rendezvous_resources::test_utils::insert_dummy_marker;
+    use crate::db::fm_rendezvous_resources::test_utils::marker_generation;
+    use crate::db::fm_rendezvous_resources::test_utils::setup_dummy_schema;
 
     // Snapshots the SQL the combinator generates, so accidental changes to the
     // hand-assembled query are caught in review.
@@ -452,63 +387,6 @@ mod tests {
             "tests/output/sitrep_guarded_insert.sql",
         )
         .await;
-    }
-
-    // Creates the tables the combinator's SQL references but which the real
-    // schema doesn't have: the dummy marker and resource tables, plus a
-    // `dummy_generation` column on the real `fm_sitrep` (the combinator reads
-    // the resource generation off `omicron.public.fm_sitrep`).
-    async fn setup_dummy_schema(
-        conn: &async_bb8_diesel::Connection<DbConnection>,
-    ) {
-        conn.batch_execute_async(
-            "ALTER TABLE omicron.public.fm_sitrep \
-                 ADD COLUMN IF NOT EXISTS dummy_generation INT8; \
-             CREATE SCHEMA IF NOT EXISTS test_schema; \
-             CREATE TABLE IF NOT EXISTS test_schema.dummy_marker ( \
-                 dummy_id UUID PRIMARY KEY, \
-                 created_at_generation INT8 NOT NULL \
-             ); \
-             CREATE TABLE IF NOT EXISTS test_schema.dummy_resource ( \
-                 id UUID PRIMARY KEY, \
-                 name TEXT NOT NULL \
-             );",
-        )
-        .await
-        .unwrap();
-    }
-
-    // Inserts a current sitrep with a given `dummy_generation`.
-    async fn insert_current_sitrep(
-        datastore: &DataStore,
-        opctx: &OpContext,
-        conn: &async_bb8_diesel::Connection<DbConnection>,
-        generation: i64,
-    ) {
-        let sitrep_id = SitrepUuid::new_v4();
-        let sitrep = Sitrep {
-            metadata: SitrepMetadata {
-                id: sitrep_id,
-                parent_sitrep_id: None,
-                inv_collection_id: CollectionUuid::new_v4(),
-                next_inv_min_time_started: Utc::now(),
-                creator_id: OmicronZoneUuid::new_v4(),
-                comment: "sitrep_guard test sitrep".to_string(),
-                time_created: Utc::now(),
-            },
-            cases: IdOrdMap::new(),
-            ereports_by_id: IdOrdMap::new(),
-        };
-        datastore.fm_sitrep_insert(opctx, sitrep).await.unwrap();
-
-        // `SitrepMetadata` doesn't have a `dummy_generation` field, so we have
-        // to update it manually.
-        conn.batch_execute_async(&format!(
-            "UPDATE omicron.public.fm_sitrep \
-                 SET dummy_generation = {generation} WHERE id = '{sitrep_id}'"
-        ))
-        .await
-        .unwrap();
     }
 
     // Builds and runs a guarded insert for `resource_id` at
@@ -549,22 +427,14 @@ mod tests {
         .unwrap()
     }
 
-    // The generation recorded in the marker row for `id`, if any.
-    async fn marker_generation(
-        conn: &async_bb8_diesel::Connection<DbConnection>,
-        id: Uuid,
-    ) -> Option<i64> {
-        dummy_marker::table
-            .filter(dummy_marker::dsl::dummy_id.eq(id))
-            .select(dummy_marker::dsl::created_at_generation)
-            .first_async::<i64>(conn)
-            .await
-            .optional()
-            .unwrap()
-    }
-
     // Both guards pass: the resource row is inserted and a marker is written
     // with the executed generation.
+    //
+    // The history deliberately contains *two* sitreps at the same generation
+    // (the request set did not change between them), and the rendezvous task is
+    // working from the older one. Along a sitrep chain, an unchanged generation
+    // means an unchanged request set, so the executor here is creating exactly
+    // the resources a "fresh" one would, rather than a stale set.
     #[tokio::test]
     async fn sitrep_guarded_insert_created_writes_marker() {
         let logctx =
@@ -573,7 +443,9 @@ mod tests {
         let (opctx, datastore) = (db.opctx(), db.datastore());
         let conn = datastore.pool_connection_for_tests().await.unwrap();
         setup_dummy_schema(&conn).await;
-        insert_current_sitrep(datastore, opctx, &conn, 2).await;
+        let parent =
+            insert_current_sitrep(datastore, opctx, &conn, None, 2).await;
+        insert_current_sitrep(datastore, opctx, &conn, Some(parent), 2).await;
 
         let resource_id = uuid!("22222222-2222-2222-2222-222222222222");
         let outcome = run_guarded_insert(&conn, resource_id, 2).await;
@@ -601,25 +473,26 @@ mod tests {
         let (opctx, datastore) = (db.opctx(), db.datastore());
         let conn = datastore.pool_connection_for_tests().await.unwrap();
         setup_dummy_schema(&conn).await;
-        insert_current_sitrep(datastore, opctx, &conn, 2).await;
+        insert_current_sitrep(datastore, opctx, &conn, None, 2).await;
 
         let resource_id = uuid!("33333333-3333-3333-3333-333333333333");
-        // Seed a marker for this resource id.
-        diesel::insert_into(dummy_marker::table)
-            .values((
-                dummy_marker::dsl::dummy_id.eq(resource_id),
-                dummy_marker::dsl::created_at_generation.eq(2i64),
-            ))
-            .execute_async(&*conn)
-            .await
-            .unwrap();
+        // Seed a marker for this resource id, at a generation *different* from
+        // the one we will execute at, so the final assertion can distinguish
+        // "marker preserved" from "marker overwritten with the executed
+        // generation".
+        insert_dummy_marker(&conn, resource_id, 1).await;
 
         let outcome = run_guarded_insert(&conn, resource_id, 2).await;
 
         assert_matches!(outcome, SitrepGuardedInsertOutcome::AlreadyExists);
         // The resource row was not inserted; the seeded marker is unchanged.
+        // (The sentinel from `prior_marker_guard` aborts the whole statement
+        // atomically, so `new_marker` never runs here; the generation could
+        // only change if the guard itself regressed. Asserting it pins the
+        // invariant that markers record the generation at which the resource
+        // was originally created.)
         assert!(!resource_exists(&conn, resource_id).await);
-        assert_eq!(marker_generation(&conn, resource_id).await, Some(2));
+        assert_eq!(marker_generation(&conn, resource_id).await, Some(1));
 
         db.terminate().await;
         logctx.cleanup_successful();
@@ -637,7 +510,7 @@ mod tests {
         let (opctx, datastore) = (db.opctx(), db.datastore());
         let conn = datastore.pool_connection_for_tests().await.unwrap();
         setup_dummy_schema(&conn).await;
-        insert_current_sitrep(datastore, opctx, &conn, 2).await;
+        insert_current_sitrep(datastore, opctx, &conn, None, 2).await;
 
         let resource_id = uuid!("44444444-4444-4444-4444-444444444444");
         // Seed the resource row, but no marker.
@@ -665,6 +538,12 @@ mod tests {
 
     // The executed generation does not match the latest sitrep's generation:
     // `stale_guard` aborts and nothing is written.
+    //
+    // The executed generation (1) deliberately matches an ancestor sitrep in
+    // the history: this is exactly the stale-sitrep case the guard exists
+    // for, and a `stale_guard` that matched any sitrep in `fm_sitrep_history`
+    // (rather than only the current one) would incorrectly let the insert
+    // through.
     #[tokio::test]
     async fn sitrep_guarded_insert_stale_sitrep() {
         let logctx = dev::test_setup_log("sitrep_guarded_insert_stale_sitrep");
@@ -672,14 +551,44 @@ mod tests {
         let (opctx, datastore) = (db.opctx(), db.datastore());
         let conn = datastore.pool_connection_for_tests().await.unwrap();
         setup_dummy_schema(&conn).await;
-        // Latest sitrep is at generation 2 ...
-        insert_current_sitrep(datastore, opctx, &conn, 2).await;
+        // History: ancestor at generation 1, current sitrep at generation 2...
+        let parent =
+            insert_current_sitrep(datastore, opctx, &conn, None, 1).await;
+        insert_current_sitrep(datastore, opctx, &conn, Some(parent), 2).await;
 
         let resource_id = uuid!("55555555-5555-5555-5555-555555555555");
-        // ... but we execute expecting generation 1.
+        // ... and we execute expecting generation 1.
         let outcome = run_guarded_insert(&conn, resource_id, 1).await;
 
         assert_matches!(outcome, SitrepGuardedInsertOutcome::StaleSitrep);
+        assert!(!resource_exists(&conn, resource_id).await);
+        assert_eq!(marker_generation(&conn, resource_id).await, None);
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    // With no sitrep in history at all, there is no current generation to
+    // match, so the guarded insert must fail closed: no resource row and no
+    // marker row may be written. We deliberately do not assert *which*
+    // outcome is reported -- this situation is unreachable via fm_rendezvous,
+    // which only runs with a loaded sitrep, so the reported outcome is not a
+    // behavior we want to guarantee -- only that the guard does not fail
+    // open.
+    #[tokio::test]
+    async fn sitrep_guarded_insert_no_sitrep_writes_nothing() {
+        let logctx = dev::test_setup_log(
+            "sitrep_guarded_insert_no_sitrep_writes_nothing",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (_opctx, datastore) = (db.opctx(), db.datastore());
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
+        setup_dummy_schema(&conn).await;
+        // Deliberately no sitrep inserted.
+
+        let resource_id = uuid!("88888888-8888-8888-8888-888888888888");
+        let _ = run_guarded_insert(&conn, resource_id, 1).await;
+
         assert!(!resource_exists(&conn, resource_id).await);
         assert_eq!(marker_generation(&conn, resource_id).await, None);
 

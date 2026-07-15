@@ -12,8 +12,7 @@
 use api_identity::ObjectIdentity;
 use omicron_common::api::external::{
     ByteCount, Hostname, IdentityMetadata, IdentityMetadataCreateParams,
-    InstanceAutoRestartPolicy, InstanceAutoRestartStatus, InstanceCpuCount,
-    InstanceRuntimeState, NameOrId, Nullable, ObjectIdentity,
+    NameOrId, Nullable, ObjectIdentity,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -21,7 +20,11 @@ use uuid::Uuid;
 
 use crate::v2025_11_20_00::{
     self as initial,
-    instance::{InstanceCpuPlatform, InstanceDiskAttach, UserData, bool_true},
+    instance::{
+        InstanceAutoRestartPolicy, InstanceAutoRestartStatus, InstanceCpuCount,
+        InstanceCpuPlatform, InstanceDiskAttach, InstanceRuntimeState,
+        UserData, bool_true,
+    },
 };
 use crate::v2026_01_03_00::instance::InstanceNetworkInterfaceAttachment;
 use crate::v2026_01_05_00::instance::ExternalIpCreate;

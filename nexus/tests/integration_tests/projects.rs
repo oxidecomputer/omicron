@@ -27,6 +27,7 @@ use nexus_test_utils::resource_helpers::test_params;
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::floating_ip;
 use nexus_types::external_api::instance;
+use nexus_types::external_api::instance::InstanceCpuCount;
 use nexus_types::external_api::ip_pool;
 use nexus_types::external_api::policy::SiloRole;
 use nexus_types::external_api::project;
@@ -37,7 +38,6 @@ use nexus_types::identity::Resource;
 use nexus_types_versions::latest::instance::Instance;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::IdentityMetadataCreateParams;
-use omicron_common::api::external::InstanceCpuCount;
 use omicron_common::api::external::Name;
 use std::str::FromStr;
 

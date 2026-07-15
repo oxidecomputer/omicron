@@ -10,9 +10,9 @@ workspace = true
 [dependencies]
 anyhow.workspace = true
 # XXX NOTE this is due to https://github.com/oxidecomputer/omicron/issues/9704
-# This is the R17 dpd client
+# This is the R20 dpd client
 # dpd-client.workspace = true
-dpd-client = { git = "https://github.com/oxidecomputer/dendrite", rev = "cc8e02a0800034c431c8cf96b889ea638da3d194" }
+dpd-client = { git = "https://github.com/oxidecomputer/dendrite", rev = "cc0c307c617f2988aafdca4e3bd35ea178b64801" }
 futures.workspace = true
 gateway-client.workspace = true
 http.workspace = true

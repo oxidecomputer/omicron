@@ -25,7 +25,7 @@ use sled_agent_types_versions::latest::multicast::{
 };
 use sled_agent_types_versions::{
     latest, v1, v4, v6, v7, v9, v10, v11, v12, v14, v16, v17, v18, v20, v22,
-    v24, v25, v26, v28, v29, v30, v31, v32, v33, v34, v37, v39,
+    v24, v25, v26, v28, v29, v30, v31, v32, v33, v34, v37, v39, v42,
 };
 use sled_diagnostics::SledDiagnosticsQueryOutput;
 use slog_error_chain::InlineErrorChain;
@@ -42,7 +42,8 @@ api_versions!([
     // |  example for the next person.
     // v
     // (next_int, IDENT),
-    (42, MCAST_M2P_FORWARDING),
+    (43, MCAST_M2P_FORWARDING),
+    (42, NON_EMPTY_UPLINK_PORTS),
     (41, ADD_INSTANCE_PRIMARY_NIC_MTU),
     (40, ADD_FMD_TO_INVENTORY),
     (39, BOOTSTORE_SERVICE_NAT_GENERATION),
@@ -1077,7 +1078,20 @@ pub trait SledAgentApi {
     #[endpoint {
         method = PUT,
         path = "/network-bootstore-config",
-        versions = VERSION_BOOTSTORE_SERVICE_NAT_GENERATION..,
+        versions = VERSION_NON_EMPTY_UPLINK_PORTS..,
+        operation_id = "write_network_bootstore_config",
+    }]
+    async fn write_network_bootstore_config_v42(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<v42::system_networking::WriteNetworkConfigRequest>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    // As described above, this must not forward to newer versions; sled-agent
+    // must implement this by faithfully serializing the requested version.
+    #[endpoint {
+        method = PUT,
+        path = "/network-bootstore-config",
+        versions = VERSION_BOOTSTORE_SERVICE_NAT_GENERATION..VERSION_NON_EMPTY_UPLINK_PORTS,
         operation_id = "write_network_bootstore_config",
     }]
     async fn write_network_bootstore_config_v39(
@@ -1165,12 +1179,26 @@ pub trait SledAgentApi {
     /// Add a sled to a rack that was already initialized via RSS
     #[endpoint {
         method = PUT,
-        path = "/sleds"
+        path = "/sleds",
+        versions = VERSION_NON_EMPTY_UPLINK_PORTS..,
     }]
     async fn sled_add(
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<latest::sled::AddSledRequest>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    #[endpoint {
+        operation_id = "sled_add",
+        method = PUT,
+        path = "/sleds",
+        versions = ..VERSION_NON_EMPTY_UPLINK_PORTS,
+    }]
+    async fn sled_add_v1(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<v1::sled::AddSledRequest>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        Self::sled_add(rqctx, body.map(Into::into)).await
+    }
 
     /// Fetch basic information about this sled
     #[endpoint {

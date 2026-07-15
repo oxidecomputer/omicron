@@ -4,8 +4,6 @@
 
 //! SQL shell implementation.
 
-// Copyright 2024 Oxide Computer Company
-
 use super::prepare_columns;
 use crate::sql::{QueryResult, Table, function_allow_list};
 use crate::{Client, make_client};

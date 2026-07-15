@@ -3,7 +3,6 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 //! Functions for querying the timeseries database.
-// Copyright 2024 Oxide Computer Company
 
 use crate::{DATABASE_NAME, Error, FieldSchema, FieldSource, TimeseriesSchema};
 use chrono::{DateTime, Utc};
