@@ -31,7 +31,7 @@ struct LsApis {
     /// `package-manifest.toml`.  Without this flag, the tool will report an
     /// error if it encounters such a dependency and cannot find a match by
     /// commit.
-    #[arg(long)]
+    #[arg(long, env = "LS_APIS_ASSUME_PATCHED_DEPS_MATCH")]
     assume_patched_deps_match: bool,
 
     #[command(subcommand)]
