@@ -281,17 +281,17 @@ mod test {
     use nexus_auth::context::OpContext;
     use nexus_db_model::TargetRelease;
     use nexus_db_model::TufRepo;
-    use omicron_common::api::external::{
-        TufArtifactMeta, TufRepoDescription, TufRepoMeta,
-    };
+    use nexus_types::tuf_repo::TufRepoDescription;
     use omicron_common::now_db_precision;
-    use omicron_common::update::ArtifactId;
     use omicron_test_utils::dev;
     use semver::Version;
     use sha2::Digest;
     use sha2::Sha256;
     use slog_error_chain::InlineErrorChain;
-    use tufaceous_artifact::{ArtifactHash, ArtifactKind, ArtifactVersion};
+    use std::collections::BTreeMap;
+    use tufaceous_artifact_v2::{
+        Artifact, ArtifactHash, ArtifactSet, ArtifactVersion,
+    };
 
     async fn insert_tuf_repo(
         opctx: &OpContext,
@@ -306,24 +306,16 @@ mod test {
             .tuf_repo_insert(
                 opctx,
                 &TufRepoDescription {
-                    repo: TufRepoMeta {
+                    artifacts: ArtifactSet::from([Artifact {
+                        version: artifact_version,
+                        tags: BTreeMap::new(),
                         hash,
-                        targets_role_version: 0,
-                        valid_until: Utc::now(),
-                        system_version: version.clone(),
-                        file_name: String::new(),
-                    },
-                    artifacts: vec![TufArtifactMeta {
-                        id: ArtifactId {
-                            name: String::new(),
-                            version: artifact_version,
-                            kind: ArtifactKind::from_static("empty"),
-                        },
-                        hash,
-                        size: 0,
-                        board: None,
-                        sign: None,
-                    }],
+                        length: 0,
+                    }]),
+                    metadata: BTreeMap::new(),
+                    system_version: version.clone(),
+                    hash,
+                    file_name: String::new(),
                 },
             )
             .await

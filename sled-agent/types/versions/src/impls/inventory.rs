@@ -15,9 +15,9 @@ use omicron_common::address::Ip;
 use omicron_common::address::NUM_SOURCE_NAT_PORTS;
 use omicron_common::api::external::Generation;
 use omicron_common::disk::{DatasetKind, DatasetName, M2Slot};
-use omicron_common::update::{ArtifactId, OmicronInstallManifestSource};
+use omicron_common::update::OmicronInstallManifestSource;
 use omicron_uuid_kinds::MupdateUuid;
-use tufaceous_artifact::{ArtifactHash, KnownArtifactKind};
+use tufaceous_artifact_v2::ArtifactHash;
 
 use crate::latest::inventory::{
     BootImageHeader, BootPartitionContents, BootPartitionDetails,
@@ -160,20 +160,6 @@ impl ZoneKind {
             ZoneKind::Nexus => "nexus",
             ZoneKind::Oximeter => "oximeter",
         }
-    }
-
-    /// Return true if an artifact represents a control plane zone image
-    /// of this kind.
-    pub fn is_control_plane_zone_artifact(
-        self,
-        artifact_id: &ArtifactId,
-    ) -> bool {
-        artifact_id
-            .kind
-            .to_known()
-            .map(|kind| matches!(kind, KnownArtifactKind::Zone))
-            .unwrap_or(false)
-            && artifact_id.name == self.artifact_id_name()
     }
 
     /// Map an artifact ID name to the corresponding file name in the install

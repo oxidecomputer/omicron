@@ -8,13 +8,17 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use omicron_common::api::external::Generation;
 use omicron_ledger::Ledgerable;
-use schemars::JsonSchema;
+use schemars::{
+    JsonSchema, SchemaGenerator,
+    schema::{ArrayValidation, InstanceType, Schema, SchemaObject},
+};
 use serde::{Deserialize, Serialize};
-use tufaceous_artifact::ArtifactHash;
+use tufaceous_artifact_v2::ArtifactHash;
 
 /// Path parameters for Artifact requests.
 #[derive(Deserialize, JsonSchema)]
 pub struct ArtifactPathParam {
+    #[schemars(schema_with = "ArtifactHash::v1_json_schema")]
     pub sha256: ArtifactHash,
 }
 
@@ -59,7 +63,21 @@ pub struct ArtifactPutResponse {
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize, JsonSchema)]
 pub struct ArtifactConfig {
     pub generation: Generation,
+    #[schemars(schema_with = "artifact_hash_set_schema")]
     pub artifacts: BTreeSet<ArtifactHash>,
+}
+
+fn artifact_hash_set_schema(generator: &mut SchemaGenerator) -> Schema {
+    SchemaObject {
+        instance_type: Some(InstanceType::Array.into()),
+        array: Some(Box::new(ArrayValidation {
+            unique_items: Some(true),
+            items: Some(ArtifactHash::v1_json_schema(generator).into()),
+            ..Default::default()
+        })),
+        ..Default::default()
+    }
+    .into()
 }
 
 impl Ledgerable for ArtifactConfig {

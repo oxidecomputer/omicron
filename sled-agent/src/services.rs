@@ -116,7 +116,7 @@ use tokio::sync::Mutex;
 use tokio::sync::oneshot;
 use tokio::sync::watch;
 use tokio::task::JoinHandle;
-use tufaceous_artifact::ArtifactHash;
+use tufaceous_artifact_v2::ArtifactHash;
 use uuid::Uuid;
 
 use illumos_utils::zone::Zones;

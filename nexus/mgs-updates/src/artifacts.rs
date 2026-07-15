@@ -11,7 +11,7 @@ use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 use thiserror::Error;
 use tokio::{io::AsyncWriteExt, sync::watch};
-use tufaceous_artifact::ArtifactHash;
+use tufaceous_artifact_v2::ArtifactHash;
 
 type RepoDepotError = repo_depot_client::Error<repo_depot_client::types::Error>;
 

@@ -1538,8 +1538,6 @@ table! {
         id -> Uuid,
         time_created -> Timestamptz,
         sha256 -> Text,
-        targets_role_version -> Int8,
-        valid_until -> Timestamptz,
         system_version -> Text,
         file_name -> Text,
         time_pruned -> Nullable<Timestamptz>,
@@ -1547,17 +1545,35 @@ table! {
 }
 
 table! {
+    tuf_repo_metadata (tuf_repo_id, key) {
+        tuf_repo_id -> Uuid,
+        key -> Text,
+        value -> Text,
+    }
+}
+
+table! {
     tuf_artifact (id) {
         id -> Uuid,
-        name -> Text,
-        version -> Text,
-        kind -> Text,
         time_created -> Timestamptz,
         sha256 -> Text,
-        artifact_size -> Int8,
         generation_added -> Int8,
-        sign -> Nullable<Binary>,
-        board -> Nullable<Text>,
+    }
+}
+
+table! {
+    tuf_artifact_file (sha256) {
+        sha256 -> Text,
+        version -> Text,
+        artifact_size -> Int8,
+    }
+}
+
+table! {
+    tuf_artifact_tag (tuf_artifact_id, key) {
+        tuf_artifact_id -> Uuid,
+        key -> Text,
+        value -> Text,
     }
 }
 
@@ -1569,10 +1585,11 @@ table! {
 }
 
 allow_tables_to_appear_in_same_query!(
-    tuf_repo,
-    tuf_repo_artifact,
-    tuf_artifact
+    tuf_artifact,
+    tuf_artifact_file,
+    tuf_repo_artifact
 );
+allow_tables_to_appear_in_same_query!(tuf_artifact_tag, tuf_repo_artifact);
 joinable!(tuf_repo_artifact -> tuf_repo (tuf_repo_id));
 joinable!(tuf_repo_artifact -> tuf_artifact (tuf_artifact_id));
 
@@ -2292,7 +2309,7 @@ table! {
     }
 }
 
-allow_tables_to_appear_in_same_query!(bp_sled_metadata, tuf_artifact);
+allow_tables_to_appear_in_same_query!(bp_sled_metadata, tuf_artifact_file);
 
 table! {
     bp_omicron_physical_disk (blueprint_id, id) {
@@ -2341,7 +2358,10 @@ table! {
     }
 }
 
-allow_tables_to_appear_in_same_query!(bp_single_measurements, tuf_artifact);
+allow_tables_to_appear_in_same_query!(
+    bp_single_measurements,
+    tuf_artifact_file
+);
 
 table! {
     bp_omicron_zone (blueprint_id, id) {
@@ -2379,7 +2399,7 @@ table! {
     }
 }
 
-allow_tables_to_appear_in_same_query!(bp_omicron_zone, tuf_artifact);
+allow_tables_to_appear_in_same_query!(bp_omicron_zone, tuf_artifact_file);
 
 table! {
     bp_omicron_zone_nic (blueprint_id, id) {

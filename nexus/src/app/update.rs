@@ -10,6 +10,7 @@ use bytes::Bytes;
 use chrono::DateTime;
 use chrono::TimeDelta;
 use chrono::Utc;
+use display_error_chain::DisplayErrorChain;
 use dropshot::HttpError;
 use futures::Stream;
 use nexus_auth::authz;
@@ -30,6 +31,7 @@ use nexus_types::identity::Asset;
 use nexus_types::internal_api::views as internal_views;
 use nexus_types::inventory::Collection;
 use nexus_types::inventory::Zpool;
+use nexus_types::tuf_repo::TufRepoDescription;
 use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::Nullable;
 use omicron_common::api::external::{DataPageParams, Error};
@@ -44,12 +46,13 @@ use slog::info;
 use slog::warn;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
+use std::error::Error as _;
 use std::iter;
 use std::sync::Arc;
 use tokio::sync::watch;
-use update_common::artifacts::{
-    ArtifactsWithPlan, ControlPlaneZonesMode, VerificationMode,
-};
+use tufaceous_artifact_v2::ArtifactHash;
+use tufaceous_v2::ExpirationEnforcement;
+use tufaceous_v2::RepositoryLoader;
 use uuid::Uuid;
 
 /// Threshold at which we consider an active saga stuck.
@@ -382,7 +385,7 @@ impl super::Nexus {
         body: impl Stream<Item = Result<Bytes, HttpError>> + Send + Sync + 'static,
         file_name: String,
     ) -> Result<TufRepoUpload, HttpError> {
-        let mut trusted_roots = Vec::new();
+        let mut loader = RepositoryLoader::new();
         let mut paginator = Paginator::new(
             SQL_BATCH_SIZE,
             dropshot::PaginationOrder::Ascending,
@@ -394,50 +397,80 @@ impl super::Nexus {
                 .await?;
             paginator = p.found_batch(&batch, &|a| a.id.into_untyped_uuid());
             for root in batch {
-                trusted_roots.push(root.root_role.0.to_bytes());
+                loader = loader.trust_root(root.root_role.0.to_bytes());
             }
         }
 
-        let artifacts_with_plan = ArtifactsWithPlan::from_stream(
-            body,
-            Some(file_name),
-            ControlPlaneZonesMode::Split,
-            VerificationMode::TrustStore(&trusted_roots),
-            &self.log,
-        )
-        .await
-        .map_err(|error| error.to_http_error())?;
+        let repo = loader
+            .compute_archive_sha256(true)
+            .expiration_enforcement(ExpirationEnforcement::Unsafe)
+            .v1_compatibility(true)
+            .load_zip_stream(body, None, &self.log)
+            .await
+            .map_err(|err| {
+                // Downcast to an underlying `dropshot::HttpError` if possible.
+                if let Some(source) = err.source()
+                    && let Some(err) = source.downcast_ref::<HttpError>()
+                {
+                    // manual Clone::clone
+                    HttpError {
+                        status_code: err.status_code,
+                        error_code: err.error_code.clone(),
+                        external_message: err.external_message.clone(),
+                        internal_message: err.internal_message.clone(),
+                        headers: err.headers.clone(),
+                    }
+                } else {
+                    let message = DisplayErrorChain::new(&err).to_string();
+                    if err.is_repository_error() {
+                        // Error is due to bad repository contents.
+                        HttpError::for_bad_request(None, message)
+                    } else {
+                        // Error is likely due to something else.
+                        HttpError::for_unavail(None, message)
+                    }
+                }
+            })?;
 
         // Now store the artifacts in the database.
+        let description = TufRepoDescription {
+            artifacts: repo.artifacts().clone(),
+            metadata: repo.metadata().clone(),
+            system_version: repo.system_version().clone(),
+            hash: ArtifactHash(*repo.archive_sha256().ok_or_else(|| {
+                HttpError::for_unavail(
+                    None,
+                    "tufaceous should have calculated repo hash but didn't"
+                        .to_owned(),
+                )
+            })?),
+            file_name,
+        };
         let response = self
             .db_datastore
-            .tuf_repo_insert(opctx, artifacts_with_plan.description())
+            .tuf_repo_insert(opctx, &description)
             .await
             .map_err(HttpError::from)?;
 
-        // Move the `ArtifactsWithPlan` (which carries with it the
-        // `Utf8TempDir`s storing the artifacts) into the artifact replication
-        // background task, then immediately activate the task. (If this repo
-        // was already uploaded, the artifacts should immediately be dropped by
-        // the task.)
-        self.tuf_artifact_replication_tx
-            .send(artifacts_with_plan)
-            .await
-            .map_err(|err| {
-                // This error can only happen while Nexus's Tokio runtime is
-                // shutting down; Sender::send returns an error only if the
-                // receiver has hung up, and the receiver should live for
-                // as long as Nexus does (it belongs to the background task
-                // driver.)
-                //
-                // In the unlikely event that it does happen within this narrow
-                // window, the impact is that the database has recorded a
-                // repository for which we no longer have the artifacts. The fix
-                // would be to reupload the repository.
-                Error::internal_error(&format!(
-                    "failed to send artifacts for replication: {err}"
-                ))
-            })?;
+        // Move the `tufaceous::Repository` (which carries with it the temporary
+        // file storing the artifacts) into the artifact replication background
+        // task, then immediately activate the task. (If this repo was already
+        // uploaded, the artifacts should immediately be dropped by the task.)
+        self.tuf_artifact_replication_tx.send(repo).await.map_err(|err| {
+            // This error can only happen while Nexus's Tokio runtime is
+            // shutting down; Sender::send returns an error only if the
+            // receiver has hung up, and the receiver should live for
+            // as long as Nexus does (it belongs to the background task
+            // driver.)
+            //
+            // In the unlikely event that it does happen within this narrow
+            // window, the impact is that the database has recorded a
+            // repository for which we no longer have the artifacts. The fix
+            // would be to reupload the repository.
+            Error::internal_error(&format!(
+                "failed to send artifacts for replication: {err}"
+            ))
+        })?;
         self.background_tasks.task_tuf_artifact_replication.activate();
 
         Ok(response)
@@ -670,9 +703,7 @@ impl super::Nexus {
         // and only if target_release_source is 'unspecified', which should only
         // happen in the initial state before any target release has been set
         let curr_target_desc = match current_tuf_repo {
-            Some(repo) => {
-                TargetReleaseDescription::TufRepo(repo.into_external())
-            }
+            Some(repo) => TargetReleaseDescription::TufRepo(repo.into()),
             None => TargetReleaseDescription::Initial,
         };
 
@@ -705,7 +736,7 @@ impl super::Nexus {
                 self.datastore()
                     .tuf_repo_get_by_id(opctx, id.into())
                     .await?
-                    .into_external(),
+                    .into(),
             ),
             None => TargetReleaseDescription::Initial,
         };
@@ -832,8 +863,8 @@ mod test {
     use sled_agent_types::inventory::ZpoolHealth;
     use slog::Logger;
     use slog::o;
-    use tufaceous_artifact::ArtifactHash;
-    use tufaceous_artifact::ArtifactVersion;
+    use tufaceous_artifact_v2::ArtifactHash;
+    use tufaceous_artifact_v2::ArtifactVersion;
     use uuid::Uuid;
 
     type ControlPlaneTestContext =

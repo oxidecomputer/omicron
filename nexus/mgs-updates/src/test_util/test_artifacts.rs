@@ -14,7 +14,7 @@ use sha2::Digest;
 use sp_sim::{SIM_GIMLET_BOARD, SIM_SIDECAR_BOARD};
 use std::collections::BTreeMap;
 use std::sync::Arc;
-use tufaceous_artifact::ArtifactHash;
+use tufaceous_artifact_v2::ArtifactHash;
 
 type ArtifactData = BTreeMap<ArtifactHash, Vec<u8>>;
 type InMemoryRepoDepotServerContext = Arc<ArtifactData>;

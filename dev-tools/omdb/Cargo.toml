@@ -95,7 +95,6 @@ tabled.workspace = true
 textwrap.workspace = true
 tokio = { workspace = true, features = ["full"] }
 trust-quorum-types.workspace = true
-tufaceous-artifact.workspace = true
 unicode-width.workspace = true
 update-engine.workspace = true
 url.workspace = true

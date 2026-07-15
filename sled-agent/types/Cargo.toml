@@ -31,7 +31,7 @@ slog-error-chain.workspace = true
 swrite.workspace = true
 test-strategy = { workspace = true, optional = true }
 thiserror.workspace = true
-tufaceous-artifact.workspace = true
+tufaceous-artifact-v2.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]

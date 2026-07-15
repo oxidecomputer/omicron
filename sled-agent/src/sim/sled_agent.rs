@@ -78,7 +78,7 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
-use tufaceous_artifact::ArtifactHash;
+use tufaceous_artifact_v2::ArtifactHash;
 use uuid::Uuid;
 
 /// Simulates management of the control plane on a sled

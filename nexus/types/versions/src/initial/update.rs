@@ -11,7 +11,7 @@ use semver::Version;
 use serde::{Deserialize, Deserializer, Serialize, de::Error as _};
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
-use tufaceous_artifact::ArtifactHash;
+use tufaceous_artifact_v2::ArtifactHash;
 use uuid::Uuid;
 
 /// Wrapper type for TUF root roles to prevent misuse.
@@ -121,6 +121,7 @@ pub struct TufRepo {
     // This is a slight abuse of `ArtifactHash`, since that's the hash of
     // individual artifacts within the repository. However, we use it here for
     // convenience.
+    #[schemars(schema_with = "ArtifactHash::v1_json_schema")]
     pub hash: ArtifactHash,
 
     /// The system version for this repository
