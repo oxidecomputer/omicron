@@ -110,25 +110,37 @@ impl DataStore {
                         BgpAnnounceSetUuid::from_untyped_uuid(announce_set_id),
                     );
 
+                    let BgpConfig {
+                        identity,
+                        asn,
+                        bgp_announce_set_id,
+                        vrf,
+                        shaper,
+                        checker,
+                        max_paths,
+                    } = config.clone();
+
                     // Idempotency:
                     // Check to see if an exact match for the config already exists
                     let query = dsl::bgp_config
-                        .filter(dsl::name.eq(config.name().to_string()))
-                        .filter(dsl::asn.eq(config.asn))
-                        .filter(dsl::bgp_announce_set_id.eq(config.bgp_announce_set_id))
+                        .filter(dsl::name.eq(identity.name.to_string()))
+                        .filter(dsl::description.eq(identity.description.to_string()))
+                        .filter(dsl::asn.eq(asn))
+                        .filter(dsl::bgp_announce_set_id.eq(bgp_announce_set_id))
+                        .filter(dsl::max_paths.eq(max_paths))
                         .into_boxed();
 
-                    let query = match config.vrf.clone() {
+                    let query = match vrf {
                         Some(v) => query.filter(dsl::vrf.eq(v)),
                         None => query.filter(dsl::vrf.is_null()),
                     };
 
-                    let query = match config.shaper.clone() {
+                    let query = match shaper {
                         Some(v) => query.filter(dsl::shaper.eq(v)),
                         None => query.filter(dsl::shaper.is_null()),
                     };
 
-                    let query = match config.checker.clone() {
+                    let query = match checker {
                         Some(v) => query.filter(dsl::checker.eq(v)),
                         None => query.filter(dsl::checker.is_null()),
                     };
@@ -1070,6 +1082,7 @@ mod tests {
     use crate::db::pub_test_utils::TestDatabase;
     use nexus_db_lookup::LookupPath;
     use nexus_db_model::SwitchPortBgpPeerConfig;
+    use nexus_types::external_api::networking::BgpConfigCreate;
     use nexus_types::external_api::networking::BgpConfigSelector;
     use nexus_types::external_api::networking::BgpPeer;
     use omicron_common::api::external::IdentityMetadataCreateParams;
@@ -1795,6 +1808,119 @@ mod tests {
                 .await
                 .is_err()
         );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_bgp_config_create_idempotency() {
+        let logctx = dev::test_setup_log("test_bgp_config_create_idempotency");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let bgp_announce_set_id = datastore
+            .bgp_create_announce_set(
+                &opctx,
+                &networking::BgpAnnounceSetCreate {
+                    identity: IdentityMetadataCreateParams {
+                        name: "announce-set".parse().unwrap(),
+                        description: String::from("the first announce set"),
+                    },
+                    announcement: Vec::default(),
+                },
+            )
+            .await
+            .expect("create bgp announce set")
+            .0
+            .identity
+            .id;
+
+        datastore
+            .bgp_create_announce_set(
+                &opctx,
+                &networking::BgpAnnounceSetCreate {
+                    identity: IdentityMetadataCreateParams {
+                        name: "other-announce-set".parse().unwrap(),
+                        description: String::from("another announce set"),
+                    },
+                    announcement: Vec::default(),
+                },
+            )
+            .await
+            .expect("create other bgp announce set");
+
+        let bgp_config = networking::BgpConfigCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "config-name".parse().unwrap(),
+                description: String::from("a test config"),
+            },
+            asn: 47,
+            bgp_announce_set_id: NameOrId::Id(
+                bgp_announce_set_id.into_untyped_uuid(),
+            ),
+            vrf: None,
+            shaper: None,
+            checker: None,
+            max_paths: MaxPathConfig::new(1).unwrap(),
+        };
+
+        let created = datastore
+            .bgp_config_create(&opctx, &bgp_config)
+            .await
+            .expect("create bgp config");
+
+        // Subsequent creates should succeed if all fields match
+        let replayed = datastore
+            .bgp_config_create(&opctx, &bgp_config)
+            .await
+            .expect("replay identical bgp config create");
+        assert_eq!(created.identity.id, replayed.identity.id);
+
+        // Subsequent creates should fail if any field is different
+        type Mutation = (&'static str, fn(&mut BgpConfigCreate));
+        let mutations: &[Mutation] = &[
+            ("identity.name", |config| {
+                config.identity.name = "other-config-name".parse().unwrap();
+            }),
+            ("identity.description", |config| {
+                config.identity.description =
+                    String::from("another description");
+            }),
+            ("asn", |config| {
+                config.asn = 48;
+            }),
+            ("bgp_announce_set_id", |config| {
+                config.bgp_announce_set_id =
+                    NameOrId::Name("other-announce-set".parse().unwrap());
+            }),
+            ("vrf", |config| {
+                config.vrf = Some("other-vrf".parse().unwrap());
+            }),
+            ("shaper", |config| {
+                config.shaper = Some(String::from("other shaper"));
+            }),
+            ("checker", |config| {
+                config.checker = Some(String::from("other checker"));
+            }),
+            ("max_paths", |config| {
+                config.max_paths = MaxPathConfig::new(2).unwrap();
+            }),
+        ];
+
+        for &(field, mutate) in mutations {
+            let mut conflicting_config = bgp_config.clone();
+            mutate(&mut conflicting_config);
+
+            let error = datastore
+                .bgp_config_create(&opctx, &conflicting_config)
+                .await
+                .expect_err(&format!("{field} should affect idempotency"));
+            assert!(
+                matches!(error, Error::Conflict { .. }),
+                "changing {field} returned an unexpected error: {error:?}"
+            );
+        }
 
         db.terminate().await;
         logctx.cleanup_successful();
