@@ -104,10 +104,14 @@ static MANIFEST_PREBUILT_REPOS: [PrebuiltRepoConfig; 8] = [
             extra_cargo_features: &["omicron-build"],
         },
     },
+    // pumpkind is ignored because it does not appear to contain Progenitor
+    // clients or APIs and we have no easy way to find a clone of the repo.
     PrebuiltRepoConfig {
         repo_name: "pumpkind",
         behavior: PrebuiltRepoBehavior::Ignore,
     },
+    // thundermuffin is ignored because it does not appear to contain Progenitor
+    // clients or APIs and we have no easy way to find a clone of the repo.
     PrebuiltRepoConfig {
         repo_name: "thundermuffin",
         behavior: PrebuiltRepoBehavior::Ignore,
