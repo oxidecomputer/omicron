@@ -216,7 +216,7 @@ fn build_sleds_array(sleds: &BTreeSet<BootstrapSledDescription>) -> Array {
 
     for sled in sleds {
         // We should never get a non-sled from wicketd; if we do, filter it out.
-        if sled.id.type_ != SpType::Sled {
+        if sled.id.typ != SpType::Sled {
             continue;
         }
 
