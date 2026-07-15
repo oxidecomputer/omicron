@@ -88,20 +88,29 @@ pub struct LoadArgs {
     pub patched_dep_policy: PatchedDepPolicy,
 }
 
-/// How the tool should treat a related-repo dependency whose resolved package
-/// has no source (typically because the developer has overridden it with a
-/// local Cargo `[patch]`).
+/// Specifies the behavior when looking for a package containing a specific Git
+/// commit SHA in a related repo (e.g., dendrite, crucible, etc.) when there no
+/// package is found with the exact Git SHA, but there _is_ a package found
+/// that appears to have been locally patched.
 ///
 /// When a dependency has been patched to a local path, there is no reliable
 /// way for this tool to check that the local copy corresponds to the commit
 /// pinned in `package-manifest.toml`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum PatchedDepPolicy {
-    /// Report an error if the only candidate for a related-repo dependency
-    /// looks like a local `[patch]` override.
+    /// Do not treat patched dependencies as matching the specific Git commit
+    /// SHA that we're looking for
+    ///
+    /// This will result in an error if there is no other version of the package
+    /// that does match the Git SHA that we're looking for.
     Reject,
-    /// Assume that a local `[patch]` override corresponds to the commit
-    /// pinned in `package-manifest.toml` and use it.
+
+    /// Assume that a local patched package does correspond to the commit that
+    /// we're looking for and use that package for further analysis
+    ///
+    /// Callers (i.e., users) may get wrong output if they're wrong about this,
+    /// but it's useful during development when you've got a local patch, you
+    /// want to use this tool, and you've verified the Git SHA.
     AssumeMatch,
 }
 
