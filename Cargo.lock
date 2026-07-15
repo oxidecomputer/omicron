@@ -968,6 +968,7 @@ dependencies = [
 name = "bootstrap-agent-lockstep-client"
 version = "0.1.0"
 dependencies = [
+ "bootstrap-agent-lockstep-types",
  "omicron-common",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
@@ -1331,9 +1332,9 @@ dependencies = [
 
 [[package]]
 name = "chrono"
-version = "0.4.44"
+version = "0.4.45"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c673075a2e0e5f4a1dde27ce9dee1ea4558c7ffe648f576438a20ca1d2acc4b0"
+checksum = "1aa79e62e7697b8e29b513a68abacf485adcd1fe8284a4316c5ae868e6633327"
 dependencies = [
  "iana-time-zone",
  "js-sys",
@@ -1630,7 +1631,7 @@ dependencies = [
 [[package]]
 name = "client-common"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=dc84a6ce494a9d004568b67e22add2285a04d887#dc84a6ce494a9d004568b67e22add2285a04d887"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=65cc70aa5507f779551a1d33c0089bb0a9b7ac72#65cc70aa5507f779551a1d33c0089bb0a9b7ac72"
 
 [[package]]
 name = "clipboard-win"
@@ -2665,7 +2666,7 @@ dependencies = [
 [[package]]
 name = "ddm-admin-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=dc84a6ce494a9d004568b67e22add2285a04d887#dc84a6ce494a9d004568b67e22add2285a04d887"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=65cc70aa5507f779551a1d33c0089bb0a9b7ac72#65cc70aa5507f779551a1d33c0089bb0a9b7ac72"
 dependencies = [
  "ddm-api-types-versions",
  "oxnet",
@@ -2679,7 +2680,7 @@ dependencies = [
 [[package]]
 name = "ddm-api-types-versions"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=dc84a6ce494a9d004568b67e22add2285a04d887#dc84a6ce494a9d004568b67e22add2285a04d887"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=65cc70aa5507f779551a1d33c0089bb0a9b7ac72#65cc70aa5507f779551a1d33c0089bb0a9b7ac72"
 dependencies = [
  "ddm-protocol",
  "oxnet",
@@ -2692,7 +2693,7 @@ dependencies = [
 [[package]]
 name = "ddm-protocol"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=dc84a6ce494a9d004568b67e22add2285a04d887#dc84a6ce494a9d004568b67e22add2285a04d887"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=65cc70aa5507f779551a1d33c0089bb0a9b7ac72#65cc70aa5507f779551a1d33c0089bb0a9b7ac72"
 dependencies = [
  "oxnet",
  "schemars 0.8.22",
@@ -6865,7 +6866,7 @@ dependencies = [
 [[package]]
 name = "mg-admin-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=dc84a6ce494a9d004568b67e22add2285a04d887#dc84a6ce494a9d004568b67e22add2285a04d887"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=65cc70aa5507f779551a1d33c0089bb0a9b7ac72#65cc70aa5507f779551a1d33c0089bb0a9b7ac72"
 dependencies = [
  "chrono",
  "client-common",
@@ -6885,7 +6886,7 @@ dependencies = [
 [[package]]
 name = "mg-api-types"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=dc84a6ce494a9d004568b67e22add2285a04d887#dc84a6ce494a9d004568b67e22add2285a04d887"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=65cc70aa5507f779551a1d33c0089bb0a9b7ac72#65cc70aa5507f779551a1d33c0089bb0a9b7ac72"
 dependencies = [
  "mg-api-types-versions",
 ]
@@ -6893,7 +6894,7 @@ dependencies = [
 [[package]]
 name = "mg-api-types-versions"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=dc84a6ce494a9d004568b67e22add2285a04d887#dc84a6ce494a9d004568b67e22add2285a04d887"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=65cc70aa5507f779551a1d33c0089bb0a9b7ac72#65cc70aa5507f779551a1d33c0089bb0a9b7ac72"
 dependencies = [
  "chrono",
  "nom 8.0.0",
@@ -8420,20 +8421,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "ntp-admin-v1-client"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "git-stub-vcs",
- "omicron-workspace-hack",
- "progenitor 0.14.0",
- "reqwest 0.13.2",
- "schemars 0.8.22",
- "serde",
- "slog",
-]
-
-[[package]]
 name = "nu-ansi-term"
 version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -9538,7 +9525,6 @@ dependencies = [
  "semver 1.0.28",
  "serde",
  "serde_json",
- "sha2 0.10.9",
  "shell-words",
  "slog",
  "slog-async",
@@ -9546,7 +9532,9 @@ dependencies = [
  "tar",
  "tokio",
  "toml 0.8.23",
+ "tufaceous 0.2.0",
  "tufaceous-artifact 0.1.0",
+ "tufaceous-artifact 0.2.0",
  "tufaceous-lib",
  "update-common",
 ]
@@ -9756,6 +9744,7 @@ dependencies = [
  "omicron-workspace-hack",
  "oxide-tokio-rt",
  "pem",
+ "port-file",
  "rcgen",
  "regex",
  "reqwest 0.13.2",
@@ -11296,6 +11285,17 @@ dependencies = [
  "cpubits",
  "cpufeatures 0.3.0",
  "universal-hash 0.6.1",
+]
+
+[[package]]
+name = "port-file"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "34fced1ed6fb91e9fa97e7c31a418cc71a9814586af88acefdaa46bc0ebdf712"
+dependencies = [
+ "atomicwrites",
+ "camino",
+ "tokio",
 ]
 
 [[package]]
@@ -13902,7 +13902,7 @@ dependencies = [
  "installinator-common",
  "key-manager",
  "key-manager-types",
- "ntp-admin-v1-client",
+ "ntp-admin-client",
  "omicron-common",
  "omicron-ledger",
  "omicron-test-utils",
@@ -17366,13 +17366,13 @@ dependencies = [
  "sled-agent-types",
  "sled-hardware-types",
  "slog",
- "slog-error-chain",
  "thiserror 2.0.18",
  "tokio",
  "toml 0.8.23",
  "transceiver-controller 0.1.1 (git+https://github.com/oxidecomputer/transceiver-control)",
  "tufaceous-artifact 0.2.0",
  "update-engine",
+ "wicketd-commission-types",
 ]
 
 [[package]]
@@ -17407,6 +17407,7 @@ dependencies = [
  "base64 0.22.1",
  "bootstrap-agent-client",
  "bootstrap-agent-lockstep-client",
+ "bootstrap-agent-lockstep-types",
  "buf-list",
  "bytes",
  "camino",
@@ -17494,6 +17495,7 @@ name = "wicketd-api"
 version = "0.1.0"
 dependencies = [
  "bootstrap-agent-lockstep-client",
+ "bootstrap-agent-lockstep-types",
  "dropshot",
  "gateway-client",
  "omicron-common",
@@ -17506,6 +17508,7 @@ dependencies = [
  "sled-hardware-types",
  "slog",
  "wicket-common",
+ "wicketd-commission-types",
 ]
 
 [[package]]
@@ -17531,6 +17534,29 @@ dependencies = [
  "update-engine",
  "uuid",
  "wicket-common",
+]
+
+[[package]]
+name = "wicketd-commission-types"
+version = "0.1.0"
+dependencies = [
+ "omicron-workspace-hack",
+ "wicketd-commission-types-versions",
+]
+
+[[package]]
+name = "wicketd-commission-types-versions"
+version = "0.1.0"
+dependencies = [
+ "omicron-common",
+ "omicron-workspace-hack",
+ "oxnet",
+ "schemars 0.8.22",
+ "serde",
+ "serde_json",
+ "sled-agent-types-versions",
+ "slog-error-chain",
+ "toml 0.8.23",
 ]
 
 [[package]]
