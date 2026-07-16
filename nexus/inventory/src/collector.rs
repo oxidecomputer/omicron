@@ -470,7 +470,7 @@ impl<'a> Collector<'a> {
         );
 
         let maybe_ident = client.inventory().await.with_context(|| {
-            format!("Sled Agent {:?}: inventory", &sled_agent_url)
+            format!("Sled Agent {:?}: inventory", sled_agent_url)
         });
         let inventory = match maybe_ident {
             Ok(inventory) => inventory.into_inner(),
@@ -545,7 +545,7 @@ impl<'a> Collector<'a> {
         );
 
         let maybe_ident = client.timesync().await.with_context(|| {
-            format!("Sled Agent {:?}: timesync", &sled_agent_url)
+            format!("Sled Agent {:?}: timesync", sled_agent_url)
         });
         let timesync = match maybe_ident {
             Ok(timesync) => nexus_types::inventory::TimeSync {
@@ -587,7 +587,7 @@ impl<'a> Collector<'a> {
         );
 
         let res = client.keeper_cluster_membership().await.with_context(|| {
-            format!("Clickhouse Keeper {:?}: inventory", &client.baseurl())
+            format!("Clickhouse Keeper {:?}: inventory", client.baseurl())
         });
 
         match res {

@@ -558,7 +558,7 @@ mod test {
         let result: RegionSnapshotReplacementStartStatus =
             serde_json::from_value(task.activate(&opctx).await).unwrap();
 
-        eprintln!("{:?}", &result);
+        eprintln!("{:?}", result);
 
         assert_eq!(result.requests_created_ok.len(), 1);
         assert_eq!(result.start_invoked_ok.len(), 1);

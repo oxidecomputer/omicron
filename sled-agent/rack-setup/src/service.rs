@@ -1817,7 +1817,7 @@ mod test {
             .join("../../smf/sled-agent/non-gimlet/config-rss.toml");
         let contents = std::fs::read_to_string(&path).unwrap();
         toml::from_str(&contents)
-            .unwrap_or_else(|e| panic!("failed to parse {:?}: {}", &path, e))
+            .unwrap_or_else(|e| panic!("failed to parse {:?}: {}", path, e))
     }
 
     fn make_sled_info(
@@ -2058,13 +2058,13 @@ mod test {
             manifest.join("../../smf/sled-agent/non-gimlet/config-rss.toml");
         let contents = std::fs::read_to_string(&path).unwrap();
         let _: RackInitializeRequest = toml::from_str(&contents)
-            .unwrap_or_else(|e| panic!("failed to parse {:?}: {}", &path, e));
+            .unwrap_or_else(|e| panic!("failed to parse {:?}: {}", path, e));
 
         let path = manifest
             .join("../../smf/sled-agent/gimlet-standalone/config-rss.toml");
         let contents = std::fs::read_to_string(&path).unwrap();
         let _: RackInitializeRequest = toml::from_str(&contents)
-            .unwrap_or_else(|e| panic!("failed to parse {:?}: {}", &path, e));
+            .unwrap_or_else(|e| panic!("failed to parse {:?}: {}", path, e));
     }
 
     #[test]
@@ -2189,7 +2189,7 @@ mod test {
             rack_initialize_request_from_file(&path).unwrap_or_else(|e| {
                 panic!(
                     "failed to parse {:?}: {}",
-                    &path,
+                    path,
                     InlineErrorChain::new(&e)
                 )
             });
@@ -2219,7 +2219,7 @@ mod test {
         let cfg_path = tempdir.path().join("config-rss.toml");
         let _ = std::fs::copy(&path, &cfg_path)
             .with_context(|| {
-                format!("failed to copy file {:?} to {:?}", &path, &cfg_path)
+                format!("failed to copy file {:?} to {:?}", path, cfg_path)
             })
             .unwrap();
 
@@ -2230,14 +2230,14 @@ mod test {
             .into_bytes();
         let cert_path = tempdir.path().join("initial-tls-cert.pem");
         std::fs::write(&cert_path, &cert_bytes)
-            .with_context(|| format!("failed to write to {:?}", &cert_path))
+            .with_context(|| format!("failed to write to {:?}", cert_path))
             .unwrap();
 
         // Write the private key.
         let key_path = tempdir.path().join("initial-tls-key.pem");
         let key_bytes = cert.serialize_private_key_pem().into_bytes();
         std::fs::write(&key_path, &key_bytes)
-            .with_context(|| format!("failed to write to {:?}", &key_path))
+            .with_context(|| format!("failed to write to {:?}", key_path))
             .unwrap();
 
         // Now try to load it all.

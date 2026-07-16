@@ -375,7 +375,7 @@ async fn test_instances_create_reboot_halt(
                     name: instance.identity.name.clone(),
                     description: format!(
                         "instance {:?}",
-                        &instance.identity.name
+                        instance.identity.name
                     ),
                 },
                 ncpus: instance.ncpus,
@@ -721,7 +721,7 @@ async fn test_instance_start_creates_networking_state(
 
     assert_eq!(guest_nics.len(), 1);
     for agent in &sled_agents {
-        println!(">>> {:#?}", &nics[0]);
+        println!(">>> {:#?}", nics[0]);
         assert_sled_v2p_mappings(agent, &nics[0], guest_nics[0].vni).await;
     }
 
@@ -855,8 +855,7 @@ async fn test_instance_migrate(cptestctx: &ControlPlaneTestContext) {
         default_sled_id
     };
 
-    let migrate_url =
-        format!("/instances/{}/migrate", &instance_id.to_string());
+    let migrate_url = format!("/instances/{}/migrate", instance_id);
     let instance = NexusRequest::new(
         RequestBuilder::new(lockstep_client, Method::POST, &migrate_url)
             .body(Some(&InstanceMigrateRequest { dst_sled_id }))
@@ -1173,8 +1172,7 @@ async fn test_instance_migrate_target_finishes_first(
         default_sled_id
     };
 
-    let migrate_url =
-        format!("/instances/{}/migrate", &instance_id.to_string());
+    let migrate_url = format!("/instances/{}/migrate", instance_id);
     let instance = NexusRequest::new(
         RequestBuilder::new(lockstep_client, Method::POST, &migrate_url)
             .body(Some(&InstanceMigrateRequest { dst_sled_id }))
@@ -1531,8 +1529,7 @@ async fn test_instance_migrate_v2p_and_routes(
     };
 
     // Kick off migration and simulate its completion on the target.
-    let migrate_url =
-        format!("/instances/{}/migrate", &instance_id.to_string());
+    let migrate_url = format!("/instances/{}/migrate", instance_id);
     let _ = NexusRequest::new(
         RequestBuilder::new(lockstep_client, Method::POST, &migrate_url)
             .body(Some(&InstanceMigrateRequest { dst_sled_id }))
@@ -1716,8 +1713,7 @@ async fn test_instance_migration_compatible_cpu_platforms(
         first_sled_id
     };
 
-    let migrate_url =
-        format!("/instances/{}/migrate", &instance_id.to_string());
+    let migrate_url = format!("/instances/{}/migrate", instance_id);
     let instance = NexusRequest::new(
         RequestBuilder::new(lockstep_client, Method::POST, &migrate_url)
             .body(Some(&InstanceMigrateRequest { dst_sled_id }))
@@ -1902,8 +1898,7 @@ async fn test_instance_migration_incompatible_cpu_platforms(
     // wrong.
     assert_eq!(sled_info.sled_id, turin_sled_id);
 
-    let migrate_url =
-        format!("/instances/{}/migrate", &instance_id.to_string());
+    let migrate_url = format!("/instances/{}/migrate", instance_id);
     NexusRequest::new(
         RequestBuilder::new(lockstep_client, Method::POST, &migrate_url)
             .body(Some(&InstanceMigrateRequest { dst_sled_id: milan_sled_id }))
@@ -1990,8 +1985,7 @@ async fn test_instance_migration_unknown_sled_type(
         (first_sled_id, http::StatusCode::BAD_REQUEST)
     };
 
-    let migrate_url =
-        format!("/instances/{}/migrate", &instance_id.to_string());
+    let migrate_url = format!("/instances/{}/migrate", instance_id);
     NexusRequest::new(
         RequestBuilder::new(lockstep_client, Method::POST, &migrate_url)
             .body(Some(&InstanceMigrateRequest { dst_sled_id }))
@@ -2848,8 +2842,7 @@ async fn test_instance_metrics_with_migration(
     };
 
     // instance is already running on destination sled
-    let migrate_url =
-        format!("/instances/{}/migrate", &instance_id.to_string());
+    let migrate_url = format!("/instances/{}/migrate", instance_id);
     let _ = NexusRequest::new(
         RequestBuilder::new(lockstep_client, Method::POST, &migrate_url)
             .body(Some(&InstanceMigrateRequest { dst_sled_id }))
@@ -6770,7 +6763,7 @@ async fn test_instances_memory_rejected_less_than_min_memory_size(
     let instance = instance::InstanceCreate {
         identity: IdentityMetadataCreateParams {
             name: instance_name.parse().unwrap(),
-            description: format!("instance {:?}", &instance_name),
+            description: format!("instance {:?}", instance_name),
         },
         ncpus: InstanceCpuCount(1),
         memory: ByteCount::from(MIN_MEMORY_BYTES_PER_INSTANCE / 2),
@@ -6827,7 +6820,7 @@ async fn test_instances_memory_not_divisible_by_min_memory_size(
     let instance = instance::InstanceCreate {
         identity: IdentityMetadataCreateParams {
             name: instance_name.parse().unwrap(),
-            description: format!("instance {:?}", &instance_name),
+            description: format!("instance {:?}", instance_name),
         },
         ncpus: InstanceCpuCount(1),
         memory: ByteCount::from(1024 * 1024 * 1024 + 300),
@@ -6883,7 +6876,7 @@ async fn test_instances_memory_greater_than_max_size(
     let instance = instance::InstanceCreate {
         identity: IdentityMetadataCreateParams {
             name: instance_name.parse().unwrap(),
-            description: format!("instance {:?}", &instance_name),
+            description: format!("instance {:?}", instance_name),
         },
         ncpus: InstanceCpuCount(1),
         memory: ByteCount::try_from(MAX_MEMORY_BYTES_PER_INSTANCE + (1 << 30))

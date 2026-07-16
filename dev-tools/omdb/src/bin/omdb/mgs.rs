@@ -83,7 +83,7 @@ impl MgsArgs {
                 format!("http://{}", addr)
             }
         };
-        eprintln!("note: using MGS URL {}", &mgs_url);
+        eprintln!("note: using MGS URL {}", mgs_url);
         Ok(gateway_client::Client::new(&mgs_url, log.clone()))
     }
 
@@ -584,7 +584,7 @@ async fn show_sp_details(
                     format!(
                         "get caboose for sp type {:?} sp slot {} \
                         component {:?} slot {}",
-                        sp_id.typ, sp_id.slot, &c.component, i
+                        sp_id.typ, sp_id.slot, c.component, i
                     )
                 });
             match r {

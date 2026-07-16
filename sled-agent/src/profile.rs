@@ -237,7 +237,7 @@ impl Display for PropertyGroupBuilder {
                     r#"        <propval type="{ty}" name="{name}" value='{value}'/>
 "#,
                     name = property_name,
-                    value = &values[0],
+                    value = values[0],
                 )?;
             } else {
                 write!(

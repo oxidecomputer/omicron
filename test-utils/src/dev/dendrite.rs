@@ -185,7 +185,7 @@ impl DendriteInstance {
             .kill_on_drop(true)
             .spawn()
             .with_context(|| {
-                format!("failed to spawn `dpd` (with args: {:?})", &args)
+                format!("failed to spawn `dpd` (with args: {:?})", args)
             })?;
         let stderr = child.stderr.take().unwrap();
 

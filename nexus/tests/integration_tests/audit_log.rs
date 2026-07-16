@@ -77,7 +77,7 @@ async fn test_audit_log_list(ctx: &ControlPlaneTestContext) {
 
     // this this creates its own entry
     let session_token = create_console_session(ctx).await;
-    let session_cookie = format!("session={}", &session_token);
+    let session_cookie = format!("session={}", session_token);
 
     let t3 = Utc::now(); // after second entry
 

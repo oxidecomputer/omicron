@@ -299,7 +299,7 @@ impl DbUrlOptions {
         log: &slog::Logger,
     ) -> anyhow::Result<Arc<DataStore>> {
         let db_url = self.resolve_pg_url(omdb, log).await?;
-        eprintln!("note: using database URL {}", &db_url);
+        eprintln!("note: using database URL {}", db_url);
 
         let addrs = db_url.all_addresses()?;
         let pool = Arc::new(db::Pool::new_fixed_hosts(log, addrs));
@@ -6571,7 +6571,7 @@ async fn cmd_db_validate_volume_references(
                     // full table scan
                     conn.batch_execute_async(ALLOW_FULL_TABLE_SCAN_SQL).await?;
 
-                    let pattern = format!("%{}%", &snapshot_addr);
+                    let pattern = format!("%{}%", snapshot_addr);
 
                     use nexus_db_schema::schema::volume::dsl;
 

@@ -1005,7 +1005,7 @@ impl super::Nexus {
                 "cannot create SAML identity provider for this Silo type \
                 (expected authentication mode {:?}, found {:?})",
                 nexus_db_model::AuthenticationMode::Saml,
-                &db_silo.authentication_mode,
+                db_silo.authentication_mode,
             )));
         }
 

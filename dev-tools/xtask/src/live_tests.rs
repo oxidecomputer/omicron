@@ -44,7 +44,7 @@ pub fn run_cmd(_args: Args) -> Result<()> {
     eprintln!();
 
     std::fs::create_dir(&proto_root)
-        .with_context(|| format!("mkdir {:?}", &proto_root))?;
+        .with_context(|| format!("mkdir {:?}", proto_root))?;
 
     let mut command = cargo_command(CargoLocation::FromEnv);
 
@@ -80,7 +80,7 @@ pub fn run_cmd(_args: Args) -> Result<()> {
     command.arg(format!(
         "tar cf - Cargo.toml .config/nextest.toml live-tests | \
          tar xf - -C {:?}",
-        &proto_root
+        proto_root
     ));
     run_subcmd(command)?;
 
@@ -95,14 +95,14 @@ pub fn run_cmd(_args: Args) -> Result<()> {
     drop(tmpdir_root);
 
     eprint!("created: ");
-    println!("{}", &final_tarball);
+    println!("{}", final_tarball);
     eprintln!("\nTo use this:\n");
     eprintln!(
         "1. Copy the tarball to the switch zone in a deployed Omicron system.\n"
     );
     let raw = &[
         "scp \\",
-        &format!("{} \\", &final_tarball),
+        &format!("{} \\", final_tarball),
         "root@YOUR_SCRIMLET_GZ_IP:/zone/oxz_switch/root/root",
     ]
     .join("\n");

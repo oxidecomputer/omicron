@@ -23,13 +23,13 @@ fn main() -> Result<()> {
         .path(&arg.storage_path)
         .create_new(false)
         .open()
-        .with_context(|| format!("open {:?}", &arg.storage_path))?;
+        .with_context(|| format!("open {:?}", arg.storage_path))?;
 
     if !db.was_recovered() {
         bail!(
             "no database found at {:?} (sorry, this command likely just \
             created an empty database there)",
-            &arg.storage_path
+            arg.storage_path
         );
     }
 
