@@ -22,6 +22,7 @@ use bootstrap_agent_lockstep_types::RackInitializeRequest;
 use bootstrap_agent_lockstep_types::RackOperationStatus;
 use bootstrap_agent_lockstep_types::ReplicatedNetworkConfig;
 use bootstrap_agent_lockstep_types::ReplicatedNetworkConfigContents;
+use bootstrap_agent_lockstep_types::scrimlet_reconcilers::ScrimletReconcilersStatus;
 use dropshot::{
     ApiDescription, HttpError, HttpResponseOk, RequestContext, TypedBody,
 };
@@ -29,6 +30,7 @@ use omicron_uuid_kinds::RackInitUuid;
 use sled_agent_config_reconciler::InternalDisksReceiver;
 use sled_agent_measurements::MeasurementsHandle;
 use sled_agent_rack_setup::RackInitializeRequestParams;
+use sled_agent_scrimlet_reconcilers::ScrimletReconcilers;
 use slog::Logger;
 use sprockets_tls::keys::SprocketsConfig;
 use std::sync::Arc;
@@ -45,6 +47,7 @@ pub(crate) struct BootstrapServerContext {
     pub(crate) sprockets: SprocketsConfig,
     pub(crate) trust_quorum_handle: trust_quorum::NodeTaskHandle,
     pub(crate) measurements: Arc<MeasurementsHandle>,
+    pub(crate) scrimlet_reconcilers: Arc<ScrimletReconcilers>,
 }
 
 impl BootstrapServerContext {
@@ -115,6 +118,13 @@ impl BootstrapAgentLockstepApi for BootstrapAgentLockstepImpl {
             },
         );
         Ok(HttpResponseOk(ReplicatedNetworkConfig { contents }))
+    }
+
+    async fn scrimlet_reconcilers_status_for_debug(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<ScrimletReconcilersStatus>, HttpError> {
+        let ctx = rqctx.context();
+        Ok(HttpResponseOk(ctx.scrimlet_reconcilers.status()))
     }
 
     async fn baseboard_ids(

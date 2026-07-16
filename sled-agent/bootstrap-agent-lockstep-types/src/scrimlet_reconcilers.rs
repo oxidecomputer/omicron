@@ -21,6 +21,7 @@ pub mod uplinkd;
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema,
 )]
+#[serde(rename_all = "snake_case")]
 pub enum ScrimletStatus {
     Scrimlet,
     NotScrimlet,
@@ -29,6 +30,7 @@ pub enum ScrimletStatus {
 /// Status of attempting to determine this sled's switch slot via MGS within
 /// this sled's switch zone.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case", tag = "status")]
 pub enum DetermineSwitchSlotStatus {
     /// We're not attempting to contact MGS because we're not a scrimlet.
     NotScrimlet,
@@ -47,6 +49,7 @@ pub enum DetermineSwitchSlotStatus {
 
 /// Why a reconciler task has gone inert.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
 pub enum ReconcilerInertReason {
     /// The reconciler task started when this sled was a scrimlet, but it has
     /// since become "not a scrimlet" (e.g., because the attached switch has
@@ -61,6 +64,7 @@ pub enum ReconcilerInertReason {
 
 /// Why a reconciler task was activated.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
 pub enum ReconcilerActivationReason {
     /// Each reconciler runs once on startup.
     Startup,
@@ -74,7 +78,7 @@ pub enum ReconcilerActivationReason {
 }
 
 /// Status of a completed-in-the-past reconciliation attempt.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReconciliationCompletedStatus<T> {
     /// Why the reconciliation attempt fired.
     pub activation_reason: ReconcilerActivationReason,
@@ -87,6 +91,32 @@ pub struct ReconciliationCompletedStatus<T> {
     pub activation_count: u64,
     /// Reconciler-specific status.
     pub status: T,
+}
+
+// shadow type for our manual JsonScema impl on the real
+// ReconciliationCompletedStatus
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+struct ReconciliationCompletedStatusShadow<T> {
+    activation_reason: ReconcilerActivationReason,
+    completed_at_time: DateTime<Utc>,
+    ran_for: Duration,
+    activation_count: u64,
+    status: T,
+}
+
+impl<T> JsonSchema for ReconciliationCompletedStatus<T>
+where
+    T: JsonSchema,
+{
+    fn schema_name() -> String {
+        format!("ReconciliationCompletedStatus{}", T::schema_name())
+    }
+
+    fn json_schema(
+        generator: &mut schemars::r#gen::SchemaGenerator,
+    ) -> schemars::schema::Schema {
+        ReconciliationCompletedStatusShadow::<T>::json_schema(generator)
+    }
 }
 
 /// Status of a currently-running reconciliation attempt.
@@ -106,6 +136,7 @@ pub struct ReconcilerRunningStatus {
 /// running and will continue to not run for a given reason", whereas `Idle`
 /// means "not currently running but will run again soon".
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case", tag = "status", content = "value")]
 pub enum ReconcilerCurrentStatus {
     /// The reconciler is inert: it will not or cannot run for some reason.
     Inert(ReconcilerInertReason),
@@ -116,7 +147,7 @@ pub enum ReconcilerCurrentStatus {
 }
 
 /// Status of a single scrimlet reconciler.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReconcilerStatus<T> {
     /// Status of the task at this moment.
     pub current_status: ReconcilerCurrentStatus,
@@ -126,8 +157,35 @@ pub struct ReconcilerStatus<T> {
     pub last_completion: Option<Box<ReconciliationCompletedStatus<T>>>,
 }
 
+// shadow type for our manual JsonScema impl on the real ReconcilerStatus
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+struct ReconcilerStatusShadow<T> {
+    /// Status of the task at this moment.
+    current_status: ReconcilerCurrentStatus,
+    /// Final status of the most recent activation of this task.
+    // Box the inner status to avoid clippy complaining about
+    // `ScrimletReconcilersStatus::Running { ... }` being overly large.
+    last_completion: Option<Box<ReconciliationCompletedStatus<T>>>,
+}
+
+impl<T> JsonSchema for ReconcilerStatus<T>
+where
+    T: JsonSchema,
+{
+    fn schema_name() -> String {
+        format!("ReconcilerStatus{}", T::schema_name())
+    }
+
+    fn json_schema(
+        generator: &mut schemars::r#gen::SchemaGenerator,
+    ) -> schemars::schema::Schema {
+        ReconcilerStatusShadow::<T>::json_schema(generator)
+    }
+}
+
 /// Status of the collective set of scrimlet reconcilers.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case", tag = "status", content = "value")]
 pub enum ScrimletReconcilersStatus {
     /// `sled-agent` has not yet provided underlay networking information.
     WaitingForSledAgentNetworkingInfo,

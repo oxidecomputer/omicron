@@ -32,6 +32,7 @@ pub struct DpdPortOperationFailure {
 
 /// Status of reconciling QSFP port settings with `dpd`.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case", tag = "status", content = "value")]
 pub enum DpdPortReconcilerStatus {
     /// Reconciliation failed while attempting to read the current settings from
     /// `dpd`.
@@ -149,6 +150,7 @@ pub struct DpdNatReconcilerStatusNatEntryFailure {
 
 /// Status of reconciling service zone NAT entries with `dpd`.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case", tag = "status", content = "value")]
 pub enum DpdNatReconcilerStatus {
     /// Reconciliation was skipped because the bootstore contains no NAT entry
     /// config information.
