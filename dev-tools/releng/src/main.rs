@@ -46,16 +46,6 @@ use tufaceous_artifact_v2::OsVariant;
 use crate::cmd::Command;
 use crate::job::Jobs;
 
-/// The base version we're currently building. Build information is appended to
-/// this later on.
-///
-/// Under current policy, each new release is a major version bump, and
-/// generally referred to only by the major version (e.g. 8.0.0 is referred
-/// to as "v8", "version 8", or "release 8" to customers). The use of semantic
-/// versioning is mostly to hedge for perhaps wanting something more granular in
-/// the future.
-const BASE_VERSION: Version = Version::new(22, 0, 0);
-
 const RETRY_ATTEMPTS: usize = 3;
 
 #[derive(Debug, Clone, Copy)]
@@ -1163,7 +1153,7 @@ async fn host_add_root_profile(host_proto_root: Utf8PathBuf) -> Result<()> {
 fn generate_version(commit: &str) -> Result<Version> {
     const PADDED_WIDTH: usize = 8;
 
-    let mut version = BASE_VERSION.clone();
+    let mut version = omicron_common::SYSTEM_VERSION.clone();
     // Differentiate between CI and local builds. We use `0.word` as the
     // prerelease field because it comes before `alpha`.
     version.pre =

@@ -9516,6 +9516,7 @@ dependencies = [
  "fs-err 3.3.0",
  "futures",
  "hex",
+ "omicron-common",
  "omicron-pins",
  "omicron-workspace-hack",
  "omicron-zone-package",

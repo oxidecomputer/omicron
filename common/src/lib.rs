@@ -101,6 +101,19 @@ pub fn format_time_delta(time_delta: chrono::TimeDelta) -> String {
     }
 }
 
+/// The system version of the Oxide software (RFD 557): the `N.P.C` form,
+/// without the `+gitHHHH` build metadata that a published release carries.
+///
+/// Under current policy, each new release is a major version bump, and
+/// generally referred to only by the major version (e.g. 8.0.0 is referred
+/// to as "v8", "version 8", or "release 8" to customers). The use of semantic
+/// versioning is mostly to hedge for perhaps wanting something more granular in
+/// the future.
+///
+/// The releng build process appends build metadata to this to produce the full
+/// version string; the `/v1/version` API endpoint returns it as-is.
+pub const SYSTEM_VERSION: semver::Version = semver::Version::new(22, 0, 0);
+
 pub const OMICRON_DPD_TAG: &str = "omicron";
 
 /// A wrapper struct that does nothing other than elide the inner value from
