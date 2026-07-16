@@ -493,7 +493,10 @@ async fn get_all_sagas_in_state(
             match Saga::try_from(row.clone()) {
                 Ok(saga_row) => sagas.push(saga_row),
                 Err(e) => {
-                    println!("WARNING: Skipping saga with id {}: {e}", row.id())
+                    eprintln!(
+                        "WARNING: Skipping saga with id {}: {e}",
+                        row.id()
+                    )
                 }
             };
         }

@@ -308,7 +308,7 @@ pub struct AbandonMetadata {
 /// insertion.
 ///
 /// Compared to [`SagaRow`], the three abandon metadata columns are bundled
-/// into a single private `abandon` field, kept all or none. Reads go through
+/// into a single `abandon` field, kept all or none. Reads go through
 /// `TryFrom<SagaRow>`, which rejects rows whose metadata is inconsistent with
 /// `saga_state` with an [`Error::internal_error`].
 #[derive(Clone, Debug, PartialEq)]
@@ -430,7 +430,7 @@ impl TryFrom<SagaRow> for Saga {
 
                 Some(metadata)
             }
-            _ => {
+            SagaState::Done | SagaState::Running | SagaState::Unwinding => {
                 if let Some(metadata) = valid_abandon_metadata {
                     return Err(Error::internal_error(&format!(
                         "saga {id}: has abandonment metadata but is not \
