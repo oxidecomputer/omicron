@@ -2975,6 +2975,19 @@ CREATE TABLE IF NOT EXISTS omicron.public.saga (
             AND abandon_reason IS NOT NULL
             AND abandon_comment IS NOT NULL
         )
+    ),
+
+    /*
+     * Conversely, a saga that isn't abandoned must not have any abandonment
+     * metadata.
+     */
+    CONSTRAINT not_abandoned_requires_no_metadata CHECK (
+        saga_state = 'abandoned'
+        OR (
+            abandon_time IS NULL
+            AND abandon_reason IS NULL
+            AND abandon_comment IS NULL
+        )
     )
 );
 
