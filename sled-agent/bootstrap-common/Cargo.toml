@@ -7,9 +7,14 @@ description = "shared code for bootstrap agent related crates"
 
 [dependencies]
 bootstore.workspace = true
+camino.workspace = true
+omicron-ledger.workspace = true
+serde.workspace = true
 sled-agent-config-reconciler.workspace = true
 sled-agent-measurements.workspace = true
+slog-error-chain.workspace = true
 slog.workspace = true
 sprockets-tls.workspace = true
+thiserror.workspace = true
 trust-quorum.workspace = true
 

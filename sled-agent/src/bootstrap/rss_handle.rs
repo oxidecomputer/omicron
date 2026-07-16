@@ -33,19 +33,11 @@ pub(super) async fn run_rss(
     config: RackInitializeRequestParams,
     step_tx: watch::Sender<RssStep>,
 ) -> Result<(), SetupServiceError> {
-    let (tx, rx) = rss_channel(ctx.sprockets_config, ctx.measurements.clone());
+    let (tx, rx) =
+        rss_channel(ctx.sprockets_config.clone(), ctx.measurements.clone());
 
-    let rss = RackSetupService::new(
-        ctx.base_log.new(o!("component" => "RSS")),
-        config,
-        ctx.internal_disks_rx,
-        tx,
-        ctx.global_zone_bootstrap_ip,
-        ctx.bootstore_node_handle,
-        ctx.trust_quorum_handle,
-        step_tx,
-    );
     let log = ctx.base_log.new(o!("component" => "BootstrapAgentRssHandler"));
+    let rss = RackSetupService::new(ctx, config, tx, step_tx);
     rx.await_local_rss_request(&log).await;
     rss.join().await
 }

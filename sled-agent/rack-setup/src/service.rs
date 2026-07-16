@@ -99,15 +99,15 @@ use omicron_common::backoff::{
 };
 use omicron_common::disk::DatasetKind;
 use omicron_ddm_admin_client::DdmError;
-use omicron_ledger::{self as ledger, Ledger, Ledgerable};
+use omicron_ledger::{self as ledger};
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::RackUuid;
 use omicron_uuid_kinds::ZpoolUuid;
-use serde::{Deserialize, Serialize};
+use sled_agent_bootstrap_common::RssContext;
+use sled_agent_bootstrap_common::RunRssError;
 use sled_agent_client::{
     Client as SledAgentClient, Error as SledAgentError, types as SledAgentTypes,
 };
-use sled_agent_config_reconciler::InternalDisksReceiver;
 use sled_agent_types::early_networking::EarlyNetworkConfigEnvelope;
 use sled_agent_types::inventory::{
     ConfigReconcilerInventoryResult, HostPhase2DesiredSlots, OmicronSledConfig,
@@ -124,7 +124,7 @@ use slog_error_chain::{InlineErrorChain, SlogInlineError};
 use std::collections::BTreeSet;
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
-use std::net::{Ipv6Addr, SocketAddrV6};
+use std::net::SocketAddrV6;
 use std::time::Duration;
 use thiserror::Error;
 use tokio::sync::watch;
@@ -263,6 +263,15 @@ pub enum SetupServiceError {
     TrustQuorumProxyCommitPending(BaseboardId),
 }
 
+impl From<RunRssError> for SetupServiceError {
+    fn from(value: RunRssError) -> Self {
+        match value {
+            RunRssError::RackAlreadyInitialized => Self::RackAlreadyInitialized,
+            RunRssError::RackInitInterrupted => Self::RackInitInterrupted,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct RackInitializeRequestParams {
     pub rack_initialize_request: RackInitializeRequest,
@@ -298,28 +307,16 @@ impl RackSetupService {
     /// - `trust_quorum` - A handle to the trust qurom task
     #[expect(clippy::too_many_arguments)]
     pub fn new<T: LocalBootstrapAgent + 'static>(
-        log: Logger,
+        ctx: RssContext,
         request: RackInitializeRequestParams,
-        internal_disks_rx: InternalDisksReceiver,
         local_bootstrap_agent: T,
-        our_bootstrap_address: Ipv6Addr,
-        bootstore: bootstore::NodeHandle,
-        trust_quorum: trust_quorum::NodeTaskHandle,
         step_tx: watch::Sender<RssStep>,
     ) -> Self {
         let handle = tokio::task::spawn(async move {
+            let log = ctx.base_log.new(o!("component" => "RSS"));
             let svc = ServiceInner::new(log.clone());
-            if let Err(e) = svc
-                .run(
-                    &request,
-                    &internal_disks_rx,
-                    local_bootstrap_agent,
-                    our_bootstrap_address,
-                    bootstore,
-                    trust_quorum,
-                    step_tx,
-                )
-                .await
+            if let Err(e) =
+                svc.run(ctx, &request, local_bootstrap_agent, step_tx).await
             {
                 error!(log, "RSS injection failed"; &e);
                 Err(e)
@@ -336,29 +333,6 @@ impl RackSetupService {
         self.handle.await.expect("Rack Setup Service Task panicked")
     }
 }
-
-#[derive(Clone, Serialize, Deserialize, Default)]
-struct RssStartedMarker {}
-
-impl Ledgerable for RssStartedMarker {
-    fn is_newer_than(&self, _other: &Self) -> bool {
-        true
-    }
-    fn generation_bump(&mut self) {}
-}
-
-const RSS_STARTED_FILENAME: &str = "rss-started.marker";
-
-#[derive(Clone, Serialize, Deserialize, Default)]
-struct RssCompleteMarker {}
-
-impl Ledgerable for RssCompleteMarker {
-    fn is_newer_than(&self, _other: &Self) -> bool {
-        true
-    }
-    fn generation_bump(&mut self) {}
-}
-const RSS_COMPLETED_FILENAME: &str = "rss-plan-completed.marker";
 
 /// The implementation of the Rack Setup Service.
 struct ServiceInner {
@@ -1052,12 +1026,9 @@ impl ServiceInner {
     #[expect(clippy::too_many_arguments)]
     async fn run<T: LocalBootstrapAgent>(
         &self,
+        ctx: RssContext,
         request: &RackInitializeRequestParams,
-        internal_disks_rx: &InternalDisksReceiver,
         local_bootstrap_agent: T,
-        our_bootstrap_address: Ipv6Addr,
-        bootstore: bootstore::NodeHandle,
-        trust_quorum: trust_quorum::NodeTaskHandle,
         step_tx: watch::Sender<RssStep>,
     ) -> Result<(), SetupServiceError> {
         info!(self.log, "Injecting RSS configuration: {:#?}", request);
@@ -1070,52 +1041,15 @@ impl ServiceInner {
             config.az_subnet(),
         )?;
 
-        let config_dataset_paths = internal_disks_rx
-            .current()
-            .all_config_datasets()
-            .collect::<Vec<_>>();
-
-        let started_marker_paths: Vec<Utf8PathBuf> = config_dataset_paths
-            .iter()
-            .map(|p| p.join(RSS_STARTED_FILENAME))
-            .collect();
-
-        let completed_marker_paths: Vec<Utf8PathBuf> = config_dataset_paths
-            .iter()
-            .map(|p| p.join(RSS_COMPLETED_FILENAME))
-            .collect();
-
-        let started_ledger = Ledger::<RssStartedMarker>::new(
-            &self.log,
-            started_marker_paths.clone(),
-        )
-        .await;
-        let completed_ledger = Ledger::<RssCompleteMarker>::new(
-            &self.log,
-            completed_marker_paths.clone(),
-        )
-        .await;
-
-        // Check if a previous RSS plan has completed successfully.
-        //
-        // If we see the completion marker in the `completed_ledger` then the
-        // system should be up-and-running. If we see the started marker in
-        // the `started_ledger`, then RSS did not complete and the rack should
-        // be clean-slated before RSS is run again.
-        if completed_ledger.is_some() {
-            info!(self.log, "RSS configuration has already been applied",);
-            return Err(SetupServiceError::RackAlreadyInitialized);
-        } else if started_ledger.is_some() {
-            error!(self.log, "RSS failed to complete rack initialization");
-            return Err(SetupServiceError::RackInitInterrupted);
-        }
+        // Check to see if we've already finished RSS or multirack join
+        ctx.is_rss_complete(&self.log).await?;
 
         info!(self.log, "RSS not previously run. Creating plans.");
 
         // Wait for enough peers to create a new plan
         let bootstrap_addrs = match &config.bootstrap_discovery {
             BootstrapAddressDiscovery::OnlyOurs => {
-                BTreeSet::from([our_bootstrap_address])
+                BTreeSet::from([ctx.global_zone_bootstrap_ip])
             }
             BootstrapAddressDiscovery::OnlyThese { addrs } => addrs.clone(),
         };
@@ -1134,12 +1068,7 @@ impl ServiceInner {
         // clean-slate and try again.
 
         // Record that we have started RSS
-        let mut ledger = Ledger::<RssStartedMarker>::new_with(
-            &self.log,
-            started_marker_paths.clone(),
-            RssStartedMarker::default(),
-        );
-        ledger.commit().await?;
+        ctx.write_rss_started_ledger(&self.log).await?;
 
         rss_step.update(RssStep::CreateSledPlan);
         info!(self.log, "Creating new allocation plan");
@@ -1161,7 +1090,7 @@ impl ServiceInner {
 
                 init_trust_quorum(
                     &self.log,
-                    trust_quorum.clone(),
+                    ctx.trust_quorum_handle.clone(),
                     tq_members.clone(),
                     rack_id,
                 )
@@ -1169,7 +1098,7 @@ impl ServiceInner {
 
                 Some(InitialTrustQuorumConfig {
                     members: tq_members.into_iter().collect(),
-                    coordinator: trust_quorum.baseboard_id().clone(),
+                    coordinator: ctx.trust_quorum_handle.baseboard_id().clone(),
                 })
             } else {
                 None
@@ -1193,7 +1122,7 @@ impl ServiceInner {
         };
         info!(self.log, "Writing initial network configuration to bootstore");
         rss_step.update(RssStep::InitialNetworkConfigUpdate);
-        bootstore
+        ctx.bootstore_node_handle
             .update_network_config(
                 EarlyNetworkConfigEnvelope::from(&system_networking_config)
                     .serialize_to_bootstore_with_generation(
@@ -1254,7 +1183,7 @@ impl ServiceInner {
             "Writing final system networking configuration to bootstore",
         );
         rss_step.update(RssStep::FinalNetworkConfigUpdate);
-        bootstore
+        ctx.bootstore_node_handle
             .update_network_config(
                 EarlyNetworkConfigEnvelope::from(&system_networking_config)
                     .serialize_to_bootstore_with_generation(
@@ -1403,13 +1332,9 @@ impl ServiceInner {
         )
         .await?;
 
-        // Finally, mark that we've completed executing the plans and handed off to nexus.
-        let mut ledger = Ledger::<RssCompleteMarker>::new_with(
-            &self.log,
-            completed_marker_paths.clone(),
-            RssCompleteMarker::default(),
-        );
-        ledger.commit().await?;
+        // Finally, mark that we've completed executing the plans and handed off
+        // to nexus.
+        ctx.write_rss_completed_ledger(&self.log).await?;
 
         Ok(())
     }

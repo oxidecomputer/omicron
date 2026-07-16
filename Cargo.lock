@@ -13784,10 +13784,15 @@ name = "sled-agent-bootstrap-common"
 version = "0.1.0"
 dependencies = [
  "bootstore",
+ "camino",
+ "omicron-ledger",
+ "serde",
  "sled-agent-config-reconciler",
  "sled-agent-measurements",
  "slog",
+ "slog-error-chain",
  "sprockets-tls",
+ "thiserror 2.0.18",
  "trust-quorum",
 ]
 
@@ -14012,6 +14017,7 @@ dependencies = [
  "reqwest 0.13.2",
  "schemars 0.8.22",
  "serde",
+ "sled-agent-bootstrap-common",
  "sled-agent-client",
  "sled-agent-config-reconciler",
  "sled-agent-types",
