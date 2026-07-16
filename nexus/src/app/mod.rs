@@ -1467,24 +1467,10 @@ async fn map_switch_zone_addrs(
 /// Begin configuring an external HTTP client, returning a
 /// `reqwest::ClientBuilder`.
 pub(crate) fn external_http_client_builder(
-    config: &nexus_config::ExternalHttpClientConfig,
+    _config: &nexus_config::ExternalHttpClientConfig,
     resolver: &Arc<external_dns::Resolver>,
 ) -> reqwest::ClientBuilder {
     let mut builder = reqwest::ClientBuilder::new();
-
     builder = builder.dns_resolver(resolver.clone());
-
-    // If we are configured to only bind external TCP connections on a specific interface, do so.
-    #[cfg(any(
-        target_os = "linux",
-        target_os = "macos",
-        target_os = "illumos",
-    ))]
-    {
-        if let Some(ref interface) = config.interface {
-            builder = builder.interface(interface);
-        }
-    }
-
     builder
 }
