@@ -5,6 +5,9 @@
 //! Reconciliation of QSFP port settings.
 
 use crate::switch_zone_slot::ThisSledSwitchSlot;
+use bootstrap_agent_lockstep_types::scrimlet_reconcilers::dpd::{
+    DpdPortOperationFailure, DpdPortReconcilerStatus,
+};
 use daft::Diffable;
 use dpd_client::Client;
 use dpd_client::types::LinkCreate as DpdLinkCreate;
@@ -39,92 +42,6 @@ use std::net::IpAddr;
 type DpdClientError = dpd_client::Error<dpd_client::types::Error>;
 
 const DPD_TAG: Option<&'static str> = Some(OMICRON_DPD_TAG);
-
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct DpdPortOperationFailure {
-    pub port_id: DpdQsfp,
-    pub error: String,
-}
-
-/// Status of reconciling QSFP port settings with `dpd`.
-#[derive(Debug, Clone)]
-pub enum DpdPortReconcilerStatus {
-    /// Reconciliation failed while attempting to read the current settings from
-    /// `dpd`.
-    FailedReadingCurrentSettings(String),
-
-    /// Reconciliation failed because the data prevented us from constructing a
-    /// plan - this should be impossible absent bugs.
-    FailedGeneratingPlan(String),
-
-    /// Reconciliation completed successfully.
-    Success {
-        unchanged: BTreeSet<DpdQsfp>,
-        cleared: BTreeSet<DpdQsfp>,
-        applied: BTreeSet<DpdQsfp>,
-    },
-
-    /// Reconciliation completed but had at least one failure.
-    PartialSuccess {
-        unchanged: BTreeSet<DpdQsfp>,
-        cleared: BTreeSet<DpdQsfp>,
-        clear_failures: Vec<DpdPortOperationFailure>,
-        applied: BTreeSet<DpdQsfp>,
-        apply_failures: Vec<DpdPortOperationFailure>,
-    },
-}
-
-impl slog::KV for DpdPortReconcilerStatus {
-    fn serialize(
-        &self,
-        _record: &slog::Record<'_>,
-        serializer: &mut dyn slog::Serializer,
-    ) -> slog::Result {
-        let skipped_key = "port-reconciler-skipped";
-        match self {
-            Self::FailedReadingCurrentSettings(reason) => {
-                serializer.emit_str(skipped_key.into(), reason)
-            }
-            Self::FailedGeneratingPlan(reason) => {
-                serializer.emit_str(skipped_key.into(), reason)
-            }
-            Self::Success { unchanged, cleared, applied } => {
-                // Only show a summary count; we have individual log statements
-                // for each clear/apply.
-                for (key, val) in [
-                    ("port-settings-unchanged", unchanged.len()),
-                    ("port-settings-successfully-cleared", cleared.len()),
-                    ("port-settings-failed-to-clear", 0),
-                    ("port-settings-successfully-applied", applied.len()),
-                    ("port-settings-failed-to-apply", 0),
-                ] {
-                    serializer.emit_usize(key.into(), val)?;
-                }
-                Ok(())
-            }
-            Self::PartialSuccess {
-                unchanged,
-                cleared,
-                clear_failures,
-                applied,
-                apply_failures,
-            } => {
-                // Only show a summary count; we have individual log statements
-                // for each clear/apply.
-                for (key, val) in [
-                    ("port-settings-unchanged", unchanged.len()),
-                    ("port-settings-successfully-cleared", cleared.len()),
-                    ("port-settings-failed-to-clear", clear_failures.len()),
-                    ("port-settings-successfully-applied", applied.len()),
-                    ("port-settings-failed-to-apply", apply_failures.len()),
-                ] {
-                    serializer.emit_usize(key.into(), val)?;
-                }
-                Ok(())
-            }
-        }
-    }
-}
 
 #[derive(Default, Debug)]
 pub(super) struct PortReconciler {
@@ -261,26 +178,27 @@ async fn apply_plan(
     let mut cleared = BTreeSet::new();
     let mut clear_failures = Vec::new();
     for port_id in to_clear {
+        let port_id_string = port_id.to_string();
         match client
-            .port_settings_clear(&DpdPortId::Qsfp(port_id.clone()), DPD_TAG)
+            .port_settings_clear(&DpdPortId::Qsfp(port_id), DPD_TAG)
             .await
         {
             Ok(_) => {
                 info!(
                     log, "successfully cleared settings for port";
-                    "port_id" => port_id.to_string(),
+                    "port_id" => &port_id_string,
                 );
-                cleared.insert(port_id);
+                cleared.insert(port_id_string);
             }
             Err(err) => {
                 let err = InlineErrorChain::new(&err);
                 warn!(
                     log, "failed to clear port settings";
-                    "port_id" => port_id.to_string(),
+                    "port_id" => &port_id_string,
                     &err,
                 );
                 clear_failures.push(DpdPortOperationFailure {
-                    port_id,
+                    port_id: port_id_string,
                     error: err.to_string(),
                 });
             }
@@ -290,30 +208,27 @@ async fn apply_plan(
     let mut applied = BTreeSet::new();
     let mut apply_failures = Vec::new();
     for (port_id, settings) in to_apply {
+        let port_id_string = port_id.to_string();
         match client
-            .port_settings_apply(
-                &DpdPortId::Qsfp(port_id.clone()),
-                DPD_TAG,
-                &settings,
-            )
+            .port_settings_apply(&DpdPortId::Qsfp(port_id), DPD_TAG, &settings)
             .await
         {
             Ok(_) => {
                 info!(
                     log, "successfully applied settings for port";
-                    "port_id" => port_id.to_string(),
+                    "port_id" => &port_id_string,
                 );
-                applied.insert(port_id);
+                applied.insert(port_id_string);
             }
             Err(err) => {
                 let err = InlineErrorChain::new(&err);
                 warn!(
                     log, "failed to apply port settings";
-                    "port_id" => port_id.to_string(),
+                    "port_id" => &port_id_string,
                     &err,
                 );
                 apply_failures.push(DpdPortOperationFailure {
-                    port_id,
+                    port_id: port_id_string,
                     error: err.to_string(),
                 });
             }
@@ -336,7 +251,7 @@ async fn apply_plan(
 #[derive(Debug, PartialEq)]
 struct ReconciliationPlan {
     // Set of ports whose settings are already correct in `dpd`.
-    unchanged: BTreeSet<DpdQsfp>,
+    unchanged: BTreeSet<String>,
 
     // Set of ports that have settings in `dpd` but not in our desired config;
     // these should be cleared.
@@ -412,10 +327,10 @@ impl ReconciliationPlan {
         // values match) or we'll add the desired value to `to_apply`.
         for leaf in common {
             if leaf.is_unchanged() {
-                unchanged.insert(parse_port_id(
-                    leaf.key(),
-                    "rack network config AND dpd",
-                )?);
+                unchanged.insert(
+                    parse_port_id(leaf.key(), "rack network config AND dpd")?
+                        .to_string(),
+                );
             } else {
                 let port_id =
                     parse_port_id(leaf.key(), "rack network config AND dpd")?;
