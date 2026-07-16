@@ -96,6 +96,11 @@ enum SwitchZonePolicyCommands {
 enum NetworkConfigCommands {
     /// show the current contents of the replicated network config
     Show,
+
+    /// get the state of the network config reconciler system
+    ///
+    /// This will only be meaningful if the target sled-agent is a scrimlet.
+    ReconcilerStatus,
 }
 
 #[derive(Debug, Subcommand)]
@@ -192,6 +197,12 @@ impl SledAgentArgs {
             SledAgentCommands::NetworkConfig(NetworkConfigCommands::Show) => {
                 cmd_network_config_show(&make_ba_lockstep_client()?).await
             }
+            SledAgentCommands::NetworkConfig(
+                NetworkConfigCommands::ReconcilerStatus,
+            ) => cmd_network_config_reconciler_status(
+                &make_ba_lockstep_client()?,
+            )
+            .await,
             SledAgentCommands::Bootstore(BootstoreCommands::Status) => {
                 cmd_bootstore_status(&make_sa_client()?).await
             }
@@ -413,4 +424,15 @@ fn print_trust_quorum_status(status: NodeStatus) {
     println!("    expunged: {:?}", status.persistent_state.expunged);
 
     println!("proxied requests: {}", status.proxied_requests);
+}
+
+async fn cmd_network_config_reconciler_status(
+    client: &bootstrap_agent_lockstep_client::Client,
+) -> anyhow::Result<()> {
+    let status = client
+        .scrimlet_reconcilers_status_for_debug()
+        .await
+        .context("failed to fetch reconciler status")?;
+    println!("{status:?}");
+    Ok(())
 }
