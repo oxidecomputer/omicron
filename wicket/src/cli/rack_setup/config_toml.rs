@@ -5,13 +5,10 @@
 //! Support for the TOML file we give to and accept from clients for setting
 //! (most of) the rack setup configuration.
 
-use omicron_common::address::IpRange;
-use omicron_common::api::external::AllowedSourceIps;
 use serde::Serialize;
 use sled_agent_types::early_networking::BgpConfig;
 use sled_agent_types::early_networking::LldpPortConfig;
 use sled_agent_types::early_networking::RouteConfig;
-use sled_agent_types::early_networking::UplinkAddress;
 use sled_hardware_types::Baseboard;
 use std::borrow::Cow;
 use std::collections::BTreeSet;
@@ -27,7 +24,10 @@ use toml_edit::Value;
 use wicket_common::inventory::SpType;
 use wicket_common::rack_setup::BootstrapSledDescription;
 use wicket_common::rack_setup::CurrentRssUserConfigInsensitive;
+use wicketd_commission_types::rack_setup::AllowedSourceIps;
+use wicketd_commission_types::rack_setup::IpRange;
 use wicketd_commission_types::rack_setup::ManualPortConfig;
+use wicketd_commission_types::rack_setup::UplinkAddress;
 use wicketd_commission_types::rack_setup::UserSpecifiedBgpPeerConfig;
 use wicketd_commission_types::rack_setup::UserSpecifiedImportExportPolicy;
 use wicketd_commission_types::rack_setup::UserSpecifiedPortConfig;
@@ -216,7 +216,7 @@ fn build_sleds_array(sleds: &BTreeSet<BootstrapSledDescription>) -> Array {
 
     for sled in sleds {
         // We should never get a non-sled from wicketd; if we do, filter it out.
-        if sled.id.type_ != SpType::Sled {
+        if sled.id.typ != SpType::Sled {
             continue;
         }
 
@@ -350,8 +350,12 @@ fn populate_uplink_table(cfg: &UserSpecifiedPortConfig) -> Table {
     let manual_port_config = match cfg {
         UserSpecifiedPortConfig::Manual(manual) => manual,
         UserSpecifiedPortConfig::DdmAutoPortConfig => {
+            // A DDM-auto port is encoded as an empty table (the comment is
+            // operator-facing).
             let mut uplink = Table::new();
-            uplink.insert("type", string_item("ddm_auto_port_config"));
+            uplink.decor_mut().set_prefix(
+                "\n# This port is configured automatically via DDM.\n",
+            );
             return uplink;
         }
     };

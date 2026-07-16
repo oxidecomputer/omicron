@@ -2,8 +2,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use omicron_common::address;
-use omicron_common::api::internal::shared::AllowedSourceIps;
 use owo_colors::OwoColorize;
 use owo_colors::Style;
 use schemars::JsonSchema;
@@ -18,7 +16,9 @@ use std::fmt;
 use std::net::IpAddr;
 use std::net::Ipv6Addr;
 use tufaceous_artifact::ArtifactHash;
+use wicketd_commission_types::rack_setup::AllowedSourceIps;
 use wicketd_commission_types::rack_setup::BgpAuthKeyId;
+use wicketd_commission_types::rack_setup::IpRange;
 use wicketd_commission_types::rack_setup::UserSpecifiedRackNetworkConfig;
 
 use crate::inventory::SpIdentifier;
@@ -30,7 +30,7 @@ pub struct CurrentRssUserConfigInsensitive {
     pub bootstrap_sleds: BTreeSet<BootstrapSledDescription>,
     pub ntp_servers: Vec<String>,
     pub dns_servers: Vec<IpAddr>,
-    pub internal_services_ip_pool_ranges: Vec<address::IpRange>,
+    pub internal_services_ip_pool_ranges: Vec<IpRange>,
     pub external_dns_ips: Vec<IpAddr>,
     pub external_dns_zone_name: String,
     pub rack_network_config: Option<UserSpecifiedRackNetworkConfig>,
