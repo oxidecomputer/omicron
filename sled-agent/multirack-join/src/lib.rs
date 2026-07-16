@@ -18,6 +18,7 @@ extern crate slog;
 
 use bootstrap_agent_lockstep_types::MultirackJoinRequest;
 use sled_agent_bootstrap_common::RssContext;
+use slog::info;
 use slog_error_chain::{InlineErrorChain, SlogInlineError};
 use thiserror::Error;
 use tokio::sync::watch;
@@ -29,13 +30,12 @@ pub enum MultirackJoinServiceError {}
 /// The current state of the `MultirackJoinService` as retrieved from the `output`
 /// watch channel.
 #[derive(Debug, Clone)]
-pub struct MulitrackJoinServiceState {}
+pub struct MultirackJoinServiceState {}
 
 /// The interface to the Multirack Join Service.
 pub struct MultirackJoinServiceHandle {
     handle: tokio::task::JoinHandle<()>,
     input_tx: watch::Sender<MultirackJoinRequest>,
-    output_tx: watch::Sender<MultirackJoinServiceState>,
     output_rx: watch::Receiver<MultirackJoinServiceState>,
 }
 
@@ -45,9 +45,12 @@ impl MultirackJoinServiceHandle {
         let state = MultirackJoinServiceState {};
         let (output_tx, output_rx) = watch::channel(state.clone());
         let handle = tokio::task::spawn(async move {
-            // do something here with output_rx
+            let log =
+                ctx.base_log.new(o!("component" => "MultirackJoinService"));
+            info!(log, "Starting Multirack Join Service");
+            // do something here with ctx, input_rx, and output_tx
         });
 
-        Self { handle, input_tx, output_tx, output_rx }
+        Self { handle, input_tx, output_rx }
     }
 }

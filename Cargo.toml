@@ -808,6 +808,7 @@ sled-agent-config-reconciler = { path = "sled-agent/config-reconciler" }
 sled-agent-early-networking = { path = "sled-agent/early-networking" }
 sled-agent-health-monitor = { path = "sled-agent/health-monitor" }
 sled-agent-measurements = { path = "sled-agent/measurements" }
+sled-agent-multirack-join = { path = "sled-agent/multirack-join" }
 sled-agent-rack-setup = { path = "sled-agent/rack-setup" }
 sled-agent-types = { path = "sled-agent/types" }
 sled-agent-types-versions = { path = "sled-agent/types/versions" }

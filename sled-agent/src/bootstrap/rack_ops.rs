@@ -6,12 +6,13 @@
 
 use crate::bootstrap::rss_handle::run_rss;
 use bootstrap_agent_lockstep_types::MultirackJoinRequest;
-use bootstrap_agent_lockstep_types::MultirackJoinStep;
 use bootstrap_agent_lockstep_types::RackOperationStatus;
 use bootstrap_agent_lockstep_types::RssStep;
 use omicron_uuid_kinds::MultirackJoinUuid;
 use omicron_uuid_kinds::RackInitUuid;
 use sled_agent_bootstrap_common::RssContext;
+use sled_agent_multirack_join::MultirackJoinServiceError;
+use sled_agent_multirack_join::MultirackJoinServiceHandle;
 use sled_agent_rack_setup::RackInitializeRequestParams;
 use sled_agent_rack_setup::SetupServiceError;
 use slog_error_chain::InlineErrorChain;
@@ -107,33 +108,9 @@ impl RssAccess {
             RssStatus::InitializationPanicked { id } => {
                 RackOperationStatus::InitializationPanicked { id: *id }
             }
-            RssStatus::MultirackJoinInProgress { id, completion, step_rx } => {
+            RssStatus::MultirackJoinInProgress { id, handle } => {
                 let id = *id;
-                // This is our only chance to notice the initialization task has
-                // panicked: if it dropped the sending half of `completion`
-                // without reporting in.
-                match completion.try_recv() {
-                    Ok(()) => {
-                        // This should be unreachable, I think? But it is
-                        // harmless to report the initialized state.
-                        RackOperationStatus::MultirackJoinCompleted {
-                            id: Some(id),
-                        }
-                    }
-                    Err(TryRecvError::Empty) => {
-                        // Initialization task is still running
-                        // Update the step we are on.
-                        RackOperationStatus::MultirackJoinInProgress {
-                            id,
-                            step: *step_rx.borrow(),
-                        }
-                    }
-                    Err(TryRecvError::Closed) => {
-                        // Initialization task has panicked!
-                        *status = RssStatus::MultirackJoinPanicked { id };
-                        RackOperationStatus::MultirackJoinPanicked { id }
-                    }
-                }
+                todo!()
             }
             RssStatus::MultirackJoinCompleted { id } => {
                 RackOperationStatus::MultirackJoinCompleted { id: *id }
@@ -292,9 +269,7 @@ enum RssStatus {
     // scales, but should eventually leave).
     MultirackJoinInProgress {
         id: MultirackJoinUuid,
-        completion: oneshot::Receiver<()>,
-        // Used by the MultirackJoin task to update us with what step it is on.
-        step_rx: watch::Receiver<MultirackJoinStep>,
+        handle: MultirackJoinServiceHandle,
     },
 
     MultirackJoinCompleted {
@@ -306,7 +281,7 @@ enum RssStatus {
     // Terminal failure states; these require support intervention.
     MultirackJoinFailed {
         id: MultirackJoinUuid,
-        err: SetupServiceError,
+        err: MultirackJoinServiceError,
     },
     MultirackJoinPanicked {
         id: MultirackJoinUuid,
