@@ -5,9 +5,12 @@
 //! Types for the status and results of the scrimlet reconcilers responsible for
 //! syncing configuration from the bootstore to uplinkd in the switch zone.
 
+use indent_write::fmt::IndentWriter;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
+use std::fmt;
+use std::fmt::Write;
 
 /// Status of the `uplinkd` scrimlet reconciler.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -32,6 +35,49 @@ impl slog::KV for UplinkdReconcilerStatus {
                 .emit_str("uplinkd".into(), "skipped: config up-to-date"),
             UplinkdReconcilerStatus::Reconciled { ports } => serializer
                 .emit_usize("uplinkd-reconciled-ports".into(), ports.len()),
+        }
+    }
+}
+
+impl super::DisplayableStatus for UplinkdReconcilerStatus {
+    type DisplayAdapter<'a>
+        = UplinkdReconcilerStatusDisplay<'a>
+    where
+        Self: 'a;
+
+    /// Get a `fmt::Display`-able version of this status (e.g., for `omdb`).
+    fn display(&self) -> UplinkdReconcilerStatusDisplay<'_> {
+        UplinkdReconcilerStatusDisplay(self)
+    }
+}
+
+pub struct UplinkdReconcilerStatusDisplay<'a>(&'a UplinkdReconcilerStatus);
+
+impl fmt::Display for UplinkdReconcilerStatusDisplay<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.0 {
+            UplinkdReconcilerStatus::Failed(reason) => {
+                writeln!(f, "reconciliation failed: {reason}")
+            }
+            UplinkdReconcilerStatus::SkippedConfigUpToDate => {
+                writeln!(f, "reconciliation skipped: config is up to date")
+            }
+            UplinkdReconcilerStatus::Reconciled { ports } => {
+                if ports.is_empty() {
+                    writeln!(f, "reconciliation skipped: no ports")
+                } else {
+                    writeln!(
+                        f,
+                        "successfully reconciled {} ports:",
+                        ports.len()
+                    )?;
+                    let mut w = IndentWriter::new("    ", f);
+                    for (port, values) in ports.iter() {
+                        writeln!(w, "* {port}: {}", values.join(", "))?;
+                    }
+                    Ok(())
+                }
+            }
         }
     }
 }

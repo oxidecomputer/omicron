@@ -956,6 +956,7 @@ dependencies = [
  "anyhow",
  "chrono",
  "iddqd",
+ "indent_write",
  "omicron-common",
  "omicron-passwords",
  "omicron-uuid-kinds",

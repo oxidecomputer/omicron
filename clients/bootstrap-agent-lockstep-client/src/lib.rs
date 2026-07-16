@@ -40,6 +40,7 @@ progenitor::generate_api!(
         RouteConfig = sled_agent_types::early_networking::RouteConfig,
         RouterLifetimeConfig = sled_agent_types::early_networking::RouterLifetimeConfig,
         RssStep = bootstrap_agent_lockstep_types::RssStep,
+        ScrimletReconcilersStatus = bootstrap_agent_lockstep_types::scrimlet_reconcilers::ScrimletReconcilersStatus,
         ServiceIpPoolConfig = bootstrap_agent_lockstep_types::ServiceIpPoolConfig,
         SwitchSlot = sled_agent_types::early_networking::SwitchSlot,
         TxEqConfig = sled_agent_types::early_networking::TxEqConfig,
