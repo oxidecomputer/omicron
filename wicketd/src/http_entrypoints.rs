@@ -15,6 +15,7 @@ use crate::http_helpers::start_update;
 use crate::mgs::GetInventoryResponse as GetMgsInventoryResponse;
 use crate::multirack_config::CurrentMultirackJoinConfig;
 use crate::transceivers::GetTransceiversResponse;
+use bootstrap_agent_lockstep_client::ClientInfo as _;
 use bootstrap_agent_lockstep_types::RackOperationStatus;
 use dropshot::ApiDescription;
 use dropshot::HttpError;
@@ -318,10 +319,7 @@ impl WicketdApi for WicketdApiImpl {
         let ctx = rqctx.context();
         let log = &rqctx.log;
 
-        let lockstep_addr =
-            ctx.bootstrap_agent_lockstep_addr().map_err(|err| {
-                HttpError::for_bad_request(None, format!("{err:#}"))
-            })?;
+        let client = ba_lockstep_client(ctx)?;
 
         let request = {
             let mut config = ctx.rss_or_multirack_join_config.lock().unwrap();
@@ -338,9 +336,8 @@ impl WicketdApi for WicketdApiImpl {
         slog::info!(
             ctx.log,
             "Sending RSS initialize request to {}",
-            lockstep_addr
+            client.baseurl()
         );
-        let client = ba_lockstep_client(ctx)?;
 
         let init_id = client
             .rack_initialize(&request)
@@ -356,13 +353,13 @@ impl WicketdApi for WicketdApiImpl {
     ) -> Result<HttpResponseOk<RackResetUuid>, HttpError> {
         let ctx = rqctx.context();
 
-        let lockstep_addr =
-            ctx.bootstrap_agent_lockstep_addr().map_err(|err| {
-                HttpError::for_bad_request(None, format!("{err:#}"))
-            })?;
-
-        slog::info!(ctx.log, "Sending RSS reset request to {}", lockstep_addr);
         let client = ba_lockstep_client(ctx)?;
+
+        slog::info!(
+            ctx.log,
+            "Sending RSS reset request to {}",
+            client.baseurl()
+        );
 
         let reset_id = client
             .rack_reset()
