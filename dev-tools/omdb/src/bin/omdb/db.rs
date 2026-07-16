@@ -55,6 +55,7 @@ use diesel::OptionalExtension;
 use diesel::TextExpressionMethods;
 use diesel::expression::SelectableHelper;
 use diesel::query_dsl::QueryDsl;
+use display_error_chain::DisplayErrorChain;
 use indicatif::ProgressBar;
 use indicatif::ProgressDrawTarget;
 use indicatif::ProgressStyle;
@@ -166,6 +167,7 @@ use omicron_uuid_kinds::RackUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::VolumeUuid;
 use omicron_uuid_kinds::ZpoolUuid;
+use parallel_task_set::ParallelTaskSet;
 use sled_agent_client::VolumeConstructionRequest;
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
@@ -1092,6 +1094,10 @@ enum ValidateCommands {
     /// Crucible agent says were deleted, or region snapshots that Nexus doesn't
     /// know about.
     ValidateRegionSnapshots,
+
+    /// Validate that the artifact replication configuration in the database
+    /// matches the one present on all sleds.
+    ValidateArtifactReplication,
 }
 
 #[derive(Debug, Args, Clone)]
@@ -1584,6 +1590,9 @@ impl DbArgs {
                     DbCommands::Validate(ValidateArgs {
                         command: ValidateCommands::ValidateRegionSnapshots,
                     }) => cmd_db_validate_region_snapshots(&datastore).await,
+                    DbCommands::Validate(ValidateArgs {
+                        command: ValidateCommands::ValidateArtifactReplication,
+                    }) => cmd_db_validate_artifact_replication(&opctx, &datastore, &fetch_opts).await,
                     DbCommands::Volumes(VolumeArgs {
                         command: VolumeCommands::Info(args),
                     }) => cmd_db_volume_info(&datastore, args).await,
@@ -7268,6 +7277,91 @@ async fn cmd_db_validate_region_snapshots(
 
     println!("{}", table);
 
+    Ok(())
+}
+
+#[derive(Tabled)]
+#[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+struct ValidateArtifactReplicationRow {
+    id: SledUuid,
+    serial: String,
+    ip: String,
+    state: String,
+}
+
+async fn cmd_db_validate_artifact_replication(
+    opctx: &OpContext,
+    datastore: &DataStore,
+    fetch_opts: &DbFetchOptions,
+) -> Result<(), anyhow::Error> {
+    let config = datastore.tuf_list_artifacts_unpruned_batched(opctx).await?;
+
+    let limit = fetch_opts.fetch_limit;
+    let filter = SledFilter::TufArtifactReplication;
+    let sleds = datastore
+        .sled_list(&opctx, &first_page(limit), filter)
+        .await
+        .context("listing sleds")?;
+    check_limit(&sleds, limit, || String::from("listing sleds"));
+
+    let mut task_set = ParallelTaskSet::new();
+    for sled in sleds {
+        let log = opctx.log.clone();
+        task_set
+            .spawn(async move {
+                let url = format!("http://{}", sled.address());
+                let client = sled_agent_client::Client::new(&url, log);
+                let sled_config = client
+                    .artifact_config_get()
+                    .await
+                    .map(|res| res.into_inner());
+                (sled, sled_config)
+            })
+            .await;
+    }
+    let mut rows = Vec::new();
+    for (sled, sled_config_result) in task_set.join_all().await {
+        let state = match sled_config_result {
+            Ok(sled_config) => {
+                match config.generation.cmp(&sled_config.generation) {
+                    Ordering::Equal => {
+                        // `artifacts` is a BTreeSet, so no need to sort.
+                        if config.artifacts == sled_config.artifacts {
+                            "OK".to_owned()
+                        } else {
+                            format!(
+                                "BAD: nexus's {g} = sled's {sg} with incorrect artifacts",
+                                g = config.generation,
+                                sg = sled_config.generation
+                            )
+                        }
+                    }
+                    Ordering::Less => format!(
+                        "BAD: nexus's {g} < sled's {sg}",
+                        g = config.generation,
+                        sg = sled_config.generation
+                    ),
+                    Ordering::Greater => format!(
+                        "OLD: nexus's {g} > sled's {sg}",
+                        g = config.generation,
+                        sg = sled_config.generation
+                    ),
+                }
+            }
+            Err(err) => format!("ERROR: {}", DisplayErrorChain::new(&err)),
+        };
+        rows.push(ValidateArtifactReplicationRow {
+            id: sled.id(),
+            serial: sled.serial_number().to_owned(),
+            ip: sled.ip().to_string(),
+            state,
+        });
+    }
+    let table = tabled::Table::new(rows)
+        .with(tabled::settings::Style::empty())
+        .with(tabled::settings::Padding::new(0, 1, 0, 0))
+        .to_string();
+    println!("{table}");
     Ok(())
 }
 
