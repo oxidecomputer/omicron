@@ -699,8 +699,22 @@ impl super::Nexus {
             match result {
                 Ok(rack) => {
                     if rack.initialized {
-                        info!(self.log, "Rack initialized");
-                        return;
+                        match rack_subnet(rack.rack_subnet) {
+                            Ok(subnet) => {
+                                info!(self.log, "Rack initialized");
+                                self.rack_subnet.set(
+                                    Ipv6Subnet::<RACK_PREFIX>::from(subnet),
+                                );
+                                return;
+                            }
+                            Err(e) => {
+                                error!(
+                                    self.log,
+                                    "Rack claims to be initialized, but rack subnet is invalid!: {}",
+                                    e
+                                );
+                            }
+                        }
                     }
                     info!(
                         self.log,
