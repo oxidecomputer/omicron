@@ -5,6 +5,9 @@
 //! Reconciliation of BFD peer configuration within mgd.
 
 use crate::switch_zone_slot::ThisSledSwitchSlot;
+use bootstrap_agent_lockstep_types::scrimlet_reconcilers::mgd::{
+    MgdBfdOperationFailure, MgdBfdReconcilerStatus,
+};
 use daft::BTreeSetDiff;
 use daft::Diffable;
 use mg_admin_client::Client;
@@ -23,80 +26,6 @@ use std::net::Ipv4Addr;
 use std::net::Ipv6Addr;
 
 type MgdClientError = mg_admin_client::Error<mg_admin_client::types::Error>;
-
-#[derive(Debug, Clone)]
-pub struct MgdBfdOperationFailure {
-    pub peer: IpAddr,
-    pub error: String,
-}
-
-#[derive(Debug, Clone)]
-pub enum MgdBfdReconcilerStatus {
-    /// Reconciliation was skipped because we couldn't fetch the current set of
-    /// BFD peers from mgd.
-    FailedReadingBfdPeers(String),
-
-    /// Reconciliation completed successfully.
-    Success {
-        unchanged: BTreeSet<IpAddr>,
-        remove_success: Vec<IpAddr>,
-        add_success: Vec<IpAddr>,
-    },
-
-    /// Reconciliation completed.
-    PartialSuccess {
-        unchanged: BTreeSet<IpAddr>,
-        remove_success: Vec<IpAddr>,
-        remove_failure: Vec<MgdBfdOperationFailure>,
-        add_success: Vec<IpAddr>,
-        add_failure: Vec<MgdBfdOperationFailure>,
-    },
-}
-
-impl slog::KV for MgdBfdReconcilerStatus {
-    fn serialize(
-        &self,
-        _record: &slog::Record<'_>,
-        serializer: &mut dyn slog::Serializer,
-    ) -> slog::Result {
-        let skipped_key = "bfd-reconciler-skipped";
-        match self {
-            Self::FailedReadingBfdPeers(reason) => {
-                serializer.emit_str(skipped_key.into(), reason)
-            }
-            Self::Success { unchanged, remove_success, add_success } => {
-                for (key, val) in [
-                    ("bfd-unchanged", unchanged.len()),
-                    ("bfd-successfully-removed", remove_success.len()),
-                    ("bfd-failed-to-remove", 0),
-                    ("bfd-successfully-added", add_success.len()),
-                    ("bfd-failed-to-add", 0),
-                ] {
-                    serializer.emit_usize(key.into(), val)?;
-                }
-                Ok(())
-            }
-            Self::PartialSuccess {
-                unchanged,
-                remove_success,
-                remove_failure,
-                add_success,
-                add_failure,
-            } => {
-                for (key, val) in [
-                    ("bfd-unchanged", unchanged.len()),
-                    ("bfd-successfully-removed", remove_success.len()),
-                    ("bfd-failed-to-remove", remove_failure.len()),
-                    ("bfd-successfully-added", add_success.len()),
-                    ("bfd-failed-to-add", add_failure.len()),
-                ] {
-                    serializer.emit_usize(key.into(), val)?;
-                }
-                Ok(())
-            }
-        }
-    }
-}
 
 pub(super) async fn reconcile(
     client: &Client,

@@ -27,6 +27,7 @@ omicron-uuid-kinds.workspace = true
 oxnet.workspace = true
 reqwest.workspace = true
 scuffle.workspace = true
+bootstrap-agent-lockstep-types.workspace = true
 sled-agent-types.workspace = true
 slog.workspace = true
 slog-error-chain.workspace = true

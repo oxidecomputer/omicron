@@ -2,8 +2,8 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::DetermineSwitchSlotStatus;
-use crate::ScrimletStatus;
+use crate::status::DetermineSwitchSlotStatus;
+use crate::status::ScrimletStatus;
 use gateway_client::Client;
 use gateway_client::ClientInfo;
 use gateway_types::component::SpType;

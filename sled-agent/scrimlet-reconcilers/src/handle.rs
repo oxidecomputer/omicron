@@ -6,15 +6,16 @@
 //! it provides a suitable handle for `sled-agent`'s "long running tasks", and
 //! contains a handle to each of the inner service-specific reconcilers.
 
-use crate::DetermineSwitchSlotStatus;
 use crate::dpd_reconciler::DpdReconciler;
 use crate::lldpd_reconciler::LldpdReconciler;
 use crate::mgd_reconciler::MgdReconciler;
 use crate::reconciler_task::ReconcilerTaskHandle;
+use crate::status::DetermineSwitchSlotStatus;
 use crate::status::ScrimletReconcilersStatus;
 use crate::status::ScrimletStatus;
 use crate::switch_zone_slot::ThisSledSwitchSlot;
 use crate::uplinkd_reconciler::UplinkdReconciler;
+use bootstrap_agent_lockstep_types::scrimlet_reconcilers as api_status;
 use omicron_common::address::DENDRITE_PORT;
 use omicron_common::address::MGD_PORT;
 use omicron_common::address::MGS_PORT;
@@ -219,9 +220,9 @@ impl ScrimletReconcilers {
         }
     }
 
-    pub fn status(&self) -> ScrimletReconcilersStatus {
+    pub fn status(&self) -> api_status::ScrimletReconcilersStatus {
         // Do we have running reconcilers? If so, report their status.
-        if let Some(running) = self.running_reconcilers.get() {
+        let status = if let Some(running) = self.running_reconcilers.get() {
             let RunningReconcilers {
                 dpd_reconciler,
                 lldpd_reconciler,
@@ -244,7 +245,8 @@ impl ScrimletReconcilers {
         // Otherwise, we're still waiting for the networking info.
         else {
             ScrimletReconcilersStatus::WaitingForSledAgentNetworkingInfo
-        }
+        };
+        status.into()
     }
 
     /// Set whether this sled is a scrimlet or not.

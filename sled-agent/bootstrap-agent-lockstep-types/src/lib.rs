@@ -31,6 +31,8 @@ use strum::EnumCount;
 use strum::EnumIter;
 use strum::IntoEnumIterator;
 
+pub mod scrimlet_reconcilers;
+
 /// Configuration for the "rack setup service".
 ///
 /// The Rack Setup Service should be responsible for one-time setup actions,

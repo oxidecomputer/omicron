@@ -5,6 +5,7 @@
 //! Reconciliation of static routes within mgd.
 
 use crate::switch_zone_slot::ThisSledSwitchSlot;
+use bootstrap_agent_lockstep_types::scrimlet_reconcilers::mgd::MgdStaticRouteReconcilerStatus;
 use daft::BTreeSetDiff;
 use daft::Diffable;
 use either::Either;
@@ -44,111 +45,6 @@ use std::net::Ipv6Addr;
 const DEFAULT_RIB_PRIORITY_STATIC: u8 = 1;
 
 type MgdClientError = mg_admin_client::Error<mg_admin_client::types::Error>;
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum MgdStaticRouteReconcilerStatus {
-    /// Reconciliation was skipped because we couldn't fetch the current set of
-    /// static routes from MGD.
-    FailedReadingStaticRoutes(String),
-
-    /// Reconciliation was skipped because we couldn't determine a plan for
-    /// changes to make.
-    ///
-    /// This should never happen - it indicates there's some faulty data
-    /// somewhere (either coming from mgd or in the rack network config).
-    FailedGeneratingPlan(String),
-
-    /// Reconciliation completed successfully.
-    ///
-    /// mgd operations are performed in bulk, so each item here contains the
-    /// count of items involved.
-    Success {
-        unchanged: usize,
-        deleted_v4: usize,
-        deleted_v6: usize,
-        added_v4: usize,
-        added_v6: usize,
-    },
-
-    /// Reconciliation completed with at least one failure.
-    ///
-    /// mgd operations are performed in bulk, so each item here contains the
-    /// count of items applied on success.
-    PartialSuccess {
-        unchanged: usize,
-        delete_v4_result: Result<usize, String>,
-        delete_v6_result: Result<usize, String>,
-        add_v4_result: Result<usize, String>,
-        add_v6_result: Result<usize, String>,
-    },
-}
-
-impl slog::KV for MgdStaticRouteReconcilerStatus {
-    fn serialize(
-        &self,
-        _record: &slog::Record<'_>,
-        serializer: &mut dyn slog::Serializer,
-    ) -> slog::Result {
-        let skipped_key = "static-routes-reconciler-skipped";
-        match self {
-            Self::FailedReadingStaticRoutes(reason) => {
-                serializer.emit_str(skipped_key.into(), reason)
-            }
-            Self::FailedGeneratingPlan(reason) => {
-                serializer.emit_str(skipped_key.into(), reason)
-            }
-            Self::Success {
-                unchanged,
-                deleted_v4,
-                deleted_v6,
-                added_v4,
-                added_v6,
-            } => {
-                serializer
-                    .emit_usize("static-routes-unchanged".into(), *unchanged)?;
-                for (key, items) in [
-                    ("static-routes-delete-v4", deleted_v4),
-                    ("static-routes-delete-v6", deleted_v6),
-                    ("static-routes-add-v4", added_v4),
-                    ("static-routes-add-v6", added_v6),
-                ] {
-                    serializer.emit_arguments(
-                        key.into(),
-                        &format_args!("success ({items} routes affected)"),
-                    )?;
-                }
-                Ok(())
-            }
-            Self::PartialSuccess {
-                unchanged,
-                delete_v4_result,
-                delete_v6_result,
-                add_v4_result,
-                add_v6_result,
-            } => {
-                serializer
-                    .emit_usize("static-routes-unchanged".into(), *unchanged)?;
-                for (key, result) in [
-                    ("static-routes-delete-v4", delete_v4_result),
-                    ("static-routes-delete-v6", delete_v6_result),
-                    ("static-routes-add-v4", add_v4_result),
-                    ("static-routes-add-v6", add_v6_result),
-                ] {
-                    match result {
-                        Ok(items) => serializer.emit_arguments(
-                            key.into(),
-                            &format_args!("success ({items} routes affected)"),
-                        )?,
-                        Err(err) => {
-                            serializer.emit_str(key.into(), &err)?;
-                        }
-                    }
-                }
-                Ok(())
-            }
-        }
-    }
-}
 
 pub(super) async fn reconcile(
     client: &Client,
