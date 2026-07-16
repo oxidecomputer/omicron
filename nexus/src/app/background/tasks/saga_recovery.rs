@@ -130,7 +130,7 @@ use nexus_db_model::SagaReasonAbandoned;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
 use nexus_db_queries::db::DataStore;
-use nexus_db_queries::db::datastore::SagaStateTransition;
+use nexus_db_queries::db::datastore::NewSagaState;
 use nexus_saga_recovery::RecoveryFailure;
 use nexus_saga_recovery::RecoveryFailureKind;
 use nexus_types::quiesce::SagaQuiesceHandle;
@@ -381,7 +381,7 @@ impl<N: MakeSagaContext> SagaRecoveryInner<N> {
                     .datastore
                     .saga_update_state(
                         *saga_id,
-                        SagaStateTransition::Abandoned {
+                        NewSagaState::Abandoned {
                             reason: SagaReasonAbandoned::Unrecoverable,
                             comment: message.clone(),
                         },

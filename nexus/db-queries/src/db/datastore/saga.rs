@@ -26,6 +26,7 @@ use nexus_db_schema::schema::saga;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
+use slog_error_chain::InlineErrorChain;
 use std::ops::Add;
 
 // This type is deliberately close to the database representation so it can be
@@ -33,7 +34,7 @@ use std::ops::Add;
 // mark a saga as abandoned even if it does not have a current SEC assigned.
 //
 // Otherwise, it's highly discouraged to use this type. Use `saga_update_state`
-// instead. This method uses `SagaStateTransition` under the hood, which makes
+// instead. This method uses `NewSagaState` under the hood, which makes
 // it impossible to represent an invalid state.
 #[derive(AsChangeset)]
 #[diesel(table_name = saga, treat_none_as_null = true)]
@@ -44,41 +45,39 @@ pub struct SagaStateDbFields {
     pub abandon_time: Option<chrono::DateTime<chrono::Utc>>,
 }
 
-// Due to DB CHECK constraint requirements, when a saga is abandoned, we must
-// capture metadata about the transition to that state
 #[derive(Debug, Clone)]
-pub enum SagaStateTransition {
+pub enum NewSagaState {
     Running,
     Unwinding,
     Done,
     Abandoned { reason: SagaReasonAbandoned, comment: String },
 }
 
-impl From<SagaStateTransition> for SagaState {
-    fn from(value: SagaStateTransition) -> Self {
+impl From<NewSagaState> for SagaState {
+    fn from(value: NewSagaState) -> Self {
         match value {
-            SagaStateTransition::Running => SagaState::Running,
-            SagaStateTransition::Unwinding => SagaState::Unwinding,
-            SagaStateTransition::Done => SagaState::Done,
-            SagaStateTransition::Abandoned { reason: _, comment: _ } => {
+            NewSagaState::Running => SagaState::Running,
+            NewSagaState::Unwinding => SagaState::Unwinding,
+            NewSagaState::Done => SagaState::Done,
+            NewSagaState::Abandoned { reason: _, comment: _ } => {
                 SagaState::Abandoned
             }
         }
     }
 }
 
-impl From<SagaStateTransition> for SagaStateDbFields {
-    fn from(value: SagaStateTransition) -> Self {
+impl From<NewSagaState> for SagaStateDbFields {
+    fn from(value: NewSagaState) -> Self {
         match value {
-            SagaStateTransition::Running
-            | SagaStateTransition::Unwinding
-            | SagaStateTransition::Done => SagaStateDbFields {
+            NewSagaState::Running
+            | NewSagaState::Unwinding
+            | NewSagaState::Done => SagaStateDbFields {
                 saga_state: value.into(),
                 abandon_reason: None,
                 abandon_comment: None,
                 abandon_time: None,
             },
-            SagaStateTransition::Abandoned { reason, comment } => {
+            NewSagaState::Abandoned { reason, comment } => {
                 let now = chrono::Utc::now();
                 SagaStateDbFields {
                     saga_state: SagaState::Abandoned,
@@ -93,13 +92,13 @@ impl From<SagaStateTransition> for SagaStateDbFields {
 
 // Steno requires that we be able to persistently record changes in the saga's
 // state (represented with `steno::SagaCachedState`). This converts that into
-// the `SagaStateTransition` that the datastore method expects.
-impl From<steno::SagaCachedState> for SagaStateTransition {
+// the `NewSagaState` that the datastore method expects.
+impl From<steno::SagaCachedState> for NewSagaState {
     fn from(value: steno::SagaCachedState) -> Self {
         match value {
-            steno::SagaCachedState::Running => SagaStateTransition::Running,
-            steno::SagaCachedState::Unwinding => SagaStateTransition::Unwinding,
-            steno::SagaCachedState::Done => SagaStateTransition::Done,
+            steno::SagaCachedState::Running => NewSagaState::Running,
+            steno::SagaCachedState::Unwinding => NewSagaState::Unwinding,
+            steno::SagaCachedState::Done => NewSagaState::Done,
         }
     }
 }
@@ -171,7 +170,7 @@ impl DataStore {
     pub async fn saga_update_state(
         &self,
         saga_id: steno::SagaId,
-        new_state: SagaStateTransition,
+        new_state: NewSagaState,
         current_sec: db::saga_types::SecId,
     ) -> Result<(), Error> {
         use nexus_db_schema::schema::saga::dsl;
@@ -245,7 +244,18 @@ impl DataStore {
 
             // Validate each row into a `Saga` as we collect it.
             for row in batch {
-                sagas.push(db::saga_types::Saga::try_from(row)?);
+                let saga_id = row.id();
+                match db::saga_types::Saga::try_from(row) {
+                    Ok(saga) => sagas.push(saga),
+                    Err(e) => {
+                        warn!(
+                            opctx.log,
+                            "failed to convert row from saga table into Saga";
+                            "saga_id" => %saga_id,
+                            InlineErrorChain::new(&e)
+                        )
+                    }
+                };
             }
         }
         Ok(sagas)
@@ -273,7 +283,24 @@ impl DataStore {
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
-        rows.into_iter().map(db::saga_types::Saga::try_from).collect()
+        let valid_rows = rows
+            .into_iter()
+            .filter_map(|row| {
+                let saga_id = row.id();
+                db::saga_types::Saga::try_from(row)
+                    .inspect_err(|e| {
+                        warn!(
+                            &opctx.log,
+                            "skipping saga with invalid stored state";
+                            "saga_id" => %saga_id,
+                            InlineErrorChain::new(e),
+                        );
+                    })
+                    .ok()
+            })
+            .collect();
+
+        Ok(valid_rows)
     }
 
     /// Returns a list of all saga log entries for the given saga, making as
@@ -636,7 +663,7 @@ mod test {
         datastore
             .saga_update_state(
                 node_cx.saga_id,
-                SagaStateTransition::Running,
+                NewSagaState::Running,
                 node_cx.sec_id,
             )
             .await
@@ -646,7 +673,7 @@ mod test {
         datastore
             .saga_update_state(
                 node_cx.saga_id,
-                SagaStateTransition::Done,
+                NewSagaState::Done,
                 node_cx.sec_id,
             )
             .await
@@ -657,7 +684,7 @@ mod test {
         datastore
             .saga_update_state(
                 node_cx.saga_id,
-                SagaStateTransition::Done,
+                NewSagaState::Done,
                 node_cx.sec_id,
             )
             .await
@@ -687,7 +714,7 @@ mod test {
         datastore
             .saga_update_state(
                 node_cx.saga_id,
-                SagaStateTransition::Abandoned {
+                NewSagaState::Abandoned {
                     reason: SagaReasonAbandoned::Unrecoverable,
                     comment: "test".to_string(),
                 },
