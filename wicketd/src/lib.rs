@@ -112,7 +112,7 @@ impl SmfConfigValues {
 }
 
 pub struct Server {
-    pub wicketd_server: HttpServer<ServerContext>,
+    pub wicketd_server: HttpServer<Arc<ServerContext>>,
     pub installinator_server: HttpServer<WicketdInstallinatorContext>,
     pub artifact_store: WicketdArtifactStore,
     pub update_tracker: Arc<UpdateTracker>,
@@ -196,7 +196,7 @@ impl Server {
             let mgs_client = make_mgs_client(log.clone(), args.mgs_address);
             dropshot::ServerBuilder::new(
                 http_entrypoints::api(),
-                ServerContext {
+                Arc::new(ServerContext {
                     bind_address: args.address,
                     mgs_handle,
                     mgs_client,
@@ -209,7 +209,7 @@ impl Server {
                     rss_or_multirack_join_config: Default::default(),
                     preflight_checker: PreflightCheckerHandler::new(&log),
                     internal_dns_resolver,
-                },
+                }),
                 ds_log,
             )
             .config(dropshot_config)

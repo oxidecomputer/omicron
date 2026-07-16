@@ -33,6 +33,7 @@ use slog::o;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
+use std::sync::Arc;
 use wicket_common::WICKETD_TIMEOUT;
 use wicket_common::inventory::MgsV1Inventory;
 use wicket_common::inventory::MgsV1InventorySnapshot;
@@ -43,15 +44,16 @@ use wicket_common::inventory::TransceiverInventorySnapshot;
 use wicket_common::multirack_setup::CurrentMultirackJoinUserConfig;
 use wicket_common::multirack_setup::MultirackJoinConfigBaseUserInput;
 use wicket_common::rack_setup::GetBgpAuthKeyInfoResponse;
-use wicket_common::rack_setup::PutRssUserConfigInsensitive;
 use wicket_common::rack_update::AbortUpdateOptions;
 use wicket_common::rack_update::ClearUpdateStateResponse;
 use wicket_common::update_events::EventReport;
 use wicketd_api::*;
+use wicketd_commission_types::rack_setup::CertificateUploadResponse;
+use wicketd_commission_types::rack_setup::PutRssUserConfigInsensitive;
 
 use crate::ServerContext;
 
-type WicketdApiDescription = ApiDescription<ServerContext>;
+type WicketdApiDescription = ApiDescription<Arc<ServerContext>>;
 
 /// Return a description of the wicketd api for use in generating an OpenAPI spec
 pub fn api() -> WicketdApiDescription {
@@ -62,7 +64,7 @@ pub fn api() -> WicketdApiDescription {
 pub enum WicketdApiImpl {}
 
 impl WicketdApi for WicketdApiImpl {
-    type Context = ServerContext;
+    type Context = Arc<ServerContext>;
 
     async fn get_bootstrap_sleds(
         rqctx: RequestContext<Self::Context>,
@@ -234,7 +236,7 @@ impl WicketdApi for WicketdApiImpl {
     }
 
     async fn get_bgp_auth_key_info(
-        rqctx: RequestContext<ServerContext>,
+        rqctx: RequestContext<Self::Context>,
         // A bit weird for a GET request to have a TypedBody, but there's no other
         // nice way to transmit this information as a batch.
         params: TypedBody<GetBgpAuthKeyParams>,
@@ -252,7 +254,7 @@ impl WicketdApi for WicketdApiImpl {
     }
 
     async fn put_bgp_auth_key(
-        rqctx: RequestContext<ServerContext>,
+        rqctx: RequestContext<Self::Context>,
         params: Path<PutBgpAuthKeyParams>,
         body: TypedBody<PutBgpAuthKeyBody>,
     ) -> Result<HttpResponseOk<PutBgpAuthKeyResponse>, HttpError> {
@@ -268,7 +270,7 @@ impl WicketdApi for WicketdApiImpl {
     }
 
     async fn put_rss_config_recovery_user_password_hash(
-        rqctx: RequestContext<ServerContext>,
+        rqctx: RequestContext<Self::Context>,
         body: TypedBody<PutRssRecoveryUserPasswordHash>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let ctx = rqctx.context();
@@ -285,7 +287,7 @@ impl WicketdApi for WicketdApiImpl {
     }
 
     async fn delete_rss_config(
-        rqctx: RequestContext<ServerContext>,
+        rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let ctx = rqctx.context();
 
@@ -300,7 +302,7 @@ impl WicketdApi for WicketdApiImpl {
     }
 
     async fn get_rack_setup_state(
-        rqctx: RequestContext<ServerContext>,
+        rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<RackOperationStatus>, HttpError> {
         let ctx = rqctx.context();
 
@@ -346,7 +348,7 @@ impl WicketdApi for WicketdApiImpl {
     }
 
     async fn post_run_rack_setup(
-        rqctx: RequestContext<ServerContext>,
+        rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<RackInitUuid>, HttpError> {
         let ctx = rqctx.context();
         let log = &rqctx.log;
@@ -410,7 +412,7 @@ impl WicketdApi for WicketdApiImpl {
     }
 
     async fn post_run_rack_reset(
-        rqctx: RequestContext<ServerContext>,
+        rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<RackResetUuid>, HttpError> {
         let ctx = rqctx.context();
 
@@ -457,7 +459,7 @@ impl WicketdApi for WicketdApiImpl {
     }
 
     async fn get_inventory(
-        rqctx: RequestContext<ServerContext>,
+        rqctx: RequestContext<Self::Context>,
         body_params: TypedBody<GetInventoryParams>,
     ) -> Result<HttpResponseOk<GetInventoryResponse>, HttpError> {
         let GetInventoryParams { force_refresh } = body_params.into_inner();
@@ -520,7 +522,7 @@ impl WicketdApi for WicketdApiImpl {
     }
 
     async fn put_repository(
-        rqctx: RequestContext<ServerContext>,
+        rqctx: RequestContext<Self::Context>,
         body: StreamingBody,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let rqctx = rqctx.context();
@@ -531,7 +533,7 @@ impl WicketdApi for WicketdApiImpl {
     }
 
     async fn get_artifacts_and_event_reports(
-        rqctx: RequestContext<ServerContext>,
+        rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<GetArtifactsAndEventReportsResponse>, HttpError>
     {
         let response =
@@ -540,7 +542,7 @@ impl WicketdApi for WicketdApiImpl {
     }
 
     async fn get_baseboard(
-        rqctx: RequestContext<ServerContext>,
+        rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<GetBaseboardResponse>, HttpError> {
         let rqctx = rqctx.context();
         Ok(HttpResponseOk(GetBaseboardResponse {
@@ -549,7 +551,7 @@ impl WicketdApi for WicketdApiImpl {
     }
 
     async fn get_location(
-        rqctx: RequestContext<ServerContext>,
+        rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<GetLocationResponse>, HttpError> {
         let rqctx = rqctx.context();
         let inventory = mgs_inventory_or_unavail(&rqctx.mgs_handle).await?;
@@ -594,7 +596,7 @@ impl WicketdApi for WicketdApiImpl {
     }
 
     async fn post_start_update(
-        rqctx: RequestContext<ServerContext>,
+        rqctx: RequestContext<Self::Context>,
         params: TypedBody<StartUpdateParams>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let log = &rqctx.log;
@@ -794,7 +796,7 @@ impl WicketdApi for WicketdApiImpl {
     }
 
     async fn get_update_sp(
-        rqctx: RequestContext<ServerContext>,
+        rqctx: RequestContext<Self::Context>,
         target: Path<SpIdentifier>,
     ) -> Result<HttpResponseOk<EventReport>, HttpError> {
         let event_report = rqctx
@@ -806,7 +808,7 @@ impl WicketdApi for WicketdApiImpl {
     }
 
     async fn post_abort_update(
-        rqctx: RequestContext<ServerContext>,
+        rqctx: RequestContext<Self::Context>,
         target: Path<SpIdentifier>,
         opts: TypedBody<AbortUpdateOptions>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
@@ -832,7 +834,7 @@ impl WicketdApi for WicketdApiImpl {
     }
 
     async fn post_clear_update_state(
-        rqctx: RequestContext<ServerContext>,
+        rqctx: RequestContext<Self::Context>,
         params: TypedBody<ClearUpdateStateParams>,
     ) -> Result<HttpResponseOk<ClearUpdateStateResponse>, HttpError> {
         let log = &rqctx.log;
@@ -859,7 +861,7 @@ impl WicketdApi for WicketdApiImpl {
     }
 
     async fn post_ignition_command(
-        rqctx: RequestContext<ServerContext>,
+        rqctx: RequestContext<Self::Context>,
         path: Path<PathSpIgnitionCommand>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let apictx = rqctx.context();
@@ -875,7 +877,7 @@ impl WicketdApi for WicketdApiImpl {
     }
 
     async fn post_start_preflight_uplink_check(
-        rqctx: RequestContext<ServerContext>,
+        rqctx: RequestContext<Self::Context>,
         body: TypedBody<PreflightUplinkCheckOptions>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let rqctx = rqctx.context();
@@ -950,7 +952,7 @@ impl WicketdApi for WicketdApiImpl {
     }
 
     async fn get_preflight_uplink_report(
-        rqctx: RequestContext<ServerContext>,
+        rqctx: RequestContext<Self::Context>,
     ) -> Result<
         HttpResponseOk<wicket_common::preflight_check::EventReport>,
         HttpError,
@@ -968,7 +970,7 @@ impl WicketdApi for WicketdApiImpl {
     }
 
     async fn post_reload_config(
-        rqctx: RequestContext<ServerContext>,
+        rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let smf_values = SmfConfigValues::read_current().map_err(|err| {
             HttpError::for_unavail(
